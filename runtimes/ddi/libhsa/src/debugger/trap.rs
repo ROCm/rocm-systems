@@ -8,11 +8,12 @@ use std::sync::atomic::AtomicBool;
 use rocddi::device::Device;
 #[cfg(target_os = "linux")]
 use rocddi::device::gpu::profiling::linux::ProcessTrap;
-use rocddi::session::{DebuggerRegistrationMode, Session};
+#[cfg(target_os = "linux")]
+use rocddi::driver::linux_kfd::{DebuggerRegistration, DebuggerRegistrationMode};
 use rocddi::topology::GpuInfo;
 
 use crate::ffi::{ERROR, OUT_OF_RESOURCES, Status};
-use crate::runtime::map_error;
+use crate::status::map_error;
 
 /// Exact trap build target and target/revision fixup rules from `ROCr`.
 pub(crate) fn trap_bytes(info: &GpuInfo) -> Option<&'static [u8]> {
@@ -48,13 +49,16 @@ pub(crate) struct TrapRestore {
 }
 
 impl TrapRestore {
-    /// Resolves the saved trap in the exact GPU VM whose binding will be restored.
-    pub(crate) fn address(&self, device: &Device) -> Result<u64, Status> {
+    /// Restores the retained normal trap after sampling has stopped.
+    #[allow(unsafe_code)]
+    pub(crate) fn restore(&self, device: &Device) -> Result<(), Status> {
         #[cfg(target_os = "linux")]
-        return self
-            .trap
-            .address(&device.gpu().map_err(map_error)?)
-            .map_err(map_error);
+        {
+            // SAFETY: HSA serializes its normal/sampling binding changes. The
+            // token retains normal code; sampling retains its displaced code
+            // and TMA through checked destruction and deferred asset release.
+            unsafe { self.trap.restore(&device.gpu().map_err(map_error)?) }.map_err(map_error)
+        }
         #[cfg(not(target_os = "linux"))]
         {
             let _ = device;
@@ -64,6 +68,7 @@ impl TrapRestore {
 }
 
 /// Debugger owner retained through partial initialization and active generations.
+#[derive(Default)]
 pub(crate) struct PendingDebugger {
     /// Native context ownership precedes publication, including on failure.
     #[cfg(target_os = "linux")]
@@ -90,25 +95,19 @@ impl PendingDebugger {
         }
     }
 
-    /// Stages the stable rendezvous and TTMP setup before native activation.
-    pub(crate) fn new(session: &mut Session) -> Result<Self, Status> {
-        // SAFETY: The static record and breakpoint live until process exit. The
-        // loader retains each linked object until its delete notification ends.
-        #[cfg(target_os = "linux")]
+    /// Prepares the stable rendezvous and TTMP policy for native configuration.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn registration() -> Result<DebuggerRegistration, Status> {
+        // SAFETY: The static record and breakpoint live until process exit.
+        // The loader retains each linked object through delete notification.
         unsafe {
-            session.request_debugger_registration(
+            DebuggerRegistration::new(
                 super::record_address(),
                 true,
                 DebuggerRegistrationMode::Prefer,
             )
         }
-        .map_err(map_error)?;
-        #[cfg(not(target_os = "linux"))]
-        let _ = session;
-        Ok(Self {
-            #[cfg(target_os = "linux")]
-            gpus: Vec::new(),
-        })
+        .map_err(map_error)
     }
 
     /// Retains a GPU's trap owner before starting fallible native publication.

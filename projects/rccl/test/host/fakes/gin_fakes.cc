@@ -20,8 +20,15 @@ ncclResult_t ncclGinQueryLastError(struct ncclGinState*, bool* hasError) {
   if (hasError) *hasError = g_ginHasError;
   return ncclSuccess;
 }
+static ncclGinType_t DefaultRailedGinType(ncclComm*) { return NCCL_GIN_TYPE_NONE; }
+std::function<ncclGinType_t(ncclComm*)> g_railedGinType = DefaultRailedGinType;
+ncclResult_t ncclGetRailedGinType(struct ncclComm* comm, ncclGinType_t* ginType) {
+  *ginType = g_railedGinType(comm);
+  return ncclSuccess;
+}
 
 void ResetGinFakes() {
   g_ncclGinInitResult = ncclSuccess;
   g_ginHasError = false;
+  g_railedGinType = DefaultRailedGinType;
 }

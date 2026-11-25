@@ -73,7 +73,7 @@ def _extract_column_data(
     raw_pmc_df: pd.DataFrame,
 ) -> Optional[list[Any]]:
     """Extract column data from a dataframe raw_pmc_df."""
-    if col_name not in raw_pmc_df.columns:
+    if col_name not in raw_pmc_df:
         return None
     series = raw_pmc_df[col_name]
     return series.tolist() if hasattr(series, "tolist") else list(series)

@@ -7,8 +7,9 @@ use std::ffi::c_void;
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::queue_intercept::{InterceptHandler, QueueNotifier};
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),

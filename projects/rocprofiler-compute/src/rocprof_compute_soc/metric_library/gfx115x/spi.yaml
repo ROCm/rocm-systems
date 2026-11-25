@@ -5,7 +5,7 @@ spi.compute_wave_dispatches:
   description: >-
     Total number of compute wavefronts dispatched by the Shader Processor Input. This
     represents the work scheduled for execution on the shader engines. Compare with
-    completed waves to identify dispatch-related bottlenecks.
+    completed wavefronts to identify dispatch-related bottlenecks.
 spi.wave_dispatch_rate:
   name: Wave Dispatch Rate
   formula: SUM(SPI_CSN_WAVE) / SUM(GRBM_GUI_ACTIVE)

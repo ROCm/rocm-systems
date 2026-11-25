@@ -3,6 +3,7 @@
 
 #include "aql_queue.h"
 #include "config_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "test_paths.h"
 
 #include "rocjitsu/code/basic_block.h"
@@ -87,8 +88,9 @@ protected:
     ASSERT_FALSE(function_symbols.empty()) << "No sized .text function symbols found";
     std::vector<BasicBlock::CodeRange> function_ranges;
     function_ranges.reserve(function_symbols.size());
-    for (const TextFunctionSymbolRange &symbol : function_symbols)
+    for (const TextFunctionSymbolRange &symbol : function_symbols) {
       function_ranges.push_back({.start_offset = symbol.start_offset, .size = symbol.size});
+    }
     ASSERT_TRUE(std::ranges::any_of(function_ranges, [&](const BasicBlock::CodeRange &range) {
       return selected_kernel->entry_text_offset >= range.start_offset &&
              selected_kernel->entry_text_offset - range.start_offset < range.size;
@@ -100,7 +102,7 @@ protected:
     const std::array<uint64_t, 1> entries{selected_kernel->entry_text_offset};
     util::StringDiagnostic cfg_error;
     FailureOr<std::vector<std::unique_ptr<BasicBlock>>> reachable = BasicBlock::build_reachable(
-        *code_object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, entries, cfg_error.emitter(),
+        *code_object, *decoder, rocjitsu::IsaFamily::Cdna5, entries, cfg_error.emitter(),
         function_ranges, {}, {}, ROCJITSU_CODE_TARGET_GFX1251);
     ASSERT_FALSE(reachable.failed()) << cfg_error.message();
 
@@ -209,11 +211,14 @@ TEST_F(Gfx1251CompiledKernelTest, ExecutesNaiveMatmulAndMatchesCpuGolden) {
     input_b[index] = static_cast<float>((index % 3) + 1);
   }
   std::vector<float> expected(kElementCount, 0.0f);
-  for (uint32_t row = 0; row < kDimension; ++row)
-    for (uint32_t column = 0; column < kDimension; ++column)
-      for (uint32_t inner = 0; inner < kDimension; ++inner)
+  for (uint32_t row = 0; row < kDimension; ++row) {
+    for (uint32_t column = 0; column < kDimension; ++column) {
+      for (uint32_t inner = 0; inner < kDimension; ++inner) {
         expected[row * kDimension + column] +=
             input_a[row * kDimension + inner] * input_b[inner * kDimension + column];
+      }
+    }
+  }
 
   const size_t matrix_bytes = kElementCount * sizeof(float);
   memory_->load_image(reinterpret_cast<const uint8_t *>(input_a.data()), matrix_bytes,

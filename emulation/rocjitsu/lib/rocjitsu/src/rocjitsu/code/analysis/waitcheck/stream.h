@@ -7,6 +7,7 @@
 /// @brief Ordinary memory dependency analysis for instruction streams.
 
 #include "rocjitsu/code/analysis/waitcheck/target.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/diagnostic.h"
 
 #include <cstddef>
@@ -83,7 +84,7 @@ analyze_waitcheck_stream(std::span<const uint32_t> words, const IsaTargetRegistr
 /// cannot decode instructions specific to another target in the same architecture.
 /// Callers with concrete target metadata should use the registry/target overload.
 [[nodiscard]] util::FailureOr<WaitcheckStreamReport>
-analyze_waitcheck_stream(std::span<const uint32_t> words, rj_code_arch_t arch,
+analyze_waitcheck_stream(std::span<const uint32_t> words, rocjitsu::IsaFamily arch,
                          WaitcheckStreamOptions options,
                          const util::DiagnosticEmitter &emit_error = {});
 

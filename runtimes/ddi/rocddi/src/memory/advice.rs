@@ -6,6 +6,8 @@
 //! A service retains exactly one provider. Device targets are created only from
 //! activated devices and carry that provider's identity. Range policy is not a
 //! backing owner or a residency lease; callers retain their own memory lifetime.
+//! New policy, query, and prefetch transactions require session admission.
+//! Discarding host backing remains available while retiring the session.
 
 use crate::device::Device;
 use crate::driver::{Driver, DriverInstance, DriverInstanceId, MemoryAdviceOperations};
@@ -178,13 +180,15 @@ impl Session {
                 selected = Some(provider);
             }
         }
+        let provider = selected.ok_or_else(|| {
+            error(
+                ErrorKind::Unsupported,
+                "session has no memory-advice provider",
+            )
+        })?;
+        let _operation = provider.admit()?;
         Ok(MemoryAdvice {
-            provider: selected.ok_or_else(|| {
-                error(
-                    ErrorKind::Unsupported,
-                    "session has no memory-advice provider",
-                )
-            })?,
+            provider,
             process: self.process_identity(),
         })
     }
@@ -204,13 +208,15 @@ impl Session {
                     "memory-advice device belongs to another session",
                 )
             })?;
+        let provider = Provider::from_driver(driver).ok_or_else(|| {
+            error(
+                ErrorKind::Unsupported,
+                "device provider has no memory advice",
+            )
+        })?;
+        let _operation = provider.admit()?;
         Ok(MemoryAdvice {
-            provider: Provider::from_driver(driver).ok_or_else(|| {
-                error(
-                    ErrorKind::Unsupported,
-                    "device provider has no memory advice",
-                )
-            })?,
+            provider,
             process: self.process_identity(),
         })
     }
@@ -232,6 +238,10 @@ macro_rules! route {
 }
 
 impl Provider {
+    fn admit(&self) -> Result<crate::session::SessionOperation, Error> {
+        route!(self, driver => driver.admission().enter())
+    }
+
     #[allow(
         clippy::unnecessary_wraps,
         reason = "optional facets differ between installed providers"
@@ -274,7 +284,8 @@ impl MemoryAdvice {
     /// Rejects invalid ranges, an inherited service, or unsupported host services.
     #[allow(unsafe_code)]
     pub unsafe fn commit_host_range(&self, address: u64, size: u64) -> Result<(), Error> {
-        self.check_range(address, size)?;
+        let _operation = self.provider.admit()?;
+        self.check_host_range(address, size)?;
         #[cfg(target_os = "linux")]
         {
             let address = usize::try_from(address)
@@ -310,7 +321,7 @@ impl MemoryAdvice {
         size: u64,
         immediate: bool,
     ) -> Result<(), Error> {
-        self.check_range(address, size)?;
+        self.check_host_range(address, size)?;
         #[cfg(target_os = "linux")]
         {
             let address = usize::try_from(address)
@@ -341,6 +352,11 @@ impl MemoryAdvice {
     /// # Errors
     /// Reports provider unavailability or failure to query its constraints.
     pub fn capabilities(&self) -> Result<AdviceCapabilities, Error> {
+        let _operation = self.provider.admit()?;
+        self.provider_capabilities()
+    }
+
+    fn provider_capabilities(&self) -> Result<AdviceCapabilities, Error> {
         self.check()?;
         route!(&self.provider, driver => driver.advice_capabilities())
     }
@@ -376,8 +392,30 @@ impl MemoryAdvice {
         Ok(())
     }
 
+    // Host backing has only host page constraints. It must work before GPU
+    // activation, and discard remains a retirement operation after admission closes.
+    fn check_host_range(&self, address: u64, size: u64) -> Result<(), Error> {
+        self.check()?;
+        Self::validate_range(address, size, crate::memory::host_page_size()?)
+    }
+
+    fn validate_range(address: u64, size: u64, alignment: u64) -> Result<(), Error> {
+        if address == 0
+            || size == 0
+            || address.checked_add(size).is_none()
+            || address % alignment != 0
+            || size % alignment != 0
+        {
+            return Err(error(
+                ErrorKind::InvalidArgument,
+                "invalid memory-advice range",
+            ));
+        }
+        Ok(())
+    }
+
     fn check_range(&self, address: u64, size: u64) -> Result<AdviceCapabilities, Error> {
-        let caps = self.capabilities()?;
+        let caps = self.provider_capabilities()?;
         if !caps.range_alignment.is_power_of_two()
             || !caps.minimum_migration_granularity.is_power_of_two()
             || !caps.maximum_migration_granularity.is_power_of_two()
@@ -388,17 +426,7 @@ impl MemoryAdvice {
                 "invalid memory-advice range alignment",
             ));
         }
-        if address == 0
-            || size == 0
-            || address.checked_add(size).is_none()
-            || address % caps.range_alignment != 0
-            || size % caps.range_alignment != 0
-        {
-            return Err(error(
-                ErrorKind::InvalidArgument,
-                "invalid memory-advice range",
-            ));
-        }
+        Self::validate_range(address, size, caps.range_alignment)?;
         Ok(caps)
     }
 
@@ -410,6 +438,7 @@ impl MemoryAdvice {
     /// # Errors
     /// Rejects malformed ranges, foreign targets, unsupported units or native errors.
     pub fn set(&self, address: u64, size: u64, changes: &[AdviceChange]) -> Result<(), Error> {
+        let _operation = self.provider.admit()?;
         let caps = self.check_range(address, size)?;
         for change in changes {
             match *change {
@@ -441,6 +470,7 @@ impl MemoryAdvice {
         size: u64,
         queries: &[AdviceQuery],
     ) -> Result<Vec<AdviceValue>, Error> {
+        let _operation = self.provider.admit()?;
         let caps = self.check_range(address, size)?;
         for query in queries {
             if let AdviceQuery::Access(target) = *query {
@@ -492,6 +522,7 @@ impl MemoryAdvice {
         location: AdviceLocation,
         completion: PrefetchCompletion,
     ) -> Result<(), Error> {
+        let _operation = self.provider.admit()?;
         let caps = self.check_range(address, size)?;
         if completion == PrefetchCompletion::Migration && caps.prefetch_completion != completion {
             return Err(error(
@@ -524,6 +555,7 @@ impl MemoryAdvice {
         location: AdviceLocation,
         completion: PrefetchCompletion,
     ) -> Result<(), Error> {
+        let _operation = self.provider.admit()?;
         self.validate_prefetch(address, size, location, completion)?;
         route!(&self.provider, driver => driver.advice_prefetch(address, size, location, completion))
     }
@@ -545,12 +577,26 @@ mod tests {
         Shared::new(driver).unwrap()
     }
 
-    fn session(drivers: &[Shared<TestDriver>]) -> Session {
+    fn session(drivers: Vec<Shared<TestDriver>>) -> Session {
         Session::from_drivers(
-            drivers.iter().cloned().map(DriverInstance::Test).collect(),
+            drivers.into_iter().map(DriverInstance::Test).collect(),
             DriverContextLifetime::Session,
         )
         .unwrap()
+    }
+
+    fn installed_provider(session: &Session, id: u8) -> Shared<TestDriver> {
+        session
+            .installed_drivers()
+            .unwrap()
+            .iter()
+            .find_map(|driver| match driver {
+                DriverInstance::Test(driver) if driver.open_endpoint([id; 16]).is_ok() => {
+                    Some(driver.clone())
+                }
+                _ => None,
+            })
+            .unwrap()
     }
 
     fn device(session: &Session, id: u8) -> Device {
@@ -559,10 +605,45 @@ mod tests {
             .unwrap()
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[allow(unsafe_code)]
+    fn host_backing_does_not_require_an_active_kfd_context() {
+        use crate::os::linux::memory::{Reservation, page_size};
+
+        for lifetime in [
+            DriverContextLifetime::Process,
+            DriverContextLifetime::Session,
+        ] {
+            let session = Session::new(lifetime).unwrap();
+            let service = session.memory_advice().unwrap();
+            assert_eq!(
+                service.capabilities().unwrap().prefetch_completion,
+                PrefetchCompletion::Attempt
+            );
+            let page = page_size().unwrap();
+            let mut reservation =
+                Reservation::new(page, page, (page as u64, isize::MAX as u64), false).unwrap();
+            let address = reservation.address() as u64;
+            // SAFETY: This test exclusively owns the anonymous reservation and
+            // retains it through both host operations; no device was activated.
+            unsafe {
+                service.commit_host_range(address, page as u64).unwrap();
+                (address as *mut u8).write(0xa5);
+                service
+                    .discard_host_range(address, page as u64, true)
+                    .unwrap();
+                assert_eq!((address as *const u8).read(), 0);
+            }
+            reservation.release().unwrap();
+        }
+    }
+
     #[test]
     fn a_non_kfd_provider_executes_policy_query_and_prefetch() {
         let driver = provider(1);
-        let session = session(std::slice::from_ref(&driver));
+        let session = session(vec![driver]);
+        let driver = installed_provider(&session, 1);
         let device = device(&session, 1);
         let service = session.memory_advice_for(&device).unwrap();
         let target = service.target(&device).unwrap();
@@ -605,12 +686,14 @@ mod tests {
     fn ambiguous_providers_and_same_id_foreign_devices_are_rejected() {
         let first = provider(1);
         let second = provider(2);
-        let local = session(&[first.clone(), second.clone()]);
+        let local = session(vec![first, second]);
+        let first = installed_provider(&local, 1);
+        let second = installed_provider(&local, 2);
         assert!(local.memory_advice().is_err());
         let service = local.memory_advice_for(&device(&local, 1)).unwrap();
         let other_service = local.memory_advice_for(&device(&local, 2)).unwrap();
         let foreign_target = other_service.target(&device(&local, 2)).unwrap();
-        let foreign = session(&[provider(1)]);
+        let foreign = session(vec![provider(1)]);
         let same_id = device(&foreign, 1);
         assert!(local.memory_advice_for(&same_id).is_err());
         assert!(service.target(&same_id).is_err());
@@ -641,7 +724,8 @@ mod tests {
     #[test]
     fn validation_precedes_native_effects_and_rejects_malformed_later_results() {
         let driver = provider(1);
-        let session = session(std::slice::from_ref(&driver));
+        let session = session(vec![driver]);
+        let driver = installed_provider(&session, 1);
         let service = session.memory_advice().unwrap();
         assert!(
             service
@@ -688,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn service_retains_provider_until_worker_lifetime_ends() {
+    fn retirement_waits_for_admitted_prefetch_and_rejects_new_work() {
         use std::sync::atomic::AtomicBool;
         use std::sync::{Arc, Barrier};
         let gate = Arc::new((Barrier::new(2), Barrier::new(2)));
@@ -697,8 +781,9 @@ mod tests {
             TestDriver::new([1; 16], EndpointKind::Npu, DriverContextLifetime::Session);
         driver.advice_enabled = true;
         driver.advice_prefetch_gate = Some(gate.clone());
-        let mut session = session(&[Shared::new(driver).unwrap()]);
+        let mut session = session(vec![Shared::new(driver).unwrap()]);
         let service = session.memory_advice().unwrap();
+        let retained_service = session.memory_advice().unwrap();
         let worker_completed = completed.clone();
         let worker = std::thread::spawn(move || {
             service
@@ -714,9 +799,24 @@ mod tests {
         gate.0.wait();
         assert!(!completed.load(Ordering::Acquire));
         assert_eq!(session.destroy().unwrap_err().kind(), ErrorKind::Busy);
+        assert_eq!(session.state().unwrap(), crate::session::SessionState::Open);
+        session.begin_retirement().unwrap();
+        assert_eq!(
+            session.state().unwrap(),
+            crate::session::SessionState::Retiring
+        );
+        assert!(retained_service.set(0x10000, 4096, &[]).is_err());
+        assert!(retained_service.query(0x10000, 4096, &[]).is_err());
+        assert!(retained_service.capabilities().is_err());
+        assert!(session.memory_advice().is_err());
+        drop(retained_service);
         gate.1.wait();
         worker.join().unwrap();
         assert!(completed.load(Ordering::Acquire));
         session.destroy().unwrap();
+        assert_eq!(
+            session.state().unwrap(),
+            crate::session::SessionState::Closed
+        );
     }
 }

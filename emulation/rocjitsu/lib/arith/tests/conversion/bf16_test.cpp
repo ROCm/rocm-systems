@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 // BF16 conversion contracts, seeded rounding, selectors, aliases and inactive lanes.
+#include "common/cpu.h"
+#include "common/registers.h"
+#include "common/semantics.h"
 #include "conversion/helpers.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_conversion.h"
@@ -89,7 +92,7 @@ template <int Lanes, int Op, typename Call> void check(Call call) {
         return narrow_reference(uint32_t(a), Op == 3 ? c << 16 : 0, Op == 3, saturate) |
                (narrow_reference(b, Op == 3 ? c & 0xffff0000U : 0, Op == 3, saturate) << 16);
       },
-      conversion_bits, mode, true);
+      conversion_bits, mode, true, 0, Op == 0 ? RJ_ARITH_CVT_SDWA : 0);
 }
 } // namespace
 
@@ -111,4 +114,33 @@ TEST(ConversionBf16StochasticPackW32, Arithmetic) {
 
 TEST(ConversionBf16StochasticPackW64, Arithmetic) {
   check<64, 3>(rj_arith_v_cvt_sr_pk_bf16_f32_w64);
+}
+
+// SDWA retains its inherited tiny-input normalization; it is not newly hardware-qualified.
+TEST(ConversionBf16WidenW64, SdwaOutput) {
+  const uint32_t input[] = {0x007fU, 0x807fU, 0x7f81U, 0xff81U, 0x8000U, 0x0080U, 0x7f7fU, 0xff7fU};
+  const uint32_t expected[] = {0x00fe0000U, 0x80fe0000U, 0x7fc10000U, 0xffc10000U,
+                               0,           0x01000000U, 0x7f800000U, 0xff800000U};
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : semantics_modes()) {
+      Registers<2, 64> values{};
+      for (int lane = 0; lane < 64; ++lane) {
+        values.v[0][lane] = input[lane % 8];
+        values.v[1][lane] = 0xdeadbeefU;
+      }
+      const uint64_t flags = cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+      const uint64_t mode = RJ_ARITH_CVT_SDWA | RJ_ARITH_ALU_OMOD_2;
+      const int error = rj_arith_v_cvt_f32_bf16_w64(flags, ~0ULL, mode, values.v + 1, values.v);
+      if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+          semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+        EXPECT_EQ(error, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+        EXPECT_EQ(rj_arith_v_cvt_f32_bf16_w64(flags, 0, mode, nullptr, nullptr), error);
+      } else {
+        EXPECT_EQ(error, RJ_ARITH_SUCCESS);
+      }
+      for (int lane = 0; lane < 64; ++lane) {
+        EXPECT_EQ(values.v[1][lane], error ? 0xdeadbeefU : expected[lane % 8]);
+      }
+    }
+  }
 }

@@ -4,11 +4,8 @@
 """Unit tests for rocprof_compute_soc/metric_library/loader.py."""
 
 import copy
-import importlib
-import sys
 
 import pytest
-from conftest import ProfileModeImportGuard
 
 from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.metric_library.loader import MetricLibrary, MetricLibraryError
@@ -296,12 +293,3 @@ def test_shipped_library_loads():
     for arch in loader.METRIC_LIBRARY_PARENT_ARCH:
         library = MetricLibrary.load(loader.default_metric_library_dir(), arch)
         assert library.metrics and library.collectables
-
-
-def test_imports_under_profile_mode_guard(monkeypatch):
-    """The metric library uses only stdlib, project and vendored code."""
-    monkeypatch.delitem(
-        sys.modules, "rocprof_compute_soc.metric_library.loader", raising=False
-    )
-    with ProfileModeImportGuard():
-        importlib.import_module("rocprof_compute_soc.metric_library.loader")

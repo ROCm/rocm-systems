@@ -60,9 +60,10 @@ template <int M, int Block = 0, typename Entry> void arithmetic(Entry entry) {
             values[row][k] = decode_matrix_format(code, format);
           }
         }
+        return int(Rows) * K * width / (32 * 32);
       };
-      fill(0, fa, fb, left);
-      fill(16, fb, fa, right);
+      const int a_regs = fill(0, fa, fb, left);
+      const int b_regs = fill(16, fb, fa, right);
       for (int reg = 0; reg < D; ++reg) {
         for (auto &word : input[32 + reg]) {
           word = std::bit_cast<uint32_t>(float(int(random() >> 8) - 0x400000) * 0x1p-23f);
@@ -140,10 +141,13 @@ template <int M, int Block = 0, typename Entry> void arithmetic(Entry entry) {
         for (uint64_t cpu : levels) {
           for (uint64_t semantics : semantics_modes()) {
             auto storage = input;
-            const uint32_t *a[16], *b[16], *c[D];
+            // Compact operands provide only the VGPRs selected by their individual formats.
+            const uint32_t *a[16]{}, *b[16]{}, *c[D];
             uint32_t *d[D];
-            for (int i = 0; i < 16; ++i) {
+            for (int i = 0; i < a_regs; ++i) {
               a[i] = storage[i].data();
+            }
+            for (int i = 0; i < b_regs; ++i) {
               b[i] = storage[16 + i].data();
             }
             for (int i = 0; i < D; ++i) {

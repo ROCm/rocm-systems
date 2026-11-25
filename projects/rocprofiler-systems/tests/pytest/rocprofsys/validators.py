@@ -399,12 +399,14 @@ def validate_timemory_json(
     depths: list[int] | None = None,
     print_output: bool = False,
     timeout: int = 60,
+    root: str = "timemory",
 ) -> ValidationResult:
     """Validate a timemory JSON output file using validate-timemory-json.py.
 
     Args:
         json_path: Path to JSON file
         metric: Metric name to validate (-m flag)
+        root: Top-level JSON key holding the metrics (-r flag)
         tests_dir: Path to directory containing validation scripts
         labels: Expected labels (-l flag)
         counts: Expected counts (-c flag)
@@ -418,7 +420,7 @@ def validate_timemory_json(
     if not json_path.exists():
         return ValidationResult(False, f"JSON file not found: {json_path}")
 
-    args = ["-i", str(json_path), "-m", metric]
+    args = ["-i", str(json_path), "-m", metric, "-r", root]
 
     if labels:
         args.extend(["-l"] + labels)

@@ -828,6 +828,28 @@ class AmdSmiPowerCapType(IntEnum):
     PPT1 = amdsmi_wrapper.AMDSMI_POWER_CAP_TYPE_PPT1
 
 
+class AmdSmiHawkInsertionPriority(IntEnum):
+    OPPORTUNISTIC = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_OPPORTUNISTIC
+    GUARANTEED = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_GUARANTEED
+    DYNAMIC = amdsmi_wrapper.AMDSMI_HAWK_INSERTION_PRIORITY_DYNAMIC
+
+
+class AmdSmiPowerStabilizationParamId(IntEnum):
+    ENABLE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_ENABLE
+    POWER_FLOOR = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_POWER_FLOOR
+    DELAY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_DELAY
+    INSERTION_PRIORITY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_INSERTION_PRIORITY
+    RAMP_ENABLE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_ENABLE
+    RAMP_MAX_RAMP_UP_RATE = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_UP_RATE
+    RAMP_MAX_RAMP_DOWN_RATE = (
+        amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MAX_RAMP_DOWN_RATE
+    )
+    RAMP_MIN_TIME_AT_POWER_FLOOR = (
+        amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_MIN_TIME_AT_POWER_FLOOR
+    )
+    RAMP_STOP_DELAY = amdsmi_wrapper.AMDSMI_POWER_STABILIZATION_PARAM_RAMP_STOP_DELAY
+
+
 class AmdSmiNpmBalancingMode(IntEnum):
     INVALID = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_INVALID
     POWER_BALANCING = amdsmi_wrapper.AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING
@@ -3164,8 +3186,8 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     """
     Retrieves a GPU's Component Unified ID together with its provenance.
 
-    Built from several queries, so not atomic under a concurrent rekey or
-    topology change.
+    Built from several queries, so not atomic under a concurrent topology
+    change.
 
     Parameters:
         processor_handle (amdsmi_processor_handle_t): The processor handle.
@@ -3173,17 +3195,20 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     Returns:
         Dict[str, Any]: with keys
 
-            primary (str): the canonical CUID, or "" when the caller lacks the
-                privilege to read it. The primary payload embeds the raw serial
-                number, so it is CAP_SYS_ADMIN-gated at the source; an empty
-                value is not an error.
-            derived (str): the derived CUID. This is the value to record.
-            component_type (str): the on-wire Component Type by name (PLATFORM,
+            primary (str): the primary CUID. Always "" in this release: every
+                CUID is temporary, and a temporary CUID has no primary. An
+                empty value is not an error.
+            derived (str): the component's CUID: its DerivedID when it has a
+                permanent CUID, otherwise its temporary CUID (always, in this
+                release). It names the component without disclosing its serial.
+            component_type (str): the component's type, reported beside the
+                CUID rather than decoded from it, by name (PLATFORM,
                 CPU, GPU, NIC, NPU, STORAGE, MEMORY, GENPCIE, GENC, RACKTRAY,
                 RACK, OTHER), or UNKNOWN.
             source (str): which stage of the staged lookup answered: DRIVER,
                 LIBRARY or UNKNOWN.
-            auxiliary (bool): True for a temporary CUID, built from the
+            auxiliary (bool): True for a temporary CUID (amd-smi shows it as
+                `temporary`), built from the
                 machine ID and world-readable device information. Such a value
                 changes when the machine ID changes and is not unique across
                 nodes.
@@ -4431,6 +4456,15 @@ def amdsmi_get_gpu_process_list_by_pid(processor_handles: list) -> list:
 
 
 def amdsmi_get_gpu_driver_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """Deprecated: use amdsmi_get_gpu_driver_info_v2() instead.
+
+    This API is planned for removal in a future major release.
+    """
+    warnings.warn(
+        "amdsmi_get_gpu_driver_info() is deprecated, use amdsmi_get_gpu_driver_info_v2() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
@@ -4449,6 +4483,67 @@ def amdsmi_get_gpu_driver_info(processor_handle: processor_handle_t) -> Dict[str
             driver_info[key] = "N/A"
 
     return driver_info
+
+
+_DRIVER_PACKAGE_NAMES = {
+    amdsmi_wrapper.AMDSMI_DRIVER_PACKAGE_DKMS: "amdgpu-dkms",
+    amdsmi_wrapper.AMDSMI_DRIVER_PACKAGE_KMOD: "amdgpu-kmod",
+}
+
+
+def amdsmi_get_gpu_driver_info_v2(processor_handle: processor_handle_t) -> Dict[str, str]:
+    """
+    Retrieves the GPU driver information, the parts of the amdgpu version and
+    the build of the driver package.
+
+    The package is the installed amdgpu-dkms or amdgpu-kmod package that has the
+    kernel version of the loaded driver. Without one, driver_package and
+    driver_build_version are "N/A" and driver_full_version is driver_version.
+
+    A call may wait up to about 5 seconds for rpm, as described for
+    amdsmi_get_gpu_driver_info_v2() in amdsmi.h. An answer from rpm is kept
+    until the process exits. A failed lookup is asked again after 5 seconds.
+
+    An amdgpu-kmod driver has a three-part version such as 6.16.13 and no
+    amdgpu_driver_version. On WSL both version values are the WDDM driver
+    version.
+
+    Parameters:
+        processor_handle (processor_handle_t): The GPU to query.
+
+    Returns:
+        dict: "N/A" for any value that is not available.
+            - driver_name, driver_version, driver_date: as amdsmi_get_gpu_driver_info().
+            - driver_kernel_version: kernel version of the amdgpu source, such as 6.19.14.
+            - amdgpu_driver_version: amdgpu release, such as 31400000.
+            - driver_build_version: build of the package, such as 2370381.
+            - driver_full_version: driver_version followed by the build, such as
+              6.19.14.31400000-2370381.
+            - driver_package: "amdgpu-dkms" or "amdgpu-kmod".
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is not a processor handle.
+        AmdSmiLibraryException: If the query fails. AMDSMI_STATUS_NOT_SUPPORTED
+            when the loaded library predates this call.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = amdsmi_wrapper.amdsmi_driver_info_v2_t()
+    get_driver_info = _amdsmi_entry_point("amdsmi_get_gpu_driver_info_v2")
+    _check_res(get_driver_info(processor_handle, ctypes.byref(info)))
+
+    driver_info = {
+        "driver_name": info.driver_name.decode("utf-8"),
+        "driver_version": info.driver_version.decode("utf-8"),
+        "driver_date": info.driver_date.decode("utf-8"),
+        "driver_kernel_version": info.driver_kernel_version.decode("utf-8"),
+        "amdgpu_driver_version": info.amdgpu_driver_version.decode("utf-8"),
+        "driver_build_version": info.driver_build_version.decode("utf-8"),
+        "driver_full_version": info.driver_full_version.decode("utf-8"),
+        "driver_package": _DRIVER_PACKAGE_NAMES.get(info.driver_package, ""),
+    }
+    return {key: value or "N/A" for key, value in driver_info.items()}
 
 
 def amdsmi_get_power_info(processor_handle: processor_handle_t) -> Dict[str, ctypes.c_uint32]:
@@ -4886,6 +4981,48 @@ def amdsmi_topo_get_link_type(
     )
 
     return {"hops": hops_64.value, "type": type_32.value}
+
+
+def amdsmi_get_gpu_cpu_links(processor_handle: processor_handle_t):
+    """Return this GPU's directly-connected CPU link(s), of any link type, via KFD io_link only.
+
+    An empty list is a normal, successful result on GPUs that have no CPU
+    io_link at all -- it means "no such links exist", not a failure.
+
+    Returns:
+        list[dict]: one entry per connected CPU, each
+        ``{"package_id": int, "link_type": int}`` where
+        ``package_id`` is the real physical socket id of the connected CPU
+        (not a NUMA node id -- a package can expose multiple NUMA nodes) and
+        ``link_type`` is a value of :class:`amdsmi_link_type_t` (e.g. XGMI,
+        PCIE). Callers that only care about one link type should filter the
+        returned list by ``link_type`` themselves.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    num_cpu_links = ctypes.c_uint32(0)
+    null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_cpu_link_t)()
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_gpu_cpu_links")(
+            processor_handle, ctypes.byref(num_cpu_links), null_ptr
+        )
+    )
+
+    cpu_links = (amdsmi_wrapper.amdsmi_cpu_link_t * num_cpu_links.value)()
+    _check_res(
+        _amdsmi_entry_point("amdsmi_get_gpu_cpu_links")(
+            processor_handle, ctypes.byref(num_cpu_links), cpu_links
+        )
+    )
+
+    links = []
+    # num_cpu_links.value may have grown since the first call (live topology,
+    # not a snapshot), past the capacity cpu_links was allocated with.
+    for i in range(min(num_cpu_links.value, len(cpu_links))):
+        links.append({"package_id": cpu_links[i].package_id, "link_type": cpu_links[i].link_type})
+
+    return links
 
 
 def amdsmi_get_link_topology(
@@ -8059,3 +8196,85 @@ def amdsmi_reset_ttm_pages_limit():
         AmdSmiException: If the function fails
     """
     _check_res(amdsmi_wrapper.amdsmi_reset_ttm_pages_limit())
+
+
+def amdsmi_get_power_stabilization_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Get Power Stabilization (HAWK dummy-compute insertion plus Ramp Management) info.
+
+    Args:
+        processor_handle: GPU processor handle
+
+    Returns:
+        dict: Dictionary with keys matching amdsmi_power_stabilization_info_t
+        fields: host_control_enabled, enabled, power_floor, delay,
+        insertion_priority (AmdSmiHawkInsertionPriority), ramp_enabled,
+        ramp_max_ramp_up_rate, ramp_max_ramp_down_rate,
+        ramp_min_time_at_power_floor, ramp_stop_delay
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is invalid
+        AmdSmiException: If the function fails
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = amdsmi_wrapper.amdsmi_power_stabilization_info_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_power_stabilization_info(processor_handle, ctypes.byref(info))
+    )
+
+    return {
+        "host_control_enabled": info.host_control_enabled,
+        "enabled": info.enabled,
+        "power_floor": info.power_floor,
+        "delay": info.delay,
+        "insertion_priority": AmdSmiHawkInsertionPriority(info.insertion_priority),
+        "ramp_enabled": info.ramp_enabled,
+        "ramp_max_ramp_up_rate": info.ramp_max_ramp_up_rate,
+        "ramp_max_ramp_down_rate": info.ramp_max_ramp_down_rate,
+        "ramp_min_time_at_power_floor": info.ramp_min_time_at_power_floor,
+        "ramp_stop_delay": info.ramp_stop_delay,
+    }
+
+
+def amdsmi_set_power_stabilization_param(
+    processor_handle: processor_handle_t, param_id: AmdSmiPowerStabilizationParamId, value: int
+) -> None:
+    """
+    Set a single Power Stabilization parameter.
+
+    Args:
+        processor_handle: GPU processor handle
+        param_id: Parameter to set
+        value: New value, written as a signed 64-bit integer -- every
+        param_id, including the two ramp rates despite being a %PL/sec
+        rate, is an int64_t (this parameter's sysfs node cannot accept
+        floating-point values).
+
+    Raises:
+        AmdSmiParameterException: If processor_handle, param_id, or value is
+        invalid, including an int64 value out of signed 64-bit range
+        AmdSmiException: If the function fails (AMDSMI_STATUS_NOT_SUPPORTED,
+        AMDSMI_STATUS_NO_PERM, AMDSMI_STATUS_INVAL, or AMDSMI_STATUS_FILE_ERROR)
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    if not isinstance(param_id, AmdSmiPowerStabilizationParamId):
+        raise AmdSmiParameterException(param_id, AmdSmiPowerStabilizationParamId)
+
+    if isinstance(value, bool) or not isinstance(value, int):
+        # bool is a subclass of int; reject it explicitly rather than
+        # silently writing 0/1 (same idiom as amdsmi_configure_ampp_profile's
+        # field_value check).
+        raise AmdSmiParameterException(value, int)
+
+    if not -(2**63) <= value < 2**63:
+        raise AmdSmiParameterException(
+            value, ctypes.c_int64, msg=f"value {value!r} does not fit in a signed 64-bit integer"
+        )
+
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_power_stabilization_param(processor_handle, param_id, value)
+    )

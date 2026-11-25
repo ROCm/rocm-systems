@@ -2,13 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/arch/risc_v/f_ext.h"
+#include "rocjitsu/isa/arch/risc_v/fp_to_integer.h"
 #include "rocjitsu/vm/risc_v/hart_state.h"
 #include "rocjitsu/vm/risc_v/memory.h"
 
 #include <algorithm>
 #include <bit>
-#include <cfenv>
-#include <climits>
 #include <cmath>
 #include <cstdint>
 
@@ -279,19 +278,8 @@ FcvtWSInst::FcvtWSInst(uint32_t raw)
 }
 
 void FcvtWSInst::execute_impl(HartState &ctx) {
-  auto *h = as_hart(ctx);
-  float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
-  int32_t result;
-  if (std::isnan(f1)) {
-    result = INT32_MAX;
-  } else if (f1 >= static_cast<float>(INT32_MAX)) {
-    result = INT32_MAX;
-  } else if (f1 <= static_cast<float>(INT32_MIN)) {
-    result = INT32_MIN;
-  } else {
-    result = static_cast<int32_t>(f1);
-  }
-  h->write_xreg(rd.encoding_value_, sext32(result));
+  const auto value = std::bit_cast<float>(unbox(ctx.read_freg(rs1.encoding_value_)));
+  convert_fp_to_integer<int32_t>(ctx, rd.encoding_value_, value, inst_.funct3);
 }
 
 FcvtWuSInst::FcvtWuSInst(uint32_t raw)
@@ -304,20 +292,8 @@ FcvtWuSInst::FcvtWuSInst(uint32_t raw)
 }
 
 void FcvtWuSInst::execute_impl(HartState &ctx) {
-  auto *h = as_hart(ctx);
-  float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
-  uint32_t result;
-  if (std::isnan(f1)) {
-    result = UINT32_MAX;
-  } else if (f1 >= static_cast<float>(UINT32_MAX)) {
-    result = UINT32_MAX;
-  } else if (f1 <= 0.0f) {
-    result = 0;
-  } else {
-    result = static_cast<uint32_t>(f1);
-  }
-  // Per RISC-V spec: sign-extend the 32-bit result to 64 bits
-  h->write_xreg(rd.encoding_value_, sext32(static_cast<int32_t>(result)));
+  const auto value = std::bit_cast<float>(unbox(ctx.read_freg(rs1.encoding_value_)));
+  convert_fp_to_integer<uint32_t>(ctx, rd.encoding_value_, value, inst_.funct3);
 }
 
 FcvtLSInst::FcvtLSInst(uint32_t raw)
@@ -330,19 +306,8 @@ FcvtLSInst::FcvtLSInst(uint32_t raw)
 }
 
 void FcvtLSInst::execute_impl(HartState &ctx) {
-  auto *h = as_hart(ctx);
-  float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
-  int64_t result;
-  if (std::isnan(f1)) {
-    result = INT64_MAX;
-  } else if (f1 >= static_cast<float>(INT64_MAX)) {
-    result = INT64_MAX;
-  } else if (f1 <= static_cast<float>(INT64_MIN)) {
-    result = INT64_MIN;
-  } else {
-    result = static_cast<int64_t>(f1);
-  }
-  h->write_xreg(rd.encoding_value_, result);
+  const auto value = std::bit_cast<float>(unbox(ctx.read_freg(rs1.encoding_value_)));
+  convert_fp_to_integer<int64_t>(ctx, rd.encoding_value_, value, inst_.funct3);
 }
 
 FcvtLuSInst::FcvtLuSInst(uint32_t raw)
@@ -355,19 +320,8 @@ FcvtLuSInst::FcvtLuSInst(uint32_t raw)
 }
 
 void FcvtLuSInst::execute_impl(HartState &ctx) {
-  auto *h = as_hart(ctx);
-  float f1 = std::bit_cast<float>(unbox(h->read_freg(rs1.encoding_value_)));
-  uint64_t result;
-  if (std::isnan(f1)) {
-    result = UINT64_MAX;
-  } else if (f1 >= static_cast<float>(UINT64_MAX)) {
-    result = UINT64_MAX;
-  } else if (f1 <= 0.0f) {
-    result = 0;
-  } else {
-    result = static_cast<uint64_t>(f1);
-  }
-  h->write_xreg(rd.encoding_value_, static_cast<int64_t>(result));
+  const auto value = std::bit_cast<float>(unbox(ctx.read_freg(rs1.encoding_value_)));
+  convert_fp_to_integer<uint64_t>(ctx, rd.encoding_value_, value, inst_.funct3);
 }
 
 // R-type int-to-FP conversions (GPR -> FPR)

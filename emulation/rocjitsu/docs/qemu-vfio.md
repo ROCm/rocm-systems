@@ -1,10 +1,10 @@
 # QEMU VFIO-user compute
 
-This guide describes the QEMU/VFIO-user path that rocJITsu supports today.
+This guide describes the QEMU/VFIO-user path that rocjitsu supports today.
 The single-GPU guest qualification recipe uses `configs/gfx1250_mi455x.json`.
 The launcher can also expose multiple local gfx1250 GPUs from a matching
 configuration, including `configs/gfx1250_mi455x_kmd_4gpu.json`. QEMU owns the
-guest, while rocJITsu supplies the emulated PCI devices and GPU models.
+guest, while rocjitsu supplies the emulated PCI devices and GPU models.
 
 The repository provides the VFIO-user server and
 `scripts/run-vfio-guest.py`. It does not build or distribute a guest kernel,
@@ -31,13 +31,11 @@ IOVA is denied rather than reinterpreted as ordinary guest RAM. GPU peer
 effects cross the modeled local fabric. Ordinary guest RAM uses its usual
 descriptor-backed VFIO-user DMA map and never routes through the GPU fabric.
 
-The active libvfio-user source carries only a generic fix for the upper
-address register of a sub-4-GiB 64-bit BAR. A former nonstandard peer
-transport is removed from the active source and launch path. Runs that
-depended on it are historical controls, not evidence for the current
-stock-transport gate. The peer endpoint does not advertise AtomicOp
-completion; peer BAR atomics are rejected. The selected
-stock driver emits UC peer PTEs, so cacheable peer coherence is a later gate.
+A former nonstandard peer transport is removed from the active source and
+launch path. Runs that depended on it are historical controls, not evidence
+for the current stock-transport gate. The peer endpoint does not advertise
+AtomicOp completion; peer BAR atomics are rejected. The selected stock
+driver emits UC peer PTEs, so cacheable peer coherence is a later gate.
 
 ## GPU VM hardware path
 
@@ -120,6 +118,11 @@ cacheable coherence, or the four-guest same-host RCCL exit gate below. The
   libvfio-user and json-c dependencies are already available locally.
 - Optional access to `/dev/kvm`. The launcher falls back to TCG.
 
+If you set `FETCHCONTENT_SOURCE_DIR_LIBVFIO-USER`, use the revision pinned in
+`cmake/rj_libvfio_user.cmake` or a checkout that preserves the upper address
+bits of sub-4-GiB 64-bit BARs, because this override bypasses the dependency
+pin and CMake does not update the supplied sources.
+
 Check the QEMU capabilities before building a guest:
 
 ```bash
@@ -153,6 +156,23 @@ The build also produces the profile-specific IP-discovery generator at:
 build-vfio/tools/rj-ip-discovery/rj-ip-discovery
 ```
 
+If reconfiguration reports `Failed to unstash changes`, cached dependency
+sources may contain changes from an earlier build. Leave the old dependency
+directory intact, including its `.git` directory, local edits, and stashes,
+and retry with fresh build and `FETCHCONTENT_BASE_DIR` directories:
+
+```bash
+cmake -S . -B tmp/build-vfio-clean -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DROCJITSU_ENABLE_VFIO=ON \
+  -DFETCHCONTENT_BASE_DIR="$PWD/tmp/vfio-deps-clean"
+cmake --build tmp/build-vfio-clean --target rocjitsu_bin rj_ip_discovery
+```
+
+Choose unused directory names and use the executables under the new build
+directory. The old sources remain available for recovering edits; inspect
+both `git status` and `git stash list` there before removing them.
+
 ## Prepare compatible guest artifacts
 
 The kernel, AMDGPU module, firmware, ROCm user-mode stack, and rocBLAS payload
@@ -183,7 +203,7 @@ release. Do not add JPEG or VCN firmware, because those IP blocks are absent.
 The launch command below selects file-based IP discovery with
 `amdgpu.discovery=2`. Its `amdgpu/ip_discovery.bin` is not a vendor firmware
 blob and must not be copied from an unrelated package. Generate it from the
-same rocJITsu gfx1250 profile used by the emulated device:
+same rocjitsu gfx1250 profile used by the emulated device:
 
 ```bash
 mkdir -p /path/to/staging-root/lib/firmware/amdgpu
@@ -192,7 +212,7 @@ build-vfio/tools/rj-ip-discovery/rj-ip-discovery \
   /path/to/staging-root/lib/firmware/amdgpu/ip_discovery.bin
 ```
 
-Regenerate the table whenever the rocJITsu device profile changes, then pack
+Regenerate the table whenever the rocjitsu device profile changes, then pack
 that staging tree into the initramfs.
 
 The initramfs must contain:
@@ -263,7 +283,7 @@ guest: done
 
 Do not qualify the device merely because the kernel probed or a kernel was
 submitted. Require numerical validation, a zero-status QEMU exit, and orderly
-rocJITsu shutdown. The packaged rocBLAS installation must select a supported
+rocjitsu shutdown. The packaged rocBLAS installation must select a supported
 gfx1250 backend and find its matching library data without runtime environment
 overrides.
 
@@ -314,11 +334,11 @@ RCCL P2P guest below uses `--smp 4`.
 
 Run the same command with `--dry-run` first. Dry-run validates all input paths
 and executable permissions, confirms that QEMU provides `vfio-user-pci`, asks
-the selected rocJITsu binary to confirm that it was built with VFIO-user
+the selected rocjitsu binary to confirm that it was built with VFIO-user
 support, selects the accelerator, prints the exact server and QEMU argument
 vectors, and does not create the output directory.
 
-Each QEMU or rocJITsu capability probe is limited to `--probe-timeout`
+Each QEMU or rocjitsu capability probe is limited to `--probe-timeout`
 seconds (10 by default). SIGTERM or SIGINT sent to the launcher while a probe
 is running terminates and reaps that probe before the launcher exits.
 
@@ -340,7 +360,7 @@ Repeat `--socket` once for each local GPU, in GPU ordinal order. Every socket
 must have a distinct, short path directly inside the new output directory.
 The paths are the complete ordered local GPU list; specifying one `--socket`
 does not append the default socket. The default remains
-`<output>/vfio-user.sock` when no `--socket` is specified. rocJITsu validates
+`<output>/vfio-user.sock` when no `--socket` is specified. rocjitsu validates
 the socket count against the selected configuration or local node.
 
 For the repository's four-GPU configuration, use the same prepared guest inputs
@@ -388,7 +408,7 @@ setting, not a physical BAR claim. The per-GPU GEMM check validates
 local compute only; the larger BAR does not qualify guest P2P or RCCL.
 
 Use `--node <id>` with a system manifest to select the local node served by
-this process; rocJITsu checks the selection. The launcher starts one rocJITsu
+this process; rocjitsu checks the selection. The launcher starts one rocjitsu
 server and waits for one readiness signal, then checks that every requested
 socket exists before starting QEMU. For multiple GPUs, QEMU receives one
 `vfio-user-pci` device per socket on `pcie.0` at slots `0x4`, `0x5`, and so
@@ -691,7 +711,7 @@ The launcher writes:
 ```
 
 Success requires all requested log markers, no rejected marker, QEMU status
-zero, and cooperative rocJITsu termination. The launcher sends SIGTERM to the
+zero, and cooperative rocjitsu termination. The launcher sends SIGTERM to the
 server after QEMU exits and waits up to five seconds for it to stop cleanly.
 After that grace period it sends SIGKILL, reaps the server, and fails the run.
 Any server exit while QEMU is still running fails the run, regardless of exit
@@ -700,7 +720,7 @@ alive until the launcher observes QEMU exit and requests shutdown.
 
 Each run needs a new output directory. Preserve the logs together with:
 
-- the rocJITsu Git commit;
+- the rocjitsu Git commit;
 - the QEMU version;
 - the accelerator selected by dry-run;
 - kernel, initramfs, AMDGPU package, firmware package, and ROCm package
@@ -720,7 +740,7 @@ host-kernel VFIO passthrough devices.
 
 Inspect `server.log`. Also keep the output path short and ensure that no
 stale path already exists. The socket must be directly inside the output
-directory. The launcher waits on a pipe inherited by rocJITsu, which reports
+directory. The launcher waits on a pipe inherited by rocjitsu, which reports
 readiness after configuration parsing, topology construction, engine startup,
 and the final socket bind. Process exit or a closed pipe reports startup
 failure immediately; a live server that does not report readiness receives
@@ -737,7 +757,7 @@ IP-discovery parser inputs.
 ### AMDGPU fails while discovering multimedia IP
 
 Use a driver containing `4e07da515d1c` or its backport. Do not work around
-this by adding a fake JPEG or VCN device to rocJITsu.
+this by adding a fake JPEG or VCN device to rocjitsu.
 
 ### `/dev/kfd` is absent
 
@@ -754,7 +774,7 @@ from another GPU target.
 ### The run stops making progress
 
 The launcher does not impose a runtime deadline. It waits for QEMU to exit and
-fails immediately if rocJITsu exits first. A normal guest disconnect leaves the
+fails immediately if rocjitsu exits first. A normal guest disconnect leaves the
 server alive until the launcher observes QEMU's exit and requests shutdown, so
 this ordering needs no grace period. Use the partial `guest.log` and `server.log`
 to distinguish slow progress from a deadlock. CI systems can enforce a job-level

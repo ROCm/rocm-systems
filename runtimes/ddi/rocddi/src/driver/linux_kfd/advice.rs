@@ -179,6 +179,24 @@ impl LinuxKfdDriver {
         }
     }
 
+    fn checked_prefetch_available(&self) -> Result<bool, Error> {
+        self.ensure_open()?;
+        if self.lifetime == crate::session::DriverContextLifetime::Process
+            && !self
+                .joined_primary
+                .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return Ok(false);
+        }
+        self.with_context_resources(|resources| {
+            let Some(kfd) = resources.kfd.get() else {
+                return Ok(false);
+            };
+            kfd.checked_prefetch()
+                .map_err(|source| native_error("KFD checked prefetch negotiation", source))
+        })
+    }
+
     fn advice_native(
         &self,
         address: u64,
@@ -201,7 +219,11 @@ impl MemoryAdviceOperations for LinuxKfdDriver {
         self.ensure_open()?;
         let page = crate::memory::host_page_size()?;
         Ok(AdviceCapabilities {
-            prefetch_completion: PrefetchCompletion::Attempt,
+            prefetch_completion: if self.checked_prefetch_available()? {
+                PrefetchCompletion::Migration
+            } else {
+                PrefetchCompletion::Attempt
+            },
             range_alignment: page,
             minimum_migration_granularity: u128::from(page),
             maximum_migration_granularity: u128::from(page)
@@ -300,20 +322,24 @@ impl MemoryAdviceOperations for LinuxKfdDriver {
         location: AdviceLocation,
         completion: PrefetchCompletion,
     ) -> Result<(), Error> {
-        // KFD's synchronous ioctl waits for submitted copy fences, but its
-        // migration trigger can suppress placement failures and use fallback
-        // locations. GET PREFETCH_LOCATION reports intent, not residency.
-        if completion == PrefetchCompletion::Migration {
-            return Err(error(
-                ErrorKind::Unsupported,
-                "KFD does not prove completed placement",
-            ));
-        }
+        let operation = match completion {
+            PrefetchCompletion::Attempt => uapi::SVM_OP_SET_ATTR,
+            PrefetchCompletion::Migration => {
+                if self.advice_capabilities()?.prefetch_completion != PrefetchCompletion::Migration
+                {
+                    return Err(error(
+                        ErrorKind::Unsupported,
+                        "KFD does not support checked migration",
+                    ));
+                }
+                uapi::SVM_OP_PREFETCH_CHECKED
+            }
+        };
         let value = self.advice_location_to_native(location)?;
         self.advice_native(
             address,
             size,
-            uapi::SVM_OP_SET_ATTR,
+            operation,
             &mut [attribute(uapi::SVM_ATTR_PREFETCH_LOCATION, value)],
         )
     }
@@ -392,19 +418,89 @@ mod tests {
                 [AdviceValue::MigrationGranularity(page << exponent)]
             );
         }
-        // This rejection requires neither an active GPU nor a native ioctl.
-        assert_eq!(
-            driver
-                .advice_prefetch(
-                    0x10000,
-                    4096,
-                    AdviceLocation::System,
-                    PrefetchCompletion::Migration
-                )
-                .unwrap_err()
-                .kind(),
-            ErrorKind::Unsupported
-        );
+    }
+
+    #[test]
+    fn prefetch_negotiates_exact_protocol_and_never_weakens_completion() {
+        use super::super::connection::{Call, Kfd};
+        use crate::memory::storage::Shared;
+        use std::fs::File;
+        use std::sync::{Arc, Mutex};
+
+        for (major, id, features, supported) in [
+            (1, 0, 0, false), // An unextended driver zero-fills the suffix.
+            (1, uapi::SVM_EXTENSION_ID + 1, 1, false),
+            (1, uapi::SVM_EXTENSION_ID, 0, false),
+            (2, uapi::SVM_EXTENSION_ID, 1, false),
+            (1, uapi::SVM_EXTENSION_ID, 1, true),
+        ] {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let observed = calls.clone();
+            let kfd = Kfd::with_hook(
+                File::open("/dev/null").unwrap(),
+                Arc::new(move |call| {
+                    match call {
+                        Call::VersionExtension(extension) => {
+                            observed.lock().unwrap().push(None);
+                            extension.version.major = major;
+                            extension.version.minor = 99; // Minor alone proves nothing.
+                            extension.extension_id = id;
+                            extension.features = features;
+                            Ok(())
+                        }
+                        Call::Svm(args, attributes) => {
+                            observed.lock().unwrap().push(Some(args.operation));
+                            assert_eq!(
+                                (args.start_address, args.size, args.attribute_count),
+                                (0x10000, 4096, 1)
+                            );
+                            assert_eq!(
+                                attributes[0].attribute_type,
+                                uapi::SVM_ATTR_PREFETCH_LOCATION
+                            );
+                            assert_eq!(attributes[0].value, uapi::SVM_LOCATION_SYSTEM);
+                            // A native migration error must not be retried as Attempt.
+                            Err(std::io::Error::from_raw_os_error(super::super::errno::EIO))
+                        }
+                        _ => Err(std::io::Error::other("unexpected ioctl in prefetch test")),
+                    }
+                }),
+            );
+            let driver = LinuxKfdDriver::new();
+            assert!(driver.local.kfd.set(Shared::new(kfd).unwrap()).is_ok());
+            let completion = driver.advice_capabilities().unwrap().prefetch_completion;
+            assert_eq!(completion == PrefetchCompletion::Migration, supported);
+            let result = driver.advice_prefetch(
+                0x10000,
+                4096,
+                AdviceLocation::System,
+                PrefetchCompletion::Migration,
+            );
+            assert!(result.is_err());
+            if !supported {
+                assert_eq!(result.unwrap_err().kind(), ErrorKind::Unsupported);
+            }
+            assert!(
+                driver
+                    .advice_prefetch(
+                        0x10000,
+                        4096,
+                        AdviceLocation::System,
+                        PrefetchCompletion::Attempt
+                    )
+                    .is_err()
+            );
+            let expected = if supported {
+                vec![
+                    None,
+                    Some(uapi::SVM_OP_PREFETCH_CHECKED),
+                    Some(uapi::SVM_OP_SET_ATTR),
+                ]
+            } else {
+                vec![None, Some(uapi::SVM_OP_SET_ATTR)]
+            };
+            assert_eq!(*calls.lock().unwrap(), expected);
+        }
     }
 
     #[test]

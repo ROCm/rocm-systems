@@ -3,7 +3,8 @@
  *
  * Spread two-shot tier of the LL-protocol all-reduce for the DDA path.
  *
- * Runs on the one-shot tier's grid and moves the two-shot tier's bytes. The
+ * Runs on a one-shot-shaped grid (one thread per packet, kDdaLLSpreadThreads
+ * a block) and moves the two-shot tier's bytes. The
  * one-shot puts one packet per thread on the wire to every peer, so one block
  * carries blockDim x 16B x (nRanks-1); here each block owns the same slice of
  * every rank's shard on all ranks, and its threads share (peer, packet) units,
@@ -37,7 +38,7 @@
 
 namespace dda::common {
 
-// Threads per block: the one-shot tier's, so the spread kernel runs on exactly its grid.
+// Threads per block. The plain one-shot runs narrower blocks; the spread keeps this width.
 constexpr int kDdaLLSpreadThreads = 512;
 
 // Payload words (8B each) one reduce pass stages in LDS: the slice length times nRanks.
@@ -65,21 +66,24 @@ __host__ __device__ constexpr size_t ddaLLSpreadShardPkts(size_t nPk, int nRanks
   return (nPk + (size_t)nRanks - 1) / (size_t)nRanks;
 }
 
+// Alignment of a block's slice: 16 packets, so each run of a block's (peer, packet) units starts on a 256 B boundary.
+constexpr size_t kDdaLLSpreadBlockAlignPkts = 16;
+
+// Packets of every shard each of `blocks` blocks owns: the even split rounded up to kDdaLLSpreadBlockAlignPkts, so
+// trailing blocks run short or idle. An even split below kDdaLLSpreadBlockAlignPkts (above 32 ranks on the one-shot
+// grid) is kept as is: rounding it would idle most blocks and can split a slice over more LDS passes.
+__host__ __device__ constexpr size_t ddaLLSpreadBlockPkts(size_t shardPkts, size_t blocks) {
+  const size_t even = (shardPkts + blocks - 1) / blocks;
+  if (even < kDdaLLSpreadBlockAlignPkts) {
+    return even;
+  }
+  return (even + kDdaLLSpreadBlockAlignPkts - 1) / kDdaLLSpreadBlockAlignPkts * kDdaLLSpreadBlockAlignPkts;
+}
+
 // Packets rank owns in shards of shardPkts: the last shards are shorter, or empty, when nRanks does not divide nPk.
 __host__ __device__ constexpr size_t ddaLLSpreadShardLen(size_t nPk, size_t shardPkts, int rank) {
   const size_t first = (size_t)rank * shardPkts;
   return first < nPk ? (nPk - first < shardPkts ? nPk - first : shardPkts) : (size_t)0;
-}
-
-// Workgroup barrier for LDS only: on gfx1250 __syncthreads() would also wait for every remote store in flight.
-__device__ __forceinline__ void ddaLLSpreadLdsBarrier() {
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
-  __builtin_amdgcn_s_barrier();
-  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
-#else
-  __syncthreads();
-#endif
 }
 
 // Polls the lines of up to kDdaLLSpreadBatch units this thread owns (mask bit i = unit i valid); false if aborted.
@@ -89,7 +93,7 @@ __device__ __forceinline__ bool ddaLLSpreadPoll(const uint32_t* const (&line)[kD
   return ddaLLWaitLineFlagsBatched<kDdaLLSpreadBatch>(line, mask, flag, params, d0, d1);
 }
 
-// LL spread two-shot all-reduce kernel; launched on the one-shot tier's grid (kDdaLLSpreadThreads per block).
+// LL spread two-shot all-reduce kernel; one thread per packet, kDdaLLSpreadThreads per block.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(kDdaLLSpreadThreads)
@@ -116,7 +120,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
   const size_t slot = ddaLLArTwoShotSlotPkts(bankSize, nRanks);
 
   // This block's slice of every shard: the same packet range on every rank, so its LL epoch stays in lockstep.
-  const size_t chunk = (nPkRank + gridDim.x - 1) / gridDim.x;
+  const size_t chunk = ddaLLSpreadBlockPkts(nPkRank, gridDim.x);
   const size_t p0 = (size_t)blockIdx.x * chunk < nPkRank ? (size_t)blockIdx.x * chunk : nPkRank;
   const size_t p1 = p0 + chunk < nPkRank ? p0 + chunk : nPkRank;
   const size_t len = p1 - p0;
@@ -241,7 +245,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
     if (aborted) {
       ldsAborted = 1;
     }
-    ddaLLSpreadLdsBarrier();
+    ddaLdsBarrier();
     aborted = aborted || ldsAborted != 0;
     // Partial sums: skip the fold, my recvbuff shard and the publish. aborted is uniform here, so no barrier is split.
     if (aborted) {
@@ -270,7 +274,7 @@ __launch_bounds__(kDdaLLSpreadThreads)
       out[w + 1] = acc1;
       ldsAcc[k] = make_uint2(acc0, acc1);
     }
-    ddaLLSpreadLdsBarrier();
+    ddaLdsBarrier();
 
     for (size_t u = tid; u < pollUnits; u += nthr) {
       const int peer = unitPeer(u, plen32);

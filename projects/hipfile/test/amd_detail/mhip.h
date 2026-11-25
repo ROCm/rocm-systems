@@ -7,8 +7,11 @@
 
 #include "context.h"
 #include "hip.h"
+#include "mock-passthrough.h"
 
 #include <gmock/gmock.h>
+
+#define MHIP_PASSTHROUGH(func) MOCK_PASSTHROUGH(hipFile::Hip, func)
 
 /* mhipxx (mock hip++)
  *
@@ -31,10 +34,16 @@ struct MHip : Hip {
     MOCK_METHOD(hipStream_t, hipStreamCreateWithPriority, (unsigned int flags, int priority),
                 (const, override));
     MOCK_METHOD(HipStreamPriorityRange, hipDeviceGetStreamPriorityRange, (), (const, override));
+    MOCK_METHOD(int, hipStreamGetPriority, (hipStream_t stream), (const, override));
     MOCK_METHOD(void, hipStreamDestroy, (hipStream_t stream), (const, override));
+    MOCK_METHOD(void, hipStreamWaitValue64,
+                (hipStream_t stream, uint64_t *ptr, uint64_t value, unsigned int flags, uint64_t mask),
+                (const, override));
     MOCK_METHOD(void *, hipHostMalloc, (size_t size, unsigned int flags), (const, override));
     MOCK_METHOD(void, hipHostFree, (void *ptr), (const, override));
     MOCK_METHOD(void *, hipHostGetDevicePointer, (void *hstPtr, unsigned int flags), (const, override));
+    MOCK_METHOD(void *, hipExtMallocWithFlags, (size_t size, unsigned int flags), (const, override));
+    MOCK_METHOD(void, hipFree, (void *ptr), (const, override));
     MOCK_METHOD(int, hipRuntimeGetVersion, (), (const, override));
     MOCK_METHOD(void *, hipGetProcAddress,
                 (const char *symbol, int hipVersion, uint64_t flags,
@@ -60,5 +69,37 @@ struct MHip : Hip {
     MOCK_METHOD(void, hipSetDevice, (int device_id), (const, override));
     MOCK_METHOD(int, hipGetDeviceCount, (), (const, override));
     MOCK_METHOD(hipUUID, hipDeviceGetUuid, (int device_id), (const, override));
+    MOCK_METHOD(hipError_t, hipGetLastError, (), (const, override));
+
+    // Route every mocked call to the real HIP runtime by default, so a test
+    // can override only the calls it wants to fail. Strongly prefer NiceMock.
+    void enable_passthrough()
+    {
+        MHIP_PASSTHROUGH(hipPointerGetAttributes);
+        MHIP_PASSTHROUGH(hipMemcpy);
+        MHIP_PASSTHROUGH(hipMemcpyWithStream);
+        MHIP_PASSTHROUGH(hipStreamSynchronize);
+        MHIP_PASSTHROUGH(hipStreamCreateWithPriority);
+        MHIP_PASSTHROUGH(hipDeviceGetStreamPriorityRange);
+        MHIP_PASSTHROUGH(hipStreamDestroy);
+        MHIP_PASSTHROUGH(hipHostMalloc);
+        MHIP_PASSTHROUGH(hipHostFree);
+        MHIP_PASSTHROUGH(hipHostGetDevicePointer);
+        MHIP_PASSTHROUGH(hipRuntimeGetVersion);
+        MHIP_PASSTHROUGH(hipGetProcAddress);
+        MHIP_PASSTHROUGH(hipAmdFileRead);
+        MHIP_PASSTHROUGH(hipAmdFileWrite);
+        MHIP_PASSTHROUGH(hipMemGetAddressRange);
+        MHIP_PASSTHROUGH(hipLaunchHostFunc);
+        MHIP_PASSTHROUGH(hipLaunchKernel);
+        MHIP_PASSTHROUGH(hipDeviceGetAttribute);
+        MHIP_PASSTHROUGH(hipStreamGetDevice);
+        MHIP_PASSTHROUGH(hipInit);
+        MHIP_PASSTHROUGH(hipGetDevice);
+        MHIP_PASSTHROUGH(hipSetDevice);
+        MHIP_PASSTHROUGH(hipGetDeviceCount);
+        MHIP_PASSTHROUGH(hipDeviceGetUuid);
+        MHIP_PASSTHROUGH(hipGetLastError);
+    }
 };
 }

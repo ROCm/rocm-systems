@@ -10,10 +10,11 @@ use super::output::write_value;
 #[cfg(all(hsa_tool_dispatch, not(test)))]
 use crate::api_trace;
 use crate::ffi::{self, *};
-use crate::runtime::{boundary, lock, map_error, plain_boundary};
+use crate::image::descriptor as image_descriptor;
+use crate::lifecycle::lock;
 #[cfg(not(all(hsa_tool_dispatch, not(test))))]
-use crate::{image_abi, loader};
-use crate::{image_gfx12, runtime};
+use crate::loader;
+use crate::status::{boundary, map_error, plain_boundary};
 
 /// Minor version of the HSA runtime ABI reported to clients.
 pub(crate) const HSA_RUNTIME_VERSION_MINOR: u16 = 21;
@@ -33,7 +34,7 @@ pub extern "C" fn hsa_amd_enable_high_precision_timestamps() -> Status {
         if guard.as_ref().is_none() {
             return NOT_INITIALIZED;
         }
-        runtime::enable_high_precision_timestamps();
+        crate::clock::enable_high_precision_timestamps();
         SUCCESS
     })
 }
@@ -84,52 +85,64 @@ pub unsafe extern "C" fn hsa_system_get_info(attribute: u32, value: *mut c_void)
                     value,
                     extension_mask(
                         runtime
+                            .agents
                             .gpus
                             .iter()
-                            .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
-                        runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported),
+                            .any(|gpu| image_descriptor::supported_gpu(&gpu.info())),
+                        runtime
+                            .agents
+                            .gpus
+                            .iter()
+                            .any(|gpu| gpu.pc_sampling_supported),
                     ),
                 ),
                 AMD_SYSTEM_INFO_SVM_SUPPORTED => write_value(
                     value,
                     runtime
-                        .session()
+                        .native_session()
                         .is_some_and(|session| session.memory_advice().is_ok()),
                 ),
                 AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT => write_value(value, false),
                 AMD_SYSTEM_INFO_MWAITX_ENABLED => write_value(value, false),
-                AMD_SYSTEM_INFO_DMABUF_SUPPORTED => write_value(
-                    value,
-                    !runtime.gpus.is_empty()
-                        && runtime
-                            .gpus
-                            .iter()
-                            .all(|gpu| crate::platform::memory::supports_dma_buf(&gpu.endpoint)),
-                ),
+                AMD_SYSTEM_INFO_DMABUF_SUPPORTED => {
+                    write_value(
+                        value,
+                        !runtime.agents.gpus.is_empty()
+                            && runtime.agents.gpus.iter().all(|gpu| {
+                                crate::platform::memory::supports_dma_buf(&gpu.endpoint)
+                            }),
+                    )
+                }
                 AMD_SYSTEM_INFO_EXT_VERSION_MAJOR => write_value(value, 1_u16),
                 AMD_SYSTEM_INFO_EXT_VERSION_MINOR => write_value(value, 39_u16),
                 AMD_SYSTEM_INFO_VIRTUAL_MEM_API_SUPPORTED => write_value(
                     value,
-                    !runtime.gpus.is_empty()
-                        && runtime.gpus.iter().all(|gpu| {
+                    !runtime.agents.gpus.is_empty()
+                        && runtime.agents.gpus.iter().all(|gpu| {
                             crate::platform::memory::supports_virtual_memory(&gpu.endpoint)
                         }),
                 ),
                 AMD_SYSTEM_INFO_XNACK_ENABLED => write_value(
                     value,
-                    runtime.gpus.first().is_some_and(|gpu| gpu.xnack_enabled),
+                    runtime
+                        .agents
+                        .gpus
+                        .first()
+                        .is_some_and(|gpu| gpu.xnack_enabled),
                 ),
                 AMD_SYSTEM_INFO_FABRIC_HANDLES_SUPPORTED => write_value(
                     value,
-                    !runtime.gpus.is_empty()
+                    !runtime.agents.gpus.is_empty()
                         && runtime
+                            .agents
                             .gpus
                             .iter()
                             .all(|gpu| gpu.info().fabric_handles_supported),
                 ),
-                AMD_SYSTEM_INFO_HOST_ALLOC_DMABUF_SUPPORTED => {
-                    write_value(value, host_alloc_dmabuf_supported(runtime.gpus.len()))
-                }
+                AMD_SYSTEM_INFO_HOST_ALLOC_DMABUF_SUPPORTED => write_value(
+                    value,
+                    host_alloc_dmabuf_supported(runtime.agents.gpus.len()),
+                ),
                 _ => INVALID_ARGUMENT,
             }
         }
@@ -277,12 +290,15 @@ pub unsafe extern "C" fn hsa_system_extension_supported(
         let supported = legacy_extension_supported(extension, version_major, version_minor)
             && match extension {
                 EXTENSION_IMAGES => runtime
+                    .agents
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
-                EXTENSION_AMD_PC_SAMPLING => {
-                    runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
-                }
+                    .any(|gpu| image_descriptor::supported_gpu(&gpu.info())),
+                EXTENSION_AMD_PC_SAMPLING => runtime
+                    .agents
+                    .gpus
+                    .iter()
+                    .any(|gpu| gpu.pc_sampling_supported),
                 _ => true,
             };
         // SAFETY: The caller supplied writable output storage.
@@ -319,12 +335,15 @@ pub unsafe extern "C" fn hsa_system_major_extension_supported(
         let minor =
             supported_extension_minor(extension, version_major).filter(|_| match extension {
                 EXTENSION_IMAGES => runtime
+                    .agents
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info())),
-                EXTENSION_AMD_PC_SAMPLING => {
-                    runtime.gpus.iter().any(|gpu| gpu.pc_sampling_supported)
-                }
+                    .any(|gpu| image_descriptor::supported_gpu(&gpu.info())),
+                EXTENSION_AMD_PC_SAMPLING => runtime
+                    .agents
+                    .gpus
+                    .iter()
+                    .any(|gpu| gpu.pc_sampling_supported),
                 _ => true,
             });
         // ROCr leaves version_minor untouched when the extension is unsupported.
@@ -404,16 +423,17 @@ pub unsafe extern "C" fn hsa_system_get_major_extension_table(
         match (extension, version_major) {
             (EXTENSION_IMAGES, 1) => {
                 if !runtime
+                    .agents
                     .gpus
                     .iter()
-                    .any(|gpu| image_gfx12::supported_gpu(&gpu.info()))
+                    .any(|gpu| image_descriptor::supported_gpu(&gpu.info()))
                 {
                     return NOT_SUPPORTED;
                 }
                 #[cfg(all(hsa_tool_dispatch, not(test)))]
                 let functions = api_trace::image_extension_table();
                 #[cfg(not(all(hsa_tool_dispatch, not(test))))]
-                let functions = image_abi::image_extension_table();
+                let functions = crate::api::image::image_extension_table();
                 #[cfg(all(hsa_tool_dispatch, not(test)))]
                 if functions.contains(&0) {
                     return ERROR;

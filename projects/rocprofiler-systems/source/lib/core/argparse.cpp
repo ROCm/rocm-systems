@@ -6,11 +6,11 @@
 #include "common/path.hpp"
 #include "common/string_utility.hpp"
 #include "config.hpp"
-#include "exception.hpp"
 #include "gpu.hpp"
 #include "state.hpp"
 #include <algorithm>
 #include <cstdint>
+#include <stdexcept>
 
 #include <timemory/settings/types.hpp>
 
@@ -846,33 +846,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _data.reg.processed_environs.emplace("cout_output");
     }
 
-    if(_data.reg.environ_filter("profile_diff", _data))
-    {
-        _parser
-            .add_argument(
-                { "--profile-diff" },
-                "Generate a diff output b/t the profile collected and an existing "
-                "profile from another run Accepts 1-2 parameters corresponding to "
-                "the input path and the input prefix")
-            .min_count(1)
-            .max_count(2)
-            .dtype("path [prefix]")
-            .action([&](parser_t& p) {
-                auto _v = p.get<strvec_t>("profile-diff");
-                update_env(_data, env_vars::DIFF_OUTPUT, true);
-                update_env(_data, env_vars::INPUT_PATH, _v.at(0));
-                if(_v.size() > 1)
-                {
-                    update_env(_data, env_vars::INPUT_PREFIX, _v.at(1));
-                }
-            });
-
-        _data.reg.processed_environs.emplace("profile_diff");
-        _data.reg.processed_environs.emplace("diff_output");
-        _data.reg.processed_environs.emplace("input_path");
-        _data.reg.processed_environs.emplace("input_prefix");
-    }
-
     _parser.start_group(
         "HOST/DEVICE (PROCESS SAMPLING) OPTIONS",
         "Process sampling is background measurements for resources available to the "
@@ -1130,7 +1103,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                     if(p.exists("sampling-overflow-event") &&
                        _v.front() != p.get<std::string>("sampling-overflow-event"))
                     {
-                        throw exception<std::runtime_error>(fmt::format(
+                        throw std::runtime_error(fmt::format(
                             "'--sample-overflow {} ...' conflicts with "
                             "'--sampling-overflow-event {}' option",
                             _v.front(), p.get<std::string>("sampling-overflow-event")));
@@ -1267,8 +1240,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
 
         if(_name.empty())
         {
-            throw exception<std::runtime_error>("Error! empty name for " +
-                                                itr->get_name());
+            throw std::runtime_error("Error! empty name for " + itr->get_name());
         }
 
         _data.reg.processed_settings.emplace(itr.get());
@@ -1290,7 +1262,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                 }
                 if(_value.empty())
                 {
-                    throw exception<std::runtime_error>(
+                    throw std::runtime_error(
                         fmt::format("Error! no value for {}", _name));
                 }
                 update_env(_data, itr->get_env_name(), _value);
@@ -1305,7 +1277,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                         fmt::format("{}", fmt::join(p.get<strvec_t>(_name), " "));
                     if(_value.empty())
                     {
-                        throw exception<std::runtime_error>(
+                        throw std::runtime_error(
                             fmt::format("Error! no value for {}", _name));
                     }
                     update_env(_data, itr->get_env_name(), _value);

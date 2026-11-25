@@ -265,7 +265,7 @@ def test_roofline_mem_levels_are_measured_levels_in_hierarchy_order() -> None:
     assert roofline_mem_levels("gfx90a", "mi210") == ["LDS", "L1", "L2", "HBM"]
     assert roofline_mem_levels("gfx1151", "rdna35_halo") == ["LDS", "L0", "L1", "L2"]
     assert roofline_mem_levels("gfx1250", "gfx1250") == ["LDS", "L0", "L2", "HBM"]
-    assert roofline_mem_levels("gfx1201", "rdna4_navi48") == ["LDS", "L0", "VRAM"]
+    assert roofline_mem_levels("gfx1201", "navi48_1") == ["LDS", "L0", "VRAM"]
 
 
 def test_extract_ai_metrics_reads_the_vram_point_into_its_own_field() -> None:
@@ -452,7 +452,7 @@ def test_calc_ceilings_gfx1201_draws_the_vram_roof() -> None:
         roofline_parameters("WMMA", "gfx1201"),
         "FP16",
         benchmark_data,
-        MockMspec("rdna4_navi48", "gfx1201"),
+        MockMspec("navi48_1", "gfx1201"),
         0,
     )
 

@@ -58,7 +58,7 @@ int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 int64_t ncclParamGdrCopySyncEnable() { return g_loadParam("GDRCOPY_SYNC_ENABLE", 1); }
 int64_t ncclParamGdrCopyFlushEnable() { return g_loadParam("GDRCOPY_FLUSH_ENABLE", 0); }
 
-// src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPlugin, which compiles net.cc.
+// src/plugin/net.cc: initTransportsRank's GDR probe. Omitted for rccl-UnitTestsMicroPluginNet, which compiles net.cc.
 int g_gdrSupportValue = 0;
 int g_gdrSupportCalls = 0;
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_ncclGpuGdrSupport
@@ -376,8 +376,8 @@ __attribute__((weak)) int ncclGinCustomAllReduceDeviceCount(void) { return 0; }
 }
 // topo.cc stores ncclNetGetDevCount / ncclGinGetDevCount / etc. as function
 // pointers in netInfo; the TOC entry survives --gc-sections on POWER even
-// when the code path is dead.  Weak stubs let MicroGraph (which links the
-// real topo.cc but not graph_fakes.cc) resolve them.
+// when the code path is dead.  Weak stubs let rccl-UnitTestsMicroGraphDev
+// (which links the real topo.cc but not graph_fakes.cc) resolve them.
 __attribute__((weak)) ncclResult_t ncclNetGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
 __attribute__((weak)) ncclResult_t ncclCollNetGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }
 __attribute__((weak)) ncclResult_t ncclGinGetDevCount(int, int* p, int* v) { if (p) *p = 0; if (v) *v = 0; return ncclSuccess; }

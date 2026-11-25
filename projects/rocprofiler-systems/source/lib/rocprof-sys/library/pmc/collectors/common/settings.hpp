@@ -347,23 +347,16 @@ struct settings_policy
                     {
                         continue;
                     }
-                    if(!utility::string::is_numeric(device_str))
+                    auto const device_index = utility::string::safe_stoul(device_str);
+                    if(device_index.is_error())
                     {
                         LOG_ERROR("Invalid :device= value in "
-                                  "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",
-                                  subtoken);
+                                  "ROCPROFSYS_GPU_PERF_COUNTERS: '{}' ({})",
+                                  subtoken, device_index.error());
                         continue;
                     }
-                    try
-                    {
-                        result.explicit_counters.push_back(
-                            { .name = name, .device_index = std::stoull(device_str) });
-                    } catch(const std::exception&)
-                    {
-                        LOG_ERROR("Invalid :device= value in "
-                                  "ROCPROFSYS_GPU_PERF_COUNTERS: '{}'",
-                                  subtoken);
-                    }
+                    result.explicit_counters.push_back(
+                        { .name = name, .device_index = device_index.value() });
                 }
             }
         }

@@ -77,6 +77,7 @@ impl GpuDevice<'_> {
         byte_length: u64,
         cancel: &AtomicBool,
     ) -> Result<(), CopyFailure> {
+        let _operation = self.driver.admit().map_err(retired)?;
         if address == 0 || byte_length == 0 || address.checked_add(byte_length).is_none() {
             return Err(invalid(
                 ErrorKind::InvalidArgument,
@@ -97,13 +98,15 @@ impl GpuDevice<'_> {
             ));
         }
         let page = host_page_size().map_err(retired)?.max(4096);
+        // CP fetches the indirect buffer from this page, which also contains
+        // the completion signal it writes. The GPU mapping needs both rights.
         let storage = self
             .device()
             .allocate(
                 MemoryKind::System,
                 page,
                 page,
-                DeviceAccess::READ | DeviceAccess::WRITE,
+                DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE,
             )
             .map_err(retired)?;
         let host = storage.info().host_address.ok_or_else(|| {

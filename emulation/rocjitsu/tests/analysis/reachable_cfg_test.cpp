@@ -5,9 +5,12 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/code_object.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "util/diagnostic.h"
 
@@ -27,7 +30,7 @@ namespace {
 using Blocks = std::vector<std::unique_ptr<BasicBlock>>;
 using Issue = BasicBlock::SuccessorIssue;
 using Range = BasicBlock::CodeRange;
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
 
 constexpr uint32_t kNop = build_s_nop(0, kArch).value();
 constexpr uint32_t kEnd = build_s_endpgm(kArch).value();
@@ -42,8 +45,9 @@ public:
   explicit TestTextSection(std::span<const uint32_t> words, size_t trailing_bytes = 0)
       : Section(".text", std::make_unique<char[]>(words.size_bytes() + trailing_bytes)),
         size_(words.size_bytes() + trailing_bytes) {
-    if (!words.empty())
+    if (!words.empty()) {
       std::memcpy(data_.get(), words.data(), words.size_bytes());
+    }
   }
   size_t size() const override { return size_; }
   uint32_t sectionHeaderNameIdx() const override { return 0; }
@@ -67,7 +71,7 @@ protected:
   FailureOr<Blocks> build_reachable(const std::vector<uint32_t> &words,
                                     const std::vector<uint64_t> &entries = {0},
                                     const std::vector<Range> &ranges = {},
-                                    rj_code_arch_t arch = kArch,
+                                    rocjitsu::IsaFamily arch = kArch,
                                     const std::vector<uint64_t> &decode_seeds = {},
                                     const std::vector<uint64_t> &split_points = {}) {
     error_("");
@@ -88,15 +92,17 @@ protected:
 
   static std::vector<uint64_t> offsets(const Blocks &blocks) {
     std::vector<uint64_t> result;
-    for (const auto &block : blocks)
+    for (const auto &block : blocks) {
       result.push_back(block->start_offset());
+    }
     return result;
   }
 
   static std::vector<uint64_t> successors(const BasicBlock &block) {
     std::vector<uint64_t> result;
-    for (const auto *successor : block.successors())
+    for (const auto *successor : block.successors()) {
       result.push_back(successor->start_offset());
+    }
     std::ranges::sort(result);
     return result;
   }
@@ -120,7 +126,8 @@ protected:
 
 std::vector<uint32_t> target_sensitive_lane_stash_words(uint8_t initial_banks, uint16_t hwreg,
                                                         uint32_t literal) {
-  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA5);
+  constexpr util::FailureOr<uint32_t> kEndpgmCdna5Result =
+      build_s_endpgm(rocjitsu::IsaFamily::Cdna5);
   static_assert(kEndpgmCdna5Result.succeeded());
 
   const auto set_banks = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = initial_banks});
@@ -148,8 +155,9 @@ std::vector<uint32_t> target_sensitive_lane_stash_words(uint8_t initial_banks, u
 
 size_t static_fixup_count(const Blocks &blocks) {
   size_t count = 0;
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     count += block->static_indirect_call_fixups().size();
+  }
   return count;
 }
 
@@ -303,15 +311,17 @@ TEST_F(ReachableCfg, DisjointRangesAllowBranchAcrossGap) {
 }
 
 TEST_F(ReachableCfg, RejectsInvalidEntries) {
-  for (uint64_t entry : std::array<uint64_t, 3>{1, 4, std::numeric_limits<uint64_t>::max()})
+  for (uint64_t entry : std::array<uint64_t, 3>{1, 4, std::numeric_limits<uint64_t>::max()}) {
     expect_failure({kEnd}, {entry});
+  }
   expect_failure({kEnd, kEnd}, {0}, {{4, 4}});
 }
 
 TEST_F(ReachableCfg, RejectsMalformedRanges) {
   for (Range range : {Range{1, 4}, Range{0, 3}, Range{0, 0}, Range{4, 4},
-                      Range{0, std::numeric_limits<uint64_t>::max() - 3}})
+                      Range{0, std::numeric_limits<uint64_t>::max() - 3}}) {
     expect_failure({kEnd}, {0}, {range});
+  }
 }
 
 TEST_F(ReachableCfg, ReachableMalformedInstructionsFailWithOffset) {
@@ -334,10 +344,10 @@ TEST_F(ReachableCfg, RejectsTargetsInsideInstructionsInEitherDiscoveryOrder) {
 }
 
 TEST_F(ReachableCfg, Gfx1250FallthroughStopsAtPadding) {
-  util::FailureOr<uint32_t> maybe_s_nop = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_nop = build_s_nop(0, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_nop.succeeded());
   const auto result =
-      build_reachable({maybe_s_nop.value(), 0, kInvalid}, {0}, {}, ROCJITSU_CODE_ARCH_CDNA5);
+      build_reachable({maybe_s_nop.value(), 0, kInvalid}, {0}, {}, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   ASSERT_EQ(result.value().size(), 1u);
   EXPECT_TRUE(result.value()[0]->has_implicit_terminator());
@@ -345,26 +355,26 @@ TEST_F(ReachableCfg, Gfx1250FallthroughStopsAtPadding) {
 }
 
 TEST_F(ReachableCfg, Gfx1250ExplicitPaddingTargetFails) {
-  util::FailureOr<uint32_t> maybe_s_branch = build_s_branch(0, ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_branch = build_s_branch(0, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_branch.succeeded());
   const auto result =
-      build_reachable({maybe_s_branch.value(), 0}, {0}, {}, ROCJITSU_CODE_ARCH_CDNA5);
+      build_reachable({maybe_s_branch.value(), 0}, {0}, {}, rocjitsu::IsaFamily::Cdna5);
   EXPECT_TRUE(result.failed());
   EXPECT_NE(error_.message().find("padding"), std::string::npos);
 }
 
 TEST_F(ReachableCfg, RangeBoundaryIsNotAnImplicitPaddingTerminator) {
-  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, ROCJITSU_CODE_ARCH_CDNA5);
+  util::FailureOr<uint32_t> maybe_s_nop_2 = build_s_nop(0, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(maybe_s_nop_2.succeeded());
   const auto result =
-      build_reachable({maybe_s_nop_2.value(), 0}, {0}, {{0, 4}}, ROCJITSU_CODE_ARCH_CDNA5);
+      build_reachable({maybe_s_nop_2.value(), 0}, {0}, {{0, 4}}, rocjitsu::IsaFamily::Cdna5);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_FALSE(result.value()[0]->has_implicit_terminator());
   EXPECT_EQ(result.value()[0]->successor_issue(), Issue::MissingFallthrough);
 }
 
 TEST_F(ReachableCfg, ClippedCalleeDoesNotDiscardCallContinuation) {
-  constexpr rj_code_arch_t arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5;
   util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(arch);
   ASSERT_TRUE(maybe_s_endpgm.succeeded());
   util::FailureOr<uint32_t> maybe_s_nop_3 = build_s_nop(0, arch);
@@ -393,7 +403,7 @@ TEST_F(ReachableCfg, RejectsAmbiguousSectionsAndReachedPartialWords) {
 }
 
 TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
     util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, arch);
     ASSERT_TRUE(maybe_s_nop_4.succeeded());
     const uint32_t nop = maybe_s_nop_4.value();
@@ -411,8 +421,9 @@ TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
         {call_result.value(), end, return_result.value()},
         {nop, end},
     };
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+    if (arch == rocjitsu::IsaFamily::Cdna5) {
       programs.push_back({nop, 0}); // Existing implicit termination at zero padding.
+    }
     for (const auto &words : programs) {
       const auto reachable = build_reachable(words, {0}, {}, arch);
       ASSERT_TRUE(reachable.succeeded()) << error_.message();
@@ -451,8 +462,8 @@ TEST_F(ReachableCfg, FullAndReachableConstructionAgreeOnClosedGraphs) {
 
 TEST_F(ReachableCfg, SupportsTargetSpecificDirectBranchEncodings) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     util::FailureOr<uint32_t> maybe_s_endpgm_3 = build_s_endpgm(arch);
     ASSERT_TRUE(maybe_s_endpgm_3.succeeded());
     util::FailureOr<uint32_t> maybe_s_branch_2 = build_s_branch(1, arch);
@@ -495,6 +506,58 @@ TEST_F(ReachableCfg, DiscoversIndirectTargetAcrossMalformedGap) {
   EXPECT_EQ(successors(consumer), (std::vector<uint64_t>{24}));
   // Concrete edges remain subject to consumer-side completeness/return analysis.
   EXPECT_EQ(consumer.successor_issue(), Issue::IndirectControlFlow);
+  expect_inverse_edges(result.value());
+}
+
+TEST_F(ReachableCfg, RelativeScalarDestinationInvalidatesRecoveredPcBuilder) {
+  const std::array<uint32_t, 1> relative =
+      cdna4::build_sop1(cdna4::kSMovreldB32Sop1, {.ssrc0 = 0, .sdst = 0});
+  const std::vector<uint32_t> words = {build_s_getpc_b64(8, kArch).value(),
+                                       build_s_add_u32(8, 8, 255, kArch).value(),
+                                       24,
+                                       build_s_addc_u32(9, 9, 128, kArch).value(),
+                                       relative[0],
+                                       build_s_setpc_b64(8, kArch).value(),
+                                       kInvalid,
+                                       kEnd};
+  const FailureOr<Blocks> result = build_reachable(words);
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const BasicBlock *consumer = nullptr;
+  for (const std::unique_ptr<BasicBlock> &block : result.value()) {
+    if (block->terminator() && block->terminator()->src_loc() == 20) {
+      consumer = block.get();
+    }
+  }
+  ASSERT_NE(consumer, nullptr);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups().empty());
+  EXPECT_EQ(consumer->successor_issue(), Issue::IndirectControlFlow);
+}
+
+TEST_F(ReachableCfg, DroppedOutOfSectionTargetMakesRetainedFixupIncomplete) {
+  std::vector<uint32_t> words(129, kNop);
+  words[0] = conditional(7); // 0 -> 32.
+  for (uint32_t offset : {4u, 32u}) {
+    const size_t index = offset / sizeof(uint32_t);
+    words[index] = build_s_getpc_b64(8, kArch).value();
+    words[index + 1] = build_s_add_u32(8, 8, 255, kArch).value();
+    words[index + 2] = (offset == 4 ? 512u : 4096u) - offset - 4;
+    words[index + 3] = build_s_addc_u32(9, 9, 128, kArch).value();
+    words[index + 4] = branch(static_cast<int16_t>((64 - offset - 20) / 4));
+  }
+  words[16] = build_s_setpc_b64(8, kArch).value();
+  words[128] = kEnd;
+  const FailureOr<Blocks> result = build_reachable(words);
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const BasicBlock *consumer = nullptr;
+  for (const std::unique_ptr<BasicBlock> &block : result.value()) {
+    if (block->start_offset() == 64) {
+      consumer = block.get();
+    }
+  }
+  ASSERT_NE(consumer, nullptr);
+  ASSERT_EQ(consumer->static_indirect_call_fixups().size(), 1u);
+  EXPECT_EQ(consumer->static_indirect_call_fixups().front().source_target_offset, 512u);
+  EXPECT_TRUE(consumer->static_indirect_call_fixups().front().source_incomplete);
   expect_inverse_edges(result.value());
 }
 
@@ -596,7 +659,7 @@ TEST_F(ReachableCfg, IndependentSeedClosurePrecedesAnOptionalLiteralSeed) {
 }
 
 TEST_F(ReachableCfg, IndependentSeedPropagatesLaneStateWithoutAssumingAnEntryMode) {
-  constexpr auto arch = ROCJITSU_CODE_ARCH_CDNA5;
+  constexpr auto arch = rocjitsu::IsaFamily::Cdna5;
   constexpr auto bank_zero = cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0});
   for (bool set_mode : {false, true}) {
     SCOPED_TRACE(set_mode);
@@ -756,8 +819,9 @@ TEST_F(ReachableCfg, ExcludedIndirectCallTargetKeepsContinuation) {
   for (bool exclude_last : {false, true}) {
     SCOPED_TRACE(exclude_last);
     auto words = mixed_indirect_targets(true);
-    if (exclude_last)
+    if (exclude_last) {
       std::swap(words[10], words[11]);
+    }
     const std::vector<Range> ranges =
         exclude_last ? std::vector<Range>{{0, 44}} : std::vector<Range>{{0, 40}, {44, 4}};
     const auto result = build_reachable(words, {0}, ranges);
@@ -821,8 +885,9 @@ TEST_F(ReachableCfg, OptionalSeedInsideAnotherSeedsIndirectClosureIsIgnored) {
 TEST_F(ReachableCfg, IndependentSeedsDoNotExhaustTheIndirectClosureBudget) {
   const std::vector<uint32_t> words(80, kEnd);
   std::vector<uint64_t> seeds;
-  for (size_t index = 0; index < words.size(); ++index)
+  for (size_t index = 0; index < words.size(); ++index) {
     seeds.push_back(index * sizeof(uint32_t));
+  }
   const auto result = build_reachable(words, {}, {}, kArch, seeds);
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_EQ(result.value().size(), words.size());
@@ -837,7 +902,7 @@ TEST_F(ReachableCfg, RealTargetCannotBeHiddenByOptionalSeed) {
 }
 
 TEST_F(ReachableCfg, SeedOnlyPaddingReturnsEmptyGraph) {
-  const auto result = build_reachable({0, 0}, {}, {}, ROCJITSU_CODE_ARCH_CDNA5, {0});
+  const auto result = build_reachable({0, 0}, {}, {}, rocjitsu::IsaFamily::Cdna5, {0});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   EXPECT_TRUE(result.value().empty());
 }
@@ -874,8 +939,9 @@ TEST_F(ReachableCfg, FullSectionPolicyRetainsImplicitFirstEntry) {
       error_.emitter());
   ASSERT_TRUE(eager.succeeded()) << error_.message();
   size_t fixup_count = 0;
-  for (const auto &block : eager.value())
+  for (const auto &block : eager.value()) {
     fixup_count += block->static_indirect_call_fixups().size();
+  }
   EXPECT_EQ(fixup_count, 1u);
   const auto reachable = BasicBlock::build_cfg(object, *decoder, kArch, {.entries = entries});
   ASSERT_TRUE(reachable.succeeded());
@@ -913,7 +979,7 @@ TEST_F(ReachableCfg, FullSectionBuildPreservesExplicitTargetForTargetlessObject)
   ASSERT_NE(decoder, nullptr);
 
   const auto result = BasicBlock::build(
-      object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, error_.emitter(), {},
+      object, *decoder, rocjitsu::IsaFamily::Cdna5, error_.emitter(), {},
       ExternalEntryPolicy::InferPredecessorless, {}, ROCJITSU_CODE_TARGET_GFX1251);
 
   ASSERT_TRUE(result.succeeded()) << error_.message();
@@ -932,7 +998,7 @@ TEST_F(ReachableCfg, ReachableBuildPreservesExplicitTargetForTargetlessObject) {
   const std::array<uint64_t, 1> entries = {0};
 
   const auto result = BasicBlock::build_cfg(
-      object, *decoder, ROCJITSU_CODE_ARCH_CDNA5,
+      object, *decoder, rocjitsu::IsaFamily::Cdna5,
       {.target = ROCJITSU_CODE_TARGET_GFX1251, .entries = entries}, error_.emitter());
 
   ASSERT_TRUE(result.succeeded()) << error_.message();

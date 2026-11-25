@@ -98,7 +98,7 @@ other project without asking.
   this (see the top-level [`CMakeLists.txt`](CMakeLists.txt)). Put
   `/opt/rocm/bin` on `PATH` when running binaries you build.
 - **Compiler**: hipFile is C++20 plus one HIP kernel
-  (`src/amd_detail/backend/memcpy-kernel.hip`), so the project enables the C,
+  (`test/system/amd/io-data-modification-kernel.hip`), so the project enables the C,
   CXX, and HIP languages, and configuring needs ROCm's HIP compiler.
   `amdclang++` is the usual C++ compiler, and the one TheRock uses, but the
   code has to build with upstream Clang and GCC too (see
@@ -123,15 +123,18 @@ Notes:
 
 - The default build type is `RelWithDebInfo`, and `BUILD_TESTING` is on by
   default.
-- `HIPFILE_CXX_STANDARD` selects C++20 (the default), 23, or 26.
+- `HIPFILE_CXX_STANDARD` selects C++20 (the default), 23, or 26. C++26
+  needs CMake 3.30 or later; configuring fails with older versions.
 - CI's build workflow
   ([hipfile-build.yml](../../.github/workflows/hipfile-build.yml), started
   by [hipfile-ci-toplevel.yml](../../.github/workflows/hipfile-ci-toplevel.yml))
-  builds with `amdclang++`, `clang++`, and `g++` across several Linux
-  distributions and ROCm versions (the matrix is in
-  `hipfile-ci-toplevel.yml`). Each job builds `Debug` and
-  `Release`, both with `-DCMAKE_CXX_FLAGS=-Werror`, runs the unit tests in
-  each, then packages the Debug build with `cpack` and installs the package.
+  builds with `amdclang++` across several Linux distributions and ROCm
+  versions, and with `clang++` and `g++` on one distribution and ROCm
+  version (the matrix is in `hipfile-ci-toplevel.yml`). Each job builds
+  `Debug` and `Release`, both with `-DCMAKE_CXX_FLAGS=-Werror`, runs the unit
+  tests in each, then packages the Debug build with `cpack`, installs the
+  package, and builds the installed examples against it
+  ([`util/ci-build-installed-examples.sh`](util/ci-build-installed-examples.sh)).
   The CI images are built from
   [`util/docker`](util/docker).
 - One fixed image also runs the sanitizer builds
@@ -155,16 +158,23 @@ Notes:
     that supports it (check with `tools/ais-check/ais-check`); they fail
     without it unless configured with
     `-DHIPFILE_ALLOW_SKIP_FASTPATH_TESTS=ON`.
-  - `stress`: `state_mt` and `batch_mt`, short concurrency tests run under
-    `gdb`. They can pass for a while after a bug lands, so a failure may not
-    come from the change you're looking at.
+  - `stress`: short concurrency tests run under `gdb`: `state_mt`,
+    `batch_mt`, and `hipfileread-cpu-visibility`, which runs once with only
+    fastpath and once with only fallback in `HIPFILE_CAPABLE_DIR`. The
+    `hipfileread-cpu-visibility` tests are skipped on GPUs whose VRAM the CPU
+    can't map, and `-DHIPFILE_ALLOW_SKIP_FASTPATH_TESTS=ON` also skips its
+    fastpath run where fastpath is unavailable. The stress tests can pass for
+    a while after a bug lands, so a failure may not come from the change
+    you're looking at.
 
   System and stress tests may not work on every machine. CI runs them on
   self-hosted AIS runners
   ([hipfile-ci-system.yml](../../.github/workflows/hipfile-ci-system.yml))
   on several kinds of storage, along with
   [`util/ci-aiscp-test.sh`](util/ci-aiscp-test.sh), which copies files with
-  the `aiscp` example on both I/O paths.
+  the `aiscp` example on both I/O paths. To save runner time, they run only
+  in the `amdclang++` C++20 builds; the `clang++`, `g++`, and C++23 builds
+  run just the unit tests.
 - **Every change to library behavior needs tests**
   ([STYLEGUIDE.md](STYLEGUIDE.md)): new functionality gets tests, including
   its error paths, and a bug fix gets a test that fails before the fix and
@@ -259,7 +269,9 @@ Notes:
   C++17 against the installed hipFile, so keep them to C++17. Add a new
   example directory to `HIPFILE_EXAMPLE_DIRS` in
   [`cmake/HipFileInstall.cmake`](cmake/HipFileInstall.cmake) and to the
-  top-level `CMakeLists.txt`.
+  top-level `CMakeLists.txt`. CI builds the installed copies, with warnings
+  as errors, and fails if an example directory is installed without its
+  `CMakeLists.txt`.
 
 ## Thread safety
 
@@ -506,16 +518,21 @@ warnings have their own suppression mechanism, described under
   don't count.
 - **clang-tidy**: configure with `-DHIPFILE_USE_CLANG_TIDY=ON` and Clang as
   the C++ compiler, and build; it must report nothing (every finding is an
-  error). [`.clang-tidy`](.clang-tidy) enables only the `clang-analyzer-*`
-  checks, which ROCm's clang-tidy doesn't have, so point
-  `HIPFILE_CLANG_TIDY_EXECUTABLE` at an upstream clang-tidy whose LLVM major
-  version matches ROCm's (the CI workflow sets the version it uses). If it
-  reports "no checks enabled," it's the wrong clang-tidy; don't work around
-  it. CI:
+  error). [`.clang-tidy`](.clang-tidy) enables whole groups of checks
+  (`bugprone-*`, `clang-analyzer-*`, `cppcoreguidelines-*`, `modernize-*`,
+  `readability-*`, and more) and turns off the ones that aren't wanted, with
+  the reason for each; [`examples/.clang-tidy`](examples/.clang-tidy) turns
+  off the ones that don't suit C++17 examples. ROCm's clang-tidy is built
+  without the `clang-analyzer-*` checks and silently skips them, so point
+  `HIPFILE_CLANG_TIDY_EXECUTABLE` at an upstream clang-tidy, version 19 or
+  later, whose LLVM major version matches ROCm's (the CI workflow sets the
+  version it uses). CI:
   [hipfile-clang-tidy.yml](../../.github/workflows/hipfile-clang-tidy.yml).
-  **Advisory:** hipObject runs a much broader set of checks
-  (`bugprone-*`, `cppcoreguidelines-*`, `modernize-*`, `readability-*`, and
-  more); keep new code clean of what those would report where you can.
+  **Advisory:** the checks in `.clang-tidy`'s TODO section still report
+  existing code, so they're turned off. Keep new and changed code clean of
+  what they report: delete a check's line, build, and read what it reports
+  for the files you touched. When a check reports nothing, delete its line
+  for good.
 - **include-what-you-use (IWYU)**: configure with `-DHIPFILE_USE_IWYU=ON`
   (Clang only) in a separate build directory, since it leaves out the
   warning flags, and build; IWYU prints the `#include` lines it suggests
@@ -524,8 +541,14 @@ warnings have their own suppression mechanism, described under
   suggestions that are right for the files you touch, and ignore the ones
   that are wrong. Fix a suggestion that names a library's internal header,
   rather than its public one, with a mapping in a `cmake/iwyu-*.imp` file,
-  as [`cmake/iwyu-libc.imp`](cmake/iwyu-libc.imp) does. Nothing in CI runs
-  IWYU.
+  as [`cmake/iwyu-libc.imp`](cmake/iwyu-libc.imp) does. CMake hides IWYU's
+  own failures, so to check that IWYU ran cleanly, build through
+  [`util/iwyu-wrapper.sh`](util/iwyu-wrapper.sh) and check the result with
+  [`util/check-iwyu.sh`](util/check-iwyu.sh) (the wrapper's comments show
+  how). CI:
+  [hipfile-iwyu.yml](../../.github/workflows/hipfile-iwyu.yml), which fails
+  only when IWYU itself fails, and lists its suggestions without acting on
+  them.
 - **Sanitizer-clean**: the unit tests must run without a report from any
   sanitizer, and any change that involves pointers, memory, or concurrency
   must be tested this way. The sanitizers need Clang (`amdclang++` or

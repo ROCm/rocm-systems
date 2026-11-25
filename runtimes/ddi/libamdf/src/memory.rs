@@ -9,12 +9,13 @@
 //! imports require native permission and cache evidence before advertisement.
 
 use crate::generated::amdf::*;
-use crate::instance::{Device, Endpoint, Instance, endpoint_id, supported_endpoint};
 use crate::platform::external_memory as external_transport;
 use crate::reservation::Reservation;
+use crate::session::{AmdfSession, Device, Endpoint, endpoint_id, supported_endpoint};
 use crate::support::*;
 use rocddi::host::cache::CacheMaintenance;
 use rocddi::memory;
+use rocddi::memory::storage::RetainOnDrop;
 use rocddi::memory::storage::TryPush;
 use rocddi::memory::storage::{Allocator, Owned, OwnerVec};
 use std::ffi::c_void;
@@ -34,8 +35,8 @@ const MAX_LENGTH: u64 = (isize::MAX as u64) - MAX_ALIGNMENT;
 
 /// Memory-profile namespace embedded in either an instance or an endpoint.
 pub(crate) struct Scope {
-    /// Instance that owns this profile namespace.
-    pub instance: *mut Instance,
+    /// Frontend session that owns this profile namespace.
+    pub instance: *mut AmdfSession,
     /// Endpoint for device-scoped profiles, or null for the host scope.
     pub endpoint: *mut Endpoint,
 }
@@ -124,12 +125,16 @@ unsafe fn publish_release(out: *mut amdf_memory_release_info_t, value: amdf_memo
     )
 )]
 fn release_gpu(
-    mut allocation: memory::device::Allocation,
+    allocation: memory::device::Allocation,
     device: *mut Device,
     allocated_backing: bool,
 ) -> amdf_memory_release_info_t {
+    let mut allocation = RetainOnDrop::new(allocation);
     match allocation.free() {
-        Ok(()) => amdf_memory_release_info_t::default(),
+        Ok(()) => {
+            drop(allocation.into_inner());
+            amdf_memory_release_info_t::default()
+        }
         Err(error) => {
             let status = if device.is_null() {
                 native(&error)
@@ -144,7 +149,6 @@ fn release_gpu(
             };
             // Explicit AMDF cleanup consumes the attachment. A second native
             // release could replay an ambiguous detach, so retain its owner.
-            std::mem::forget(allocation);
             amdf_memory_release_info_t {
                 status,
                 abandoned_byte_length,
@@ -186,8 +190,8 @@ impl Memory {
                 } else {
                     0
                 };
-                let owner = std::mem::replace(&mut self.backing, Backing::Registered);
-                std::mem::forget(owner);
+                let _retained =
+                    RetainOnDrop::new(std::mem::replace(&mut self.backing, Backing::Registered));
                 Ok(amdf_memory_release_info_t {
                     status,
                     abandoned_byte_length,
@@ -204,18 +208,19 @@ impl Memory {
         let backing = std::mem::replace(&mut self.backing, Backing::Registered);
         match backing {
             Backing::Gpu(allocation) => release_gpu(allocation, device, self.allocated_backing),
-            Backing::Host(mut allocation) => match allocation.free() {
-                Ok(()) => amdf_memory_release_info_t::default(),
-                Err(error) => {
-                    let status = native(&error);
-                    let abandoned_byte_length = self.info.native_allocation_byte_length;
-                    std::mem::forget(allocation);
-                    amdf_memory_release_info_t {
-                        status,
-                        abandoned_byte_length,
+            Backing::Host(allocation) => {
+                let mut allocation = RetainOnDrop::new(allocation);
+                match allocation.free() {
+                    Ok(()) => {
+                        drop(allocation.into_inner());
+                        amdf_memory_release_info_t::default()
                     }
+                    Err(error) => amdf_memory_release_info_t {
+                        status: native(&error),
+                        abandoned_byte_length: self.info.native_allocation_byte_length,
+                    },
                 }
-            },
+            }
             Backing::Registered | Backing::Alias { .. } => amdf_memory_release_info_t::default(),
         }
     }
@@ -272,7 +277,7 @@ impl Drop for PendingGpu {
 /// full native extent. Its child borrow stabilizes those facts through the
 /// view's lifetime. rocddi separately reuses BO mappings across frontends.
 unsafe fn find_host_alias(
-    instance: &Instance,
+    instance: &AmdfSession,
     address: usize,
     byte_length: u64,
     accesses: &[amdf_memory_device_access_t],
@@ -324,14 +329,14 @@ unsafe fn find_host_alias(
     Ok(None)
 }
 
-fn list_host_backing(instance: &Instance, memory: &mut Owned<Memory>) -> Result<(), u64> {
+fn list_host_backing(instance: &AmdfSession, memory: &mut Owned<Memory>) -> Result<(), u64> {
     let mut head = instance.host_backing_head.lock().map_err(|_| INTERNAL)?;
     memory.host_backing_next.store(*head, Ordering::Relaxed);
     *head = memory.as_mut_ptr() as usize;
     Ok(())
 }
 
-fn unlink_host_backing(instance: &Instance, pointer: *mut Memory) -> Result<(), u64> {
+fn unlink_host_backing(instance: &AmdfSession, pointer: *mut Memory) -> Result<(), u64> {
     let mut head = instance.host_backing_head.lock().map_err(|_| INTERNAL)?;
     // SAFETY: the caller owns this memory exclusively, and the list lock
     // prevents a new alias from acquiring a child between the check and unlink.
@@ -387,7 +392,7 @@ impl Mapping {
     ///
     /// # Safety
     /// The caller holds a live public mapping handle.
-    unsafe fn instance(&self) -> &Instance {
+    unsafe fn instance(&self) -> &AmdfSession {
         match self.owner {
             MappingOwner::Memory(memory) => unsafe { &*(*(*memory).scope).instance },
             MappingOwner::Reservation(reservation) => unsafe { &*(*reservation).instance },
@@ -612,7 +617,7 @@ unsafe fn profile(
         let endpoint = endpoint.ok_or(UNSUPPORTED)?;
         let owner = unsafe { &*scope.endpoint };
         if !instance
-            .native
+            .native_session()
             .can_access_local_memory(&endpoint.native, &owner.native)
         {
             return Err(UNSUPPORTED);
@@ -622,8 +627,11 @@ unsafe fn profile(
     // devices. Separate profiles keep both placement and host-map limits exact.
     let host_visible = !local || ordinal == 1;
     if registered
-        && endpoint
-            .is_some_and(|endpoint| !instance.native.supports_host_registration(&endpoint.native))
+        && endpoint.is_some_and(|endpoint| {
+            !instance
+                .native_session()
+                .supports_host_registration(&endpoint.native)
+        })
     {
         return Err(UNSUPPORTED);
     }
@@ -651,7 +659,7 @@ unsafe fn profile(
                 endpoint
             };
             instance
-                .native
+                .native_session()
                 .memory_capabilities(&owner.native, request)
                 .map_err(|error| native(&error))
         })
@@ -661,7 +669,7 @@ unsafe fn profile(
         let consumer = endpoint.ok_or(UNSUPPORTED)?;
         Some(
             instance
-                .native
+                .native_session()
                 .memory_capabilities(
                     &consumer.native,
                     memory::device::MemoryCapabilityRequest::Access {
@@ -1186,9 +1194,9 @@ pub(crate) unsafe extern "C" fn instance_scopes(
     count: *mut u32,
 ) -> u64 {
     crate::support::boundary(|| unsafe {
-        object(pointer.cast::<Instance>())?;
+        object(pointer.cast::<AmdfSession>())?;
         scopes(
-            &raw const (*pointer.cast::<Instance>()).scope,
+            &raw const (*pointer.cast::<AmdfSession>()).scope,
             1,
             capacity,
             out,
@@ -1337,7 +1345,7 @@ pub(crate) unsafe extern "C" fn create(
         let accesses = unsafe { array(create.accesses, create.access_count) }?;
         // SAFETY: The live scope borrows its parent instance.
         let instance = unsafe { object(scope.instance) }?;
-        if instance.closing || !instance.native.is_current_process() {
+        if instance.closing || !instance.native_session().is_current_process() {
             return Err(PRECONDITION);
         }
         if !unique_devices(accesses) {
@@ -1939,7 +1947,7 @@ pub(crate) unsafe fn map_reservation(
 
 pub(crate) unsafe fn host_mapping_source<'a>(
     pointer: *mut amdf_memory_t,
-    instance: *mut Instance,
+    instance: *mut AmdfSession,
 ) -> Result<(&'a memory::host::HostAllocation, u64), u64> {
     let source = unsafe { object(pointer.cast::<Memory>())? };
     if unsafe { (*source.scope).instance } != instance {
@@ -2285,7 +2293,7 @@ pub(crate) unsafe extern "C" fn import(
             .ok_or(UNSUPPORTED)?;
         let (native_allocation, rollback) = memory::device::with_rollback_report(false, || {
             external_transport::import_system(
-                &instance.native,
+                instance.native_session(),
                 devices.as_slice(),
                 &external,
                 alignment,

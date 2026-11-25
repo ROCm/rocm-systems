@@ -38,6 +38,12 @@ _FLOAT_NAME_MAP: dict[float, str] = {
 }
 
 
+# MIMG ray-intersection opcodes use the shared C++ BVH register layout.
+MIMG_BVH_INSTRUCTIONS = frozenset(
+    {'IMAGE_BVH_INTERSECT_RAY', 'IMAGE_BVH64_INTERSECT_RAY'}
+)
+
+
 class MemoryCoherencyModel(Enum):
     """Identifies the memory coherency encoding model for an ISA family.
 
@@ -454,6 +460,8 @@ class IsaProfile(ABC):
 
     paired_special_register_names: frozenset[str] = frozenset()
     # Saturation of V_PK_MUL_LO_U16 is target-specific.
+    # Legacy halfword MAD wraps except on CDNA2, which honors encoded CLAMP.
+    legacy_integer_mad_clamp = False
     packed_mul_lo_u16_clamp = False
     # The VOP2 form of V_MUL_LO_U16 carries CLAMP in its SDWA extension.
     mul_lo_u16_clamp_encodings: frozenset[str] = frozenset()
@@ -675,6 +683,10 @@ class IsaProfile(ABC):
         """Whether image dimensions come from T# rather than instruction DIM."""
         return False
 
+    def mimg_r128_resource(self, name: str) -> bool:
+        """Whether R128 selects a four-DWORD resource for this MIMG opcode."""
+        return False
+
     @property
     def mimg_max_nsa_words(self) -> int:
         """Maximum DWORD count of a MIMG NSA extension."""
@@ -703,23 +715,6 @@ class IsaProfile(ABC):
     def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
         """GFX11 MIMG instructions with gather-style VDATA sizing."""
         return frozenset()
-
-    @property
-    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
-        """GFX11 MIMG instructions with a fixed VDATA width in DWORDs."""
-        return {}
-
-    @property
-    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
-        """GFX11 MIMG VADDR widths as ``(default, a16)`` DWORD counts."""
-        return {}
-
-    @property
-    def gfx11_mimg_nsa_group_words(
-        self,
-    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
-        """GFX11 partial-NSA group widths as ``(default, a16)`` tuples."""
-        return {}
 
     @property
     def sendmsg_return_symbolic(self) -> bool:
@@ -1757,6 +1752,11 @@ class _AmdgpuProfileBase(IsaProfile):
         return True
 
     @property
+    def indexed_gds_counts_empty_exec(self) -> bool:
+        """Whether indexed GDS still occupies counter slots without active lanes."""
+        return False
+
+    @property
     def gds_uses_expcnt(self) -> bool:
         """Whether GDS operations also contribute to EXPCNT."""
         return False
@@ -2319,7 +2319,42 @@ class Cdna2Profile(CdnaProfile):
     - Older float-atomic rules; the MI300A/MI350X captures do not cover it.
     """
 
+    legacy_integer_mad_clamp = True
     mul_lo_u16_clamp_encodings = frozenset()
+
+    @property
+    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
+        return {
+            **super().semantic_overrides,
+            'BUFFER_STORE_LDS_DWORD': ('buffer_store_from_lds', '', ''),
+            'BUFFER_INVL2': ('gl2_inv', '', ''),
+        }
+
+    # MI200 adds row broadcasts to its double-precision ALU. LLVM's gfx90a
+    # assembler also exposes the five unary forms omitted by the base XML.
+    def dpp_opcode_rule(
+        self, enc_name: str, inst_name: str, *, src0_size_bits: int | None = None
+    ) -> DppOpcodeRule:
+        if enc_name == 'ENC_VOP1' and _opcode_uses_64bit_data(inst_name):
+            return DppOpcodeRule.ROW_SELECT_ONLY
+        return super().dpp_opcode_rule(
+            enc_name, inst_name, src0_size_bits=src0_size_bits
+        )
+
+    def supports_dpp_opcode(
+        self, enc_name: str, inst_name: str, *, has_modifier_encoding: bool
+    ) -> bool:
+        if enc_name == 'ENC_VOP1' and inst_name in {
+            'V_CVT_F64_F32',
+            'V_RNDNE_F64',
+            'V_RCP_F64',
+            'V_RSQ_F64',
+            'V_SQRT_F64',
+        }:
+            return True
+        return super().supports_dpp_opcode(
+            enc_name, inst_name, has_modifier_encoding=has_modifier_encoding
+        )
 
     legacy_flat_lds = True
     scratch_has_vaddr_expr = 'inst_.saddr == 0x7F'
@@ -2374,6 +2409,11 @@ class Cdna2Profile(CdnaProfile):
                 EncodingModifier('scc'),
                 EncodingModifier('lds'),
             ]
+        if upper == 'ENC_MIMG':
+            return [
+                EncodingModifier(flag)
+                for flag in ('unorm', 'glc', 'slc', 'scc', 'a16', 'lwe', 'da', 'd16')
+            ]
         return []
 
     @property
@@ -2408,6 +2448,15 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     models_nop_issue_delay = True
 
+    def mimg_r128_resource(self, name: str) -> bool:
+        return name not in MIMG_BVH_INSTRUCTIONS
+
+    semantic_class_overrides = {
+        'DS_ORDERED_COUNT': 'ds_ordered_count',
+        'S_ATC_PROBE': 'atc_probe',
+        'S_ATC_PROBE_BUFFER': 'atc_probe',
+    }
+
     @property
     def mimg_max_nsa_words(self) -> int:
         return 3
@@ -2426,6 +2475,19 @@ class Rdna1Profile(_AmdgpuProfileBase):
     flat_offset_bits = 12
     scratch_has_vaddr_expr = '(inst_.saddr == 0x7D || inst_.saddr == 0x7F)'
 
+    def skip_inst_encoding(
+        self, enc_name: str, enc_cond: str, *, unique_segment_opcode: bool = False
+    ) -> bool:
+        # The XML spells the unmodified VOP3 relative-move form as a
+        # conjunction of negative modifier conditions rather than "default".
+        if enc_name == 'ENC_VOP3' and enc_cond == (
+            'Nothas_dpp16_Nothas_dpp8_Nothas_lit_0_Nothas_lit_1_Nothas_lit_2'
+        ):
+            return False
+        return super().skip_inst_encoding(
+            enc_name, enc_cond, unique_segment_opcode=unique_segment_opcode
+        )
+
     def saddr_null_selector_expr(self, enc_name: str) -> str | None:
         if enc_name.upper() == 'ENC_FLAT':
             return '0x7D'
@@ -2436,6 +2498,11 @@ class Rdna1Profile(_AmdgpuProfileBase):
 
     @property
     def gds_uses_expcnt(self) -> bool:
+        return True
+
+    @property
+    def indexed_gds_counts_empty_exec(self) -> bool:
+        # GFX10 issues nullified GDS returns as if EXEC were zero.
         return True
 
     @property
@@ -2574,6 +2641,8 @@ class Rdna3Profile(_AmdgpuProfileBase):
     - DPP support expanded to VOP3/VOP3P/VOPC/VOP3_SDST_ENC.
     - SDWA removed (no ``_VOP_SDWA`` variants).
     - ``ENC_LDSDIR`` and ``ENC_VINTERP`` replace CDNA's ``ENC_VINTRP``.
+    - BVH MIMG instructions have a four-DWORD resource regardless of R128.
+      Their VADDR widths and NSA groups come from the C++ BVH layout helpers.
 
     XML bugs worked around:
 
@@ -2610,22 +2679,31 @@ class Rdna3Profile(_AmdgpuProfileBase):
     flat_saddr_null_aliases = ('127',)
 
     @property
+    def renders_gfx11_image_syntax(self) -> bool:
+        return True
+
+    @property
     def has_gfx11_image_address_extension(self) -> bool:
         return True
+
+    def mimg_r128_resource(self, name: str) -> bool:
+        return name not in MIMG_BVH_INSTRUCTIONS
 
     @property
     def mimg_max_nsa_words(self) -> int:
         return 1
 
     @property
-    def gfx11_mimg_fixed_vaddr_words(self) -> dict[str, tuple[int, int]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': (11, 8),
-            'IMAGE_BVH64_INTERSECT_RAY': (12, 9),
-        }
+    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
+        return frozenset({'IMAGE_MSAA_LOAD'})
 
     @property
     def gds_uses_expcnt(self) -> bool:
+        return True
+
+    @property
+    def indexed_gds_counts_empty_exec(self) -> bool:
+        # RDNA3 and RDNA3.5 section 13.4.2, EXEC Handling.
         return True
 
     def normalize_encoding_condition(self, enc_name: str, cond_name: str) -> str:
@@ -2858,6 +2936,17 @@ class Rdna3_5Profile(Rdna3Profile):
     """
 
     @property
+    def semantic_class_overrides(self) -> dict[str, str]:
+        return {
+            **super().semantic_class_overrides,
+            'DS_ADD_GS_REG_RTN': 'ds_gs_reg',
+            'DS_SUB_GS_REG_RTN': 'ds_gs_reg',
+            'DS_ORDERED_COUNT': 'ds_ordered_count',
+            'S_ATC_PROBE': 'atc_probe',
+            'S_ATC_PROBE_BUFFER': 'atc_probe',
+        }
+
+    @property
     def uses_rj_arith_matrix(self) -> bool:
         # RDNA3.5 retains its legacy implementation despite sharing the RDNA3 layout.
         return False
@@ -2873,36 +2962,12 @@ class Rdna3_5Profile(Rdna3Profile):
         return ((192, 192),)
 
     @property
-    def renders_gfx11_image_syntax(self) -> bool:
-        return True
-
-    @property
     def split_ds_2addr_offsets(self) -> bool:
         return True
 
     @property
     def vop3p_absolute_source_instructions(self) -> frozenset[str]:
         return frozenset({'V_FMA_MIX_F32', 'V_FMA_MIXLO_F16', 'V_FMA_MIXHI_F16'})
-
-    @property
-    def gfx11_mimg_gather_style_instructions(self) -> frozenset[str]:
-        return frozenset({'IMAGE_MSAA_LOAD'})
-
-    @property
-    def gfx11_mimg_fixed_vdata_words(self) -> dict[str, int]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': 4,
-            'IMAGE_BVH64_INTERSECT_RAY': 4,
-        }
-
-    @property
-    def gfx11_mimg_nsa_group_words(
-        self,
-    ) -> dict[str, tuple[tuple[int, ...], tuple[int, ...]]]:
-        return {
-            'IMAGE_BVH_INTERSECT_RAY': ((1, 1, 3, 3, 3), (1, 1, 3, 3)),
-            'IMAGE_BVH64_INTERSECT_RAY': ((2, 1, 3, 3, 3), (2, 1, 3, 3)),
-        }
 
     @property
     def sendmsg_return_symbolic(self) -> bool:
@@ -2935,15 +3000,6 @@ class Rdna4Profile(_AmdgpuProfileBase):
     """
 
     supports_sleep_wakeup_credit = True
-
-    @property
-    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
-        return {
-            **super().semantic_overrides,
-            'S_BARRIER_SIGNAL': ('true_nop', '', ''),
-            'S_BARRIER_SIGNAL_ISFIRST': ('true_nop', '', ''),
-            'S_BARRIER_WAIT': ('barrier', '', ''),
-        }
 
     _SKIP_DPP_SDWA = True
     _SKIP = frozenset({'VOPDXY', 'VOPDXY_INST_LITERAL'})
@@ -3285,17 +3341,6 @@ class Cdna5Profile(Rdna4Profile):
     logical target used by parser/codegen rules while generated and handwritten
     C++ lives under ``amdgpu/cdna5`` in the ``cdna5`` namespace.
     """
-
-    @property
-    def semantic_overrides(self) -> dict[str, tuple[str, ...]]:
-        overrides = dict(super().semantic_overrides)
-        for mnemonic in (
-            'S_BARRIER_SIGNAL',
-            'S_BARRIER_SIGNAL_ISFIRST',
-            'S_BARRIER_WAIT',
-        ):
-            overrides.pop(mnemonic, None)
-        return overrides
 
     flat_saddr_null_aliases = ()
 

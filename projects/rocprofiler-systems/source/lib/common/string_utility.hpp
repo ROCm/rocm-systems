@@ -211,6 +211,21 @@ safe_stol(std::string_view number_str)
     return safe_from_chars<long>(number_str);
 }
 
+/// @brief Strictly parse a whole string as an unsigned long. See safe_from_chars.
+///        A leading '-' or '+' is reported as not_a_number.
+[[nodiscard]] inline result<unsigned long, parse_error>
+safe_stoul(std::string_view number_str)
+{
+    return safe_from_chars<unsigned long>(number_str);
+}
+
+/// @brief Strictly parse a whole string as a double. See safe_from_chars.
+[[nodiscard]] inline result<double, parse_error>
+safe_stod(std::string_view number_str)
+{
+    return safe_from_chars<double>(number_str);
+}
+
 /// @brief Parse a string into a boolean.
 ///
 /// Leading and trailing whitespace is trimmed before interpretation. All-digit
@@ -254,27 +269,6 @@ to_bool(std::string_view value, bool fallback = false)
     };
     return !std::ranges::any_of(k_false_values,
                                 [&lower](std::string_view val) { return lower == val; });
-}
-
-/// @brief Normalize a POSIX clock identifier name, e.g. "CLOCK_MONOTONIC" -> "monotonic".
-/// @param value The clock identifier name.
-/// @return The lowercased name with the "clock_" prefix stripped;
-///         "process_cputime_id" is further mapped to "cputime".
-[[nodiscard]] inline std::string
-clock_name(std::string_view value)
-{
-    constexpr std::string_view k_clock_prefix = "clock_";
-
-    std::string name{ to_lower(value) };
-    if(name.starts_with(k_clock_prefix))
-    {
-        name = name.substr(k_clock_prefix.length());
-    }
-    if(name == "process_cputime_id")
-    {
-        name = "cputime";
-    }
-    return name;
 }
 
 /// @brief Strip ANSI escape (SGR/color) sequences from a string.

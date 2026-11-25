@@ -11,7 +11,6 @@
 #include <array>
 #include <bit>
 #include <cstdint>
-#include <exception>
 #include <memory>
 #include <span>
 
@@ -24,7 +23,8 @@ namespace rocjitsu::amdgpu {
 /// writes cannot reuse stale decodes.
 /// Instructions that borrow the fetch buffer cannot be retained. Entries use
 /// heap storage because a CU can run on different workers. Re-execution follows
-/// the stateless Instruction::execute contract. The decoder consumes bytes, not
+/// the Instruction::execute contract; completed memory state is retired before
+/// return and reset before its next preparation. The decoder consumes bytes, not
 /// their PC: identical fetched windows can share a decode at different addresses.
 /// PC-relative execution still reads the issuing wave's current PC.
 /// Up to kNumEntries consecutive four-byte instructions occupy distinct primary
@@ -47,7 +47,7 @@ public:
   /// @brief Decode from freshly fetched words, or take the matching cached object.
   ///
   /// @details The CU uses heap storage for every miss, including uncached
-  /// memory operations and debugger execution. The allocation guard also
+  /// asynchronous operations and debugger execution. The allocation guard also
   /// bypasses an unrelated decoder pool installed by the caller.
   /// @param enabled False bypasses reuse and table allocation while debugging.
   [[gnu::always_inline]] DecodeResult decode(Decoder &decoder, uint64_t pc, uint32_t vmid,
@@ -63,49 +63,27 @@ public:
       from_pc_slot_ = false;
       auto &shared = entries_->slots[entries_->content_slots[content_index(words)]];
       if (shared.instruction && shared.vmid == vmid &&
-          std::equal(words.begin(), words.end(), shared.words.begin()))
+          std::equal(words.begin(), words.end(), shared.words.begin())) {
         return std::move(shared.instruction);
+      }
     }
     from_pc_slot_ = false;
     return decode_miss(decoder, words, emit_error, enabled);
   }
 
-  /// @brief Return only completed, stateless instructions.
-  ///
-  /// @details Construct immediately after decode() with the same key and policy.
-  /// Memory pipelines and async execution take ownership by releasing/moving
-  /// the caller's unique_ptr, so their in-flight instructions cannot become
-  /// cache entries.
-  class ScopedReturn {
-  public:
-    ScopedReturn(DecodedInstructionCache &cache, std::unique_ptr<Instruction> &instruction,
-                 uint64_t pc, uint32_t vmid, Words words, bool enabled = true)
-        : cache_(cache), instruction_(instruction), pc_(pc), vmid_(vmid), words_(words),
-          enabled_(enabled), exceptions_(std::uncaught_exceptions()),
-          from_pc_slot_(cache.from_pc_slot_) {}
-
-    [[gnu::always_inline]] ~ScopedReturn() {
-      if (enabled_ && instruction_ && !instruction_->is_memory_op() && !instruction_->data() &&
-          !borrows_fetch_buffer(*instruction_, words_) && std::uncaught_exceptions() == exceptions_)
-        cache_.put(pc_, vmid_, words_, instruction_, from_pc_slot_);
+  /// Return an instruction after issue finishes. A deferred pipeline may already
+  /// own it, and tensor DMA retains its continuation outside this cache.
+  [[gnu::always_inline]] void return_completed(uint64_t pc, uint32_t vmid, Words words,
+                                               DecodeResult &decoded) {
+    if (decoded.failed()) {
+      return;
     }
-
-    ScopedReturn(const ScopedReturn &) = delete;
-    ScopedReturn &operator=(const ScopedReturn &) = delete;
-
-    /// @brief Exclude a failed execution from reuse.
-    void discard() { enabled_ = false; }
-
-  private:
-    DecodedInstructionCache &cache_;
-    std::unique_ptr<Instruction> &instruction_;
-    uint64_t pc_;
-    uint32_t vmid_;
-    Words words_;
-    bool enabled_;
-    int exceptions_;
-    bool from_pc_slot_;
-  };
+    auto &instruction = decoded.value();
+    if (instruction->amdgpu_memory_addressing() != MemoryAddressing::Tensor &&
+        !instruction->data() && !borrows_fetch_buffer(*instruction, words)) {
+      put(pc, vmid, words, instruction, from_pc_slot_);
+    }
+  }
 
   /// @brief Drop entries before replacing the decoder/target, or destroying this CU.
   void clear() {
@@ -142,8 +120,9 @@ private:
   // Keep allocation and decoder setup out of the per-instruction cache-hit path.
   RJ_NOINLINE DecodeResult decode_miss(Decoder &decoder, Words words,
                                        const DecodeErrorEmitter &emit_error, bool enabled) {
-    if (enabled && !entries_)
+    if (enabled && !entries_) {
       entries_ = std::make_unique<Table>();
+    }
     Instruction::ScopedHeapAllocation heap_allocation;
     return decoder.decode(words.data(), emit_error);
   }
@@ -157,10 +136,10 @@ private:
   [[gnu::always_inline]] void put(uint64_t pc, uint32_t vmid, Words words,
                                   std::unique_ptr<Instruction> &instruction,
                                   bool from_pc_slot = false) {
-    // A decode miss allocates the table before execution; returning an
-    // instruction during stack unwinding must not allocate.
-    if (!entries_)
+    // A callback can clear the table during issue.
+    if (!entries_) {
       return;
+    }
     const auto slot = pc_index(pc);
     auto &entry = entries_->slots[slot];
     // An instruction taken from this PC's slot goes back where its key still
@@ -173,8 +152,9 @@ private:
       entry.instruction = std::move(instruction);
       return;
     }
-    if (entry.instruction)
+    if (entry.instruction) {
       evict(entry);
+    }
     entry.vmid = vmid;
     std::copy(words.begin(), words.end(), entry.words.begin());
     entry.instruction = std::move(instruction);
@@ -187,7 +167,7 @@ private:
   }
 
   std::unique_ptr<Table> entries_;
-  /// Set by decode() for the ScopedReturn constructed right after it.
+  /// Placement hint from the most recent decode. put() rechecks the key after nested issues.
   bool from_pc_slot_ = false;
 };
 

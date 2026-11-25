@@ -83,36 +83,44 @@ struct EncodingSourceFields {
 /// the caller treats an unrecognized format as a rewrite it cannot encode
 /// rather than copying the instruction unchanged.
 [[nodiscard]] std::optional<EncodingSourceFields> source_fields(uint32_t word0) {
-  if ((word0 >> 23) == 381) // SOP1
+  if ((word0 >> 23) == 381) { // SOP1
     return EncodingSourceFields{.fields = {{{0, 0, 8}}}, .count = 1, .vector = false};
-  if ((word0 >> 23) == 382) // SOPC
+  }
+  if ((word0 >> 23) == 382) { // SOPC
     return EncodingSourceFields{.fields = {{{0, 0, 8}, {0, 8, 8}}}, .count = 2, .vector = false};
-  if ((word0 >> 30) == 2) // SOP2
+  }
+  if ((word0 >> 30) == 2) { // SOP2
     return EncodingSourceFields{.fields = {{{0, 0, 8}, {0, 8, 8}}}, .count = 2, .vector = false};
-  if ((word0 >> 26) == 53) // VOP3
+  }
+  if ((word0 >> 26) == 53) { // VOP3
     return EncodingSourceFields{.fields = {{{1, 0, 9}, {1, 9, 9}, {1, 18, 9}}},
                                 .count = 3,
                                 .vector = true,
                                 .destination_stageable = true};
+  }
   // VOP3P shares VOP3's second-word source layout but not its leading bits, and
   // its packed sources are 64 bits wide, so it reaches the selector the same way.
-  if ((word0 >> 24) == 204) // VOP3P
+  if ((word0 >> 24) == 204) { // VOP3P
     return EncodingSourceFields{.fields = {{{1, 0, 9}, {1, 9, 9}, {1, 18, 9}}},
                                 .count = 3,
                                 .vector = true,
                                 .destination_stageable = true};
-  if ((word0 >> 25) == 63) // VOP1
+  }
+  if ((word0 >> 25) == 63) { // VOP1
     return EncodingSourceFields{
         .fields = {{{0, 0, 9}}}, .count = 1, .vector = true, .destination_stageable = true};
-  if ((word0 >> 25) == 62) // VOPC
+  }
+  if ((word0 >> 25) == 62) { // VOPC
     return EncodingSourceFields{.fields = {{{0, 0, 9}, {0, 9, 8}}}, .count = 2, .vector = true};
+  }
   // VOP2 is the remaining format whose leading bit is clear; the compact
   // formats above are tested first, so reaching here identifies it.
-  if ((word0 >> 31) == 0) // VOP2
+  if ((word0 >> 31) == 0) { // VOP2
     return EncodingSourceFields{.fields = {{{0, 0, 9}, {0, 9, 8}}},
                                 .count = 2,
                                 .vector = true,
                                 .destination_stageable = true};
+  }
   return std::nullopt;
 }
 
@@ -126,8 +134,9 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
 /// @returns The field's value, or nullopt when it lies outside @p words.
 [[nodiscard]] std::optional<uint32_t> read_word_field(std::span<const uint32_t> words,
                                                       const SourceField &field) {
-  if (field.word >= words.size())
+  if (field.word >= words.size()) {
     return std::nullopt;
+  }
   const uint32_t mask = (uint32_t{1} << field.width) - 1;
   return (words[field.word] >> field.shift) & mask;
 }
@@ -137,8 +146,9 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
 /// cannot drift apart as encodings are added.
 [[nodiscard]] size_t modelled_word_count(const EncodingSourceFields &layout) {
   size_t words = 0;
-  for (uint8_t i = 0; i < layout.count; ++i)
+  for (uint8_t i = 0; i < layout.count; ++i) {
     words = std::max<size_t>(words, static_cast<size_t>(layout.fields[i].word) + 1);
+  }
   return words;
 }
 
@@ -163,11 +173,13 @@ void set_word_field(uint32_t &word, uint32_t value, uint32_t shift, uint32_t wid
                                                      const EncodingSourceFields &layout,
                                                      std::span<const uint32_t> words) {
   const Operand *op = inst.src_operand(index);
-  if (op == nullptr || op->size_bits() != k64BitOperand)
+  if (op == nullptr || op->size_bits() != k64BitOperand) {
     return false;
+  }
   const SourceField &field = layout.fields[static_cast<size_t>(index)];
-  if (layout.vector && field.width != kSelectorCapableVectorFieldWidth)
+  if (layout.vector && field.width != kSelectorCapableVectorFieldWidth) {
     return false;
+  }
   const std::optional<uint32_t> encoded = read_word_field(words, field);
   return encoded.has_value() && names_flat_scratch_base(*encoded);
 }
@@ -219,13 +231,16 @@ instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint
 [[nodiscard]] bool unmodelled_source_names_selector(const Instruction &inst, int first) {
   for (int i = first; i < inst.num_src_operands(); ++i) {
     const Operand *op = inst.src_operand(i);
-    if (op == nullptr || op->is_vgpr() || op->size_bits() != k64BitOperand)
+    if (op == nullptr || op->is_vgpr() || op->size_bits() != k64BitOperand) {
       continue;
-    if (is_decoded_literal(*op))
+    }
+    if (is_decoded_literal(*op)) {
       continue;
+    }
     const int value = op->encoding_value();
-    if (value >= 0 && names_flat_scratch_base(static_cast<uint32_t>(value)))
+    if (value >= 0 && names_flat_scratch_base(static_cast<uint32_t>(value))) {
       return true;
+    }
   }
   return false;
 }
@@ -244,13 +259,16 @@ instruction_words(const Instruction &inst, uint64_t offset, std::span<const uint
 [[nodiscard]] bool instruction_names_selector_in_any_64bit_source(const Instruction &inst) {
   for (int i = 0; i < inst.num_src_operands(); ++i) {
     const Operand *op = inst.src_operand(i);
-    if (op == nullptr || op->is_vgpr() || op->size_bits() != k64BitOperand)
+    if (op == nullptr || op->is_vgpr() || op->size_bits() != k64BitOperand) {
       continue;
-    if (is_decoded_literal(*op))
+    }
+    if (is_decoded_literal(*op)) {
       continue;
+    }
     const int value = op->encoding_value();
-    if (value >= 0 && names_flat_scratch_base(static_cast<uint32_t>(value)))
+    if (value >= 0 && names_flat_scratch_base(static_cast<uint32_t>(value))) {
       return true;
+    }
   }
   return false;
 }
@@ -281,66 +299,81 @@ FailureOr<std::optional<uint16_t>> reusable_destination_pair(const Instruction &
                                                              const EncodingSourceFields &layout,
                                                              std::span<const uint32_t> words,
                                                              const LivenessAnalysis &liveness) {
-  if (!layout.destination_stageable || inst.num_dst_operands() != 1)
+  if (!layout.destination_stageable || inst.num_dst_operands() != 1) {
     return std::optional<uint16_t>{};
+  }
   auto maybe_complete = liveness.global_vgpr_usage_is_complete();
-  if (maybe_complete.failed())
+  if (maybe_complete.failed()) {
     return Result::failure();
-  if (!maybe_complete.value())
+  }
+  if (!maybe_complete.value()) {
     return std::optional<uint16_t>{};
+  }
 
   const Operand *dst = inst.dst_operand(0);
-  if (dst == nullptr)
+  if (dst == nullptr) {
     return std::optional<uint16_t>{};
+  }
   const auto dst_ref = dst->to_register_ref();
   if (!dst_ref || dst_ref->cls != RegClass::VGPR || dst_ref->width != 2 ||
-      static_cast<uint32_t>(dst_ref->index) + dst_ref->width > 256u)
+      static_cast<uint32_t>(dst_ref->index) + dst_ref->width > 256u) {
     return std::optional<uint16_t>{};
+  }
   auto maybe_dst_bank = liveness.vgpr_msb_bank_before(inst, dst->vgpr_msb_role());
-  if (maybe_dst_bank.failed())
+  if (maybe_dst_bank.failed()) {
     return Result::failure();
+  }
   const auto dst_bank = maybe_dst_bank.value();
-  if (!dst_bank)
+  if (!dst_bank) {
     return std::optional<uint16_t>{};
+  }
   const uint16_t dst_phys =
       static_cast<uint16_t>(dst_ref->index + static_cast<uint16_t>(*dst_bank) * 256u);
 
   bool found_rewritable_source = false;
   for (int index = 0; index < inst.num_src_operands(); ++index) {
     const Operand *src = inst.src_operand(index);
-    if (src == nullptr)
+    if (src == nullptr) {
       continue;
+    }
     const bool rewritable = index < static_cast<int>(layout.count) &&
                             is_flat_scratch_base_64bit_source(inst, index, layout, words);
     if (rewritable) {
       found_rewritable_source = true;
       auto maybe_src_bank = liveness.vgpr_msb_bank_before(inst, src->vgpr_msb_role());
-      if (maybe_src_bank.failed())
+      if (maybe_src_bank.failed()) {
         return Result::failure();
+      }
       const auto src_bank = maybe_src_bank.value();
-      if (!src_bank || *src_bank != *dst_bank)
+      if (!src_bank || *src_bank != *dst_bank) {
         return std::optional<uint16_t>{};
+      }
       continue;
     }
 
     const auto src_ref = src->to_register_ref();
-    if (!src_ref || src_ref->cls != RegClass::VGPR)
+    if (!src_ref || src_ref->cls != RegClass::VGPR) {
       continue;
-    if (static_cast<uint32_t>(src_ref->index) + src_ref->width > 256u)
+    }
+    if (static_cast<uint32_t>(src_ref->index) + src_ref->width > 256u) {
       return std::optional<uint16_t>{};
+    }
     auto maybe_src_bank = liveness.vgpr_msb_bank_before(inst, src->vgpr_msb_role());
-    if (maybe_src_bank.failed())
+    if (maybe_src_bank.failed()) {
       return Result::failure();
+    }
     const auto src_bank = maybe_src_bank.value();
     if (!src_bank) {
-      if (register_ranges_overlap(dst_ref->index, dst_ref->width, src_ref->index, src_ref->width))
+      if (register_ranges_overlap(dst_ref->index, dst_ref->width, src_ref->index, src_ref->width)) {
         return std::optional<uint16_t>{};
+      }
       continue;
     }
     const uint16_t src_phys =
         static_cast<uint16_t>(src_ref->index + static_cast<uint16_t>(*src_bank) * 256u);
-    if (register_ranges_overlap(dst_phys, dst_ref->width, src_phys, src_ref->width))
+    if (register_ranges_overlap(dst_phys, dst_ref->width, src_phys, src_ref->width)) {
       return std::optional<uint16_t>{};
+    }
   }
 
   RegisterSet implicit_uses;
@@ -349,11 +382,13 @@ FailureOr<std::optional<uint16_t>> reusable_destination_pair(const Instruction &
   implicit_uses.for_each([&](RegisterRef ref) {
     if (ref.cls == RegClass::VGPR &&
         register_ranges_overlap(dst_ref->index, dst_ref->width,
-                                static_cast<uint16_t>(ref.index & 0xffu), ref.width))
+                                static_cast<uint16_t>(ref.index & 0xffu), ref.width)) {
       implicit_alias = true;
+    }
   });
-  if (implicit_alias || !found_rewritable_source)
+  if (implicit_alias || !found_rewritable_source) {
     return std::optional<uint16_t>{};
+  }
   return dst_ref->index;
 }
 
@@ -361,13 +396,15 @@ FailureOr<std::optional<uint16_t>> reusable_destination_pair(const Instruction &
 
 bool gfx1250_reads_flat_scratch_base_64bit(const Instruction &inst) {
   const uint32_t *raw = inst.raw_encoding();
-  if (raw == nullptr)
+  if (raw == nullptr) {
     return false;
+  }
   const std::optional<EncodingSourceFields> layout = source_fields(raw[0]);
   // An unmodelled encoding is reported so the lowering can refuse it rather
   // than let it reach the copy path unexamined.
-  if (!layout)
+  if (!layout) {
     return instruction_names_selector_in_any_64bit_source(inst);
+  }
   // Only the base encoding is read here. Every modelled source field lies
   // inside it, so the decoded size bounds the span without depending on
   // whether raw_encoding() also addresses trailing literal or modifier words.
@@ -376,32 +413,38 @@ bool gfx1250_reads_flat_scratch_base_64bit(const Instruction &inst) {
   const std::span<const uint32_t> words(raw, std::min(modelled_word_count(*layout), available));
   const int sources = std::min(inst.num_src_operands(), static_cast<int>(layout->count));
   for (int i = 0; i < sources; ++i) {
-    if (is_flat_scratch_base_64bit_source(inst, i, *layout, words))
+    if (is_flat_scratch_base_64bit_source(inst, i, *layout, words)) {
       return true;
+    }
   }
   return false;
 }
 
 bool gfx1250_flat_scratch_base_residual(const Instruction &inst) {
   const uint32_t *raw = inst.raw_encoding();
-  if (raw == nullptr)
+  if (raw == nullptr) {
     return false;
+  }
   const std::optional<EncodingSourceFields> layout = source_fields(raw[0]);
-  if (!layout)
+  if (!layout) {
     return instruction_names_selector_in_any_64bit_source(inst);
+  }
 
   const size_t available =
       inst.size() > 0 ? static_cast<size_t>(inst.size()) / sizeof(uint32_t) : 0;
   const std::span<const uint32_t> words(raw, std::min(modelled_word_count(*layout), available));
   const int sources = std::min(inst.num_src_operands(), static_cast<int>(layout->count));
   for (int source_index = 0; source_index < sources; ++source_index) {
-    if (!is_flat_scratch_base_64bit_source(inst, source_index, *layout, words))
+    if (!is_flat_scratch_base_64bit_source(inst, source_index, *layout, words)) {
       continue;
-    if (layout->vector)
+    }
+    if (layout->vector) {
       return true;
+    }
     const Operand *operand = inst.src_operand(source_index);
-    if (operand != nullptr && operand->encoding_value() == kFlatScratchBaseHi)
+    if (operand != nullptr && operand->encoding_value() == kFlatScratchBaseHi) {
       return true;
+    }
   }
   return false;
 }
@@ -410,8 +453,9 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
                                                     std::span<const uint8_t> source_text,
                                                     const LivenessAnalysis &liveness,
                                                     TranslationContext &) {
-  if (!gfx1250_reads_flat_scratch_base_64bit(inst))
+  if (!gfx1250_reads_flat_scratch_base_64bit(inst)) {
     return ExpandResult::not_handled();
+  }
 
   auto words = instruction_words(inst, offset, source_text);
   if (!words) {
@@ -436,15 +480,17 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
   std::optional<uint16_t> staged_vgpr_pair;
   if (layout->vector) {
     auto maybe_free_pair = liveness.find_free_sgpr_pair(&inst);
-    if (maybe_free_pair.failed())
+    if (maybe_free_pair.failed()) {
       return ExpandResult::liveness_unavailable();
+    }
     const auto free_pair = maybe_free_pair.value();
     borrowed_pair =
         (free_pair.has_value() && *free_pair + 1 <= kMaxOrdinarySgpr) ? free_pair : std::nullopt;
     if (!borrowed_pair) {
       auto maybe_staged_pair = reusable_destination_pair(inst, *layout, *words, liveness);
-      if (maybe_staged_pair.failed())
+      if (maybe_staged_pair.failed()) {
         return ExpandResult::liveness_unavailable();
+      }
       staged_vgpr_pair = maybe_staged_pair.value();
       if (!staged_vgpr_pair) {
         return ExpandResult::failed(
@@ -467,13 +513,15 @@ ExpandResult gfx1250_lower_flat_scratch_base_source(const Instruction &inst, uin
       // range form of insert() reduces to a bulk copy whose bounds GCC cannot
       // relate back to a single-element std::array, and it reports the
       // one-past-the-end pointer as an out-of-bounds access.
-      for (const uint32_t word : move)
+      for (const uint32_t word : move) {
         prologue.push_back(word);
+      }
     }
   }
   for (int i = 0; i < rewritable; ++i) {
-    if (!is_flat_scratch_base_64bit_source(inst, i, *layout, *words))
+    if (!is_flat_scratch_base_64bit_source(inst, i, *layout, *words)) {
       continue;
+    }
 
     const SourceField &field = layout->fields[static_cast<size_t>(i)];
     if (field.word >= words->size()) {

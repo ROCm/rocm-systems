@@ -33,10 +33,12 @@ use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::topology::GpuInfo;
 
 use crate::callback_arg::CallbackArg;
+use crate::events::{CallbackScope, VM_FAULT_CONDVAR};
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::queue_intercept::{InterceptQueue, QueueNotifier};
-use crate::runtime::{CallbackScope, VM_FAULT_CONDVAR, initialized_mut, lock, map_error};
 use crate::signal::AmdSignal;
+use crate::status::map_error;
 
 mod caps;
 mod mask;
@@ -44,7 +46,9 @@ mod scratch;
 pub(crate) use mask::constrain_cu_mask;
 pub(crate) use scratch::{ScratchOptions, ScratchPolicy};
 mod create;
+mod lifecycle;
 pub(crate) use caps::aql_extensions;
+pub(crate) use lifecycle::{AqlQueueKind, AqlQueueRequest, create, destroy};
 mod event;
 mod sdma_event;
 pub(crate) use create::{create_hardware_queue, create_sdma_queue};
@@ -92,7 +96,7 @@ pub(crate) struct QueueEventOwner {
 impl QueueEventSignal {
     /// Finds or creates the shared queue error event for a native device.
     fn shared_event(
-        runtime: &mut crate::runtime::HsaState,
+        runtime: &mut crate::session::HsaSession,
     ) -> Result<Arc<QueueEventOwner>, Status> {
         let event = if let Some(event) = &runtime.queue_state.queue_event {
             event.clone()
@@ -255,6 +259,32 @@ pub(crate) struct Queue {
     pub(crate) vm_fault_reason: u32,
     /// Native destruction has begun and can only be resumed.
     teardown_started: bool,
+}
+
+impl Queue {
+    /// Borrows fatal queue state and scratch while the registry excludes teardown.
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<
+        (
+            rocddi::device::gpu::diagnostic::CoreQueueSnapshot<'_>,
+            Vec<rocddi::device::gpu::diagnostic::DiagnosticMemory<'_>>,
+        ),
+        rocddi::Error,
+    > {
+        self.native.inactivate()?;
+        self.inactivated = true;
+        // SAFETY: Both parts remain borrowed from the retained owner. No backing
+        // is replaced or released; capture only stops execution and reads bytes.
+        let (native, backing) = unsafe { self.native.parts_mut() };
+        let scratch = backing
+            .scratch
+            .iter()
+            .chain(&backing.uncertain_scratch)
+            .map(Allocation::diagnostic_memory)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((native.core_snapshot()?, scratch))
+    }
 }
 
 /// External GPU addresses retained by the native queue through retirement.
@@ -591,7 +621,7 @@ pub(crate) struct QueueState {
     pub(crate) counted_queue_pools: HashMap<(u64, u32), Vec<CountedHardwareQueue>>,
     /// Public counted queue pointers already released by the caller.
     pub(crate) released_counted_queues: HashSet<usize>,
-    /// Maximum counted queues accepted by this HSA generation.
+    /// Maximum counted hardware queues per agent and priority.
     pub(crate) counted_queue_limit: usize,
     /// Ring size selected for counted hardware queues.
     pub(crate) counted_queue_size: u32,
@@ -599,7 +629,7 @@ pub(crate) struct QueueState {
 
 impl QueueState {
     /// Initializes empty queue registries and the next queue ID.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(counted_queue_limit: usize) -> Self {
         Self {
             next_queue_id: 0,
             queue_event: None,
@@ -612,7 +642,7 @@ impl QueueState {
             counted_queues: HashMap::new(),
             counted_queue_pools: HashMap::new(),
             released_counted_queues: HashSet::new(),
-            counted_queue_limit: 4,
+            counted_queue_limit,
             counted_queue_size: 16_384,
         }
     }
@@ -804,30 +834,23 @@ unsafe fn dispatch_scratch_requirements(address: usize) -> Option<(u32, u32)> {
 }
 
 /// Finds the native queue key corresponding to a public queue pointer.
-pub(crate) fn hardware_queue_key(
-    runtime: &crate::runtime::HsaState,
-    queue: *const HsaQueue,
-) -> Option<usize> {
+pub(crate) fn hardware_queue_key(state: &QueueState, queue: *const HsaQueue) -> Option<usize> {
     let key = queue as usize;
-    if let Some(intercept) = runtime.queue_state.intercept_queues.get(&key) {
+    if let Some(intercept) = state.intercept_queues.get(&key) {
         return Some(intercept.lower);
     }
-    runtime.queue_state.counted_queues.get(&key).map_or_else(
-        || runtime.queue_state.queues.contains_key(&key).then_some(key),
+    state.counted_queues.get(&key).map_or_else(
+        || state.queues.contains_key(&key).then_some(key),
         |queue| Some(queue.hardware_queue),
     )
 }
 
 /// Builds the pool key used to share counted hardware queues.
-pub(crate) fn counted_pool_key(
-    runtime: &crate::runtime::HsaState,
-    queue: *const HsaQueue,
-) -> Option<(u64, u32)> {
+pub(crate) fn counted_pool_key(state: &QueueState, queue: *const HsaQueue) -> Option<(u64, u32)> {
     let key = queue as usize;
-    runtime.queue_state.counted_queues.get(&key).map_or_else(
+    state.counted_queues.get(&key).map_or_else(
         || {
-            runtime
-                .queue_state
+            state
                 .queues
                 .get(&key)
                 .and_then(|queue| queue.counted_pool_key)
@@ -837,13 +860,10 @@ pub(crate) fn counted_pool_key(
 }
 
 /// Checks whether a public queue pointer is still registered.
-pub(crate) fn queue_known(runtime: &crate::runtime::HsaState, queue: *const HsaQueue) -> bool {
+pub(crate) fn queue_known(state: &QueueState, queue: *const HsaQueue) -> bool {
     !queue.is_null()
-        && (hardware_queue_key(runtime, queue).is_some()
-            || runtime
-                .queue_state
-                .soft_queues
-                .contains_key(&(queue as usize)))
+        && (hardware_queue_key(state, queue).is_some()
+            || state.soft_queues.contains_key(&(queue as usize)))
 }
 
 /// Selects the least-used live hardware queue in a counted pool.

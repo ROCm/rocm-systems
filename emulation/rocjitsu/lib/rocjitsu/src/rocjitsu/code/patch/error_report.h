@@ -22,8 +22,9 @@ namespace rocjitsu {
 /// a running log. The caller is in charge of Cross-call accumulation (e.g.
 /// `std::vector<std::string>`).
 inline void report(std::string *out, const char *msg) {
-  if (out)
+  if (out) {
     *out = msg;
+  }
 }
 
 /// @brief Diagnostic sink that replaces an optional caller-owned error string.
@@ -36,8 +37,9 @@ public:
       : out_(out), prefix_(std::move(prefix)) {}
 
   void operator()(std::string_view message) const {
-    if (out_ != nullptr)
+    if (out_ != nullptr) {
       *out_ = prefix_ + std::string(message);
+    }
   }
 
 private:

@@ -6,6 +6,9 @@
 //! Queue objects retain their backing and platform state until explicit
 //! destruction succeeds. Packet-format policy and public ABI behavior remain
 //! responsibilities of the frontend using rocddi.
+//! Session retirement rejects new producer mappings and queue updates while
+//! allowing progress checks, inactivation, and destruction. Already published
+//! transport addresses retain their explicit producer lifetime contract.
 
 mod exception;
 mod layout;
@@ -13,7 +16,8 @@ mod scratch;
 mod types;
 pub use super::kernel_queue::*;
 pub use exception::{
-    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, replace_scratch_owner,
+    AqlQueueException, aql_scratch_lanes, decode_aql_queue_exception, decode_kfd_queue_exception,
+    replace_scratch_owner,
 };
 #[cfg(target_os = "linux")]
 pub(crate) use layout::{AqlControlLayout, AqlQueueHeader};
@@ -120,6 +124,7 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
         device_driver: &Shared<D>,
         state: &D::DeviceState,
     ) -> Result<QueueTransport, Error> {
+        let _operation = self.driver.admission().enter()?;
         if !Shared::ptr_eq(&self.driver, device_driver) {
             return Err(Error::Operation {
                 kind: ErrorKind::InvalidArgument,
@@ -140,15 +145,23 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
         self.inner.progress()
     }
 
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<super::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        self.inner.core_snapshot()
+    }
+
     pub(crate) fn inactivate(&mut self) -> Result<(), Error> {
         self.inner.inactivate()
     }
 
     pub(crate) fn set_priority(&mut self, priority: QueuePriority) -> Result<(), Error> {
+        let _operation = self.driver.admission().enter()?;
         self.inner.set_priority(priority)
     }
 
     pub(crate) fn set_cu_mask(&mut self, mask: &[u32]) -> Result<(), Error> {
+        let _operation = self.driver.admission().enter()?;
         self.inner.set_cu_mask(mask)
     }
 
@@ -161,11 +174,15 @@ impl<D: Driver, Q: UserQueueResource<DeviceState = D::DeviceState>> DriverQueue<
         &mut self,
         scratch: Option<QueueScratch>,
     ) -> Result<(), Error> {
+        let _operation = scratch
+            .map(|_| self.driver.admission().enter())
+            .transpose()?;
         // SAFETY: The caller keeps the stopped-queue and backing obligations.
         unsafe { self.inner.set_scratch(scratch) }
     }
 
     pub(crate) fn enable_async_scratch(&mut self) -> Result<(), Error> {
+        let _operation = self.driver.admission().enter()?;
         self.inner.enable_async_scratch()
     }
 
@@ -276,6 +293,14 @@ impl<D> RetainedQueue<D> {
     /// Propagates ownership, routing, and native mapping failures.
     pub fn map_device(&self, device: GpuDevice<'_>) -> Result<QueueTransport, Error> {
         self.queue.map_device(device)
+    }
+
+    /// Captures fatal compute state while retaining the dependency bundle.
+    ///
+    /// # Errors
+    /// Returns inactivation or native capture errors.
+    pub fn core_snapshot(&mut self) -> Result<super::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        self.queue.core_snapshot()
     }
 
     /// Stops native execution while keeping its dependency bundle live.
@@ -416,6 +441,14 @@ pub(crate) fn abandon_unpublished<T, D: 'static>(
 }
 
 impl Queue {
+    /// Permanently inactivates the queue and captures its saved GPU state.
+    ///
+    /// # Errors
+    /// Returns native inactivation, capture, or unsupported-provider errors.
+    pub fn core_snapshot(&mut self) -> Result<super::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        self.inner.core_snapshot()
+    }
+
     /// Copies the ring, index, and doorbell facts captured at creation.
     /// It performs no health poll or progress read. The adapter permits address
     /// use only while a live public queue mapping borrows this native owner.
@@ -668,6 +701,7 @@ mod queue_resource_tests {
     struct FakeDevice;
 
     struct FakeDriver {
+        admission: crate::session::SessionAdmission,
         dropped: Arc<AtomicBool>,
         queue_drops: Arc<AtomicUsize>,
     }
@@ -702,6 +736,10 @@ mod queue_resource_tests {
 
     impl Driver for FakeDriver {
         type DeviceState = FakeDevice;
+
+        fn admission(&self) -> &crate::session::SessionAdmission {
+            &self.admission
+        }
 
         fn driver_instance(&self) -> crate::driver::DriverInstanceId {
             crate::driver::DriverInstanceId::TEST
@@ -881,10 +919,60 @@ mod queue_resource_tests {
     }
 
     #[test]
+    fn retiring_queue_rejects_new_producers_and_keeps_cleanup_available() -> Result<(), Error> {
+        let driver_dropped = Arc::new(AtomicBool::new(false));
+        let queue_drops = Arc::new(AtomicUsize::new(0));
+        let driver = Shared::new(FakeDriver {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().map_err(|source| {
+                    crate::os::native_error("test session process identity", source)
+                })?,
+            ),
+            dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+        })?;
+        let inner = Owned::new(FakeQueue {
+            info: transport(),
+            driver_dropped,
+            queue_drops: queue_drops.clone(),
+            fail_destroy: false,
+            released: false,
+        })?;
+        let mut queue = DriverQueue::new(driver.clone(), inner, request())?;
+        queue.set_priority(QueuePriority::Normal)?;
+        driver.admission.begin_retirement()?;
+        assert!(matches!(
+            queue.map_device(&driver, &FakeDevice),
+            Err(error) if error.kind() == ErrorKind::Unsupported
+        ));
+        assert!(matches!(
+            queue.set_priority(QueuePriority::Normal),
+            Err(error) if error.kind() == ErrorKind::Unsupported
+        ));
+        assert!(matches!(
+            queue.set_cu_mask(&[1]),
+            Err(error) if error.kind() == ErrorKind::Unsupported
+        ));
+        queue.check()?;
+        assert_eq!(queue.progress()?, (0, 0));
+        queue.inactivate()?;
+        // SAFETY: The fake never publishes addresses to a native producer.
+        unsafe { queue.destroy()? };
+        drop(queue);
+        assert_eq!(queue_drops.load(Ordering::Relaxed), 1);
+        Ok(())
+    }
+
+    #[test]
     fn driver_queue_retains_native_owner_and_driver_through_failed_cleanup() -> Result<(), Error> {
         let driver_dropped = Arc::new(AtomicBool::new(false));
         let queue_drops = Arc::new(AtomicUsize::new(0));
         let driver = Shared::new(FakeDriver {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().map_err(|source| {
+                    crate::os::native_error("test session process identity", source)
+                })?,
+            ),
             dropped: driver_dropped.clone(),
             queue_drops: queue_drops.clone(),
         })?;
@@ -899,6 +987,11 @@ mod queue_resource_tests {
         let mut queue = DriverQueue::new(driver.clone(), driver_queue, request())?;
         assert_eq!(queue.info(), transport());
         let foreign = Shared::new(FakeDriver {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().map_err(|source| {
+                    crate::os::native_error("test session process identity", source)
+                })?,
+            ),
             dropped: Arc::new(AtomicBool::new(false)),
             queue_drops: Arc::new(AtomicUsize::new(0)),
         })?;
@@ -934,6 +1027,11 @@ mod queue_resource_tests {
         let driver_dropped = Arc::new(AtomicBool::new(false));
         let queue_drops = Arc::new(AtomicUsize::new(0));
         let driver = Shared::new(FakeDriver {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().map_err(|source| {
+                    crate::os::native_error("test session process identity", source)
+                })?,
+            ),
             dropped: driver_dropped.clone(),
             queue_drops: queue_drops.clone(),
         })?;
@@ -962,6 +1060,11 @@ mod queue_resource_tests {
             let driver_dropped = Arc::new(AtomicBool::new(false));
             let queue_drops = Arc::new(AtomicUsize::new(0));
             let driver = Shared::new(FakeDriver {
+                admission: crate::session::SessionAdmission::new(
+                    crate::os::ProcessIdentity::capture().map_err(|source| {
+                        crate::os::native_error("test session process identity", source)
+                    })?,
+                ),
                 dropped: driver_dropped.clone(),
                 queue_drops: queue_drops.clone(),
             })?;

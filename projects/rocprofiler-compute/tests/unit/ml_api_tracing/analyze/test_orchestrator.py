@@ -1,0 +1,925 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+"""Workload state and diagnostics for ML API trace analysis."""
+
+import argparse
+
+import pandas as pd
+import pytest
+
+from ml_api_tracing.analyze import orchestrator
+from ml_api_tracing.analyze.call_tree import rollup_node_stats
+from ml_api_tracing.analyze.definitions import CallTreeNode, KernelStats
+from ml_api_tracing.analyze.errors import MarkerNotNestedError
+from ml_api_tracing.analyze.orchestrator import process_ml_api_trace_output
+from ml_api_tracing.marker_format import parse_marker_function
+from utils import csv_compression, file_io, schema
+
+FIRST_PMC_GROUP_KEY = ("guid", 1, 256, 64, 0)
+SECOND_PMC_GROUP_KEY = ("guid", 2, 256, 64, 0)
+
+
+def build_operator_workload():
+    first = CallTreeNode(
+        name="aten::first",
+        backend="torch",
+        kernels={
+            "first_kernel": KernelStats(
+                launches=2,
+                total_duration_ns=6000.0,
+                min_duration_ns=1000.0,
+                max_duration_ns=5000.0,
+                pmc_group_keys=[FIRST_PMC_GROUP_KEY, FIRST_PMC_GROUP_KEY],
+            )
+        },
+        invocation_ids={"10", "20"},
+        args_invocations={"(value=float32[2x2])": {"10", "20"}},
+        file_name="model.py",
+        line_number=19,
+        thread_id="1",
+        launcher_thread_id="2",
+        start_timestamp=10.0,
+        end_timestamp=60.0,
+    )
+    second = CallTreeNode(
+        name="aten::second",
+        backend="torch",
+        kernels={
+            "second_kernel": KernelStats(
+                launches=1,
+                total_duration_ns=2000.0,
+                min_duration_ns=2000.0,
+                max_duration_ns=2000.0,
+                pmc_group_keys=[SECOND_PMC_GROUP_KEY],
+            )
+        },
+    )
+    cpu = CallTreeNode(
+        name="aten::cpu",
+        backend="torch",
+        invocation_ids={"30"},
+        args_invocations={"(value=3)": {"30"}},
+        file_name="model.py",
+        line_number=23,
+        thread_id="1",
+    )
+    root = CallTreeNode(
+        name="model.forward", backend="torch", children=[first, second, cpu]
+    )
+    rollup_node_stats(root)
+    return schema.Workload(
+        ml_api_call_trees={"1": [root]},
+        ml_api_trace_df=pd.DataFrame({"Function": ["retained"]}),
+        raw_pmc=pd.DataFrame({
+            "Dispatch_ID": [8, 3],
+            "Kernel_Name": ["first_kernel", "second_kernel"],
+        }),
+        filter_dispatch_ids=["8"],
+        filter_kernel_ids=[],
+    )
+
+
+class GenericKernelErrorRecorder:
+    """Stand in for file_io.console_error: keep the message and exit."""
+
+    def __init__(self):
+        self.messages = []
+
+    def __call__(self, *argv, **_kwargs):
+        self.messages.append(str(argv[-1]))
+        raise SystemExit(1)
+
+
+@pytest.fixture
+def record_console_error_and_exit():
+    return build_record_console_error_and_exit
+
+
+class ConsoleErrorRecorder:
+    """Stand in for console_error: keep the message and exit like the real one."""
+
+    def __init__(self):
+        self.messages = []
+
+    def __call__(self, *argv, exit=True, exit_code=1):
+        self.messages.append(str(argv[-1]) if argv else "")
+        if exit:
+            raise SystemExit(exit_code)
+
+
+class EventRecorder:
+    """Record every console call in order, exiting when asked to."""
+
+    def __init__(self, events, exit_code=None):
+        self.events = events
+        self.exit_code = exit_code
+
+    def __call__(self, *args):
+        self.events.append(args)
+        if self.exit_code is not None:
+            raise SystemExit(self.exit_code)
+
+
+def build_record_console_error_and_exit(monkeypatch):
+    """Replace console_error so tests see the message and SystemExit."""
+    recorder = ConsoleErrorRecorder()
+    monkeypatch.setattr(orchestrator, "console_error", recorder)
+    return recorder.messages
+
+
+def fail_validation(_trace, _forest):
+    raise MarkerNotNestedError("missing", "42", 20.0)
+
+
+def test_unmatched_warning_precedes_pass_matching_fatal(
+    tmp_path, monkeypatch, write_ml_api_pass, linear_marker_row, counter_row
+):
+    write_ml_api_pass(
+        tmp_path,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [
+            counter_row(1, "k", 10, 20),
+            counter_row(99, "orphan", 30, 40, dispatch_id=2),
+        ],
+    )
+    write_ml_api_pass(
+        tmp_path,
+        1,
+        [linear_marker_row(2, 200, 300), linear_marker_row(3, 400, 500)],
+        [
+            counter_row(2, "k", 210, 220),
+            counter_row(3, "k", 410, 420, dispatch_id=2),
+        ],
+    )
+
+    events = []
+    monkeypatch.setattr(orchestrator, "console_warning", EventRecorder(events))
+    monkeypatch.setattr(orchestrator, "console_error", EventRecorder(events, 1))
+
+    with pytest.raises(SystemExit) as failure:
+        process_ml_api_trace_output(schema.Workload(), str(tmp_path))
+
+    assert failure.value.code == 1
+    assert len(events) == 2
+    assert events[0] == (
+        "analysis",
+        "1 unmatched dispatches; Kernel_Names: orphan",
+    )
+    assert "per-pass marker counts [1, 2]" in events[1][1]
+
+
+def test_attachment_warning_precedes_validation_fatal(
+    tmp_path,
+    monkeypatch,
+    write_ml_api_pass,
+    linear_marker_row,
+    counter_row,
+):
+    events = []
+    monkeypatch.setattr(orchestrator, "console_warning", EventRecorder(events))
+
+    monkeypatch.setattr(orchestrator, "console_error", EventRecorder(events, 1))
+    monkeypatch.setattr(orchestrator, "validate_all_markers_nested", fail_validation)
+    write_ml_api_pass(
+        tmp_path,
+        0,
+        [
+            linear_marker_row(
+                1, 20, 60, thread_id=42, function="aten::mm:n/a|ltid=7|torch"
+            )
+        ],
+        [counter_row(1, "k", 30, 40)],
+    )
+    with pytest.raises(SystemExit):
+        process_ml_api_trace_output(schema.Workload(), str(tmp_path))
+
+    assert len(events) == 2
+    assert "Launcher thread not found" in events[0][1]
+    assert "Marker was not nested" in events[1][1]
+
+
+def test_parse_marker_function_ltid_and_thread_id_unchanged(
+    tmp_path, write_ml_api_pass, counter_row, guid
+):
+    parsed = parse_marker_function(
+        "aten::addmm:n/a|seqNr=1|tid=1|ftid=1|ltid=7|scope=FUNCTION|args=()|torch"
+    )
+    assert parsed["launcher_thread_id"] == "7"
+    workload_dir = tmp_path / "ltid_thread"
+    function = (
+        "nn.Module.Linear.forward:simple_torch_code.py:19"
+        "|seqNr=n/a|tid=n/a|ftid=1|ltid=7|scope=n/a|args=()|torch"
+    )
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [
+            {
+                "Function": function,
+                "Thread_Id": 42,
+                "Correlation_ID": 8,
+                "GUID": guid,
+                "Start_Timestamp": 20,
+                "End_Timestamp": 70,
+            }
+        ],
+        [counter_row(8, "addmm_kernel", 30, 60, dispatch_id=1)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert workload.ml_api_trace_df["Thread_Id"].tolist() == [42]
+    assert workload.ml_api_trace_df["launcher_thread_id"].tolist() == ["7"]
+
+
+def test_process_outer_join_keeps_wrap_with_empty_kernel_names(
+    tmp_path, linear_marker_row
+):
+    workload_dir = tmp_path / "empty_kernels"
+    workload_dir.mkdir()
+    pd.DataFrame([linear_marker_row(1, 10, 80)]).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_0_marker_api_trace.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    pd.DataFrame(
+        columns=[
+            "Correlation_ID",
+            "GUID",
+            "Kernel_Name",
+            "Dispatch_ID",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Counter_Name",
+        ]
+    ).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_0_counter_collection.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == []
+    assert workload.ml_api_call_trees == {}
+
+
+def test_process_collapses_two_counter_rows_to_one_dispatch_duration(
+    tmp_path, write_ml_api_pass, linear_marker_row, counter_row
+):
+    workload_dir = tmp_path / "two_counters"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 200)],
+        [
+            counter_row(
+                1,
+                "addmm_kernel",
+                100,
+                150,
+                dispatch_id=7,
+                counter_name="SQ_WAVES",
+            ),
+            counter_row(
+                1,
+                "addmm_kernel",
+                100,
+                150,
+                dispatch_id=7,
+                counter_name="GRBM_GUI_ACTIVE",
+            ),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    stats = workload.ml_api_call_trees["1"][0].kernels["addmm_kernel"]
+    assert stats.launches == 1
+    assert stats.total_duration_ns == 50
+
+
+def test_process_two_dispatches_same_marker_keep_both_kernel_names(
+    tmp_path, write_ml_api_pass, linear_marker_row, counter_row
+):
+    workload_dir = tmp_path / "two_kernels"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(5, 0, 200)],
+        [
+            counter_row(5, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(5, "kernel_b", 30, 40, dispatch_id=2),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    names = list(workload.ml_api_trace_df["Kernel_Names"].iloc[0])
+    assert names == ["kernel_a", "kernel_b"]
+    assert set(workload.ml_api_call_trees["1"][0].kernels) == {"kernel_a", "kernel_b"}
+
+
+def test_process_unmatched_kernel_warns_and_continues(
+    tmp_path, monkeypatch, write_ml_api_pass, linear_marker_row, counter_row
+):
+    warnings = []
+    monkeypatch.setattr(orchestrator, "console_warning", EventRecorder(warnings))
+    workload_dir = tmp_path / "unmatched"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(99, "orphan_kernel", 10, 20)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    warning_text = str(warnings)
+    assert "orphan_kernel" in warning_text
+    assert "unmatched dispatches" in warning_text
+    assert not workload.ml_api_trace_df.empty
+
+
+def test_process_unmatched_dispatch_two_counter_rows_is_one_row(
+    tmp_path, monkeypatch, write_ml_api_pass, linear_marker_row, counter_row
+):
+    warnings = []
+    monkeypatch.setattr(orchestrator, "console_warning", EventRecorder(warnings))
+    workload_dir = tmp_path / "unmatched_two_counters"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [
+            counter_row(
+                99,
+                "orphan_kernel",
+                10,
+                20,
+                dispatch_id=3,
+                counter_name="SQ_WAVES",
+            ),
+            counter_row(
+                99,
+                "orphan_kernel",
+                10,
+                20,
+                dispatch_id=3,
+                counter_name="GRBM_GUI_ACTIVE",
+            ),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert warnings == [
+        ("analysis", "1 unmatched dispatches; Kernel_Names: orphan_kernel")
+    ]
+
+
+def test_process_joins_on_guid_and_correlation_id(
+    tmp_path, write_ml_api_pass, linear_marker_row, counter_row, guid
+):
+    workload_dir = tmp_path / "guid_join"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100, guid=guid)],
+        [counter_row(1, "addmm_kernel", 10, 40, guid=guid)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == ["addmm_kernel"]
+
+
+def test_process_same_correlation_id_different_guid_does_not_join(
+    tmp_path,
+    monkeypatch,
+    write_ml_api_pass,
+    linear_marker_row,
+    counter_row,
+    guid,
+    other_guid,
+):
+    warnings = []
+    monkeypatch.setattr(orchestrator, "console_warning", EventRecorder(warnings))
+    workload_dir = tmp_path / "guid_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100, guid=guid)],
+        [counter_row(1, "addmm_kernel", 10, 40, guid=other_guid)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert list(workload.ml_api_trace_df["Kernel_Names"].iloc[0]) == []
+    assert "addmm_kernel" in warnings[0][1]
+
+
+def test_process_one_pass_builds_ml_api_trace_df(
+    tmp_path, write_ml_api_pass, linear_marker_row, counter_row
+):
+    workload_dir = tmp_path / "one_pass"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(1, "addmm_kernel", 10, 40)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 1
+    assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
+
+
+@pytest.mark.parametrize("csv_kind", ["marker", "counter"])
+def test_process_exits_when_guid_column_is_missing(
+    tmp_path,
+    monkeypatch,
+    csv_kind,
+    record_console_error_and_exit,
+    write_ml_api_pass,
+    linear_marker_row,
+    counter_row,
+):
+    messages = record_console_error_and_exit(monkeypatch)
+    marker = linear_marker_row(1, 0, 100)
+    counter = counter_row(1, "addmm_kernel", 10, 40)
+    row_without_guid = marker if csv_kind == "marker" else counter
+    del row_without_guid["GUID"]
+    write_ml_api_pass(tmp_path, 0, [marker], [counter])
+    with pytest.raises(SystemExit):
+        process_ml_api_trace_output(schema.Workload(), str(tmp_path))
+    assert "missing required columns ['GUID']" in messages[-1]
+
+
+def test_process_two_passes_collapse_to_one_launch(
+    tmp_path, write_ml_api_pass, linear_marker_row, counter_row
+):
+    workload_dir = tmp_path / "two_pass_collapse"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(11, 0, 100)],
+        [counter_row(11, "addmm_kernel", 10, 40, dispatch_id=1)],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(22, 1000, 1100)],
+        [counter_row(22, "addmm_kernel", 1010, 1040, dispatch_id=9)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 1
+    assert workload.ml_api_call_trees["1"][0].kernel_launches == 1
+
+
+def test_process_collapse_keeps_pass0_gpu_time(
+    tmp_path, write_ml_api_pass, linear_marker_row, counter_row
+):
+    workload_dir = tmp_path / "pass0_gpu_time"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(11, 0, 100)],
+        [counter_row(11, "addmm_kernel", 10, 40, dispatch_id=1)],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(22, 1000, 1100)],
+        [counter_row(22, "addmm_kernel", 1010, 1100, dispatch_id=9)],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    stats = workload.ml_api_call_trees["1"][0].kernels["addmm_kernel"]
+    assert stats.total_duration_ns == 30
+
+
+def test_process_two_wraps_same_stitch_key_keep_ordinals(
+    tmp_path, write_ml_api_pass, linear_marker_row, counter_row
+):
+    workload_dir = tmp_path / "two_ordinals"
+    first = linear_marker_row(1, 0, 50)
+    second = linear_marker_row(2, 60, 110)
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [first, second],
+        [
+            counter_row(1, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(2, "kernel_b", 70, 80, dispatch_id=2),
+        ],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(8, 200, 250), linear_marker_row(9, 260, 310)],
+        [
+            counter_row(8, "kernel_a", 210, 220, dispatch_id=1),
+            counter_row(9, "kernel_b", 270, 280, dispatch_id=2),
+        ],
+    )
+    workload = schema.Workload()
+    process_ml_api_trace_output(workload, str(workload_dir))
+    assert len(workload.ml_api_trace_df) == 2
+    roots = workload.ml_api_call_trees["1"]
+    assert len(roots) == 2
+    assert [root.call_count for root in roots] == [1, 1]
+
+
+def test_process_pass_null_kernel_name_mismatch_exits(
+    tmp_path,
+    monkeypatch,
+    record_console_error_and_exit,
+    write_ml_api_pass,
+    linear_marker_row,
+    counter_row,
+):
+    messages = record_console_error_and_exit(monkeypatch)
+    workload_dir = tmp_path / "kernel_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 100)],
+        [counter_row(1, "kernel_a", 10, 40)],
+    )
+    workload_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame([linear_marker_row(1, 0, 100)]).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_1_marker_api_trace.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    pd.DataFrame(
+        columns=[
+            "Correlation_ID",
+            "GUID",
+            "Kernel_Name",
+            "Dispatch_ID",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Counter_Name",
+        ]
+    ).to_csv(
+        csv_compression.compressed_name(
+            workload_dir / "ml_api_trace_pmc_perf_1_counter_collection.csv"
+        ),
+        index=False,
+        compression="gzip",
+    )
+    workload = schema.Workload()
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(workload, str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "Pass marker mismatch" in messages[0]
+    assert "Kernel_Names" in messages[0]
+
+
+def test_process_pass_marker_count_mismatch_exits(
+    tmp_path,
+    monkeypatch,
+    record_console_error_and_exit,
+    write_ml_api_pass,
+    linear_marker_row,
+    counter_row,
+):
+    messages = record_console_error_and_exit(monkeypatch)
+    workload_dir = tmp_path / "count_mismatch"
+    write_ml_api_pass(
+        workload_dir,
+        0,
+        [linear_marker_row(1, 0, 50), linear_marker_row(2, 60, 110)],
+        [
+            counter_row(1, "kernel_a", 10, 20, dispatch_id=1),
+            counter_row(2, "kernel_b", 70, 80, dispatch_id=2),
+        ],
+    )
+    write_ml_api_pass(
+        workload_dir,
+        1,
+        [linear_marker_row(1, 0, 50)],
+        [counter_row(1, "kernel_a", 10, 20)],
+    )
+    workload = schema.Workload()
+    with pytest.raises(SystemExit) as excinfo:
+        process_ml_api_trace_output(workload, str(workload_dir))
+    assert excinfo.value.code == 1
+    assert "per-pass marker counts" in messages[0]
+
+
+@pytest.mark.parametrize(
+    ("options", "expected_message"),
+    [
+        pytest.param(
+            {"torch": ["nomatch"]},
+            "No PyTorch operators matched the pattern(s): nomatch",
+            id="torch",
+        ),
+        pytest.param(
+            {"torch": ["nofirst"], "triton": ["nosecond"]},
+            "No PyTorch, Triton operators matched the pattern(s): nofirst, nosecond",
+            id="combined-backend-label-and-normalized-patterns",
+        ),
+    ],
+)
+def test_apply_operator_filter_reports_a_pattern_without_match(
+    monkeypatch, record_console_error_and_exit, options, expected_message
+):
+    workload = build_operator_workload()
+    workload.operator_patterns = options
+    messages = record_console_error_and_exit(monkeypatch)
+
+    with pytest.raises(SystemExit) as failure:
+        orchestrator.apply_operator_filter(workload, "/workload")
+
+    assert failure.value.code == 1
+    assert messages == [f"/workload: {expected_message}"]
+
+
+def test_apply_operator_filter_reports_matches_without_dispatches(
+    monkeypatch, record_console_error_and_exit
+):
+    workload = build_operator_workload()
+    workload.operator_patterns = {"torch": ["aten::cpu"]}
+    messages = record_console_error_and_exit(monkeypatch)
+
+    with pytest.raises(SystemExit) as failure:
+        orchestrator.apply_operator_filter(workload, "/workload")
+
+    assert failure.value.code == 1
+    assert messages == [
+        "/workload: No PyTorch kernel dispatches on the matched operators"
+    ]
+    root = workload.ml_api_call_trees["1"][0]
+    assert [child.name for child in root.children] == ["aten::cpu"]
+    assert root.kernel_launches == 0
+
+
+def test_apply_operator_filter_returns_the_pmc_keys_of_the_matches():
+    workload = build_operator_workload()
+    workload.operator_patterns = {"torch": ["aten::first", "aten::second"]}
+
+    pmc_group_keys = orchestrator.apply_operator_filter(workload, "/workload")
+
+    assert pmc_group_keys == [FIRST_PMC_GROUP_KEY, SECOND_PMC_GROUP_KEY]
+    assert [child.name for child in workload.ml_api_call_trees["1"][0].children] == [
+        "aten::first",
+        "aten::second",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("keys", "user_filter", "expected_message"),
+    [
+        pytest.param(
+            [FIRST_PMC_GROUP_KEY, ("first-missing",), ("later-missing",)],
+            ["not-an-integer"],
+            "No PyTorch analyze dispatch id for pmc group key ('first-missing',)",
+            id="first-missing-pmc-key-precedes-user-filter-parsing",
+        ),
+        pytest.param(
+            [FIRST_PMC_GROUP_KEY, SECOND_PMC_GROUP_KEY],
+            ["9"],
+            "No PyTorch dispatches matched the -d filter: ['9']",
+            id="empty-explicit-d-intersection",
+        ),
+        pytest.param(
+            [FIRST_PMC_GROUP_KEY, SECOND_PMC_GROUP_KEY],
+            [" > 8 "],
+            "No PyTorch dispatches matched the -d filter: [' > 8 ']",
+            id="empty-exclusive-threshold-intersection",
+        ),
+        pytest.param(
+            [],
+            None,
+            "No PyTorch dispatches matched the -d filter: None",
+            id="empty-mapped-dispatches",
+        ),
+    ],
+)
+def test_select_operator_dispatches_reports_unmatched_dispatches(
+    monkeypatch, record_console_error_and_exit, keys, user_filter, expected_message
+):
+    workload = build_operator_workload()
+    workload.filter_dispatch_ids = user_filter
+    messages = record_console_error_and_exit(monkeypatch)
+
+    with pytest.raises(SystemExit) as failure:
+        orchestrator.select_operator_dispatches(
+            workload,
+            keys,
+            {FIRST_PMC_GROUP_KEY: 8, SECOND_PMC_GROUP_KEY: 3},
+            ["torch"],
+        )
+
+    assert failure.value.code == 1
+    assert messages == [expected_message]
+
+
+@pytest.mark.parametrize(
+    ("user_filter", "expected_ids"),
+    [
+        pytest.param(None, [3, 8], id="no-user-restriction"),
+        pytest.param([], [3, 8], id="empty-cli-filter-is-unrestricted"),
+        pytest.param([" 8 ", "8", "99"], [8], id="normalize-id-values"),
+        pytest.param([" > 3 "], [8], id="normalize-exclusive-threshold"),
+    ],
+)
+def test_select_operator_dispatches_restricts_to_the_user_filter(
+    monkeypatch, user_filter, expected_ids
+):
+    workload = build_operator_workload()
+    workload.filter_dispatch_ids = user_filter
+    logged = []
+    monkeypatch.setattr(orchestrator, "console_log", EventRecorder(logged))
+
+    orchestrator.select_operator_dispatches(
+        workload,
+        [FIRST_PMC_GROUP_KEY, SECOND_PMC_GROUP_KEY, FIRST_PMC_GROUP_KEY],
+        {FIRST_PMC_GROUP_KEY: 8, SECOND_PMC_GROUP_KEY: 3},
+        ["torch", "triton"],
+    )
+
+    assert workload.filter_dispatch_ids == expected_ids
+    assert logged == [
+        (
+            "ml api trace",
+            "PyTorch, Triton operator filter selected "
+            f"{len(expected_ids)} dispatch(es) for metric analysis.",
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("kernel_names", "kernel_filter", "expected_generic_message"),
+    [
+        pytest.param(
+            [" second_kernel ", "first_kernel"],
+            [2],
+            "2 is an invalid kernel id. Please enter an id between 0-1",
+            id="invalid-kernel-id",
+        ),
+        pytest.param(
+            [],
+            [0],
+            "No kernels found in this workload.",
+            id="empty-top",
+        ),
+    ],
+)
+def test_apply_sliced_kernel_top_reports_an_invalid_kernel_filter(
+    monkeypatch, kernel_names, kernel_filter, expected_generic_message
+):
+    workload = build_operator_workload()
+    workload.filter_kernel_ids = kernel_filter
+    workload.filter_dispatch_ids = [8, 3]
+    generic_errors = GenericKernelErrorRecorder()
+    monkeypatch.setattr(file_io, "console_error", generic_errors)
+
+    with pytest.raises(SystemExit) as failure:
+        orchestrator.apply_sliced_kernel_top(
+            workload,
+            pd.DataFrame({"Kernel_Name": kernel_names}),
+            argparse.Namespace(gpu_kernel=[kernel_filter]),
+            ["torch"],
+        )
+
+    assert failure.value.code == 1
+    assert generic_errors.messages == [expected_generic_message]
+
+
+def test_apply_sliced_kernel_top_reports_a_kernel_filter_without_match(
+    monkeypatch, record_console_error_and_exit
+):
+    workload = build_operator_workload()
+    workload.filter_dispatch_ids = [8]
+    workload.filter_kernel_ids = [0]
+    messages = record_console_error_and_exit(monkeypatch)
+
+    with pytest.raises(SystemExit) as failure:
+        orchestrator.apply_sliced_kernel_top(
+            workload,
+            pd.DataFrame({"Kernel_Name": ["second_kernel", "first_kernel"]}),
+            argparse.Namespace(gpu_kernel=[["0"]]),
+            ["torch"],
+        )
+
+    assert failure.value.code == 1
+    assert messages == ["No PyTorch operators matched the -k filter: [['0']]"]
+    assert workload.filter_dispatch_ids == []
+
+
+@pytest.mark.parametrize(
+    "kernel_filter", [[], [1]], ids=["number-only", "restrict-kernel"]
+)
+def test_apply_sliced_kernel_top_records_ids_and_restricts_dispatches(kernel_filter):
+    workload = build_operator_workload()
+    workload.filter_dispatch_ids = [8, 3, 8]
+    workload.filter_kernel_ids = kernel_filter
+
+    orchestrator.apply_sliced_kernel_top(
+        workload,
+        pd.DataFrame({"Kernel_Name": [" second_kernel ", "\tfirst_kernel\n"]}),
+        argparse.Namespace(gpu_kernel=[kernel_filter]),
+        ["torch"],
+    )
+
+    assert workload.operator_kernel_ids == {"second_kernel": 0, "first_kernel": 1}
+    assert workload.filter_dispatch_ids == ([8, 8] if kernel_filter else [8, 3, 8])
+
+
+@pytest.mark.parametrize(
+    ("listing", "operator", "traced", "expected"),
+    [
+        pytest.param(None, None, [], None, id="no-action"),
+        pytest.param(
+            [], ["invalid:ignored"], ["torch"], None, id="bare-list-precedence"
+        ),
+        pytest.param(["user"], None, ["triton"], None, id="user-list"),
+        pytest.param(
+            None,
+            ["*relu*", "literal,comma"],
+            ["torch"],
+            {"torch": ["*relu*", "literal,comma"], "user": ["*relu*", "literal,comma"]},
+            id="unscoped-binds-with-literal-comma",
+        ),
+        pytest.param(
+            None,
+            ["user:region1"],
+            ["triton"],
+            {"user": ["region1"]},
+            id="user-filter",
+        ),
+    ],
+)
+def test_validate_operator_trace_options_binds_raw_tokens_for_workload(
+    listing, operator, traced, expected
+):
+    bound = orchestrator.validate_operator_trace_options(
+        "/workload", listing, operator, {"trace_ml_api": traced}
+    )
+
+    assert bound == expected
+
+
+@pytest.mark.parametrize(
+    ("listing", "operator", "configuration", "message"),
+    [
+        pytest.param(
+            [],
+            None,
+            {},
+            "Profile again with --trace-ml-api",
+            id="bare-list-needs-trace",
+        ),
+        pytest.param(
+            None,
+            ["user:region1"],
+            {"torch_trace": True},
+            "Profile again with --trace-ml-api",
+            id="legacy-config-requires-reprofile",
+        ),
+        pytest.param(
+            ["triton"],
+            None,
+            {"trace_ml_api": ["torch"]},
+            "--trace-ml-api triton",
+            id="uncollected-list-framework",
+        ),
+        pytest.param(
+            None,
+            ["triton:*"],
+            {"trace_ml_api": ["torch"]},
+            "--trace-ml-api triton",
+            id="uncollected-filter-framework",
+        ),
+    ],
+)
+def test_validate_operator_trace_options_identifies_failing_path(
+    monkeypatch,
+    record_console_error_and_exit,
+    listing,
+    operator,
+    configuration,
+    message,
+):
+    messages = record_console_error_and_exit(monkeypatch)
+
+    with pytest.raises(SystemExit):
+        orchestrator.validate_operator_trace_options(
+            "/failing-workload", listing, operator, configuration
+        )
+
+    assert len(messages) == 1
+    assert messages[0].startswith("/failing-workload: ")
+    assert message in messages[0]

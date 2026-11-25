@@ -66,6 +66,9 @@ memory:
   Unit_hipMemcpy3D_Negative_Parameters:
     <<: *level_default
     tags: [transfer, P1]
+  Unit_hipMemcpy3D_Positive_UnalignedDeviceToDevice:
+    <<: *level_default
+    tags: [transfer, P1]
   Unit_hipMemcpy3D_Capture:
     <<: *level_default
     tags: [transfer]
@@ -151,6 +154,9 @@ memory:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpy2D_Negative_Parameters:
+    <<: *level_default
+    tags: [transfer, P1]
+  Unit_hipMemcpy2D_Positive_UnalignedDeviceToDevice:
     <<: *level_default
     tags: [transfer, P1]
   Unit_hipMemcpy2D_Capture:
@@ -358,6 +364,9 @@ memory:
       targets: [amd_linux]
       reason: "AIRUNTIME-2744 - Rock Linux failures on gfx94X; needs to be re-triaged on amd_linux."
     tags: [P1]
+  Unit_hipHostRegister_SharedLockDeviceSubset:
+    <<: *level_default
+    tags: [multigpu, P1]
   Unit_hipHostRegister_SameChunkRepeat:
     <<: *level_default
     tags: [alloc, P1]
@@ -871,7 +880,16 @@ memory:
     <<: *level_default
     tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_Functional: *level_default
+  Unit_hipMemcpyBatchAsync_NestedBufferViews:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_D2D_LargeBatch: *level_default
+  Unit_hipMemcpyBatchAsync_D2D_BroadcastsWithShaderCopy:
+    <<: *level_default
+    tags: [transfer]
+  Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts:
+    <<: *level_default
+    tags: [transfer]
   Unit_hipMemcpyBatchAsync_Swap:
     <<: *level_default
     tags: [transfer]
@@ -902,6 +920,12 @@ memory:
   Unit_hipMemcpyBatchAsync_P2P_IndirectCopy:
     <<: *level_default
     tags: [transfer, multigpu]
+  Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack:
+    <<: *level_default
+    tags: [transfer, multigpu, stream]
+  Unit_hipMemcpyBatchAsync_P2P_Allgather_BackToBack_AllDevices:
+    <<: *level_3
+    tags: [transfer, multigpu, stream]
   Unit_hipMemcpyBatchAsync_Negative:
     <<: *level_default
     tags: [transfer]
@@ -926,6 +950,15 @@ memory:
   Unit_hipMemcpyBatchAsync_Mixed_Functional:
     <<: *level_default
     tags: [transfer]
+  Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack:
+    <<: *level_default
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack:
+    <<: *level_default
+    tags: [transfer, stream]
+  Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers:
+    <<: *level_default
+    tags: [transfer, stream]
   Unit_hipMemcpyBatchAsync_Stream:
     <<: *level_default
     tags: [transfer, stream]
@@ -1031,6 +1064,9 @@ memory:
   Unit_hipMemsetD2D16_NegTsts:
     <<: *level_default
     tags: [memset]
+  Unit_hipMemsetD2D16_ShortRowPadding:
+    <<: *level_default
+    tags: [memset]
   Unit_hipMemsetD2D16Async_BasicFunctional:
     <<: *level_default
     tags: [memset]
@@ -1047,6 +1083,9 @@ memory:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32_NegTsts:
+    <<: *level_default
+    tags: [memset]
+  Unit_hipMemsetD2D32_ShortRowPadding:
     <<: *level_default
     tags: [memset]
   Unit_hipMemsetD2D32Async_BasicFunctional:
@@ -1280,6 +1319,9 @@ memory:
   Unit_hipGetSymbolSizeAddress_Positive_Basic:
     <<: *level_default
     tags: [query, P0]
+  Unit_hipGetSymbolSizeAddress_Positive_Managed:
+    <<: *level_default
+    tags: [query, managed_memory, P0]
   Unit_hipGetSymbolAddress_Negative_Parameters: *level_default
   Unit_hipGetSymbolSize_Negative_Parameters: *level_default
   Unit_hipMemPrefetchAsync_v2_Device_Host:
@@ -1720,6 +1762,9 @@ memory:
   Unit_hipMemcpy_KernelLaunch:
     <<: *level_default
     tags: [P0]
+  Unit_hipMemcpy_LargeDeviceToDevice:
+    <<: *level_default
+    tags: [transfer, P1]
   Unit_hipMemcpy_H2H_H2D_D2H_H2PinMem:
     <<: *level_default
     tags: [P1]
@@ -2302,7 +2347,8 @@ memory:
   Unit_hipMemDiscardAndPrefetchBatchAsync_NegativeTests:
     <<: *level_default
     tags: [query]
-  Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer: *level_default
+  Unit_hipMemDiscardAndPrefetchBatchAsync_SingleBuffer:
+    <<: *level_default
   Unit_hipMemDiscardAndPrefetchBatchAsync_MultipleSameDevice: *level_default
   Unit_hipMemDiscardAndPrefetchBatchAsync_ParitySeparateCalls: *level_default
   Unit_hipMemDiscardAndPrefetchBatchAsync_Atomicity: *level_default
@@ -2848,6 +2894,12 @@ memory:
   Unit_hipArrayGetInfo_Negative_Parameters:
     <<: *level_default
     tags: [query, image, P1]
+  Unit_hipArrayGetPlane_Negative_NotSupported:
+    <<: *level_default
+    tags: [query, image, P1]
+  Unit_hipArrayGetPlane_Negative_Parameters:
+    <<: *level_default
+    tags: [query, image, P1]
   Unit_hipArrayCreate_DiffSizes:
     <<: *level_default
     tags: [image, P1]
@@ -2916,7 +2968,8 @@ memory:
     <<: *level_default
     tags: []
   Unit_hipMemGetMemPool_Negative: *level_default
-  Unit_hipMemGetMemPool_Basic: *level_default
+  Unit_hipMemGetMemPool_Basic:
+    <<: *level_default
   Unit_hipMemSetMemPool_Negative: *level_default
   Unit_hipMemSetMemPool_Basic: *level_default
   Unit_hipFreeHost_Capture_negative:

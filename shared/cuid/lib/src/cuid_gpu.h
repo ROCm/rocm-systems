@@ -12,32 +12,20 @@
 #include "src/cuid_device.h"
 #include "src/cuid_internal.h"
 
-namespace cuid {
-namespace gim {
-class GimClient;
-}  // namespace gim
-}  // namespace cuid
-
 struct amdcuid_gpu_info {
   amdcuid_cuid_public_fields header;
   // DRM device node: /sys/class/drm/renderDXXX or /sys/class/drm/cardN
   std::string render_node;
   std::string bdf;
-  // An SR-IOV virtual function whose index could not be determined, which is
-  // what a guest sees: there is no physfn link there, so nothing says which
-  // share of the card this is. Everything else reachable belongs to the card,
-  // so this device has no serial of its own and takes the auxiliary path.
-  bool unnamed_vf = false;
+  // A VF as its host sees it (a physfn link). It is named by its own BDF with
+  // UnitID 0, has no serial of its own and no partitions. A guest's VF has no
+  // physfn link and is not one of these.
+  bool host_vf = false;
   // Set only for a spatial partition, which is named by its own node
   // (/sys/class/drm/cardN/device/xcp) because its BDF names the whole GPU.
   // Empty for an ordinary GPU, which is answered by BDF.
   std::string partition_attr_dir;
   bool partition_metadata_valid = false;
-  // The GIM SMI ASIC serial, reported as the hardware fingerprint of a
-  // GIM-only device whose sysfs unique_id and PCI config space are not exposed
-  // to userspace.
-  uint64_t gim_fingerprint = 0;
-  bool gim_fingerprint_valid = false;
   // Where a partition's parent is looked up; empty means /sys/bus/pci/devices
   // and /sys/class/kfd/kfd/topology/nodes. Set by tests.
   std::string pci_root;
@@ -92,18 +80,8 @@ class CuidGpu : public CuidDevice {
   static amdcuid_status_t discover_partition(amdcuid_gpu_info* gpu_info,
                                              const std::string& device_path);
   static amdcuid_status_t discover(std::vector<DevicePtr>& gpus);
-  // discover_single populates `gpu_info` from `device_path`. When the host
-  // runs the GIM SR-IOV driver, sysfs/PCI config space may not expose the
-  // device, in which case the caller can pass an already-initialized
-  // GimClient via `gim_client` to be used as a fallback. Passing nullptr
-  // disables the GIM fallback for that call (used by code paths that have
-  // no GimClient handy, e.g. amdcuid_get_handle_by_dev_path). `gim_bdf` is
-  // the BDF GIM reported for the device, used when `device_path` does not
-  // exist to name it.
   static amdcuid_status_t discover_single(amdcuid_gpu_info* gpu_info,
-                                          const std::string& device_path,
-                                          cuid::gim::GimClient* gim_client = nullptr,
-                                          const std::string& gim_bdf = "");
+                                          const std::string& device_path);
 
   // Source 1 of the serial precedence: amdgpu's sysfs `unique_id` attribute.
   // Succeeds only for a well-formed, non-zero value; absent, empty, malformed

@@ -17,13 +17,6 @@ concept string_literal =
     std::same_as<std::decay_t<T>, const char*> || std::same_as<std::decay_t<T>, char*>;
 
 template <typename T>
-constexpr bool
-is_string_literal()
-{
-    return string_literal<T>;
-}
-
-template <typename T>
 struct is_optional : std::false_type
 {};
 

@@ -17,8 +17,9 @@ fabric.hbm_rd_bw_est:
   formula: 64 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Estimated bandwidth of read requests from the Data Fabric to HBM (DRAM), assuming
-    64 bytes per request. Upper-bound estimate because some requests may be 32 bytes.
+    The number of bytes per second due to L2 read requests routed to Infinity Fabric
+    targeting the accelerator's local HBM (DRAM). Each request counts as 64 bytes, so
+    this is an upper bound because some requests are 32 bytes.
 fabric.hbm_rd_traffic:
   formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)
 fabric.hbm_wr_atomic:
@@ -28,9 +29,9 @@ fabric.hbm_wr_atomic_bw_est:
   formula: 64 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Estimated bandwidth of write and atomic requests from the Data Fabric to HBM (DRAM),
-    assuming 64 bytes per request. Upper-bound estimate because some requests may
-    be 32 bytes.
+    The number of bytes per second due to L2 write and atomic requests routed to
+    Infinity Fabric targeting the accelerator's local HBM (DRAM). Each request counts as
+    64 bytes, so this is an upper bound because some requests are 32 bytes.
 fabric.hbm_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
 fabric.rd_128b:
@@ -39,7 +40,7 @@ fabric.rd_128b:
   unit: (Requests + $normUnit)
   description: >-
     The total number of L2 requests to Infinity Fabric to read 128B of data from any
-    memory location, per normalization unit.
+    memory location.
 fabric.rd_32b:
   formula: SUM(TCC_EA0_RDREQ_32B_sum) / SUM($denom)
 fabric.rd_64b:
@@ -59,7 +60,7 @@ fabric.remote_wr_atomic:
 fabric.remote_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
 fabric.uncached_rd_traffic:
-  formula: 100 * SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_sum)
+  formula: 100 * SUM(TCC_EA0_RD_UNCACHED_32B_sum) / SUM(TCC_EA0_RDREQ_32B_sum + 2 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 4 * TCC_BUBBLE_sum)
 fabric.uncached_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA0_WR_UNCACHED_32B_sum) / SUM(TCC_EA0_WRREQ_sum)
 fabric.wr_atomic_32b:

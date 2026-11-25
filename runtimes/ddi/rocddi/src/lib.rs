@@ -19,7 +19,7 @@
 // algorithms even when their only production instantiations are absent.
 #![cfg_attr(windows, allow(dead_code))]
 pub mod device;
-mod driver;
+pub mod driver;
 mod error;
 pub mod host;
 pub mod memory;

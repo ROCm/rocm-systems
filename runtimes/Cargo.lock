@@ -40,7 +40,6 @@ dependencies = [
  "libc",
  "rocaddr3",
  "rocddi",
- "rocelf",
  "rocloader",
 ]
 
@@ -68,15 +67,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "rocelf"
-version = "0.1.0"
-
-[[package]]
 name = "rocloader"
 version = "0.1.0"
 dependencies = [
  "rocddi",
- "rocelf",
 ]
 
 [[package]]

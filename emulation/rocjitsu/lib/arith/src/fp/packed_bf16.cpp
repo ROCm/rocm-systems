@@ -4,6 +4,7 @@
 // Packed BF16 arithmetic and numeric selection reuse FP32/mixed BF16 SIMD paths.
 #include "common/packed_alu.h"
 #include "common/validation.h"
+#include "fp/binary.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 #include <stdint.h>
@@ -41,6 +42,15 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
     return RJ_ARITH_SUCCESS;
   }
   constexpr bool selection = Op == Operation::Min || Op == Operation::Max;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (selection) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::packed_bf16_selection_x86_64_v4(Op == Operation::Max, exec_mask,
+                                                       uint32_t(mode), d[0], a[0], b[0]);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
   const bool saturate = !selection && (flags & RJ_ARITH_FP16_OVFL);
   flags &= ~(RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
              RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP16_OVFL);

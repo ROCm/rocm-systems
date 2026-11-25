@@ -23,31 +23,36 @@ GpuAliasIngressGate::try_acquire(std::span<const Key> aliases) noexcept {
 
 GpuAliasIngressGate::SlotLocks GpuAliasIngressGate::lock_local_slots() const {
   SlotLocks locks;
-  for (size_t i = 0; i < local_slots_.size(); ++i)
+  for (size_t i = 0; i < local_slots_.size(); ++i) {
     locks[i] = std::unique_lock(local_slots_[i].mutex);
+  }
   return locks;
 }
 
+class GpuAliasIngressGate::LocalCache::Owner {
+public:
+  explicit Owner(std::shared_ptr<GpuAliasIngressGate> gate) : gate(std::move(gate)) {}
+  // Keeps the slot storage alive until the last admitted permit is released.
+  std::shared_ptr<GpuAliasIngressGate> gate;
+};
+
 std::optional<amdgpu::MemoryIngressPermit>
-GpuAliasIngressGate::try_acquire_local(Key key) noexcept {
+GpuAliasIngressGate::try_acquire_local(Key key, LocalCache &cache) noexcept {
   static std::atomic<size_t> next_slot{0};
   static thread_local const size_t index =
       next_slot.fetch_add(1, std::memory_order_relaxed) % kLocalSlots;
   if (!maintenance_active_.load(std::memory_order_acquire)) {
-    // The worker keeps one gate reference between requests. A permit still
-    // outlives its issuing worker: it owns this anchor until release, even
+    // The cache keeps one gate reference between requests. A permit still
+    // outlives its issuing scope: it owns this anchor until release, even
     // if destruction is on another worker after exit or a driver change.
-    struct WorkerOwner {
-      std::shared_ptr<GpuAliasIngressGate> gate;
-      explicit WorkerOwner(std::shared_ptr<GpuAliasIngressGate> gate) : gate(std::move(gate)) {}
-    };
-    static thread_local std::shared_ptr<WorkerOwner> worker;
+    auto &worker = cache.owner_;
     auto &slot = local_slots_[index];
     std::lock_guard lock(slot.mutex);
     if (!slot.key && !maintenance_active_.load(std::memory_order_acquire)) {
       try {
-        if (!worker || worker->gate.get() != this)
-          worker = std::make_shared<WorkerOwner>(shared_from_this());
+        if (!worker || worker->gate.get() != this) {
+          worker = std::make_shared<LocalCache::Owner>(shared_from_this());
+        }
         std::function<void()> done = [&slot] { release_local(slot); };
         slot.owner = {worker, this};
         slot.key = key;
@@ -72,20 +77,21 @@ void GpuAliasIngressGate::release_local(LocalSlot &slot) noexcept {
     slot.key.reset();
     transferred = std::exchange(slot.transferred, false);
   }
-  if (transferred)
+  if (transferred) {
     owner->release(std::span(&key, 1));
-  else if (owner->quiescence_waiters_.load(std::memory_order_acquire)) {
+  } else if (owner->quiescence_waiters_.load(std::memory_order_acquire)) {
     std::lock_guard lock(owner->mutex_);
     owner->quiescent_.notify_all();
   }
 }
 
 void GpuAliasIngressGate::transfer_local_key(const Key &key, Entry &entry) {
-  for (auto &slot : local_slots_)
+  for (auto &slot : local_slots_) {
     if (slot.key == key && !slot.transferred) {
       ++entry.active;
       slot.transferred = true;
     }
+  }
 }
 
 size_t GpuAliasIngressGate::tracked_generation_count() const {
@@ -96,8 +102,9 @@ size_t GpuAliasIngressGate::tracked_generation_count() const {
     const auto &key = local_slots_[i].key;
     if (key && !entries_.contains(*key) &&
         std::none_of(local_slots_.begin(), local_slots_.begin() + i,
-                     [&](const auto &slot) { return slot.key == key; }))
+                     [&](const auto &slot) { return slot.key == key; })) {
       ++count;
+    }
   }
   return count;
 }
@@ -111,14 +118,16 @@ GpuAliasIngressGate::try_acquire_for_drained_owner(std::span<const Key> aliases,
 void GpuAliasIngressGate::EffectWindow::reset() noexcept {
   auto state = std::exchange(state_, {});
   auto gate = std::exchange(gate_, {});
-  if (gate && state)
+  if (gate && state) {
     gate->release_effect_window(state);
+  }
 }
 
 std::optional<GpuAliasIngressGate::EffectWindow>
 GpuAliasIngressGate::try_freeze_for_effect(std::span<const Key> aliases) noexcept {
-  if (aliases.empty())
+  if (aliases.empty()) {
     return std::nullopt;
+  }
   try {
     auto state = std::make_shared<EffectWindow::State>();
     state->keys.assign(aliases.begin(), aliases.end());
@@ -129,28 +138,36 @@ GpuAliasIngressGate::try_freeze_for_effect(std::span<const Key> aliases) noexcep
     auto self = shared_from_this();
     {
       std::lock_guard lock(mutex_);
-      if (single_close_claim_ || batch_close_claim_ || effect_window_claim_)
+      if (single_close_claim_ || batch_close_claim_ || effect_window_claim_) {
         return std::nullopt;
+      }
       auto slots = lock_local_slots();
-      for (const auto &slot : local_slots_)
-        if (slot.key && std::binary_search(state->keys.begin(), state->keys.end(), *slot.key))
+      for (const auto &slot : local_slots_) {
+        if (slot.key && std::binary_search(state->keys.begin(), state->keys.end(), *slot.key)) {
           return std::nullopt;
+        }
+      }
       for (const Key &key : state->keys) {
         const auto it = entries_.find(key);
-        if (it != entries_.end() && (!it->second.open || it->second.active != 0))
+        if (it != entries_.end() && (!it->second.open || it->second.active != 0)) {
           return std::nullopt;
+        }
       }
       try {
-        for (const Key &key : state->keys)
-          if (entries_.try_emplace(key).second)
+        for (const Key &key : state->keys) {
+          if (entries_.try_emplace(key).second) {
             inserted.push_back(key);
+          }
+        }
       } catch (...) {
-        for (const Key &key : inserted)
+        for (const Key &key : inserted) {
           entries_.erase(key);
+        }
         return std::nullopt;
       }
-      for (const Key &key : state->keys)
+      for (const Key &key : state->keys) {
         entries_.find(key)->second.open = false;
+      }
       maintenance_active_.store(true, std::memory_order_release);
       effect_window_claim_ = state;
     }
@@ -163,15 +180,17 @@ GpuAliasIngressGate::try_freeze_for_effect(std::span<const Key> aliases) noexcep
 std::optional<amdgpu::MemoryIngressPermit>
 GpuAliasIngressGate::try_acquire_for_effect(std::span<const Key> aliases,
                                             const EffectWindow &window) noexcept {
-  if (aliases.empty())
+  if (aliases.empty()) {
     return std::nullopt;
+  }
   return try_acquire_impl(aliases, nullptr, &window);
 }
 
 bool GpuAliasIngressGate::drained_owner_covers(std::span<const Key> aliases,
                                                const DrainAuthority &authority) const noexcept {
-  if (aliases.empty())
+  if (aliases.empty()) {
     return false;
+  }
   std::lock_guard lock(mutex_);
   return std::ranges::all_of(
       aliases, [&](const Key &key) { return drained_owner_covers_key_locked(authority, key); });
@@ -184,8 +203,9 @@ GpuAliasIngressGate::try_acquire_impl(std::span<const Key> aliases, const DrainA
     std::vector<Key> keys(aliases.begin(), aliases.end());
     std::sort(keys.begin(), keys.end());
     keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
-    if (keys.empty())
+    if (keys.empty()) {
       return amdgpu::MemoryIngressPermit{};
+    }
 
     // Prepare the release closure before counting anything. If allocation
     // fails, admission declines without leaving an outstanding count behind.
@@ -194,38 +214,44 @@ GpuAliasIngressGate::try_acquire_impl(std::span<const Key> aliases, const DrainA
     inserted.reserve(keys.size());
     {
       std::lock_guard lock(mutex_);
-      if (window && !valid_effect_window_locked(*window))
+      if (window && !valid_effect_window_locked(*window)) {
         return std::nullopt;
+      }
       for (const Key &key : keys) {
         const auto it = entries_.find(key);
         if (window) {
           if (it == entries_.end() || it->second.open ||
               !std::binary_search(window->state_->keys.begin(), window->state_->keys.end(), key) ||
-              it->second.active == SIZE_MAX)
+              it->second.active == SIZE_MAX) {
             return std::nullopt;
+          }
           continue;
         }
         const bool drained_owner =
             authority != nullptr && drained_owner_covers_key_locked(*authority, key);
         if (it != entries_.end() &&
-            ((!it->second.open && !drained_owner) || it->second.active == SIZE_MAX))
+            ((!it->second.open && !drained_owner) || it->second.active == SIZE_MAX)) {
           return std::nullopt;
+        }
       }
       try {
         for (const Key &key : keys) {
           const bool was_inserted = entries_.try_emplace(key).second;
-          if (was_inserted)
+          if (was_inserted) {
             inserted.push_back(key);
+          }
         }
       } catch (...) {
-        for (const Key &key : inserted)
+        for (const Key &key : inserted) {
           entries_.erase(key);
+        }
         throw;
       }
       for (const Key &key : keys) {
         Entry &entry = entries_.find(key)->second;
-        if (entry.batch && entry.active == 0)
+        if (entry.batch && entry.active == 0) {
           ++entry.batch->active_generations;
+        }
         ++entry.active;
       }
     }
@@ -242,16 +268,19 @@ bool GpuAliasIngressGate::valid_effect_window_locked(const EffectWindow &window)
 
 void GpuAliasIngressGate::finish_effect_window_if_quiescent_locked() noexcept {
   const auto &state = effect_window_claim_;
-  if (!state || !state->release_requested)
+  if (!state || !state->release_requested) {
     return;
+  }
   for (const Key &key : state->keys) {
     const auto it = entries_.find(key);
     assert(it != entries_.end() && !it->second.open);
-    if (it == entries_.end() || it->second.active != 0)
+    if (it == entries_.end() || it->second.active != 0) {
       return;
+    }
   }
-  for (const Key &key : state->keys)
+  for (const Key &key : state->keys) {
     entries_.erase(key);
+  }
   effect_window_claim_.reset();
   maintenance_active_.store(false, std::memory_order_release);
 }
@@ -259,16 +288,18 @@ void GpuAliasIngressGate::finish_effect_window_if_quiescent_locked() noexcept {
 void GpuAliasIngressGate::release_effect_window(
     const std::shared_ptr<EffectWindow::State> &state) noexcept {
   std::lock_guard lock(mutex_);
-  if (effect_window_claim_ != state)
+  if (effect_window_claim_ != state) {
     return;
+  }
   state->active = false;
   state->release_requested = true;
   finish_effect_window_if_quiescent_locked();
 }
 
 bool GpuAliasIngressGate::valid_drained_owner_locked(const DrainAuthority &authority) const {
-  if (authority.gate_.get() != this || !authority.state_ || !authority.state_->active)
+  if (authority.gate_.get() != this || !authority.state_ || !authority.state_->active) {
     return false;
+  }
   if (authority.key_) {
     const auto it = entries_.find(*authority.key_);
     return single_close_claim_ == authority.key_ && !batch_close_claim_ && it != entries_.end() &&
@@ -282,10 +313,12 @@ bool GpuAliasIngressGate::valid_drained_owner_locked(const DrainAuthority &autho
 
 bool GpuAliasIngressGate::drained_owner_covers_key_locked(const DrainAuthority &authority,
                                                           Key key) const {
-  if (!valid_drained_owner_locked(authority))
+  if (!valid_drained_owner_locked(authority)) {
     return false;
-  if (authority.key_)
+  }
+  if (authority.key_) {
     return *authority.key_ == key;
+  }
   const auto batch = authority.batch_.lock();
   const auto it = entries_.find(key);
   return batch && std::binary_search(batch->keys.begin(), batch->keys.end(), key) &&
@@ -301,21 +334,25 @@ void GpuAliasIngressGate::set_drain_authority_active(const DrainAuthority &autho
 std::optional<bool>
 GpuAliasIngressGate::final_writeback_done(const DrainAuthority &authority) const {
   std::lock_guard lock(mutex_);
-  if (!valid_drained_owner_locked(authority))
+  if (!valid_drained_owner_locked(authority)) {
     return std::nullopt;
-  if (authority.key_)
+  }
+  if (authority.key_) {
     return entries_.find(*authority.key_)->second.final_writeback_done;
+  }
   return authority.batch_.lock()->final_writeback_done;
 }
 
 bool GpuAliasIngressGate::mark_final_writeback_done(const DrainAuthority &authority) {
   std::lock_guard lock(mutex_);
-  if (!valid_drained_owner_locked(authority))
+  if (!valid_drained_owner_locked(authority)) {
     return false;
-  if (authority.key_)
+  }
+  if (authority.key_) {
     entries_.find(*authority.key_)->second.final_writeback_done = true;
-  else
+  } else {
     authority.batch_.lock()->final_writeback_done = true;
+  }
   return true;
 }
 
@@ -345,8 +382,9 @@ GpuAliasIngressGate::make_batch_drain_continuation(std::shared_ptr<Batch> batch,
   return [self = shared_from_this(), weak_batch = std::weak_ptr<Batch>(batch),
           drained = std::move(drained), state = std::move(state)] {
     const auto batch = weak_batch.lock();
-    if (!batch)
+    if (!batch) {
       throw std::runtime_error("alias drain batch was discarded before maintenance");
+    }
     const DrainAuthority authority(self, batch, state);
     self->set_drain_authority_active(authority, true);
     try {
@@ -362,8 +400,9 @@ GpuAliasIngressGate::make_batch_drain_continuation(std::shared_ptr<Batch> batch,
 }
 
 bool GpuAliasIngressGate::close(Key alias, OwnerPost owner_post, std::function<void()> drained) {
-  if (!drained)
+  if (!drained) {
     return false;
+  }
   return close_with_drain_authority(
       alias, std::move(owner_post),
       [drained = std::move(drained)](const DrainAuthority &) { drained(); });
@@ -371,8 +410,9 @@ bool GpuAliasIngressGate::close(Key alias, OwnerPost owner_post, std::function<v
 
 bool GpuAliasIngressGate::close_with_drain_authority(Key alias, OwnerPost owner_post,
                                                      DrainedOwner drained) {
-  if (!owner_post || !drained)
+  if (!owner_post || !drained) {
     return false;
+  }
   std::function<void()> continuation;
   try {
     continuation = make_drain_continuation(alias, std::move(drained));
@@ -382,11 +422,13 @@ bool GpuAliasIngressGate::close_with_drain_authority(Key alias, OwnerPost owner_
   std::optional<Drain> ready;
   {
     std::lock_guard lock(mutex_);
-    if (single_close_claim_ || batch_close_claim_ || effect_window_claim_)
+    if (single_close_claim_ || batch_close_claim_ || effect_window_claim_) {
       return false;
+    }
     Entry &entry = entries_[alias];
-    if (!entry.open)
+    if (!entry.open) {
       return false;
+    }
     auto slots = lock_local_slots();
     transfer_local_key(alias, entry);
     maintenance_active_.store(true, std::memory_order_release);
@@ -394,10 +436,11 @@ bool GpuAliasIngressGate::close_with_drain_authority(Key alias, OwnerPost owner_
     entry.open = false;
     entry.drain_pending = true;
     entry.retryable = false;
-    if (entry.active == 0)
+    if (entry.active == 0) {
       ready = Drain{std::move(owner_post), std::move(continuation)};
-    else
+    } else {
       entry.drain = Drain{std::move(owner_post), std::move(continuation)};
+    }
   }
   if (ready) {
     try {
@@ -412,8 +455,9 @@ bool GpuAliasIngressGate::close_with_drain_authority(Key alias, OwnerPost owner_
 
 bool GpuAliasIngressGate::retry_closed(Key alias, OwnerPost owner_post,
                                        std::function<void()> drained) {
-  if (!drained)
+  if (!drained) {
     return false;
+  }
   return retry_closed_with_drain_authority(
       alias, std::move(owner_post),
       [drained = std::move(drained)](const DrainAuthority &) { drained(); });
@@ -421,8 +465,9 @@ bool GpuAliasIngressGate::retry_closed(Key alias, OwnerPost owner_post,
 
 bool GpuAliasIngressGate::retry_closed_with_drain_authority(Key alias, OwnerPost owner_post,
                                                             DrainedOwner drained) {
-  if (!owner_post || !drained)
+  if (!owner_post || !drained) {
     return false;
+  }
   std::function<void()> continuation;
   try {
     continuation = make_drain_continuation(alias, std::move(drained));
@@ -434,8 +479,9 @@ bool GpuAliasIngressGate::retry_closed_with_drain_authority(Key alias, OwnerPost
     const auto it = entries_.find(alias);
     if (single_close_claim_ != alias || batch_close_claim_ || it == entries_.end() ||
         it->second.open || it->second.batch || it->second.active != 0 ||
-        !it->second.drain_pending || !it->second.retryable || it->second.drain)
+        !it->second.drain_pending || !it->second.retryable || it->second.drain) {
       return false;
+    }
     // A queued retry is not itself eligible for a second retry.
     it->second.retryable = false;
   }
@@ -450,8 +496,9 @@ bool GpuAliasIngressGate::retry_closed_with_drain_authority(Key alias, OwnerPost
 
 bool GpuAliasIngressGate::close_batch(std::span<const Key> aliases, OwnerPost owner_post,
                                       std::function<void()> drained) {
-  if (!drained)
+  if (!drained) {
     return false;
+  }
   return close_batch_with_drain_authority(
       aliases, std::move(owner_post),
       [drained = std::move(drained)](const DrainAuthority &) { drained(); });
@@ -460,8 +507,9 @@ bool GpuAliasIngressGate::close_batch(std::span<const Key> aliases, OwnerPost ow
 bool GpuAliasIngressGate::close_batch_with_drain_authority(std::span<const Key> aliases,
                                                            OwnerPost owner_post,
                                                            DrainedOwner drained) {
-  if (!owner_post || !drained || aliases.empty())
+  if (!owner_post || !drained || aliases.empty()) {
     return false;
+  }
   std::shared_ptr<Batch> batch;
   std::vector<Key> inserted;
   try {
@@ -483,23 +531,28 @@ bool GpuAliasIngressGate::close_batch_with_drain_authority(std::span<const Key> 
     // allocation. No unrelated close may overlap this batch's maintenance.
     if (batch_close_claim_ || effect_window_claim_ ||
         (single_close_claim_ &&
-         std::ranges::find(batch->keys, *single_close_claim_) == batch->keys.end()))
+         std::ranges::find(batch->keys, *single_close_claim_) == batch->keys.end())) {
       return false;
+    }
     for (const Key &key : batch->keys) {
       const auto it = entries_.find(key);
       if (it != entries_.end() &&
           (!it->second.open &&
            (it->second.batch || it->second.active != 0 || !it->second.drain_pending ||
-            !it->second.retryable || it->second.drain)))
+            !it->second.retryable || it->second.drain))) {
         return false;
+      }
     }
     try {
-      for (const Key &key : batch->keys)
-        if (entries_.try_emplace(key).second)
+      for (const Key &key : batch->keys) {
+        if (entries_.try_emplace(key).second) {
           inserted.push_back(key);
+        }
+      }
     } catch (...) {
-      for (const Key &key : inserted)
+      for (const Key &key : inserted) {
         entries_.erase(key);
+      }
       return false;
     }
     single_close_claim_.reset();
@@ -509,8 +562,9 @@ bool GpuAliasIngressGate::close_batch_with_drain_authority(std::span<const Key> 
     for (const Key &key : batch->keys) {
       Entry &entry = entries_.find(key)->second;
       transfer_local_key(key, entry);
-      if (entry.active != 0)
+      if (entry.active != 0) {
         ++batch->active_generations;
+      }
       entry.open = false;
       entry.drain_pending = false;
       entry.retryable = false;
@@ -535,8 +589,9 @@ bool GpuAliasIngressGate::close_batch_with_drain_authority(std::span<const Key> 
 
 bool GpuAliasIngressGate::retry_closed_batch(std::span<const Key> aliases, OwnerPost owner_post,
                                              std::function<void()> drained) {
-  if (!drained)
+  if (!drained) {
     return false;
+  }
   return retry_closed_batch_with_drain_authority(
       aliases, std::move(owner_post),
       [drained = std::move(drained)](const DrainAuthority &) { drained(); });
@@ -545,8 +600,9 @@ bool GpuAliasIngressGate::retry_closed_batch(std::span<const Key> aliases, Owner
 bool GpuAliasIngressGate::retry_closed_batch_with_drain_authority(std::span<const Key> aliases,
                                                                   OwnerPost owner_post,
                                                                   DrainedOwner drained) {
-  if (!owner_post || !drained || aliases.empty())
+  if (!owner_post || !drained || aliases.empty()) {
     return false;
+  }
   std::vector<Key> keys;
   std::shared_ptr<Batch> batch;
   try {
@@ -555,17 +611,20 @@ bool GpuAliasIngressGate::retry_closed_batch_with_drain_authority(std::span<cons
     keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
     std::lock_guard lock(mutex_);
     const auto first = entries_.find(keys.front());
-    if (first == entries_.end() || !first->second.batch)
+    if (first == entries_.end() || !first->second.batch) {
       return false;
+    }
     batch = first->second.batch;
     if (batch_close_claim_ != batch || single_close_claim_ || batch->keys != keys ||
         !batch->drain_pending || !batch->retryable || batch->active_generations != 0 ||
-        batch->drain)
+        batch->drain) {
       return false;
+    }
     for (const Key &key : keys) {
       const auto it = entries_.find(key);
-      if (it == entries_.end() || it->second.batch != batch || it->second.active != 0)
+      if (it == entries_.end() || it->second.batch != batch || it->second.active != 0) {
         return false;
+      }
     }
   } catch (...) {
     return false;
@@ -579,12 +638,14 @@ bool GpuAliasIngressGate::retry_closed_batch_with_drain_authority(std::span<cons
   {
     std::lock_guard lock(mutex_);
     if (batch_close_claim_ != batch || single_close_claim_ || !batch->drain_pending ||
-        !batch->retryable || batch->active_generations != 0)
+        !batch->retryable || batch->active_generations != 0) {
       return false;
+    }
     for (const Key &key : keys) {
       const auto it = entries_.find(key);
-      if (it == entries_.end() || it->second.batch != batch || it->second.active != 0)
+      if (it == entries_.end() || it->second.batch != batch || it->second.active != 0) {
         return false;
+      }
     }
     batch->retryable = false;
   }
@@ -598,27 +659,34 @@ bool GpuAliasIngressGate::retry_closed_batch_with_drain_authority(std::span<cons
 }
 
 bool GpuAliasIngressGate::reopen_batch(std::span<const Key> aliases) {
-  if (aliases.empty())
+  if (aliases.empty()) {
     return false;
+  }
   std::lock_guard lock(mutex_);
   const auto first = entries_.find(aliases.front());
-  if (first == entries_.end() || !first->second.batch)
+  if (first == entries_.end() || !first->second.batch) {
     return false;
+  }
   const auto &batch = first->second.batch;
   if (batch_close_claim_ != batch || single_close_claim_ || aliases.size() != batch->keys.size() ||
-      batch->drain_pending || batch->active_generations != 0)
+      batch->drain_pending || batch->active_generations != 0) {
     return false;
+  }
   for (size_t index = 0; index < aliases.size(); ++index) {
     const Key &key = aliases[index];
-    for (size_t previous = 0; previous < index; ++previous)
-      if (aliases[previous] == key)
+    for (size_t previous = 0; previous < index; ++previous) {
+      if (aliases[previous] == key) {
         return false;
+      }
+    }
     const auto it = entries_.find(key);
-    if (it == entries_.end() || it->second.batch != batch || it->second.active != 0)
+    if (it == entries_.end() || it->second.batch != batch || it->second.active != 0) {
       return false;
+    }
   }
-  for (const Key &key : aliases)
+  for (const Key &key : aliases) {
     entries_.erase(key);
+  }
   batch_close_claim_.reset();
   maintenance_active_.store(false, std::memory_order_release);
   return true;
@@ -628,8 +696,9 @@ bool GpuAliasIngressGate::reopen(Key alias) {
   std::lock_guard lock(mutex_);
   const auto it = entries_.find(alias);
   if (single_close_claim_ != alias || batch_close_claim_ || it == entries_.end() ||
-      it->second.open || it->second.batch || it->second.active != 0 || it->second.drain_pending)
+      it->second.open || it->second.batch || it->second.active != 0 || it->second.drain_pending) {
     return false;
+  }
   entries_.erase(it);
   single_close_claim_.reset();
   maintenance_active_.store(false, std::memory_order_release);
@@ -649,8 +718,9 @@ bool GpuAliasIngressGate::close_claimed() const {
 
 bool GpuAliasIngressGate::close_claimed_by_process(uint64_t process_incarnation) const {
   std::lock_guard lock(mutex_);
-  if (single_close_claim_)
+  if (single_close_claim_) {
     return single_close_claim_->process_incarnation == process_incarnation;
+  }
   return batch_close_claim_ && !batch_close_claim_->keys.empty() &&
          std::ranges::all_of(batch_close_claim_->keys, [&](const Key &key) {
            return key.process_incarnation == process_incarnation;
@@ -663,23 +733,27 @@ bool GpuAliasIngressGate::discard_failed(Key alias) {
   if (it != entries_.end() && it->second.batch) {
     const auto batch = it->second.batch;
     if (batch_close_claim_ != batch || single_close_claim_ || !batch->drain_pending ||
-        !batch->retryable || batch->active_generations != 0)
+        !batch->retryable || batch->active_generations != 0) {
       return false;
+    }
     for (const Key &key : batch->keys) {
       const auto member = entries_.find(key);
-      if (member == entries_.end() || member->second.batch != batch || member->second.active != 0)
+      if (member == entries_.end() || member->second.batch != batch || member->second.active != 0) {
         return false;
+      }
     }
-    for (const Key &key : batch->keys)
+    for (const Key &key : batch->keys) {
       entries_.erase(key);
+    }
     batch_close_claim_.reset();
     maintenance_active_.store(false, std::memory_order_release);
     return true;
   }
   if (single_close_claim_ != alias || batch_close_claim_ || it == entries_.end() ||
       it->second.open || it->second.active != 0 || !it->second.drain_pending ||
-      !it->second.retryable || it->second.drain)
+      !it->second.retryable || it->second.drain) {
     return false;
+  }
   entries_.erase(it);
   single_close_claim_.reset();
   maintenance_active_.store(false, std::memory_order_release);
@@ -691,14 +765,18 @@ void GpuAliasIngressGate::wait_for_process_quiescent(uint64_t process_incarnatio
   ++quiescence_waiters_;
   quiescent_.wait(lock, [&] {
     auto slots = lock_local_slots();
-    for (const auto &slot : local_slots_)
-      if (slot.key && slot.key->process_incarnation == process_incarnation)
+    for (const auto &slot : local_slots_) {
+      if (slot.key && slot.key->process_incarnation == process_incarnation) {
         return false;
+      }
+    }
     const Key first{.process_incarnation = process_incarnation};
     for (auto it = entries_.lower_bound(first);
-         it != entries_.end() && it->first.process_incarnation == process_incarnation; ++it)
-      if (it->second.active != 0)
+         it != entries_.end() && it->first.process_incarnation == process_incarnation; ++it) {
+      if (it->second.active != 0) {
         return false;
+      }
+    }
     return true;
   });
   --quiescence_waiters_;
@@ -732,16 +810,18 @@ void GpuAliasIngressGate::release(std::span<const Key> aliases) noexcept {
         }
       }
     }
-    if (became_inactive)
+    if (became_inactive) {
       quiescent_.notify_all();
+    }
     if (ready) {
       try {
         ready->owner_post(std::move(ready->continuation));
       } catch (...) {
-        if (batch)
+        if (batch) {
           fail_batch(batch);
-        else
+        } else {
           fail_drain(key);
+        }
       }
     }
   }
@@ -750,8 +830,9 @@ void GpuAliasIngressGate::release(std::span<const Key> aliases) noexcept {
 void GpuAliasIngressGate::fail_drain(Key alias) noexcept {
   std::lock_guard lock(mutex_);
   const auto it = entries_.find(alias);
-  if (it != entries_.end() && !it->second.open && it->second.drain_pending)
+  if (it != entries_.end() && !it->second.open && it->second.drain_pending) {
     it->second.retryable = true;
+  }
 }
 
 void GpuAliasIngressGate::finish_drain(Key alias) noexcept {
@@ -765,8 +846,9 @@ void GpuAliasIngressGate::finish_drain(Key alias) noexcept {
 
 void GpuAliasIngressGate::fail_batch(const std::shared_ptr<Batch> &batch) noexcept {
   std::lock_guard lock(mutex_);
-  if (batch->drain_pending)
+  if (batch->drain_pending) {
     batch->retryable = true;
+  }
 }
 
 void GpuAliasIngressGate::finish_batch(const std::shared_ptr<Batch> &batch) noexcept {

@@ -12,7 +12,7 @@ use std::io;
 use std::os::fd::{AsFd, BorrowedFd, OwnedFd, RawFd};
 
 use crate::device::Device;
-use crate::driver::{DriverInstance, KfdDeviceState, KfdDriver};
+use crate::driver::{Driver, DriverInstance, KfdDeviceState, KfdDriver};
 use crate::memory::storage::Shared;
 use crate::memory::{Allocation, DeviceAccess, VirtualMemory};
 use crate::os::linux::{errno, file as os_file};
@@ -168,6 +168,7 @@ pub fn ais_transfer(
     file_offset: i64,
     operation: AisFileOperation,
 ) -> Result<AisFileResult, Error> {
+    let _operation = allocation.inner.linux_kfd()?.admit()?;
     crate::driver::KfdDriver::ais_transfer(
         allocation.inner.linux_kfd()?.driver_state(),
         descriptor,
@@ -277,6 +278,7 @@ pub fn import_virtual_memory(
     descriptor: BorrowedFd<'_>,
 ) -> Result<VirtualMemory, Error> {
     let driver = kfd_driver(session)?;
+    let _operation = driver.admission().enter()?;
     let process = crate::os::ProcessIdentity::capture()
         .map_err(|source| crate::os::native_error("virtual memory process identity", source))?;
     let owner = crate::memory::storage::Shared::try_new_uninit()?;
@@ -295,6 +297,7 @@ pub fn import_virtual_memory(
 /// # Errors
 /// Reports descriptor duplication or backing-validation failures.
 pub fn export_virtual_memory(memory: &VirtualMemory) -> Result<DmaBuf, Error> {
+    let _operation = memory.inner.linux_kfd().admit()?;
     crate::driver::KfdDriver::export_virtual_memory(memory.inner.linux_kfd().driver_state()?)
 }
 
@@ -304,6 +307,7 @@ pub fn export_virtual_memory(memory: &VirtualMemory) -> Result<DmaBuf, Error> {
 /// # Errors
 /// Reports a lost or invalid native owner.
 pub fn fabric_virtual_memory_ready(memory: &VirtualMemory) -> Result<bool, Error> {
+    let _operation = memory.inner.linux_kfd().admit()?;
     crate::driver::KfdDriver::fabric_virtual_memory_ready(memory.inner.linux_kfd().driver_state()?)
 }
 
@@ -312,6 +316,7 @@ pub fn fabric_virtual_memory_ready(memory: &VirtualMemory) -> Result<bool, Error
 /// # Errors
 /// Reports accelerator readiness, native export, or owner failures.
 pub fn export_fabric_virtual_memory(memory: &VirtualMemory) -> Result<[u8; 16], Error> {
+    let _operation = memory.inner.linux_kfd().admit()?;
     crate::driver::KfdDriver::export_fabric_virtual_memory(memory.inner.linux_kfd().driver_state()?)
 }
 
@@ -323,6 +328,7 @@ pub fn import_fabric_virtual_memory(
     device: &Device,
     fabric: [u8; 16],
 ) -> Result<VirtualMemory, Error> {
+    let _operation = device.driver_state.admit()?;
     let (driver, state) = device.driver_state.linux_kfd()?;
     let process = crate::os::ProcessIdentity::capture()
         .map_err(|source| crate::os::native_error("virtual memory process identity", source))?;
@@ -355,6 +361,7 @@ pub fn import_dma_buf(
     alignment: u64,
     permissions: DeviceAccess,
 ) -> Result<Allocation, Error> {
+    let _operation = device.driver_state.admit()?;
     let (driver, state) = device.driver_state.linux_kfd()?;
     let inner = driver.import_dma_buf(
         state,
@@ -407,6 +414,7 @@ pub fn import_system_dma_buf(
         });
     }
     let driver = kfd_driver(session)?;
+    let _operation = driver.admission().enter()?;
     let states = kfd_states_for(
         driver,
         devices,
@@ -448,6 +456,7 @@ pub fn import_graphics_dma_buf(
         });
     }
     let driver = kfd_driver(session)?;
+    let _operation = driver.admission().enter()?;
     let states = kfd_states_for(
         driver,
         devices,
@@ -465,6 +474,7 @@ pub fn import_graphics_dma_buf(
 /// Returns a native error if Linux cannot export the allocation, or a driver
 /// contract error if the resulting file does not describe the same backing.
 pub fn export_dma_buf(allocation: &Allocation) -> Result<DmaBuf, Error> {
+    let _operation = allocation.inner.linux_kfd()?.admit()?;
     crate::driver::KfdDriver::export_dma_buf(allocation.inner.linux_kfd()?.driver_state())
 }
 
@@ -487,6 +497,7 @@ pub fn import_kfd_ipc_memory(
     size: u64,
 ) -> Result<Allocation, Error> {
     let driver = kfd_driver(session)?;
+    let _operation = driver.admission().enter()?;
     let states = kfd_states_for(
         driver,
         devices,
@@ -511,6 +522,7 @@ pub fn import_kfd_ipc_memory(
 /// Rejects unsupported backing or an unavailable allocation and reports the
 /// native export failure without changing ownership.
 pub fn export_kfd_ipc_memory(allocation: &Allocation) -> Result<KfdIpcMemoryHandle, Error> {
+    let _operation = allocation.inner.linux_kfd()?.admit()?;
     crate::driver::KfdDriver::export_kfd_ipc_memory(allocation.inner.linux_kfd()?.driver_state())
 }
 

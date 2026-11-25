@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <array>
 #include <cassert>
@@ -14,6 +15,23 @@
 #include <span>
 
 namespace rocjitsu::amdgpu {
+
+/// RDNA and gfx1250 allocate a vector-memory and an LDS counter position
+/// for every generic FLAT, even when all requesting lanes resolve to one space.
+/// CDNA1–4 use address-domain participation as an unverified model. CDNA3/4
+/// ISA section 10.2 describes joint VM and LGKM completion.
+[[nodiscard]] constexpr bool flat_issues_both_counter_domains(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
+}
+
+/// With the GFX10/GFX11 wait counters, each generic FLAT result needs both
+/// domains. Split-counter targets can establish completion per lane and space.
+[[nodiscard]] constexpr bool flat_requires_both_counters(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5;
+}
 
 /// @brief Completion ordering associated with an AMDGPU memory issue.
 /// @details Counter membership and completion ordering are separate: operations
@@ -69,7 +87,7 @@ private:
                                 static_cast<uint8_t>(wait_counter_type));
   }
 
-  static_assert(static_cast<uint8_t>(WaitCounterType::SAMPLECNT) < 16);
+  static_assert(static_cast<uint8_t>(WaitCounterType::BVHCNT) < 16);
   static_assert(static_cast<uint8_t>(MemoryCompletionClass::UNORDERED) < 8);
   uint8_t encoded_ = 0;
 };
@@ -81,7 +99,9 @@ private:
 /// Each obligation carries its own completion-order class because operations
 /// sharing one counter need not form one FIFO, and one instruction's different
 /// counter domains can have different ordering guarantees. Decoded FLAT metadata
-/// lists possible domains; address routing selects the domains actually used.
+/// lists both domains. Address routing selects the obligations for each request.
+/// flat_issues_both_counter_domains() selects RDNA1–4 and CDNA5 for additional
+/// counter occupancy in unused domains. CDNA1–4 use the routed domains.
 /// The dynamic race detector requires every attached obligation for whole-event
 /// completion, including destination-register and memory dependencies. This API
 /// does not represent a separate source-register lifetime. The same obligations
@@ -109,19 +129,22 @@ struct MemoryIssueInfo {
   [[nodiscard]] MemoryIssueInfo for_flat_memory_domains(bool vmem, bool lds) const {
     MemoryIssueInfo result;
     result.exec_masked = exec_masked;
+    result.counts_with_empty_exec = counts_with_empty_exec;
     for (const auto obligation : counter_obligations()) {
       switch (obligation.wait_counter_type()) {
       case WaitCounterType::VMCNT:
       case WaitCounterType::VSCNT:
       case WaitCounterType::LOADCNT:
       case WaitCounterType::STORECNT:
-        if (!vmem)
+        if (!vmem) {
           continue;
+        }
         break;
       case WaitCounterType::LGKMCNT:
       case WaitCounterType::DSCNT:
-        if (!lds)
+        if (!lds) {
           continue;
+        }
         break;
       default:
         break;
@@ -134,6 +157,8 @@ struct MemoryIssueInfo {
   std::array<MemoryCounterObligation, MAX_COUNTER_OBLIGATIONS> counter_obligations_{};
   uint8_t num_counter_obligations_ = 0;
   bool exec_masked = true;
+  /// Count this instruction even when its EXEC-controlled data lanes are empty.
+  bool counts_with_empty_exec = false;
 };
 
 } // namespace rocjitsu::amdgpu

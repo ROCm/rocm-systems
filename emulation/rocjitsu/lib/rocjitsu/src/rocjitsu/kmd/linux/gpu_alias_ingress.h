@@ -124,9 +124,25 @@ public:
   /// permit keeps every admitted generation counted until its release.
   [[nodiscard]] std::optional<amdgpu::MemoryIngressPermit>
   try_acquire(std::span<const Key> aliases) noexcept;
+  /// @brief Cached gate ownership for one command or simulation worker.
+  /// @details Outstanding permits retain their anchor after this cache expires.
+  class LocalCache {
+  public:
+    LocalCache() = default;
+    LocalCache(const LocalCache &) = delete;
+    LocalCache &operator=(const LocalCache &) = delete;
+
+  private:
+    friend class GpuAliasIngressGate;
+    class Owner;
+    // Shared with outstanding permits, including across a change of gate.
+    std::shared_ptr<Owner> owner_;
+  };
+
   // Common local requests register in one worker slot. A concurrent close
   // transfers their count into the same Entry used by general admission.
-  [[nodiscard]] std::optional<amdgpu::MemoryIngressPermit> try_acquire_local(Key key) noexcept;
+  [[nodiscard]] std::optional<amdgpu::MemoryIngressPermit>
+  try_acquire_local(Key key, LocalCache &cache) noexcept;
   /// @brief Count every touched alias atomically during drained maintenance.
   /// @details Only the authority's exact closed key or batch keys bypass
   /// ordinary denial; all other keys follow try_acquire().

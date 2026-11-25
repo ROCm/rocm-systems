@@ -297,6 +297,14 @@ typedef struct rocprofiler_callback_tracing_kernel_dispatch_data_t
     rocprofiler_timestamp_t            start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t            end_timestamp;    ///< end time in nanoseconds
     rocprofiler_kernel_dispatch_info_t dispatch_info;    ///< Dispatch info
+    int32_t                            pipe_id;
+
+    /// @var pipe_id
+    /// @brief Hardware pipe the kernel ran on (the pipe its completion was reported on), counted
+    /// from 0. Equal to ::ROCPROFILER_KERNEL_DISPATCH_PIPE_ID_NONE unless the dispatch completed
+    /// through KFD dispatch-log signal-less completion (environment variable
+    /// ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS), and always equal to it on
+    /// ::ROCPROFILER_KERNEL_DISPATCH_ENQUEUE records, where the pipe is not yet known.
 } rocprofiler_callback_tracing_kernel_dispatch_data_t;
 
 /**

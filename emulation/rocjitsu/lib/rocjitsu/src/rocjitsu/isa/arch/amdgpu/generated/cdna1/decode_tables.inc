@@ -1581,6 +1581,22 @@ RJ_DECODE_CASE(118, detail, decodeDsReadB64Ds) \
 RJ_DECODE_CASE(119, detail, decodeDsRead2B64Ds) \
 RJ_DECODE_CASE(120, detail, decodeDsRead2st64B64Ds) \
 RJ_DECODE_CASE(126, detail, decodeDsCondxchg32RtnB64Ds) \
+RJ_DECODE_CASE(128, detail, decodeDsAddSrc2U32Ds) \
+RJ_DECODE_CASE(129, detail, decodeDsSubSrc2U32Ds) \
+RJ_DECODE_CASE(130, detail, decodeDsRsubSrc2U32Ds) \
+RJ_DECODE_CASE(131, detail, decodeDsIncSrc2U32Ds) \
+RJ_DECODE_CASE(132, detail, decodeDsDecSrc2U32Ds) \
+RJ_DECODE_CASE(133, detail, decodeDsMinSrc2I32Ds) \
+RJ_DECODE_CASE(134, detail, decodeDsMaxSrc2I32Ds) \
+RJ_DECODE_CASE(135, detail, decodeDsMinSrc2U32Ds) \
+RJ_DECODE_CASE(136, detail, decodeDsMaxSrc2U32Ds) \
+RJ_DECODE_CASE(137, detail, decodeDsAndSrc2B32Ds) \
+RJ_DECODE_CASE(138, detail, decodeDsOrSrc2B32Ds) \
+RJ_DECODE_CASE(139, detail, decodeDsXorSrc2B32Ds) \
+RJ_DECODE_CASE(141, detail, decodeDsWriteSrc2B32Ds) \
+RJ_DECODE_CASE(146, detail, decodeDsMinSrc2F32Ds) \
+RJ_DECODE_CASE(147, detail, decodeDsMaxSrc2F32Ds) \
+RJ_DECODE_CASE(149, detail, decodeDsAddSrc2F32Ds) \
 RJ_DECODE_CASE(152, detail, decodeDsGwsSemaReleaseAllDs) \
 RJ_DECODE_CASE(153, detail, decodeDsGwsInitDs) \
 RJ_DECODE_CASE(154, detail, decodeDsGwsSemaVDs) \
@@ -1591,6 +1607,21 @@ RJ_DECODE_CASE(182, detail, decodeDsReadAddtidB32Ds) \
 RJ_DECODE_CASE(189, detail, decodeDsConsumeDs) \
 RJ_DECODE_CASE(190, detail, decodeDsAppendDs) \
 RJ_DECODE_CASE(191, detail, decodeDsOrderedCountDs) \
+RJ_DECODE_CASE(192, detail, decodeDsAddSrc2U64Ds) \
+RJ_DECODE_CASE(193, detail, decodeDsSubSrc2U64Ds) \
+RJ_DECODE_CASE(194, detail, decodeDsRsubSrc2U64Ds) \
+RJ_DECODE_CASE(195, detail, decodeDsIncSrc2U64Ds) \
+RJ_DECODE_CASE(196, detail, decodeDsDecSrc2U64Ds) \
+RJ_DECODE_CASE(197, detail, decodeDsMinSrc2I64Ds) \
+RJ_DECODE_CASE(198, detail, decodeDsMaxSrc2I64Ds) \
+RJ_DECODE_CASE(199, detail, decodeDsMinSrc2U64Ds) \
+RJ_DECODE_CASE(200, detail, decodeDsMaxSrc2U64Ds) \
+RJ_DECODE_CASE(201, detail, decodeDsAndSrc2B64Ds) \
+RJ_DECODE_CASE(202, detail, decodeDsOrSrc2B64Ds) \
+RJ_DECODE_CASE(203, detail, decodeDsXorSrc2B64Ds) \
+RJ_DECODE_CASE(205, detail, decodeDsWriteSrc2B64Ds) \
+RJ_DECODE_CASE(210, detail, decodeDsMinSrc2F64Ds) \
+RJ_DECODE_CASE(211, detail, decodeDsMaxSrc2F64Ds) \
 RJ_DECODE_CASE(222, detail, decodeDsWriteB96Ds) \
 RJ_DECODE_CASE(223, detail, decodeDsWriteB128Ds) \
 RJ_DECODE_CASE(254, detail, decodeDsReadB96Ds) \
@@ -1600,10 +1631,16 @@ RJ_DECODE_GAP(22, 7, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(92, 4, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(116, 2, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(121, 5, DecoderImpl, decodeInvalid) \
-RJ_DECODE_GAP(127, 25, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(127, 1, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(140, 1, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(142, 4, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(148, 1, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(150, 2, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(158, 24, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(183, 6, DecoderImpl, decodeInvalid) \
-RJ_DECODE_GAP(192, 30, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(204, 1, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(206, 4, DecoderImpl, decodeInvalid) \
+RJ_DECODE_GAP(212, 10, DecoderImpl, decodeInvalid) \
 RJ_DECODE_GAP(224, 30, DecoderImpl, decodeInvalid)
 
 #define RJ_SUB_DECODE_FLAT_ROWS \

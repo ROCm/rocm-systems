@@ -31,6 +31,7 @@
 #include "memory/window_info.hpp"
 #include "team.hpp"
 
+#include <type_traits>
 #include <utility>
 #include <cassert>
 
@@ -259,6 +260,15 @@ __host__ inline MPI_Datatype HostInterface::get_mpi_type() {
     return MPI_T;                                                 \
   }
 
+template <> __host__ inline MPI_Datatype HostInterface::get_mpi_type<__half>() {
+    LOG_ERROR_EXIT("host::mpi\t__half is not supported on the host/MPI path");
+    return 0;
+}
+template <> __host__ inline MPI_Datatype HostInterface::get_mpi_type<__hip_bfloat16>() {
+  LOG_ERROR_EXIT("host::mpi\t__hip_bfloat16 is not supported on the host/MPI path");
+  return 0;
+}
+
 GET_MPI_TYPE(int, MPI_INT)
 GET_MPI_TYPE(unsigned int, MPI_UNSIGNED)
 GET_MPI_TYPE(short, MPI_SHORT)
@@ -294,6 +304,22 @@ __host__ void HostInterface::amo_cas(void* dst, T value, T cond, int pe,
 template <typename T>
 __host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe,
                                         WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  /*
+   * Verbs host path (ROCSHMEM_HOST_TRANSPORT=verbs). 8-byte integral atomics
+   * are served by WindowInfoVerbs via verbs_amo_fetch_add() (defined in
+   * host.cpp so the verbs headers stay out of this device-compiled template).
+   * On bnxt the operand/result are native byte order; see host.cpp for the
+   * mlx5/ionic big-endian TODO.
+   */
+  if constexpr (std::is_integral_v<T> && sizeof(T) == 8) {
+    uint64_t vret{};
+    if (verbs_amo_fetch_add(window_info, dst, static_cast<uint64_t>(value), pe,
+                            &vret)) {
+      return static_cast<T>(vret);
+    }
+  }
+#endif
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();
@@ -323,6 +349,17 @@ __host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe,
 template <typename T>
 __host__ T HostInterface::amo_fetch_cas(void* dst, T value, T cond, int pe,
                                         WindowInfo* window_info) {
+#ifdef USE_HOST_VERBS
+  /* Verbs host path; see amo_fetch_add / host.cpp for the endianness TODO.
+   * value is the swap operand, cond is the compare (MPI arg order). */
+  if constexpr (std::is_integral_v<T> && sizeof(T) == 8) {
+    uint64_t vret{};
+    if (verbs_amo_fetch_cas(window_info, dst, static_cast<uint64_t>(value),
+                            static_cast<uint64_t>(cond), pe, &vret)) {
+      return static_cast<T>(vret);
+    }
+  }
+#endif
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();

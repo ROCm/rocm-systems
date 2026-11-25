@@ -456,21 +456,24 @@ def _extract_single_binary(
         List of ExtractedKernelRef objects with file paths.
     """
     binary = BundledBinary(fat_binary_path)
-    code_object_index: dict[str, int] = defaultdict(int)
     refs: list[ExtractedKernelRef] = []
 
-    # Create a subdirectory per binary to avoid filename collisions
-    binary_name = Path(overlay_relative_path).name
-    binary_staging = kernel_staging_dir / binary_name
+    # One subdirectory per binary, keyed by its full relative path: binaries
+    # with the same file name in different directories would otherwise
+    # overwrite each other's staged code objects.
+    binary_staging = kernel_staging_dir / overlay_relative_path
     binary_staging.mkdir(parents=True, exist_ok=True)
 
     with binary.unbundle() as unbundled:
-        for target_name, file_name in unbundled.target_list:
+        for (target_name, file_name), index in zip(
+            unbundled.target_list, unbundled.bundle_indices
+        ):
             arch = extract_architecture_from_target(target_name)
             if arch:
                 src_path = unbundled.dest_dir / file_name
-                index = code_object_index[arch]
-                code_object_index[arch] += 1
+                # Key by source bundle index (see
+                # UnbundledContents.bundle_indices), not a per-arch counter:
+                # bundles without code for this arch would shift it.
                 indexed_relpath = f"{overlay_relative_path}#{index}"
 
                 # Move kernel file to staging (avoids a copy since unbundle

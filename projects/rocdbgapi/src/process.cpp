@@ -728,16 +728,13 @@ process_t::update_agents ()
 
       agent->set_mark (agent_mark);
 
-      if (agent->supports_debugging ())
-        {
-          precise_memory_supported = (precise_memory_supported.value_or (true)
-                                      && agent_info.precise_memory_supported);
-          precise_alu_exceptions_supported
-            = (precise_alu_exceptions_supported.value_or (true)
-               && agent_info.precise_alu_exceptions_supported);
-          lds_exception_supported = (lds_exception_supported.value_or (true)
-                                     && agent_info.lds_exception_supported);
-        }
+      precise_memory_supported = (precise_memory_supported.value_or (true)
+                                  && agent_info.precise_memory_supported);
+      precise_alu_exceptions_supported
+        = (precise_alu_exceptions_supported.value_or (true)
+           && agent_info.precise_alu_exceptions_supported);
+      lds_exception_supported = (lds_exception_supported.value_or (true)
+                                 && agent_info.lds_exception_supported);
     }
 
   /* Remove agents that are no longer online.  */

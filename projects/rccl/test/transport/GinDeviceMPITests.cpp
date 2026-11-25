@@ -27,6 +27,7 @@
 #include "nccl_device/gin/anvil_sdma/gin_anvil_sdma_device_host_common.h"
 #endif
 #ifdef ENABLE_ROCSHMEM_GIN
+#include "algorithms/gin/gin_all_gather.h"
 #include "gin/gin_anvil_sdma_factory.h"
 #include "gin/gin_host_anvil_sdma.h"
 #include "gin/gin_type_env.h"
@@ -336,6 +337,37 @@ std::string sdmaInternalA2ACommSkipReason(ncclComm_t comm) {
     return "GIN-SDMA alltoall requires symmetric memory support";
   if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL)
     return "GIN-SDMA alltoall requires full GIN connectivity";
+  return "";
+}
+
+std::string sdmaInternalAgEnvSkipReason() {
+  if (requestedGinType() != NCCL_NET_DEVICE_GIN_ANVIL_SDMA)
+    return "GIN-SDMA allgather requires NCCL_GIN_TYPE=" +
+           std::to_string(NCCL_NET_DEVICE_GIN_ANVIL_SDMA);
+  if (const char* e = std::getenv("NCCL_GIN_ALLGATHER_ENABLE"); e && std::strcmp(e, "0") == 0)
+    return "GIN-SDMA allgather disabled (NCCL_GIN_ALLGATHER_ENABLE=0)";
+  if (std::getenv("NCCL_GIN_ALLGATHER_MIN_BYTES"))
+    return "count sweep assumes the default NCCL_GIN_ALLGATHER_MIN_BYTES";
+  if (std::getenv("NCCL_GIN_ALLGATHER_SDMA_MIN_BYTES"))
+    return "SDMA tier coverage assumes the default NCCL_GIN_ALLGATHER_SDMA_MIN_BYTES";
+  return "";
+}
+
+std::string sdmaInternalAgCommSkipReason(ncclComm_t comm) {
+  if (comm->archName == nullptr ||
+      (std::strncmp(comm->archName, "gfx950", 6) != 0 && std::strncmp(comm->archName, "gfx1250", 7) != 0))
+    return "GIN-SDMA allgather requires gfx950 or gfx1250";
+  if (std::strncmp(comm->archName, "gfx1250", 7) == 0) {
+    const char* gfx1250 = std::getenv("NCCL_GIN_ALLGATHER_GFX1250_ENABLE");
+    if (gfx1250 == nullptr || std::strcmp(gfx1250, "1") != 0)
+      return "GIN-SDMA allgather on gfx1250 requires NCCL_GIN_ALLGATHER_GFX1250_ENABLE=1";
+  }
+  if (comm->nNodes != 1)
+    return "GIN-SDMA allgather is scaleup-only (requires nNodes=1)";
+  if (!comm->symmetricSupport)
+    return "GIN-SDMA allgather requires symmetric memory support";
+  if (comm->globalGinSupport != NCCL_GIN_CONNECTION_FULL)
+    return "GIN-SDMA allgather requires full GIN connectivity";
   return "";
 }
 
@@ -5347,6 +5379,158 @@ TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
   }
 }
 
+// ncclAllGather dispatches to ncclAllGatherGinSdma on a single-segment symmetric window.
+// Covers both kernel tiers, in-place and out-of-place, a repeated call, and graph replay.
+TEST_F(GinMPIDeviceTests, Allgather_SdmaInternal) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (auto reason = sdmaInternalAgEnvSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  if (auto reason = sdmaInternalAgCommSkipReason(comm); !reason.empty())
+    GTEST_SKIP() << reason;
+
+  int rank = -1, nRanks = -1;
+  ncclCommUserRank(comm, &rank);
+  ncclCommCount(comm, &nRanks);
+  ASSERT_GE(nRanks, 2);
+  ASSERT_LE(nRanks, 8);
+
+  constexpr size_t kSdmaMinBytes = size_t{8} << 20;
+  // 1 and the SDMA size plus one float are not 16-byte multiples, so the LSA
+  // copy takes its 4-byte and byte tails. 1024 and the 8 MiB count cover the
+  // aligned LSA and SDMA tiers.
+  const size_t sdmaCount = kSdmaMinBytes / sizeof(float);
+  const std::vector<size_t> counts = {1, 1024, sdmaCount, sdmaCount + 1};
+  const size_t maxBytes = counts.back() * static_cast<size_t>(nRanks) * sizeof(float);
+#if defined(ENABLE_ROCSHMEM_GIN)
+  if (std::getenv("NCCL_GIN_ALLGATHER_SDMA_MIN_BYTES") == nullptr)
+    ASSERT_EQ(64, ncclAllGatherGinSdmaCtaCount(16, size_t{1} << 20));
+#endif
+
+  // ASSERT_MPI_EQ returns from the enclosing function, so this stays a macro.
+#define EXPECT_GIN_SDMA(countExpr, sendPtr, recvPtr)                                                                 \
+  do {                                                                                                               \
+    int algo_ = 0, proto_ = 0, channels_ = 0;                                                                        \
+    ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, (countExpr), ncclFloat, ncclSum,         \
+                                                   (sendPtr), (recvPtr), /*graphCapturing=*/0, &algo_, &proto_,      \
+                                                   &channels_));                                                     \
+    ASSERT_MPI_EQ(static_cast<int>(rcclAddonAlgos_t::RCCL_AG_GIN_SDMA), algo_);                                      \
+  } while (0)
+
+  void* dSend = nullptr;
+  void* dRecv = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dSend, maxBytes));
+  ASSERT_MPI_EQ(ncclSuccess, ncclMemAlloc(&dRecv, maxBytes));
+  auto memCleanup = makeScopeGuard([&]() {
+    if (dSend) (void)ncclMemFree(dSend);
+    if (dRecv) (void)ncclMemFree(dRecv);
+  });
+
+  ncclWindow_t sendWin = nullptr, recvWin = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, dSend, maxBytes, &sendWin, NCCL_WIN_COLL_SYMMETRIC));
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommWindowRegister(comm, dRecv, maxBytes, &recvWin, NCCL_WIN_COLL_SYMMETRIC));
+  auto winCleanup = makeScopeGuard([&]() {
+    if (sendWin) (void)ncclCommWindowDeregister(comm, sendWin);
+    if (recvWin) (void)ncclCommWindowDeregister(comm, recvWin);
+  });
+
+  for (size_t count : counts) {
+    for (int tag = 0; tag < 2; tag++) {
+      SCOPED_TRACE(::testing::Message() << "out-of-place count=" << count << " tag=" << tag);
+      const size_t total = count * static_cast<size_t>(nRanks);
+      std::vector<float> hostSend(count, 0.0f);
+      std::vector<float> hostRecv(total, 0.0f);
+      for (size_t i = 0; i < count; i++) hostSend[i] = static_cast<float>(rank * 1000 + tag + static_cast<int>(i));
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSend, hostSend.data(), count * sizeof(float), hipMemcpyHostToDevice));
+      ASSERT_MPI_EQ(hipSuccess, hipMemset(dRecv, 0, total * sizeof(float)));
+      MPI_Barrier(MPI_COMM_WORLD);
+      EXPECT_GIN_SDMA(count, dSend, dRecv);
+      ASSERT_MPI_EQ(ncclSuccess, ncclAllGather(dSend, dRecv, count, ncclFloat, comm, stream));
+      ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+      if (tag == 0) ASSERT_MPI_TRUE(comm->ginAllGatherState.initialized);
+      ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), dRecv, total * sizeof(float), hipMemcpyDeviceToHost));
+      for (int src = 0; src < nRanks; src++) {
+        for (size_t i = 0; i < count; i++) {
+          const float expected = static_cast<float>(src * 1000 + tag + static_cast<int>(i));
+          ASSERT_EQ(expected, hostRecv[static_cast<size_t>(src) * count + i])
+              << "out-of-place rank=" << rank << " src=" << src << " i=" << i << " tag=" << tag;
+        }
+      }
+    }
+  }
+
+  // In-place: this rank's slice already lives in the receive window.
+  for (size_t count : counts) {
+    SCOPED_TRACE(::testing::Message() << "in-place count=" << count);
+    const size_t total = count * static_cast<size_t>(nRanks);
+    std::vector<float> host(total, -1.0f);
+    for (size_t i = 0; i < count; i++)
+      host[static_cast<size_t>(rank) * count + i] = static_cast<float>(rank * 1000 + static_cast<int>(i));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dRecv, host.data(), total * sizeof(float), hipMemcpyHostToDevice));
+    void* inPlaceSend = static_cast<char*>(dRecv) + static_cast<size_t>(rank) * count * sizeof(float);
+    MPI_Barrier(MPI_COMM_WORLD);
+    EXPECT_GIN_SDMA(count, inPlaceSend, dRecv);
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllGather(inPlaceSend, dRecv, count, ncclFloat, comm, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(host.data(), dRecv, total * sizeof(float), hipMemcpyDeviceToHost));
+    for (int src = 0; src < nRanks; src++) {
+      for (size_t i = 0; i < count; i++) {
+        const float expected = static_cast<float>(src * 1000 + static_cast<int>(i));
+        ASSERT_EQ(expected, host[static_cast<size_t>(src) * count + i])
+            << "in-place rank=" << rank << " src=" << src << " i=" << i;
+      }
+    }
+  }
+
+  // Graph replay of the LSA tier. Init already ran, so capture records only the kernel.
+  {
+    constexpr size_t count = 1024;
+    const size_t total = count * static_cast<size_t>(nRanks);
+    std::vector<float> hostSend(count, 0.0f);
+    std::vector<float> hostRecv(total, 0.0f);
+    for (size_t i = 0; i < count; i++) hostSend[i] = static_cast<float>(rank * 1000 + 7 + static_cast<int>(i));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(dSend, hostSend.data(), count * sizeof(float), hipMemcpyHostToDevice));
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(dRecv, 0, total * sizeof(float)));
+    MPI_Barrier(MPI_COMM_WORLD);
+    EXPECT_GIN_SDMA(count, dSend, dRecv);
+
+    ASSERT_MPI_EQ(hipSuccess, hipStreamBeginCapture(stream, hipStreamCaptureModeThreadLocal));
+    const ncclResult_t captureRes = ncclAllGather(dSend, dRecv, count, ncclFloat, comm, stream);
+    hipGraph_t graph = nullptr;
+    const hipError_t endCapture = hipStreamEndCapture(stream, &graph);
+    ASSERT_MPI_EQ(ncclSuccess, captureRes);
+    ASSERT_MPI_EQ(hipSuccess, endCapture);
+    ASSERT_NE(graph, nullptr);
+    auto graphCleanup = makeScopeGuard([&]() {
+      if (graph) (void)hipGraphDestroy(graph);
+    });
+
+    hipGraphExec_t exec = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+    auto execCleanup = makeScopeGuard([&]() {
+      if (exec) (void)hipGraphExecDestroy(exec);
+    });
+    ASSERT_MPI_EQ(hipSuccess, hipGraphLaunch(exec, stream));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(hostRecv.data(), dRecv, total * sizeof(float), hipMemcpyDeviceToHost));
+    for (int src = 0; src < nRanks; src++) {
+      for (size_t i = 0; i < count; i++) {
+        const float expected = static_cast<float>(src * 1000 + 7 + static_cast<int>(i));
+        ASSERT_EQ(expected, hostRecv[static_cast<size_t>(src) * count + i])
+            << "graph replay rank=" << rank << " src=" << src << " i=" << i;
+      }
+    }
+  }
+}
+#undef EXPECT_GIN_SDMA
+
 // Producer: one block per GIN context. Block b uses ginContext=b, puts into
 // its own slot, and signals signal[b] in that context.
 __global__ void multiContextProducerKernel(
@@ -8410,6 +8594,46 @@ TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodeUnsetType) {
   runPutWaitRoundTrip(comm, getActiveStream());
   ASSERT_MPI_TRUE(!HasFatalFailure());
   runPutWaitRoundTrip(comm, getActiveStream(), NCCL_GIN_TYPE_PROXY);
+}
+
+// 2 ranks per host, NCCL_GIN_TYPE unset (AICOMRCCL-3501): a per-host split keeps Anvil SDMA,
+// since the drop keys on the comm's own nHosts, not the job's.
+TEST_F(GinMPIDeviceTests, MixedBackends_TwoNodePerHostSplitKeepsAnvil) {
+  if (auto reason = mixedBackendTwoNodeSkipReason(); !reason.empty()) GTEST_SKIP() << reason;
+  int ranksPerNode = 0;
+  const bool uniform = uniformNodeLocalRanks(&ranksPerNode);
+  if (auto reason = mpiCoordinatedSkipReason(
+          !validateTestPrerequisites(/*min_processes=*/4, /*max_processes=*/4,
+                                     /*require_power_of_two=*/false, /*min_nodes=*/2, /*max_nodes=*/2) ||
+              !uniform || ranksPerNode != 2,
+          "Requires exactly 4 ranks, 2 on each of 2 hosts");
+      !reason.empty())
+    GTEST_SKIP() << reason;
+
+  // No GIN gate on the world comm: only the per-host comms use GIN, and a
+  // 2-host job without a GIN-capable NIC leaves the world comm with none.
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  ncclComm_t world = getActiveCommunicator();
+  ASSERT_MPI_EQ(2, world->topo->nHosts);
+  ncclCommProperties_t worldProps = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(world, &worldProps));
+  ASSERT_MPI_EQ(false, worldProps.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA]);
+
+  ncclComm_t host = nullptr;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommSplit(world, world->topo->hostIdx, getTestMpiRank(), &host, nullptr));
+  ASSERT_MPI_TRUE(host != nullptr);
+  auto hostCleanup = makeScopeGuard([&]() {
+    if (host) (void)ncclCommDestroy(host);
+  });
+  ASSERT_MPI_EQ(1, host->topo->nHosts);
+
+  ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+  ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(host, &props));
+  ASSERT_MPI_EQ(NCCL_GIN_TYPE_ANVIL_SDMA, props.ginType);
+  ASSERT_MPI_EQ(true, props.ginSupport[NCCL_GIN_TYPE_ANVIL_SDMA]);
+  ASSERT_MPI_EQ(NCCL_GIN_CONNECTION_FULL, host->globalGinSupport);
+
+  runPutWaitRoundTrip(host, getActiveStream());
 }
 
 // ---------------------------------------------------------------------------

@@ -31,6 +31,7 @@
 #include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -77,16 +78,16 @@ constexpr uint32_t kSentinel2 = 9; // Distinct value for a second reg, to catch 
 // = index); vsrc1 and vdst are VGPR indices. Reading a register as a source keeps it live
 // across the anchor without clobbering it -- used to pin many registers live at once.
 util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t vsrc1,
-                                          rj_code_arch_t arch,
+                                          rocjitsu::IsaFamily arch,
                                           util::DiagnosticEmitter emit_error = {}) {
   const uint8_t d = static_cast<uint8_t>(vdst);
   const uint8_t s1 = static_cast<uint8_t>(vsrc1);
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     return cdna3::build_vop2(cdna3::kVAddU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return cdna4::build_vop2(cdna4::kVAddU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return rdna4::build_vop2(rdna4::kVAddNcU32Vop2, {.src0 = src0, .vsrc1 = s1, .vdst = d})[0];
   default:
     return emit_error.emit() << "Unimplemented instruction: v_add_u32 for target architecture";
@@ -96,7 +97,7 @@ util::FailureOr<uint32_t> build_v_add_u32(uint16_t vdst, uint16_t src0, uint16_t
 TEST(DbiSpillBuilders, UnsupportedArchitectureReturnsFailure) {
   util::StringDiagnostic diagnostic;
   EXPECT_TRUE(
-      build_v_add_u32(1, 256, 1, ROCJITSU_CODE_ARCH_INVALID, diagnostic.emitter()).failed());
+      build_v_add_u32(1, 256, 1, rocjitsu::IsaFamily::Invalid, diagnostic.emitter()).failed());
   EXPECT_EQ(diagnostic.message(), "Unimplemented instruction: v_add_u32 for target architecture");
 }
 
@@ -108,16 +109,16 @@ TEST(DbiSpillBuilders, UnsupportedArchitectureReturnsFailure) {
 // arch (for builders), the ELF machine flag, and the wavefront size.
 struct SpillSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
 };
 
-inline constexpr SpillSimArch kCdna3SpillArch{"cdna3", ROCJITSU_CODE_ARCH_CDNA3,
+inline constexpr SpillSimArch kCdna3SpillArch{"cdna3", rocjitsu::IsaFamily::Cdna3,
                                               EF_AMDGPU_MACH_AMDGCN_GFX942, /*wave_size=*/64};
-inline constexpr SpillSimArch kCdna4SpillArch{"cdna4", ROCJITSU_CODE_ARCH_CDNA4,
+inline constexpr SpillSimArch kCdna4SpillArch{"cdna4", rocjitsu::IsaFamily::Cdna4,
                                               EF_AMDGPU_MACH_AMDGCN_GFX950, /*wave_size=*/64};
-inline constexpr SpillSimArch kRdna4SpillArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
+inline constexpr SpillSimArch kRdna4SpillArch{"rdna4", rocjitsu::IsaFamily::Rdna4,
                                               EF_AMDGPU_MACH_AMDGCN_GFX1200, /*wave_size=*/32};
 
 // Patches a kernel with a probe that clobbers the live VGPR v2, forcing a spill,
@@ -176,9 +177,10 @@ protected:
     const std::vector<uint32_t> v3 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3[lane], kSentinel)
           << "lane " << lane << ": v2 was not restored after the probe clobbered it";
+    }
   }
 
   // Negative control: prove the *restore* preserves the value. Nop the epilogue
@@ -196,26 +198,29 @@ protected:
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, load).begin();
     ASSERT_NE(it, sabotaged.end()) << "epilogue scratch load (the restore) not found";
-    for (size_t i = 0; i < load.size(); ++i)
+    for (size_t i = 0; i < load.size(); ++i) {
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
+    }
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_broken =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_broken.size(), a_.wave_size);
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3_broken[lane], 0u)
           << "lane " << lane << ": without the restore, v3 should read the clobbered 0";
+    }
 
     test::DbiSim intact;
     ASSERT_NO_FATAL_FAILURE(intact.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_intact =
         intact.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_intact.size(), a_.wave_size);
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3_intact[lane], kSentinel)
           << "lane " << lane << ": intact restore should recover v2";
+    }
   }
 
   SpillSimArch a_;
@@ -320,9 +325,10 @@ protected:
     const std::vector<uint32_t> v3 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3[lane], kSentinel)
           << "lane " << lane << ": s8 was not restored after the probe clobbered it";
+    }
   }
 
   // Negative control: nop the epilogue v_readlane (the scalar restore) so s8 stays
@@ -339,26 +345,29 @@ protected:
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, readlane).begin();
     ASSERT_NE(it, sabotaged.end()) << "epilogue v_readlane (the scalar restore) not found";
-    for (size_t i = 0; i < readlane.size(); ++i)
+    for (size_t i = 0; i < readlane.size(); ++i) {
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
+    }
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_broken =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_broken.size(), a_.wave_size);
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3_broken[lane], 0u)
           << "lane " << lane << ": without the readlane, v3 should read the clobbered 0";
+    }
 
     test::DbiSim intact;
     ASSERT_NO_FATAL_FAILURE(intact.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_intact =
         intact.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_intact.size(), a_.wave_size);
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3_intact[lane], kSentinel)
           << "lane " << lane << ": intact restore should recover s8";
+    }
   }
 
   SpillSimArch a_;
@@ -574,9 +583,10 @@ protected:
     const std::vector<uint32_t> v3 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3[lane], kSentinel)
           << "lane " << lane << ": acc0 was not restored after the probe clobbered it";
+    }
   }
 
   // Negative control: nop the epilogue acc=1 scratch load (the AGPR restore) so
@@ -594,26 +604,29 @@ protected:
     std::vector<uint32_t> sabotaged = patched_text_;
     auto it = std::ranges::search(sabotaged, load).begin();
     ASSERT_NE(it, sabotaged.end()) << "epilogue acc scratch load (the restore) not found";
-    for (size_t i = 0; i < load.size(); ++i)
+    for (size_t i = 0; i < load.size(); ++i) {
       *(it + static_cast<std::ptrdiff_t>(i)) = nop;
+    }
 
     test::DbiSim broken;
     ASSERT_NO_FATAL_FAILURE(broken.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_broken =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_broken.size(), a_.wave_size);
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3_broken[lane], 0u)
           << "lane " << lane << ": without the restore, v3 should read the clobbered 0";
+    }
 
     test::DbiSim intact;
     ASSERT_NO_FATAL_FAILURE(intact.initialize(a_.sim_arch, a_.wave_size));
     const std::vector<uint32_t> v3_intact =
         intact.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3_intact.size(), a_.wave_size);
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3_intact[lane], kSentinel)
           << "lane " << lane << ": intact restore should recover acc0";
+    }
   }
 
   SpillSimArch a_;
@@ -727,9 +740,10 @@ protected:
          {std::pair{uint32_t{5}, "v2"}, {uint32_t{6}, "s8"}, {uint32_t{7}, "acc0"}}) {
       const std::vector<uint32_t> v = sim.run_and_read_vgpr(patched_text_, patched_scratch_, reg);
       ASSERT_EQ(v.size(), a_.wave_size) << "kernel did not run to completion";
-      for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+      for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
         EXPECT_EQ(v[lane], kSentinel)
             << "lane " << lane << ": " << src << " was not restored after the probe clobbered it";
+      }
     }
   }
 
@@ -757,8 +771,9 @@ protected:
     const auto nop_seq = [&](const auto &seq, const char *what) {
       auto it = std::ranges::search(sabotaged, seq).begin();
       ASSERT_NE(it, sabotaged.end()) << "restore not found: " << what;
-      for (size_t i = 0; i < seq.size(); ++i)
+      for (size_t i = 0; i < seq.size(); ++i) {
         *(it + static_cast<std::ptrdiff_t>(i)) = nop;
+      }
     };
     nop_seq(vload, "VGPR scratch load");
     nop_seq(readlane, "SGPR readlane");
@@ -769,8 +784,9 @@ protected:
     for (uint32_t reg : {5u, 6u, 7u}) {
       const std::vector<uint32_t> v = broken.run_and_read_vgpr(sabotaged, patched_scratch_, reg);
       ASSERT_EQ(v.size(), a_.wave_size);
-      for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+      for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
         EXPECT_EQ(v[lane], 0u) << "lane " << lane << ": v" << reg << " should read the clobbered 0";
+      }
     }
 
     test::DbiSim intact;
@@ -779,9 +795,10 @@ protected:
       const std::vector<uint32_t> v =
           intact.run_and_read_vgpr(patched_text_, patched_scratch_, reg);
       ASSERT_EQ(v.size(), a_.wave_size);
-      for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+      for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
         EXPECT_EQ(v[lane], kSentinel)
             << "lane " << lane << ": intact restore should recover v" << reg;
+      }
     }
   }
 
@@ -844,8 +861,9 @@ protected:
         build_v_add_u32(5, kVgprSrc + 4, 5, a_.arch, diagnostic.emitter()),
         build_v_add_u32(7, kVgprSrc + 6, 7, a_.arch, diagnostic.emitter()),
         build_v_add_u32(1, kSpilledSgpr, 1, a_.arch, diagnostic.emitter())};
-    for (const util::FailureOr<uint32_t> &add : adds)
+    for (const util::FailureOr<uint32_t> &add : adds) {
       ASSERT_TRUE(add.succeeded()) << diagnostic.message();
+    }
     // v_mov v0,K ; s_mov s8,K2 ; then an add chain (ANCHOR at offset 8) that reads v0..v7
     // and s8 -- keeping all eight VGPRs and s8 live -- while writing only v1/v3/v5/v7, so v0
     // and s8 stay intact for readback. s_endpgm.
@@ -904,9 +922,10 @@ protected:
     const std::vector<uint32_t> v0 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/0);
     ASSERT_EQ(v0.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v0[lane], kSentinel)
           << "lane " << lane << ": bridge v0 not restored; a swapped reload corrupts lane 0";
+    }
   }
 
   SpillSimArch a_;
@@ -958,7 +977,7 @@ struct ExecSimArch {
 
 // CDNA3 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
 [[nodiscard]] inline ExecSimArch cdna3_exec_arch() {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA3;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna3;
   constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_28 = scalar_inline_neg_one(kArch);
   static_assert(maybe_scalar_inline_neg_one_28.succeeded());
   constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_29 =
@@ -975,7 +994,7 @@ struct ExecSimArch {
 
 // CDNA4 wave64: clear exec_hi -> lanes 0..31; restore with exec_hi = -1.
 [[nodiscard]] inline ExecSimArch cdna4_exec_arch() {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_25 = scalar_inline_neg_one(kArch);
   static_assert(maybe_scalar_inline_neg_one_25.succeeded());
   constexpr util::FailureOr<uint32_t> maybe_s_mov_b32_26 =
@@ -992,7 +1011,7 @@ struct ExecSimArch {
 
 // RDNA4 wave32: narrow exec_lo to 0x0000FFFF (lanes 0..15); restore with exec_lo = -1.
 [[nodiscard]] inline ExecSimArch rdna4_exec_arch() {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Rdna4;
   constexpr util::FailureOr<uint16_t> maybe_scalar_inline_neg_one_21 = scalar_inline_neg_one(kArch);
   static_assert(maybe_scalar_inline_neg_one_21.succeeded());
   constexpr util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_22 =
@@ -1016,26 +1035,31 @@ struct ExecSimArch {
 // Index of the trampoline's EXEC restore: an s_mov_b64 writing EXEC_LO from a
 // dead SGPR temp (< VCC_LO), not the probe's own `s_mov_b64 exec, 0` (reads
 // inline 0 = 128). text.size() if absent.
-[[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text, rj_code_arch_t arch) {
+[[nodiscard]] size_t find_exec_restore(const std::vector<uint32_t> &text,
+                                       rocjitsu::IsaFamily arch) {
   util::FailureOr<uint32_t> maybe_sop1_op_mov_b64_20 = sop1_op_mov_b64(arch);
   EXPECT_TRUE(maybe_sop1_op_mov_b64_20.succeeded());
-  if (maybe_sop1_op_mov_b64_20.failed())
+  if (maybe_sop1_op_mov_b64_20.failed()) {
     return text.size();
+  }
   const uint32_t mov64 = maybe_sop1_op_mov_b64_20.value();
   util::FailureOr<uint16_t> maybe_scalar_operand_vcc_lo_18 = scalar_operand_vcc_lo(arch);
   EXPECT_TRUE(maybe_scalar_operand_vcc_lo_18.succeeded());
-  if (maybe_scalar_operand_vcc_lo_18.failed())
+  if (maybe_scalar_operand_vcc_lo_18.failed()) {
     return text.size();
+  }
   util::FailureOr<uint16_t> maybe_scalar_operand_exec_lo_19 = scalar_operand_exec_lo(arch);
   EXPECT_TRUE(maybe_scalar_operand_exec_lo_19.succeeded());
-  if (maybe_scalar_operand_exec_lo_19.failed())
+  if (maybe_scalar_operand_exec_lo_19.failed()) {
     return text.size();
+  }
   for (size_t i = 0; i < text.size(); ++i) {
     const uint32_t w = text[i];
     if ((w >> 23) == kSop1EncodingPrefix && ((w >> 8) & 0xFFu) == mov64 &&
         ((w >> 16) & 0x7Fu) == maybe_scalar_operand_exec_lo_19.value() &&
-        (w & 0xFFu) < maybe_scalar_operand_vcc_lo_18.value())
+        (w & 0xFFu) < maybe_scalar_operand_vcc_lo_18.value()) {
       return i;
+    }
   }
   return text.size();
 }
@@ -1137,9 +1161,10 @@ protected:
     const std::vector<uint32_t> v3_broken =
         broken.run_and_read_vgpr(sabotaged, /*private_bytes=*/0, /*reg=*/3);
     ASSERT_EQ(v3_broken.size(), a_.base.wave_size);
-    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane) {
       EXPECT_EQ(v3_broken[lane], 0u)
           << "lane " << lane << ": without the EXEC restore, no lane should be written";
+    }
 
     // Revert: the intact restore recovers the low-lane writes.
     test::DbiSim intact;
@@ -1147,9 +1172,10 @@ protected:
     const std::vector<uint32_t> v3_intact =
         intact.run_and_read_vgpr(patched_text_, /*private_bytes=*/0, /*reg=*/3);
     ASSERT_EQ(v3_intact.size(), a_.base.wave_size);
-    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane) {
       EXPECT_EQ(v3_intact[lane], lane < a_.active_lanes ? kSentinel : 0u)
           << "lane " << lane << ": intact EXEC restore should recover the low-lane writes";
+    }
   }
 
   ExecSimArch a_;
@@ -1271,10 +1297,11 @@ protected:
     const std::vector<uint32_t> v3 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.base.wave_size) << "kernel did not run to completion";
-    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane) {
       EXPECT_EQ(v3[lane], kSentinel)
           << "lane " << lane
           << ": v2 was not saved/restored under full mask across the widening probe";
+    }
   }
 
   // Negative control: nop the store-side EXEC=-1 toggle, so the store runs under the
@@ -1313,12 +1340,14 @@ protected:
     const std::vector<uint32_t> v3 =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.base.wave_size);
-    for (uint32_t lane = 0; lane < a_.active_lanes; ++lane)
+    for (uint32_t lane = 0; lane < a_.active_lanes; ++lane) {
       EXPECT_EQ(v3[lane], kSentinel)
           << "lane " << lane << ": active-lane spill should still round-trip";
-    for (uint32_t lane = a_.active_lanes; lane < a_.base.wave_size; ++lane)
+    }
+    for (uint32_t lane = a_.active_lanes; lane < a_.base.wave_size; ++lane) {
       EXPECT_NE(v3[lane], kSentinel)
           << "lane " << lane << ": without the store full-mask, this lane must not be recovered";
+    }
   }
 
   ExecSimArch a_;
@@ -1432,9 +1461,10 @@ protected:
     const std::vector<uint32_t> v5 =
         sim.run_and_read_vgpr(patched_text_, patched_scratch_, /*reg=*/5);
     ASSERT_EQ(v5.size(), a_.base.wave_size) << "kernel did not run to completion";
-    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.base.wave_size; ++lane) {
       EXPECT_EQ(v5[lane], lane < a_.active_lanes ? kSentinel : 0u)
           << "lane " << lane << ": probe write should honor the anchor mask";
+    }
   }
 
   // Negative control: nop the pre-call anchor-mask restore, so the probe runs under
@@ -1453,10 +1483,11 @@ protected:
     const std::vector<uint32_t> v5 =
         broken.run_and_read_vgpr(sabotaged, patched_scratch_, /*reg=*/5);
     ASSERT_EQ(v5.size(), a_.base.wave_size);
-    for (uint32_t lane = a_.active_lanes; lane < a_.base.wave_size; ++lane)
+    for (uint32_t lane = a_.active_lanes; lane < a_.base.wave_size; ++lane) {
       EXPECT_EQ(v5[lane], kSentinel)
           << "lane " << lane
           << ": without the restore the probe runs full-mask and marks this lane";
+    }
   }
 
   ExecSimArch a_;
@@ -1498,7 +1529,7 @@ TEST_F(DbiRdna4ExecMaskAtSpillSimFixture, MissingAnchorRestoreRunsProbeFullMask)
 
 void expect_scalar_relative_probe(bool relative_source, bool with_probe,
                                   uint16_t selected_value = 7) {
-  constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
   ASSERT_LE(selected_value, 64);
   const util::FailureOr<uint16_t> m0_operand = scalar_operand_m0(kArch);
   ASSERT_TRUE(m0_operand.succeeded());

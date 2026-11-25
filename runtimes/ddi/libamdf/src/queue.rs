@@ -13,9 +13,10 @@ use rocddi::device::gpu::queue::{
 use rocddi::memory::storage::{Allocator, Owned};
 
 use crate::generated::amdf::*;
-use crate::instance::{self, Device};
 use crate::memory;
+use crate::session::{self, Device};
 use crate::support::*;
+use rocddi::memory::storage::RetainOnDrop;
 
 // Native errors originate in API/errno domains, so the high bit is available
 // internally to publish the first terminal status and its loss classification
@@ -129,7 +130,7 @@ impl Queue {
         if matches!(self.native, NativeQueue::Fixture(_)) {
             // The queue fixture has no activated native device.
             // SAFETY: Its environment keeps this epoch live through the test.
-            instance::advance_reset_epoch(
+            session::advance_reset_epoch(
                 unsafe { &*self.device_reset_epoch },
                 self.info.reset_epoch,
             );
@@ -486,10 +487,10 @@ pub(crate) unsafe extern "C" fn create(
         let create_info = input(create_info, AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO)?;
         let device = object(pointer.cast::<Device>())?;
         device.require_current_process()?;
-        let family = instance::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
+        let family = session::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
         let (scratch, scratch_memory) = scratch_descriptor(&create_info, &family, pointer.cast())?;
         let desc = descriptor(&create_info, &family, scratch)?;
-        let instance = instance::device_instance(device);
+        let instance = session::device_instance(device);
         let slot = instance.owner_slot::<Queue>()?;
         let id = next_id(&instance.ids)?;
         register(&device.queues)?;
@@ -775,11 +776,9 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_user_queue_t) -> u64 
                 return result;
             }
             unregister(&*queue.device_queues);
-            let owner = Owned::from_raw(pointer.cast::<Queue>());
-            if result.is_err() {
-                std::mem::forget(owner);
-            } else {
-                drop(owner);
+            let owner = RetainOnDrop::new(Owned::from_raw(pointer.cast::<Queue>()));
+            if result.is_ok() {
+                drop(owner.into_inner());
             }
             result
         }

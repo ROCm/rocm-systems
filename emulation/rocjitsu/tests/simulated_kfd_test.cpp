@@ -4,6 +4,7 @@
 /// @file simulated_kfd_test.cpp
 /// @brief SimulatedKfd lifecycle, allocation, sharing, and topology tests.
 
+#include "legacy_gpu_memory_fixture.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
@@ -15,6 +16,7 @@
 #include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
 #include "util/diagnostic.h"
+#include "util/unique_handle.h"
 
 #include "rocjitsu/base/rj_compiler.h"
 RJ_DIAGNOSTIC_PUSH
@@ -28,8 +30,10 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -45,6 +49,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <linux/filter.h>
 #include <linux/seccomp.h>
+#include <sched.h>
 #include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
@@ -90,8 +95,9 @@ util::FailureOr<TestVM> create_test_vm(util::DiagnosticEmitter emit_error,
   TestVM t;
   auto loaded_result =
       rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema, emit_error);
-  if (loaded_result.failed())
+  if (loaded_result.failed()) {
     return util::Result::failure();
+  }
   t.loaded = std::move(loaded_result).value();
   auto *soc = t.loaded.soc();
 
@@ -106,16 +112,19 @@ util::FailureOr<TestVM> create_test_vm(util::DiagnosticEmitter emit_error,
   auto root = t.loaded.take_root();
   root.release();
   auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc));
-  if (gfx_target != 0)
+  if (gfx_target != 0) {
     t.loaded.device.gfx_target_version = gfx_target;
+  }
   vm->driver()->setup_topology(t.loaded.device, soc->num_xcds());
 
   t.engine->topology().set_root(std::move(vm));
-  if (t.loaded.wire_links(t.engine->topology(), emit_error).failed())
+  if (t.loaded.wire_links(t.engine->topology(), emit_error).failed()) {
     return util::Result::failure();
+  }
   soc->wire_backing(t.engine->topology());
-  if (t.engine->create(emit_error).failed())
+  if (t.engine->create(emit_error).failed()) {
     return util::Result::failure();
+  }
   t.engine->register_as_primary();
 
   return t;
@@ -366,8 +375,9 @@ TEST_F(SimulatedKfdTest, PartialPrivateVramViewUnmapKeepsOnlyLiveFragments) {
     EXPECT_EQ(::mincore(hole, kPage, &residency), 0);
     EXPECT_EQ(*hole, 0x5a);
     for (size_t page = 0; page < 3; ++page) {
-      if (page >= first_page && page * kPage < first_page * kPage + hole_bytes)
+      if (page >= first_page && page * kPage < first_page * kPage + hole_bytes) {
         continue;
+      }
       errno = 0;
       EXPECT_EQ(::mincore(view + page * kPage, kPage, &residency), -1);
       EXPECT_EQ(errno, ENOMEM);
@@ -518,6 +528,7 @@ TEST_F(SimulatedKfdTest, UserptrUsesCpuAddressIndependentOfGpuVa) {
   EXPECT_EQ(driver->close(), 0);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(SimulatedKfdTest, PartialUserptrUnmapAndFixedReuseRetireOnlyAffectedGpuPages) {
   util::StringDiagnostic diagnostic;
   auto result = create_test_vm(diagnostic.emitter());
@@ -611,6 +622,7 @@ TEST_F(SimulatedKfdTest, PartialUserptrUnmapAndFixedReuseRetireOnlyAffectedGpuPa
   EXPECT_EQ(::mincore(cpu + 2 * kPage, kPage, &residency), 0);
   EXPECT_EQ(::munmap(cpu, 3 * kPage), 0);
 }
+#endif
 
 TEST_F(SimulatedKfdTest, AsanHeaderReplacementAndReturnPreserveSurvivingViews) {
   constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
@@ -664,6 +676,7 @@ TEST_F(SimulatedKfdTest, AsanHeaderReplacementAndReturnPreserveSurvivingViews) {
   }
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST_F(SimulatedKfdTest, ShortHeaderReturnRetiresTailGpuBackingAfterAddressReuse) {
   constexpr size_t kPage = rocjitsu::KfdProcess::kPageSize;
   for (uint32_t flags : {uint32_t{KFD_IOC_ALLOC_MEM_FLAGS_GTT},
@@ -852,6 +865,7 @@ TEST_F(SimulatedKfdTest, PartialFixedReplacementOfCallerVramAndGttRetiresGpuPage
     EXPECT_EQ(::munmap(cpu, 3 * kPage), 0);
   }
 }
+#endif
 
 TEST_F(SimulatedKfdTest, IpcImportRetainsBackingAcrossViewAndReleasesItOnFree) {
   util::StringDiagnostic diagnostic;
@@ -1247,6 +1261,110 @@ TEST(SimulatedKfdDeathTest, DaemonIpcReexportRetainsPolicyWithoutMemfdXattrs) {
       ::testing::ExitedWithCode(0), "");
 }
 
+TEST_F(SimulatedKfdTest, ImportedDmabufAliasesPreserveWholeTransactions) {
+  rocjitsu::test::ScopedHostMappingObservation observation(true);
+  cpu_set_t original_affinity;
+  ASSERT_EQ(sched_getaffinity(0, sizeof(original_affinity), &original_affinity), 0);
+  const std::string config = std::string(CONFIG_DIR) + "/gfx1250_mi455x.json";
+  ASSERT_EQ(setenv("RJ_CONFIG", config.c_str(), 1), 0);
+  util::StringDiagnostic diagnostic;
+  auto result = create_test_vm(diagnostic.emitter(), config);
+  ASSERT_TRUE(result.succeeded()) << diagnostic.message();
+  auto vm = std::move(result).value();
+  auto *driver = vm.driver();
+  ASSERT_GE(driver->open(), 0);
+  ASSERT_EQ(sched_setaffinity(0, sizeof(original_affinity), &original_affinity), 0);
+
+  using Transaction = std::array<uint32_t, 32>;
+  ASSERT_EQ(vm.memory()->transaction_policy().bytes(), sizeof(Transaction));
+  const size_t page = static_cast<size_t>(sysconf(_SC_PAGESIZE));
+  const size_t size = 2 * page;
+  util::UniqueHandle fd(
+      static_cast<int>(syscall(SYS_memfd_create, "rj-import-alias", MFD_CLOEXEC)));
+  ASSERT_GE(fd.get(), 0);
+  ASSERT_EQ(ftruncate(fd.get(), size), 0);
+  auto unmap = [size](void *ptr) {
+    auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+    munmap(ptr, size);
+  };
+
+  const auto import = [&](void *ptr, uint64_t &handle) {
+    kfd_ioctl_import_dmabuf_args args{};
+    args.dmabuf_fd = fd.get();
+    args.gpu_id = driver->gpu_id();
+    args.va_addr = reinterpret_cast<uint64_t>(ptr);
+    ASSERT_EQ(driver->ioctl(AMDKFD_IOC_IMPORT_DMABUF, &args), 0);
+    ASSERT_EQ(grant_allocation_to_gpu(*driver, args.handle, args.gpu_id), 0);
+    handle = args.handle;
+  };
+  std::array<std::unique_ptr<void, decltype(unmap)>, 2> views{
+      std::unique_ptr<void, decltype(unmap)>(nullptr, unmap),
+      std::unique_ptr<void, decltype(unmap)>(nullptr, unmap)};
+  std::array<uint64_t, 2> handles{};
+  for (size_t i = 0; i < views.size(); ++i) {
+    auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+    void *ptr = mmap(nullptr, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd.get(), 0);
+    lock.unlock();
+    ASSERT_NE(ptr, MAP_FAILED);
+    views[i].reset(ptr);
+    ASSERT_NO_FATAL_FAILURE(import(ptr, handles[i]));
+  }
+  auto access = vm.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+  ASSERT_TRUE(access);
+  const auto writer_address = reinterpret_cast<uint64_t>(views[0].get()) + page;
+  const auto reader_address = reinterpret_cast<uint64_t>(views[1].get());
+  Transaction initial{}, observed{};
+  initial.fill(0xa5);
+  ASSERT_TRUE(access->try_write_contiguous(writer_address, std::as_bytes(std::span(initial))));
+  ASSERT_TRUE(
+      access->try_read_contiguous(reader_address, std::as_writable_bytes(std::span(observed))));
+  EXPECT_NE(observed, initial);
+  // Keep the GPU VA and change just the host file offset. The first read
+  // warmed the backing identity for the old view.
+  {
+    auto lock = rocjitsu::host_mapping_lock().lock_exclusive();
+    ASSERT_EQ(
+        mmap(views[1].get(), page, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, fd.get(), page),
+        views[1].get());
+  }
+  ASSERT_TRUE(
+      access->try_read_contiguous(reader_address, std::as_writable_bytes(std::span(observed))));
+  ASSERT_EQ(observed, initial);
+
+  std::barrier start(2);
+  bool wrote = false;
+  bool write_failed = false;
+  std::jthread writer([&](std::stop_token stop) {
+    Transaction value{};
+    start.arrive_and_wait();
+    for (uint32_t epoch = 1; !stop.stop_requested(); ++epoch) {
+      value.fill(epoch);
+      if (!access->try_write_contiguous(writer_address, std::as_bytes(std::span(value)))) {
+        write_failed = true;
+        break;
+      }
+      wrote = true;
+    }
+  });
+  start.arrive_and_wait();
+  for (int i = 0; i < 100000; ++i) {
+    ASSERT_TRUE(
+        access->try_read_contiguous(reader_address, std::as_writable_bytes(std::span(observed))));
+    ASSERT_TRUE(std::ranges::all_of(observed, [&](uint32_t value) { return value == observed[0]; }))
+        << "Torn 128-byte transaction at iteration " << i;
+  }
+  writer.request_stop();
+  writer.join();
+  EXPECT_TRUE(wrote);
+  EXPECT_FALSE(write_failed);
+  for (auto handle : handles) {
+    kfd_ioctl_free_memory_of_gpu_args args{};
+    args.handle = handle;
+    EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &args), 0);
+  }
+  EXPECT_EQ(driver->close(), 0);
+}
+
 TEST_F(SimulatedKfdTest, ImportedDmabufReexportKeepsTheOriginalBacking) {
   util::StringDiagnostic t_diagnostic;
   auto t_result = create_test_vm(t_diagnostic.emitter());
@@ -1580,8 +1698,9 @@ TEST_F(SimulatedKfdTest, AdditionalDoorbellMmapKeepsEarlierClientViewLive) {
 [[nodiscard]] bool wait_for_blocked_mapping_change() {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
   while (rocjitsu::host_mapping_lock().blocked_writers() == 0) {
-    if (std::chrono::steady_clock::now() > deadline)
+    if (std::chrono::steady_clock::now() > deadline) {
       return false;
+    }
     std::this_thread::yield();
   }
   return true;
@@ -2458,10 +2577,12 @@ public:
   [[nodiscard]] uint32_t calls() const { return calls_; }
 
   int ioctl(unsigned long request, void *arg) override {
-    if (request != request_)
+    if (request != request_) {
       return SimulatedKfd::ioctl(request, arg);
-    if (request == AMDKFD_IOC_MAP_MEMORY_TO_GPU)
+    }
+    if (request == AMDKFD_IOC_MAP_MEMORY_TO_GPU) {
       return retry(static_cast<kfd_ioctl_map_memory_to_gpu_args *>(arg));
+    }
     return retry(static_cast<kfd_ioctl_unmap_memory_from_gpu_args *>(arg));
   }
 
@@ -2937,8 +3058,9 @@ TEST_F(SimulatedKfdTest, DispatchedWaitSurvivesAConcurrentFinalClose) {
     });
     const auto close_by = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     while (!close_done.load(std::memory_order_acquire) &&
-           std::chrono::steady_clock::now() < close_by)
+           std::chrono::steady_clock::now() < close_by) {
       std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
     closed_before_wake = close_done.load(std::memory_order_acquire);
   }
 
@@ -2950,8 +3072,9 @@ TEST_F(SimulatedKfdTest, DispatchedWaitSurvivesAConcurrentFinalClose) {
   // in-process can recover. CMakeLists registers this test with its own CTest timeout for
   // exactly that case.
   guest.begin_local_shutdown();
-  if (closer.joinable())
+  if (closer.joinable()) {
     closer.join();
+  }
   waiter.join();
 
   ASSERT_TRUE(registered) << "the waiter never registered";
@@ -3039,6 +3162,7 @@ TEST_F(SimulatedKfdTest, TopologyDirectoryExists) {
   EXPECT_TRUE(std::filesystem::exists(path + "/nodes/1/properties"));
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // begin_local_shutdown() releases parked waiters so their callers drop the driver
 // snapshot that keeps the object alive. It must do ONLY that: an earlier version
 // also marked the driver closing and poisoned every event-page slot with
@@ -3164,6 +3288,8 @@ TEST_F(SimulatedKfdTest, MemoryExceptionNamesTheFaultingGpu) {
   rj_vm_destroy(vm);
 }
 
+#endif
+
 // A page that is readable but refuses the write is a protection fault, and the
 // KFD ABI reports it in a different field than a missing page. The runtime
 // reads the two separately, so collapsing them misstates the cause.
@@ -3221,6 +3347,7 @@ TEST_F(SimulatedKfdTest, ReadOnlyPageReportsReadOnlyRatherThanNotPresent) {
   EXPECT_EQ(drv->close(), 0);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // An atomic against a mapped page that is not writable must name the cause the
 // mapping actually has. A PROT_NONE reservation -- the shape the runtime leaves
 // around an aperture -- is absent to the GPU, so reporting it as a protection
@@ -3285,6 +3412,8 @@ TEST_F(SimulatedKfdTest, MappedReservationReportsNotPresentRatherThanReadOnly) {
   munmap(raw, rocjitsu::KfdProcess::kPageSize);
   EXPECT_EQ(drv->close(), 0);
 }
+
+#endif
 
 // The reporting path must stay quiet for addresses that do resolve, or every
 // local-mode workload would raise faults for its ordinary pageable pointers.
@@ -3444,8 +3573,9 @@ TEST_F(SimulatedKfdTest, WakeDoesNotDisturbPendingAutoResetEventPage) {
     wait_rc.store(drv->ioctl(AMDKFD_IOC_WAIT_EVENTS, &wait), std::memory_order_release);
     wait_result.store(wait.wait_result, std::memory_order_release);
   });
-  while (proc->event_state_.waiter_count(create.event_id) == 0)
+  while (proc->event_state_.waiter_count(create.event_id) == 0) {
     std::this_thread::yield();
+  }
 
   kfd_ioctl_set_event_args set{};
   set.event_id = create.event_id;
@@ -3510,8 +3640,9 @@ TEST_F(SimulatedKfdTest, BeginLocalShutdownReleasesIndefiniteWaitAsTimeout) {
     wait_result = wait.wait_result;
   });
 
-  while (!parked.load(std::memory_order_acquire))
+  while (!parked.load(std::memory_order_acquire)) {
     std::this_thread::yield();
+  }
   // Give the waiter a moment to actually park inside the condition variable.
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
@@ -3558,8 +3689,8 @@ TEST_F(SimulatedKfdTest, ConcurrentIoctlAndCloseIsRaceFree) {
     workers.reserve(kIoctlThreads);
     for (int i = 0; i < kIoctlThreads; ++i) {
       workers.emplace_back([&, pid] {
-        while (!go.load(std::memory_order_acquire))
-          ;
+        while (!go.load(std::memory_order_acquire)) {
+        }
         // The canonical publication writer can refuse an overlapping ioctl
         // with EAGAIN before close publishes its terminal closing flag. Once
         // close has finished, only a terminal result may remain.
@@ -3571,8 +3702,9 @@ TEST_F(SimulatedKfdTest, ConcurrentIoctlAndCloseIsRaceFree) {
           // Stateless routing probe.
           kfd_ioctl_get_version_args ver{};
           bool done_before = close_done.load(std::memory_order_acquire);
-          if (!ok(drv->ioctl(pid, AMDKFD_IOC_GET_VERSION, &ver), done_before))
+          if (!ok(drv->ioctl(pid, AMDKFD_IOC_GET_VERSION, &ver), done_before)) {
             bad.fetch_add(1, std::memory_order_relaxed);
+          }
 
           // State-touching ioctls that read/write alloc_mutex_-guarded
           // allocations_, so close()'s teardown can actually overlap a handler
@@ -3585,14 +3717,16 @@ TEST_F(SimulatedKfdTest, ConcurrentIoctlAndCloseIsRaceFree) {
           alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
           done_before = close_done.load(std::memory_order_acquire);
           int arc = drv->ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc);
-          if (!ok(arc, done_before))
+          if (!ok(arc, done_before)) {
             bad.fetch_add(1, std::memory_order_relaxed);
+          }
           if (arc == 0) {
             kfd_ioctl_free_memory_of_gpu_args freed{};
             freed.handle = alloc.handle;
             done_before = close_done.load(std::memory_order_acquire);
-            if (!ok(drv->ioctl(pid, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), done_before))
+            if (!ok(drv->ioctl(pid, AMDKFD_IOC_FREE_MEMORY_OF_GPU, &freed), done_before)) {
               bad.fetch_add(1, std::memory_order_relaxed);
+            }
           }
         }
       });
@@ -3604,8 +3738,9 @@ TEST_F(SimulatedKfdTest, ConcurrentIoctlAndCloseIsRaceFree) {
     int cret = drv->close(pid);
     close_done.store(true, std::memory_order_release);
     EXPECT_EQ(cret, 0);
-    for (auto &w : workers)
+    for (auto &w : workers) {
       w.join();
+    }
     EXPECT_EQ(bad.load(), 0) << "round " << round << ": ioctl saw invalid state during close";
     kfd_ioctl_get_version_args after_close{};
     EXPECT_EQ(drv->ioctl(pid, AMDKFD_IOC_GET_VERSION, &after_close), -ESRCH);

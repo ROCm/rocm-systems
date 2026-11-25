@@ -94,8 +94,14 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
     g_hipGetLastError = [] { return hipSuccess; };
     g_loadParam = [this](const char* env, int64_t deftVal) {
       auto it = params_.find(env);
-      return it == params_.end() ? deftVal : it->second;
+      if (it != params_.end()) {
+        return it->second;
+      }
+      auto pinned = pinned_.find(env);
+      return pinned == pinned_.end() ? deftVal : pinned->second;
     };
+    // The narrow widths the gfx1250 SPX table sets for 16 ranks or fewer.
+    g_rcclDdaFabricNarrowThreads = [](const ncclComm*) { return 256; };
     comm().rank = 5;
     comm().addonStopEvent = kStopEvent;
   }
@@ -215,6 +221,9 @@ class DdaAllReduceFabricLLMicrotest : public ::testing::Test {
 
   DdaFabricMockComm mock_;
   std::map<std::string, int64_t> params_;
+  // Params a fixture fixes for all its tests; params_ (which tests clear) overrides them. These tests cover the
+  // one-warp-per-slice LL128 kernels; DdaAllReduceFabricLL128PeerParMicrotest covers the peer-parallel default.
+  std::map<std::string, int64_t> pinned_{{"RCCL_DDA_LL128_AR_PEER_PARALLEL", 0}};
 };
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_SharedShapeChecks) {
@@ -254,6 +263,19 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_UpToOneShotThresholdOnWh
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 256));
   EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, 260));
   EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, 512, ncclFloat16));
+}
+
+// The ceiling is this comm's rcclDdaLLOneShotThreshold (the arch table's 32-rank 4 MiB, for one), not the env default.
+TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_UpToOneShotThresholdOfThisComm) {
+  const ncclComm* seen = nullptr;
+  g_rcclDdaLLOneShotThreshold = [&](const ncclComm* c) {
+    seen = c;
+    return size_t{4} << 20;
+  };
+  comm().ddaScratchBytes = 1u << 30;
+  EXPECT_TRUE(Eligible(ddaLLArOneShotEligible, (4u << 20) / 4));
+  EXPECT_EQ(seen, mock_.get());
+  EXPECT_FALSE(Eligible(ddaLLArOneShotEligible, (4u << 20) / 4 + 4));
 }
 
 TEST_F(DdaAllReduceFabricLLMicrotest, LLOneShotEligible_WholeMessageIn16ByteUnitsWithinTheSlot) {
@@ -435,7 +457,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_FourAndEightRanksUnrolledOthersRuntime
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotPassesWholeMessageEpochAndBank) {
   comm().ddaScratchBytes = (64u << 20) + 40;
   const DdaLaunch& launch = RunOneLL(64);
-  EXPECT_EQ(launch.block.x, 512u);
+  EXPECT_EQ(launch.block.x, 256u);
   EXPECT_EQ(launch.stream, kStream);
   EXPECT_EQ(launch.startEvent, nullptr);
   EXPECT_EQ(launch.stopEvent, kStopEvent);
@@ -509,13 +531,13 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_TwoShotPassesShardBytesAndSlices)
   EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
 }
 
-// One-shot LL: a block per 512 packets of the message, capped at ddaFabricMaxBlocks.
+// One-shot LL: a block per 256 packets of the message, capped at ddaFabricMaxBlocks.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_OneShotGridFollowsMessagePackets) {
-  EXPECT_EQ(RunOneLL(1024).grid.x, 1u);
-  EXPECT_EQ(RunOneLL(1028).grid.x, 2u);
+  EXPECT_EQ(RunOneLL(512).grid.x, 1u);
+  EXPECT_EQ(RunOneLL(516).grid.x, 2u);
   EXPECT_EQ(RunOneLL(1024, ncclFloat16).grid.x, 1u);
-  EXPECT_EQ(RunOneLL(1u << 16).grid.x, 64u);
-  EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 1u << 16, ncclFloat32), 64u);
+  EXPECT_EQ(RunOneLL(1u << 16).grid.x, 128u);
+  EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 1u << 16, ncclFloat32), 128u);
   comm().ddaFabricMaxBlocks = 5;
   EXPECT_EQ(RunOneLL(1u << 16).grid.x, 5u);
   EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 1u << 16, ncclFloat32), 5u);
@@ -534,6 +556,25 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_TwoShotGridFollowsShardPackets) {
   EXPECT_EQ(RunOneLL(8 * 6144).grid.x, 2u);
   comm().ddaFabricMaxBlocks = 0;
   EXPECT_EQ(RunOneLL(8 * 6144).grid.x, 1u);
+}
+
+// With no ddaNarrowThreads (DPX, larger SPX comms, no table) the LL one-shot keeps its 512-thread blocks and the
+// spread rule measures a 512-thread one-shot block; the two-shot tiers are 1024 / 512 either way.
+TEST_F(DdaAllReduceFabricLLMicrotest, Run_WithoutNarrowThreadsKeepsTheWideBlocks) {
+  g_rcclDdaFabricNarrowThreads = [](const ncclComm*) { return 0; };
+  comm().ddaFabricMaxBlocks = 256;
+  comm().ddaScratchBytes = 1u << 30;
+  EXPECT_EQ(RunOneLL(1u << 16).block.x, 512u);
+  EXPECT_EQ(Only().grid.x, 64u);
+  EXPECT_EQ(ncclAllReduceDdaFabricLLBlocks(mock_.get(), 1u << 16, ncclFloat32), 64u);
+  comm().nRanks = 16;
+  EXPECT_EQ(RunOneLL(Floats(4096)).kernel, (LLSpread<float, 0>())) << "512 packets x 16 B x 15 = 120 KiB a block";
+  comm().nRanks = 8;
+  OnlyTwoShot();
+  EXPECT_EQ(RunOneLL(8 * 1536).block.x, 1024u);
+  EXPECT_EQ(Only().grid.x, 1u);
+  EXPECT_EQ(RunOneLL128(8 * 8 * kSliceData / 4).block.x, 512u);
+  EXPECT_EQ(Only().grid.x, 1u);
 }
 
 // One-shot LL128: a warp per slice, 16 warps a block.
@@ -568,7 +609,8 @@ constexpr ncclDataType_t kLLTypes[] = {ncclFloat32, ncclFloat16, ncclBfloat16, n
 constexpr size_t kShardBytes[] = {16, 48, 1040, 17 * kSliceData, 3 * 8192 + 16, 65536 + 112, 262144};
 constexpr int kSweepRanks[] = {2, 3, 4, 8, 16};
 
-// The fixed shape of each tier before caps existed: threads per block and threads per unit of work.
+// The fixed shape of each tier before caps existed: threads per block and threads per unit of work. The LL one-shot
+// tier's spread messages run kSpreadThreads-wide blocks instead.
 struct FixedTier {
   bool ll128;
   bool twoShot;
@@ -576,7 +618,8 @@ struct FixedTier {
   unsigned unitThreads;
 };
 constexpr FixedTier kTiers[] = {
-    {false, false, 512, 1}, {false, true, 1024, 1}, {true, false, 512, 32}, {true, true, 512, 32}};
+    {false, false, 256, 1}, {false, true, 1024, 1}, {true, false, 512, 32}, {true, true, 512, 32}};
+constexpr unsigned kSpreadThreads = dda::common::kDdaLLSpreadThreads;
 
 // Units of work a tier covers: LL packets (8B) or LL128 slices, of the message (one-shot) or one shard (two-shot).
 size_t TierUnits(const FixedTier& tier, size_t bytes, int nRanks) {
@@ -629,8 +672,11 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_NoCapKeepsTheFixedShapeInEveryTier) {
   ForEachTierCase([&](int maxBlocks, const FixedTier& tier, int nRanks, ncclDataType_t type, size_t bytes,
                       size_t count) {
     const DdaLaunch launch = RunTier(tier, count, type);
-    EXPECT_EQ(launch.block.x, tier.threads);
-    EXPECT_EQ(launch.grid.x, FixedBlocks(TierUnits(tier, bytes, nRanks), tier.threads, tier.unitThreads, maxBlocks));
+    const size_t units = TierUnits(tier, bytes, nRanks);
+    const unsigned threads =
+        launch.kernel == LLTypeTier(true, type, nRanks) ? kSpreadThreads : tier.threads;
+    EXPECT_EQ(launch.block.x, threads);
+    EXPECT_EQ(launch.grid.x, FixedBlocks(units, threads, tier.unitThreads, maxBlocks));
     const DdaLaunch zero = RunTier(tier, count, type, {0, 0});
     EXPECT_EQ(zero.grid.x, launch.grid.x);
     EXPECT_EQ(zero.block.x, launch.block.x);
@@ -650,23 +696,24 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_CapBoundsTheGridAndTheReporterInEveryT
     for (const rcclDdaLaunchCap& cap : caps) {
       SCOPED_TRACE(testing::Message() << "cap={" << cap.blocks << "," << cap.threads << "}");
       const DdaLaunch capped = RunTier(tier, count, type, cap);
-      const bool narrowedSpread = fixed.kernel == LLTypeTier(true, type, nRanks) && capped.block.x < tier.threads;
+      const bool spread = fixed.kernel == LLTypeTier(true, type, nRanks);
+      const bool narrowedSpread = spread && cap.threads > 0 && cap.threads < kSpreadThreads;
       EXPECT_EQ(capped.kernel, narrowedSpread ? LLTypeTier(false, type, nRanks) : fixed.kernel);
+      const int blockBound = cap.blocks > 0 ? std::min<int>(cap.blocks, maxBlocks) : maxBlocks;
+      const size_t units = TierUnits(tier, bytes, nRanks);
+      const unsigned width = spread && !narrowedSpread ? kSpreadThreads : tier.threads;
       EXPECT_GE(capped.grid.x, 1u);
       EXPECT_LE(capped.grid.x, (unsigned)maxBlocks);
       if (cap.blocks > 0) {
         EXPECT_LE(capped.grid.x, cap.blocks);
       }
-      EXPECT_LE(capped.block.x, tier.threads);
+      EXPECT_LE(capped.block.x, width);
       if (cap.threads >= 64) {
         EXPECT_LE(capped.block.x, cap.threads);
       }
       EXPECT_EQ(capped.block.x % 64, 0u);
       const unsigned threads = capped.block.x;
-      EXPECT_EQ(threads, cap.threads > 0 && cap.threads < tier.threads ? std::max(cap.threads / 64 * 64, 64u)
-                                                                         : tier.threads);
-      const int blockBound = cap.blocks > 0 ? std::min<int>(cap.blocks, maxBlocks) : maxBlocks;
-      const size_t units = TierUnits(tier, bytes, nRanks);
+      EXPECT_EQ(threads, cap.threads > 0 && cap.threads < width ? std::max(cap.threads / 64 * 64, 64u) : width);
       EXPECT_EQ(capped.grid.x, FixedBlocks(units, threads, tier.unitThreads, blockBound))
           << "the capped width sizes the grid";
       EXPECT_EQ(ReportTier(tier, count, type, cap), capped.grid.x * capped.grid.y)
@@ -693,7 +740,7 @@ TEST_F(DdaAllReduceFabricLLMicrotest, Run_LaunchErrorIsReportedFromEveryTier) {
   EXPECT_EQ(g_ddaLaunches.size(), 4u);
 }
 
-// Spread once the one-shot's block wire, 16 B x min(packets, 512) x (n - 1), reaches 96 KiB or its saved wire 4 MiB.
+// Spread once the one-shot's block wire, 16 B x min(packets, 256) x (n - 1), reaches 96 KiB or its saved wire 4 MiB.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadWhereOneShotBlockWireOrSavedWireIsLarge) {
   comm().ddaScratchBytes = 1u << 30;
   struct Case {
@@ -703,12 +750,14 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadWhereOneShotBlockWireOrSavedWi
   };
   const Case cases[] = {
       {16, 2048, false},       // 256 packets x 16 B x 15 = 60 KiB a block
-      {16, 4096, true},        // 512 packets: 120 KiB a block
+      {16, 4096, false},       // still 60 KiB a block, 105 KiB saved
+      {16, 128 << 10, false},  // 3.28 MiB saved
+      {16, 256 << 10, true},   // 6.56 MiB saved
       {32, 1024, false},       // 128 packets x 16 B x 31 = 62 KiB
       {32, 2048, true},        // 124 KiB
-      {12, 4096, false},       // 88 KiB, and 2 x 11 x 10 / 12 x 4 KiB of saved wire
+      {12, 4096, false},       // 44 KiB, and 2 x 11 x 10 / 12 x 4 KiB of saved wire
       {64, 1024, true},        // 126 KiB
-      {8, 256 << 10, false},   // 56 KiB a block, 2.6 MiB saved
+      {8, 256 << 10, false},   // 28 KiB a block, 2.6 MiB saved
       {8, 512 << 10, true},    // 5.25 MiB saved
       {4, 1 << 20, false},     // 3 MiB saved
       {2, 1 << 20, false},     // nothing saved at 2 ranks
@@ -719,20 +768,23 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadWhereOneShotBlockWireOrSavedWi
   }
 }
 
-// Both rules at their exact edges and just below: 96 KiB of block wire at 13 ranks, 4 MiB of saved wire.
+// Both rules at their exact edges and just below: 96 KiB of block wire at 25 ranks, 4 MiB of saved wire.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadRuleEdges) {
-  EXPECT_TRUE(ddaLLArSpreadWins(4096, 13));       // 512 packets x 16 B x 12 = 96 KiB
-  EXPECT_FALSE(ddaLLArSpreadWins(4080, 13));      // 510 packets: 95.625 KiB
-  EXPECT_TRUE(ddaLLArSpreadWins(3 << 20, 3));     // 2 x 2 x 1 / 3 x 3 MiB = 4 MiB
-  EXPECT_FALSE(ddaLLArSpreadWins(1398101, 4));    // 2 x 3 x 2 / 4 x bytes = 4 MiB - 1
-  comm().nRanks = 13;
+  EXPECT_TRUE(ddaLLArSpreadWins(2048, 25, 256));       // 256 packets x 16 B x 24 = 96 KiB
+  EXPECT_FALSE(ddaLLArSpreadWins(2032, 25, 256));      // 254 packets: 95.25 KiB
+  EXPECT_FALSE(ddaLLArSpreadWins(64 << 10, 24, 256));  // a full block: 92 KiB, and 2.8 MiB saved
+  EXPECT_TRUE(ddaLLArSpreadWins(3 << 20, 3, 256));     // 2 x 2 x 1 / 3 x 3 MiB = 4 MiB
+  EXPECT_FALSE(ddaLLArSpreadWins(1398101, 4, 256));    // 2 x 3 x 2 / 4 x bytes = 4 MiB - 1
+  EXPECT_TRUE(ddaLLArSpreadWins(4096, 16, 512));       // 512 packets x 16 B x 15 = 120 KiB
+  EXPECT_FALSE(ddaLLArSpreadWins(4096, 16, 256));      // 256 packets: 60 KiB
+  comm().nRanks = 25;
   comm().ddaScratchBytes = 1u << 30;
-  EXPECT_EQ(RunOneLL(Floats(4096)).kernel, (LLSpread<float, 0>()));
-  EXPECT_EQ(RunOneLL(Floats(4080)).kernel, (LLOneShot<float, 0>()));
+  EXPECT_EQ(RunOneLL(Floats(2048)).kernel, (LLSpread<float, 0>()));
+  EXPECT_EQ(RunOneLL(Floats(2032)).kernel, (LLOneShot<float, 0>()));
 }
 
-// The spread runs on exactly the one-shot's grid, which the reporter also returns.
-TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesTheOneShotGridAndArguments) {
+// The spread runs its own grid of kSpreadThreads-wide blocks, which the reporter also returns.
+TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesItsOwnGridAndArguments) {
   comm().nRanks = 32;
   comm().ddaScratchBytes = (256u << 20) + 40;
   for (size_t bytes : {size_t{2048}, size_t{64} << 10, size_t{1} << 20}) {
@@ -758,13 +810,17 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesTheOneShotGridAndArgument
   }
   comm().ddaFabricMaxBlocks = 5;
   EXPECT_EQ(RunOneLL(Floats(1 << 20)).grid.x, 5u);
+  comm().ddaFabricMaxBlocks = 256;
+  const DdaLaunch& oneShot = RunOneLL(Floats(1024));  // 128 packets: 62 KiB a block keeps the one-shot
+  ASSERT_EQ(oneShot.kernel, (LLOneShot<float, 0>()));
+  EXPECT_EQ(oneShot.block.x, 256u);
 }
 
 // Shards need not be equal: a rank count that does not divide the message gives the last ranks shorter shards.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadTakesUnevenShards) {
-  comm().nRanks = 24;
+  comm().nRanks = 25;
   comm().ddaScratchBytes = 1u << 30;
-  EXPECT_EQ(RunOneLL(Floats(8192)).kernel, (LLSpread<float, 0>()));   // 1024 packets: 23 shards of 43, one of 35
+  EXPECT_EQ(RunOneLL(Floats(8192)).kernel, (LLSpread<float, 0>()));   // 1024 packets: 24 shards of 41, one of 40
   comm().nRanks = 64;
   EXPECT_EQ(RunOneLL(Floats(784)).kernel, (LLSpread<float, 0>()));    // 98 packets: 49 shards of 2, 15 empty
   comm().nRanks = 12;
@@ -786,11 +842,43 @@ TEST_F(DdaAllReduceFabricLLMicrotest, LLSpreadSelected_ShardMustFitTheTwoShotSlo
   EXPECT_FALSE(ddaLLArSpreadSelected(mock_.get(), 1u << 20, kFull - 64)) << "a narrowed block keeps the one-shot";
 }
 
+// A spread block's slice is the even split rounded up to a multiple of 16 packets (256 B of LL lines); an even split
+// below 16 packets is kept.
+TEST_F(DdaAllReduceFabricLLMicrotest, LLSpreadBlockPkts_EvenSplitRoundedUpTo16Packets) {
+  using dda::common::ddaLLSpreadBlockPkts;
+  constexpr size_t kAlign = dda::common::kDdaLLSpreadBlockAlignPkts;
+  static_assert(kAlign == 16, "16 packets: 256 B of LL lines");
+  EXPECT_EQ(ddaLLSpreadBlockPkts(6656, 192), 48u) << "16 ranks, 832 KiB: 35 packets a block unrounded";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(8192, 192), 48u) << "16 ranks, 1 MiB: 43 unrounded";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(14336, 192), 80u) << "8 ranks, 896 KiB: 75 unrounded";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(6144, 192), 32u) << "16 ranks, 768 KiB: already a multiple of 16";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(256, 16), 16u) << "32 ranks, 64 KiB: already 16";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(512, 64), 8u) << "64 ranks, 256 KiB: 8 packets kept, all 64 blocks busy";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(2048, 192), 11u) << "64 ranks, 1 MiB: 11 kept, 187 blocks busy";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(911, 192), 5u) << "144 ranks, 1 MiB: 5 kept, one LDS pass of 14";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(1, 192), 1u) << "a short shard keeps its 1 packet";
+  EXPECT_EQ(ddaLLSpreadBlockPkts(0, 192), 0u) << "an empty shard gives every block an empty slice";
+  for (size_t shard : {1u, 5u, 17u, 256u, 308u, 4096u, 14336u, 28672u, 87382u}) {
+    for (size_t blocks : {1u, 2u, 7u, 128u, 192u}) {
+      SCOPED_TRACE(::testing::Message() << shard << " packets on " << blocks << " blocks");
+      const size_t even = (shard + blocks - 1) / blocks;
+      const size_t got = ddaLLSpreadBlockPkts(shard, blocks);
+      if (even < kAlign) {
+        EXPECT_EQ(got, even);
+      } else {
+        EXPECT_EQ(got % kAlign, 0u);
+        EXPECT_GE(got, even);
+        EXPECT_LT(got, even + kAlign);
+      }
+    }
+  }
+}
+
 // A cap that narrows the blocks keeps the one-shot; one that lowers only the blocks runs the spread on the capped grid.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsFullWidthBlocksUnderACap) {
   comm().nRanks = 32;
   comm().ddaScratchBytes = 1u << 30;
-  const size_t count = Floats(1 << 20);  // 131072 packets: 256 one-shot blocks uncapped
+  const size_t count = Floats(1 << 20);  // 131072 packets: 256 spread blocks uncapped
   ASSERT_EQ(RunOneLL(count).kernel, (LLSpread<float, 0>()));
   for (uint32_t threads : {64u, 256u, 448u, 511u}) {
     const DdaLaunch& narrowed = RunOneLL(count, ncclFloat32, {0, threads});
@@ -808,12 +896,12 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadNeedsFullWidthBlocksUnderACap)
 
 // Every datatype has its own spread kernel.
 TEST_F(DdaAllReduceFabricLLMicrotest, RunLL_SpreadEachDatatypeLaunchesItsOwnKernel) {
-  comm().nRanks = 16;
+  comm().nRanks = 32;
   comm().ddaScratchBytes = 1u << 30;
-  EXPECT_EQ(RunOneLL(4096 / 2, ncclFloat16).kernel, (LLSpread<half, 0>()));
-  EXPECT_EQ(RunOneLL(4096 / 2, ncclBfloat16).kernel, (LLSpread<bf16, 0>()));
-  EXPECT_EQ(RunOneLL(4096, ncclFloat8e4m3).kernel, (LLSpread<dda::common::fp8e4m3, 0>()));
-  EXPECT_EQ(RunOneLL(4096, ncclFloat8e5m2).kernel, (LLSpread<dda::common::fp8e5m2, 0>()));
+  EXPECT_EQ(RunOneLL(2048 / 2, ncclFloat16).kernel, (LLSpread<half, 0>()));
+  EXPECT_EQ(RunOneLL(2048 / 2, ncclBfloat16).kernel, (LLSpread<bf16, 0>()));
+  EXPECT_EQ(RunOneLL(2048, ncclFloat8e4m3).kernel, (LLSpread<dda::common::fp8e4m3, 0>()));
+  EXPECT_EQ(RunOneLL(2048, ncclFloat8e5m2).kernel, (LLSpread<dda::common::fp8e5m2, 0>()));
 }
 
 // ---- LDS-staged LL128 wire writer ----
@@ -906,6 +994,191 @@ TEST_F(DdaAllReduceFabricLLMicrotest, RunLL128_StagedKernelsPerRankCountAndDatat
   EXPECT_EQ(RunOneLL128(16 * kMiB / 2, ncclFloat16).kernel, (LL128TwoShotW<half, 8, kAsync>()));
   EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e4m3).kernel, (LL128TwoShotW<dda::common::fp8e4m3, 8, kAsync>()));
   EXPECT_EQ(RunOneLL128(16 * kMiB, ncclFloat8e5m2).kernel, (LL128TwoShotW<dda::common::fp8e5m2, 8, kAsync>()));
+}
+
+// ---- Peer-parallel LL128 kernels (RCCL_DDA_LL128_AR_PEER_PARALLEL, on by default) ----
+
+template <typename T, int N>
+const void* LL128OneShotPP() {
+  return KernelPtr(&dda::common::ddaAllReduceFlatLL128PeerPar<T, N>);
+}
+template <typename T, int N>
+const void* LL128TwoShotPP() {
+  return KernelPtr(&dda::common::ddaAllReduceTwoShotLL128PeerPar<T, N>);
+}
+
+// Floats in `slices` LL128 slices.
+constexpr size_t SliceFloats(size_t slices) {
+  return slices * kSliceData / 4;
+}
+
+// The peer-parallel launch shape: a group of one warp per rank (at most the block) per block, the block doubling up
+// to 512 threads only while the group-per-block grid would pass the block cap.
+struct PeerParShape {
+  unsigned threads;
+  unsigned blocks;
+};
+PeerParShape PeerParModel(int nRanks, size_t slices, int maxBlocks, rcclDdaLaunchCap cap) {
+  const unsigned maxThreads = dda::common::ddaCapThreads(512, cap.threads);
+  const unsigned group = std::min<unsigned>((unsigned)nRanks, maxThreads / 32) * 32;
+  const size_t blockCap = dda::common::ddaCapBlocks((size_t)std::max(maxBlocks, 1), cap.blocks);
+  unsigned threads = group;
+  while (threads * 2 <= maxThreads && (slices + threads / group - 1) / (threads / group) > blockCap) {
+    threads *= 2;
+  }
+  const size_t groups = threads / group;
+  const size_t blocks = std::min((slices + groups - 1) / groups, blockCap);
+  return {threads, (unsigned)std::max<size_t>(blocks, 1)};
+}
+
+// The production default: peer-parallel on.
+class DdaAllReduceFabricLL128PeerParMicrotest : public DdaAllReduceFabricLLMicrotest {
+ protected:
+  void SetUp() override {
+    DdaAllReduceFabricLLMicrotest::SetUp();
+    pinned_.clear();
+  }
+};
+
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_BothShotsTakeThePeerParallelKernelOfEachDatatype) {
+  EXPECT_EQ(RunOneLL128(64).kernel, (LL128OneShotPP<float, 8>()));
+  EXPECT_EQ(RunOneLL128(64, ncclFloat16).kernel, (LL128OneShotPP<half, 8>()));
+  EXPECT_EQ(RunOneLL128(64, ncclBfloat16).kernel, (LL128OneShotPP<bf16, 8>()));
+  EXPECT_EQ(RunOneLL128(256, ncclFloat8e4m3).kernel, (LL128OneShotPP<dda::common::fp8e4m3, 8>()));
+  EXPECT_EQ(RunOneLL128(256, ncclFloat8e5m2).kernel, (LL128OneShotPP<dda::common::fp8e5m2, 8>()));
+  OnlyTwoShot();
+  EXPECT_EQ(RunOneLL128(256).kernel, (LL128TwoShotPP<float, 8>()));
+  EXPECT_EQ(RunOneLL128(512, ncclFloat16).kernel, (LL128TwoShotPP<half, 8>()));
+  EXPECT_EQ(RunOneLL128(512, ncclBfloat16).kernel, (LL128TwoShotPP<bf16, 8>()));
+  EXPECT_EQ(RunOneLL128(2048, ncclFloat8e4m3).kernel, (LL128TwoShotPP<dda::common::fp8e4m3, 8>()));
+  EXPECT_EQ(RunOneLL128(2048, ncclFloat8e5m2).kernel, (LL128TwoShotPP<dda::common::fp8e5m2, 8>()));
+}
+
+// RCCL_DDA_LL128_AR_PEER_PARALLEL=0 restores the one-warp-per-slice kernels and their 512-thread blocks.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_OffSwitchRestoresTheFlatKernels) {
+  params_["RCCL_DDA_LL128_AR_PEER_PARALLEL"] = 0;
+  const DdaLaunch& one = RunOneLL128(64);
+  EXPECT_EQ(one.kernel, (LL128OneShot<float, 8>()));
+  EXPECT_EQ(one.block.x, 512u);
+  OnlyTwoShot();
+  const DdaLaunch& two = RunOneLL128(256);
+  EXPECT_EQ(two.kernel, (LL128TwoShot<float, 8>()));
+  EXPECT_EQ(two.block.x, 512u);
+}
+
+// A block holds one warp group, one warp per rank up to 16 warps: 64 / 96 / 128 / 256 / 512 threads at 2 / 3 / 4 / 8 /
+// 16+ ranks, so one slice is one block.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_BlockIsOneWarpGroup) {
+  const struct {
+    int nRanks;
+    unsigned threads;
+  } cases[] = {{2, 64}, {3, 96}, {4, 128}, {8, 256}, {16, 512}, {32, 512}};
+  for (const auto& c : cases) {
+    comm().nRanks = c.nRanks;
+    const DdaLaunch& one = RunOneLL128(16);
+    EXPECT_EQ(one.block.x, c.threads) << "nRanks " << c.nRanks;
+    EXPECT_EQ(one.grid.x, 1u) << "nRanks " << c.nRanks;
+    EXPECT_EQ(one.sharedMemBytes, c.threads / 32 * kSliceWire) << "a wire slice of LDS per warp, nRanks " << c.nRanks;
+    EXPECT_EQ(RunOneLL128(SliceFloats(17)).grid.x, 17u) << "a block per slice, nRanks " << c.nRanks;
+  }
+}
+
+// Blocks widen, two groups then four, only once a group per block would pass the block cap; past that they loop.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_BlocksWidenOnlyPastTheBlockCap) {
+  comm().nRanks = 4;  // 128-thread groups
+  comm().ddaFabricMaxBlocks = 2;
+  const struct {
+    size_t slices;
+    unsigned threads;
+    unsigned blocks;
+  } cases[] = {{2, 128, 2}, {3, 256, 2}, {4, 256, 2}, {5, 512, 2}, {100, 512, 2}};
+  for (const auto& c : cases) {
+    const DdaLaunch& one = RunOneLL128(SliceFloats(c.slices));
+    EXPECT_EQ(one.block.x, c.threads) << "slices " << c.slices;
+    EXPECT_EQ(one.grid.x, c.blocks) << "slices " << c.slices;
+    EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), SliceFloats(c.slices), ncclFloat32), c.blocks);
+  }
+  OnlyTwoShot();
+  const DdaLaunch& two = RunOneLL128(4 * SliceFloats(3));  // three slices a shard
+  EXPECT_EQ(two.block.x, 256u);
+  EXPECT_EQ(two.grid.x, 2u);
+}
+
+// Every LL128 sweep case: uncapped, the launch is the peer-parallel shape. Capped, DDA runs another backend's call,
+// so the launch is the one RCCL_DDA_LL128_AR_PEER_PARALLEL=0 gives under the same cap. The reporter reports its grid.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_PeerParallelOnlyUncapped) {
+  const rcclDdaLaunchCap caps[] = {{1, 64}, {3, 192}, {17, 256}, {3, 0},  {0, 192},
+                                   {17, 96}, {2, 1024}, {0, 64}, {0, 480}, {1, 32}, {0, 1}};
+  ForEachTierCase([&](int maxBlocks, const FixedTier& tier, int nRanks, ncclDataType_t type, size_t bytes,
+                      size_t count) {
+    if (!tier.ll128) {
+      return;
+    }
+    const DdaLaunch uncapped = RunTier(tier, count, type);
+    const PeerParShape shape = PeerParModel(nRanks, TierUnits(tier, bytes, nRanks), maxBlocks, {});
+    EXPECT_EQ(uncapped.block.x, shape.threads);
+    EXPECT_EQ(uncapped.grid.x, shape.blocks);
+    EXPECT_EQ(ReportTier(tier, count, type, {}), uncapped.grid.x * uncapped.grid.y);
+    for (const rcclDdaLaunchCap& cap : caps) {
+      SCOPED_TRACE(testing::Message() << "cap={" << cap.blocks << "," << cap.threads << "}");
+      params_["RCCL_DDA_LL128_AR_PEER_PARALLEL"] = 0;
+      const DdaLaunch flat = RunTier(tier, count, type, cap);
+      params_.erase("RCCL_DDA_LL128_AR_PEER_PARALLEL");
+      const DdaLaunch launch = RunTier(tier, count, type, cap);
+      EXPECT_EQ(launch.kernel, flat.kernel);
+      EXPECT_EQ(launch.block.x, flat.block.x);
+      EXPECT_EQ(launch.grid.x, flat.grid.x);
+      EXPECT_EQ(launch.sharedMemBytes, flat.sharedMemBytes);
+      EXPECT_EQ(ReportTier(tier, count, type, cap), launch.grid.x * launch.grid.y);
+    }
+  });
+}
+
+// The two-shot is peer-parallel with the cooperative writer only: from a 2 MiB shard, RCCL_DDA_LL128_ASYNC_WIRE=1 on a
+// gfx1250 wave32 comm keeps the staged one-warp-per-slice kernel on its 512-thread blocks.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, RunLL128_TwoShotPeerParallelOnlyWithTheCooperativeWriter) {
+  params_["RCCL_DDA_LL128_ASYNC_WIRE"] = 1;
+  comm().WarpSize = 32;
+  const size_t big = 16 * kMiB / 4;  // 8 ranks: a 2 MiB shard, two-shot
+  const DdaLaunch& staged = RunOneLL128(big);
+  EXPECT_EQ(staged.kernel, (LL128TwoShotW<float, 8, kAsync>()));
+  EXPECT_EQ(staged.block.x, 512u);
+  EXPECT_GT(staged.sharedMemBytes, 0u);
+  EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), big, ncclFloat32), staged.grid.x);
+  const DdaLaunch& below = RunOneLL128(big - 8 * 4);  // one 16 B chunk short of a 2 MiB shard
+  EXPECT_EQ(below.kernel, (LL128TwoShotPP<float, 8>()));
+  EXPECT_EQ(below.sharedMemBytes, below.block.x / 32 * kSliceWire) << "the fold's slice per warp";
+  comm().WarpSize = 64;
+  EXPECT_EQ(RunOneLL128(big).kernel, (LL128TwoShotPP<float, 8>())) << "no staged writer on wave64";
+  EXPECT_EQ(RunOneLL128(64).kernel, (LL128OneShotPP<float, 8>())) << "the one-shot never stages";
+}
+
+// Past the rank-scaled cap the one-shot gives way, but only to a two-shot that splits the message into whole 16 B
+// shards; anything else stays on the one-shot up to RCCL_DDA_LL128_ONESHOT_THRESHOLD. A capped launch keeps that
+// unscaled cap.
+TEST_F(DdaAllReduceFabricLL128PeerParMicrotest, LL128OneShotEligible_PastTheRankScaledCapOnlyForTheTwoShot) {
+  comm().nRanks = 4;
+  const ncclComm* seen = nullptr;
+  g_rcclDdaLL128OneShotThreshold = [&](const ncclComm* c) {
+    seen = c;
+    return 1 * kMiB;  // 4 MiB / 4 ranks
+  };
+  EXPECT_TRUE(Eligible(ddaLL128ArOneShotEligible, kMiB / 4));
+  const size_t splits = kMiB / 4 + 16;  // 4 shards of 256 KiB + 16 B
+  EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, splits));
+  EXPECT_EQ(seen, mock_.get());
+  EXPECT_TRUE(Eligible(ddaLL128ArTwoShotEligible, splits));
+  EXPECT_EQ(RunOneLL128(splits).kernel, (LL128TwoShotPP<float, 4>()));
+  const size_t ragged = kMiB / 4 + 4;  // shards of 256 KiB + 4 B
+  EXPECT_FALSE(Eligible(ddaLL128ArTwoShotEligible, ragged));
+  EXPECT_TRUE(Eligible(ddaLL128ArOneShotEligible, ragged));
+  EXPECT_EQ(RunOneLL128(ragged).kernel, (LL128OneShotPP<float, 4>()));
+  EXPECT_TRUE(Eligible(ddaLL128ArOneShotEligible, 4 * kMiB / 4 - 4)) << "ragged, at the unscaled cap";
+  EXPECT_FALSE(Eligible(ddaLL128ArOneShotEligible, 4 * kMiB / 4 + 4)) << "ragged, past the unscaled cap";
+  const rcclDdaLaunchCap cap{2, 256};
+  const DdaLaunch& capped = RunOneLL128(splits, ncclFloat32, cap);
+  EXPECT_EQ(capped.kernel, (LL128OneShot<float, 4>())) << "capped: the one-warp one-shot";
+  EXPECT_EQ(ncclAllReduceDdaFabricLL128Blocks(mock_.get(), splits, ncclFloat32, cap), capped.grid.x);
 }
 
 }  // namespace

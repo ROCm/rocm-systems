@@ -4,8 +4,10 @@
 #pragma once
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
+#include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
 #include "rocjitsu/vm/plugins/race_detector/core/instruction_snapshot.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "util/result.h"
@@ -27,15 +29,18 @@ struct CounterCapacities {
   /// Combined counters of the pre-GFX12 targets.
   int vmcnt = 0;
   int lgkmcnt = 0;
-  /// Split counters of gfx1250. On the pre-GFX12 capacity targets, the split
-  /// counter names in decoded metadata alias the combined counters instead.
-  /// RDNA4 has split counters, but its capacity is not modeled.
+  /// Capacities of the split counters implemented on the target.
   int loadcnt = 0;
   int storecnt = 0;
   int dscnt = 0;
   int kmcnt = 0;
   int asynccnt = 0;
   int tensorcnt = 0;
+  int samplecnt = 0;
+  int bvhcnt = 0;
+  int expcnt = 0;
+  bool compact_counter_only_issues = false;
+  bool split_wait_counters = false;
 
   /// Capacity of a split counter, or zero for a combined or unmodeled one.
   [[nodiscard]] constexpr int split(amdgpu::WaitCounterType type) const {
@@ -52,6 +57,12 @@ struct CounterCapacities {
       return asynccnt;
     case amdgpu::WaitCounterType::TENSORCNT:
       return tensorcnt;
+    case amdgpu::WaitCounterType::SAMPLECNT:
+      return samplecnt;
+    case amdgpu::WaitCounterType::BVHCNT:
+      return bvhcnt;
+    case amdgpu::WaitCounterType::EXPCNT:
+      return expcnt;
     default:
       return 0;
     }
@@ -68,13 +79,18 @@ struct CounterCapacities {
 /// counter, so each holds 2^n - 1 tokens: 63, or 31 for KMcnt.
 /// The wait policy shared with the core memory-wait checker caps a wait at one
 /// below that all-ones value, so its maximum plus one is the same capacity.
-[[nodiscard]] inline constexpr CounterCapacities counterCapacitiesForArch(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr CounterCapacities
+counterCapacitiesForArch(rocjitsu::IsaFamily arch) {
   const auto properties = isa_properties(arch);
   CounterCapacities capacities{
       .vmcnt = properties.vmcnt_capacity,
       .lgkmcnt = properties.lgkmcnt_capacity,
+      .compact_counter_only_issues =
+          arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2,
+      .split_wait_counters =
+          arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5,
   };
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (capacities.split_wait_counters) {
     const auto capacity = [](amdgpu::WaitCounterKind kind) {
       return static_cast<int>(amdgpu::WaitCounterPolicy::maximum_dependency_wait(
                  amdgpu::WaitcntModel::SplitGfx12, kind)) +
@@ -84,8 +100,14 @@ struct CounterCapacities {
     capacities.storecnt = capacity(amdgpu::WaitCounterKind::Store);
     capacities.dscnt = capacity(amdgpu::WaitCounterKind::Ds);
     capacities.kmcnt = capacity(amdgpu::WaitCounterKind::Km);
-    capacities.asynccnt = capacity(amdgpu::WaitCounterKind::Async);
-    capacities.tensorcnt = capacity(amdgpu::WaitCounterKind::Tensor);
+    if (arch == rocjitsu::IsaFamily::Cdna5) {
+      capacities.asynccnt = capacity(amdgpu::WaitCounterKind::Async);
+      capacities.tensorcnt = capacity(amdgpu::WaitCounterKind::Tensor);
+    } else {
+      capacities.samplecnt = capacity(amdgpu::WaitCounterKind::Sample);
+      capacities.bvhcnt = capacity(amdgpu::WaitCounterKind::Bvh);
+      capacities.expcnt = capacity(amdgpu::WaitCounterKind::Exp);
+    }
   }
   return capacities;
 }
@@ -102,6 +124,15 @@ class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
 
+  /// A retained unavailable issue blocks the wave until it completes or is
+  /// rewound. Keep its changes separate even when the same PC executes again.
+  void beginRoutedIssue(const Instruction &inst);
+  void finishRoutedIssue();
+  void cancelRoutedIssue(const Instruction &inst);
+
+  /// An empty-EXEC ordinary memory operation can skip a counter that is already idle.
+  [[nodiscard]] bool hasPendingCounter(amdgpu::WaitCounterType) const;
+
   /// Apply the issue backpressure required before an instruction adds one
   /// token to a finite hardware counter. Call before operand checks when the
   /// counter is known statically, or after routing for address-dependent FLAT.
@@ -110,6 +141,12 @@ public:
 
   /// Apply backpressure to every counter incremented by a resolved issue.
   util::Result prepareForMemoryIssue(const amdgpu::MemoryIssueInfo &);
+
+  /// GDS reads its sources at grant. Remember a producer for each lane
+  /// until EXPCNT drains, independently of the LGKMCNT result.
+  void lockGdsVgpr(InstructionSnapshot instruction, int reg, uint64_t lanes);
+  void lockGdsExec(InstructionSnapshot instruction);
+  void checkGdsExecWrite() const;
 
   /// Register an in-flight memory event that does not involve LDS.
   /// \param instruction Complete captured encoding and PC of the producing instruction.
@@ -126,7 +163,8 @@ public:
   void registerEvent(InstructionSnapshot instruction, MemoryEventType type,
                      std::vector<uint32_t> registers, uint64_t execMask, uint8_t byteMask,
                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                     MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0);
+                     VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
+                     ConditionalVgprWrite feedback = {});
 
   /// Register an in-flight scalar load using its architectural destination.
   void registerScalarLoad(InstructionSnapshot instruction, RegisterRef destination,
@@ -147,24 +185,24 @@ public:
   /// Bits outside execMask are ignored; zero records no LDS intervals.
   /// elementBytes selects the execution granularity at the backing boundary;
   /// zero treats the whole per-lane access as one element.
-  void registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
-                        std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
-                        std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
-                        uint8_t byteMask,
-                        std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                        MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
-                        int elementBytes = 0, LdsAccess ldsAccess = {});
+  EventId registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
+                           std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
+                           std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
+                           uint8_t byteMask,
+                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                           VgprWriteOrder writeOrder, uint64_t ldsLaneMask = ~uint64_t{0},
+                           int elementBytes = 0, LdsAccess ldsAccess = {});
   /// Register two LDS address sets per lane. elementBytes selects the granularity
   /// of complete elements retained at the backing boundary; zero treats the
   /// whole per-lane access in each address set as one element.
-  void registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
-                        std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
-                        std::span<const uint32_t> firstLaneBaseAddresses,
-                        std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane,
-                        uint8_t byteMask,
-                        std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                        MemoryOrderClass memoryOrder, int elementBytes = 0,
-                        LdsAccess ldsAccess = {});
+  EventId registerLdsEvent(InstructionSnapshot instruction, MemoryEventType type,
+                           std::vector<uint32_t> registers, uint64_t execMask, int waveSize,
+                           std::span<const uint32_t> firstLaneBaseAddresses,
+                           std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane,
+                           uint8_t byteMask,
+                           std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                           MemoryOrderClass memoryOrder, int elementBytes = 0,
+                           LdsAccess ldsAccess = {});
 
   /// Register an LDS event described by byte ranges rather than lanes, such as
   /// a tensor DMA transfer. The event has no registers. Each range is retained
@@ -187,45 +225,91 @@ public:
   ///   UNORDERED, since the ISA does not specify the timing of its LDS
   ///   accesses; passing TENSOR would skip conflicts with the wave's own
   ///   pending transfers.
-  void registerLdsRangeEvent(InstructionSnapshot instruction, MemoryEventType type,
-                             std::span<const LdsByteRange> ranges,
-                             std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                             MemoryOrderClass memoryOrder);
+  /// @returns The allocated event ID, or an invalid ID if no event was created.
+  EventId registerLdsRangeEvent(InstructionSnapshot instruction, MemoryEventType type,
+                                std::span<const LdsByteRange> ranges,
+                                std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                                MemoryOrderClass memoryOrder);
 
   /// @brief Register an event using the caller's finalized LDS intervals.
   /// @details Intervals must contain only accessed bytes within the LDS backing
   /// and, for FLAT, the workgroup allocation, with endpoints that fit in int.
   /// This does not clip ranges or validate conflicts; validate before registering.
   /// Empty intervals retain the event's register and counter dependencies.
-  void registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
-                                  std::vector<uint32_t> registers, uint64_t execMask,
-                                  uint8_t byteMask, IntervalSet ldsIntervals,
-                                  std::span<const amdgpu::MemoryCounterObligation>,
-                                  MemoryOrderClass memoryOrder, uint8_t lastRegisterByteMask = 0,
-                                  LdsAccess ldsAccess = {});
+  /// @returns The allocated event ID, or an invalid ID if no event was created.
+  EventId registerEventWithIntervals(InstructionSnapshot instruction, MemoryEventType,
+                                     std::vector<uint32_t> registers, uint64_t execMask,
+                                     uint8_t byteMask, IntervalSet ldsIntervals,
+                                     std::span<const amdgpu::MemoryCounterObligation>,
+                                     VgprWriteOrder writeOrder, uint8_t lastRegisterByteMask = 0,
+                                     LdsAccess ldsAccess = {}, ConditionalVgprWrite feedback = {},
+                                     bool pendingLdsAccess = false);
 
   /// Dispatch the counter thresholds changed by one wait instruction.
   void dispatch(const PendingWaitCount &);
+
+  /// Retire the LDS events of this wave whose LDS access completed in barrier
+  /// epochs up to `epoch`. Events are kept in that order, so these are a
+  /// prefix.
+  void retireReleasedThrough(uint32_t epoch);
 
   /// Check a synchronous VALU source against older writers and remember the
   /// completed read until a barrier publishes it to peer waves.
   void recordLdsOperandRead(InstructionSnapshot instruction, uint32_t address, uint32_t bytes,
                             uint32_t lane);
 
-  /// Retire non-trimmable events whose owning wave completed them before a workgroup barrier.
-  void flushBarrierPendingEvents();
+  /// Forget which LDS DWORDs this wave has read as operands, so that its next
+  /// read of each is recorded again. Called when the wave signals a barrier or
+  /// arrives at an LDS barrier cell: reads recorded before that release are
+  /// released by it, later ones are not.
+  void forgetLdsOperandReads() { directLdsReadWidths.clear(); }
+
+  /// Hand off, in the wave's handoff epoch `epoch` of `kind`, the wave's
+  /// in-flight LDS accesses that an arrival of `kind` at an LDS barrier cell is
+  /// ordered after, so they have executed in LDS when the arrival does (CDNA5
+  /// ISA 11.2.2):
+  /// - Ds: its DS operations, and the LDS lanes of its FLAT operations. The
+  ///   arrive "is ordered with other LDS operations", "LDS instructions are
+  ///   kept in order" (CDNA5 ISA 5.7.1.4), and "FLAT and LDS instructions
+  ///   issued from a single wave stay in order as they move through LDS"
+  ///   (CDNA5 ISA 5.7.1.3).
+  /// - Async: its async loads to LDS, and its earlier async arrives. The arrive
+  ///   executes "only when all previously issued asynchronous loads have
+  ///   completed" (CDNA5 ISA 15.15). Async stores are not included: they
+  ///   complete out of order with async loads (CDNA5 ISA 10.8).
+  /// - Tensor: its tensor transfers, which "complete in-order with other Tensor
+  ///   instructions from the same wave" (CDNA5 ISA 10.11.1). The arrival is
+  ///   sent when its own transfer completes (CDNA5 ISA 10.11.3), and the wave
+  ///   issues nothing between a transfer and its arrival.
+  /// Accesses of any other class stay in flight until the wave waits for them.
+  /// That includes a tensor transfer at an async arrive, where the ISA is not
+  /// consistent. The async arrive "follows previous async operations including
+  /// TDM" (CDNA5 ISA 11.2.2), and a transfer sends its own arrival "to keep
+  /// ordering of operations between descriptors of the same wave" (CDNA5 ISA
+  /// 10.11.3). But tensor instructions "are unordered with respect to other
+  /// types of memory instructions" (CDNA5 ISA 10.11.1), and the arrive waits
+  /// only for "all previously issued asynchronous loads" (CDNA5 ISA 15.15).
+  /// The detector takes the reading that hides no race: an async arrive does
+  /// not hand off a tensor transfer, and a transfer's arrival does not hand off
+  /// an async load.
+  void handOffPending(BarrierCellArrival kind, uint32_t epoch);
 
   /// Check a VGPR read by a set of lanes for races. Calls the RaceHandler on violation.
   void checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
 
+  /// GDS source locks and outstanding VMEM results have independent lifetimes.
+  bool needsVgprWriteCheck(int reg) const {
+    return !vgprMemoryEvents[reg].empty() || !gdsVgprLocks.empty();
+  }
+
   /// Check a VGPR instruction write for conflicts with pending asynchronous
-  /// loads targeting the same register bytes and lanes in laneMask.
+  /// loads or locked GDS export sources touching the same register bytes and lanes.
   void checkVgprWriteLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
 
   /// Check an asynchronous memory destination write. On supported targets,
   /// operations in the same non-UNORDERED class cannot overtake one another.
   void checkVgprWrite(int reg, uint64_t execMask, uint8_t byteMask,
-                      MemoryOrderClass currentMemoryOrder) const;
+                      VgprWriteOrder writeOrder) const;
 
   /// Check a scalar register read for races. Calls the RaceHandler on
   /// violation (outstanding scalar load targeting the same register).
@@ -241,6 +325,13 @@ public:
 
   const std::vector<EventId> &getBarrierPendingEvents() const { return barrierPendingEvents; }
 
+  /// Whether retained LDS history could overlap [start, end). The bounds may
+  /// include retired prefixes, but never exclude a retained access.
+  bool barrierPendingMayOverlap(int start, int end) const {
+    return !barrierPendingEvents.empty() && start < barrierPendingBounds.end &&
+           barrierPendingBounds.start < end;
+  }
+
   RaceDetector *getDetector() { return detector; }
   const RaceDetector *getDetector() const { return detector; }
 
@@ -248,26 +339,47 @@ public:
 
 private:
   void retireEventRegisters(EventId);
+  /// Keep an event whose LDS access has completed until a barrier orders it
+  /// for the other waves, recording the barrier epoch it completed in.
+  void queueForBarrier(EventId);
   void checkScalarAccess(RegisterRef reg, bool isWrite) const;
-
-  /// The counter whose capacity a token of `type` counts against: the split counter
-  /// itself when it has a capacity, else the combined counter it aliases.
-  amdgpu::WaitCounterType capacityCounterFor(amdgpu::WaitCounterType type) const;
 
   template <typename Pred>
   void satisfyOldestCounterObligations(int count, amdgpu::WaitCounterType, Pred matches);
   void applyCounterConstraint(amdgpu::WaitCounterType type, int maximumRemaining,
                               bool includeUnordered);
   void applyWaitCounter(amdgpu::WaitCounterType type, int threshold);
+  amdgpu::WaitCounterType architecturalCounter(amdgpu::WaitCounterType type) const;
   int doNotWaitValue(amdgpu::WaitCounterType type) const;
+
+  const Instruction *routedInstruction = nullptr;
+  int firstRoutedEvent = 0;
+  std::optional<size_t> priorGdsLocks;
+  bool hadGdsExecLock = false;
+  EventRegistry::RoutedChanges routedChanges;
+
+  struct GdsVgprLock {
+    int reg;
+    uint64_t lanes;
+    InstructionSnapshot instruction;
+  };
+  std::vector<GdsVgprLock> gdsVgprLocks;
+  std::optional<InstructionSnapshot> gdsExecLock;
+  void checkGdsVgprWrite(int reg, uint64_t lanes) const;
+  void reportGdsSourceWrite(RaceViolation::Space space, int reg, int lane,
+                            const InstructionSnapshot &source) const;
 
   std::vector<std::vector<EventId>> vgprMemoryEvents;
   std::vector<std::vector<EventId>> sgprMemoryEvents;
   std::vector<std::vector<EventId>> ttmpMemoryEvents;
 
   std::vector<EventId> waveMemoryEvents;
-  std::unordered_map<uint32_t, uint8_t> directLdsReadWidths;
   std::vector<EventId> barrierPendingEvents;
+  /// Conservative bounds avoid scanning another group's history when its
+  /// LDS tile is disjoint. Reset when starting a new, previously empty history.
+  Interval barrierPendingBounds{0, 0};
+  // GFX10 direct reads cover the first 1, 2, or 4 bytes of an aligned DWORD.
+  std::unordered_map<uint32_t, uint8_t> directLdsReadWidths;
 
   CounterCapacities counterCapacities;
 

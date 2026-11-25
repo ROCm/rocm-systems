@@ -25,7 +25,7 @@ struct ProbeGuard<'a> {
     /// Native cleanup has not yet been established.
     armed: bool,
     /// Shared generation health retained by runtime teardown.
-    health: &'a crate::runtime::GenerationHealth,
+    health: &'a crate::session::SessionHealth,
 }
 
 impl Drop for ProbeGuard<'_> {
@@ -41,7 +41,7 @@ fn probe(
     device: &Device,
     page_size: usize,
     stop: &AtomicBool,
-    health: &crate::runtime::GenerationHealth,
+    health: &crate::session::SessionHealth,
 ) -> Result<u32, Status> {
     let allocation = device
         .allocate(
@@ -146,20 +146,20 @@ pub(crate) fn aql_extensions(agent: HsaAgent) -> Result<[u8; 8], Status> {
     let (device, cache, stop, health, page_size, native_extended, _token) = {
         let guard = lock()?;
         let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
-        if runtime.cpu_index(agent).is_some() {
+        if runtime.agents.cpu_index(agent).is_some() {
             return Ok([0; 8]);
         }
-        let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-        let gpu = &runtime.gpus[index];
+        let index = runtime.agents.gpu_index(agent).ok_or(INVALID_AGENT)?;
+        let gpu = &runtime.agents.gpus[index];
         let info = gpu.info();
         (
             gpu.device.clone(),
             gpu.cp_caps.clone(),
-            runtime.operation_stop(),
-            runtime.health.clone(),
-            runtime.host_page_size,
+            runtime.control.operation_stop(),
+            runtime.control.health.clone(),
+            runtime.agents.host_page_size,
             info.gfx_major == 12 && info.gfx_minor >= 5,
-            runtime.inflight.enter().ok_or(OUT_OF_RESOURCES)?,
+            runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?,
         )
     };
     let mut cache = cache.lock().map_err(|_| ERROR)?;

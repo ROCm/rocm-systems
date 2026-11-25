@@ -6,10 +6,11 @@
 use std::ffi::c_void;
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::loader::code_object::map_loader_error;
 use crate::loader::query::*;
 use crate::loader::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::status::boundary;
 use rocloader::CodeObject as LoaderCodeObject;
 
 #[cfg_attr(

@@ -37,14 +37,39 @@ Predefined teams
    valid team. Predefined teams such as ``ROCSHMEM_TEAM_SHARED`` may also
    hold this value when the required capability (e.g. IPC) is unavailable.
 
+Team configuration
+------------------
+
+.. cpp:struct:: rocshmem_team_config_t
+
+   Configuration passed to the team creation routines.
+
+   .. cpp:member:: int num_contexts
+
+      Number of contexts the new team is expected to support.
+
+The ``config_mask`` argument of the team creation routines selects which
+fields of ``rocshmem_team_config_t`` are honored:
+
+.. list-table:: Team configuration masks
+    :widths: 40 60
+    :header-rows: 1
+
+    * - Constant
+      - Description
+    * - ``ROCSHMEM_TEAM_DEFAULT_CONFIGS``
+      - No fields are read from the config; every field takes its default.
+        Equivalent to passing a zero mask.
+    * - ``ROCSHMEM_TEAM_NUM_CONTEXTS``
+      - Honor the ``num_contexts`` field of the config.
+
 ROCSHMEM_TEAM_MY_PE
 -------------------
 
-.. cpp:function:: __host__ int rocshmem_team_my_pe(rocshmem_team_t team)
-.. cpp:function:: __device__ int rocshmem_team_my_pe(rocshmem_team_t team)
+.. cpp:function:: __host__ __device__ int rocshmem_team_my_pe(rocshmem_team_t team)
 
-  :param team: The team to query.
-  :returns: PE ID of the caller in the provided team.
+   :param team: The team to query.
+   :returns: PE ID of the caller in the provided team.
 
 **Description:**
 This routine queries the PE ID of the caller in a team.
@@ -52,11 +77,10 @@ This routine queries the PE ID of the caller in a team.
 ROCSHMEM_TEAM_N_PES
 -------------------
 
-.. cpp:function:: __host__ int rocshmem_team_n_pes(rocshmem_team_t team)
-.. cpp:function:: __device__ int rocshmem_team_n_pes(rocshmem_team_t team)
+.. cpp:function:: __host__ __device__ int rocshmem_team_n_pes(rocshmem_team_t team)
 
-  :param team: The team to query.
-  :returns: Number of PEs in the provided team.
+   :param team: The team to query.
+   :returns: Number of PEs in the provided team.
 
 **Description:**
 This routine queries the number of PEs in a team.
@@ -100,6 +124,60 @@ ROCSHMEM_TEAM_SPLIT_STRIDED
 
 **Description:**
 This routine creates a new a team of PEs. It must be called by all PEs in the parent team.
+
+ROCSHMEM_TEAM_SPLIT_2D
+----------------------
+
+.. cpp:function:: __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange, const rocshmem_team_config_t *xaxis_config, long xaxis_mask, rocshmem_team_t *xaxis_team, const rocshmem_team_config_t *yaxis_config, long yaxis_mask, rocshmem_team_t *yaxis_team)
+
+  :param parent_team:  The team to be split.
+  :param xrange:       Number of PEs per row.
+  :param xaxis_config: Pointer to a team configuration struct for the x-axis.
+  :param xaxis_mask:   Bitmask selecting which fields of ``xaxis_config`` to
+                       use. A zero mask means all fields take their defaults.
+  :param xaxis_team:   Receives the calling PE's x-axis team.
+  :param yaxis_config: Pointer to a team configuration struct for the y-axis.
+  :param yaxis_mask:   Bitmask selecting which fields of ``yaxis_config`` to
+                       use. A zero mask means all fields take their defaults.
+  :param yaxis_team:   Receives the calling PE's y-axis team.
+
+  :returns:            Zero on success; non-zero on failure.
+
+**Description:**
+Splits a parent team into two subteams along the axes of a logical
+two-dimensional grid of ``xrange`` PEs per row. Each PE ends up in exactly one
+x-axis team (its row) and one y-axis team (its column). It must be called by
+all PEs in the parent team.
+
+ROCSHMEM_TEAM_SYNC
+------------------
+
+.. cpp:function:: __host__ void rocshmem_team_sync(rocshmem_team_t team)
+
+  :param team: Team participating in the sync. Passing
+               ``ROCSHMEM_TEAM_INVALID`` is a no-op.
+  :returns:    None.
+
+**Description:**
+Synchronizes all PEs in ``team`` via a cross-PE barrier. Unlike
+``rocshmem_barrier``, this routine does not complete outstanding
+remote memory accesses issued through rocSHMEM routines before synchronizing;
+use ``rocshmem_quiet`` first if you need that guarantee.
+
+ROCSHMEM_TEAM_SYNC_ON_STREAM
+----------------------------
+
+.. cpp:function:: __host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team, hipStream_t stream)
+
+  :param team:   Team participating in the sync. Passing
+                 ``ROCSHMEM_TEAM_INVALID`` is a no-op and enqueues nothing.
+  :param stream: HIP stream on which to enqueue the operation.
+  :returns:      None.
+
+**Description:**
+Stream-ordered form of ``rocshmem_team_sync``. The sync is enqueued on
+``stream`` rather than performed inline, and carries the same weaker guarantee:
+completion and visibility of previously issued memory stores only.
 
 ROCSHMEM_TEAM_DESTROY
 ---------------------

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/vm/amdgpu/aql/aql_packet_types.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -42,16 +43,18 @@ class CommandProcessorCloseTestAccess {
 public:
   static bool retain_pending_execution(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.compute_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1) {
       return false;
+    }
     command_processor.compute_queues_.front().entries.emplace_back();
     return true;
   }
 
   static bool fetch_first_queue(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.compute_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1) {
       return false;
+    }
     command_processor.fetch_from_queue(command_processor.compute_queues_.front(), 0);
     return true;
   }
@@ -59,15 +62,17 @@ public:
   static VmAccessOutcome retire_first_packet(CommandProcessor &cp) {
     std::lock_guard<std::recursive_mutex> lock(cp.hw_queue_mutex_);
     auto &queue = cp.compute_queues_.front();
-    if (queue.entries.empty())
+    if (queue.entries.empty()) {
       return VmAccessOutcome::Malformed;
+    }
     return cp.retire_aql_packet(queue, queue.entries.front());
   }
 
   static bool retain_replica_work(CommandProcessor &cp) {
     std::lock_guard lock(cp.hw_queue_mutex_);
-    if (cp.compute_queues_.size() != 1 || !cp.compute_queues_.front().fanout_replica)
+    if (cp.compute_queues_.size() != 1 || !cp.compute_queues_.front().fanout_replica) {
       return false;
+    }
     auto &queue = cp.compute_queues_.front();
     DispatchEntry shard{};
     shard.queue_id = queue.queue_id;
@@ -86,8 +91,9 @@ public:
   static bool retain_cursor_publication(CommandProcessor &command_processor, GpuVmAccess access,
                                         uint64_t cursor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.compute_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1) {
       return false;
+    }
     auto &queue = command_processor.compute_queues_.front();
     DispatchEntry entry{};
     entry.queue_id = queue.queue_id;
@@ -104,21 +110,24 @@ public:
 
   static bool retry_cursor_publication(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.compute_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1) {
       return false;
+    }
     ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.faulted = true;
     if (queue.entries.empty() || command_processor.retire_aql_packet(
-                                     queue, queue.entries.front()) != VmAccessOutcome::Complete)
+                                     queue, queue.entries.front()) != VmAccessOutcome::Complete) {
       return false;
+    }
     queue.entries.pop_front();
     return true;
   }
 
   static bool retain_idle_completion_publication(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.compute_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1) {
       return false;
+    }
     ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.idle_publication.phase = QueueIdlePublicationPhase::StoreMailbox;
     queue.publication_retry_pending = true;
@@ -127,8 +136,9 @@ public:
 
   static bool clear_idle_completion_publication(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.compute_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1) {
       return false;
+    }
     ComputeQueueRecord &queue = command_processor.compute_queues_.front();
     queue.idle_publication.reset();
     queue.publication_retry_pending = false;
@@ -137,8 +147,9 @@ public:
 
   static bool mark_publication_faulted(CommandProcessor &command_processor) {
     std::lock_guard<std::recursive_mutex> lock(command_processor.hw_queue_mutex_);
-    if (command_processor.compute_queues_.size() != 1)
+    if (command_processor.compute_queues_.size() != 1) {
       return false;
+    }
     command_processor.compute_queues_.front().publication_faulted = true;
     return true;
   }
@@ -286,8 +297,9 @@ public:
 
   VmTranslationResult translate(uint64_t address, std::size_t size,
                                 VmAccessKind /*access*/) const override {
-    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {
         .outcome = VmAccessOutcome::Complete,
         .translation = {.domain = VmMemoryDomain::System,
@@ -299,10 +311,12 @@ public:
 
   VmAccessOutcome read(VmMemoryDomain domain, uint64_t address,
                        std::span<std::byte> bytes) override {
-    if (domain != VmMemoryDomain::System)
+    if (domain != VmMemoryDomain::System) {
       return VmAccessOutcome::Malformed;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
                         bytes.begin());
     return VmAccessOutcome::Complete;
@@ -310,20 +324,24 @@ public:
 
   VmAccessOutcome write(VmMemoryDomain domain, uint64_t address,
                         std::span<const std::byte> bytes) override {
-    if (domain != VmMemoryDomain::System)
+    if (domain != VmMemoryDomain::System) {
       return VmAccessOutcome::Malformed;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address, uint32_t width) override {
     if (domain != VmMemoryDomain::System || (width != 2 && width != 4 && width != 8) ||
-        address > bytes_.size() || width > bytes_.size() - address)
+        address > bytes_.size() || width > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted};
-    if (address == observed_load_address)
+    }
+    if (address == observed_load_address) {
       observed_load_widths.push_back(width);
+    }
     uint64_t value = 0;
     std::memcpy(&value, bytes_.data() + address, width);
     return {.outcome = VmAccessOutcome::Complete, .value = value};
@@ -336,8 +354,9 @@ public:
       return VmAccessOutcome::Faulted;
     }
     atomic_store_calls_.fetch_add(1, std::memory_order_relaxed);
-    if (address == unavailable_store_address && store_outcome != VmAccessOutcome::Complete)
+    if (address == unavailable_store_address && store_outcome != VmAccessOutcome::Complete) {
       return store_outcome;
+    }
     std::memcpy(bytes_.data() + address, &value, width);
     return VmAccessOutcome::Complete;
   }
@@ -364,8 +383,9 @@ class AtomicLaneAddressSpace final : public AddressSpaceTranslator, public Physi
 public:
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
     ++translation_calls;
-    if (address == translation_failure || address / 8 >= values.size())
+    if (address == translation_failure || address / 8 >= values.size()) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {.outcome = VmAccessOutcome::Complete,
             .translation = {.domain = domains[address / 8],
                             .address = address + physical_base,
@@ -385,13 +405,16 @@ public:
   }
   VmAccessOutcome atomic_modify(VmMemoryDomain domain, uint64_t address, uint32_t width,
                                 const AtomicMutation &mutation) override {
-    if (address == physical_failure)
+    if (address == physical_failure) {
       return physical_outcome;
-    if (address < physical_base || address - physical_base >= sizeof(values))
+    }
+    if (address < physical_base || address - physical_base >= sizeof(values)) {
       return VmAccessOutcome::Malformed;
+    }
     const uint64_t index = (address - physical_base) / 8;
-    if (domain != domains[index])
+    if (domain != domains[index]) {
       return VmAccessOutcome::Malformed;
+    }
     modified_addresses.push_back(address);
     mutation(std::as_writable_bytes(std::span(&values[index], 1)).first(width));
     return VmAccessOutcome::Complete;
@@ -501,8 +524,9 @@ TEST(GpuVmService, AtomicLanePhysicalFailurePrecedesLaterTranslationFault) {
     EXPECT_EQ(next, 1u);
     EXPECT_TRUE(faults.empty());
     EXPECT_EQ(backing->values, (std::array<uint64_t, 4>{1, 0, 0, 0}));
-    if (first_failure != VmAccessOutcome::Unavailable)
+    if (first_failure != VmAccessOutcome::Unavailable) {
       continue;
+    }
     backing->physical_failure = UINT64_MAX;
     EXPECT_EQ(access->atomic_modify_lanes(addresses, 0xf, 8, increment, next),
               VmAccessOutcome::Faulted);
@@ -517,8 +541,9 @@ TEST(GpuVmService, AtomicLanesCommitPrefixBeforeMalformedOperand) {
     SCOPED_TRACE(short_span);
     GpuVm vm;
     auto backing = std::make_shared<AtomicLaneAddressSpace>();
-    if (short_span)
+    if (short_span) {
       backing->short_translation = 16;
+    }
     std::vector<uint64_t> faults;
     const auto handle = vm.register_unrouted_address_space(
         7, backing, backing, [&](uint64_t address, VmAccessKind) { faults.push_back(address); });
@@ -621,8 +646,9 @@ private:
         : blocked_operation(blocked_operation_value) {}
 
     void block(BlockedQueueOperation operation) {
-      if (operation != blocked_operation)
+      if (operation != blocked_operation) {
         return;
+      }
       std::unique_lock lock(mutex);
       callback_is_blocked = true;
       condition.notify_all();
@@ -657,8 +683,9 @@ private:
       }
       try {
         std::lock_guard lock(shared_->mutex);
-        if (shared_->destruction_observer)
+        if (shared_->destruction_observer) {
           shared_->destruction_observer();
+        }
       } catch (...) {
       }
     }
@@ -793,8 +820,9 @@ public:
   uint32_t total_destruction_calls() const {
     std::lock_guard lock(state_->mutex);
     uint32_t total = 0;
-    for (const std::shared_ptr<BindingState> &binding : state_->bindings)
+    for (const std::shared_ptr<BindingState> &binding : state_->bindings) {
       total += binding->destruction_calls;
+    }
     return total;
   }
 
@@ -815,16 +843,18 @@ private:
 bool wait_until_queue_is_revoked(const GpuQueueRegistry &queues, QueueHandle handle) {
   const std::chrono::steady_clock::time_point deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (queues.contains(handle) && std::chrono::steady_clock::now() < deadline)
+  while (queues.contains(handle) && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
+  }
   return !queues.contains(handle);
 }
 
 bool wait_until_registration_admission_closes(const GpuQueueRegistry &queues) {
   const std::chrono::steady_clock::time_point deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(5);
-  while (queues.accepting_registrations_for_test() && std::chrono::steady_clock::now() < deadline)
+  while (queues.accepting_registrations_for_test() && std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
+  }
   return !queues.accepting_registrations_for_test();
 }
 
@@ -1650,9 +1680,11 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   VmMtypeCache cache;
   cache.clear();
   cache.clear(); // Clearing an already-empty table is idempotent.
-  for (uint32_t repeat = 0; repeat < 3; ++repeat)
-    for (uint64_t page = 0; page < 8; ++page)
+  for (uint32_t repeat = 0; repeat < 3; ++repeat) {
+    for (uint64_t page = 0; page < 8; ++page) {
       EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::RW);
+    }
+  }
   EXPECT_EQ(policy->queries, 8u);
 
   {
@@ -1674,8 +1706,9 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
 
   policy->epoch->value.fetch_add(1);
   policy->mtype = Mtype::UC;
-  for (uint64_t page = 0; page < 8; ++page)
+  for (uint64_t page = 0; page < 8; ++page) {
     EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::UC);
+  }
   EXPECT_EQ(policy->queries, 17u);
 
   // Explicit clearing must release every retained token and force fresh policy
@@ -1684,8 +1717,9 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   cache.clear(); // Clearing an already-empty table is idempotent.
   EXPECT_EQ(policy->epoch->ref_count(), 1);
   policy->mtype = Mtype::CC;
-  for (uint64_t page = 0; page < 8; ++page)
+  for (uint64_t page = 0; page < 8; ++page) {
     EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::CC);
+  }
   EXPECT_EQ(policy->queries, 25u);
 
   // A different VM generation may reuse the same epoch token. Entries from
@@ -1802,17 +1836,21 @@ TEST(GpuVmService, PolicyCacheReusesContiguousAndTiledPages) {
     SCOPED_TRACE(stride);
     cache.clear();
     policy->queries = 0;
-    for (uint32_t repeat = 0; repeat < 3; ++repeat)
-      for (uint64_t row = 0; row < rows; ++row)
-        for (uint64_t column = 0; column < columns; ++column)
+    for (uint32_t repeat = 0; repeat < 3; ++repeat) {
+      for (uint64_t row = 0; row < rows; ++row) {
+        for (uint64_t column = 0; column < columns; ++column) {
           EXPECT_EQ(access->query_mtype(base + row * stride + column * 4096, cache), Mtype::RW);
+        }
+      }
+    }
     EXPECT_EQ(policy->queries, rows * columns);
   };
 
   // Preserve contiguous locality across allocation and index-block boundaries.
   constexpr uint64_t kRegionBase = 0x100000000;
-  for (uint64_t offset : {512 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 64 * 1024 * 1024})
+  for (uint64_t offset : {512 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 64 * 1024 * 1024}) {
     check_reuse(kRegionBase + offset - 32 * 4096, 1, 64, 0);
+  }
 
   // Tiled rows must spread without limiting a larger row set to the same slots.
   // The 4 MiB pitch also requires indexing bits beyond the initial block offset.
@@ -1820,6 +1858,9 @@ TEST(GpuVmService, PolicyCacheReusesContiguousAndTiledPages) {
   check_reuse(kRegionBase, 8, 8, kRowStride);
   check_reuse(kRegionBase, 32, 1, kRowStride);
   check_reuse(kRegionBase, 8, 1, 4 * 1024 * 1024);
+
+  // A 128-row tile revisits input pages separated by an 8 KiB row pitch.
+  check_reuse(kRegionBase, 128, 1, 8 * 1024);
 }
 
 TEST(GpuVmService, GenerationsShareFaultReporterWithoutCopyingItsTarget) {
@@ -1866,8 +1907,9 @@ TEST(GpuVmService, FaultReporterSerializesDistinctSnapshotsAndGenerations) {
     Reporter(const Reporter &other) : overlapped_(other.overlapped_), calls_(other.calls_) {}
 
     void operator()(uint64_t, VmAccessKind) {
-      if (active_.fetch_add(1) != 0)
+      if (active_.fetch_add(1) != 0) {
         overlapped_ = true;
+      }
       std::this_thread::yield();
       ++calls_;
       --active_;
@@ -1909,14 +1951,15 @@ TEST(GpuVmService, FaultReporterSerializesDistinctSnapshotsAndGenerations) {
         for (unsigned iteration = 0; iteration < kIterations; ++iteration) {
           start.arrive_and_wait();
           const auto &snapshot = snapshots[index];
-          if (index == 0)
+          if (index == 0) {
             EXPECT_EQ(snapshot.probe(4096, 1, VmAccessKind::Read), VmAccessOutcome::Faulted);
-          else if (index == 1)
+          } else if (index == 1) {
             EXPECT_EQ(snapshot.read(4096, bytes), VmAccessOutcome::Faulted);
-          else if (index == 2)
+          } else if (index == 2) {
             EXPECT_EQ(snapshot.write(4096, bytes), VmAccessOutcome::Faulted);
-          else
+          } else {
             EXPECT_EQ(snapshot.atomic_load(0, 3).outcome, VmAccessOutcome::Malformed);
+          }
         }
       });
     }
@@ -1938,8 +1981,9 @@ TEST(GpuVmService, FaultReporterAllowsNestedFaultsAndReleasesAfterException) {
       ASSERT_TRUE(nested);
       EXPECT_EQ(nested->probe(4097, 1, VmAccessKind::Read), VmAccessOutcome::Faulted);
     }
-    if (address == 4098)
+    if (address == 4098) {
       throw std::runtime_error("fault reporter");
+    }
   });
   auto access = vm.snapshot(handle);
   ASSERT_TRUE(access);
@@ -1974,10 +2018,11 @@ TEST(GpuVmService, ConcurrentSnapshotsPreserveRootEpochAndRetirement) {
           EXPECT_EQ(access->cache_namespace().address_space, handle);
           std::array<std::byte, 1> value{};
           const auto outcome = access->read(0, value);
-          if (outcome == VmAccessOutcome::Complete)
+          if (outcome == VmAccessOutcome::Complete) {
             EXPECT_EQ(value[0], std::byte(access->info().translation_epoch & 255));
-          else
+          } else {
             EXPECT_EQ(outcome, VmAccessOutcome::Revoked);
+          }
         }
         EXPECT_EQ(gpu_vm.find_vmid(7), handle);
         EXPECT_TRUE(gpu_vm.lookup(handle)->ready);
@@ -2410,8 +2455,9 @@ TEST(CommandProcessorQueueRegistration, RejectsInvalidAqlRingLayoutsAtDirectBoun
   invalid[8].write_ptr_va += 1;
   invalid[9].doorbell_mode = QueueDoorbellMode::VmPolled;
 
-  for (ComputeQueueConfig &config : invalid)
+  for (ComputeQueueConfig &config : invalid) {
     EXPECT_EQ(command_processor.register_queue(std::move(config)), 0u);
+  }
   EXPECT_EQ(command_processor.registered_queue_count_for_test(), 0u);
 
   const uint64_t registration_id = command_processor.register_queue(valid);
@@ -2476,7 +2522,7 @@ TEST(SoCAssembly, RejectsNullIodWithoutRecordingIt) {
 
 TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
   GpuMemory memory("memory");
-  rocjitsu::SoC soc("soc", &memory, ROCJITSU_CODE_ARCH_CDNA4);
+  rocjitsu::SoC soc("soc", &memory, rocjitsu::IsaFamily::Cdna4);
   const AddressSpaceHandle internal = soc.internal_address_space();
   const SdmaQueueScheduler::Handle queue =
       soc.sdma_queue_scheduler().attach({.ring = {.address_space = internal,
@@ -2489,9 +2535,9 @@ TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
   ASSERT_TRUE(queue);
   util::StringDiagnostic diagnostic;
 
-  EXPECT_TRUE(soc.set_arch(ROCJITSU_CODE_ARCH_RDNA4, diagnostic.emitter()).failed());
+  EXPECT_TRUE(soc.set_arch(rocjitsu::IsaFamily::Rdna4, diagnostic.emitter()).failed());
   EXPECT_EQ(diagnostic.message(), "SoC architecture cannot change while copy queues are active");
-  EXPECT_EQ(soc.arch(), ROCJITSU_CODE_ARCH_CDNA4);
+  EXPECT_EQ(soc.arch(), rocjitsu::IsaFamily::Cdna4);
   EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), SdmaPacketDialect::LegacyExtendedCount);
   EXPECT_TRUE(soc.sdma_queue_scheduler().contains(queue));
   EXPECT_EQ(soc.internal_address_space(), internal);
@@ -2500,9 +2546,9 @@ TEST(SoCAssembly, RejectsArchitectureReplacementWhileCopyQueueIsActive) {
 
   ASSERT_TRUE(soc.sdma_queue_scheduler().detach(queue));
   util::StringDiagnostic retry_diagnostic;
-  EXPECT_TRUE(soc.set_arch(ROCJITSU_CODE_ARCH_RDNA4, retry_diagnostic.emitter()).succeeded());
+  EXPECT_TRUE(soc.set_arch(rocjitsu::IsaFamily::Rdna4, retry_diagnostic.emitter()).succeeded());
   EXPECT_TRUE(retry_diagnostic.message().empty());
-  EXPECT_EQ(soc.arch(), ROCJITSU_CODE_ARCH_RDNA4);
+  EXPECT_EQ(soc.arch(), rocjitsu::IsaFamily::Rdna4);
   EXPECT_EQ(soc.sdma_queue_scheduler().packet_dialect(), SdmaPacketDialect::Rdna4);
   EXPECT_EQ(soc.internal_address_space(), internal);
 }

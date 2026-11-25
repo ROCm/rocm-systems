@@ -1,15 +1,11 @@
 l1i.hits_per_req:
-  name: L1I Hits per Request
+  name: L1I Hit Rate
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
   unit: Percent
-  description: >-
-    Percentage of instruction cache accesses that hit. High hit rates are essential
-    for sustained instruction throughput. Low rates may indicate large kernels or
-    divergent branches causing instruction cache thrashing.
+  description: Percentage of Instruction Cache requests that hit in the cache.
   peak: 100
 l1i.req:
   name: L1I Requests
   formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Instruction cache requests from the SQ, normalized by the chosen unit.
+  description: Total Instruction Cache fetch requests.

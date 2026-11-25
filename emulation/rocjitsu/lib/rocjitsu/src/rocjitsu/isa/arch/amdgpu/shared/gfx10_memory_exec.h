@@ -10,6 +10,8 @@ namespace rocjitsu::amdgpu {
 
 inline void prepare_buffer_tfe(Wavefront &wf, VectorMemState &d) {
   d.check_texel_residency = true;
+  d.texel_status = std::make_unique<TexelStatus>();
+  d.texel_status->report_failure = true;
   if (!wf.vgpr_alloc().contains(d.dst_reg_base, d.destination_vgpr_count() + 1)) {
     d.exec_mask = 0;
     d.lane_mask = 0;

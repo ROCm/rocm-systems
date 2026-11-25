@@ -1,0 +1,6 @@
+repository: https://github.com/NVIDIA/nccl-extensions
+path: python (nccl_m2n subset)
+branch: main
+commit: cd509938321658a5d4bfc4cf94bdae9c5d9c6d08
+date: 2026-10-28
+# Same commit as projects/rccl/contrib/nccl_m2n/UPSTREAM_VERSION; resync both together.

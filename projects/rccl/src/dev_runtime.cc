@@ -893,12 +893,20 @@ static ncclResult_t symMemoryRegisterGin(struct ncclComm* comm, struct ncclDevrM
     return ncclSuccess;
   }
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  // RCCL: one HIP DMA-BUF covers only the first segment; fail closed instead of registering a partial MR.
+  // One HIP DMA-BUF covers only the first segment, so GPU-only multi-segment
+  // windows stay off GIN. A GIN-only window has no other path, so that case
+  // still fails. Other windows stay usable for LSA collectives.
   if (mem->maxGlobalNumSegments > 1 && !mem->globalHasSysmemSegment) {
-    WARN("Window %p spans %d device-memory segments; GIN cannot register it on HIP", mem->primaryAddr,
+    if (mem->winFlags & NCCL_WIN_GIN_ONLY) {
+      WARN("Window %p spans %d device-memory segments; GIN-only windows cannot be registered on HIP",
+           mem->primaryAddr, mem->maxGlobalNumSegments);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
+    INFO(NCCL_INIT, "Window %p spans %d device-memory segments; leaving it unregistered with GIN", mem->primaryAddr,
          mem->maxGlobalNumSegments);
-    ret = ncclInvalidUsage;
-    goto fail;
+    mem->numGinSegments = 0;
+    return ncclSuccess;
   }
 #endif
 
@@ -1314,6 +1322,10 @@ static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) 
   symMemoryUnmapLsaTeam(comm, mem);
 
   ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
+  if (mem->allocTrackedBytes != 0) {
+    ncclAllocUntrack(comm->cudaDev, mem->allocTrackedBytes, "symMemoryDestroy");
+    mem->allocTrackedBytes = 0;
+  }
   for (int segment = 0; segment < mem->numSegments; segment++) {
     CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
   }
@@ -1349,6 +1361,13 @@ static ncclResult_t symWindowInitGin(struct ncclDevrState* devr, struct ncclDevr
                                      struct ncclWindow_vidmem* winDevHost, cudaStream_t stream) {
   ncclResult_t ret = ncclSuccess;
   if (!ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterGin)) return ret;
+  // Skipped HIP registration sets numGinSegments to 0. A non-zero count with
+  // no segment infos is not that state and still goes through allocation.
+  if (mem->numGinSegments == 0) {
+    winDevHost->numSegments = 0;
+    winDevHost->ginMultiSegmentWins = nullptr;
+    return ncclSuccess;
+  }
   struct ncclSegmentWindow* segmentWindowsDev;
   NCCLCHECK(ncclDevrAllocAndPopulateSegmentWindows(devr, mem, stream, &segmentWindowsDev));
   winDevHost->ginMultiSegmentWins = segmentWindowsDev;
@@ -1665,7 +1684,7 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     // builds can't use this single-descriptor path.
     exportCuMem = false;
     if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
-        CUPFN(cuMemRetainAllocationHandle(&localCuMemHandle,
+        CUPROBE(cuMemRetainAllocationHandle(&localCuMemHandle,
                                           reinterpret_cast<void*>(allocBase))) == CUDA_SUCCESS) {
       haveLocalCuMemHandle = true;
       const size_t retainedSize = allocSize;
@@ -2515,9 +2534,13 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
     memProp.location.id = comm->cudaDev;
 
     CUCHECKGOTO(cuMemCreate(&memHandle, bufSizeTotal, &memProp, 0), ret, fail_stream);
+    ncclAllocTrack(comm->cudaDev, bufSizeTotal, "ncclDevrCommCreateInternal");
 
     NCCLCHECKGOTO(symMemoryObtain(comm, &memHandle, 1, NULL, bufSizeTotal, /*winFlags=*/0, &mem), ret, fail_stream_mem);
     memHandle = 0x0; // Reference given to symMemoryObtain
+    // Reuse requires identical handles, so a freshly created handle always yields a new
+    // registration, and symMemoryDestroy releases it.
+    mem->allocTrackedBytes = bufSizeTotal;
 
     NCCLCHECKGOTO(symWindowCreate( // Requires world barrier afterward.
                     comm, mem, /*memOffset=*/0, nullptr, bufSizeTotal, /*winFlags=*/0,
@@ -2565,6 +2588,7 @@ fail_stream_mem_win:
 fail_stream_mem:
   if (memHandle != 0x0) {
     CUCHECKIGNORE(cuMemRelease(memHandle));
+    ncclAllocUntrack(comm->cudaDev, bufSizeTotal, "ncclDevrCommCreateInternal");
   }
   symMemoryDropRef(comm, mem);
 fail_stream:
@@ -2887,6 +2911,13 @@ ncclResult_t ncclDevrFindWindow(struct ncclComm* comm, void const* userPtr, stru
 
 bool ncclDevrWindowIsMultiSegment(struct ncclDevrWindow* win) {
   return win != NULL && win->memory != NULL && win->memory->maxGlobalNumSegments > 1;
+}
+
+bool ncclDevrWindowMissingGinSegments(struct ncclDevrWindow* win) {
+  // The HIP skip in symMemoryRegisterGin. Host windows with no memory object,
+  // and windows GIN never tried to register, are not this state.
+  return win != nullptr && win->memory != nullptr && win->memory->numGinSegments <= 0 &&
+         win->memory->maxGlobalNumSegments > 1 && !win->memory->globalHasSysmemSegment;
 }
 
 bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* win) {

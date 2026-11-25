@@ -22,6 +22,36 @@ inline __m256 mixed_mad_input(const uint32_t *p, uint32_t mode) {
       _mm256_set1_epi32(mode & RJ_ARITH_ALU_NEG_A ? INT32_MIN : 0)));
 }
 
+// Narrow FP32 lanes to FP16 using the guest mode and finite overflow policy.
+// Native conversion quiets NaNs. Results occupy the low half of each word.
+inline __m256i narrow_mixed_half(__m256 value, uint64_t flags) {
+  __m128i half;
+  switch ((flags & RJ_ARITH_FP_ROUND_MASK) >> 24) {
+  case 1:
+    half = _mm256_cvtps_ph(value, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+    break;
+  case 2:
+    half = _mm256_cvtps_ph(value, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+    break;
+  case 3:
+    half = _mm256_cvtps_ph(value, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    break;
+  default:
+    half = _mm256_cvtps_ph(value, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    break;
+  }
+  auto result = _mm256_cvtepu16_epi32(half);
+  if (flags & RJ_ARITH_FP16_OVFL) {
+    auto finite = _mm256_cmpgt_epi32(
+        _mm256_set1_epi32(0x7f800000),
+        _mm256_and_si256(_mm256_castps_si256(value), _mm256_set1_epi32(INT32_MAX)));
+    auto infinity = _mm256_cmpeq_epi32(_mm256_and_si256(result, _mm256_set1_epi32(0x7fff)),
+                                       _mm256_set1_epi32(0x7c00));
+    result = _mm256_add_epi32(result, _mm256_and_si256(finite, infinity));
+  }
+  return result;
+}
+
 // Apply CLAMP and optional directed FP16 narrowing to the FP32 intermediate.
 // Nonfinite input lanes use baseline NaN handling, without a whole-vector fallback.
 inline __m256i mixed_mad_finish(MixedFma destination, uint64_t flags, uint32_t mode, __m256 value,
@@ -32,30 +62,7 @@ inline __m256i mixed_mad_finish(MixedFma destination, uint64_t flags, uint32_t m
   }
   __m256i result = _mm256_castps_si256(value);
   if (destination != MixedFma::Float) {
-    __m128i half;
-    switch ((flags & RJ_ARITH_FP_ROUND_MASK) >> 24) {
-    case 1:
-      half = _mm256_cvtps_ph(value, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
-      break;
-    case 2:
-      half = _mm256_cvtps_ph(value, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
-      break;
-    case 3:
-      half = _mm256_cvtps_ph(value, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-      break;
-    default:
-      half = _mm256_cvtps_ph(value, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-      break;
-    }
-    result = _mm256_cvtepu16_epi32(half);
-    if (flags & RJ_ARITH_FP16_OVFL) {
-      auto finite = _mm256_cmpgt_epi32(
-          _mm256_set1_epi32(0x7f800000),
-          _mm256_and_si256(_mm256_castps_si256(value), _mm256_set1_epi32(INT32_MAX)));
-      auto infinity = _mm256_cmpeq_epi32(_mm256_and_si256(result, _mm256_set1_epi32(0x7fff)),
-                                         _mm256_set1_epi32(0x7c00));
-      result = _mm256_add_epi32(result, _mm256_and_si256(finite, infinity));
-    }
+    result = narrow_mixed_half(value, flags);
   }
   const auto magnitude = _mm256_set1_epi32(INT32_MAX);
   auto largest =

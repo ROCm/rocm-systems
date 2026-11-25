@@ -11,6 +11,7 @@
 #include "common/float_encoding.h"
 #include "common/validation.h"
 #include "fp/fma_integer.h"
+#include "fp/rounding_status.h"
 #include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
@@ -29,7 +30,7 @@ inline bool half_fma_reporting_unsupported(uint64_t flags, bool rdna3) {
 // Directed rounding follows rocjitsu pseudo_scalar.h::round_f64_to_f16;
 // integer discarded-bit tests avoid depending on host conversions.
 inline uint16_t half_fma_narrow(uint64_t bits, bool saturate, unsigned rounding = 0) {
-  // Adapted from rocjitsu mixed_fma_simd.h: round_finite_f16_simd.
+  // Follow the inherited FP64 significand/exponent rounding model.
   int exponent = (bits >> 52) & 2047;
   uint16_t sign = uint16_t((bits >> 48) & 0x8000);
   const bool away = rounding == (sign ? 2u : 1u);
@@ -162,15 +163,11 @@ inline uint16_t half_fma_value(uint16_t a, uint16_t b, uint16_t c, uint32_t inst
     uint16_t magnitude = rounded & 0x7fff;
     if (magnitude == 0x7c00) {
       *exceptions |= RJ_ARITH_EXCEPTION_OVERFLOW | (omod ? 0 : RJ_ARITH_EXCEPTION_INEXACT);
-    } else if (!omod && value != double(f16_to_float(rounded))) {
-      *exceptions |= RJ_ARITH_EXCEPTION_INEXACT;
-
+    } else if (!omod) {
       // Tininess is detected after significand rounding, before limiting the
-      // exponent: the unbounded-exponent midpoint 2^-14 - 2^-26 is not tiny.
-      // The FP16 encoding midpoint 2^-14 - 2^-25 is still tiny.
-      if (__builtin_fabs(value) < 0x1p-14 - 0x1p-26) {
-        *exceptions |= RJ_ARITH_EXCEPTION_UNDERFLOW;
-      }
+      // exponent (fp/rounding_status.h): the unbounded-exponent midpoint
+      // 2^-14 - 2^-26 is not tiny, the FP16 encoding midpoint 2^-14 - 2^-25 is.
+      *exceptions |= rounding_causes<true>(bits, rounded, rounding);
     }
     if ((omod == 1 || omod == 2) && magnitude < 0x7c00 && (magnitude >> 10) + omod >= 31) {
       *exceptions |= RJ_ARITH_EXCEPTION_OVERFLOW;

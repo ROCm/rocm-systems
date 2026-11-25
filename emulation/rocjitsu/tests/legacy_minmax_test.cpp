@@ -6,6 +6,8 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
@@ -19,6 +21,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -37,7 +40,8 @@
 namespace rocjitsu {
 namespace {
 
-class LegacyMinMaxInstruction : public testing::TestWithParam<std::tuple<rj_code_arch_t, bool>> {
+class LegacyMinMaxInstruction
+    : public testing::TestWithParam<std::tuple<rocjitsu::IsaFamily, bool>> {
 protected:
   void SetUp() override {
     saved_scalar_ = util::force_scalar();
@@ -57,14 +61,16 @@ protected:
   }
 
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
     util::set_force_scalar_for_testing(saved_scalar_);
   }
 
   void put(unsigned reg, uint32_t value) {
-    for (unsigned lane = 0; lane != wave_->wf_size(); ++lane)
+    for (unsigned lane = 0; lane != wave_->wf_size(); ++lane) {
       cu_->write_vgpr(wave_->vgpr_alloc().base + reg, lane, value);
+    }
   }
 
   void check(std::array<uint32_t, 2> words, uint32_t expected) {
@@ -75,10 +81,11 @@ protected:
     SCOPED_TRACE(testing::Message() << instruction->mnemonic() << " words=" << std::hex << words[0]
                                     << ":" << words[1]);
     ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
-    for (unsigned lane = 0; lane != wave_->wf_size(); ++lane)
+    for (unsigned lane = 0; lane != wave_->wf_size(); ++lane) {
       EXPECT_EQ(cu_->read_vgpr_storage(wave_->vgpr_alloc().base + 4, lane),
                 wave_->exec() & (uint64_t{1} << lane) ? expected : 0xdeadbeefu)
           << "lane=" << lane;
+    }
   }
 
   static std::array<uint32_t, 2> vop3(uint32_t opcode, uint32_t opsel = 0, uint32_t omod = 0) {
@@ -113,8 +120,9 @@ TEST_P(LegacyMinMaxInstruction, MinMaxSignedZeroAndSignalingNanSelection) {
 }
 
 TEST_P(LegacyMinMaxInstruction, MinimumMaximumPropagateNanPayload) {
-  if (std::get<0>(GetParam()) != ROCJITSU_CODE_ARCH_CDNA4)
+  if (std::get<0>(GetParam()) != rocjitsu::IsaFamily::Cdna4) {
     GTEST_SKIP() << "MINIMUM3/MAXIMUM3 starts with CDNA4";
+  }
   for (unsigned nan_source = 0; nan_source != 3; ++nan_source) {
     put(0, 0x3f800000);
     put(1, 0x40000000);
@@ -206,29 +214,31 @@ TEST_P(LegacyMinMaxInstruction, PackedHalfMinMaxSelectNanPayloads) {
 class LegacySelectionPolicy : public LegacyMinMaxInstruction {
 protected:
   bool rdna12() const {
-    return std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_RDNA1 ||
-           std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_RDNA2;
+    return std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna1 ||
+           std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna2;
   }
 
   bool rdna() const {
-    return rdna12() || std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_RDNA3 ||
-           std::get<0>(GetParam()) == ROCJITSU_CODE_ARCH_RDNA3_5;
+    return rdna12() || std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna3 ||
+           std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna3_5;
   }
 
   void check_vop3(uint32_t cdna_opcode, uint32_t rdna_opcode, uint32_t expected,
                   bool half = false) {
-    if (half && rdna())
+    if (half && rdna()) {
       expected |= 0xdead0000u; // RDNA half writes preserve the other destination half.
+    }
     if (rdna12()) {
       // Binary min/max opcodes agree across RDNA; MED3 moved in RDNA3.
       static_assert(rdna2::kVMinF32Vop3 == rdna3::kVMinF32Vop3 &&
                     rdna2::kVMaxF32Vop3 == rdna3::kVMaxF32Vop3 &&
                     rdna2::kVMinF16Vop3 == rdna3::kVMinF16Vop3 &&
                     rdna2::kVMaxF16Vop3 == rdna3::kVMaxF16Vop3);
-      if (rdna_opcode == rdna3::kVMed3F16Vop3)
+      if (rdna_opcode == rdna3::kVMed3F16Vop3) {
         rdna_opcode = rdna2::kVMed3F16Vop3;
-      else if (rdna_opcode == rdna3::kVMed3F32Vop3)
+      } else if (rdna_opcode == rdna3::kVMed3F32Vop3) {
         rdna_opcode = rdna2::kVMed3F32Vop3;
+      }
       check(rdna2::build_vop3(rdna_opcode, {.vdst = 4, .src0 = 256, .src1 = 257, .src2 = 258}),
             expected);
       return;
@@ -311,7 +321,7 @@ TEST_P(LegacySelectionPolicy, PackedSelectionPreservesDenormalResults) {
   for (uint32_t mode = 0; mode != 4; ++mode) {
     wave_->set_mode_raw(mode << 6);
     SCOPED_TRACE(mode);
-    for (bool clamp : {false, true})
+    for (bool clamp : {false, true}) {
       for (bool maximum : {false, true}) {
         // Opposite signs in the two halves expose sign preservation independently.
         put(0, 0x80010001u);
@@ -326,6 +336,7 @@ TEST_P(LegacySelectionPolicy, PackedSelectionPreservesDenormalResults) {
                            {.vdst = 4, .clamp = clamp, .src0 = 256, .src1 = 257, .op_sel_hi = 3}),
               expected);
       }
+    }
   }
 }
 
@@ -378,8 +389,9 @@ TEST_P(LegacySelectionPolicy, MedianSignedZeroOrdering) {
                                                    {negative_zero, negative_zero, 0},
                                                    {negative_zero, 0, negative_one},
                                                    {negative_one, negative_zero, 0}}}) {
-        for (unsigned source = 0; source != 3; ++source)
+        for (unsigned source = 0; source != 3; ++source) {
           put(source, inputs[source]);
+        }
         check_vop3(half ? cdna4::kVMed3F16Vop3 : cdna4::kVMed3F32Vop3,
                    half ? rdna3::kVMed3F16Vop3 : rdna3::kVMed3F32Vop3, rdna() ? negative_zero : 0,
                    half);
@@ -415,11 +427,217 @@ TEST_P(LegacySelectionPolicy, PackedHalfNanPriorityAndClamp) {
 
 INSTANTIATE_TEST_SUITE_P(
     Legacy, LegacySelectionPolicy,
-    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                     ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4,
-                                     ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                     ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5),
+    testing::Combine(testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                     rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4,
+                                     rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                     rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5),
                      testing::Bool()));
+
+// Finite literals cover all newly migrated selections, both waves, aliases and
+// guest output controls; existing policy tests above cover NaN/zero precedence.
+// Reusing another target's arithmetic does not qualify strict semantics here.
+TEST(OlderFloatingSelection, RejectsUnqualifiedStrictModelsBeforeWrites) {
+  for (auto arch : {IsaFamily::Cdna1, IsaFamily::Cdna2, IsaFamily::Rdna1, IsaFamily::Rdna2,
+                    IsaFamily::Rdna3_5}) {
+    for (auto semantics : {amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus,
+                           amdgpu::ArithmeticSemantics::BitExactEmpirical}) {
+      amdgpu::GpuMemory memory("selection_qualification");
+      amdgpu::L2Cache cache("selection_qualification");
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 104;
+      config.vgprs_per_wf = 16;
+      config.lds_size_kb = 64;
+      config.arithmetic.semantics = semantics;
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          test::initialize_compute_unit(cu, "selection_qualification", config, &memory, &cache));
+      auto decoder = Decoder::create(arch);
+      auto *wave = cu->dispatch_wf(0, 0, 104, 16, 64);
+      ASSERT_NE(wave, nullptr);
+      const bool cdna = arch == IsaFamily::Cdna1 || arch == IsaFamily::Cdna2;
+      const bool gfx11 = arch == IsaFamily::Rdna3_5;
+      const auto encode = [&](uint16_t c, uint16_t g10, uint16_t g11) {
+        if (cdna) {
+          return cdna2::build_vop3(c, {.vdst = 4, .src0 = 256, .src1 = 258, .src2 = 260});
+        }
+        if (gfx11) {
+          return rdna3_5::build_vop3(g11, {.vdst = 4, .src0 = 256, .src1 = 258, .src2 = 260});
+        }
+        return rdna2::build_vop3(g10, {.vdst = 4, .src0 = 256, .src1 = 258, .src2 = 260});
+      };
+      const auto base = wave->vgpr_alloc().base;
+      for (auto words :
+           {std::array<uint32_t, 2>{
+                (uint32_t(cdna ? 10 : 15) << 25) | (4u << 17) | (2u << 9) | 256u, 0},
+            encode(cdna2::kVMinF32Vop3, rdna2::kVMinF32Vop3, rdna3_5::kVMinF32Vop3),
+            encode(cdna2::kVMinF64Vop3, rdna2::kVMinF64Vop3, rdna3_5::kVMinF64Vop3),
+            encode(cdna2::kVMin3F32Vop3, rdna2::kVMin3F32Vop3, rdna3_5::kVMin3F32Vop3)}) {
+        auto instruction = decoder->decode_window(words);
+        ASSERT_TRUE(instruction.succeeded());
+        for (uint64_t exec_mask : {0ULL, 1ULL}) {
+          wave->set_exec(exec_mask);
+          cu->write_vgpr(base + 4, 0, 0xdeadbeef);
+          cu->write_vgpr(base + 5, 0, 0xdeadbeef);
+          EXPECT_EQ(cu->execute_instruction(instruction.value().get(), *wave).failed(),
+                    exec_mask != 0);
+          EXPECT_EQ(cu->read_vgpr_storage(base + 4, 0), 0xdeadbeefU);
+          EXPECT_EQ(cu->read_vgpr_storage(base + 5, 0), 0xdeadbeefU);
+        }
+      }
+      wave->halt();
+    }
+  }
+}
+
+TEST(OlderFloatingSelection, ControlsAliasesAndSdwa) {
+  struct Architecture {
+    rocjitsu::IsaFamily arch;
+    bool cdna, gfx10;
+  };
+  for (const auto profile : {Architecture{rocjitsu::IsaFamily::Cdna1, true, false},
+                             Architecture{rocjitsu::IsaFamily::Cdna2, true, false},
+                             Architecture{rocjitsu::IsaFamily::Rdna1, false, true},
+                             Architecture{rocjitsu::IsaFamily::Rdna2, false, true},
+                             Architecture{rocjitsu::IsaFamily::Rdna3_5, false, false}}) {
+    for (int lanes : {32, 64}) {
+      if (profile.cdna && lanes == 32) {
+        continue;
+      }
+      for (auto semantics :
+           {amdgpu::ArithmeticSemantics::Compatibility, amdgpu::ArithmeticSemantics::Loose}) {
+        amdgpu::GpuMemory memory("older_selection");
+        amdgpu::L2Cache cache("older_selection");
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = profile.arch;
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 104;
+        config.vgprs_per_wf = 16;
+        config.lds_size_kb = 64;
+        config.arithmetic.semantics = semantics;
+        std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+        ASSERT_NO_FATAL_FAILURE(
+            test::initialize_compute_unit(cu, "older_selection", config, &memory, &cache));
+        auto decoder = Decoder::create(profile.arch);
+        auto *wave = cu->dispatch_wf(0, 0, 104, 16, lanes);
+        ASSERT_NE(wave, nullptr);
+        const auto base = wave->vgpr_alloc().base;
+        const auto execute = [&](std::array<uint32_t, 2> words) {
+          auto inst = decoder->decode_window(words);
+          ASSERT_TRUE(inst.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wave).succeeded());
+        };
+        const auto encode = [&](uint32_t cdna, uint32_t gfx10, uint32_t gfx11, int destination,
+                                int source_b, uint32_t omod = 0) {
+          if (profile.cdna) {
+            return cdna2::build_vop3(cdna, {.vdst = uint8_t(destination),
+                                            .src0 = 256,
+                                            .src1 = uint16_t(256 + source_b),
+                                            .src2 = 260,
+                                            .omod = uint8_t(omod)});
+          }
+          if (profile.gfx10) {
+            return rdna2::build_vop3(gfx10, {.vdst = uint8_t(destination),
+                                             .src0 = 256,
+                                             .src1 = uint16_t(256 + source_b),
+                                             .src2 = 260,
+                                             .omod = uint8_t(omod)});
+          }
+          return rdna3_5::build_vop3(gfx11, {.vdst = uint8_t(destination),
+                                             .src0 = 256,
+                                             .src1 = uint16_t(256 + source_b),
+                                             .src2 = 260,
+                                             .omod = uint8_t(omod)});
+        };
+        struct Operation {
+          uint16_t cdna, gfx10, gfx11;
+          bool wide;
+          uint64_t expected;
+        };
+        const Operation operations[] = {
+            {cdna2::kVMinF32Vop3, rdna2::kVMinF32Vop3, rdna3_5::kVMinF32Vop3, false, 0x3e800000},
+            {cdna2::kVMaxF32Vop3, rdna2::kVMaxF32Vop3, rdna3_5::kVMaxF32Vop3, false, 0x3f000000},
+            {cdna2::kVMin3F32Vop3, rdna2::kVMin3F32Vop3, rdna3_5::kVMin3F32Vop3, false, 0x3e800000},
+            {cdna2::kVMax3F32Vop3, rdna2::kVMax3F32Vop3, rdna3_5::kVMax3F32Vop3, false, 0x3f400000},
+            {cdna2::kVMed3F32Vop3, rdna2::kVMed3F32Vop3, rdna3_5::kVMed3F32Vop3, false, 0x3f000000},
+            {cdna2::kVMinF64Vop3, rdna2::kVMinF64Vop3, rdna3_5::kVMinF64Vop3, true,
+             0x3fd0000000000000ULL},
+            {cdna2::kVMaxF64Vop3, rdna2::kVMaxF64Vop3, rdna3_5::kVMaxF64Vop3, true,
+             0x3fe0000000000000ULL},
+        };
+        for (const auto &op : operations) {
+          SCOPED_TRACE(testing::Message() << profile.arch << '/' << lanes << '/' << op.cdna);
+          for (int destination : {0, 6}) {
+            for (bool suppress_omod : {false, true}) {
+              // IEEE suppresses legacy OMOD; otherwise multiply the selection by two.
+              wave->set_mode_raw(suppress_omod ? amdgpu::Wavefront::IEEE_BIT : 0);
+              const uint64_t exec_mask = 1ULL | (1ULL << (lanes - 1));
+              wave->set_exec(exec_mask);
+              wave->set_trapsts(0x100);
+              const uint64_t values[] = {op.wide ? 0x3fd0000000000000ULL : 0x3e800000ULL,
+                                         op.wide ? 0x3fe0000000000000ULL : 0x3f000000ULL,
+                                         op.wide ? 0x3fe8000000000000ULL : 0x3f400000ULL};
+              for (int lane = 0; lane < lanes; ++lane) {
+                for (int reg = 0; reg < 8; ++reg) {
+                  cu->write_vgpr(base + reg, lane, 0xdeadbeef);
+                }
+                for (int operand = 0; operand < 3; ++operand) {
+                  cu->write_vgpr(base + operand * 2, lane, uint32_t(values[operand]));
+                  if (op.wide) {
+                    cu->write_vgpr(base + operand * 2 + 1, lane, uint32_t(values[operand] >> 32));
+                  }
+                }
+              }
+              execute(encode(op.cdna, op.gfx10, op.gfx11, destination, 2, 1));
+              const uint64_t expected =
+                  op.expected + (suppress_omod ? 0 : (op.wide ? 1ULL << 52 : 1ULL << 23));
+              for (int lane = 0; lane < lanes; ++lane) {
+                const uint64_t before =
+                    destination ? (op.wide ? 0xdeadbeefdeadbeefULL : 0xdeadbeefULL) : values[0];
+                const uint64_t wanted = (exec_mask >> lane) & 1 ? expected : before;
+                EXPECT_EQ(cu->read_vgpr_storage(base + destination, lane), uint32_t(wanted));
+                if (op.wide) {
+                  EXPECT_EQ(cu->read_vgpr_storage(base + destination + 1, lane),
+                            uint32_t(wanted >> 32));
+                }
+              }
+              EXPECT_EQ(wave->trapsts(), 0x100U);
+            }
+          }
+        }
+        if (profile.cdna || profile.gfx10) {
+          // SDWA owns scaling and packed destination placement. Wave32 must not
+          // call the Wave64 entry point or read/write a second, nonexistent half.
+          for (int lane = 0; lane < lanes; ++lane) {
+            cu->write_vgpr(base, lane, 0x3e800000);
+            cu->write_vgpr(base + 1, lane, 0x3f000000);
+            cu->write_vgpr(base + 6, lane, 0xdeadbeef);
+          }
+          wave->set_exec(1ULL << (lanes - 1));
+          wave->set_mode_raw(0);
+          const uint32_t opcode = profile.cdna ? cdna2::kVMinF32Vop2 : rdna2::kVMinF32Vop2;
+          for (bool packed_destination : {false, true}) {
+            for (int lane = 0; lane < lanes; ++lane) {
+              cu->write_vgpr(base + 6, lane, 0xdeadbeef);
+            }
+            const uint32_t placement =
+                packed_destination ? amdgpu::sdwa::WORD_1 : amdgpu::sdwa::DWORD;
+            execute({(opcode << 25) | (6U << 17) | (1U << 9) | amdgpu::SRC_SDWA,
+                     (placement << 8) | (amdgpu::sdwa::UNUSED_PRESERVE << 11) | (1U << 14) |
+                         (amdgpu::sdwa::DWORD << 16) | (amdgpu::sdwa::DWORD << 24)});
+            const uint32_t expected = packed_destination ? 0x0000beefU : 0x3f000000U;
+            for (int lane = 0; lane < lanes; ++lane) {
+              EXPECT_EQ(cu->read_vgpr_storage(base + 6, lane),
+                        lane == lanes - 1 ? expected : 0xdeadbeefU);
+            }
+          }
+        }
+        wave->halt();
+      }
+    }
+  }
+}
 
 class ScalarFloatMinMax : public LegacyMinMaxInstruction {};
 
@@ -457,15 +675,15 @@ TEST_P(ScalarFloatMinMax, HalfAndFloatUseArchitecturePolicy) {
   }
 }
 INSTANTIATE_TEST_SUITE_P(Rdna35, ScalarFloatMinMax,
-                         testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA3_5),
+                         testing::Combine(testing::Values(rocjitsu::IsaFamily::Rdna3_5),
                                           testing::Bool()));
 
 class RdnaMinMax : public LegacyMinMaxInstruction {};
 
 TEST_P(RdnaMinMax, NanSelectionAcrossScalarSimdAndDualIssue) {
   const auto arch = std::get<0>(GetParam());
-  const bool number = arch == ROCJITSU_CODE_ARCH_RDNA4;
-  const bool legacy = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool number = arch == rocjitsu::IsaFamily::Rdna4;
+  const bool legacy = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   // RDNA1-3 hardware prefers src0 when both sources are NaN; RDNA4 *_NUM
   // also quiets the selected NaN. All cases run in both input orders.
   constexpr std::array<std::array<uint32_t, 2>, 5> inputs{{
@@ -487,26 +705,28 @@ TEST_P(RdnaMinMax, NanSelectionAcrossScalarSimdAndDualIssue) {
         const bool nan_b = (b & 0x7fffffffu) > 0x7f800000u;
         for (bool maximum : {false, true}) {
           uint32_t expected;
-          if (!number && ieee && nan_a && !(a & 0x400000u))
+          if (!number && ieee && nan_a && !(a & 0x400000u)) {
             expected = a | 0x400000u;
-          else if (!number && ieee && nan_b && !(b & 0x400000u))
+          } else if (!number && ieee && nan_b && !(b & 0x400000u)) {
             expected = b | 0x400000u;
-          else if (nan_a && nan_b)
+          } else if (nan_a && nan_b) {
             expected = number ? a | 0x400000u : a;
-          else if (nan_a)
+          } else if (nan_a) {
             expected = b;
-          else if (nan_b)
+          } else if (nan_b) {
             expected = a;
-          else
+          } else {
             expected = maximum ? 0 : 0x80000000u;
+          }
           const uint32_t op = (number ? rdna4::kVMinNumF32Vop2 : rdna3::kVMinF32Vop2) + maximum;
           check({(op << 25) | (4u << 17) | (1u << 9) | 256u, 0}, expected);
           check(number   ? rdna4::build_vop3(op + 256, {.vdst = 4, .src0 = 256, .src1 = 257})
                 : legacy ? rdna2::build_vop3(op + 256, {.vdst = 4, .src0 = 256, .src1 = 257})
                          : rdna3::build_vop3(op + 256, {.vdst = 4, .src0 = 256, .src1 = 257}),
                 expected);
-          if (legacy)
+          if (legacy) {
             continue; // Dual issue starts with RDNA3.
+          }
           // VOPD X is MIN/MAX, Y is MOV. Destinations v4/v5 are disjoint.
           const uint32_t dual_op = maximum ? 10u : 11u;
           check({(0x32u << 26) | (dual_op << 22) | (8u << 17) | (1u << 9) | 256u,
@@ -520,9 +740,10 @@ TEST_P(RdnaMinMax, NanSelectionAcrossScalarSimdAndDualIssue) {
 
 TEST_P(RdnaMinMax, DoubleNanPayloadPriority) {
   const auto arch = std::get<0>(GetParam());
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch == rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "RDNA4 uses MIN_NUM/MAX_NUM rather than legacy selection";
-  const bool rdna12 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  }
+  const bool rdna12 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   constexpr uint64_t kQuiet0 = 0x7ff8000000000000ull;
   constexpr uint64_t kQuiet1 = 0x7ff8000012345678ull;
   constexpr uint64_t kSignaling0 = 0x7ff0000000000001ull;
@@ -573,7 +794,7 @@ TEST_P(PackedNumberSelection, PreservesDenormalResults) {
   for (uint32_t mode = 0; mode != 4; ++mode) {
     wave_->set_mode_raw(mode << 6);
     SCOPED_TRACE(mode);
-    for (bool clamp : {false, true})
+    for (bool clamp : {false, true}) {
       for (bool maximum : {false, true}) {
         put(0, 0x80010001u);
         put(1, maximum ? 0xbc00bc00u : 0x3c003c00u);
@@ -582,6 +803,7 @@ TEST_P(PackedNumberSelection, PreservesDenormalResults) {
                   {.vdst = 4, .clamp = clamp, .src0 = 256, .src1 = 257, .opsel_hi = 3}),
               (clamp ? 0 : 0x80000000u) | ((mode & 1u) ? (clamp ? 1u : 0x00010001u) : 0));
       }
+    }
   }
 }
 
@@ -607,27 +829,29 @@ TEST_P(PackedNumberSelection, SignalingNanUsesNumberSemantics) {
 }
 
 TEST(LegacyMinMaxPolicyDeathTest, RejectsUnsupportedArchitectures) {
-  static_assert(noexcept(amdgpu::fp_mode::legacy_minmax_policy(ROCJITSU_CODE_ARCH_CDNA1, false)));
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RV32I,
-                    ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID})
+  static_assert(noexcept(amdgpu::fp_mode::legacy_minmax_policy(rocjitsu::IsaFamily::Cdna1, false)));
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rv32i,
+        rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Invalid}) {
     EXPECT_DEATH(amdgpu::fp_mode::legacy_minmax_policy(arch, false), "");
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Rdna4, PackedNumberSelection,
-                         testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA4),
+                         testing::Combine(testing::Values(rocjitsu::IsaFamily::Rdna4),
                                           testing::Bool()));
 
 INSTANTIATE_TEST_SUITE_P(
     Rdna, RdnaMinMax,
-    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                     ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                     ROCJITSU_CODE_ARCH_RDNA4),
+    testing::Combine(testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                     rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                     rocjitsu::IsaFamily::Rdna4),
                      testing::Bool()));
 
 INSTANTIATE_TEST_SUITE_P(
     Cdna, LegacyMinMaxInstruction,
-    testing::Combine(testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                     ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4),
+    testing::Combine(testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                     rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4),
                      testing::Bool()));
 
 } // namespace

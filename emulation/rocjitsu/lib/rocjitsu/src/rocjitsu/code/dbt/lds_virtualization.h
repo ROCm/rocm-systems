@@ -10,6 +10,7 @@
 #include "rocjitsu/code/dbt/kernel_descriptor_translator.h"
 #include "rocjitsu/code/dbt/translation_rule.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstdint>
 #include <optional>
@@ -36,8 +37,8 @@ struct VirtualLdsBaseSgprReservation {
 /// relocation flow does not need target-pair-specific branches. The actual
 /// target instruction encoders and resource limits remain in pair-specific
 /// semantic implementations.
-[[nodiscard]] bool supports_virtual_lds_sidecars(rj_code_arch_t guest_arch,
-                                                 rj_code_arch_t host_arch);
+[[nodiscard]] bool supports_virtual_lds_sidecars(rocjitsu::IsaFamily guest_arch,
+                                                 rocjitsu::IsaFamily host_arch);
 
 /// @brief Return true when @p inst requires a virtual-LDS body variant.
 ///
@@ -45,8 +46,8 @@ struct VirtualLdsBaseSgprReservation {
 /// operations when translating to CDNA3. Other architecture pairs return false
 /// until they get an explicit lowering path.
 [[nodiscard]] bool source_instruction_uses_virtualizable_lds(const Instruction &inst,
-                                                             rj_code_arch_t guest_arch,
-                                                             rj_code_arch_t host_arch);
+                                                             rocjitsu::IsaFamily guest_arch,
+                                                             rocjitsu::IsaFamily host_arch);
 
 /// @brief Reserve scalar state used by virtual-LDS address lowering.
 ///
@@ -55,16 +56,16 @@ struct VirtualLdsBaseSgprReservation {
 /// the architecture-specific lowering.
 [[nodiscard]] std::optional<VirtualLdsBaseSgprReservation>
 reserve_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope blocks,
-                                   const KdTranslation &translation, rj_code_arch_t guest_arch,
-                                   rj_code_arch_t host_arch);
+                                   const KdTranslation &translation, rocjitsu::IsaFamily guest_arch,
+                                   rocjitsu::IsaFamily host_arch);
 
 /// @brief Append the target entry prologue that initializes the virtual-LDS base.
 ///
 /// @returns false when the descriptor ABI state cannot encode the prologue for
 /// the selected host architecture.
 [[nodiscard]] bool append_virtual_lds_entry_prologue(KdTranslation &translation,
-                                                     rj_code_arch_t guest_arch,
-                                                     rj_code_arch_t host_arch);
+                                                     rocjitsu::IsaFamily guest_arch,
+                                                     rocjitsu::IsaFamily host_arch);
 
 /// @brief Try to lower one instruction into virtual-LDS backing-buffer traffic.
 ///
@@ -73,7 +74,7 @@ reserve_virtual_lds_base_sgpr_pair(TranslationContext &context, KernelBlockScope
 /// storage but this lowering cannot preserve it safely.
 [[nodiscard]] ExpandResult lower_virtual_lds_instruction(const Instruction &inst,
                                                          TranslationContext &context,
-                                                         rj_code_arch_t guest_arch,
-                                                         rj_code_arch_t host_arch);
+                                                         rocjitsu::IsaFamily guest_arch,
+                                                         rocjitsu::IsaFamily host_arch);
 
 } // namespace rocjitsu

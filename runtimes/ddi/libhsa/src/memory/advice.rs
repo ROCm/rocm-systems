@@ -27,19 +27,19 @@ fn storage<T>(count: usize) -> Result<Vec<T>, Status> {
 
 /// Qualifies a GPU agent with the selected provider.
 fn device_target(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     service: &MemoryAdvice,
     agent: HsaAgent,
 ) -> Result<rocddi::memory::advice::AdviceTarget, Status> {
-    let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
+    let index = runtime.agents.gpu_index(agent).ok_or(INVALID_AGENT)?;
     service
-        .target(&runtime.gpus[index].device)
+        .target(&runtime.agents.gpus[index].device)
         .map_err(map_error)
 }
 
 /// Applies HSA policy after validating the complete frontend batch.
 pub(crate) fn set(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     address: u64,
     size: u64,
     pairs: &[HsaAmdSvmAttributePair],
@@ -56,7 +56,7 @@ pub(crate) fn set(
             )
         })
         .map(|pair| HsaAgent { handle: pair.value })
-        .find(|agent| runtime.gpu_index(*agent).is_some());
+        .find(|agent| runtime.agents.gpu_index(*agent).is_some());
     let service = svm_service(runtime, selected)?;
     let mut changes = storage(pairs.len() + 1)?;
     let mut agents = storage(pairs.len())?;
@@ -104,14 +104,14 @@ pub(crate) fn set(
             | AMD_SVM_ATTRIB_AGENT_ACCESSIBLE_IN_PLACE
             | AMD_SVM_ATTRIB_AGENT_NO_ACCESS => {
                 let agent = HsaAgent { handle: pair.value };
-                if !runtime.is_agent(agent) {
+                if !runtime.agents.is_agent(agent) {
                     return Err(INVALID_AGENT);
                 }
                 if agents.contains(&agent.handle) {
                     return Err(INCOMPATIBLE_ARGUMENTS);
                 }
                 agents.push(agent.handle);
-                if runtime.is_cpu_agent(agent) {
+                if runtime.agents.is_cpu_agent(agent) {
                     // All CPU aliases address one host property; any permitted
                     // host access wins over another CPU alias denying access.
                     host_access = Some(
@@ -147,7 +147,7 @@ pub(crate) fn set(
 /// `pairs` addresses `count` writable ABI pairs. Every tag and the value of
 /// each `ACCESS_QUERY` are initialized; other input values may be uninitialized.
 pub(crate) unsafe fn get(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     address: u64,
     size: u64,
     pairs: *mut HsaAmdSvmAttributePair,
@@ -171,20 +171,22 @@ pub(crate) unsafe fn get(
     let selected = inputs
         .iter()
         .filter_map(|(_, agent)| *agent)
-        .find(|agent| runtime.gpu_index(*agent).is_some());
+        .find(|agent| runtime.agents.gpu_index(*agent).is_some());
     let service = svm_service(runtime, selected)?;
     let mut queries = storage(count)?;
     for &(attribute, agent) in &inputs {
+        if attribute == AMD_SVM_ATTRIB_PREFETCH_LOCATION {
+            continue;
+        }
         queries.push(if let Some(property) = property(attribute) {
             AdviceQuery::Property(property)
         } else {
             match attribute {
                 AMD_SVM_ATTRIB_PREFERRED_LOCATION => AdviceQuery::PreferredLocation,
-                AMD_SVM_ATTRIB_PREFETCH_LOCATION => AdviceQuery::PrefetchLocation,
                 AMD_SVM_ATTRIB_MIGRATION_GRANULARITY => AdviceQuery::MigrationGranularity,
                 AMD_SVM_ATTRIB_ACCESS_QUERY => {
                     let agent = agent.ok_or(INVALID_AGENT)?;
-                    if runtime.is_cpu_agent(agent) {
+                    if runtime.agents.is_cpu_agent(agent) {
                         AdviceQuery::Property(AdviceProperty::HostAccess)
                     } else {
                         AdviceQuery::Access(device_target(runtime, &service, agent)?)
@@ -194,9 +196,34 @@ pub(crate) unsafe fn get(
             }
         });
     }
-    let values = service.query(address, size, &queries).map_err(map_error)?;
+    let values = if queries.is_empty() {
+        Vec::new()
+    } else {
+        service.query(address, size, &queries).map_err(map_error)?
+    };
+    let mut values = values.into_iter();
     let mut outputs = storage(count)?;
-    for ((attribute, _), value) in inputs.into_iter().zip(values) {
+    for (attribute, _) in inputs {
+        if attribute == AMD_SVM_ATTRIB_PREFETCH_LOCATION {
+            let agent =
+                runtime
+                    .memory_state
+                    .pending_prefetches
+                    .query(address, size, |start, length| {
+                        let values = service
+                            .query(start, length, &[AdviceQuery::PrefetchLocation])
+                            .map_err(map_error)?;
+                        match values.into_iter().next() {
+                            Some(AdviceValue::Location(location)) => {
+                                svm_agent_from_location(runtime, location)
+                            }
+                            _ => Err(ERROR),
+                        }
+                    })?;
+            outputs.push(agent.handle);
+            continue;
+        }
+        let value = values.next().ok_or(ERROR)?;
         outputs.push(match (attribute, value) {
             (AMD_SVM_ATTRIB_GLOBAL_FLAG, AdviceValue::Property(state)) => match state {
                 AdviceState::Enabled => AMD_SVM_GLOBAL_FLAG_FINE_GRAINED,
