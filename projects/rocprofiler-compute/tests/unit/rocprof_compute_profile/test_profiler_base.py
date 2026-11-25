@@ -1489,8 +1489,7 @@ def test_sanitize_joins_injected_command_without_losing_arguments(tmp_path):
         *interpreter,
         str(launcher),
         "--frameworks",
-        "torch",
-        "triton",
+        *sorted(KNOWN_ML_API_BACKENDS),
         "--",
         *command[len(interpreter) :],
     ]
