@@ -267,31 +267,23 @@ public:
   ClientSession(int client_fd, rj_daemon_t *daemon)
       : client_fd_(client_fd), daemon_(daemon), client_pid_(peer_pid_for_socket(client_fd)) {}
 
-  ~ClientSession() {
-    try {
-      close_device();
-    } catch (...) {
-    }
-  }
+  ~ClientSession() { close_device(); }
 
   ClientSession(const ClientSession &) = delete;
   ClientSession &operator=(const ClientSession &) = delete;
 
   void run(std::stop_token stop) {
-    try {
-      while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
-        RpcHeader header{};
-        ReceivedFds input_fds;
-        if (!receive_header_with_fds(client_fd_, &header, &input_fds)) {
-          break;
-        }
-
-        if (header.reserved != 0 ||
-            handle_request(header, input_fds) == RequestDisposition::Disconnect) {
-          break;
-        }
+    while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
+      RpcHeader header{};
+      ReceivedFds input_fds;
+      if (!receive_header_with_fds(client_fd_, &header, &input_fds)) {
+        break;
       }
-    } catch (...) {
+
+      if (header.reserved != 0 ||
+          handle_request(header, input_fds) == RequestDisposition::Disconnect) {
+        break;
+      }
     }
     close_device();
   }
@@ -763,27 +755,22 @@ private:
     if (process_id_ == 0) {
       return 0;
     }
-    try {
-      if (auto *driver = daemon_->vm->vm->driver()) {
-        if (auto transaction = driver->begin_gem_va_transaction(process_id_)) {
-          for (size_t index = 0; index < gem_va_mappings_.size();) {
-            const auto mapping = gem_va_mappings_[index];
-            if (!transaction->unmap(mapping.va_address, mapping.map_size, mapping.drm_file_id)) {
-              ++index;
-              continue;
-            }
-            gem_va_mappings_.erase(gem_va_mappings_.begin() + index);
-            if (std::ranges::none_of(gem_va_mappings_, [&](const GemVaMapping &entry) {
-                  return entry.backing.get() == mapping.backing.get();
-                })) {
-              transaction->release_backing(mapping.backing.get());
-            }
+    if (auto *driver = daemon_->vm->vm->driver()) {
+      if (auto transaction = driver->begin_gem_va_transaction(process_id_)) {
+        for (size_t index = 0; index < gem_va_mappings_.size();) {
+          const auto mapping = gem_va_mappings_[index];
+          if (!transaction->unmap(mapping.va_address, mapping.map_size, mapping.drm_file_id)) {
+            ++index;
+            continue;
+          }
+          gem_va_mappings_.erase(gem_va_mappings_.begin() + index);
+          if (std::ranges::none_of(gem_va_mappings_, [&](const GemVaMapping &entry) {
+                return entry.backing.get() == mapping.backing.get();
+              })) {
+            transaction->release_backing(mapping.backing.get());
           }
         }
       }
-    } catch (...) {
-      // A partial page-table mutation can throw. The process owns its backing
-      // until final close, which must still be attempted after that failure.
     }
     if (rj_vm_device_close(daemon_->vm, process_id_) != ROCJITSU_STATUS_SUCCESS) {
       return -(errno != 0 ? errno : EIO);
@@ -818,55 +805,57 @@ void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
   }
 
   struct ClientThread {
-    std::jthread thread;
+    pthread_t thread;
+    std::shared_ptr<std::atomic<bool>> complete;
+  };
+  struct ClientStart {
+    rj_daemon_t *daemon;
+    int fd;
     std::shared_ptr<std::atomic<bool>> complete;
   };
   std::vector<ClientThread> client_threads;
-  try {
-    while (!stop.stop_requested() && !daemon->stop_requested.load(std::memory_order_acquire)) {
-      std::erase_if(client_threads, [](const ClientThread &client) {
-        return client.complete->load(std::memory_order_acquire);
-      });
-
-      const int client_fd = accept4(daemon->listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
-      if (client_fd < 0) {
-        if (errno == EINTR) {
-          continue;
-        }
-        break;
+  while (!stop.stop_requested() && !daemon->stop_requested.load(std::memory_order_acquire)) {
+    std::erase_if(client_threads, [](const ClientThread &client) {
+      if (!client.complete->load(std::memory_order_acquire)) {
+        return false;
       }
-
-      {
-        std::lock_guard lock(daemon->clients_mutex);
-        daemon->client_fds.push_back(client_fd);
+      pthread_join(client.thread, nullptr);
+      return true;
+    });
+    const int client_fd = accept4(daemon->listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
+    if (client_fd < 0) {
+      if (errno == EINTR) {
+        continue;
       }
-      try {
-        client_threads.reserve(client_threads.size() + 1);
-        auto complete = std::make_shared<std::atomic<bool>>(false);
-        std::jthread thread([daemon, client_fd, complete](std::stop_token client_stop) {
-          try {
-            handle_client(client_fd, daemon, client_stop);
-          } catch (...) {
-          }
-          close_client(daemon, client_fd);
-          complete->store(true, std::memory_order_release);
-        });
-        client_threads.push_back({std::move(thread), std::move(complete)});
-      } catch (...) {
-        close_client(daemon, client_fd);
-        throw;
-      }
+      break;
     }
-  } catch (...) {
-    mark_error(daemon);
+    {
+      std::lock_guard lock(daemon->clients_mutex);
+      daemon->client_fds.push_back(client_fd);
+    }
+    client_threads.reserve(client_threads.size() + 1);
+    auto complete = std::make_shared<std::atomic<bool>>(false);
+    auto start = std::make_unique<ClientStart>(ClientStart{daemon, client_fd, complete});
+    pthread_t thread;
+    const int started = pthread_create(
+        &thread, nullptr,
+        +[](void *argument) -> void * {
+          std::unique_ptr<ClientStart> state(static_cast<ClientStart *>(argument));
+          handle_client(state->fd, state->daemon, {});
+          close_client(state->daemon, state->fd);
+          state->complete->store(true, std::memory_order_release);
+          return nullptr;
+        },
+        start.get());
+    if (started != 0) {
+      close_client(daemon, client_fd);
+      break;
+    }
+    start.release();
+    client_threads.push_back({thread, std::move(complete)});
   }
-
   if (!daemon->stop_requested.load(std::memory_order_acquire)) {
     mark_error(daemon);
-  }
-
-  for (auto &client : client_threads) {
-    client.thread.request_stop();
   }
   {
     std::lock_guard lock(daemon->clients_mutex);
@@ -874,7 +863,9 @@ void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
       ::shutdown(fd, SHUT_RDWR);
     }
   }
-  client_threads.clear();
+  for (const ClientThread &client : client_threads) {
+    pthread_join(client.thread, nullptr);
+  }
 }
 
 void remove_owned_socket(const rj_daemon_t *daemon) {
@@ -1099,13 +1090,7 @@ rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_pa
     return status;
   }
 
-  try {
-    status = bind_socket(created.get());
-  } catch (const std::bad_alloc &) {
-    status = ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (...) {
-    status = ROCJITSU_STATUS_ERROR;
-  }
+  status = bind_socket(created.get());
   if (status != ROCJITSU_STATUS_SUCCESS) {
     rj_vm_destroy(created->vm);
     created->vm = nullptr;
