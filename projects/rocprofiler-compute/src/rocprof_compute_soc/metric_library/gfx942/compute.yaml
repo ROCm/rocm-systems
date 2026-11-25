@@ -24,8 +24,7 @@ compute.mfma_flops_f8:
   formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    The total number of 8-bit floating point MFMA operations executed per second. It is
-    supported on AMD Instinct MI300 series and later only.
+    The total number of 8-bit floating point MFMA operations executed per second.
   peak: $max_sclk * $cu_per_gpu * 4096 / 1000
   peak_empirical: $MFMAF8Flops_empirical_peak
 compute.mfma_iops_int8:
@@ -34,15 +33,3 @@ compute.total_flops:
   formula: $valu_f16_flop_rate + $valu_f32_flop_rate + $valu_f64_flop_rate + $mfma_f16_flop_rate + $mfma_bf16_flop_rate + $mfma_f32_flop_rate + $mfma_f64_flop_rate + $mfma_f8_flop_rate
 compute.valu_active_threads:
   peak: $wave_size
-compute.vmem_ta_addr_stall:
-  description: >-
-    The number of cycles the sequencer was stalled waiting to send address requests to
-    the address processor due to a full address FIFO.
-compute.vmem_ta_cmd_stall:
-  description: >-
-    The number of cycles the sequencer was stalled waiting to send commands to the
-    address processor due to a full command FIFO.
-compute.vmem_ta_data_stall:
-  description: >-
-    The number of cycles the sequencer was stalled waiting to send write data to the
-    address processor due to a full data FIFO.

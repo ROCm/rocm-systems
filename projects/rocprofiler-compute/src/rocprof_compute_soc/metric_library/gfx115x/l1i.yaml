@@ -20,4 +20,4 @@ l1i.req:
   name: L1I Requests
   formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: ''
+  description: Total Instruction Cache fetch requests.

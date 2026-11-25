@@ -2,12 +2,12 @@ wave.dispatched_threads:
   name: Dispatched Threads
   formula: AVG(SQ_ITEMS_sum)
   unit: Threads
-  description: ''
+  description: Total work-items dispatched.
 wave.dispatched_wavefronts:
   name: WGP Dispatched Wavefronts
   formula: AVG(SQ_WAVES_sum)
   unit: Wavefronts
-  description: ''
+  description: Total wavefronts dispatched.
 wave.issue_wait:
   name: Wave Issue Wait
   formula: 100 * SUM(SQ_WAIT_INST_ANY) / SUM(SQ_WAVE_CYCLES)

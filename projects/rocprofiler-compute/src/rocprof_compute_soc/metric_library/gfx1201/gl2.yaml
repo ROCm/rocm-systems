@@ -24,7 +24,7 @@ gl2.hit_rate:
   name: GL2 Cache Hit Rate
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  description: Percentage of L2 lookups that hit.
+  description: Percentage of GL2 cache requests that hit in the cache.
   peak: 100
 gl2.hits:
   name: GL2 Cache Hits
@@ -89,7 +89,7 @@ gl2.total_req:
   name: GL2 Total Requests
   formula: SUM(GL2C_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: L2 requests.
+  description: Total number of GL2 cache requests.
 gl2.wr_req:
   name: GL2 Write Requests
   formula: SUM(GL2C_WRITE_sum) / SUM($denom)

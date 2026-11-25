@@ -10,10 +10,7 @@ dispatch.grid_size:
   name: Grid Size
   formula: AVG(Grid_Size)
   unit: Work-items
-  description: >-
-    The total number of work-items (or, threads) launched as a part of the kernel
-    dispatch. In HIP, this is equivalent to the total grid size multiplied by the total
-    workgroup (or, block) size.
+  description: Total number of work-items in the dispatch grid.
 dispatch.kernel_time:
   name: Kernel Time
   formula: AVG(End_Timestamp - Start_Timestamp)
@@ -32,9 +29,8 @@ dispatch.scratch_allocation:
   formula: AVG(Scratch_Per_Workitem)
   unit: Bytes per Work-item
   description: >-
-    The number of bytes of scratch memory requested per work-item for this kernel.
-    Scratch memory is used for stack memory on the accelerator, as well as for register
-    spills and restores.
+    The number of bytes of scratch memory per work-item. Scratch memory holds the stack
+    and register spills.
 dispatch.scratch_allocation_per_wave:
   name: Scratch Allocation per Wave
   formula: AVG(Scratch_Per_Workitem) * $wave_size / 1024
@@ -63,6 +59,4 @@ dispatch.workgroup_size:
   name: Workgroup Size
   formula: AVG(Workgroup_Size)
   unit: Work-items
-  description: >-
-    The total number of work-items (or, threads) in each workgroup (or, block) launched
-    as part of the kernel dispatch. In HIP, this is equivalent to the total block size.
+  description: Number of work-items per workgroup.

@@ -67,7 +67,8 @@ A description says what the metric counts. It follows the
    wavefront), and optionally how to read the value, for example "High VALU counts
    indicate compute-intensive kernels."
 3. **One description per id.** An id has the same description on every arch where its
-   formula means the same.
+   formula means the same. An arch keeps its own description only when it is short and
+   says what differs on that arch.
 4. **Rates.** A rate says "per second". A peak bandwidth says which peak it gives.
 5. **Percentages.** A percentage starts with "Percentage of".
 6. **Terms.** "wavefront", not "wave"; "for example", not "e.g." or "for instance";

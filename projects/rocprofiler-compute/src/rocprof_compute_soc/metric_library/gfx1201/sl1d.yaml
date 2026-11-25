@@ -2,10 +2,7 @@ sl1d.hits_per_req:
   name: sL1D Hit Rate
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
   unit: Percent
-  description: >-
-    Percentage of scalar data cache accesses that hit. High hit rates indicate efficient
-    reuse of constant and uniform data. Low rates may suggest excessive unique constant
-    data or poor temporal locality.
+  description: Percentage of Scalar Data Cache requests that hit in the cache.
   peak: 100
 sl1d.load_bw:
   name: sL1D Load Bandwidth
@@ -20,4 +17,4 @@ sl1d.req:
   name: sL1D Requests
   formula: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: Scalar data cache requests after bank serialization.
+  description: Total Scalar Data Cache requests.

@@ -10,19 +10,12 @@ gl2.ea_rd_req_dram:
   name: EA Read Requests (DRAM)
   formula: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of read requests forwarded from GL2 cache through GCEA (Graphics Core
-    Efficiency Arbiter). These requests go toward system memory, though they may be
-    served by system-level caches before reaching DRAM. High counts indicate
-    memory-bound workloads.
+  description: Number of GL2 read requests sent through the EA toward system memory.
 gl2.ea_wr_req_dram:
   name: EA Write Requests (DRAM)
   formula: SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of write requests forwarded from GL2 cache through GCEA (Graphics Core
-    Efficiency Arbiter). These include evictions and writebacks going toward system
-    memory. High counts indicate write-intensive workloads consuming memory bandwidth.
+  description: Number of GL2 write requests sent through the EA toward system memory.
 gl2.fabric_rd_bw:
   name: GL2-Fabric Read Bandwidth
   formula: SUM(GL2C_EA_RDREQ_32B_sum * 32 + GL2C_EA_RDREQ_64B_sum * 64 + GL2C_EA_RDREQ_96B_sum * 96 + GL2C_EA_RDREQ_128B_sum * 128) / SUM(End_Timestamp - Start_Timestamp)
@@ -46,11 +39,7 @@ gl2.hit_rate:
   name: GL2 Cache Hit Rate
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  description: >-
-    Percentage of GL2 cache requests that are serviced from cache without accessing
-    system memory. Higher hit rates reduce memory bandwidth pressure and improve
-    performance. Low hit rates may indicate poor data locality or working sets that
-    exceed cache capacity.
+  description: Percentage of GL2 cache requests that hit in the cache.
   peak: 100
 gl2.hits:
   name: GL2 Cache Hits
@@ -79,15 +68,12 @@ gl2.total_req:
   name: GL2 Total Requests
   formula: SUM(GL2C_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Total number of requests received by the GL2 cache from all GL1 caches and other
-    clients. This represents the aggregate memory traffic at the GPU's final on-chip
-    cache.
+  description: Total number of GL2 cache requests.
 gl2.util:
   name: GL2 Cache Utilization
   formula: 100 * SUM(GL2C_BUSY_sum) / SUM(GL2C_CYCLE_sum)
   unit: Percent
-  description: ''
+  description: Percentage of cycles the GL2 cache is busy.
 gl2.wr_bw:
   name: GL2 Cache Write Bandwidth
   formula: 64 * SUM(GL2C_WRITE_sum) / SUM(End_Timestamp - Start_Timestamp)

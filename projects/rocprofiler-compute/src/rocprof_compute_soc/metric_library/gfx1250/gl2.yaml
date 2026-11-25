@@ -309,4 +309,4 @@ gl2.util:
   name: GL2 Cache Utilization
   formula: 100 * SUM(GL2C_BUSY_sum) / SUM(GL2C_CYCLE_sum)
   unit: Percent
-  description: Percentage of GL2 Cache cycles when it's busy.
+  description: Percentage of cycles the GL2 cache is busy.

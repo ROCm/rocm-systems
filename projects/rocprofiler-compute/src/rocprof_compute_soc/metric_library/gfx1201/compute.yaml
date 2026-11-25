@@ -84,11 +84,7 @@ compute.ipc:
   name: IPC
   formula: SUM(SQ_INSTS_ALL_sum - SQ_INSTS_INTERNAL_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Instructions per Cycle
-  description: >-
-    Instructions executed per cycle, measuring overall instruction throughput
-    efficiency. Higher IPC indicates better utilization of the shader pipeline. Low IPC
-    may indicate stalls due to memory latency, register dependencies, or insufficient
-    wavefront occupancy to hide latencies.
+  description: Average number of instructions per active WGP cycle.
   peak: 5
 compute.lds_direct_load_insts:
   name: LDS Direct Load Instructions
@@ -116,10 +112,7 @@ compute.total_insts:
   name: Total Instructions
   formula: SUM(SQ_INSTS_ALL_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Total number of instructions executed across all wavefronts. This provides an
-    overall measure of computational work. Compare with specific instruction types to
-    understand the workload characteristics.
+  description: Total instructions issued.
 compute.valu_flops:
   name: VALU FLOPs
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum)) / SUM(End_Timestamp - Start_Timestamp)

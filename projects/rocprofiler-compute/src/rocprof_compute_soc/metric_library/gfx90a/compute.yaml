@@ -331,17 +331,23 @@ compute.vmem_ta_addr_stall:
   name: Sequencer -> TA Address Stall
   formula: SUM(SQ_VMEM_TA_ADDR_FIFO_FULL) / SUM($denom)
   unit: (Cycles + $normUnit)
-  description: ''
+  description: >-
+    The number of cycles the sequencer was stalled waiting to send address requests to
+    the address processor due to a full address FIFO.
 compute.vmem_ta_cmd_stall:
   name: Sequencer -> TA Command Stall
   formula: SUM(SQ_VMEM_TA_CMD_FIFO_FULL) / SUM($denom)
   unit: (Cycles + $normUnit)
-  description: ''
+  description: >-
+    The number of cycles the sequencer was stalled waiting to send commands to the
+    address processor due to a full command FIFO.
 compute.vmem_ta_data_stall:
   name: Sequencer -> TA Data Stall
   formula: SUM(SQ_VMEM_WR_TA_DATA_FIFO_FULL) / SUM($denom)
   unit: (Cycles + $normUnit)
-  description: ''
+  description: >-
+    The number of cycles the sequencer was stalled waiting to send write data to the
+    address processor due to a full data FIFO.
 compute.vmem_util:
   name: VMEM Utilization
   formula: 100 * SUM(SQ_ACTIVE_INST_FLAT + SQ_ACTIVE_INST_VMEM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)

@@ -2,7 +2,4 @@ gl1.total_req:
   name: GL1 Total Requests
   formula: SUM(GL1C_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Total number of requests received by GL1 from all GL0 caches (TCP instances) within
-    the shader engine. This represents aggregated memory traffic from multiple Workgroup
-    Processors.
+  description: Total requests processed by GL1.
