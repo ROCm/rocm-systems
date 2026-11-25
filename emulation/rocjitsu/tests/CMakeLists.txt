@@ -2885,6 +2885,7 @@ set(_rj_maintenance_interposer_cases
     FinalDrmCloseWaitsForSnapshotOnWritebackFailure
 )
 set(_rj_hook_interposer_cases
+    TimelineWaitAllowsThreadExitFromSignal
     LiveSvmDenialEndsOnHostVmaReplacement
     ${_rj_maintenance_interposer_cases}
 )

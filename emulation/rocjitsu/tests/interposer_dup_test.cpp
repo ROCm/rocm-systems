@@ -6363,8 +6363,12 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
 }
 
 TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
+  auto ref_count =
+      reinterpret_cast<int (*)()>(dlsym(RTLD_DEFAULT, "rj_interposer_test_local_ref_count"));
+  ASSERT_NE(ref_count, nullptr);
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
+  const int refs_before_drm = ref_count();
   int drm = open_drm_render();
   ASSERT_GE(drm, 0);
   drm_syncobj_create create{};
@@ -6428,8 +6432,9 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   drm_syncobj_destroy destroy{};
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
-  // Closing the file also exercises release of the ioctl reservation.
+  // Check before final KFD close so backend teardown cannot hide a leaked lease.
   EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(ref_count(), refs_before_drm);
   EXPECT_EQ(close(kfd), 0);
 }
 
