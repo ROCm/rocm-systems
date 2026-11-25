@@ -76,9 +76,9 @@ TEST(code_object_vgpr_count, unified_register_file_up_to_128_arch_vgprs)
         SCOPED_TRACE(name);
 
         // 128 arch VGPRs + 128 AGPRs
-        auto half = make_descriptor(31, 31);
-        EXPECT_EQ(code_object::arch_vgpr_count(name, half), 128u);
-        EXPECT_EQ(code_object::accum_vgpr_count(name, half), 128u);
+        auto even_split = make_descriptor(31, 31);
+        EXPECT_EQ(code_object::arch_vgpr_count(name, even_split), 128u);
+        EXPECT_EQ(code_object::accum_vgpr_count(name, even_split), 128u);
 
         // 4 arch VGPRs (minimum) out of 8 total
         auto minimum = make_descriptor(0, 0);
