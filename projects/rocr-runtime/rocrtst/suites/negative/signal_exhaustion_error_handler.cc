@@ -22,7 +22,11 @@
 
 namespace {
 // KFD gives each process at most 4096 events and hsa_signal_create() consumes one per interrupt
-// signal, so this is more than enough to run out of them.
+// signal, so this is more than enough to run out of them. No public HSA API reports whether a
+// signal got a KFD event, and the runtime does not return OUT_OF_RESOURCES when it runs out, so
+// the test cannot observe exhaustion directly. It relies on the KFD limit staying at 4096: if the
+// limit is raised above kTargetSignalCount, every signal gets an event and the test takes the
+// ordinary path while still passing. Keep kTargetSignalCount above the KFD limit when changing it.
 constexpr uint32_t kMinSignalCount = 4096;
 constexpr uint32_t kTargetSignalCount = 8192;
 constexpr uint32_t kQueueSize = 1024;
@@ -110,7 +114,8 @@ hsa_status_t SignalExhaustionErrorHandlerTest::SystemEventCallback(const hsa_amd
   CallbackData* cb_data = reinterpret_cast<CallbackData*>(data);
 
   // Ignore the other events, e.g. the shutdown event. Returning an error for them leaves the
-  // runtime to its default action.
+  // runtime to its default action, which aborts the process. This is intentional: an unexpected
+  // GPU event fails the whole run rather than being masked.
   if (event->event_type != HSA_AMD_GPU_MEMORY_FAULT_EVENT) return HSA_STATUS_ERROR;
 
   cb_data->fault_address = event->memory_fault.virtual_address;
