@@ -790,7 +790,7 @@ lists the operators and ignores ``--operator``.
 List all operators
 ---------------------
 
-``--list-operators`` accepts ``torch``, ``triton``, and ``user``, separated
+``--list-operators`` accepts ``torch``, ``triton``, ``jax``, and ``user``, separated
 by spaces. For example, ``--list-operators torch user`` lists both groups.
 With no values, it lists every captured operator and user ROCTx region.
 
@@ -863,7 +863,7 @@ Filtering by Operator
 case-sensitive. A pattern can match an operator's name or its full call path,
 such as ``nn.Module.Net.forward/aten::addmm``.
 
-Use ``torch:``, ``triton:``, or ``user:`` to limit a pattern to that group.
+Use ``torch:``, ``triton:``, ``jax:``, or ``user:`` to limit a pattern to that group.
 A pattern without a prefix uses the most recent prefix. Before any prefix,
 the pattern matches every traced framework and user ROCTx regions.
 Separate patterns with spaces and quote them so the shell does not expand
@@ -940,6 +940,16 @@ After profiling with ``--experimental --trace-ml-api triton`` (see
 :ref:`triton-trace`), use ``--list-operators triton`` and
 ``--operator 'triton:PATTERN'``, such as ``--operator 'triton:*rmsnorm_kernel*'``.
 They show only Triton kernels.
+
+
+JAX operator analysis
+=====================
+
+After profiling with ``--experimental --trace-ml-api jax`` (see
+:ref:`jax-trace`), use ``--list-operators jax`` and
+``--operator 'jax:PATTERN'``, such as ``--operator 'jax:*train_step*'``.
+They print a ``JAX Operator Call Tree:`` with kernels as children of the
+compiled function or eager primitive.
 
 
 .. _cli-debug-options:
