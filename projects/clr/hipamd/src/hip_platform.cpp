@@ -44,7 +44,9 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 
   // Find wave occupancy per CU => simd_per_cu * GPR usage
   const uint32_t simdPerCU = device.info().simdPerCU_;
-  const size_t MaxWavesPerSimd = device.info().maxWavesPerCU_ / simdPerCU;
+  // For older platforms: limited by SPI 32 per CU, hence 8 per SIMD
+  const size_t MaxWavesPerSimd =
+      (device.isa().versionMajor() <= 9) ? 8 : device.info().maxWavesPerCU_ / simdPerCU;
   const size_t wavefrontSize = wrkGrpInfo->wavefrontSize_;
   const bool adjust_for_wave64 = device.isa().versionMajor() >= 10 && wavefrontSize == 64;
   const uint32_t VgprGranularity = adjust_for_wave64
