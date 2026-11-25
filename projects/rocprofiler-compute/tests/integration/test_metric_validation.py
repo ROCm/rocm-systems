@@ -1,8 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import warnings
+from pathlib import Path
+
 import common
 import pandas as pd
+import pytest
 
 from tests.integration import common as integration_common
 
@@ -218,3 +222,30 @@ def test_validate_metrics(
         finally:
             common.clean_output_dir(True, analysis_workload_dir)
             common.clean_output_dir(True, profile_workload_dir)
+
+
+def test_log_navi4_counter_totals(binary_handler_profile_rocprof_compute, gpu_arch):
+    """Temporary: log raw counter totals on Navi 4 to see whether counters read 0."""
+    if not gpu_arch.startswith("gfx120"):
+        pytest.skip("Navi 4 only")
+    workload_dir = common.get_output_dir(param_id="navi4_counter_totals")
+    binary_handler_profile_rocprof_compute(
+        {"memcopy": ["tests/memcopy"]},
+        workload_dir,
+        ["-b", "9.2.0"],
+        check_success=True,
+        app_name="memcopy",
+    )
+    totals = {}
+    for path in sorted(Path(workload_dir).iterdir()):
+        if not path.name.startswith(("pmc_perf_", "results_")):
+            continue
+        if not path.name.endswith((".csv", ".csv.gz")):
+            continue
+        df = pd.read_csv(path)
+        if {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+            sums = df.groupby("Counter_Name")["Counter_Value"].sum()
+        else:
+            sums = df.select_dtypes("number").sum()
+        totals.update({f"{path.name}:{name}": value for name, value in sums.items()})
+    warnings.warn(f"{gpu_arch} counter totals for memcopy: {totals}")
