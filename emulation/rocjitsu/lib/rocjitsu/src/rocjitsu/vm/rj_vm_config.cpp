@@ -21,12 +21,12 @@ struct rj_vm_config_t {
   std::vector<rj_vm_gpu_info_t> devices; ///< Immutable metadata in node-local GPU ordinal order.
 };
 
-rj_status_t rj_vm_config_create_from_string(const char *json, rj_vm_config_t **config) {
+rj_status_t rj_vm_config_create_from_string(const char *json, rj_vm_config_t **config) noexcept {
   return rj_vm_config_create_from_string_for_node(json, nullptr, config);
 }
 
 rj_status_t rj_vm_config_create_from_string_for_node(const char *json, const char *node_id,
-                                                     rj_vm_config_t **config) {
+                                                     rj_vm_config_t **config) noexcept {
   if (!json || !config) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
   }
