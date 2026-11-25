@@ -724,6 +724,14 @@ add_test(
 )
 
 add_test(
+    NAME test_roofline_ai_points
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest -m roofline_validation
+        --junitxml=tests/test_roofline_ai_points.xml ${COV_OPTION}
+        tests/integration/test_roofline_ai_points.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_roofline_main
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_roofline_main.xml
@@ -1388,6 +1396,7 @@ if(${ENABLE_COVERAGE})
         test_membw_tree_spec
         test_roofline_calc
         test_roofline_analyze
+        test_roofline_ai_points
         test_roofline_main
         test_report_shell
         test_rocpd_data

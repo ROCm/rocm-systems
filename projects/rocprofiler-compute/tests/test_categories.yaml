@@ -177,6 +177,7 @@ test_categories:
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
+      - test_roofline_ai_points
       - test_roofline_main
       - test_report_shell
       - test_rocpd_data
@@ -327,6 +328,7 @@ test_categories:
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
+      - test_roofline_ai_points
       - test_roofline_main
       - test_report_shell
       - test_rocpd_data
@@ -477,6 +479,7 @@ test_categories:
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
+      - test_roofline_ai_points
       - test_roofline_main
       - test_report_shell
       - test_rocpd_data
