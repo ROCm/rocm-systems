@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -1300,6 +1301,161 @@ TEST_P(OlderAccumulatingIntegerDotRegression, DotcWrapsTheOldDestination) {
           ? cdna2::build_vop2(cdna2::kVDot4cI32I8Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 4})
           : rdna2::build_vop2(rdna2::kVDot4cI32I8Vop2, {.src0 = 256, .vsrc1 = 1, .vdst = 4});
   check({words[0], 0}, 0x8000ffff, 0x7fffffff);
+}
+
+class Gfx10HalfArithmetic : public NumericEncodingRegression {};
+
+INSTANTIATE_TEST_SUITE_P(Gfx10, Gfx10HalfArithmetic,
+                         testing::Combine(testing::Values(rocjitsu::IsaFamily::Rdna1,
+                                                          rocjitsu::IsaFamily::Rdna2),
+                                          testing::Bool()));
+
+TEST_P(Gfx10HalfArithmetic, QuietingTininessAndStickyCauses) {
+  const bool gfx1010 = std::get<0>(GetParam()) == rocjitsu::IsaFamily::Rdna1;
+  for (uint32_t width : {32u, 64u}) {
+    wave_->halt();
+    wave_ = cu_->dispatch_wf(0, 0, 106, 256, width);
+    ASSERT_NE(wave_, nullptr);
+    wave_->set_exec(1ULL | (1ULL << (width - 1)));
+    wave_->set_mode_raw(0); // IEEE clear: the inherited NaN-quieting policies differ.
+    wave_->set_trapsts(0x100);
+    put(0, 0x7c01);
+    put(1, 0x3c00);
+    check({0xd5320004, 0x02020300}, gfx1010 ? 0xdead7e01 : 0xdead7c01);
+    EXPECT_EQ(wave_->trapsts(), 0x101u);
+
+    // The halfway product rounds to minimum normal. Only gfx1010 judges output
+    // tininess from that rounded encoding; gfx1030 keeps its existing flush policy.
+    wave_->set_mode_raw(1u << 6); // Preserve inputs; flush subnormal outputs.
+    wave_->set_trapsts(0x100);
+    put(0, 0x0400);
+    put(1, 0x3bff);
+    check({0xd5350004, 0x02020300}, gfx1010 ? 0xdead0400 : 0xdead0000);
+    EXPECT_EQ(wave_->trapsts(), gfx1010 ? 0x100u : 0x130u);
+  }
+}
+
+TEST_P(LegacyMathRegression, HalfAddKeepsTheInheritedScalingOrderAndNaNQuieting) {
+  wave_->set_exec(0x8000000000000001ULL);
+  wave_->set_mode_raw(0);
+  put(0, 0x7bff);
+  put(1, 0x7bff);
+  const auto sdwa =
+      cdna4::build_vop2(cdna4::kVAddF16Vop2, {.src0 = amdgpu::SRC_SDWA, .vsrc1 = 1, .vdst = 4});
+  // WORD_0 sources/destination, zero-pad, and divide by two.
+  check({sdwa[0], 0x0404c400}, 0x7bff, 0);
+  check(vop3(cdna4::kVAddF16Vop3, 0, 3), 0x7c00, 0);
+  put(0, 0x7c01);
+  put(1, 0x3c00);
+  check(vop3(cdna4::kVAddF16Vop3), 0x7e01, 0);
+}
+
+class OlderPackedHalf : public NumericEncodingRegression {};
+
+INSTANTIATE_TEST_SUITE_P(
+    OlderProfiles, OlderPackedHalf,
+    testing::Combine(testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                     rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                     rocjitsu::IsaFamily::Rdna3_5),
+                     testing::Bool()));
+
+TEST_P(OlderPackedHalf, ArithmeticSelectorsAndAliasing) {
+  const auto arch = std::get<0>(GetParam());
+  const bool cdna = arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2;
+  const uint32_t prefix = cdna ? 0xd3800000U : 0xcc000000U;
+  struct Case {
+    uint32_t opcode, plain, selected, negated;
+  };
+  // All five profiles use these VOP3P opcodes; each result packs two distinct halves.
+  constexpr Case cases[] = {{15, 0x46004400, 0x45004500, 0xc0004000},
+                            {16, 0x48004200, 0x46004600, 0xc800c200},
+                            {17, 0x40003c00, 0x40004000, 0xc400bc00},
+                            {18, 0x44004200, 0x42004200, 0x40004200}};
+  for (unsigned width : {32U, 64U}) {
+    if (cdna && width == 32) {
+      continue;
+    }
+    wave_->halt();
+    wave_ = cu_->dispatch_wf(0, 0, 106, 256, width);
+    ASSERT_NE(wave_, nullptr);
+    const uint64_t exec_mask = 1ULL | (1ULL << (width - 1));
+    wave_->set_exec(exec_mask);
+    wave_->set_mode_raw(0xc0); // Preserve half denormals; nearest rounding.
+    for (const auto &test : cases) {
+      for (unsigned variant : {0U, 1U, 2U}) {
+        for (bool alias : {false, true}) {
+          put(0, 0x40003c00);
+          put(1, 0x44004200);
+          put(4, alias ? 0x40003c00 : 0xdeadbeef);
+          const uint32_t word0 = prefix | 4U | (test.opcode << 16) | (variant == 1 ? 1U << 11 : 0) |
+                                 (variant == 2 ? 2U << 8 : 0);
+          const uint32_t word1 = (alias ? 260U : 256U) | (257U << 9) |
+                                 ((variant == 1 ? 1U : 3U) << 27) | (variant == 2 ? 1U << 29 : 0);
+          std::array<uint32_t, 2> words{word0, word1};
+          std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
+          ASSERT_NE(instruction, nullptr);
+          wave_->set_trapsts(0x20);
+          ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wave_).succeeded());
+          const uint32_t expected = variant == 0   ? test.plain
+                                    : variant == 1 ? test.selected
+                                                   : test.negated;
+          for (unsigned lane = 0; lane < width; ++lane) {
+            EXPECT_EQ(cu_->read_vgpr_storage(wave_->vgpr_alloc().base + 4, lane),
+                      exec_mask & (1ULL << lane) ? expected
+                      : alias                    ? 0x40003c00U
+                                                 : 0xdeadbeefU)
+                << "opcode=" << test.opcode << " variant=" << variant << " lane=" << lane;
+          }
+          EXPECT_EQ(wave_->trapsts(), 0x20U);
+        }
+      }
+    }
+    // ADD rounds at the half destination, and MIN/MAX retain their target's NaN priority.
+    put(0, 0x3c003c00);
+    put(1, 0x10001000);        // Half an ULP at one.
+    wave_->set_mode_raw(0xc4); // Round toward positive infinity.
+    check({prefix | 0x000f0004U, 0x18020300}, 0x3c013c01);
+    wave_->set_mode_raw(0xc0);
+    put(0, 0x7e117e11);
+    put(1, 0xfe22fe22);
+    check({prefix | 0x00110004U, 0x18020300}, cdna ? 0xfe22fe22 : 0x7e117e11);
+    // Inline 1.0 is narrowed into the low half only, rather than replicated.
+    put(1, 0x40004000);
+    check({prefix | 0x000f0004U, 0x180202f2}, 0x40004200);
+  }
+}
+
+TEST_P(OlderPackedHalf, StrictQualificationAndEmptyExec) {
+  using amdgpu::ArithmeticSemantics;
+  const auto arch = std::get<0>(GetParam());
+  const uint32_t prefix = arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2
+                              ? 0xd3800000U
+                              : 0xcc000000U;
+  for (auto semantics :
+       {ArithmeticSemantics::Loose, ArithmeticSemantics::BitExactEmpiricalAllowLoose,
+        ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical,
+        ArithmeticSemantics::Compatibility}) {
+    wave_->halt();
+    cu_->restore_arithmetic_policy({semantics});
+    wave_ = cu_->dispatch_wf(0, 0, 106, 256, 64);
+    ASSERT_NE(wave_, nullptr);
+    for (uint64_t exec_mask : {0ULL, 1ULL}) {
+      put(0, 0x3c003c00);
+      put(1, 0x40004000);
+      put(4, 0xdeadbeef);
+      wave_->set_exec(exec_mask);
+      wave_->set_mode_raw(0xc0);
+      std::array<uint32_t, 2> words{prefix | 0x000f0004U, 0x18020300};
+      std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
+      ASSERT_NE(instruction, nullptr);
+      const bool reject =
+          exec_mask && (semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus ||
+                        semantics == ArithmeticSemantics::BitExactEmpirical);
+      EXPECT_EQ(cu_->execute_instruction(instruction.get(), *wave_).failed(), reject);
+      EXPECT_EQ(cu_->read_vgpr_storage(wave_->vgpr_alloc().base + 4, 0),
+                exec_mask && !reject ? 0x42004200U : 0xdeadbeefU);
+    }
+  }
 }
 
 } // namespace

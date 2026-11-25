@@ -2551,6 +2551,9 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
     add("AddF16Div2NegativeMinNormalFlushInputsKeepOutputs", target.addition, 0x8400u, 0x0000u,
         0x8400u, 0xa0u);
   }
+  for (auto &test : cases) {
+    test.arith_dispatch = true;
+  }
   return cases;
 }
 

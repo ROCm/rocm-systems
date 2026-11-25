@@ -1,3 +1,5 @@
+import pytest
+
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -27,24 +29,6 @@ def test_pk_fma_f16_has_no_legacy_ternary_fallback():
             op_sel_hi_2_expr='hi_c',
             opsel_exprs=('lo', 'hi'),
         )
-
-
-def test_pk_f16_binop_narrows_inline_float_constants():
-    cpp = gen_pk_binop(
-        ['vdst'],
-        ['src0', 'src1'],
-        'add',
-        'f16',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert 'if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))' in cpp
-    assert 'raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));' in cpp
-    assert 'if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))' in cpp
-    assert 'raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));' in cpp
-    # Keyed on the selector field, never on the operand: an IsaOperand keeps a
-    # 255-literal's value in encoding_value_.
-    assert 'encoding_value_' not in cpp
 
 
 def test_pk_bf16_ternary_preserves_fp32_inline_constants():
@@ -197,8 +181,7 @@ def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
         is None
     )
     assert (
-        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi'))
-        == '  ROCJITSU_TRY_SIMD_PACKED_FLOAT(ADD, false);'
+        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi')) is None
     )
 
 
@@ -223,8 +206,6 @@ def test_renamed_vop3p_packed_fma_f32_probe_passes_all_profile_selectors():
 
 def test_renamed_packed_float_routes_use_exact_helpers():
     for spelling, operation, bf16 in (
-        ('v_pk_min_f16_vop3p', 'MIN', False),
-        ('v_pk_max_f16_vop3p', 'MAX', False),
         ('v_pk_add_bf16_vop3p', 'ADD', True),
         ('v_pk_fma_bf16_vop3p', 'FMA', True),
     ):
@@ -278,3 +259,8 @@ def test_dot_dispatch_covers_every_semantic_class():
     assert found, 'no DOT semantic classes found; the ISA specs did not load'
     routes = ('dot2', 'dot4', 'dot8')
     assert found == {cls for cls in DISPATCH if cls.startswith(routes)}
+
+
+def test_pk_f16_binary_has_no_legacy_fallback():
+    with pytest.raises(ValueError, match='does not support f16'):
+        gen_pk_binop(['vdst'], ['src0', 'src1'], 'add', 'f16')
