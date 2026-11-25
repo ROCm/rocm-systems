@@ -26,7 +26,7 @@ namespace {
 
 TEST(FaultLdsWrongAddress, Rdna4Wave32BasicFormsPreserveGuestAndAllocation) {
   const std::vector<LdsCapability> capabilities = lds_wrong_address_capabilities();
-  ASSERT_EQ(capabilities.size(), 205u);
+  ASSERT_EQ(capabilities.size(), 299u);
   for (uint32_t machine : {EF_AMDGPU_MACH_AMDGCN_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1201}) {
     SCOPED_TRACE(machine);
     const std::vector<uint8_t> image = test::make_lds_load_elf(machine, true, 0);
@@ -613,8 +613,9 @@ TEST(FaultLdsWrongAddress, TargetsWavesAndTwoAddressFormsStayBounded) {
       discover_lds_wrong_address(wave32, "test_kernel", error);
   ASSERT_TRUE(wave32_inventory.succeeded()) << error.message;
   EXPECT_EQ(wave32_inventory.value().sites().size(), 2u);
-  const FaultMutationContext other(test::make_lds_elf(1, false, EF_AMDGPU_MACH_AMDGCN_GFX1100));
+  const FaultMutationContext other(test::make_lds_elf(1, false, EF_AMDGPU_MACH_AMDGCN_GFX90A));
   EXPECT_TRUE(discover_lds_wrong_address(other, "test_kernel", error).failed());
+  EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedTarget);
   const FaultMutationContext dual(
       test::make_lds_elf(1, false, EF_AMDGPU_MACH_AMDGCN_GFX1201, true));
   const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(dual, "test_kernel", error);
@@ -715,8 +716,9 @@ TEST(FaultLdsWrongAddress, EmissionFailureDoesNotChangeSource) {
 TEST(FaultLdsWrongAddress, TwoAddressFormsAreSelectedAndMutated) {
   for (const test::TwoAddressTarget &target : test::kTwoAddressTargets) {
     for (bool wave32 : {false, true}) {
-      if (target.cdna && wave32)
+      if (target.cdna && wave32) {
         continue;
+      }
       SCOPED_TRACE(static_cast<int>(target.target));
       SCOPED_TRACE(wave32);
       const uint32_t allocation = wave32 ? 32 : 16;
@@ -835,8 +837,9 @@ TEST(FaultLdsWrongAddress, TwoAddressFormsAreSelectedAndMutated) {
 TEST(FaultLdsWrongAddress, SubwordAndTransposeFormsAreAdmittedAndPreserved) {
   for (const test::LdsFormCase &fixture : test::kSubwordCases) {
     for (bool wave32 : {false, true}) {
-      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+      if (fixture.arch != IsaFamily::Rdna4 && wave32) {
         continue;
+      }
       SCOPED_TRACE(wave32);
       SCOPED_TRACE(fixture.form);
       SCOPED_TRACE(static_cast<int>(fixture.target));
@@ -952,8 +955,9 @@ TEST(FaultLdsWrongAddress, SubwordTruncatedExtentAndLateFailureRollBack) {
   for (size_t index : {0u, 8u}) {
     const test::LdsFormCase &fixture = test::kSubwordCases[index];
     for (bool wave32 : {false, true}) {
-      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+      if (fixture.arch != IsaFamily::Rdna4 && wave32) {
         continue;
+      }
       SCOPED_TRACE(wave32);
       SCOPED_TRACE(fixture.form);
       std::vector<uint8_t> truncated = test::make_amdgpu_kernel_elf(
@@ -987,8 +991,9 @@ TEST(FaultLdsWrongAddress, SubwordTruncatedExtentAndLateFailureRollBack) {
 TEST(FaultLdsWrongAddress, RemainingSubwordFormsPreserveGuestAndControls) {
   for (const test::LdsFormCase &fixture : test::kRemainingSubwordCases) {
     for (bool wave32 : {false, true}) {
-      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+      if (fixture.arch != IsaFamily::Rdna4 && wave32) {
         continue;
+      }
       SCOPED_TRACE(wave32);
       SCOPED_TRACE(fixture.form);
       SCOPED_TRACE(static_cast<int>(fixture.target));
@@ -1101,10 +1106,11 @@ TEST(FaultLdsWrongAddress, RemainingSubwordFormsPreserveGuestAndControls) {
         test::LdsFormCase alias = fixture;
         const bool load =
             fixture.form.starts_with("ds_load_") || fixture.form.starts_with("ds_read_");
-        if (load)
+        if (load) {
           alias.words[1] = (alias.words[1] & 0x00ffffffu) | 0x02000000u;
-        else
+        } else {
           alias.words[1] = (alias.words[1] & 0xffff00ffu) | 0x00000200u;
+        }
         const FaultMutationContext alias_context(test::make_lds_form_elf(alias, false, wave32));
         const FailureOr<LdsInventory> alias_inventory =
             discover_lds_wrong_address(alias_context, "test_kernel", error);
@@ -1126,8 +1132,9 @@ TEST(FaultLdsWrongAddress, RemainingSubwordTruncationAndLateFailureRollBack) {
   for (size_t index : {0u, 14u, 28u, 36u, 50u}) {
     const test::LdsFormCase &fixture = test::kRemainingSubwordCases[index];
     for (bool wave32 : {false, true}) {
-      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+      if (fixture.arch != IsaFamily::Rdna4 && wave32) {
         continue;
+      }
       SCOPED_TRACE(wave32);
       SCOPED_TRACE(fixture.form);
       SCOPED_TRACE(static_cast<int>(fixture.target));
@@ -1165,8 +1172,9 @@ TEST(FaultLdsWrongAddress, GenericDsFieldDoesNotAdmitNopOrAtomic) {
   for (size_t index : {0u, 14u, 28u, 36u, 50u}) {
     const test::LdsFormCase &fixture = test::kRemainingSubwordCases[index];
     for (bool wave32 : {false, true}) {
-      if (fixture.arch != IsaFamily::Rdna4 && wave32)
+      if (fixture.arch != IsaFamily::Rdna4 && wave32) {
         continue;
+      }
       SCOPED_TRACE(wave32);
       SCOPED_TRACE(static_cast<int>(fixture.target));
       const bool cdna = fixture.arch == IsaFamily::Cdna3 || fixture.arch == IsaFamily::Cdna4;
@@ -1203,19 +1211,23 @@ TEST(FaultLdsWrongAddress, Rdna4Wave32AllFormsPreserveGuestAndAllocation) {
        std::array<std::pair<rj_code_target_id_t, uint32_t>, 2>{
            {{ROCJITSU_CODE_TARGET_GFX1200, EF_AMDGPU_MACH_AMDGCN_GFX1200},
             {ROCJITSU_CODE_TARGET_GFX1201, EF_AMDGPU_MACH_AMDGCN_GFX1201}}}) {
-    for (const std::pair<std::string_view, std::array<uint32_t, 2>> &item : base)
+    for (const std::pair<std::string_view, std::array<uint32_t, 2>> &item : base) {
       cases.push_back({.target = target.first,
                        .machine = target.second,
                        .arch = IsaFamily::Rdna4,
                        .form = item.first,
                        .words = item.second});
+    }
   }
   for (std::span<const test::LdsFormCase> fixtures :
        {std::span<const test::LdsFormCase>(test::kScalarTwoCases),
-        std::span<const test::LdsFormCase>(test::kRemainingSubwordCases)})
-    for (const test::LdsFormCase &fixture : fixtures)
-      if (fixture.arch == IsaFamily::Rdna4)
+        std::span<const test::LdsFormCase>(test::kRemainingSubwordCases)}) {
+    for (const test::LdsFormCase &fixture : fixtures) {
+      if (fixture.arch == IsaFamily::Rdna4) {
         cases.push_back(fixture);
+      }
+    }
+  }
   ASSERT_EQ(cases.size(), 60u);
   const std::vector<LdsCapability> capabilities = lds_wrong_address_capabilities();
   for (const test::LdsFormCase &fixture : cases) {
@@ -1233,8 +1245,9 @@ TEST(FaultLdsWrongAddress, Rdna4Wave32AllFormsPreserveGuestAndAllocation) {
     FaultMutationError error;
     const FailureOr<LdsInventory> found = discover_lds_wrong_address(source, "test_kernel", error);
     EXPECT_TRUE(found.succeeded()) << error.message;
-    if (found.failed())
+    if (found.failed()) {
       continue;
+    }
     ASSERT_EQ(found.value().sites().size(), 1u) << fixture.form;
     EXPECT_EQ(found.value().sites()[0].form, fixture.form);
     const FailureOr<LdsSelection> selected = select_lds_wrong_address(found.value(), {}, error);

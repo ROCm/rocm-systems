@@ -64,8 +64,9 @@ TEST_P(LdsCounterTest, AppendAndConsumeBroadcastOldCounterToSparseActiveLanes) {
     wf->set_lds_size(512);
     for (uint16_t op : {uint16_t{61}, uint16_t{62}}) {
       wf->lds().write32(0, 99);
-      for (uint32_t lane = 0; lane < 6; ++lane)
+      for (uint32_t lane = 0; lane < 6; ++lane) {
         cu->write_vgpr(wf->vgpr_alloc().base + 6, lane, 0xdeadbeef);
+      }
       // LLVM encoding: GFX9 uses op 189/190; RDNA and CDNA5 use 61/62.
       const std::array<uint32_t, 2> words{
           0xd8000000u | ((op + (gfx9() ? 128u : 0u)) << (gfx9() ? 17 : 18)), 6u << 24};
@@ -76,9 +77,10 @@ TEST_P(LdsCounterTest, AppendAndConsumeBroadcastOldCounterToSparseActiveLanes) {
       amdgpu::LocalMemPipeline pipeline;
       pipeline.issue(inst.release(), *wf);
       EXPECT_EQ(wf->lds().read32(0), op == 61 ? 96u : 102u);
-      for (uint32_t lane = 0; lane < 6; ++lane)
+      for (uint32_t lane = 0; lane < 6; ++lane) {
         EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 6, lane),
                   (0x25 & (1u << lane)) ? 99u : 0xdeadbeefu);
+      }
     }
     wf->halt();
   }

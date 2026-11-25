@@ -32,9 +32,10 @@ protected:
         test::manifest(capture_.header), execution.dimensions, execution.group_bytes, 0);
     ASSERT_TRUE(layout.succeeded());
     stride_ = layout.value().row_stride;
-    for (uint32_t wave = 0; wave < layout.value().wave_count; ++wave)
+    for (uint32_t wave = 0; wave < layout.value().wave_count; ++wave) {
       wire::write_u32(execution.report, row(wave) + wire::kRowStatus,
                       wire::kRowEntered | wire::kRowExited);
+    }
     capture_.executions.push_back(std::move(execution));
   }
 
@@ -62,12 +63,13 @@ protected:
               {wire::kRecordAnalysis, uint32_t(facts.analysis)},
               {wire::kRecordKind, uint32_t(facts.record)},
               {wire::kRecordSite, site},
-              {wire::kRecordRange, facts.range_id},
+              {wire::kRecordRange, 0},
               {wire::kRecordSequence, sequence},
               {wire::kRecordLdsOffset, offset},
               {wire::kRecordWidth, facts.width},
-              {wire::kRecordFlags, wire::kExactGuestMask}}})
+              {wire::kRecordFlags, wire::kExactGuestMask}}}) {
       wire::write_u32(report, base + field, value);
+    }
     const uint32_t phase = static_cast<uint32_t>(
         std::ranges::count_if(owner->barriers, [&](const BarrierFacts &barrier) {
           return barrier.original_wait < facts.original_offset;
@@ -78,21 +80,42 @@ protected:
     wire::write_u32(report, row(wave) + wire::kRowFinalSequence, std::max(final, sequence));
   }
 
+  void set_transpose_site(uint32_t target) {
+    Manifest &facts = test::manifest(capture_.header);
+    facts.target = target;
+    facts.wave_size = target == 950 ? 64 : 32;
+    facts.sites[1].width = 8;
+    facts.sites[1].lds_ranges.shape = LdsRangeShape::Transpose8;
+    capture_.executions.clear();
+  }
+
+  void transpose_access(uint64_t mask, uint64_t anchor_exec, uint32_t group = 0,
+                        uint32_t offset = 0) {
+    access(0, 1, 1, offset, mask, group);
+    std::vector<uint8_t> &report = capture_.executions.front().report;
+    wire::write_u32(report, record(0, 1, group) + wire::kRecordFlags,
+                    wire::kExactTransposeRequestMask);
+    wire::write_u64(report, record(0, 1, group) + wire::kRecordAnchorExec, anchor_exec);
+  }
+
   FailureOr<std::vector<uint8_t>> encode() {
     test::refresh_image(capture_.header);
     CaptureEncoder encoder;
     FailureOr<std::vector<uint8_t>> bytes = encoder.start(capture_.header, error_.emitter());
-    if (bytes.failed())
+    if (bytes.failed()) {
       return Result::failure();
+    }
     for (const CapturedExecution &execution : capture_.executions) {
       const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution, error_.emitter());
-      if (frame.failed())
+      if (frame.failed()) {
         return Result::failure();
+      }
       bytes.value().insert(bytes.value().end(), frame.value().begin(), frame.value().end());
     }
     const FailureOr<std::vector<uint8_t>> end = encoder.finish(error_.emitter());
-    if (end.failed())
+    if (end.failed()) {
       return Result::failure();
+    }
     bytes.value().insert(bytes.value().end(), end.value().begin(), end.value().end());
     return bytes;
   }
@@ -105,11 +128,13 @@ protected:
 
   FailureOr<LdsRaceResult> analyze(AnalysisOptions options = {}) {
     const FailureOr<std::vector<uint8_t>> bytes = encode();
-    if (bytes.failed())
+    if (bytes.failed()) {
       return Result::failure();
+    }
     const FailureOr<Capture> decoded = decode_capture(bytes.value(), error_.emitter());
-    if (decoded.failed())
+    if (decoded.failed()) {
       return Result::failure();
+    }
     return analyze_capture(decoded.value(), options, error_.emitter());
   }
 
@@ -163,14 +188,16 @@ protected:
       std::copy_n(old_report.begin() + kReportHeaderBytes + wave * old_stride,
                   std::min(old_stride, stride_),
                   capture_.executions.front().report.begin() + row(wave));
-      for (const SiteFacts &site : facts.sites)
+      for (const SiteFacts &site : facts.sites) {
         for (uint32_t group = 0; group < kAddressGroupsPerSite; ++group) {
           const size_t offset = record(wave, site.id, group);
           if (wire::read_u32(capture_.executions.front().report, offset + wire::kRecordCommit) ==
-              wire::kAccessCommitted)
+              wire::kAccessCommitted) {
             wire::write_u32(capture_.executions.front().report, offset + wire::kRecordPhase,
                             site.id == 1 ? 1 : 0);
+          }
         }
+      }
     }
     std::vector<uint8_t> &report = capture_.executions.front().report;
     for (const uint32_t wave : {0u, 1u}) {
@@ -353,10 +380,11 @@ TEST_F(ConSanAnalysis, SaturatedAccessPhasesAreCoverageLossWithoutInventingOrder
   EXPECT_EQ(invalid.integrity_events, 1u);
   EXPECT_FALSE(invalid.coverage_complete);
   for (const char *reason :
-       {"access_phase_contradicts_qualified_program", "mismatched_workgroup_final_phases"})
+       {"access_phase_contradicts_qualified_program", "mismatched_workgroup_final_phases"}) {
     EXPECT_TRUE(std::ranges::any_of(invalid.issues, [reason](const LdsRaceIntegrityIssue &issue) {
       return issue.reason == reason;
     }));
+  }
 }
 
 TEST_F(ConSanAnalysis, SaturatedPhaseResidueIsUnknownOnlyAfterCounterExhaustion) {
@@ -490,8 +518,8 @@ TEST_F(ConSanAnalysis, OverlappingWriteReadProducesAttributedUnorderedCrossWaveF
 TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot) {
   test::manifest(capture_.header).target = 1250;
   test::manifest(capture_.header).sites[0].width = 8;
-  for (const AccessKind wide_access : {AccessKind::Write, AccessKind::Read})
-    for (const AccessKind narrow_access : {AccessKind::Read, AccessKind::Write})
+  for (const AccessKind wide_access : {AccessKind::Write, AccessKind::Read}) {
+    for (const AccessKind narrow_access : {AccessKind::Read, AccessKind::Write}) {
       for (const uint32_t offset : {4u, 8u}) {
         SCOPED_TRACE(::testing::Message()
                      << "wide_access=" << static_cast<uint32_t>(wide_access) << ", narrow_access="
@@ -510,11 +538,308 @@ TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot
         EXPECT_EQ(result.value().cross_wave_pairs, conflict ? 1u : 0u);
         EXPECT_TRUE(result.value().coverage_complete);
       }
+    }
+  }
+}
+
+TEST_F(ConSanAnalysis, AtomicOverlapUsesOrdinaryPeersAndRetainsTheSavedAccessRole) {
+  struct PeerRange {
+    uint32_t offset, width;
+    bool overlaps;
+  };
+  // The atomic covers [4, 8). Exercise the equal-range bucket and both sides
+  // of the range sweep, including an adjacent ordinary access.
+  for (const AccessKind ordinary : {AccessKind::Read, AccessKind::Write})
+    for (const PeerRange peer : {PeerRange{4, 4, true}, {0, 8, true}, {6, 2, true}, {8, 4, false}})
+      for (const uint32_t atomic_site : {0u, 1u}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "atomic site " << atomic_site << " peer " << uint32_t(ordinary)
+                     << " offset " << peer.offset << " width " << peer.width);
+        Manifest &manifest = test::manifest(capture_.header);
+        manifest.sites[atomic_site].access = AccessKind::Atomic;
+        manifest.sites[atomic_site].width = 4;
+        const uint32_t ordinary_site = 1 - atomic_site;
+        manifest.sites[ordinary_site].access = ordinary;
+        manifest.sites[ordinary_site].width = peer.width;
+        workgroups(1, 950, 64);
+        access(atomic_site, atomic_site, 1, 4, uint64_t{3} << 62);
+        access(ordinary_site, ordinary_site, 1, peer.offset);
+        const FailureOr<LdsRaceResult> result = analyze();
+        ASSERT_TRUE(result.succeeded()) << error_.message();
+        EXPECT_TRUE(result.value().coverage_complete);
+        const LdsRaceExecutionResult &execution = result.value().executions.front();
+        EXPECT_EQ(execution.valid_observations, 2u);
+        EXPECT_EQ(execution.cross_wave_pairs, peer.overlaps ? 1u : 0u);
+        EXPECT_EQ(execution.cross_wave_lane_pairs, peer.overlaps ? 2u : 0u);
+        EXPECT_EQ(execution.collision_groups, 0u);
+        if (peer.overlaps) {
+          ASSERT_EQ(execution.cross_wave_examples.size(), 1u);
+          const LdsRaceFinding &finding = execution.cross_wave_examples.front();
+          const LdsRaceParticipant &atomic =
+              finding.first.site == atomic_site ? finding.first : finding.second;
+          EXPECT_EQ(atomic.access, AccessKind::Atomic);
+          EXPECT_EQ(atomic.offset, 4u);
+          EXPECT_EQ(atomic.mask, uint64_t{3} << 62);
+          EXPECT_NE(render_analysis(result.value()).find("\"access\":\"atomic\""),
+                    std::string::npos);
+        }
+      }
+}
+
+TEST_F(ConSanAnalysis, AtomicPeersAndSameWaveOrdinaryAccessDoNotFormCandidates) {
+  Manifest &manifest = test::manifest(capture_.header);
+  for (auto &site : manifest.sites)
+    site.access = AccessKind::Atomic;
+  workgroups(1, 950, 64);
+  access(0, 0, 1, 4, 3);
+  access(1, 1, 1, 4, 3);
+  auto result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_TRUE(result.value().coverage_complete);
+  EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
+  EXPECT_EQ(result.value().cross_wave_pairs, 0u);
+  EXPECT_EQ(result.value().collision_groups, 0u);
+
+  manifest.sites[1].access = AccessKind::Write;
+  workgroups(1, 950, 64);
+  access(0, 0, 1, 4, 3);
+  access(0, 1, 2, 4);
+  result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_TRUE(result.value().coverage_complete);
+  EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
+  EXPECT_EQ(result.value().cross_wave_pairs, 0u);
+  EXPECT_EQ(result.value().collision_groups, 0u);
+}
+
+TEST_F(ConSanAnalysis, QwordAtomicRequiresEightValidBytesAndOverlapsTheHighDword) {
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.sites.front().access = AccessKind::Atomic;
+  manifest.sites.front().width = 8;
+  // [120,128) is the last aligned qword inside this 128-byte LDS extent.
+  for (const uint32_t offset : {120u, 116u, 128u}) {
+    workgroups(1, 950, 64);
+    access(0, 0, 1, offset, 3);
+    access(1, 1, 1, 124);
+    const auto result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    const auto &execution = result.value().executions.front();
+    const bool valid = offset == 120;
+    EXPECT_EQ(execution.coverage_complete, valid);
+    EXPECT_EQ(execution.valid_observations, valid ? 2u : 1u);
+    EXPECT_EQ(execution.rejected_records, valid ? 0u : 1u);
+    EXPECT_EQ(execution.cross_wave_pairs, valid ? 1u : 0u);
+    EXPECT_EQ(execution.collision_groups, 0u);
+  }
+}
+
+TEST_F(ConSanAnalysis, OrdinaryLdsProfileReplaysByteAccessesAndRejectsAtomicFacts) {
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.options = {
+      0x0c, 0x9d, 0x4a, 0x7a, 0x78, 0x6b, 0xd8, 0x4a, 0xe6, 0x60, 0xc3,
+      0xff, 0xa2, 0xcf, 0xe2, 0xf3, 0x2b, 0xb4, 0x29, 0xc7, 0x23, 0x4b,
+      0x13, 0x17, 0x87, 0x26, 0x0f, 0x4d, 0xfa, 0x19, 0xe6, 0x15,
+  };
+  manifest.sites[0].width = 1;
+  workgroups(1, 950, 64);
+  access(0, 0, 1);
+  access(1, 1, 1);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_EQ(result.value().cross_wave_pairs, 1u);
+  manifest.sites[1].access = AccessKind::Atomic;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+}
+
+TEST_F(ConSanAnalysis, ThreeDwordAccessRequiresNativeAlignmentAndCoversOnlyTwelveBytes) {
+  test::manifest(capture_.header).sites[0].width = 12;
+  for (uint32_t start : {12u, 16u}) {
+    for (uint32_t peer : {24u, 28u, 32u}) {
+      SCOPED_TRACE(::testing::Message() << start << ", " << peer);
+      capture_.executions.clear();
+      append_execution();
+      access(0, 0, 1, start);
+      access(1, 1, 1, peer);
+      const FailureOr<LdsRaceResult> result = analyze();
+      ASSERT_TRUE(result.succeeded()) << error_.message();
+      EXPECT_EQ(result.value().coverage_complete, start == 16);
+      EXPECT_EQ(result.value().executions[0].valid_observations, start == 16 ? 2u : 1u);
+      EXPECT_EQ(result.value().cross_wave_pairs, start == 16 && peer == 24 ? 1u : 0u);
+    }
+  }
+}
+
+TEST_F(ConSanAnalysis, TransposeFactsRequireTheTargetReadWidthAndNoEncodedDualOffsets) {
+  for (uint32_t target : {950u, 1250u}) {
+    set_transpose_site(target);
+    Manifest &facts = test::manifest(capture_.header);
+    SiteFacts &site = facts.sites[1];
+    for (const auto &[shape, width] : std::array<std::pair<LdsRangeShape, uint32_t>, 4>{
+             {{LdsRangeShape::Transpose4, 8},
+              {LdsRangeShape::Transpose6, 12},
+              {LdsRangeShape::Transpose8, 8},
+              {LdsRangeShape::Transpose16, target == 950 ? 8u : 16u}}}) {
+      site.lds_ranges = {.shape = shape};
+      site.width = width;
+      const auto bytes = encode_manifest(facts);
+      ASSERT_TRUE(bytes.succeeded());
+      const auto decoded = decode_manifest(bytes.value());
+      ASSERT_TRUE(decoded.succeeded());
+      EXPECT_EQ(decoded.value().sites[1], site);
+      site.width = 4;
+      EXPECT_TRUE(validate_manifest(facts).failed());
+    }
+    site.width = target == 950 ? 8 : 16;
+    site.lds_ranges.offset0 = 1;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+    site.lds_ranges.offset0 = 0;
+    site.lds_ranges.offset1 = 1;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+    site.lds_ranges.offset1 = 0;
+    site.access = AccessKind::Write;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+    site.access = AccessKind::Read;
+    facts.target = target == 950 ? 942 : 1201;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+  }
+}
+
+TEST_F(ConSanAnalysis, PhysicalTransposeLanesAndGuestExecRemainDistinctInAShortWave) {
+  set_transpose_site(1250);
+  append_execution({{4, 1, 1}, {4, 1, 1}});
+  transpose_access(UINT32_MAX, 0);
+  const auto complete = analyze();
+  ASSERT_TRUE(complete.succeeded()) << error_.message();
+  EXPECT_TRUE(complete.value().coverage_complete);
+  EXPECT_EQ(complete.value().executions[0].valid_observations, 1u);
+  EXPECT_NE(render_analysis(complete.value()).find("transpose_no_sync"), std::string::npos);
+  auto &report = capture_.executions[0].report;
+  for (const auto &[field, value] :
+       std::array<std::pair<uint32_t, uint64_t>, 5>{{{wire::kRecordGuestMask, 15},
+                                                     {wire::kRecordGuestMask, uint64_t{1} << 32},
+                                                     {wire::kRecordAnchorExec, uint64_t{1} << 32},
+                                                     {wire::kRecordFlags, wire::kExactGuestMask},
+                                                     {wire::kRecordAnchorExec + 8, 1}}}) {
+    SCOPED_TRACE(::testing::Message() << field << ", " << value);
+    const auto saved = report;
+    wire::write_u64(report, record(0, 1) + field, value);
+    const auto malformed = analyze();
+    ASSERT_TRUE(malformed.succeeded()) << error_.message();
+    EXPECT_FALSE(malformed.value().coverage_complete);
+    EXPECT_EQ(malformed.value().executions[0].rejected_records, 1u);
+    EXPECT_EQ(malformed.value().executions[0].valid_observations, 0u);
+    report = saved;
+  }
+  access(0, 0, 1, 0, 16);
+  const auto ordinary = analyze();
+  ASSERT_TRUE(ordinary.succeeded());
+  EXPECT_FALSE(ordinary.value().coverage_complete);
+  EXPECT_EQ(ordinary.value().executions[0].rejected_records, 1u);
+}
+
+TEST_F(ConSanAnalysis, DisagreeingTransposeExecAcrossSourceGroupsCannotProduceAWitness) {
+  set_transpose_site(1250);
+  append_execution();
+  access(1, 0, 1);
+  transpose_access(1, 0);
+  transpose_access(UINT32_MAX - 1, 1, 1, 8);
+  const auto malformed = analyze();
+  ASSERT_TRUE(malformed.succeeded()) << error_.message();
+  EXPECT_EQ(malformed.value().executions[0].rejected_records, 2u);
+  EXPECT_EQ(malformed.value().executions[0].valid_observations, 1u);
+  EXPECT_EQ(malformed.value().cross_wave_pairs, 0u);
+}
+
+TEST_F(ConSanAnalysis, Cdna4TransposeRequiresFullExecAndOrdinarySlotsKeepReservedWordsZero) {
+  set_transpose_site(950);
+  append_execution();
+  transpose_access(UINT64_MAX, UINT64_MAX);
+  const auto complete = analyze();
+  ASSERT_TRUE(complete.succeeded());
+  EXPECT_TRUE(complete.value().coverage_complete);
+  auto &report = capture_.executions[0].report;
+  for (const uint64_t bad : std::array<uint64_t, 2>{0, 1}) {
+    wire::write_u64(report, record(0, 1) + wire::kRecordAnchorExec, bad);
+    const auto malformed = analyze();
+    ASSERT_TRUE(malformed.succeeded());
+    EXPECT_EQ(malformed.value().executions[0].rejected_records, 1u);
+    EXPECT_EQ(malformed.value().executions[0].valid_observations, 0u);
+  }
+  test::manifest(capture_.header).sites[1].lds_ranges = {};
+  access(0, 1, 1, 0, 1);
+  const auto reserved = analyze();
+  ASSERT_TRUE(reserved.succeeded());
+  EXPECT_EQ(reserved.value().executions[0].rejected_records, 1u);
+}
+
+TEST_F(ConSanAnalysis, DualBaseGroupsRetainTheSharedStoreOccurrenceAndBothOrdinals) {
+  test::manifest(capture_.header).sites[0].lds_ranges = {LdsRangeShape::Dual, 3, 5};
+  access(0, 0, 1, 0, 1);
+  access(0, 0, 1, 8, 2, 1);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const LdsRaceExecutionResult &execution = result.value().executions.front();
+  EXPECT_TRUE(execution.coverage_complete);
+  EXPECT_EQ(execution.valid_observations, 4u);
+  EXPECT_EQ(execution.collision_groups, 1u);
+  EXPECT_EQ(execution.collision_lane_pairs, 1u);
+  ASSERT_EQ(execution.collision_examples.size(), 1u);
+  const LdsRaceFinding &finding = execution.collision_examples.front();
+  EXPECT_EQ(finding.first.offset, 20u);
+  EXPECT_EQ(finding.second.offset, 20u);
+  EXPECT_EQ(finding.first.range_id, 1u);
+  EXPECT_EQ(finding.second.range_id, 0u);
+  EXPECT_EQ(finding.first.mask, 1u);
+  EXPECT_EQ(finding.second.mask, 2u);
+}
+
+TEST_F(ConSanAnalysis, InvalidSecondRangeRetainsTheFirstValidConflict) {
+  test::manifest(capture_.header).sites[0].lds_ranges = {LdsRangeShape::DualStride64, 0, 255};
+  access(0, 0, 1, 16);
+  access(1, 1, 1, 16);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const LdsRaceExecutionResult &execution = result.value().executions.front();
+  EXPECT_FALSE(execution.coverage_complete);
+  EXPECT_EQ(execution.rejected_records, 1u);
+  EXPECT_EQ(execution.valid_observations, 2u);
+  EXPECT_EQ(execution.cross_wave_pairs, 1u);
+}
+
+TEST_F(ConSanAnalysis, CoincidentOffsetsFollowTargetRequestSemantics) {
+  Manifest &manifest = test::manifest(capture_.header);
+  for (uint32_t target : {950u, 1100u}) {
+    manifest.target = target;
+    manifest.wave_size = 64;
+    manifest.sites[0].lds_ranges = {LdsRangeShape::Dual, 3, 3};
+    capture_.executions.clear();
+    append_execution({{128, 1, 1}, {128, 1, 1}});
+    access(0, 0, 1, 0);
+    access(1, 1, 1, 12);
+    const FailureOr<LdsRaceResult> result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    EXPECT_EQ(result.value().cross_wave_pairs, target == 950 ? 1u : 2u);
+    EXPECT_EQ(result.value().collision_groups, 0u);
+  }
+}
+
+TEST_F(ConSanAnalysis, EarlierThreeDwordProfileCannotAdvertiseByteSites) {
+  // The selection identity emitted before whole-register byte loads were admitted.
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.options = {
+      0x0f, 0xd8, 0x00, 0xf0, 0xff, 0xf8, 0x77, 0xb0, 0xf0, 0x51, 0x04,
+      0x56, 0xfe, 0x42, 0x8d, 0x4c, 0xab, 0x4e, 0xe3, 0x50, 0x3b, 0xb6,
+      0x11, 0xe3, 0x11, 0xda, 0xd5, 0x94, 0x33, 0x0b, 0xd5, 0xf5,
+  };
+  manifest.sites[0].width = 12;
+  EXPECT_TRUE(validate_manifest(manifest).succeeded());
+  manifest.sites[0].width = 1;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
 }
 
 TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
   test::manifest(capture_.header).target = 1250;
-  for (const uint32_t width : {2u, 8u, 16u}) {
+  for (const uint32_t width : {2u, 8u, 12u, 16u}) {
     test::manifest(capture_.header).sites[0].width = width;
     for (const uint32_t offset : {1u, 128u - width + 1, UINT32_MAX - 7}) {
       capture_.executions.clear();
@@ -530,7 +855,7 @@ TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
       EXPECT_FALSE(result.value().coverage_complete);
     }
   }
-  for (const uint32_t width : {0u, 1u, 3u, 12u, 32u}) {
+  for (const uint32_t width : {0u, 3u, 5u, 10u, 32u}) {
     test::manifest(capture_.header).sites[0].width = width;
     EXPECT_TRUE(validate_manifest(test::manifest(capture_.header)).failed());
   }
@@ -585,10 +910,11 @@ TEST_F(ConSanAnalysis, LocalConflictsAndReadReadExclusionApplyIndependentlyInEve
 }
 
 TEST_F(ConSanAnalysis, EveryTargetKeepsNoSyncConflictsAndReadReadExclusionLocalToWorkgroups) {
-  for (const TargetProfile &target : kNativeLdsTargets)
+  for (const TargetProfile &target : kNativeLdsTargets) {
     for (const uint32_t wave_size : {32u, 64u}) {
-      if (!supports_wave(target, wave_size))
+      if (!supports_wave(target, wave_size)) {
         continue;
+      }
       SCOPED_TRACE(target.name);
       SCOPED_TRACE(wave_size);
       for (const bool read_read : {false, true}) {
@@ -620,19 +946,22 @@ TEST_F(ConSanAnalysis, EveryTargetKeepsNoSyncConflictsAndReadReadExclusionLocalT
         }
       }
     }
+  }
 }
 
 TEST_F(ConSanAnalysis, EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups) {
-  for (const TargetProfile &target : kNativeLdsTargets)
+  for (const TargetProfile &target : kNativeLdsTargets) {
     for (const uint32_t wave_size : {32u, 64u}) {
-      if (!supports_wave(target, wave_size))
+      if (!supports_wave(target, wave_size)) {
         continue;
+      }
       SCOPED_TRACE(target.name);
       SCOPED_TRACE(wave_size);
       ASSERT_NO_FATAL_FAILURE(workgroups(4, target.id, wave_size));
       access(0, 0, 1);
-      for (uint32_t group = 1; group < 4; ++group)
+      for (uint32_t group = 1; group < 4; ++group) {
         access(3 * group + 1, 1, 1);
+      }
       const FailureOr<LdsRaceResult> result = analyze();
       ASSERT_TRUE(result.succeeded()) << error_.message();
       const LdsRaceExecutionResult &execution = result.value().executions.front();
@@ -642,12 +971,14 @@ TEST_F(ConSanAnalysis, EveryTargetNeverJoinsIdenticalLdsOffsetsAcrossWorkgroups)
       EXPECT_EQ(execution.ordering_unresolved_pairs, 0u);
       EXPECT_TRUE(execution.coverage_complete);
     }
+  }
 }
 
 TEST_F(ConSanAnalysis, Wave64WorkgroupsKeepHighLanesAndRejectOnlyInvalidPartialWaveMasks) {
   for (const TargetProfile &target : kNativeLdsTargets) {
-    if (!supports_wave(target, 64))
+    if (!supports_wave(target, 64)) {
       continue;
+    }
     SCOPED_TRACE(target.name);
     ASSERT_NO_FATAL_FAILURE(workgroups(4, target.id, 64));
     for (uint32_t group = 0; group < 4; ++group) {
@@ -716,8 +1047,9 @@ TEST_F(ConSanAnalysis,
     EXPECT_EQ(execution.unresolved_examples[0].first.workgroup, 2u);
     EXPECT_EQ(execution.unresolved_examples[0].second.workgroup, 2u);
     EXPECT_EQ(execution.unresolved_examples[0].ordering, LdsRaceOrdering::Unresolved);
-    for (const LdsRaceFinding &finding : execution.ordered_examples)
+    for (const LdsRaceFinding &finding : execution.ordered_examples) {
       EXPECT_NE(finding.first.workgroup, 2u);
+    }
   }
 }
 
@@ -749,13 +1081,32 @@ TEST_F(ConSanAnalysis, MultiWorkgroupReusedStorageNeverJoinsDifferentDispatches)
   EXPECT_TRUE(result.value().coverage_complete);
 }
 
+TEST_F(ConSanAnalysis, AtomicOrdinaryOverlapRequiresACompleteBarrierWitnessToBeOrdered) {
+  test::manifest(capture_.header).sites[0].access = AccessKind::Atomic;
+  access(0, 0, 1);
+  access(1, 1, 1);
+  barrier();
+  for (const bool complete : {true, false}) {
+    if (!complete)
+      wire::write_u32(capture_.executions[0].report, completion(1) + wire::kSyncCommit, 0);
+    const auto result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    const auto &execution = result.value().executions.front();
+    EXPECT_EQ(execution.ordered_pairs, complete ? 1u : 0u);
+    EXPECT_EQ(execution.ordering_unresolved_pairs, complete ? 0u : 1u);
+    EXPECT_EQ(execution.cross_wave_pairs, 0u);
+    EXPECT_EQ(execution.coverage_complete, complete);
+  }
+}
+
 TEST_F(ConSanAnalysis, FixedBarrierCertificateOrdersRetainedPairAndSurvivesUnrelatedLocalGap) {
   access(0, 0, 1);
   access(1, 1, 1);
   barrier();
   for (const bool unrelated_gap : {false, true}) {
-    if (unrelated_gap)
+    if (unrelated_gap) {
       wire::write_u32(capture_.executions[0].report, record(0, 1) + wire::kRecordCommit, 7);
+    }
     const FailureOr<LdsRaceResult> result = analyze();
     ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions.front();
@@ -828,8 +1179,9 @@ TEST_F(ConSanAnalysis, OrderedPairSummaryAccumulatesAcrossExecutionsWithoutExamp
   std::vector<uint8_t> &second = capture_.executions[1].report;
   second = capture_.executions[0].report;
   wire::write_u64(second, wire::kReportSerial, 2);
-  for (const uint32_t wave : {0u, 1u})
+  for (const uint32_t wave : {0u, 1u}) {
     wire::write_u64(second, row(wave) + wire::kRowSerial, 2);
+  }
 
   const FailureOr<LdsRaceResult> result = analyze({0});
   ASSERT_TRUE(result.succeeded()) << error_.message();
@@ -889,8 +1241,9 @@ TEST_F(ConSanAnalysis, DecoderControlEmptyAccessWaveStillMustCompleteTheSameBarr
   access(0, 0, 1);
   access(1, 1, 1);
   barrier();
-  for (const uint32_t wave : {0u, 1u})
+  for (const uint32_t wave : {0u, 1u}) {
     wire::write_u32(capture_.executions[0].report, completion(wave) + wire::kSyncParticipants, 3);
+  }
   const FailureOr<LdsRaceResult> result = analyze();
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
@@ -919,11 +1272,12 @@ TEST_F(ConSanAnalysis, SamePhaseRequiresCompleteJournalWithoutUnexpectedTail) {
   for (const bool unexpected_tail : {false, true}) {
     SCOPED_TRACE(unexpected_tail);
     report = saved;
-    if (unexpected_tail)
+    if (unexpected_tail) {
       std::copy_n(report.begin() + completion(1), kSyncRecordBytes,
                   report.begin() + completion(1, 1));
-    else
+    } else {
       wire::write_u32(report, completion(1) + wire::kSyncCommit, 0);
+    }
     const FailureOr<LdsRaceResult> result = analyze();
     ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions.front();
@@ -1134,8 +1488,9 @@ TEST_F(ConSanAnalysis, MultipleEpochsUseIndependentGroupWitnesses) {
   }
   wire::write_u32(report, record(1, 1) + wire::kRecordPhase, 2);
   for (uint32_t missing = 0; missing < 3; ++missing) {
-    if (missing)
+    if (missing) {
       wire::write_u32(report, completion(1, missing - 1) + wire::kSyncCommit, 0);
+    }
     const FailureOr<LdsRaceResult> result = analyze();
     ASSERT_TRUE(result.succeeded()) << error_.message();
     const LdsRaceExecutionResult &execution = result.value().executions[0];
@@ -1347,8 +1702,9 @@ TEST_F(ConSanAnalysis, BarrierProfileStillRequiresAnEmptyAccessParticipant) {
   access(0, 0, 1);
   access(1, 1, 1);
   auto &report = capture_.executions[0].report;
-  for (uint32_t wave = 0; wave < 3; ++wave)
+  for (uint32_t wave = 0; wave < 3; ++wave) {
     wire::write_u32(report, completion(wave) + wire::kSyncSequence, wave < 2 ? 1 : 0);
+  }
   const auto baseline = analyze();
   ASSERT_TRUE(baseline.succeeded()) << error_.message();
   ASSERT_EQ(baseline.value().cross_wave_pairs, 1u);
@@ -1519,8 +1875,9 @@ TEST_F(ConSanAnalysis, DuplicateOccurrencesAndOverlappingMasksCannotInflateFindi
 }
 
 TEST_F(ConSanAnalysis, ReservationLossRetainsValidFindingsButMakesCoverageIncomplete) {
-  for (uint32_t address_group = 0; address_group < 4; ++address_group)
+  for (uint32_t address_group = 0; address_group < 4; ++address_group) {
     access(0, 0, 1, address_group * 4, 1u << address_group, address_group);
+  }
   access(1, 1, 1);
   wire::write_u32(capture_.executions[0].report, row(0) + wire::kRowLoss, 1);
   wire::write_u32(capture_.executions[0].report, row(0) + wire::kRowStatus,
@@ -1623,9 +1980,11 @@ TEST_F(ConSanAnalysis, EmptyValidObservationsAndNoExecutionsNeverClaimRaceFreedo
 TEST_F(ConSanAnalysis, LargeCandidateCountsRemainCompleteWithOneExample) {
   constexpr uint32_t sites = 1024;
   many_sites(sites);
-  for (uint32_t wave = 0; wave < 2; ++wave)
-    for (uint32_t site = 0; site < sites; ++site)
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    for (uint32_t site = 0; site < sites; ++site) {
       access(wave, site, site + 1, 0, 3);
+    }
+  }
   const FailureOr<LdsRaceResult> result = analyze({1});
   ASSERT_TRUE(result.succeeded()) << error_.message();
   const LdsRaceExecutionResult &execution = result.value().executions.front();
@@ -1639,14 +1998,17 @@ TEST_F(ConSanAnalysis, LargeCandidateCountsRemainCompleteWithOneExample) {
 
 TEST_F(ConSanAnalysis, LargeBarrierCountsRetainAllPairsWithBoundedExamples) {
   constexpr uint32_t sites = 1024;
-  for (const uint32_t split : {0u, sites / 2, sites})
+  for (const uint32_t split : {0u, sites / 2, sites}) {
     for (const bool missing : {false, true}) {
       many_barrier_sites(sites, split);
-      for (uint32_t wave = 0; wave < 2; ++wave)
-        for (uint32_t site = 0; site < sites; ++site)
+      for (uint32_t wave = 0; wave < 2; ++wave) {
+        for (uint32_t site = 0; site < sites; ++site) {
           access(wave, site, site + 1, 0, wave == 0 ? 3 : 7);
-      if (missing)
+        }
+      }
+      if (missing) {
         wire::write_u32(capture_.executions[0].report, completion(1) + wire::kSyncCommit, 0);
+      }
       for (const uint32_t examples : {0u, 1u, 7u}) {
         SCOPED_TRACE(split);
         SCOPED_TRACE(missing);
@@ -1672,6 +2034,7 @@ TEST_F(ConSanAnalysis, LargeBarrierCountsRetainAllPairsWithBoundedExamples) {
         }
       }
     }
+  }
 }
 
 TEST_F(ConSanAnalysis, BarrierCountsAndExampleOrderMatchExhaustiveCandidatePairs) {
@@ -1682,19 +2045,21 @@ TEST_F(ConSanAnalysis, BarrierCountsAndExampleOrderMatchExhaustiveCandidatePairs
     for (uint32_t wave = 0; wave < waves; ++wave) {
       wire::write_u32(capture_.executions[0].report, completion(wave) + wire::kSyncSequence,
                       boundaries[wave]);
-      for (uint32_t site = 0; site < sites; ++site)
+      for (uint32_t site = 0; site < sites; ++site) {
         access(wave, site, site + 1, 0, (uint64_t{1} << (wave + 1)) - 1);
+      }
     }
-    if (missing)
+    if (missing) {
       wire::write_u32(capture_.executions[0].report, completion(3) + wire::kSyncCommit, 0);
+    }
     for (const uint32_t examples : {0u, 1u, 7u, 64u}) {
       std::vector<LdsRaceFinding> ordered, retained, unresolved;
       uint64_t ordered_count = 0, unresolved_count = 0, retained_count = 0, lane_pairs = 0;
       // Brute-force the original candidate order independently of classification
       // buckets, including both static sides and contradictory dynamic boundaries.
-      for (uint32_t second_wave = 1; second_wave < waves; ++second_wave)
-        for (uint32_t first_wave = 0; first_wave < second_wave; ++first_wave)
-          for (uint32_t first_site = 0; first_site < sites; ++first_site)
+      for (uint32_t second_wave = 1; second_wave < waves; ++second_wave) {
+        for (uint32_t first_wave = 0; first_wave < second_wave; ++first_wave) {
+          for (uint32_t first_site = 0; first_site < sites; ++first_site) {
             for (uint32_t second_site = 0; second_site < sites; ++second_site) {
               const bool first_valid =
                   (first_site + 1 <= boundaries[first_wave]) == (first_site < split);
@@ -1722,19 +2087,25 @@ TEST_F(ConSanAnalysis, BarrierCountsAndExampleOrderMatchExhaustiveCandidatePairs
                                      participant(second_wave, second_site), lanes, order};
               if (order == LdsRaceOrdering::Ordered) {
                 ++ordered_count;
-                if (ordered.size() < examples)
+                if (ordered.size() < examples) {
                   ordered.push_back(finding);
+                }
               } else if (order == LdsRaceOrdering::Unresolved) {
                 ++unresolved_count;
-                if (unresolved.size() < examples)
+                if (unresolved.size() < examples) {
                   unresolved.push_back(finding);
+                }
               } else {
                 ++retained_count;
                 lane_pairs += lanes;
-                if (retained.size() < examples)
+                if (retained.size() < examples) {
                   retained.push_back(finding);
+                }
               }
             }
+          }
+        }
+      }
       const FailureOr<LdsRaceResult> result = analyze({examples});
       ASSERT_TRUE(result.succeeded()) << error_.message();
       const LdsRaceExecutionResult &execution = result.value().executions.front();
@@ -1887,7 +2258,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedStaticPhaseContradictionMustNotConf
   // A between-barriers read has an odd phase. Corrupt both its phase and the
   // corresponding sequence boundaries, so numeric agreement cannot mask the
   // static contradiction. Integrity validation also covers non-candidates.
-  for (const uint32_t phase : {0u, 2u})
+  for (const uint32_t phase : {0u, 2u}) {
     for (const uint32_t mode : {0u, 1u, 2u}) {
       SCOPED_TRACE(phase);
       SCOPED_TRACE(mode);
@@ -1905,6 +2276,7 @@ TEST_F(ConSanAnalysis, DecoderControlRepeatedStaticPhaseContradictionMustNotConf
       EXPECT_EQ(result.value().executions[0].completed_barrier_waves, 1u);
       EXPECT_FALSE(result.value().coverage_complete);
     }
+  }
 }
 
 TEST_F(ConSanAnalysis, DecoderControlLaterJournalLossKeepsEarlierUnorderedPair) {
@@ -1948,9 +2320,10 @@ TEST_F(ConSanAnalysis, DecoderControlUnorderedIntervalNeedsBothAdjacentOccurrenc
     wire::write_u32(report, row(wave) + wire::kRowSyncLoss, 1);
     wire::write_u32(report, row(wave) + wire::kRowStatus, 7);
     for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
-      if (slot)
+      if (slot) {
         std::copy_n(report.begin() + completion(wave), kSyncRecordBytes,
                     report.begin() + completion(wave, slot));
+      }
       wire::write_u32(report, completion(wave, slot) + wire::kSyncPhase, slot + 1);
       wire::write_u32(report, completion(wave, slot) + wire::kSyncOccurrence, slot + 1);
       wire::write_u32(report, completion(wave, slot) + wire::kSyncSequence, slot ? 1 : 0);
@@ -1962,8 +2335,9 @@ TEST_F(ConSanAnalysis, DecoderControlUnorderedIntervalNeedsBothAdjacentOccurrenc
   for (const uint32_t missing_slot : {0u, 1u, kSyncCapacity - 1, kSyncCapacity}) {
     SCOPED_TRACE(missing_slot);
     report = original;
-    if (missing_slot < kSyncCapacity)
+    if (missing_slot < kSyncCapacity) {
       wire::write_u32(report, completion(1, missing_slot) + wire::kSyncCommit, 0);
+    }
     const FailureOr<LdsRaceResult> result = analyze();
     ASSERT_TRUE(result.succeeded()) << error_.message();
     EXPECT_EQ(result.value().cross_wave_pairs, missing_slot < 2 ? 0u : 1u);
@@ -2018,9 +2392,10 @@ TEST_F(ConSanAnalysis, DecoderControlUnorderedIntervalRequiresTheEmptyAccessWave
     wire::write_u32(report, row(wave) + wire::kRowSyncLoss, 1);
     wire::write_u32(report, row(wave) + wire::kRowStatus, 7);
     for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
-      if (slot)
+      if (slot) {
         std::copy_n(report.begin() + completion(wave), kSyncRecordBytes,
                     report.begin() + completion(wave, slot));
+      }
       wire::write_u32(report, completion(wave, slot) + wire::kSyncPhase, slot + 1);
       wire::write_u32(report, completion(wave, slot) + wire::kSyncOccurrence, slot + 1);
       wire::write_u32(report, completion(wave, slot) + wire::kSyncSequence, wave < 2 ? 1 : 0);
@@ -2072,6 +2447,31 @@ TEST_F(ConSanAnalysis, LargeTruncatedLoopCountsKeepDistinctLatePhasesAggregated)
   }
 }
 
+TEST_F(ConSanAnalysis, SecondSelectedEntryContributesDualAndTransposeMetadata) {
+  capture_.header = test::multi_entry_header();
+  capture_.executions.clear();
+  Manifest &second = *capture_.header.image.entries[1].selected;
+  test::manifest(capture_.header).target = 1250;
+  second.target = 1250;
+  second.sites[1].width = 8;
+  second.sites[1].lds_ranges.shape = LdsRangeShape::Transpose8;
+  second.sites[0].lds_ranges = {LdsRangeShape::Dual, 3, 5};
+  CapturedExecution execution = test::execution(second, 1);
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    wire::write_u32(execution.report, row(wave) + wire::kRowStatus,
+                    wire::kRowEntered | wire::kRowExited);
+  }
+  capture_.executions.push_back(std::move(execution));
+  access(0, 0, 1);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_TRUE(result.value().has_dual_ranges);
+  EXPECT_TRUE(result.value().has_transpose);
+  ASSERT_EQ(result.value().executions.size(), 1u);
+  EXPECT_EQ(result.value().executions.front().entry_key, second.entry.original_descriptor_offset);
+  EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
+}
+
 TEST_F(ConSanAnalysis, SameImageEntriesUseTheirOwnFactsAndRepeatAttribution) {
   capture_.header = test::multi_entry_header();
   capture_.executions.clear();
@@ -2080,9 +2480,10 @@ TEST_F(ConSanAnalysis, SameImageEntriesUseTheirOwnFactsAndRepeatAttribution) {
     const Manifest *facts = selected_manifest(capture_.header.image, keys[index]);
     ASSERT_NE(facts, nullptr);
     CapturedExecution execution = test::execution(*facts, index + 1, index + 1);
-    for (uint32_t wave = 0; wave < 2; ++wave)
+    for (uint32_t wave = 0; wave < 2; ++wave) {
       wire::write_u32(execution.report, row(wave) + wire::kRowStatus,
                       wire::kRowEntered | wire::kRowExited);
+    }
     capture_.executions.push_back(std::move(execution));
     access(0, 0, 1, 0, 1, 0, index);
     access(1, 1, 1, 0, 1, 0, index);

@@ -9,6 +9,8 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -30,6 +32,32 @@ namespace rocjitsu::consan {
 namespace {
 
 constexpr const TargetProfile &kTarget = kNativeLdsTargets[2];
+
+TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
+  const auto decoder = Decoder::create(IsaFamily::Cdna4);
+  ASSERT_NE(decoder, nullptr);
+  const auto check = [&](uint16_t opcode, cdna4::DsBuilderFields fields, InputErrorCode expected) {
+    const DecodeResult decoded = decoder->decode_window(cdna4::build_ds(opcode, fields));
+    ASSERT_TRUE(decoded.succeeded());
+    std::vector<NativeLdsAccess> sites;
+    InputError error;
+    EXPECT_TRUE(classify_lds_race_instruction(*decoded.value(), IsaFamily::Cdna4, 8, sites, error)
+                    .failed());
+    EXPECT_EQ(error.code, expected);
+    EXPECT_TRUE(sites.empty());
+  };
+  check(cdna4::kDsAddU32Ds, {.gds = 1, .addr = 3, .data0 = 7},
+        InputErrorCode::UnsupportedSynchronization);
+  check(cdna4::kDsAddRtnU32Ds, {.addr = 3, .data0 = 7, .vdst = 2},
+        InputErrorCode::UnsupportedSynchronization);
+  check(cdna4::kDsAddU32Ds, {.acc = 1, .addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsAddU32Ds, {.addr = 3, .data0 = 8}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsAddU64Ds, {.addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsCmpstRtnB32Ds, {.addr = 3, .data0 = 7, .data1 = 8, .vdst = 3},
+        InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsCmpstRtnB32Ds, {.addr = 3, .data0 = 7, .data1 = 2, .vdst = 8},
+        InputErrorCode::UnsupportedAccess);
+}
 
 TEST(ConSanInput, Gfx1100UsesConcreteModelOnlyDecoder) {
   const IsaTargetRegistry &registry = default_isa_target_registry();
@@ -254,8 +282,9 @@ protected:
     const util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, kTarget.arch);
     ASSERT_TRUE(maybe_nop.succeeded());
     const uint32_t nop = maybe_nop.value();
-    for (uint32_t offset = sizeof(uint32_t); offset < first_size; offset += sizeof(uint32_t))
+    for (uint32_t offset = sizeof(uint32_t); offset < first_size; offset += sizeof(uint32_t)) {
       std::memcpy(patched.data() + anchor + offset, &nop, sizeof(nop));
+    }
     CodeObjectPatcher patcher(source);
     ASSERT_TRUE(patcher.replace_text(patched));
     image = std::move(patcher).emit();
@@ -495,10 +524,14 @@ TEST_F(ConSanInputFixture, BarrierAndExcludedAccessCannotBecomeNoSyncFacts) {
   EXPECT_TRUE(inspect(load("barrier")).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedSynchronization);
   EXPECT_TRUE(error_.text_offset.has_value());
-  const std::vector<uint8_t> excluded =
-      test::read_fixture(test::target_fixture_path({"gfx1100", 32}, "width-excluded-b8"));
-  ASSERT_FALSE(excluded.empty());
-  EXPECT_TRUE(inspect(excluded).failed());
+  const FailureOr<InputProgram> ordinary = inspect(image_);
+  ASSERT_TRUE(ordinary.succeeded());
+  ASSERT_FALSE(ordinary.value().accesses.empty());
+  const size_t offset = text_offset_ + ordinary.value().accesses.front().original_offset;
+  const std::array<uint32_t, 2> gds = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.gds = 1});
+  ASSERT_LE(offset + sizeof(gds), image_.size());
+  std::memcpy(image_.data() + offset, gds.data(), sizeof(gds));
+  EXPECT_TRUE(inspect(image_).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedAccess);
   EXPECT_TRUE(error_.text_offset.has_value());
 }
@@ -667,8 +700,9 @@ TEST_F(ConSanInputFixture, LdsAccessOrderAtAJoinIncludesEveryPredecessor) {
     words[first + 4] = join_branch.value();
     std::memcpy(words.data() + first + 6, text.data() + read, 8);
     words[first + 8] = terminator.value();
-    if (high_access)
+    if (high_access) {
       std::memcpy(words.data() + first + 10, text.data() + write, 8);
+    }
     words[first + 12] = backward_branch.value();
     CodeObjectPatcher patcher(source);
     ASSERT_TRUE(patcher.replace_text(

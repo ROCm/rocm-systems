@@ -354,75 +354,125 @@ TEST(ConversionCvtU32F64W64Gfx1250, Arithmetic) {
                                        Conversion64::DoubleToUnsigned);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
+// gfx942 shares the RDNA3 model and matches MI300X captures.
 TEST(ConversionCvtF32F64W32Gfx942, Arithmetic) {
-  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w32_gfx942,
-                                        Conversion64::DoubleToFloat);
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_f32_f64_w32_gfx942,
+                                       Conversion64::DoubleToFloat);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
 TEST(ConversionCvtF32F64W64Gfx942, Arithmetic) {
-  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w64_gfx942,
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_f32_f64_w64_gfx942,
+                                       Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF64F32W32Gfx942, Arithmetic) {
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_f32_w32_gfx942,
+                                       Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64F32W64Gfx942, Arithmetic) {
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_f32_w64_gfx942,
+                                       Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64I32W32Gfx942, Arithmetic) {
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_i32_w32_gfx942,
+                                       Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64I32W64Gfx942, Arithmetic) {
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_i32_w64_gfx942,
+                                       Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W32Gfx942, Arithmetic) {
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_u32_w32_gfx942,
+                                       Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W64Gfx942, Arithmetic) {
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_u32_w64_gfx942,
+                                       Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtI32F64W32Gfx942, Arithmetic) {
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_i32_f64_w32_gfx942,
+                                       Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtI32F64W64Gfx942, Arithmetic) {
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_i32_f64_w64_gfx942,
+                                       Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtU32F64W32Gfx942, Arithmetic) {
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_u32_f64_w32_gfx942,
+                                       Conversion64::DoubleToUnsigned);
+}
+
+TEST(ConversionCvtU32F64W64Gfx942, Arithmetic) {
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_u32_f64_w64_gfx942,
+                                       Conversion64::DoubleToUnsigned);
+}
+
+// gfx950 inherits the RDNA3/gfx942 model but stays loose-only until gfx950 captures are reviewed.
+TEST(ConversionCvtF32F64W32Gfx950, Arithmetic) {
+  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w32_gfx950,
                                         Conversion64::DoubleToFloat);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtF64F32W32Gfx942, Arithmetic) {
-  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w32_gfx942,
+TEST(ConversionCvtF32F64W64Gfx950, Arithmetic) {
+  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w64_gfx950,
+                                        Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF64F32W32Gfx950, Arithmetic) {
+  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w32_gfx950,
                                         Conversion64::FloatToDouble);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtF64F32W64Gfx942, Arithmetic) {
-  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w64_gfx942,
+TEST(ConversionCvtF64F32W64Gfx950, Arithmetic) {
+  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w64_gfx950,
                                         Conversion64::FloatToDouble);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtF64I32W32Gfx942, Arithmetic) {
-  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w32_gfx942,
+TEST(ConversionCvtF64I32W32Gfx950, Arithmetic) {
+  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w32_gfx950,
                                         Conversion64::SignedToDouble);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtF64I32W64Gfx942, Arithmetic) {
-  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w64_gfx942,
+TEST(ConversionCvtF64I32W64Gfx950, Arithmetic) {
+  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w64_gfx950,
                                         Conversion64::SignedToDouble);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtF64U32W32Gfx942, Arithmetic) {
-  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w32_gfx942,
+TEST(ConversionCvtF64U32W32Gfx950, Arithmetic) {
+  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w32_gfx950,
                                         Conversion64::UnsignedToDouble);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtF64U32W64Gfx942, Arithmetic) {
-  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w64_gfx942,
+TEST(ConversionCvtF64U32W64Gfx950, Arithmetic) {
+  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w64_gfx950,
                                         Conversion64::UnsignedToDouble);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtI32F64W32Gfx942, Arithmetic) {
-  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w32_gfx942,
+TEST(ConversionCvtI32F64W32Gfx950, Arithmetic) {
+  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w32_gfx950,
                                         Conversion64::DoubleToSigned);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtI32F64W64Gfx942, Arithmetic) {
-  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w64_gfx942,
+TEST(ConversionCvtI32F64W64Gfx950, Arithmetic) {
+  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w64_gfx950,
                                         Conversion64::DoubleToSigned);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtU32F64W32Gfx942, Arithmetic) {
-  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w32_gfx942,
+TEST(ConversionCvtU32F64W32Gfx950, Arithmetic) {
+  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w32_gfx950,
                                         Conversion64::DoubleToUnsigned);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtU32F64W64Gfx942, Arithmetic) {
-  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w64_gfx942,
+TEST(ConversionCvtU32F64W64Gfx950, Arithmetic) {
+  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w64_gfx950,
                                         Conversion64::DoubleToUnsigned);
 }
 

@@ -15,8 +15,13 @@
 namespace rocjitsu::consan {
 namespace {
 
+constexpr Digest kPriorOptions = {
+    0x8e, 0x4e, 0x17, 0xc7, 0x9d, 0x00, 0x15, 0x6a, 0x93, 0x8a, 0xeb, 0xa2, 0x32, 0x06, 0x3d, 0xb0,
+    0xa7, 0x24, 0x2c, 0x81, 0x8f, 0xe1, 0x9f, 0xa8, 0x3e, 0x6c, 0x37, 0x78, 0xd4, 0x3c, 0xff, 0x17,
+};
+
 // Deliberately synthetic codec facts; these do not claim valid ELF/GPU evidence.
-ImageFacts example_image() {
+ImageFacts example_image(const Digest &options = mvp_options_digest()) {
   ImageFacts image;
   image.original = {.sha256 = digest(std::array<uint8_t, 4096>{}), .bytes = 4096};
   image.prepared = {.sha256 = digest(std::array<uint8_t, 8192>{}), .bytes = 8192};
@@ -46,7 +51,7 @@ ImageFacts example_image() {
       Manifest manifest;
       manifest.original = image.original;
       manifest.prepared = image.prepared;
-      manifest.options = mvp_options_digest();
+      manifest.options = options;
       manifest.target = image.target;
       manifest.wave_size = image.wave_size;
       manifest.code_object_abi = image.code_object_abi;
@@ -71,7 +76,8 @@ ImageFacts example_image() {
     image.entries.push_back(std::move(entry));
   }
   const std::array<EntryKey, 2> keys = {2048, 2112};
-  image.selection_profile = selection_profile_digest(keys);
+  image.selection_profile =
+      selection_profile_digest(keys, ScopeKind::NativeLdsNoSynchronization, options);
   return image;
 }
 
@@ -83,8 +89,9 @@ ImageFacts qualified_image(const TargetProfile &target, uint32_t wave_size, Scop
   for (ImageEntryFacts &entry : image.entries) {
     entry.binding.workgroup_id_scalar =
         target.id == 1201 || target.id == 1250 ? kWorkgroupIdTtmp9Selector : 15;
-    if (!entry.selected)
+    if (!entry.selected) {
       continue;
+    }
     Manifest &manifest = *entry.selected;
     manifest.target = target.id;
     manifest.wave_size = wave_size;
@@ -120,7 +127,7 @@ TEST(ConSanImageFacts, EncodingPreservesKnownWireIdentity) {
   const Digest expected = {0xbb, 0xe5, 0xc6, 0x24, 0x70, 0x8c, 0xba, 0xde, 0xa9, 0xac, 0xb7,
                            0x75, 0x88, 0xd6, 0xde, 0x57, 0xff, 0x4e, 0xee, 0xfc, 0xb9, 0x4a,
                            0x05, 0xe9, 0x58, 0x89, 0x36, 0x30, 0x4a, 0x6a, 0xd8, 0x45};
-  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image());
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image(kPriorOptions));
   ASSERT_TRUE(encoded.succeeded());
   EXPECT_EQ(encoded.value().size(), 1331u);
   EXPECT_EQ(digest(encoded.value()), expected);
@@ -213,14 +220,15 @@ TEST(ConSanImageFacts, RejectsDuplicateKeysNamesDescriptorsAndSharedSites) {
       image.entries[1].binding.original_descriptor_offset = image.entries[1].key;
       const std::array<EntryKey, 2> keys = {image.entries[0].key, image.entries[1].key};
       image.selection_profile = selection_profile_digest(keys);
-    } else if (kind == 1)
+    } else if (kind == 1) {
       image.entries[1].binding.name = image.entries[0].binding.name;
-    else if (kind == 2)
+    } else if (kind == 2) {
       image.entries[1].binding.prepared_descriptor_offset =
           image.entries[0].binding.prepared_descriptor_offset;
-    else
+    } else {
       image.entries[1].selected->sites[0].original_offset =
           image.entries[0].selected->sites[0].original_offset;
+    }
     image.entries[1].selected->entry = image.entries[1].binding;
     EXPECT_TRUE(validate_image_facts(image).failed()) << kind;
   }
@@ -232,17 +240,17 @@ TEST(ConSanImageFacts, NativeCodeRangesAreBoundedOrderedAndDisjoint) {
     SCOPED_TRACE(kind);
     ImageFacts image = baseline;
     ImageEntryFacts &native = image.entries.back();
-    if (kind == 0)
+    if (kind == 0) {
       native.native_code.clear();
-    else if (kind == 1)
+    } else if (kind == 1) {
       native.native_code.front().bytes = 0;
-    else if (kind == 2)
+    } else if (kind == 2) {
       native.native_code.front().bytes = image.original_text_bytes;
-    else if (kind == 3)
+    } else if (kind == 3) {
       ++native.native_code.front().prepared_offset;
-    else if (kind == 4)
+    } else if (kind == 4) {
       native.native_code.push_back(native.native_code.front());
-    else {
+    } else {
       native.native_code.front().original_offset =
           image.entries[0].selected->sites[0].original_offset;
       native.binding.original_entry_offset = native.native_code.front().original_offset;
@@ -270,14 +278,15 @@ TEST(ConSanImageFacts, RejectsReboundEntryImageAndSelectionFacts) {
   const ImageFacts baseline = example_image();
   for (uint32_t kind = 0; kind < 4; ++kind) {
     ImageFacts image = baseline;
-    if (kind == 0)
+    if (kind == 0) {
       image.entries[0].selected->entry.name = "rebound";
-    else if (kind == 1)
+    } else if (kind == 1) {
       image.entries[1].selected->prepared.sha256[0] ^= 1;
-    else if (kind == 2)
+    } else if (kind == 2) {
       image.selection_profile[0] ^= 1;
-    else
+    } else {
       image.entries[1].selected->target = 1100;
+    }
     EXPECT_TRUE(validate_image_facts(image).failed()) << kind;
   }
 }
@@ -287,14 +296,15 @@ TEST(ConSanImageFacts, NativeCannotClaimDetectorFactsOrGrownResources) {
   for (uint32_t kind = 0; kind < 4; ++kind) {
     ImageFacts image = baseline;
     ImageEntryFacts &native = image.entries.back();
-    if (kind == 0)
+    if (kind == 0) {
       native.selected = image.entries[0].selected;
-    else if (kind == 1)
+    } else if (kind == 1) {
       ++native.binding.prepared_group_bytes;
-    else if (kind == 2)
+    } else if (kind == 2) {
       ++native.binding.prepared_sgprs;
-    else
+    } else {
       native.disposition = static_cast<EntryDisposition>(99);
+    }
     EXPECT_TRUE(validate_image_facts(image).failed()) << kind;
   }
 }
@@ -336,8 +346,9 @@ TEST(ConSanImageFacts, BoundedAggregateMetadataAndSiteCounts) {
 TEST(ConSanImageFacts, DecoderRejectsTruncationCorruptionAndOversizedEntryClaims) {
   const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(example_image());
   ASSERT_TRUE(encoded.succeeded());
-  for (size_t extent = 0; extent < encoded.value().size(); ++extent)
+  for (size_t extent = 0; extent < encoded.value().size(); ++extent) {
     EXPECT_TRUE(decode_image_facts(std::span(encoded.value()).first(extent)).failed()) << extent;
+  }
   std::vector<uint8_t> bytes = encoded.value();
   bytes.back() ^= 1;
   EXPECT_TRUE(decode_image_facts(bytes).failed());
@@ -351,6 +362,15 @@ TEST(ConSanImageFacts, DecoderRejectsTruncationCorruptionAndOversizedEntryClaims
   bytes[8] ^= 1;
   EXPECT_TRUE(decode_image_facts(bytes, error.emitter()).failed());
   EXPECT_EQ(error.message(), "producer contract mismatch");
+}
+
+TEST(ConSanImageFacts, ReadEarlierWidthProfileWithoutAdmittingNewSitesUnderItsIdentity) {
+  ImageFacts image = example_image(kPriorOptions);
+  const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image);
+  ASSERT_TRUE(encoded.succeeded());
+  EXPECT_TRUE(decode_image_facts(encoded.value()).succeeded());
+  image.entries.front().selected->sites.front().width = 12;
+  EXPECT_TRUE(validate_image_facts(image).failed());
 }
 
 TEST(ConSanImageFacts, ExpectedProfileIsIndependentOfInternallyValidFacts) {
@@ -367,14 +387,15 @@ TEST(ConSanImageFacts, ExpectedProfileIsIndependentOfInternallyValidFacts) {
 }
 
 TEST(ConSanImageFacts, EveryQScopeWidthAndTargetWaveRoundTripsWorkgroupAndBarrierFacts) {
-  for (const TargetProfile &target : kNativeLdsTargets)
+  for (const TargetProfile &target : kNativeLdsTargets) {
     for (const uint32_t wave_size : {32u, 64u}) {
-      if (!supports_wave(target, wave_size))
+      if (!supports_wave(target, wave_size)) {
         continue;
+      }
       for (const ScopeKind scope :
            {ScopeKind::NativeLdsNoSynchronization, ScopeKind::NativeLdsWorkgroupBarrier,
-            ScopeKind::NativeLdsWorkgroupBarrierLoop})
-        for (const uint32_t width : {2u, 4u, 8u, 16u}) {
+            ScopeKind::NativeLdsWorkgroupBarrierLoop}) {
+        for (const uint32_t width : {1u, 2u, 4u, 8u, 12u, 16u}) {
           SCOPED_TRACE(target.id);
           SCOPED_TRACE(wave_size);
           SCOPED_TRACE(static_cast<uint32_t>(scope));
@@ -390,8 +411,9 @@ TEST(ConSanImageFacts, EveryQScopeWidthAndTargetWaveRoundTripsWorkgroupAndBarrie
           EXPECT_EQ(decoded.value(), image);
           EXPECT_EQ(selected_scope(decoded.value()), scope);
           for (const ImageEntryFacts &entry : decoded.value().entries) {
-            if (!entry.selected)
+            if (!entry.selected) {
               continue;
+            }
             const Manifest &manifest = *entry.selected;
             const uint32_t threads = 2 * wave_size;
             const FailureOr<LaunchLayout> layout = plan_launch(
@@ -403,7 +425,9 @@ TEST(ConSanImageFacts, EveryQScopeWidthAndTargetWaveRoundTripsWorkgroupAndBarrie
                       report_row_bytes(1, scope != ScopeKind::NativeLdsNoSynchronization));
           }
         }
+      }
     }
+  }
 }
 
 TEST(ConSanImageFacts, ScopeIdentityIsExplicitAndMixedSelectedScopesAreRejected) {

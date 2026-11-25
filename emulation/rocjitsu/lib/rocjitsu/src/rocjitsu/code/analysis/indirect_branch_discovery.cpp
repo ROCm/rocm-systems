@@ -246,18 +246,22 @@ struct SgprWriteMask {
   }
 
   void expand(RegisterRef ref) {
-    if (ref.cls != RegClass::SGPR)
+    if (ref.cls != RegClass::SGPR) {
       return;
+    }
     const uint16_t width = std::max<uint16_t>(1, ref.width);
-    for (uint16_t i = 0; i < width; ++i)
+    for (uint16_t i = 0; i < width; ++i) {
       set(static_cast<uint16_t>(ref.index + i));
+    }
   }
 
   [[nodiscard]] bool test(uint16_t sgpr) const {
-    if (sgpr < 64)
+    if (sgpr < 64) {
       return (lo & (uint64_t{1} << sgpr)) != 0;
-    if (sgpr < REGISTER_SET_MAX_SGPRS)
+    }
+    if (sgpr < REGISTER_SET_MAX_SGPRS) {
       return (hi & (uint64_t{1} << (sgpr - 64))) != 0;
+    }
     return false;
   }
 
@@ -293,10 +297,12 @@ struct CalleeSummary {
   CalleeSummary &operator|=(const CalleeSummary &other) {
     sgprs |= other.sgprs;
     vgprs |= other.vgprs;
-    if (return_mode != other.return_mode)
+    if (return_mode != other.return_mode) {
       return_mode = std::nullopt;
-    if (return_gpr_idx_enabled != other.return_gpr_idx_enabled)
+    }
+    if (return_gpr_idx_enabled != other.return_gpr_idx_enabled) {
       return_gpr_idx_enabled = std::nullopt;
+    }
     return *this;
   }
 };
@@ -422,8 +428,9 @@ void seed_pc_builder(PcAddressBuilderMap &builders, uint64_t getpc_offset, uint1
 
 void poison_pc_builder(PcAddressBuilderMap &builders, uint64_t getpc_offset) {
   auto it = builders.find(getpc_offset);
-  if (it == builders.end())
+  if (it == builders.end()) {
     return;
+  }
   it->second.poisoned = true;
   it->second.record.resolved = false;
 }
@@ -450,8 +457,9 @@ void note_pc_builder(PcAddressBuilderMap &builders, uint16_t pair_lo, const PcVa
     builders.emplace(value.source_getpc_offset, PcAddressBuilderEntry{.record = record});
     return;
   }
-  if (it->second.poisoned)
+  if (it->second.poisoned) {
     return;
+  }
   if (it->second.record.resolved && it->second.record != record) {
     it->second.poisoned = true;
     it->second.record.resolved = false;
@@ -542,26 +550,30 @@ private:
 class BlockState {
 public:
   void set_builder(uint16_t pair_lo, PcValue value) {
-    if (pair_lo >= kMaxTrackedSgprPair)
+    if (pair_lo >= kMaxTrackedSgprPair) {
       return;
+    }
     invalidate_half(pair_lo, pair_lo);
     invalidate_half(static_cast<uint16_t>(pair_lo + 1), pair_lo);
     mark_dirty(pair_lo);
     mark_dirty(static_cast<uint16_t>(pair_lo + 1));
-    if (!builders_[pair_lo])
+    if (!builders_[pair_lo]) {
       active_pairs_.push_back(pair_lo);
+    }
     builders_[pair_lo] = value;
   }
 
   [[nodiscard]] PcValue *builder(uint16_t pair_lo) {
-    if (pair_lo >= builders_.size() || !builders_[pair_lo])
+    if (pair_lo >= builders_.size() || !builders_[pair_lo]) {
       return nullptr;
+    }
     return &*builders_[pair_lo];
   }
 
   [[nodiscard]] const PcValue *builder(uint16_t pair_lo) const {
-    if (pair_lo >= builders_.size() || !builders_[pair_lo])
+    if (pair_lo >= builders_.size() || !builders_[pair_lo]) {
       return nullptr;
+    }
     return &*builders_[pair_lo];
   }
 
@@ -572,10 +584,12 @@ public:
   }
 
   [[nodiscard]] bool dirty(uint16_t sgpr) const {
-    if (sgpr < 64)
+    if (sgpr < 64) {
       return (dirty_lo_ & (uint64_t{1} << sgpr)) != 0;
-    if (sgpr < REGISTER_SET_MAX_SGPRS)
+    }
+    if (sgpr < REGISTER_SET_MAX_SGPRS) {
       return (dirty_hi_ & (uint64_t{1} << (sgpr - 64))) != 0;
+    }
     return false;
   }
 
@@ -609,11 +623,13 @@ public:
       builders_[sgpr].reset();
     }
 
-    if (sgpr == 0)
+    if (sgpr == 0) {
       return;
+    }
     const uint16_t previous_pair = static_cast<uint16_t>(sgpr - 1);
-    if (!protected_pair || *protected_pair != previous_pair)
+    if (!protected_pair || *protected_pair != previous_pair) {
       builders_[previous_pair].reset();
+    }
   }
 
   void invalidate_pair(uint16_t pair_lo) {
@@ -643,8 +659,9 @@ private:
   // zero for out-of-range literal reads; the surrounding matcher will then fail
   // naturally instead of needing a separate bounds status.
   uint32_t word = 0;
-  if (offset + sizeof(word) <= text.size())
+  if (offset + sizeof(word) <= text.size()) {
     std::memcpy(&word, text.data() + offset, sizeof(word));
+  }
   return word;
 }
 
@@ -745,33 +762,43 @@ scalar_pc_sreg(rocjitsu::IsaFamily arch, const Instruction &inst, uint32_t word,
   // encoding. If the instruction is not exactly the scalar PC form, returning
   // nullopt is safer than trying to recover from the generic Instruction API:
   // false positives here would create real CFG edges.
-  if (inst.size() != sizeof(uint32_t))
+  if (inst.size() != sizeof(uint32_t)) {
     return std::nullopt;
-  if ((word >> 23) != kSop1EncodingPrefix)
+  }
+  if ((word >> 23) != kSop1EncodingPrefix) {
     return std::nullopt;
+  }
   auto opcode = scalar_pc_opcode(arch, op);
-  if (!opcode || ((word >> 8) & 0xffu) != *opcode)
+  if (!opcode || ((word >> 8) & 0xffu) != *opcode) {
     return std::nullopt;
-  if (op == ScalarPcOp::GetPc64)
+  }
+  if (op == ScalarPcOp::GetPc64) {
     return static_cast<uint16_t>((word >> 16) & 0x7fu);
+  }
   return static_cast<uint16_t>(word & 0xffu);
 }
 
 [[nodiscard]] bool sop2_literal_to_sreg(const Instruction &inst, uint32_t word,
                                         uint32_t literal_word, uint32_t opcode, uint16_t sdst,
                                         uint16_t ssrc0, uint32_t &literal) {
-  if (inst.size() != 2 * sizeof(uint32_t))
+  if (inst.size() != 2 * sizeof(uint32_t)) {
     return false;
-  if ((word >> 30) != kSop2EncodingPrefix)
+  }
+  if ((word >> 30) != kSop2EncodingPrefix) {
     return false;
-  if (((word >> 23) & 0x7fu) != opcode)
+  }
+  if (((word >> 23) & 0x7fu) != opcode) {
     return false;
-  if (((word >> 16) & 0x7fu) != sdst)
+  }
+  if (((word >> 16) & 0x7fu) != sdst) {
     return false;
-  if (((word >> 8) & 0xffu) != 255u)
+  }
+  if (((word >> 8) & 0xffu) != 255u) {
     return false;
-  if ((word & 0xffu) != ssrc0)
+  }
+  if ((word & 0xffu) != ssrc0) {
     return false;
+  }
   literal = literal_word;
   return true;
 }
@@ -780,41 +807,53 @@ scalar_pc_sreg(rocjitsu::IsaFamily arch, const Instruction &inst, uint32_t word,
                                                uint32_t literal_word, uint32_t opcode,
                                                uint16_t sdst, uint16_t inline_src1,
                                                uint32_t &literal) {
-  if (inst.size() != 2 * sizeof(uint32_t))
+  if (inst.size() != 2 * sizeof(uint32_t)) {
     return false;
-  if ((word >> 30) != kSop2EncodingPrefix)
+  }
+  if ((word >> 30) != kSop2EncodingPrefix) {
     return false;
-  if (((word >> 23) & 0x7fu) != opcode)
+  }
+  if (((word >> 23) & 0x7fu) != opcode) {
     return false;
-  if (((word >> 16) & 0x7fu) != sdst)
+  }
+  if (((word >> 16) & 0x7fu) != sdst) {
     return false;
-  if (((word >> 8) & 0xffu) != inline_src1)
+  }
+  if (((word >> 8) & 0xffu) != inline_src1) {
     return false;
-  if ((word & 0xffu) != 255u)
+  }
+  if ((word & 0xffu) != 255u) {
     return false;
+  }
   // Raw SDST encodings also name special destinations such as NULL, whose
   // discarded write cannot supply the temporary value used by these patterns.
   const Operand *destination = inst.dst_operand(0);
   const std::optional<RegisterRef> ref =
       destination ? destination->to_register_ref() : std::nullopt;
-  if (!ref || ref->cls != RegClass::SGPR || ref->index != sdst || ref->width != 1)
+  if (!ref || ref->cls != RegClass::SGPR || ref->index != sdst || ref->width != 1) {
     return false;
+  }
   literal = literal_word;
   return true;
 }
 
 [[nodiscard]] bool sop2_sreg_inline_to_sreg(const Instruction &inst, uint32_t word, uint32_t opcode,
                                             uint16_t sdst, uint16_t ssrc0, uint16_t inline_src1) {
-  if (inst.size() != sizeof(uint32_t))
+  if (inst.size() != sizeof(uint32_t)) {
     return false;
-  if ((word >> 30) != kSop2EncodingPrefix)
+  }
+  if ((word >> 30) != kSop2EncodingPrefix) {
     return false;
-  if (((word >> 23) & 0x7fu) != opcode)
+  }
+  if (((word >> 23) & 0x7fu) != opcode) {
     return false;
-  if (((word >> 16) & 0x7fu) != sdst)
+  }
+  if (((word >> 16) & 0x7fu) != sdst) {
     return false;
-  if (((word >> 8) & 0xffu) != inline_src1)
+  }
+  if (((word >> 8) & 0xffu) != inline_src1) {
     return false;
+  }
   return (word & 0xffu) == ssrc0;
 }
 
@@ -850,11 +889,13 @@ void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
   // in this lattice.
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
-    if (op == nullptr)
+    if (op == nullptr) {
       continue;
+    }
     facts.writes_scc = facts.writes_scc || op->to_special_reg_class() == RegClass::SCC;
-    if (auto ref = op->to_register_ref())
+    if (auto ref = op->to_register_ref()) {
       record_written_sgpr_ref(facts, *ref);
+    }
   }
 
   RegisterSet implicit_defs;
@@ -867,8 +908,9 @@ void record_written_sgprs(const Instruction &inst, InstructionFacts &facts) {
 
 void ensure_written_sgprs(AnalysisContext &ctx, size_t index) {
   InstructionFacts &facts = ctx.facts[index];
-  if (!facts.written_sgprs_computed)
+  if (!facts.written_sgprs_computed) {
     record_written_sgprs(*ctx.insts[index], facts);
+  }
 }
 
 void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &state,
@@ -888,8 +930,9 @@ void invalidate_written_sgprs(AnalysisContext &ctx, size_t index, BlockState &st
     const std::vector<uint16_t> pairs = state.active_pairs();
     for (uint16_t pair : pairs) {
       const PcValue *value = state.builder(pair);
-      if ((!protected_pair || pair != *protected_pair) && value && value->pending_high_carry)
+      if ((!protected_pair || pair != *protected_pair) && value && value->pending_high_carry) {
         state.invalidate_pair(pair);
+      }
     }
   }
 }
@@ -933,8 +976,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   // targets and extra leaders that require lookups.
   const auto it = std::ranges::lower_bound(insts, offset, {},
                                            [](const Instruction *inst) { return inst->src_loc(); });
-  if (it == insts.end() || (*it)->src_loc() != offset)
+  if (it == insts.end() || (*it)->src_loc() != offset) {
     return std::nullopt;
+  }
   return static_cast<size_t>(std::distance(insts.begin(), it));
 }
 
@@ -949,17 +993,20 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 [[nodiscard]] std::vector<uint8_t> compute_block_leaders(std::span<const Instruction *const> insts,
                                                          std::span<const uint64_t> extra_leaders) {
   std::vector<uint8_t> leaders(insts.size(), 0);
-  if (insts.empty())
+  if (insts.empty()) {
     return leaders;
+  }
   leaders.front() = 1;
 
   const uint64_t section_end =
       insts.back()->src_loc() + static_cast<uint64_t>(insts.back()->size());
   for (uint64_t leader : extra_leaders) {
-    if (leader >= section_end)
+    if (leader >= section_end) {
       continue;
-    if (auto index = instruction_index_for_offset(insts, leader))
+    }
+    if (auto index = instruction_index_for_offset(insts, leader)) {
       leaders[*index] = 1;
+    }
   }
 
   for (size_t i = 0; i < insts.size(); ++i) {
@@ -967,17 +1014,20 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
     const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
     // An address discontinuity or the instruction after any terminator begins a
     // new block.
-    if (i + 1 < insts.size() && insts[i + 1]->src_loc() != next_offset)
+    if (i + 1 < insts.size() && insts[i + 1]->src_loc() != next_offset) {
       leaders[i + 1] = 1;
+    }
     if (is_block_terminator(inst) && next_offset < section_end && i + 1 < insts.size() &&
-        insts[i + 1]->src_loc() == next_offset)
+        insts[i + 1]->src_loc() == next_offset) {
       leaders[i + 1] = 1;
+    }
 
     if (auto delta = inst.branch_offset_bytes()) {
       const int64_t target = static_cast<int64_t>(next_offset) + static_cast<int64_t>(*delta);
       if (target >= 0 && static_cast<uint64_t>(target) < section_end) {
-        if (auto index = instruction_index_for_offset(insts, static_cast<uint64_t>(target)))
+        if (auto index = instruction_index_for_offset(insts, static_cast<uint64_t>(target))) {
           leaders[*index] = 1;
+        }
       }
     }
   }
@@ -1001,21 +1051,25 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   // a temporary whose value is not part of the lattice. Recognizing the compact
   // idiom as a single transfer lets the block scan keep tracking the pair
   // without adding arbitrary scalar-value analysis.
-  if (index + 2 > last_index)
+  if (index + 2 > last_index) {
     return std::nullopt;
+  }
 
   size_t low_index = index + 1;
-  if (ctx.insts[low_index]->amdgpu_operation() == amdgpu::Operation::S_DELAY_ALU)
+  if (ctx.insts[low_index]->amdgpu_operation() == amdgpu::Operation::S_DELAY_ALU) {
     ++low_index;
+  }
   const size_t high_index = low_index + 1;
-  if (high_index > last_index)
+  if (high_index > last_index) {
     return std::nullopt;
+  }
 
   const auto add_i32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddI32);
   const auto add_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddU32);
   const auto addc_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddcU32);
-  if (!add_i32_opcode || !add_u32_opcode || !addc_u32_opcode)
+  if (!add_i32_opcode || !add_u32_opcode || !addc_u32_opcode) {
     return std::nullopt;
+  }
 
   const Instruction &temp_inst = *ctx.insts[index];
   const Instruction &low_inst = *ctx.insts[low_index];
@@ -1024,23 +1078,28 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   const uint32_t low_word = ctx.facts[low_index].word;
   const uint32_t high_word = ctx.facts[high_index].word;
   const auto temp_sdst = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
-  if (temp_sdst == pair_lo || temp_sdst == static_cast<uint16_t>(pair_lo + 1))
+  if (temp_sdst == pair_lo || temp_sdst == static_cast<uint16_t>(pair_lo + 1)) {
     return std::nullopt;
+  }
 
   uint32_t literal = 0;
   if (!sop2_literal_inline_to_sreg(temp_inst, temp_word,
                                    text_word_at(ctx.text, temp_inst.src_loc() + sizeof(uint32_t)),
-                                   *add_i32_opcode, temp_sdst, kInlineInt4, literal))
+                                   *add_i32_opcode, temp_sdst, kInlineInt4, literal)) {
     return std::nullopt;
+  }
   const int64_t delta = static_cast<int32_t>(literal + 4u);
-  if (delta < 0)
+  if (delta < 0) {
     return std::nullopt;
-  if (!sop2_sreg_inline_to_sreg(low_inst, low_word, *add_u32_opcode, pair_lo, pair_lo, temp_sdst))
+  }
+  if (!sop2_sreg_inline_to_sreg(low_inst, low_word, *add_u32_opcode, pair_lo, pair_lo, temp_sdst)) {
     return std::nullopt;
+  }
   if (!sop2_sreg_inline_zero_to_sreg(high_inst, high_word, *addc_u32_opcode,
                                      static_cast<uint16_t>(pair_lo + 1),
-                                     static_cast<uint16_t>(pair_lo + 1)))
+                                     static_cast<uint16_t>(pair_lo + 1))) {
     return std::nullopt;
+  }
 
   return TempDeltaPattern{
       .delta = delta,
@@ -1062,14 +1121,16 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   // This is the straight-line negative half of the signed PC-delta template.
   // The actual delta is still the signed `literal + 4`; the abs/sub pair is
   // just the encoding sequence used when that delta is negative.
-  if (index + 3 > last_index)
+  if (index + 3 > last_index) {
     return std::nullopt;
+  }
 
   const auto add_i32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddI32);
   const auto sub_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubU32);
   const auto subb_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubbU32);
-  if (!add_i32_opcode || !sub_u32_opcode || !subb_u32_opcode)
+  if (!add_i32_opcode || !sub_u32_opcode || !subb_u32_opcode) {
     return std::nullopt;
+  }
 
   const Instruction &temp_inst = *ctx.insts[index];
   const Instruction &abs_inst = *ctx.insts[index + 1];
@@ -1077,26 +1138,33 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   const Instruction &high_inst = *ctx.insts[index + 3];
   const uint32_t temp_word = ctx.facts[index].word;
   const auto temp_sdst = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
-  if (temp_sdst == pair_lo || temp_sdst == static_cast<uint16_t>(pair_lo + 1))
+  if (temp_sdst == pair_lo || temp_sdst == static_cast<uint16_t>(pair_lo + 1)) {
     return std::nullopt;
+  }
 
   uint32_t literal = 0;
   if (!sop2_literal_inline_to_sreg(temp_inst, temp_word,
                                    text_word_at(ctx.text, temp_inst.src_loc() + sizeof(uint32_t)),
-                                   *add_i32_opcode, temp_sdst, kInlineInt4, literal))
+                                   *add_i32_opcode, temp_sdst, kInlineInt4, literal)) {
     return std::nullopt;
+  }
   const int64_t delta = static_cast<int32_t>(literal + 4u);
-  if (delta > 0)
+  if (delta > 0) {
     return std::nullopt;
-  if (!sop1_same_sreg(abs_inst, ctx.facts[index + 1].word, amdgpu::Operation::S_ABS_I32, temp_sdst))
+  }
+  if (!sop1_same_sreg(abs_inst, ctx.facts[index + 1].word, amdgpu::Operation::S_ABS_I32,
+                      temp_sdst)) {
     return std::nullopt;
+  }
   if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[index + 2].word, *sub_u32_opcode, pair_lo,
-                                pair_lo, temp_sdst))
+                                pair_lo, temp_sdst)) {
     return std::nullopt;
+  }
   if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[index + 3].word, *subb_u32_opcode,
                                      static_cast<uint16_t>(pair_lo + 1),
-                                     static_cast<uint16_t>(pair_lo + 1)))
+                                     static_cast<uint16_t>(pair_lo + 1))) {
     return std::nullopt;
+  }
 
   return TempDeltaPattern{
       .delta = delta,
@@ -1107,12 +1175,15 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
 
 [[nodiscard]] bool sop1_same_sreg(const Instruction &inst, uint32_t word,
                                   amdgpu::Operation operation, uint16_t sreg) {
-  if (inst.size() != sizeof(uint32_t))
+  if (inst.size() != sizeof(uint32_t)) {
     return false;
-  if (inst.amdgpu_operation() != operation)
+  }
+  if (inst.amdgpu_operation() != operation) {
     return false;
-  if ((word >> 23) != kSop1EncodingPrefix)
+  }
+  if ((word >> 23) != kSop1EncodingPrefix) {
     return false;
+  }
   return ((word >> 16) & 0x7fu) == sreg && (word & 0xffu) == sreg;
 }
 
@@ -1125,8 +1196,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   // invalidation path and kills the pair.
   const auto add_u32_opcode = scalar_sop2_opcode(arch, ScalarSop2Op::AddU32);
   const auto sub_u32_opcode = scalar_sop2_opcode(arch, ScalarSop2Op::SubU32);
-  if (!add_u32_opcode || !sub_u32_opcode || value.pending_high_carry)
+  if (!add_u32_opcode || !sub_u32_opcode || value.pending_high_carry) {
     return false;
+  }
 
   uint32_t literal = 0;
   const uint32_t literal_word = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
@@ -1156,8 +1228,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   // The high operation must consume the low operation's carry/borrow and use
   // the sign extension already included in the tracked signed delta.
   const std::optional<uint32_t> opcode = scalar_sop2_opcode(arch, value.pending_high_operation);
-  if (!value.pending_high_carry || !opcode)
+  if (!value.pending_high_carry || !opcode) {
     return false;
+  }
 
   const uint16_t pair_hi = static_cast<uint16_t>(pair_lo + 1);
   if (value.pending_high_literal == 0 &&
@@ -1194,36 +1267,41 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   // separate constant-propagation proof and must continue to fail closed.
   if (arch != rocjitsu::IsaFamily::Cdna5 ||
       inst.amdgpu_operation() != amdgpu::Operation::S_ADD_NC_U64 || inst.num_dst_operands() != 1 ||
-      inst.num_src_operands() != 2)
+      inst.num_src_operands() != 2) {
     return false;
+  }
 
   const Operand *dst = inst.dst_operand(0);
   const Operand *src0 = inst.src_operand(0);
   const Operand *src1 = inst.src_operand(1);
-  if (dst == nullptr || src0 == nullptr || src1 == nullptr)
+  if (dst == nullptr || src0 == nullptr || src1 == nullptr) {
     return false;
+  }
   const auto dst_ref = dst->to_register_ref();
   const auto src0_ref = src0->to_register_ref();
   if (!dst_ref || !src0_ref || dst_ref->cls != RegClass::SGPR || src0_ref->cls != RegClass::SGPR ||
       dst_ref->index != pair_lo || src0_ref->index != pair_lo || dst_ref->width != 2 ||
-      src0_ref->width != 2)
+      src0_ref->width != 2) {
     return false;
+  }
 
   uint64_t literal = 0;
   if (auto literal64 = src1->literal64_value()) {
     literal = *literal64;
   } else {
     constexpr uint16_t kLiteralOperand = 255;
-    if (inst.size() != 2 * sizeof(uint32_t) || ((word >> 8) & 0xffu) != kLiteralOperand)
+    if (inst.size() != 2 * sizeof(uint32_t) || ((word >> 8) & 0xffu) != kLiteralOperand) {
       return false;
+    }
     literal = text_word_at(text, inst.src_loc() + sizeof(uint32_t));
   }
 
   // s_add_nc_u64 performs modulo-2^64 arithmetic. A valid local text target is
   // representable as a non-negative int64 offset after the modulo addition.
   const uint64_t updated = static_cast<uint64_t>(value.offset) + literal;
-  if (updated > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+  if (updated > static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
     return false;
+  }
   value.offset = static_cast<int64_t>(updated);
   value.source_recovery_end_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
   return true;
@@ -1235,8 +1313,9 @@ instruction_index_for_offset(std::span<const Instruction *const> insts, uint64_t
   // A target outside this section cannot become a local BasicBlock successor.
   // The emitter must preserve that loss of target-set completeness on any
   // remaining local targets; another executable section may contain the target.
-  if (value.offset < 0 || static_cast<uint64_t>(value.offset) >= ctx.text.size())
+  if (value.offset < 0 || static_cast<uint64_t>(value.offset) >= ctx.text.size()) {
     return std::nullopt;
+  }
 
   return IndirectCallFixup{
       .source_getpc_offset = value.source_getpc_offset,
@@ -1355,8 +1434,9 @@ bool append_lattice_value(LatticeValue &dst, PcValue value) {
     return std::array<uint64_t, 2>{static_cast<uint64_t>(pc_value.offset),
                                    pc_value.source_getpc_offset};
   });
-  if (it != dst.values.end() && *it == value)
+  if (it != dst.values.end() && *it == value) {
     return false;
+  }
   if (dst.values.size() >= kMaxIndirectTargetsPerConsumer) {
     dst.incomplete = true;
     return false;
@@ -1369,12 +1449,15 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
   // JOIN is monotone: concrete values only accumulate, and incomplete/killed
   // only change from false to true. The finite target cap bounds the height of
   // the lattice and guarantees worklist convergence.
-  if (src.incomplete)
+  if (src.incomplete) {
     dst.incomplete = true;
-  if (src.killed)
+  }
+  if (src.killed) {
     dst.killed = true;
-  for (const PcValue &value : src.values)
+  }
+  for (const PcValue &value : src.values) {
     append_lattice_value(dst, value);
+  }
 }
 
 [[nodiscard]] AnalysisContext build_context(std::span<const Instruction *const> insts,
@@ -1395,8 +1478,9 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
       target_architecture != nullptr && target_architecture->family == arch
           ? registry.find_target(target_id)
           : nullptr;
-  if (target == nullptr && architecture != nullptr)
+  if (target == nullptr && architecture != nullptr) {
     target = registry.find_default_target(*architecture);
+  }
   ctx.setreg_vgpr_msb_fixup = target != nullptr && target->capabilities.setreg_vgpr_msb_fixup;
 
   ctx.facts.resize(insts.size());
@@ -1407,12 +1491,15 @@ void join_lattice_value(LatticeValue &dst, const LatticeValue &src) {
     facts.getpc_sdst = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::GetPc64);
     facts.setpc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SetPc64);
     facts.swappc_ssrc = scalar_pc_sreg(arch, inst, facts.word, ScalarPcOp::SwapPc64);
-    if (facts.setpc_ssrc && *facts.setpc_ssrc < kMaxTrackedSgprPair)
+    if (facts.setpc_ssrc && *facts.setpc_ssrc < kMaxTrackedSgprPair) {
       ctx.consumer_pairs.set(*facts.setpc_ssrc);
-    if (facts.swappc_ssrc && *facts.swappc_ssrc < kMaxTrackedSgprPair)
+    }
+    if (facts.swappc_ssrc && *facts.swappc_ssrc < kMaxTrackedSgprPair) {
       ctx.consumer_pairs.set(*facts.swappc_ssrc);
-    if (facts.swappc_ssrc)
+    }
+    if (facts.swappc_ssrc) {
       facts.swappc_sdst = static_cast<uint16_t>((facts.word >> 16) & 0x7fu);
+    }
     facts.call_sdst = s_call_sdst(inst, facts.word);
   }
 
@@ -1437,8 +1524,9 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
   std::vector<AnalysisBlock> blocks;
   blocks.reserve(std::ranges::count(leaders, uint8_t{1}));
   for (size_t i = 0; i < ctx.insts.size(); ++i) {
-    if (leaders[i] == 0)
+    if (leaders[i] == 0) {
       continue;
+    }
     AnalysisBlock block;
     block.offset = ctx.insts[i]->src_loc();
     block.first_index = i;
@@ -1454,8 +1542,9 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
 
   std::unordered_map<uint64_t, size_t> block_by_offset;
   block_by_offset.reserve(blocks.size());
-  for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     block_by_offset.emplace(blocks[block_index].offset, block_index);
+  }
 
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     AnalysisBlock &block = blocks[block_index];
@@ -1468,17 +1557,20 @@ build_analysis_blocks(const AnalysisContext &ctx, std::span<const uint64_t> extr
       const int64_t target = static_cast<int64_t>(next_offset) + static_cast<int64_t>(*delta);
       if (target >= 0) {
         if (auto it = block_by_offset.find(static_cast<uint64_t>(target));
-            it != block_by_offset.end())
+            it != block_by_offset.end()) {
           block.successors.push_back(it->second);
+        }
       }
     }
 
-    if (has_no_direct_successor(term) || (is_unconditional_branch(term) && !is_direct_call(term)))
+    if (has_no_direct_successor(term) || (is_unconditional_branch(term) && !is_direct_call(term))) {
       continue;
+    }
 
     if (auto it = block_by_offset.find(next_offset); it != block_by_offset.end()) {
-      if (std::ranges::find(block.successors, it->second) == block.successors.end())
+      if (std::ranges::find(block.successors, it->second) == block.successors.end()) {
         block.successors.push_back(it->second);
+      }
     }
   }
 
@@ -1490,18 +1582,21 @@ explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
                           std::span<const uint64_t> sorted_extra_leaders,
                           ExternalEntryPolicy entry_policy) {
   std::vector<uint8_t> entries(blocks.size(), 0);
-  if (!entries.empty() && entry_policy == ExternalEntryPolicy::InferPredecessorless)
+  if (!entries.empty() && entry_policy == ExternalEntryPolicy::InferPredecessorless) {
     entries[0] = 1;
+  }
   // Analysis blocks are built from the ordered instruction stream. Both input
   // sequences are therefore ascending and can be matched in one merge pass.
   assert(std::ranges::is_sorted(blocks, {}, &AnalysisBlock::offset));
   assert(std::ranges::is_sorted(sorted_extra_leaders));
   auto leader = sorted_extra_leaders.begin();
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    while (leader != sorted_extra_leaders.end() && *leader < blocks[block_index].offset)
+    while (leader != sorted_extra_leaders.end() && *leader < blocks[block_index].offset) {
       ++leader;
-    if (leader != sorted_extra_leaders.end() && *leader == blocks[block_index].offset)
+    }
+    if (leader != sorted_extra_leaders.end() && *leader == blocks[block_index].offset) {
       entries[block_index] = 1;
+    }
   }
   return entries;
 }
@@ -1509,8 +1604,9 @@ explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
 [[nodiscard]] bool is_external_root(size_t block_index, std::span<const uint8_t> external_entries,
                                     const std::vector<std::vector<size_t>> &predecessors,
                                     ExternalEntryPolicy entry_policy) {
-  if (external_entries[block_index] != 0)
+  if (external_entries[block_index] != 0) {
     return true;
+  }
   return entry_policy == ExternalEntryPolicy::InferPredecessorless &&
          predecessors[block_index].empty();
 }
@@ -1518,11 +1614,13 @@ explicit_external_entries(const std::vector<AnalysisBlock> &blocks,
 void set_kill_transfer(AnalysisBlock &block, uint16_t pair_lo) {
   // KILL is weaker than SET for the same block: if the final state proves a
   // concrete builder, earlier dirty writes in the block should not downgrade it.
-  if (pair_lo >= kMaxTrackedSgprPair)
+  if (pair_lo >= kMaxTrackedSgprPair) {
     return;
+  }
   auto &transfer = block.transfers[pair_lo];
-  if (transfer.kind != PairTransfer::Kind::Set)
+  if (transfer.kind != PairTransfer::Kind::Set) {
     transfer.kind = PairTransfer::Kind::Kill;
+  }
 }
 
 void finalize_block_transfers(AnalysisBlock &block, const BlockState &state,
@@ -1535,11 +1633,13 @@ void finalize_block_transfers(AnalysisBlock &block, const BlockState &state,
   //    SET kills that interpretation: s[N:N+1] or, when N > 0, s[N-1:N].
   // 3. Pairs never mentioned in transfers are implicit PASS.
   for (uint16_t pair_lo : state.active_pairs()) {
-    if (!consumer_pairs[pair_lo])
+    if (!consumer_pairs[pair_lo]) {
       continue;
+    }
     const PcValue *value = state.builder(pair_lo);
-    if (value == nullptr)
+    if (value == nullptr) {
       continue;
+    }
     PairTransfer &transfer = block.transfers[pair_lo];
     transfer.kind = PairTransfer::Kind::Set;
     transfer.value = *value;
@@ -1550,12 +1650,14 @@ void finalize_block_transfers(AnalysisBlock &block, const BlockState &state,
     return transfer != block.transfers.end() && transfer->second.kind == PairTransfer::Kind::Set;
   };
   state.for_each_dirty([&](uint16_t half) {
-    if (consumer_pairs[half] && !has_set_transfer(half))
+    if (consumer_pairs[half] && !has_set_transfer(half)) {
       set_kill_transfer(block, half);
+    }
     if (half > 0) {
       const uint16_t previous_pair = static_cast<uint16_t>(half - 1);
-      if (consumer_pairs[previous_pair] && !has_set_transfer(previous_pair))
+      if (consumer_pairs[previous_pair] && !has_set_transfer(previous_pair)) {
         set_kill_transfer(block, previous_pair);
+      }
     }
   });
 }
@@ -1572,8 +1674,9 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     const PcValue *value = state.builder(pair_lo);
     // These idioms overwrite SCC before their own low/high adjustment, so
     // they cannot preserve an earlier low operation's pending carry.
-    if (value == nullptr || value->pending_high_carry)
+    if (value == nullptr || value->pending_high_carry) {
       continue;
+    }
     // The matched idiom's first instruction must start where the recorded range
     // ends, or an unmodeled instruction sits inside the range that the patcher
     // would NOP-erase along with the builder. Mark the value non-contiguous so
@@ -1585,8 +1688,9 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
       updated.source_recovery_end_offset = pattern->end_offset;
       updated.contiguous = updated.contiguous && adjacent;
 
-      for (size_t i = 0; i < pattern->instruction_count; ++i)
+      for (size_t i = 0; i < pattern->instruction_count; ++i) {
         invalidate_written_sgprs(ctx, index + i, state, pair_lo);
+      }
       state.set_builder(pair_lo, updated);
       return pattern->instruction_count;
     }
@@ -1596,8 +1700,9 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
       updated.source_recovery_end_offset = pattern->end_offset;
       updated.contiguous = updated.contiguous && adjacent;
 
-      for (size_t i = 0; i < pattern->instruction_count; ++i)
+      for (size_t i = 0; i < pattern->instruction_count; ++i) {
         invalidate_written_sgprs(ctx, index + i, state, pair_lo);
+      }
       state.set_builder(pair_lo, updated);
       return pattern->instruction_count;
     }
@@ -1621,12 +1726,14 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
   // the sibling subtract block proves both paths are the same static target.
   const auto add_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddU32);
   const auto addc_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddcU32);
-  if (!add_u32_opcode || !addc_u32_opcode)
+  if (!add_u32_opcode || !addc_u32_opcode) {
     return std::nullopt;
+  }
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != rocjitsu::IsaFamily::Cdna5)
+    if (ctx.arch != rocjitsu::IsaFamily::Cdna5) {
       return false;
+    }
     const Instruction &inst = *ctx.insts[index];
     // The gfx1250 sequence drains XCNT before an instruction prefetch. The
     // shader manual defines S_WAIT_XCNT as a counter wait, so neither it nor
@@ -1637,50 +1744,62 @@ std::optional<size_t> try_apply_temp_delta_pattern(AnalysisContext &ctx, const A
     // inside the range and has to reproduce its drain -- see
     // match_signed_delta_sub_consumer.
     if (inst.amdgpu_operation() == amdgpu::Operation::S_WAIT_XCNT ||
-        inst.amdgpu_operation() == amdgpu::Operation::S_PREFETCH_INST_PC_REL)
+        inst.amdgpu_operation() == amdgpu::Operation::S_PREFETCH_INST_PC_REL) {
       return true;
+    }
     // The compiler also emits a scalar immediate move to configure the
     // prefetch. It is safe to skip only when its destination is outside the
     // getpc pair being proven AND is not tmp_sreg — a move into tmp_sreg would
     // change the value the following s_add/s_abs consumes while recovery keeps
     // computing the target from the original literal.
-    if (inst.amdgpu_operation() != amdgpu::Operation::S_MOV_B32 || inst.size() != sizeof(uint32_t))
+    if (inst.amdgpu_operation() != amdgpu::Operation::S_MOV_B32 ||
+        inst.size() != sizeof(uint32_t)) {
       return false;
+    }
     const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
     return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
   };
 
   size_t low_index = block.first_index;
-  while (low_index <= block.last_index && is_gfx1250_padding(low_index))
+  while (low_index <= block.last_index && is_gfx1250_padding(low_index)) {
     ++low_index;
-  if (low_index > block.last_index)
+  }
+  if (low_index > block.last_index) {
     return std::nullopt;
+  }
   const Instruction &low_inst = *ctx.insts[low_index];
 
   size_t high_index = low_index + 1;
-  while (high_index <= block.last_index && is_gfx1250_padding(high_index))
+  while (high_index <= block.last_index && is_gfx1250_padding(high_index)) {
     ++high_index;
-  if (high_index > block.last_index)
+  }
+  if (high_index > block.last_index) {
     return std::nullopt;
+  }
   const Instruction &high_inst = *ctx.insts[high_index];
 
   size_t setpc_index = high_index + 1;
-  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index)) {
     ++setpc_index;
-  if (setpc_index > block.last_index)
+  }
+  if (setpc_index > block.last_index) {
     return std::nullopt;
+  }
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
   if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[low_index].word, *add_u32_opcode, pair_lo,
-                                pair_lo, tmp_sreg))
+                                pair_lo, tmp_sreg)) {
     return std::nullopt;
+  }
   if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[high_index].word, *addc_u32_opcode,
                                      static_cast<uint16_t>(pair_lo + 1),
-                                     static_cast<uint16_t>(pair_lo + 1)))
+                                     static_cast<uint16_t>(pair_lo + 1))) {
     return std::nullopt;
+  }
   auto setpc_sreg =
       scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word, ScalarPcOp::SetPc64);
-  if (!setpc_sreg || *setpc_sreg != pair_lo)
+  if (!setpc_sreg || *setpc_sreg != pair_lo) {
     return std::nullopt;
+  }
   return setpc_index;
 }
 
@@ -1707,20 +1826,25 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
   // statically accounted for.
   const auto sub_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubU32);
   const auto subb_u32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::SubbU32);
-  if (!sub_u32_opcode || !subb_u32_opcode)
+  if (!sub_u32_opcode || !subb_u32_opcode) {
     return std::nullopt;
+  }
 
   const auto is_gfx1250_padding = [&](size_t index) {
-    if (ctx.arch != rocjitsu::IsaFamily::Cdna5)
+    if (ctx.arch != rocjitsu::IsaFamily::Cdna5) {
       return false;
+    }
     const Instruction &inst = *ctx.insts[index];
     if (inst.amdgpu_operation() == amdgpu::Operation::S_WAIT_XCNT ||
-        inst.amdgpu_operation() == amdgpu::Operation::S_PREFETCH_INST_PC_REL)
+        inst.amdgpu_operation() == amdgpu::Operation::S_PREFETCH_INST_PC_REL) {
       return true;
+    }
     // Skip a prefetch-config move only when it clobbers neither the getpc pair
     // nor tmp_sreg (whose value s_abs_i32/s_sub_u32 below consume).
-    if (inst.amdgpu_operation() != amdgpu::Operation::S_MOV_B32 || inst.size() != sizeof(uint32_t))
+    if (inst.amdgpu_operation() != amdgpu::Operation::S_MOV_B32 ||
+        inst.size() != sizeof(uint32_t)) {
       return false;
+    }
     const uint16_t dst = static_cast<uint16_t>((ctx.facts[index].word >> 16) & 0x7fu);
     return dst != pair_lo && dst != static_cast<uint16_t>(pair_lo + 1u) && dst != tmp_sreg;
   };
@@ -1737,30 +1861,38 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
         skipped_xcnt || ctx.insts[abs_index]->amdgpu_operation() == amdgpu::Operation::S_WAIT_XCNT;
     ++abs_index;
   }
-  if (abs_index + 3 > block.last_index)
+  if (abs_index + 3 > block.last_index) {
     return std::nullopt;
+  }
   const Instruction &abs_inst = *ctx.insts[abs_index];
   const Instruction &low_inst = *ctx.insts[abs_index + 1];
   const Instruction &high_inst = *ctx.insts[abs_index + 2];
   size_t setpc_index = abs_index + 3;
-  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index))
+  while (setpc_index <= block.last_index && is_gfx1250_padding(setpc_index)) {
     ++setpc_index;
-  if (setpc_index > block.last_index)
+  }
+  if (setpc_index > block.last_index) {
     return std::nullopt;
+  }
   const Instruction &setpc_inst = *ctx.insts[setpc_index];
-  if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, amdgpu::Operation::S_ABS_I32, tmp_sreg))
+  if (!sop1_same_sreg(abs_inst, ctx.facts[abs_index].word, amdgpu::Operation::S_ABS_I32,
+                      tmp_sreg)) {
     return std::nullopt;
+  }
   if (!sop2_sreg_inline_to_sreg(low_inst, ctx.facts[abs_index + 1].word, *sub_u32_opcode, pair_lo,
-                                pair_lo, tmp_sreg))
+                                pair_lo, tmp_sreg)) {
     return std::nullopt;
+  }
   if (!sop2_sreg_inline_zero_to_sreg(high_inst, ctx.facts[abs_index + 2].word, *subb_u32_opcode,
                                      static_cast<uint16_t>(pair_lo + 1),
-                                     static_cast<uint16_t>(pair_lo + 1)))
+                                     static_cast<uint16_t>(pair_lo + 1))) {
     return std::nullopt;
+  }
   auto setpc_sreg =
       scalar_pc_sreg(ctx.arch, setpc_inst, ctx.facts[setpc_index].word, ScalarPcOp::SetPc64);
-  if (!setpc_sreg || *setpc_sreg != pair_lo)
+  if (!setpc_sreg || *setpc_sreg != pair_lo) {
     return std::nullopt;
+  }
   return SignedDeltaSubMatch{
       .setpc_index = setpc_index,
       .recovery_end = high_inst.src_loc() + static_cast<uint64_t>(high_inst.size()),
@@ -1771,8 +1903,9 @@ match_signed_delta_sub_consumer(const AnalysisContext &ctx, const AnalysisBlock 
 bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state) {
   for (uint16_t pair_lo : state.active_pairs()) {
     const PcValue *value = state.builder(pair_lo);
-    if (value == nullptr)
+    if (value == nullptr) {
       continue;
+    }
     PcValue updated = *value;
     const Instruction &inst = *ctx.insts[index];
     const uint32_t word = ctx.facts[index].word;
@@ -1797,8 +1930,9 @@ bool try_apply_pair_update(AnalysisContext &ctx, size_t index, BlockState &state
     const bool adjacent = inst.src_loc() == updated.source_recovery_end_offset;
     if (!apply_gfx1250_add_nc_u64_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
         !apply_low_literal_update(inst, word, ctx.text, ctx.arch, pair_lo, updated) &&
-        !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated))
+        !apply_high_carry_update(inst, word, ctx.text, ctx.arch, pair_lo, updated)) {
       continue;
+    }
     updated.contiguous = updated.contiguous && adjacent;
 
     invalidate_written_sgprs(ctx, index, state, pair_lo);
@@ -1851,16 +1985,18 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
   // of publishing, so a whole-scope relocation claim fails closed rather than resting on a value
   // the program never finished computing.
   const auto publish_or_poison = [&](uint16_t pair_lo, const PcValue &value) {
-    if (value.pending_high_carry)
+    if (value.pending_high_carry) {
       poison_pc_builder(pc_builders, value.source_getpc_offset);
-    else
+    } else {
       note_pc_builder(pc_builders, pair_lo, value);
+    }
   };
 
   const auto note_live_pc_builders = [&] {
     for (uint16_t pair_lo : state.active_pairs()) {
-      if (const PcValue *value = state.builder(pair_lo))
+      if (const PcValue *value = state.builder(pair_lo)) {
         publish_or_poison(pair_lo, *value);
+      }
     }
   };
 
@@ -1883,8 +2019,9 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // Code that materializes several function pointers through one scratch pair -- build, spill
       // to a VGPR lane, rebuild -- would leave a poisoned record behind for the first pointer and
       // defeat any whole-scope or whole-object claim that every code address is relocated.
-      if (const PcValue *replaced = state.builder(pair_lo))
+      if (const PcValue *replaced = state.builder(pair_lo)) {
         publish_or_poison(pair_lo, *replaced);
+      }
       seed_pc_builder(pc_builders, inst.src_loc(), pair_lo);
       state.set_builder(pair_lo, PcValue{.offset = static_cast<int64_t>(next_offset),
                                          .source_getpc_offset = inst.src_loc(),
@@ -1931,10 +2068,11 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
         });
       }
 
-      if (facts.swappc_sdst)
+      if (facts.swappc_sdst) {
         // swappc writes a return PC to its destination pair. That value is
         // useful to hardware but not a getpc-relative builder for this pass.
         state.invalidate_pair(*facts.swappc_sdst);
+      }
       continue;
     }
 
@@ -1948,8 +2086,9 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       // here, so publish them before dropping them.
       note_live_pc_builders();
       const std::vector<uint16_t> active_pairs = state.active_pairs();
-      for (uint16_t pair_lo : active_pairs)
+      for (uint16_t pair_lo : active_pairs) {
         state.invalidate_pair(pair_lo);
+      }
 
       // The call destination receives the hardware return PC. It is meaningful
       // to the callee, but it is not an editable getpc-relative target builder.
@@ -1962,8 +2101,9 @@ void scan_block(AnalysisContext &ctx, size_t block_index, std::vector<AnalysisBl
       continue;
     }
 
-    if (try_apply_pair_update(ctx, index, state))
+    if (try_apply_pair_update(ctx, index, state)) {
       continue;
+    }
 
     // Anything not modeled above is allowed to read arbitrary registers, but
     // only SGPR writes affect this analysis. Every write to either half of a
@@ -1995,8 +2135,9 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   // external path; any real predecessor facts still determine their entry map.
   std::vector<std::vector<size_t>> predecessors(blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    for (size_t successor : blocks[block_index].successors)
+    for (size_t successor : blocks[block_index].successors) {
       predecessors[successor].push_back(block_index);
+    }
   }
   const std::vector<uint8_t> external_entries =
       explicit_external_entries(blocks, sorted_extra_leaders, entry_policy);
@@ -2009,8 +2150,9 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   // unresolved.
   std::bitset<REGISTER_SET_MAX_SGPRS> relevant_pairs;
   for (const PendingConsumer &consumer : pending_consumers) {
-    if (consumer.pair_lo < kMaxTrackedSgprPair)
+    if (consumer.pair_lo < kMaxTrackedSgprPair) {
       relevant_pairs.set(consumer.pair_lo);
+    }
   }
 
   std::vector<LatticeFacts> entry_facts(blocks.size());
@@ -2061,8 +2203,9 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
     std::vector<uint8_t> visited(blocks.size(), 0);
     std::vector<std::pair<size_t, size_t>> stack;
     for (size_t root = 0; root < blocks.size(); ++root) {
-      if (visited[root])
+      if (visited[root]) {
         continue;
+      }
       visited[root] = 1;
       stack.emplace_back(root, 0);
       while (!stack.empty()) {
@@ -2083,8 +2226,9 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
   }
   std::ranges::reverse(rpo_order);
   std::vector<size_t> rpo_position(blocks.size(), 0);
-  for (size_t position = 0; position < rpo_order.size(); ++position)
+  for (size_t position = 0; position < rpo_order.size(); ++position) {
     rpo_position[rpo_order[position]] = position;
+  }
 
   // Keyed by reverse-postorder position so the lowest position is always popped
   // next. Positions are unique, so this is a total order and the pop sequence is
@@ -2117,24 +2261,28 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
       // Track the bounded SGPR-pair key union in fixed storage and evaluate each
       // predecessor's exit value only for the pair currently being joined.
       for (size_t predecessor : predecessors[block_index]) {
-        if (!reachable[predecessor])
+        if (!reachable[predecessor]) {
           continue;
+        }
         mentioned_pairs |= entry_pairs[predecessor];
         for (const auto &[pair_lo, _] : blocks[predecessor].transfers) {
-          if (relevant_pairs[pair_lo])
+          if (relevant_pairs[pair_lo]) {
             mentioned_pairs.set(pair_lo);
+          }
         }
       }
 
       new_entry.reserve(mentioned_pairs.count());
       for (uint16_t pair_lo = 0; pair_lo < mentioned_pairs.size(); ++pair_lo) {
-        if (!mentioned_pairs[pair_lo])
+        if (!mentioned_pairs[pair_lo]) {
           continue;
+        }
 
         LatticeValue joined;
         for (size_t predecessor : predecessors[block_index]) {
-          if (!reachable[predecessor])
+          if (!reachable[predecessor]) {
             continue;
+          }
           const AnalysisBlock &pred_block = blocks[predecessor];
           const auto transfer = pred_block.transfers.find(pair_lo);
           if (transfer != pred_block.transfers.end()) {
@@ -2148,10 +2296,11 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
               // transfer map, but handle it explicitly to keep this lookup
               // equivalent if a caller ever stores a Pass summary.
               const LatticeValue *entry = entry_facts[predecessor].find(pair_lo);
-              if (entry == nullptr)
+              if (entry == nullptr) {
                 joined.incomplete = true;
-              else
+              } else {
                 join_lattice_value(joined, *entry);
+              }
             }
             continue;
           }
@@ -2170,21 +2319,24 @@ run_block_dataflow(const std::vector<AnalysisBlock> &blocks,
         // Every explicit kernel entry has an external path carrying an
         // unconstrained SGPR pair, even if it also has structural
         // predecessors. That path must participate in the join.
-        if (external_entries[block_index] != 0)
+        if (external_entries[block_index] != 0) {
           joined.incomplete = true;
+        }
         new_entry.append(pair_lo, std::move(joined));
       }
     }
 
-    if (new_reachable == reachable[block_index] && new_entry == entry_facts[block_index])
+    if (new_reachable == reachable[block_index] && new_entry == entry_facts[block_index]) {
       continue;
+    }
 
     reachable[block_index] = new_reachable;
     entry_facts[block_index] = std::move(new_entry);
     entry_pairs[block_index] = mentioned_pairs;
     for (size_t successor : blocks[block_index].successors) {
-      if (on_worklist[successor])
+      if (on_worklist[successor]) {
         continue;
+      }
       worklist.insert(rpo_position[successor]);
       on_worklist[successor] = true;
     }
@@ -2247,18 +2399,21 @@ void add_recovered_successors(const std::vector<IndirectCallFixup> &recovered,
   // speculating about unknown indirect targets.
   std::unordered_map<uint64_t, size_t> block_by_offset;
   block_by_offset.reserve(blocks.size());
-  for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     block_by_offset.emplace(blocks[block_index].offset, block_index);
+  }
 
   for (const IndirectCallFixup &fixup : recovered) {
     auto source_it = block_by_offset.find(fixup.source_call_offset);
     auto target_it = block_by_offset.find(fixup.source_target_offset);
-    if (source_it == block_by_offset.end() || target_it == block_by_offset.end())
+    if (source_it == block_by_offset.end() || target_it == block_by_offset.end()) {
       continue;
+    }
 
     std::vector<size_t> &successors = blocks[source_it->second].successors;
-    if (std::ranges::find(successors, target_it->second) == successors.end())
+    if (std::ranges::find(successors, target_it->second) == successors.end()) {
       successors.push_back(target_it->second);
+    }
   }
 }
 
@@ -2301,29 +2456,33 @@ public:
   void set(VectorLaneSlot slot, StashedPcHalf half) {
     if (values_) {
       const auto found = values_->find(slot);
-      if (found != values_->end() && found->second == half)
+      if (found != values_->end() && found->second == half) {
         return;
+      }
     }
     writable_values().insert_or_assign(slot, std::move(half));
   }
 
   void erase(VectorLaneSlot slot) {
-    if (!values_ || !values_->contains(slot))
+    if (!values_ || !values_->contains(slot)) {
       return;
+    }
     writable_values().erase(slot);
     reset_if_empty();
   }
 
   template <typename Predicate> void erase_if(Predicate &&predicate) {
-    if (!values_ || std::ranges::none_of(*values_, predicate))
+    if (!values_ || std::ranges::none_of(*values_, predicate)) {
       return;
+    }
     std::erase_if(writable_values(), std::forward<Predicate>(predicate));
     reset_if_empty();
   }
 
   void intersect_with(const VectorLaneFacts &other) {
-    if (!values_ || values_ == other.values_)
+    if (!values_ || values_ == other.values_) {
       return;
+    }
     const auto conflicts = [&](const auto &item) {
       const auto incoming = other.find(item.first);
       return incoming == other.end() || incoming->second != item.second;
@@ -2344,16 +2503,18 @@ private:
   }
 
   [[nodiscard]] Map &writable_values() {
-    if (!values_)
+    if (!values_) {
       values_ = std::make_shared<Map>();
-    else if (!values_.unique())
+    } else if (!values_.unique()) {
       values_ = std::make_shared<Map>(*values_);
+    }
     return *values_;
   }
 
   void reset_if_empty() {
-    if (values_->empty())
+    if (values_->empty()) {
       values_.reset();
+    }
   }
 
   std::shared_ptr<Map> values_;
@@ -2424,8 +2585,9 @@ public:
     const auto found = std::ranges::lower_bound(current, sgpr, {}, &Entry::sgpr);
     const size_t index = static_cast<size_t>(found - current.begin());
     if (found != current.end() && found->sgpr == sgpr) {
-      if (found->half == half)
+      if (found->half == half) {
         return;
+      }
       writable_values()[index].half = std::move(half);
       return;
     }
@@ -2435,11 +2597,13 @@ public:
   }
 
   void erase(uint16_t sgpr) {
-    if (!values_)
+    if (!values_) {
       return;
+    }
     const auto found = std::ranges::lower_bound(values_->value, sgpr, {}, &Entry::sgpr);
-    if (found == values_->value.end() || found->sgpr != sgpr)
+    if (found == values_->value.end() || found->sgpr != sgpr) {
       return;
+    }
     const size_t index = static_cast<size_t>(found - values_->value.begin());
     Storage &updated = writable_values();
     updated.erase(updated.begin() + static_cast<Storage::difference_type>(index));
@@ -2447,22 +2611,26 @@ public:
   }
 
   template <typename Predicate> void erase_if(Predicate &&predicate) {
-    if (!values_ || std::ranges::none_of(values_->value,
-                                         [&](const Entry &entry) { return predicate(entry.sgpr); }))
+    if (!values_ || std::ranges::none_of(values_->value, [&](const Entry &entry) {
+          return predicate(entry.sgpr);
+        })) {
       return;
+    }
     std::erase_if(writable_values(), [&](const Entry &entry) { return predicate(entry.sgpr); });
     reset_if_empty();
   }
 
   void intersect_with(const RestoredSgprFacts &other) {
-    if (!values_ || values_ == other.values_)
+    if (!values_ || values_ == other.values_) {
       return;
+    }
     const auto conflicts = [&](const Entry &entry) {
       const StashedPcHalf *incoming = other.find(entry.sgpr);
       return incoming == nullptr || *incoming != entry.half;
     };
-    if (std::ranges::none_of(values_->value, conflicts))
+    if (std::ranges::none_of(values_->value, conflicts)) {
       return;
+    }
     std::erase_if(writable_values(), conflicts);
     reset_if_empty();
   }
@@ -2482,16 +2650,18 @@ private:
   }
 
   [[nodiscard]] Storage &writable_values() {
-    if (!values_)
+    if (!values_) {
       values_ = StoragePtr::make();
-    else if (values_->ref_count() != 1)
+    } else if (values_->ref_count() != 1) {
       values_ = StoragePtr::make(values_->value);
+    }
     return values_->value;
   }
 
   void reset_if_empty() {
-    if (values_->value.empty())
+    if (values_->value.empty()) {
       values_.reset();
+    }
   }
 
   // All owners are local flow states in one synchronous analysis invocation.
@@ -2543,21 +2713,24 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
   adjacent_hazard = false;
   const amdgpu::Operation operation = inst.amdgpu_operation();
   if (operation == amdgpu::Operation::S_SET_VGPR_MSB) {
-    if (setreg_vgpr_msb_fixup && incoming_hazard == std::optional<bool>{true})
+    if (setreg_vgpr_msb_fixup && incoming_hazard == std::optional<bool>{true}) {
       return;
+    }
     if (setreg_vgpr_msb_fixup && !incoming_hazard) {
       mode = std::nullopt;
       return;
     }
-    if (const Operand *imm = inst.src_operand(0))
+    if (const Operand *imm = inst.src_operand(0)) {
       mode = static_cast<uint8_t>(imm->encoding_value() & 0xffu);
-    else
+    } else {
       mode = std::nullopt;
+    }
     return;
   }
   if (operation != amdgpu::Operation::S_SETREG_B32 &&
-      operation != amdgpu::Operation::S_SETREG_IMM32_B32)
+      operation != amdgpu::Operation::S_SETREG_IMM32_B32) {
     return;
+  }
   const Operand *hwreg_operand = inst.dst_operand(0);
   if (hwreg_operand == nullptr) {
     mode = std::nullopt;
@@ -2581,8 +2754,9 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
     return;
   }
   if (operation == amdgpu::Operation::S_SETREG_B32) {
-    if (amdgpu::hwreg_slice_overlaps_vgpr_msb(hwreg))
+    if (amdgpu::hwreg_slice_overlaps_vgpr_msb(hwreg)) {
       mode = std::nullopt;
+    }
     return;
   }
   amdgpu::VgprMsbBanks banks = amdgpu::unpack_vgpr_msb_banks(mode);
@@ -2592,8 +2766,9 @@ void update_vgpr_mode(std::optional<uint8_t> &mode, std::optional<bool> &adjacen
 
 void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &inst,
                             std::span<const uint8_t> text, rocjitsu::IsaFamily arch) {
-  if (!isa_properties(arch).mode_has_gpr_idx_en)
+  if (!isa_properties(arch).mode_has_gpr_idx_en) {
     return;
+  }
   constexpr uint16_t kGprIdxEnableBit = 27;
   const amdgpu::Operation operation = inst.amdgpu_operation();
   if (operation == amdgpu::Operation::S_SET_GPR_IDX_ON) {
@@ -2605,16 +2780,18 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
     return;
   }
   if (operation != amdgpu::Operation::S_SETREG_B32 &&
-      operation != amdgpu::Operation::S_SETREG_IMM32_B32)
+      operation != amdgpu::Operation::S_SETREG_IMM32_B32) {
     return;
+  }
   const Operand *hwreg_operand = inst.dst_operand(0);
   if (hwreg_operand == nullptr) {
     enabled = std::nullopt;
     return;
   }
   const uint16_t hwreg = static_cast<uint16_t>(hwreg_operand->encoding_value());
-  if (!amdgpu::hwreg_slice_overlaps_mode_bit(hwreg, kGprIdxEnableBit))
+  if (!amdgpu::hwreg_slice_overlaps_mode_bit(hwreg, kGprIdxEnableBit)) {
     return;
+  }
   if (operation == amdgpu::Operation::S_SETREG_B32) {
     enabled = std::nullopt;
     return;
@@ -2630,8 +2807,9 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
   for (int index = 0; index < inst.num_dst_operands(); ++index) {
     const Operand *dst = inst.dst_operand(index);
     const auto ref = dst ? dst->to_register_ref() : std::nullopt;
-    if (ref && ref->cls == RegClass::VGPR)
+    if (ref && ref->cls == RegClass::VGPR) {
       return true;
+    }
   }
   return false;
 }
@@ -2650,17 +2828,20 @@ void update_gpr_idx_enabled(std::optional<bool> &enabled, const Instruction &ins
 
 [[nodiscard]] std::optional<uint16_t> inline_lane(const Operand *operand) {
   if (operand == nullptr || operand->encoding_value() < kInlineInt0 ||
-      operand->encoding_value() >= kInlineInt0 + 32)
+      operand->encoding_value() >= kInlineInt0 + 32) {
     return std::nullopt;
+  }
   return static_cast<uint16_t>(operand->encoding_value() - kInlineInt0);
 }
 
 [[nodiscard]] std::optional<RegisterRef> operand_register(const Operand *operand, RegClass cls) {
-  if (operand == nullptr)
+  if (operand == nullptr) {
     return std::nullopt;
+  }
   auto ref = operand->to_register_ref();
-  if (!ref || ref->cls != cls || ref->width != 1)
+  if (!ref || ref->cls != cls || ref->width != 1) {
     return std::nullopt;
+  }
   return ref;
 }
 
@@ -2710,32 +2891,38 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   // This pass only observes MODE; it never inserts or reorders
   // S_SETREG/S_SET_VGPR_MSB and therefore cannot violate the required co-issue
   // spacing.
-  if (ctx.arch != rocjitsu::IsaFamily::Cdna5)
+  if (ctx.arch != rocjitsu::IsaFamily::Cdna5) {
     return;
+  }
 
-  if (blocks.empty())
+  if (blocks.empty()) {
     return;
-  if (ctx.insts.size() > kMaxAnalysisScaffoldingBytes / kInstructionScaffoldingBytes)
+  }
+  if (ctx.insts.size() > kMaxAnalysisScaffoldingBytes / kInstructionScaffoldingBytes) {
     return;
+  }
   const size_t instruction_scaffolding_bytes = ctx.insts.size() * kInstructionScaffoldingBytes;
   const size_t remaining_scaffolding_bytes =
       kMaxAnalysisScaffoldingBytes - instruction_scaffolding_bytes;
-  if (blocks.size() > remaining_scaffolding_bytes / kBlockScaffoldingBytes)
+  if (blocks.size() > remaining_scaffolding_bytes / kBlockScaffoldingBytes) {
     return;
+  }
   const size_t initial_recovered_size = recovered.size();
   const std::vector<uint8_t> external_entries =
       explicit_external_entries(blocks, sorted_extra_leaders, entry_policy);
 
   std::unordered_map<uint64_t, size_t> instruction_by_offset;
   instruction_by_offset.reserve(ctx.insts.size());
-  for (size_t index = 0; index < ctx.insts.size(); ++index)
+  for (size_t index = 0; index < ctx.insts.size(); ++index) {
     instruction_by_offset.emplace(ctx.insts[index]->src_loc(), index);
+  }
 
   std::vector<size_t> block_for_instruction(ctx.insts.size(), blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     for (size_t index = blocks[block_index].first_index; index <= blocks[block_index].last_index;
-         ++index)
+         ++index) {
       block_for_instruction[index] = block_index;
+    }
   }
 
   // Cache exact register clobbers for a statically recovered helper whose
@@ -2761,10 +2948,12 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     const CalleeSummaryGroupKey group{.target = target, .return_pair = return_pair};
     auto group_variants = callee_summary_variants.find(group);
     if (group_variants != callee_summary_variants.end() &&
-        group_variants->second > kMaxCalleeSummaryVariantsPerTarget)
+        group_variants->second > kMaxCalleeSummaryVariantsPerTarget) {
       return std::nullopt;
-    if (auto cached = callee_summary_cache.find(key); cached != callee_summary_cache.end())
+    }
+    if (auto cached = callee_summary_cache.find(key); cached != callee_summary_cache.end()) {
       return cached->second;
+    }
     // Once a target/return pair needs more than the bounded number of MODE and
     // GPR-index variants, permanently use the conservative ABI summary for the
     // group. This loss of precision is monotone across the dataflow fixed point.
@@ -2802,8 +2991,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         const uint64_t gpr_idx_key = item.gpr_idx_enabled ? (*item.gpr_idx_enabled ? 1u : 0u) : 2u;
         const uint64_t visit_key = (static_cast<uint64_t>(item.block_index) << 13) |
                                    (gpr_idx_key << 11) | (hazard_key << 9) | mode_key;
-        if (!visited.insert(visit_key).second)
+        if (!visited.insert(visit_key).second) {
           continue;
+        }
         // Bound malformed or unexpectedly broad callees. Falling back to the
         // ABI is always safe and avoids turning one recovery into a whole-text
         // traversal.
@@ -2817,8 +3007,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         std::optional<bool> setreg_vgpr_msb_hazard = item.setreg_vgpr_msb_hazard;
         std::optional<bool> gpr_idx_enabled = item.gpr_idx_enabled;
         const auto record_all_banks = [&](uint16_t selector) {
-          for (uint16_t bank = 0; bank < 4; ++bank)
+          for (uint16_t bank = 0; bank < 4; ++bank) {
             summary.vgprs.set(static_cast<uint16_t>((selector & 0xffu) + bank * 256u));
+          }
         };
         for (size_t index = block.first_index; index <= block.last_index; ++index) {
           const Instruction &inst = *ctx.insts[index];
@@ -2838,17 +3029,21 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           RegisterSet implicit_defs;
           inst.implicit_defs(implicit_defs);
           implicit_defs.for_each([&](RegisterRef ref) {
-            if (ref.cls == RegClass::VGPR)
-              for (uint16_t lane = 0; lane < std::max<uint16_t>(1, ref.width); ++lane)
+            if (ref.cls == RegClass::VGPR) {
+              for (uint16_t lane = 0; lane < std::max<uint16_t>(1, ref.width); ++lane) {
                 record_all_banks(static_cast<uint16_t>(ref.index + lane));
+              }
+            }
           });
           for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
             const Operand *dst = inst.dst_operand(dst_index);
-            if (dst == nullptr)
+            if (dst == nullptr) {
               continue;
+            }
             auto ref = dst->to_register_ref();
-            if (!ref || ref->cls != RegClass::VGPR)
+            if (!ref || ref->cls != RegClass::VGPR) {
               continue;
+            }
             const auto bank = vgpr_bank_for_role(mode, dst->vgpr_msb_role());
             for (uint16_t lane = 0; lane < std::max<uint16_t>(1, ref->width); ++lane) {
               const uint16_t selector = static_cast<uint16_t>(ref->index + lane);
@@ -2863,23 +3058,26 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           update_vgpr_mode(mode, setreg_vgpr_msb_hazard, inst, ctx.text, ctx.setreg_vgpr_msb_fixup);
           update_gpr_idx_enabled(gpr_idx_enabled, inst, ctx.text, ctx.arch);
         }
-        if (unsupported)
+        if (unsupported) {
           break;
+        }
 
         const Instruction &term = *ctx.insts[block.last_index];
         const InstructionFacts &facts = ctx.facts[block.last_index];
         if (facts.setpc_ssrc) {
-          if (*facts.setpc_ssrc != return_pair)
+          if (*facts.setpc_ssrc != return_pair) {
             unsupported = true;
-          else if (!saw_return) {
+          } else if (!saw_return) {
             return_mode = mode;
             return_gpr_idx_enabled = gpr_idx_enabled;
             saw_return = true;
           } else {
-            if (return_mode != mode)
+            if (return_mode != mode) {
               return_mode = std::nullopt;
-            if (return_gpr_idx_enabled != gpr_idx_enabled)
+            }
+            if (return_gpr_idx_enabled != gpr_idx_enabled) {
               return_gpr_idx_enabled = std::nullopt;
+            }
           }
           continue;
         }
@@ -2888,12 +3086,14 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
           continue;
         }
         if (block.successors.empty()) {
-          if (!is_program_path_terminator(term))
+          if (!is_program_path_terminator(term)) {
             unsupported = true;
+          }
           continue;
         }
-        for (size_t successor : block.successors)
+        for (size_t successor : block.successors) {
           worklist.push_back({successor, mode, setreg_vgpr_msb_hazard, gpr_idx_enabled});
+        }
       }
       // A transfer through the nominal return pair is only a proven return if
       // the callee never repurposed either half. This deliberately rejects
@@ -2914,10 +3114,11 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       return std::nullopt;
     }
     callee_summary_cache.emplace(key, result);
-    if (group_variants == callee_summary_variants.end())
+    if (group_variants == callee_summary_variants.end()) {
       callee_summary_variants.emplace(group, 1);
-    else
+    } else {
       ++group_variants->second;
+    }
     retained_summary_units += retained_units;
     return result;
   };
@@ -2929,8 +3130,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     const auto publish_builders = [&]() {
       for (uint16_t pair_lo : builders.active_pairs()) {
         const PcValue *value = builders.builder(pair_lo);
-        if (value == nullptr || static_cast<size_t>(pair_lo) + 1 >= REGISTER_SET_MAX_SGPRS)
+        if (value == nullptr || static_cast<size_t>(pair_lo) + 1 >= REGISTER_SET_MAX_SGPRS) {
           continue;
+        }
         state.restored_sgprs.set(pair_lo, StashedPcHalf{.value = *value, .high = false});
         state.restored_sgprs.set(static_cast<uint16_t>(pair_lo + 1),
                                  StashedPcHalf{.value = *value, .high = true});
@@ -2952,8 +3154,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       const auto physical_vgpr = [&](uint16_t low,
                                      amdgpu::VgprMsbRole role) -> std::optional<uint16_t> {
         const auto bank = amdgpu::vgpr_msb_bank_for_role(operand_vgpr_msb_imm, role);
-        if (!bank)
+        if (!bank) {
           return std::nullopt;
+        }
         return static_cast<uint16_t>(low + static_cast<uint16_t>(*bank) * 256u);
       };
       // Large dispatchers keep getpc-built targets in long-lived SGPRs, then
@@ -2995,8 +3198,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
                                                         .source_recovery_end_offset = next_offset});
         continue;
       }
-      if (try_apply_pair_update(ctx, index, builders))
+      if (try_apply_pair_update(ctx, index, builders)) {
         continue;
+      }
 
       if (facts.call_sdst) {
         // A direct call can clobber any caller-saved VGPR before its
@@ -3009,8 +3213,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         state.restored_sgprs.erase(destination);
         state.restored_sgprs.erase(static_cast<uint16_t>(destination + 1));
         publish_builders();
-        if (call_entry_state != nullptr)
+        if (call_entry_state != nullptr) {
           *call_entry_state = state;
+        }
         const uint64_t next_offset = inst.src_loc() + static_cast<uint64_t>(inst.size());
         const auto delta = inst.branch_offset_bytes();
         const std::optional<CalleeSummary> callee_summary =
@@ -3029,8 +3234,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         state.restored_sgprs.erase_if([&](uint16_t sgpr) { return !survives_call(sgpr); });
         const std::vector<uint16_t> active_pairs = builders.active_pairs();
         for (uint16_t pair_lo : active_pairs) {
-          if (!survives_call(pair_lo) || !survives_call(static_cast<uint16_t>(pair_lo + 1)))
+          if (!survives_call(pair_lo) || !survives_call(static_cast<uint16_t>(pair_lo + 1))) {
             builders.invalidate_pair(pair_lo);
+          }
         }
         state.vgpr_msb_imm =
             callee_summary ? callee_summary->return_mode : std::optional<uint8_t>{};
@@ -3057,8 +3263,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
               } else {
                 for (uint16_t pair_lo : builders.active_pairs()) {
                   const PcValue *value = builders.builder(pair_lo);
-                  if (value == nullptr || (src->index != pair_lo && src->index != pair_lo + 1))
+                  if (value == nullptr || (src->index != pair_lo && src->index != pair_lo + 1)) {
                     continue;
+                  }
                   state.slots.set(written_slot, StashedPcHalf{.value = *value,
                                                               .high = src->index == pair_lo + 1});
                   break;
@@ -3088,8 +3295,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
             src ? physical_vgpr(src->index, inst.src_operand(0)->vgpr_msb_role()) : std::nullopt;
         if (dst && lane && src_phys && state.gpr_idx_enabled == std::optional<bool>{false}) {
           auto slot = state.slots.find(VectorLaneSlot{*src_phys, *lane});
-          if (slot != state.slots.end())
+          if (slot != state.slots.end()) {
             state.restored_sgprs.set(dst->index, slot->second);
+          }
         }
         continue;
       }
@@ -3099,8 +3307,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         const StashedPcHalf *lo = state.restored_sgprs.find(pair_lo);
         const StashedPcHalf *hi = state.restored_sgprs.find(static_cast<uint16_t>(pair_lo + 1));
         if (lo != nullptr && hi != nullptr && !lo->high && hi->high && lo->value == hi->value) {
-          if (auto fixup = fixup_for_value(ctx, index, pair_lo, lo->value))
+          if (auto fixup = fixup_for_value(ctx, index, pair_lo, lo->value)) {
             append_unique(recovered, *fixup);
+          }
         }
       }
       if (facts.swappc_sdst) {
@@ -3117,33 +3326,38 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
             state.restored_sgprs.find(static_cast<uint16_t>(pair_lo + 1));
         if (restored_lo != nullptr && restored_hi != nullptr && !restored_lo->high &&
             restored_hi->high && restored_lo->value == restored_hi->value) {
-          if (restored_lo->value.offset >= 0)
+          if (restored_lo->value.offset >= 0) {
             targets.push_back(static_cast<uint64_t>(restored_lo->value.offset));
+          }
         } else if (const PcValue *builder = builders.builder(pair_lo)) {
-          if (builder->offset >= 0)
+          if (builder->offset >= 0) {
             targets.push_back(static_cast<uint64_t>(builder->offset));
+          }
         }
         if (targets.empty()) {
           bool complete = true;
           for (const IndirectCallFixup &fixup : known_fixups) {
-            if (fixup.source_call_offset != inst.src_loc())
+            if (fixup.source_call_offset != inst.src_loc()) {
               continue;
+            }
             if (fixup.source_incomplete) {
               complete = false;
               break;
             }
             targets.push_back(fixup.source_target_offset);
           }
-          if (!complete)
+          if (!complete) {
             targets.clear();
+          }
         }
         const uint16_t destination = *facts.swappc_sdst;
         builders.invalidate_pair(destination);
         state.restored_sgprs.erase(destination);
         state.restored_sgprs.erase(static_cast<uint16_t>(destination + 1));
         publish_builders();
-        if (call_entry_state != nullptr)
+        if (call_entry_state != nullptr) {
           *call_entry_state = state;
+        }
         std::ranges::sort(targets);
         targets.erase(std::ranges::unique(targets).begin(), targets.end());
         std::optional<CalleeSummary> callee_summary;
@@ -3157,13 +3371,15 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
               all_bounded = false;
               break;
             }
-            if (combined)
+            if (combined) {
               *combined |= *summary;
-            else
+            } else {
               combined = *summary;
+            }
           }
-          if (all_bounded)
+          if (all_bounded) {
             callee_summary = combined;
+          }
         }
         const auto survives_call = [&](uint16_t sgpr) {
           return callee_summary ? !callee_summary->sgprs.test(sgpr) : is_callee_saved_sgpr(sgpr);
@@ -3175,8 +3391,10 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         state.restored_sgprs.erase_if([&](uint16_t sgpr) { return !survives_call(sgpr); });
         const std::vector<uint16_t> active_pairs = builders.active_pairs();
         for (uint16_t active_pair : active_pairs) {
-          if (!survives_call(active_pair) || !survives_call(static_cast<uint16_t>(active_pair + 1)))
+          if (!survives_call(active_pair) ||
+              !survives_call(static_cast<uint16_t>(active_pair + 1))) {
             builders.invalidate_pair(active_pair);
+          }
         }
         state.vgpr_msb_imm =
             callee_summary ? callee_summary->return_mode : std::optional<uint8_t>{};
@@ -3202,11 +3420,13 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         };
         for (int dst_index = 0; dst_index < inst.num_dst_operands(); ++dst_index) {
           const Operand *op = inst.dst_operand(dst_index);
-          if (op == nullptr)
+          if (op == nullptr) {
             continue;
+          }
           auto ref = op->to_register_ref();
-          if (!ref || ref->cls != RegClass::VGPR)
+          if (!ref || ref->cls != RegClass::VGPR) {
             continue;
+          }
           for (uint16_t lane = 0; lane < std::max<uint16_t>(1, ref->width); ++lane) {
             const uint32_t selector = static_cast<uint32_t>(ref->index) + lane;
             if (selector >= 256) {
@@ -3225,19 +3445,22 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
         RegisterSet implicit_defs;
         inst.implicit_defs(implicit_defs);
         implicit_defs.for_each([&](RegisterRef ref) {
-          if (ref.cls != RegClass::VGPR)
+          if (ref.cls != RegClass::VGPR) {
             return;
+          }
           erase_selector_in_all_banks(ref.index);
         });
       }
 
-      if (!builders.active_pairs().empty())
+      if (!builders.active_pairs().empty()) {
         invalidate_written_sgprs(ctx, index, builders);
+      }
 
       if ((inst.flags() & RELATIVE_SGPR_DESTINATION) != 0) {
         state.restored_sgprs.clear();
-        for (uint16_t pair_lo : builders.active_pairs())
+        for (uint16_t pair_lo : builders.active_pairs()) {
           builders.invalidate_pair(pair_lo);
+        }
       }
 
       if (copied_pair) {
@@ -3256,8 +3479,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
 
   std::vector<std::vector<size_t>> predecessors(blocks.size());
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    for (size_t successor : blocks[block_index].successors)
+    for (size_t successor : blocks[block_index].successors) {
       predecessors[successor].push_back(block_index);
+    }
   }
 
   // A call block has two different outgoing states: the callee sees the
@@ -3269,23 +3493,29 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     const AnalysisBlock &block = blocks[block_index];
     const Instruction &term = *ctx.insts[block.last_index];
     const InstructionFacts &facts = ctx.facts[block.last_index];
-    if (!facts.call_sdst && !facts.swappc_sdst)
+    if (!facts.call_sdst && !facts.swappc_sdst) {
       continue;
+    }
     CallEdgeInfo &call = call_edges[block_index];
     const uint64_t next_offset = term.src_loc() + static_cast<uint64_t>(term.size());
     if (const auto next = instruction_by_offset.find(next_offset);
-        next != instruction_by_offset.end() && block_for_instruction[next->second] != blocks.size())
+        next != instruction_by_offset.end() &&
+        block_for_instruction[next->second] != blocks.size()) {
       call.continuation_successor = block_for_instruction[next->second];
-    if (!facts.call_sdst)
+    }
+    if (!facts.call_sdst) {
       continue;
+    }
     const auto delta = term.branch_offset_bytes();
-    if (!delta || static_cast<int64_t>(next_offset) + *delta < 0)
+    if (!delta || static_cast<int64_t>(next_offset) + *delta < 0) {
       continue;
+    }
     const uint64_t target = static_cast<uint64_t>(static_cast<int64_t>(next_offset) + *delta);
     if (const auto entry = instruction_by_offset.find(target);
         entry != instruction_by_offset.end() &&
-        block_for_instruction[entry->second] != blocks.size())
+        block_for_instruction[entry->second] != blocks.size()) {
       call.target_successors.insert(block_for_instruction[entry->second]);
+    }
   }
   // Every known source offset was added as a leader before these blocks were
   // built, so a recovered call is the first instruction in its source block
@@ -3293,16 +3523,19 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   // targets are still useful here: extra predecessor edges only weaken the
   // entry-state meet.
   for (const IndirectCallFixup &fixup : known_fixups) {
-    if (!fixup.source_is_call)
+    if (!fixup.source_is_call) {
       continue;
+    }
     const auto source = instruction_by_offset.find(fixup.source_call_offset);
     const auto target = instruction_by_offset.find(fixup.source_target_offset);
-    if (source == instruction_by_offset.end() || target == instruction_by_offset.end())
+    if (source == instruction_by_offset.end() || target == instruction_by_offset.end()) {
       continue;
+    }
     const size_t source_block = block_for_instruction[source->second];
     const size_t target_block = block_for_instruction[target->second];
-    if (source_block < blocks.size() && target_block < blocks.size())
+    if (source_block < blocks.size() && target_block < blocks.size()) {
       call_edges[source_block].target_successors.insert(target_block);
+    }
   }
 
   std::vector<VectorLaneFlowState> entry_states(blocks.size());
@@ -3310,8 +3543,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
   std::vector<uint8_t> reachable(blocks.size(), 0);
   std::vector<uint8_t> on_worklist(blocks.size(), 1);
   std::deque<size_t> worklist;
-  for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     worklist.push_back(block_index);
+  }
 
   const auto state_units = [](const VectorLaneFlowState &state) {
     return state.slots.size() + state.restored_sgprs.size();
@@ -3322,8 +3556,9 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     // Exact-summary selection is intentionally fail-closed, but switching
     // between a state-derived target and the ABI fallback is not monotone.
     // Abandon this optional recovery if malformed control flow oscillates.
-    if (++worklist_visits > max_worklist_visits)
+    if (++worklist_visits > max_worklist_visits) {
       return;
+    }
     const size_t block_index = worklist.front();
     worklist.pop_front();
     on_worklist[block_index] = 0;
@@ -3336,12 +3571,14 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
     // be physically adjacent to an earlier S_SETREG: an explicit transfer into
     // the root is itself the intervening instruction. A reachable fallthrough
     // predecessor, when one exists, replaces this seed with its exit state.
-    if (new_reachable)
+    if (new_reachable) {
       new_entry.setreg_vgpr_msb_hazard = false;
+    }
     // Unsupported indexing is an architectural fact, not an entry-mode promise.
     // Mutable mode bits such as VGPR_MSB remain unknown until code sets them.
-    if (new_reachable && !isa_properties(ctx.arch).mode_has_gpr_idx_en)
+    if (new_reachable && !isa_properties(ctx.arch).mode_has_gpr_idx_en) {
       new_entry.gpr_idx_enabled = false;
+    }
     bool have_predecessor_state = false;
     const auto meet_predecessor = [&](const VectorLaneFlowState &incoming) {
       new_reachable = true;
@@ -3352,28 +3589,34 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       }
       new_entry.slots.intersect_with(incoming.slots);
       new_entry.restored_sgprs.intersect_with(incoming.restored_sgprs);
-      if (new_entry.vgpr_msb_imm != incoming.vgpr_msb_imm)
+      if (new_entry.vgpr_msb_imm != incoming.vgpr_msb_imm) {
         new_entry.vgpr_msb_imm = std::nullopt;
-      if (new_entry.setreg_vgpr_msb_hazard != incoming.setreg_vgpr_msb_hazard)
+      }
+      if (new_entry.setreg_vgpr_msb_hazard != incoming.setreg_vgpr_msb_hazard) {
         new_entry.setreg_vgpr_msb_hazard = std::nullopt;
-      if (new_entry.gpr_idx_enabled != incoming.gpr_idx_enabled)
+      }
+      if (new_entry.gpr_idx_enabled != incoming.gpr_idx_enabled) {
         new_entry.gpr_idx_enabled = std::nullopt;
+      }
     };
     for (size_t predecessor : predecessors[block_index]) {
-      if (!reachable[predecessor])
+      if (!reachable[predecessor]) {
         continue;
+      }
       const auto call = call_edges.find(predecessor);
       const bool call_target =
           call != call_edges.end() && call->second.target_successors.contains(block_index);
       if (call_target) {
-        if (call->second.entry_state)
+        if (call->second.entry_state) {
           meet_predecessor(*call->second.entry_state);
-        else
+        } else {
           meet_predecessor(VectorLaneFlowState{});
+        }
       }
       if (!call_target ||
-          (call != call_edges.end() && call->second.continuation_successor == block_index))
+          (call != call_edges.end() && call->second.continuation_successor == block_index)) {
         meet_predecessor(exit_states[predecessor]);
+      }
     }
 
     // Generic callers conservatively infer predecessorless device-function
@@ -3398,29 +3641,35 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       } else {
         new_entry.slots.clear();
         new_entry.restored_sgprs.clear();
-        if (new_entry.vgpr_msb_imm != external_entry.vgpr_msb_imm)
+        if (new_entry.vgpr_msb_imm != external_entry.vgpr_msb_imm) {
           new_entry.vgpr_msb_imm = std::nullopt;
-        if (new_entry.setreg_vgpr_msb_hazard != external_entry.setreg_vgpr_msb_hazard)
+        }
+        if (new_entry.setreg_vgpr_msb_hazard != external_entry.setreg_vgpr_msb_hazard) {
           new_entry.setreg_vgpr_msb_hazard = std::nullopt;
-        if (new_entry.gpr_idx_enabled != external_entry.gpr_idx_enabled)
+        }
+        if (new_entry.gpr_idx_enabled != external_entry.gpr_idx_enabled) {
           new_entry.gpr_idx_enabled = std::nullopt;
+        }
       }
     }
-    if (!new_reachable)
+    if (!new_reachable) {
       continue;
+    }
 
     std::optional<VectorLaneFlowState> new_call_entry;
     VectorLaneFlowState new_exit =
         scan_block(blocks[block_index], new_entry, false, &new_call_entry);
-    if (analysis_budget_exhausted)
+    if (analysis_budget_exhausted) {
       return;
+    }
     auto call = call_edges.find(block_index);
     const bool call_entry_unchanged =
         new_call_entry ? call != call_edges.end() && call->second.entry_state == new_call_entry
                        : call == call_edges.end() || !call->second.entry_state;
     if (reachable[block_index] && entry_states[block_index] == new_entry &&
-        exit_states[block_index] == new_exit && call_entry_unchanged)
+        exit_states[block_index] == new_exit && call_entry_unchanged) {
       continue;
+    }
 
     // Count logical facts rather than unique COW allocations. This makes the
     // limit independent of sharing details and bounds both lane and restored
@@ -3430,41 +3679,47 @@ void recover_vector_lane_stashed_pcs(AnalysisContext &ctx, const std::vector<Ana
       assert(next_retained_state_units >= old_count);
       next_retained_state_units -= old_count;
       if (new_count >
-          kMaxRetainedAnalysisUnits - retained_summary_units - next_retained_state_units)
+          kMaxRetainedAnalysisUnits - retained_summary_units - next_retained_state_units) {
         return false;
+      }
       next_retained_state_units += new_count;
       return true;
     };
     if (!replace_fact_count(state_units(entry_states[block_index]), state_units(new_entry)) ||
-        !replace_fact_count(state_units(exit_states[block_index]), state_units(new_exit)))
+        !replace_fact_count(state_units(exit_states[block_index]), state_units(new_exit))) {
       return;
+    }
     if (call != call_edges.end()) {
       const size_t old_call_count =
           call->second.entry_state ? state_units(*call->second.entry_state) : 0;
       const size_t new_call_count = new_call_entry ? state_units(*new_call_entry) : 0;
-      if (!replace_fact_count(old_call_count, new_call_count))
+      if (!replace_fact_count(old_call_count, new_call_count)) {
         return;
+      }
     }
 
     reachable[block_index] = 1;
     entry_states[block_index] = std::move(new_entry);
     exit_states[block_index] = std::move(new_exit);
-    if (call != call_edges.end())
+    if (call != call_edges.end()) {
       call->second.entry_state = std::move(new_call_entry);
-    else
+    } else {
       assert(!new_call_entry);
+    }
     retained_state_units = next_retained_state_units;
     for (size_t successor : blocks[block_index].successors) {
-      if (on_worklist[successor])
+      if (on_worklist[successor]) {
         continue;
+      }
       worklist.push_back(successor);
       on_worklist[successor] = 1;
     }
   }
 
   for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
-    if (!reachable[block_index])
+    if (!reachable[block_index]) {
       continue;
+    }
     const AnalysisBlock &block = blocks[block_index];
     bool has_consumer = false;
     for (size_t index = block.first_index; index <= block.last_index; ++index) {
@@ -3515,29 +3770,36 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
   // duplicate builder range.
   std::unordered_map<uint64_t, size_t> block_by_offset;
   block_by_offset.reserve(blocks.size());
-  for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
+  for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
     block_by_offset.emplace(blocks[block_index].offset, block_index);
+  }
   std::vector<std::vector<size_t>> predecessors(blocks.size());
-  for (size_t source = 0; source < blocks.size(); ++source)
-    for (size_t destination : blocks[source].successors)
+  for (size_t source = 0; source < blocks.size(); ++source) {
+    for (size_t destination : blocks[source].successors) {
       predecessors[destination].push_back(source);
+    }
+  }
   const std::vector<uint8_t> external_entries =
       explicit_external_entries(blocks, sorted_extra_leaders, entry_policy);
 
   const auto add_i32_opcode = scalar_sop2_opcode(ctx.arch, ScalarSop2Op::AddI32);
-  if (!add_i32_opcode)
+  if (!add_i32_opcode) {
     return;
+  }
 
   for (const AnalysisBlock &entry : blocks) {
-    if (entry.last_index < entry.first_index + 3)
+    if (entry.last_index < entry.first_index + 3) {
       continue;
+    }
 
     const Instruction &term = *ctx.insts[entry.last_index];
-    if ((term.flags() & COND_BRANCH) == 0)
+    if ((term.flags() & COND_BRANCH) == 0) {
       continue;
+    }
     const auto branch_delta = term.branch_offset_bytes();
-    if (!branch_delta)
+    if (!branch_delta) {
       continue;
+    }
 
     const size_t getpc_index = entry.last_index - 3;
     const size_t temp_index = entry.last_index - 2;
@@ -3545,34 +3807,39 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
     const Instruction &temp_inst = *ctx.insts[temp_index];
     auto pair_lo =
         scalar_pc_sreg(ctx.arch, getpc_inst, ctx.facts[getpc_index].word, ScalarPcOp::GetPc64);
-    if (!pair_lo)
+    if (!pair_lo) {
       continue;
+    }
 
     const uint32_t temp_word = ctx.facts[temp_index].word;
     const auto tmp_sreg = static_cast<uint16_t>((temp_word >> 16) & 0x7fu);
     uint32_t literal = 0;
     if (!sop2_literal_inline_to_sreg(temp_inst, temp_word,
                                      text_word_at(ctx.text, temp_inst.src_loc() + sizeof(uint32_t)),
-                                     *add_i32_opcode, tmp_sreg, kInlineInt4, literal))
+                                     *add_i32_opcode, tmp_sreg, kInlineInt4, literal)) {
       continue;
+    }
 
     const uint64_t fallthrough_offset = term.src_loc() + static_cast<uint64_t>(term.size());
     const int64_t branch_target =
         static_cast<int64_t>(fallthrough_offset) + static_cast<int64_t>(*branch_delta);
-    if (branch_target < 0)
+    if (branch_target < 0) {
       continue;
+    }
 
     auto sub_block_it = block_by_offset.find(fallthrough_offset);
     auto add_block_it = block_by_offset.find(static_cast<uint64_t>(branch_target));
-    if (sub_block_it == block_by_offset.end() || add_block_it == block_by_offset.end())
+    if (sub_block_it == block_by_offset.end() || add_block_it == block_by_offset.end()) {
       continue;
+    }
 
     auto sub_consumer =
         match_signed_delta_sub_consumer(ctx, blocks[sub_block_it->second], *pair_lo, tmp_sreg);
     auto add_consumer =
         match_signed_delta_add_consumer(ctx, blocks[add_block_it->second], *pair_lo, tmp_sreg);
-    if (!sub_consumer || !add_consumer)
+    if (!sub_consumer || !add_consumer) {
       continue;
+    }
 
     const size_t entry_index = block_by_offset.at(entry.offset);
     const auto closed_arm = [&](size_t arm) {
@@ -3619,10 +3886,12 @@ void recover_signed_delta_templates(const AnalysisContext &ctx,
 }
 
 std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
-  if (inst.size() != sizeof(uint32_t))
+  if (inst.size() != sizeof(uint32_t)) {
     return std::nullopt;
-  if ((inst.flags() & INDIRECT_CALL) == 0 || !inst.branch_offset_bytes())
+  }
+  if ((inst.flags() & INDIRECT_CALL) == 0 || !inst.branch_offset_bytes()) {
     return std::nullopt;
+  }
   return static_cast<uint16_t>((word >> 16) & 0x7fu);
 }
 
@@ -3666,8 +3935,9 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     std::vector<uint8_t> analysis_roots;
     if (!sorted_analysis_roots.empty()) {
       analysis_roots.reserve(blocks.size());
-      for (const AnalysisBlock &block : blocks)
+      for (const AnalysisBlock &block : blocks) {
         analysis_roots.push_back(std::ranges::binary_search(sorted_analysis_roots, block.offset));
+      }
     }
 
     std::vector<PendingConsumer> pending_consumers;
@@ -3684,15 +3954,17 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     // and index in sync and avoid quadratic collection.
     FixupIndex iteration_recovered_index;
     iteration_recovered_index.reserve(iteration_recovered.size());
-    for (size_t i = 0; i < iteration_recovered.size(); ++i)
+    for (size_t i = 0; i < iteration_recovered.size(); ++i) {
       iteration_recovered_index.try_emplace(fixup_identity(iteration_recovered[i]), i);
+    }
     // Recovered leaders can split a block between rounds, which changes where a
     // builder's block-exit value is observed. Keep only the final round's view
     // so the published records are internally consistent with one CFG.
     round_builders.clear();
-    for (size_t block_index = 0; block_index < blocks.size(); ++block_index)
+    for (size_t block_index = 0; block_index < blocks.size(); ++block_index) {
       scan_block(ctx, block_index, blocks, pending_consumers, iteration_recovered,
                  iteration_recovered_index, round_builders);
+    }
     recover_signed_delta_templates(ctx, blocks, iteration_recovered, iteration_recovered_index,
                                    sorted_extra_leaders, entry_policy);
 
@@ -3704,10 +3976,12 @@ std::optional<uint16_t> s_call_sdst(const Instruction &inst, uint32_t word) {
     }
 
     bool changed = false;
-    for (const IndirectCallFixup &fixup : iteration_recovered)
+    for (const IndirectCallFixup &fixup : iteration_recovered) {
       changed |= append_unique_indexed(recovered, recovered_index, fixup);
-    if (!changed)
+    }
+    if (!changed) {
       break;
+    }
   }
 
   if (pc_builders != nullptr) {
@@ -3746,10 +4020,12 @@ std::vector<IndirectCallFixup> discover_indirect_branch_edges(
     ExternalEntryPolicy entry_policy, std::vector<PcAddressBuilder> *pc_builders,
     std::span<const uint64_t> extra_split_points, std::span<const uint64_t> analysis_root_offsets,
     rj_code_target_id_t target) {
-  if (pc_builders != nullptr)
+  if (pc_builders != nullptr) {
     pc_builders->clear();
-  if (insts.empty())
+  }
+  if (insts.empty()) {
     return {};
+  }
 
   // Every recoverable edge ends at an indirect branch/call consumer. Most
   // generated kernels have none, so avoid building the auxiliary CFG and

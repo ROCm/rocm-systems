@@ -9,21 +9,24 @@
 namespace rocjitsu {
 
 void HazardTracker::maybe_insert_delay(std::vector<uint32_t> &words, Pipeline consumer) {
-  if (consumer == Pipeline::None)
+  if (consumer == Pipeline::None) {
     return;
+  }
 
   // s_delay_alu simm16: instid0[3:0] at bits[3:0], instid1[3:0] at bits[10:7].
   // Each instid = pipeline[1:0] | (distance[2:0] << 2). 0 = no dependency.
   uint16_t simm16 = 0;
   for (int i = 0; i < 2; ++i) {
     auto &s = slots_[i];
-    if (s.pipeline == Pipeline::None || s.distance > 4)
+    if (s.pipeline == Pipeline::None || s.distance > 4) {
       continue;
+    }
     uint8_t dep = static_cast<uint8_t>(s.pipeline) | (s.distance << 2);
-    if (i == 0)
+    if (i == 0) {
       simm16 |= dep;
-    else
+    } else {
       simm16 |= (static_cast<uint16_t>(dep) << 7);
+    }
   }
 
   if (simm16 != 0) {
@@ -33,10 +36,12 @@ void HazardTracker::maybe_insert_delay(std::vector<uint32_t> &words, Pipeline co
 
 void HazardTracker::advance(Pipeline producer) {
   for (auto &s : slots_) {
-    if (s.pipeline != Pipeline::None)
+    if (s.pipeline != Pipeline::None) {
       ++s.distance;
-    if (s.distance > 7)
+    }
+    if (s.distance > 7) {
       s.pipeline = Pipeline::None;
+    }
   }
   if (producer != Pipeline::None) {
     slots_[1] = slots_[0];

@@ -23,48 +23,67 @@ void write_json_string(std::ostream &out, std::string_view value) {
   constexpr char digits[] = "0123456789abcdef";
   out << '"';
   for (const unsigned char ch : value) {
-    if (ch == '"' || ch == '\\')
+    if (ch == '"' || ch == '\\') {
       out << '\\' << ch;
-    else if (ch < 32)
+    } else if (ch < 32) {
       out << "\\u00" << digits[ch >> 4] << digits[ch & 15];
-    else
+    } else {
       out << ch;
+    }
   }
   out << '"';
 }
 
+std::string_view access_name(AccessKind access) {
+  switch (access) {
+  case AccessKind::Read:
+    return "read";
+  case AccessKind::Write:
+    return "write";
+  case AccessKind::Atomic:
+    return "atomic";
+  }
+  return "unknown";
+}
+
 void write_participant(std::ostream &out, const LdsRaceParticipant &value) {
   out << "{\"workgroup_x\":" << value.workgroup << ",\"wave\":" << value.wave
-      << ",\"site\":" << value.site << ",\"phase\":" << value.phase
-      << ",\"sequence\":" << value.sequence << ",\"mask\":" << value.mask
-      << ",\"offset\":" << value.offset << ",\"width\":" << value.width
-      << ",\"original_offset\":" << value.original_offset << ",\"access\":\""
-      << (value.access == AccessKind::Write ? "write" : "read") << "\"}";
+      << ",\"site\":" << value.site << ",\"range_id\":" << value.range_id
+      << ",\"phase\":" << value.phase << ",\"sequence\":" << value.sequence
+      << ",\"mask\":" << value.mask << ",\"offset\":" << value.offset
+      << ",\"width\":" << value.width << ",\"original_offset\":" << value.original_offset
+      << ",\"access\":\"" << access_name(value.access) << '"';
+  if (value.transpose_exec)
+    out << ",\"mask_role\":\"transpose_source_lanes\",\"anchor_exec\":" << *value.transpose_exec;
+  out << '}';
 }
 
 void write_examples(std::ostream &out, const std::vector<LdsRaceFinding> &findings) {
   out << '[';
   bool first = true;
   for (const LdsRaceFinding &finding : findings) {
-    if (!first)
+    if (!first) {
       out << ',';
+    }
     first = false;
     out << "{\"kind\":\""
         << (finding.kind == LdsRaceFindingKind::CrossWave ? "cross_wave" : "instruction_collision")
         << "\",\"lane_pairs\":" << finding.lane_pairs;
-    if (finding.kind == LdsRaceFindingKind::CrossWave)
+    if (finding.kind == LdsRaceFindingKind::CrossWave) {
       out << ",\"ordering\":\""
           << (finding.ordering == LdsRaceOrdering::Ordered      ? "ordered"
               : finding.ordering == LdsRaceOrdering::Unresolved ? "ordering_unresolved"
                                                                 : "unordered")
           << "\"";
-    else
+    } else {
       out << ",\"reason\":\"ordinary_store_exact_mask\"";
-    if (finding.ordering == LdsRaceOrdering::Unresolved)
+    }
+    if (finding.ordering == LdsRaceOrdering::Unresolved) {
       out << ",\"reason\":\"incomplete_synchronization_evidence\"";
+    }
     out << ",\"first\":";
     write_participant(out, finding.first);
-    if (finding.kind == LdsRaceFindingKind::CrossWave) {
+    if (finding.kind == LdsRaceFindingKind::CrossWave || finding.second.mask != 0) {
       out << ",\"second\":";
       write_participant(out, finding.second);
     }
@@ -82,17 +101,19 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
   out << "{\"verdict\":\""
       << (result.cross_wave_pairs || result.collision_groups ? "findings" : "no_observed_findings")
       << "\",\"scope\":\""
-      << (result.scope != ScopeKind::NativeLdsNoSynchronization
-              ? "native_lds_single_range_epoch_workgroup_barriers"
-              : "native_lds_single_range_no_sync_bounded_1d")
+      << (result.has_dual_ranges ? "native_lds_multi_range_" : "native_lds_single_range_")
+      << (result.has_transpose ? "transpose_" : "")
+      << (result.scope != ScopeKind::NativeLdsNoSynchronization ? "epoch_workgroup_barriers"
+                                                                : "no_sync_bounded_1d")
       << "\"" << ",\"run_identity\":\"" << hex_bytes(result.run_identity)
       << "\",\"original_sha256\":\"" << hex_bytes(result.original.sha256)
       << "\",\"original_bytes\":" << result.original.bytes << ",\"selection_profile\":\""
       << hex_bytes(result.selection_profile) << "\",\"entries\":[";
   bool first_entry = true;
   for (const LdsRaceImageEntry &entry : result.entries) {
-    if (!first_entry)
+    if (!first_entry) {
       out << ',';
+    }
     first_entry = false;
     out << "{\"entry_key\":" << entry.key << ",\"entry\":";
     write_json_string(out, entry.name);
@@ -111,8 +132,9 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
       << ",\"collision_groups\":" << result.collision_groups << ",\"executions\":[";
   bool first = true;
   for (const LdsRaceExecutionResult &execution : result.executions) {
-    if (!first)
+    if (!first) {
       out << ',';
+    }
     first = false;
     // Once any counter exhausts, do not present the difference of saturating
     // total-loss and address-loss counters as an exact dropped count; emit null.
@@ -142,24 +164,28 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
         << ",\"collision_lane_pairs\":" << execution.collision_lane_pairs << ",\"issues\":[";
     bool first_issue = true;
     for (const LdsRaceIntegrityIssue &issue : execution.issues) {
-      if (!first_issue)
+      if (!first_issue) {
         out << ',';
+      }
       first_issue = false;
       out << "{\"wave\":";
-      if (issue.wave == UINT32_MAX)
+      if (issue.wave == UINT32_MAX) {
         out << "null";
-      else
+      } else {
         out << issue.wave;
+      }
       out << ",\"site\":";
-      if (issue.site == UINT32_MAX)
+      if (issue.site == UINT32_MAX) {
         out << "null";
-      else
+      } else {
         out << issue.site;
+      }
       out << ",\"workgroup_x\":";
-      if (issue.workgroup == UINT32_MAX)
+      if (issue.workgroup == UINT32_MAX) {
         out << "null";
-      else
+      } else {
         out << issue.workgroup;
+      }
       out << ",\"reason\":";
       write_json_string(out, issue.reason);
       out << '}';

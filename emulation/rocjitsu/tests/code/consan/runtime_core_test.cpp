@@ -446,8 +446,9 @@ TEST_F(ConSanRuntimeCore, WriterKeepsEntryFactsAcrossSharedReportReuseAndModuleR
     snapshots.push_back(std::move(snapshot));
   }
   header_.image.entries.clear();
-  for (const OwnedSnapshot &snapshot : snapshots)
+  for (const OwnedSnapshot &snapshot : snapshots) {
     EXPECT_EQ(writer.append(snapshot), RuntimeStatus::Success);
+  }
   EXPECT_EQ(writer.finish(), RuntimeStatus::Success);
   const FailureOr<Capture> capture = decode_capture(output_);
   ASSERT_TRUE(capture.succeeded());

@@ -26,13 +26,11 @@
 #define _TESTER_HPP_
 
 #include <algorithm>
-#include <functional>
 #include <rocshmem/rocshmem.hpp>
 #include <vector>
 #include <climits>
 
 #include "tester_arguments.hpp"
-#include "type_lists.hpp"
 #include "../src/util.hpp"
 #include "verify_results_kernels.hpp"
 
@@ -267,20 +265,6 @@ typedef int ShmemContextType;
 /******************************************************************************
  * TESTER INTERFACE
  *****************************************************************************/
-class Tester;
-
-/**
- * Deferred construction of a single tester.
- *
- * Testers allocate their symmetric buffers in their constructors, so building
- * them all up front would hold every tester's buffers in the symmetric heap at
- * once.  With per-type coverage (-types full) one test type expands to a dozen or
- * more testers, which overruns the heap.  The factory method hands back one
- * thunk per tester instead; the driver constructs, runs, and destroys them one
- * at a time so only a single tester's buffers are resident.
- */
-using TesterFactory = std::function<Tester *()>;
-
 class Tester {
  public:
   explicit Tester(TesterArguments args);
@@ -288,9 +272,7 @@ class Tester {
 
   virtual void execute();
 
-  virtual std::string typeName() const { return ""; }
-
-  static std::vector<TesterFactory> create(TesterArguments args);
+  static std::vector<Tester *> create(TesterArguments args);
 
   void *alloc_test_buffer(size_t size, enum UserBufType user_buf_type = USER_BUF_TYPE_HEAP);
   void free_test_buffer(void *buffer, enum UserBufType user_buf_type = USER_BUF_TYPE_HEAP);

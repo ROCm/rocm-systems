@@ -29,8 +29,9 @@ std::optional<RegisterRef> first_intersection(const RegisterSet &a, const Regist
   std::optional<RegisterRef> first;
   // Keep the optional assignment together with RegisterRef construction.
   (a & b).for_each([&](RegisterRef ref) __attribute__((always_inline)) {
-    if (!first)
+    if (!first) {
       first = ref;
+    }
   });
   return first;
 }
@@ -38,8 +39,9 @@ std::optional<RegisterRef> first_intersection(const RegisterSet &a, const Regist
 RegisterSet vector_registers(const RegisterSet &regs) {
   RegisterSet result;
   regs.for_each([&](RegisterRef ref) {
-    if (ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR)
+    if (ref.cls == RegClass::VGPR || ref.cls == RegClass::ACC_VGPR) {
       result.expand(ref);
+    }
   });
   return result;
 }
@@ -60,10 +62,12 @@ bool scratch_vector_address_enabled(const Instruction &inst, rocjitsu::IsaFamily
   constexpr uint32_t kCdnaScratchSveBit = 1u << 13;
   constexpr uint32_t kRdna3ScratchSveBit = 1u << 23;
   constexpr uint32_t kGfx12ScratchSveBit = 1u << 17;
-  if (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4)
+  if (arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4) {
     return (words[0] & kCdnaScratchSveBit) != 0;
-  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5)
+  }
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) {
     return (words[1] & kRdna3ScratchSveBit) != 0;
+  }
   assert(arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5);
   return (words[1] & kGfx12ScratchSveBit) != 0;
 }
@@ -74,16 +78,19 @@ RegisterEffects register_effects(const Instruction &inst, rocjitsu::IsaFamily ar
   const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
   const bool scalar_address = [&] {
     if ((addressing != MemoryAddressing::Global && addressing != MemoryAddressing::Scratch) ||
-        (inst.flags() & SMEM))
+        (inst.flags() & SMEM)) {
       return false;
+    }
     for (int i = 1; i < inst.num_src_operands(); ++i) {
-      if (!inst.tracks_explicit_source(i))
+      if (!inst.tracks_explicit_source(i)) {
         continue;
+      }
       const auto *op = inst.src_operand(i);
       if (op) {
         const auto ref = op->to_register_ref();
-        if (ref && ref->cls == RegClass::SGPR)
+        if (ref && ref->cls == RegClass::SGPR) {
           return true;
+        }
       }
     }
     return false;
@@ -91,32 +98,40 @@ RegisterEffects register_effects(const Instruction &inst, rocjitsu::IsaFamily ar
   if (!Ops::is_cdna_lds_dma_load(inst, arch)) {
     for (int i = 0; i < inst.num_dst_operands(); ++i) {
       const auto *op = inst.dst_operand(i);
-      if (!op)
+      if (!op) {
         continue;
-      if (auto ref = WaitcheckTarget::register_operand(*op, arch))
+      }
+      if (auto ref = WaitcheckTarget::register_operand(*op, arch)) {
         effects.defs.expand(inst.wave_sized_destination(*op, *ref, wave_size));
+      }
     }
   }
   inst.implicit_defs(effects.defs);
   for (int i = 0; i < inst.num_src_operands(); ++i) {
-    if (!inst.tracks_explicit_source(i))
+    if (!inst.tracks_explicit_source(i)) {
       continue;
+    }
     const auto *op = inst.src_operand(i);
-    if (!op)
+    if (!op) {
       continue;
+    }
     auto ref = WaitcheckTarget::register_operand(*op, arch);
-    if (!ref)
+    if (!ref) {
       continue;
+    }
     if (i == 0 && addressing == MemoryAddressing::Scratch && !(inst.flags() & SMEM) &&
-        !scratch_vector_address_enabled(inst, arch))
+        !scratch_vector_address_enabled(inst, arch)) {
       continue;
-    if (i == 0 && scalar_address && ref->cls == RegClass::VGPR)
+    }
+    if (i == 0 && scalar_address && ref->cls == RegClass::VGPR) {
       ref->width = 1;
+    }
     effects.uses.expand(wave_sized_register(*op, *ref, wave_size));
   }
   inst.implicit_uses(effects.uses);
-  if (inst.flags() & WRITES_EXEC)
+  if (inst.flags() & WRITES_EXEC) {
     effects.defs.expand({RegClass::EXEC, 0, 1});
+  }
   return effects;
 }
 
@@ -127,23 +142,28 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
   // dropping either a pending result or one of its consumers.
   for (int i = 0; i < inst.num_src_operands() + inst.num_dst_operands(); ++i) {
     const bool destination = i >= inst.num_src_operands();
-    if (!destination && !inst.tracks_explicit_source(i))
+    if (!destination && !inst.tracks_explicit_source(i)) {
       continue;
+    }
     const auto *op =
         destination ? inst.dst_operand(i - inst.num_src_operands()) : inst.src_operand(i);
-    if (!op)
+    if (!op) {
       continue;
+    }
     const auto ref = op->to_register_ref();
-    if (ref && ref->cls == RegClass::TTMP)
+    if (ref && ref->cls == RegClass::TTMP) {
       return "trap-temporary registers are not tracked";
+    }
     // Selector-encoded VCC, FLAT_SCRATCH and XNACK_MASK destinations are
     // not all represented by the ordinary-register operand projection.
     if (destination && inst.is_memory_op() && (inst.flags() & (SALU | SMEM)) &&
-        !op->is_fieldless() && op->size_bits() > 0 && !ref)
+        !op->is_fieldless() && op->size_bits() > 0 && !ref) {
       return "scalar-memory destination is not represented by register tracking";
+    }
   }
-  if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst))
+  if (is_control_flow_transfer(inst) && !is_program_path_terminator(inst)) {
     return "control flow requires CFG analysis";
+  }
   switch (operation) {
   case Operation::S_SET_VGPR_MSB:
   case Operation::S_SETREG_B32:
@@ -156,17 +176,20 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
   case Operation::S_WAITCNT_DEPCTR:
   case Operation::S_WAIT_ALU:
     // Dependency waits themselves are handled by the transfer layer, below.
-    if (!inst.is_waitcnt())
+    if (!inst.is_waitcnt()) {
       return "scheduling or register-mode state is not analyzed";
+    }
     break;
   default:
     break;
   }
   if (inst.flags() & (RELATIVE_SGPR_SOURCE | RELATIVE_SGPR_DESTINATION | RELATIVE_VGPR_SOURCE |
-                      RELATIVE_VGPR_DESTINATION))
+                      RELATIVE_VGPR_DESTINATION)) {
     return "relative-register operands are not analyzed";
-  if (inst.has_d16_memory_data() || inst.amdgpu_secondary_operation() != Operation::Unknown)
+  }
+  if (inst.has_d16_memory_data() || inst.amdgpu_secondary_operation() != Operation::Unknown) {
     return "partial-register or dual-issue semantics are not analyzed";
+  }
   const MemoryAddressing addressing = inst.amdgpu_memory_addressing();
   // Ordinary DS read-modify-write operations use the same operand tracking as
   // DS loads/stores. Barrier atomics have separate ordering semantics.
@@ -174,24 +197,30 @@ std::optional<std::string_view> deferred_reason(const Instruction &inst,
   if (addressing == MemoryAddressing::Image ||
       (inst.amdgpu_memory_kind() == MemoryKind::Atomic && !ds) ||
       operation == Operation::DS_ATOMIC_ASYNC_BARRIER_ARRIVE_B64 ||
-      operation == Operation::DS_ATOMIC_BARRIER_ARRIVE_RTN_B64)
+      operation == Operation::DS_ATOMIC_BARRIER_ARRIVE_RTN_B64) {
     return "image and atomic operand semantics are not analyzed";
-  for (const auto &event : events) {
-    if (event.check_counter_parity_order)
-      return "counter parity ordering is not analyzed";
-    if (event.counter == WaitCounterKind::Async || event.counter == WaitCounterKind::Tensor ||
-        event.check_memory_order || event.barrier_id)
-      return "async, tensor or barrier ordering is not analyzed";
   }
-  if (inst.is_barrier())
+  for (const auto &event : events) {
+    if (event.check_counter_parity_order) {
+      return "counter parity ordering is not analyzed";
+    }
+    if (event.counter == WaitCounterKind::Async || event.counter == WaitCounterKind::Tensor ||
+        event.check_memory_order || event.barrier_id) {
+      return "async, tensor or barrier ordering is not analyzed";
+    }
+  }
+  if (inst.is_barrier()) {
     return "barrier ordering is not analyzed";
-  if (inst.is_memory_op() && events.empty())
+  }
+  if (inst.is_memory_op() && events.empty()) {
     return "memory instruction has no event policy";
+  }
   if ((inst.flags() & (SALU | SMEM)) && events.empty() && !inst.is_waitcnt() &&
       !is_program_path_terminator(inst) && operation != Operation::S_NOP &&
       operation != Operation::S_DELAY_ALU && inst.num_src_operands() == 0 &&
-      inst.num_dst_operands() == 0)
+      inst.num_dst_operands() == 0) {
     return "unmodeled scalar control instruction";
+  }
   return std::nullopt;
 }
 
@@ -221,22 +250,26 @@ bool ordered_waw(const PendingEvent &event, std::span<const ClassifiedEvent> cur
   // wave. GDS and SMEM are separate event kinds that are not ordered with LDS.
   // Only DS-counter results qualify: expert scheduling also tracks DS sources
   // on VmVsrc, and result ordering does not end those source lifetimes.
-  if (event.counter == WaitCounterKind::Ds && event.kind == WaitEventKind::Ds)
+  if (event.counter == WaitCounterKind::Ds && event.kind == WaitEventKind::Ds) {
     return std::ranges::any_of(current, [](const auto &other) {
       return other.counter == WaitCounterKind::Ds && other.kind == WaitEventKind::Ds;
     });
-  if (!amdgpu::has_ordered_vmem_writeback(arch))
+  }
+  if (!amdgpu::has_ordered_vmem_writeback(arch)) {
     return false;
+  }
   if (event.kind == WaitEventKind::FlatLoad) {
-    if (event.counter != WaitCounterKind::Load)
+    if (event.counter != WaitCounterKind::Load) {
       return false;
+    }
     return std::ranges::any_of(current, [](const auto &other) {
       return other.counter == WaitCounterKind::Load &&
              other.kind == WaitEventKind::VmemNoSamplerLoad;
     });
   }
-  if (event.kind != WaitEventKind::VmemNoSamplerLoad)
+  if (event.kind != WaitEventKind::VmemNoSamplerLoad) {
     return false;
+  }
   return std::ranges::any_of(current, [&](const auto &other) { return other.kind == event.kind; });
 }
 
@@ -256,20 +289,25 @@ public:
 
   util::Result analyze(const Instruction &inst, std::span<const ClassifiedEvent> events,
                        uint64_t offset) {
-    if (inst.is_waitcnt())
+    if (inst.is_waitcnt()) {
       return Ops::apply_waitcnt(state_, inst, arch_);
-    if (Ops::apply_embedded_waitcnt(state_, inst, arch_).failed())
+    }
+    if (Ops::apply_embedded_waitcnt(state_, inst, arch_).failed()) {
       return util::Result::failure();
+    }
     const auto effects = register_effects(inst, arch_, options_.wave_size);
     apply_translation_ordering(effects, events);
-    if (check_dependencies(inst, effects, events, offset).failed())
+    if (check_dependencies(inst, effects, events, offset).failed()) {
       return util::Result::failure();
+    }
     RegisterSet async_defs;
     for (const auto &event : events) {
-      if (event.registers == TrackedRegisterSource::Defs)
+      if (event.registers == TrackedRegisterSource::Defs) {
         async_defs |= registers_for_event(event, effects);
-      if (add_event(event, effects, inst, offset).failed())
+      }
+      if (add_event(event, effects, inst, offset).failed()) {
         return util::Result::failure();
+      }
     }
     update_committed_registers(effects, async_defs);
     return util::Result::success();
@@ -288,27 +326,32 @@ private:
       for (const auto &event : pending) {
         std::optional<RegisterRef> reg;
         auto access = WaitcheckAccess::Read;
-        if (event.check_uses)
+        if (event.check_uses) {
           reg = first_intersection(event.regs - event.old_value_regs, effects.uses);
+        }
         if (!reg && event.check_defs) {
           // A visible old value can satisfy a read, but an outstanding memory
           // response can still overwrite a newer synchronous definition.
-          if (!ordered_waw(event, current, arch_))
+          if (!ordered_waw(event, current, arch_)) {
             reg = first_intersection(event.regs, effects.defs);
+          }
           access = WaitcheckAccess::Write;
         }
         if (!reg && event.check_exec_defs && effects.defs.contains({RegClass::EXEC, 0, 1})) {
           reg = RegisterRef{RegClass::EXEC, 0, 1};
           access = WaitcheckAccess::Write;
         }
-        if (!reg)
+        if (!reg) {
           continue;
+        }
         const auto count = Ops::dependency_required_count(state_, event, arch_);
-        if (count.failed())
+        if (count.failed()) {
           return util::Result::failure();
+        }
         auto wait = wait_expression(event.counter, count.value(), arch_);
-        if (wait.failed())
+        if (wait.failed()) {
           return util::Result::failure();
+        }
         report_.diagnostics.push_back({event.section_offset, offset, event.counter, *reg, access,
                                        count.value(), event.instruction, inst.disassemble(),
                                        std::move(wait).value()});
@@ -326,8 +369,9 @@ private:
     event.produces_regs = has_committed_generations(arch_) &&
                           classification.registers == TrackedRegisterSource::Defs &&
                           event.regs == vector_registers(event.regs);
-    if (event.produces_regs)
+    if (event.produces_regs) {
       event.old_value_regs = event.regs & (state_.ready_regs | local_ready_);
+    }
     event.check_uses = classification.check_uses;
     event.check_defs = classification.check_defs;
     event.check_exec_defs = classification.check_exec_defs;
@@ -335,15 +379,18 @@ private:
     event.section_offset = offset;
     event.instruction = inst.disassemble();
     const auto idx = Ops::counter_index(event.counter);
-    if (event.kind == WaitEventKind::Smem)
+    if (event.kind == WaitEventKind::Smem) {
       state_.pending_smem[idx] = true;
+    }
     const auto max_wait = Ops::maximum_dependency_wait(arch_, event.counter);
-    if (max_wait.failed())
+    if (max_wait.failed()) {
       return util::Result::failure();
+    }
     auto &ages = state_.pending_event_ages[idx].values;
     for (auto &age : ages) {
-      if (age != kNoPendingEventAge && age < max_wait.value())
+      if (age != kNoPendingEventAge && age < max_wait.value()) {
         ++age;
+      }
     }
     ages[static_cast<size_t>(event.kind)] = 0;
     const bool ordered_exp =
@@ -354,27 +401,32 @@ private:
          event.kind == WaitEventKind::ExportDualSourceBlend ||
          event.kind == WaitEventKind::LdsDirect);
     for (auto &pending : state_.pending[idx]) {
-      if (pending.min_younger < max_wait.value())
+      if (pending.min_younger < max_wait.value()) {
         ++pending.min_younger;
+      }
       if (ordered_exp && pending.kind == event.kind &&
-          pending.min_younger_in_fifo < max_wait.value())
+          pending.min_younger_in_fifo < max_wait.value()) {
         ++pending.min_younger_in_fifo;
+      }
     }
     // Counter-only operations must age older requests without accumulating a
     // dependency record of their own (notably long sequences of stores).
-    if (!event.regs.none() || event.check_exec_defs || event.special_reg)
+    if (!event.regs.none() || event.check_exec_defs || event.special_reg) {
       state_.pending[idx].push_back(std::move(event));
+    }
     return util::Result::success();
   }
 
   void update_committed_registers(const RegisterEffects &effects, const RegisterSet &async_defs) {
-    if (!has_committed_generations(arch_))
+    if (!has_committed_generations(arch_)) {
       return;
+    }
     RegisterSet unavailable;
     for (const auto &pending : state_.pending) {
       for (const auto &event : pending) {
-        if (event.produces_regs)
+        if (event.produces_regs) {
           unavailable |= event.regs - event.old_value_regs;
+        }
       }
     }
     local_ready_ |= vector_registers(effects.uses - unavailable);
@@ -382,8 +434,9 @@ private:
     state_.ready_regs |= synchronous;
     for (auto &pending : state_.pending) {
       for (auto &event : pending) {
-        if (event.produces_regs)
+        if (event.produces_regs) {
           event.old_value_regs |= event.regs & synchronous;
+        }
       }
     }
   }
@@ -401,17 +454,20 @@ private:
       Ops::apply_xcnt_wait(state_, 0);
       return;
     }
-    if (!vmem)
+    if (!vmem) {
       return;
+    }
     std::optional<uint32_t> count;
     for (const auto &event : state_.pending[Ops::counter_index(WaitCounterKind::X)]) {
-      if (Ops::is_xcnt_vmem_event(event) && event.regs.intersects(effects.defs))
+      if (Ops::is_xcnt_vmem_event(event) && event.regs.intersects(effects.defs)) {
         count = count ? std::min(*count, event.min_younger) : event.min_younger;
+      }
     }
     // A newer VMEM result cannot overwrite an older VMEM translation input
     // before that translation completes. Other outstanding inputs remain live.
-    if (count)
+    if (count) {
       Ops::apply_xcnt_wait(state_, *count);
+    }
   }
 };
 
@@ -433,26 +489,31 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
     return emit_error.emit() << "unsupported waitcheck architecture";
   }
   if ((options.wave_size != 32 && options.wave_size != 64) ||
-      (has_committed_generations(arch) && options.wave_size != 64))
+      (has_committed_generations(arch) && options.wave_size != 64)) {
     return emit_error.emit() << "invalid waitcheck wave size";
-  if (options.expert_scheduling && !amdgpu::supports_expert_scheduling(arch))
+  }
+  if (options.expert_scheduling && !amdgpu::supports_expert_scheduling(arch)) {
     return emit_error.emit() << "expert scheduling is unavailable on this architecture";
+  }
   WaitcheckStreamReport report;
   StreamAnalyzer analyzer{arch, options, report};
   size_t index = 0;
   while (index < words.size()) {
     const uint64_t offset = index * sizeof(uint32_t);
     auto decoded = decoder.decode_window(words.subspan(index), offset, emit_error);
-    if (decoded.failed())
+    if (decoded.failed()) {
       return util::Result::failure();
+    }
     const auto &inst = *decoded.value();
     auto events = waitcheck_detail::WaitcheckTarget::classify_events(inst, arch);
-    if (events.failed())
+    if (events.failed()) {
       return util::Result::failure();
+    }
     if (auto reason = deferred_reason(inst, events.value())) {
       if (is_control_flow_transfer(inst) &&
-          analyzer.check_control_flow_operands(inst, offset).failed())
+          analyzer.check_control_flow_operands(inst, offset).failed()) {
         return emit_error.emit() << "waitcheck dependency check failed at byte " << offset;
+      }
       report.incomplete = WaitcheckStreamStop{offset, inst.disassemble(), std::string(*reason)};
       break;
     }
@@ -462,12 +523,14 @@ util::FailureOr<WaitcheckStreamReport> analyze_stream(std::span<const uint32_t> 
         return event.counter == WaitCounterKind::VmVsrc || event.counter == WaitCounterKind::VaVdst;
       });
     }
-    if (analyzer.analyze(inst, events.value(), offset).failed())
+    if (analyzer.analyze(inst, events.value(), offset).failed()) {
       return emit_error.emit() << "waitcheck transfer failed at byte " << offset;
+    }
     ++report.instructions_analyzed;
     index += static_cast<size_t>(inst.size()) / sizeof(uint32_t);
-    if (is_program_path_terminator(inst))
+    if (is_program_path_terminator(inst)) {
       break;
+    }
   }
   return report;
 }
@@ -478,11 +541,13 @@ analyze_waitcheck_stream(std::span<const uint32_t> words, const IsaTargetRegistr
                          rj_code_target_id_t target, WaitcheckStreamOptions options,
                          const util::DiagnosticEmitter &emit_error) {
   const IsaTargetDescriptor *descriptor = registry.find(target);
-  if (!descriptor)
+  if (!descriptor) {
     return emit_error.emit() << "unknown waitcheck target";
+  }
   auto decoder = Decoder::create(registry, target);
-  if (!decoder)
+  if (!decoder) {
     return emit_error.emit() << "missing waitcheck ISA decoder";
+  }
   return analyze_stream(words, descriptor->family, *decoder, options, emit_error);
 }
 
@@ -491,8 +556,9 @@ analyze_waitcheck_stream(std::span<const uint32_t> words, rocjitsu::IsaFamily ar
                          WaitcheckStreamOptions options,
                          const util::DiagnosticEmitter &emit_error) {
   auto decoder = Decoder::create(arch);
-  if (!decoder)
+  if (!decoder) {
     return emit_error.emit() << "missing waitcheck ISA decoder";
+  }
   return analyze_stream(words, arch, *decoder, options, emit_error);
 }
 } // namespace rocjitsu

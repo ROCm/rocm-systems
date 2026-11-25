@@ -5,22 +5,26 @@
 #include "rocjitsu/code/consan/encoding.h"
 #include "util/diagnostic.h"
 
+#include <array>
 #include <fstream>
 #include <iostream>
 
 int main(int argc, char **argv) {
   using namespace rocjitsu::consan;
   using rocjitsu::FailureOr;
-  if (argc != 2)
+  if (argc != 2) {
     return 2;
+  }
   std::ifstream file(argv[1], std::ios::binary | std::ios::ate);
-  if (!file || file.tellg() < 0 || uint64_t(file.tellg()) > CaptureLimits{}.file_bytes)
+  if (!file || file.tellg() < 0 || uint64_t(file.tellg()) > CaptureLimits{}.file_bytes) {
     return 2;
+  }
   std::vector<uint8_t> bytes(static_cast<size_t>(file.tellg()));
   file.seekg(0);
   file.read(reinterpret_cast<char *>(bytes.data()), bytes.size());
-  if (!file)
+  if (!file) {
     return 2;
+  }
   util::StringDiagnostic error;
   const FailureOr<Capture> captured = decode_capture(bytes, error.emitter());
   if (captured.failed()) {
@@ -31,43 +35,60 @@ int main(int argc, char **argv) {
   const auto write_sites = [](const Manifest &manifest) {
     bool first_site = true;
     for (const SiteFacts &site : manifest.sites) {
-      if (!first_site)
+      if (!first_site) {
         std::cout << ',';
+      }
       first_site = false;
       std::cout << "{\"id\":" << site.id << ",\"access\":" << uint32_t(site.access)
                 << ",\"width\":" << site.width << ",\"original_offset\":" << site.original_offset
-                << ",\"guest_offset\":" << site.prepared_guest_offset << '}';
+                << ",\"guest_offset\":" << site.prepared_guest_offset;
+      if (is_dual(site.lds_ranges.shape)) {
+        std::cout << ",\"range_offsets\":[" << site.lds_ranges.byte_offset(0, site.width) << ','
+                  << site.lds_ranges.byte_offset(1, site.width) << ']';
+      }
+      if (is_transpose(site.lds_ranges.shape)) {
+        constexpr std::array<uint32_t, 4> bits{4, 6, 8, 16};
+        std::cout << ",\"transpose_bits\":"
+                  << bits[uint32_t(site.lds_ranges.shape) - uint32_t(LdsRangeShape::Transpose4)];
+      }
+      std::cout << '}';
     }
   };
   std::cout << "{\"execution_conditions\":" << capture.header.execution_conditions
             << ",\"sites\":[";
-  if (capture.header.image.entries.size() == 1 && capture.header.image.entries.front().selected)
+  if (capture.header.image.entries.size() == 1 && capture.header.image.entries.front().selected) {
     write_sites(*capture.header.image.entries.front().selected);
+  }
   std::cout << "],\"entries\":[";
   bool first = true;
   for (const ImageEntryFacts &entry : capture.header.image.entries) {
-    if (!first)
+    if (!first) {
       std::cout << ',';
+    }
     first = false;
     std::cout << "{\"entry_key\":" << entry.key
               << ",\"selected\":" << (entry.selected ? "true" : "false") << ",\"sites\":[";
-    if (entry.selected)
+    if (entry.selected) {
       write_sites(*entry.selected);
+    }
     std::cout << "]}";
   }
   std::cout << "],\"executions\":[";
   first = true;
   for (const CapturedExecution &execution : capture.executions) {
-    if (!first)
+    if (!first) {
       std::cout << ',';
+    }
     first = false;
     const Manifest *manifest = selected_manifest(capture.header.image, execution.entry_key);
-    if (manifest == nullptr)
+    if (manifest == nullptr) {
       return 2;
+    }
     const FailureOr<LaunchLayout> layout = plan_launch(
         *manifest, execution.dimensions, execution.group_bytes, execution.private_bytes);
-    if (layout.failed())
+    if (layout.failed()) {
       return 2;
+    }
     std::cout << "{\"serial\":" << execution.serial << ",\"slot\":" << execution.storage_slot
               << ",\"entry_key\":" << execution.entry_key
               << ",\"generation\":" << execution.storage_generation << ",\"report_address\":"
@@ -75,14 +96,16 @@ int main(int argc, char **argv) {
               << ",\"grid_x\":" << execution.dimensions.grid[0]
               << ",\"workgroup_size_x\":" << execution.dimensions.workgroup[0]
               << ",\"argument_u32\":";
-    if (const std::optional<uint32_t> argument = wire::read_u32(execution.arguments, 0))
+    if (const std::optional<uint32_t> argument = wire::read_u32(execution.arguments, 0)) {
       std::cout << *argument;
-    else
+    } else {
       std::cout << "null";
+    }
     std::cout << ",\"rows\":[";
     for (uint32_t wave = 0; wave < layout.value().wave_count; ++wave) {
-      if (wave != 0)
+      if (wave != 0) {
         std::cout << ',';
+      }
       const size_t row = kReportHeaderBytes + wave * layout.value().row_stride;
       std::cout << "{\"wave\":" << *wire::read_u32(execution.report, row + wire::kRowWave)
                 << ",\"workgroup_x\":"
@@ -99,13 +122,15 @@ int main(int argc, char **argv) {
                 << *wire::read_u32(execution.report, row + wire::kRowFinalPhase)
                 << ",\"completions\":[";
       bool first_completion = true;
-      if (!manifest->barriers.empty())
+      if (!manifest->barriers.empty()) {
         for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
           const size_t offset = row + sync_offset(manifest->sites.size()) + slot * kSyncRecordBytes;
-          if (wire::read_u32(execution.report, offset + wire::kSyncCommit) == 0)
+          if (wire::read_u32(execution.report, offset + wire::kSyncCommit) == 0) {
             continue;
-          if (!first_completion)
+          }
+          if (!first_completion) {
             std::cout << ',';
+          }
           first_completion = false;
           std::cout << "{\"commit\":"
                     << *wire::read_u32(execution.report, offset + wire::kSyncCommit)
@@ -119,6 +144,7 @@ int main(int argc, char **argv) {
                     << ",\"phase\":" << *wire::read_u32(execution.report, offset + wire::kSyncPhase)
                     << '}';
         }
+      }
       std::cout << ']' << ",\"records\":[";
       bool first_record = true;
       for (const SiteFacts &site : manifest->sites) {
@@ -126,10 +152,12 @@ int main(int argc, char **argv) {
           const size_t record =
               row + kRowHeaderBytes + (site.first_slot + address_group) * kAccessRecordBytes;
           const uint32_t commit = *wire::read_u32(execution.report, record + wire::kRecordCommit);
-          if (commit == 0)
+          if (commit == 0) {
             continue;
-          if (!first_record)
+          }
+          if (!first_record) {
             std::cout << ',';
+          }
           first_record = false;
           std::cout
               << "{\"commit\":" << commit
@@ -141,8 +169,12 @@ int main(int argc, char **argv) {
               << *wire::read_u32(execution.report, record + wire::kRecordLdsOffset)
               << ",\"width\":" << *wire::read_u32(execution.report, record + wire::kRecordWidth)
               << ",\"mask\":" << *wire::read_u64(execution.report, record + wire::kRecordGuestMask)
-              << ",\"flags\":" << *wire::read_u32(execution.report, record + wire::kRecordFlags)
-              << '}';
+              << ",\"flags\":" << *wire::read_u32(execution.report, record + wire::kRecordFlags);
+          if (is_transpose(site.lds_ranges.shape)) {
+            std::cout << ",\"anchor_exec\":"
+                      << *wire::read_u64(execution.report, record + wire::kRecordAnchorExec);
+          }
+          std::cout << '}';
         }
       }
       std::cout << "]}";

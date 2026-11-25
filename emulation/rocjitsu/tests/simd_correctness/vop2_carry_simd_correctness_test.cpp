@@ -1,21 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file vop2_carry_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the
-/// carry-bearing VOP2 instructions wired into SIMD_VOP2_CARRY:
-///   v_add_co_u32, v_sub_co_u32, v_subrev_co_u32,
-///   v_addc_co_u32, v_subb_co_u32, v_subbrev_co_u32.
-/// Unlike the plain binary VOP2 path these write per-lane carry/borrow into
-/// VCC, and the addc/subb/subbrev forms read VCC as a carry-in. Each op runs
-/// TWICE in the same process -- once forcing the scalar body, once the SIMD fast
-/// path, with identical seed/inputs/EXEC/VCC-in -- and the scalar-vs-SIMD
-/// equivalence on BOTH the 64-lane destination AND the full 64-bit VCC is
-/// asserted with EXPECT_EQ (util::set_force_scalar_for_testing flips the gate
-/// in-process). Inputs deliberately seed the
-/// 32-bit carry/borrow boundary (0xFFFFFFFF+1, a<b, a==b+cin, ...) on the low
-/// lanes — random-only inputs hide these corners. Inactive-lane carry-out VCC
-/// bits are zeroed under full and partial EXEC masks.
+// Compare decoded carry/borrow on scalar and SIMD CPU paths, including carry-in,
+// carry-out, boundary inputs and inactive lanes. Both results must agree bit for bit.
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
@@ -23,7 +10,6 @@
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"

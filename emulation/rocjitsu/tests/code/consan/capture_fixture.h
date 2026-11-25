@@ -70,13 +70,14 @@ inline void refresh_image(CaptureHeader &header) {
   header.image.prepared_text_bytes = first.prepared_text_bytes;
   std::vector<EntryKey> keys;
   for (ImageEntryFacts &entry : header.image.entries) {
-    if (!entry.selected)
+    if (!entry.selected) {
       continue;
+    }
     entry.key = entry.selected->entry.original_descriptor_offset;
     entry.binding = entry.selected->entry;
     keys.push_back(entry.key);
   }
-  header.image.selection_profile = selection_profile_digest(keys, first.scope);
+  header.image.selection_profile = selection_profile_digest(keys, first.scope, first.options);
 }
 
 inline CaptureHeader multi_entry_header() {

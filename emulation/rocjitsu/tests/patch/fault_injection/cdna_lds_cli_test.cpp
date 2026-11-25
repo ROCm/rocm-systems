@@ -43,19 +43,22 @@ protected:
   int run(std::vector<std::string> args) {
     args.insert(args.begin(), cli_);
     std::vector<char *> argv;
-    for (std::string &arg : args)
+    for (std::string &arg : args) {
       argv.push_back(arg.data());
+    }
     argv.push_back(nullptr);
     const pid_t pid = fork();
     if (pid == 0) {
       execv(argv[0], argv.data());
       _exit(127);
     }
-    if (pid < 0)
+    if (pid < 0) {
       return -1;
+    }
     int status = 0;
-    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status))
+    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) {
       return -1;
+    }
     return WEXITSTATUS(status);
   }
   std::vector<std::string> args() const {

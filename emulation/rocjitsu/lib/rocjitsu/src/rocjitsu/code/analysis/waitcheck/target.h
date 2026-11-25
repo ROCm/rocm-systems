@@ -28,8 +28,9 @@ using amdgpu::WaitFields;
 [[nodiscard]] inline util::FailureOr<std::string>
 wait_expression(WaitCounterKind counter, uint32_t required_count, rocjitsu::IsaFamily arch) {
   const auto model = amdgpu::waitcnt_model(arch);
-  if (model.failed())
+  if (model.failed()) {
     return util::Result::failure();
+  }
   std::ostringstream os;
   if (amdgpu::uses_legacy_waitcnt(model.value())) {
     switch (counter) {

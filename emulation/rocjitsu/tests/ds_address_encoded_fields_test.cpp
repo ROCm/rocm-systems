@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "ds_address_test_support.h"
+
 #include "rocjitsu/isa/arch/amdgpu/shared/ds_address_encoded_fields.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -24,12 +26,14 @@ struct Target {
   bool rdna;
   const char *name;
 };
-constexpr std::array<Target, 5> kTargets = {{
+constexpr std::array<Target, 7> kTargets = {{
+    {.id = ROCJITSU_CODE_TARGET_GFX1100, .rdna = true, .name = "Gfx1100"},
     {.id = ROCJITSU_CODE_TARGET_GFX1200, .rdna = true, .name = "Gfx1200"},
     {.id = ROCJITSU_CODE_TARGET_GFX1201, .rdna = true, .name = "Gfx1201"},
     {.id = ROCJITSU_CODE_TARGET_GFX942, .rdna = false, .name = "Gfx942"},
     {.id = ROCJITSU_CODE_TARGET_GFX950, .rdna = false, .name = "Gfx950"},
     {.id = ROCJITSU_CODE_TARGET_GFX1250, .rdna = true, .name = "Gfx1250"},
+    {.id = ROCJITSU_CODE_TARGET_GFX1251, .rdna = true, .name = "Gfx1251"},
 }};
 struct Fixture {
   std::array<uint32_t, 2> source;
@@ -85,37 +89,29 @@ TEST_P(DsAddressEncodedFields, ReplacesSingleAndTwoAddressFieldsLosslessly) {
   const Target &target = GetParam();
   std::unique_ptr<Decoder> decoder = Decoder::create(default_isa_target_registry(), target.id);
   ASSERT_TRUE(decoder);
-  const std::array<Fixture, 4> &fixtures = target.id == ROCJITSU_CODE_TARGET_GFX1250 ? kCdna5
-                                           : target.rdna                             ? kRdna
-                                                                                     : kCdna;
+  const std::array<Fixture, 4> &fixtures =
+      (target.id == ROCJITSU_CODE_TARGET_GFX1250 || target.id == ROCJITSU_CODE_TARGET_GFX1251)
+          ? kCdna5
+      : target.rdna ? kRdna
+                    : kCdna;
   for (const Fixture &fixture : fixtures) {
     SCOPED_TRACE(fixture.mnemonic);
     const std::optional<std::array<uint32_t, 2>> result =
         amdgpu::replace_ds_address_field(target.id, fixture.source, 6);
     EXPECT_TRUE(result);
-    if (!result)
+    if (!result) {
       continue;
+    }
     EXPECT_EQ(*result, fixture.expected);
+    EXPECT_TRUE(test_support::only_ds_address_changed(fixture.source, *result, 6));
     const DecodeResult before = decoder->decode_window(fixture.source);
     const DecodeResult after = decoder->decode_window(*result);
     ASSERT_TRUE(before.succeeded());
     ASSERT_TRUE(after.succeeded());
     EXPECT_EQ(before.value()->mnemonic(), fixture.mnemonic);
     EXPECT_EQ(after.value()->mnemonic(), fixture.mnemonic);
-    EXPECT_EQ(before.value()->size(), 8u);
-    EXPECT_EQ(after.value()->size(), 8u);
-    ASSERT_NE(before.value()->src_operand(0), nullptr);
-    EXPECT_EQ(before.value()->src_operand(0)->encoding_value(), 2);
-    ASSERT_NE(after.value()->src_operand(0), nullptr);
-    EXPECT_EQ(after.value()->src_operand(0)->encoding_value(), 6);
-    ASSERT_EQ(before.value()->num_src_operands(), after.value()->num_src_operands());
-    ASSERT_EQ(before.value()->num_dst_operands(), after.value()->num_dst_operands());
-    for (int i = 1; i < before.value()->num_src_operands(); ++i)
-      EXPECT_EQ(before.value()->src_operand(i)->encoding_value(),
-                after.value()->src_operand(i)->encoding_value());
-    for (int i = 0; i < before.value()->num_dst_operands(); ++i)
-      EXPECT_EQ(before.value()->dst_operand(i)->encoding_value(),
-                after.value()->dst_operand(i)->encoding_value());
+    ASSERT_NO_FATAL_FAILURE(
+        test_support::expect_ds_address_replacement(*before.value(), *after.value(), 2, 6));
   }
 }
 
@@ -142,7 +138,7 @@ TEST_P(DsAddressEncodedFields, PreservesAllNonAddressBitsAndRejectsInvalidInputs
   EXPECT_FALSE(amdgpu::replace_ds_address_field(target.id, source, UINT32_MAX));
   const std::array<uint32_t, 2> non_ds = {0xbf820000u, 0x01000302u};
   EXPECT_FALSE(amdgpu::replace_ds_address_field(target.id, non_ds, 6));
-  EXPECT_FALSE(amdgpu::replace_ds_address_field(ROCJITSU_CODE_TARGET_GFX1251, source, 6));
+  EXPECT_FALSE(amdgpu::replace_ds_address_field(ROCJITSU_CODE_TARGET_INVALID, source, 6));
   EXPECT_FALSE(amdgpu::replace_ds_address_field(ROCJITSU_CODE_TARGET_GFX90A, source, 6));
 }
 

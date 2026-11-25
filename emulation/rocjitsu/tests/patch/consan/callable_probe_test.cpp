@@ -84,8 +84,10 @@ TEST_P(ConSanCallableProbe, IntegerBookkeepingHasNoFloatingPointInstructions) {
       const std::string_view mnemonic = instruction.value()->mnemonic();
       // The call envelope does not save FP exception state. Check the compiled
       // body because integer source expressions can still lower to FP helpers.
-      for (const std::string_view format : {"_f4", "_f8", "_f16", "_f32", "_f64", "_bf8", "_bf16"})
+      for (const std::string_view format :
+           {"_f4", "_f8", "_f16", "_f32", "_f64", "_bf8", "_bf16"}) {
         EXPECT_EQ(mnemonic.find(format), std::string_view::npos) << mnemonic;
+      }
       cursor += instruction.value()->size() / sizeof(uint32_t);
     }
   }
