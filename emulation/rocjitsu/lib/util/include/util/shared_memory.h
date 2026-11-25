@@ -64,10 +64,9 @@
 ///   Operations" and "Bus Locking"; the AMD64 Architecture Programmer's
 ///   Manual, volume 2, on access atomicity).
 ///
-/// x86-64 is the only processor this has been established and tested for.
-/// The header compiles for any target on which the four widths are lock-free,
-/// but a port has to establish the last property for its processor before it
-/// maps memory that another party accesses at other widths.
+/// x86-64 is the only processor this has been established and tested for, so
+/// the header refuses to compile for any other. A port has to establish the
+/// last property for its processor before it lifts that check.
 ///
 /// A plain access (memcpy, std::copy, a dereference) to bytes that are also
 /// reached through this header is a data race in every model, and a libc
@@ -82,6 +81,10 @@
 
 #if !defined(__GNUC__) && !defined(__clang__)
 #error "util/shared_memory.h needs the GCC/Clang __atomic built-ins and may_alias"
+#endif
+
+#if !defined(__x86_64__)
+#error "util/shared_memory.h relies on x86-64 access atomicity; see the file comment before porting"
 #endif
 
 namespace util {

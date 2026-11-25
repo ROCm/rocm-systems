@@ -78,6 +78,7 @@ extern "C" {
 #include <format>
 #include <functional>
 #include <future>
+#include <latch>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -4504,6 +4505,162 @@ TEST_F(VfioDeviceHostGuestExchangeRace,
 
   EXPECT_EQ(refused.load(), 0u);
   EXPECT_EQ(split.load(), 0u) << "an aligned read saw part of a write";
+}
+
+// A cache line fill reads a whole line of guest RAM on the mapped path while
+// other device threads and the guest exchange, atomically store and plainly
+// write single words of it, with no lock in common. The fill loads the words it
+// is not waiting on all the same, so a plain copy on the mapped path races
+// each of those writers here, which a ThreadSanitizer build reports. In any
+// build the test checks what the fill may rely on with no lock: the words
+// nobody stores stay intact, each stored word is one of the values its writer
+// stored, in the order it stored them, and no store or exchange is lost.
+TEST_F(VfioDeviceHostGuestExchangeRace, LineFillsRaceExchangesAndStoresOfOtherWordsInTheLine) {
+  constexpr std::size_t kLineOffset = 0x400;
+  constexpr uint64_t kLine = kGuestAddress + kLineOffset;
+  constexpr std::size_t kLineBytes = 128;
+  constexpr std::size_t kExchangedQuadword = 0x18;
+  // The low half of a quadword whose high half nobody stores: a fill loads
+  // both halves at once, and an exchange of one must leave the other alone.
+  constexpr std::size_t kGuestExchangedWord = 0x30;
+  constexpr std::size_t kAtomicallyStored = 0x48;
+  constexpr std::size_t kPlainWord = 0x60;
+  constexpr std::size_t kPlainQuadword = 0x68;
+  constexpr uint32_t kRounds = 20000;
+  constexpr auto kComplete = simdojo::DmaAccessOutcome::Complete;
+  // The round in the low half and its complement in the high half, so that a
+  // value made of two different stores is told apart from either.
+  const auto quadword_of = [](uint32_t round) { return (uint64_t{~round} << 32) | round; };
+  const auto word_of = [](uint32_t round) {
+    return ((~round & 0xffffu) << 16) | (round & 0xffffu);
+  };
+  const auto round_of_quadword = [](uint64_t quadword) -> std::optional<uint32_t> {
+    const uint32_t round = static_cast<uint32_t>(quadword);
+    if (static_cast<uint32_t>(quadword >> 32) != ~round) {
+      return std::nullopt;
+    }
+    return round;
+  };
+  const auto round_of_word = [](uint32_t word) -> std::optional<uint32_t> {
+    if ((word >> 16) != (~word & 0xffffu)) {
+      return std::nullopt;
+    }
+    return word & 0xffffu;
+  };
+  struct Stored {
+    std::size_t offset;
+    std::size_t width;
+  };
+  constexpr std::array<Stored, 5> kStored{
+      Stored{kExchangedQuadword, sizeof(uint64_t)}, Stored{kGuestExchangedWord, sizeof(uint32_t)},
+      Stored{kAtomicallyStored, sizeof(uint64_t)}, Stored{kPlainWord, sizeof(uint32_t)},
+      Stored{kPlainQuadword, sizeof(uint64_t)}};
+  const auto line_at_round = [&](uint32_t round) {
+    std::vector<std::byte> line = backing_.expected(kLineOffset, kLineBytes);
+    for (const Stored &stored : kStored) {
+      const uint64_t value = stored.width == sizeof(uint64_t) ? quadword_of(round) : word_of(round);
+      std::memcpy(line.data() + stored.offset, &value, stored.width);
+    }
+    return line;
+  };
+  rocjitsu::VfioDeviceHost &host = served_.host();
+  const std::vector<std::byte> initial = line_at_round(0);
+  ASSERT_EQ(host.write_outcome(kLine, initial), kComplete);
+
+  std::latch start{1};
+  std::atomic<bool> stop{false};
+  std::atomic<uint32_t> refused{0};
+  std::atomic<uint32_t> lost{0};
+  std::atomic<uint32_t> disturbed{0};
+  std::atomic<uint32_t> torn{0};
+  std::atomic<uint32_t> reordered{0};
+  const auto count_unless = [](std::atomic<uint32_t> &counter, bool ok) {
+    if (!ok) {
+      counter.fetch_add(1, std::memory_order_relaxed);
+    }
+  };
+
+  std::vector<std::jthread> writers;
+  writers.emplace_back([&] {
+    start.wait();
+    for (uint32_t round = 1; round <= kRounds; ++round) {
+      const simdojo::DmaAtomicCompareExchangeResult exchanged = host.compare_exchange(
+          kLine + kExchangedQuadword, sizeof(uint64_t), quadword_of(round - 1), quadword_of(round));
+      count_unless(refused, exchanged.outcome == kComplete);
+      // Nothing else stores this word, so an exchange can only fail to find
+      // its own last value if something put an older one back.
+      count_unless(lost, exchanged.exchanged);
+    }
+  });
+  writers.emplace_back([&] {
+    std::byte *const word = backing_.guest_view(kLineOffset + kGuestExchangedWord);
+    start.wait();
+    for (uint32_t round = 1; round <= kRounds; ++round) {
+      uint64_t expected = word_of(round - 1);
+      count_unless(lost, util::shared_compare_exchange_word(word, sizeof(uint32_t), expected,
+                                                            word_of(round)));
+    }
+  });
+  writers.emplace_back([&] {
+    start.wait();
+    for (uint32_t round = 1; round <= kRounds; ++round) {
+      count_unless(refused, host.atomic_store(kLine + kAtomicallyStored, sizeof(uint64_t),
+                                              quadword_of(round)) == kComplete);
+    }
+  });
+  writers.emplace_back([&] {
+    start.wait();
+    for (uint32_t round = 1; round <= kRounds; ++round) {
+      const uint32_t word = word_of(round);
+      const uint64_t quadword = quadword_of(round);
+      count_unless(
+          refused,
+          host.write_outcome(kLine + kPlainWord, std::as_bytes(std::span(&word, 1))) == kComplete &&
+              host.write_outcome(kLine + kPlainQuadword, std::as_bytes(std::span(&quadword, 1))) ==
+                  kComplete);
+    }
+  });
+  std::jthread filler([&] {
+    std::vector<std::byte> line(kLineBytes);
+    std::array<uint32_t, kStored.size()> last_round{};
+    start.wait();
+    // Sampled before the fill, so that one more fill follows the last store.
+    for (bool last = false; !last;) {
+      last = stop.load();
+      if (host.read_outcome(kLine, line) != kComplete) {
+        count_unless(refused, false);
+        continue;
+      }
+      std::vector<std::byte> unstored = line;
+      for (std::size_t index = 0; index < kStored.size(); ++index) {
+        const Stored &stored = kStored[index];
+        uint64_t value = 0;
+        std::memcpy(&value, line.data() + stored.offset, stored.width);
+        const std::optional<uint32_t> round = stored.width == sizeof(uint64_t)
+                                                  ? round_of_quadword(value)
+                                                  : round_of_word(static_cast<uint32_t>(value));
+        count_unless(torn, round.has_value());
+        if (round) {
+          count_unless(reordered, *round >= last_round[index]);
+          last_round[index] = *round;
+        }
+        std::memcpy(unstored.data() + stored.offset, initial.data() + stored.offset, stored.width);
+      }
+      count_unless(disturbed, unstored == initial);
+    }
+  });
+  start.count_down();
+  writers.clear();
+  stop.store(true);
+  filler.join();
+
+  EXPECT_EQ(refused.load(), 0u);
+  EXPECT_EQ(lost.load(), 0u) << "an exchange did not find the value the one before it left";
+  EXPECT_EQ(disturbed.load(), 0u) << "a fill returned a changed byte that no thread stores";
+  EXPECT_EQ(torn.load(), 0u) << "a fill returned a word that no single store left";
+  EXPECT_EQ(reordered.load(), 0u) << "a fill returned an older value of a word than one before it";
+  backing_.expect_write(kLineOffset, line_at_round(kRounds));
+  EXPECT_TRUE(backing_.matches_expectation());
 }
 
 // A function bound to target grants never takes the mapped path. It copies
