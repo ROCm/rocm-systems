@@ -10,7 +10,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/prepared_canonical_writeback.h"
-#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/peer_memory_fabric.h"
 #include "rocjitsu/vm/topology_assembly.h"
 #include "rocjitsu/vm/virtual_machine.h"
 #include "util/diagnostic.h"
@@ -54,10 +54,10 @@ std::vector<config::SystemPeerRoute> fanout_routes() {
           {"g0", "g2", kRequester, kThird, {"e0", "sw", "e2"}}};
 }
 
-FabricEndpoint::EffectAdmission admit_local_test_effect() {
+PeerMemoryFabric::EffectAdmission admit_local_test_effect() {
   return [](const amdgpu::GpuBackingRange &, bool write, amdgpu::MemoryIngressPermit &) {
     EXPECT_TRUE(write);
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     authority.permit = amdgpu::MemoryIngressPermit([] {});
     return authority;
   };
@@ -354,22 +354,22 @@ private:
   std::array<std::byte, 2 * sizeof(uint32_t)> bytes_{};
 };
 
-TEST(FabricEndpointConfigTest, RejectsNullAndRepeatedCoherenceDomains) {
+TEST(PeerMemoryFabricConfigTest, RejectsNullAndRepeatedCoherenceDomains) {
   util::StringDiagnostic diagnostic;
-  EXPECT_EQ(FabricEndpoint::create({}, {nullptr}, diagnostic.emitter()), nullptr);
+  EXPECT_EQ(PeerMemoryFabric::create({}, {nullptr}, diagnostic.emitter()), nullptr);
   EXPECT_EQ(diagnostic.message(), "fabric coherence domains must be non-null and distinct");
   auto domain = std::make_shared<amdgpu::DeviceCacheCoherence>();
-  EXPECT_EQ(FabricEndpoint::create({}, {domain, domain}, diagnostic.emitter()), nullptr);
+  EXPECT_EQ(PeerMemoryFabric::create({}, {domain, domain}, diagnostic.emitter()), nullptr);
   EXPECT_EQ(diagnostic.message(), "fabric coherence domains must be non-null and distinct");
-  EXPECT_NE(FabricEndpoint::create({}, {domain}), nullptr);
+  EXPECT_NE(PeerMemoryFabric::create({}, {domain}), nullptr);
 }
 
-class FabricEndpointTest : public ::testing::Test {
+class PeerMemoryFabricTest : public ::testing::Test {
 protected:
   void SetUp() override {
     ASSERT_TRUE(backing_.valid());
     auto root = std::make_unique<simdojo::CompositeComponent>("root");
-    auto fabric = FabricEndpoint::create(fanout_routes());
+    auto fabric = PeerMemoryFabric::create(fanout_routes());
     ASSERT_NE(fabric, nullptr);
     endpoint_ = fabric.get();
     root->add_child(std::move(fabric));
@@ -393,17 +393,17 @@ protected:
 
   BackingFixture backing_;
   simdojo::SimulationEngine engine_{{.num_threads = 1}};
-  FabricEndpoint *endpoint_ = nullptr;
+  PeerMemoryFabric *endpoint_ = nullptr;
 };
 
-class FabricEndpointClockedTest : public ::testing::Test {
+class PeerMemoryFabricClockedTest : public ::testing::Test {
 protected:
   void SetUp() override {
     ASSERT_TRUE(backing_.valid());
     auto root = std::make_unique<simdojo::CompositeComponent>("root");
     std::vector<config::SystemPeerRoute> routes = {
         {"g0", "g1", kRequester, kOwner, {"e0", "sw", "e1"}}};
-    auto fabric = FabricEndpoint::create(std::move(routes));
+    auto fabric = PeerMemoryFabric::create(std::move(routes));
     ASSERT_NE(fabric, nullptr);
     endpoint_ = fabric.get();
     root->add_child(std::move(fabric));
@@ -433,15 +433,15 @@ protected:
 
   BackingFixture backing_;
   simdojo::SimulationEngine engine_{{.num_threads = 1}};
-  FabricEndpoint *endpoint_ = nullptr;
+  PeerMemoryFabric *endpoint_ = nullptr;
   bool stopped_ = false;
 };
 
-class FabricEndpointLocalTest : public ::testing::Test {
+class PeerMemoryFabricLocalTest : public ::testing::Test {
 protected:
   void SetUp() override {
     auto root = std::make_unique<simdojo::CompositeComponent>("root");
-    auto fabric = FabricEndpoint::create(std::vector<config::SystemPeerRoute>{});
+    auto fabric = PeerMemoryFabric::create(std::vector<config::SystemPeerRoute>{});
     ASSERT_NE(fabric, nullptr);
     endpoint_ = fabric.get();
     root->add_child(std::move(fabric));
@@ -457,10 +457,10 @@ protected:
   }
 
   simdojo::SimulationEngine engine_{{.num_threads = 1}};
-  FabricEndpoint *endpoint_ = nullptr;
+  PeerMemoryFabric *endpoint_ = nullptr;
 };
 
-class FabricEndpointCoherenceTest : public ::testing::Test {
+class PeerMemoryFabricCoherenceTest : public ::testing::Test {
 protected:
   void SetUp() override {
     memory_ = std::make_shared<amdgpu::GpuMemory>("peer_backing");
@@ -479,7 +479,7 @@ protected:
     std::vector<config::SystemPeerRoute> routes = {
         {"g0", "g1", kRequester, kOwner, {"e0", "sw", "e1"}}};
     auto fabric =
-        FabricEndpoint::create(std::move(routes), std::vector{requester_domain_, owner_domain_});
+        PeerMemoryFabric::create(std::move(routes), std::vector{requester_domain_, owner_domain_});
     ASSERT_NE(fabric, nullptr);
     endpoint_ = fabric.get();
     root->add_child(std::move(fabric));
@@ -512,13 +512,13 @@ protected:
   std::unique_ptr<amdgpu::L2Cache> requester_l2_;
   std::unique_ptr<amdgpu::L2Cache> owner_l2_;
   simdojo::SimulationEngine engine_{{.num_threads = 1}};
-  FabricEndpoint *endpoint_ = nullptr;
+  PeerMemoryFabric *endpoint_ = nullptr;
 };
 
 class FabricVmMemory final : public amdgpu::AddressSpaceTranslator,
                              public amdgpu::PhysicalMemoryAccess {
 public:
-  FabricVmMemory(FabricEndpoint &endpoint, const BackingFixture &backing)
+  FabricVmMemory(PeerMemoryFabric &endpoint, const BackingFixture &backing)
       : endpoint_(endpoint), backing_(backing) {}
 
   amdgpu::VmTranslationResult translate(uint64_t, size_t, amdgpu::VmAccessKind) const override {
@@ -570,11 +570,11 @@ public:
   }
 
 private:
-  FabricEndpoint &endpoint_;
+  PeerMemoryFabric &endpoint_;
   const BackingFixture &backing_;
 };
 
-TEST_F(FabricEndpointLocalTest, OwnerInboxWritesWithoutRouteOrWireMessages) {
+TEST_F(PeerMemoryFabricLocalTest, OwnerInboxWritesWithoutRouteOrWireMessages) {
   auto owner = std::make_shared<VectorBackingOwner>();
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   constexpr uint64_t kOffset = VectorBackingOwner::kBase + 4;
@@ -606,7 +606,7 @@ TEST_F(FabricEndpointLocalTest, OwnerInboxWritesWithoutRouteOrWireMessages) {
   EXPECT_EQ(owner->writes(), 1u);
 }
 
-TEST_F(FabricEndpointLocalTest, OwnerWriteRequiresMatchingBackingAndExtent) {
+TEST_F(PeerMemoryFabricLocalTest, OwnerWriteRequiresMatchingBackingAndExtent) {
   auto owner = std::make_shared<VectorBackingOwner>();
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   const std::array<std::byte, 4> payload{};
@@ -632,7 +632,7 @@ TEST_F(FabricEndpointLocalTest, OwnerWriteRequiresMatchingBackingAndExtent) {
   EXPECT_EQ(owner->writes(), 0u);
 }
 
-TEST_F(FabricEndpointLocalTest, RetryKeepsReservationUntilOwnerEffectFinishes) {
+TEST_F(PeerMemoryFabricLocalTest, RetryKeepsReservationUntilOwnerEffectFinishes) {
   auto owner = std::make_shared<VectorBackingOwner>();
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   const std::array<std::byte, 4> payload{std::byte{0x56}, std::byte{0x67}, std::byte{0x78},
@@ -642,7 +642,7 @@ TEST_F(FabricEndpointLocalTest, RetryKeepsReservationUntilOwnerEffectFinishes) {
   auto admit = [&](const amdgpu::GpuBackingRange &, bool write,
                    amdgpu::MemoryIngressPermit &reservation) {
     EXPECT_TRUE(write);
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     if (++admissions == 1) {
       EXPECT_FALSE(reservation);
       reservation = amdgpu::MemoryIngressPermit([&] { ++releases; });
@@ -675,7 +675,7 @@ TEST_F(FabricEndpointLocalTest, RetryKeepsReservationUntilOwnerEffectFinishes) {
   EXPECT_EQ(endpoint_->diagnostics().request_messages, 0u);
 }
 
-TEST_F(FabricEndpointLocalTest, QueuedCancellationAndShutdownNeverWriteBacking) {
+TEST_F(PeerMemoryFabricLocalTest, QueuedCancellationAndShutdownNeverWriteBacking) {
   auto owner = std::make_shared<VectorBackingOwner>();
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   const std::array<std::byte, 4> payload{std::byte{0x92}, std::byte{0x92}, std::byte{0x92},
@@ -701,7 +701,7 @@ TEST_F(FabricEndpointLocalTest, QueuedCancellationAndShutdownNeverWriteBacking) 
   EXPECT_EQ(endpoint_->diagnostics().effects, 0u);
 }
 
-TEST_F(FabricEndpointLocalTest, ShutdownWaitsForEnteredAdmissionAndReservation) {
+TEST_F(PeerMemoryFabricLocalTest, ShutdownWaitsForEnteredAdmissionAndReservation) {
   using namespace std::chrono_literals;
   auto owner = std::make_shared<VectorBackingOwner>();
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
@@ -717,7 +717,7 @@ TEST_F(FabricEndpointLocalTest, ShutdownWaitsForEnteredAdmissionAndReservation) 
     reservation = amdgpu::MemoryIngressPermit([&] { releases.fetch_add(1); });
     entered.set_value();
     continue_future.wait();
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     authority.outcome = amdgpu::VmAccessOutcome::Unavailable;
     return authority;
   };
@@ -760,7 +760,7 @@ TEST_F(FabricEndpointLocalTest, ShutdownWaitsForEnteredAdmissionAndReservation) 
   EXPECT_EQ(endpoint_->diagnostics().effects, 0u);
 }
 
-TEST_F(FabricEndpointTest, SwitchFanoutUsesDistinctBidirectionalEdgePorts) {
+TEST_F(PeerMemoryFabricTest, SwitchFanoutUsesDistinctBidirectionalEdgePorts) {
   // e0-sw, sw-e1, and sw-e2 each need their own request and response link.
   EXPECT_EQ(engine_.topology().links().size(), 6u);
   EXPECT_EQ(endpoint_->routes().size(), 2u);
@@ -769,7 +769,7 @@ TEST_F(FabricEndpointTest, SwitchFanoutUsesDistinctBidirectionalEdgePorts) {
   EXPECT_FALSE(endpoint_->can_route(kOwner, kThird));
 }
 
-TEST_F(FabricEndpointTest, OwnerEventSendsOneRequestAndResponseFromItsOwnThread) {
+TEST_F(PeerMemoryFabricTest, OwnerEventSendsOneRequestAndResponseFromItsOwnThread) {
   ASSERT_TRUE(endpoint_->enable_effect_trace(4));
   EXPECT_FALSE(endpoint_->enable_effect_trace(1));
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
@@ -897,7 +897,7 @@ TEST_F(FabricEndpointTest, OwnerEventSendsOneRequestAndResponseFromItsOwnThread)
   EXPECT_EQ(stats.effect_trace_dropped, 1u);
 }
 
-TEST_F(FabricEndpointTest, KfdLeaseSubviewsShareStorageAndEnforceTheRequestBounds) {
+TEST_F(PeerMemoryFabricTest, KfdLeaseSubviewsShareStorageAndEnforceTheRequestBounds) {
   const auto parent = fabric_lease(3, 8);
   ASSERT_TRUE(parent.storage);
   const std::array<std::byte, 8> initial{};
@@ -916,7 +916,7 @@ TEST_F(FabricEndpointTest, KfdLeaseSubviewsShareStorageAndEnforceTheRequestBound
   EXPECT_FALSE(parent.storage.subview(UINT64_MAX, 2));
 }
 
-TEST_F(FabricEndpointTest, NonKfdBackingRetainsOwnerAndBoundsReadWrite) {
+TEST_F(PeerMemoryFabricTest, NonKfdBackingRetainsOwnerAndBoundsReadWrite) {
   auto owner = std::make_shared<VectorBackingOwner>();
   std::weak_ptr<VectorBackingOwner> lifetime = owner;
   constexpr uint64_t kOffset = VectorBackingOwner::kBase + 5;
@@ -981,7 +981,7 @@ TEST_F(FabricEndpointTest, NonKfdBackingRetainsOwnerAndBoundsReadWrite) {
   EXPECT_EQ(endpoint_->diagnostics().effects, 2u);
 }
 
-TEST_F(FabricEndpointTest, ManualEndpointLeavesCacheableBackingUnmanaged) {
+TEST_F(PeerMemoryFabricTest, ManualEndpointLeavesCacheableBackingUnmanaged) {
   auto memory = std::make_shared<amdgpu::GpuMemory>("manual_peer_backing");
   auto owner = std::make_shared<CacheableBackingOwner>(memory);
   auto domain = std::make_shared<amdgpu::DeviceCacheCoherence>();
@@ -1010,7 +1010,7 @@ TEST_F(FabricEndpointTest, ManualEndpointLeavesCacheableBackingUnmanaged) {
   EXPECT_EQ(memory->read8(CacheableBackingOwner::kBase), 0x11);
 }
 
-TEST_F(FabricEndpointCoherenceTest, ReadPublishesDirtyCacheableOwnerBeforeBackingEffect) {
+TEST_F(PeerMemoryFabricCoherenceTest, ReadPublishesDirtyCacheableOwnerBeforeBackingEffect) {
   constexpr uint64_t kAddress = CacheableBackingOwner::kBase;
   constexpr uint64_t kRequesterAddress = kAddress + amdgpu::L2Cache::LINE_SIZE;
   memory_->write8(kAddress, 0x11);
@@ -1044,7 +1044,7 @@ TEST_F(FabricEndpointCoherenceTest, ReadPublishesDirtyCacheableOwnerBeforeBackin
   EXPECT_EQ(result[0], std::byte{0x5a});
 }
 
-TEST_F(FabricEndpointCoherenceTest, WriteInvalidatesBothLocalCacheableViewsBeforeReply) {
+TEST_F(PeerMemoryFabricCoherenceTest, WriteInvalidatesBothLocalCacheableViewsBeforeReply) {
   constexpr uint64_t kAddress = CacheableBackingOwner::kBase;
   memory_->write8(kAddress, 0x11);
   memory_->write8(kAddress + 1, 0x44);
@@ -1088,7 +1088,7 @@ TEST_F(FabricEndpointCoherenceTest, WriteInvalidatesBothLocalCacheableViewsBefor
   EXPECT_EQ(owner_->writes(), 1u);
 }
 
-TEST_F(FabricEndpointCoherenceTest, HostMappedHandshakeCannotHideMissingDataInvalidation) {
+TEST_F(PeerMemoryFabricCoherenceTest, HostMappedHandshakeCannotHideMissingDataInvalidation) {
   constexpr uint64_t kAddress = CacheableBackingOwner::kBase;
   constexpr uint64_t kReady = HostMappedControlMemory::kBase;
   constexpr uint64_t kDone = kReady + sizeof(uint32_t);
@@ -1140,7 +1140,7 @@ TEST_F(FabricEndpointCoherenceTest, HostMappedHandshakeCannotHideMissingDataInva
   EXPECT_EQ(endpoint_->diagnostics().effects, effects);
 }
 
-TEST_F(FabricEndpointCoherenceTest, PreflushFailureIsTerminalWithoutBackingEffect) {
+TEST_F(PeerMemoryFabricCoherenceTest, PreflushFailureIsTerminalWithoutBackingEffect) {
   constexpr uint64_t kAddress = CacheableBackingOwner::kBase;
   constexpr uint64_t kPreviouslyDirtyAddress = kAddress + amdgpu::L2Cache::LINE_SIZE;
   memory_->write8(kAddress, 0x11);
@@ -1188,7 +1188,7 @@ TEST_F(FabricEndpointCoherenceTest, PreflushFailureIsTerminalWithoutBackingEffec
   EXPECT_EQ(memory_->read8(kPreviouslyDirtyAddress), 0x77u);
 }
 
-TEST_F(FabricEndpointCoherenceTest, CancellationAfterPreflushReleasesEveryLease) {
+TEST_F(PeerMemoryFabricCoherenceTest, CancellationAfterPreflushReleasesEveryLease) {
   using namespace std::chrono_literals;
   constexpr uint64_t kAddress = CacheableBackingOwner::kBase;
   memory_->write8(kAddress, 0x11);
@@ -1234,7 +1234,7 @@ TEST_F(FabricEndpointCoherenceTest, CancellationAfterPreflushReleasesEveryLease)
   EXPECT_EQ(endpoint_->diagnostics().effects, 0u);
 }
 
-TEST_F(FabricEndpointTest, RejectedNonKfdWriteReportsFaultWithoutBackingEffect) {
+TEST_F(PeerMemoryFabricTest, RejectedNonKfdWriteReportsFaultWithoutBackingEffect) {
   ASSERT_TRUE(endpoint_->enable_effect_trace(2));
   auto owner = std::make_shared<VectorBackingOwner>();
   owner->reject_writes();
@@ -1259,7 +1259,7 @@ TEST_F(FabricEndpointTest, RejectedNonKfdWriteReportsFaultWithoutBackingEffect) 
   EXPECT_EQ(endpoint_->diagnostics().effect_trace_dropped, 0u);
 }
 
-TEST_F(FabricEndpointTest, MissingAndAmbiguousRoutesFaultBeforeSubmission) {
+TEST_F(PeerMemoryFabricTest, MissingAndAmbiguousRoutesFaultBeforeSubmission) {
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   auto missing = endpoint_->prepare_read(kThird, kOwner, fabric_lease(0, 4), gate);
   EXPECT_FALSE(missing);
@@ -1270,7 +1270,7 @@ TEST_F(FabricEndpointTest, MissingAndAmbiguousRoutesFaultBeforeSubmission) {
   ambiguous.push_back({"g0", "g1", kRequester, kOwner, {"e0", "alternate", "e1"}});
   simdojo::SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<simdojo::CompositeComponent>("root");
-  auto duplicate = FabricEndpoint::create(std::move(ambiguous));
+  auto duplicate = PeerMemoryFabric::create(std::move(ambiguous));
   ASSERT_NE(duplicate, nullptr);
   auto *endpoint = duplicate.get();
   root->add_child(std::move(duplicate));
@@ -1284,7 +1284,7 @@ TEST_F(FabricEndpointTest, MissingAndAmbiguousRoutesFaultBeforeSubmission) {
   EXPECT_EQ(endpoint->diagnostics().submissions, 0u);
 }
 
-TEST_F(FabricEndpointTest, OverlongManualRouteFailsClosedBeforeWiring) {
+TEST_F(PeerMemoryFabricTest, OverlongManualRouteFailsClosedBeforeWiring) {
   config::SystemPeerRoute route{"g0", "g1", kRequester, kOwner, {"e0"}};
   for (size_t i = 0; i < config::kMaxPeerRouteEndpoints - 1; ++i) {
     route.endpoints.push_back("sw" + std::to_string(i));
@@ -1294,7 +1294,7 @@ TEST_F(FabricEndpointTest, OverlongManualRouteFailsClosedBeforeWiring) {
 
   simdojo::SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<simdojo::CompositeComponent>("root");
-  auto fabric = FabricEndpoint::create(std::vector{std::move(route)});
+  auto fabric = PeerMemoryFabric::create(std::vector{std::move(route)});
   ASSERT_NE(fabric, nullptr);
   auto *endpoint = fabric.get();
   root->add_child(std::move(fabric));
@@ -1308,7 +1308,7 @@ TEST_F(FabricEndpointTest, OverlongManualRouteFailsClosedBeforeWiring) {
   EXPECT_EQ(denied.outcome, amdgpu::VmAccessOutcome::Faulted);
 }
 
-TEST_F(FabricEndpointTest, QueuedCancellationAndShutdownDrainWithoutEffect) {
+TEST_F(PeerMemoryFabricTest, QueuedCancellationAndShutdownDrainWithoutEffect) {
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   auto original = lease(24, 4);
   ASSERT_TRUE(original);
@@ -1334,7 +1334,7 @@ TEST_F(FabricEndpointTest, QueuedCancellationAndShutdownDrainWithoutEffect) {
   EXPECT_EQ(endpoint_->diagnostics().effects, 0u);
 }
 
-TEST_F(FabricEndpointTest, ResetRejectsAnOldPreparedRequest) {
+TEST_F(PeerMemoryFabricTest, ResetRejectsAnOldPreparedRequest) {
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   auto old = endpoint_->prepare_read(kRequester, kOwner, fabric_lease(32, 4), gate);
   ASSERT_TRUE(old);
@@ -1355,7 +1355,7 @@ TEST_F(FabricEndpointTest, ResetRejectsAnOldPreparedRequest) {
   EXPECT_EQ(endpoint_->diagnostics().effects, 1u);
 }
 
-TEST_F(FabricEndpointTest, ShutdownWaitsForAnEnteredTargetEffect) {
+TEST_F(PeerMemoryFabricTest, ShutdownWaitsForAnEnteredTargetEffect) {
   using namespace std::chrono_literals;
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   auto original = lease(40, 4);
@@ -1403,7 +1403,7 @@ TEST_F(FabricEndpointTest, ShutdownWaitsForAnEnteredTargetEffect) {
   EXPECT_EQ(endpoint_->diagnostics().effects, 1u);
 }
 
-TEST_F(FabricEndpointTest, CancellationDuringTargetProbePreventsBackingEffect) {
+TEST_F(PeerMemoryFabricTest, CancellationDuringTargetProbePreventsBackingEffect) {
   using namespace std::chrono_literals;
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   auto backing = lease(44, 4);
@@ -1439,7 +1439,7 @@ TEST_F(FabricEndpointTest, CancellationDuringTargetProbePreventsBackingEffect) {
   EXPECT_EQ(endpoint_->diagnostics().effects, 0u);
 }
 
-TEST_F(FabricEndpointClockedTest, RequestAndResponseAccumulateEveryLinkLatency) {
+TEST_F(PeerMemoryFabricClockedTest, RequestAndResponseAccumulateEveryLinkLatency) {
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   std::array<std::byte, 4> payload{std::byte{0x12}, std::byte{0x23}, std::byte{0x34},
                                    std::byte{0x45}};
@@ -1470,7 +1470,7 @@ TEST_F(FabricEndpointClockedTest, RequestAndResponseAccumulateEveryLinkLatency) 
   EXPECT_EQ(endpoint_->diagnostics().effects, 1u);
 }
 
-TEST_F(FabricEndpointClockedTest, RequestReservationSurvivesAdmissionRetryUntilEffectReply) {
+TEST_F(PeerMemoryFabricClockedTest, RequestReservationSurvivesAdmissionRetryUntilEffectReply) {
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   const std::array<std::byte, 4> payload{std::byte{0x37}, std::byte{0x37}, std::byte{0x37},
                                          std::byte{0x37}};
@@ -1480,7 +1480,7 @@ TEST_F(FabricEndpointClockedTest, RequestReservationSurvivesAdmissionRetryUntilE
                    amdgpu::MemoryIngressPermit &reservation) {
     EXPECT_TRUE(write);
     ++admissions;
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     if (admissions == 1) {
       EXPECT_FALSE(reservation);
       reservation = amdgpu::MemoryIngressPermit([&] { ++releases; });
@@ -1522,7 +1522,7 @@ TEST_F(FabricEndpointClockedTest, RequestReservationSurvivesAdmissionRetryUntilE
   EXPECT_TRUE(std::equal(payload.begin(), payload.end(), lease(132, 4).bytes().begin()));
 }
 
-TEST_F(FabricEndpointClockedTest, PreEffectRefusalRetriesBeforeEffectAdmissionOrBacking) {
+TEST_F(PeerMemoryFabricClockedTest, PreEffectRefusalRetriesBeforeEffectAdmissionOrBacking) {
   auto owner = std::make_shared<VectorBackingOwner>();
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   constexpr uint64_t kOffset = VectorBackingOwner::kBase + 4;
@@ -1543,7 +1543,7 @@ TEST_F(FabricEndpointClockedTest, PreEffectRefusalRetriesBeforeEffectAdmissionOr
                           amdgpu::MemoryIngressPermit &) {
     EXPECT_TRUE(write);
     ++effect_admissions;
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     authority.permit = amdgpu::MemoryIngressPermit([] {});
     return authority;
   };
@@ -1577,7 +1577,7 @@ TEST_F(FabricEndpointClockedTest, PreEffectRefusalRetriesBeforeEffectAdmissionOr
   EXPECT_TRUE(std::equal(payload.begin(), payload.end(), owner->bytes_for_testing().begin() + 4));
 }
 
-TEST_F(FabricEndpointClockedTest, PreEffectPermitOutlivesCancelledTokenThroughTargetHandler) {
+TEST_F(PeerMemoryFabricClockedTest, PreEffectPermitOutlivesCancelledTokenThroughTargetHandler) {
   using namespace std::chrono_literals;
   auto owner = std::make_shared<VectorBackingOwner>();
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
@@ -1602,7 +1602,7 @@ TEST_F(FabricEndpointClockedTest, PreEffectPermitOutlivesCancelledTokenThroughTa
     EXPECT_FALSE(write);
     entered_validation.set_value();
     validation_continued.wait();
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     authority.permit = amdgpu::MemoryIngressPermit([] {});
     return authority;
   };
@@ -1659,7 +1659,7 @@ TEST_F(FabricEndpointClockedTest, PreEffectPermitOutlivesCancelledTokenThroughTa
   EXPECT_EQ(endpoint_->diagnostics().effects, 0u);
 }
 
-TEST_F(FabricEndpointClockedTest, CommittedReservedWriteReconcilesOnceBeforeReply) {
+TEST_F(PeerMemoryFabricClockedTest, CommittedReservedWriteReconcilesOnceBeforeReply) {
   auto owner = std::make_shared<VectorBackingOwner>();
   constexpr uint64_t kOffset = VectorBackingOwner::kBase + 4;
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
@@ -1673,7 +1673,7 @@ TEST_F(FabricEndpointClockedTest, CommittedReservedWriteReconcilesOnceBeforeRepl
     EXPECT_FALSE(reservation);
     ++admissions;
     reservation = amdgpu::MemoryIngressPermit([&] { ++releases; });
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     authority.permit = amdgpu::MemoryIngressPermit([] {});
     return authority;
   };
@@ -1706,7 +1706,7 @@ TEST_F(FabricEndpointClockedTest, CommittedReservedWriteReconcilesOnceBeforeRepl
   EXPECT_TRUE(std::equal(payload.begin(), payload.end(), written.begin() + 4));
 }
 
-TEST_F(FabricEndpointClockedTest, CancellationAndShutdownWaitForActiveReservationHandler) {
+TEST_F(PeerMemoryFabricClockedTest, CancellationAndShutdownWaitForActiveReservationHandler) {
   using namespace std::chrono_literals;
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   const std::array<std::byte, 4> payload{std::byte{0x48}, std::byte{0x48}, std::byte{0x48},
@@ -1721,7 +1721,7 @@ TEST_F(FabricEndpointClockedTest, CancellationAndShutdownWaitForActiveReservatio
     reservation = amdgpu::MemoryIngressPermit([&] { releases.fetch_add(1); });
     entered.set_value();
     continue_future.wait();
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     authority.outcome = amdgpu::VmAccessOutcome::Unavailable;
     return authority;
   };
@@ -1763,7 +1763,7 @@ TEST_F(FabricEndpointClockedTest, CancellationAndShutdownWaitForActiveReservatio
   EXPECT_EQ(lease(136, 4).bytes()[0], std::byte{0});
 }
 
-TEST_F(FabricEndpointClockedTest, VmInvalidationReconcilesCommittedWriteBeforeReply) {
+TEST_F(PeerMemoryFabricClockedTest, VmInvalidationReconcilesCommittedWriteBeforeReply) {
   auto memory = std::make_shared<FabricVmMemory>(*endpoint_, backing_);
   amdgpu::GpuVm vm;
   const auto handle = vm.register_translated(7, memory, memory);
@@ -1790,7 +1790,7 @@ TEST_F(FabricEndpointClockedTest, VmInvalidationReconcilesCommittedWriteBeforeRe
   EXPECT_TRUE(std::equal(source.begin(), source.end(), lease(96, 4).bytes().begin()));
 }
 
-TEST_F(FabricEndpointClockedTest, VmInvalidationRetainsReadBytesFromTargetEffect) {
+TEST_F(PeerMemoryFabricClockedTest, VmInvalidationRetainsReadBytesFromTargetEffect) {
   auto memory = std::make_shared<FabricVmMemory>(*endpoint_, backing_);
   amdgpu::GpuVm vm;
   const auto handle = vm.register_translated(7, memory, memory);
@@ -1818,7 +1818,7 @@ TEST_F(FabricEndpointClockedTest, VmInvalidationRetainsReadBytesFromTargetEffect
                                               std::byte{0x33}}));
 }
 
-TEST_F(FabricEndpointClockedTest, VmInvalidationRevokesQueuedWriteWithoutEffect) {
+TEST_F(PeerMemoryFabricClockedTest, VmInvalidationRevokesQueuedWriteWithoutEffect) {
   auto memory = std::make_shared<FabricVmMemory>(*endpoint_, backing_);
   amdgpu::GpuVm vm;
   const auto handle = vm.register_translated(7, memory, memory);
@@ -1840,7 +1840,7 @@ TEST_F(FabricEndpointClockedTest, VmInvalidationRevokesQueuedWriteWithoutEffect)
   EXPECT_EQ(lease(112, 4).bytes()[0], std::byte{0});
 }
 
-TEST_F(FabricEndpointClockedTest, EnteredEffectRemainsPendingUntilPublished) {
+TEST_F(PeerMemoryFabricClockedTest, EnteredEffectRemainsPendingUntilPublished) {
   using namespace std::chrono_literals;
   auto memory = std::make_shared<FabricVmMemory>(*endpoint_, backing_);
   amdgpu::GpuVm vm;
@@ -1897,7 +1897,7 @@ TEST_F(FabricEndpointClockedTest, EnteredEffectRemainsPendingUntilPublished) {
   EXPECT_EQ(lease(120, 4).bytes()[0], std::byte{0x5b});
 }
 
-TEST_F(FabricEndpointClockedTest, ShutdownRetainsCommittedReadResponse) {
+TEST_F(PeerMemoryFabricClockedTest, ShutdownRetainsCommittedReadResponse) {
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   auto backing = lease(72, 4);
   ASSERT_TRUE(backing);
@@ -1920,7 +1920,7 @@ TEST_F(FabricEndpointClockedTest, ShutdownRetainsCommittedReadResponse) {
                                               std::byte{0x33}}));
 }
 
-TEST_F(FabricEndpointClockedTest, ShutdownRetainsCommittedWriteButDropsQueuedWrite) {
+TEST_F(PeerMemoryFabricClockedTest, ShutdownRetainsCommittedWriteButDropsQueuedWrite) {
   auto gate = std::make_shared<amdgpu::VmTransferEffectGate>();
   std::array<std::byte, 4> payload{std::byte{0x55}, std::byte{0x55}, std::byte{0x55},
                                    std::byte{0x55}};
@@ -1945,7 +1945,7 @@ TEST_F(FabricEndpointClockedTest, ShutdownRetainsCommittedWriteButDropsQueuedWri
   EXPECT_EQ(endpoint_->diagnostics().directed_effects[0].write_bytes, payload.size());
 }
 
-class FabricEndpointAssemblyCoherenceTest : public ::testing::Test {
+class PeerMemoryFabricAssemblyCoherenceTest : public ::testing::Test {
 protected:
   void SetUp() override {
     auto loaded = load_assembly_config(assembly_coherence_config());
@@ -1954,7 +1954,7 @@ protected:
                                           /*daemon_mode=*/false);
     ASSERT_NE(machine_, nullptr);
     ASSERT_EQ(machine_->num_socs(), 2u);
-    endpoint_ = machine_->fabric_endpoint();
+    endpoint_ = machine_->peer_memory_fabric();
     ASSERT_NE(endpoint_, nullptr);
     ASSERT_TRUE(engine_.create().succeeded());
     engine_.register_as_primary();
@@ -1984,12 +1984,12 @@ protected:
 
   simdojo::SimulationEngine engine_{{.num_threads = 1}};
   VirtualMachine *machine_ = nullptr;
-  FabricEndpoint *endpoint_ = nullptr;
+  PeerMemoryFabric *endpoint_ = nullptr;
   std::shared_ptr<CacheableBackingOwner> owner_;
   bool started_ = false;
 };
 
-TEST_F(FabricEndpointAssemblyCoherenceTest,
+TEST_F(PeerMemoryFabricAssemblyCoherenceTest,
        PeerReadPublishesOwnerDirtyL2WithoutGuestHdpMaintenance) {
   SoC *requester_soc = machine_->soc(0);
   SoC *owner_soc = machine_->soc(1);
@@ -2058,7 +2058,7 @@ TEST_F(FabricEndpointAssemblyCoherenceTest,
   EXPECT_EQ(write.operation->poll({}), amdgpu::VmAccessOutcome::Complete);
 }
 
-TEST(FabricEndpointAssemblyTest, RejectsInvalidWritebackGpuIdentityAndClearsTopology) {
+TEST(PeerMemoryFabricAssemblyTest, RejectsInvalidWritebackGpuIdentityAndClearsTopology) {
   for (uint32_t gpu_id : {0u, kRequester}) {
     SCOPED_TRACE(gpu_id);
     auto loaded = load_assembly_config(assembly_config(kLocalSwitchManifest));
@@ -2080,7 +2080,7 @@ TEST(FabricEndpointAssemblyTest, RejectsInvalidWritebackGpuIdentityAndClearsTopo
   }
 }
 
-TEST(FabricEndpointAssemblyTest, RetainsExplicitLocalRouteAfterLoadedConfigIsReleased) {
+TEST(PeerMemoryFabricAssemblyTest, RetainsExplicitLocalRouteAfterLoadedConfigIsReleased) {
   simdojo::Topology topology;
   VirtualMachine *machine = nullptr;
   {
@@ -2103,7 +2103,7 @@ TEST(FabricEndpointAssemblyTest, RetainsExplicitLocalRouteAfterLoadedConfigIsRel
   EXPECT_EQ(routes[0].target_gpu_id, kOwner);
   EXPECT_EQ(routes[0].endpoints, (std::vector<std::string>{"e0", "sw", "e1"}));
 
-  const auto *fabric = machine->fabric_endpoint();
+  const auto *fabric = machine->peer_memory_fabric();
   ASSERT_NE(fabric, nullptr);
   ASSERT_EQ(fabric->routes().size(), 1u);
   EXPECT_EQ(fabric->routes()[0].endpoints, routes[0].endpoints);
@@ -2111,13 +2111,13 @@ TEST(FabricEndpointAssemblyTest, RetainsExplicitLocalRouteAfterLoadedConfigIsRel
   EXPECT_EQ(topology.links().size(), 4u); // two physical edges in both directions
 }
 
-TEST(FabricEndpointAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForScopedEffect) {
+TEST(PeerMemoryFabricAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForScopedEffect) {
   auto loaded = load_assembly_config(assembly_config());
   simdojo::SimulationEngine engine{{.num_threads = 1}};
   VirtualMachine *machine =
       assemble_topology_or_throw(loaded, engine.topology(), /*daemon_mode=*/false);
   ASSERT_NE(machine, nullptr);
-  FabricEndpoint *endpoint = machine->fabric_endpoint();
+  PeerMemoryFabric *endpoint = machine->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   ASSERT_TRUE(endpoint->routes().empty());
   auto domain = machine->soc(0)->cache_coherence();
@@ -2133,7 +2133,7 @@ TEST(FabricEndpointAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForS
   auto admit = [domain, &resolved_dirty_line](const amdgpu::GpuBackingRange &, bool write,
                                               amdgpu::MemoryIngressPermit &) {
     EXPECT_TRUE(write);
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     authority.permit = amdgpu::MemoryIngressPermit([] {});
     authority.cache_aliases.push_back({.domain = {domain, kRequester},
                                        .vmid = 1,
@@ -2168,13 +2168,13 @@ TEST(FabricEndpointAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForS
   engine.shutdown();
 }
 
-TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCommitsOnce) {
+TEST(PeerMemoryFabricAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCommitsOnce) {
   auto loaded = load_assembly_config(assembly_config());
   simdojo::SimulationEngine engine{{.num_threads = 1}};
   VirtualMachine *machine =
       assemble_topology_or_throw(loaded, engine.topology(), /*daemon_mode=*/false);
   ASSERT_NE(machine, nullptr);
-  FabricEndpoint *endpoint = machine->fabric_endpoint();
+  PeerMemoryFabric *endpoint = machine->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   auto domain = machine->soc(0)->cache_coherence();
   ASSERT_NE(domain, nullptr);
@@ -2210,7 +2210,7 @@ TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCo
     if (!reservation) {
       reservation = amdgpu::MemoryIngressPermit([&] { ++reservation_releases; });
     }
-    FabricEndpoint::EffectAuthority authority;
+    PeerMemoryFabric::EffectAuthority authority;
     authority.permit = amdgpu::MemoryIngressPermit([&] { ++authority_releases; });
     authority.cache_aliases.push_back({.domain = {domain, kRequester},
                                        .vmid = kVmid,
@@ -2257,7 +2257,7 @@ TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCo
   engine.shutdown();
 }
 
-TEST(FabricEndpointAssemblyTest, LegacyAndRemoteSharedSwitchInstallRouteFreeOwnerEndpoint) {
+TEST(PeerMemoryFabricAssemblyTest, LegacyAndRemoteSharedSwitchInstallRouteFreeOwnerEndpoint) {
   simdojo::Topology legacy_topology;
   VirtualMachine *legacy_machine = nullptr;
   {
@@ -2267,9 +2267,9 @@ TEST(FabricEndpointAssemblyTest, LegacyAndRemoteSharedSwitchInstallRouteFreeOwne
   }
   ASSERT_NE(legacy_machine, nullptr);
   EXPECT_TRUE(legacy_machine->peer_routes().routes().empty());
-  ASSERT_NE(legacy_machine->fabric_endpoint(), nullptr);
-  EXPECT_TRUE(legacy_machine->fabric_endpoint()->routes().empty());
-  EXPECT_TRUE(legacy_machine->fabric_endpoint()->children().empty());
+  ASSERT_NE(legacy_machine->peer_memory_fabric(), nullptr);
+  EXPECT_TRUE(legacy_machine->peer_memory_fabric()->routes().empty());
+  EXPECT_TRUE(legacy_machine->peer_memory_fabric()->children().empty());
   EXPECT_TRUE(legacy_topology.links().empty());
 
   simdojo::Topology remote_topology;
@@ -2283,9 +2283,9 @@ TEST(FabricEndpointAssemblyTest, LegacyAndRemoteSharedSwitchInstallRouteFreeOwne
   }
   ASSERT_NE(remote_machine, nullptr);
   EXPECT_TRUE(remote_machine->peer_routes().routes().empty());
-  ASSERT_NE(remote_machine->fabric_endpoint(), nullptr);
-  EXPECT_TRUE(remote_machine->fabric_endpoint()->routes().empty());
-  EXPECT_TRUE(remote_machine->fabric_endpoint()->children().empty());
+  ASSERT_NE(remote_machine->peer_memory_fabric(), nullptr);
+  EXPECT_TRUE(remote_machine->peer_memory_fabric()->routes().empty());
+  EXPECT_TRUE(remote_machine->peer_memory_fabric()->children().empty());
   EXPECT_TRUE(remote_topology.links().empty());
 }
 

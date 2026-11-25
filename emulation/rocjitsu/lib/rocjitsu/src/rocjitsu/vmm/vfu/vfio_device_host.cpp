@@ -4,7 +4,7 @@
 #include "rocjitsu/vmm/vfu/vfio_device_host.h"
 
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
-#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/peer_memory_fabric.h"
 #include "rocjitsu/vmm/vfu/bus_plan.h"
 #include "rocjitsu/vmm/vfu/vfio_target_grants.h"
 
@@ -385,7 +385,7 @@ VfioDeviceHost::ClientSnapshot VfioDeviceHost::client_snapshot() const {
 }
 
 bool VfioDeviceHost::enable_target_grants(VfioTargetGrants &grants, uint32_t ordinal,
-                                          uint32_t gpu_id, FabricEndpoint *fabric) {
+                                          uint32_t gpu_id, PeerMemoryFabric *fabric) {
   const std::lock_guard lock(state_mutex_);
   if (ctx_ != nullptr || target_grants_ != nullptr || quiesce_wake_->fd() < 0 ||
       !grants.bind(ordinal, *this, gpu_id)) {
@@ -431,7 +431,7 @@ VfioDeviceHost::prepare_peer_read(uint64_t requester_generation, uint64_t iova, 
     return terminal_peer_token(length, amdgpu::VmAccessOutcome::Faulted);
   }
   auto snapshot = std::move(prepared.snapshot);
-  const FabricEndpoint::TraceOrigin trace_origin{
+  const PeerMemoryFabric::TraceOrigin trace_origin{
       .map_id = snapshot.map_id, .gpu_va = gpu_va, .iova = iova};
   const uint32_t owner_gpu_id = snapshot.owner_gpu_id;
   auto backing = snapshot.retain_backing_range();
@@ -442,17 +442,17 @@ VfioDeviceHost::prepare_peer_read(uint64_t requester_generation, uint64_t iova, 
                     gpu_va, iova, length](const amdgpu::GpuBackingRange &, bool write,
                                           amdgpu::MemoryIngressPermit &) {
     if (write) {
-      return FabricEndpoint::EffectAuthority(
+      return PeerMemoryFabric::EffectAuthority(
           {.outcome = amdgpu::VmAccessOutcome::Revoked, .permit = {}});
     }
     const amdgpu::VmAccessOutcome outcome = captured_access.validate_deferred_system_span(
         gpu_va, iova, length, amdgpu::VmAccessKind::Read, selected);
     if (outcome != amdgpu::VmAccessOutcome::Complete) {
-      return FabricEndpoint::EffectAuthority({.outcome = outcome, .permit = {}});
+      return PeerMemoryFabric::EffectAuthority({.outcome = outcome, .permit = {}});
     }
-    return FabricEndpoint::EffectAuthority(captured_admission());
+    return PeerMemoryFabric::EffectAuthority(captured_admission());
   };
-  FabricEndpoint::PreEffectAdmission admit_pt = [captured_access, expected = *pt_epoch] {
+  PeerMemoryFabric::PreEffectAdmission admit_pt = [captured_access, expected = *pt_epoch] {
     return captured_access.admit_pt_rewalk(expected);
   };
   auto transfer = fabric_->prepare_read(target_gpu_id_, owner_gpu_id, std::move(backing), gate,
@@ -493,7 +493,7 @@ VfioDeviceHost::prepare_peer_write(uint64_t requester_generation, uint64_t iova,
     return terminal_peer_token(bytes.size(), amdgpu::VmAccessOutcome::Faulted);
   }
   auto snapshot = std::move(prepared.snapshot);
-  const FabricEndpoint::TraceOrigin trace_origin{
+  const PeerMemoryFabric::TraceOrigin trace_origin{
       .map_id = snapshot.map_id, .gpu_va = gpu_va, .iova = iova};
   const uint32_t owner_gpu_id = snapshot.owner_gpu_id;
   auto backing = snapshot.retain_backing_range();
@@ -504,17 +504,17 @@ VfioDeviceHost::prepare_peer_write(uint64_t requester_generation, uint64_t iova,
                     gpu_va, iova, length = bytes.size()](
                        const amdgpu::GpuBackingRange &, bool write, amdgpu::MemoryIngressPermit &) {
     if (!write) {
-      return FabricEndpoint::EffectAuthority(
+      return PeerMemoryFabric::EffectAuthority(
           {.outcome = amdgpu::VmAccessOutcome::Revoked, .permit = {}});
     }
     const amdgpu::VmAccessOutcome outcome = captured_access.validate_deferred_system_span(
         gpu_va, iova, length, amdgpu::VmAccessKind::Write, selected);
     if (outcome != amdgpu::VmAccessOutcome::Complete) {
-      return FabricEndpoint::EffectAuthority({.outcome = outcome, .permit = {}});
+      return PeerMemoryFabric::EffectAuthority({.outcome = outcome, .permit = {}});
     }
-    return FabricEndpoint::EffectAuthority(captured_admission());
+    return PeerMemoryFabric::EffectAuthority(captured_admission());
   };
-  FabricEndpoint::PreEffectAdmission admit_pt = [captured_access, expected = *pt_epoch] {
+  PeerMemoryFabric::PreEffectAdmission admit_pt = [captured_access, expected = *pt_epoch] {
     return captured_access.admit_pt_rewalk(expected);
   };
   auto transfer =

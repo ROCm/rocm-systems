@@ -38,7 +38,7 @@
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
-#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/peer_memory_fabric.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/rj_vm.h"
 #include "rocjitsu/vm/rj_vm_impl.h"
@@ -3613,7 +3613,7 @@ TEST_F(KfdPeerBindingTest, ProductionProviderPublishesTwoDirtyPeerRunsBeforeFabr
       process->gpu_peer_backing_grant(kRequester, allocation.va_addr + kFirstDirtyOffset, 1)
           .backing.retain_backing_range();
   ASSERT_TRUE(effect_backing.storage);
-  auto read = machine_->fabric_endpoint()->prepare_read(
+  auto read = machine_->peer_memory_fabric()->prepare_read(
       kRequester, kOwner, std::move(effect_backing), access->retain_effect_gate());
   ASSERT_TRUE(read);
   read.operation->submit();
@@ -3696,7 +3696,7 @@ TEST_F(KfdPeerBindingTest, QueuedPeerWriteRejectsRetiredAndReboundRequesterGrant
   EXPECT_EQ(outcome, VmAccessOutcome::Revoked);
   EXPECT_EQ(progress, 0u);
   EXPECT_EQ(backing.bytes()[0], std::byte{0x12});
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 0u);
 }
 
 TEST_F(KfdPeerBindingTest, QueuedPeerReadRejectsIncompleteRequesterHostExtent) {
@@ -3767,8 +3767,8 @@ TEST_F(KfdPeerBindingTest, QueuedPeerReadRejectsIncompleteRequesterHostExtent) {
   EXPECT_EQ(progress, 0u);
   EXPECT_EQ(result, unchanged_result);
   EXPECT_TRUE(std::ranges::equal(backing.bytes(), payload));
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 1u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 0u);
 }
 
 TEST_F(KfdPeerBindingTest, AdmittedPeerWriteDrainsBeforeRequesterUnmap) {
@@ -3824,7 +3824,7 @@ TEST_F(KfdPeerBindingTest, AdmittedPeerWriteDrainsBeforeRequesterUnmap) {
   auto entered_future = entered.get_future();
   std::promise<void> release;
   auto release_future = release.get_future().share();
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   endpoint->set_effect_probe_for_testing([&] {
     entered.set_value();
     release_future.wait();
@@ -3926,7 +3926,7 @@ TEST_F(KfdPeerBindingTest, ImportedPeerRemainsLiveAfterExporterFreeAndClose) {
   EXPECT_EQ(outcome, VmAccessOutcome::Complete);
   EXPECT_EQ(progress, payload.size());
   EXPECT_EQ(backing.bytes()[0], payload[0]);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 1u);
   EXPECT_EQ(driver_->close(importer_id), 0);
 }
 
@@ -4242,7 +4242,7 @@ TEST_F(KfdPeerClientMappingTest, Pm4DataPacketsTransferThroughCanonicalPeerBacki
   EXPECT_EQ(std::memcmp(hosts[0] + 672, source.data(), source.size()), 0);
   const std::array<uint8_t, 7> filled{0x12, 0x34, 0x56, 0x78, 0x12, 0x34, 0x56};
   EXPECT_EQ(std::memcmp(hosts[0] + 704, filled.data(), filled.size()), 0);
-  EXPECT_GT(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  EXPECT_GT(machine_->peer_memory_fabric()->diagnostics().effects, 0u);
   for (const auto &allocation : allocations) {
     kfd_ioctl_free_memory_of_gpu_args free{};
     free.handle = allocation.handle;
@@ -7984,7 +7984,7 @@ TEST_F(KfdMissingPeerRouteTest, PublicPeerMapRejectsAbsentSameNodeRouteBeforePub
   const auto process = driver_->find_process(process_id_);
   ASSERT_NE(process, nullptr);
   ASSERT_TRUE(process->gpu_peer_backing_grant(kOwner, allocation.va_addr, 4).backing);
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   ASSERT_TRUE(endpoint->can_route(kFirstRequester, kOwner));
   ASSERT_FALSE(endpoint->can_route(kSecondRequester, kOwner));
@@ -8044,7 +8044,7 @@ TEST_F(KfdTwoRequesterBindingTest, PublicPeerMapsRemainIndependentAcrossRequeste
       process->gpu_peer_backing_grant(kOwner, allocation.va_addr + kOffset, initial.size()).backing;
   ASSERT_TRUE(owner_backing);
   std::ranges::copy(initial, owner_backing.bytes().begin());
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   ASSERT_TRUE(endpoint->can_route(kFirstRequester, kOwner));
   ASSERT_TRUE(endpoint->can_route(kSecondRequester, kOwner));
@@ -8244,7 +8244,7 @@ TEST_F(KfdPeerBindingTest, IpcExportPublishesDirtyOwnerBytesBeforeUncachedPeerAl
   }
   ASSERT_EQ(outcome, VmAccessOutcome::Complete);
   EXPECT_EQ(progress, updated.size());
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 1u);
   owner_value = 0;
   imported_value = 0;
   EXPECT_EQ(owner_l2->read(allocation.va_addr + kOffset, &owner_value, 1, Mtype::UC, process_id_),
@@ -8335,7 +8335,7 @@ TEST_F(KfdPeerBindingTest, PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueued
       requester_access->read(imported.va_addr + kReadOffset, denied, denied_progress, denied_token),
       VmAccessOutcome::Faulted);
   EXPECT_EQ(denied_progress, 0u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 0u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, 0u);
 
   uint32_t requester_id = kRequester;
   kfd_ioctl_map_memory_to_gpu_args requester_map{};
@@ -8404,7 +8404,7 @@ TEST_F(KfdPeerBindingTest, PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueued
     cu->step();
   }
   EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), kPeerWord);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 1u);
 
   constexpr uint32_t kStoredWord = 0xfedcba98u;
   wave->pc = code_va + 12;
@@ -8425,11 +8425,11 @@ TEST_F(KfdPeerBindingTest, PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueued
   ASSERT_TRUE(stored_backing);
   std::memcpy(&observed_store, stored_backing.data(), sizeof(observed_store));
   EXPECT_EQ(observed_store, kStoredWord);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 2u);
 
   // Stop accepting endpoint work while the public peer grant remains live.
   // Restore the endpoint before the remaining transfer and fixture teardown.
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   endpoint->shutdown();
   std::array<std::byte, 4> disconnected{};
   std::size_t disconnected_progress = 0;
@@ -8455,8 +8455,8 @@ TEST_F(KfdPeerBindingTest, PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueued
       requester_access->write(imported.va_addr + kPendingOffset, pending_payload, progress, token),
       VmAccessOutcome::Unavailable);
   ASSERT_TRUE(token.pending());
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 3u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, 3u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 2u);
 
   kfd_ioctl_unmap_memory_from_gpu_args unmap{};
   unmap.handle = imported.handle;
@@ -8472,7 +8472,7 @@ TEST_F(KfdPeerBindingTest, PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueued
                                    denied_token),
             VmAccessOutcome::Faulted);
   EXPECT_EQ(denied_progress, 0u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 3u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, 3u);
 
   VmAccessOutcome pending_outcome = VmAccessOutcome::Unavailable;
   for (int attempt = 0; attempt < 8 && pending_outcome == VmAccessOutcome::Unavailable; ++attempt) {
@@ -8483,8 +8483,8 @@ TEST_F(KfdPeerBindingTest, PublicPeerMapAdmitsImportedAliasAndUnmapRejectsQueued
   EXPECT_EQ(pending_outcome, VmAccessOutcome::Revoked);
   EXPECT_EQ(progress, 0u);
   EXPECT_TRUE(std::ranges::equal(pending_backing.bytes(), before_pending));
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 3u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, 3u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 2u);
   importer->unmap_pages(code_va, kBytes);
   EXPECT_EQ(driver_->close(importer_id), 0);
 }
@@ -8599,10 +8599,10 @@ TEST_F(KfdPeerBindingTest, LivePeerEffectSelectsDistinctVaAliasesWithoutFlushing
     outcome = requester_access->write(imported.va_addr + kEffectOffset, payload, progress, token);
   }
   ASSERT_EQ(outcome, VmAccessOutcome::Complete)
-      << "submissions=" << machine_->fabric_endpoint()->diagnostics().submissions
-      << " effects=" << machine_->fabric_endpoint()->diagnostics().effects;
+      << "submissions=" << machine_->peer_memory_fabric()->diagnostics().submissions
+      << " effects=" << machine_->peer_memory_fabric()->diagnostics().effects;
   EXPECT_EQ(progress, payload.size());
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 1u);
   const auto written = owner_process->gpu_peer_backing_grant(
       kOwner, allocation.va_addr + kEffectOffset, payload.size());
   ASSERT_TRUE(written.backing);
@@ -8681,8 +8681,8 @@ TEST_F(KfdPeerBindingTest, ImportedPeerFreeAndVaReuseRejectQueuedWriteWithoutEff
             VmAccessOutcome::Unavailable);
   ASSERT_TRUE(token.pending());
   EXPECT_EQ(progress, 0u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 1u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 0u);
 
   kfd_ioctl_free_memory_of_gpu_args free{};
   free.handle = imported.handle;
@@ -8711,7 +8711,7 @@ TEST_F(KfdPeerBindingTest, ImportedPeerFreeAndVaReuseRejectQueuedWriteWithoutEff
   EXPECT_EQ(requester_access->classify_data_route(import_va + kOffset, replacement_value.size(),
                                                   VmAccessKind::Read),
             VmDataRoute::Local);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 0u);
 
   VmAccessOutcome outcome = VmAccessOutcome::Unavailable;
   for (int attempt = 0; attempt < 8 && outcome == VmAccessOutcome::Unavailable; ++attempt) {
@@ -8723,8 +8723,8 @@ TEST_F(KfdPeerBindingTest, ImportedPeerFreeAndVaReuseRejectQueuedWriteWithoutEff
   EXPECT_TRUE(std::ranges::equal(old_backing.bytes(), old_before));
   EXPECT_TRUE(std::ranges::equal(std::span(replacement_bytes, replacement_value.size()),
                                  replacement_value));
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 1u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 0u);
 
   std::array<std::byte, 4> observed{};
   EXPECT_EQ(requester_access->read(import_va + kOffset, observed), VmAccessOutcome::Complete);
@@ -8884,10 +8884,10 @@ TEST_F(KfdPeerBindingTest, ProductionSdmaCopiesBetweenLocalAndPeerBacking) {
 
   ASSERT_TRUE(submit_copy(reinterpret_cast<uint64_t>(local.data()), peer.va_addr, 0));
   EXPECT_TRUE(std::ranges::equal(backing.backing.bytes(), payload));
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 1u);
   ASSERT_TRUE(submit_copy(peer.va_addr, reinterpret_cast<uint64_t>(local.data() + 16), 7));
   EXPECT_TRUE(std::ranges::equal(std::span(local).subspan(16, kPayloadBytes), payload));
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 2u);
 
   // Peer MAP is intentionally closed in this phase. Revoke the directed
   // fixture grant after the queue has posted its endpoint request but before
@@ -8922,7 +8922,7 @@ TEST_F(KfdPeerBindingTest, ProductionSdmaCopiesBetweenLocalAndPeerBacking) {
             kRevokedProducer);
   EXPECT_TRUE(std::ranges::equal(backing.backing.bytes().subspan(32, kPayloadBytes),
                                  retained_before_revocation));
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 2u);
   const auto requester_handle = machine_->soc(0)->gpu_vm().find_vmid(process_id_);
   ASSERT_TRUE(requester_handle);
   const auto requester_access = machine_->soc(0)->gpu_vm().snapshot_pinned(*requester_handle);
@@ -8933,7 +8933,7 @@ TEST_F(KfdPeerBindingTest, ProductionSdmaCopiesBetweenLocalAndPeerBacking) {
   EXPECT_EQ(requester_access->read(peer.va_addr + 32, denied, progress, token),
             rocjitsu::amdgpu::VmAccessOutcome::Faulted);
   EXPECT_EQ(progress, 0u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 2u);
 
   kfd_ioctl_destroy_queue_args destroy{};
   destroy.queue_id = queue.queue_id;
@@ -9066,12 +9066,12 @@ TEST_F(KfdPeerBindingTest, ImportedPeerAliasCopiesBothDirectionsThroughKfdSdmaQu
   ASSERT_TRUE(submit_copy(reinterpret_cast<uint64_t>(local.data()), imported.va_addr, 0));
   EXPECT_TRUE(std::ranges::equal(imported_backing.bytes(), payload));
   EXPECT_TRUE(std::ranges::equal(owner_backing.bytes(), payload));
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 1u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, 1u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 1u);
   ASSERT_TRUE(submit_copy(imported.va_addr, reinterpret_cast<uint64_t>(local.data() + 16), 7));
   EXPECT_TRUE(std::ranges::equal(std::span(local).subspan(16, kPayloadBytes), payload));
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, 2u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, 2u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 2u);
 
   kfd_ioctl_destroy_queue_args destroy{};
   destroy.queue_id = queue.queue_id;
@@ -9172,7 +9172,7 @@ TEST_F(KfdPeerBindingTest, CuScalarAndVectorPeerReadsReuseRequesterCache) {
   wave->set_address_space(*handle);
   wave->set_exec(1);
 
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   auto issue_scalar = [&](size_t offset) {
     wave->pc = code_va;
@@ -9686,7 +9686,7 @@ TEST_F(KfdPeerBindingTest, ControlledRequesterCuStoreRefreshesCachedPeerLine) {
   writer_wave->set_process_id(process_id_);
   writer_wave->set_address_space(*owner_handle);
   writer_wave->set_exec(1);
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
 
   const auto read_peer = [&](rocjitsu::amdgpu::ComputeUnitCore *cu, auto *wave, uint64_t code_va,
@@ -9905,7 +9905,7 @@ TEST_F(KfdPeerBindingTest, ControlledRequesterWriteRetriesBusyCanonicalAlias) {
   ASSERT_TRUE(handle);
   const auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
   ASSERT_TRUE(access);
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   const auto before = endpoint->diagnostics();
   std::array<std::byte, sizeof(kAfter)> payload{};
@@ -10069,7 +10069,7 @@ TEST_F(KfdCdna5PeerBindingTest, ControlledRequesterVectorStoreRefreshesCachedPee
     wave->set_address_space(*handle);
     wave->set_exec(1);
   }
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   const auto read_vector = [&](uint32_t expected) {
     reader_wave->pc = code_va;
@@ -10192,7 +10192,7 @@ TEST_F(KfdPeerBindingTest, QueuedSameLinePeerWriteFollowsFirstEffect) {
   ASSERT_TRUE(handle);
   const auto access = machine_->soc(0)->gpu_vm().snapshot_pinned(*handle);
   ASSERT_TRUE(access);
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
 
   std::array<std::byte, sizeof(kFirst)> first_bytes{};
@@ -10376,7 +10376,7 @@ TEST_F(KfdPeerBindingTest, ControlledOwnerWriteUsesSelectedLocalEffectForCanonic
             VmDataRoute::Local);
   EXPECT_EQ(access->resolve_host_pointer(address, original.size()), nullptr);
   EXPECT_FALSE(access->try_write_contiguous(address, owner_bytes));
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   const auto before = endpoint->diagnostics();
   std::size_t progress = 0;
@@ -10572,7 +10572,7 @@ TEST_F(KfdPeerBindingTest, ControlledOwnerWritePreservesDisjointDirtyLocalLine) 
     EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
     EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), expected);
   };
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   const uint64_t before_fill = endpoint->diagnostics().effects;
   read_requester(0x78563412u);
@@ -10742,7 +10742,7 @@ TEST_F(KfdOwnerNoPeerRouteTest, ControlledOwnerWriteUsesEndpointWithoutPeerRoute
   constexpr size_t kOffset = 32;
   const std::array<std::byte, 4> bytes{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
                                        std::byte{0x44}};
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   EXPECT_FALSE(endpoint->can_route(kRequester, kOwner));
   EXPECT_TRUE(endpoint->routes().empty());
@@ -10864,11 +10864,11 @@ TEST_F(KfdPeerBindingTest, ControlledOwnerCuStoreUsesLocalEffect) {
   cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(address));
   cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>(address >> 32));
   cu->write_sgpr(wave->sgpr_alloc().base + 2, kStoredWord);
-  const auto before = machine_->fabric_endpoint()->diagnostics();
+  const auto before = machine_->peer_memory_fabric()->diagnostics();
   cu->step();
   ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().submissions, before.submissions + 1);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, before.effects);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().submissions, before.submissions + 1);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, before.effects);
   uint32_t observed = 0;
   std::memcpy(&observed, backing.backing.data(), sizeof(observed));
   EXPECT_EQ(observed, kInitialWord);
@@ -10880,7 +10880,7 @@ TEST_F(KfdPeerBindingTest, ControlledOwnerCuStoreUsesLocalEffect) {
   EXPECT_EQ(wave->state(), rocjitsu::amdgpu::WfState::RUNNING);
   std::memcpy(&observed, backing.backing.data(), sizeof(observed));
   EXPECT_EQ(observed, kStoredWord);
-  const auto after = machine_->fabric_endpoint()->diagnostics();
+  const auto after = machine_->peer_memory_fabric()->diagnostics();
   EXPECT_EQ(after.effects, before.effects + 1);
   EXPECT_EQ(after.request_messages, before.request_messages);
   EXPECT_EQ(after.response_messages, before.response_messages);
@@ -10977,7 +10977,7 @@ TEST_F(KfdCdna5PeerBindingTest, ControlledOwnerSdmaWriteAndFillPreserveDisjointD
   wave->set_process_id(process_id_);
   wave->set_address_space(*requester_handle);
   wave->set_exec(1);
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   const auto read_requester = [&](uint32_t expected) {
     wave->pc = code_va;
@@ -11287,7 +11287,7 @@ TEST_F(KfdCdna5PeerBindingTest, ControlledOwnerSdmaCopyAndFillRefreshCachedReque
   wave->set_process_id(process_id_);
   wave->set_address_space(*requester_handle);
   wave->set_exec(1);
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   const auto read_requester = [&](uint32_t expected) {
     wave->pc = code_va;
@@ -11580,7 +11580,7 @@ TEST_F(KfdCdna5PeerClientMappingTest,
   wave->set_process_id(process_id_);
   wave->set_address_space(*requester_handle);
   wave->set_exec(1);
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   const auto read_requester = [&](uint32_t expected) {
     wave->pc = code_va;
@@ -11869,7 +11869,7 @@ TEST_F(KfdCdna5PeerBindingTest, ProductionAqlTensorStoreRefreshesCachedRequester
     EXPECT_EQ(requester_wave->state(), WfState::RUNNING);
     return requester_cu->read_sgpr_storage(requester_wave->sgpr_alloc().base + 4);
   };
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   EXPECT_EQ(load_scalar(), kOriginal);
   const auto filled = endpoint->diagnostics();
@@ -11892,7 +11892,7 @@ TEST_F(KfdCdna5PeerBindingTest, ProductionAqlTensorStoreRefreshesCachedRequester
   class InitializeTensorStore final : public rocjitsu::ExecutionPlugin {
   public:
     InitializeTensorStore(uint32_t process_id, uint64_t address, std::array<uint32_t, 4> values,
-                          rocjitsu::FabricEndpoint &endpoint, const void *backing_word)
+                          rocjitsu::PeerMemoryFabric &endpoint, const void *backing_word)
         : ExecutionPlugin("initialize-tensor-store"), process_id_(process_id), address_(address),
           values_(values), endpoint_(endpoint), backing_word_(backing_word) {}
 
@@ -11944,7 +11944,7 @@ TEST_F(KfdCdna5PeerBindingTest, ProductionAqlTensorStoreRefreshesCachedRequester
     uint32_t process_id_;
     uint64_t address_;
     std::array<uint32_t, 4> values_;
-    rocjitsu::FabricEndpoint &endpoint_;
+    rocjitsu::PeerMemoryFabric &endpoint_;
     const void *backing_word_;
   };
   auto group = std::make_shared<rocjitsu::ExecutionPluginGroup>(rocjitsu::PluginSinkConfig{});
@@ -12147,7 +12147,7 @@ TEST_F(KfdCdna5PeerBindingTest, ControlledOwnerTensorDmaStoresRefreshCachedReque
     return requester_cu->read_sgpr_storage(requester_wave->sgpr_alloc().base + 4);
   };
 
-  auto *endpoint = machine_->fabric_endpoint();
+  auto *endpoint = machine_->peer_memory_fabric();
   ASSERT_NE(endpoint, nullptr);
   EXPECT_EQ(load_scalar(kCoalescedOffset), kCoalescedOriginal);
   EXPECT_EQ(load_scalar(kSingleOffset), kSingleOriginal);
@@ -12706,7 +12706,7 @@ TEST_F(KfdPeerBindingTest, ControlledPeerCacheHitSurvivesRefusedOwnerDirtyWriteb
   };
 
   load_scalar();
-  const uint64_t filled_effects = machine_->fabric_endpoint()->diagnostics().effects;
+  const uint64_t filled_effects = machine_->peer_memory_fabric()->diagnostics().effects;
   ASSERT_GT(filled_effects, 0u);
   auto *owner_l2 = machine_->soc(1)->xcd(0)->l2_cache();
   ASSERT_NE(owner_l2, nullptr);
@@ -12755,9 +12755,9 @@ TEST_F(KfdPeerBindingTest, ControlledPeerCacheHitSurvivesRefusedOwnerDirtyWriteb
   std::memcpy(&canonical, backing.backing.data() + kOffset, sizeof(canonical));
   EXPECT_EQ(canonical, kOriginal);
   EXPECT_EQ(backing.backing.bytes()[kMscOffset], std::byte{0});
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, filled_effects);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, filled_effects);
   load_scalar();
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, filled_effects);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, filled_effects);
 
   process->unmap_pages(code_va, kBytes);
   kfd_ioctl_free_memory_of_gpu_args free{};
@@ -12817,7 +12817,7 @@ TEST_F(KfdPeerBindingTest, UnrelatedDrainCannotPublishControlledDirtyLine) {
       *owner_l2, allocations[1].va_addr, process_id_, owner_access->cache_identity(),
       protected_grant.admission.generation, dirty_bytes);
   const uint64_t before_writes = owner_l2->backing_write_transactions();
-  const uint64_t before_effects = machine_->fabric_endpoint()->diagnostics().effects;
+  const uint64_t before_effects = machine_->peer_memory_fabric()->diagnostics().effects;
 
   kfd_ioctl_free_memory_of_gpu_args free_a{};
   free_a.handle = allocations[0].handle;
@@ -12826,7 +12826,7 @@ TEST_F(KfdPeerBindingTest, UnrelatedDrainCannotPublishControlledDirtyLine) {
   EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocations[1].va_addr,
                                                            process_id_, kDirtyOffset));
   EXPECT_EQ(owner_l2->backing_write_transactions(), before_writes);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, before_effects);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, before_effects);
 
   // The failed A drain remains closed. Remove only the test-created B writer,
   // then retry A and retire B through their ordinary KFD ownership paths.
@@ -12974,7 +12974,7 @@ TEST_F(KfdPeerBindingTest, ProductionAqlCompletionRetriesAfterSelectedPeerWriteb
   ASSERT_EQ(requester_access->classify_data_route(controlled.va_addr + kDirtyOffset, 1,
                                                   rocjitsu::amdgpu::VmAccessKind::Read),
             rocjitsu::amdgpu::VmDataRoute::Deferred);
-  const uint64_t before_peer_effects = machine_->fabric_endpoint()->diagnostics().effects;
+  const uint64_t before_peer_effects = machine_->peer_memory_fabric()->diagnostics().effects;
   std::array<std::byte, 1> observed{};
   std::size_t progress = 0;
   rocjitsu::amdgpu::VmTransferToken token;
@@ -12988,7 +12988,7 @@ TEST_F(KfdPeerBindingTest, ProductionAqlCompletionRetriesAfterSelectedPeerWriteb
   EXPECT_EQ(progress, observed.size());
   EXPECT_EQ(observed[0], std::byte{0xa5});
   EXPECT_EQ(backing.backing.bytes()[kDirtyOffset], std::byte{0xa5});
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, before_peer_effects + 1);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, before_peer_effects + 1);
   EXPECT_FALSE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, controlled.va_addr,
                                                             process_id_, kDirtyOffset));
 
@@ -13205,7 +13205,7 @@ TEST_F(KfdPeerBindingTest, RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBa
   EXPECT_EQ(access->read(allocation.va_addr, denied_bytes, denied_progress, denied_token),
             VmAccessOutcome::Faulted);
   EXPECT_EQ(denied_progress, 0u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 0u);
   {
     std::lock_guard lock(process->alloc_mutex_);
     process->allocations_.at(allocation.handle).gpu_id = kOwner;
@@ -13226,7 +13226,7 @@ TEST_F(KfdPeerBindingTest, RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBa
   // page table, even though that host mapping is present.
   EXPECT_EQ(access->read(allocation.va_addr, value, progress, token), VmAccessOutcome::Faulted);
   EXPECT_EQ(progress, 0u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 0u);
 
   kfd_ioctl_ipc_export_handle_args exported{};
   exported.handle = allocation.handle;
@@ -13248,7 +13248,7 @@ TEST_F(KfdPeerBindingTest, RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBa
   EXPECT_EQ(access->read(allocation.va_addr, denied_bytes, denied_progress, denied_token),
             VmAccessOutcome::Faulted);
   EXPECT_EQ(denied_progress, 0u);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 0u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 0u);
   {
     std::lock_guard lock(process->alloc_mutex_);
     process->allocations_.at(allocation.handle).gpu_id = kOwner;
@@ -13282,7 +13282,7 @@ TEST_F(KfdPeerBindingTest, RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBa
   }
   ASSERT_EQ(mixed_outcome, VmAccessOutcome::Complete);
   EXPECT_EQ(mixed_result, mixed_payload);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 2u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 2u);
 
   // Fetch a real gfx9 scalar load from the requester's KFD binding. The
   // instruction must wait for the endpoint, while a second load from the
@@ -13338,14 +13338,14 @@ TEST_F(KfdPeerBindingTest, RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBa
     cu->step();
   }
   EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), kPeerWord);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 3u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 3u);
 
   wave->pc = code_va;
   cu->write_sgpr(wave->sgpr_alloc().base, static_cast<uint32_t>(local_va + kBytes - 8));
   cu->write_sgpr(wave->sgpr_alloc().base + 1, static_cast<uint32_t>((local_va + kBytes - 8) >> 32));
   cu->step();
   EXPECT_EQ(cu->read_sgpr_storage(wave->sgpr_alloc().base), kLocalWord);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 3u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 3u);
 
   auto peer_store = process->gpu_peer_backing_grant(kRequester, allocation.va_addr + 20, 4).backing;
   ASSERT_TRUE(peer_store);
@@ -13365,7 +13365,7 @@ TEST_F(KfdPeerBindingTest, RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBa
   uint32_t observed_peer_store = 0;
   std::memcpy(&observed_peer_store, peer_store.data(), sizeof(observed_peer_store));
   EXPECT_EQ(observed_peer_store, kStoredPeerWord);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 4u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 4u);
 
   constexpr uint32_t kStoredLocalWord = 0x10203040u;
   wave->pc = code_va + 12;
@@ -13376,7 +13376,7 @@ TEST_F(KfdPeerBindingTest, RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBa
   uint32_t observed_local_store = 0;
   std::memcpy(&observed_local_store, local_bytes.data() + kBytes - 8, sizeof(observed_local_store));
   EXPECT_EQ(observed_local_store, kStoredLocalWord);
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 4u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 4u);
 
   const std::array<std::byte, 4> payload{std::byte{0x11}, std::byte{0x22}, std::byte{0x33},
                                          std::byte{0x44}};
@@ -13396,7 +13396,7 @@ TEST_F(KfdPeerBindingTest, RoutesOnlyGrantedLeasedPeerChunksAndRetainsPreparedBa
   EXPECT_EQ(outcome, VmAccessOutcome::Revoked);
   EXPECT_EQ(progress, 0u);
   EXPECT_TRUE(std::ranges::equal(retained.bytes(), retained_before));
-  EXPECT_EQ(machine_->fabric_endpoint()->diagnostics().effects, 4u);
+  EXPECT_EQ(machine_->peer_memory_fabric()->diagnostics().effects, 4u);
   process->unmap_pages(local_va, kBytes);
   process->unmap_pages(code_va, kBytes);
 }

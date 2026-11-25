@@ -77,7 +77,7 @@ namespace rocjitsu {
 
 class VfioTargetGrants;
 class VfioQuiesceWake;
-class FabricEndpoint;
+class PeerMemoryFabric;
 
 /// @brief Serves one @ref simdojo::PciDevice to a VMM over a vfio-user socket.
 class VfioDeviceHost final : public simdojo::IrqSink,
@@ -135,7 +135,7 @@ public:
   /// Bind this function to the server-local peer BAR address domain before
   /// build. A standalone host has no peer BAR mappings.
   [[nodiscard]] bool enable_target_grants(VfioTargetGrants &grants, uint32_t ordinal,
-                                          uint32_t gpu_id = 0, FabricEndpoint *fabric = nullptr);
+                                          uint32_t gpu_id = 0, PeerMemoryFabric *fabric = nullptr);
 
   /// Check the installed fabric route before admitting a descriptorless peer map.
   [[nodiscard]] bool can_route_peer(uint32_t owner_gpu_id) const;
@@ -302,7 +302,7 @@ private:
   VfioTargetGrants *target_grants_ = nullptr;
   uint32_t target_ordinal_ = 0;
   uint32_t target_gpu_id_ = 0;
-  FabricEndpoint *fabric_ = nullptr;
+  PeerMemoryFabric *fabric_ = nullptr;
   std::shared_ptr<VfioQuiesceWake> quiesce_wake_;
   bool quiescing_ = false;
   bool quiesce_pending_ = false;

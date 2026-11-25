@@ -39,10 +39,11 @@ enum class PortDirection : uint8_t {
 /// Both requester and completer sides of the same protocol use the same tag;
 /// direction (IN/OUT) distinguishes the role.
 enum class PortProtocol : uint8_t {
-  UNTYPED,  ///< No protocol constraint (default).
-  MEMORY,   ///< Memory transactions (load/store/atomic).
-  DISPATCH, ///< Workgroup/wavefront dispatch.
-  STATUS,   ///< Status reporting (idle, busy, done).
+  UNTYPED,     ///< No protocol constraint (default).
+  MEMORY,      ///< Memory transactions (load/store/atomic).
+  DISPATCH,    ///< Workgroup/wavefront dispatch.
+  STATUS,      ///< Status reporting (idle, busy, done).
+  SPECIALIZED, ///< Named protocol with a concrete message type.
 };
 
 class Port;
@@ -149,6 +150,12 @@ public:
   /// @param[in] port The port to add (ownership transferred).
   /// @returns Raw pointer to the added port.
   Port *add_port(std::unique_ptr<Port> port);
+
+  template <class PortType> PortType *add_port(std::unique_ptr<PortType> port) {
+    auto *result = port.get();
+    add_port(std::unique_ptr<Port>(std::move(port)));
+    return result;
+  }
 
   /// @brief Find a port by its ID.
   /// @param[in] port_id The port ID to search for.

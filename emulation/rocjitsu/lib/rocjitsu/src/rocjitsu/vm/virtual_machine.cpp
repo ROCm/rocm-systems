@@ -4,7 +4,7 @@
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
-#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/peer_memory_fabric.h"
 
 #include "simdojo/sim/topology.h"
 
@@ -103,7 +103,7 @@ util::Result VirtualMachine::install_peer_routes(config::SystemPeerRouteProjecti
     }
   }
   auto fabric =
-      FabricEndpoint::create(std::move(route_copy), std::move(coherence_domains), emit_error);
+      PeerMemoryFabric::create(std::move(route_copy), std::move(coherence_domains), emit_error);
   if (!fabric) {
     return util::Result::failure();
   }
@@ -113,11 +113,11 @@ util::Result VirtualMachine::install_peer_routes(config::SystemPeerRouteProjecti
                      .failed()) {
     return util::Result::failure();
   }
-  fabric_endpoint_ = fabric.get();
+  peer_memory_fabric_ = fabric.get();
   add_child(std::move(fabric));
-  fabric_endpoint_->wire(topology, mode);
+  peer_memory_fabric_->wire(topology, mode);
   if (driver_) {
-    driver_->attach_fabric_endpoint(fabric_endpoint_);
+    driver_->attach_peer_memory_fabric(peer_memory_fabric_);
   }
   return util::Result::success();
 }

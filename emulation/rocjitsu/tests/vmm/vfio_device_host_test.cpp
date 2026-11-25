@@ -19,7 +19,7 @@
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/pci/scratch_pci_device.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
-#include "rocjitsu/vm/fabric_endpoint.h"
+#include "rocjitsu/vm/peer_memory_fabric.h"
 #include "rocjitsu/vm/soc.h"
 #include "rocjitsu/vm/topology_assembly.h"
 #include "rocjitsu/vm/virtual_machine.h"
@@ -349,7 +349,7 @@ private:
 
 class MappedGrantPair {
 public:
-  explicit MappedGrantPair(bool seal_owner, rocjitsu::FabricEndpoint *fabric = nullptr,
+  explicit MappedGrantPair(bool seal_owner, rocjitsu::PeerMemoryFabric *fabric = nullptr,
                            uint32_t requester_gpu_id = 0, uint32_t owner_gpu_id = 0,
                            bool owner_msix = false, uint64_t owner_fd_offset = 0,
                            bool owner_64bit = false)
@@ -869,7 +869,8 @@ TEST(VfioTargetGrants, StandardMapResolves64BitPeerBarAbove4GiB) {
 }
 
 TEST(VfioTargetGrants, StandardMapWithMissingFabricRouteLeavesPeerWindowUnreachable) {
-  auto fabric = rocjitsu::FabricEndpoint::create(std::vector<rocjitsu::config::SystemPeerRoute>{});
+  auto fabric =
+      rocjitsu::PeerMemoryFabric::create(std::vector<rocjitsu::config::SystemPeerRoute>{});
   ASSERT_NE(fabric, nullptr);
   MappedGrantPair pair(/*seal_owner=*/true, fabric.get(), 0, 202);
   ASSERT_TRUE(pair.built());
@@ -1429,7 +1430,7 @@ TEST(VfioTargetGrants, Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks) 
   constexpr uint64_t kPteFlags = (uint64_t{1} << 63) | 1 | 2 | 4 | 32 | 64;
   simdojo::SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<simdojo::CompositeComponent>("root");
-  auto fabric = rocjitsu::FabricEndpoint::create(
+  auto fabric = rocjitsu::PeerMemoryFabric::create(
       std::vector<rocjitsu::config::SystemPeerRoute>{{"g0", "g1", 0, 202, {"e0", "switch", "e1"}}});
   ASSERT_NE(fabric, nullptr);
   auto *endpoint = fabric.get();
