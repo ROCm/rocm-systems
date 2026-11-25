@@ -1596,13 +1596,11 @@ TEST(evaluate_ast, evaluate_broadcast_scalar_left_operand_order)
 
     struct check_t
     {
-        std::string                        name;
-        std::function<double(double)>      fn;
+        std::string                   name;
+        std::function<double(double)> fn;
     };
-    std::vector<check_t> checks = {{"SUB_LEFT", op_sub},
-                                   {"DIV_LEFT", op_div},
-                                   {"SUB_RIGHT", sub_r},
-                                   {"DIV_RIGHT", div_r}};
+    std::vector<check_t> checks = {
+        {"SUB_LEFT", op_sub}, {"DIV_LEFT", op_div}, {"SUB_RIGHT", sub_r}, {"DIV_RIGHT", div_r}};
 
     for(const auto& c : checks)
     {

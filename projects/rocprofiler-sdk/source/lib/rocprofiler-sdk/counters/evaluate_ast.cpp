@@ -879,10 +879,10 @@ EvaluateAST::evaluate(
             // retain identity fields of the multi-record side.
             for(auto& val : *r2)
             {
-                auto res         = op(*r1->begin(), val);
-                res.id           = val.id;
-                res.dispatch_id  = val.dispatch_id;
-                val              = res;
+                auto res        = op(*r1->begin(), val);
+                res.id          = val.id;
+                res.dispatch_id = val.dispatch_id;
+                val             = res;
             }
             return r2;
         }
