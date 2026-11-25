@@ -186,7 +186,7 @@ The roofline metrics subtract WMMA by design, as an estimate described in
 
 ``Wavefront Occupancy`` and WGP ``Wave Life`` use ``SQ_WAVE_CYCLES``, which follows
 the number of live waves. ROCm Compute Profiler 3.11 (ROCm 10.3) used
-``SQG_WAVE_CYCLES``, which read far above the true wave count on the Radeon RX 9070.
+``SQG_WAVE_CYCLES``, which did not track the true wave count on the Radeon RX 9070.
 ``Wavefront Occupancy`` is still an estimate. The occupancy peak is not validated,
 and measured wave counts can exceed the application launch geometry. Do not infer
 exact resident-wave counts, shader cycles, or occupancy limits from these values.
