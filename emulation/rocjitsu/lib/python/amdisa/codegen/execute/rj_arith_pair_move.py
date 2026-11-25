@@ -6,11 +6,12 @@
 from . import ExecuteContext
 
 PAIR_MOVE_NAMES = {'V_MOV_B64', 'V_PK_MOV_B32'}
+PAIR_MOVE_ARCHITECTURES = ('cdna2', 'cdna3', 'cdna4', 'cdna5')
 
 
 def gen_pair_move(ctx: ExecuteContext) -> str | None:
     if (
-        ctx.arch_name not in ('cdna3', 'cdna4', 'cdna5')
+        ctx.arch_name not in PAIR_MOVE_ARCHITECTURES
         or ctx.inst.name not in PAIR_MOVE_NAMES
     ):
         return None

@@ -24,7 +24,7 @@ def supports_integer_compare(arch, mnemonic):
         return False
     return arch in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5') or (
         arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
-        and INTEGER_COMPARISONS[mnemonic][0] == 32
+        and INTEGER_COMPARISONS[mnemonic][0] in (16, 32, 64)
     )
 
 
@@ -126,7 +126,18 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
     dst, src = ctx.dst_ops, ctx.src_ops
     is_vop3, result_writer = ctx.is_vop3, ctx.result_writer
     if (
-        arch not in ('rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        arch
+        not in (
+            'rdna2',
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
+            'cdna1',
+            'cdna2',
+            'cdna3',
+            'cdna4',
+            'cdna5',
+        )
         or mnemonic not in FLOAT_COMPARISONS
     ):
         return None
@@ -183,6 +194,30 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
         + mnemonic.lower().replace('_tru_', '_t_')
         + ('_gfx12' if arch == 'rdna4' else '')
     )
+    if arch == 'cdna3' and is_vop3:
+        # Gfx942's inherited CLAMP/status contract is identical to gfx908's.
+        skip_inputs = '!inst_.clamp' if constant else 'false'
+        lines += [
+            f'  amdgpu::arith::execute_float_compare_wave64<{bits}>(wf, {wave_api(api, 64)}_gfx908,',
+            f'      wf.cu().arithmetic_flags(), {modifiers},',
+            f'      {src[0]}, {src[1]}, {skip_inputs}, {result_writer}, exec_mask);',
+        ]
+        return '\n'.join(lines)
+    if arch == 'cdna1':
+        # Constants still need operands for Compatibility's signaling CLAMP.
+        skip_inputs = str(constant).lower()
+        if constant and is_vop3:
+            skip_inputs = (
+                '!(inst_.clamp && ((wf.cu().arithmetic_flags() & '
+                'RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY))'
+            )
+        lines += [
+            f'  amdgpu::arith::execute_float_compare_wave64<{bits}>(wf, {wave_api(api, 64)}_gfx908,',
+            f'      wf.cu().arithmetic_flags(), {modifiers},',
+            f'      {src[0]}, {src[1]}, {skip_inputs},',
+            f'      {result_writer}, exec_mask);',
+        ]
+        return '\n'.join(lines)
     signaling = ', true' if arch == 'rdna2' else ''
     lines += [
         f'  amdgpu::arith::execute_float_compare<{bits}{signaling}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',

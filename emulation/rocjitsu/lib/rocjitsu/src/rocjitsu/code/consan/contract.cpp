@@ -77,7 +77,9 @@ void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
   encoder.u32(site.owner_entry);
   encoder.u32(static_cast<uint32_t>(site.analysis));
   encoder.u32(static_cast<uint32_t>(site.record));
-  encoder.u32(site.range_id);
+  // The original single-range encoding wrote zero in this word.
+  encoder.u32((static_cast<uint32_t>(site.lds_ranges.shape) << 16) |
+              (uint32_t{site.lds_ranges.offset1} << 8) | site.lds_ranges.offset0);
   encoder.u32(static_cast<uint32_t>(site.access));
   encoder.u32(site.width);
   encoder.u64(site.original_offset);
@@ -92,15 +94,19 @@ void encode_site(wire::Encoder &encoder, const SiteFacts &site) {
 bool decode_site(wire::Decoder &decoder, SiteFacts &site) {
   uint32_t analysis = 0;
   uint32_t record = 0;
+  uint32_t ranges = 0;
   uint32_t access = 0;
   if (!decoder.u32(site.id) || !decoder.u32(site.owner_entry) || !decoder.u32(analysis) ||
-      !decoder.u32(record) || !decoder.u32(site.range_id) || !decoder.u32(access) ||
+      !decoder.u32(record) || !decoder.u32(ranges) || !decoder.u32(access) ||
       !decoder.u32(site.width) || !decoder.u64(site.original_offset) ||
       !decoder.u32(site.original_size) || !decoder.u64(site.prepared_guest_offset) ||
       !decoder.u32(site.prepared_guest_size) || !decoder.u64(site.probe_offset) ||
       !decoder.u32(site.probe_size) || !decoder.u32(site.first_slot)) {
     return false;
   }
+  site.lds_ranges = {.shape = static_cast<LdsRangeShape>(ranges >> 16),
+                     .offset0 = static_cast<uint8_t>(ranges),
+                     .offset1 = static_cast<uint8_t>(ranges >> 8)};
   site.analysis = static_cast<AnalysisKind>(analysis);
   site.record = static_cast<RecordKind>(record);
   site.access = static_cast<AccessKind>(access);
@@ -137,13 +143,32 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
     return diagnostic.emit() << "static facts exceed metadata budget";
   }
 
+  // Older capture profiles share this wire layout. Only admit facts their producer supported.
+  constexpr Digest kPriorWidths = {
+      0x8e, 0x4e, 0x17, 0xc7, 0x9d, 0x00, 0x15, 0x6a, 0x93, 0x8a, 0xeb,
+      0xa2, 0x32, 0x06, 0x3d, 0xb0, 0xa7, 0x24, 0x2c, 0x81, 0x8f, 0xe1,
+      0x9f, 0xa8, 0x3e, 0x6c, 0x37, 0x78, 0xd4, 0x3c, 0xff, 0x17,
+  };
+  constexpr Digest kB96Widths = {
+      0x0f, 0xd8, 0x00, 0xf0, 0xff, 0xf8, 0x77, 0xb0, 0xf0, 0x51, 0x04,
+      0x56, 0xfe, 0x42, 0x8d, 0x4c, 0xab, 0x4e, 0xe3, 0x50, 0x3b, 0xb6,
+      0x11, 0xe3, 0x11, 0xda, 0xd5, 0x94, 0x33, 0x0b, 0xd5, 0xf5,
+  };
+  constexpr Digest kOrdinaryLds = {
+      0x0c, 0x9d, 0x4a, 0x7a, 0x78, 0x6b, 0xd8, 0x4a, 0xe6, 0x60, 0xc3,
+      0xff, 0xa2, 0xcf, 0xe2, 0xf3, 0x2b, 0xb4, 0x29, 0xc7, 0x23, 0x4b,
+      0x13, 0x17, 0x87, 0x26, 0x0f, 0x4d, 0xfa, 0x19, 0xe6, 0x15,
+  };
+  const bool admits_atomics = manifest.options == mvp_options_digest();
+  const bool admits_bytes = admits_atomics || manifest.options == kOrdinaryLds;
+  const bool admits_b96 = admits_bytes || manifest.options == kB96Widths;
   const TargetProfile *target = target_profile(manifest.target);
   if (manifest.original.bytes == 0 || manifest.prepared.bytes == 0 || target == nullptr ||
       !supports_wave(*target, manifest.wave_size) || manifest.code_object_abi != 5 ||
       (manifest.scope != ScopeKind::NativeLdsNoSynchronization &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop) ||
-      manifest.options != mvp_options_digest()) {
+      (!admits_b96 && manifest.options != kPriorWidths)) {
     return diagnostic.emit() << "empty image or unsupported target, ABI, scope or options";
   }
 
@@ -229,11 +254,30 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
   uint64_t previous_original_end = 0;
   for (size_t index = 0; index < manifest.sites.size(); ++index) {
     const SiteFacts &site = manifest.sites[index];
+    const LdsRangeRecipe &ranges = site.lds_ranges;
+    bool valid_ranges = ranges.offset0 == 0 && ranges.offset1 == 0;
+    if (is_dual(ranges.shape)) {
+      valid_ranges = admits_bytes && (site.width == 4 || site.width == 8);
+    } else if (is_transpose(ranges.shape)) {
+      const bool cdna4 = target->arch == IsaFamily::Cdna4 && manifest.wave_size == 64;
+      const bool cdna5 = target->arch == IsaFamily::Cdna5 && manifest.wave_size == 32;
+      const uint32_t width = ranges.shape == LdsRangeShape::Transpose6             ? 12
+                             : ranges.shape == LdsRangeShape::Transpose16 && cdna5 ? 16
+                                                                                   : 8;
+      valid_ranges = valid_ranges && admits_bytes && (cdna4 || cdna5) &&
+                     site.access == AccessKind::Read && site.width == width;
+    } else {
+      valid_ranges = valid_ranges && ranges.shape == LdsRangeShape::Single;
+    }
+    const bool valid_access =
+        site.access == AccessKind::Read || site.access == AccessKind::Write ||
+        (site.access == AccessKind::Atomic && admits_atomics &&
+         ranges.shape == LdsRangeShape::Single && (site.width == 4 || site.width == 8));
     if (site.id != index || site.owner_entry != entry.id ||
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
-        site.range_id != 0 ||
-        (site.access != AccessKind::Read && site.access != AccessKind::Write) ||
-        (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16) ||
+        !valid_ranges || !valid_access ||
+        (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16 &&
+         (!admits_b96 || site.width != 12) && (!admits_bytes || site.width != 1)) ||
         site.original_size != 8 || site.prepared_guest_size != 8 || site.probe_size == 0 ||
         (site.probe_size % 4) != 0 || (site.original_offset % 4) != 0 ||
         (site.prepared_guest_offset % 4) != 0 || (site.probe_offset % 4) != 0 ||

@@ -4,8 +4,11 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "halt_snapshot_plugin.h"
+#include "native_d16_oracle.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "target_fixture.h"
+#include "transpose_oracle.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -146,7 +149,8 @@ protected:
   void run(std::string_view fixture, Bootstrap mode, RunResult &result,
            test::TargetMode target_mode = {"gfx1100", 32}, uint32_t threads = 64,
            bool target_fixture = false, uint32_t output_words_per_wave = 1,
-           bool seed_counters = false, uint32_t workgroups = 1) {
+           bool seed_counters = false, uint32_t workgroups = 1,
+           std::unique_ptr<ExecutionPlugin> observer = {}) {
 #ifdef CONSAN_FIXTURE_DIR
     const std::vector<uint8_t> original =
         test::read_fixture(target_fixture ? test::target_fixture_path(target_mode, fixture)
@@ -282,6 +286,9 @@ protected:
       counter_seed = seed.get();
       ASSERT_TRUE(plugins->add(std::move(seed)));
     }
+    if (observer) {
+      ASSERT_TRUE(plugins->add(std::move(observer)));
+    }
     soc->set_plugin_group(plugins);
     object.load_to_memory(memory, kImageBase);
     const uint64_t descriptor = object.kernel_descriptor_offset("lds_producer_consumer");
@@ -372,6 +379,7 @@ protected:
     (void)target_fixture;
     (void)output_words_per_wave;
     (void)workgroups;
+    (void)observer;
 #endif
   }
 };
@@ -577,7 +585,12 @@ TEST_F(ConSanBootstrapSim,
 }
 
 class ConSanTargetSim : public ConSanBootstrapSim,
-                        public ::testing::WithParamInterface<test::TargetMode> {};
+                        public ::testing::WithParamInterface<test::TargetMode> {
+protected:
+  void check_atomic_add(const std::string &form, uint32_t width,
+                        const std::vector<uint32_t> &expected_words);
+  void check_atomic_peers(const std::string &form, uint32_t width);
+};
 
 TEST_P(ConSanTargetSim, PublicationBarrierBlocksAnEarlyConsumer) {
   const test::TargetMode target = GetParam();
@@ -1138,6 +1151,586 @@ TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {
   }
 }
 
+// The capture counts probes. Count the original memory operations independently,
+// including a second execution if instrumentation accidentally duplicates one.
+class AtomicIssueTrace final : public ExecutionPlugin {
+public:
+  using Masks = std::array<std::vector<uint64_t>, 2>;
+
+  AtomicIssueTrace(std::string_view mnemonic, Masks &masks)
+      : ExecutionPlugin("atomic_issue_trace"), mnemonic_(mnemonic), masks_(masks) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &instruction,
+                                        amdgpu::Wavefront &wave) override {
+    if (instruction.mnemonic() == mnemonic_ && wave.exec())
+      masks_.at(wave.wave_in_group()).push_back(wave.exec());
+  }
+
+private:
+  std::string_view mnemonic_;
+  Masks &masks_;
+};
+
+#ifdef CONSAN_ANALYZER_ENABLED
+void expect_atomic_analysis(const RunResult &run, uint32_t threads, size_t observations,
+                            unsigned cross_wave_pairs) {
+  const CapturedExecution execution = {.serial = 41,
+                                       .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                       .group_bytes = run.manifest.entry.prepared_group_bytes,
+                                       .arguments = {},
+                                       .report = run.report};
+  const LdsRaceExecutionResult analysis = analyze_lds_race_execution(run.manifest, execution, 8);
+  EXPECT_TRUE(analysis.coverage_complete);
+  EXPECT_EQ(analysis.valid_observations, observations);
+  EXPECT_EQ(analysis.rejected_records, 0u);
+  EXPECT_EQ(analysis.cross_wave_pairs, cross_wave_pairs);
+  EXPECT_EQ(analysis.collision_groups, 0u);
+  EXPECT_EQ(analysis.ordered_pairs, 0u);
+  EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
+}
+#endif
+
+void ConSanTargetSim::check_atomic_add(const std::string &form, uint32_t width,
+                                       const std::vector<uint32_t> &expected_words) {
+  SCOPED_TRACE(form);
+  const std::string fixture = "width-atomic-" + form + "-count";
+  const std::string mnemonic = "ds_add_" + form;
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  const uint64_t high = uint64_t{1} << (target.wave_size - 1);
+  const uint64_t atomic_mask = high | (high >> 1);
+  RunResult before, after;
+  AtomicIssueTrace::Masks before_masks, after_masks;
+  ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, width / 4,
+                              false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, before_masks)));
+  ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true,
+                              width / 4, false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, after_masks)));
+  expect_guest_state(before, after);
+  EXPECT_EQ(before.full_output, expected_words);
+  EXPECT_EQ(after_masks, before_masks);
+  EXPECT_EQ(after.manifest.scope, ScopeKind::NativeLdsNoSynchronization);
+  ASSERT_EQ(after.manifest.sites.size(), 3u);
+  const std::array roles{AccessKind::Write, AccessKind::Atomic, AccessKind::Read};
+  const auto records = published_accesses(after);
+  ASSERT_EQ(records.size(), 6u);
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    EXPECT_EQ(before_masks[wave], (std::vector<uint64_t>{atomic_mask}));
+    for (uint32_t site = 0; site < roles.size(); ++site) {
+      EXPECT_EQ(after.manifest.sites[site].access, roles[site]);
+      EXPECT_EQ(after.manifest.sites[site].width, width);
+      const auto &record = records[3 * wave + site];
+      EXPECT_EQ(record.wave, wave);
+      EXPECT_EQ(record.site, site);
+      EXPECT_EQ(record.offset, 1024 - 3 * width + 2 * width * wave);
+      EXPECT_EQ(record.mask, site == 1 ? atomic_mask : high);
+    }
+  }
+#ifdef CONSAN_ANALYZER_ENABLED
+  expect_atomic_analysis(after, threads, records.size(), 0);
+#endif
+}
+
+void ConSanTargetSim::check_atomic_peers(const std::string &form, uint32_t width) {
+  SCOPED_TRACE(form);
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  const uint64_t high = uint64_t{1} << (target.wave_size - 1);
+  const uint32_t atomic_offset = 1024 - 2 * width;
+  const uint32_t overlap_offset = atomic_offset + width - 4;
+  for (const auto &[peer, role, offset, pairs] :
+       {std::tuple{"read", AccessKind::Read, overlap_offset, 1u},
+        std::tuple{"write", AccessKind::Write, overlap_offset, 1u},
+        std::tuple{"atomic", AccessKind::Atomic, atomic_offset, 0u},
+        std::tuple{"adjacent", AccessKind::Write, atomic_offset + width, 0u}}) {
+    SCOPED_TRACE(peer);
+    const std::string fixture = "width-atomic-" + form + "-" + peer;
+    RunResult before, after;
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true));
+    // The peer discards its racing load before publishing the output.
+    expect_guest_state(before, after);
+    EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 8}));
+    ASSERT_EQ(after.manifest.sites.size(), 2u);
+    EXPECT_EQ(after.manifest.sites[0].access, AccessKind::Atomic);
+    EXPECT_EQ(after.manifest.sites[1].access, role);
+    const auto records = published_accesses(after);
+    ASSERT_EQ(records.size(), 2u);
+    for (uint32_t wave = 0; wave < 2; ++wave) {
+      EXPECT_EQ(after.manifest.sites[wave].width,
+                wave == 0 || role == AccessKind::Atomic ? width : 4u);
+      EXPECT_EQ(records[wave].wave, wave);
+      EXPECT_EQ(records[wave].site, wave);
+      EXPECT_EQ(records[wave].mask, high);
+      EXPECT_EQ(records[wave].offset, wave == 0 ? atomic_offset : offset);
+    }
+#ifdef CONSAN_ANALYZER_ENABLED
+    expect_atomic_analysis(after, threads, records.size(), pairs);
+#endif
+  }
+}
+
+TEST_P(ConSanTargetSim, AtomicU32AddsOnceAndConflictsWithOverlappingOrdinaryPeers) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("u32", 4, {9, 10}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("u32", 4));
+}
+
+TEST_P(ConSanTargetSim, AtomicU64PropagatesCarryAndConflictsWithTheUpperDword) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("u64", 8, {0, 4, 0, 4}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("u64", 8));
+}
+
+TEST_P(ConSanTargetSim, AtomicF32PerformsFloatingPointAddition) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("f32", 4, {0x40200000u, 0x40200000u}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("f32", 4));
+}
+
+class ConSanAtomicF64Sim : public ConSanTargetSim {};
+
+TEST_P(ConSanAtomicF64Sim, AtomicF64PerformsFloatingPointAddition) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("f64", 8, {0, 0x40040000u, 0, 0x40040000u}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("f64", 8));
+}
+
+TEST_P(ConSanTargetSim, AtomicCompareStorePreservesOldValueAndUsesThePreGuestAddress) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  const uint64_t high = uint64_t{1} << (target.wave_size - 1);
+  const std::string_view gpu = target.target;
+  const std::string_view mnemonic =
+      gpu == "gfx942" || gpu == "gfx950" ? "ds_cmpst_rtn_b32" : "ds_cmpstore_rtn_b32";
+  RunResult before, after;
+  AtomicIssueTrace::Masks before_masks, after_masks;
+  ASSERT_NO_FATAL_FAILURE(run("width-atomic-cas-count", Bootstrap::None, before, target, threads,
+                              true, 4, false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, before_masks)));
+  ASSERT_NO_FATAL_FAILURE(run("width-atomic-cas-count", Bootstrap::Instrumented, after, target,
+                              threads, true, 4, false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, after_masks)));
+  expect_guest_state(before, after);
+  // Both waves see the old value 7. Only wave zero matches the comparison.
+  // The neighboring inactive lane retains the original address in the aliased VGPR.
+  EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 0x2468, 1008, 0, 7, 7, 1016, 0}));
+  EXPECT_EQ(after_masks, before_masks);
+  EXPECT_EQ(after.manifest.scope, ScopeKind::NativeLdsNoSynchronization);
+  const auto records = published_accesses(after);
+  ASSERT_EQ(records.size(), 6u);
+  const std::array roles{AccessKind::Write, AccessKind::Atomic, AccessKind::Read};
+  ASSERT_EQ(after.manifest.sites.size(), roles.size());
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    EXPECT_EQ(before_masks[wave], (std::vector<uint64_t>{high}));
+    for (uint32_t site = 0; site < roles.size(); ++site) {
+      EXPECT_EQ(after.manifest.sites[site].access, roles[site]);
+      EXPECT_EQ(after.manifest.sites[site].width, 4u);
+      const auto &record = records[3 * wave + site];
+      EXPECT_EQ(record.wave, wave);
+      EXPECT_EQ(record.site, site);
+      EXPECT_EQ(record.offset, 1012 + 8 * wave);
+      EXPECT_EQ(record.mask, high);
+    }
+  }
+#ifdef CONSAN_ANALYZER_ENABLED
+  expect_atomic_analysis(after, threads, records.size(), 0);
+#endif
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("cas", 4));
+}
+
+class NativeWidthIssueCounter final : public ExecutionPlugin {
+public:
+  explicit NativeWidthIssueCounter(std::vector<std::array<unsigned, 2>> &counts)
+      : ExecutionPlugin("native_width_issue_counter"), counts_(counts) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &instruction,
+                                        amdgpu::Wavefront &wave) override {
+    if (!wave.exec())
+      return;
+    switch (instruction.amdgpu_operation()) {
+    case amdgpu::Operation::DS_STORE_B8:
+    case amdgpu::Operation::DS_WRITE_B8:
+    case amdgpu::Operation::DS_STORE_2ADDR_B32:
+    case amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B32:
+    case amdgpu::Operation::DS_WRITE2_B32:
+    case amdgpu::Operation::DS_WRITE2ST64_B32:
+    case amdgpu::Operation::DS_STORE_2ADDR_B64:
+    case amdgpu::Operation::DS_STORE_2ADDR_STRIDE64_B64:
+    case amdgpu::Operation::DS_WRITE2_B64:
+    case amdgpu::Operation::DS_WRITE2ST64_B64:
+    case amdgpu::Operation::DS_STORE_B96:
+    case amdgpu::Operation::DS_WRITE_B96:
+      ++counts_.at(wave.wave_in_group())[0];
+      break;
+    case amdgpu::Operation::DS_LOAD_I8:
+    case amdgpu::Operation::DS_READ_I8:
+    case amdgpu::Operation::DS_LOAD_U8:
+    case amdgpu::Operation::DS_READ_U8:
+    case amdgpu::Operation::DS_LOAD_2ADDR_B32:
+    case amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B32:
+    case amdgpu::Operation::DS_READ2_B32:
+    case amdgpu::Operation::DS_READ2ST64_B32:
+    case amdgpu::Operation::DS_LOAD_2ADDR_B64:
+    case amdgpu::Operation::DS_LOAD_2ADDR_STRIDE64_B64:
+    case amdgpu::Operation::DS_READ2_B64:
+    case amdgpu::Operation::DS_READ2ST64_B64:
+    case amdgpu::Operation::DS_LOAD_B96:
+    case amdgpu::Operation::DS_READ_B96:
+      ++counts_.at(wave.wave_in_group())[1];
+      break;
+    default:
+      break;
+    }
+  }
+
+private:
+  std::vector<std::array<unsigned, 2>> &counts_;
+};
+
+TEST_P(ConSanTargetSim, DualInstructionsExecuteOnceAndPreserveAllGuestRegisters) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size + 1;
+  for (const unsigned bits : {32u, 64u}) {
+    for (const char *spacing : {"normal", "stride64"}) {
+      const std::string fixture =
+          "width-dual-b" + std::to_string(bits) + "-" + spacing + "-values-high";
+      SCOPED_TRACE(fixture);
+      RunResult before, after;
+      std::vector<std::array<unsigned, 2>> before_counts(3), after_counts(3);
+      ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
+                                  1, std::make_unique<NativeWidthIssueCounter>(before_counts)));
+      ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
+                                  false, 1,
+                                  std::make_unique<NativeWidthIssueCounter>(after_counts)));
+      expect_guest_state(before, after);
+      EXPECT_EQ(before_counts, (std::vector<std::array<unsigned, 2>>{{0, 1}, {1, 0}, {0, 0}}));
+      EXPECT_EQ(after_counts, before_counts);
+      const std::vector<uint32_t> expected = {7,
+                                              0x89abcdefu,
+                                              bits == 32 ? 0x76543210u : 0x13579bdfu,
+                                              bits == 32 ? 0xa5a5a5a5u : 0xfedcba98u,
+                                              8,
+                                              0x89abcdefu,
+                                              bits == 32 ? 0x76543210u : 0x13579bdfu,
+                                              bits == 32 ? 0xa5a5a5a5u : 0xfedcba98u,
+                                              0,
+                                              0,
+                                              0,
+                                              0};
+      EXPECT_EQ(before.full_output, expected);
+      EXPECT_EQ(after.full_output, expected);
+    }
+  }
+}
+
+#ifdef CONSAN_ANALYZER_ENABLED
+TEST_P(ConSanTargetSim, DualStoreCollisionMatchesDifferentOrdinalsInDistinctLaneGroups) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = target.wave_size;
+  RunResult after;
+  ASSERT_NO_FATAL_FAILURE(run("width-dual-b32-normal-collision", Bootstrap::Instrumented, after,
+                              target, threads, true, 4));
+  const CapturedExecution execution = {.serial = 41,
+                                       .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                       .group_bytes = after.manifest.entry.prepared_group_bytes,
+                                       .arguments = {},
+                                       .report = after.report};
+  const LdsRaceExecutionResult analysis = analyze_lds_race_execution(after.manifest, execution, 4);
+  EXPECT_TRUE(analysis.coverage_complete);
+  EXPECT_EQ(analysis.valid_observations, 4u);
+  EXPECT_EQ(analysis.cross_wave_pairs, 0u);
+  EXPECT_EQ(analysis.collision_groups, 1u);
+  EXPECT_EQ(analysis.collision_lane_pairs, 1u);
+  ASSERT_EQ(analysis.collision_examples.size(), 1u);
+  const LdsRaceFinding &example = analysis.collision_examples.front();
+  EXPECT_EQ(example.first.offset, 28u);
+  EXPECT_EQ(example.second.offset, 28u);
+  EXPECT_EQ(example.first.mask | example.second.mask, 3u);
+  EXPECT_NE(example.first.mask, example.second.mask);
+  EXPECT_EQ(example.first.range_id, example.first.mask == 1 ? 1u : 0u);
+  EXPECT_EQ(example.second.range_id, example.second.mask == 1 ? 1u : 0u);
+}
+#endif
+
+TEST_P(ConSanTargetSim, B96PreservesThreeWordsAndRecordsThePreGuestAddressOnce) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size + 1;
+  for (const bool high : {false, true}) {
+    const char *fixture = high ? "width-b96-alias-high" : "width-b96";
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    std::vector<std::array<unsigned, 2>> before_counts(3), after_counts(3);
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
+                                1, std::make_unique<NativeWidthIssueCounter>(before_counts)));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
+                                false, 1, std::make_unique<NativeWidthIssueCounter>(after_counts)));
+    expect_guest_state(before, after);
+    const unsigned active_waves = high ? 2 : 3;
+    std::vector<uint32_t> expected;
+    for (unsigned wave = 0; wave < 3; ++wave) {
+      const unsigned count = wave < active_waves ? 1 : 0;
+      EXPECT_EQ(before_counts[wave], (std::array<unsigned, 2>{count, count}));
+      EXPECT_EQ(after_counts[wave], before_counts[wave]);
+      std::array<uint32_t, 4> words{7 + wave, 0x89abcdefu, 0x13579bdfu, 0xa5a5a5a5u};
+      if (!count)
+        words.fill(0);
+      expected.insert(expected.end(), words.begin(), words.end());
+    }
+    EXPECT_EQ(before.full_output, expected);
+    EXPECT_EQ(after.full_output, expected);
+    const std::vector<ObservedAccess> records = published_accesses(after);
+    ASSERT_EQ(after.manifest.sites.size(), 2u);
+    EXPECT_EQ(after.manifest.sites[0].access, AccessKind::Write);
+    EXPECT_EQ(after.manifest.sites[1].access, AccessKind::Read);
+    ASSERT_EQ(records.size(), 2 * active_waves);
+    for (unsigned index = 0; index < records.size(); ++index) {
+      const ObservedAccess &record = records[index];
+      EXPECT_EQ(record.site, index % 2);
+      EXPECT_EQ(after.manifest.sites[index % 2].width, 12u);
+      EXPECT_EQ(record.wave, index / 2);
+      EXPECT_EQ(record.offset, 16 + 16 * (index / 2));
+      EXPECT_EQ(record.mask, high ? uint64_t{1} << (target.wave_size - 1) : 1u);
+    }
+  }
+}
+
+TEST_P(ConSanTargetSim, ByteAccessPreservesNeighborBytesAndExtendsOnlyActiveLanes) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size + 1;
+  for (const bool high : {false, true}) {
+    const char *fixture = high ? "width-i8-alias-high" : "width-u8";
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    std::vector<std::array<unsigned, 2>> before_counts(3), after_counts(3);
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
+                                1, std::make_unique<NativeWidthIssueCounter>(before_counts)));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
+                                false, 1, std::make_unique<NativeWidthIssueCounter>(after_counts)));
+    expect_guest_state(before, after);
+    for (unsigned wave = 0; wave < 3; ++wave) {
+      const unsigned count = high && wave == 2 ? 0 : 1;
+      EXPECT_EQ(before_counts[wave], (std::array<unsigned, 2>{count, count}));
+      EXPECT_EQ(after_counts[wave], before_counts[wave]);
+      const uint32_t byte = 0x87u + wave;
+      EXPECT_EQ(after.full_output[4 * wave], count ? (high ? 0xffffff00u | byte : byte) : 0);
+      EXPECT_EQ(after.full_output[4 * wave + 1], count ? (byte << 24) | 0x00234567u : 0);
+    }
+  }
+}
+
+// Observe the guest issue and routed LDS request independently of the emitted probe.
+struct TransposeTrace {
+  std::vector<uint64_t> issued_exec;
+  std::vector<uint64_t> routed_masks;
+};
+
+class TransposeRequests final : public ExecutionPlugin {
+public:
+  TransposeRequests(TransposeTrace &trace, std::string mnemonic, uint32_t width,
+                    std::string_view scenario)
+      : ExecutionPlugin("transpose_requests"), trace_(trace), mnemonic_(std::move(mnemonic)),
+        width_(width), scenario_(scenario) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  bool observes_memory_routing() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &inst,
+                                        amdgpu::Wavefront &wave) override {
+    if (inst.mnemonic() == mnemonic_)
+      trace_.issued_exec.push_back(wave.exec());
+  }
+  void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
+                                  const Instruction &, amdgpu::Wavefront &wave) override {
+    if (access.mnemonic != mnemonic_)
+      return;
+    EXPECT_EQ(access.bytes_per_lane(), width_);
+    EXPECT_EQ(wave.wave_in_group(), 0u);
+    ASSERT_EQ(trace_.issued_exec.size(), 1u);
+    EXPECT_EQ(access.architectural_exec_lane_mask, trace_.issued_exec.front());
+    trace_.routed_masks.push_back(access.request_lane_mask);
+    ASSERT_EQ(access.addresses.size(), access.wavefront_size);
+    for (uint32_t lane = 0; lane < access.wavefront_size; ++lane) {
+      if ((access.request_lane_mask & (uint64_t{1} << lane)) == 0)
+        continue;
+      const uint32_t offset = scenario_ == "overlap" || scenario_ == "adjacent" ? 32 * (lane % 4)
+                              : scenario_ == "short" && lane >= 4               ? 0
+                                                                                : 16 * lane;
+      EXPECT_EQ(access.addresses[lane], wave.lds_base() + 2048 + offset) << lane;
+    }
+  }
+
+private:
+  TransposeTrace &trace_;
+  std::string mnemonic_;
+  uint32_t width_;
+  std::string_view scenario_;
+};
+
+TEST_F(ConSanBootstrapSim, TransposeIssuesOnceAndRoutesPhysicalSourceLanes) {
+  for (const test::TargetMode target :
+       {test::TargetMode{"gfx950", 64}, test::TargetMode{"gfx1250", 32}}) {
+    const bool cdna4 = target.wave_size == 64;
+    const uint64_t full = cdna4 ? UINT64_MAX : UINT32_MAX;
+    for (const uint32_t bits : {4u, 6u, 8u, 16u}) {
+      const uint32_t width = 4 * test::transpose_words(bits, cdna4);
+      const std::string payload = "b" + std::to_string(8 * width);
+      const std::string mnemonic = cdna4 ? "ds_read_" + payload + "_tr_b" + std::to_string(bits)
+                                         : "ds_load_tr" + std::to_string(bits) + "_" + payload;
+      for (const std::string_view scenario :
+           {"full", "partial", "empty", "overlap", "adjacent", "short"}) {
+        if (cdna4 && scenario == "short")
+          continue;
+        SCOPED_TRACE(target.target);
+        SCOPED_TRACE(mnemonic);
+        SCOPED_TRACE(scenario);
+        const std::string fixture =
+            "width-transpose-" + std::to_string(bits) + "-" + std::string(scenario);
+        const bool peer = scenario == "overlap" || scenario == "adjacent";
+        const uint32_t threads = scenario == "short" ? 4 : (peer ? 2 : 1) * target.wave_size;
+        const uint32_t words_per_wave = 4 * std::min(threads, target.wave_size);
+        const uint64_t exec = scenario == "short"     ? 15
+                              : scenario == "empty"   ? 0
+                              : scenario == "partial" ? (uint64_t{1} << (target.wave_size - 1))
+                                                      : full;
+        const uint64_t requests = cdna4 ? exec : full;
+        RunResult before, after;
+        for (auto mode : {Bootstrap::None, Bootstrap::Instrumented}) {
+          TransposeTrace trace;
+          RunResult &result = mode == Bootstrap::None ? before : after;
+          ASSERT_NO_FATAL_FAILURE(
+              run(fixture, mode, result, target, threads, true, words_per_wave, false, 1,
+                  std::make_unique<TransposeRequests>(trace, mnemonic, width, scenario)));
+          EXPECT_EQ(trace.issued_exec, (std::vector<uint64_t>{exec}));
+          if (requests || !trace.routed_masks.empty()) {
+            EXPECT_EQ(trace.routed_masks, (std::vector<uint64_t>{requests}));
+          }
+        }
+        expect_guest_state(before, after);
+        if (cdna4 && scenario == "partial")
+          continue; // ISA result is undefined; replay checks the diagnostic.
+        ASSERT_EQ(after.full_output.size(), 4 * threads);
+        for (uint32_t thread = 0; thread < threads; ++thread) {
+          const auto expected =
+              test::transpose_output(thread % target.wave_size, bits, cdna4, scenario);
+          for (uint32_t word = 0; word < 4; ++word)
+            EXPECT_EQ(after.full_output[4 * thread + word], expected[word])
+                << thread << " word " << word;
+        }
+        if (scenario == "short") {
+          for (uint32_t lane = threads; lane < target.wave_size; ++lane) {
+            const auto expected = test::transpose_output(lane, bits, cdna4, scenario);
+            for (uint32_t word = 0; word < width / 4; ++word)
+              EXPECT_EQ(after.waves[0].vgpr(8 + word, lane), expected[word]) << lane;
+          }
+        }
+      }
+    }
+  }
+}
+
+class D16IssueTrace final : public ExecutionPlugin {
+public:
+  explicit D16IssueTrace(std::vector<std::vector<std::string>> &instructions)
+      : ExecutionPlugin("d16_issue_trace"), instructions_(instructions) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &instruction,
+                                        amdgpu::Wavefront &wave) override {
+    const std::string_view name = instruction.mnemonic();
+    if (wave.exec() && name.starts_with("ds_") && name.find("_d16") != std::string_view::npos)
+      instructions_.at(wave.wave_in_group()).emplace_back(name);
+  }
+
+private:
+  std::vector<std::vector<std::string>> &instructions_;
+};
+
+TEST_P(ConSanTargetSim, D16AccessesSelectSubwordsAndExecuteEachGuestFormOnce) {
+  const test::TargetMode target = GetParam();
+  const bool legacy = target_profile(target.target)->id < 1000;
+  const std::string read = legacy ? "ds_read_" : "ds_load_";
+  const std::string write = legacy ? "ds_write_" : "ds_store_";
+  for (const std::string_view name :
+       {"d16-u8", "d16-i8-high", "d16-u16", "d16-overlap", "d16-adjacent"}) {
+    SCOPED_TRACE(name);
+    const bool peer = name == "d16-overlap" || name == "d16-adjacent";
+    const bool signed_byte = name == "d16-i8-high";
+    const bool halfword = name == "d16-u16";
+    const uint32_t threads = 2 * target.wave_size + (peer ? 0 : 1);
+    const uint32_t waves = peer ? 2 : 3;
+    const std::string fixture = "width-" + std::string(name);
+    RunResult before, after;
+    std::vector<std::vector<std::string>> before_trace(waves), after_trace(waves);
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
+                                1, std::make_unique<D16IssueTrace>(before_trace)));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
+                                false, 1, std::make_unique<D16IssueTrace>(after_trace)));
+    expect_guest_state(before, after);
+    const std::string load = read + (halfword ? "u16_d16" : signed_byte ? "i8_d16" : "u8_d16");
+    const std::vector<std::string> operations =
+        peer ? std::vector<std::string>{write + "b8_d16_hi", write + "b16_d16_hi",
+                                        read + "u8_d16",     read + "u8_d16_hi",
+                                        read + "i8_d16",     read + "i8_d16_hi",
+                                        read + "u16_d16",    read + "u16_d16_hi"}
+             : std::vector<std::string>{write + (halfword ? "b16_d16_hi" : "b8_d16_hi"), load,
+                                        load + "_hi"};
+    EXPECT_EQ(before_trace, after_trace);
+    ASSERT_EQ(after.full_output.size(), 4 * waves);
+    for (uint32_t wave = 0; wave < waves; ++wave) {
+      const bool empty = (peer && wave == 1) || (signed_byte && wave == 2);
+      if (empty)
+        EXPECT_TRUE(before_trace[wave].empty());
+      else
+        EXPECT_EQ(before_trace[wave], operations);
+      if (peer)
+        continue;
+      const std::array<uint32_t, 4> expected =
+          empty ? std::array<uint32_t, 4>{}
+                : test::d16_output(target.target, wave, halfword, signed_byte);
+      EXPECT_TRUE(
+          std::equal(expected.begin(), expected.end(), after.full_output.begin() + 4 * wave));
+      // Lane one starts with the same sentinels as the active lane but neither
+      // writes the alias address nor executes a D16 load.
+      if (wave < 2) {
+        EXPECT_EQ(after.waves[wave].vgpr(8, 1), 0xdeadbeefu);
+        EXPECT_EQ(after.waves[wave].vgpr(9, 1), 0x01234567u);
+      }
+    }
+  }
+}
+
+TEST_P(ConSanTargetSim, B96OnlyConflictsWithTheOverlappingPeerDword) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  for (const auto &[fixture, peer_offset] : std::array<std::pair<const char *, uint32_t>, 3>{
+           {{"width-b96-overlap", 24}, {"width-b96-adjacent", 28}, {"width-b96-disjoint", 32}}}) {
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4));
+    expect_guest_state(before, after);
+    const std::vector<ObservedAccess> records = published_accesses(after);
+    ASSERT_EQ(records.size(), 2u);
+    ASSERT_EQ(after.manifest.sites.size(), 2u);
+    for (unsigned index = 0; index < 2; ++index) {
+      EXPECT_EQ(records[index].wave, index);
+      EXPECT_EQ(records[index].mask, 1u);
+      EXPECT_EQ(records[index].site, index);
+      EXPECT_EQ(records[index].offset, index == 0 ? 16u : peer_offset);
+      EXPECT_EQ(after.manifest.sites[index].access, AccessKind::Write);
+      EXPECT_EQ(after.manifest.sites[index].width, index == 0 ? 12u : 4u);
+    }
+#ifdef CONSAN_ANALYZER_ENABLED
+    const CapturedExecution execution = {.serial = 41,
+                                         .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                         .group_bytes = after.manifest.entry.prepared_group_bytes,
+                                         .arguments = {},
+                                         .report = after.report};
+    const LdsRaceExecutionResult analysis =
+        analyze_lds_race_execution(after.manifest, execution, 8);
+    EXPECT_TRUE(analysis.coverage_complete);
+    EXPECT_EQ(analysis.valid_observations, 2u);
+    EXPECT_EQ(analysis.cross_wave_pairs, peer_offset == 24 ? 1u : 0u);
+    EXPECT_EQ(analysis.rejected_records, 0u);
+#endif
+  }
+}
+
 TEST_F(ConSanBootstrapSim, MixedWidthBarrierPreservesTheIndependentCrossWaveValueAndState) {
   RunResult before, after;
   run("mixed-5", Bootstrap::None, before, {"gfx1250", 32}, 65, true);
@@ -1236,6 +1829,11 @@ const auto target_name = [](const auto &info) {
   return std::string(info.param.target) + "Wave" + std::to_string(info.param.wave_size);
 };
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanTargetSim, ::testing::ValuesIn(test::kTargetModes),
+                         target_name);
+INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanAtomicF64Sim,
+                         ::testing::Values(test::TargetMode{"gfx942", 64},
+                                           test::TargetMode{"gfx950", 64},
+                                           test::TargetMode{"gfx1250", 32}),
                          target_name);
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanHipSim,
                          ::testing::ValuesIn(std::span(test::kTargetModes).first(6)), target_name);

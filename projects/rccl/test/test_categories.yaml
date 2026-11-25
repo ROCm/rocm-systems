@@ -112,6 +112,7 @@ test_categories:
       - "Register.*"
       - "Recorder.*"
       - "ProxyTraceTestFixture.*"
+      - "ProxyProtocol.*"
       - "CollTraceUtilsTest.*"
       - "DebugAttn.*"
       - "GinPluginInitFail.*"
