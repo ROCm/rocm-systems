@@ -67,7 +67,7 @@ util::FailureOr<uint64_t> focused_work_units(FuzzTarget target, std::span<const 
     return stats.code_objects_valid + stats.executables_valid;
   }
   case FuzzTarget::ConcurrentDispatch:
-    return concurrent_dispatch_fuzz::run_input(payload).instructions;
+    return concurrent_dispatch_fuzz::run_input(payload).value().instructions;
   }
   return util::Result::failure();
 }
@@ -164,7 +164,8 @@ TEST(MultiplexerFuzzTest, ConcurrentDispatchWorkUnitsCountExecutedInstructions) 
   const std::vector<uint8_t> input = maybe_seeds.value().back();
   ASSERT_EQ(input.front(), static_cast<uint8_t>(FuzzTarget::ConcurrentDispatch));
   const std::span<const uint8_t> payload(input.data() + 1, input.size() - 1);
-  const concurrent_dispatch_fuzz::RunStats focused = concurrent_dispatch_fuzz::run_input(payload);
+  const concurrent_dispatch_fuzz::RunStats focused =
+      concurrent_dispatch_fuzz::run_input(payload).value();
   const util::FailureOr<std::optional<DispatchResult>> maybe_dispatched = run_input(input);
   ASSERT_TRUE(maybe_dispatched.succeeded());
   const std::optional<DispatchResult> dispatched = maybe_dispatched.value();

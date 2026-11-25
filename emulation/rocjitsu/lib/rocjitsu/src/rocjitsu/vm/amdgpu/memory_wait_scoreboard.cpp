@@ -1308,12 +1308,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     return;
   }
   std::optional<uint64_t> selection;
-  if ((operation == Operation::V_CNDMASK_B16 || operation == Operation::V_CNDMASK_B32) && lanes &&
-      (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3 ||
-       wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 ||
-       wf.cu().arch() == rocjitsu::IsaFamily::Cdna3 ||
-       wf.cu().arch() == rocjitsu::IsaFamily::Cdna4 ||
-       wf.cu().arch() == rocjitsu::IsaFamily::Cdna5)) {
+  if ((operation == Operation::V_CNDMASK_B16 || operation == Operation::V_CNDMASK_B32) && lanes) {
     // Check the condition dependency before using its current value to select sources.
     const auto *condition = inst.num_src_operands() > 2 ? inst.src_operand(2) : nullptr;
     if (!condition || condition->is_fieldless()) {

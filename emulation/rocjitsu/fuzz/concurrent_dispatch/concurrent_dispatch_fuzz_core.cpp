@@ -73,14 +73,12 @@ RJ_DIAGNOSTIC_POP
 #include <atomic>
 #include <bit>
 #include <bitset>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <format>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -130,14 +128,15 @@ template <typename Words> void append_words(std::vector<uint8_t> &bytes, const W
   }
 }
 
-std::vector<uint8_t> cache_program(execution_fuzz::FuzzTarget target) {
+util::FailureOr<std::vector<uint8_t>> cache_program(execution_fuzz::FuzzTarget target,
+                                                    util::DiagnosticEmitter diagnostic) {
   std::vector<uint8_t> code;
   const rocjitsu::IsaFamily arch = execution_fuzz::target_arch(target);
   const util::FailureOr<uint32_t> address_lo = build_v_mov_b32_src(0, 0, arch);
   const util::FailureOr<uint32_t> address_hi = build_v_mov_b32_src(1, 1, arch);
   const util::FailureOr<uint32_t> increment = build_v_mov_b32_src(2, kInlineOne, arch);
   if (address_lo.failed() || address_hi.failed() || increment.failed()) {
-    throw std::invalid_argument("invalid concurrent dispatch fuzz architecture");
+    return diagnostic.emit() << "invalid concurrent dispatch fuzz architecture";
   }
   append_words(code, std::array{address_lo.value(), address_hi.value(), increment.value()});
   switch (target) {
@@ -209,12 +208,13 @@ std::vector<uint8_t> cache_program(execution_fuzz::FuzzTarget target) {
     append_words(code, cdna5::build_sopp(cdna5::kSWaitStorecntDscntSopp));
     break;
   case execution_fuzz::FuzzTarget::Count:
-    throw std::invalid_argument("invalid concurrent dispatch fuzz target");
+    return diagnostic.emit() << "invalid concurrent dispatch fuzz target";
   }
   return code;
 }
 
-uint32_t representative_xcd_count(execution_fuzz::FuzzTarget target) {
+util::FailureOr<uint32_t> representative_xcd_count(execution_fuzz::FuzzTarget target,
+                                                   util::DiagnosticEmitter diagnostic) {
   switch (target) {
   case execution_fuzz::FuzzTarget::Gfx942:
   case execution_fuzz::FuzzTarget::Gfx950:
@@ -231,9 +231,9 @@ uint32_t representative_xcd_count(execution_fuzz::FuzzTarget target) {
   case execution_fuzz::FuzzTarget::Gfx1201:
     return 1;
   case execution_fuzz::FuzzTarget::Count:
-    throw std::invalid_argument("invalid concurrent dispatch fuzz target");
+    return diagnostic.emit() << "invalid concurrent dispatch fuzz target";
   }
-  throw std::invalid_argument("invalid concurrent dispatch fuzz target");
+  return diagnostic.emit() << "invalid concurrent dispatch fuzz target";
 }
 
 std::string fuzz_config(execution_fuzz::FuzzTarget target, uint32_t xcd_count) {
@@ -302,13 +302,18 @@ struct Scenario {
   std::span<const uint8_t> input;
 };
 
-std::optional<Scenario> decode_scenario(std::span<const uint8_t> input) {
+util::FailureOr<std::optional<Scenario>> decode_scenario(std::span<const uint8_t> input,
+                                                         util::DiagnosticEmitter diagnostic) {
   const std::optional<execution_fuzz::FuzzTarget> target =
       execution_fuzz::indexed_target(input.front());
   if (!target) {
     return std::nullopt;
   }
-  const uint32_t xcd_count = representative_xcd_count(*target);
+  const util::FailureOr<uint32_t> count = representative_xcd_count(*target, diagnostic);
+  if (count.failed()) {
+    return util::Result::failure();
+  }
+  const uint32_t xcd_count = count.value();
   const uint8_t control = input_byte(input, 1);
   return Scenario{
       .target = *target,
@@ -361,9 +366,10 @@ public:
 
 class QueueDriver {
 public:
-  QueueDriver(amdgpu::GpuMemory *memory, amdgpu::CommandProcessor *cp, uint32_t queue_id,
-              bool xcd_fanout)
-      : memory_(memory), cp_(cp), queue_id_(queue_id) {
+  QueueDriver(amdgpu::GpuMemory *memory, amdgpu::CommandProcessor *cp, uint32_t queue_id)
+      : memory_(memory), cp_(cp), queue_id_(queue_id) {}
+
+  util::Result initialize(bool xcd_fanout, util::DiagnosticEmitter diagnostic) {
     uint64_t zero = 0;
     memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), sizeof(zero), read_ptr_address());
     memory_->load_image(reinterpret_cast<const uint8_t *>(&zero), sizeof(zero),
@@ -372,7 +378,7 @@ public:
 
     amdgpu::ComputeQueueConfig config{};
     config.process_id = kProcessId;
-    config.queue_id = queue_id;
+    config.queue_id = queue_id_;
     config.ring_base_va = kRingBase;
     config.ring_size = kRingSize;
     config.read_ptr_va = read_ptr_address();
@@ -381,8 +387,9 @@ public:
     config.doorbell_mode = amdgpu::QueueDoorbellMode::VmPolled;
     config.xcd_fanout = xcd_fanout;
     if (cp_->register_queue(std::move(config)) == 0) {
-      throw std::runtime_error("concurrent dispatch fuzz could not register its queue");
+      return diagnostic.emit() << "concurrent dispatch fuzz could not register its queue";
     }
+    return util::Result::success();
   }
 
   void submit(const hsa_kernel_dispatch_packet_t &packet) {
@@ -534,7 +541,8 @@ private:
   std::atomic<uint64_t> instructions_{0};
 };
 
-void install_input_kernel(amdgpu::GpuMemory &memory, const Scenario &scenario) {
+util::Result install_input_kernel(amdgpu::GpuMemory &memory, const Scenario &scenario,
+                                  util::DiagnosticEmitter diagnostic) {
   using namespace rocjitsu::amdhsa;
   const rocjitsu::IsaFamily arch = execution_fuzz::target_arch(scenario.target);
   const IsaProperties properties = isa_properties(arch);
@@ -542,7 +550,7 @@ void install_input_kernel(amdgpu::GpuMemory &memory, const Scenario &scenario) {
   const std::optional<uint32_t> granule =
       descriptor_vgpr_count_granule_for_wavefront(arch, wave_size);
   if (!granule) {
-    throw std::logic_error("concurrent dispatch fuzz target has no VGPR descriptor granule");
+    return diagnostic.emit() << "concurrent dispatch fuzz target has no VGPR descriptor granule";
   }
 
   kernel_descriptor_t descriptor{};
@@ -561,9 +569,14 @@ void install_input_kernel(amdgpu::GpuMemory &memory, const Scenario &scenario) {
   memory.load_image(reinterpret_cast<const uint8_t *>(&descriptor), sizeof(descriptor),
                     kKernelAddress);
 
-  const std::vector<uint8_t> code =
-      execution_fuzz::terminated_program(scenario.program, scenario.target);
+  const auto terminated =
+      execution_fuzz::terminated_program(scenario.program, scenario.target, diagnostic);
+  if (terminated.failed()) {
+    return util::Result::failure();
+  }
+  const std::vector<uint8_t> &code = terminated.value();
   memory.load_image(code.data(), code.size(), kKernelAddress + sizeof(descriptor));
+  return util::Result::success();
 }
 
 std::array<uint8_t, kDataSize> initial_data(std::span<const uint8_t> input) {
@@ -654,24 +667,27 @@ bool mode_complete(const ModeResult &result) {
          result.pending_packets == 0;
 }
 
-ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
-  util::StringDiagnostic diagnostic;
-  util::FailureOr<config::LoadedConfig> loaded_result = config::load_config_from_string(
-      fuzz_config(scenario.target, scenario.xcd_count), kEmbeddedSchema, diagnostic.emitter());
+util::FailureOr<ModeResult> run_mode(const Scenario &scenario, const ModeConfig &mode,
+                                     util::DiagnosticEmitter diagnostic) {
+  util::StringDiagnostic detail_diagnostic;
+  util::FailureOr<config::LoadedConfig> loaded_result =
+      config::load_config_from_string(fuzz_config(scenario.target, scenario.xcd_count),
+                                      kEmbeddedSchema, detail_diagnostic.emitter());
   if (loaded_result.failed()) {
-    throw std::runtime_error("concurrent dispatch fuzz config failed: " + diagnostic.message());
+    return diagnostic.emit() << "concurrent dispatch fuzz config failed: " +
+                                    detail_diagnostic.message();
   }
   config::LoadedConfig loaded = std::move(loaded_result).value();
   SoC *soc = loaded.soc();
   amdgpu::GpuMemory *memory = loaded.memory();
   if (!soc || !memory || soc->num_xcds() != scenario.xcd_count) {
-    throw std::runtime_error("concurrent dispatch fuzz topology is incomplete");
+    return diagnostic.emit() << "concurrent dispatch fuzz topology is incomplete";
   }
 
   soc->set_dispatch_threads(mode.dispatch_threads);
   const uint32_t effective_dispatch_threads = soc->dispatch_threads();
   if (effective_dispatch_threads != mode.dispatch_threads) {
-    throw std::runtime_error("concurrent dispatch fuzz topology capped the CPU dispatch pool");
+    return diagnostic.emit() << "concurrent dispatch fuzz topology capped the CPU dispatch pool";
   }
   const uint32_t engine_threads =
       mode.topology_threads
@@ -680,20 +696,22 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
   loaded.engine_config.num_threads = engine_threads;
   auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
   engine->topology().set_root(loaded.take_root());
-  if (loaded.wire_links(engine->topology(), diagnostic.emitter()).failed()) {
-    throw std::runtime_error("concurrent dispatch fuzz link wiring failed: " +
-                             diagnostic.message());
+  if (loaded.wire_links(engine->topology(), detail_diagnostic.emitter()).failed()) {
+    return diagnostic.emit() << "concurrent dispatch fuzz link wiring failed: " +
+                                    detail_diagnostic.message();
   }
   if (engine_threads > 1 &&
       !amdgpu::partition_topology_by_xcds(engine->topology(), soc, engine_threads)) {
-    throw std::runtime_error("concurrent dispatch fuzz could not partition the XCD topology");
+    return diagnostic.emit() << "concurrent dispatch fuzz could not partition the XCD topology";
   }
-  if (engine->create(diagnostic.emitter()).failed()) {
-    throw std::runtime_error("concurrent dispatch fuzz engine creation failed: " +
-                             diagnostic.message());
+  if (engine->create(detail_diagnostic.emitter()).failed()) {
+    return diagnostic.emit() << "concurrent dispatch fuzz engine creation failed: " +
+                                    detail_diagnostic.message();
   }
 
-  install_input_kernel(*memory, scenario);
+  if (install_input_kernel(*memory, scenario, diagnostic).failed()) {
+    return util::Result::failure();
+  }
   const std::array<uint8_t, kDataSize> data = initial_data(scenario.input);
   memory->load_image(data.data(), data.size(), kDataBase);
   if (scenario.prime_caches) {
@@ -701,12 +719,12 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
     for (uint32_t xcd = 0; xcd < soc->num_xcds(); ++xcd) {
       amdgpu::L2Cache *l2 = soc->xcd(xcd)->l2_cache();
       if (!l2) {
-        throw std::runtime_error("concurrent dispatch fuzz target has no L2 cache");
+        return diagnostic.emit() << "concurrent dispatch fuzz target has no L2 cache";
       }
       for (uint32_t line = 0; line < scenario.prime_lines; ++line) {
         const uint64_t address = kDataBase + line * amdgpu::L2Cache::LINE_SIZE;
         if (l2->read(address, sink.data(), sink.size()) != amdgpu::VmAccessOutcome::Complete) {
-          throw std::runtime_error("concurrent dispatch fuzz could not prime an XCD cache");
+          return diagnostic.emit() << "concurrent dispatch fuzz could not prime an XCD cache";
         }
       }
     }
@@ -717,22 +735,25 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
   const amdgpu::AddressSpaceHandle fuzz_address_space =
       soc->gpu_vm().register_unrouted_address_space(1, translator, physical_memory);
   if (!fuzz_address_space) {
-    throw std::runtime_error("concurrent dispatch fuzz address-space registration failed");
+    return diagnostic.emit() << "concurrent dispatch fuzz address-space registration failed";
   }
 
   auto observer_plugin = std::make_unique<FuzzObserver>(fuzz_address_space, *memory, scenario);
   FuzzObserver *observer = observer_plugin.get();
   auto plugins = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   if (!plugins->add(std::move(observer_plugin))) {
-    throw std::runtime_error("concurrent dispatch fuzz could not attach its observer");
+    return diagnostic.emit() << "concurrent dispatch fuzz could not attach its observer";
   }
   soc->set_plugin_group(plugins);
 
   amdgpu::CommandProcessor *owner = soc->assign_queue_owner_cp(scenario.queue_ordinal);
   if (!owner) {
-    throw std::runtime_error("concurrent dispatch fuzz has no queue owner");
+    return diagnostic.emit() << "concurrent dispatch fuzz has no queue owner";
   }
-  QueueDriver queue(memory, owner, scenario.queue_ordinal + 1, scenario.xcd_fanout);
+  QueueDriver queue(memory, owner, scenario.queue_ordinal + 1);
+  if (queue.initialize(scenario.xcd_fanout, diagnostic).failed()) {
+    return util::Result::failure();
+  }
   for (uint32_t packet_index = 0; packet_index < scenario.packets; ++packet_index) {
     hsa_kernel_dispatch_packet_t packet{};
     packet.header = HSA_PACKET_TYPE_KERNEL_DISPATCH;
@@ -763,23 +784,23 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
   soc->flush_all();
   std::vector<uint64_t> histogram = soc->dispatched_workgroups_per_xcd();
   if (histogram.size() != scenario.xcd_count) {
-    throw std::runtime_error("concurrent dispatch fuzz produced an invalid XCD histogram");
+    return diagnostic.emit() << "concurrent dispatch fuzz produced an invalid XCD histogram";
   }
   uint64_t dispatched = 0;
   for (uint64_t count : histogram) {
     dispatched += count;
   }
   if (!observer->valid_progress(scenario.packets)) {
-    throw std::runtime_error(
-        "concurrent dispatch fuzz observed an invalid dispatch or workgroup ID");
+    return diagnostic.emit()
+           << "concurrent dispatch fuzz observed an invalid dispatch or workgroup ID";
   }
   if (observer->barrier_violation()) {
-    throw std::runtime_error(
-        "concurrent dispatch fuzz placed work before its barrier predecessor retired");
+    return diagnostic.emit()
+           << "concurrent dispatch fuzz placed work before its barrier predecessor retired";
   }
   if (observer->published_early()) {
-    throw std::runtime_error(
-        "concurrent dispatch fuzz published completion before workgroup retirement");
+    return diagnostic.emit()
+           << "concurrent dispatch fuzz published completion before workgroup retirement";
   }
   uint64_t pending_packets = 0;
   uint64_t completed_workgroups = 0;
@@ -790,10 +811,10 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
     if (retired > scenario.workgroups ||
         (signal != kPendingSignalValue &&
          (signal != kCompletedSignalValue || retired != scenario.workgroups))) {
-      throw std::runtime_error(
-          std::format("concurrent dispatch fuzz packet {} publication invariant failed "
-                      "(signal={:#x}, retired={}/{})",
-                      packet_index, signal, retired, scenario.workgroups));
+      return diagnostic.emit() << std::format(
+                 "concurrent dispatch fuzz packet {} publication invariant failed "
+                 "(signal={:#x}, retired={}/{})",
+                 packet_index, signal, retired, scenario.workgroups);
     }
     pending_packets += signal == kPendingSignalValue;
     completed_workgroups += retired;
@@ -820,16 +841,17 @@ ModeResult run_mode(const Scenario &scenario, const ModeConfig &mode) {
   return result;
 }
 
-void validate_mode(const Scenario &scenario, const ModeResult &result) {
+util::Result validate_mode(const Scenario &scenario, const ModeResult &result,
+                           util::DiagnosticEmitter diagnostic) {
   const uint64_t workgroups = uint64_t{scenario.packets} * scenario.workgroups;
   if (result.completed_workgroups > workgroups || result.dispatched_workgroups > workgroups ||
       result.completed_workgroups > result.dispatched_workgroups ||
       (mode_complete(result) &&
        (result.completed_workgroups != workgroups || result.dispatched_workgroups != workgroups))) {
-    throw std::runtime_error("concurrent dispatch fuzz bookkeeping invariant failed");
+    return diagnostic.emit() << "concurrent dispatch fuzz bookkeeping invariant failed";
   }
   if (result.terminal_faulted && result.pending_packets == 0) {
-    throw std::runtime_error("concurrent dispatch fuzz faulted queue published every completion");
+    return diagnostic.emit() << "concurrent dispatch fuzz faulted queue published every completion";
   }
   if (mode_complete(result)) {
     for (uint32_t xcd = 0; xcd < scenario.xcd_count; ++xcd) {
@@ -839,20 +861,21 @@ void validate_mode(const Scenario &scenario, const ModeResult &result) {
                                       : (xcd == scenario.queue_ordinal ? scenario.workgroups : 0);
       const uint64_t expected = uint64_t{per_packet} * scenario.packets;
       if (result.dispatched_per_xcd[xcd] != expected) {
-        throw std::runtime_error(
-            std::format("concurrent dispatch fuzz {} placed {} workgroups on XCD {}, expected {}",
-                        result.name, result.dispatched_per_xcd[xcd], xcd, expected));
+        return diagnostic.emit() << std::format(
+                   "concurrent dispatch fuzz {} placed {} workgroups on XCD {}, expected {}",
+                   result.name, result.dispatched_per_xcd[xcd], xcd, expected);
       }
     }
   }
   if (!detail::primary_lifecycle_is_valid(result.pending_packets == 0, result.terminal_faulted,
                                           result.exit_cause)) {
-    throw std::runtime_error(std::format(
-        "concurrent dispatch fuzz {} primary lifecycle disagrees with {} pending packets "
-        "(cause={}, faulted={})",
-        result.name, result.pending_packets, static_cast<unsigned>(result.exit_cause),
-        result.terminal_faulted));
+    return diagnostic.emit() << std::format(
+               "concurrent dispatch fuzz {} primary lifecycle disagrees with {} pending packets "
+               "(cause={}, faulted={})",
+               result.name, result.pending_packets, static_cast<unsigned>(result.exit_cause),
+               result.terminal_faulted);
   }
+  return util::Result::success();
 }
 
 bool completed_results_match(const ModeResult &left, const ModeResult &right) {
@@ -891,8 +914,13 @@ bool raw_outcomes_match(const ModeResult &left, const ModeResult &right) {
          left.dispatched_workgroups == right.dispatched_workgroups;
 }
 
-bool has_differential_oracle(const Scenario &scenario) {
-  const std::vector<uint8_t> expected = cache_program(scenario.target);
+util::FailureOr<bool> has_differential_oracle(const Scenario &scenario,
+                                              util::DiagnosticEmitter diagnostic) {
+  const util::FailureOr<std::vector<uint8_t>> program = cache_program(scenario.target, diagnostic);
+  if (program.failed()) {
+    return util::Result::failure();
+  }
+  const std::vector<uint8_t> &expected = program.value();
   return scenario.program.size() == expected.size() &&
          std::equal(scenario.program.begin(), scenario.program.end(), expected.begin());
 }
@@ -930,31 +958,45 @@ bool primary_lifecycle_is_valid(bool published_all_completions, bool terminal_fa
 
 } // namespace detail
 
-RunStats run_input(std::span<const uint8_t> input) {
+util::FailureOr<RunStats> run_input(std::span<const uint8_t> input,
+                                    util::DiagnosticEmitter diagnostic) {
   if (input.empty() || input.size() > kMaxInputSize) {
-    throw std::invalid_argument("concurrent dispatch fuzz input must contain 1..1024 bytes");
+    return diagnostic.emit() << "concurrent dispatch fuzz input must contain 1..1024 bytes";
   }
-  const std::optional<Scenario> decoded = decode_scenario(input);
-  if (!decoded) {
-    return {.inputs = 1};
+  const util::FailureOr<std::optional<Scenario>> decoded = decode_scenario(input, diagnostic);
+  if (decoded.failed()) {
+    return util::Result::failure();
   }
-  const Scenario &scenario = *decoded;
+  if (!decoded.value()) {
+    return RunStats{.inputs = 1};
+  }
+  const Scenario &scenario = *decoded.value();
 
   std::vector<ModeResult> results;
   for (const ModeConfig &mode : kModes) {
     if (!mode.topology_threads || scenario.xcd_count > 1) {
-      results.push_back(run_mode(scenario, mode));
+      util::FailureOr<ModeResult> result = run_mode(scenario, mode, diagnostic);
+      if (result.failed()) {
+        return util::Result::failure();
+      }
+      results.push_back(std::move(result).value());
     }
   }
   for (const ModeResult &result : results) {
-    validate_mode(scenario, result);
+    if (validate_mode(scenario, result, diagnostic).failed()) {
+      return util::Result::failure();
+    }
   }
 
   const ModeResult &serial = results.front();
   const ModeResult &pooled = results.back();
   const bool any_budget_limited = std::ranges::any_of(results, budget_limited);
   const bool completed = std::ranges::all_of(results, mode_complete);
-  const bool differential = has_differential_oracle(scenario);
+  const util::FailureOr<bool> oracle = has_differential_oracle(scenario, diagnostic);
+  if (oracle.failed()) {
+    return util::Result::failure();
+  }
+  const bool differential = oracle.value();
   const auto every_result_matches = [&](auto predicate) {
     return std::ranges::all_of(results, [&](const ModeResult &result) {
       return &result == &serial || predicate(serial, result);
@@ -975,13 +1017,14 @@ RunStats run_input(std::span<const uint8_t> input) {
   }
   if (differential &&
       (!completed || !exact_result || !every_result_matches(completed_results_match))) {
-    throw std::runtime_error(std::format(
-        "concurrent dispatch fuzz differential {} cache kernel failed (expected_hash={:#x}): {}",
-        execution_fuzz::target_name(scenario.target), expected_hash, result_description));
+    return diagnostic.emit() << std::format("concurrent dispatch fuzz differential {} cache kernel "
+                                            "failed (expected_hash={:#x}): {}",
+                                            execution_fuzz::target_name(scenario.target),
+                                            expected_hash, result_description);
   }
   if (!differential && !every_result_matches(raw_outcomes_match)) {
-    throw std::runtime_error(std::format(
-        "concurrent dispatch fuzz raw-kernel outcomes disagree: {}", result_description));
+    return diagnostic.emit() << std::format(
+               "concurrent dispatch fuzz raw-kernel outcomes disagree: {}", result_description);
   }
 
   uint64_t completed_modes = 0;
@@ -1003,7 +1046,7 @@ RunStats run_input(std::span<const uint8_t> input) {
   }
 
   const uint64_t workgroups = uint64_t{scenario.packets} * scenario.workgroups;
-  return {
+  return RunStats{
       .inputs = 1,
       .targets = 1,
       .modes = results.size(),
@@ -1029,7 +1072,8 @@ RunStats run_input(std::span<const uint8_t> input) {
   };
 }
 
-std::vector<uint8_t> random_input(uint64_t seed) {
+util::FailureOr<std::vector<uint8_t>> random_input(uint64_t seed,
+                                                   util::DiagnosticEmitter diagnostic) {
   const uint64_t original_seed = seed;
   std::vector<uint8_t> input(kGeneratedInputSize);
   for (std::size_t offset = 0; offset < kHeaderSize; offset += sizeof(uint64_t)) {
@@ -1041,10 +1085,14 @@ std::vector<uint8_t> random_input(uint64_t seed) {
   const auto target = static_cast<execution_fuzz::FuzzTarget>(
       original_seed % static_cast<uint8_t>(execution_fuzz::FuzzTarget::Count));
   input[0] = static_cast<uint8_t>(target);
-  const std::vector<uint8_t> prefix = cache_program(target);
+  const util::FailureOr<std::vector<uint8_t>> maybe_prefix = cache_program(target, diagnostic);
+  if (maybe_prefix.failed()) {
+    return util::Result::failure();
+  }
+  const std::vector<uint8_t> &prefix = maybe_prefix.value();
   if (prefix.size() > input.size() - kHeaderSize) {
-    throw std::logic_error(
-        "concurrent dispatch fuzz canonical kernel exceeds the generated input size");
+    return diagnostic.emit()
+           << "concurrent dispatch fuzz canonical kernel exceeds the generated input size";
   }
   std::copy(prefix.begin(), prefix.end(), input.begin() + kHeaderSize);
   // Keep a regular stream under the differential exact-result oracle. The
@@ -1055,15 +1103,17 @@ std::vector<uint8_t> random_input(uint64_t seed) {
   }
   const std::size_t tail_size = input.size() - kHeaderSize - prefix.size();
   const util::FailureOr<std::vector<uint8_t>> maybe_program = execution_fuzz::random_input(
-      next_random(seed), tail_size + execution_fuzz::kHeaderSize, target);
-  assert(maybe_program.succeeded());
+      next_random(seed), tail_size + execution_fuzz::kHeaderSize, target, diagnostic);
+  if (maybe_program.failed()) {
+    return util::Result::failure();
+  }
   const std::vector<uint8_t> &program = maybe_program.value();
   std::copy(program.begin() + execution_fuzz::kHeaderSize, program.end(),
             input.begin() + kHeaderSize + prefix.size());
   return input;
 }
 
-std::vector<std::vector<uint8_t>> seed_corpus() {
+util::FailureOr<std::vector<std::vector<uint8_t>>> seed_corpus(util::DiagnosticEmitter diagnostic) {
   std::vector<std::vector<uint8_t>> seeds;
   for (uint8_t index = 0; index < static_cast<uint8_t>(execution_fuzz::FuzzTarget::Count);
        ++index) {
@@ -1071,7 +1121,11 @@ std::vector<std::vector<uint8_t>> seed_corpus() {
     std::vector<uint8_t> seed(kHeaderSize + sizeof(uint32_t));
     seed[0] = index;
     seed[1] = static_cast<uint8_t>(index & 0xf);
-    if (representative_xcd_count(target) > 1 && (index & 1) != 0) {
+    const util::FailureOr<uint32_t> count = representative_xcd_count(target, diagnostic);
+    if (count.failed()) {
+      return util::Result::failure();
+    }
+    if (count.value() > 1 && (index & 1) != 0) {
       seed[1] |= kXcdFanoutBit;
     }
     seed[2] = index;
@@ -1080,7 +1134,11 @@ std::vector<std::vector<uint8_t>> seed_corpus() {
     // Exercise owner-only routing on XCD 1 as well as on XCD 0.
     seed[5] = target == execution_fuzz::FuzzTarget::Gfx942 ? 1 : index;
     seed[7] = index;
-    const std::vector<uint8_t> program = cache_program(target);
+    const util::FailureOr<std::vector<uint8_t>> maybe_program = cache_program(target, diagnostic);
+    if (maybe_program.failed()) {
+      return util::Result::failure();
+    }
+    const std::vector<uint8_t> &program = maybe_program.value();
     seed.resize(kHeaderSize + program.size());
     std::copy(program.begin(), program.end(), seed.begin() + kHeaderSize);
     seeds.push_back(std::move(seed));

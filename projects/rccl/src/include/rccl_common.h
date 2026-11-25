@@ -398,6 +398,10 @@ size_t rcclDdaLL128OneShotThreshold(const ncclComm* comm);
 // Ceiling for the DDA LL two-shot AllReduce: RCCL_DDA_LL_TWOSHOT_THRESHOLD when
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
+// Ceiling for the DDA LL one-shot AllReduce tier: RCCL_DDA_LL_ONESHOT_THRESHOLD when
+// set, else the arch table's ddaLargeCommArLLOneShotMax where it applies, else the
+// env var's default.
+size_t rcclDdaLLOneShotThreshold(const ncclComm* comm);
 // Largest registered gfx1250 AllReduce that graph capture keeps on fabric DDA instead of Ring; 0 = no re-route.
 size_t rcclDdaArRegCaptureMaxBytes(const ncclComm* comm);
 // Whether an eager registered AllReduce of `bytes` has a shard the DDA LL128 two-shot takes over from CE-registered.
@@ -411,6 +415,8 @@ size_t rcclArSymMaxR2Cap(const ncclComm* comm, bool graphMode, ncclDataType_t da
 int rcclDdaFabricVmmBlocks(const ncclComm* comm);
 // DDA LL128 AllGather block size for this total from the arch table, or 0 when it sets none.
 int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes);
+// Narrow DDA LL one-shot block width for this comm from the arch table (ddaNarrowThreads), or 0 when it sets none.
+int rcclDdaFabricNarrowThreads(const ncclComm* comm);
 // Blocks the DDA LL128 AllGather may launch for this total: the init cap, lowered by the arch table.
 int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
 // DDA LL128 AllToAll block size for this total from the arch table, or 0 when it sets none.
