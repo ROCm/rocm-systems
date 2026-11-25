@@ -3,6 +3,8 @@
 
 #include "rocjitsu/code/consan/analysis/lds_race.h"
 #include "rocjitsu/code/consan/encoding.h"
+#include "rocjitsu/code/consan/target.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 
 #include <algorithm>
 #include <array>
@@ -42,6 +44,7 @@ struct SiteGroup {
   std::vector<Observation> records;
   uint32_t sequence = 0;
   uint64_t mask = 0;
+  std::optional<uint64_t> transpose_exec;
   std::set<uint32_t> offsets;
   bool ambiguous = false;
 };
@@ -70,9 +73,53 @@ struct WaveEvidence {
   uint32_t final_phase = 0;
 };
 
+// Each retained group holds one pre-guest base shared by the lanes in its mask.
+void expand_dual_group(const SiteGroup &group, const SiteFacts &site, bool coalesce,
+                       uint32_t extent, uint32_t examples, LdsRaceExecutionResult &result,
+                       std::vector<Observation> &observations) {
+  const size_t first = observations.size();
+  const LdsRangeRecipe &recipe = site.lds_ranges;
+  const unsigned count = coalesce && recipe.offset0 == recipe.offset1 ? 1 : 2;
+  for (const Observation &raw : group.records) {
+    const LdsRaceParticipant &base = raw.participant;
+    bool out_of_bounds = false;
+    for (unsigned ordinal = 0; ordinal < count; ++ordinal) {
+      const uint64_t start = uint64_t{base.offset} + recipe.byte_offset(ordinal, site.width);
+      if (start + site.width > extent) {
+        out_of_bounds = true;
+        continue;
+      }
+      Observation access = raw;
+      access.participant.offset = static_cast<uint32_t>(start);
+      access.participant.range_id = ordinal;
+      // Two different address groups in this occurrence can write the same
+      // bytes through different ordinals. Their validated lane masks are disjoint.
+      if (site.access == AccessKind::Write) {
+        for (const Observation &other : std::span(observations).subspan(first)) {
+          if (other.participant.offset != start || other.participant.mask == base.mask)
+            continue;
+          const uint64_t pairs = uint64_t{other.lanes()} * raw.lanes();
+          ++result.collision_groups;
+          result.collision_lane_pairs += pairs;
+          if (result.collision_examples.size() < examples)
+            result.collision_examples.push_back({LdsRaceFindingKind::InstructionCollision,
+                                                 other.participant, access.participant, pairs});
+        }
+      }
+      observations.push_back(access);
+    }
+    if (out_of_bounds) {
+      ++result.rejected_records;
+      issue(result, base.wave, base.site, "invalid_or_out_of_bounds_effective_range",
+            base.workgroup);
+    }
+  }
+}
+
 void read_wave(const Manifest &facts, const CapturedExecution &execution,
-               const LaunchLayout &layout, uint32_t row_index, LdsRaceExecutionResult &result,
-               std::vector<Observation> &observations, std::vector<WaveEvidence> &completions) {
+               const LaunchLayout &layout, uint32_t row_index, uint32_t examples,
+               LdsRaceExecutionResult &result, std::vector<Observation> &observations,
+               std::vector<WaveEvidence> &completions) {
   const uint32_t wave = row_index % layout.waves_per_workgroup;
   const uint32_t workgroup = row_index / layout.waves_per_workgroup;
   const std::span<const uint8_t> row =
@@ -162,7 +209,17 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   }
   using Operation = std::pair<uint32_t, uint32_t>;
   std::map<Operation, SiteGroup> groups;
+  const uint32_t lanes =
+      std::min(facts.wave_size, execution.dimensions.workgroup[0] - wave * facts.wave_size);
+  const uint64_t active_mask = lanes == 64 ? UINT64_MAX : (uint64_t{1} << lanes) - 1;
+  // Transpose records identify physical LDS request lanes, including those
+  // beyond the logical workitems in a short CDNA5 wave.
+  const uint64_t physical_mask = facts.wave_size == 64 ? UINT64_MAX : UINT32_MAX;
   for (const SiteFacts &site : facts.sites) {
+    const bool transpose = is_transpose(site.lds_ranges.shape);
+    const uint64_t request_mask = transpose ? physical_mask : active_mask;
+    const uint32_t reserved_begin =
+        transpose ? wire::kRecordAnchorExec + sizeof(uint64_t) : wire::kRecordReservedBegin;
     bool vacant = false;
     for (uint32_t address_group = 0; address_group < kAddressGroupsPerSite; ++address_group) {
       const std::span<const uint8_t> record =
@@ -177,28 +234,47 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       const uint32_t offset = *wire::read_u32(record, wire::kRecordLdsOffset);
       const uint32_t width = *wire::read_u32(record, wire::kRecordWidth);
       const uint64_t mask = *wire::read_u64(record, wire::kRecordGuestMask);
-      const uint32_t lanes =
-          std::min(facts.wave_size, execution.dimensions.workgroup[0] - wave * facts.wave_size);
-      const uint64_t active_mask = lanes == 64 ? UINT64_MAX : (uint64_t{1} << lanes) - 1;
       const uint32_t flags = *wire::read_u32(record, wire::kRecordFlags);
       if (commit != wire::kAccessCommitted ||
           wire::read_u32(record, wire::kRecordAnalysis) != uint32_t(site.analysis) ||
           wire::read_u32(record, wire::kRecordKind) != uint32_t(site.record) ||
           wire::read_u32(record, wire::kRecordSite) != site.id ||
-          wire::read_u32(record, wire::kRecordRange) != site.range_id || sequence == 0 ||
-          sequence > final || width != site.width || mask == 0 || (mask & ~active_mask) != 0 ||
-          !all_zero(record.subspan(wire::kRecordReservedBegin))) {
+          wire::read_u32(record, wire::kRecordRange) != 0 || sequence == 0 || sequence > final ||
+          width != site.width || mask == 0 || (mask & ~request_mask) != 0 ||
+          !all_zero(record.subspan(reserved_begin))) {
         ++result.rejected_records;
         issue(result, wave, site.id, "invalid_record_commit_identity_mask_or_sequence", workgroup);
         continue;
       }
-      if (flags != wire::kExactGuestMask || offset > execution.group_bytes ||
+      const uint32_t mask_kind =
+          transpose ? wire::kExactTransposeRequestMask : wire::kExactGuestMask;
+      if (flags != mask_kind || offset > execution.group_bytes ||
           width > execution.group_bytes - offset) {
         ++result.rejected_records;
         issue(result, wave, site.id, "invalid_or_out_of_bounds_effective_range", workgroup);
         continue;
       }
-      if ((offset % width) != 0) {
+      SiteGroup &group = groups[{site.id, repeated ? sequence : 0}];
+      if (transpose) {
+        const uint64_t anchor_exec = *wire::read_u64(record, wire::kRecordAnchorExec);
+        if (group.transpose_exec && *group.transpose_exec != anchor_exec)
+          group.ambiguous = true;
+        group.transpose_exec = anchor_exec;
+        if (facts.wave_size == 64 && anchor_exec != physical_mask) {
+          ++result.rejected_records;
+          issue(result, wave, site.id, "partial_exec_lds_transpose", workgroup);
+          continue;
+        }
+        if (anchor_exec & ~physical_mask) {
+          ++result.rejected_records;
+          issue(result, wave, site.id, "invalid_transpose_anchor_exec", workgroup);
+          continue;
+        }
+      }
+      // The qualified three-dword profile conservatively requires 16-byte alignment.
+      // Without the launch alignment mode we can only trust mode-independent addresses.
+      const uint32_t alignment = width == 12 ? 16 : width;
+      if ((offset % alignment) != 0) {
         ++result.rejected_records;
         issue(result, wave, site.id, "unaligned_lds_alignment_mode_unavailable", workgroup);
         continue;
@@ -206,7 +282,6 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       if (vacant && !repeated) {
         issue(result, wave, site.id, "record_after_vacant_reservation", workgroup);
       }
-      SiteGroup &group = groups[{site.id, repeated ? sequence : 0}];
       if (repeated && (std::countr_zero(mask) % kAddressGroupsPerSite) != address_group) {
         ++result.rejected_records;
         issue(result, wave, site.id, "invalid_first_publisher_lane_bank", workgroup);
@@ -244,7 +319,7 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
         issue(result, wave, site.id, "access_phase_contradicts_qualified_program", workgroup);
       }
       group.records.push_back({{wave, site.id, sequence, mask, offset, width, site.original_offset,
-                                site.access, phase, workgroup},
+                                site.access, phase, workgroup, 0, group.transpose_exec},
                                phase_valid});
     }
   }
@@ -283,11 +358,21 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
     issue(result, wave, UINT32_MAX, "missing_observed_occurrence", workgroup);
   }
   for (const auto &[site, group] : groups) {
-    if (group.ambiguous || std::ranges::any_of(group.records, [&](const Observation &record) {
-          return record.participant.phase != group.records.front().participant.phase;
-        })) {
+    if (!group.records.empty() && group.transpose_exec && group.mask != physical_mask &&
+        (loss == 0 || (!repeated && group.records.size() < kAddressGroupsPerSite))) {
+      result.rejected_records += group.records.size();
+      issue(result, wave, site.first, "incomplete_transpose_request_mask", workgroup);
+    } else if (group.ambiguous ||
+               std::ranges::any_of(group.records, [&](const Observation &record) {
+                 return record.participant.phase != group.records.front().participant.phase;
+               })) {
       result.rejected_records += group.records.size();
       issue(result, wave, site.first, "ambiguous_instruction_group_ownership", workgroup);
+    } else if (is_dual(facts.sites[site.first].lds_ranges.shape)) {
+      const bool coalesce =
+          isa_properties(target_profile(facts.target)->arch).coincident_ds_ignores_data1;
+      expand_dual_group(group, facts.sites[site.first], coalesce, execution.group_bytes, examples,
+                        result, observations);
     } else {
       observations.insert(observations.end(), group.records.begin(), group.records.end());
     }
@@ -321,10 +406,9 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
 }
 
 struct Bucket {
-  // Reads and writes remain separate so counts and example generation never
-  // enumerate the potentially quadratic Read/Read non-candidates.
+  // Separate by role to skip whole groups of Read/Read and Atomic/Atomic pairs.
   struct Wave {
-    std::vector<const Observation *> reads, writes;
+    std::vector<const Observation *> reads, writes, atomics;
   };
   std::map<uint32_t, Wave> waves;
 };
@@ -536,7 +620,7 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
     result.required_barrier_waves = layout.value().wave_count;
   }
   for (uint32_t wave = 0; wave < layout.value().wave_count; ++wave) {
-    read_wave(facts, execution, layout.value(), wave, result, observations, completions);
+    read_wave(facts, execution, layout.value(), wave, examples, result, observations, completions);
   }
   result.workgroup_count = layout.value().workgroup_count;
   result.waves_per_workgroup = layout.value().waves_per_workgroup;
@@ -547,7 +631,17 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
     const LdsRaceParticipant &participant = observation.participant;
     Bucket &bucket = domains[participant.workgroup][{participant.offset, participant.width}];
     Bucket::Wave &wave = bucket.waves[participant.wave];
-    (participant.access == AccessKind::Write ? wave.writes : wave.reads).push_back(&observation);
+    switch (participant.access) {
+    case AccessKind::Read:
+      wave.reads.push_back(&observation);
+      break;
+    case AccessKind::Write:
+      wave.writes.push_back(&observation);
+      break;
+    case AccessKind::Atomic:
+      wave.atomics.push_back(&observation);
+      break;
+    }
     if (participant.access == AccessKind::Write && observation.lanes() > 1) {
       const uint64_t pairs = uint64_t{observation.lanes()} * (observation.lanes() - 1) / 2;
       ++result.collision_groups;
@@ -587,6 +681,19 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
         complete_witnesses |= 1u << slot;
       }
     }
+    const auto compare_waves = [&](const Bucket::Wave &left, const Bucket::Wave &right) {
+      const auto pairs = [&](const auto &first, const auto &second) {
+        compare(first, second, examples, facts.scope, domain_completions, complete_witnesses,
+                complete_exit, result);
+      };
+      pairs(left.writes, right.writes);
+      pairs(left.writes, right.reads);
+      pairs(left.reads, right.writes);
+      pairs(left.atomics, right.writes);
+      pairs(left.atomics, right.reads);
+      pairs(left.writes, right.atomics);
+      pairs(left.reads, right.atomics);
+    };
     // Sweep checked half-open byte ranges. Grouping identical ranges retains
     // aggregate counting for dense no-barrier cases and never enumerates Read/Read
     // pairs. Natural alignment and the admitted widths bound active range shapes.
@@ -603,26 +710,18 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
             if (prior_wave == wave) {
               continue;
             }
-            compare(prior_accesses.writes, accesses.writes, examples, facts.scope,
-                    domain_completions, complete_witnesses, complete_exit, result);
-            compare(prior_accesses.writes, accesses.reads, examples, facts.scope,
-                    domain_completions, complete_witnesses, complete_exit, result);
-            compare(prior_accesses.reads, accesses.writes, examples, facts.scope,
-                    domain_completions, complete_witnesses, complete_exit, result);
+            compare_waves(prior_accesses, accesses);
           }
         }
       }
-      std::vector<const Observation *> prior_reads, prior_writes;
+      Bucket::Wave earlier;
       for (const auto &[wave, accesses] : bucket.waves) {
         (void)wave;
-        compare(prior_writes, accesses.writes, examples, facts.scope, domain_completions,
-                complete_witnesses, complete_exit, result);
-        compare(prior_writes, accesses.reads, examples, facts.scope, domain_completions,
-                complete_witnesses, complete_exit, result);
-        compare(prior_reads, accesses.writes, examples, facts.scope, domain_completions,
-                complete_witnesses, complete_exit, result);
-        prior_writes.insert(prior_writes.end(), accesses.writes.begin(), accesses.writes.end());
-        prior_reads.insert(prior_reads.end(), accesses.reads.begin(), accesses.reads.end());
+        compare_waves(earlier, accesses);
+        earlier.writes.insert(earlier.writes.end(), accesses.writes.begin(), accesses.writes.end());
+        earlier.reads.insert(earlier.reads.end(), accesses.reads.begin(), accesses.reads.end());
+        earlier.atomics.insert(earlier.atomics.end(), accesses.atomics.begin(),
+                               accesses.atomics.end());
       }
       active.push_back({range.first + range.second, &bucket});
     }

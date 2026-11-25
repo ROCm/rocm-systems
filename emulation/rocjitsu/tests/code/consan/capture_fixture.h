@@ -77,7 +77,7 @@ inline void refresh_image(CaptureHeader &header) {
     entry.binding = entry.selected->entry;
     keys.push_back(entry.key);
   }
-  header.image.selection_profile = selection_profile_digest(keys, first.scope);
+  header.image.selection_profile = selection_profile_digest(keys, first.scope, first.options);
 }
 
 inline CaptureHeader multi_entry_header() {

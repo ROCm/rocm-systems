@@ -32,12 +32,12 @@ def _formats(source, result):
 _INTEGER_TO_FLOAT = [
     (f'V_CVT_{dtype.upper()}', _formats(*formats))
     for dtype, formats in TO_FLOAT_CONVERSIONS.items()
-    if dtype in INTEGER_SOURCE_CONVERSIONS
+    if dtype in INTEGER_SOURCE_CONVERSIONS and not dtype.startswith('f16_')
 ]
 _FLOAT_TO_FLOAT = [
     (f'V_CVT_{dtype.upper()}', _formats(*formats))
     for dtype, formats in TO_FLOAT_CONVERSIONS.items()
-    if dtype not in INTEGER_SOURCE_CONVERSIONS
+    if dtype not in INTEGER_SOURCE_CONVERSIONS and not dtype.startswith('f16_')
 ]
 
 
@@ -90,25 +90,6 @@ def test_f32_integer_conversion_simd_passes_the_scalar_stage_object(dtype):
     assert simd_probe_line(f'v_cvt_{dtype}_vop3') == probe
 
 
-@pytest.mark.parametrize('dtype', ['f16_i16', 'f16_u16'])
-def test_f16_integer_conversion_simd_writes_true16_halves(dtype):
-    vop3 = simd_probe_line(f'v_cvt_{dtype}_vop3', true16_vop3=True)
-    assert vop3 == (
-        '  if (amdgpu::try_execute_words_simd<1, false, true, 1>(inst, wf, conversion))'
-        ' return;'
-    )
-    e32 = local_coverage_probe(
-        f'v_cvt_{dtype}_vop1', e32=True, e32_half_dst=True, e32_half_inputs=1
-    )
-    assert e32 == (
-        '  if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, conversion)) return;'
-    )
-    # Without true16 halves the result is written zero-extended.
-    assert simd_probe_line(f'v_cvt_{dtype}_vop1').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t,'
-    )
-
-
 @pytest.mark.parametrize(('name', 'formats'), _FLOAT_TO_FLOAT)
 def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, formats):
     cpp = _lower(name, 'ENC_VOP3', {'abs', 'neg', 'clamp', 'omod'})
@@ -126,12 +107,20 @@ def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, for
         assert host not in cpp
 
 
-def test_half_conversion_simd_uses_raw_lane_glue():
-    f16 = simd_probe_line('v_cvt_f16_f32_vop3', true16_vop3=True)
-    assert f16 == (
-        '  if (amdgpu::try_execute_words_simd<1, false, true, 0>(inst, wf, conversion))'
-        ' return;'
-    )
+@pytest.mark.parametrize(
+    'dtype', ['f16_i16', 'f16_u16', 'i16_f16', 'u16_f16', 'f16_f32', 'f32_f16']
+)
+def test_half_conversions_have_no_legacy_simd_probe(dtype):
+    for encoding in ('vop1', 'vop3'):
+        assert simd_probe_line(f'v_cvt_{dtype}_{encoding}') is None
+
+
+@pytest.mark.parametrize(
+    'name', ['V_CVT_F16_I16', 'V_CVT_F16_U16', 'V_CVT_F16_F32', 'V_CVT_F32_F16']
+)
+def test_half_conversion_requires_arithmetic_lowering(name):
+    with pytest.raises(ValueError, match='require rj-arith lowering'):
+        _lower(name, 'ENC_VOP1')
 
 
 def test_share_stages_hoists_the_scalar_declaration_above_the_probe():

@@ -77,6 +77,7 @@ class Assembler {
 
       void PrintTextHex();
       const char* GetTargetAsic();
+      bool IsTargetSupported();
 
       const char* GetInstrStream();
       const size_t GetInstrStreamSize();

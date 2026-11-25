@@ -106,6 +106,7 @@ foreach(
     IN
     ITEMS
         v_add_sub
+        v_gfx10_half_binary
         v_round_f64
         v_div_fixup
         v_div_fmas
@@ -149,6 +150,10 @@ foreach(
     set(target "rj_arith_${test_name}_test")
     rj_arith_add_test(${target} fp/${mnemonic}_test.cpp)
 endforeach()
+target_compile_definitions(
+    rj_arith_fma64_variants_test
+    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_fma64
+)
 
 # Conversion layouts share contract checks; family references remain independent.
 foreach(

@@ -1,19 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file vop3_cndmask_pack_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for two VOP3 ops
-/// that don't fit the binary/unary tables and reach SIMD through dedicated
-/// paths. Each case runs TWICE in the same process -- once forcing the scalar
-/// body, once the SIMD fast path, with identical inputs/EXEC -- and the two
-/// 64-lane result arrays are asserted equal with EXPECT_EQ
-/// (util::set_force_scalar_for_testing flips the gate in-process).
-/// In-process inactive lanes must keep the sentinel.
-///   - v_cndmask_b32_vop3: per-lane select from a 64-bit selector read out of
-///     the SGPR-pair `src2` (instead of fixed VCC); routes through the new
-///     try_execute_cndmask_vop3_simd glue.
-///   - v_pack_b32_f16_vop3: pack the OPSEL-selected 16-bit halves of src0/src1
-///     into a b32 dst.
+// Decoded conditional selection and halfword packing agree across scalar/native dispatch.
+// Selected masks preserve inactive destinations; inputs include mixed raw bit patterns.
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
@@ -21,7 +10,7 @@
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"

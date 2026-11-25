@@ -35,6 +35,12 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   result.original = capture.header.image.original;
   result.selection_profile = capture.header.image.selection_profile;
   for (const ImageEntryFacts &entry : capture.header.image.entries) {
+    if (entry.selected) {
+      for (const SiteFacts &site : entry.selected->sites) {
+        result.has_dual_ranges |= is_dual(site.lds_ranges.shape);
+        result.has_transpose |= is_transpose(site.lds_ranges.shape);
+      }
+    }
     result.entries.push_back(
         {.key = entry.key, .name = entry.binding.name, .disposition = entry.disposition});
   }

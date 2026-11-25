@@ -6,17 +6,26 @@
 from . import ExecuteContext
 from .rj_arith_names import wave_api
 
+DS_ARCHITECTURES = (
+    'cdna1',
+    'cdna2',
+    'cdna3',
+    'cdna4',
+    'cdna5',
+    'rdna1',
+    'rdna2',
+    'rdna3',
+    'rdna3_5',
+    'rdna4',
+)
+
 DS_NAMES = {'DS_PERMUTE_B32', 'DS_BPERMUTE_B32', 'DS_BPERMUTE_FI_B32', 'DS_SWIZZLE_B32'}
 
 
 def gen_ds(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
     dst, src = ctx.dst_ops, ctx.src_ops
-    if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
-        or mnemonic not in DS_NAMES
-        or len(dst) != 1
-    ):
+    if arch not in DS_ARCHITECTURES or mnemonic not in DS_NAMES or len(dst) != 1:
         return None
     if arch not in ('rdna4', 'cdna5') and mnemonic == 'DS_BPERMUTE_FI_B32':
         return None
@@ -31,9 +40,12 @@ def gen_ds(ctx: ExecuteContext) -> str | None:
             + f'  amdgpu::arith::execute_ds_swizzle(wf, {flags}, {dst[0]}, {src[0]}, offset);'
         )
     api = 'rj_arith_' + mnemonic.lower()
-    # CDNA and gfx12 route across all 64 lanes; RDNA3 uses two 32-lane groups.
+    # CDNA and gfx12 span Wave64; older Radeon profiles use two 32-lane groups.
     wave64 = api + (
-        '_gfx12' if arch != 'rdna3' and mnemonic != 'DS_BPERMUTE_FI_B32' else ''
+        '_gfx12'
+        if arch not in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5')
+        and mnemonic != 'DS_BPERMUTE_FI_B32'
+        else ''
     )
     backward = 'BPERMUTE' in mnemonic
     inactive = '_FI_' in mnemonic

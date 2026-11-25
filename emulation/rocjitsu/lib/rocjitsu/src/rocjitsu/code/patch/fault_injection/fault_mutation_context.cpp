@@ -172,10 +172,35 @@ std::span<const uint8_t> FaultMutationContext::image() const {
   return {reinterpret_cast<const uint8_t *>(source_->image_data()), source_->image_size()};
 }
 
+FailureOr<const KernelOwnership *>
+FaultMutationContext::execution_ownership(FaultMutationError &error) const {
+  std::call_once(state_->ownership_once, [&] {
+    std::string detail;
+    FailureOr<KernelOwnership> owners =
+        KernelOwnership::build(source_, source_->target_id(), detail);
+    if (owners.failed()) {
+      state_->ownership_error = {.code = FaultMutationErrorCode::UnsupportedForm,
+                                 .message = std::move(detail)};
+      return;
+    }
+    state_->ownership = std::make_unique<KernelOwnership>(std::move(owners).value());
+  });
+  if (!state_->ownership) {
+    error = state_->ownership_error;
+    return Result::failure();
+  }
+  error = {};
+  return state_->ownership.get();
+}
+
 Result FaultMutationContext::analyze() const {
   // Admit one immutable image and its source-derived concrete target. Family
   // policy limits mutation forms; it must not substitute an architecture decoder.
   FaultMutationError &error = state_->error;
+  const auto require_complete_ownership = [&](const char *message, uint64_t offset = 0) {
+    state_->complete_ownership_needed = true;
+    return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm, message, offset);
+  };
   const std::span<const uint8_t> image = this->image();
   const AmdGpuCodeObject &object = source();
   const rj_code_target_id_t target = object.target_id();
@@ -224,6 +249,7 @@ Result FaultMutationContext::analyze() const {
   // Loaded VAs of complete descriptors whose file facts define owner admission.
   std::vector<uint64_t> descriptor_addresses;
   descriptor_addresses.reserve(kernels.size());
+  bool has_preload = false;
   for (const KernelDescriptorInfo &owner : kernels) {
     const std::optional<uint64_t> descriptor_address = resolve_file_backed_address(
         *segments, owner.descriptor_file_offset, sizeof(owner.descriptor), 0);
@@ -237,10 +263,7 @@ Result FaultMutationContext::analyze() const {
           error, FaultMutationErrorCode::UnsupportedForm,
           "descriptor load mapping does not resolve to its analyzed entry");
     }
-    if (kernarg_preload_length(owner.descriptor) != 0) {
-      return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
-                                   "firmware preload ownership requires additional entry analysis");
-    }
+    has_preload |= kernarg_preload_length(owner.descriptor) != 0;
     descriptor_addresses.push_back(*descriptor_address);
   }
 
@@ -266,6 +289,7 @@ Result FaultMutationContext::analyze() const {
           .failed()) {
     return Result::failure();
   }
+  bool has_function_owners = false;
   for (const Elf64_Shdr &section : sections) {
     if (section.sh_type != SHT_SYMTAB && section.sh_type != SHT_DYNSYM) {
       continue;
@@ -339,18 +363,27 @@ Result FaultMutationContext::analyze() const {
         continue;
       }
       const bool external = elf_symbol_bind(symbol.st_info) != kElfSymbolBindLocal;
-      if (type == kElfSymbolTypeObject || type == kElfSymbolTypeAmdGpuHsaKernel ||
-          ((type == kElfSymbolTypeFunc || external) &&
-           (symbol.st_value < text.vaddr() ||
-            !std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &candidate) {
-              return symbol.st_value - text.vaddr() == candidate.entry_text_offset;
-            })))) {
+      if (type == kElfSymbolTypeObject || type == kElfSymbolTypeAmdGpuHsaKernel)
         return reject_fault_mutation(
             error, FaultMutationErrorCode::UnsupportedForm,
             "separate function/data owners inside .text are outside this profile");
-      }
+      if ((type == kElfSymbolTypeFunc || external) &&
+          (symbol.st_value < text.vaddr() ||
+           !std::ranges::any_of(kernels, [&](const KernelDescriptorInfo &candidate) {
+             return symbol.st_value - text.vaddr() == candidate.entry_text_offset;
+           })))
+        has_function_owners = true;
     }
   }
+  // Finish common structural/loader admission before permitting an ownership
+  // fallback. In particular, preload must not bypass sibling descriptor or
+  // dynamic relocation checks that protect the source facts.
+  if (has_preload)
+    return require_complete_ownership(
+        "firmware preload ownership requires additional entry analysis");
+  if (has_function_owners)
+    return require_complete_ownership(
+        "separate function/data owners inside .text are outside this profile");
   // Build Reachable / ExplicitOnly CFG facts from all descriptor entries. Starting
   // only at the selected entry would hide cross-kernel or shared-block ownership;
   // these reachability facts cannot replace the full-text structural scan above.
@@ -392,17 +425,13 @@ Result FaultMutationContext::analyze() const {
     for (BasicBlock *block : scope) {
       const std::pair<std::unordered_map<const BasicBlock *, uint64_t>::iterator, bool> inserted =
           block_owners.emplace(block, owner.entry_text_offset);
-      if (!inserted.second && inserted.first->second != owner.entry_text_offset) {
-        return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
-                                     "shared reachable blocks require broader ownership analysis",
-                                     block->start_offset());
-      }
+      if (!inserted.second && inserted.first->second != owner.entry_text_offset)
+        return require_complete_ownership(
+            "shared reachable blocks require broader ownership analysis", block->start_offset());
       if (block->successor_issue() != BasicBlock::SuccessorIssue::None ||
-          block->has_implicit_terminator() || !block->call_edges().empty()) {
-        return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
-                                     "kernel ownership requires a closed direct CFG",
-                                     block->start_offset());
-      }
+          block->has_implicit_terminator() || !block->call_edges().empty())
+        return require_complete_ownership("kernel ownership requires a closed direct CFG",
+                                          block->start_offset());
       for (const BasicBlock *successor : block->successors()) {
         if (all_entries.contains(successor->start_offset()) &&
             successor->start_offset() != owner.entry_text_offset) {
@@ -413,10 +442,8 @@ Result FaultMutationContext::analyze() const {
       }
       for (const Instruction &instruction : block->instructions()) {
         if ((instruction.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 ||
-            (is_control_flow_transfer(instruction) && !instruction.branch_offset_bytes())) {
-          return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
-                                       "indirect owner is unsupported", instruction.src_loc());
-        }
+            (is_control_flow_transfer(instruction) && !instruction.branch_offset_bytes()))
+          return require_complete_ownership("indirect owner is unsupported", instruction.src_loc());
       }
     }
     state_->sources.push_back({.section = {.index = *text.sectionHeaderIndex(),
@@ -430,10 +457,8 @@ Result FaultMutationContext::analyze() const {
                                .blocks = std::move(scope),
                                .boundaries = boundaries});
   }
-  if (block_owners.size() != blocks.value().size()) {
-    return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
-                                 "unresolved code ownership");
-  }
+  if (block_owners.size() != blocks.value().size())
+    return require_complete_ownership("unresolved code ownership");
   state_->blocks = std::move(blocks).value();
   return Result::success();
 }
@@ -469,7 +494,8 @@ FaultMutationContext::fork_instrumentor(FaultMutationError &error) const {
   std::call_once(state_->analysis_once, [&] { state_->analysis_ok = analyze().succeeded(); });
   if (!state_->analysis_ok) {
     error = state_->error;
-    return Result::failure();
+    if (!state_->complete_ownership_needed || execution_ownership(error).failed())
+      return Result::failure();
   }
   TextEditError edit_error;
   FailureOr<std::unique_ptr<Instrumentor>> fork = state_->instrumentor->fork(edit_error);

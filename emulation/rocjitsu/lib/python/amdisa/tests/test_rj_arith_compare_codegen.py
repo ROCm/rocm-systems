@@ -76,7 +76,7 @@ def test_integer_compare_signatures_and_result_commit(name):
     assert (
         gen_integer_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False))
         is not None
-    ) == (bits in (32, 64))
+    ) == (bits in (16, 32, 64))
 
 
 @pytest.mark.parametrize(
@@ -86,6 +86,7 @@ def test_integer_compare_signatures_and_result_commit(name):
         ('rdna4', 'integer', 120),
         ('rdna3', 'float', 160),
         ('cdna1', 'float', {'vopc': 160, 'vop3': 96}),
+        ('cdna2', 'float', {'vopc': 160, 'vop3': 96}),
         ('rdna4', 'float', 140),
         ('rdna3', 'class', 10),
         ('rdna4', 'class', 10),
@@ -127,7 +128,7 @@ def test_generated_comparisons_cannot_bypass_rj_arith(arch, kind, count):
             if '::execute_modifier_impl(' in match[0]:
                 if 'dpp_new_result' in body:
                     assert 'if (wf.instruction_execution_failed())' in body
-                if kind == 'float' and arch == 'cdna1':
+                if kind == 'float' and arch in ('cdna1', 'cdna2'):
                     assert 'if (wf.instruction_execution_failed())' in body
                     assert 'wf.set_vcc_raw(dpp_old_vcc_)' in body
                 elif kind == 'float':
@@ -181,9 +182,6 @@ def test_float_comparisons_preserve_policy_modifiers_and_state_signature(name):
         implicit = gen_float_compare(context(arch, name, [], ['a', 'b'], is_vop3=False))
         assert 'inst_.abs' not in implicit
         assert ('wf.set_exec(result)' in implicit) == name.startswith('V_CMPX_')
-    assert (
-        gen_float_compare(context('cdna2', name, [], ['a', 'b'], is_vop3=False)) is None
-    )
 
 
 @pytest.mark.parametrize('name', sorted(CLASS_COMPARISONS))
@@ -236,18 +234,19 @@ def test_every_vopc_handler_routes_through_rj_arith(arch):
     assert 'ROCJITSU_TRY_SIMD' not in source
 
 
+@pytest.mark.parametrize('bits', [16, 64])
 @pytest.mark.parametrize(
     'arch', ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5')
 )
 @pytest.mark.parametrize('cmpx', (False, True))
 @pytest.mark.parametrize('explicit_destination', (False, True))
 def test_cdna_integer_compare_architectural_destinations(
-    arch, cmpx, explicit_destination
+    arch, cmpx, explicit_destination, bits
 ):
-    name = 'V_CMPX_EQ_U64' if cmpx else 'V_CMP_EQ_U64'
+    name = f'V_CMPX_EQ_U{bits}' if cmpx else f'V_CMP_EQ_U{bits}'
     dst = ['dst'] if explicit_destination else []
     body = gen_integer_compare(context(arch, name, dst, ['a', 'b']))
-    assert 'execute_compare<64>' in body
+    assert f'execute_compare<{bits}>' in body
     assert ('wf.set_exec(result)' in body) == cmpx
     writes_scalar = not cmpx or _PROFILES[arch.replace('_', '.')]().cmpx_writes_vcc
     assert ('write_wave_mask_scalar(dst' in body) == (
@@ -371,6 +370,37 @@ def test_older_class_compare_profile_contract(arch, bits, cmpx):
         bits == 16 and profile.uses_true16_vop3_opsel
     )
     assert 'excp_flag_user' not in body and 'trapsts' not in body
+
+
+@pytest.mark.parametrize('name', sorted(FLOAT_COMPARISONS))
+def test_gfx90a_float_comparisons_use_shared_numeric_policy(name):
+    bits, constant = FLOAT_COMPARISONS[name]
+    for vop3 in (False, True):
+        body = gen_float_compare(
+            context(
+                'cdna2',
+                name,
+                ['dst'] if vop3 else [],
+                ['a', 'b'],
+                is_vop3=vop3,
+                result_writer='commit_result' if vop3 else None,
+            )
+        )
+        api = 'rj_arith_' + name.lower().replace('_tru_', '_t_')
+        assert f'{api}_w32, {api}_w64,' in body
+        assert f'execute_float_compare<{bits}>' in body
+        assert f'a, b, {str(constant).lower()},' in body
+        assert ('RJ_ARITH_ALU_HIGH_A' in body) == (bits == 16 and vop3)
+        assert (
+            'wf.set_exec(result)' in body or 'commit_result(result)' in body
+        ) == name.startswith('V_CMPX_')
+        if name.startswith('V_CMPX_'):
+            assert (
+                'write_wave_mask_scalar(dst, wf, result)'
+                if vop3
+                else 'wf.set_vcc_mask(result)'
+            ) in body
+        assert 'execute_compare_with_exceptions' not in body
 
 
 @pytest.mark.parametrize('name', sorted(FLOAT_COMPARISONS))

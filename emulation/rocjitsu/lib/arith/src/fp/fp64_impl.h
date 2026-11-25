@@ -48,7 +48,8 @@ inline double fp64_flush_denorm(double value) {
 }
 
 // FP64 ADD/MUL/FMA return the first NaN source in operand order, quieted unless quiet_snan is
-// clear. An invalid FMA product (0 * infinity) gives the default NaN even when the addend is a NaN.
+// clear. Invalid operations (+Inf + -Inf, 0 * +-Inf) return the architectural default NaN
+// (0xfff8000000000000) even when the FMA addend is a NaN or host arithmetic produces +qNaN.
 // Host arithmetic may commute its operands, so its NaN choice is replaced; other results are kept.
 template <bool Fma>
 inline double fp64_nan_priority(double value, double x, double y, double z = 0,
@@ -70,6 +71,9 @@ inline double fp64_nan_priority(double value, double x, double y, double z = 0,
     if ((zb & 0x7fffffffffffffffULL) > infinity) {
       return as_double(zb | quiet);
     }
+  }
+  if ((double_bits(value) & 0x7fffffffffffffffULL) > infinity) {
+    return as_double(0xfff8000000000000ULL);
   }
   return value;
 }
