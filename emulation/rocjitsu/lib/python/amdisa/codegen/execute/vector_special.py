@@ -13,7 +13,6 @@ from __future__ import annotations
 from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.conversion import (
     decode_fp8_expr,
-    pk_rtz_f16_expr,
     to_fp8_expr,
 )
 from amdisa.codegen.execute.fp8_formats import (
@@ -827,26 +826,13 @@ def gen_vector_cvt_pk(
         raise ValueError('Normalized packing requires rj-arith lowering')
     if cls in ('vector_cvt_pk_u8_f32', 'vector_pack_b32_f16'):
         raise ValueError('Byte and halfword packing requires rj-arith lowering')
+    if cls == 'vector_cvt_pkrtz_f16_f32':
+        raise ValueError('Packed RTZ conversion requires rj-arith lowering')
     L = []
     L.append('  uint64_t exec = wf.exec();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
-    if cls == 'vector_cvt_pkrtz_f16_f32':
-        # shared/conversion.h stages, resolved before the lane loop.
-        L.insert(
-            0,
-            f'  const auto conversion = {pk_rtz_f16_expr(is_vop3, has_abs, "inst_")};',
-        )
-        L.append(
-            f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'
-        )
-        L.append(
-            f'    uint32_t s1 = amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane);'
-        )
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, conversion(s0, s1));'
-        )
-    elif cls == 'vector_cvt_pk':
+    if cls == 'vector_cvt_pk':
         if op in ('fp8_f32', 'bf8_f32') and uses_shared_fp8_narrowing(arch_name):
             _gen_ocp_pk_fp8(
                 L,
@@ -963,24 +949,7 @@ def gen_vector_cvt_pk(
                     f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, lo_bits | (hi_bits << 16));'
                 )
         elif op in ('u16_f32', 'i16_f32'):
-            L.append(
-                f'    float f0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-            )
-            L.append(
-                f'    float f1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
-            )
-            if is_vop3:
-                L.extend(vop3_src_mod('f0', 0, has_abs))
-                L.extend(vop3_src_mod('f1', 1, has_abs))
-            if op == 'u16_f32':
-                L.append('    uint32_t lo = amdgpu::cvt_u16_f32(f0);')
-                L.append('    uint32_t hi = amdgpu::cvt_u16_f32(f1);')
-            else:
-                L.append('    uint32_t lo = amdgpu::cvt_i16_f32(f0);')
-                L.append('    uint32_t hi = amdgpu::cvt_i16_f32(f1);')
-            L.append(
-                f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, (hi << 16) | (lo & 0xFFFFu));'
-            )
+            raise ValueError('Packed integer conversion requires rj-arith lowering')
         else:
             L.append(
                 f'    uint32_t s0 = amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane);'

@@ -21,25 +21,6 @@ inline conversion_model::output_modifier::Policy sdwa_output_policy(uint64_t fla
           uint32_t((flags >> 24) & 3), bool(flags & RJ_ARITH_FP16_OVFL)};
 }
 
-// Finalize an already-rounded half: active OMOD canonicalizes tiny values and zeros.
-// The producer owns scaling; this stage only applies final encoding rules and clamp.
-template <typename V>
-V sdwa_finalize_f16(V bits, const conversion_model::output_modifier::Policy &policy) {
-  using F16 = conversion_model::fp_format::F16;
-  static_assert(conversion_model::fp_format::is_lane_v<F16, V>);
-  if (policy.omod) {
-    bits = conversion_model::lane::choose((bits & V(0x7c00U)) == V(0U), V(0U), bits);
-  }
-  return conversion_model::output_modifier::clamp<F16>(bits, policy);
-}
-
-// Finalize both halves of a packed result before the VM selects destination bytes.
-template <typename V>
-V sdwa_finalize_packed_f16(V bits, const conversion_model::output_modifier::Policy &policy) {
-  return sdwa_finalize_f16(bits & V(0xffffU), policy) |
-         (sdwa_finalize_f16(bits >> 16, policy) << 16);
-}
-
 // Scale FP32 encodings with the old SDWA rounding, NaN and tiny-output rules.
 // All candidates use defined unsigned shifts, including inactive SIMD candidates.
 template <typename V>
@@ -89,6 +70,25 @@ template <typename V>
 V sdwa_output_f32(V bits, const conversion_model::output_modifier::Policy &policy) {
   return conversion_model::output_modifier::clamp<conversion_model::fp_format::F32>(
       sdwa_scale_f32(bits, policy), policy);
+}
+
+// Finalize an already-rounded half: active OMOD canonicalizes tiny values and zeros.
+// The producer owns scaling; this stage only applies final encoding rules and clamp.
+template <typename V>
+V sdwa_finalize_f16(V bits, const conversion_model::output_modifier::Policy &policy) {
+  using F16 = conversion_model::fp_format::F16;
+  static_assert(conversion_model::fp_format::is_lane_v<F16, V>);
+  if (policy.omod) {
+    bits = conversion_model::lane::choose((bits & V(0x7c00U)) == V(0U), V(0U), bits);
+  }
+  return conversion_model::output_modifier::clamp<F16>(bits, policy);
+}
+
+// Finalize both halves of a packed result before the VM selects destination bytes.
+template <typename V>
+V sdwa_finalize_packed_f16(V bits, const conversion_model::output_modifier::Policy &policy) {
+  return sdwa_finalize_f16(bits & V(0xffffU), policy) |
+         (sdwa_finalize_f16(bits >> 16, policy) << 16);
 }
 
 // Scale a rounded output word, then clamp, preserving an unselected half when present.

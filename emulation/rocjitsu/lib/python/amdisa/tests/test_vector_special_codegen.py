@@ -595,60 +595,23 @@ def test_migrated_true16_packing_skips_legacy_simd_glue():
     assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_FP16' in div_fixup
 
 
-@pytest.mark.parametrize(
-    'name', ['v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3']
-)
-def test_packed_rtz_simd_applies_source_modifiers(name):
-    # Every probe passes the scalar body's stage object, ABS/NEG included.
-    probes = [simd_probe_line(name), simd_probe_line(name.replace('_vop3', '_vop2'))]
-    local = local_coverage_probe(name)
-    if name == 'v_cvt_pkrtz_f16_f32_vop3':
-        assert local is not None
-        probes.append(local)
-    else:
-        assert local is None
-    for probe in probes:
-        assert 'conversion)' in probe
-        assert 'conversion_pk_rtz_f16' not in probe
-        assert 'f32_to_f16_rtz_simd' not in probe
-
-
-@pytest.mark.parametrize('has_abs', [False, True])
-def test_packed_rtz_vop3_modifiers_reach_the_shared_conversion(has_abs):
-    cpp = gen_vector_cvt_pk(
-        ['vdst'],
-        ['src0', 'src1'],
-        'vector_cvt_pkrtz_f16_f32',
-        None,
-        is_vop3=True,
-        has_abs=has_abs,
-    )
-    abs_field = 'inst_.abs' if has_abs else '0u'
-    stages = f'const auto conversion = amdgpu::conversion_pk_rtz_f16(wf, {abs_field}, inst_.neg);'
-    assert cpp.startswith(f'  {stages}')
-    assert 'conversion(s0, s1)' in cpp
-    assert 'util::f32_to_f16_rtz' not in cpp
+def test_packed_rtz_rejects_retired_fallbacks():
+    for name in ('v_cvt_pkrtz_f16_f32', 'v_cvt_pk_rtz_f16_f32'):
+        for encoding in ('vop2', 'vop3'):
+            assert simd_probe_line(f'{name}_{encoding}') is None
+            assert local_coverage_probe(f'{name}_{encoding}') is None
+    with pytest.raises(
+        ValueError, match='Packed RTZ conversion requires rj-arith lowering'
+    ):
+        gen_vector_cvt_pk(['vdst'], ['src0', 'src1'], 'vector_cvt_pkrtz_f16_f32', None)
 
 
 @pytest.mark.parametrize('op', ['u16_f32', 'i16_f32'])
-@pytest.mark.parametrize('has_abs', [False, True])
-def test_packed_integer_vop3_modifiers_precede_conversion(op, has_abs):
-    cpp = gen_vector_cvt_pk(
-        ['vdst'],
-        ['src0', 'src1'],
-        'vector_cvt_pk',
-        op,
-        is_vop3=True,
-        has_abs=has_abs,
-    )
-    abs_field = 'inst_.abs' if has_abs else '0u'
-    for source in (0, 1):
-        modifiers = (
-            f'f{source} = amdgpu::source_modifier::apply_to_float('
-            f'f{source}, {source}, {abs_field}, inst_.neg);'
-        )
-        assert modifiers in cpp
-        assert cpp.index(modifiers) < cpp.index(f'amdgpu::cvt_{op}(f0)')
+def test_packed_integer_rejects_retired_fallback(op):
+    with pytest.raises(
+        ValueError, match='Packed integer conversion requires rj-arith lowering'
+    ):
+        gen_vector_cvt_pk(['vdst'], ['src0', 'src1'], 'vector_cvt_pk', op, is_vop3=True)
 
 
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])

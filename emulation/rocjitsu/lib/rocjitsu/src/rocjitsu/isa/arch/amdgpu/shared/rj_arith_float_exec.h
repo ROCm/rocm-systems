@@ -105,8 +105,8 @@ inline void execute_fp8_widen_sdwa(Inst &inst, Wavefront &wave, Unary32Function 
   }
 }
 
-// Convert the already selected SDWA source, then apply floating output modifiers
-// and byte placement exactly once. Validate arithmetic before any destination write.
+// Convert and apply output modifiers in rj-arith, then place the SDWA result bytes.
+// Validate arithmetic before any destination write.
 template <typename Inst>
 inline void execute_byte_conversion_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
                                          Unary64Function wave64, uint64_t flags,
@@ -122,46 +122,17 @@ inline void execute_byte_conversion_sdwa(Inst &inst, Wavefront &wave, Unary32Fun
   }
   uint32_t result[64]{};
   uint32_t *d = result;
-  const int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data)
-                                         : wave64(flags, exec_mask, 0, &d, &a.data);
+  const uint64_t modifiers = sdwa_float_modifiers(inst);
+  const int error = wave.wf_size() == 32
+                        ? wave32(flags, uint32_t(exec_mask), modifiers, &d, &a.data)
+                        : wave64(flags, exec_mask, modifiers, &d, &a.data);
   if (error != RJ_ARITH_SUCCESS) {
     wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
     if (exec_mask & (1ULL << lane)) {
-      sdwa::write_lane<sdwa::ResultFormat::F32>(inst, wave, destination, lane, result[lane]);
-    }
-  }
-}
-
-// Widen the staged BF16 source, then retain SDWA's FP32 scaling and destination
-// placement. Source capture precedes writes to any overlapping destination.
-template <typename Inst>
-inline void execute_bf16_widen_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
-                                    Unary64Function wave64, const Operand &destination,
-                                    const Operand &source) {
-  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
-  if (!exec_mask) {
-    return;
-  }
-  RegisterAccess registers(wave);
-  VectorInput32 a(registers, wave, source, wave.exec(), 3);
-  if (wave.instruction_execution_failed()) {
-    return;
-  }
-  uint32_t result[64]{};
-  uint32_t *d = result;
-  uint64_t flags = wave.cu().arithmetic_flags();
-  int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data)
-                                   : wave64(flags, exec_mask, 0, &d, &a.data);
-  if (error != RJ_ARITH_SUCCESS) {
-    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
-    return;
-  }
-  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-    if (exec_mask & (1ULL << lane)) {
-      sdwa::write_lane<sdwa::ResultFormat::F32>(inst, wave, destination, lane, result[lane]);
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
     }
   }
 }
@@ -183,6 +154,42 @@ inline uint64_t float32_flags(const Wavefront &wave, uint64_t flags, bool rdna3)
     flags |= RJ_ARITH_FP_IEEE_MODE;
   }
   return flags;
+}
+
+// Widen BF16 and apply inherited SDWA numerical controls in rj-arith before byte placement.
+// Source capture precedes writes to any overlapping destination.
+template <typename Inst>
+inline void execute_bf16_widen_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
+                                    Unary64Function wave64, const Operand &destination,
+                                    const Operand &source) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!exec_mask) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec(), 3);
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  // Pure selection/widening needs no numerical SDWA stage or guest FP controls.
+  const uint64_t modifiers = sdwa_float_modifiers(inst);
+  const uint64_t mode = modifiers ? RJ_ARITH_CVT_SDWA | modifiers : 0;
+  const uint64_t flags = modifiers ? float32_flags(wave, wave.cu().arithmetic_flags(), true) &
+                                         ~RJ_ARITH_FP_FLUSH_INPUT_DENORMALS
+                                   : wave.cu().arithmetic_flags();
+  int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), mode, &d, &a.data)
+                                   : wave64(flags, exec_mask, mode, &d, &a.data);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
+  }
 }
 
 // Translate the shared FP16/FP64 rounding, denormal, IEEE and clamp controls.
@@ -216,7 +223,7 @@ using FloatUnary64Function = int (*)(uint64_t, uint64_t, uint64_t, uint32_t *con
                                      const uint32_t *const *, uint32_t *);
 
 // Convert a staged SDWA source, retaining the legacy F16 prescaling order.
-// SDWA owns destination placement and clamp; errors commit neither results nor FP status.
+// SDWA owns only destination placement; errors commit neither results nor FP status.
 template <sdwa::ResultFormat Format, typename Inst>
 inline void execute_conversion16_sdwa(Inst &inst, Wavefront &wave, FloatUnary32Function wave32,
                                       FloatUnary64Function wave64, uint64_t flags,
@@ -230,9 +237,8 @@ inline void execute_conversion16_sdwa(Inst &inst, Wavefront &wave, FloatUnary32F
     return;
   }
   uint64_t mode = 0;
-  if constexpr (Format == sdwa::ResultFormat::F16) {
-    mode = RJ_ARITH_CVT_SDWA |
-           (uint64_t(sdwa::output_modifier<Format>(inst, wave)) << RJ_ARITH_ALU_OMOD_SHIFT);
+  if constexpr (Format != sdwa::ResultFormat::NONE) {
+    mode = RJ_ARITH_CVT_SDWA | sdwa_float_modifiers(inst);
   }
   uint32_t result[64]{};
   uint32_t *d = result;
@@ -247,14 +253,14 @@ inline void execute_conversion16_sdwa(Inst &inst, Wavefront &wave, FloatUnary32F
   }
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
     if (exec_mask & (1ULL << lane)) {
-      sdwa::write_lane<Format>(inst, wave, destination, lane, result[lane]);
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
     }
   }
   wave.set_trapsts(wave.trapsts() | causes);
   wave.raise_alu_causes(causes);
 }
 
-// Convert an already staged SDWA word, then apply destination scaling and placement.
+// Convert a staged SDWA word with numerical controls in rj-arith, then place its bytes.
 // All inputs are read before writes; an error commits neither destinations nor FP status.
 template <sdwa::ResultFormat Format, typename Inst, typename Wave32, typename Wave64>
 inline void execute_conversion32_sdwa(Inst &inst, Wavefront &wave, Wave32 wave32, Wave64 wave64,
@@ -272,12 +278,13 @@ inline void execute_conversion32_sdwa(Inst &inst, Wavefront &wave, Wave32 wave32
   uint32_t *d = result;
   uint32_t causes = 0;
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  const uint64_t mode = Format == sdwa::ResultFormat::NONE ? 0 : sdwa_float_modifiers(inst);
   // Some conversions have no architectural FP-status output parameter.
   const auto invoke = [&](auto call, auto mask) {
-    if constexpr (requires { call(flags, mask, 0, &d, &a.data, &causes); }) {
-      return call(flags, mask, 0, &d, &a.data, &causes);
+    if constexpr (requires { call(flags, mask, mode, &d, &a.data, &causes); }) {
+      return call(flags, mask, mode, &d, &a.data, &causes);
     } else {
-      return call(flags, mask, 0, &d, &a.data);
+      return call(flags, mask, mode, &d, &a.data);
     }
   };
   const int error =
@@ -288,7 +295,7 @@ inline void execute_conversion32_sdwa(Inst &inst, Wavefront &wave, Wave32 wave32
   }
   for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
     if (exec_mask & (1ULL << lane)) {
-      sdwa::write_lane<Format>(inst, wave, destination, lane, result[lane]);
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
     }
   }
   wave.set_trapsts(wave.trapsts() | causes);
@@ -545,6 +552,51 @@ inline void execute_float_pack(Wavefront &wave, FloatBinary32Function wave32,
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
   }
+}
+
+// Convert and finalize packed halves in rj-arith before SDWA byte placement.
+// Both inputs are captured before any overlapping destination is written.
+template <typename Inst>
+inline void execute_packed_rtz_sdwa(Inst &inst, Wavefront &wave, FloatBinary32Function wave32,
+                                    FloatBinary64Function wave64, uint64_t flags,
+                                    const Operand &destination, const Operand &lhs,
+                                    const Operand &rhs) {
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  if (!wave.exec()) {
+    return;
+  }
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, lhs, wave.exec());
+  VectorInput32 b(registers, wave, rhs, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  // Preserve the generator's F32 input/F16 output denormal flags.
+  if (wave.ieee_mode()) {
+    flags |= RJ_ARITH_FP_IEEE_MODE;
+  }
+  if (!wave.dx10_clamp()) {
+    flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+  }
+  const uint64_t modifiers = RJ_ARITH_CVT_SDWA | sdwa_float_modifiers(inst);
+  uint32_t result[64]{};
+  uint32_t *d = result;
+  uint32_t causes = 0;
+  const int error =
+      wave.wf_size() == 32
+          ? wave32(flags, uint32_t(exec_mask), modifiers, &d, &a.data, &b.data, &causes)
+          : wave64(flags, exec_mask, modifiers, &d, &a.data, &b.data, &causes);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
+  }
+  wave.set_trapsts(wave.trapsts() | causes);
+  wave.raise_alu_causes(causes);
 }
 
 // Execute binary arithmetic and let the library compute optional FP causes.

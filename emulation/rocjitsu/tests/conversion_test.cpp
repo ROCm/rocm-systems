@@ -335,33 +335,6 @@ TEST(FloatRoundingTest, OverflowFollowsModeUnlessSaturated) {
   EXPECT_EQ(f32_to_f16(0xff800000u, saturate), 0xfc00u);
 }
 
-// A prescale multiplies the exact value before its single rounding.
-TEST(FloatRoundingTest, PrescaleAppliesBeforeRounding) {
-  FloatRounding halve;
-  halve.prescale = -1;
-  // 131008 overflows F16, but 65504 is its largest finite value.
-  EXPECT_EQ(f32_to_f16(0x47ffe000u, FloatRounding{}), 0x7c00u);
-  EXPECT_EQ(f32_to_f16(0x47ffe000u, halve), 0x7bffu);
-  // Halving the smallest normal gives a subnormal, not a flushed or rounded value.
-  EXPECT_EQ(f32_to_f16(0x38800000u, halve), 0x0200u);
-  FloatRounding quadruple;
-  quadruple.prescale = 2;
-  EXPECT_EQ(integer_to_f16(2u, false, quadruple), 0x4800u);
-  EXPECT_EQ(integer_to_f16(32767u, true, quadruple), 0xfc00u);
-}
-
-// Pins the SDWA ordering that simd_glue.h's sdwa_conversion_to_f16 documents as
-// a known hardware mismatch: scaling the exact value first rounds 65535 div:2 to
-// 32768, while gfx1030 rounds to infinity first and halves that. Measured on
-// gfx1030 (RX 6800 XT) for SDWA v_cvt_f16_{u16,i16,f32} at mul:2/mul:4/div:2,
-// which match VOP3 on every lane; left for the SDWA F16 migration follow-up.
-TEST(FloatRoundingTest, PrescaleBeforeRoundingDisagreesWithGfx1030Sdwa) {
-  FloatRounding halve;
-  halve.prescale = -1;
-  EXPECT_EQ(integer_to_f16(65535u, false, FloatRounding{}), 0x7c00u);
-  EXPECT_EQ(integer_to_f16(65535u, false, halve), 0x7800u);
-}
-
 TEST(FloatRoundingTest, NarrowQuietsNanAndKeepsLeadingPayload) {
   EXPECT_EQ(f32_to_f16(0x7f800001u, {}), 0x7e00u);
   EXPECT_EQ(f32_to_f16(0xffa12345u, {}), 0xff09u);

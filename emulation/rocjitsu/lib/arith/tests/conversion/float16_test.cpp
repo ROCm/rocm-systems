@@ -101,7 +101,7 @@ void check_float16(Call call, Conversion16 operation) {
       modifiers, Exact,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | (op == 5 && !Gfx12 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0),
-      Cdna && (op < 2 || op == 4) ? RJ_ARITH_CVT_SDWA : 0);
+      (Cdna && (op < 2 || op == 4)) || (!Gfx12 && op == 5) ? RJ_ARITH_CVT_SDWA : 0);
 }
 
 } // namespace
@@ -578,4 +578,30 @@ TEST(ConversionFloat16Gfx11, ExactMatchesHardware) {
       rj_arith_v_cvt_f16_i16_w32, 0x1f5, 0, 0xd6a37fff, 0, 0, d, 0xa5a57800U);
   rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 16>(
       rj_arith_v_cvt_f16_i16_w32, 0x1fa, 0, 0xd6a37fff, 0, 0, d, 0xa5a577ffU);
+}
+
+// Active SDWA scaling quiets widened NaNs and normalizes zero's sign with IEEE clear.
+TEST(ConversionCvtF32F16W64Gfx11, SdwaOutput) {
+  using namespace rocjitsu::arith::test;
+  const uint32_t source_bits[] = {0x7c01U, 0xfc21U, 0x8000U, 1};
+  const uint32_t expected[] = {0x7fc02000U, 0xffc42000U, 0, 0x34000000U};
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      uint32_t source[64], result[64];
+      for (int lane = 0; lane < 64; ++lane) {
+        source[lane] = source_bits[lane % 4];
+      }
+      const uint32_t *a = source;
+      uint32_t *d = result;
+      uint32_t status = 0x10;
+      ASSERT_EQ(rj_arith_v_cvt_f32_f16_w64(cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                                           ~0ULL, RJ_ARITH_CVT_SDWA | RJ_ARITH_ALU_OMOD_2, &d, &a,
+                                           &status),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < 64; ++lane) {
+        EXPECT_EQ(result[lane], expected[lane % 4]);
+      }
+      EXPECT_EQ(status, 0x10U);
+    }
+  }
 }

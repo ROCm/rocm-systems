@@ -570,6 +570,7 @@ add_executable(
     older_half_unary_test.cpp
     older_screen_partition_test.cpp
     older_packed_routing_test.cpp
+    older_conversion16_test.cpp
     cdna5_gfx1251_simulation_test.cpp
     cdna5_instruction_test.cpp
     cdna5_sdma_test.cpp
@@ -641,6 +642,8 @@ add_executable(
     conversion_test.cpp
     older_normalized_conversion_test.cpp
     older_packing_test.cpp
+    older_packed_conversion_test.cpp
+    older_byte_conversion_test.cpp
     denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp

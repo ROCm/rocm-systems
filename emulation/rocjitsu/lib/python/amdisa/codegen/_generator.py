@@ -18499,18 +18499,12 @@ class CodeGenerator:
                             False,
                         )
                     )
-                if (
-                    self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5')
-                    and any((i.name in BYTE_NIBBLE_CONVERSION_NAMES for i in all_insts))
+                if any((i.name in BYTE_NIBBLE_CONVERSION_NAMES for i in all_insts)) or (
+                    self.isa_spec.arch_name in ('rdna3', 'rdna4')
+                    and any((i.name in FLOAT_NAMES for i in all_insts))
                     or (
-                        self.isa_spec.arch_name in ('rdna3', 'rdna4')
-                        and any((i.name in FLOAT_NAMES for i in all_insts))
-                        or (
-                            self.isa_spec.arch_name in ('cdna4', 'cdna5')
-                            and any(
-                                (i.name in FLOAT16_CONVERSION_NAMES for i in all_insts)
-                            )
-                        )
+                        self.isa_spec.arch_name in ('cdna4', 'cdna5')
+                        and any((i.name in FLOAT16_CONVERSION_NAMES for i in all_insts))
                     )
                 ):
                     cpp_includes.append(
@@ -18553,9 +18547,20 @@ class CodeGenerator:
                                 False,
                             )
                         )
-                if self.isa_spec.arch_name in ('cdna3', 'cdna4', 'cdna5') and any(
-                    i.name in CONVERSION16_NAMES for i in all_insts
+                if self.isa_spec.arch_name in (
+                    'cdna1',
+                    'cdna2',
+                    'rdna1',
+                    'rdna2',
+                    'rdna3_5',
+                ) and any(
+                    i.name.replace('_PKRTZ_', '_PK_RTZ_') in PACKED_CONVERSION_NAMES
+                    for i in all_insts
                 ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                if any(i.name in CONVERSION16_NAMES for i in all_insts):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
                     )
@@ -19729,11 +19734,6 @@ class CodeGenerator:
             prefixed_body = prefixed_body.replace(
                 'amdgpu::vop3_fp8_decode_e5m3(*this)',
                 'amdgpu::vop3_fp8_decode_e5m3(inst)',
-            )
-            prefixed_body = _re.sub(
-                r'(amdgpu::sdwa_conversion_to_f16<[\w:]+>)\(\*this, wf\)',
-                r'\1(inst, wf)',
-                prefixed_body,
             )
             prefixed_body = _re.sub(
                 r'\s*\(void\)wf;\s*(?://[^\n]*)?\n?', '\n', prefixed_body
