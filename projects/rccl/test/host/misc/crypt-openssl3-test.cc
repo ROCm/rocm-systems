@@ -3,20 +3,9 @@
  *
  * See LICENSE.txt for license information
  ************************************************************************/
-//
-// Host-only microtests for the TLS handshake in src/misc/crypt.cc.
-//
-// Contract: once ncclSetEncryption() sets a pre-shared key, a connecting socket
-// finishes its handshake only with a peer that used that key. A server that
-// ignores the PSK and presents a certificate instead is refused before the
-// client sends it anything (NCCL 2.32.3, "crypt: require OpenSSL handshakes to
-// use PSK path").
-//
-// The suite compiles the hipified crypt.cc directly (via CRYPT_CC_PATH) with the
-// OpenSSL 3 backend, which librccl only gets from TLS_BACKEND=OPENSSL3. crypt.cc
-// dlopens libssl.so.3, so building needs just the OpenSSL 3 headers. CMake builds
-// this binary only when TLS_BACKEND=OPENSSL3. Both ends of a connection run in this process over a
-// socketpair and are stepped in turn, non-blocking. No GPU, no librccl.so.
+
+// Host-only microtests for the OpenSSL 3 TLS handshake in src/misc/crypt.cc: with a PSK set, the client
+// completes a handshake only with a peer holding that key.
 
 #include <gtest/gtest.h>
 
@@ -37,9 +26,6 @@
 #include "ScopedHook.h"
 #include "fakes/socket_fakes.h"
 
-// crypt.cc's calls into src/os/linux.cc, which this binary does not link: the
-// default poll timeout (0: never poll), dl*, and a non-blocking send/recv with
-// ncclOsSocketProgressOpt's closed/error contract.
 int64_t ncclParamPollTimeOut() { return 0; }
 ncclOsLibraryHandle ncclOsDlopen(const char* name) { return dlopen(name, RTLD_NOW | RTLD_LOCAL); }
 void* ncclOsDlsym(ncclOsLibraryHandle handle, const char* symbol) { return dlsym(handle, symbol); }
@@ -123,8 +109,7 @@ struct ImpostorOutcome {
   int leaked = 0;
 };
 
-// A peer without the PSK ignores the client's PSK offer and completes a
-// certificate handshake instead, which any client that skips verification accepts.
+// The impostor is a server without the PSK that offers a self-signed certificate instead.
 class CryptImpostorTest : public CryptPskHandshakeTest {
  protected:
   void ConnectToImpostor(bool clientSkipsVerification, ImpostorOutcome* out) {
