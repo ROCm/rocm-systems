@@ -31,6 +31,7 @@ set(TEST_SRC
     hipMemcpy3D.cc
     hipMemcpy3DAsync.cc
     hipMemcpy3DBatchAsync.cc
+    hipMemcpySdmaCopyPath.cc
 )
 
 hip_add_exe_to_target(NAME MemcpyPerformance

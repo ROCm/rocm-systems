@@ -139,6 +139,7 @@ BlitSdma<useGCR, scopeFields>::BlitSdma()
       is_dxg_(false),
       enable_sdma_hdp_flush_(false),
       sw_poll_workaround_(false),
+      sdma_poll_interval_(0x04),
       sdma_epilogue_bytes_(0),
       queue_wptr_(nullptr),
       queue_rptr_(nullptr),
@@ -264,6 +265,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
     sdma_epilogue_bytes_ = agent_->properties().NativeSDMAEpilogueBytes;
   sdma_wait_idle_ = core::Runtime::runtime_singleton_->flag().sdma_wait_idle();
   enable_sdma_hdp_flush_ = core::Runtime::runtime_singleton_->flag().enable_sdma_hdp_flush();
+  sdma_poll_interval_ = core::Runtime::runtime_singleton_->flag().sdma_poll_interval();
 
   // Cache gfx90x SW poll workaround flag to avoid static-local guard overhead
   // on every SubmitCommand call.
@@ -2741,7 +2743,7 @@ void BlitSdma<useGCR, scopeFields>::BuildPollCommand(char* cmd_addr, void* addr,
 
   packet_addr->MASK_UNION.mask = 0xffffffff;  // Compare the whole content.
 
-  packet_addr->DW5_UNION.interval = 0x04;
+  packet_addr->DW5_UNION.interval = sdma_poll_interval_;  // by HSA_SDMA_POLL_INTERVAL
   packet_addr->DW5_UNION.retry_count = 0xfff;  // Retry forever.
   if (scopeFields) packet_addr->DW5_UNION.scope = SDMA_MEMORY_SCOPE_SYS;
 }

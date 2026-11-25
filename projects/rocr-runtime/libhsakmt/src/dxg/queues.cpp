@@ -133,6 +133,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueV2(HSAuint32 NodeId,
   case HSA_QUEUE_SDMA_BY_ENG_ID: {
     pr_debug("create sdma queue in engine %d\n", SdmaEngineId);
     uint32_t queue_engine = device_->GetSdmaEngine(0); // TODO: SdmaEngineId
+    // DMA2 is a dedicated SDMA engine with the GPU timeout disabled, so a long-running HSA
+    // SDMA copy is not killed by the hang detection DMA/DMA1 apply. Use it when the KMD
+    // schedules it; every other queue type stays on GetSdmaEngine(0).
+    if (device_->IsSdmaSupported() && device_->DeviceInfo().hwsInfo.hwsMask.dma2HwsEnabled) {
+      queue_engine = wsl::thunk::WDDMDevice::kSchedulerIdDrmDma2;
+    }
     bool use_hws = device_->IsHwsEnabled(queue_engine);
     auto queue_ = new wsl::thunk::SDMAQueue(
 		device_, QueueAddress, QueueSizeInBytes,

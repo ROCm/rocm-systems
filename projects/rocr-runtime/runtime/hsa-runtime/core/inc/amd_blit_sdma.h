@@ -562,6 +562,9 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
   bool is_dxg_;
   bool enable_sdma_hdp_flush_;
   bool sw_poll_workaround_;
+  /// DW5_UNION.interval written into every SDMA POLL_REGMEM packet.
+  /// Overridable with HSA_SDMA_POLL_INTERVAL.
+  uint32_t sdma_poll_interval_;
 
   /// Bytes libhsakmt appends to the ring on every doorbell for its progress-fence
   /// epilogue (Windows/DXG native SDMA user queue); every reservation must include them.

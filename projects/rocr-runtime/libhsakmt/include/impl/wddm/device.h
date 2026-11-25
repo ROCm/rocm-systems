@@ -116,6 +116,7 @@ public:
   // DXUMD_SCHEDULERIDENTIFIER_COMPUTE0 from the KMD scheduler enum (kdx_umd.h,
   // not on this include path). The PM4 path must run on COMPUTE0.
   static constexpr uint32_t kSchedulerIdCompute0 = 5;
+  static constexpr uint32_t kSchedulerIdDrmDma2 = 1;
 
   WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_id);
   ~WDDMDevice();
