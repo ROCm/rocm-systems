@@ -238,7 +238,8 @@ the profiler will restart profiling when encountering this new targeted kernel a
 Thread tracing without dispatch interception
 ============================================
 
-``--att-no-intercept`` traces without intercepting or serializing kernel dispatches, so traced kernels run as they would without the profiler.
+``--att-no-intercept`` drops all queue interception and kernel dispatch tracing, which can give a lower kernel launch overhead while the trace is active compared to other methods, at the cost of some PCIe bandwidth.
+Use it when you need to measure the gaps between waves of different dispatches, where kernel tracing and queue interception could interfere with the timing.
 Thread trace runs continuously on each selected GPU, and the dispatches of targeted kernels are extracted from the trace on the host.
 Kernel filtering options such as ``--kernel-include-regex`` and ``--kernel-iteration-range`` work as with ``--att``. Because the trace is device-wide, each capture can also contain other dispatches that ran concurrently.
 
@@ -254,6 +255,11 @@ Requirements and limitations:
 * Traces a single shader engine per device.
 * ``--selected-regions`` doesn't control ``--att-no-intercept`` captures.
 * Uses six host buffers of ``att-buffer-size`` bytes per traced GPU. Lower ``--att-buffer-size`` to reduce host memory usage.
+
+If any of these limitations isn't acceptable, use ``--att --selected-regions`` instead.
+It doesn't trace kernel dispatches either, so it also has a small per-launch overhead while the trace is active. See :ref:`thread-trace-marker-controlled`.
+
+.. _thread-trace-marker-controlled:
 
 Marker-controlled thread tracing
 ================================
