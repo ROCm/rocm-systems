@@ -10,8 +10,8 @@ lds.atomic_bw:
   formula: 64 * SUM(SQ_INSTS_LDS_ATOMIC_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes accessed by LDS atomic operations, divided by total duration.
-    Only the work-items that executed (execution mask) are counted.
+    The number of bytes per second accessed by LDS atomic operations. Only the
+    work-items that executed (execution mask) are counted.
 lds.command_fifo_full_rate:
   name: LDS Command FIFO Full Rate
   formula: SUM(SQ_LDS_CMD_FIFO_FULL) / SUM($denom)
@@ -38,8 +38,8 @@ lds.load_bw:
   formula: 64 * SUM(SQ_INSTS_LDS_LOAD_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes loaded from the LDS by load operations, divided by total
-    duration. Only the work-items that executed (execution mask) are counted.
+    The number of bytes per second loaded from the LDS by load operations. Only the
+    work-items that executed (execution mask) are counted.
 lds.store:
   name: LDS STORE
   formula: SUM(SQ_INSTS_LDS_STORE) / SUM($denom)
@@ -50,5 +50,5 @@ lds.store_bw:
   formula: 64 * SUM(SQ_INSTS_LDS_STORE_BANDWIDTH) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes stored to the LDS by store operations, divided by total
-    duration. Only the work-items that executed (execution mask) are counted.
+    The number of bytes per second stored to the LDS by store operations. Only the
+    work-items that executed (execution mask) are counted.

@@ -92,8 +92,7 @@ fabric.rd_bw:
   formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes read by the L2 over the Infinity Fabric interface, divided by
-    total duration.
+    The number of bytes per second read by the L2 over the Infinity Fabric interface.
   peak: $hbmBandwidth
 fabric.rd_bw_norm:
   name: L2-Fabric Read Bytes
@@ -189,10 +188,10 @@ fabric.wr_atomic_bw:
   formula: SUM(TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes sent by the L2 over the Infinity Fabric interface by write and
-    atomic operations, divided by total duration. Infinity Fabric considers a request
-    atomic only if it targets non-write-cacheable memory, for example, fine-grained or
-    uncached memory allocations.
+    The number of bytes per second sent by the L2 over the Infinity Fabric interface by
+    write and atomic operations. Infinity Fabric considers a request atomic only if it
+    targets non-write-cacheable memory, for example, fine-grained or uncached memory
+    allocations.
   peak: $hbmBandwidth
 fabric.wr_atomic_bw_norm:
   name: L2-Fabric Write and Atomic Bytes

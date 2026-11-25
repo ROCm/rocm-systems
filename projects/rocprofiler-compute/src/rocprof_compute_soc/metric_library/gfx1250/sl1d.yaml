@@ -2,8 +2,7 @@ sl1d.bw:
   name: sL1D Cache Bandwidth
   formula: 64 * SUM(SQC_DCACHE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: >-
-    The number of bytes looked up in the sL1D cache, divided by total duration.
+  description: The number of bytes per second looked up in the sL1D cache.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 sl1d.dcache_gl1_req_lat:
   name: Dcache-GL1 Request Latency
@@ -30,9 +29,9 @@ sl1d.gl1_rd_bw:
   formula: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes the scalar data cache (sL1D) reads from the GL1 cache, divided
-    by total duration. Scalar operations load uniform data shared across all threads in
-    a wavefront, making efficient caching critical for performance.
+    The number of bytes per second the scalar data cache (sL1D) reads from the GL1
+    cache. Scalar operations load uniform data shared across all threads in a wavefront,
+    making efficient caching critical for performance.
 sl1d.hit_rate_excl_dup:
   name: sL1D Hit Rate (Excluding Duplicate Misses)
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
@@ -57,9 +56,9 @@ sl1d.load_bw:
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes loaded by scalar memory instructions, divided by total duration.
-    The number of bytes is the number of dwords each instruction loads multiplied by
-    four; bounds-check reductions are ignored.
+    The number of bytes per second loaded by scalar memory instructions. The number of
+    bytes is the number of dwords each instruction loads multiplied by four;
+    bounds-check reductions are ignored.
 sl1d.load_bw_norm:
   name: sL1D Load Bytes
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM($denom)

@@ -12,9 +12,8 @@ gl0.bw:
   formula: 128 * SUM(TCP_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes requested from the GL0 vector cache (TCP Cache), divided by
-    total duration. Each TCP_REQ cache-line request counts as 128 bytes, so this is an
-    upper bound.
+    The number of bytes per second requested from the GL0 vector cache (TCP Cache). Each
+    TCP_REQ cache-line request counts as 128 bytes, so this is an upper bound.
   peak_empirical: $L0Bw_empirical_peak
 gl0.hit_rate:
   name: GL0 Hit Rate

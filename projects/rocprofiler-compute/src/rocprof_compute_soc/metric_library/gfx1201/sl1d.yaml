@@ -12,9 +12,9 @@ sl1d.load_bw:
   formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes loaded by scalar memory instructions, divided by total duration.
-    The number of bytes is the number of dwords each instruction loads multiplied by
-    four; bounds-check reductions are ignored.
+    The number of bytes per second loaded by scalar memory instructions. The number of
+    bytes is the number of dwords each instruction loads multiplied by four;
+    bounds-check reductions are ignored.
   peak: '$sqc_per_gpu * 64 * $max_sclk / 1000'
 sl1d.req:
   name: sL1D Requests

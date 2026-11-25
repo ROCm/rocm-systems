@@ -29,10 +29,8 @@ lds.theoretical_bw:
   formula: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Estimated number of bytes transferred by Local Data Share operations, divided by
-    total duration. This reflects the effective throughput after accounting for bank
-    conflicts. RDNA 3.5 provides 32 LDS banks per compute unit for high-bandwidth shared
-    memory access.
+    The maximum number of bytes per second the LDS could have moved, from its active
+    cycles without bank conflicts. It ignores the execution mask.
   peak_empirical: $LDSBw_empirical_peak
 lds.util:
   name: LDS Utilization

@@ -3,9 +3,9 @@ sl1d.gl1_rd_bw:
   formula: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes the scalar data cache (sL1D) reads from the GL1 cache, divided
-    by total duration. Scalar operations load uniform data shared across all threads in
-    a wavefront, making efficient caching critical for performance.
+    The number of bytes per second the scalar data cache (sL1D) reads from the GL1
+    cache. Scalar operations load uniform data shared across all threads in a wavefront,
+    making efficient caching critical for performance.
   peak: $sqc_per_gpu * 64 * $max_sclk / 1000
 sl1d.hit_rate_excl_dup:
   name: sL1D Hit Rate (Excluding Duplicate Misses)

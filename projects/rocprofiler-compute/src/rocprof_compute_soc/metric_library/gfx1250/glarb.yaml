@@ -3,8 +3,8 @@ glarb.gl2_atomic_bw:
   formula: 64 * SUM(GLARBC_REQ_ATOMIC_WITH_RET_sum + GLARBC_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of atomic requests from the Graphics Level Arbiter to the GL2
-    cache, divided by total duration. Each request counts as 64 bytes.
+    The number of bytes per second of atomic requests from the Graphics Level Arbiter to
+    the GL2 cache. Each request counts as 64 bytes.
 glarb.glarba_req:
   name: GLARBA Requests
   formula: SUM(GLARBA_ARB_REQUESTS_sum) / SUM($denom)
@@ -80,15 +80,15 @@ glarb.glarbc_req_bw_rd:
   formula: SUM(GLARBC_REQ_READ_32B_sum * 32 + GLARBC_REQ_READ_64B_sum * 64 + GLARBC_REQ_READ_128B_sum * 128 + GLARBC_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of read requests from the Graphics Level Arbiter to the GL2
-    cache, divided by total duration.
+    The number of bytes per second of read requests from the Graphics Level Arbiter to
+    the GL2 cache.
 glarb.glarbc_req_bw_wr:
   name: GLARBC Request Bandwidth - Write
   formula: SUM(GLARBC_REQ_WRITE_32B_sum * 32 + GLARBC_REQ_WRITE_64B_sum * 64 + GLARBC_REQ_WRITE_128B_sum * 128 + GLARBC_REQ_WRITE_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of write requests from the Graphics Level Arbiter to the GL2
-    cache, divided by total duration.
+    The number of bytes per second of write requests from the Graphics Level Arbiter to
+    the GL2 cache.
 glarb.glarbc_req_rd:
   name: GLARBC Requests - Read
   formula: SUM(GLARBC_REQ_READ_sum) / SUM($denom)

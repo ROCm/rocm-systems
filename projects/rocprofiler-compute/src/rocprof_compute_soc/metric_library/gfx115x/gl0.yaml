@@ -19,9 +19,9 @@ gl0.bw:
   formula: 64 * SUM(TCP_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes requested from the GL0 vector cache (TCP Cache), divided by
-    total duration. This represents the rate at which the shader cores are requesting
-    data from the cache hierarchy. High bandwidth indicates memory-intensive workloads.
+    The number of bytes per second requested from the GL0 vector cache (TCP Cache). This
+    represents the rate at which the shader cores are requesting data from the cache
+    hierarchy. High bandwidth indicates memory-intensive workloads.
   peak: $cu_per_gpu * 128 * $max_sclk / 1000
   peak_empirical: $L0Bw_empirical_peak
 gl0.data_fifo_stall:
@@ -43,9 +43,9 @@ gl0.gl1_cache_bw:
   formula: 64 * SUM(TCP_GL1_REQ_READ_sum + TCP_GL1_REQ_WRITE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes transferred between the GL0 (TCP Cache) and GL1 caches, divided
-    by total duration. This represents GL0 miss traffic. High bandwidth relative to peak
-    may indicate cache pressure at the GL0 level or memory access patterns with poor
+    The number of bytes per second transferred between the GL0 (TCP Cache) and GL1
+    caches. This represents GL0 miss traffic. High bandwidth relative to peak may
+    indicate cache pressure at the GL0 level or memory access patterns with poor
     locality.
   peak_empirical: $L1Bw_empirical_peak
 gl0.gl1_rd_128b_req:

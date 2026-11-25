@@ -25,17 +25,16 @@ lds.bw:
   formula: 4 * SUM(SQC_LDS_LOAD_DWORDS_sum + SQC_LDS_STORE_DWORDS_sum + SQC_LDS_ATOMIC_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes loaded from, stored to, or atomically updated in the LDS,
-    divided by total duration. The number of bytes is the number of dwords accessed by
-    load, store, and atomic instructions multiplied by four.
+    The number of bytes per second loaded from, stored to, or atomically updated in the
+    LDS. The number of bytes is the number of dwords accessed by load, store, and atomic
+    instructions multiplied by four.
 lds.theoretical_bw:
   name: Theoretical LDS Bandwidth
   formula: SUM((SQC_LDS_IDX_ACTIVE_sum - SQC_LDS_BANK_CONFLICT_sum) * 4 * $lds_banks_per_cu) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Indicates the maximum amount of bytes that could have been loaded from, stored to,
-    or atomically updated in the LDS divided by total duration. Does not take into
-    account the execution mask of the wavefront when the instruction was executed.
+    The maximum number of bytes per second the LDS could have moved, from its active
+    cycles without bank conflicts. It ignores the execution mask.
   peak_empirical: $LDSBw_empirical_peak
 lds.util:
   name: LDS Utilization

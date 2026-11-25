@@ -11,6 +11,6 @@ l2.bw:
   formula: SUM(GL2C_READ_32_REQ_sum * 32 + GL2C_READ_64_REQ_sum * 64 + GL2C_READ_128_REQ_sum * 128 + GL2C_COMPRESSED_READ_96_REQ_sum * 96) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes read from the L2 cache, divided by total duration. It shows L2
-    cache read traffic and helps identify memory subsystem bottlenecks.
+    The number of bytes per second read from the L2 cache. It shows L2 cache read
+    traffic and helps identify memory subsystem bottlenecks.
   peak: $total_l2_chan * 128 * $max_sclk / 1000

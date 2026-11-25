@@ -11,9 +11,9 @@ gcea.dram_rd_bw:
   formula: 32 * SUM(GCEA_RDRAM_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes read from system memory, divided by total duration. RDNA 3.5
-    APUs use DDR5/LPDDR5 system memory. High read bandwidth indicates memory-intensive
-    read patterns. This is a key metric for identifying memory-bound workloads.
+    The number of bytes per second read from system memory. RDNA 3.5 APUs use
+    DDR5/LPDDR5 system memory. High read bandwidth indicates memory-intensive read
+    patterns. This is a key metric for identifying memory-bound workloads.
 gcea.dram_rd_chained_req:
   name: DRAM Read Chained Requests
   formula: SUM(GCEA_RDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)
@@ -48,9 +48,9 @@ gcea.dram_wr_bw:
   formula: 32 * SUM(GCEA_WDRAM_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes written to system memory, divided by total duration. High write
-    bandwidth indicates write-intensive workloads. Combined with read bandwidth, this
-    shows total memory traffic between the GPU and system memory.
+    The number of bytes per second written to system memory. High write bandwidth
+    indicates write-intensive workloads. Combined with read bandwidth, this shows total
+    memory traffic between the GPU and system memory.
 gcea.dram_wr_chained_req:
   name: DRAM Write Chained Requests
   formula: SUM(GCEA_WDRAM_CHAINED_REQ_PER_CLIGRP_sum) / SUM($denom)

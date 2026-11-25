@@ -39,8 +39,8 @@ fabric.hbm_atomic_bw:
   formula: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes due to L2 atomic requests routed to Infinity Fabric targeting
-    the accelerator's local HBM (DRAM), divided by total duration.
+    The number of bytes per second due to L2 atomic requests routed to Infinity Fabric
+    targeting the accelerator's local HBM (DRAM).
 fabric.hbm_bw:
   formula: $hbm_read_bandwidth + $hbm_write_bandwidth
 fabric.hbm_rd_bw:
@@ -48,22 +48,22 @@ fabric.hbm_rd_bw:
   formula: 32 * SUM(TCC_EA0_RDREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes due to L2 read requests routed to Infinity Fabric targeting
-    the accelerator's local HBM (DRAM), divided by total duration.
+    The number of bytes per second due to L2 read requests routed to Infinity Fabric
+    targeting the accelerator's local HBM (DRAM).
 fabric.hbm_wr_atomic_bw:
   name: HBM Write and Atomic Bandwidth
   formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum + TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Combined bandwidth of write and atomic requests from L2 to the accelerator's local
-    HBM (DRAM), divided by total duration.
+    The number of bytes per second that L2 write and atomic requests send to the
+    accelerator's local HBM (DRAM).
 fabric.hbm_wr_bw:
   name: HBM Write Bandwidth
   formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes due to L2 write requests routed to Infinity Fabric targeting
-    the accelerator's local HBM (DRAM), divided by total duration.
+    The number of bytes per second due to L2 write requests routed to Infinity Fabric
+    targeting the accelerator's local HBM (DRAM).
 fabric.memory_bw_bound_combined_credit_pressure:
   name: L2 Memory Bandwidth Bound - Combined Credit Pressure
   formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum + TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum) / SUM(TCC_BUSY_sum)
@@ -78,22 +78,22 @@ fabric.pcie_atomic_bw:
   formula: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes due to L2 atomic requests routed to PCIe (CPU or non-xGMI
-    connected GPU traffic), divided by total duration.
+    The number of bytes per second due to L2 atomic requests routed to PCIe (CPU or
+    non-xGMI connected GPU traffic).
 fabric.pcie_rd_bw:
   name: PCIe Read Bandwidth
   formula: 32 * SUM(TCC_EA0_RDREQ_IO_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes due to L2 read requests routed to PCIe (CPU or non-xGMI
-    connected GPU traffic), divided by total duration.
+    The number of bytes per second due to L2 read requests routed to PCIe (CPU or
+    non-xGMI connected GPU traffic).
 fabric.pcie_wr_bw:
   name: PCIe Write Bandwidth
   formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_IO_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes due to L2 write requests routed to PCIe (CPU or non-xGMI
-    connected GPU traffic), divided by total duration.
+    The number of bytes per second due to L2 write requests routed to PCIe (CPU or
+    non-xGMI connected GPU traffic).
 fabric.rd_128b_ea0:
   name: L2-Fabric Read Requests (128B, EA0 Counter)
   formula: SUM(TCC_EA0_RDREQ_128B_sum) / SUM($denom)
@@ -181,19 +181,19 @@ fabric.xgmi_atomic_bw:
   formula: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes due to L2 atomic requests routed to Infinity Fabric (xGMI peer
-    GPU traffic), divided by total duration.
+    The number of bytes per second due to L2 atomic requests routed to Infinity Fabric
+    (xGMI peer GPU traffic).
 fabric.xgmi_rd_bw:
   name: Infinity Fabric Read Bandwidth
   formula: 32 * SUM(TCC_EA0_RDREQ_GMI_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes due to L2 read requests routed to Infinity Fabric (xGMI peer
-    GPU traffic), divided by total duration.
+    The number of bytes per second due to L2 read requests routed to Infinity Fabric
+    (xGMI peer GPU traffic).
 fabric.xgmi_wr_bw:
   name: Infinity Fabric Write Bandwidth
   formula: 32 * SUM(TCC_EA0_WRREQ_WRITE_GMI_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes due to L2 write requests routed to Infinity Fabric (xGMI peer
-    GPU traffic), divided by total duration.
+    The number of bytes per second due to L2 write requests routed to Infinity Fabric
+    (xGMI peer GPU traffic).

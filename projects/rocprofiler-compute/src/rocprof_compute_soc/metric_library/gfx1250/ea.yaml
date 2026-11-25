@@ -2,15 +2,13 @@ ea.dram_rd_bw:
   name: DRAM Bandwidth - Read
   formula: 32 * SUM(GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: >-
-    The number of bytes read from HBM (DRAM) through the EA, divided by total duration.
+  description: The number of bytes per second read from HBM (DRAM) through the EA.
   peak: $hbmBandwidth
 ea.dram_wr_bw:
   name: DRAM Bandwidth - Write
   formula: 32 * SUM(GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: >-
-    The number of bytes written to HBM (DRAM) through the EA, divided by total duration.
+  description: The number of bytes per second written to HBM (DRAM) through the EA.
   peak: $hbmBandwidth
 ea.gl2_to_dram_rd_lat:
   name: GL2 to DRAM Read Latency
@@ -27,43 +25,43 @@ ea.gmi_bw_rd:
   formula: 32 * SUM(GC_EA_SE_SARB_GMI_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes read from peer GPU HBM over Infinity Fabric through the EA,
-    divided by total duration.
+    The number of bytes per second read from peer GPU HBM over Infinity Fabric through
+    the EA.
 ea.gmi_bw_wr:
   name: GMI Bandwidth - Write
   formula: 32 * SUM(GC_EA_SE_SARB_GMI_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes written to peer GPU HBM over Infinity Fabric through the EA,
-    divided by total duration.
+    The number of bytes per second written to peer GPU HBM over Infinity Fabric through
+    the EA.
 ea.hdm_bw_rd:
   name: HDM Bandwidth - Read
   formula: 32 * SUM(GC_EA_SE_SARB_HDM_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes read from Host Data Memory (unified memory pages) through the
-    EA, divided by total duration.
+    The number of bytes per second read from Host Data Memory (unified memory pages)
+    through the EA.
 ea.hdm_bw_wr:
   name: HDM Bandwidth - Write
   formula: 32 * SUM(GC_EA_SE_SARB_HDM_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes written to Host Data Memory (unified memory pages) through the
-    EA, divided by total duration.
+    The number of bytes per second written to Host Data Memory (unified memory pages)
+    through the EA.
 ea.io_bw_rd:
   name: IO Bandwidth - Read
   formula: 32 * SUM(GC_EA_SE_SARB_IO_RD_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes read from host CPU memory (pinned or mapped) through the EA,
-    divided by total duration.
+    The number of bytes per second read from host CPU memory (pinned or mapped) through
+    the EA.
 ea.io_bw_wr:
   name: IO Bandwidth - Write
   formula: 32 * SUM(GC_EA_SE_SARB_IO_WR_SIZE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes written to host CPU memory (pinned or mapped) through the EA,
-    divided by total duration.
+    The number of bytes per second written to host CPU memory (pinned or mapped) through
+    the EA.
 ea.outstanding_req:
   name: EA Outstanding Requests
   formula: SUM(GC_EA_SE_SARB_OUTSTANDING_ALL_sum) / SUM(GC_EA_SE_BUSY_CYCLE_sum)

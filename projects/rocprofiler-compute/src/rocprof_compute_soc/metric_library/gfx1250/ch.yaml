@@ -40,16 +40,14 @@ ch.chc_bw_rd:
   name: CHC Bandwidth - Read
   formula: SUM(CHC_REQ_READ_32B_sum * 32 + CHC_REQ_READ_64B_sum * 64 + CHC_REQ_READ_128B_sum * 128 + CHC_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: >-
-    The number of bytes read through the Central Hub Buffer, divided by total duration.
+  description: The number of bytes per second read through the Central Hub Buffer.
 ch.chc_bw_wr:
   name: CHC Bandwidth - Write
   formula: 32 * SUM(CHC_REQ_WRITE_32B_DATA_BEATS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes written through the Central Hub Buffer, divided by total
-    duration. The number of bytes is the number of 32-byte write data beats multiplied
-    by 32.
+    The number of bytes per second written through the Central Hub Buffer. The number of
+    bytes is the number of 32-byte write data beats multiplied by 32.
 ch.chc_gl2_lat_rd:
   name: CHC-GL2 Latency - Read
   formula: SUM(CHC_GL2_REQ_READ_LEVEL_sum) / SUM(CHC_REQ_READ_sum)

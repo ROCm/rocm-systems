@@ -2,7 +2,7 @@ l1i.bw:
   name: L1I Bandwidth
   formula: 64 * SUM(SQC_ICACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: The number of bytes looked up in the L1I cache divided by total duration.
+  description: The number of bytes per second looked up in the L1I cache.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 l1i.bw_util:
   name: L1I Bandwidth Utilization
@@ -51,9 +51,7 @@ l1i.l2_bw:
   name: L1I-L2 Bandwidth
   formula: 64 * SUM(SQC_TC_INST_REQ) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: >-
-    Total number of bytes transferred across L1I - L2 interface divided by total
-    duration.
+  description: The number of bytes per second transferred across L1I - L2 interface.
 l1i.l2_bw_util:
   name: L1I-L2 Bandwidth Utilization
   formula: 100000 * SUM(SQC_TC_INST_REQ) / (2 * SUM($max_sclk * $sqc_per_gpu * (End_Timestamp - Start_Timestamp)))

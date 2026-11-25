@@ -5,8 +5,7 @@ l2.atomic_bw:
   formula: 32 * SUM(TCC_ATOMIC_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes looked up in the L2 cache for atomic requests, divided by
-    total duration.
+    The number of bytes per second looked up in the L2 cache for atomic requests.
 l2.bypass_req:
   name: L2 Bypass Requests
   formula: SUM(TCC_BYPASS_REQ_sum) / SUM($denom)
@@ -78,8 +77,7 @@ l2.rd_bw:
   formula: 32 * SUM(TCC_READ_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes looked up in the L2 cache for read requests, divided by total
-    duration.
+    The number of bytes per second looked up in the L2 cache for read requests.
 l2.stalled_on_lat_fifo:
   name: L2 Stalled on Latency FIFO
   formula: SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM($denom)
@@ -95,8 +93,7 @@ l2.wr_bw:
   formula: 32 * SUM(TCC_WRITE_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes looked up in the L2 cache for write requests, divided by total
-    duration.
+    The number of bytes per second looked up in the L2 cache for write requests.
 l2.wr_data_fifo_full_rate:
   name: L2 Write Data FIFO Full Rate
   formula: 100 * SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)

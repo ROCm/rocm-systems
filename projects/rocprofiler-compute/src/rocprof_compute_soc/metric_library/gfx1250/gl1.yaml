@@ -37,8 +37,8 @@ gl1.gl1c_glarb_rd_bw:
   formula: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of read requests from the GL1 cache to the Graphics Level
-    Arbiter, divided by total duration.
+    The number of bytes per second of read requests from the GL1 cache to the Graphics
+    Level Arbiter.
 gl1.gl1c_glarb_rd_lat:
   name: GL1C-GLARB Read Latency
   formula: SUM(GL1C_GL2_REQ_READ_LEVEL_sum) / SUM(GL1C_GL2_REQ_READ_sum)
@@ -70,9 +70,9 @@ gl1.gl1c_glarb_wr_bw:
   formula: 32 * SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of write requests from the GL1 cache to the Graphics Level
-    Arbiter, divided by total duration. The number of bytes is the number of 32-byte
-    write data beats multiplied by 32.
+    The number of bytes per second of write requests from the GL1 cache to the Graphics
+    Level Arbiter. The number of bytes is the number of 32-byte write data beats
+    multiplied by 32.
 gl1.gl1c_glarb_wr_lat:
   name: GL1C-GLARB Write Latency
   formula: SUM(GL1C_GL2_REQ_WRITE_LEVEL_sum) / SUM(GL1C_GL2_REQ_WRITE_sum)
@@ -154,21 +154,17 @@ gl1.gl1c_req_bw_multicast:
   name: GL1C Request Bandwidth - Multicast
   formula: SUM(GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: >-
-    The number of bytes of multicast requests to the GL1 cache, divided by total
-    duration.
+  description: The number of bytes per second of multicast requests to the GL1 cache.
 gl1.gl1c_req_bw_rd:
   name: GL1C Request Bandwidth - Read
   formula: SUM(GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: >-
-    The number of bytes of read requests to the GL1 cache, divided by total duration.
+  description: The number of bytes per second of read requests to the GL1 cache.
 gl1.gl1c_req_bw_wr:
   name: GL1C Request Bandwidth - Write
   formula: SUM(GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: >-
-    The number of bytes of write requests to the GL1 cache, divided by total duration.
+  description: The number of bytes per second of write requests to the GL1 cache.
 gl1.gl1c_return_arbitration_lat:
   name: GL1C Return Arbitration Latency
   formula: SUM(GL1C_ARB_RET_LEVEL_sum) / SUM(GL1C_REQ_sum)

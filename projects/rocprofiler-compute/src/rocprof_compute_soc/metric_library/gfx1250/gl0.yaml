@@ -13,8 +13,8 @@ gl0.bw:
   formula: SUM(TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes loaded from, stored to, or atomically updated in the GL0 cache,
-    divided by total duration.
+    The number of bytes per second loaded from, stored to, or atomically updated in the
+    GL0 cache.
   peak: $max_sclk / 1000 * 256 * $cu_per_gpu
   peak_empirical: $L0Bw_empirical_peak
 gl0.capacity_stall_rate:
@@ -29,8 +29,8 @@ gl0.gl1_atomic_bw:
   formula: 128 * SUM(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of atomic requests from the GL0 cache to the GL1 cache, divided
-    by total duration. Each request counts as 128 bytes.
+    The number of bytes per second of atomic requests from the GL0 cache to the GL1
+    cache. Each request counts as 128 bytes.
 gl0.gl1_atomic_req_with_return:
   name: GL0-GL1 Atomic Requests - With Return
   formula: SUM(TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum) / SUM($denom)
@@ -72,8 +72,7 @@ gl0.gl1_rd_bw:
   formula: SUM(TX_VMW_GL1_REQ_READ_64B_sum * 64 + TX_VMW_GL1_REQ_READ_128B_sum * 128 + TX_VMW_GL1_READ_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of read requests from the GL0 cache to the GL1 cache, divided by
-    total duration.
+    The number of bytes per second of read requests from the GL0 cache to the GL1 cache.
 gl0.gl1_rd_lat:
   name: GL0-GL1 Read Latency
   formula: SUM(TX_VMW_GL1_READ_LATENCY_sum) / SUM(TX_VMW_GL1_REQ_READ_sum)
@@ -94,8 +93,8 @@ gl0.gl1_wr_bw:
   formula: SUM(TX_VMW_GL1_WRITE_REQ_128B_sum * 128 + TX_VMW_GL1_WRITE_REQ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of write requests from the GL0 cache to the GL1 cache, divided
-    by total duration.
+    The number of bytes per second of write requests from the GL0 cache to the GL1
+    cache.
 gl0.gl1_wr_lat:
   name: GL0-GL1 Write Latency
   formula: SUM(TX_VMW_GL1_WRITE_LATENCY_sum) / SUM(TX_VMW_GL1_REQ_WRITE_sum)
@@ -111,8 +110,8 @@ gl0.gl2_cache_bw:
   formula: 128 * SUM(TX_VMW_GL1_REQ_READ_sum + TX_VMW_GL1_REQ_WRITE_sum + TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes transferred between the GL0 and GL1 caches by read, write, and
-    atomic requests, divided by total duration. Each request counts as 128 bytes.
+    The number of bytes per second transferred between the GL0 and GL1 caches by read,
+    write, and atomic requests. Each request counts as 128 bytes.
   peak_empirical: $L2Bw_empirical_peak
 gl0.hit_rate:
   name: GL0 Hit Rate

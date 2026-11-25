@@ -49,27 +49,27 @@ gl2.memory_bw:
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes the L2 cache (GL2C) reads from and writes to memory over the EA,
-    divided by total duration. The counters count 32-byte granules. They include
-    requests the Infinity Cache serves and cannot separate them, so this can be higher
-    than true VRAM traffic and can exceed the measured VRAM peak.
+    The number of bytes per second the L2 cache (GL2C) reads from and writes to memory
+    over the EA. The counters count 32-byte granules. They include requests the Infinity
+    Cache serves and cannot separate them, so this can be higher than true VRAM traffic
+    and can exceed the measured VRAM peak.
   peak_empirical: $VRAMBw_empirical_peak
 gl2.memory_rd_bw:
   name: Memory Read Bandwidth
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes the L2 cache (GL2C) reads over the EA for requests destined for
-    VRAM, divided by total duration. The counter counts 32-byte granules. Infinity Cache
-    hits are included, so this can exceed the VRAM bandwidth peak.
+    The number of bytes per second the L2 cache (GL2C) reads over the EA for requests
+    destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are
+    included, so this can exceed the VRAM bandwidth peak.
 gl2.memory_wr_bw:
   name: Memory Write Bandwidth
   formula: 32 * SUM(GL2C_EA_WRREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes the L2 cache (GL2C) writes over the EA for requests destined for
-    VRAM, divided by total duration. The counter counts 32-byte granules. Infinity Cache
-    hits are included.
+    The number of bytes per second the L2 cache (GL2C) writes over the EA for requests
+    destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are
+    included.
 gl2.misses:
   name: GL2 Cache Misses
   formula: SUM(GL2C_MISS_sum) / SUM($denom)

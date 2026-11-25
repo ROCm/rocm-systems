@@ -43,67 +43,64 @@ gl2.ea_hbm_bw_atomic:
   formula: 32 * SUM(GL2C_EA_ATOMIC_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of atomic requests from the GL2 cache to HBM through the
-    Efficiency Arbiter (EA), divided by total duration. Each request counts as 32 bytes.
+    The number of bytes per second of atomic requests from the GL2 cache to HBM through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_hbm_bw_rd:
   name: GL2-EA HBM Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of read requests from the GL2 cache to HBM through the
-    Efficiency Arbiter (EA), divided by total duration. Each request counts as 32 bytes.
+    The number of bytes per second of read requests from the GL2 cache to HBM through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_hbm_bw_wr:
   name: GL2-EA HBM Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of write requests from the GL2 cache to HBM through the
-    Efficiency Arbiter (EA), divided by total duration. Each request counts as 32 bytes.
+    The number of bytes per second of write requests from the GL2 cache to HBM through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_host_cpu_bw_atomic:
   name: GL2-EA Host CPU Bandwidth - Atomic
   formula: 32 * SUM(GL2C_EA_ATOMIC_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of atomic requests from the GL2 cache to host CPU memory through
-    the Efficiency Arbiter (EA), divided by total duration. Each request counts as 32
-    bytes.
+    The number of bytes per second of atomic requests from the GL2 cache to host CPU
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_host_cpu_bw_rd:
   name: GL2-EA Host CPU Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of read requests from the GL2 cache to host CPU memory through
-    the Efficiency Arbiter (EA), divided by total duration. Each request counts as 32
-    bytes.
+    The number of bytes per second of read requests from the GL2 cache to host CPU
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_host_cpu_bw_wr:
   name: GL2-EA Host CPU Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of write requests from the GL2 cache to host CPU memory through
-    the Efficiency Arbiter (EA), divided by total duration. Each request counts as 32
-    bytes.
+    The number of bytes per second of write requests from the GL2 cache to host CPU
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_pcie_bw_atomic:
   name: GL2-EA PCIE Bandwidth - Atomic
   formula: 32 * SUM(GL2C_EA_ATOMIC_PCIE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of atomic requests from the GL2 cache to PCIe through the
-    Efficiency Arbiter (EA), divided by total duration. Each request counts as 32 bytes.
+    The number of bytes per second of atomic requests from the GL2 cache to PCIe through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_pcie_bw_rd:
   name: GL2-EA PCIE Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_PCIE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of read requests from the GL2 cache to PCIe through the
-    Efficiency Arbiter (EA), divided by total duration. Each request counts as 32 bytes.
+    The number of bytes per second of read requests from the GL2 cache to PCIe through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_pcie_bw_wr:
   name: GL2-EA PCIE Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_PCIE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of write requests from the GL2 cache to PCIe through the
-    Efficiency Arbiter (EA), divided by total duration. Each request counts as 32 bytes.
+    The number of bytes per second of write requests from the GL2 cache to PCIe through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_rd_lat:
   name: GL2-EA Read Latency
   formula: SUM(GL2C_EA_RDREQ_LEVEL_sum) / SUM(GL2C_EA_RDREQ_sum)
@@ -114,49 +111,45 @@ gl2.ea_remote_memory_bw_atomic:
   formula: 32 * SUM(GL2C_EA_ATOMIC_RM_MEM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of atomic requests from the GL2 cache to same-node peer GPU
-    memory through the Efficiency Arbiter (EA), divided by total duration. Each request
-    counts as 32 bytes.
+    The number of bytes per second of atomic requests from the GL2 cache to same-node
+    peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32
+    bytes.
 gl2.ea_remote_memory_bw_rd:
   name: GL2-EA Remote Memory Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_RM_MEM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of read requests from the GL2 cache to same-node peer GPU memory
-    through the Efficiency Arbiter (EA), divided by total duration. Each request counts
-    as 32 bytes.
+    The number of bytes per second of read requests from the GL2 cache to same-node peer
+    GPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_remote_memory_bw_wr:
   name: GL2-EA Remote Memory Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_RM_MEM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of write requests from the GL2 cache to same-node peer GPU
-    memory through the Efficiency Arbiter (EA), divided by total duration. Each request
-    counts as 32 bytes.
+    The number of bytes per second of write requests from the GL2 cache to same-node
+    peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32
+    bytes.
 gl2.ea_remote_node_bw_atomic:
   name: GL2-EA Remote Node Bandwidth - Atomic
   formula: 32 * SUM(GL2C_EA_ATOMIC_RM_NODE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of atomic requests from the GL2 cache to remote-node memory
-    through the Efficiency Arbiter (EA), divided by total duration. Each request counts
-    as 32 bytes.
+    The number of bytes per second of atomic requests from the GL2 cache to remote-node
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_remote_node_bw_rd:
   name: GL2-EA Remote Node Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_RM_NODE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of read requests from the GL2 cache to remote-node memory
-    through the Efficiency Arbiter (EA), divided by total duration. Each request counts
-    as 32 bytes.
+    The number of bytes per second of read requests from the GL2 cache to remote-node
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_remote_node_bw_wr:
   name: GL2-EA Remote Node Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_RM_NODE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes of write requests from the GL2 cache to remote-node memory
-    through the Efficiency Arbiter (EA), divided by total duration. Each request counts
-    as 32 bytes.
+    The number of bytes per second of write requests from the GL2 cache to remote-node
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_req_stall_on_vc3:
   name: GL2-EA Request Stall on VC3
   formula: 100 * SUM(GL2C_EA_REQ_VC3_STALL_sum) / SUM(GL2C_BUSY_sum)

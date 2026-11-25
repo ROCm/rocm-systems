@@ -2,16 +2,16 @@ l1i.bw:
   name: L1I Bandwidth
   formula: 64 * SUM(SQC_ICACHE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: The number of bytes looked up in the L1I cache divided by total duration.
+  description: The number of bytes per second looked up in the L1I cache.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 l1i.gl1_rd_bw:
   name: L1I-GL1 Read Bandwidth
   formula: 128 * SUM(SQC_TC_INST_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes the instruction cache (L1I) requests from the GL1 cache, divided
-    by total duration. High values may indicate instruction cache pressure from large
-    kernels or frequent instruction cache misses.
+    The number of bytes per second the instruction cache (L1I) requests from the GL1
+    cache. High values may indicate instruction cache pressure from large kernels or
+    frequent instruction cache misses.
 l1i.hit_rate_excl_dup:
   name: L1I Hit Rate (Excluding Duplicate Misses)
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)

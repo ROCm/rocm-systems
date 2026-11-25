@@ -17,9 +17,9 @@ fabric.hbm_rd_bw_est:
   formula: 64 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes due to L2 read requests routed to Infinity Fabric targeting the
-    accelerator's local HBM (DRAM), divided by total duration. Each request counts as 64
-    bytes, so this is an upper bound because some requests are 32 bytes.
+    The number of bytes per second due to L2 read requests routed to Infinity Fabric
+    targeting the accelerator's local HBM (DRAM). Each request counts as 64 bytes, so
+    this is an upper bound because some requests are 32 bytes.
 fabric.hbm_rd_traffic:
   formula: 100 * SUM(TCC_EA0_RDREQ_DRAM_sum) / SUM(TCC_EA0_RDREQ_sum)
 fabric.hbm_wr_atomic:
@@ -29,10 +29,9 @@ fabric.hbm_wr_atomic_bw_est:
   formula: 64 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes due to L2 write and atomic requests routed to Infinity Fabric
-    targeting the accelerator's local HBM (DRAM), divided by total duration. Each
-    request counts as 64 bytes, so this is an upper bound because some requests are 32
-    bytes.
+    The number of bytes per second due to L2 write and atomic requests routed to
+    Infinity Fabric targeting the accelerator's local HBM (DRAM). Each request counts as
+    64 bytes, so this is an upper bound because some requests are 32 bytes.
 fabric.hbm_wr_atomic_traffic:
   formula: 100 * SUM(TCC_EA0_WRREQ_DRAM_sum) / SUM(TCC_EA0_WRREQ_sum)
 fabric.rd_128b:
