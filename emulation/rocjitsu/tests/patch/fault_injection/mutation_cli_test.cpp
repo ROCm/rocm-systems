@@ -6,6 +6,7 @@
 #include "cdna_lds_fixture.h"
 #include "lds_fixture.h"
 #include "lds_owner_fixture.h"
+#include "legacy_target_coverage_fixture.h"
 #include "remaining_subword_fixture.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
@@ -15,6 +16,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "scoped_temp.h"
 #include "subword_fixture.h"
+#include "target_coverage_fixture.h"
 #include "two_address_fixture.h"
 
 #include <gtest/gtest.h>
@@ -349,11 +351,162 @@ TEST_F(FaultMutationCli, ListsCdnaAndBankedForms) {
   EXPECT_NE(stdout_.find("address_bank=1 target=gfx1250 form=ds_load_b32"), std::string::npos);
 }
 
+class FaultLegacyLdsCli : public FaultMutationCli,
+                          public testing::WithParamInterface<test::LdsFormCase> {};
+
+TEST_P(FaultLegacyLdsCli, ListExactOrdinalAndMutationMatchLibrary) {
+  ASSERT_EQ(test::retained_lds_cases().size(), 145u);
+  const test::LdsFormCase &fixture = GetParam();
+  const IsaTargetBinding *binding = default_isa_target_registry().find_target(fixture.target);
+  ASSERT_NE(binding, nullptr);
+  for (bool wave32 : {false, true}) {
+    if (wave32 && fixture.arch != IsaFamily::Rdna4)
+      continue;
+    SCOPED_TRACE(wave32);
+    const std::vector<uint8_t> image = test::make_lds_form_elf(fixture, false, wave32);
+    write(input_, image);
+    const FaultMutationContext source(image);
+    FaultMutationError error;
+    const FailureOr<LdsInventory> inventory =
+        discover_lds_wrong_address(source, "test_kernel", error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    ASSERT_EQ(inventory.value().sites().size(), 1u);
+    const LdsSite &site = inventory.value().sites().front();
+    EXPECT_EQ(site.offset, 0u);
+    EXPECT_EQ(site.form, fixture.form);
+    EXPECT_EQ(site.address_vgpr, fixture.words[1] & 255u);
+    EXPECT_EQ(site.address_bank, 0u);
+    ASSERT_EQ(site.affected_owners.size(), 1u);
+    const FaultMutationOwner &owner = site.affected_owners.front();
+    const std::vector<std::string> common = {
+        "--input", input_.string(),   "--kernel", "test_kernel",
+        "--kind",  "LdsWrongAddress", "--target", std::string(binding->id)};
+    std::vector<std::string> command = common;
+    command.push_back("--list");
+    ASSERT_EQ(invoke(command), 0) << stderr_;
+    EXPECT_EQ(stdout_, "ordinal=0 exact=0 address_vgpr=" + std::to_string(site.address_vgpr) +
+                           " address_bank=0 target=" + std::string(binding->id) + " form=" +
+                           std::string(fixture.form) + " affected_owners=1 owner=" + owner.entry +
+                           ":" + std::to_string(owner.entry_offset) + ":" +
+                           std::to_string(owner.descriptor_file_offset) + "\n");
+    const FailureOr<LdsSelection> selected = select_lds_wrong_address(inventory.value(), {}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    const FailureOr<LdsResult> expected =
+        apply_lds_wrong_address(source, selected.value(), 6, error);
+    ASSERT_TRUE(expected.succeeded()) << error.message;
+    for (bool exact : {false, true}) {
+      command = common;
+      command.insert(command.end(), {"--output", output_.string(), "--address-vgpr", "6"});
+      if (exact)
+        command.insert(command.end(), {"--exact", "0", "--ordinal", "999"});
+      else
+        command.insert(command.end(), {"--ordinal", "0"});
+      ASSERT_EQ(invoke(command), 0) << stderr_;
+      const std::vector<uint8_t> output = read(output_);
+      EXPECT_EQ(output, expected.value().image);
+      EXPECT_TRUE(test::lds_form_output_matches(source, fixture, 0, 6, output));
+      EXPECT_NE(stdout_.find("logical_mutations=1"), std::string::npos);
+      ASSERT_TRUE(std::filesystem::remove(output_));
+    }
+    EXPECT_EQ(read(input_), image);
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(RetainedCatalog, FaultLegacyLdsCli,
+                         testing::ValuesIn(test::retained_lds_cases()),
+                         [](const testing::TestParamInfo<test::LdsFormCase> &info) {
+                           return "T" + std::to_string(static_cast<int>(info.param.target)) + "_" +
+                                  std::string(info.param.form);
+                         });
+
+TEST_F(FaultMutationCli, NewTargetSharedLdsReportsEveryOwnerAndAllocationBoundary) {
+  for (rj_code_target_id_t target : {ROCJITSU_CODE_TARGET_GFX1100, ROCJITSU_CODE_TARGET_GFX1251}) {
+    for (test::TargetLdsCase fixture : test::target_lds_cases(target)) {
+      if (fixture.form.form != "ds_store_b32")
+        continue;
+      SCOPED_TRACE(fixture.wave);
+      fixture.form.words = {0xd8340104u, 0x00000302u};
+      fixture.expected = {0xd8340104u, 0x00000306u};
+      const std::vector<uint8_t> image = test::make_target_shared_lds_elf(fixture, {3, 0});
+      write(input_, image);
+      const FaultMutationContext source(image);
+      const uint32_t bound = test::target_lds_allocation(fixture, 0);
+      for (const std::string owner : {"test_kernel0", "test_kernel1"}) {
+        SCOPED_TRACE(owner);
+        FaultMutationError error;
+        const FailureOr<LdsInventory> inventory = discover_lds_wrong_address(source, owner, error);
+        ASSERT_TRUE(inventory.succeeded()) << error.message;
+        ASSERT_EQ(inventory.value().sites().size(), 1u);
+        const LdsSite &site = inventory.value().sites().front();
+        ASSERT_EQ(site.affected_owners.size(), 2u);
+        const std::vector<std::string> common = {"--input", input_.string(), "--kernel",
+                                                 owner,     "--kind",        "LdsWrongAddress"};
+        std::vector<std::string> command = common;
+        command.push_back("--list");
+        ASSERT_EQ(invoke(command), 0) << stderr_;
+        std::string expected = "ordinal=0 exact=512 address_vgpr=2 address_bank=0 target=" +
+                               std::string(default_isa_target_registry().find_target(target)->id) +
+                               " form=ds_store_b32 affected_owners=2";
+        for (const FaultMutationOwner &affected : site.affected_owners)
+          expected += " owner=" + affected.entry + ":" + std::to_string(affected.entry_offset) +
+                      ":" + std::to_string(affected.descriptor_file_offset);
+        EXPECT_EQ(stdout_, expected + "\n");
+        const FailureOr<LdsSelection> selected =
+            select_lds_wrong_address(inventory.value(), {}, error);
+        ASSERT_TRUE(selected.succeeded()) << error.message;
+        const FailureOr<LdsResult> library =
+            apply_lds_wrong_address(source, selected.value(), bound - 1, error);
+        ASSERT_TRUE(library.succeeded()) << error.message;
+        command = common;
+        command.insert(command.end(), {"--exact", "512", "--ordinal", "999", "--address-vgpr",
+                                       std::to_string(bound - 1), "--output", output_.string()});
+        ASSERT_EQ(invoke(command), 0) << stderr_;
+        const std::vector<uint8_t> output = read(output_);
+        EXPECT_EQ(output, library.value().image);
+        EXPECT_TRUE(test::target_lds_output_matches(source, fixture, 512, bound - 1, output));
+        EXPECT_NE(stdout_.find("affected_owners=2 owner=test_kernel0:"), std::string::npos);
+        EXPECT_NE(stdout_.find(" owner=test_kernel1:"), std::string::npos);
+        ASSERT_TRUE(std::filesystem::remove(output_));
+        command = common;
+        command.insert(command.end(), {"--exact", "512", "--address-vgpr", std::to_string(bound),
+                                       "--output", output_.string()});
+        EXPECT_NE(invoke(command), 0);
+        EXPECT_FALSE(std::filesystem::exists(output_));
+        EXPECT_EQ(read(input_), image);
+      }
+    }
+  }
+}
+
+TEST_F(FaultMutationCli, Gfx1251SharedBankDisagreementCannotPublishAMutant) {
+  const test::TargetLdsCase fixture = test::target_lds_cases(ROCJITSU_CODE_TARGET_GFX1251).front();
+  const std::array<uint32_t, 1> bank_one = {
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 1})[0]};
+  const std::array<uint32_t, 1> bank_zero = {
+      cdna5::build_sopp(cdna5::kSSetVgprMsbSopp, {.simm16 = 0})[0]};
+  const std::vector<uint8_t> image =
+      test::make_target_shared_lds_elf(fixture, {16, 16}, bank_one, bank_zero);
+  write(input_, image);
+  for (const std::string owner : {"test_kernel0", "test_kernel1"}) {
+    ASSERT_EQ(invoke({"--input", input_.string(), "--kernel", owner, "--kind", "LdsWrongAddress",
+                      "--list"}),
+              0)
+        << stderr_;
+    EXPECT_TRUE(stdout_.empty());
+    EXPECT_NE(invoke({"--input", input_.string(), "--kernel", owner, "--kind", "LdsWrongAddress",
+                      "--exact", "512", "--address-vgpr", "6", "--output", output_.string()}),
+              0);
+    EXPECT_FALSE(std::filesystem::exists(output_));
+    EXPECT_EQ(read(input_), image);
+  }
+}
+
 TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
   EXPECT_EQ(invoke({"--help"}), 0);
   EXPECT_NE(stdout_.find("Exact takes precedence"), std::string::npos);
-  EXPECT_NE(stdout_.find("LdsWrongAddress admits gfx1200/gfx1201 wave32/wave64 scalar"),
+  EXPECT_NE(stdout_.find("LdsWrongAddress admits gfx1100/gfx1200/gfx1201 wave32/wave64 scalar"),
             std::string::npos);
+  EXPECT_NE(stdout_.find("gfx1251 wave32 scalar/two-address forms."), std::string::npos);
   EXPECT_NE(stdout_.find("allocated --address-vgpr"), std::string::npos);
   EXPECT_NE(stdout_.find("LDS output lists every affected owner when a helper is shared."),
             std::string::npos);
@@ -363,7 +516,7 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
             std::string::npos);
   EXPECT_EQ(invoke({"--capabilities"}), 0);
   const std::string capabilities = stdout_;
-  EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 215);
+  EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'), 309);
   EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=gfx1250 wave=32 "
                               "form=ds_store_b32 admission=proven-all-owners\n"),
             std::string::npos);
@@ -396,7 +549,7 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
     }
   }
   const std::vector<LdsCapability> lds_capabilities = lds_wrong_address_capabilities();
-  ASSERT_EQ(lds_capabilities.size(), 205u);
+  ASSERT_EQ(lds_capabilities.size(), 299u);
   for (const LdsCapability &capability : lds_capabilities) {
     const IsaTargetBinding *target = default_isa_target_registry().find_target(capability.target);
     ASSERT_NE(target, nullptr);

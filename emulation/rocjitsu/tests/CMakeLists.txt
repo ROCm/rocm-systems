@@ -1410,6 +1410,9 @@ add_executable(
     patch/fault_injection/scalar_two_lds_test.cpp
     patch/fault_injection/lds_wrong_address_test.cpp
     patch/fault_injection/lds_ownership_test.cpp
+    patch/fault_injection/lds_target_ownership_test.cpp
+    patch/fault_injection/gfx1100_lds_test.cpp
+    patch/fault_injection/gfx1251_lds_test.cpp
     patch/fault_injection/cdna_lds_wrong_address_test.cpp
 )
 target_include_directories(
@@ -1460,6 +1463,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         patch/fault_injection/b96_lds_cli_test.cpp
         patch/fault_injection/scalar_two_lds_cli_test.cpp
         patch/fault_injection/lds_cli_test.cpp
+        patch/fault_injection/gfx1251_lds_cli_test.cpp
+        patch/fault_injection/gfx1100_lds_cli_test.cpp
         patch/fault_injection/cdna_lds_cli_test.cpp
     )
     target_include_directories(
