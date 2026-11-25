@@ -72,6 +72,10 @@ def test_triton_trace_profile_csvs(triton_trace_profiled_workload):
                 functions.append(row["Function"])
     assert any("|triton" in fn for fn in functions)
     assert any("triton.JITFunction.matmul_kernel" in fn for fn in functions)
+    assert any(
+        "|args=(" in fn and "float32[" in fn and "|args=n/a|triton" not in fn
+        for fn in functions
+    )
 
 
 def test_list_triton_operators_prints_call_tree(
@@ -90,6 +94,7 @@ def test_list_triton_operators_prints_call_tree(
     out = captured.out + captured.err
     assert "Triton Operator Call Tree:" in out
     assert "triton.JITFunction.matmul_kernel" in out
+    assert "float32[" in out
 
 
 def test_triton_operator_matmul_selects_kernels(
