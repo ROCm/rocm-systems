@@ -35,10 +35,17 @@ inline void execute_fmac64(Wavefront &wave, uint64_t modifiers, const Operand &d
           }
         }
         if constexpr (OldCdna) {
+          if (wave.cu().arch() == rocjitsu::IsaFamily::Cdna3) {
+            return wave.wf_size() == 32
+                       ? rj_arith_v_fmac_f64_w32_gfx942(flags, uint32_t(mask), modifiers, d,
+                                                        a.data.data(), b.data.data(), &state)
+                       : rj_arith_v_fmac_f64_w64_gfx942(flags, mask, modifiers, d, a.data.data(),
+                                                        b.data.data(), &state);
+          }
           return wave.wf_size() == 32
-                     ? rj_arith_v_fmac_f64_w32_gfx942(flags, uint32_t(mask), modifiers, d,
+                     ? rj_arith_v_fmac_f64_w32_gfx950(flags, uint32_t(mask), modifiers, d,
                                                       a.data.data(), b.data.data(), &state)
-                     : rj_arith_v_fmac_f64_w64_gfx942(flags, mask, modifiers, d, a.data.data(),
+                     : rj_arith_v_fmac_f64_w64_gfx950(flags, mask, modifiers, d, a.data.data(),
                                                       b.data.data(), &state);
         } else {
           return rj_arith_v_fmac_f64_w32_gfx1250(flags, uint32_t(mask), modifiers, d, a.data.data(),

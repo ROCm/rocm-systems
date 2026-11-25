@@ -1801,13 +1801,13 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_WorkArgsAbove4K_C
   for (int n : batchSizes) EXPECT_LE(symkMaxDevWorkArgsSize(nCh, n, false), kSymkArgBytes);
 }
 
-// The per-launch channel bound: at least ncclSymkAgHierMaxBlocks (72), else min(nChannels, maxCTAs).
-TEST_F(SchedulerMicrotest, SymkMaxLaunchChannels_FloorAt72_ElseMinOfNChannelsAndMaxCtas) {
+// The per-launch channel bound: at least ncclSymkRsHierMaxBlocks (96), else min(nChannels, maxCTAs).
+TEST_F(SchedulerMicrotest, SymkMaxLaunchChannels_FloorAt96_ElseMinOfNChannelsAndMaxCtas) {
   std::unique_ptr<ncclComm> comm(new ncclComm{});
   struct Case {
     int nChannels, maxCTAs, expected;
   };
-  for (const Case& c : {Case{0, 0, 72}, Case{128, 128, 128}, Case{128, 64, 72}, Case{200, 100, 100}}) {
+  for (const Case& c : {Case{0, 0, 96}, Case{128, 128, 128}, Case{128, 64, 96}, Case{200, 100, 100}}) {
     comm->nChannels = c.nChannels;
     comm->config.maxCTAs = c.maxCTAs;
     EXPECT_EQ(symkMaxLaunchChannels(comm.get()), c.expected) << "nChannels=" << c.nChannels << " maxCTAs=" << c.maxCTAs;

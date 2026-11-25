@@ -294,27 +294,38 @@ private:
   std::atomic<bool> submitted_{false};
 };
 
+std::unique_ptr<FabricEndpoint>
+FabricEndpoint::create(std::vector<config::SystemPeerRoute> routes,
+                       std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains,
+                       util::DiagnosticEmitter emit_error) {
+  std::unordered_set<const amdgpu::DeviceCacheCoherence *> seen_domains;
+  for (const std::shared_ptr<amdgpu::DeviceCacheCoherence> &domain : coherence_domains) {
+    if (!domain || !seen_domains.insert(domain.get()).second) {
+      emit_error.emit() << "fabric coherence domains must be non-null and distinct";
+      return nullptr;
+    }
+  }
+  return std::unique_ptr<FabricEndpoint>(
+      new FabricEndpoint(std::move(routes), std::move(coherence_domains)));
+}
+
 FabricEndpoint::FabricEndpoint(
     std::vector<config::SystemPeerRoute> routes,
     std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains)
     : CompositeComponent("fabric"), routes_(std::move(routes)),
       coherence_domains_(std::move(coherence_domains)), state_(std::make_shared<State>()) {
-  std::unordered_set<const amdgpu::DeviceCacheCoherence *> seen_domains;
-  for (const std::shared_ptr<amdgpu::DeviceCacheCoherence> &domain : coherence_domains_) {
-    if (!domain || !seen_domains.insert(domain.get()).second) {
-      throw util::ConfigError("fabric coherence domains must be non-null and distinct");
-    }
-  }
   set_weight(0);
   inbox_event_.set_handler([this](simdojo::Tick, simdojo::Message *) { service_inbox(); });
 }
 
 FabricEndpoint::~FabricEndpoint() { shutdown(); }
 
-void FabricEndpoint::configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain> domains,
-                                               amdgpu::PreparedWritebackResolver resolver) {
+util::Result
+FabricEndpoint::configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain> domains,
+                                          amdgpu::PreparedWritebackResolver resolver,
+                                          util::DiagnosticEmitter emit_error) {
   if (wired_ || !resolver || domains.size() != coherence_domains_.size()) {
-    throw util::ConfigError("fabric cache writeback domains are incomplete");
+    return emit_error.emit() << "fabric cache writeback domains are incomplete";
   }
   std::unordered_set<uint32_t> gpu_ids;
   // A legacy single-GPU KFD receives its public GPU ID in setup_topology(),
@@ -325,11 +336,12 @@ void FabricEndpoint::configure_cache_writeback(std::vector<amdgpu::DeviceCacheDo
     if (domains[i].coherence != coherence_domains_[i] ||
         (domains[i].gpu_id == 0 && !deferred_owner_id) ||
         !gpu_ids.insert(domains[i].gpu_id).second) {
-      throw util::ConfigError("fabric cache writeback domain identity is invalid");
+      return emit_error.emit() << "fabric cache writeback domain identity is invalid";
     }
   }
   prepared_domains_ = std::move(domains);
   resolve_cache_writeback_ = std::move(resolver);
+  return util::Result::success();
 }
 
 void FabricEndpoint::wire(simdojo::Topology &topology, simdojo::ExecMode mode) {

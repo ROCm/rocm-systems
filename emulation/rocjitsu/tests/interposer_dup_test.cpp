@@ -6361,8 +6361,12 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
 }
 
 TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
+  auto ref_count =
+      reinterpret_cast<int (*)()>(dlsym(RTLD_DEFAULT, "rj_interposer_test_local_ref_count"));
+  ASSERT_NE(ref_count, nullptr);
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
+  const int refs_before_drm = ref_count();
   int drm = open_drm_render();
   ASSERT_GE(drm, 0);
   drm_syncobj_create create{};
@@ -6379,11 +6383,14 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   // inheriting the C++ libc header's noexcept declaration in the caller, too.
   auto call = reinterpret_cast<int (*)(int, unsigned long, ...)>(dlsym(RTLD_DEFAULT, "ioctl"));
   ASSERT_NE(call, nullptr);
+  // TSan delivers SIGSYS immediately. It can defer SIGUSR1 until the waiter
+  // tries to reacquire the mutex, which would unwind from inside the lock call.
+  constexpr int kExitSignal = SIGSYS;
   struct sigaction action {
   }, old_action{};
   action.sa_handler = +[](int) { pthread_exit(nullptr); };
   sigemptyset(&action.sa_mask);
-  ASSERT_EQ(sigaction(SIGUSR1, &action, &old_action), 0);
+  ASSERT_EQ(sigaction(kExitSignal, &action, &old_action), 0);
   std::atomic<pid_t> tid{0};
   bool cleaned_up = false, returned = false;
   std::thread waiter([&] {
@@ -6413,18 +6420,19 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   if (blocked) {
-    EXPECT_EQ(pthread_kill(waiter.native_handle(), SIGUSR1), 0);
+    EXPECT_EQ(pthread_kill(waiter.native_handle(), kExitSignal), 0);
   }
   waiter.join();
   EXPECT_TRUE(blocked);
   EXPECT_TRUE(cleaned_up);
   EXPECT_FALSE(returned);
-  EXPECT_EQ(sigaction(SIGUSR1, &old_action, nullptr), 0);
+  EXPECT_EQ(sigaction(kExitSignal, &old_action, nullptr), 0);
   drm_syncobj_destroy destroy{};
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
-  // Closing the file also exercises release of the ioctl reservation.
+  // Check before final KFD close so backend teardown cannot hide a leaked lease.
   EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(ref_count(), refs_before_drm);
   EXPECT_EQ(close(kfd), 0);
 }
 

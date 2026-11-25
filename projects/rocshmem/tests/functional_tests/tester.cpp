@@ -23,7 +23,6 @@
  *****************************************************************************/
 
 #include "tester.hpp"
-#include "type_lists.hpp"
 
 #include <hip/hip_runtime.h>
 
@@ -63,7 +62,6 @@
 #include "team_broadcast_tester.hpp"
 #include "team_ctx_infra_tester.hpp"
 #include "team_ctx_primitive_tester.hpp"
-#include "typed_rma_tester.hpp"
 #include "team_fcollect_tester.hpp"
 #include "fcollect_wave_tester.hpp"
 #include "team_reduction_tester.hpp"
@@ -219,34 +217,10 @@ Tester::~Tester() {
   CHECK_HIP(hipFree(verification_error));
 }
 
-/**
- * Queue a tester for deferred construction.
- *
- * `args` is captured by value at the point of the push, so cases that tweak
- * args (team_type, wg_size) before queuing keep those tweaks.  Variadic so
- * template arguments containing commas pass through intact.
- */
-#define PUSH_TESTER(...) \
-  testers.push_back([args]() -> Tester* { return new __VA_ARGS__; })
-
-std::vector<TesterFactory> Tester::create(TesterArguments args) {
+std::vector<Tester*> Tester::create(TesterArguments args) {
   int rank = args.myid;
-  std::vector<TesterFactory> testers;
+  std::vector<Tester*> testers;
   std::string test_name;
-
-  // Types the user asked for (via -types full or -types <types>) that this build or
-  // backend cannot run. Reported under the test header so a skip is visible
-  // rather than silent. Minimal mode never asks for these types, so it never
-  // produces a note.
-  std::vector<std::string> skipped_types;
-  auto note_skip = [&](const char* name, const char* reason) {
-    if (args.type_enabled(name))
-      skipped_types.push_back(std::string(name) + " (" + reason + ")");
-  };
-  static constexpr const char* kSkipRO = "not supported on the RO backend";
-  static constexpr const char* kSkipBf16Reduce =
-      "reductions not supported with HIP 7.16/7.17";
-  #define NOTE_SKIP_RO(T, name) note_skip(name, kSkipRO);
 
   BackendType backend_type = rocshmem_query_backend_type();
   TestType type = (TestType)args.algorithm;
@@ -262,1268 +236,943 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
   switch (type) {
     case InitTestType:
       test_name = "Init";
-      PUSH_TESTER(EmptyTester(args));
+      testers.push_back(new EmptyTester(args));
       break;
     case GetTestType:
       test_name = "Blocking Gets";
-      PUSH_TESTER(PrimitiveTester(args));
-      // PrimitiveTester goes through the byte-oriented getmem path; the typed
-      // entry points come along when the caller selects an element type.
-      #define PUSH_TYPED_RMA(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TypedRMATester<T>(args));
-      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
-      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
-      } else {
-        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
-      }
-      #undef PUSH_TYPED_RMA
+      testers.push_back(new PrimitiveTester(args));
       break;
     case GetNBITestType:
       test_name = "Non-Blocking Gets";
-      PUSH_TESTER(PrimitiveTester(args));
-      #define PUSH_TYPED_RMA(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TypedRMATester<T>(args));
-      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
-      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
-      } else {
-        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
-      }
-      #undef PUSH_TYPED_RMA
+      testers.push_back(new PrimitiveTester(args));
       break;
     case PutTestType:
       test_name = "Blocking Puts";
-      PUSH_TESTER(PrimitiveTester(args));
-      #define PUSH_TYPED_RMA(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TypedRMATester<T>(args));
-      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
-      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
-      } else {
-        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
-      }
-      #undef PUSH_TYPED_RMA
+      testers.push_back(new PrimitiveTester(args));
       break;
     case PutNBITestType:
       test_name = "Non-Blocking Puts";
-      PUSH_TESTER(PrimitiveTester(args));
-      #define PUSH_TYPED_RMA(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TypedRMATester<T>(args));
-      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
-      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
-      } else {
-        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
-      }
-      #undef PUSH_TYPED_RMA
+      testers.push_back(new PrimitiveTester(args));
       break;
     case DefaultCTXGetTestType:
       test_name = "Default context Blocking Gets";
-      PUSH_TESTER(DefaultCTXPrimitiveTester(args));
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
       break;
     case DefaultCTXGetNBITestType:
       test_name = "Default context Non-Blocking Gets";
-      PUSH_TESTER(DefaultCTXPrimitiveTester(args));
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
       break;
     case DefaultCTXPutTestType:
       test_name = "Default context Blocking Puts";
-      PUSH_TESTER(DefaultCTXPrimitiveTester(args));
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
       break;
     case DefaultCTXPutNBITestType:
       test_name = "Default context Non-Blocking Puts";
-      PUSH_TESTER(DefaultCTXPrimitiveTester(args));
+      testers.push_back(new DefaultCTXPrimitiveTester(args));
       break;
     case TeamCtxInfraTestType:
       test_name = "Team Ctx Infra test";
-      PUSH_TESTER(TeamCtxInfraTester(args));
+      testers.push_back(new TeamCtxInfraTester(args));
       break;
     case TeamCtxInfraSingleTestType:
       test_name = "Team Ctx Infra Single test";
       args.team_type = ROCSHMEM_TEST_TEAM_SINGLE;
-      PUSH_TESTER(TeamCtxInfraTester(args));
+      testers.push_back(new TeamCtxInfraTester(args));
       break;
     case TeamCtxInfraBlockTestType:
       test_name = "Team Ctx Infra Block test";
       args.team_type = ROCSHMEM_TEST_TEAM_BLOCK;
-      PUSH_TESTER(TeamCtxInfraTester(args));
+      testers.push_back(new TeamCtxInfraTester(args));
       break;
     case TeamCtxInfraOddEvenTestType:
       test_name = "Team Ctx Infra Odd-Even test";
       args.team_type = ROCSHMEM_TEST_TEAM_ODDEVEN;
-      PUSH_TESTER(TeamCtxInfraTester(args));
+      testers.push_back(new TeamCtxInfraTester(args));
       break;
     case TeamCtxSharedInfraTestType:
       test_name = "Team Ctx Infra Shared test";
       args.team_type = ROCSHMEM_TEST_TEAM_SHARED;
-      PUSH_TESTER(TeamCtxInfraTester(args));
+      testers.push_back(new TeamCtxInfraTester(args));
       break;
     case TeamCtxSubsetParentInfraTestType:
       test_name = "Team Ctx Infra Subset Parent test";
       args.team_type = ROCSHMEM_TEST_TEAM_SUBSET_PARENT;
-      PUSH_TESTER(TeamCtxInfraTester(args));
+      testers.push_back(new TeamCtxInfraTester(args));
       break;
     case TeamCtxGetTestType:
       test_name = "Blocking Team Ctx Gets";
-      PUSH_TESTER(TeamCtxPrimitiveTester(args));
+      testers.push_back(new TeamCtxPrimitiveTester(args));
       break;
     case TeamCtxGetNBITestType:
       test_name = "Non-Blocking Team Ctx Gets";
-      PUSH_TESTER(TeamCtxPrimitiveTester(args));
+      testers.push_back(new TeamCtxPrimitiveTester(args));
       break;
     case TeamCtxPutTestType:
       test_name = "Blocking Team Ctx Puts";
-      PUSH_TESTER(TeamCtxPrimitiveTester(args));
+      testers.push_back(new TeamCtxPrimitiveTester(args));
       break;
     case TeamCtxPutNBITestType:
       test_name = "Non-Blocking Team Ctx Puts";
-      PUSH_TESTER(TeamCtxPrimitiveTester(args));
+      testers.push_back(new TeamCtxPrimitiveTester(args));
       break;
     case PTestType:
       test_name = "P Test";
-      PUSH_TESTER(PrimitiveTester(args));
-      #define PUSH_TYPED_RMA(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TypedRMATester<T>(args));
-      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
-      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
-      } else {
-        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
-      }
-      #undef PUSH_TYPED_RMA
+      testers.push_back(new PrimitiveTester(args));
       break;
     case GTestType:
       test_name = "G Test";
-      PUSH_TESTER(PrimitiveTester(args));
-      #define PUSH_TYPED_RMA(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TypedRMATester<T>(args));
-      ROCSHMEM_RMA_TYPES_ALWAYS(PUSH_TYPED_RMA)
-      if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-        ROCSHMEM_RMA_TYPES_NONRO(PUSH_TYPED_RMA)
-      } else {
-        ROCSHMEM_RMA_TYPES_NONRO(NOTE_SKIP_RO)
-      }
-      #undef PUSH_TYPED_RMA
+      testers.push_back(new PrimitiveTester(args));
       break;
     case TeamReductionTestType:
       test_name = "All-to-All Team-based Reduction";
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReductionTester, float, args, testers)
-      } else {
-        ROCSHMEM_PUSH_REDUCTION_ALWAYS(TeamReductionTester, args, testers)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_PUSH_REDUCTION_NONRO(TeamReductionTester, args, testers)
-          if (!ROCSHMEM_BF16_REDUCE_SUPPORTED) note_skip("bfloat16", kSkipBf16Reduce);
-        } else {
-          note_skip("half", kSkipRO);
-          note_skip("bfloat16", kSkipRO);
-        }
-      }
+      testers.push_back(new TeamReductionTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float& f1, float& f2) {
+            f1 = 1;
+            f2 = 1;
+          },
+          [](float v, float n_pes) {
+            return (v == n_pes)
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false, "Got " + std::to_string(v) +
+                                                   ", Expect " +
+                                                   std::to_string(n_pes));
+          }));
       break;
     case TeamReduceScatterTestType:
       test_name = "Team-based Reduce-Scatter";
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReduceScatterTester, float, args, testers)
-      } else {
-        ROCSHMEM_PUSH_REDUCTION_ALWAYS(TeamReduceScatterTester, args, testers)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_PUSH_REDUCTION_NONRO(TeamReduceScatterTester, args, testers)
-          if (!ROCSHMEM_BF16_REDUCE_SUPPORTED) note_skip("bfloat16", kSkipBf16Reduce);
-        } else {
-          note_skip("half", kSkipRO);
-          note_skip("bfloat16", kSkipRO);
-        }
-      }
+      testers.push_back(new TeamReduceScatterTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float& f1, float& f2) {
+            f1 = 1;
+            f2 = 0;
+          },
+          [](float v, float n_pes) {
+            return (v == n_pes)
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false, "Got " + std::to_string(v) +
+                                                   ", Expect " +
+                                                   std::to_string(n_pes));
+          }));
       break;
     case ReduceWaveTestType:
       test_name = "Wave-level Reduction";
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        ROCSHMEM_PUSH_REDUCTION_FLOAT(ReduceWaveTester, float, args, testers)
-      } else {
-        ROCSHMEM_PUSH_REDUCTION_ALWAYS(ReduceWaveTester, args, testers)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_PUSH_REDUCTION_NONRO(ReduceWaveTester, args, testers)
-          if (!ROCSHMEM_BF16_REDUCE_SUPPORTED) note_skip("bfloat16", kSkipBf16Reduce);
-        } else {
-          note_skip("half", kSkipRO);
-          note_skip("bfloat16", kSkipRO);
-        }
-      }
+      testers.push_back(new ReduceWaveTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float& f1, float& f2) {
+            f1 = 1;
+            f2 = 1;
+          },
+          [](float v, float n_pes) {
+            return (v == n_pes)
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false, "Got " + std::to_string(v) +
+                                                   ", Expect " +
+                                                   std::to_string(n_pes));
+          }));
       break;
     case TeamReduceScatterWaveTestType:
       test_name = "Team-based Reduce-Scatter Wave";
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        ROCSHMEM_PUSH_REDUCTION_FLOAT(TeamReduceScatterWaveTester, float, args, testers)
-      } else {
-        ROCSHMEM_PUSH_REDUCTION_ALWAYS(TeamReduceScatterWaveTester, args, testers)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_PUSH_REDUCTION_NONRO(TeamReduceScatterWaveTester, args, testers)
-          if (!ROCSHMEM_BF16_REDUCE_SUPPORTED) note_skip("bfloat16", kSkipBf16Reduce);
-        } else {
-          note_skip("half", kSkipRO);
-          note_skip("bfloat16", kSkipRO);
-        }
-      }
+      testers.push_back(new TeamReduceScatterWaveTester<float, ROCSHMEM_SUM>(
+          args,
+          [](float& f1, float& f2) {
+            f1 = 1;
+            f2 = 0;
+          },
+          [](float v, float n_pes) {
+            return (v == n_pes)
+                       ? std::make_pair(true, "")
+                       : std::make_pair(false, "Got " + std::to_string(v) +
+                                                   ", Expect " +
+                                                   std::to_string(n_pes));
+          }));
       break;
-    case TeamBroadcastTestType: {
+    case TeamBroadcastTestType:
       test_name = "Team Broadcast Test";
-      // Full mode: push all 13 compiled types via the full list.
-      // Minimal mode: push the original 7-type subset.
-      // Custom mode: push any requested type from the full compiled set.
-      #define PUSH_BCAST(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TeamBroadcastTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(TeamBroadcastTester<int64_t>(args));
-        PUSH_TESTER(TeamBroadcastTester<int>(args));
-        PUSH_TESTER(TeamBroadcastTester<long long>(args));
-        PUSH_TESTER(TeamBroadcastTester<float>(args));
-        PUSH_TESTER(TeamBroadcastTester<double>(args));
-        PUSH_TESTER(TeamBroadcastTester<char>(args));
-        PUSH_TESTER(TeamBroadcastTester<unsigned char>(args));
-      } else {
-        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_BCAST)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_COLL_TYPES_NONRO(PUSH_BCAST)
-        } else {
-          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
-        }
-      }
-      #undef PUSH_BCAST
+      testers.push_back(new TeamBroadcastTester<int64_t>(args));
+      testers.push_back(new TeamBroadcastTester<int>(args));
+      testers.push_back(new TeamBroadcastTester<long long>(args));
+      testers.push_back(new TeamBroadcastTester<float>(args));
+      testers.push_back(new TeamBroadcastTester<double>(args));
+      testers.push_back(new TeamBroadcastTester<char>(args));
+      testers.push_back(new TeamBroadcastTester<unsigned char>(args));
       break;
-    }
-    case BroadcastWaveTestType: {
+    case BroadcastWaveTestType:
       test_name = "Broadcast Wave Test";
-      #define PUSH_BWAVE(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(BroadcastWaveTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(BroadcastWaveTester<int>(args));
-        PUSH_TESTER(BroadcastWaveTester<long long>(args));
-        PUSH_TESTER(BroadcastWaveTester<float>(args));
-        PUSH_TESTER(BroadcastWaveTester<double>(args));
-      } else {
-        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_BWAVE)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_COLL_TYPES_NONRO(PUSH_BWAVE)
-        } else {
-          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
-        }
-      }
-      #undef PUSH_BWAVE
+      testers.push_back(new BroadcastWaveTester<int>(args));
+      testers.push_back(new BroadcastWaveTester<long long>(args));
+      testers.push_back(new BroadcastWaveTester<float>(args));
+      testers.push_back(new BroadcastWaveTester<double>(args));
       break;
-    }
-    case TeamAllToAllTestType: {
+    case TeamAllToAllTestType:
       test_name = "Alltoall Test";
-      #define PUSH_A2A(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TeamAlltoallTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(TeamAlltoallTester<float>(args));
-      } else {
-        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_A2A)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_COLL_TYPES_NONRO(PUSH_A2A)
-        } else {
-          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
-        }
-      }
-      #undef PUSH_A2A
+      testers.push_back(new TeamAlltoallTester<float>(args));
       break;
-    }
-    case TeamAllToAllvTestType: {
+    case TeamAllToAllvTestType:
       test_name = "Alltoallv Test";
-      #define PUSH_A2AV(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TeamAlltoallvTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(TeamAlltoallvTester<float>(args));
-      } else {
-        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_A2AV)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_COLL_TYPES_NONRO(PUSH_A2AV)
-        } else {
-          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
-        }
-      }
-      #undef PUSH_A2AV
+      testers.push_back(new TeamAlltoallvTester<float>(args));
       break;
-    }
     case TeamAlltoallmemOnStreamTestType:
       test_name = "Alltoallmem_On_Stream";
-      PUSH_TESTER(TeamAlltoallmemOnStreamTester(args));
+      testers.push_back(new TeamAlltoallmemOnStreamTester(args));
       break;
-    case AllToAllWaveTestType: {
+    case AllToAllWaveTestType:
       test_name = "AllToAll Wave Test";
-      #define PUSH_A2AWAVE(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AlltoallWaveTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AlltoallWaveTester<float>(args));
-        PUSH_TESTER(AlltoallWaveTester<char>(args));
-        PUSH_TESTER(AlltoallWaveTester<int>(args));
-      } else {
-        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_A2AWAVE)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_COLL_TYPES_NONRO(PUSH_A2AWAVE)
-        } else {
-          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
-        }
-      }
-      #undef PUSH_A2AWAVE
+      testers.push_back(new AlltoallWaveTester<float>(args));
+      testers.push_back(new AlltoallWaveTester<char>(args));
+      testers.push_back(new AlltoallWaveTester<int>(args));
       break;
-    }
     case BarrierAllOnStreamTestType:
       test_name = "Barrier_All_On_Stream";
-      PUSH_TESTER(BarrierAllOnStreamTester(args));
+      testers.push_back(new BarrierAllOnStreamTester(args));
       break;
     case QuietOnStreamTestType:
       test_name = "Quiet_On_Stream";
-      PUSH_TESTER(QuietOnStreamTester(args));
+      testers.push_back(new QuietOnStreamTester(args));
       break;
     case SyncAllOnStreamTestType:
       test_name = "Sync_All_On_Stream";
-      PUSH_TESTER(BarrierAllOnStreamTester(args, SYNC_ALL_OP));
+      testers.push_back(new BarrierAllOnStreamTester(args, SYNC_ALL_OP));
       break;
     case TeamBroadcastmemOnStreamTestType:
       test_name = "Broadcastmem_On_Stream";
-      PUSH_TESTER(TeamBroadcastmemOnStreamTester(args));
+      testers.push_back(new TeamBroadcastmemOnStreamTester(args));
       break;
     case GetmemOnStreamTestType:
       test_name = "Getmem_On_Stream";
-      PUSH_TESTER(GetmemOnStreamTester(args));
+      testers.push_back(new GetmemOnStreamTester(args));
       break;
     case PutmemOnStreamTestType:
       test_name = "Putmem_On_Stream";
-      PUSH_TESTER(PutmemOnStreamTester(args));
+      testers.push_back(new PutmemOnStreamTester(args));
       break;
     case HostPutmemTestType:
       test_name = "Host_Putmem";
       if (BackendType::IPC_BACKEND == backend_type ||
           BackendType::GDA_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostGetmemTestType:
       test_name = "Host_Getmem";
       if (BackendType::IPC_BACKEND == backend_type ||
           BackendType::GDA_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostAmoFAddTestType:
       test_name = "Host_Amo_FAdd";
-      if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostAmoFCswapTestType:
       test_name = "Host_Amo_FCswap";
-      if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+      if (BackendType::IPC_BACKEND == backend_type ||
+          BackendType::GDA_BACKEND == backend_type)
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostPutmemSignalTestType:
       test_name = "Host_Putmem_Signal";
       if (BackendType::GDA_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostPutmemSignalAddTestType:
       test_name = "Host_Putmem_Signal_Add";
       if (BackendType::GDA_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostCtxPutmemTestType:
       test_name = "Host_Ctx_Putmem";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostCtxGetmemTestType:
       test_name = "Host_Ctx_Getmem";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostIntAmoFAddTestType:
       test_name = "Host_Int_Amo_FAdd";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostIntAmoFCswapTestType:
       test_name = "Host_Int_Amo_FCswap";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostAmoAllPesTestType:
       test_name = "Host_Amo_AllPes";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostAmoSelfTestType:
       test_name = "Host_Amo_Self";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostAmoAddTestType:
       test_name = "Host_Amo_Add";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilTestType:
       test_name = "Host_Wait_Until";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostTestTestType:
       test_name = "Host_Test";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilAllTestType:
       test_name = "Host_Wait_Until_All";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilAnyTestType:
       test_name = "Host_Wait_Until_Any";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilSomeTestType:
       test_name = "Host_Wait_Until_Some";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilAllVectorTestType:
       test_name = "Host_Wait_Until_All_Vector";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilAnyVectorTestType:
       test_name = "Host_Wait_Until_Any_Vector";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilSomeVectorTestType:
       test_name = "Host_Wait_Until_Some_Vector";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilAllStatusTestType:
       test_name = "Host_Wait_Until_All_Status";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilAnyStatusTestType:
       test_name = "Host_Wait_Until_Any_Status";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case HostWaitUntilSomeStatusTestType:
       test_name = "Host_Wait_Until_Some_Status";
       if (BackendType::IPC_BACKEND == backend_type)
-        PUSH_TESTER(HostRmaTester(args));
+        testers.push_back(new HostRmaTester(args));
       break;
     case PutmemSignalOnStreamTestType:
       test_name = "Putmem_Signal_On_Stream";
-      PUSH_TESTER(PutmemSignalOnStreamTester(args));
+      testers.push_back(new PutmemSignalOnStreamTester(args));
       break;
     case SignalWaitUntilOnStreamTestType:
       test_name = "Signal_Wait_Until_On_Stream";
-      PUSH_TESTER(SignalWaitUntilOnStreamTester(args));
+      testers.push_back(new SignalWaitUntilOnStreamTester(args));
       break;
     case SignalOpsOnStreamTestType:
       test_name = "Signal_Ops_On_Stream";
-      PUSH_TESTER(SignalOpsOnStreamTester(args));
+      testers.push_back(new SignalOpsOnStreamTester(args));
       break;
-    case TeamFCollectTestType: {
+    case TeamFCollectTestType:
       test_name = "Fcollect Test";
-      #define PUSH_FCOL(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(TeamFcollectTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(TeamFcollectTester<int64_t>(args));
-        PUSH_TESTER(TeamFcollectTester<int>(args));
-        PUSH_TESTER(TeamFcollectTester<long long>(args));
-        PUSH_TESTER(TeamFcollectTester<float>(args));
-        PUSH_TESTER(TeamFcollectTester<double>(args));
-        PUSH_TESTER(TeamFcollectTester<char>(args));
-        PUSH_TESTER(TeamFcollectTester<unsigned char>(args));
-      } else {
-        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_FCOL)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_COLL_TYPES_NONRO(PUSH_FCOL)
-        } else {
-          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
-        }
-      }
-      #undef PUSH_FCOL
+      testers.push_back(new TeamFcollectTester<int64_t>(args));
+      testers.push_back(new TeamFcollectTester<int>(args));
+      testers.push_back(new TeamFcollectTester<long long>(args));
+      testers.push_back(new TeamFcollectTester<float>(args));
+      testers.push_back(new TeamFcollectTester<double>(args));
+      testers.push_back(new TeamFcollectTester<char>(args));
+      testers.push_back(new TeamFcollectTester<unsigned char>(args));
       break;
-    }
-    case FcollectWaveTestType: {
+    case FcollectWaveTestType:
       test_name = "Fcollect Wave Test";
-      #define PUSH_FWAVE(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(FcollectWaveTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(FcollectWaveTester<int64_t>(args));
-        PUSH_TESTER(FcollectWaveTester<int>(args));
-        PUSH_TESTER(FcollectWaveTester<long long>(args));
-        PUSH_TESTER(FcollectWaveTester<float>(args));
-        PUSH_TESTER(FcollectWaveTester<double>(args));
-        PUSH_TESTER(FcollectWaveTester<char>(args));
-        PUSH_TESTER(FcollectWaveTester<unsigned char>(args));
-      } else {
-        ROCSHMEM_COLL_TYPES_ALWAYS(PUSH_FWAVE)
-        if (BackendType::RO_BACKEND != backend_type) { // no half/bfloat16 on RO
-          ROCSHMEM_COLL_TYPES_NONRO(PUSH_FWAVE)
-        } else {
-          ROCSHMEM_COLL_TYPES_NONRO(NOTE_SKIP_RO)
-        }
-      }
-      #undef PUSH_FWAVE
+      testers.push_back(new FcollectWaveTester<int64_t>(args));
+      testers.push_back(new FcollectWaveTester<int>(args));
+      testers.push_back(new FcollectWaveTester<long long>(args));
+      testers.push_back(new FcollectWaveTester<float>(args));
+      testers.push_back(new FcollectWaveTester<double>(args));
+      testers.push_back(new FcollectWaveTester<char>(args));
+      testers.push_back(new FcollectWaveTester<unsigned char>(args));
       break;
-    }
-    case AMO_FAddTestType: {
+    case AMO_FAddTestType:
       test_name = "AMO Fetch_Add";
-      #define PUSH_AMO_STD(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOStandardTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOStandardTester<long long>(args));
-        PUSH_TESTER(AMOStandardTester<long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOStandardTester<int>(args));
-      } else {
-        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
-        }
-      }
-      #undef PUSH_AMO_STD
+      testers.push_back(new AMOStandardTester<long long>(args));
+      testers.push_back(new AMOStandardTester<long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOStandardTester<int>(args));
       break;
-    }
-    case AMO_FIncTestType: {
+    case AMO_FIncTestType:
       test_name = "AMO Fetch_Inc";
-      #define PUSH_AMO_STD(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOStandardTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOStandardTester<long long>(args));
-        PUSH_TESTER(AMOStandardTester<long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOStandardTester<int>(args));
-      } else {
-        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
-        }
-      }
-      #undef PUSH_AMO_STD
+      testers.push_back(new AMOStandardTester<long long>(args));
+      testers.push_back(new AMOStandardTester<long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOStandardTester<int>(args));
       break;
-    }
-    case AMO_FetchTestType: {
+    case AMO_FetchTestType:
       test_name = "AMO Fetch";
-      #define PUSH_AMO_EXT(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOExtendedTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOExtendedTester<long long>(args));
-        PUSH_TESTER(AMOExtendedTester<long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOExtendedTester<int>(args));
-      } else {
-        ROCSHMEM_AMO_EXT_TYPES_ALWAYS(PUSH_AMO_EXT)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_EXT_TYPES_NONGDA(PUSH_AMO_EXT)
-        }
-      }
-      #undef PUSH_AMO_EXT
+      testers.push_back(new AMOExtendedTester<long long>(args));
+      testers.push_back(new AMOExtendedTester<long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOExtendedTester<int>(args));
       break;
-    }
-    case AMO_FCswapTestType: {
+    case AMO_FCswapTestType:
       test_name = "AMO Fetch_CSWAP";
-      #define PUSH_AMO_STD(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOStandardTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOStandardTester<long long>(args));
-        PUSH_TESTER(AMOStandardTester<long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOStandardTester<int>(args));
-      } else {
-        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
-        }
-      }
-      #undef PUSH_AMO_STD
+      testers.push_back(new AMOStandardTester<long long>(args));
+      testers.push_back(new AMOStandardTester<long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOStandardTester<int>(args));
       break;
-    }
-    case AMO_AddTestType: {
+    case AMO_AddTestType:
       test_name = "AMO Add";
-      #define PUSH_AMO_STD(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOStandardTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOStandardTester<long long>(args));
-        PUSH_TESTER(AMOStandardTester<long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOStandardTester<int>(args));
-      } else {
-        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
-        }
-      }
-      #undef PUSH_AMO_STD
+      testers.push_back(new AMOStandardTester<long long>(args));
+      testers.push_back(new AMOStandardTester<long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOStandardTester<int>(args));
       break;
-    }
-    case AMO_SetTestType: {
+    case AMO_SetTestType:
       test_name = "AMO Set";
-      #define PUSH_AMO_EXT(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOExtendedTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOExtendedTester<long long>(args));
-        PUSH_TESTER(AMOExtendedTester<long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOExtendedTester<int>(args));
-      } else {
-        ROCSHMEM_AMO_EXT_TYPES_ALWAYS(PUSH_AMO_EXT)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_EXT_TYPES_NONGDA(PUSH_AMO_EXT)
-        }
-      }
-      #undef PUSH_AMO_EXT
+      testers.push_back(new AMOExtendedTester<long long>(args));
+      testers.push_back(new AMOExtendedTester<long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOExtendedTester<int>(args));
       break;
-    }
-    case AMO_SwapTestType: {
+    case AMO_SwapTestType:
       test_name = "AMO Swap";
-      #define PUSH_AMO_EXT(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOExtendedTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOExtendedTester<long long>(args));
-        PUSH_TESTER(AMOExtendedTester<long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOExtendedTester<int>(args));
-      } else {
-        ROCSHMEM_AMO_EXT_TYPES_ALWAYS(PUSH_AMO_EXT)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_EXT_TYPES_NONGDA(PUSH_AMO_EXT)
-        }
-      }
-      #undef PUSH_AMO_EXT
+      testers.push_back(new AMOExtendedTester<long long>(args));
+      testers.push_back(new AMOExtendedTester<long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOExtendedTester<int>(args));
       break;
-    }
-    case AMO_FetchAndTestType: {
+    case AMO_FetchAndTestType:
       test_name = "AMO Fetch And";
-      #define PUSH_AMO_BIT(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOBitwiseTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOBitwiseTester<unsigned long long>(args));
-        PUSH_TESTER(AMOBitwiseTester<unsigned long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOBitwiseTester<unsigned int>(args));
-      } else {
-        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
-        }
-      }
-      #undef PUSH_AMO_BIT
+      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
       break;
-    }
-    case AMO_AndTestType: {
+    case AMO_AndTestType:
       test_name = "AMO And";
-      #define PUSH_AMO_BIT(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOBitwiseTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOBitwiseTester<unsigned long long>(args));
-        PUSH_TESTER(AMOBitwiseTester<unsigned long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOBitwiseTester<unsigned int>(args));
-      } else {
-        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
-        }
-      }
-      #undef PUSH_AMO_BIT
+      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
       break;
-    }
-    case AMO_FetchOrTestType: {
+    case AMO_FetchOrTestType:
       test_name = "AMO Fetch Or";
-      #define PUSH_AMO_BIT(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOBitwiseTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOBitwiseTester<unsigned long long>(args));
-        PUSH_TESTER(AMOBitwiseTester<unsigned long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOBitwiseTester<unsigned int>(args));
-      } else {
-        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
-        }
-      }
-      #undef PUSH_AMO_BIT
+      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
       break;
-    }
-    case AMO_OrTestType: {
+    case AMO_OrTestType:
       test_name = "AMO Or";
-      #define PUSH_AMO_BIT(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOBitwiseTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOBitwiseTester<unsigned long long>(args));
-        PUSH_TESTER(AMOBitwiseTester<unsigned long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOBitwiseTester<unsigned int>(args));
-      } else {
-        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
-        }
-      }
-      #undef PUSH_AMO_BIT
+      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
       break;
-    }
-    case AMO_FetchXorTestType: {
+    case AMO_FetchXorTestType:
       test_name = "AMO Fetch Xor";
-      #define PUSH_AMO_BIT(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOBitwiseTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOBitwiseTester<unsigned long long>(args));
-        PUSH_TESTER(AMOBitwiseTester<unsigned long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOBitwiseTester<unsigned int>(args));
-      } else {
-        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
-        }
-      }
-      #undef PUSH_AMO_BIT
+      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
       break;
-    }
-    case AMO_XorTestType: {
+    case AMO_XorTestType:
       test_name = "AMO Xor";
-      #define PUSH_AMO_BIT(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOBitwiseTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOBitwiseTester<unsigned long long>(args));
-        PUSH_TESTER(AMOBitwiseTester<unsigned long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOBitwiseTester<unsigned int>(args));
-      } else {
-        ROCSHMEM_AMO_BIT_TYPES_ALWAYS(PUSH_AMO_BIT)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_BIT_TYPES_NONGDA(PUSH_AMO_BIT)
-        }
-      }
-      #undef PUSH_AMO_BIT
+      testers.push_back(new AMOBitwiseTester<unsigned long long>(args));
+      testers.push_back(new AMOBitwiseTester<unsigned long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOBitwiseTester<unsigned int>(args));
       break;
-    }
-    case AMO_IncTestType: {
+    case AMO_IncTestType:
       test_name = "AMO Inc";
-      #define PUSH_AMO_STD(T, name) \
-        if (args.type_coverage == TypeCoverage::Full || args.type_enabled(name)) \
-          PUSH_TESTER(AMOStandardTester<T>(args));
-      if (args.type_coverage == TypeCoverage::Minimal) {
-        PUSH_TESTER(AMOStandardTester<long long>(args));
-        PUSH_TESTER(AMOStandardTester<long>(args));
-        if (BackendType::GDA_BACKEND != backend_type) // GDA is 64-bit AMO only
-          PUSH_TESTER(AMOStandardTester<int>(args));
-      } else {
-        ROCSHMEM_AMO_STD_TYPES_ALWAYS(PUSH_AMO_STD)
-        if (BackendType::GDA_BACKEND != backend_type) { // GDA is 64-bit AMO only
-          ROCSHMEM_AMO_STD_TYPES_NONGDA(PUSH_AMO_STD)
-        }
-      }
-      #undef PUSH_AMO_STD
+      testers.push_back(new AMOStandardTester<long long>(args));
+      testers.push_back(new AMOStandardTester<long>(args));
+      if (BackendType::GDA_BACKEND != backend_type) // not implemented for GDA
+        testers.push_back(new AMOStandardTester<int>(args));
       break;
-    }
     case PingPongTestType:
       test_name = (args.num_wgs > 1) ? "PingPong (W>1: bidir BW)"
                                      : "PingPong";
-      PUSH_TESTER(PingPongTester(args));
+      testers.push_back(new PingPongTester(args));
       break;
     case PingAllTestType:
       test_name = "PingAll";
-      PUSH_TESTER(PingAllTester(args));
+      testers.push_back(new PingAllTester(args));
       break;
     case BarrierAllTestType:
       test_name = "Barrier_All";
-      PUSH_TESTER(BarrierAllTester(args));
+      testers.push_back(new BarrierAllTester(args));
       break;
     case WAVEBarrierAllTestType:
       test_name = "WAVE Barrier_All";
-      PUSH_TESTER(BarrierAllTester(args));
+      testers.push_back(new BarrierAllTester(args));
       break;
     case WGBarrierAllTestType:
       test_name = "WG Barrier_All";
-      PUSH_TESTER(BarrierAllTester(args));
+      testers.push_back(new BarrierAllTester(args));
       break;
     case TeamBarrierTestType:
       test_name = "Team Barrier Test";
-      PUSH_TESTER(TeamBarrierTester(args));
+      testers.push_back(new TeamBarrierTester(args));
       break;
     case TeamWAVEBarrierTestType:
       test_name = "Team WAVE Barrier Test";
-      PUSH_TESTER(TeamBarrierTester(args));
+      testers.push_back(new TeamBarrierTester(args));
       break;
     case TeamWGBarrierTestType:
       test_name = "Team WG Barrier Test";
-      PUSH_TESTER(TeamBarrierTester(args));
+      testers.push_back(new TeamBarrierTester(args));
       break;
     case SyncAllTestType:
       test_name = "SyncAll";
-      PUSH_TESTER(SyncAllTester(args));
+      testers.push_back(new SyncAllTester(args));
       break;
     case WAVESyncAllTestType:
       test_name = "WAVE SyncAll";
-      PUSH_TESTER(SyncAllTester(args));
+      testers.push_back(new SyncAllTester(args));
       break;
     case WGSyncAllTestType:
       test_name = "WG SyncAll";
-      PUSH_TESTER(SyncAllTester(args));
+      testers.push_back(new SyncAllTester(args));
       break;
     case TeamSyncTestType:
       test_name = "Team Sync";
-      PUSH_TESTER(TeamSyncTester(args));
+      testers.push_back(new TeamSyncTester(args));
       break;
     case TeamWAVESyncTestType:
       test_name = "Team WAVE Sync";
-      PUSH_TESTER(TeamSyncTester(args));
+      testers.push_back(new TeamSyncTester(args));
       break;
     case TeamWGSyncTestType:
       test_name = "Team WG Sync";
-      PUSH_TESTER(TeamSyncTester(args));
+      testers.push_back(new TeamSyncTester(args));
       break;
     case RandomAccessTestType:
       test_name = "Random_Access";
-      PUSH_TESTER(RandomAccessTester(args));
+      testers.push_back(new RandomAccessTester(args));
       break;
     case ShmemPtrTestType:
       test_name = "Shmem_Ptr";
-      PUSH_TESTER(ShmemPtrTester(args));
+      testers.push_back(new ShmemPtrTester(args));
       break;
     case WGGetTestType:
       test_name = "Blocking WG level Gets";
-      PUSH_TESTER(WorkGroupPrimitiveTester(args));
+      testers.push_back(new WorkGroupPrimitiveTester(args));
       break;
     case WGGetNBITestType:
       test_name = "Non-Blocking WG level Gets";
-      PUSH_TESTER(WorkGroupPrimitiveTester(args));
+      testers.push_back(new WorkGroupPrimitiveTester(args));
       break;
     case WGPutTestType:
       test_name = "Blocking WG level Puts";
-      PUSH_TESTER(WorkGroupPrimitiveTester(args));
+      testers.push_back(new WorkGroupPrimitiveTester(args));
       break;
     case WGPutNBITestType:
       test_name = "Non-Blocking WG level Puts";
-      PUSH_TESTER(WorkGroupPrimitiveTester(args));
+      testers.push_back(new WorkGroupPrimitiveTester(args));
       break;
     case WAVEGetTestType:
       test_name = "Blocking WAVE level Gets";
-      PUSH_TESTER(WaveFrontPrimitiveTester(args));
+      testers.push_back(new WaveFrontPrimitiveTester(args));
       break;
     case WAVEGetNBITestType:
       test_name = "Non-Blocking WAVE level Gets";
-      PUSH_TESTER(WaveFrontPrimitiveTester(args));
+      testers.push_back(new WaveFrontPrimitiveTester(args));
       break;
     case WAVEPutTestType:
       test_name = "Blocking WAVE level Puts";
-      PUSH_TESTER(WaveFrontPrimitiveTester(args));
+      testers.push_back(new WaveFrontPrimitiveTester(args));
       break;
     case WAVEPutNBITestType:
       test_name = "Non-Blocking WAVE level Puts";
-      PUSH_TESTER(WaveFrontPrimitiveTester(args));
+      testers.push_back(new WaveFrontPrimitiveTester(args));
       break;
     case PutSignalTestType:
       test_name = "Putmem Signal";
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case WGPutSignalTestType:
       test_name = "WG Putmem Signal";
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case WAVEPutSignalTestType:
       test_name = "Wave Putmem Signal";
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case PutSignalNBITestType:
       test_name = "Non-Blocking Putmem Signal";
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case WGPutSignalNBITestType:
       test_name = "Non-Blocking WG Putmem Signal";
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case WAVEPutSignalNBITestType:
       test_name = "Non-Blocking Wave Putmem Signal";
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
-      PUSH_TESTER(SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_SET));
+      testers.push_back(new SignalingOperationsTester(args, ROCSHMEM_SIGNAL_ADD));
       break;
     case SignalFetchTestType:
       test_name = "Signal Fetch";
-      PUSH_TESTER(SignalingOperationsTester(args));
+      testers.push_back(new SignalingOperationsTester(args));
       break;
     case WGSignalFetchTestType:
       test_name = "WG Signal Fetch";
-      PUSH_TESTER(SignalingOperationsTester(args));
+      testers.push_back(new SignalingOperationsTester(args));
       break;
     case WAVESignalFetchTestType:
       test_name = "Wave Signal Fetch";
-      PUSH_TESTER(SignalingOperationsTester(args));
+      testers.push_back(new SignalingOperationsTester(args));
       break;
     case SignalAddTestType:
       test_name = "Signal Add";
-      PUSH_TESTER(SignalingOperationsTester(args));
+      testers.push_back(new SignalingOperationsTester(args));
       break;
     case SignalSetTestType:
       test_name = "Signal Set";
-      PUSH_TESTER(SignalingOperationsTester(args));
+      testers.push_back(new SignalingOperationsTester(args));
       break;
     case SignalWaitUntilTestType:
       test_name = "Signal Wait Until";
-      PUSH_TESTER(SignalingOperationsTester(args));
+      testers.push_back(new SignalingOperationsTester(args));
       break;
     case FloodPutTestType:
       test_name = "Flood Put (multidirectional)";
-      PUSH_TESTER(FloodTester(args));
+      testers.push_back(new FloodTester(args));
       break;
     case FloodPutNBITestType:
       test_name = "Flood Non-Blocking Put (multidirectional)";
-      PUSH_TESTER(FloodTester(args));
+      testers.push_back(new FloodTester(args));
       break;
     case FloodPTestType:
       test_name = "Flood P (multidirectional)";
-      PUSH_TESTER(FloodTester(args));
+      testers.push_back(new FloodTester(args));
       break;
     case FloodGetTestType:
       test_name = "Flood Get (multidirectional)";
-      PUSH_TESTER(FloodTester(args));
+      testers.push_back(new FloodTester(args));
       break;
     case FloodGetNBITestType:
       test_name = "Flood Non-Blocking Get (multidirectional)";
-      PUSH_TESTER(FloodTester(args));
+      testers.push_back(new FloodTester(args));
       break;
     case FloodGTestType:
       test_name = "Flood G (multidirectional)";
-      PUSH_TESTER(FloodTester(args));
+      testers.push_back(new FloodTester(args));
       break;
     case HipModuleInitTestType:
       test_name = "HIP Module Init Test";
-      PUSH_TESTER(HipModuleInitTester(args));
+      testers.push_back(new HipModuleInitTester(args));
       break;
     case FloodAddTestType:
       test_name = "Flood Add (multidirectional)";
-      PUSH_TESTER(FloodAmoTester(args));
+      testers.push_back(new FloodAmoTester(args));
       break;
     case FloodFAddTestType:
       test_name = "Flood FAdd (multidirectional)";
-      PUSH_TESTER(FloodAmoTester(args));
+      testers.push_back(new FloodAmoTester(args));
       break;
     case FloodWaitAmoTestType:
       test_name = "Flood WaitAdd (multidirectional)";
-      PUSH_TESTER(FloodAmoTester(args));
+      testers.push_back(new FloodAmoTester(args));
       break;
     case DeviceBitcodeTestType:
       test_name = "Device Bitcode Test";
-      PUSH_TESTER(DeviceBitcodeTester(args));
+      testers.push_back(new DeviceBitcodeTester(args));
       break;
     case LibraryInfoTestType:
       test_name = "Library Info Test";
-      PUSH_TESTER(LibraryInfoTester(args));
+      testers.push_back(new LibraryInfoTester(args));
       break;
     case BufferRegisterSymmetricTestType:
       test_name = "Buffer Register Symmetric Test";
-      PUSH_TESTER(BufferRegisterSymmetricTester(args));
+      testers.push_back(new BufferRegisterSymmetricTester(args));
       break;
     case FenceOrderPutWaveSignalTestType:
       test_name = "Fence PutWaveSignal Ordering";
-      PUSH_TESTER(FenceOrderingTester(args));
+      testers.push_back(new FenceOrderingTester(args));
       break;
     case FenceOrderPutLargeSmallTestType:
       test_name = "Fence PutLargeSmall Ordering";
-      PUSH_TESTER(FenceOrderingTester(args));
+      testers.push_back(new FenceOrderingTester(args));
       break;
     case FenceOrderFanoutTestType:
       test_name = "Fence Fanout Ordering";
-      PUSH_TESTER(FenceOrderingTester(args));
+      testers.push_back(new FenceOrderingTester(args));
       break;
     case FenceOrderPutWaveNbiChunksTestType:
       test_name = "Fence PutWaveNbiChunks Ordering";
-      PUSH_TESTER(FenceOrderingTester(args));
+      testers.push_back(new FenceOrderingTester(args));
       break;
     case TilePutContiguousTestType:
       test_name = "Tile Put Contiguous";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutRowMajorTestType:
       test_name = "Tile Put Row-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutColumnMajorTestType:
       test_name = "Tile Put Column-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutArbitraryTestType:
       test_name = "Tile Put Arbitrary Strides";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutWaveContiguousTestType:
       test_name = "Tile Put Wave-Collective Contiguous";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutWGContiguousTestType:
       test_name = "Tile Put Workgroup-Collective Contiguous";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetContiguousTestType:
       test_name = "Tile Get Contiguous";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetWGContiguousTestType:
       test_name = "Tile Get Workgroup-Collective Contiguous";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePut1DTestType:
       test_name = "Tile Put 1D Tensor";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGet1DTestType:
       test_name = "Tile Get 1D Tensor";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetWaveContiguousTestType:
       test_name = "Tile Get Wave-Collective Contiguous";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetRowMajorTestType:
       test_name = "Tile Get Row-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetColumnMajorTestType:
       test_name = "Tile Get Column-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetArbitraryTestType:
       test_name = "Tile Get Arbitrary Strides";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutWaveRowMajorTestType:
       test_name = "Tile Put Wave Row-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutWaveColumnMajorTestType:
       test_name = "Tile Put Wave Column-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetWaveRowMajorTestType:
       test_name = "Tile Get Wave Row-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetWaveColumnMajorTestType:
       test_name = "Tile Get Wave Column-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutWGRowMajorTestType:
       test_name = "Tile Put WG Row-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutWGColumnMajorTestType:
       test_name = "Tile Put WG Column-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetWGRowMajorTestType:
       test_name = "Tile Get WG Row-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetWGColumnMajorTestType:
       test_name = "Tile Get WG Column-Major";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutRowMajorStartCoordTestType:
       test_name = "Tile Put Row-Major (non-zero start_coord)";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetRowMajorStartCoordTestType:
       test_name = "Tile Get Row-Major (non-zero start_coord)";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutWaveRowMajorStartCoordTestType:
       test_name = "Tile Put Wave Row-Major (non-zero start_coord)";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetWaveRowMajorStartCoordTestType:
       test_name = "Tile Get Wave Row-Major (non-zero start_coord)";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePutWGRowMajorStartCoordTestType:
       test_name = "Tile Put WG Row-Major (non-zero start_coord)";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TileGetWGRowMajorStartCoordTestType:
       test_name = "Tile Get WG Row-Major (non-zero start_coord)";
-      PUSH_TESTER(TileRMATester(args));
+      testers.push_back(new TileRMATester(args));
       break;
     case TilePut3DTestType:
       test_name = "Tile Put 3D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGet3DTestType:
       test_name = "Tile Get 3D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePutWG3DTestType:
       test_name = "Tile Put WG 3D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGetWG3DTestType:
       test_name = "Tile Get WG 3D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePut4DTestType:
       test_name = "Tile Put 4D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGet4DTestType:
       test_name = "Tile Get 4D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePutWG4DTestType:
       test_name = "Tile Put WG 4D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGetWG4DTestType:
       test_name = "Tile Get WG 4D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePutWave3DTestType:
       test_name = "Tile Put Wave 3D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGetWave3DTestType:
       test_name = "Tile Get Wave 3D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePutWave4DTestType:
       test_name = "Tile Put Wave 4D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGetWave4DTestType:
       test_name = "Tile Get Wave 4D Contiguous";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePut3DStridedTestType:
       test_name = "Tile Put 3D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGet3DStridedTestType:
       test_name = "Tile Get 3D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePutWG3DStridedTestType:
       test_name = "Tile Put WG 3D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGetWG3DStridedTestType:
       test_name = "Tile Get WG 3D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePutWave3DStridedTestType:
       test_name = "Tile Put Wave 3D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGetWave3DStridedTestType:
       test_name = "Tile Get Wave 3D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePut4DStridedTestType:
       test_name = "Tile Put 4D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGet4DStridedTestType:
       test_name = "Tile Get 4D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePutWG4DStridedTestType:
       test_name = "Tile Put WG 4D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGetWG4DStridedTestType:
       test_name = "Tile Get WG 4D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TilePutWave4DStridedTestType:
       test_name = "Tile Put Wave 4D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case TileGetWave4DStridedTestType:
       test_name = "Tile Get Wave 4D Strided";
-      PUSH_TESTER(TileNDRMATester(args));
+      testers.push_back(new TileNDRMATester(args));
       break;
     case HostTeamSyncBarrierTestType:
       test_name = "Host Team Sync/Barrier";
-      PUSH_TESTER(HostTeamSyncBarrierTester(args));
+      testers.push_back(new HostTeamSyncBarrierTester(args));
       break;
     case ReduceOnStreamTestType:
       test_name = "Reduce On Stream";
-      PUSH_TESTER(ReduceOnStreamTester<int>(args));
+      testers.push_back(new ReduceOnStreamTester(args));
       break;
     case HostCtxCreateTestType:
       test_name = "Host CTX Create";
-      PUSH_TESTER(HostCtxCreateTester(args));
+      testers.push_back(new HostCtxCreateTester(args));
       break;
     case TeamSplit2DTestType:
       test_name = "Team Split 2D";
-      PUSH_TESTER(TeamSplit2DTester(args));
+      testers.push_back(new TeamSplit2DTester(args));
       break;
     case TileBroadcastTestType:
       test_name = "Tile Broadcast";
-      PUSH_TESTER(TileBroadcastTester(args));
+      testers.push_back(new TileBroadcastTester(args));
       break;
     case TileBroadcastWaveTestType:
       test_name = "Tile Broadcast Wave-Collective";
-      PUSH_TESTER(TileBroadcastTester(args));
+      testers.push_back(new TileBroadcastTester(args));
       break;
     case TileBroadcastWGTestType:
       test_name = "Tile Broadcast Workgroup-Collective";
-      PUSH_TESTER(TileBroadcastTester(args));
+      testers.push_back(new TileBroadcastTester(args));
       break;
     case TileAllgatherTestType:
       test_name = "Tile Allgather";
-      PUSH_TESTER(TileAllgatherTester(args));
+      testers.push_back(new TileAllgatherTester(args));
       break;
     case TileAllgatherWaveTestType:
       test_name = "Tile Allgather Wave-Collective";
-      PUSH_TESTER(TileAllgatherTester(args));
+      testers.push_back(new TileAllgatherTester(args));
       break;
     case TileAllgatherWGTestType:
       test_name = "Tile Allgather Workgroup-Collective";
-      PUSH_TESTER(TileAllgatherTester(args));
+      testers.push_back(new TileAllgatherTester(args));
       break;
     case TileReduceTestType:
       test_name = "Tile Reduce";
       // float, short, int, long × SUM, MAX, MIN
-#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                      \
-      PUSH_TESTER(TileReduceTester<T, OP>(args,                              \
-          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                        \
+#define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
+          [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
           [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
       TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
       TILE_REDUCE_PUSH(float, ROCSHMEM_MAX,  1.0f, 0.0f, static_cast<int>(v) == 1);
@@ -1542,7 +1191,7 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
     case TileReduceWaveTestType:
       test_name = "Tile Reduce Wave-Collective";
 #define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
-      PUSH_TESTER(TileReduceTester<T, OP>(args,                             \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
           [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
           [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
       TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
@@ -1562,7 +1211,7 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
     case TileReduceWGTestType:
       test_name = "Tile Reduce Workgroup-Collective";
 #define TILE_REDUCE_PUSH(T, OP, INIT_S, INIT_R, VERIFY)                     \
-      PUSH_TESTER(TileReduceTester<T, OP>(args,                             \
+      testers.push_back(new TileReduceTester<T, OP>(args,                    \
           [](T &s, T &r) { s = INIT_S; r = INIT_R; },                       \
           [](T v, int n_pes, [[maybe_unused]] int idx) { return VERIFY; }))
       TILE_REDUCE_PUSH(float, ROCSHMEM_SUM,  1.0f, 0.0f, static_cast<int>(v) == n_pes);
@@ -1583,30 +1232,30 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
     case QpPingPongTestType:
       test_name = (args.num_wgs > 1) ? "QP-Direct PingPong (W>1: bidir BW)"
                                      : "QP-Direct PingPong";
-      PUSH_TESTER(QpPingPongTester(args));
+      testers.push_back(new QpPingPongTester(args));
       break;
     case QpPutNbiTestType:
       test_name = "QP-Direct Put NBI";
-      PUSH_TESTER(QpPutNbiTester(args));
+      testers.push_back(new QpPutNbiTester(args));
       break;
     case QpPutNbiPollTestType:
       test_name = "QP-Direct Put NBI Poll";
-      PUSH_TESTER(QpPutNbiTester(args));
+      testers.push_back(new QpPutNbiTester(args));
       break;
 #endif
 #if defined(USE_SDMA)
     case SdmaPingPongTestType:
       test_name = (args.num_wgs > 1) ? "SDMA-Direct PingPong (W>1: bidir BW)"
                                      : "SDMA-Direct PingPong";
-      PUSH_TESTER(SdmaPingPongTester(args));
+      testers.push_back(new SdmaPingPongTester(args));
       break;
     case SdmaPutNbiTestType:
       test_name = "SDMA-Direct Put NBI";
-      PUSH_TESTER(SdmaPutNbiTester(args));
+      testers.push_back(new SdmaPutNbiTester(args));
       break;
     case SdmaPutNbiPollTestType:
       test_name = "SDMA-Direct Put NBI Poll";
-      PUSH_TESTER(SdmaPutNbiTester(args));
+      testers.push_back(new SdmaPutNbiTester(args));
       break;
 #endif
     default:
@@ -1624,16 +1273,10 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
               << " W=" << args.num_wgs
               << " Z=" << args.wg_size
               << " ###" << std::endl;
-    for (const auto& skipped : skipped_types) {
-      std::cout << "### Skipped type:\t" << skipped << " ###" << std::endl;
-    }
   }
-  #undef NOTE_SKIP_RO
 
   return testers;
 }
-
-#undef PUSH_TESTER
 
 void Tester::execute() {
   if (_type == InitTestType) return;
@@ -1859,19 +1502,13 @@ void Tester::print(uint64_t size) {
   int float_precision = 2;
 
   if (_print_header) {
-    const std::string tname = typeName();
-    std::string type_header = "";
-    if (!tname.empty()) {
-      type_header = "   Type: " + tname;
-    }
-    printf("%-*s%-*s%-*s%*s%*s%*s%s\n",
+    printf("%-*s%-*s%-*s%*s%*s%*s",
            15, "# Volume (B)",
            15, "Msg Size (B)",
            15, "# of timed Msgs",
            field_width, "Latency (us)",
            field_width, "Bandwidth (GiB/s)",
-           field_width + 1, "Msg Rate (Msg/s)",
-           type_header.c_str());
+           field_width + 1, "Msg Rate (Msg/s)\n");
     _print_header = 0;
   }
 
@@ -1958,10 +1595,8 @@ void* Tester::alloc_test_buffer(size_t size, enum UserBufType user_buf_type) {
     default:
       buffer  = rocshmem_malloc(size);
       if (buffer == nullptr) {
-        std::cerr << "Error allocating memory from symmetric heap: requested "
-                  << size << " bytes" << std::endl;
-        std::cerr << "Raise ROCSHMEM_HEAP_SIZE, or lower -v / -w / -z / -b"
-                  << std::endl;
+        std::cerr << "Error allocating memory from symmetric heap" << std::endl;
+        std::cerr << "buffer: " << (uintptr_t) buffer << std::endl;
         exit(-1);
       }
       return buffer;
