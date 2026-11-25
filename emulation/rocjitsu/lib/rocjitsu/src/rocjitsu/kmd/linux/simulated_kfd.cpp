@@ -53,6 +53,7 @@ RJ_DIAGNOSTIC_POP
 #include <limits>
 #include <linux/sched.h>
 #include <linux/types.h>
+#include <new>
 #include <poll.h>
 #include <pthread.h>
 #include <shared_mutex>
@@ -4417,7 +4418,13 @@ int SimulatedKfd::close_all_processes() {
   return first_error;
 }
 
-int SimulatedKfd::close(uint32_t process_id) {
+// Allocation failure must not return through a KFD caller with an open
+// transaction. Other unwinding, including pthread_exit, still passes through.
+int SimulatedKfd::close(uint32_t process_id)
+#if defined(__cpp_exceptions)
+    try
+#endif
+{
   std::lock_guard close_lock(close_mutex_);
   std::shared_ptr<PendingClose> pending;
   std::shared_ptr<KfdProcess> candidate;
@@ -5027,19 +5034,33 @@ int SimulatedKfd::close(uint32_t process_id) {
   }
   return 0;
 }
+#if defined(__cpp_exceptions)
+catch (const std::bad_alloc &) {
+  std::terminate();
+}
+#endif
 
 int SimulatedKfd::ioctl(unsigned long request, void *arg) {
   return ioctl(local_process_id_, request, arg);
 }
 
 int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg, int *target_mem_fd,
-                        int target_proc_fd) {
+                        int target_proc_fd)
+#if defined(__cpp_exceptions)
+    try
+#endif
+{
   auto proc = find_process(process_id);
   if (!proc) {
     return -ESRCH;
   }
   return dispatch_ioctl(*proc, request, arg, target_mem_fd, target_proc_fd);
 }
+#if defined(__cpp_exceptions)
+catch (const std::bad_alloc &) {
+  std::terminate();
+}
+#endif
 
 int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
                                  int *target_mem_fd, int target_proc_fd) {
@@ -5813,7 +5834,6 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     }
 
     void *ptr = MAP_FAILED;
-    int map_error = 0;
     {
       // Keep the published view and its PTE synchronized for independent
       // mprotect/munmap classification. The established writer order is
@@ -5906,10 +5926,6 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
     }
 
     update_cp_doorbell_base(ord, proc.process_id(), monitor_ptr);
-    if (map_error != 0) {
-      errno = map_error;
-      return MAP_FAILED;
-    }
     return ptr;
   }
 

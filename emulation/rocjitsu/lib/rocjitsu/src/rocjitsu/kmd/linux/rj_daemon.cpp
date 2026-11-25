@@ -274,18 +274,16 @@ public:
   ClientSession &operator=(const ClientSession &) = delete;
 
   void run(std::stop_token stop) {
-    {
-      while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
-        RpcHeader header{};
-        ReceivedFds input_fds;
-        if (!receive_header_with_fds(client_fd_, &header, &input_fds)) {
-          break;
-        }
+    while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
+      RpcHeader header{};
+      ReceivedFds input_fds;
+      if (!receive_header_with_fds(client_fd_, &header, &input_fds)) {
+        break;
+      }
 
-        if (header.reserved != 0 ||
-            handle_request(header, input_fds) == RequestDisposition::Disconnect) {
-          break;
-        }
+      if (header.reserved != 0 ||
+          handle_request(header, input_fds) == RequestDisposition::Disconnect) {
+        break;
       }
     }
     close_device();
@@ -758,21 +756,19 @@ private:
     if (process_id_ == 0) {
       return 0;
     }
-    {
-      if (auto *driver = daemon_->vm->vm->driver()) {
-        if (auto transaction = driver->begin_gem_va_transaction(process_id_)) {
-          for (size_t index = 0; index < gem_va_mappings_.size();) {
-            const auto mapping = gem_va_mappings_[index];
-            if (!transaction->unmap(mapping.va_address, mapping.map_size, mapping.drm_file_id)) {
-              ++index;
-              continue;
-            }
-            gem_va_mappings_.erase(gem_va_mappings_.begin() + index);
-            if (std::ranges::none_of(gem_va_mappings_, [&](const GemVaMapping &entry) {
-                  return entry.backing.get() == mapping.backing.get();
-                })) {
-              transaction->release_backing(mapping.backing.get());
-            }
+    if (auto *driver = daemon_->vm->vm->driver()) {
+      if (auto transaction = driver->begin_gem_va_transaction(process_id_)) {
+        for (size_t index = 0; index < gem_va_mappings_.size();) {
+          const auto mapping = gem_va_mappings_[index];
+          if (!transaction->unmap(mapping.va_address, mapping.map_size, mapping.drm_file_id)) {
+            ++index;
+            continue;
+          }
+          gem_va_mappings_.erase(gem_va_mappings_.begin() + index);
+          if (std::ranges::none_of(gem_va_mappings_, [&](const GemVaMapping &entry) {
+                return entry.backing.get() == mapping.backing.get();
+              })) {
+            transaction->release_backing(mapping.backing.get());
           }
         }
       }
@@ -821,15 +817,17 @@ void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
   std::vector<ClientThread> client_threads;
   while (!stop.stop_requested() && !daemon->stop_requested.load(std::memory_order_acquire)) {
     std::erase_if(client_threads, [](const ClientThread &client) {
-      if (!client.complete->load(std::memory_order_acquire))
+      if (!client.complete->load(std::memory_order_acquire)) {
         return false;
+      }
       pthread_join(client.thread, nullptr);
       return true;
     });
     const int client_fd = accept4(daemon->listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
     if (client_fd < 0) {
-      if (errno == EINTR)
+      if (errno == EINTR) {
         continue;
+      }
       break;
     }
     {
@@ -857,15 +855,18 @@ void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
     start.release();
     client_threads.push_back({thread, std::move(complete)});
   }
-  if (!daemon->stop_requested.load(std::memory_order_acquire))
+  if (!daemon->stop_requested.load(std::memory_order_acquire)) {
     mark_error(daemon);
+  }
   {
     std::lock_guard lock(daemon->clients_mutex);
-    for (int fd : daemon->client_fds)
+    for (int fd : daemon->client_fds) {
       ::shutdown(fd, SHUT_RDWR);
+    }
   }
-  for (const ClientThread &client : client_threads)
+  for (const ClientThread &client : client_threads) {
     pthread_join(client.thread, nullptr);
+  }
 }
 
 void remove_owned_socket(const rj_daemon_t *daemon) {
