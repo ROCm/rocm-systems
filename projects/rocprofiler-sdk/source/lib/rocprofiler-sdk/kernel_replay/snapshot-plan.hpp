@@ -69,7 +69,7 @@ struct placement_t
 // The request fits whole or moves on to the next tier.
 struct whole_region
 {
-    size_t admit(const request_t& request, size_t available) const
+    static size_t admit(const request_t& request, size_t available)
     {
         return request.size <= available ? request.size : 0;
     }

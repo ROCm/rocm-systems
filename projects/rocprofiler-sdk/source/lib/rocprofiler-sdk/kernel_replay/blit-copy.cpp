@@ -783,10 +783,12 @@ struct packet_builder
                 state->mapped_counters ? "device memory the CPU reads" : "the workspace",
                 agent.name());
         }
-        const auto counters = !digests ? 0
-                              : state->mapped_counters
-                                  ? reinterpret_cast<uint64_t>(state->mapped_counters)
-                                  : workspace + layout.counters;
+        auto counters = uint64_t{0};
+        if(digests)
+        {
+            counters = state->mapped_counters ? reinterpret_cast<uint64_t>(state->mapped_counters)
+                                              : workspace + layout.counters;
+        }
 
         const auto write_args = [&](size_t index, const auto& args) {
             std::memcpy(image.data() + chain.offsets.at(index), &args, sizeof(args));
@@ -960,14 +962,14 @@ bool
 has_kept_list(const hsa::Queue& queue)
 {
     const auto* state = get_state(queue.get_agent());
-    return state && state->kept;
+    return state != nullptr && state->kept;
 }
 
 bool
 has_digests(const hsa::Queue& queue)
 {
     const auto* state = get_state(queue.get_agent());
-    return state && state->kept && state->digests;
+    return state != nullptr && state->kept && state->digests;
 }
 
 void

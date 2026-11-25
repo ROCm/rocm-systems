@@ -120,14 +120,14 @@ struct null_tier
 {
     static constexpr bool terminal = true;
 
-    std::optional<planning::reservation_t> reserve(const planning::request_t&)
+    static std::optional<planning::reservation_t> reserve(const planning::request_t&)
     {
         return std::nullopt;
     }
 
-    bool commit() { return true; }
-    void reset() {}
-    void disable() {}
+    static bool commit() { return true; }
+    void        reset() {}
+    void        disable() {}
 };
 
 // Offers what is left of each request to the tiers in order, ending in the null tier.

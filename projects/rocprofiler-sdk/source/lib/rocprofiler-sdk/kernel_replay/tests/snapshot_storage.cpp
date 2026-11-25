@@ -20,6 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+// GCC 13 at -O2 wrongly reports the mock backing's shared_ptr handle, held in a disengaged
+// std::optional by bump_suballocator, as maybe used uninitialized.
+#if defined(__GNUC__) && !defined(__clang__)
+#    pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
+#endif
+
 #include "lib/rocprofiler-sdk/kernel_replay/snapshot-plan.hpp"
 #include "lib/rocprofiler-sdk/kernel_replay/snapshot-storage.hpp"
 
