@@ -74,8 +74,8 @@ struct LdsRaceExecutionResult {
   // Read/read pairs contribute to neither count.
   uint64_t cross_wave_pairs = 0;
   uint64_t cross_wave_lane_pairs = 0;
-  // Each write observation with multiple lanes sharing its address contributes
-  // one group; lane pairs count the unordered lane combinations within it.
+  // A write observation with multiple lanes sharing an address, or two
+  // cross-range base groups reaching one address in a store, contributes a group.
   uint64_t collision_groups = 0;
   uint64_t collision_lane_pairs = 0;
   bool coverage_complete = true;

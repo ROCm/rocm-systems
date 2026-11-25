@@ -1097,6 +1097,84 @@ TEST_P(ConSanTargetSim, RepeatedAddressGroupExhaustionIsSeparateFromOccupiedBank
 #endif
 }
 
+TEST_P(ConSanTargetSim, DualInstructionsPreserveAliasedAddressesAndEveryResultWord) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size + 1;
+  for (const uint32_t width : {4u, 8u}) {
+    for (const std::string_view spacing : {"normal", "stride64"}) {
+      for (const bool high : {false, true}) {
+        const std::string fixture = "width-dual-b" + std::to_string(width * 8) + "-" +
+                                    std::string(spacing) + (high ? "-high" : "-values");
+        SCOPED_TRACE(fixture);
+        RunResult before, after;
+        ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4));
+        ASSERT_NO_FATAL_FAILURE(
+            run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4));
+        expect_guest_state(before, after);
+        std::vector<uint32_t> expected;
+        for (uint32_t wave = 0; wave < 3; ++wave) {
+          std::array<uint32_t, 4> words = {7u + wave, 0x89abcdefu,
+                                           width == 8 ? 0x13579bdfu : 0x76543210u,
+                                           width == 8 ? 0xfedcba98u : 0xa5a5a5a5u};
+          if (high && wave == 2)
+            words.fill(0);
+          expected.insert(expected.end(), words.begin(), words.end());
+        }
+        EXPECT_EQ(before.full_output, expected);
+        EXPECT_EQ(after.full_output, expected);
+        const std::vector<ObservedAccess> records = published_accesses(after);
+        EXPECT_EQ(records.size(), high ? 4u : 6u);
+        for (const ObservedAccess &record : records) {
+          EXPECT_EQ(record.offset, record.wave * 64u);
+          EXPECT_EQ(record.mask, high ? uint64_t{1} << (target.wave_size - 1) : 1u);
+        }
+        const uint32_t stride = static_cast<uint32_t>(report_row_bytes(2, false));
+        for (uint32_t wave = 0; wave < 3; ++wave)
+          EXPECT_EQ(wire::read_u32(after.report,
+                                   kReportHeaderBytes + wave * stride + wire::kRowFinalSequence),
+                    high && wave == 2 ? 0u : 2u);
+      }
+    }
+  }
+}
+
+#ifdef CONSAN_ANALYZER_ENABLED
+TEST_P(ConSanTargetSim, DualStoreCollisionHasTwoRealBaseGroupsAndOppositeOrdinals) {
+  const test::TargetMode target = GetParam();
+  for (const uint32_t width : {4u, 8u}) {
+    const std::string fixture =
+        "width-dual-b" + std::to_string(width * 8) + "-normal-cross-ordinal-collision";
+    SCOPED_TRACE(fixture);
+    RunResult before, after;
+    ASSERT_NO_FATAL_FAILURE(
+        run(fixture, Bootstrap::None, before, target, target.wave_size, true, 4));
+    ASSERT_NO_FATAL_FAILURE(
+        run(fixture, Bootstrap::Instrumented, after, target, target.wave_size, true, 4));
+    expect_guest_state(before, after);
+    const CapturedExecution execution = {
+        .serial = 41,
+        .dimensions = {{target.wave_size, 1, 1}, {target.wave_size, 1, 1}},
+        .group_bytes = after.manifest.entry.prepared_group_bytes,
+        .arguments = {},
+        .report = after.report};
+    const LdsRaceExecutionResult result = analyze_lds_race_execution(after.manifest, execution, 4);
+    EXPECT_TRUE(result.coverage_complete);
+    EXPECT_EQ(result.valid_observations, 4u);
+    EXPECT_EQ(result.cross_wave_pairs, 0u);
+    EXPECT_EQ(result.collision_groups, 1u);
+    EXPECT_EQ(result.collision_lane_pairs, 1u);
+    ASSERT_EQ(result.collision_examples.size(), 1u);
+    const LdsRaceFinding &finding = result.collision_examples.front();
+    EXPECT_EQ(finding.first.offset, 5u * width);
+    EXPECT_EQ(finding.second.offset, 5u * width);
+    EXPECT_EQ(finding.first.mask, 1u);
+    EXPECT_EQ(finding.second.mask, 2u);
+    EXPECT_EQ(finding.first.range_id, 1u);
+    EXPECT_EQ(finding.second.range_id, 0u);
+  }
+}
+#endif
+
 TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {
   const test::TargetMode target = GetParam();
   const uint32_t wave_size = target.wave_size;
