@@ -2480,6 +2480,15 @@ def test_scaled_widen_gfx950_bindings_and_gates():
             f'execute_scaled_conversion<false, false, false, {str(pair).lower()}>'
             in body
         )
+        assert 'RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS' in body
+        expected_denorm = (
+            'fp_denorm_mode_f16_f64' if '_F16_' in name else 'fp_denorm_mode_f32'
+        )
+        other_denorm = (
+            'fp_denorm_mode_f32' if '_F16_' in name else 'fp_denorm_mode_f16_f64'
+        )
+        assert f'!(wf.{expected_denorm}() & 2)' in body
+        assert other_denorm not in body
         assert (
             'uint64_t(inst_.op_sel & 3) << 16' in body
             if '_PK_' not in name or name.endswith('_FP4')
@@ -2518,6 +2527,14 @@ def test_scaled_fp6_widen_bindings_and_gates():
         assert 'rj_arith_' + name.lower() + '_w64_gfx950' in body
         assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
         assert 'execute_wide_scaled_widen' in body
+        expected_denorm = (
+            'fp_denorm_mode_f16_f64' if '_F16_' in name else 'fp_denorm_mode_f32'
+        )
+        other_denorm = (
+            'fp_denorm_mode_f32' if '_F16_' in name else 'fp_denorm_mode_f16_f64'
+        )
+        assert f'!(wf.{expected_denorm}() & 2)' in body
+        assert other_denorm not in body
         assert 'source_base, b, ' + ('32' if '_F32_' in name else '16') in body
         assert 'inst_.op_sel' not in body and 'inst_.neg' not in body
         assert body.count('resolved_vgpr_offset') == 2
@@ -2600,10 +2617,20 @@ def test_scaled_narrow_gfx950_bindings_and_gates():
         assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
         ternary = len(sources) == 3
         pair_a = fp4 and stochastic and f32
+        special_policy = f', false, true, {str(stochastic).lower()}' if fp4 else ''
         assert (
-            f'execute_scaled_conversion<true, {str(ternary).lower()}, {str(pair_a).lower()}>'
+            f'execute_scaled_conversion<true, {str(ternary).lower()}, {str(pair_a).lower()}{special_policy}>'
             in body
         )
+        assert 'RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body
+        expected_denorm = (
+            'fp_denorm_mode_f16_f64' if name.endswith('_F16') else 'fp_denorm_mode_f32'
+        )
+        other_denorm = (
+            'fp_denorm_mode_f32' if name.endswith('_F16') else 'fp_denorm_mode_f16_f64'
+        )
+        assert f'!(wf.{expected_denorm}() & 1)' in body
+        assert other_denorm not in body
         source_bytes = '0x3' if stochastic and not f32 and not fp4 else '0xF'
         assert f'{source_bytes}, destination_bytes' in body
         assert (
@@ -2643,6 +2670,14 @@ def test_scaled_fp6_narrow_bindings_and_gates():
             context('cdna4', name, ['d'], sources, is_vop3=True)
         )
         assert f'execute_wide_scaled_narrow<{str(ternary).lower()}>' in body
+        expected_denorm = (
+            'fp_denorm_mode_f16_f64' if name.endswith('_F16') else 'fp_denorm_mode_f32'
+        )
+        other_denorm = (
+            'fp_denorm_mode_f32' if name.endswith('_F16') else 'fp_denorm_mode_f16_f64'
+        )
+        assert f'!(wf.{expected_denorm}() & 1)' in body
+        assert other_denorm not in body
         assert 'rj_arith_' + name.lower() + '_w64_gfx950' in generated
         assert 'resolved_vgpr_offset' in body
         for arch in ('rdna3', 'rdna4', 'cdna3', 'cdna5'):
