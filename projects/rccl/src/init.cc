@@ -161,6 +161,7 @@ extern int64_t ncclParamDiagnostics();
 extern int64_t ncclParamRasEnable();
 extern int64_t ncclParamP2pLL128Enable();
 extern int64_t ncclParamTreeCompact();
+extern int64_t ncclParamSymCTAs();
 
 // Whether this communicator may use GIN. MI300X CPX stamps mloPart on every partition, so without
 // NCCL_GIN_MLOPART every CPX rank would turn GIN off and fall back to a path that can't export its
@@ -1894,6 +1895,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int localCollNetCount;
     int isAllNvlink;
     bool nicFused;
+    int minCTAs;
+    int maxCTAs;
+    int symAgHierMaxBlocks;
+    int64_t symAgHierMaxChunkBytes;
+    int64_t symCtas;
   };
 
   int nChannelsOrig;
@@ -2476,6 +2482,11 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   allGather3Data[rank].p2pMaxPeers = comm->p2pMaxPeers;
+  allGather3Data[rank].minCTAs = comm->config.minCTAs;
+  allGather3Data[rank].maxCTAs = comm->config.maxCTAs;
+  allGather3Data[rank].symAgHierMaxBlocks = ncclSymkAgHierMaxBlocksLimit();
+  allGather3Data[rank].symAgHierMaxChunkBytes = int64_t(ncclSymkAgHierMaxChunkBytesLimit());
+  allGather3Data[rank].symCtas = ncclParamSymCTAs();
 
   allGather3Data[rank].localNetDeviceCount = localNetDeviceCount;
   allGather3Data[rank].localNetCountByBw = localNetCountByBw;
@@ -2513,6 +2524,27 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
            allGather3Data[r].treeCompact);
       ret = ncclInvalidUsage;
       goto fail;
+    }
+  }
+
+  // The hierarchical AllGather pairs blocks across ranks by index and chunk, so ranks that size its grid or
+  // chunks differently hang
+  if (ncclSymkAgHierAvailable(comm)) {
+    for (int r = 0; r < nranks; r++) {
+      const auto& mine = allGather3Data[rank];
+      const auto& peer = allGather3Data[r];
+      if (peer.minCTAs != mine.minCTAs || peer.maxCTAs != mine.maxCTAs ||
+          peer.symAgHierMaxBlocks != mine.symAgHierMaxBlocks ||
+          peer.symAgHierMaxChunkBytes != mine.symAgHierMaxChunkBytes || peer.symCtas != mine.symCtas) {
+        WARN("CTA bounds or NCCL_SYM_CTAS/NCCL_SYM_AG_HIER_CTAS/NCCL_SYM_AG_HIER_CHUNK_BYTES mismatch: rank %d (%s) "
+             "has minCTAs %d maxCTAs %d sym CTAs %lld hier CTAs %d chunk %lld, rank %d (%s) has %d %d %lld %d %lld; "
+             "all ranks must match",
+             rank, mine.hostname, mine.minCTAs, mine.maxCTAs, (long long)mine.symCtas, mine.symAgHierMaxBlocks,
+             (long long)mine.symAgHierMaxChunkBytes, r, peer.hostname, peer.minCTAs, peer.maxCTAs,
+             (long long)peer.symCtas, peer.symAgHierMaxBlocks, (long long)peer.symAgHierMaxChunkBytes);
+        ret = ncclInvalidUsage;
+        goto fail;
+      }
     }
   }
 
