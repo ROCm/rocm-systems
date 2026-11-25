@@ -91,7 +91,10 @@ set(TLS_BACKEND "$ENV{TLS_BACKEND}" CACHE STRING "TLS backend (empty or OPENSSL3
 if(TLS_BACKEND STREQUAL "OPENSSL3")
   find_package(OpenSSL 3.0 REQUIRED COMPONENTS SSL Crypto)
   rccl_add_misc_micro_binary(rccl-UnitTestsMicroMiscCryptOpenssl3 crypt-openssl3-test.cc
-    EXTRA_DEFS NCCL_TLS_BACKEND_OPENSSL3=1)
+    EXTRA_DEFS NCCL_TLS_BACKEND_OPENSSL3=1
+    SOURCES
+      fakes/debug_fakes.cc
+      fakes/socket_fakes.cc)
   target_include_directories(rccl-UnitTestsMicroMiscCryptOpenssl3 PRIVATE ${OPENSSL_INCLUDE_DIR})
 else()
   message(STATUS "rccl-UnitTestsMicroMiscCryptOpenssl3 not built: set TLS_BACKEND=OPENSSL3 to enable")

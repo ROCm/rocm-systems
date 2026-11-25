@@ -32,18 +32,12 @@
 
 #include CRYPT_CC_PATH
 
-// crypt.cc's calls into src/debug.cc, src/misc/socket.cc and src/os/linux.cc, which
-// this binary does not link: logging (discarded), socket names, the default poll
-// timeout (0: never poll), dl*, and a non-blocking send/recv with
+#include "ScopedHook.h"
+#include "fakes/socket_fakes.h"
+
+// crypt.cc's calls into src/os/linux.cc, which this binary does not link: the
+// default poll timeout (0: never poll), dl*, and a non-blocking send/recv with
 // ncclOsSocketProgressOpt's closed/error contract.
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
-void ncclDebugLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
-const char* ncclSocketToString(const union ncclSocketAddress*, char* buf, size_t bufLen, const int) {
-  snprintf(buf, bufLen, "peer");
-  return buf;
-}
 int64_t ncclParamPollTimeOut() { return 0; }
 ncclOsLibraryHandle ncclOsDlopen(const char* name) { return dlopen(name, RTLD_NOW | RTLD_LOCAL); }
 void* ncclOsDlsym(ncclOsLibraryHandle handle, const char* symbol) { return dlsym(handle, symbol); }
@@ -77,6 +71,11 @@ class CryptPskHandshakeTest : public ::testing::Test {
   int fds_[2] = {-1, -1};  // [0] the NCCL client, [1] its peer
   struct ncclSocket client_ = {};
   void* libssl_ = nullptr;
+  HookOf<decltype(g_ncclSocketToString)> socketToString_{
+      g_ncclSocketToString, [](const union ncclSocketAddress*, char* buf, size_t bufLen, int) {
+        snprintf(buf, bufLen, "peer");
+        return static_cast<const char*>(buf);
+      }};
 
   void SetUp() override {
     libssl_ = dlopen("libssl.so.3", RTLD_NOW | RTLD_LOCAL);
