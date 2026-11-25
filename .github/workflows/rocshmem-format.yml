@@ -1,0 +1,59 @@
+name: rocSHMEM format
+
+# Checks C/C++ formatting with clang-format on the files a PR changes. The
+# checks live in projects/rocshmem/.pre-commit-config.yaml so that a developer
+# can run locally exactly what CI runs.
+#
+# This only reports; it never pushes a fix to the PR branch. To fix a failure:
+#   git clang-format --style file          # or
+#   projects/rocshmem/scripts/run-clang-format.sh <path>
+
+on:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'projects/rocshmem/**'
+      - '.github/workflows/rocshmem-format.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: rocshmem-clang-format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout rocshmem
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # pre-commit needs the PR base commit to work out which files changed.
+          fetch-depth: 0
+          sparse-checkout: |
+            projects/rocshmem
+            .github
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pre-commit hook environments
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('projects/rocshmem/.pre-commit-config.yaml') }}
+
+      - run: pip install pre-commit
+
+      - name: Run pre-commit on changed files
+        run: |
+          pre-commit run \
+            --config projects/rocshmem/.pre-commit-config.yaml \
+            --from-ref ${{ github.event.pull_request.base.sha }} \
+            --to-ref ${{ github.event.pull_request.head.sha }}
