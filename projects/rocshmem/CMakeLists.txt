@@ -627,10 +627,8 @@ if (NOT BUILD_TESTS_ONLY)
 
   if (BUILD_TOOLS)
     add_subdirectory(tools)
-    rocm_install(
-      PROGRAMS "${CMAKE_BINARY_DIR}/tools/rocshmem_info"
-      DESTINATION ${CMAKE_INSTALL_BINDIR}
-    )
+    # Install the target (not the built file) so the build RUNPATH is rewritten.
+    rocm_install(TARGETS rocshmem_info)
   endif()
 
   rocm_package_add_dependencies(
