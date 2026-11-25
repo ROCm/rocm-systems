@@ -6381,11 +6381,14 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   // inheriting the C++ libc header's noexcept declaration in the caller, too.
   auto call = reinterpret_cast<int (*)(int, unsigned long, ...)>(dlsym(RTLD_DEFAULT, "ioctl"));
   ASSERT_NE(call, nullptr);
+  // TSan delivers SIGSYS immediately. It can defer SIGUSR1 until the waiter
+  // tries to reacquire the mutex, which would unwind from inside the lock call.
+  constexpr int kExitSignal = SIGSYS;
   struct sigaction action {
   }, old_action{};
   action.sa_handler = +[](int) { pthread_exit(nullptr); };
   sigemptyset(&action.sa_mask);
-  ASSERT_EQ(sigaction(SIGUSR1, &action, &old_action), 0);
+  ASSERT_EQ(sigaction(kExitSignal, &action, &old_action), 0);
   std::atomic<pid_t> tid{0};
   bool cleaned_up = false, returned = false;
   std::thread waiter([&] {
@@ -6415,13 +6418,13 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   if (blocked) {
-    EXPECT_EQ(pthread_kill(waiter.native_handle(), SIGUSR1), 0);
+    EXPECT_EQ(pthread_kill(waiter.native_handle(), kExitSignal), 0);
   }
   waiter.join();
   EXPECT_TRUE(blocked);
   EXPECT_TRUE(cleaned_up);
   EXPECT_FALSE(returned);
-  EXPECT_EQ(sigaction(SIGUSR1, &old_action, nullptr), 0);
+  EXPECT_EQ(sigaction(kExitSignal, &old_action, nullptr), 0);
   drm_syncobj_destroy destroy{};
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
