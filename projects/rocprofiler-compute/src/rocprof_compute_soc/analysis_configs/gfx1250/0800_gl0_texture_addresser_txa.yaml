@@ -224,8 +224,6 @@ Panel Config:
         max: Max
         unit: Unit
       metric:
-        # Shader-TXA bus util: cycle counters are summed across WGPs; normalize
-        # against one WGP-slot per PER_XCD GUI-active cycle (no literal 2).
         Request Bus Utilization:
           avg: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
           min: 100 * MIN((TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))

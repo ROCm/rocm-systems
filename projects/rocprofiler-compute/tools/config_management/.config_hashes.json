@@ -42,7 +42,7 @@
         "0500_command_processor_cpc.yaml": "86d05b4eb2c2dcb2a29b041ebe69a4d6",
         "0600_workgroup_manager_spi.yaml": "8686b77dec3617f869025abcc9503da0",
         "0700_workgroup_processor_wgp.yaml": "54441b4d05b50341fb7e16b1be8027ef",
-        "0800_gl0_texture_addresser_txa.yaml": "bd1c75b36964e4ed0aef0522643347db",
+        "0800_gl0_texture_addresser_txa.yaml": "a8a9bef0efb521452fbe03dc7bd24c75",
         "0900_gl0_cache_and_lds.yaml": "83d170d91877f5581f6e1ff7331da18f",
         "1000_gl0_texture_data_txd.yaml": "1f2283b3b4909baf56d732921b1da3b7",
         "1100_gl1_cache.yaml": "fe9c952fee2023af6c4539c93d9e39fa",
