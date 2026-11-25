@@ -51,7 +51,7 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
       * - Platform
         - Status
 
-      * - AMD Ryzen AI Max / Ryzen™ AI Max+ 300 and 400 Series integrated graphics (Strix/Halo, Gorgon/Halo, Gorgon/Point gfx1153)
+      * - Strix Halo, Gorgon Halo, Gorgon Point, Krackan Point and Strix Point
         - Supported ✅ (see :doc:`/conceptual/rdna/rdna-performance-model`)
 
   .. tab-item:: AMD Radeon GPUs
@@ -62,8 +62,5 @@ ROCm Compute Profiler. See :doc:`rocm:reference/gpu-arch-specs` for full AMD Ins
       * - Platform
         - Status
 
-      * - AMD Radeon Navi44
-        - Supported ✅ (experimental)
-
-      * - AMD Radeon Navi48
+      * - Navi 44 and Navi 48
         - Supported ✅ (experimental)
