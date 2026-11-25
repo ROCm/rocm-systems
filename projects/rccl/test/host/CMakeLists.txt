@@ -1149,6 +1149,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroWrap wrap-test.cc ${_MICRO_ROOT_TE
     fakes/dda_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
     fakes/env_fakes.cc
+    fakes/gin_sdma_fakes.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
     fakes/rccl_arch_thresholds_fakes.cc
@@ -1181,6 +1182,7 @@ rccl_add_unit_micro_binary(rccl-UnitTestsMicroCollectives collectives-test.cc
     fakes/dda_fakes.cc
     fakes/dev_runtime_fakes.cc
     fakes/enqueue_fakes.cc
+    fakes/gin_sdma_fakes.cc
     fakes/group_fakes.cc
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc

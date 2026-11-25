@@ -52,6 +52,7 @@
 #include "ScopedHook.h"                              // RAII install/restore for g_loadParam et al.
 #include "fakes/dev_runtime_micro_fakes.h"           // g_devrBootstrapAllGather
 #include "fakes/env_fakes.h"                         // SetMicroEnv/SetMicroEnvAbsent/ClearMicroEnv
+#include "fakes/gin_sdma_fakes.h"                    // g_allGatherGinSdmaEligible/CtaCount
 #include "fakes/hip_fakes.h"                         // g_hipGetLastError
 #include "fakes/wrap_fakes.h"                        // rccl_wrap.cc's dependency seams
 #include "graph/topo.h"                              // ncclTopoSystem/ncclTopoNode (MakeCommWithArch)
@@ -6888,8 +6889,10 @@ TEST(WrapMicrotestIsolated, SelectAllGather_GinSdmaPreemptsSymk) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_GinSdmaPreemptsSymk",
       []() {
+        static constexpr int kAllGatherGinSdmaFakeCtas = 4;
         ScopedHook ginEligible(g_allGatherGinSdmaEligible,
                                [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return true; });
+        ScopedHook ginCtaCount(g_allGatherGinSdmaCtaCount, [](int, size_t) { return kAllGatherGinSdmaFakeCtas; });
         ScopedHook symRequested(g_isSymmetricKernelRequested,
                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t, const void*, void*,
                                    bool) { return true; });
@@ -6899,7 +6902,7 @@ TEST(WrapMicrotestIsolated, SelectAllGather_GinSdmaPreemptsSymk) {
                                                    /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false,
                                                    &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_AG_GIN_SDMA, decision.algo);
-        EXPECT_EQ(4, decision.nMaxChannels);
+        EXPECT_EQ(kAllGatherGinSdmaFakeCtas, decision.nMaxChannels);
         DeleteCommWithArch(comm);
       });
 }
