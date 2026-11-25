@@ -15,6 +15,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed roofline limiter detection misidentifying memory-bound kernels as compute-bound when performance exceeded a memory ceiling.
+
 ### Upcoming changes
 
 ### Known issues
