@@ -157,6 +157,38 @@ TEST(VmConfigApi, CanonicalGpuProfilesAreDiscoverableWithoutActivation) {
   }
 }
 
+TEST(VmConfigApi, TopologyGenerationFailureRejectsLocalAndDaemonVms) {
+  rocjitsu::test::ScopedTempFile blocked_runtime;
+  ASSERT_TRUE(blocked_runtime.initialize("rocjitsu-blocked-runtime-"));
+  rocjitsu::test::ScopedTempDirectory runtime;
+  ASSERT_TRUE(runtime.initialize("rocjitsu-topology-retry-"));
+  const rocjitsu::test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR",
+                                                              runtime.path());
+  for (const auto mode : {RJ_VM_MODE_LOCAL, RJ_VM_MODE_DAEMON}) {
+    SCOPED_TRACE(mode);
+    for (const bool replicated : {false, true}) {
+      SCOPED_TRACE(replicated);
+      const std::string json = small_config(replicated);
+      rj_vm_config_t *raw = nullptr;
+      ASSERT_EQ(rj_vm_config_create_from_string(json.c_str(), &raw), ROCJITSU_STATUS_SUCCESS);
+      Config config(raw, rj_vm_config_destroy);
+      rj_vm_t *raw_vm = nullptr;
+      {
+        // A regular file cannot contain the synthetic topology directories.
+        const rocjitsu::test::ScopedEnvironmentVariable blocked_dir("ROCJITSU_RUNTIME_DIR",
+                                                                    blocked_runtime.path());
+        EXPECT_EQ(rj_vm_create_from_config(config.get(), mode, &raw_vm), ROCJITSU_STATUS_ERROR);
+        Vm failed_vm(raw_vm, rj_vm_destroy);
+        EXPECT_EQ(failed_vm.get(), nullptr);
+      }
+      raw_vm = nullptr;
+      ASSERT_EQ(rj_vm_create_from_config(config.get(), mode, &raw_vm), ROCJITSU_STATUS_SUCCESS);
+      Vm vm(raw_vm, rj_vm_destroy);
+      EXPECT_NE(vm.get(), nullptr);
+    }
+  }
+}
+
 TEST(VmConfigApi, MetadataMatchesIndependentLocalAndDaemonVms) {
   for (const auto mode : {RJ_VM_MODE_LOCAL, RJ_VM_MODE_DAEMON}) {
     SCOPED_TRACE(mode);
