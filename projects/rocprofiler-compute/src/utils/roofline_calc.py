@@ -45,8 +45,10 @@ SUPPORTED_DATATYPES: dict[str, dict[str, OpsSupport]] = {
 # Metric labels of the "Roofline Plot Points" table, mapped to PlotPoints fields.
 _METRIC_TO_AI_FIELD = {
     "AI L0": "ai_l0",
+    "AI GL0": "ai_l0",
     "AI L1": "ai_l1",
     "AI L2": "ai_l2",
+    "AI GL2": "ai_l2",
     "AI HBM": "ai_hbm",
     "AI VRAM": "ai_vram",
     "AI LDS": "ai_lds",

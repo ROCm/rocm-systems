@@ -131,6 +131,9 @@ Panel Config:
         AI GL0:
           value: SUM($sp_flops + $wmma_flops) / SUM($gl0_bytes)
           unit: FLOPs/Byte
+        AI LDS:
+          value: SUM($sp_flops + $wmma_flops) / SUM($lds_bytes)
+          unit: FLOPs/Byte
         Performance (GFLOPs):
           value: $sp_flop_rate + $wmma_flop_rate
           unit: GFLOP/s
@@ -211,6 +214,9 @@ Panel Config:
 
     AI GL0: >-
       Arithmetic intensity relative to GL0 data bandwidth.
+
+    AI LDS: >-
+      Arithmetic intensity relative to LDS bandwidth.
 
     Performance (GFLOPs): >-
       Total achieved compute throughput combining all VALU and WMMA FLOPs.
