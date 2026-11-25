@@ -22,6 +22,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace {
@@ -511,6 +512,242 @@ TEST(RaceReportDescriptionTest, RejectsUnavailableAndRetiredConflicts) {
   EXPECT_THROW(
       formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4),
       std::logic_error);
+}
+
+// ----- The barrier a conflicting access crossed in flight -----
+//
+// A barrier signal waits for no memory counter (CDNA5 ISA 5.6 and 15.3,
+// S_BARRIER_SIGNAL), so an LDS access in flight when its wave signals is not
+// ordered by that barrier. The detector puts the barrier on the violation when
+// such an access races with a wave that has passed it, and the report then
+// ends with a line naming the wave, the barrier and the counters to wait for
+// before it.
+
+constexpr uint64_t kBarrierPc = 0x180;
+
+/// What one description of a cross-wave LDS race is built from. Wave 1 owns
+/// the conflicting event, issued at PC 0x100; wave 0 makes the access at 0x200.
+struct BarrierRace {
+  MemoryEventType type = MemoryEventType::VGPR_TO_LDS;
+  WaitCounterType counter = WaitCounterType::DSCNT;
+  MemoryOrderClass order = MemoryOrderClass::LDS;
+  std::optional<WaitCounterType> second_counter = std::nullopt;
+  LdsAccess access = {};
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna5;
+  /// Whether wave 1 has waited for the event since the barrier.
+  bool completed = false;
+};
+
+/// The description of `race`, with the violation carrying the barrier at
+/// kBarrierPc or none, and the barrier's disassembly `instruction` supplied to
+/// the formatter.
+std::string describeBarrierRace(const BarrierRace &race, bool crossed_barrier,
+                                std::string_view instruction = "s_barrier_signal -1") {
+  RaceDetector detector(2, 4, 4, Dim3d(0), [](RaceViolation) {}, {}, 65536);
+  const EventId event = detector.allocateEventId(
+      WaveId{1}, testInstruction(0x100), race.type, /*registers=*/{2}, /*execMask=*/1,
+      /*byteMask=*/0xf, /*ldsIntervals=*/{},
+      CounterObligations(race.counter, race.order, race.second_counter), race.order,
+      /*lastRegisterByteMask=*/0, race.access);
+  if (race.completed) {
+    for (const auto obligation : detector.events().counterObligations(event))
+      detector.satisfyEventWaitCounter(event, obligation.wait_counter_type());
+    detector.markEventWaveComplete(event);
+  }
+  const bool reads_lds =
+      race.type == MemoryEventType::LDS_TO_VGPR || race.type == MemoryEventType::LDS_TO_GLOBAL;
+  RaceViolation violation{RaceViolation::Space::LDS,
+                          16,
+                          /*wave=*/0,
+                          3,
+                          /*isWrite=*/reads_lds,
+                          Dim3d(1, 2, 3),
+                          event};
+  if (crossed_barrier)
+    violation.crossedBarrier = testInstruction(kBarrierPc);
+  return formatRaceDescription(violation, detector.events(), 0x200, race.arch, instruction);
+}
+
+/// The line that names the barrier, for wave 1's access pending on `counters`.
+std::string barrierLine(std::string_view counters,
+                        std::string_view instruction = " (s_barrier_signal -1)") {
+  return std::format("  Wave 1 arrived at the barrier at PC 0x180{} with this access in flight, so "
+                     "that barrier does not order it. Wait for {} before the barrier.\n",
+                     instruction, counters);
+}
+
+TEST(RaceReportBarrierTest, NamesTheBarrierAPendingConflictCrossedInFlight) {
+  const BarrierRace race{};
+  EXPECT_EQ(describeBarrierRace(race, /*crossed_barrier=*/true),
+            "Race on LDS byte 16 [workgroup (1, 2, 3), wave 0, lane 3]: read-after-write (RAW).\n"
+            "  Current access: read at PC 0x200.\n"
+            "  Conflict: transfer from VGPRs into LDS at PC 0x100, wave 1.\n"
+            "  Completion for wave 1 is not guaranteed; pending counters: dscnt.\n"
+            "  The detector observed no synchronization between waves 1 and 0 for this access.\n"
+            "  Wave 1 arrived at the barrier at PC 0x180 (s_barrier_signal -1) with this access in "
+            "flight, so that barrier does not order it. Wait for dscnt before the barrier.\n");
+}
+
+// The line is appended to the description the report has without it.
+TEST(RaceReportBarrierTest, AppendsToTheExistingDescription) {
+  const BarrierRace race{};
+  EXPECT_EQ(describeBarrierRace(race, /*crossed_barrier=*/true),
+            describeBarrierRace(race, /*crossed_barrier=*/false) + barrierLine("dscnt"));
+}
+
+// A wait after the signal completes the access for its own wave, and the
+// barrier still did not order it for the others.
+TEST(RaceReportBarrierTest, NamesTheBarrierAfterTheConflictCompleted) {
+  const BarrierRace race{.completed = true};
+  const std::string without = describeBarrierRace(race, /*crossed_barrier=*/false);
+  ASSERT_TRUE(without.ends_with(
+      "  Wait requirements satisfied for this operation in wave 1.\n"
+      "  The detector observed no synchronization between waves 1 and 0 for this access.\n"))
+      << without;
+  EXPECT_EQ(describeBarrierRace(race, /*crossed_barrier=*/true), without + barrierLine("dscnt"));
+}
+
+TEST(RaceReportBarrierTest, NamesAReadThatCrossedTheBarrier) {
+  const BarrierRace race{.type = MemoryEventType::LDS_TO_VGPR};
+  const std::string without = describeBarrierRace(race, /*crossed_barrier=*/false);
+  ASSERT_TRUE(without.starts_with(
+      "Race on LDS byte 16 [workgroup (1, 2, 3), wave 0, lane 3]: write-after-read (WAR).\n"))
+      << without;
+  EXPECT_EQ(describeBarrierRace(race, /*crossed_barrier=*/true), without + barrierLine("dscnt"));
+}
+
+// The counters named are the ones the LDS access completes on, under the
+// architecture's own names.
+TEST(RaceReportBarrierTest, NamesTheCountersTheLdsAccessCompletesOn) {
+  struct Case {
+    BarrierRace race;
+    const char *counters;
+    const char *barrier;
+  };
+  const Case cases[] = {
+      // s_barrier and the combined counter of the targets before GFX12.
+      {{.counter = WaitCounterType::LGKMCNT, .arch = rocjitsu::IsaFamily::Cdna4},
+       "lgkmcnt",
+       "s_barrier"},
+      // The LDS access of a FLAT store completes on DScnt (CDNA5 ISA 5.7.1.3);
+      // its STOREcnt does not matter to the barrier.
+      {{.counter = WaitCounterType::STORECNT,
+        .order = MemoryOrderClass::UNORDERED,
+        .second_counter = WaitCounterType::DSCNT,
+        .access = LdsAccess{.uses_flat_lds = true}},
+       "dscnt",
+       "s_barrier_signal -1"},
+      {{.counter = WaitCounterType::VMCNT,
+        .order = MemoryOrderClass::UNORDERED,
+        .second_counter = WaitCounterType::LGKMCNT,
+        .access = LdsAccess{.uses_flat_lds = true},
+        .arch = rocjitsu::IsaFamily::Cdna4},
+       "lgkmcnt",
+       "s_barrier"},
+      // Tensor DMA and async copies complete on their own counters.
+      {{.type = MemoryEventType::GLOBAL_TO_LDS,
+        .counter = WaitCounterType::TENSORCNT,
+        .order = MemoryOrderClass::TENSOR},
+       "tensorcnt",
+       "s_barrier_signal -1"},
+      {{.type = MemoryEventType::LDS_TO_GLOBAL,
+        .counter = WaitCounterType::TENSORCNT,
+        .order = MemoryOrderClass::TENSOR},
+       "tensorcnt",
+       "s_barrier_signal -1"},
+      {{.type = MemoryEventType::GLOBAL_TO_LDS,
+        .counter = WaitCounterType::ASYNCCNT,
+        .order = MemoryOrderClass::ASYNC_LOAD},
+       "asynccnt",
+       "s_barrier_signal -1"},
+      {{.type = MemoryEventType::LDS_TO_GLOBAL,
+        .counter = WaitCounterType::ASYNCCNT,
+        .order = MemoryOrderClass::ASYNC_STORE},
+       "asynccnt",
+       "s_barrier_signal -1"},
+      // Every counter the access completes on is named, in the order of its
+      // obligations.
+      {{.type = MemoryEventType::GLOBAL_TO_LDS,
+        .counter = WaitCounterType::ASYNCCNT,
+        .order = MemoryOrderClass::ASYNC_LOAD,
+        .second_counter = WaitCounterType::DSCNT},
+       "asynccnt, dscnt",
+       "s_barrier_signal -1"},
+      // Two obligations on the same counter name it once: before GFX12 the DS
+      // and constant-load counters are the one LGKMcnt.
+      {{.counter = WaitCounterType::LGKMCNT,
+        .second_counter = WaitCounterType::DSCNT,
+        .arch = rocjitsu::IsaFamily::Cdna4},
+       "lgkmcnt",
+       "s_barrier"},
+      // A direct-to-LDS load completes with the vector-memory loads.
+      {{.type = MemoryEventType::GLOBAL_TO_LDS,
+        .counter = WaitCounterType::VMCNT,
+        .order = MemoryOrderClass::VMEM,
+        .arch = rocjitsu::IsaFamily::Cdna4},
+       "vmcnt",
+       "s_barrier"},
+  };
+  for (const Case &test : cases) {
+    SCOPED_TRACE(std::string(test.counters) + " " + test.barrier);
+    EXPECT_EQ(describeBarrierRace(test.race, /*crossed_barrier=*/true, test.barrier),
+              describeBarrierRace(test.race, /*crossed_barrier=*/false, test.barrier) +
+                  barrierLine(test.counters, std::string(" (") + test.barrier + ")"));
+  }
+}
+
+// Without the barrier's disassembly the line gives its PC alone.
+TEST(RaceReportBarrierTest, OmitsTheInstructionWhenItIsNotSupplied) {
+  const BarrierRace race{};
+  EXPECT_EQ(describeBarrierRace(race, /*crossed_barrier=*/true, /*instruction=*/{}),
+            describeBarrierRace(race, /*crossed_barrier=*/false, /*instruction=*/{}) +
+                barrierLine("dscnt", /*instruction=*/{}));
+}
+
+// The barrier a violation names is disassembled through the caller's
+// disassembler, and one that names none is not disassembled at all.
+TEST(RaceReportBarrierTest, DisassemblesTheBarrierTheViolationNames) {
+  std::vector<uint64_t> disassembled;
+  const auto disassemble =
+      [&](const InstructionSnapshot &instruction) -> util::FailureOr<std::string> {
+    disassembled.push_back(instruction.pc());
+    return std::string("s_barrier_signal -1");
+  };
+  RaceViolation violation{
+      RaceViolation::Space::LDS, 16, /*wave=*/0, 3, /*isWrite=*/false, Dim3d(1, 2, 3), EventId{0}};
+  util::FailureOr<std::string> none = formatCrossedBarrier(violation, disassemble);
+  ASSERT_TRUE(none.succeeded());
+  EXPECT_EQ(none.value(), "");
+  EXPECT_EQ(disassembled, std::vector<uint64_t>{});
+
+  violation.crossedBarrier = testInstruction(kBarrierPc);
+  util::FailureOr<std::string> named = formatCrossedBarrier(violation, disassemble);
+  ASSERT_TRUE(named.succeeded());
+  EXPECT_EQ(named.value(), "s_barrier_signal -1");
+  EXPECT_EQ(disassembled, std::vector<uint64_t>{kBarrierPc});
+}
+
+// A barrier that does not disassemble is a failure, which the plugin reports
+// in place of the race report, as it does for the trace.
+TEST(RaceReportBarrierTest, ReportsABarrierThatDoesNotDisassemble) {
+  RaceViolation violation{
+      RaceViolation::Space::LDS, 16, /*wave=*/0, 3, /*isWrite=*/false, Dim3d(1, 2, 3), EventId{0}};
+  violation.crossedBarrier = testInstruction(kBarrierPc);
+  const util::FailureOr<std::string> failed = formatCrossedBarrier(
+      violation, [](const InstructionSnapshot &) -> util::FailureOr<std::string> {
+        return util::Result::failure();
+      });
+  EXPECT_TRUE(failed.failed());
+}
+
+// A violation that carries no barrier gets no line, whatever the caller
+// supplies.
+TEST(RaceReportBarrierTest, NoLineWithoutABarrierOnTheViolation) {
+  const BarrierRace race{};
+  EXPECT_EQ(describeBarrierRace(race, /*crossed_barrier=*/false, "s_barrier_signal -1"),
+            describeBarrierRace(race, /*crossed_barrier=*/false, /*instruction=*/{}));
+  EXPECT_EQ(describeBarrierRace(race, /*crossed_barrier=*/false).find("arrived at the barrier"),
+            std::string::npos);
 }
 
 static_assert(sizeof(InstructionSnapshot) == 32);

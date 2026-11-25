@@ -19,6 +19,8 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -303,6 +305,55 @@ public:
                                    LdsAccess{.uses_flat_lds = true});
   }
 
+  /// Register a DS atomic that updates `bytes` bytes at `addr` in place, on
+  /// `waitCounterType` in the LDS class.
+  void ldsAtomic(int wave, int lane, int addr, int bytes,
+                 amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::DSCNT) {
+    registerDsAtomic(wave, lane, addr, bytes, waitCounterType);
+  }
+
+  /// Register a DS atomic that also reads a second LDS operand at
+  /// `sourceAddr`, attached to the event as the plugin attaches an SRC2 source.
+  void ldsSrc2Atomic(int wave, int lane, int addr, int sourceAddr, int bytes,
+                     amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::DSCNT) {
+    const EventId event = registerDsAtomic(wave, lane, addr, bytes, waitCounterType);
+    ASSERT_TRUE(event.isValid());
+    IntervalSet source;
+    source.append(sourceAddr, sourceAddr + bytes);
+    source.finalize();
+    detector_->attachSrc2Source(event, std::move(source));
+  }
+
+  /// Register a DS write issued with no active lane: it counts on
+  /// `waitCounterType` and touches no LDS bytes.
+  void ldsWriteNoLanes(int wave,
+                       amdgpu::WaitCounterType waitCounterType = amdgpu::WaitCounterType::DSCNT) {
+    ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(waitCounterType).succeeded());
+    const std::vector<uint32_t> ldsAddrs(waveSize_, 0);
+    waves_[wave]->registerLdsEvent(
+        testInstruction(pc_++), MemoryEventType::VGPR_TO_LDS, /*registers=*/{}, /*execMask=*/0,
+        waveSize_, ldsAddrs, /*bytesPerLane=*/4, /*byteMask=*/0xF,
+        CounterObligations{waitCounterType, MemoryOrderClass::LDS}, MemoryOrderClass::LDS);
+  }
+
+  /// Register a routed FLAT store to LDS. Its LDS access completes with
+  /// `ldsCounter`, independently of the store's `storeCounter`.
+  void flatLdsWrite(int wave, int lane, int addr, int bytes,
+                    amdgpu::WaitCounterType storeCounter = amdgpu::WaitCounterType::STORECNT,
+                    amdgpu::WaitCounterType ldsCounter = amdgpu::WaitCounterType::DSCNT) {
+    constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::UNORDERED;
+    ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(storeCounter).succeeded());
+    ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(ldsCounter).succeeded());
+    detector_->validateWrite(addr, WaveId{wave}, lane, bytes, MemoryOrderClass::LDS);
+    std::vector<uint32_t> ldsAddrs(waveSize_, 0);
+    ldsAddrs[lane] = addr;
+    waves_[wave]->registerLdsEvent(
+        testInstruction(pc_++), MemoryEventType::VGPR_TO_LDS,
+        /*registers=*/{}, uint64_t{1} << lane, waveSize_, ldsAddrs, bytes, /*byteMask=*/0xF,
+        CounterObligations{storeCounter, memoryOrder, ldsCounter}, memoryOrder,
+        /*ldsLaneMask=*/~uint64_t{0}, /*elementBytes=*/0, LdsAccess{.uses_flat_lds = true});
+  }
+
   // -- Sync --
 
   /// Dispatch s_waitcnt. -1 means "don't change this counter".
@@ -334,11 +385,21 @@ public:
   /// A single-instruction workgroup barrier (s_barrier): every live wave
   /// signals, the round completes, and every live wave passes its wait, as the
   /// simulator reports it.
-  void barrier() {
+  void barrier() { barrier(std::nullopt); }
+
+  /// The same, with every wave signalling from the barrier instruction at
+  /// `barrierPc`.
+  void barrierAt(uint64_t barrierPc) { barrier(barrierPc); }
+
+  void barrier(std::optional<uint64_t> barrierPc) {
     const BarrierRoundId round = workgroupRound(nextWorkgroupGeneration_++);
     const std::vector<int> members = liveWaves();
-    for (int wave : members)
-      signal(wave, round);
+    for (int wave : members) {
+      if (barrierPc)
+        signalAt(wave, round, *barrierPc);
+      else
+        signal(wave, round);
+    }
     completeRound(round, members);
     for (int wave : members)
       waitPassed(wave, round);
@@ -359,6 +420,13 @@ public:
   }
 
   void signal(int wave, BarrierRoundId round) { detector_->barrierSignaled(WaveId{wave}, round); }
+
+  /// Signal `round` from the barrier instruction at `barrierPc`, as the plugin
+  /// reports a signal the wave's newest instruction issued.
+  void signalAt(int wave, BarrierRoundId round, uint64_t barrierPc) {
+    const InstructionSnapshot barrier = testInstruction(barrierPc);
+    detector_->barrierSignaled(WaveId{wave}, round, &barrier);
+  }
 
   /// Complete `round`, arming the wait of each wave in `armed`: the waves
   /// whose completion bit the round sets. A wave whose bit an earlier round
@@ -393,6 +461,28 @@ public:
   }
 
   size_t openBarrierRounds() const { return detector_->openBarrierRounds(); }
+
+  /// The most recent barrier each LDS access of `wave` crossed in flight, as
+  /// the PC of the access to the PC of the barrier, over the wave's accesses
+  /// the detector still checks: those in flight and those completed but not
+  /// yet retired. An access that crossed no barrier in flight is absent.
+  std::map<uint64_t, uint64_t> barriersCrossedInFlight(int wave) const {
+    const EventRegistry &events = detector_->events();
+    // A wave that has acquired every epoch has passed every barrier.
+    constexpr uint32_t kEveryEpoch = std::numeric_limits<uint32_t>::max();
+    std::map<uint64_t, uint64_t> crossed;
+    const auto collect = [&](const std::vector<EventId> &list) {
+      for (const EventId event : list)
+        if (const InstructionSnapshot *barrier = events.barrierCrossedInFlight(event, kEveryEpoch))
+          crossed[events.pc(event)] = barrier->pc();
+    };
+    collect(waves_[wave]->getWaveMemoryEvents());
+    collect(waves_[wave]->getBarrierPendingEvents());
+    return crossed;
+  }
+
+  /// The PC the next registered event gets. Each event has its own.
+  uint64_t nextPc() const { return static_cast<uint64_t>(pc_); }
 
   // -- LDS barrier cells (ds_atomic_*barrier_arrive, tensor DMA arrival) --
 
@@ -569,6 +659,25 @@ private:
       if (!ended_[wave])
         live.push_back(wave);
     return live;
+  }
+
+  /// A one-lane DS atomic on `waitCounterType` in the LDS class, validated as a
+  /// read and a write of its bytes.
+  EventId registerDsAtomic(int wave, int lane, int addr, int bytes,
+                           amdgpu::WaitCounterType waitCounterType) {
+    constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::LDS;
+    EXPECT_TRUE(waves_[wave]->prepareForCounterIncrement(waitCounterType).succeeded());
+    const auto atomicBytes = static_cast<uint8_t>(bytes);
+    detector_->validateRead(addr, WaveId{wave}, lane, bytes, memoryOrder, atomicBytes);
+    detector_->validateWrite(addr, WaveId{wave}, lane, bytes, memoryOrder, atomicBytes);
+    std::vector<uint32_t> ldsAddrs(waveSize_, 0);
+    ldsAddrs[lane] = addr;
+    return waves_[wave]->registerLdsEvent(
+        testInstruction(pc_++), MemoryEventType::VGPR_TO_LDS, /*registers=*/{}, uint64_t{1} << lane,
+        waveSize_, ldsAddrs, bytes, /*byteMask=*/0xF,
+        CounterObligations{waitCounterType, memoryOrder}, memoryOrder,
+        /*ldsLaneMask=*/~uint64_t{0}, /*elementBytes=*/0,
+        LdsAccess{.read_modify_write = true, .aligned_atomic_bytes = atomicBytes});
   }
 
   /// A transfer has no lanes; its violations report lane -1. Validates and

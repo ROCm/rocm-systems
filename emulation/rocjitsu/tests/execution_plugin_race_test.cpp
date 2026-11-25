@@ -64,6 +64,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -14831,6 +14832,797 @@ TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
       EXPECT_EQ(sink.str().find("RACE ") != std::string::npos, store_address == 16);
     }
   }
+}
+
+// --- LDS accesses in flight at a barrier signal ---
+//
+// A barrier signal waits for no memory counter (CDNA5 ISA 5.6 and 15.3,
+// S_BARRIER_SIGNAL). A wave that signals with an LDS access in flight leaves
+// that access outside the barrier's ordering, so another wave that passes the
+// barrier and touches the bytes races with it. The report of that race names
+// the wave, the barrier it was signalling and the counters to wait for before
+// it. A wave that touches the bytes without having passed that barrier gets
+// the report without the line: the barrier is not what it relied on. Nothing
+// else is reported: with no conflicting access there is no race.
+
+/// Whether `text` contains `part`.
+bool contains(std::string_view text, std::string_view part) {
+  return text.find(part) != std::string_view::npos;
+}
+
+/// The RACE ... END_RACE blocks of `log`, each from its header to END_RACE.
+std::vector<std::string> race_reports(const std::string &log) {
+  std::vector<std::string> reports;
+  std::istringstream lines(log);
+  std::string line;
+  while (std::getline(lines, line)) {
+    if (!line.starts_with("RACE "))
+      continue;
+    std::string report = line + "\n";
+    while (std::getline(lines, line)) {
+      report += line + "\n";
+      if (line == "END_RACE")
+        break;
+    }
+    reports.push_back(std::move(report));
+  }
+  return reports;
+}
+
+/// The line of `report` that names a barrier, with its newline, or an empty
+/// string if the report names none.
+std::string barrier_line(const std::string &report) {
+  std::istringstream lines(report);
+  std::string line;
+  while (std::getline(lines, line))
+    if (line.find(" arrived at the barrier at PC ") != std::string::npos)
+      return line + "\n";
+  return {};
+}
+
+/// The line a report gets when `wave` signalled the barrier `instruction` at
+/// `barrier_pc` with the conflicting access, pending on `counters`, in flight.
+std::string expected_barrier_line(int wave, uint64_t barrier_pc, std::string_view counters,
+                                  std::string_view instruction = "s_barrier_signal -1") {
+  return std::format(
+      "  Wave {} arrived at the barrier at PC {:#x} ({}) with this access in flight, "
+      "so that barrier does not order it. Wait for {} before the barrier.\n",
+      wave, barrier_pc, instruction, counters);
+}
+
+/// The hexadecimal PC after `label` in `text`, or 0 if `text` has none.
+uint64_t pc_after(std::string_view text, std::string_view label) {
+  const size_t at = text.find(label);
+  if (at == std::string_view::npos)
+    return 0;
+  return std::stoull(std::string(text.substr(at + label.size())), nullptr, 16);
+}
+
+/// Drives the plugin's hooks on gfx1250 as execution does, with each barrier
+/// signal preceded by its s_barrier_signal instruction, so that the wave's
+/// trace holds the barrier.
+class BarrierRaceReportTest : public LdsBarrierCellRaceTest {
+protected:
+  /// The LDS dwords the waves use, away from kTile and kCell.
+  static constexpr uint32_t kSlot0 = 64;
+  static constexpr uint32_t kSlot1 = 96;
+
+  static BarrierRound named_round(uint32_t named_id) {
+    return {.kind = BarrierKind::Named,
+            .completion_bit = kNamedBarrierBit,
+            .named_id = named_id,
+            .generation = 0};
+  }
+
+  /// The inline constants that name a barrier (Table 21 of CDNA5 ISA 5.6.3):
+  /// -1 the workgroup barrier, -2 its trap barrier, -3 the cluster barrier, -4
+  /// its trap barrier, 1 the first named one.
+  static constexpr uint8_t kWorkgroupBarrierId = cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN;
+  static constexpr uint8_t kWorkgroupTrapBarrierId = cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN + 1;
+  static constexpr uint8_t kClusterBarrierId = cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN + 2;
+  static constexpr uint8_t kClusterTrapBarrierId = cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN + 3;
+  static constexpr uint8_t kNamedBarrier1Id = cdna5::OPR_SSRC_BARRIER_ID_POS_INT_MIN + 1;
+
+  /// Execute s_barrier_signal, or `opcode`, on the barrier `barrier_id` for
+  /// `round` in `wave`: the instruction enters the wave's trace, then its
+  /// signal is counted. Returns the signal's PC.
+  uint64_t barrier_signal(int wave, const BarrierRound &round = workgroup_round(0),
+                          uint16_t opcode = cdna5::kSBarrierSignalSop1,
+                          uint8_t barrier_id = kWorkgroupBarrierId) {
+    waves[wave]->pc += 16;
+    const std::array<uint32_t, 1> words = cdna5::build_sop1(opcode, {.ssrc0 = barrier_id});
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    EXPECT_NE(inst, nullptr);
+    if (!inst)
+      return 0;
+    fixture.plugin_group_->onAmdgpuBeforeExecuteInstruction(waves[wave]->pc, *inst, *waves[wave]);
+    fixture.plugin_group_->onAmdgpuBarrierSignaled(*waves[wave], round);
+    return waves[wave]->pc;
+  }
+
+  /// Both waves signal `round`, it completes, and both pass their wait.
+  /// Returns the PCs of wave 0's and wave 1's signals.
+  std::array<uint64_t, 2> pass_barrier(const BarrierRound &round = workgroup_round(0)) {
+    const std::array<uint64_t, 2> signals{barrier_signal(0, round), barrier_signal(1, round)};
+    complete(round, waves);
+    wait_passed(0, round);
+    wait_passed(1, round);
+    return signals;
+  }
+
+  /// Issue a DS write in `wave` and return its PC.
+  uint64_t ds_write_at(int wave, uint32_t address) {
+    EXPECT_FALSE(ds_write(wave, address));
+    return waves[wave]->pc;
+  }
+
+  /// The one race report in the log.
+  std::string the_race() const {
+    const std::vector<std::string> reports = race_reports(sink->str());
+    EXPECT_EQ(reports.size(), 1u) << sink->str();
+    return reports.empty() ? std::string() : reports.front();
+  }
+};
+
+// ----- The line -----
+
+// Wave 0 signals with its store in flight. Wave 1 passes the barrier and reads
+// the bytes: the race names wave 0, the barrier and DScnt.
+TEST_F(BarrierRaceReportTest, RaceNamesTheBarrierTheStoreCrossed) {
+  const uint64_t store = ds_write_at(0, kSlot0);
+  const uint64_t barrier = pass_barrier()[0];
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  const uint64_t load = waves[1]->pc;
+  const std::string report = the_race();
+  EXPECT_TRUE(contains(
+      report,
+      std::format(
+          "Race on LDS byte {} [workgroup (0, 0, 0), wave 1, lane 0]: read-after-write (RAW).\n"
+          "  Current access: read at PC {:#x}.\n"
+          "  Conflict: transfer from VGPRs into LDS at PC {:#x}, wave 0.\n"
+          "  Completion for wave 0 is not guaranteed; pending counters: dscnt.\n"
+          "  The detector observed no synchronization between waves 0 and 1 for this access.\n"
+          "  Wave 0 arrived at the barrier at PC {:#x} (s_barrier_signal -1) with this access in "
+          "flight, so that barrier does not order it. Wait for dscnt before the barrier.\n"
+          // The trace follows; its PC column is as wide as the widest PC in it.
+          "       PC ",
+          kSlot0, load, store, barrier)))
+      << report;
+}
+
+// With the wait before the signal the barrier orders the store.
+TEST_F(BarrierRaceReportTest, StoreWaitedBeforeTheSignalDoesNotRace) {
+  ds_write_at(0, kSlot0);
+  wait_dscnt(0);
+  pass_barrier();
+  EXPECT_FALSE(ds_read(1, kSlot0));
+  EXPECT_EQ(race_reports(sink->str()).size(), 0u) << sink->str();
+}
+
+// A load in flight at its wave's signal can observe a store another wave
+// issues after the barrier. The race names the loading wave's barrier.
+TEST_F(BarrierRaceReportTest, RaceNamesTheBarrierTheLoadCrossed) {
+  EXPECT_FALSE(ds_read(1, kSlot0));
+  const uint64_t barrier = pass_barrier()[1];
+  EXPECT_TRUE(ds_write(0, kSlot0));
+  const std::string report = the_race();
+  EXPECT_TRUE(contains(report, "write-after-read (WAR)")) << report;
+  EXPECT_EQ(barrier_line(report), expected_barrier_line(/*wave=*/1, barrier, "dscnt")) << report;
+}
+
+// A wait between the signal and the barrier wait completes the store for its
+// own wave. The barrier still did not order it, and the line says so beside
+// the report that the wait requirements are satisfied.
+TEST_F(BarrierRaceReportTest, RaceNamesTheBarrierAfterALateWait) {
+  const BarrierRound round = workgroup_round(0);
+  ds_write_at(0, kSlot0);
+  const uint64_t barrier = barrier_signal(0, round);
+  wait_dscnt(0);
+  barrier_signal(1, round);
+  complete(round, waves);
+  wait_passed(0, round);
+  wait_passed(1, round);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  const std::string report = the_race();
+  EXPECT_TRUE(contains(report, "  Wait requirements satisfied for this operation in wave 0.\n"))
+      << report;
+  EXPECT_EQ(barrier_line(report), expected_barrier_line(/*wave=*/0, barrier, "dscnt")) << report;
+}
+
+// A store still in flight at its wave's second signal crossed that barrier
+// too. A reader that has passed both is told about the later one, which it
+// passed last.
+TEST_F(BarrierRaceReportTest, RaceNamesTheMostRecentBarrierTheReaderPassed) {
+  ds_write_at(0, kSlot0);
+  const uint64_t first = pass_barrier(workgroup_round(0))[0];
+  const uint64_t second = pass_barrier(workgroup_round(1))[0];
+  // Each signal of a wave is issued 16 bytes after its previous instruction.
+  ASSERT_EQ(second, first + 16);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()), expected_barrier_line(/*wave=*/0, second, "dscnt"));
+}
+
+// Wave 0 runs ahead and signals the second barrier, still with the store in
+// flight. Wave 1 has passed only the first, so that is the barrier it relied
+// on and the one the report names.
+TEST_F(BarrierRaceReportTest, RaceNamesTheFirstBarrierToAReaderThatPassedOnlyIt) {
+  ds_write_at(0, kSlot0);
+  const uint64_t first = pass_barrier(workgroup_round(0))[0];
+  const uint64_t second = barrier_signal(0, workgroup_round(1));
+  // Each signal of a wave is issued 16 bytes after its previous instruction.
+  ASSERT_EQ(second, first + 16);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()), expected_barrier_line(/*wave=*/0, first, "dscnt"));
+}
+
+// The same when wave 0 waited for the store before its second signal, which
+// then released it: wave 1 has not passed that barrier, and the first one did
+// not order the store.
+TEST_F(BarrierRaceReportTest, RaceNamesTheFirstBarrierAfterALaterSignalReleasedTheStore) {
+  ds_write_at(0, kSlot0);
+  const uint64_t first = pass_barrier(workgroup_round(0))[0];
+  wait_dscnt(0);
+  barrier_signal(0, workgroup_round(1));
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()), expected_barrier_line(/*wave=*/0, first, "dscnt"));
+}
+
+// Wave 0 signalled with the store in flight, but wave 1 reads without having
+// passed that barrier, or the next. The missing synchronization is wave 1's.
+TEST_F(BarrierRaceReportTest, ReaderThatPassedNoBarrierNamesNoBarrier) {
+  ds_write_at(0, kSlot0);
+  barrier_signal(0, workgroup_round(0));
+  wait_dscnt(0);
+  barrier_signal(0, workgroup_round(1));
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()), "");
+}
+
+// ----- Which accesses -----
+
+// A FLAT load that resolves to LDS completes there on DScnt (CDNA5 ISA
+// 5.7.1.3). Its LOADcnt is not what the barrier needed.
+TEST_F(BarrierRaceReportTest, RaceOnAFlatLoadFromLdsNamesDscnt) {
+  flat_load(0, /*vgpr=*/2, FlatRoute::Lds);
+  const uint64_t barrier = pass_barrier()[0];
+  EXPECT_TRUE(ds_write(1, kFlatLdsAddress));
+  EXPECT_EQ(barrier_line(the_race()), expected_barrier_line(/*wave=*/0, barrier, "dscnt"));
+}
+
+// Async copies and tensor DMA transfers are recorded like DS accesses. A
+// pipelined kernel leaves one in flight across a barrier on purpose, which is
+// not a race; one that another wave touches before it is ordered is, and the
+// report names the barrier and the transfer's own counter.
+TEST_F(BarrierRaceReportTest, RaceOnAnAsyncLoadNamesAsynccnt) {
+  EXPECT_FALSE(async_load(0, kTile));
+  const uint64_t barrier = pass_barrier()[0];
+  EXPECT_TRUE(ds_read(1, kTile));
+  EXPECT_EQ(barrier_line(the_race()), expected_barrier_line(/*wave=*/0, barrier, "asynccnt"));
+}
+
+TEST_F(BarrierRaceReportTest, RaceOnAnAsyncStoreSourceNamesAsynccnt) {
+  EXPECT_FALSE(TensorDmaRaceTest::async_store(0, kTile));
+  const uint64_t barrier = pass_barrier()[0];
+  EXPECT_TRUE(ds_write(1, kTile));
+  EXPECT_EQ(barrier_line(the_race()), expected_barrier_line(/*wave=*/0, barrier, "asynccnt"));
+}
+
+TEST_F(BarrierRaceReportTest, RaceOnATensorLoadNamesTensorcnt) {
+  EXPECT_FALSE(tensor_load(0, {{.address = kTile, .bytes = 16}}));
+  const uint64_t barrier = pass_barrier()[0];
+  EXPECT_TRUE(ds_read(1, kTile));
+  EXPECT_EQ(barrier_line(the_race()), expected_barrier_line(/*wave=*/0, barrier, "tensorcnt"));
+}
+
+TEST_F(BarrierRaceReportTest, RaceOnATensorStoreSourceNamesTensorcnt) {
+  EXPECT_FALSE(tensor_store(0, {{.address = kTile, .bytes = 16}}));
+  const uint64_t barrier = pass_barrier()[0];
+  EXPECT_TRUE(ds_write(1, kTile));
+  EXPECT_EQ(barrier_line(the_race()), expected_barrier_line(/*wave=*/0, barrier, "tensorcnt"));
+}
+
+// DScnt holds kCapacity tokens (see Gfx1250CounterCapacityRaceTest), so
+// issuing one more DS store proves the oldest completed. It was not in flight
+// at the signal, so the barrier orders it; a younger one was, and races.
+TEST_F(BarrierRaceReportTest, CapacityCompletedStoreIsOrderedAndAYoungerOneNamesTheBarrier) {
+  for (int index = 0; index < kCapacity + 1; ++index)
+    ds_write_at(0, kSlot0 + 4 * static_cast<uint32_t>(index));
+  const uint64_t barrier = pass_barrier()[0];
+  EXPECT_FALSE(ds_read(1, kSlot0));
+  EXPECT_TRUE(ds_read(1, kSlot0 + 4));
+  EXPECT_EQ(barrier_line(the_race()), expected_barrier_line(/*wave=*/0, barrier, "dscnt"));
+}
+
+// ----- Which signals -----
+
+// Both waves are members of named barrier 1 and pass it.
+TEST_F(BarrierRaceReportTest, RaceAfterANamedBarrierNamesIt) {
+  const BarrierRound round = named_round(1);
+  ds_write_at(0, kSlot0);
+  const uint64_t barrier = barrier_signal(0, round, cdna5::kSBarrierSignalSop1, kNamedBarrier1Id);
+  barrier_signal(1, round, cdna5::kSBarrierSignalSop1, kNamedBarrier1Id);
+  complete(round, waves);
+  wait_passed(0, round);
+  wait_passed(1, round);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()),
+            expected_barrier_line(/*wave=*/0, barrier, "dscnt", "s_barrier_signal 1"));
+}
+
+// Wave 1 is not a member of the named barrier wave 0 signals and has not
+// synchronized with wave 0 since, so it is not ordered after that signal.
+TEST_F(BarrierRaceReportTest, RaceWithAWaveOutsideANamedBarrierNamesNoBarrier) {
+  const BarrierRound round = named_round(1);
+  std::array<Wavefront *, 1> members{waves[0]};
+  ds_write_at(0, kSlot0);
+  barrier_signal(0, round, cdna5::kSBarrierSignalSop1, kNamedBarrier1Id);
+  complete(round, members);
+  wait_passed(0, round);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()), "");
+}
+
+// A cluster barrier counts one signal per workgroup: wave 0's. The round
+// releases every wave of the workgroup, and wave 1 passes its wait.
+TEST_F(BarrierRaceReportTest, RaceAfterAClusterBarrierNamesIt) {
+  const BarrierRound round{.kind = BarrierKind::Cluster, .completion_bit = kClusterBarrierBit};
+  ds_write_at(0, kSlot0);
+  const uint64_t barrier = barrier_signal(0, round, cdna5::kSBarrierSignalSop1, kClusterBarrierId);
+  complete(round, waves);
+  wait_passed(0, round);
+  wait_passed(1, round);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()),
+            expected_barrier_line(/*wave=*/0, barrier, "dscnt", "s_barrier_signal -3"));
+}
+
+// A wave that has not waited on the cluster barrier has not passed it.
+TEST_F(BarrierRaceReportTest, RaceBeforeTheClusterBarrierWaitNamesNoBarrier) {
+  const BarrierRound round{.kind = BarrierKind::Cluster, .completion_bit = kClusterBarrierBit};
+  ds_write_at(0, kSlot0);
+  barrier_signal(0, round, cdna5::kSBarrierSignalSop1, kClusterBarrierId);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()), "");
+}
+
+// s_barrier_signal_isfirst signals the barrier like s_barrier_signal.
+TEST_F(BarrierRaceReportTest, RaceAfterAnIsfirstSignalNamesIt) {
+  const BarrierRound round = workgroup_round(0);
+  ds_write_at(0, kSlot0);
+  const uint64_t barrier = barrier_signal(0, round, cdna5::kSBarrierSignalIsfirstSop1);
+  barrier_signal(1, round);
+  complete(round, waves);
+  wait_passed(0, round);
+  wait_passed(1, round);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()),
+            expected_barrier_line(/*wave=*/0, barrier, "dscnt", "s_barrier_signal_isfirst -1"));
+}
+
+// A signal reported before the wave has issued any instruction has no barrier
+// instruction behind it. It is counted like any other: the barrier orders wave
+// 1's completed store for wave 0.
+TEST_F(BarrierRaceReportTest, SignalWithAnEmptyTraceIsCounted) {
+  const BarrierRound round = workgroup_round(0);
+  ds_write_at(1, kSlot0);
+  wait_dscnt(1);
+  signal(0, round);
+  barrier_signal(1, round);
+  complete(round, waves);
+  wait_passed(0, round);
+  wait_passed(1, round);
+  EXPECT_FALSE(ds_read(0, kSlot0));
+  EXPECT_EQ(race_reports(sink->str()).size(), 0u) << sink->str();
+}
+
+// The trap barriers are signalled by the trap handler, not by the kernel.
+// Wave 1 passes both, and the report names neither.
+TEST_F(BarrierRaceReportTest, RaceAfterATrapBarrierSignalNamesNoBarrier) {
+  ds_write_at(0, kSlot0);
+  const std::pair<BarrierRound, uint8_t> traps[] = {
+      {{.kind = BarrierKind::Workgroup, .completion_bit = kWorkgroupTrapBarrierBit},
+       kWorkgroupTrapBarrierId},
+      {{.kind = BarrierKind::Cluster, .completion_bit = kClusterTrapBarrierBit},
+       kClusterTrapBarrierId}};
+  for (const auto &[round, barrier_id] : traps) {
+    barrier_signal(0, round, cdna5::kSBarrierSignalSop1, barrier_id);
+    barrier_signal(1, round, cdna5::kSBarrierSignalSop1, barrier_id);
+    complete(round, waves);
+    wait_passed(0, round);
+    wait_passed(1, round);
+  }
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()), "");
+}
+
+// The simulator counts a signal while the wave's newest instruction is the one
+// that signals the barrier. A signal reported with any other instruction
+// newest has no barrier to name: a memory instruction, a wait, a barrier wait
+// and a barrier-cell arrive, the last three of which the trace always keeps.
+// Wave 1 passes every one of the barriers. The plugin warns about the first
+// such signal, and only the first.
+TEST_F(BarrierRaceReportTest, SignalWithoutABarrierInstructionNamesNoBarrier) {
+  testing::internal::CaptureStderr();
+  uint64_t generation = 0;
+  // Wave 0 signals the next round with whatever it issued last; wave 1
+  // signals too, and both pass.
+  const auto pass_unnamed_barrier = [&] {
+    const BarrierRound round = workgroup_round(generation++);
+    signal(0, round);
+    barrier_signal(1, round);
+    complete(round, waves);
+    wait_passed(0, round);
+    wait_passed(1, round);
+  };
+  const uint64_t store = ds_write_at(0, kSlot0);
+  pass_unnamed_barrier();
+  // s_wait_loadcnt 0, which leaves the DS write in flight.
+  ASSERT_NO_FATAL_FAILURE(issue_word(0, 0xbfc00000u));
+  pass_unnamed_barrier();
+  // s_barrier_wait -1.
+  ASSERT_NO_FATAL_FAILURE(
+      issue_word(0, cdna5::build_sopp(cdna5::kSBarrierWaitSopp, {.simm16 = 0xffff})[0]));
+  pass_unnamed_barrier();
+  // An arrive with no arrival, so the write is not handed off.
+  EXPECT_FALSE(issue_arrive(0, Source::AsyncDsAtomic, kCell));
+  pass_unnamed_barrier();
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  const std::string logged = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(barrier_line(the_race()), "");
+  const std::string warning = std::format(
+      "race detector: wave 0 signalled a barrier at PC {:#x} from an instruction that does not "
+      "signal one; race reports will not name barriers signalled this way",
+      store);
+  const size_t at = logged.find(warning);
+  EXPECT_TRUE(at != std::string::npos) << logged;
+  EXPECT_EQ(logged.find("race detector: wave", at == std::string::npos ? 0 : at + 1),
+            std::string::npos)
+      << logged;
+}
+
+// A signal from a signalling instruction is not warned about.
+TEST_F(BarrierRaceReportTest, SignalFromABarrierInstructionIsNotWarnedAbout) {
+  testing::internal::CaptureStderr();
+  ds_write_at(0, kSlot0);
+  pass_barrier();
+  const std::string logged = testing::internal::GetCapturedStderr();
+  EXPECT_FALSE(contains(logged, "race detector: wave")) << logged;
+}
+
+// ----- No line, and no report -----
+
+// With no barrier between the two accesses the report is what it always was.
+TEST_F(BarrierRaceReportTest, RaceWithoutABarrierNamesNoBarrier) {
+  ds_write_at(0, kSlot0);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()), "");
+}
+
+// The store was complete at wave 0's signal, so the barrier ordered it. Wave 1
+// reads before passing its own wait, which is a different mistake.
+TEST_F(BarrierRaceReportTest, ReaderBeforeItsOwnWaitNamesNoBarrier) {
+  const BarrierRound round = workgroup_round(0);
+  ds_write_at(0, kSlot0);
+  wait_dscnt(0);
+  barrier_signal(0, round);
+  barrier_signal(1, round);
+  complete(round, waves);
+  EXPECT_TRUE(ds_read(1, kSlot0));
+  EXPECT_EQ(barrier_line(the_race()), "");
+}
+
+// Each wave writes and reads back only its own slot, with no wait before the
+// barrier. No access conflicts, so there is no race, and nothing is reported.
+TEST_F(BarrierRaceReportTest, OwnSlotReadBackReportsNothing) {
+  ds_write_at(0, kSlot0);
+  ds_write_at(1, kSlot1);
+  pass_barrier();
+  EXPECT_FALSE(ds_read(0, kSlot0));
+  EXPECT_FALSE(ds_read(1, kSlot1));
+  EXPECT_EQ(sink->str(), "");
+  EXPECT_EQ(plugin->getSummary(), "\n========================================\n"
+                                  " ROCJITSU RACE DETECTION SUMMARY\n"
+                                  "========================================\n"
+                                  "  No races detected.\n"
+                                  "========================================\n");
+}
+
+// A pipelined transfer: in flight at one barrier, waited for, and ordered by
+// the next. Wave 1 reads it after that barrier, and nothing is reported.
+TEST_F(BarrierRaceReportTest, TransferOrderedByTheNextBarrierReportsNothing) {
+  EXPECT_FALSE(async_load(0, kTile));
+  pass_barrier(workgroup_round(0));
+  wait_asynccnt(0, 0);
+  pass_barrier(workgroup_round(1));
+  EXPECT_FALSE(ds_read(1, kTile));
+  EXPECT_EQ(sink->str(), "");
+}
+
+// ----- Executed kernels -----
+//
+// These run a two-wave kernel through the simulator, so the barrier hooks,
+// their timing and the waves' traces are the simulator's own.
+
+/// Which waves omit the wait for their LDS write before the barrier.
+enum class MissingWait { None, Wave0, Wave1, Both };
+/// Which slot a wave reads back after the barrier.
+enum class ReadSlot { Own, Neighbour };
+
+/// One race report from an executed kernel.
+struct ExecutedRace {
+  int conflict_wave = -1;
+  uint64_t conflict_pc = 0;
+  /// The barrier line, or an empty string.
+  std::string barrier;
+  uint64_t barrier_pc = 0;
+};
+
+std::vector<ExecutedRace> executed_races(const std::string &log) {
+  std::vector<ExecutedRace> races;
+  for (const std::string &report : race_reports(log)) {
+    ExecutedRace race;
+    const size_t conflict = report.find("  Conflict: ");
+    EXPECT_TRUE(conflict != std::string::npos) << report;
+    if (conflict == std::string::npos)
+      continue;
+    const std::string_view line =
+        std::string_view(report).substr(conflict, report.find('\n', conflict) - conflict);
+    race.conflict_pc = pc_after(line, " at PC 0x");
+    race.conflict_wave = std::stoi(std::string(line.substr(line.rfind("wave ") + 5)));
+    race.barrier = barrier_line(report);
+    race.barrier_pc = pc_after(race.barrier, " at the barrier at PC 0x");
+    races.push_back(std::move(race));
+  }
+  return races;
+}
+
+/// Run a two-wave CDNA4 kernel in which each wave writes its own LDS slot,
+/// reaches its own s_barrier, and reads a slot back: its own, or the other
+/// wave's. `missing` says which waves omit s_waitcnt lgkmcnt(0) before the
+/// barrier. The waves' barriers are different instructions: wave 0's is 12
+/// bytes after its write, wave 1's 16. Returns the plugin's output, followed by
+/// its summary.
+std::string run_legacy_barrier_kernel(MissingWait missing, ReadSlot read) {
+  PluginFixture f;
+  EXPECT_NO_FATAL_FAILURE(f.initialize());
+  PluginSinkConfig config;
+  auto &sink = config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  const RaceDetectorPlugin *reporter = plugin.get();
+  EXPECT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  constexpr uint16_t kVgprBase = 256;
+  constexpr uint16_t kInline2 = 130;
+  constexpr uint16_t kInline63 = 191;
+  constexpr uint8_t kInline64 = 192;
+  const bool wave0_waits = missing != MissingWait::Wave0 && missing != MissingWait::Both;
+  const bool wave1_waits = missing != MissingWait::Wave1 && missing != MissingWait::Both;
+  const bool own = read == ReadSlot::Own;
+  const auto first_id =
+      cdna4::build_vop1(cdna4::kVReadfirstlaneB32Vop1, {.src0 = kVgprBase + 0, .vdst = 4});
+  // v1 = (work-item ID & 63) * 4: the lane's dword in a wave's slot. Wave 0's
+  // slot starts at byte 0 and wave 1's at byte 256, the DS offset below.
+  const auto lane =
+      cdna4::build_vop2(cdna4::kVAndB32Vop2, {.src0 = kInline63, .vsrc1 = 0, .vdst = 1});
+  const auto address =
+      cdna4::build_vop2(cdna4::kVLshlrevB32Vop2, {.src0 = kInline2, .vsrc1 = 1, .vdst = 1});
+  const auto is_wave_0 = cdna4::build_sopc(cdna4::kSCmpLtU32Sopc, {.ssrc0 = 4, .ssrc1 = kInline64});
+  const auto to_wave_0 = cdna4::build_sopp(cdna4::kSCbranchScc1Sopp, {.simm16 = 8});
+  const auto to_end = cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 6});
+  // offset1 is the high byte of the 16-bit offset, so it adds 256.
+  const auto write0 = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.addr = 1, .data0 = 0});
+  const auto write1 = cdna4::build_ds(cdna4::kDsWriteB32Ds, {.offset1 = 1, .addr = 1, .data0 = 0});
+  const auto read0 = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 1, .vdst = 2});
+  const auto read1 = cdna4::build_ds(cdna4::kDsReadB32Ds, {.offset1 = 1, .addr = 1, .vdst = 2});
+  const uint32_t lgkm_wait = legacy_wait_word(rocjitsu::IsaFamily::Cdna4, 63, 0);
+  const uint32_t code[] = {
+      first_id[0],
+      lane[0],
+      address[0],
+      is_wave_0[0],
+      to_wave_0[0], // Waves with work-item IDs below 64 take the second path.
+      // Wave 1.
+      write1[0],
+      write1[1],
+      wave1_waits ? lgkm_wait : S_NOP,
+      S_NOP,
+      S_BARRIER,
+      (own ? read1 : read0)[0],
+      (own ? read1 : read0)[1],
+      to_end[0],
+      // Wave 0.
+      write0[0],
+      write0[1],
+      wave0_waits ? lgkm_wait : S_NOP,
+      S_BARRIER,
+      (own ? read0 : read1)[0],
+      (own ? read0 : read1)[1],
+      // Both.
+      lgkm_wait,
+      S_ENDPGM,
+  };
+  const uint64_t kernel = f.write_kernel(0x1000, code, std::size(code), /*sgprs=*/12,
+                                         /*group_segment_fixed_size=*/512);
+  test::AqlQueue queue(f.mem, f.cp());
+  queue.dispatch(kernel, /*grid=*/128, /*workgroup=*/128);
+  f.run_until_idle();
+  // The plugin writes its summary when it is destroyed; append it here.
+  return sink.str() + reporter->getSummary();
+}
+
+/// The distance in bytes from a wave's write to its own barrier in
+/// run_legacy_barrier_kernel().
+constexpr uint64_t kLegacyWave0BarrierDistance = 12;
+constexpr uint64_t kLegacyWave1BarrierDistance = 16;
+
+/// `race` is with `writer`'s write, and names the s_barrier that wave reached
+/// `distance` bytes after it.
+void expect_legacy_barrier_named(const ExecutedRace &race, int writer, uint64_t distance) {
+  SCOPED_TRACE(race.barrier);
+  EXPECT_EQ(race.conflict_wave, writer);
+  EXPECT_EQ(race.barrier,
+            expected_barrier_line(writer, race.conflict_pc + distance, "lgkmcnt", "s_barrier"));
+}
+
+TEST(RaceDetectorPluginTest, LegacyBarrierAfterWaitsOrdersTheNeighboursWrite) {
+  const std::string report = run_legacy_barrier_kernel(MissingWait::None, ReadSlot::Neighbour);
+  EXPECT_EQ(race_reports(report).size(), 0u) << report;
+  EXPECT_TRUE(contains(report, "  No races detected.\n")) << report;
+}
+
+// s_barrier is reported when the round resolves, for every member. A member
+// that reached the barrier earlier has issued nothing since, so the race names
+// the writer's own s_barrier, not the instruction of the wave that arrived
+// last.
+TEST(RaceDetectorPluginTest, LegacyBarrierRaceNamesWave0sOwnBarrier) {
+  const std::string report = run_legacy_barrier_kernel(MissingWait::Wave0, ReadSlot::Neighbour);
+  const std::vector<ExecutedRace> races = executed_races(report);
+  ASSERT_EQ(races.size(), 1u) << report;
+  expect_legacy_barrier_named(races[0], /*writer=*/0, kLegacyWave0BarrierDistance);
+}
+
+TEST(RaceDetectorPluginTest, LegacyBarrierRaceNamesWave1sOwnBarrier) {
+  const std::string report = run_legacy_barrier_kernel(MissingWait::Wave1, ReadSlot::Neighbour);
+  const std::vector<ExecutedRace> races = executed_races(report);
+  ASSERT_EQ(races.size(), 1u) << report;
+  expect_legacy_barrier_named(races[0], /*writer=*/1, kLegacyWave1BarrierDistance);
+}
+
+TEST(RaceDetectorPluginTest, LegacyBarrierRacesNameEachWritersOwnBarrier) {
+  const std::string report = run_legacy_barrier_kernel(MissingWait::Both, ReadSlot::Neighbour);
+  std::vector<ExecutedRace> races = executed_races(report);
+  ASSERT_EQ(races.size(), 2u) << report;
+  std::ranges::sort(races, {}, &ExecutedRace::conflict_wave);
+  expect_legacy_barrier_named(races[0], /*writer=*/0, kLegacyWave0BarrierDistance);
+  expect_legacy_barrier_named(races[1], /*writer=*/1, kLegacyWave1BarrierDistance);
+}
+
+// With each wave reading back only its own slot, the missing waits conflict
+// with nothing, so there is no race and nothing is reported.
+TEST(RaceDetectorPluginTest, LegacyBarrierOwnSlotReadBackReportsNothing) {
+  const std::string report = run_legacy_barrier_kernel(MissingWait::Both, ReadSlot::Own);
+  EXPECT_EQ(race_reports(report).size(), 0u) << report;
+  EXPECT_TRUE(contains(report, "  No races detected.\n")) << report;
+}
+
+/// Where the s_wait_dscnt 0 that follows the store goes.
+enum class DscntWait { BeforeSignal, BetweenSignalAndWait, AfterBarrier };
+/// The barrier the kernel signals: the workgroup barrier, or named barrier 1,
+/// which the kernel has not allocated, so the signal is ignored.
+enum class SignalledBarrier { Workgroup, UnallocatedNamed };
+
+/// Run a two-wave gfx1250 kernel in which each wave stores to its own LDS
+/// slot, passes s_barrier_signal and s_barrier_wait, and loads a slot back:
+/// its own, or the other wave's. The signal is 12 bytes after the store.
+/// Returns the plugin's output, followed by its summary.
+std::string run_split_barrier_kernel(DscntWait wait, ReadSlot read,
+                                     SignalledBarrier barrier = SignalledBarrier::Workgroup) {
+  PluginFixture f;
+  EXPECT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/10, /*arch=*/"cdna5", /*wavefront_size=*/32));
+  PluginSinkConfig config;
+  auto &sink = config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(config));
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  const RaceDetectorPlugin *reporter = plugin.get();
+  EXPECT_TRUE(f.plugin_group_->add(std::move(plugin)));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  constexpr uint16_t kInline2 = 130;
+  constexpr uint16_t kInline32 = 160;
+  // Barrier -1, the workgroup barrier (CDNA5 ISA 5.6.3, Table 21).
+  constexpr uint16_t kWorkgroupBarrier = 0xffff;
+  const bool ignored = barrier == SignalledBarrier::UnallocatedNamed;
+  // Each work-item's own dword is its ID times four. The other wave's
+  // work-item in the same lane differs in bit 5 of the ID, a wave being 32.
+  const auto own_address =
+      cdna5::build_vop2(cdna5::kVLshlrevB32Vop2, {.src0 = kInline2, .vsrc1 = 0, .vdst = 1});
+  const auto neighbour_id =
+      cdna5::build_vop2(cdna5::kVXorB32Vop2, {.src0 = kInline32, .vsrc1 = 0, .vdst = 3});
+  const auto neighbour_address =
+      cdna5::build_vop2(cdna5::kVLshlrevB32Vop2, {.src0 = kInline2, .vsrc1 = 3, .vdst = 3});
+  const auto store = cdna5::build_vds(cdna5::kDsStoreB32Vds, {.addr = 1, .data0 = 0});
+  const auto load =
+      cdna5::build_vds(cdna5::kDsLoadB32Vds,
+                       {.addr = static_cast<uint8_t>(read == ReadSlot::Own ? 1 : 3), .vdst = 2});
+  const uint32_t wait_dscnt = cdna5::build_sopp(cdna5::kSWaitDscntSopp, {.simm16 = 0})[0];
+  const uint32_t nop = cdna5::build_sopp(cdna5::kSNopSopp, {})[0];
+  // Inline constants 193 and 129 are -1, the workgroup barrier, and 1.
+  const uint32_t signal = cdna5::build_sop1(
+      cdna5::kSBarrierSignalSop1,
+      {.ssrc0 = static_cast<uint8_t>(ignored ? cdna5::OPR_SSRC_BARRIER_ID_POS_INT_MIN + 1
+                                             : cdna5::OPR_SSRC_BARRIER_ID_NEG_INT_MIN)})[0];
+  // A wave that has joined no named barrier does not wait on one, so the
+  // ignored signal is followed by no wait.
+  const uint32_t barrier_wait =
+      ignored ? nop : cdna5::build_sopp(cdna5::kSBarrierWaitSopp, {.simm16 = kWorkgroupBarrier})[0];
+  const uint32_t code[] = {
+      own_address[0],
+      neighbour_id[0],
+      neighbour_address[0],
+      store[0],
+      store[1],
+      wait == DscntWait::BeforeSignal ? wait_dscnt : nop,
+      signal,
+      wait == DscntWait::BetweenSignalAndWait ? wait_dscnt : nop,
+      barrier_wait,
+      load[0],
+      load[1],
+      wait_dscnt,
+      cdna5::build_sopp(cdna5::kSEndpgmSopp, {})[0],
+  };
+  const uint64_t kernel = f.write_kernel(0x1000, code, std::size(code), /*sgprs=*/12,
+                                         /*group_segment_fixed_size=*/256);
+  test::AqlQueue queue(f.mem, f.cp());
+  queue.dispatch(kernel, /*grid=*/64, /*workgroup=*/64);
+  f.run_until_idle();
+  // The plugin writes its summary when it is destroyed; append it here.
+  return sink.str() + reporter->getSummary();
+}
+
+TEST(RaceDetectorPluginTest, SplitBarrierSignalAfterDscntWaitOrdersTheNeighboursStore) {
+  const std::string report = run_split_barrier_kernel(DscntWait::BeforeSignal, ReadSlot::Neighbour);
+  EXPECT_EQ(race_reports(report).size(), 0u) << report;
+  EXPECT_TRUE(contains(report, "  No races detected.\n")) << report;
+}
+
+// Both waves run the same instructions, so the two races are one report. A
+// wait between the signal and s_barrier_wait is too late for the round: the
+// store was in flight at the signal either way.
+TEST(RaceDetectorPluginTest, SplitBarrierRaceNamesTheSignalTheStoreCrossed) {
+  for (const DscntWait wait : {DscntWait::BetweenSignalAndWait, DscntWait::AfterBarrier}) {
+    SCOPED_TRACE(static_cast<int>(wait));
+    const std::string report = run_split_barrier_kernel(wait, ReadSlot::Neighbour);
+    const std::vector<ExecutedRace> races = executed_races(report);
+    ASSERT_EQ(races.size(), 1u) << report;
+    // Wave 0 runs first and reads wave 1's slot.
+    EXPECT_EQ(races[0].conflict_wave, 1) << report;
+    // The signal is the fourth word after the store's first.
+    EXPECT_EQ(races[0].barrier,
+              expected_barrier_line(/*wave=*/1, races[0].conflict_pc + 12, "dscnt"))
+        << report;
+  }
+}
+
+// A signal the hardware ignores, here of a named barrier the kernel did not
+// allocate (CDNA5 ISA 15.3, S_BARRIER_SIGNAL), is never counted. The waves are
+// not synchronized at all, so they race, and the report names no barrier.
+TEST(RaceDetectorPluginTest, SplitBarrierIgnoredSignalNamesNoBarrier) {
+  const std::string report = run_split_barrier_kernel(DscntWait::AfterBarrier, ReadSlot::Neighbour,
+                                                      SignalledBarrier::UnallocatedNamed);
+  const std::vector<ExecutedRace> races = executed_races(report);
+  ASSERT_EQ(races.size(), 1u) << report;
+  EXPECT_EQ(races[0].barrier, "");
+}
+
+TEST(RaceDetectorPluginTest, SplitBarrierOwnSlotReadBackReportsNothing) {
+  const std::string report = run_split_barrier_kernel(DscntWait::AfterBarrier, ReadSlot::Own);
+  EXPECT_EQ(race_reports(report).size(), 0u) << report;
+  EXPECT_TRUE(contains(report, "  No races detected.\n")) << report;
 }
 
 } // namespace

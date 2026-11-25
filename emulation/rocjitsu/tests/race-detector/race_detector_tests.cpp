@@ -4394,3 +4394,715 @@ TEST(RaceDetector, BarrierCell_SingleWaveWorkgroup) {
   EXPECT_EQ(b.ldsWriteEventCount(), 0u);
   EXPECT_EQ(b.ldsReadEventCount(), 0u);
 }
+
+// ===== LDS accesses in flight at a barrier signal =====
+//
+// A barrier signal waits for no memory counter (CDNA5 ISA 5.6 and 15.3,
+// S_BARRIER_SIGNAL), and an LDS access is complete only once its wave's
+// counter says so (CDNA5 ISA 5.7.1.4). A wave that signals with an LDS access
+// in flight has told the other waves to proceed while that access may not have
+// reached LDS. The signal does not release the access, so another wave that
+// touches those bytes races with it. The detector records, on each access in
+// flight at a signal, the barrier its wave was signalling, so that the report
+// of such a race can name the barrier the wait belongs before. A race names
+// the barrier when the accessing wave is ordered after that signal: it passed
+// the barrier, or it synchronized with a wave that did. A wait before the
+// signal would then have ordered the access for it. Recording reports nothing
+// and orders nothing.
+
+namespace {
+
+/// The PC of an access to the PC of the barrier it crossed in flight.
+using Crossed = std::map<uint64_t, uint64_t>;
+
+/// PCs for barrier instructions, away from the builder's event PCs.
+constexpr uint64_t kBarrierPc = 0x1000;
+constexpr uint64_t kLaterBarrierPc = 0x2000;
+constexpr uint64_t kLastBarrierPc = 0x3000;
+
+/// A DS write of the dword at `addr`. Returns its PC.
+uint64_t dsWriteAt(RaceTestBuilder &b, int wave, int addr = kX) {
+  const uint64_t pc = b.nextPc();
+  dsWrite(b, wave, addr);
+  return pc;
+}
+
+/// `wave` signals round `generation` of the workgroup barrier from the barrier
+/// instruction at `barrierPc`. The round does not complete.
+void signalAt(RaceTestBuilder &b, int wave, uint64_t barrierPc, uint64_t generation = 0) {
+  b.signalAt(wave, RaceTestBuilder::workgroupRound(generation), barrierPc);
+}
+
+/// The PC of the barrier the first reported race names, if it names one.
+std::optional<uint64_t> crossedBarrierPc(const RaceTestBuilder &b) {
+  if (b.violations().empty() || !b.violations().front().crossedBarrier)
+    return std::nullopt;
+  return b.violations().front().crossedBarrier->pc();
+}
+
+/// A workgroup with the gfx1250 counter capacities.
+RaceTestBuilder gfx1250Builder(int numWaves = 2) {
+  return RaceTestBuilder(numWaves, /*vgprs=*/8, /*sgprs=*/8, kWave32, Dim3d(0),
+                         counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5));
+}
+
+} // namespace
+
+// ----- What is in flight at a signal -----
+
+TEST(RaceDetector, BarrierInFlight_DsWriteWithoutWait) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t write = dsWriteAt(b, 0);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{write, kBarrierPc}}));
+}
+
+TEST(RaceDetector, BarrierInFlight_DsWriteWaited) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  b.waitDscnt(0, 0);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), Crossed{});
+}
+
+// A load in flight at a barrier can observe a write another wave issues after
+// the barrier.
+TEST(RaceDetector, BarrierInFlight_DsReadWithoutWait) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t read = b.nextPc();
+  dsRead(b, 0, /*vgprDst=*/1);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{read, kBarrierPc}}));
+}
+
+TEST(RaceDetector, BarrierInFlight_DsReadWaited) {
+  RaceTestBuilder b = cellBuilder();
+  dsRead(b, 0, /*vgprDst=*/1);
+  b.waitDscnt(0, 0);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), Crossed{});
+}
+
+TEST(RaceDetector, BarrierInFlight_DsAtomic) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t atomic = b.nextPc();
+  b.ldsAtomic(0, /*lane=*/0, kX, /*bytes=*/4);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{atomic, kBarrierPc}}));
+}
+
+// The source operand of an SRC2 atomic shares its event's lifetime.
+TEST(RaceDetector, BarrierInFlight_Src2SourceBelongsToItsEvent) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t atomic = b.nextPc();
+  b.ldsSrc2Atomic(0, /*lane=*/0, kX, /*sourceAddr=*/kY, /*bytes=*/4);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{atomic, kBarrierPc}}));
+}
+
+TEST(RaceDetector, BarrierInFlight_EveryInFlightAccessIsRecorded) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t first = dsWriteAt(b, 0, kX);
+  const uint64_t second = b.nextPc();
+  dsRead(b, 0, /*vgprDst=*/1, kY);
+  const uint64_t third = dsWriteAt(b, 0, kX + 8);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0),
+            (Crossed{{first, kBarrierPc}, {second, kBarrierPc}, {third, kBarrierPc}}));
+}
+
+// DS instructions complete in issue order (CDNA5 ISA 5.7.1.4), so a wait that
+// leaves one outstanding completed the older.
+TEST(RaceDetector, BarrierInFlight_PartialWaitLeavesTheYounger) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0, kX);
+  const uint64_t younger = dsWriteAt(b, 0, kY);
+  b.waitDscnt(0, 1);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{younger, kBarrierPc}}));
+}
+
+// DScnt is a 6-bit counter (the counter table in CDNA5 ISA 5.7.1), and issue
+// stalls rather than overflow it, so it holds 2^6 - 1 = 63 tokens. Issuing a
+// 64th DS write proves the oldest completed, so it is not in flight.
+TEST(RaceDetector, BarrierInFlight_CapacityCompletesTheOldest) {
+  constexpr int kDscntCapacity = 63;
+  RaceTestBuilder b = gfx1250Builder();
+  Crossed expected;
+  for (int index = 0; index < kDscntCapacity + 1; ++index) {
+    const uint64_t write = dsWriteAt(b, 0, kX + 4 * index);
+    if (index != 0)
+      expected[write] = kBarrierPc;
+  }
+  ASSERT_EQ(expected.size(), static_cast<size_t>(kDscntCapacity));
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), expected);
+}
+
+// A FLAT store that resolves to LDS stays in order with DS instructions as it
+// moves through LDS, and completes there on DScnt (CDNA5 ISA 5.7.1.3).
+TEST(RaceDetector, BarrierInFlight_FlatLdsLanes) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t flat = b.nextPc();
+  b.flatLdsWrite(0, /*lane=*/0, kX, /*bytes=*/4);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{flat, kBarrierPc}}));
+}
+
+// Its LDS access is complete once DScnt is waited for, whatever its STOREcnt.
+TEST(RaceDetector, BarrierInFlight_FlatLdsLanesDsWaited) {
+  RaceTestBuilder b = cellBuilder();
+  b.flatLdsWrite(0, /*lane=*/0, kX, /*bytes=*/4);
+  b.waitDscnt(0, 0);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), Crossed{});
+}
+
+// A FLAT load whose lanes all resolve to global memory counts on DScnt but
+// touches no LDS bytes, and a global load touches none either.
+TEST(RaceDetector, BarrierInFlight_AccessesWithoutLdsBytes) {
+  RaceTestBuilder b = cellBuilder();
+  b.globalLoad(0, /*vgprBase=*/1, /*numRegs=*/1, /*exec=*/0, /*byteMask=*/0xF,
+               MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::DSCNT);
+  b.globalLoad(0, /*vgprBase=*/2, /*numRegs=*/1);
+  // A DS write issued with no active lane counts on DScnt and writes nothing.
+  b.ldsWriteNoLanes(0);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), Crossed{});
+}
+
+// A signal concerns its own wave's accesses only.
+TEST(RaceDetector, BarrierInFlight_OnlyTheSignallingWave) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t write = dsWriteAt(b, 1);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(1), Crossed{});
+  signalAt(b, 1, kLaterBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(1), (Crossed{{write, kLaterBarrierPc}}));
+}
+
+// A workgroup of one wave treats barrier instructions as S_NOP (CDNA5 ISA
+// 5.6), and has no other wave to race with.
+TEST(RaceDetector, BarrierInFlight_SingleWaveWorkgroup) {
+  RaceTestBuilder b = cellBuilder(/*numWaves=*/1);
+  dsWriteAt(b, 0);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), Crossed{});
+}
+
+// Async copies, tensor DMA transfers and direct-to-LDS loads are recorded like
+// DS accesses: recording reports nothing, so a transfer a pipelined kernel
+// leaves in flight on purpose costs nothing, and one that does race gets the
+// barrier named.
+TEST(RaceDetector, BarrierInFlight_TransfersAreRecorded) {
+  RaceTestBuilder b = cellBuilder();
+  Crossed expected;
+  expected[b.nextPc()] = kBarrierPc;
+  asyncLoad(b, 0, kX);
+  expected[b.nextPc()] = kBarrierPc;
+  asyncStore(b, 0, kX + 16);
+  expected[b.nextPc()] = kBarrierPc;
+  tensorLoad(b, 0, kX + 32);
+  expected[b.nextPc()] = kBarrierPc;
+  b.tensorStoreFromLds(0, {{.address = uint32_t(kX + 48), .bytes = 4}});
+  expected[b.nextPc()] = kBarrierPc;
+  b.globalToLds(0, {uint32_t(kY)}, /*bytesPerLane=*/4, /*exec=*/1);
+  ASSERT_EQ(expected.size(), 5u);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), expected);
+}
+
+// An arrive at an LDS barrier cell, and an access the arrive handed off to the
+// waves that read the cell, are in flight at a later signal like any other
+// access. A wave that passes the barrier without reading the cell is not
+// ordered after them.
+TEST(RaceDetector, BarrierInFlight_ArrivesAndHandedOffAccessesAreRecorded) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t write = dsWriteAt(b, 0);
+  const uint64_t arrive = b.nextPc();
+  b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{write, kBarrierPc}, {arrive, kBarrierPc}}));
+}
+
+// ----- Across signals -----
+
+TEST(RaceDetector, BarrierInFlight_NothingRecordedWithoutASignal) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), Crossed{});
+}
+
+// A signal the plugin could not attribute to a barrier instruction records
+// nothing.
+TEST(RaceDetector, BarrierInFlight_NothingRecordedWithoutABarrierInstruction) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  b.signal(0, RaceTestBuilder::workgroupRound(0));
+  EXPECT_EQ(b.barriersCrossedInFlight(0), Crossed{});
+}
+
+// An access issued after a signal was not in flight at it.
+TEST(RaceDetector, BarrierInFlight_AccessIssuedAfterASignal) {
+  RaceTestBuilder b = cellBuilder();
+  signalAt(b, 0, kBarrierPc);
+  const uint64_t write = dsWriteAt(b, 0);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), Crossed{});
+  signalAt(b, 0, kLaterBarrierPc, /*generation=*/1);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{write, kLaterBarrierPc}}));
+}
+
+// An access still in flight at its wave's next signal crossed that barrier
+// too.
+TEST(RaceDetector, BarrierInFlight_ALaterBarrierIsTheMostRecent) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t write = dsWriteAt(b, 0);
+  signalAt(b, 0, kBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{write, kBarrierPc}}));
+  signalAt(b, 0, kLaterBarrierPc, /*generation=*/1);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{write, kLaterBarrierPc}}));
+}
+
+// A wait after the signal completes the write for its own wave, but the
+// barrier it crossed still did not order it for the others.
+TEST(RaceDetector, BarrierInFlight_TheBarrierIsKeptAfterTheWriteCompletes) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t write = dsWriteAt(b, 0);
+  signalAt(b, 0, kBarrierPc);
+  b.waitDscnt(0, 0);
+  ASSERT_EQ(b.barrierPendingEventCount(0), 1u);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{write, kBarrierPc}}));
+}
+
+// The wave's next signal finds the first write complete and releases it. That
+// write was not in flight at the later barrier, so it keeps the earlier one;
+// the write still in flight crossed both.
+TEST(RaceDetector, BarrierInFlight_ALaterSignalRecordsOnlyWhatIsStillInFlight) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t completed = dsWriteAt(b, 0, kX);
+  const uint64_t pending = dsWriteAt(b, 0, kY);
+  signalAt(b, 0, kBarrierPc);
+  b.waitDscnt(0, 1);
+  signalAt(b, 0, kLaterBarrierPc, /*generation=*/1);
+  EXPECT_EQ(b.barriersCrossedInFlight(0),
+            (Crossed{{completed, kBarrierPc}, {pending, kLaterBarrierPc}}));
+}
+
+// Each event refers to the barrier its own wave was signalling.
+TEST(RaceDetector, BarrierInFlight_EachWaveKeepsItsOwnBarrier) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t write0 = dsWriteAt(b, 0, kX);
+  const uint64_t write1 = dsWriteAt(b, 1, kY);
+  signalAt(b, 0, kBarrierPc);
+  signalAt(b, 1, kLaterBarrierPc);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{write0, kBarrierPc}}));
+  EXPECT_EQ(b.barriersCrossedInFlight(1), (Crossed{{write1, kLaterBarrierPc}}));
+}
+
+// The registry trims completed events from its front. The barrier an event
+// crossed stays with the event.
+TEST(RaceDetector, BarrierInFlight_TheBarrierSurvivesARegistryTrim) {
+  RaceTestBuilder b = cellBuilder();
+  for (int index = 0; index < EventRegistry::kTrimAttemptInterval; ++index) {
+    b.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1);
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
+  }
+  const uint64_t write = dsWriteAt(b, 0);
+  signalAt(b, 0, kBarrierPc);
+  // Complete, so that the trim can pass over it.
+  b.waitDscnt(0, 0);
+  // The first batch of loads but the last has been trimmed.
+  ASSERT_EQ(b.events().trimmedCount(), EventRegistry::kTrimAttemptInterval - 1);
+  for (int index = 0; index < 2 * EventRegistry::kTrimAttemptInterval; ++index) {
+    b.globalLoad(/*wave=*/0, /*vgprBase=*/1, /*numRegs=*/1);
+    b.waitcnt(/*wave=*/0, /*vmcnt=*/0);
+  }
+  // Every event but the newest two has been trimmed, the write among them.
+  ASSERT_EQ(b.events().trimmedCount(), 3 * EventRegistry::kTrimAttemptInterval - 2);
+  EXPECT_EQ(b.barriersCrossedInFlight(0), (Crossed{{write, kBarrierPc}}));
+}
+
+// ----- In a race -----
+
+// Wave 1 passes the barrier and reads the bytes wave 0's write, in flight at
+// wave 0's signal, may not have reached. The race names the barrier.
+TEST(RaceDetector, BarrierInFlight_ARaceNamesTheBarrierBothWavesPassed) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t write = dsWriteAt(b, 0);
+  b.barrierAt(kBarrierPc);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(b.events().pc(b.violations().front().conflictingEvent), write);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// A load in flight at a barrier races with a write another wave issues after
+// passing it.
+TEST(RaceDetector, BarrierInFlight_AWriteOverAnInFlightReadNamesTheBarrier) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t read = b.nextPc();
+  dsRead(b, 0, /*vgprDst=*/1);
+  b.barrierAt(kBarrierPc);
+  dsWrite(b, 1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/true);
+  EXPECT_EQ(b.events().pc(b.violations().front().conflictingEvent), read);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// With no barrier between them, the race names none.
+TEST(RaceDetector, BarrierInFlight_ARaceWithoutABarrierNamesNone) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::nullopt);
+}
+
+// Wave 0 signalled with the write in flight, but wave 1 reads without having
+// passed that barrier. The missing synchronization is wave 1's, so the race
+// names no barrier.
+TEST(RaceDetector, BarrierInFlight_AReaderThatPassedNoBarrierNamesNone) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  signalAt(b, 0, kBarrierPc);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::nullopt);
+}
+
+// The same when wave 0 went on to wait for the write and signal again: wave 1
+// has passed neither barrier.
+TEST(RaceDetector, BarrierInFlight_AReaderThatPassedNeitherBarrierNamesNone) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  signalAt(b, 0, kBarrierPc);
+  b.waitDscnt(0, 0);
+  signalAt(b, 0, kLaterBarrierPc, /*generation=*/1);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::nullopt);
+}
+
+// A named barrier orders its members. A wave outside it that has synchronized
+// with none of them since has acquired nothing of wave 0, so it is not
+// ordered after wave 0's signal.
+TEST(RaceDetector, BarrierInFlight_AWaveOutsideANamedBarrierNamesNone) {
+  RaceTestBuilder b = cellBuilder(/*numWaves=*/3);
+  const BarrierRoundId round = RaceTestBuilder::namedRound(/*namedId=*/1, /*generation=*/0);
+  dsWriteAt(b, 0);
+  b.signalAt(0, round, kBarrierPc);
+  b.signalAt(1, round, kBarrierPc);
+  b.completeRound(round, {0, 1});
+  b.waitPassed(0, round);
+  b.waitPassed(1, round);
+  dsRead(b, 2, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/2, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::nullopt);
+}
+
+// A member of the named barrier has passed it.
+TEST(RaceDetector, BarrierInFlight_AMemberOfANamedBarrierNamesIt) {
+  RaceTestBuilder b = cellBuilder(/*numWaves=*/3);
+  const BarrierRoundId round = RaceTestBuilder::namedRound(/*namedId=*/1, /*generation=*/0);
+  dsWriteAt(b, 0);
+  b.signalAt(0, round, kBarrierPc);
+  b.signalAt(1, round, kBarrierPc);
+  b.completeRound(round, {0, 1});
+  b.waitPassed(0, round);
+  b.waitPassed(1, round);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// The write was complete at wave 0's signal, so the barrier ordered it. Wave 1
+// reads before its own wait, which is a different mistake: the racing write
+// crossed no barrier in flight.
+TEST(RaceDetector, BarrierInFlight_AReaderBeforeItsWaitNamesNone) {
+  RaceTestBuilder b = cellBuilder();
+  const BarrierRoundId round = RaceTestBuilder::workgroupRound(0);
+  dsWriteAt(b, 0);
+  b.waitDscnt(0, 0);
+  b.signalAt(0, round, kBarrierPc);
+  b.signalAt(1, round, kBarrierPc);
+  b.completeRound(round, {0, 1});
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::nullopt);
+}
+
+// Wave 0 runs ahead: its write crosses the first barrier in flight, it waits
+// for the write, and it signals the next barrier, which releases the write.
+// Wave 1 has passed only the first barrier, so that is the one the race names.
+TEST(RaceDetector, BarrierInFlight_AWriterAheadNamesTheBarrierTheReaderPassed) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  b.barrierAt(kBarrierPc);
+  b.waitDscnt(0, 0);
+  signalAt(b, 0, kLaterBarrierPc, /*generation=*/1);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// The write is in flight across two barriers. A reader that has passed only
+// the first is told about the first.
+TEST(RaceDetector, BarrierInFlight_AcrossTwoBarriersNamesTheFirstToAReaderPastTheFirst) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  b.barrierAt(kBarrierPc);
+  signalAt(b, 0, kLaterBarrierPc, /*generation=*/1);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// A reader that has passed both is told about the most recent: the barrier it
+// passed last before it touched the bytes.
+TEST(RaceDetector, BarrierInFlight_AcrossTwoBarriersNamesTheLastToAReaderPastBoth) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  b.barrierAt(kBarrierPc);
+  b.barrierAt(kLaterBarrierPc);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kLaterBarrierPc});
+}
+
+// Wave 0 waits for the write after its signal and hands it off through an LDS
+// barrier cell. Wave 1 has passed no barrier and has not read the cell, so the
+// race names no barrier.
+TEST(RaceDetector, BarrierInFlight_ACellArrivalAfterTheSignalNamesNoneToAReaderPastNothing) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  signalAt(b, 0, kBarrierPc);
+  b.waitDscnt(0, 0);
+  b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::nullopt);
+}
+
+// A barrier orders accesses between waves. A wave's race with its own access
+// is not something a barrier could have ordered.
+TEST(RaceDetector, BarrierInFlight_ARaceWithTheWavesOwnAccessNamesNone) {
+  RaceTestBuilder b = cellBuilder();
+  asyncLoad(b, 0, kX);
+  signalAt(b, 0, kBarrierPc);
+  dsRead(b, 0, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/0, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::nullopt);
+}
+
+// Nor does a barrier order a register: only the LDS side of an access is
+// ordered by it. Wave 0 uses the result of a load it has not waited for.
+TEST(RaceDetector, BarrierInFlight_ARegisterRaceNamesNone) {
+  RaceTestBuilder b = cellBuilder();
+  dsRead(b, 0, /*vgprDst=*/1);
+  b.barrierAt(kBarrierPc);
+  b.checkVgprRead(/*wave=*/0, /*reg=*/1, /*lane=*/0);
+  ASSERT_EQ(b.raceCount(), 1);
+  EXPECT_EQ(b.violations().front().space, RaceViolation::Space::VGPR);
+  EXPECT_EQ(crossedBarrierPc(b), std::nullopt);
+}
+
+// A wave outside the named barrier that synchronizes with a member after the
+// member passed it is ordered after wave 0's signal too, without having waited
+// on that barrier. A wait before the signal would have ordered the write for
+// it, so the race names the barrier.
+TEST(RaceDetector, BarrierInFlight_AWaveOrderedThroughAMemberNamesTheNamedBarrier) {
+  RaceTestBuilder b = cellBuilder(/*numWaves=*/3);
+  const BarrierRoundId first = RaceTestBuilder::namedRound(/*namedId=*/1, /*generation=*/0);
+  const BarrierRoundId second = RaceTestBuilder::namedRound(/*namedId=*/2, /*generation=*/0);
+  dsWriteAt(b, 0);
+  b.signalAt(0, first, kBarrierPc);
+  b.signalAt(1, first, kBarrierPc);
+  b.completeRound(first, {0, 1});
+  b.waitPassed(0, first);
+  b.waitPassed(1, first);
+  b.signalAt(1, second, kLaterBarrierPc);
+  b.signalAt(2, second, kLaterBarrierPc);
+  b.completeRound(second, {1, 2});
+  b.waitPassed(1, second);
+  b.waitPassed(2, second);
+  dsRead(b, 2, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/2, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// A round whose signals recorded nothing, as a trap barrier's do, still orders
+// the waves that pass it. Wave 1 passes such a round after wave 0 signalled a
+// barrier with the write in flight, so it is ordered after that signal.
+TEST(RaceDetector, BarrierInFlight_AWaveOrderedThroughAnUnrecordedRoundNamesTheBarrier) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  b.signalAt(0, RaceTestBuilder::namedRound(/*namedId=*/1, /*generation=*/0), kBarrierPc);
+  b.barrier();
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// The first and the most recent barrier are kept. Wave 1 has passed only the
+// one between them, so the first is named: a barrier wave 1 did not wait on,
+// and still one a wait before which would have ordered the write.
+TEST(RaceDetector, BarrierInFlight_AReaderPastOnlyAMiddleBarrierNamesTheFirst) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  b.signalAt(0, RaceTestBuilder::namedRound(/*namedId=*/1, /*generation=*/0), kBarrierPc);
+  b.barrierAt(kLaterBarrierPc);
+  signalAt(b, 0, kLastBarrierPc, /*generation=*/1);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// In flight across three barriers, with wave 1 past the first two: the first
+// is named, not the second, which is not kept.
+TEST(RaceDetector, BarrierInFlight_AcrossThreeBarriersNamesTheFirstToAReaderPastTwo) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  b.barrierAt(kBarrierPc);
+  b.barrierAt(kLaterBarrierPc);
+  signalAt(b, 0, kLastBarrierPc, /*generation=*/2);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// A DS arrive does not hand off an async load. Wave 0 signals with the load in
+// flight and then arrives at a cell wave 1 reads. Reading the cell orders
+// wave 1 after that signal, without a wait on the barrier, and its read of the
+// tile races with the load.
+TEST(RaceDetector, BarrierInFlight_AWaveOrderedThroughACellNamesTheBarrier) {
+  RaceTestBuilder b = cellBuilder();
+  const uint64_t load = b.nextPc();
+  asyncLoad(b, 0, kX);
+  signalAt(b, 0, kBarrierPc);
+  b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
+  pollCell(b, 1);
+  dsRead(b, 1, /*vgprDst=*/1);
+  expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  EXPECT_EQ(b.events().pc(b.violations().front().conflictingEvent), load);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// The same with a DS store, which the arrive hands off to the waves that read
+// the cell: there is no race to report.
+TEST(RaceDetector, BarrierInFlight_AStoreHandedOffThroughACellDoesNotRace) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  signalAt(b, 0, kBarrierPc);
+  b.cellArrive(0, kCell, Arrival::Ds, /*completes=*/true);
+  pollCell(b, 1);
+  dsRead(b, 1, /*vgprDst=*/1);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
+// A race with the LDS source operand of an atomic in flight at a barrier
+// names the barrier like a race with its destination.
+TEST(RaceDetector, BarrierInFlight_ARaceWithASourceOperandNamesTheBarrier) {
+  RaceTestBuilder b = cellBuilder();
+  b.ldsSrc2Atomic(0, /*lane=*/0, kX, /*sourceAddr=*/kY, /*bytes=*/4);
+  b.barrierAt(kBarrierPc);
+  dsWrite(b, 1, kY);
+  expectOneLdsRace(b, /*wave=*/1, kY, /*isWrite=*/true);
+  EXPECT_TRUE(b.violations().front().conflictsWithSrc2Read);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// So does a race with the cell a tensor transfer in flight at a barrier
+// arrives at.
+TEST(RaceDetector, BarrierInFlight_ARaceWithATensorArrivalNamesTheBarrier) {
+  RaceTestBuilder b = cellBuilder();
+  tensorLoad(b, 0);
+  b.cellArrive(0, kCell, Arrival::Tensor, /*completes=*/true);
+  b.barrierAt(kBarrierPc);
+  b.checkLdsWrite(/*wave=*/1, /*lane=*/0, kCell, kBarrierCellBytes);
+  expectOneLdsRace(b, /*wave=*/1, kCell, /*isWrite=*/true);
+  EXPECT_TRUE(b.violations().front().conflictsWithBarrierArrive);
+  EXPECT_EQ(crossedBarrierPc(b), std::optional<uint64_t>{kBarrierPc});
+}
+
+// The registry refers to a bounded number of distinct barrier instructions.
+// A signal from one more records nothing, and the earlier ones stay.
+TEST(RaceDetector, BarrierInFlight_ABarrierBeyondTheRegistrysBoundRecordsNothing) {
+  RaceDetector detector(2, 4, 4, Dim3d(0), [](RaceViolation) {}, {}, 65536);
+  ASSERT_EQ(EventRegistry::kMaxBarriers, 65535u);
+  // The indices are 1-based; 0 is "none".
+  for (size_t index = 1; index <= EventRegistry::kMaxBarriers; ++index)
+    ASSERT_EQ(detector.barrierIndex(testInstruction(0x100000 + 4 * index)), index);
+  EXPECT_EQ(detector.barrierIndex(testInstruction(0x100000)), 0u);
+  EXPECT_EQ(detector.barrierIndex(testInstruction(0x100000 + 4)), 1u);
+  EXPECT_EQ(detector.barrierIndex(testInstruction(0x100000 + 4 * EventRegistry::kMaxBarriers)),
+            EventRegistry::kMaxBarriers);
+  // Index 0 records nothing on an event.
+  const EventId event = detector.allocateEventId(
+      WaveId{0}, testInstruction(0x100), MemoryEventType::VGPR_TO_LDS, /*registers=*/{2},
+      /*execMask=*/1, /*byteMask=*/0xf, /*ldsIntervals=*/{},
+      CounterObligations(amdgpu::WaitCounterType::DSCNT, MemoryOrderClass::LDS),
+      MemoryOrderClass::LDS);
+  constexpr uint32_t kEveryEpoch = std::numeric_limits<uint32_t>::max();
+  detector.markBarrierCrossedInFlight(event, 0, /*epoch=*/1);
+  EXPECT_EQ(detector.events().barrierCrossedInFlight(event, kEveryEpoch), nullptr);
+  detector.markBarrierCrossedInFlight(event, 1, /*epoch=*/1);
+  ASSERT_NE(detector.events().barrierCrossedInFlight(event, kEveryEpoch), nullptr);
+  EXPECT_EQ(detector.events().barrierCrossedInFlight(event, kEveryEpoch)->pc(), 0x100004u);
+}
+
+// The write crossed one barrier in flight, its wave then waited for it, and
+// the next barrier ordered it: a reader past that barrier does not race.
+TEST(RaceDetector, BarrierInFlight_OrderedByALaterBarrierDoesNotRace) {
+  RaceTestBuilder b = cellBuilder();
+  dsWriteAt(b, 0);
+  b.barrierAt(kBarrierPc);
+  b.waitDscnt(0, 0);
+  b.barrierAt(kLaterBarrierPc);
+  dsRead(b, 1, /*vgprDst=*/1);
+  EXPECT_EQ(b.raceCount(), 0);
+}
+
+// ----- Recording changes nothing -----
+
+TEST(RaceDetector, BarrierInFlight_RecordingDoesNotChangeRaces) {
+  for (const bool record : {false, true}) {
+    SCOPED_TRACE(record);
+    RaceTestBuilder b = cellBuilder();
+    dsWriteAt(b, 0);
+    if (record)
+      b.barrierAt(kBarrierPc);
+    else
+      b.barrier();
+    dsRead(b, 1, /*vgprDst=*/1);
+    expectOneLdsRace(b, /*wave=*/1, kX, /*isWrite=*/false);
+  }
+}
+
+// The same events stay live whether or not a signal names its instruction.
+TEST(RaceDetector, BarrierInFlight_RecordingDoesNotChangeLiveEvents) {
+  struct Live {
+    size_t writes;
+    size_t pending;
+    int events;
+    int races;
+    bool operator==(const Live &) const = default;
+  };
+  const auto live = [](bool record) {
+    RaceTestBuilder b = cellBuilder();
+    dsWriteAt(b, 0, kX);
+    dsWriteAt(b, 0, kY);
+    b.waitDscnt(0, 1);
+    asyncLoad(b, 0, kX + 16);
+    if (record)
+      signalAt(b, 0, kBarrierPc);
+    else
+      b.signal(0, RaceTestBuilder::workgroupRound(0));
+    return Live{b.ldsWriteEventCount(), b.barrierPendingEventCount(0), b.events().size(),
+                b.raceCount()};
+  };
+  const Live recorded = live(true);
+  EXPECT_EQ(recorded.writes, 3u);
+  EXPECT_EQ(recorded.pending, 1u);
+  EXPECT_EQ(recorded.races, 0);
+  EXPECT_TRUE(recorded == live(false));
+}
