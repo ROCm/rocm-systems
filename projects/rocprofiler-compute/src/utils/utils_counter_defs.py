@@ -4,7 +4,7 @@
 """Shared counter definitions for HW performance counter parsing.
 
 Imported by both the main runtime code and lightweight tooling such as
-``tools/validate_sets_metric_ids.py``.
+``tools/validate_metric_library.py``.
 """
 
 import re

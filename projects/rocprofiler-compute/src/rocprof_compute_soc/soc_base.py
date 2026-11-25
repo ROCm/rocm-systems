@@ -54,7 +54,6 @@ from utils.utils_common import (
     load_views,
     metric_placements,
     numbered_view_tables,
-    parse_sets_yaml,
     row_ids_as_metric_ids,
     row_metric_ids,
     selects_roofline,
@@ -315,16 +314,13 @@ class OmniSoC_Base:
             warn_numeric_metric_ids(filter_blocks, self.__arch)
             filter_blocks = row_ids_as_metric_ids(filter_blocks, self.__arch)
         if args.set_selected and self.__arch:
-            sets_info = parse_sets_yaml(self.__arch)
-            if args.set_selected not in sets_info:
+            sets = self._profile_library().sets
+            if args.set_selected not in sets:
                 console_error(
                     f'argument --set: invalid choice: "{args.set_selected}" '
-                    f"(choose from {', '.join(sets_info)})"
+                    f"(choose from {', '.join(sets)})"
                 )
-            filter_blocks = [
-                next(iter(metric.keys()))
-                for metric in sets_info[args.set_selected]["metric"]
-            ]
+            filter_blocks = list(sets[args.set_selected]["metrics"])
 
         if filter_blocks:
             metric_ids = [
