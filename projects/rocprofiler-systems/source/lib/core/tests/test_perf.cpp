@@ -52,7 +52,7 @@ constexpr int k_miss   = PERF_COUNT_HW_CACHE_RESULT_MISS;
 
 // --- get_event_type ---
 
-// regression: ISS-001 - the hw_cache branch tested PERF_COUNT_SW_ twice and was
+// regression: the hw_cache branch tested PERF_COUNT_SW_ twice and was
 // unreachable.
 TEST(perf_event_type, hw_cache_name_is_classified_as_hw_cache)
 {
@@ -108,64 +108,66 @@ TEST_P(perf_hw_cache_valid_name, selects_cache_operation_and_result)
 
 INSTANTIATE_TEST_SUITE_P(
     every_cache_id_with_default_modifiers, perf_hw_cache_valid_name,
-    ::testing::Values(valid_cache_name{ "PERF_COUNT_HW_CACHE_L1D",
-                                        expected_cache_config(PERF_COUNT_HW_CACHE_L1D,
-                                                              k_read, k_miss) },
-                      valid_cache_name{ "PERF_COUNT_HW_CACHE_L1I",
-                                        expected_cache_config(PERF_COUNT_HW_CACHE_L1I,
-                                                              k_read, k_miss) },
-                      valid_cache_name{
-                          "PERF_COUNT_HW_CACHE_LL",
-                          expected_cache_config(PERF_COUNT_HW_CACHE_LL, k_read, k_miss) },
-                      valid_cache_name{ "PERF_COUNT_HW_CACHE_DTLB",
-                                        expected_cache_config(PERF_COUNT_HW_CACHE_DTLB,
-                                                              k_read, k_miss) },
-                      valid_cache_name{ "PERF_COUNT_HW_CACHE_ITLB",
-                                        expected_cache_config(PERF_COUNT_HW_CACHE_ITLB,
-                                                              k_read, k_miss) },
-                      valid_cache_name{ "PERF_COUNT_HW_CACHE_BPU",
-                                        expected_cache_config(PERF_COUNT_HW_CACHE_BPU,
-                                                              k_read, k_miss) },
-                      valid_cache_name{ "PERF_COUNT_HW_CACHE_NODE",
-                                        expected_cache_config(PERF_COUNT_HW_CACHE_NODE,
-                                                              k_read, k_miss) }));
+    ::testing::Values(valid_cache_name{ .name            = "PERF_COUNT_HW_CACHE_L1D",
+                                        .expected_config = expected_cache_config(
+                                            PERF_COUNT_HW_CACHE_L1D, k_read, k_miss) },
+                      valid_cache_name{ .name            = "PERF_COUNT_HW_CACHE_L1I",
+                                        .expected_config = expected_cache_config(
+                                            PERF_COUNT_HW_CACHE_L1I, k_read, k_miss) },
+                      valid_cache_name{ .name            = "PERF_COUNT_HW_CACHE_LL",
+                                        .expected_config = expected_cache_config(
+                                            PERF_COUNT_HW_CACHE_LL, k_read, k_miss) },
+                      valid_cache_name{ .name            = "PERF_COUNT_HW_CACHE_DTLB",
+                                        .expected_config = expected_cache_config(
+                                            PERF_COUNT_HW_CACHE_DTLB, k_read, k_miss) },
+                      valid_cache_name{ .name            = "PERF_COUNT_HW_CACHE_ITLB",
+                                        .expected_config = expected_cache_config(
+                                            PERF_COUNT_HW_CACHE_ITLB, k_read, k_miss) },
+                      valid_cache_name{ .name            = "PERF_COUNT_HW_CACHE_BPU",
+                                        .expected_config = expected_cache_config(
+                                            PERF_COUNT_HW_CACHE_BPU, k_read, k_miss) },
+                      valid_cache_name{ .name            = "PERF_COUNT_HW_CACHE_NODE",
+                                        .expected_config = expected_cache_config(
+                                            PERF_COUNT_HW_CACHE_NODE, k_read, k_miss) }));
 
-// regression: ISS-002 - the result was derived from the operation (WRITE meant MISS, a
+// regression: the result was derived from the operation (WRITE meant MISS, a
 // READ could never be a MISS), and a result modifier was never read.
 INSTANTIATE_TEST_SUITE_P(
     modifiers, perf_hw_cache_valid_name,
     ::testing::Values(
         // one modifier, as rocprof-sys-avail lists them
+        valid_cache_name{ .name            = "perf::PERF_COUNT_HW_CACHE_LL:ACCESS",
+                          .expected_config = expected_cache_config(PERF_COUNT_HW_CACHE_LL,
+                                                                   k_read, k_access) },
+        valid_cache_name{ .name            = "perf::PERF_COUNT_HW_CACHE_LL:MISS",
+                          .expected_config = expected_cache_config(PERF_COUNT_HW_CACHE_LL,
+                                                                   k_read, k_miss) },
+        valid_cache_name{ .name            = "perf::PERF_COUNT_HW_CACHE_LL:READ",
+                          .expected_config = expected_cache_config(PERF_COUNT_HW_CACHE_LL,
+                                                                   k_read, k_miss) },
+        valid_cache_name{ .name            = "perf::PERF_COUNT_HW_CACHE_LL:WRITE",
+                          .expected_config = expected_cache_config(PERF_COUNT_HW_CACHE_LL,
+                                                                   k_write, k_miss) },
         valid_cache_name{
-            "perf::PERF_COUNT_HW_CACHE_LL:ACCESS",
-            expected_cache_config(PERF_COUNT_HW_CACHE_LL, k_read, k_access) },
-        valid_cache_name{ "perf::PERF_COUNT_HW_CACHE_LL:MISS",
-                          expected_cache_config(PERF_COUNT_HW_CACHE_LL, k_read, k_miss) },
-        valid_cache_name{ "perf::PERF_COUNT_HW_CACHE_LL:READ",
-                          expected_cache_config(PERF_COUNT_HW_CACHE_LL, k_read, k_miss) },
-        valid_cache_name{
-            "perf::PERF_COUNT_HW_CACHE_LL:WRITE",
-            expected_cache_config(PERF_COUNT_HW_CACHE_LL, k_write, k_miss) },
-        valid_cache_name{ "perf::PERF_COUNT_HW_CACHE_LL:PREFETCH",
-                          expected_cache_config(PERF_COUNT_HW_CACHE_LL,
-                                                PERF_COUNT_HW_CACHE_OP_PREFETCH,
-                                                k_miss) },
+            .name            = "perf::PERF_COUNT_HW_CACHE_LL:PREFETCH",
+            .expected_config = expected_cache_config(
+                PERF_COUNT_HW_CACHE_LL, PERF_COUNT_HW_CACHE_OP_PREFETCH, k_miss) },
         // operation and result together, in either order
-        valid_cache_name{
-            "perf::PERF_COUNT_HW_CACHE_L1D:READ:MISS",
-            expected_cache_config(PERF_COUNT_HW_CACHE_L1D, k_read, k_miss) },
-        valid_cache_name{
-            "perf::PERF_COUNT_HW_CACHE_L1D:READ:ACCESS",
-            expected_cache_config(PERF_COUNT_HW_CACHE_L1D, k_read, k_access) },
-        valid_cache_name{
-            "perf::PERF_COUNT_HW_CACHE_L1D:WRITE:ACCESS",
-            expected_cache_config(PERF_COUNT_HW_CACHE_L1D, k_write, k_access) },
-        valid_cache_name{
-            "perf::PERF_COUNT_HW_CACHE_L1D:WRITE:MISS",
-            expected_cache_config(PERF_COUNT_HW_CACHE_L1D, k_write, k_miss) },
-        valid_cache_name{
-            "perf::PERF_COUNT_HW_CACHE_L1D:ACCESS:WRITE",
-            expected_cache_config(PERF_COUNT_HW_CACHE_L1D, k_write, k_access) }));
+        valid_cache_name{ .name            = "perf::PERF_COUNT_HW_CACHE_L1D:READ:MISS",
+                          .expected_config = expected_cache_config(
+                              PERF_COUNT_HW_CACHE_L1D, k_read, k_miss) },
+        valid_cache_name{ .name            = "perf::PERF_COUNT_HW_CACHE_L1D:READ:ACCESS",
+                          .expected_config = expected_cache_config(
+                              PERF_COUNT_HW_CACHE_L1D, k_read, k_access) },
+        valid_cache_name{ .name            = "perf::PERF_COUNT_HW_CACHE_L1D:WRITE:ACCESS",
+                          .expected_config = expected_cache_config(
+                              PERF_COUNT_HW_CACHE_L1D, k_write, k_access) },
+        valid_cache_name{ .name            = "perf::PERF_COUNT_HW_CACHE_L1D:WRITE:MISS",
+                          .expected_config = expected_cache_config(
+                              PERF_COUNT_HW_CACHE_L1D, k_write, k_miss) },
+        valid_cache_name{ .name            = "perf::PERF_COUNT_HW_CACHE_L1D:ACCESS:WRITE",
+                          .expected_config = expected_cache_config(
+                              PERF_COUNT_HW_CACHE_L1D, k_write, k_access) }));
 
 // --- get_hw_cache_config: rejected names ---
 
@@ -252,20 +254,25 @@ TEST_P(perf_overflow_sample_clock, selects_clock_the_kernel_accepts)
     EXPECT_EQ(attr.clockid, param.expected_clock);
 }
 
-// regression: ISS-828 - every overflow event asked for the timeline clock
+// regression: every overflow event asked for the timeline clock
 // (CLOCK_BOOTTIME), and perf_event_open() fails with EINVAL for that clock on a hardware
 // event.
 INSTANTIATE_TEST_SUITE_P(
     hardware_events_use_monotonic, perf_overflow_sample_clock,
-    ::testing::Values(
-        sample_clock_case{ "perf::PERF_COUNT_HW_CACHE_REFERENCES", CLOCK_MONOTONIC },
-        sample_clock_case{ "perf::PERF_COUNT_HW_CPU_CYCLES", CLOCK_MONOTONIC },
-        sample_clock_case{ "perf::PERF_COUNT_HW_CACHE_L1D:READ:MISS", CLOCK_MONOTONIC }));
+    ::testing::Values(sample_clock_case{ .event = "perf::PERF_COUNT_HW_CACHE_REFERENCES",
+                                         .expected_clock = CLOCK_MONOTONIC },
+                      sample_clock_case{ .event = "perf::PERF_COUNT_HW_CPU_CYCLES",
+                                         .expected_clock = CLOCK_MONOTONIC },
+                      sample_clock_case{
+                          .event          = "perf::PERF_COUNT_HW_CACHE_L1D:READ:MISS",
+                          .expected_clock = CLOCK_MONOTONIC }));
 
 INSTANTIATE_TEST_SUITE_P(
     software_events_use_timeline_clock, perf_overflow_sample_clock,
     ::testing::Values(
-        sample_clock_case{ "perf::PERF_COUNT_SW_CPU_CLOCK",
-                           rocprofsys::clocks::timeline::k_timeline_clock_id },
-        sample_clock_case{ "perf::PERF_COUNT_SW_PAGE_FAULTS",
-                           rocprofsys::clocks::timeline::k_timeline_clock_id }));
+        sample_clock_case{
+            .event          = "perf::PERF_COUNT_SW_CPU_CLOCK",
+            .expected_clock = rocprofsys::clocks::timeline::k_timeline_clock_id },
+        sample_clock_case{
+            .event          = "perf::PERF_COUNT_SW_PAGE_FAULTS",
+            .expected_clock = rocprofsys::clocks::timeline::k_timeline_clock_id }));
