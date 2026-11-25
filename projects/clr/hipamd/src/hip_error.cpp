@@ -11,15 +11,16 @@
 extern "C" void __hipOnError(const void *err_info) { (void)err_info; }
 
 namespace hip {
+// hipExtGetLastError and hipGetLastError only read and clear a thread-local value, so
+// they must not initialize the runtime (no HIP_INIT_API): calling them must be safe in
+// a process that never used HIP, e.g. a fork-based multiprocess parent.
 hipError_t hipExtGetLastError() {
-  HIP_INIT_API(hipExtGetLastError);
   hipError_t err = hip::tls.last_command_error_;
   hip::tls.last_command_error_ = hipSuccess;
   return err;
 }
 
 hipError_t hipGetLastError() {
-  HIP_INIT_API(hipGetLastError);
   hipError_t err = hip::tls.last_error_;
   hip::tls.last_error_ = hipSuccess;
   return err;
