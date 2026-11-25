@@ -212,9 +212,10 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
   // Create SDMA Queue
   memset(&queue_, 0, sizeof(HsaQueueResource));
 
-  // A generic HSA_QUEUE_SDMA retry cannot constrain the engine or doorbell slot. KFD could place
-  // it on one of the odd-engine slots that a GPU-written doorbell cannot reach (ROCM-32598), so a
-  // rejected pinned create must fail the connect instead of risking a later hang.
+  // No generic HSA_QUEUE_SDMA retry when this is rejected (typically the engine's queue slots are
+  // full): KFD picks the engine and slot of a generic queue, so it can land on a doorbell a GPU
+  // write never reaches (ROCM-32598). Failing the connect lets the caller fall back instead of
+  // hanging later.
   createStatus_ = hsaKmtCreateQueueExt(
       localNodeId, HSA_QUEUE_SDMA_BY_ENG_ID, DEFAULT_QUEUE_PERCENTAGE, DEFAULT_PRIORITY, engineId,
       queueBuffer_, SDMA_QUEUE_SIZE, nullptr, &queue_);
@@ -232,6 +233,17 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
     hsaKmtUnmapMemoryToGPU(queueBuffer_);
     hsaKmtFreeMemory(queueBuffer_, SDMA_QUEUE_SIZE);
     queueBuffer_ = nullptr;
+    return;
+  }
+
+  if (gpuDoorbellMisrouted(reinterpret_cast<uintptr_t>(queue_.Queue_DoorBell_aql))) {
+    LOG_INFO("anvil: engine %u queue doorbell at page offset %#x is not reachable from the GPU "
+             "(ROCM-32598); holding the slot and taking the next one",
+             engineId,
+             static_cast<unsigned>(reinterpret_cast<uintptr_t>(queue_.Queue_DoorBell_aql) %
+                                   kDoorbellHalfPage));
+    doorbellMisrouted_ = true;
+    valid_ = true;
     return;
   }
 
@@ -274,10 +286,12 @@ SdmaQueue::SdmaQueue(int localDeviceId, int remoteDeviceId, const hsa_agent_t& l
 SdmaQueue::~SdmaQueue() {
   if (!valid_) return;
   CHECK_HSAKMT_SUCCESS(hsaKmtDestroyQueue(queue_.QueueId), "Failed to destroy queue.");
-  ANVIL_CHECK_HIP_ERROR(hipFree(deviceHandle_));
-  if (singleProducerDeviceHandle_) ANVIL_CHECK_HIP_ERROR(hipFree(singleProducerDeviceHandle_));
-  ANVIL_CHECK_HIP_ERROR(hipFree(cachedWptr_));
-  ANVIL_CHECK_HIP_ERROR(hipFree(committedWptr_));
+  if (!doorbellMisrouted_) {
+    ANVIL_CHECK_HIP_ERROR(hipFree(deviceHandle_));
+    if (singleProducerDeviceHandle_) ANVIL_CHECK_HIP_ERROR(hipFree(singleProducerDeviceHandle_));
+    ANVIL_CHECK_HIP_ERROR(hipFree(cachedWptr_));
+    ANVIL_CHECK_HIP_ERROR(hipFree(committedWptr_));
+  }
   CHECK_HSAKMT_SUCCESS(hsaKmtUnmapMemoryToGPU(queueBuffer_), "Failed");
   CHECK_HSAKMT_SUCCESS(hsaKmtFreeMemory(queueBuffer_, SDMA_QUEUE_SIZE), "Failed");
 }
@@ -285,6 +299,8 @@ SdmaQueue::~SdmaQueue() {
 bool SdmaQueue::valid() const { return valid_; }
 
 HSAKMT_STATUS SdmaQueue::createStatus() const { return createStatus_; }
+
+bool SdmaQueue::doorbellMisrouted() const { return doorbellMisrouted_; }
 
 SdmaQueueDeviceHandle* SdmaQueue::deviceHandle() const { return deviceHandle_; }
 
@@ -408,6 +424,7 @@ AnvilLib::~AnvilLib() {
   for (auto& p : remote_peer_channels_) {
     p.second.clear();
   }
+  parkedQueues_.clear();
   if (s_kfd_opened) {
     CloseKFD();
     hsa_shut_down();
@@ -519,10 +536,17 @@ void AnvilLib::init() {
 SdmaQueue* AnvilLib::createSdmaQueue(std::vector<std::unique_ptr<SdmaQueue>>& vec, int srcDeviceId,
                                      int dstDeviceId, uint32_t engineId,
                                      const EngineSelection& selection, int* channelIdx) {
-  auto queue = std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, getHipGpuAgent(srcDeviceId),
-                                           engineId, selection);
-  lastQueueStatus_ = queue->createStatus();
-  if (!queue->valid()) return nullptr;
+  std::unique_ptr<SdmaQueue> queue;
+  // Ends because every parked queue holds one of the engine's slots: once they are all taken, KFD
+  // rejects the create.
+  while (true) {
+    queue = std::make_unique<SdmaQueue>(srcDeviceId, dstDeviceId, getHipGpuAgent(srcDeviceId),
+                                        engineId, selection);
+    lastQueueStatus_ = queue->createStatus();
+    if (!queue->valid()) return nullptr;
+    if (!queue->doorbellMisrouted()) break;
+    parkedQueues_.emplace_back(std::move(queue));
+  }
   vec.emplace_back(std::move(queue));
   queuesUsedTotal_ += 1;
   if (channelIdx != nullptr) {
@@ -538,8 +562,7 @@ SdmaQueue* AnvilLib::createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t 
 }
 
 void AnvilLib::reportQueueBudget(uint32_t used, int numChannels, const uint64_t* peerKey) const {
-  const uint32_t usableEngines = usableSdmaEngines(numSdmaEnginesTotal_);
-  const uint32_t queueBudget = usableEngines * numSdmaQueuesPerEngine_;
+  const uint32_t queueBudget = sdmaQueueBudget(numSdmaEnginesTotal_, numSdmaQueuesPerEngine_);
   char peer[64] = "";
   if (peerKey != nullptr) {
     std::snprintf(peer, sizeof(peer), " for remote peer %#llx",
@@ -547,10 +570,10 @@ void AnvilLib::reportQueueBudget(uint32_t used, int numChannels, const uint64_t*
   }
   LOG_ERROR(
       "anvil: SDMA queue budget exhausted: %u queue(s) taken by this process + %d requested%s, "
-      "limit %u (%u usable even engines of %u: host=%u xgmi=%u, %u queues per engine). ROCm "
+      "limit %u GPU-reachable slots (%u engines: host=%u xgmi=%u, %u queues per engine). ROCm "
       "already holds some of them, so this GPU cannot cover this peer count at %d channel(s) per "
       "peer. Use fewer ranks per node, fewer channels, or a coarser partition mode (DPX/SPX).",
-      used, numChannels, peer, queueBudget, usableEngines, numSdmaEnginesTotal_, numSdmaEngines_,
+      used, numChannels, peer, queueBudget, numSdmaEnginesTotal_, numSdmaEngines_,
       numSdmaXgmiEngines_, numSdmaQueuesPerEngine_, numChannels);
 }
 
@@ -570,11 +593,11 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   }
   // KFD does not report how many queues ROCr already holds, so this only predicts gross
   // over-subscription; a NO_MEMORY from queue creation below is reported against the same budget.
-  const uint32_t usableEngines = usableSdmaEngines(numSdmaEnginesTotal_);
+  const uint32_t queueBudget = sdmaQueueBudget(numSdmaEnginesTotal_, numSdmaQueuesPerEngine_);
 
   // The whole request is known up front. Refusing here avoids creating a queue
   // that rollback would destroy immediately.
-  if (queueBudgetExceeded(queuesUsedTotal_, numChannels, usableEngines, numSdmaQueuesPerEngine_)) {
+  if (queueBudgetExceeded(queuesUsedTotal_, numChannels, queueBudget)) {
     reportQueueBudget(queuesUsedTotal_, numChannels);
     return false;
   }
@@ -584,9 +607,8 @@ bool AnvilLib::connect(int srcDeviceId, int dstDeviceId, int numChannels) {
   for (int c = 0; c < numChannels; ++c) {
     // Per channel: each new queue changes which preferred engine is least loaded.
     const EngineSelection selection = getSdmaEngineId(srcDeviceId, dstDeviceId);
-    if (!isUsableSdmaEngine(selection.engineId)) {
-      LOG_ERROR("anvil: no usable even SDMA engine for %d -> %d (selected %d)", srcDeviceId,
-                dstDeviceId, selection.engineId);
+    if (selection.engineId < 0) {
+      LOG_ERROR("anvil: no SDMA engine mapping for %d -> %d", srcDeviceId, dstDeviceId);
       releaseQueues(vec, already);
       return false;
     }
@@ -618,6 +640,7 @@ void AnvilLib::disconnect() {
   // Destroy all SDMA queues. SdmaQueue destructor calls hsaKmtDestroyQueue.
   sdma_channels_.clear();
   remote_peer_channels_.clear();
+  parkedQueues_.clear();
   queuesUsedTotal_ = 0;
   LOG_TRACE("SDMA: Disconnected all queues");
 }
@@ -662,8 +685,8 @@ bool AnvilLib::connectRemotePeer(int srcDeviceId, uint64_t peerKey, int numChann
               srcDeviceId, static_cast<unsigned long long>(peerKey));
     return false;
   }
-  const uint32_t usableEngines = usableSdmaEngines(numSdmaEnginesTotal_);
-  if (queueBudgetExceeded(queuesUsedTotal_, numChannels, usableEngines, numSdmaQueuesPerEngine_)) {
+  const uint32_t queueBudget = sdmaQueueBudget(numSdmaEnginesTotal_, numSdmaQueuesPerEngine_);
+  if (queueBudgetExceeded(queuesUsedTotal_, numChannels, queueBudget)) {
     reportQueueBudget(queuesUsedTotal_, numChannels, &peerKey);
     return false;
   }
@@ -677,7 +700,7 @@ bool AnvilLib::connectRemotePeer(int srcDeviceId, uint64_t peerKey, int numChann
     selection.numSdmaEngines = numSdmaEngines_;
     selection.numSdmaXgmiEngines = numSdmaXgmiEngines_;
     selection.numSdmaEnginesTotal = numSdmaEnginesTotal_;
-    selection.engineId = leastLoadedUsableEngine(queuesPerEngine());
+    selection.engineId = leastLoadedUsableEngine(queuesPerEngine(), numSdmaQueuesPerEngine_);
     const uint32_t engineId = static_cast<uint32_t>(selection.engineId);
     LOG_INFO("SDMA: remote peer %#llx channel %d from device %d on engine %d",
              static_cast<unsigned long long>(peerKey), c, srcDeviceId, engineId);
@@ -755,11 +778,12 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
 
   // The map and the doubling assume the 14 xGMI SDMA engines of an unpartitioned MI300X. A
   // partition owns fewer engines (CPX: 2 host, 0 xGMI). Same-device peers share an OAM id, so they
-  // hit the diagonal (oamEngine 0) and engineId 0 is in range. The fold still runs there, but it
-  // now targets only the even engines whose every queue slot accepts GPU-written doorbells.
+  // hit the diagonal (oamEngine 0) and engineId 0 is in range. The fold has to run there too, not
+  // only when the doubled id is past the engine count.
   //
-  // (srcFn + dstFn) rather than dstFn alone lets modes with multiple usable even engines separate
-  // pairs that share a destination function. CPX has only one such engine and therefore uses 0.
+  // (srcFn + dstFn) rather than dstFn alone: with 2 engines the two split a mixed-parity mesh the
+  // same way, but once the node has more than 2 engines the sum still separates pairs that share a
+  // destination function. Two engines cannot give 8 partitions distinct ids.
   const bool partition = isSdmaPartition(numSdmaXgmiEngines_, numSdmaEnginesTotal_);
   if (oamMapEngineNeedsFold(numSdmaXgmiEngines_, numSdmaEnginesTotal_, engineId)) {
     const PciFunctionBus srcPci = pciFunctionBus(getBusId(srcDeviceId));
@@ -806,7 +830,8 @@ EngineSelection AnvilLib::getSdmaEngineId(int srcDeviceId, int dstDeviceId) {
         hsa_amd_memory_get_preferred_copy_engine(dstAgent, srcAgent, &selection_.preferredMask);
     selection_.preferredQueried = true;
     if (selection_.preferredStatus == HSA_STATUS_SUCCESS && selection_.preferredMask != 0) {
-      const int engineId = leastLoadedPreferredEngine(selection_.preferredMask, queuesPerEngine());
+      const int engineId = leastLoadedPreferredEngine(selection_.preferredMask, queuesPerEngine(),
+                                                      numSdmaQueuesPerEngine_);
       if (engineId >= 0 && (numSdmaEnginesTotal_ == 0 ||
                             static_cast<uint32_t>(engineId) < numSdmaEnginesTotal_)) {
         selection_.usedPreferred = true;

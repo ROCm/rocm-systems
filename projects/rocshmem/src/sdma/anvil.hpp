@@ -85,9 +85,14 @@ class SdmaQueue {
   // How the engine was chosen. RCCL's AnvilEngineChoice test checks it against the mask HSA
   // reported; rocSHMEM's own tests do not create SDMA queues.
   const EngineSelection& selection() const { return selection_; }
+  // True when KFD placed the queue on a doorbell slot a GPU write cannot reach
+  // (gpuDoorbellMisrouted). Such a queue is valid but has no device handles: it only holds the slot
+  // so the next create on the same engine gets a usable one.
+  bool doorbellMisrouted() const;
 
  private:
   bool valid_{false};
+  bool doorbellMisrouted_{false};
   HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
   int remoteDeviceId_{-1};
   uint32_t engineId_{0};
@@ -171,11 +176,13 @@ class AnvilLib {
   // queue budget. Track usage to refuse a mesh that cannot fit before KFD returns NO_MEMORY part
   // way through building it.
   uint32_t numSdmaQueuesPerEngine_{0};
-  // Queues already taken by this process, counted across the usable even engines rather than per
-  // engine. connect() compares this against usableSdmaEngines(numSdmaEnginesTotal_) *
-  // numSdmaQueuesPerEngine_; an engine-pinned rejection fails instead of retrying on an
-  // unconstrained engine.
+  // Queues this process uses, counted across all engines. Parked queues are not counted: they sit
+  // on the slots sdmaQueueBudget() already leaves out. connect() compares this against that budget.
+  // A single engine filling up first is caught by KFD rejecting the engine-pinned create.
   uint32_t queuesUsedTotal_{0};
+  // Queues created on GPU-unreachable doorbell slots. KFD hands out an engine's first free slot, so
+  // they stay held until disconnect() to keep later creates on reachable slots.
+  std::vector<std::unique_ptr<SdmaQueue>> parkedQueues_;
   HSAKMT_STATUS lastQueueStatus_{HSAKMT_STATUS_SUCCESS};
   // Selection in progress, so getOamId can report why the map was consulted without the caller
   // threading the same values back down.
