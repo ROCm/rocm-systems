@@ -299,6 +299,7 @@ if(BUILD_TESTS)
     GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    NonuniformHostLayoutTests.cpp
     RasDiagnosticsTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp

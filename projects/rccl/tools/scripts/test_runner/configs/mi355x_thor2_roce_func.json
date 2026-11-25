@@ -2109,6 +2109,16 @@
           "name": "CollTraceUtils.getSizeMb",
           "description": "CollTrace utils get size MB",
           "test_filter": "CollTraceUtilsTest.getSizeMbTest"
+        },
+        {
+          "name": "NonuniformHostLayout.DuplicateGpuAfterNonuniformHost",
+          "description": "NCCL 71ef2f4: init peer checks run for every rank after hosts turn out nonuniform",
+          "test_filter": "NonuniformHostLayout.DuplicateGpuAfterNonuniformHost"
+        },
+        {
+          "name": "NonuniformHostLayout.DuplicateGpuUniformHosts",
+          "description": "Duplicate GPU on one host is refused with uniform hosts",
+          "test_filter": "NonuniformHostLayout.DuplicateGpuUniformHosts"
         }
       ]
     },

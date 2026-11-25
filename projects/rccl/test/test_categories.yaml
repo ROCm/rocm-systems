@@ -126,6 +126,7 @@ test_categories:
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"
       - "HipProbe.*"
+      - "NonuniformHostLayout.*"
     exclude_windows:
       - "*"
     labels:
