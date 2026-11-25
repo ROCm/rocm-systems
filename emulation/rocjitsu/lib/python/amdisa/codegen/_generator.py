@@ -17931,7 +17931,6 @@ class CodeGenerator:
                     ('rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h', False),
                     ('rocjitsu/isa/arch/amdgpu/shared/division.h', False),
-                    ('rocjitsu/isa/arch/amdgpu/shared/cube.h', False),
                     ('util/except.h', False),
                 ]
                 if self.isa_spec.arch_name == 'cdna1':
@@ -18400,6 +18399,11 @@ class CodeGenerator:
                 )
                 from amdisa.codegen.execute.rj_arith_scalar import supports_scalar
                 from amdisa.codegen.execute.rj_arith_graphics import CUBE_NAMES
+
+                if any(i.name in CUBE_NAMES | {'V_MULLIT_F32'} for i in all_insts):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
                 from amdisa.codegen.execute.rj_arith_float import (
                     SCALED_FP6_WIDEN_NAMES,
                     WIDE_SCALED_WIDEN_GFX1250_NAMES,
@@ -19319,7 +19323,6 @@ class CodeGenerator:
                     'gfx12_dot2_packed16',
                     'gfx12_dot4_f32_fp8',
                 ),
-                'rocjitsu/isa/arch/amdgpu/shared/cube.h': 'cube::',
                 'rocjitsu/isa/arch/amdgpu/shared/division.h': (
                     'div_scale(',
                     'div_fmas(',
@@ -19803,7 +19806,6 @@ class CodeGenerator:
             '#include "rocjitsu/isa/arch/amdgpu/shared/lds_direct.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"',
             '#include "rocjitsu/isa/arch/amdgpu/shared/division.h"',
-            '#include "rocjitsu/isa/arch/amdgpu/shared/cube.h"',
             *simd_extra_includes(),
             '#include "util/data_types.h"',
             '#include "util/except.h"',
