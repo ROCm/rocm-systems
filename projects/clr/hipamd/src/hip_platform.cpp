@@ -118,13 +118,19 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   // So this calculates how many blocks we can fit.
   const int aligned_input_size = amd::alignUp(inputBlockSize, wrkGrpInfo->wavefrontSize_);
   *maxBlocksPerCU = alu_limited_threads / aligned_input_size;
-  // Also cap by physical wavefront-slot limit: each CU can only schedule a
-  // fixed number of wavefronts, so the number of blocks per CU is bounded by
-  // floor(total_wave_slots / waves_per_block).  This ensures that cooperative
-  // launches sized from the occupancy API never exceed physical residency.
+  // Cap by physical wavefront-slot limit.  Compute per physical CU first
+  // (using the base simdPerCU, not the WGP-doubled value) to avoid the
+  // rounding error where floor(2N/W) > 2*floor(N/W).  Then scale to the
+  // kernel's scheduling unit (WGP or CU).
   const uint32_t waves_per_block = aligned_input_size / wrkGrpInfo->wavefrontSize_;
-  const int wave_slot_limit_per_cu = waves_per_block > 0
-      ? static_cast<int>(alu_occupancy / waves_per_block) : INT_MAX;
+  const size_t phys_simds = device.isa().simdPerCU();  // per physical CU, not WGP-doubled
+  const size_t phys_occ = phys_simds * std::min(MaxWavesPerSimd, GprWaves);
+  int wave_slot_limit_per_cu = waves_per_block > 0
+      ? static_cast<int>(phys_occ / waves_per_block) : INT_MAX;
+  // Scale to WGP if the kernel uses WGP mode (2 physical CUs per scheduling unit)
+  if (wrkGrpInfo->isWGPMode_) {
+    wave_slot_limit_per_cu *= 2;
+  }
   *maxBlocksPerCU = std::min(*maxBlocksPerCU, wave_slot_limit_per_cu);
   // Unless those blocks are further constrained by LDS size.
   *maxBlocksPerCU = std::min(*maxBlocksPerCU, lds_occupancy_wgs);
@@ -142,11 +148,12 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   // Use waves derived from bestBlockSize (not aligned_input_size) so the cap
   // matches the block size that numBlocksPerGrid is computed for.
   int bestBlocksPerCU = alu_limited_threads / (*bestBlockSize);
+  // Same physical-CU rounding as maxBlocksPerCU to keep occupancy consistent.
   const uint32_t best_waves =
       (*bestBlockSize + wrkGrpInfo->wavefrontSize_ - 1) / wrkGrpInfo->wavefrontSize_;
   if (best_waves > 0) {
-    const int best_wave_limit = static_cast<int>(
-        simdPerCU * std::min(MaxWavesPerSimd, GprWaves) / best_waves);
+    int best_wave_limit = static_cast<int>(phys_occ / best_waves);
+    if (wrkGrpInfo->isWGPMode_) best_wave_limit *= 2;
     if (best_wave_limit > 0) {
       bestBlocksPerCU = std::min(bestBlocksPerCU, best_wave_limit);
     }

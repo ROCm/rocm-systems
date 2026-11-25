@@ -431,29 +431,16 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     if (err != hipSuccess) {
       return err;
     }
-    // Safety cap: compute physical CU-level limit to prevent grid.sync()
-    // deadlock. Use per-physical-CU wavefront slots, then scale to the
-    // device's scheduling units.  This avoids the WGP rounding error where
-    // floor(2N/W) > 2*floor(N/W) lets through oversized grids.
+    // num_blocks is the per-scheduling-unit occupancy for the actual block_size,
+    // already accounting for registers, LDS, and wave slots.  Use it directly
+    // with the CU count as the cooperative grid limit, since max_blocks_per_grid
+    // is computed for bestBlockSize which may differ from the launch block_size.
     {
-      const auto* kernel = hip::asKernel(f);
-      const auto* wgi = kernel->getDeviceKernel(*device)->workGroupInfo();
-      const uint32_t wf = wgi->wavefrontSize_;
-      const uint32_t waves = (block_size + wf - 1) / wf;
-      if (waves > 0) {
-        const size_t MaxWavesPerSimd = (device->isa().versionMajor() <= 9) ? 8 : 16;
-        // Always compute in physical CU units first (simdPerCU without WGP doubling)
-        const uint32_t phys_simds_per_cu = device->isa().simdPerCU();
-        const uint32_t phys_slots_per_cu = phys_simds_per_cu * MaxWavesPerSimd;
-        const uint32_t blocks_per_phys_cu = phys_slots_per_cu / waves;
-        // Physical CU count: undo WGP halving
-        uint32_t phys_cus = device->info().maxComputeUnits_;
-        if (phys_cus == 0) phys_cus = device->info().maxPhysicalComputeUnits_;
-        if (device->settings().enableWgpMode_) phys_cus *= 2;
-        const int hw_max = static_cast<int>(phys_cus * blocks_per_phys_cu);
-        if (hw_max > 0) {
-          max_blocks_per_grid = std::min(max_blocks_per_grid, hw_max);
-        }
+      uint32_t cu_count = device->info().maxComputeUnits_;
+      if (cu_count == 0) cu_count = device->info().maxPhysicalComputeUnits_;
+      const int actual_max = num_blocks * static_cast<int>(cu_count);
+      if (actual_max >= 0) {
+        max_blocks_per_grid = std::min(max_blocks_per_grid, actual_max);
       }
     }
     if (((launch_params.global_.product()) / block_size) > unsigned(max_blocks_per_grid)) {
