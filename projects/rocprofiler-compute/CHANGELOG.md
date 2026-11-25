@@ -15,7 +15,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed Uncached Read Traffic (17.2.3) going above 100% on gfx908, gfx90a, gfx942 and gfx950.
+
 * Fixed MI200 profiling collecting the L2-Fabric write counters twice under two names, which took one extra profiling pass.
+
+* Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life reading far above the real wave count.
 
 * Fixed the percent of peak of *L2 Cache BW* in the System Speed of Light panel on MI200 (gfx90a). It was twice the real value.
 
