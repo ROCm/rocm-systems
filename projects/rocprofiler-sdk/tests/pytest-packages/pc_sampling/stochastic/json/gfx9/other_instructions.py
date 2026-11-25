@@ -63,7 +63,7 @@ def validate_valu_instructions(sample_records):
             ):
                 assert (
                     snapshot["arb_state_issue_valu"] == 1
-                    or snapshot["arb_state_stall_matrix"] == 1
+                    or snapshot["arb_state_issue_matrix"] == 1
                 ), "VALU or Matrix instruction should be issued"
 
 
