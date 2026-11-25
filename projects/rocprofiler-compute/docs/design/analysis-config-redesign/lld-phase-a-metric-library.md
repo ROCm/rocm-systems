@@ -680,11 +680,9 @@ compute_thruput_util:
 - **Single-pass check.** `tools/validate_metric_library.py` uses
   `get_counters_for_metrics()` to confirm that each set's counters fit in one pass on
   every GPU arch the directory serves.
-- **Transition.** Production `--set` and `--list-sets` keep reading
-  `profile_configs/sets/` until they read `metric_library/{arch}/sets.yaml`. The numeric
-  ids select view rows by position, and `validate_sets_metric_ids.py` checks them against
-  the views. An arch has no set whose metrics it cannot compute: gfx908 has no MFMA
-  counters, so it has no `compute_thruput_flops` set.
+- **Production.** `--set` and `--list-sets` read `metric_library/{arch}/sets.yaml`; the
+  numeric set files are removed. An arch has no set whose metrics it cannot compute:
+  gfx908 has no MFMA counters, so it has no `compute_thruput_flops` set.
 
 ### Built-in variable migration
 
