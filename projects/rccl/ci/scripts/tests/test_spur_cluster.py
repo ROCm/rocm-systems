@@ -65,11 +65,25 @@ class ManifestTest(TempWork):
             self.assertEqual(env["NCCL_IB_HCA"].split(","),
                              [f"ionic_{i}:1" for i in range(8)])
             self.assertEqual(env["NCCL_IB_GID_INDEX"], "1")
-            self.assertEqual(env["NCCL_IB_TC"], "104")
-            self.assertEqual(env["NCCL_IB_FIFO_TC"], "192")
+            self.assertEqual(env["NCCL_IB_DISABLE"], "0")
             self.assertEqual(env["RCCL_IB_QPS_PER_P2P"], "4")
+            self.assertEqual(env["RCCL_USE_AMD_SMI_LIB"], "1")
+            self.assertEqual(env["NCCL_TOPO_FILE"],
+                             "/etc/crusoe/rccl_topo/mi355x-288gb-ib.xml")
             self.assertEqual(env["NCCL_IGNORE_CPU_AFFINITY"], "1")
             self.assertEqual(env["GLOO_SOCKET_IFNAME"], "ens3")
+            for unset in ("NCCL_NET", "NCCL_NET_PLUGIN", "NCCL_IB_TC",
+                          "NCCL_IB_FIFO_TC", "RCCL_FORCE_ENABLE_DMABUF"):
+                self.assertNotIn(unset, env)
+
+    def test_topology_file_mounted_read_only(self):
+        opts = self.manifest(CRUSOE)["built_models"]["overlay"][
+            "additional_docker_run_options"]
+        topo_dir = os.path.dirname(CRUSOE["nccl_env"]["NCCL_TOPO_FILE"])
+        self.assertIn(f" -v {topo_dir}:{topo_dir}:ro", opts)
+        ruby_opts = self.manifest(RUBY)["built_models"]["overlay"][
+            "additional_docker_run_options"]
+        self.assertNotIn(topo_dir, ruby_opts)
 
 
 class AllocationTest(TempWork):

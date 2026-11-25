@@ -445,22 +445,23 @@ CLUSTER_CONFIGS = {
         "mount_host_ib_libs": False,
         # The nodes' docker-authz plugin refuses the whole run over either one.
         "docker_run_options_denied": ["--privileged", "-v /run/udev:/run/udev:ro"],
+        # Bind-mounted read-only at the same path.
+        "docker_ro_mounts": ["/etc/crusoe/rccl_topo"],
         "nccl_env": {
-            "NCCL_NET": "IB",
             "NCCL_IB_DISABLE": "0",
             "NCCL_IB_HCA": "ionic_0:1,ionic_1:1,ionic_2:1,ionic_3:1,ionic_4:1,ionic_5:1,ionic_6:1,ionic_7:1",
             "NCCL_IB_GID_INDEX": "1",
-            # The fabric's RoCE traffic classes: data QPs, then the FIFO QP.
-            "NCCL_IB_TC": "104",
-            "NCCL_IB_FIFO_TC": "192",
             # P2P connections otherwise get a single QP, and 4-node all-to-all
             # then fails with ibv receive-completion errors.
             "RCCL_IB_QPS_PER_P2P": "4",
             "NCCL_SOCKET_IFNAME": "ens3",
             "NCCL_DEBUG": "WARN",
-            "NCCL_NET_PLUGIN": "none",
             "RCCL_AINIC_ROCE": "1",
-            "RCCL_FORCE_ENABLE_DMABUF": "1",
+            "RCCL_USE_AMD_SMI_LIB": "1",
+            # The VMs flatten PCIe: without the hosts' topology file every
+            # GPU-NIC path looks like it crosses the host bridge, and RCCL
+            # builds 2 rings across nodes instead of 64 channels.
+            "NCCL_TOPO_FILE": "/etc/crusoe/rccl_topo/mi355x-288gb-ib.xml",
             "NCCL_DMABUF_ENABLE": "1",
             "NCCL_NET_GDR_LEVEL": "SYS",
             "RDMAV_DRIVERS": "ionic",
@@ -1649,6 +1650,8 @@ def generate_manifest(
     docker_env_vars = {
         **nccl_env,
         "NCCL_DEBUG": "WARN",
+        # madengine's multi-node SLURM preset sets NCCL_IB_DISABLE=1 for a run
+        # that leaves it unset, and RCCL then runs over TCP sockets.
         "NCCL_IB_DISABLE": "0",
         "NCCL_TIMEOUT": "900",
         "IBV_SHOW_WARNINGS": "1",
@@ -1678,6 +1681,8 @@ def generate_manifest(
             " -v /usr/lib64/libibumad.so.3"
             ":/usr/lib/x86_64-linux-gnu/libibumad.so.3:ro"
         )
+    for path in cluster_config.get("docker_ro_mounts", ()):
+        docker_run_opts += f" -v {path}:{path}:ro"
 
     if family == "sglang-disagg":
         # The launcher writes its server logs, and the RCCL banner the
