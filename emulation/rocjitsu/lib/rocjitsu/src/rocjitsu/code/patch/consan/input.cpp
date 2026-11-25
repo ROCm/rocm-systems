@@ -176,18 +176,25 @@ struct ApertureWords {
 struct FlatPointers {
   ApertureWords shared, non_group, selected;
   void transfer(const Instruction &inst, const InstDefUse &effects, ExecState exec) {
-    // Exactly one selected SGPR high word comes from the shared aperture;
-    // a selection between two unknowns supplies no LDS premise.
+    // Qualify a shared high word paired with an unknown SGPR or inline zero
+    // (the null arm of a generic LDS pointer select).
     std::optional<RegisterRef> selected_dst;
     if (inst.amdgpu_operation() == amdgpu::Operation::S_CSELECT_B32 &&
         inst.num_src_operands() >= 2 && inst.num_dst_operands() == 1) {
-      const auto lhs = inst.src_operand(0)->to_register_ref();
-      const auto rhs = inst.src_operand(1)->to_register_ref();
+      const auto shared_with_alternative = [&](const Operand &source, const Operand &alternative) {
+        const auto reg = source.to_register_ref();
+        if (!reg || reg->cls != RegClass::SGPR || !shared.active.contains(*reg))
+          return false;
+        if (const auto other = alternative.to_register_ref())
+          return other->cls == RegClass::SGPR && !shared.active.contains(*other) &&
+                 !non_group.active.contains(*other);
+        return alternative.has_register_selector() && alternative.const_value() == 0;
+      };
+      const Operand &lhs = *inst.src_operand(0);
+      const Operand &rhs = *inst.src_operand(1);
       const auto dst = inst.dst_operand(0)->to_register_ref();
-      if (dst && dst->cls == RegClass::SGPR && lhs && rhs && lhs->cls == RegClass::SGPR &&
-          rhs->cls == RegClass::SGPR &&
-          shared.active.contains(*lhs) != shared.active.contains(*rhs) &&
-          !non_group.active.contains(*lhs) && !non_group.active.contains(*rhs))
+      if (dst && dst->cls == RegClass::SGPR &&
+          (shared_with_alternative(lhs, rhs) || shared_with_alternative(rhs, lhs)))
         selected_dst = dst;
     }
     shared.transfer(inst, effects, exec, ApertureSelector::SharedBase);

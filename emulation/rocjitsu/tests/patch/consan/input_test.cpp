@@ -66,6 +66,12 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
       ASSERT_EQ(input.value().accesses.size(), 1u);
       EXPECT_EQ(input.value().accesses.front().origin, AccessOrigin::GroupFlat);
       EXPECT_EQ(input.value().accesses.front().assumption, premise);
+      if (premise == FlatAssumption::SelectedSharedHigh) {
+        EXPECT_TRUE(build_input_program(candidate, target, "lds_producer_consumer", error, {},
+                                        FlatPolicy::Strict)
+                        .failed());
+        EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+      }
     } else {
       EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
     }
@@ -101,6 +107,15 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
   check({shared, copy, 0xbf840001, clobber}, false); // conditional branch bypasses the clobber
   check({shared, 0xbe8601eb, select, copy}, true);   // both high words are shared
   check({shared, select, copy}, true, FlatAssumption::SelectedSharedHigh);
+  constexpr uint32_t shared_or_zero = 0x85058005; // s_cselect_b32 s5, s5, 0
+  constexpr uint32_t zero_or_shared = 0x85050580; // s_cselect_b32 s5, 0, s5
+  check({shared, shared_or_zero, copy}, true, FlatAssumption::SelectedSharedHigh);
+  check({shared, zero_or_shared, copy}, true, FlatAssumption::SelectedSharedHigh);
+  check({shared_or_zero, copy}, false);             // no shared input
+  check({0xbe8401ed, shared_or_zero, copy}, false); // private high or zero
+  check({shared, 0x85058105, copy}, false);         // shared high or inline one
+  check({shared, 0x8505ff05, 0, copy}, false);      // shared high or extended literal zero
+  check({shared, 0x8505ff05, 128, copy}, false);    // payload matches the inline selector
   check({select, copy}, false);                     // neither high word is known shared
   check({shared, 0xbe8601ed, select, copy}, false); // known private alternative in s7
   check({shared, 0xbe860100, select, copy}, false); // known kernarg high in s7
@@ -109,8 +124,11 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
 }
 
 TEST(ConSanInput, StrictRejectsConditionalOnlyImageAndRevalidatesTheSavedPolicy) {
-  auto image =
-      test::read_fixture(test::target_fixture_path({"gfx950", 64}, "width-flat-load-likely"));
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-likely");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  auto image = test::read_fixture(fixture);
   const auto &target = *target_profile(950);
   InputError error;
   const auto mixed = build_input_program(image, target, "lds_producer_consumer", error);

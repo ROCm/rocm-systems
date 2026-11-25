@@ -244,9 +244,12 @@ gfx942, gfx950, and gfx1100 use 8-byte instructions. gfx1201 and gfx1250 use
 12-byte VFLAT instructions with a signed displacement.
 
 The default policy also admits a scalar pointer-high select between a known
-shared high word and an unknown one. Its range and findings are conditional on
-the shared high word being selected. The guest executes the original
-instruction on either branch.
+shared high word and either an unknown SGPR or the inline zero used in a
+null-pointer check. Its range and findings are conditional on the shared high
+word being selected. The guest executes the original instruction on either
+branch. If the other arm selects a valid global address, its sampled low word
+can fall outside the LDS allocation. Replay then reports
+`invalid_or_out_of_bounds_effective_range` and marks coverage incomplete.
 
 Append `--flat-policy=strict` to the prepare command to observe proven sites
 only. Known global/private accesses and unresolved pointers are excluded under
