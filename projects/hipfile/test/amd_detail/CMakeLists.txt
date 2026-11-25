@@ -151,3 +151,18 @@ set_tests_properties(hipfileread_cpu_visibility_fallback_test PROPERTIES
     ENVIRONMENT "HIPFILE_FORCE_COMPAT_MODE=true"
     SKIP_REGULAR_EXPRESSION "VRAM is not CPU-accessible"
 )
+
+hipfile_add_test_executable(
+    NAME async_mt
+    DEPS hipfile
+    SRCS "async_mt.cpp"
+    SYSINCLS ${HIPFILE_AMD_SOURCE_PATH} ${HIPFILE_INCLUDE_PATH}
+)
+
+target_link_libraries(async_mt PRIVATE Threads::Threads)
+
+add_test(
+    NAME async_mt_test
+    COMMAND gdb --batch --quiet -ex run -ex "thread apply all bt full" --return-child-result --args $<TARGET_FILE:async_mt>
+)
+set_tests_properties(async_mt_test PROPERTIES LABELS "stress;internal")

@@ -67,6 +67,24 @@ jobs:
           - id: gfx1100-01
             label: lstt-gfx1100
             gfx: gfx1100
+          # These two GPUs are on one machine whose single runner carries both
+          # labels, so their rows run one after the other on it.
+          - id: gfx908-01
+            label: lstt-gfx908
+            gfx: gfx908
+          - id: gfx1030-01
+            label: lstt-gfx1030
+            gfx: gfx1030
+          # Same again for this machine: its runner carries lstt-gfx1201 and
+          # lstt-gfx90a. The MI210 is the second machine with that GPU, so its
+          # row takes the next number and needs its own host label, gfx90a-02.
+          - id: gfx1201-01
+            label: lstt-gfx1201
+            gfx: gfx1201
+          - id: gfx90a-02
+            label: lstt-gfx90a
+            host_label: gfx90a-02
+            gfx: gfx90a
     runs-on:
       - ${{ matrix.label }}
       - ${{ matrix.host_label || matrix.label }}
@@ -96,6 +114,13 @@ jobs:
           GFX: ${{ matrix.gfx }}
         run: python3 .github/scripts/lstt_hw_health.py --id "$ID" --gfx "$GFX"
 
+      # The container runs as root, so give the shared workspace back to the
+      # runner user or the next job on this runner cannot clean it.
+      - name: Give the workspace back to the runner user
+        if: always()
+        shell: bash
+        run: chown -R "$(stat -c '%u:%g' "$RUNNER_TEMP")" "$GITHUB_WORKSPACE"
+
   # Host level, no container: ipmitool and /dev/ipmi0 are the host's.
   bmc:
     name: ${{ matrix.id }} BMC
@@ -112,14 +137,22 @@ jobs:
       - ${{ matrix.host_label }}
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: .github/scripts/lstt_hw_health.py
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
+      # No checkout: this job runs as the runner user in the workspace that other
+      # jobs on this runner share, and a root container job can leave files there
+      # that stop a checkout. The one script is fetched at this commit instead,
+      # into the runner's own temp folder.
+      - name: Fetch the check script
+        shell: bash
+        env:
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          curl -fsSL --retry 3 \
+            "https://raw.githubusercontent.com/${REPO}/${SHA}/.github/scripts/lstt_hw_health.py" \
+            -o "$RUNNER_TEMP/lstt_hw_health.py"
 
       - name: BMC reachability
         shell: bash
         env:
           ID: ${{ matrix.id }}
-        run: python3 .github/scripts/lstt_hw_health.py --id "$ID" --gfx unused --bmc-only
+        run: python3 "$RUNNER_TEMP/lstt_hw_health.py" --id "$ID" --gfx unused --bmc-only

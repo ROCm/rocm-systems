@@ -37,9 +37,11 @@ namespace simdojo {
 template <uint32_t NumSets, uint32_t Associativity> class LRUPolicy {
 public:
   LRUPolicy() : order_(static_cast<size_t>(NumSets) * Associativity) {
-    for (uint32_t s = 0; s < NumSets; ++s)
-      for (uint32_t w = 0; w < Associativity; ++w)
+    for (uint32_t s = 0; s < NumSets; ++s) {
+      for (uint32_t w = 0; w < Associativity; ++w) {
         order_[static_cast<size_t>(s) * Associativity + w] = static_cast<WayIndex>(w);
+      }
+    }
   }
 
   /// @brief Promote a way to MRU position within a set.
@@ -48,11 +50,14 @@ public:
   void access(uint32_t set, uint32_t way) {
     WayIndex *o = &order_[static_cast<size_t>(set) * Associativity];
     uint32_t pos = 0;
-    for (; pos < Associativity; ++pos)
-      if (o[pos] == way)
+    for (; pos < Associativity; ++pos) {
+      if (o[pos] == way) {
         break;
-    for (uint32_t i = pos; i + 1 < Associativity; ++i)
+      }
+    }
+    for (uint32_t i = pos; i + 1 < Associativity; ++i) {
       o[i] = o[i + 1];
+    }
     o[Associativity - 1] = static_cast<WayIndex>(way);
   }
 
@@ -165,19 +170,23 @@ public:
   /// @brief Return whether every byte in one line-relative range is present.
   static bool bytes_valid(const CacheTag &tag, uint32_t offset, uint32_t size) {
     assert(offset <= LINE_SIZE && size <= LINE_SIZE - offset);
-    if (size == 0)
+    if (size == 0) {
       return true;
+    }
     // Missing-byte fills probe individual bytes; retain their single-bit test.
-    if (size == 1)
+    if (size == 1) {
       return (tag.valid_bytes[offset / 64] & (uint64_t{1} << (offset % 64))) != 0;
+    }
     const uint32_t word = offset / 64;
     const uint32_t shift = offset % 64;
     const uint32_t first_size = std::min(size, 64u - shift);
     const uint64_t first_mask = util::mask<uint64_t>(first_size) << shift;
-    if ((tag.valid_bytes[word] & first_mask) != first_mask)
+    if ((tag.valid_bytes[word] & first_mask) != first_mask) {
       return false;
-    if (first_size == size)
+    }
+    if (first_size == size) {
       return true;
+    }
     const uint64_t second_mask = util::mask<uint64_t>(size - first_size);
     return (tag.valid_bytes[word + 1] & second_mask) == second_mask;
   }
@@ -188,14 +197,16 @@ public:
   /// @brief Mark one line-relative byte range present.
   static void mark_valid_bytes(CacheTag &tag, uint32_t offset, uint32_t size) {
     assert(offset <= LINE_SIZE && size <= LINE_SIZE - offset);
-    if (size == 0)
+    if (size == 0) {
       return;
+    }
     const uint32_t word = offset / 64;
     const uint32_t shift = offset % 64;
     const uint32_t first_size = std::min(size, 64u - shift);
     tag.valid_bytes[word] |= util::mask<uint64_t>(first_size) << shift;
-    if (first_size != size)
+    if (first_size != size) {
       tag.valid_bytes[word + 1] |= util::mask<uint64_t>(size - first_size);
+    }
   }
 
   /// @brief Look up an address in the cache.
@@ -208,37 +219,50 @@ public:
   /// @retval false Cache miss.
   bool lookup(uint64_t addr, CacheTag **tag_out = nullptr, uint32_t vmid = 0,
               uint64_t address_space_identity = 0) {
+    const Allocation line = lookup_with_data(addr, vmid, address_space_identity);
+    if (line.tag && tag_out) {
+      *tag_out = line.tag;
+    }
+    return line.tag != nullptr;
+  }
+
+  /// Look up and promote a line, borrowing its tag and bytes together.
+  Allocation lookup_with_data(uint64_t addr, uint32_t vmid = 0,
+                              uint64_t address_space_identity = 0) {
     uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
-      if (!touched_sets_[set])
-        return false;
+    if constexpr (LazyStorage) {
+      if (!touched_sets_[set]) {
+        return {};
+      }
+    }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
         policy_.access(set, w);
-        if (tag_out)
-          *tag_out = &t;
-        return true;
+        return {&t, line_data(set, w)};
       }
     }
-    return false;
+    return {};
   }
 
   /// Inspect residency without changing replacement order or cache contents.
   const CacheTag *peek(uint64_t addr, uint32_t vmid = 0,
                        uint64_t address_space_identity = 0) const {
     const uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
-      if (!touched_sets_[set])
+    if constexpr (LazyStorage) {
+      if (!touched_sets_[set]) {
         return nullptr;
+      }
+    }
     const uint64_t tag = tag_bits(addr);
     for (uint32_t way = 0; way < Associativity; ++way) {
       const auto &entry = tag_at(set, way);
       if (entry.valid && entry.tag == tag && entry.vmid == vmid &&
-          entry.address_space_identity == address_space_identity)
+          entry.address_space_identity == address_space_identity) {
         return &entry;
+      }
     }
     return nullptr;
   }
@@ -274,8 +298,9 @@ public:
       auto &t = tag_at(set, w);
       if (!t.valid) {
         // Adjacent markers can share a host cache line. Write only on first use.
-        if (!touched_sets_[set])
+        if (!touched_sets_[set]) {
           touched_sets_[set] = 1;
+        }
         t.tag = tag;
         t.coherence_epoch = 0;
         t.admission_generation = 0;
@@ -291,8 +316,9 @@ public:
         t.dirty = false;
         t.coherence = CoherenceState::INVALID;
         policy_.access(set, w);
-        if (evicted_tag)
+        if (evicted_tag) {
           *evicted_tag = {};
+        }
         return {&t, line_data(set, w)};
       }
     }
@@ -300,10 +326,12 @@ public:
     // A full set is already marked, so eviction need not write its shared marker.
     uint32_t victim_way = policy_.victim(set);
     auto &vt = tag_at(set, victim_way);
-    if (evicted_tag)
+    if (evicted_tag) {
       *evicted_tag = vt;
-    if (evicted_data)
+    }
+    if (evicted_data) {
       std::memcpy(evicted_data, line_data(set, victim_way), LINE_SIZE);
+    }
 
     vt.tag = tag;
     vt.coherence_epoch = 0;
@@ -343,8 +371,9 @@ public:
         break;
       }
     }
-    if (!has_invalid_way && tag_at(set, policy_.victim(set)).dirty)
+    if (!has_invalid_way && tag_at(set, policy_.victim(set)).dirty) {
       return {};
+    }
     return allocate_with_data(addr, vmid, evicted_tag, evicted_data, address_space_identity);
   }
 
@@ -352,10 +381,27 @@ public:
   /// @details The caller must hold the set's synchronization through its allocation.
   const CacheTag *full_set_victim(uint64_t addr) const {
     const uint32_t set = set_index(addr);
-    for (uint32_t way = 0; way < Associativity; ++way)
-      if (!tag_at(set, way).valid)
+    for (uint32_t way = 0; way < Associativity; ++way) {
+      if (!tag_at(set, way).valid) {
         return nullptr;
+      }
+    }
     return &tag_at(set, policy_.victim(set));
+  }
+
+  /// Invalidate a known resident way without changing replacement order.
+  static void invalidate_tag(CacheTag &tag) {
+    tag.coherence_epoch = 0;
+    tag.admission_generation = 0;
+    tag.cache_identity = 0;
+    tag.address_space_identity = 0;
+    tag.backing_address = 0;
+    tag.mapping_attributes = 0;
+    tag.local_backing_epoch = 0;
+    tag.local_line_epoch = 0;
+    tag.valid = false;
+    tag.dirty = false;
+    tag.coherence = CoherenceState::INVALID;
   }
 
   /// @brief Invalidate the cache line for an address (if present).
@@ -363,25 +409,17 @@ public:
   /// @param vmid Owning process address space.
   void invalidate(uint64_t addr, uint32_t vmid = 0, uint64_t address_space_identity = 0) {
     uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
-      if (!touched_sets_[set])
+    if constexpr (LazyStorage) {
+      if (!touched_sets_[set]) {
         return;
+      }
+    }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
-        t.coherence_epoch = 0;
-        t.admission_generation = 0;
-        t.cache_identity = 0;
-        t.address_space_identity = 0;
-        t.backing_address = 0;
-        t.mapping_attributes = 0;
-        t.local_backing_epoch = 0;
-        t.local_line_epoch = 0;
-        t.valid = false;
-        t.dirty = false;
-        t.coherence = CoherenceState::INVALID;
+        invalidate_tag(t);
         return;
       }
     }
@@ -391,24 +429,16 @@ public:
   /// @param addr The memory address whose cache line to invalidate.
   void invalidate_all_vmids(uint64_t addr) {
     uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
-      if (!touched_sets_[set])
+    if constexpr (LazyStorage) {
+      if (!touched_sets_[set]) {
         return;
+      }
+    }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag) {
-        t.coherence_epoch = 0;
-        t.admission_generation = 0;
-        t.cache_identity = 0;
-        t.address_space_identity = 0;
-        t.backing_address = 0;
-        t.mapping_attributes = 0;
-        t.local_backing_epoch = 0;
-        t.local_line_epoch = 0;
-        t.valid = false;
-        t.dirty = false;
-        t.coherence = CoherenceState::INVALID;
+        invalidate_tag(t);
       }
     }
   }
@@ -421,15 +451,18 @@ public:
       // Full-cache maintenance already excludes concurrent set accesses.
       // Scan empty marker groups together without changing fill-side writes.
       std::memcpy(&touched, touched_sets_.data() + first, end - first);
-      if (touched == 0)
+      if (touched == 0) {
         continue;
+      }
       for (uint32_t s = first; s < end; ++s) {
-        if (!touched_sets_[s])
+        if (!touched_sets_[s]) {
           continue;
+        }
         for (uint32_t w = 0; w < Associativity; ++w) {
           auto &t = tag_at(s, w);
-          if (vmid && t.vmid != *vmid)
+          if (vmid && t.vmid != *vmid) {
             continue;
+          }
           t.coherence_epoch = 0;
           t.admission_generation = 0;
           t.cache_identity = 0;
@@ -442,8 +475,9 @@ public:
           t.dirty = false;
           t.coherence = CoherenceState::INVALID;
         }
-        if (!vmid)
+        if (!vmid) {
           touched_sets_[s] = 0;
+        }
       }
     }
   }
@@ -458,8 +492,9 @@ public:
   /// The caller must exclude concurrent accesses during this traversal.
   template <typename Predicate> void invalidate_clean_if(Predicate matches) {
     for (uint32_t set = 0; set < NumSets; ++set) {
-      if (!touched_sets_[set])
+      if (!touched_sets_[set]) {
         continue;
+      }
       for (uint32_t way = 0; way < Associativity; ++way) {
         CacheTag &tag = tag_at(set, way);
         if (tag.valid && !tag.dirty && matches(tag)) {
@@ -479,11 +514,12 @@ public:
   void read_line(uint64_t addr, uint8_t *dst, uint32_t offset, uint32_t size, uint32_t vmid = 0,
                  uint64_t address_space_identity = 0) const {
     uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
+    if constexpr (LazyStorage) {
       if (!touched_sets_[set]) {
         assert(false && "read_line called on a miss");
         return;
       }
+    }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       const auto &t = tag_at(set, w);
@@ -513,9 +549,11 @@ public:
   const uint8_t *line_data_for_read_if(uint64_t addr, uint32_t vmid,
                                        uint64_t address_space_identity, Predicate accept) {
     uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
-      if (!touched_sets_[set])
+    if constexpr (LazyStorage) {
+      if (!touched_sets_[set]) {
         return nullptr;
+      }
+    }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -536,23 +574,28 @@ public:
   void write_line(uint64_t addr, const uint8_t *src, uint32_t offset, uint32_t size,
                   uint32_t vmid = 0, uint64_t address_space_identity = 0) {
     uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
+    if constexpr (LazyStorage) {
       if (!touched_sets_[set]) {
         assert(false && "write_line called on a miss");
         return;
       }
+    }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
-        assert(offset + size <= LINE_SIZE);
-        std::memcpy(line_data(set, w) + offset, src, size);
-        mark_valid_bytes(t, offset, size);
+        write_line({&t, line_data(set, w)}, src, offset, size);
         return;
       }
     }
     assert(false && "write_line called on a miss");
+  }
+
+  static void write_line(Allocation line, const uint8_t *src, uint32_t offset, uint32_t size) {
+    assert(offset <= LINE_SIZE && size <= LINE_SIZE - offset);
+    std::memcpy(line.data + offset, src, size);
+    mark_valid_bytes(*line.tag, offset, size);
   }
 
   /// @brief Fill an entire cache line with data (used after allocate on a miss).
@@ -561,11 +604,12 @@ public:
   void fill_line(uint64_t addr, const uint8_t *data, uint32_t vmid = 0,
                  uint64_t address_space_identity = 0) {
     uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
+    if constexpr (LazyStorage) {
       if (!touched_sets_[set]) {
         assert(false && "fill_line called on a miss");
         return;
       }
+    }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -585,25 +629,31 @@ public:
   void fill_missing_bytes(uint64_t addr, const uint8_t *data, uint32_t vmid = 0,
                           uint64_t address_space_identity = 0) {
     uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
+    if constexpr (LazyStorage) {
       if (!touched_sets_[set]) {
         assert(false && "fill_missing_bytes called on a miss");
         return;
       }
+    }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
       if (t.valid && t.tag == tag && t.vmid == vmid &&
           t.address_space_identity == address_space_identity) {
-        uint8_t *line = line_data(set, w);
-        for (uint32_t byte = 0; byte < LINE_SIZE; ++byte)
-          if (!bytes_valid(t, byte, 1))
-            line[byte] = data[byte];
-        t.valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
+        fill_missing_bytes({&t, line_data(set, w)}, data);
         return;
       }
     }
     assert(false && "fill_missing_bytes called on a miss");
+  }
+
+  static void fill_missing_bytes(Allocation line, const uint8_t *data) {
+    for (uint32_t byte = 0; byte < LINE_SIZE; ++byte) {
+      if (!bytes_valid(*line.tag, byte, 1)) {
+        line.data[byte] = data[byte];
+      }
+    }
+    line.tag->valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
   }
 
   /// @brief Return a mutable pointer to the data for a cache line (must be a hit).
@@ -614,9 +664,11 @@ public:
   uint8_t *line_data_for_write(uint64_t addr, uint32_t vmid = 0,
                                uint64_t address_space_identity = 0) {
     uint32_t set = set_index(addr);
-    if constexpr (LazyStorage)
-      if (!touched_sets_[set])
+    if constexpr (LazyStorage) {
+      if (!touched_sets_[set]) {
         return nullptr;
+      }
+    }
     uint64_t tag = tag_bits(addr);
     for (uint32_t w = 0; w < Associativity; ++w) {
       auto &t = tag_at(set, w);
@@ -634,8 +686,9 @@ public:
   /// @param fn Callback invoked for each dirty cache line.
   template <typename F> void for_each_dirty(F &&fn) {
     for (uint32_t s = 0; s < NumSets; ++s) {
-      if (!touched_sets_[s])
+      if (!touched_sets_[s]) {
         continue;
+      }
       for (uint32_t w = 0; w < Associativity; ++w) {
         auto &t = tag_at(s, w);
         if (t.valid && t.dirty) {
@@ -655,12 +708,14 @@ public:
   /// @tparam F Callable with signature void(CacheTag&, uint64_t, uint8_t*).
   template <typename F> void for_each_valid_line(F &&fn) {
     for (uint32_t s = 0; s < NumSets; ++s) {
-      if (!touched_sets_[s])
+      if (!touched_sets_[s]) {
         continue;
+      }
       for (uint32_t w = 0; w < Associativity; ++w) {
         auto &t = tag_at(s, w);
-        if (!t.valid)
+        if (!t.valid) {
           continue;
+        }
         const uint64_t line_addr =
             (t.tag << (LineSizeBits + log2_sets())) | (static_cast<uint64_t>(s) << LineSizeBits);
         fn(t, line_addr, line_data(s, w));
@@ -721,14 +776,16 @@ private:
     // allocation of the whole store.
     ZeroStorage() : elements_(LazyStorage ? nullptr : allocate()) {}
     ZeroStorage(const ZeroStorage &other) : elements_(other.elements_ ? allocate() : nullptr) {
-      if (elements_)
+      if (elements_) {
         std::memcpy(elements_.get(), other.elements_.get(), Count * sizeof(T));
+      }
     }
     ZeroStorage &operator=(const ZeroStorage &other) {
       if (this != &other) {
         if (other.elements_) {
-          if (!elements_)
+          if (!elements_) {
             elements_.reset(allocate());
+          }
           std::memcpy(elements_.get(), other.elements_.get(), Count * sizeof(T));
         } else {
           elements_.reset();
@@ -749,9 +806,11 @@ private:
     }
 
     void materialize() {
-      if constexpr (LazyStorage)
-        if (!elements_)
+      if constexpr (LazyStorage) {
+        if (!elements_) {
           elements_.reset(allocate());
+        }
+      }
     }
 
   private:
@@ -762,11 +821,13 @@ private:
     static T *allocate() {
       while (true) {
         auto *ptr = static_cast<T *>(std::calloc(Count, sizeof(T)));
-        if (ptr || Count == 0)
+        if (ptr || Count == 0) {
           return ptr;
+        }
         std::new_handler handler = std::get_new_handler();
-        if (!handler)
+        if (!handler) {
           std::abort();
+        }
         handler();
       }
     }

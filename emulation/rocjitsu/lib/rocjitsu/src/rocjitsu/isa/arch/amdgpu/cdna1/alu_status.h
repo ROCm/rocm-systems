@@ -20,17 +20,21 @@ inline void record_exceptions(amdgpu::Wavefront &wf, uint32_t causes) {
 template <bool Multiply, typename Inst>
 uint32_t classify_binary_f32(const Inst &inst, amdgpu::Wavefront &wf, const Operand &rhs) {
   const uint64_t active = wf.exec() & wf.vgpr_write_mask();
-  if (!active)
+  if (!active) {
     return 0;
+  }
   const amdgpu::RegisterAccess regs(wf);
   const unsigned denorm_mode = wf.fp_denorm_mode_f32();
-  amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   unsigned omod = amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F32>(inst, wf);
-  if constexpr (requires { inst.inst_.omod; })
+  if constexpr (requires { inst.inst_.omod; }) {
     omod = amdgpu::fp_mode::effective_omod(wf.cu().arch(), denorm_mode, wf.ieee_mode(),
                                            inst.inst_.omod);
+  }
   const float scale = omod == 1 ? 2.0f : omod == 2 ? 4.0f : omod == 3 ? 0.5f : 1.0f;
   uint32_t causes = 0;
+  // Guest rounding for the host arithmetic below; the scope also starts with clear
+  // host exception flags, which fetestexcept reads after the loop.
+  amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   for (uint64_t mask = active; mask; mask &= mask - 1) {
     const unsigned lane = std::countr_zero(mask);
     auto read = [&](const Operand &src, unsigned index) {
@@ -38,12 +42,14 @@ uint32_t classify_binary_f32(const Inst &inst, amdgpu::Wavefront &wf, const Oper
       const auto magnitude = bits & 0x7fffffffu;
       if (magnitude != 0 && magnitude < 0x00800000u) {
         causes |= 1u << 1;
-        if (!(denorm_mode & 1u))
+        if (!(denorm_mode & 1u)) {
           bits &= 0x80000000u;
+        }
       }
-      if constexpr (requires { inst.inst_.abs; })
+      if constexpr (requires { inst.inst_.abs; }) {
         bits = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(bits, index, inst.inst_.abs,
                                                                       inst.inst_.neg);
+      }
       return std::bit_cast<float>(bits);
     };
     const float lhs = read(inst.src0, 0), other = read(rhs, 1);
@@ -51,8 +57,9 @@ uint32_t classify_binary_f32(const Inst &inst, amdgpu::Wavefront &wf, const Oper
     auto flush_output = [&](float value) {
       const uint32_t raw = std::bit_cast<uint32_t>(value);
       const uint32_t magnitude = raw & amdgpu::fp_format::F32::kMagnitude;
-      if ((denorm_mode & 2u) || magnitude == 0 || magnitude >= 0x00800000u)
+      if ((denorm_mode & 2u) || magnitude == 0 || magnitude >= 0x00800000u) {
         return value;
+      }
       causes |= (1u << 4) | (1u << 5);
       return std::bit_cast<float>(raw & amdgpu::fp_format::F32::kSign);
     };

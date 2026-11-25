@@ -24,7 +24,8 @@ enum class Conversion32 {
 };
 
 // Check FP32/integer conversion results, modifiers, and aliasing for the supplied entry point.
-template <int Lanes, bool Gfx12, typename Call>
+// Exact is false for entry points that stay loose-only until their captures are reviewed.
+template <int Lanes, bool Gfx12, bool Exact = true, typename Call>
 void check_float32(Call call, Conversion32 operation) {
   int op = int(operation);
   auto input = conversion_inputs<Lanes>(32);
@@ -77,9 +78,10 @@ void check_float32(Call call, Conversion32 operation) {
           conversion_bits(actual, expected, flags, mode);
         }
       },
-      modifiers, false,
+      modifiers, Exact,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+      /*separately_tested_modifiers=*/0, /*status_free=*/false);
 }
 
 } // namespace
@@ -182,4 +184,223 @@ TEST(ConversionCvtNearestI32F32W64, Arithmetic) {
 // Check FP32/integer conversion results, modifiers, and aliasing.
 TEST(ConversionCvtFloorI32F32W64, Arithmetic) {
   check_float32<64, false>(rj_arith_v_cvt_floor_i32_f32_w64, Conversion32::Floor);
+}
+
+// gfx1201 captures: guest rounding of wide integers, saturation of infinities and finite
+// overflow, and the half-up rounding of CVT_NEAREST and the floor of CVT_FLOOR.
+TEST(ConversionFloat32Gfx12, ExactMatchesHardware) {
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_i32_w32_gfx12, 0, 0x7fffffff, 0, 0, 0,
+                                   0x4f000000);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_i32_w32_gfx12, RJ_ARITH_FP_ROUND_ZERO,
+                                   0x7fffffff, 0, 0, 0, 0x4effffff);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_u32_w32_gfx12, 0, 0xffffffff, 0, 0, 0,
+                                   0x4f800000);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_f32_u32_w32_gfx12, RJ_ARITH_FP_ROUND_ZERO,
+                                   0xffffffff, 0, 0, 0, 0x4f7fffff);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_i32_f32_w32_gfx12, 0, 0x7f7fffff, 0, 0, 0,
+                                   0x7fffffff);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_i32_f32_w32_gfx12, 0, 0xff800000, 0, 0, 0,
+                                   0x80000000);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_nearest_i32_f32_w32, 0, 0x3fc00000, 0, 0, 0, 2);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_nearest_i32_f32_w32, 0, 0x40200000, 0, 0, 0, 3);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_nearest_i32_f32_w32, 0, 0xc0200000, 0, 0, 0,
+                                   0xfffffffe);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_floor_i32_f32_w32, 0, 0xbf000000, 0, 0, 0,
+                                   0xffffffff);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_floor_i32_f32_w32, 0, 0xc0200000, 0, 0, 0,
+                                   0xfffffffd);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF32I32W32Gfx1250, Arithmetic) {
+  check_float32<32, true, false>(rj_arith_v_cvt_f32_i32_w32_gfx1250, Conversion32::SignedToFloat);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF32I32W64Gfx1250, Arithmetic) {
+  check_float32<64, true, false>(rj_arith_v_cvt_f32_i32_w64_gfx1250, Conversion32::SignedToFloat);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF32U32W32Gfx1250, Arithmetic) {
+  check_float32<32, true, false>(rj_arith_v_cvt_f32_u32_w32_gfx1250, Conversion32::UnsignedToFloat);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtF32U32W64Gfx1250, Arithmetic) {
+  check_float32<64, true, false>(rj_arith_v_cvt_f32_u32_w64_gfx1250, Conversion32::UnsignedToFloat);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtI32F32W32Gfx1250, Arithmetic) {
+  check_float32<32, true, false>(rj_arith_v_cvt_i32_f32_w32_gfx1250, Conversion32::FloatToSigned);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtI32F32W64Gfx1250, Arithmetic) {
+  check_float32<64, true, false>(rj_arith_v_cvt_i32_f32_w64_gfx1250, Conversion32::FloatToSigned);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtU32F32W32Gfx1250, Arithmetic) {
+  check_float32<32, true, false>(rj_arith_v_cvt_u32_f32_w32_gfx1250, Conversion32::FloatToUnsigned);
+}
+
+// gfx1250 inherits the gfx12 model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtU32F32W64Gfx1250, Arithmetic) {
+  check_float32<64, true, false>(rj_arith_v_cvt_u32_f32_w64_gfx1250, Conversion32::FloatToUnsigned);
+}
+
+// gfx1250 inherits the shared RDNA model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtFloorI32F32W32Gfx1250, Arithmetic) {
+  check_float32<32, false, false>(rj_arith_v_cvt_floor_i32_f32_w32_gfx1250, Conversion32::Floor);
+}
+
+// gfx1250 inherits the shared RDNA model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtFloorI32F32W64Gfx1250, Arithmetic) {
+  check_float32<64, false, false>(rj_arith_v_cvt_floor_i32_f32_w64_gfx1250, Conversion32::Floor);
+}
+
+// gfx1250 inherits the shared RDNA model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtNearestI32F32W32Gfx1250, Arithmetic) {
+  check_float32<32, false, false>(rj_arith_v_cvt_nearest_i32_f32_w32_gfx1250,
+                                  Conversion32::Nearest);
+}
+
+// gfx1250 inherits the shared RDNA model but stays loose-only pending gfx1250 captures.
+TEST(ConversionCvtNearestI32F32W64Gfx1250, Arithmetic) {
+  check_float32<64, false, false>(rj_arith_v_cvt_nearest_i32_f32_w64_gfx1250,
+                                  Conversion32::Nearest);
+}
+
+// gfx942 shares the RDNA3 model and matches MI300X captures.
+TEST(ConversionCvtF32I32W32Gfx942, Arithmetic) {
+  check_float32<32, false, true>(rj_arith_v_cvt_f32_i32_w32_gfx942, Conversion32::SignedToFloat);
+}
+
+TEST(ConversionCvtF32I32W64Gfx942, Arithmetic) {
+  check_float32<64, false, true>(rj_arith_v_cvt_f32_i32_w64_gfx942, Conversion32::SignedToFloat);
+}
+
+TEST(ConversionCvtF32U32W32Gfx942, Arithmetic) {
+  check_float32<32, false, true>(rj_arith_v_cvt_f32_u32_w32_gfx942, Conversion32::UnsignedToFloat);
+}
+
+TEST(ConversionCvtF32U32W64Gfx942, Arithmetic) {
+  check_float32<64, false, true>(rj_arith_v_cvt_f32_u32_w64_gfx942, Conversion32::UnsignedToFloat);
+}
+
+TEST(ConversionCvtI32F32W32Gfx942, Arithmetic) {
+  check_float32<32, false, true>(rj_arith_v_cvt_i32_f32_w32_gfx942, Conversion32::FloatToSigned);
+}
+
+TEST(ConversionCvtI32F32W64Gfx942, Arithmetic) {
+  check_float32<64, false, true>(rj_arith_v_cvt_i32_f32_w64_gfx942, Conversion32::FloatToSigned);
+}
+
+TEST(ConversionCvtU32F32W32Gfx942, Arithmetic) {
+  check_float32<32, false, true>(rj_arith_v_cvt_u32_f32_w32_gfx942, Conversion32::FloatToUnsigned);
+}
+
+TEST(ConversionCvtU32F32W64Gfx942, Arithmetic) {
+  check_float32<64, false, true>(rj_arith_v_cvt_u32_f32_w64_gfx942, Conversion32::FloatToUnsigned);
+}
+
+TEST(ConversionCvtFloorI32F32W32Gfx942, Arithmetic) {
+  check_float32<32, false, true>(rj_arith_v_cvt_floor_i32_f32_w32_gfx942, Conversion32::Floor);
+}
+
+TEST(ConversionCvtFloorI32F32W64Gfx942, Arithmetic) {
+  check_float32<64, false, true>(rj_arith_v_cvt_floor_i32_f32_w64_gfx942, Conversion32::Floor);
+}
+
+TEST(ConversionCvtNearestI32F32W32Gfx942, Arithmetic) {
+  check_float32<32, false, true>(rj_arith_v_cvt_nearest_i32_f32_w32_gfx942, Conversion32::Nearest);
+}
+
+TEST(ConversionCvtNearestI32F32W64Gfx942, Arithmetic) {
+  check_float32<64, false, true>(rj_arith_v_cvt_nearest_i32_f32_w64_gfx942, Conversion32::Nearest);
+}
+
+// gfx950 inherits the RDNA3/gfx942 model but stays loose-only until gfx950 captures are reviewed.
+TEST(ConversionCvtF32I32W32Gfx950, Arithmetic) {
+  check_float32<32, false, false>(rj_arith_v_cvt_f32_i32_w32_gfx950, Conversion32::SignedToFloat);
+}
+
+TEST(ConversionCvtF32I32W64Gfx950, Arithmetic) {
+  check_float32<64, false, false>(rj_arith_v_cvt_f32_i32_w64_gfx950, Conversion32::SignedToFloat);
+}
+
+TEST(ConversionCvtF32U32W32Gfx950, Arithmetic) {
+  check_float32<32, false, false>(rj_arith_v_cvt_f32_u32_w32_gfx950, Conversion32::UnsignedToFloat);
+}
+
+TEST(ConversionCvtF32U32W64Gfx950, Arithmetic) {
+  check_float32<64, false, false>(rj_arith_v_cvt_f32_u32_w64_gfx950, Conversion32::UnsignedToFloat);
+}
+
+TEST(ConversionCvtI32F32W32Gfx950, Arithmetic) {
+  check_float32<32, false, false>(rj_arith_v_cvt_i32_f32_w32_gfx950, Conversion32::FloatToSigned);
+}
+
+TEST(ConversionCvtI32F32W64Gfx950, Arithmetic) {
+  check_float32<64, false, false>(rj_arith_v_cvt_i32_f32_w64_gfx950, Conversion32::FloatToSigned);
+}
+
+TEST(ConversionCvtU32F32W32Gfx950, Arithmetic) {
+  check_float32<32, false, false>(rj_arith_v_cvt_u32_f32_w32_gfx950, Conversion32::FloatToUnsigned);
+}
+
+TEST(ConversionCvtU32F32W64Gfx950, Arithmetic) {
+  check_float32<64, false, false>(rj_arith_v_cvt_u32_f32_w64_gfx950, Conversion32::FloatToUnsigned);
+}
+
+TEST(ConversionCvtFloorI32F32W32Gfx950, Arithmetic) {
+  check_float32<32, false, false>(rj_arith_v_cvt_floor_i32_f32_w32_gfx950, Conversion32::Floor);
+}
+
+TEST(ConversionCvtFloorI32F32W64Gfx950, Arithmetic) {
+  check_float32<64, false, false>(rj_arith_v_cvt_floor_i32_f32_w64_gfx950, Conversion32::Floor);
+}
+
+TEST(ConversionCvtNearestI32F32W32Gfx950, Arithmetic) {
+  check_float32<32, false, false>(rj_arith_v_cvt_nearest_i32_f32_w32_gfx950, Conversion32::Nearest);
+}
+
+TEST(ConversionCvtNearestI32F32W64Gfx950, Arithmetic) {
+  check_float32<64, false, false>(rj_arith_v_cvt_nearest_i32_f32_w64_gfx950, Conversion32::Nearest);
+}
+
+// gfx1100 (W7900, mkm2) lanes: hw1100-noieee (2026-09-25, MODE.IEEE clear) for 0x1f0/0x100 and
+// the Track C hw1100-wide corpus (2026-11-18) for round toward +inf (0x1f5) and -inf (0x1fa).
+// INT_MAX rounds up to 2^31 toward +inf and down to its predecessor toward -inf; UINT_MAX
+// likewise; mul:2 of 1 applies with output denormals flushed; float-to-integer saturates and maps
+// NaN to zero, while the floor form maps NaN to the positive limit.
+TEST(ConversionFloat32Gfx11, ExactMatchesHardware) {
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_f32_i32_w32, 0x1f5, 0, 0x7fffffff, 0, 0, 0, 0x4f000000U);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_f32_i32_w32, 0x1fa, 0, 0x7fffffff, 0, 0, 0, 0x4effffffU);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_f32_u32_w32, 0x1f5, 0, 0xffffffff, 0, 0, 0, 0x4f800000U);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_f32_u32_w32, 0x1fa, 0, 0xffffffff, 0, 0, 0, 0x4f7fffffU);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_f32_u32_w32, 0x100, RJ_ARITH_ALU_OMOD_2, 1, 0, 0, 0, 0x40000000U);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_i32_f32_w32, 0x1f0, 0, 0x7f7fffff, 0, 0, 0, 0x7fffffffU);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_i32_f32_w32, 0x1f0, 0, 0xff800000, 0, 0, 0, 0x80000000U);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_i32_f32_w32, 0x1f0, 0, 0x7fc00000, 0, 0, 0, 0);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_u32_f32_w32, 0x1f0, 0, 0x7f800000, 0, 0, 0, 0xffffffffU);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_floor_i32_f32_w32, 0x1f0, 0, 0x7fc00000, 0, 0, 0, 0x7fffffffU);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_floor_i32_f32_w32, 0x1f0, 0, 0x7f800001, 0, 0, 0, 0x7fffffffU);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_nearest_i32_f32_w32, 0x1f0, 0, 0x3fc00000, 0, 0, 0, 2);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<1, 1, 32>(
+      rj_arith_v_cvt_nearest_i32_f32_w32, 0x1f0, 0, 0xbfc00000, 0, 0, 0, 0xffffffffU);
 }

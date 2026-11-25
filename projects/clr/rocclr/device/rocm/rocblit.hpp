@@ -310,6 +310,9 @@ class KernelBlitManager : public DmaBlitManager {
     StreamOpsIncrement,
     StreamOpsDecrement,
     BlitCopyBufferBatch,
+    BlitCopyBufferRectUnaligned,
+    BlitCopyBufferRectStream,
+    FillBufferRect,
     BlitLinearTotal,
     FillImage = BlitLinearTotal,
     BlitCopyImage,
@@ -519,6 +522,16 @@ class KernelBlitManager : public DmaBlitManager {
                             bool forceBlit = false        //!< Force GPU Blit for fill
   ) const;
 
+  //! Fills a pitched 2D or 3D region in one dispatch of 16-byte stores. The pattern, a power of
+  //! two up to 16 bytes, restarts at every row.
+  bool fillBufferRect(device::Memory& memory,       //!< Memory object to fill with pattern
+                      const void* pattern,          //!< Pattern data
+                      size_t patternSize,           //!< Pattern size
+                      const amd::Coord3D& surface,  //!< {row pitch, row bytes, rows per slice}
+                      const amd::Coord3D& origin,   //!< Destination origin
+                      const amd::Coord3D& size      //!< Size of the fill region
+  ) const;
+
 
   //! Fills an image memory with a pattern data
   bool fillImage(device::Memory& dstMemory,           //!< Memory object to fill with pattern
@@ -683,6 +696,9 @@ class KernelBlitManager : public DmaBlitManager {
     "__amd_rocclr_streamOpsIncrement",
     "__amd_rocclr_streamOpsDecrement",
     "__amd_rocclr_copyBufferBatch",
+    "__amd_rocclr_copyBufferRectUnaligned",
+    "__amd_rocclr_copyBufferRectStream",
+    "__amd_rocclr_fillBufferRect",
     "__amd_rocclr_fillImage",
     "__amd_rocclr_copyImage",
     "__amd_rocclr_copyImage1DA",

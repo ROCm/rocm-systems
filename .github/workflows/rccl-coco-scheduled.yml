@@ -85,6 +85,7 @@ jobs:
     with:
       job: ${{ matrix.job }}
       runs_on: ${{ matrix.runner }}
+      shared_scratch: ${{ matrix.shared_scratch }}
       coco_ref: ${{ needs.setup.outputs.coco_ref }}
       trigger_kind: ${{ needs.setup.outputs.trigger_kind }}
       coco_args: ${{ needs.setup.outputs.coco_args }}

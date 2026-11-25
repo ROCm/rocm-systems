@@ -1,13 +1,16 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Inherited scalar FP exception classification from Rocjitsu shared/fp_status.h.
+// Scalar FP exception classification, inherited from Rocjitsu shared/fp_status.h with the
+// hardware overflow/tininess rule fitted to gfx1201 captures.
 // Numerical causes belong here; committing guest registers and traps belongs to the VM.
 
 #pragma once
 
 #include "common/float_encoding.h"
 #include "common/validation.h"
+#include "fp/fma_integer.h"
+#include "fp/rounding_status.h"
 #include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
@@ -34,8 +37,9 @@ template <bool Half> inline uint32_t scalar_input_causes(uint32_t bits, uint64_t
              : 0;
 }
 
-// Classify a wider, round-to-odd intermediate against the scalar destination.
-// This retains Rocjitsu's overflow thresholds and after-rounding underflow rule.
+// Classify a wider, round-to-odd intermediate against the scalar destination with
+// Rocjitsu's inherited overflow thresholds and stored-result underflow rule. Only gfx1150
+// keeps it: the shared rule is fitted to gfx1201 captures and gfx1150 has none.
 template <bool Half>
 inline uint32_t scalar_result_causes(double exact, uint32_t result, unsigned rounding) {
   if (exact == scalar_fp_value<Half>(result)) {
@@ -56,9 +60,11 @@ inline uint32_t scalar_result_causes(double exact, uint32_t result, unsigned rou
                                                : 0);
 }
 
-// Classify the scalar FMA model, also used for ADD/SUB/MUL lowering.
+// Classify the scalar FMA model, also used for ADD/SUB/MUL lowering, with the shared
+// hardware overflow/tininess rule of fp/rounding_status.h, or the inherited
+// stored-result rule for gfx1150.
 // Preserve the inherited suppression of input-denormal causes for NaN results.
-template <bool Half>
+template <bool Half, bool Inherited = false>
 inline uint32_t scalar_fma_causes(uint64_t flags, uint32_t a, uint32_t b, uint32_t c,
                                   uint32_t result) {
   constexpr uint32_t sign = Half ? 0x8000 : 0x80000000;
@@ -84,20 +90,31 @@ inline uint32_t scalar_fma_causes(uint64_t flags, uint32_t a, uint32_t b, uint32
     causes |= RJ_ARITH_EXCEPTION_INVALID;
   }
   if (x < infinity && y < infinity && z < infinity) {
-    // The inherited model uses an exact FP64 product and TwoSum residual.
-    // FP16/FP32 operands cannot overflow or underflow FP64 here. With default
-    // host rounding, moving an even sum one encoding toward the residual
-    // retains its sticky information before the destination is classified.
-    const double product = scalar_fp_value<Half>(a) * scalar_fp_value<Half>(b);
-    const double addend = scalar_fp_value<Half>(c), sum = product + addend;
-    const double part = sum - product;
-    const double residual = (product - (sum - part)) + (addend - part);
-    uint64_t bits = double_bits(sum);
-    if (residual != 0 && !(bits & 1)) {
-      bits = (sum > 0) == (residual > 0) ? bits + 1 : bits - 1;
+    const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
+    if constexpr (Inherited) {
+      // The inherited model uses an exact FP64 product and TwoSum residual.
+      // FP16/FP32 operands cannot overflow or underflow FP64 here. With default
+      // host rounding, moving an even sum one encoding toward the residual
+      // retains its sticky information before the destination is classified.
+      const double product = scalar_fp_value<Half>(a) * scalar_fp_value<Half>(b);
+      const double addend = scalar_fp_value<Half>(c), sum = product + addend;
+      const double part = sum - product;
+      const double residual = (product - (sum - part)) + (addend - part);
+      uint64_t bits = double_bits(sum);
+      if (residual != 0 && !(bits & 1)) {
+        bits = (sum > 0) == (residual > 0) ? bits + 1 : bits - 1;
+      }
+      causes |= scalar_result_causes<Half>(as_double(bits), result, rounding);
+    } else {
+      // Exact round-to-odd FP64 intermediate; FP16 operands widen exactly to FP32.
+      auto widen = [](uint32_t bits) {
+        return Half ? as_bits(f16_to_float(uint16_t(bits))) : bits;
+      };
+      const uint64_t exact = fma_finite_round_odd(widen(a), widen(b), widen(c));
+      if (exact & 0x7fffffffffffffffULL) {
+        causes |= rounding_causes<Half>(exact, result, rounding);
+      }
     }
-    const double exact = as_double(bits);
-    causes |= scalar_result_causes<Half>(exact, result, (flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   }
   if ((result & magnitude) > infinity) {
     causes &= ~RJ_ARITH_EXCEPTION_INPUT_DENORM;

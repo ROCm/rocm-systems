@@ -1,12 +1,15 @@
 // Auto-generated from @SCHEMA_FILE@
+// Schema version @SCHEMA_VERSION@
 #pragma once
 
 namespace rocpd {
 namespace data_storage {
 namespace schema {
+namespace @SCHEMA_NS@ {
 
 constexpr const char* @SCHEMA_NAME_UPPER@_SQL = "@SQL_CONTENT@";
 
-} // namespace schema
-} // namespace data_storage
-} // namespace rocpd
+}  // namespace @SCHEMA_NS@
+}  // namespace schema
+}  // namespace data_storage
+}  // namespace rocpd

@@ -291,7 +291,8 @@ races. Some examples:
   `tensor_store_from_lds` reads are LDS events on `tensorcnt`. Any wave,
   including the issuing one, that reads a load's destination or overwrites a
   store's source before the transfer completes, through `s_wait_tensorcnt` or a
-  full `tensorcnt`, is reported; other waves also need an `s_barrier`. A load
+  full `tensorcnt`, is reported; other waves also need an `s_barrier`, or an
+  arrival at an LDS barrier cell that they read (see LDS barrier cells). A load
   covers every element of its tile, including elements outside the tensor, which
   it zero-fills; padding bytes are excluded. A store covers only the elements
   inside the tensor. Either way, only bytes inside the wave's LDS allocation are
@@ -314,10 +315,9 @@ races. Some examples:
   are LDS events on `asynccnt`, one per instruction, with each lane's bytes at
   its LDS address. Any wave, including the issuing one, that reads a load's
   destination or overwrites a store's source before `s_wait_asynccnt` is
-  reported; other waves also need an `s_barrier`. Synchronizing other waves
-  through an LDS barrier cell instead is not modeled (see False positives with
-  LDS barrier synchronization). Async copies may access LDS out of order with
-  each other (CDNA5 ISA 10.8), so a store is also reported when it reads bytes
+  reported; other waves also need an `s_barrier`, or an arrival at an LDS
+  barrier cell that they read (see LDS barrier cells). Async copies may access
+  LDS out of order with each other (CDNA5 ISA 10.8), so a store is also reported when it reads bytes
   of the same wave's pending async load, and an async load when it overwrites
   the source of the same wave's pending async store. The ISA does not
   establish the LDS access order of an async copy relative to DS instructions
@@ -371,7 +371,8 @@ following lifecycle:
    the wave that issued the operation, but is still in flight from the
    perspective of other waves in the same workgroup.
 1. **RETIRED** — every other live wave of the workgroup has passed a barrier
-   that orders the event (see Barriers below). The event is fully retired and,
+   that orders the event, or read an LDS barrier cell the event was released
+   into (see Barriers and LDS barrier cells below). The event is fully retired and,
    from the perspective of all threads in all wavefronts, the operation is
    complete. A wave whose workgroup has no other live wave, because it is the
    only wave or the others have ended, has no other wave to race with, so its
@@ -435,9 +436,9 @@ without polling or another unmodeled synchronization mechanism.
 
 A completed LDS event stays in the history, and is still checked, until every
 other live wave of the workgroup has acquired it. A workgroup in which some
-wave never passes a barrier wait, or whose waves synchronize only through
-named barriers among subsets, therefore keeps its completed events until those
-waves end. Each wave's completed events are kept in the order of the signals
+wave never passes a barrier wait or reads an LDS barrier cell the event was
+released into, or whose waves synchronize only through named barriers among
+subsets, therefore keeps its completed events until those waves end. Each wave's completed events are kept in the order of the signals
 that release them, and a cross-wave check scans only the ones the accessing
 wave has not acquired: waves that keep exchanging LDS data through a named
 barrier do not rescan each other's ordered accesses, which remain in the
@@ -459,6 +460,92 @@ s_wait_dscnt 0                   s_barrier_wait -1
 s_barrier_wait -1                ds_load_b32 v2, v0   ; race: the store
                                                       ; completed after the signal
 ```
+
+### LDS barrier cells
+
+On gfx1250 waves can also synchronize without blocking, through an LDS barrier
+cell: a 64-bit LDS word holding a pending count and a phase (CDNA5 ISA 11.2.2).
+A wave arrives at the cell, which decrements the count; when the count rolls
+under, the phase changes. Other waves poll the cell with an ordinary load and
+proceed once they see the new phase.
+
+The detector treats a cell as another release/acquire channel on the same
+clock as barriers:
+
+- **An arrival releases.** It releases what the wave has completed and what it
+  has acquired, as a barrier signal does.
+- **An arrival hands off pending operations.** The wave's pending operations
+  that the arrive is ordered after have executed in LDS by the time the arrival
+  does, although the wave has not waited for them, so the arrival hands them
+  off to the waves that read the cell:
+
+  | Arrival | Pending operations it hands off |
+  | --- | --- |
+  | `ds_atomic_barrier_arrive_rtn_b64` | The wave's earlier DS operations and the LDS lanes of its FLAT operations: the arrive "is ordered with other LDS operations" (11.2.2), and FLAT and LDS instructions "stay in order as they move through LDS" (5.7.1.3). |
+  | `ds_atomic_async_barrier_arrive_b64` | The wave's earlier async loads to LDS: the arrive executes "only when all previously issued asynchronous loads have completed" (15.15). |
+  | A tensor transfer's completion arrival (10.11.3) | That transfer and the wave's earlier tensor transfers, which complete in issue order (10.11.1). |
+
+  A producer can therefore hand off an async load or a tensor load without ever
+  waiting on `asynccnt` or `tensorcnt`. A handoff is carried only by what is
+  ordered after the operation: the wave's later arrivals of the same kind, and
+  whatever a wave that acquired the handoff releases afterwards. The wave's own
+  barrier signal, and its arrival of another kind, do not carry it, so a wave
+  that only passes an `s_barrier` with the producer is still reported until
+  the producer waits for the operation. Handing an operation off orders it for
+  other waves only; the detector still reports its own wave's access until the
+  wave waits for it (see Limitations).
+
+  Operations of any other class are not handed off: a pending async store's
+  LDS source (async stores complete out of order with async loads, 10.8), a
+  pending tensor transfer at a DS or async arrive, a pending DS operation at an
+  async arrive. For a tensor transfer at an async arrive the ISA is not
+  consistent. 11.2.2 says the async arrive "follows previous async operations
+  including TDM", and 10.11.3 says a transfer moves its data with
+  `GLOBAL_LOAD_ASYNC` operations and sends its own arrival "to keep ordering
+  of operations between descriptors of the same wave". But 10.11.1 says tensor
+  instructions "are unordered with respect to other types of memory
+  instructions", and 15.15 has the arrive wait only for "all previously issued
+  asynchronous loads". The detector takes the reading that hides no race, so a
+  tensor load needs `s_wait_tensorcnt` before a
+  `ds_atomic_async_barrier_arrive_b64` hands it off, and a transfer's own
+  arrival does not hand off the wave's earlier async loads.
+- **A read of the cell acquires.** A wave that loads any byte of the cell's low
+  dword, which holds the phase, acquires every phase of that cell that has
+  completed, when the load issues. So does `ds_atomic_barrier_arrive_rtn_b64`,
+  which returns the cell; `ds_atomic_async_barrier_arrive_b64` returns nothing
+  and acquires nothing. A wave that reads the cell before a phase completes
+  acquires nothing from that phase, even from waves that have already arrived.
+- **The cell itself.** An arrival updates the cell atomically, so it does not
+  race with a read of the cell or with another arrival. It does race with a
+  plain store to the cell that nothing orders, so the store that initializes a
+  cell has to be ordered before the first arrival. For a store by another wave,
+  that takes a wait and a barrier, or an arrival at another cell that the
+  arriving wave has read. For the same wave, a DS store needs no wait before the
+  wave's `ds_atomic_barrier_arrive_rtn_b64`, which stays in order with it, and
+  a `s_wait_dscnt` before its `ds_atomic_async_barrier_arrive_b64` or before a
+  tensor transfer that arrives at the cell. A tensor transfer's arrival lasts
+  as long as the transfer: a plain store to the cell after the transfer issues
+  races with the arrival until the transfer is ordered before the store, by the
+  transfer's wave waiting on TENSORcnt and, for another wave, a barrier, or by
+  the storing wave reading the cell once the phase completes. The arrival
+  shares the transfer's one TENSORcnt slot.
+
+```asm
+; wave 0                                 ; wave 1
+global_load_async_to_lds_b32 v1, v0, s[0:1]
+ds_atomic_async_barrier_arrive_b64 v2    poll: ds_load_b32 v3, v2
+                                               s_wait_dscnt 0
+                                               ; loop until the phase bit flips
+                                         ds_load_b32 v4, v1   ; ordered
+```
+
+The simulator reports each arrival to plugins, once per active lane for the DS
+instructions and once per tensor instruction. A `ds_atomic_barrier_arrive_rtn_b64`
+with an update value of zero reads the cell without arriving, so it acquires
+but releases and hands off nothing. An operation handed off while pending
+stays in flight, and then in its wave's history, checked and skipped as
+ordered for the waves that acquired the handoff, until its wave completes it
+and every other live wave has acquired that completion.
 
 On RDNA and CDNA5 every issued generic `FLAT_*` instruction occupies a
 vector-memory and an LDS counter position, including when EXEC is empty. On
@@ -655,9 +742,11 @@ mixed chunk uses the scan until its count drains. The history remains available
 for checks by other waves until a barrier orders it for all of them. Direct-to-LDS and unordered
 memory operations still require their own completion checks.
 For a DS or FLAT instruction, the plugin first merges the active lanes' byte
-ranges into intervals and checks the chunk counts under them. When no chunk can
-hold a conflict, it skips the per-lane checks. The same intervals become the
-instruction's event.
+ranges into intervals and checks the chunk counts under them. When a chunk can
+hold a conflict, it scans the events once for the instruction, against all of
+its intervals. The per-lane checks, which report each conflicting lane, run
+only when that scan finds an event that conflicts. The same intervals become
+the instruction's event.
 
 For indexed RDNA1/2 LDS instructions, the byte checks use the same workgroup
 allocation bounds as execution. The two addresses of a dual operation are
@@ -752,12 +841,13 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   for the combined counters before GFX12 and the gfx1250 split counters.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
-  tensor DMA transfers and async copies on gfx1250.
+  tensor DMA transfers, async copies and LDS barrier cells on gfx1250.
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
   owns the gfx942, gfx950, gfx1151 and gfx1250 end-to-end HIP programs; the
-  gfx1250 program covers tensor DMA and counter capacity. The
+  gfx1250 program covers tensor DMA, counter capacity, split barriers and LDS
+  barrier cells. The
   `rocjitsu-test-corpus` workflow builds them with the corpus HIP toolchain and
   runs each case under the emulator with the `race` plugin enabled.
 
@@ -813,19 +903,41 @@ this source tree. The original
   async copies follow that rule, so neither the emulator nor the detector
   applies it to them.
 
-- **False positives with LDS barrier synchronization**: a producer can hand LDS
-  data to another wave through an LDS barrier cell instead of a wait and
-  `s_barrier`. A tensor load can request an arrival on a barrier cell when it
-  completes, and `ds_atomic_async_barrier_arrive_b64` advances a barrier only
-  after the producer's earlier async loads complete (CDNA5 ISA 11.2.2). A
-  consumer wave can then wait for the barrier's phase and read the tile, or copy
-  it out with an async store, without the producer waiting on `s_wait_tensorcnt`
-  or `s_wait_asynccnt` or the workgroup passing `s_barrier`. The detector does
-  not observe this synchronization: it retires a transfer only through
-  wait-counter instructions, counter capacity and `s_barrier`. A consumer that
-  is correctly synchronized through the barrier cell is therefore reported as
-  racing with the tensor or async load. These reports are false positives, not
-  missing coverage.
+- **LDS barrier cells**:
+  - A wave acquires a cell's completed phases when it reads the cell, whether
+    or not it then tests the phase. A wave that reads a cell, ignores the value
+    and uses the data is reported only if the read ran before the phase
+    completed, which depends on how the simulator interleaves the waves. The
+    same holds for a wave whose `ds_atomic_barrier_arrive_rtn_b64` completes
+    the phase and that does not test the returned value: it is reported only
+    when another wave arrives last.
+  - A handoff orders an operation for other waves only. A wave that polls a
+    cell for its own transfer's arrival and then reads its own tile, without
+    waiting on the transfer's counter, is reported. Where the phase cannot
+    complete without that arrival the program is correct and the report is a
+    false positive.
+  - Only completed phases are acquired, so a kernel that reads the pending
+    count to learn that some arrivals have happened is reported.
+  - `tensor_load_to_lds` followed by `ds_atomic_async_barrier_arrive_b64` with
+    no `s_wait_tensorcnt` between them is reported when another wave reads the
+    tile, and so is an async load followed by a tensor transfer whose
+    descriptor arrival is the only handoff. If hardware orders an async arrive
+    after tensor transfers, as CDNA5 ISA 11.2.2 and 10.11.3 can be read, those
+    reports are false positives (see LDS barrier cells).
+  - Only loads and returning atomics acquire. A cell read directly as an
+    instruction's LDS operand does not.
+  - A cell is remembered for the life of the workgroup. A load of those bytes
+    after the kernel reuses them as data still acquires the cell's completed
+    phases.
+  - Every poll of a cell is an LDS read that stays in the history until the
+    other live waves acquire the polling wave's next release, so a wave that
+    polls many times between its own releases grows the history by one read
+    per poll.
+  - The detector takes each arrival, and whether it completed the phase, from
+    the simulator, which models one pending-count width (29 bits) of those the
+    ISA lists (CDNA5 ISA 11.2.2). An update value with bits at or above that
+    width changes the phase field without rolling the count under, and is not
+    a completed phase.
 
 - **NULL tensor descriptors and NOP tiles**: like the emulator, the detector
   counts a NULL descriptor (`count = 0`) and a NOP tile (`tile_dim0 = 0`) on

@@ -35,8 +35,9 @@ protected:
     decoder_ = Decoder::create(GetParam());
   }
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
   }
   void put(unsigned reg, uint32_t value) { cu_->write_sgpr(wave_->sgpr_alloc().base + reg, value); }
   void base(uint32_t records = 0xffffffff, uint32_t stride = 0) {

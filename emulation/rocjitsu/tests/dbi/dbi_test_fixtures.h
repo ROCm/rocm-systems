@@ -75,10 +75,13 @@ inline void find_vector_add_anchors(const AmdGpuCodeObject &object, rocjitsu::Is
   auto blocks = BasicBlock::build_reachable(object, *decoder, arch, {&entry, 1},
                                             diagnostic.emitter(), {&range, 1});
   ASSERT_TRUE(blocks.succeeded()) << diagnostic.message();
-  for (const auto &block : blocks.value())
-    for (const Instruction &inst : block->instructions())
-      if (is_relocatable_anchor(inst, inst.src_loc(), bytes, arch))
+  for (const auto &block : blocks.value()) {
+    for (const Instruction &inst : block->instructions()) {
+      if (is_relocatable_anchor(inst, inst.src_loc(), bytes, arch)) {
         offsets.push_back(inst.src_loc());
+      }
+    }
+  }
   ASSERT_FALSE(offsets.empty()) << "No relocatable anchor in vector_add";
 }
 
@@ -117,8 +120,9 @@ inline uint32_t count_matching_golden(const std::vector<float> &out,
                                       const std::vector<float> &golden) {
   uint32_t matches = 0;
   for (uint32_t i = 0; i < out.size(); ++i) {
-    if (std::abs(out[i] - golden[i]) < 1e-5f)
+    if (std::abs(out[i] - golden[i]) < 1e-5f) {
       ++matches;
+    }
   }
   return matches;
 }
@@ -130,8 +134,9 @@ inline uint32_t count_matching_golden(const std::vector<float> &out,
 /// that the surrounding HSA plumbing succeeded.
 inline bool kernel_wrote_output(const std::vector<float> &out) {
   for (float v : out) {
-    if (v != 0.0f)
+    if (v != 0.0f) {
       return true;
+    }
   }
   return false;
 }
@@ -228,12 +233,14 @@ protected:
 
   static void SetUpTestSuite() {
     s_init_ok_ = (hsa_init() == HSA_STATUS_SUCCESS);
-    if (s_init_ok_)
+    if (s_init_ok_) {
       s_gpu_ = find_gpu_agent(Params.isa_substring);
+    }
   }
   static void TearDownTestSuite() {
-    if (s_init_ok_)
+    if (s_init_ok_) {
       hsa_shut_down();
+    }
     s_init_ok_ = false;
     s_gpu_ = {};
   }
@@ -244,10 +251,12 @@ protected:
   // HasFatalFailure() guard here, or a genuine patch failure would be reported
   // as a skip.
   void SetUp() override {
-    if (!s_init_ok_)
+    if (!s_init_ok_) {
       GTEST_SKIP() << "hsa_init failed (no HSA runtime at runtime)";
-    if (s_gpu_.handle == 0)
+    }
+    if (s_gpu_.handle == 0) {
       GTEST_SKIP() << "No " << Params.isa_substring << " agent present";
+    }
     Fixture::SetUp();
   }
 

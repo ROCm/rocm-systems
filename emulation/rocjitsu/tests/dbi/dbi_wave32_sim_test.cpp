@@ -67,15 +67,17 @@ std::vector<uint32_t> patch_and_run(const std::vector<uint32_t> &text, uint64_t 
   auto result = instr.patch_with_debug_summaries();
   EXPECT_TRUE(result.errors.empty())
       << (result.errors.empty() ? std::string{} : result.errors.front());
-  if (!result.errors.empty())
+  if (!result.errors.empty()) {
     return {};
+  }
   AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
   EXPECT_TRUE(patched.is_valid());
 
   test::DbiSim sim;
   sim.initialize("rdna4", kWaveSize);
-  if (testing::Test::HasFatalFailure())
+  if (testing::Test::HasFatalFailure()) {
     return {};
+  }
   sim.set_wave32_dispatch();
   return sim.run_and_read_vgpr(test::section_words(patched, ".text"),
                                test::patched_private_segment_size(patched), /*reg=*/3);
@@ -120,8 +122,9 @@ std::vector<uint32_t> run_saved_exec_kernel(bool descriptor_wave32) {
 TEST(DbiWave32Sim, CompareIntoS0KeepsSavedExecInS1) {
   const std::vector<uint32_t> v3 = run_saved_exec_kernel(/*descriptor_wave32=*/true);
   ASSERT_EQ(v3.size(), kWaveSize) << "kernel did not run to completion (no dispatched wave)";
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
     EXPECT_EQ(v3[lane], kWritten) << "lane " << lane << " did not get its EXEC bit back";
+  }
 }
 
 // Negative control: planned as Wave64, liveness takes the compare to write
@@ -157,8 +160,9 @@ TEST(DbiWave32Sim, ProbeCompareIntoS2KeepsKernelValueInS3) {
                                                  {compare[0], compare[1], setpc.value()},
                                                  /*descriptor_wave32=*/true);
   ASSERT_EQ(v3.size(), kWaveSize) << "kernel did not run to completion (no dispatched wave)";
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
     EXPECT_EQ(v3[lane], kWritten) << "lane " << lane << " lost the kernel's s3";
+  }
 }
 
 } // namespace

@@ -142,16 +142,19 @@ public:
   std::optional<int64_t> branch_offset_bytes() const override { return branch_delta_; }
 
   void implicit_uses(RegisterSet &uses) const override {
-    for (RegisterRef ref : implicit_uses_)
+    for (RegisterRef ref : implicit_uses_) {
       uses.expand(ref);
+    }
     // Mirror the codegen: a sub-dword (< 32-bit) destination writes only part
     // of its register lane, so the old value survives and the register is also
     // read. Generated instructions surface these partial defs via implicit_uses.
     for (int i = 0; i < num_dst_; ++i) {
       const Operand *op = dst_operands_[i];
-      if (op != nullptr && op->size_bits() > 0 && op->size_bits() < REGISTER_GRANULARITY)
-        if (auto ref = op->to_register_ref())
+      if (op != nullptr && op->size_bits() > 0 && op->size_bits() < REGISTER_GRANULARITY) {
+        if (auto ref = op->to_register_ref()) {
           uses.expand(*ref);
+        }
+      }
     }
   }
 
@@ -318,8 +321,9 @@ std::vector<std::unique_ptr<BasicBlock>>
 build_test_blocks(std::vector<TestOpcode> ops, std::span<const uint64_t> extra_leaders = {}) {
   std::vector<uint32_t> words;
   words.reserve(ops.size());
-  for (TestOpcode op : ops)
+  for (TestOpcode op : ops) {
     words.push_back(static_cast<uint32_t>(op));
+  }
 
   TestCodeObject co(std::move(words));
   TestDecoder decoder;
@@ -347,8 +351,9 @@ BasicBlock *block_starting_at(const std::vector<std::unique_ptr<BasicBlock>> &bl
 std::vector<BasicBlock *> block_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   std::vector<BasicBlock *> scope;
   scope.reserve(blocks.size());
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     scope.push_back(block.get());
+  }
   return scope;
 }
 
@@ -529,16 +534,18 @@ TYPED_TEST(RegisterSetTyped, WordIterationObservesEditsWithinAndBetweenBatches) 
   RegisterSet set;
   const auto add = [&](uint16_t index) { set.expand({RegClass::VGPR, index, 1}); };
   const auto remove = [&](uint16_t index) { set.erase({RegClass::VGPR, index, 1}); };
-  for (uint16_t index : {0, 8, 31, 255, 256})
+  for (uint16_t index : {0, 8, 31, 255, 256}) {
     add(index);
+  }
   std::vector<uint16_t> visited;
   set.for_each([&](RegisterRef ref) {
     visited.push_back(ref.index);
     switch (ref.index) {
     case 0:
       remove(8);
-      for (uint16_t index : {2, 7, 9, 32})
+      for (uint16_t index : {2, 7, 9, 32}) {
         add(index);
+      }
       break;
     case 2:
       remove(7);
@@ -590,17 +597,20 @@ TYPED_TEST(RegisterSetTyped, WordIterationHandlesEditsAtEveryPositionInFullBatch
     RegisterSet set;
     set.expand({RegClass::VGPR, 248, 16});
     std::vector<uint16_t> visited, expected;
-    for (unsigned index = 248; index <= 248 + trigger; ++index)
+    for (unsigned index = 248; index <= 248 + trigger; ++index) {
       expected.push_back(index);
-    for (unsigned index = 257; index <= 264; ++index)
+    }
+    for (unsigned index = 257; index <= 264; ++index) {
       expected.push_back(index);
+    }
     set.for_each([&](RegisterRef ref) {
       visited.push_back(ref.index);
       if (ref.index == 248 + trigger) {
         set.erase({RegClass::VGPR, 248, 1});
-        if (trigger < 7)
+        if (trigger < 7) {
           set.erase({RegClass::VGPR, static_cast<uint16_t>(249 + trigger),
                      static_cast<uint8_t>(7 - trigger)});
+        }
         set.erase({RegClass::VGPR, 256, 1});
         set.expand({RegClass::VGPR, 264, 1});
       }
@@ -616,17 +626,20 @@ TYPED_TEST(RegisterSetTyped, WordIterationHandlesEditsAtEveryPositionInFullLanes
     RegisterSet set;
     set.expand({RegClass::VGPR, 192, 128});
     std::vector<uint16_t> visited, expected;
-    for (unsigned index = 192; index <= 192 + trigger; ++index)
+    for (unsigned index = 192; index <= 192 + trigger; ++index) {
       expected.push_back(index);
-    for (unsigned index = 257; index <= 320; ++index)
+    }
+    for (unsigned index = 257; index <= 320; ++index) {
       expected.push_back(index);
+    }
     set.for_each([&](RegisterRef ref) {
       visited.push_back(ref.index);
       if (ref.index == 192 + trigger) {
         set.erase({RegClass::VGPR, 192, 1});
-        if (trigger < 63)
+        if (trigger < 63) {
           set.erase({RegClass::VGPR, static_cast<uint16_t>(193 + trigger),
                      static_cast<uint8_t>(63 - trigger)});
+        }
         set.erase({RegClass::VGPR, 256, 1});
         set.expand({RegClass::VGPR, 320, 1});
       }
@@ -643,10 +656,13 @@ TYPED_TEST(RegisterSetTyped, WordIterationMatchesBitsetModelAcrossMutationsAndAl
   using Model = std::array<std::bitset<REGISTER_SET_MAX_VGPRS>, 3>;
   const auto check = [&](const RegisterSet &actual, const Model &model) {
     std::vector<RegisterRef> expected, visited;
-    for (size_t cls = 0; cls < classes.size(); ++cls)
-      for (size_t index = 0; index < model[cls].size(); ++index)
-        if (model[cls].test(index))
+    for (size_t cls = 0; cls < classes.size(); ++cls) {
+      for (size_t index = 0; index < model[cls].size(); ++index) {
+        if (model[cls].test(index)) {
           expected.push_back({classes[cls], static_cast<uint16_t>(index), 1});
+        }
+      }
+    }
     actual.for_each_ordinary([&](RegisterRef ref) { visited.push_back(ref); });
     EXPECT_EQ(visited, expected);
     EXPECT_EQ(actual.ordinary_size(), expected.size());
@@ -676,12 +692,14 @@ TYPED_TEST(RegisterSetTyped, WordIterationMatchesBitsetModelAcrossMutationsAndAl
       models[which][cls].reset();
     } else {
       const bool insert = operation < 7;
-      if (insert)
+      if (insert) {
         sets[which].expand(ref);
-      else
+      } else {
         sets[which].erase(ref);
-      for (size_t index = base; index < std::min(end, capacities[cls]); ++index)
+      }
+      for (size_t index = base; index < std::min(end, capacities[cls]); ++index) {
         models[which][cls].set(index, insert);
+      }
     }
     bool contains = true, intersects = false;
     for (size_t index = base; index < end; ++index) {
@@ -716,17 +734,21 @@ TYPED_TEST(RegisterSetTyped, WordIterationHandlesFullWordsAndPartialClassTails) 
   RegisterSet set;
   std::vector<RegisterRef> expected, visited;
   for (size_t cls = 0; cls < classes.size(); ++cls) {
-    for (size_t base = 0; base < capacities[cls]; base += 64)
+    for (size_t base = 0; base < capacities[cls]; base += 64) {
       set.expand({classes[cls], static_cast<uint16_t>(base), 64});
-    for (size_t index = 0; index < capacities[cls]; ++index)
-      if (index != 63 && index != 64)
+    }
+    for (size_t index = 0; index < capacities[cls]; ++index) {
+      if (index != 63 && index != 64) {
         expected.push_back({classes[cls], static_cast<uint16_t>(index), 1});
+      }
+    }
   }
   set.expand({RegClass::EXEC, 0, 1});
   set.for_each_ordinary([&](RegisterRef ref) {
     visited.push_back(ref);
-    if (ref.index == 0)
+    if (ref.index == 0) {
       set.erase({ref.cls, 63, 2});
+    }
   });
   EXPECT_EQ(visited, expected);
   EXPECT_EQ(set.ordinary_size(), expected.size());
@@ -737,8 +759,9 @@ TYPED_TEST(RegisterSetTyped, WordIterationHandlesFullWordsAndPartialClassTails) 
 TYPED_TEST(RegisterSetTyped, WordIterationPreservesForwardCallbackEdits) {
   using RegisterSet = TypeParam;
   RegisterSet set;
-  for (uint16_t index : {0, 1, 63, 64, 1023})
+  for (uint16_t index : {0, 1, 63, 64, 1023}) {
     set.expand({RegClass::VGPR, index, 1});
+  }
   std::vector<uint16_t> visited;
   set.for_each_ordinary([&](RegisterRef ref) {
     visited.push_back(ref.index);
@@ -771,18 +794,21 @@ TYPED_TEST(RegisterSetTyped, WordIterationAlternatesUnchangedAndEditedMembership
       auto edit = [&](size_t index, auto &&add, auto &&erase) {
         if ((index + seed) % 4 == 0) {
           erase(index);
-          if (index != 0)
+          if (index != 0) {
             add(index - 1); // Never revisit members behind the cursor.
-          if (index + 2 < capacity)
+          }
+          if (index + 2 < capacity) {
             add(index + 2);
+          }
         } else if ((index + seed) % 4 == 1 && index + 1 < capacity) {
           erase(index + 1);
         }
       };
       std::vector<uint16_t> expected, visited;
       for (size_t i = 0; i < capacity; ++i) {
-        if (!model.test(i))
+        if (!model.test(i)) {
           continue;
+        }
         expected.push_back(static_cast<uint16_t>(i));
         edit(i, [&](size_t index) { model.set(index); }, [&](size_t index) { model.reset(index); });
       }
@@ -794,8 +820,9 @@ TYPED_TEST(RegisterSetTyped, WordIterationAlternatesUnchangedAndEditedMembership
             [&](size_t index) { set.erase({cls, static_cast<uint16_t>(index), 1}); });
       });
       EXPECT_EQ(visited, expected) << "seed=" << seed;
-      for (size_t i = 0; i < capacity; ++i)
+      for (size_t i = 0; i < capacity; ++i) {
         EXPECT_EQ(set.contains({cls, static_cast<uint16_t>(i), 1}), model.test(i));
+      }
     }
   }
 }
@@ -3181,8 +3208,9 @@ TEST(CfgAnalysis, KeepsDistinctBuildersReachingSameTarget) {
   // Both builders resolve to target 0x28 but from distinct getpc offsets (0x04,
   // 0x14); both fixups must survive.
   ASSERT_EQ(fixups.size(), 2u);
-  for (const auto &fixup : fixups)
+  for (const auto &fixup : fixups) {
     EXPECT_EQ(fixup.source_target_offset, 40u);
+  }
   std::vector<uint64_t> getpc_offsets{fixups[0].source_getpc_offset, fixups[1].source_getpc_offset};
   std::ranges::sort(getpc_offsets);
   EXPECT_EQ(getpc_offsets, (std::vector<uint64_t>{4u, 20u}));
@@ -3511,8 +3539,9 @@ TEST(CfgAnalysis, Gfx1250SignedDeltaRejectsMoveClobberingTemporary) {
   size_t resolved_to_target = 0;
   for (const auto &block : blocks) {
     for (const auto &fixup : block->static_indirect_call_fixups()) {
-      if (fixup.source_target_offset == 76u)
+      if (fixup.source_target_offset == 76u) {
         ++resolved_to_target;
+      }
     }
   }
   EXPECT_EQ(resolved_to_target, 0u);
@@ -3592,8 +3621,9 @@ TEST(CfgAnalysis, Gfx1250WideVgprWriteInvalidatesStashedLane) {
   auto blocks = build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Cdna5);
 
   size_t total_fixups = 0;
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     total_fixups += block->static_indirect_call_fixups().size();
+  }
   EXPECT_EQ(total_fixups, 0u);
 }
 
@@ -3839,8 +3869,9 @@ TEST(CfgAnalysis, Gfx1250DirectCallKillsCarriedLaneStash) {
   auto blocks = build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Cdna5);
 
   size_t total_fixups = 0;
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     total_fixups += block->static_indirect_call_fixups().size();
+  }
   EXPECT_EQ(total_fixups, 0u);
 }
 
@@ -3888,8 +3919,9 @@ TEST(CfgAnalysis, Gfx1250ExactCalleeSummaryPreservesUnwrittenCallerSavedLaneStas
     const IndirectCallFixup *continuation_fixup = nullptr;
     for (const auto &block : blocks) {
       for (const auto &fixup : block->static_indirect_call_fixups()) {
-        if (fixup.source_call_offset == 52)
+        if (fixup.source_call_offset == 52) {
           continuation_fixup = &fixup;
+        }
       }
     }
     ASSERT_NE(continuation_fixup, nullptr);
@@ -3996,8 +4028,9 @@ TEST(CfgAnalysis, Gfx1250ModeBit27DoesNotInvalidateExactCalleeSummary) {
     const IndirectCallFixup *continuation_fixup = nullptr;
     for (const auto &block : blocks) {
       for (const auto &fixup : block->static_indirect_call_fixups()) {
-        if (fixup.source_call_offset == 52)
+        if (fixup.source_call_offset == 52) {
           continuation_fixup = &fixup;
+        }
       }
     }
     if (expect_recovery) {
@@ -4104,8 +4137,9 @@ TEST(CfgAnalysis, Gfx1250CalleeSavedLaneStashSurvivesDirectCall) {
   const IndirectCallFixup *continuation_fixup = nullptr;
   for (const auto &block : blocks) {
     for (const auto &fixup : block->static_indirect_call_fixups()) {
-      if (fixup.source_call_offset == 52) // 0x34: the continuation swappc.
+      if (fixup.source_call_offset == 52) { // 0x34: the continuation swappc.
         continuation_fixup = &fixup;
+      }
     }
   }
   ASSERT_NE(continuation_fixup, nullptr);
@@ -4169,8 +4203,9 @@ TEST(CfgAnalysis, Gfx1250ExactCalleeSummaryPreservesBankedLaneStash) {
   const IndirectCallFixup *continuation_fixup = nullptr;
   for (const auto &block : blocks) {
     for (const auto &fixup : block->static_indirect_call_fixups()) {
-      if (fixup.source_call_offset == 56)
+      if (fixup.source_call_offset == 56) {
         continuation_fixup = &fixup;
+      }
     }
   }
   ASSERT_NE(continuation_fixup, nullptr);
@@ -4288,8 +4323,9 @@ TEST(CfgAnalysis, Gfx1250IndirectCallKillsCarriedLaneStash) {
   for (const auto &block : blocks) {
     total_fixups += block->static_indirect_call_fixups().size();
     for (const auto &fixup : block->static_indirect_call_fixups()) {
-      if (fixup.source_call_offset == 48)
+      if (fixup.source_call_offset == 48) {
         call_fixup = &fixup;
+      }
     }
   }
   ASSERT_EQ(total_fixups, 1u);
@@ -4357,8 +4393,9 @@ TEST(CfgAnalysis, Gfx1250CalleeSavedLaneStashSurvivesIndirectCall) {
   const IndirectCallFixup *continuation_fixup = nullptr;
   for (const auto &block : blocks) {
     for (const auto &fixup : block->static_indirect_call_fixups()) {
-      if (fixup.source_call_offset == 68) // 0x44: the continuation swappc.
+      if (fixup.source_call_offset == 68) { // 0x44: the continuation swappc.
         continuation_fixup = &fixup;
+      }
     }
   }
   ASSERT_NE(continuation_fixup, nullptr);
@@ -4450,8 +4487,9 @@ TEST(CfgAnalysis, Gfx1250ExplicitKernelEntryClearsIncomingLaneStash) {
   auto blocks = build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Cdna5, extra_leaders);
 
   size_t total_fixups = 0;
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     total_fixups += block->static_indirect_call_fixups().size();
+  }
   EXPECT_EQ(total_fixups, 0u);
 }
 
@@ -4619,8 +4657,9 @@ TEST(CfgAnalysis, Gfx1250RestoredSgprMutationPreservesSiblingBranch) {
   for (const auto &block : blocks) {
     for (const auto &fixup : block->static_indirect_call_fixups()) {
       EXPECT_NE(fixup.source_call_offset, 0x38u);
-      if (fixup.source_call_offset == 0x40)
+      if (fixup.source_call_offset == 0x40) {
         sibling_call = &fixup;
+      }
     }
   }
   ASSERT_NE(sibling_call, nullptr);
@@ -4663,8 +4702,9 @@ TEST(CfgAnalysis, Gfx1250PcPairCopyReachesConsumer) {
   const IndirectCallFixup *copied_call = nullptr;
   for (const auto &block : blocks) {
     for (const auto &fixup : block->static_indirect_call_fixups()) {
-      if (fixup.source_call_offset == 20)
+      if (fixup.source_call_offset == 20) {
         copied_call = &fixup;
+      }
     }
   }
   ASSERT_NE(copied_call, nullptr);
@@ -4745,8 +4785,9 @@ TEST(CfgAnalysis, Gfx1250SwapPcOverwritesPcBuilderInReturnPair) {
   const IndirectCallFixup *first_call = nullptr;
   for (const auto &block : blocks) {
     for (const auto &fixup : block->static_indirect_call_fixups()) {
-      if (fixup.source_call_offset == 16)
+      if (fixup.source_call_offset == 16) {
         first_call = &fixup;
+      }
       EXPECT_NE(fixup.source_call_offset, 20u);
     }
   }
@@ -4864,8 +4905,9 @@ TEST(CfgAnalysis, Gfx1250ExactCalleeSummaryPreservesUnwrittenRestoredSgprs) {
     const IndirectCallFixup *fixup = nullptr;
     for (const auto &block : blocks) {
       for (const auto &candidate : block->static_indirect_call_fixups()) {
-        if (candidate.source_call_offset == 52)
+        if (candidate.source_call_offset == 52) {
           fixup = &candidate;
+        }
       }
     }
     ASSERT_NE(fixup, nullptr);
@@ -5003,8 +5045,9 @@ TEST(CfgAnalysis, Gfx1250ExactCalleeSummaryDropsWrittenRestoredSgprs) {
     const IndirectCallFixup *fixup = nullptr;
     for (const auto &block : blocks) {
       for (const auto &candidate : block->static_indirect_call_fixups()) {
-        if (candidate.source_call_offset == 52)
+        if (candidate.source_call_offset == 52) {
           fixup = &candidate;
+        }
       }
     }
     if (restored_pair == 20) {
@@ -5061,8 +5104,9 @@ TEST(CfgAnalysis, Gfx1250UnsupportedCalleeSummaryFallsBackToCallPreservedSgprs) 
     const IndirectCallFixup *fixup = nullptr;
     for (const auto &block : blocks) {
       for (const auto &candidate : block->static_indirect_call_fixups()) {
-        if (candidate.source_call_offset == 52)
+        if (candidate.source_call_offset == 52) {
           fixup = &candidate;
+        }
       }
     }
     if (restored_pair == 64) {
@@ -5166,8 +5210,9 @@ TEST(CfgAnalysis, Gfx1250CalleeSavedPcBuilderCanBeStashedAfterCall) {
   const IndirectCallFixup *second_call = nullptr;
   for (const auto &block : blocks) {
     for (const auto &fixup : block->static_indirect_call_fixups()) {
-      if (fixup.source_call_offset == 52)
+      if (fixup.source_call_offset == 52) {
         second_call = &fixup;
+      }
     }
   }
   ASSERT_NE(second_call, nullptr);
@@ -5215,8 +5260,9 @@ TEST(CfgAnalysis, Gfx1250DoesNotRecoverLaneStashWithDifferingRoleBanks) {
   auto blocks = build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Cdna5);
 
   size_t total_fixups = 0;
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     total_fixups += block->static_indirect_call_fixups().size();
+  }
   EXPECT_EQ(total_fixups, 0u);
 }
 
@@ -5330,8 +5376,9 @@ TEST(CfgAnalysis, Gfx1250DoesNotReuseStashFromSkippedFallthroughPredecessor) {
   }
   std::vector<const Instruction *> decoded_insts;
   decoded_insts.reserve(owned.size());
-  for (const auto &inst : owned)
+  for (const auto &inst : owned) {
     decoded_insts.push_back(inst.get());
+  }
   const auto text =
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
 
@@ -5357,8 +5404,9 @@ run_indirect_discovery_for_test(std::vector<uint32_t> words,
   TestCodeObject co(std::move(words));
   auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   EXPECT_NE(decoder, nullptr);
-  if (decoder == nullptr)
+  if (decoder == nullptr) {
     return {};
+  }
 
   const auto *sec = co.text_sections().front();
   const auto *inst_data = reinterpret_cast<const uint32_t *>(sec->data());
@@ -5372,8 +5420,9 @@ run_indirect_discovery_for_test(std::vector<uint32_t> words,
     }
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, &inst_data[pc], byte_offset));
     EXPECT_NE(inst, nullptr);
-    if (inst == nullptr)
+    if (inst == nullptr) {
       return {};
+    }
     const uint32_t inst_words = static_cast<uint32_t>(inst->size()) / sizeof(uint32_t);
     byte_offset += inst->size();
     pc += inst_words;
@@ -5381,8 +5430,9 @@ run_indirect_discovery_for_test(std::vector<uint32_t> words,
   }
   std::vector<const Instruction *> decoded_insts;
   decoded_insts.reserve(owned.size());
-  for (const auto &inst : owned)
+  for (const auto &inst : owned) {
     decoded_insts.push_back(inst.get());
+  }
   const auto text =
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(sec->data()), sec->size());
 
@@ -5818,9 +5868,10 @@ TEST(VgprMsbHwregSlice, MatchesTheBankFieldBitsForEveryEncoding) {
   for (uint32_t encoding = 0; encoding <= 0xffffu; ++encoding) {
     const amdgpu::HwregSlice slice = amdgpu::decode_hwreg_slice(encoding);
     bool overlaps = false;
-    for (uint32_t bit = 12; bit <= 19; ++bit)
+    for (uint32_t bit = 12; bit <= 19; ++bit) {
       overlaps |= slice.id == amdgpu::MODE_HWREG && bit >= slice.begin &&
                   bit < static_cast<uint32_t>(slice.begin) + slice.width;
+    }
     ASSERT_EQ(amdgpu::hwreg_slice_overlaps_vgpr_msb(encoding), overlaps) << encoding;
   }
 }
@@ -6584,10 +6635,11 @@ TEST(LivenessAnalysis, Cdna4ImmediateGprIndexModeWriteUsesLiteralValue) {
     auto maybe_unused_run = liveness.find_globally_unused_vgpr_run(&*instruction, 1, 1, 1, 2);
     ASSERT_TRUE(maybe_unused_run.succeeded());
     const auto unused = maybe_unused_run.value();
-    if (literal == 0)
+    if (literal == 0) {
       EXPECT_EQ(unused, 1);
-    else
+    } else {
       EXPECT_EQ(unused, std::nullopt);
+    }
     EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
   }
 }
@@ -7182,8 +7234,9 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
   const Instruction *joined_move = nullptr;
   for (const auto &block : blocks) {
     for (const Instruction &inst : block->instructions()) {
-      if (inst.mnemonic() == "v_mov_b32_e32")
+      if (inst.mnemonic() == "v_mov_b32_e32") {
         joined_move = &inst;
+      }
     }
   }
   ASSERT_NE(joined_move, nullptr);
@@ -7198,8 +7251,9 @@ TEST(LivenessAnalysis, Gfx1250VgprMsbJoinExcludesUnreachablePredecessor) {
 // Collect a block's instructions in order for index-based assertions.
 std::vector<const Instruction *> insts_of(BasicBlock &block) {
   std::vector<const Instruction *> out;
-  for (const auto &inst : block.instructions())
+  for (const auto &inst : block.instructions()) {
     out.push_back(&inst);
+  }
   return out;
 }
 
@@ -7443,8 +7497,9 @@ TEST(LivenessAnalysis, VskipStateWritesControlWhetherDefinitionsKill) {
     LivenessAnalysisOptions options = {.arch = rocjitsu::IsaFamily::Cdna4,
                                        .entry_block = blocks.front().get(),
                                        .additional_entry_blocks = {}};
-    if (test_case.provide_text)
+    if (test_case.provide_text) {
       options.text = text_span(co);
+    }
     const LivenessAnalysis liveness(KernelBlockScope(scope), kScopeWaveSize, nullptr, options);
     const FailureOr<bool> before = liveness.is_live_before(**definition, {RegClass::SGPR, 4, 1});
     ASSERT_TRUE(before.succeeded());
@@ -8255,8 +8310,9 @@ TEST(LivenessAnalysis, AdditionalUsesAreOwnedScopedAndIndependentOfSnapshotFilte
                                                       .live_before_instructions = snapshots,
                                                       .additional_uses = uses});
     // Caller buffers can be reused and then destroyed before deferred dataflow.
-    for (AdditionalRegisterUse &use : uses)
+    for (AdditionalRegisterUse &use : uses) {
       use.registers = {};
+    }
     return analysis;
   }();
   EXPECT_FALSE(liveness.has_materialized_cfg_liveness());
@@ -9164,8 +9220,9 @@ TEST(GeneratedInstDefUse, Gfx1150ImageLivenessFollowsVaddrSelectors) {
           test.opcode,
           {.nsa = nsa, .dim = test.dim, .dmask = 1, .a16 = test.a16, .vaddr = 23, .vdata = 100});
       std::vector<uint32_t> words{image[0], image[1]};
-      if (nsa)
+      if (nsa) {
         words.push_back(29u | (30u << 8) | (11u << 16) | (41u << 24));
+      }
       words.push_back(rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp)[0]);
       TestCodeObject co(std::move(words));
       auto blocks = build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Rdna3_5);
@@ -9213,8 +9270,9 @@ TEST(GeneratedInstDefUse, Gfx10GetLodTracksCubeFacesButSkipsArrayLayersAtIssue) 
       for (const bool a16 : {false, true}) {
         const unsigned words = a16 ? (dim.coordinates + 1) / 2 : dim.coordinates;
         for (const bool nsa : {false, true}) {
-          if (nsa && words == 1)
+          if (nsa && words == 1) {
             continue;
+          }
           SCOPED_TRACE(testing::Message() << "arch=" << arch << " dim=" << +dim.dim
                                           << " a16=" << a16 << " nsa=" << nsa);
           const auto op = rdna1::build_mimg(
@@ -9329,9 +9387,10 @@ TEST(GeneratedInstDefUse, Gfx1150ImageFeedbackIsConditionalAtFullExec) {
         std::vector<uint32_t> words{
             rdna3_5::build_sop1(rdna3_5::kSMovB32Sop1, {.ssrc0 = 193, .sdst = 126})[0], image[0],
             image[1], rdna3_5::build_sopp(rdna3_5::kSWaitcntSopp)[0]};
-        for (uint16_t reg = data; reg < status + read_status; ++reg)
+        for (uint16_t reg = data; reg < status + read_status; ++reg) {
           words.push_back(rdna3_5::build_vop1(
               rdna3_5::kVMovB32Vop1, {.src0 = static_cast<uint16_t>(256 + reg), .vdst = 50})[0]);
+        }
         words.push_back(rdna3_5::build_sopp(rdna3_5::kSEndpgmSopp)[0]);
         TestCodeObject co(std::move(words));
         auto blocks = build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Rdna3_5);
@@ -9472,8 +9531,9 @@ TEST(ExplicitOrdinarySgprBound, ReportsZeroForAScopeNamingNoScalars) {
   ASSERT_FALSE(blocks.empty());
 
   std::vector<BasicBlock *> scope;
-  for (const auto &b : blocks)
+  for (const auto &b : blocks) {
     scope.push_back(b.get());
+  }
   EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 0u);
 }
 
@@ -9497,8 +9557,9 @@ TEST(ExplicitOrdinarySgprBound, CountsOperandWidthNotJustTheBase) {
   ASSERT_FALSE(blocks.empty());
 
   std::vector<BasicBlock *> scope;
-  for (const auto &b : blocks)
+  for (const auto &b : blocks) {
     scope.push_back(b.get());
+  }
   EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 22u);
 }
 
@@ -9554,8 +9615,9 @@ TEST(ExplicitOrdinarySgprBound, IgnoresIndicesPastTheAllocatableMaximum) {
   ASSERT_FALSE(blocks.empty());
 
   std::vector<BasicBlock *> scope;
-  for (const auto &b : blocks)
+  for (const auto &b : blocks) {
     scope.push_back(b.get());
+  }
   EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 13u);
 }
 
@@ -9577,8 +9639,9 @@ TEST(ExplicitOrdinarySgprBound, SpecialRegisterEffectsDoNotRaiseTheBound) {
   ASSERT_FALSE(blocks.empty());
 
   std::vector<BasicBlock *> scope;
-  for (const auto &b : blocks)
+  for (const auto &b : blocks) {
     scope.push_back(b.get());
+  }
   EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 2u);
 }
 
@@ -9602,8 +9665,9 @@ TEST(ExplicitOrdinarySgprBound, SeesAnSgprThatIsAlsoAnImplicitUse) {
   ASSERT_FALSE(blocks.empty());
 
   std::vector<BasicBlock *> scope;
-  for (const auto &b : blocks)
+  for (const auto &b : blocks) {
     scope.push_back(b.get());
+  }
   EXPECT_EQ(explicit_ordinary_sgpr_bound(KernelBlockScope(scope), kScopeWaveSize), 12u);
 }
 
