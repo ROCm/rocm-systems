@@ -484,7 +484,7 @@ ncclResult_t ncclAllGather_impl(const void* sendbuff, void* recvbuff, size_t sen
       return ncclHierarchicalAllGather_Impl(sendbuff, recvbuff, sendcount, datatype, comm, stream);
     });
 #if defined(ENABLE_ROCSHMEM_GIN)
-  case RCCL_AG_GIN_SDMA:
+  case RCCL_GIN_SDMA:
     INFO(NCCL_COLL, "AllGather: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
          comm->nRanks, sendcount, (int)datatype, sendcount * ncclTypeSize(datatype),
          sendbuff == (const char*)recvbuff + comm->rank * sendcount * ncclTypeSize(datatype) ? 1 : 0);
@@ -563,7 +563,7 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
     }
 #endif
 #if defined(ENABLE_ROCSHMEM_GIN)
-    case RCCL_A2A_GIN_SDMA:
+    case RCCL_GIN_SDMA:
       INFO(NCCL_COLL, "AllToAll: taking GIN-SDMA path: nRanks=%d count=%zu datatype=%d bytes=%zu inPlace=%d",
            comm->nRanks, count, (int)datatype, count * ncclTypeSize(datatype), sendbuff == recvbuff ? 1 : 0);
       return rcclAddonLaunch(info, [&] {
