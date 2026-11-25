@@ -2,10 +2,7 @@ l1i.bw:
   name: L1I Bandwidth
   formula: 64 * SUM(SQC_ICACHE_REQ) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: >-
-    The percent of L1I requests that hit on a previously loaded line the cache. Calculated
-    as the ratio of the number of L1I requests that hit over the number of all L1I
-    requests.
+  description: The number of bytes looked up in the L1I cache per unit time.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 l1i.bw_util:
   name: L1I Bandwidth Utilization
@@ -25,16 +22,18 @@ l1i.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
   unit: Percent
   description: >-
-    The number of bytes looked up in the L1I cache per unit time.
+    The percent of L1I requests that hit on a previously loaded line the cache.
+    Calculated as the number of L1I hits over the number of hits and misses, excluding
+    duplicate misses.
   peak: 100
 l1i.hit_rate_incl_dup:
   name: L1I Hit Rate (Including Duplicate Misses)
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_HITS + SQC_ICACHE_MISSES + SQC_ICACHE_MISSES_DUPLICATE)
   unit: Percent
   description: >-
-    The percent of L1I requests that hit [#l1i-cache]_ on a previously loaded line
-    the cache. Calculated as the ratio of the number of L1I requests that hit over
-    the number of all L1I requests.
+    The percent of L1I requests that hit [#l1i-cache]_ on a previously loaded line the
+    cache. Calculated as the number of L1I hits over the number of hits and misses,
+    including duplicate misses.
 l1i.hits:
   name: L1I Hits
   formula: SUM(SQC_ICACHE_HITS) / SUM($denom)
@@ -43,7 +42,7 @@ l1i.hits:
     The total number of L1I requests that hit on a previously loaded cache line, per
     normalization-unit.
 l1i.hits_per_req:
-  name: L1I Hits per Request
+  name: L1I Hit Rate
   formula: 100 * SUM(SQC_ICACHE_HITS) / SUM(SQC_ICACHE_REQ)
   unit: Percent
   description: >-

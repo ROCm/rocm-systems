@@ -35,9 +35,7 @@ gcea.dram_rd_size_32b_increments:
   formula: SUM(GCEA_RDRAM_SIZE_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Total volume of read data transferred from system memory. This metric helps quantify
-    memory read bandwidth consumption. Compare with theoretical bandwidth to assess
-    memory utilization.
+    Total volume of read data transferred from system memory, in 32-byte increments.
 gcea.dram_wr_banks_active:
   name: DRAM Write Banks Active
   formula: SUM(GCEA_WDRAM_NUM_BANKS_VLD_sum) / SUM($denom)
@@ -74,8 +72,8 @@ gcea.dram_wr_size_32b_increments:
   formula: SUM(GCEA_WDRAM_SIZE_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Total volume of write data transferred to system memory. This quantifies memory
-    write bandwidth consumption. High values indicate write-intensive workloads.
+    Total volume of write data transferred to system memory, in 32-byte increments. High
+    values indicate write-intensive workloads.
 gcea.probe_req:
   name: GCEA Probe Requests
   formula: SUM(GCEA_PRB_REQ_sum) / SUM($denom)

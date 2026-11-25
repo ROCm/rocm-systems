@@ -3,8 +3,8 @@ vl1d.access_lat_norm:
   formula: SUM(TCP_TCP_LATENCY_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    Calculated as the average number of cycles that a vL1D cache line request spent in
-    the vL1D cache pipeline.
+    The total number of cycles vL1D cache line requests spent in the vL1D cache
+    pipeline.
 vl1d.ai:
   formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops + $mfma_f6f4_flops) / SUM($l1_bytes)
 vl1d.cache_full_stall:
@@ -58,29 +58,26 @@ vl1d.cache_tcp_stalled_by_utcl2:
     Measures backpressure from UTCL2 to TCP. A high stall rate (>= 10%) indicates
     UTCL2 misses causing TLB latency.
 vl1d.inflight_req:
-  name: vL1D Inflight Requests
+  name: UTCL1 Inflight Requests
   formula: SUM(TCP_CLIENT_UTCL1_INFLIGHT_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    The sum of inflight client-to-UTCL1 translation requests per cycle, per normalization
-    unit. Measures the average number of translation requests actively being processed
-    by the UTCL1 at any given time.
+  description: The sum over cycles of inflight client-to-UTCL1 translation requests.
 vl1d.l2_rd_lat_norm:
   name: vL1D-L2 Read Latency Cycles
   formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    Calculated as the average number of cycles that the vL1D cache took to issue and
-    receive read requests from the L2 Cache. This number also includes requests for
-    atomics with return values.
+    The total number of cycles that the vL1D cache took to issue and receive read
+    requests from the L2 Cache. This number also includes requests for atomics with
+    return values.
 vl1d.l2_wr_lat_norm:
   name: vL1D-L2 Write Latency Cycles
   formula: SUM(TCP_TCC_WRITE_REQ_LATENCY_sum) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    Calculated as the average number of cycles that the vL1D cache took to issue and
-    receive acknowledgement of a write request to the L2 Cache. This number also
-    includes requests for atomics without return values.
+    The total number of cycles that the vL1D cache took to issue and receive
+    acknowledgement of write requests to the L2 Cache. This number also includes
+    requests for atomics without return values.
 vl1d.lat_fifo_stall:
   name: vL1D Latency FIFO Stall
   formula: SUM(TCP_UTCL1_LFIFO_FULL_sum) / SUM($denom)
@@ -89,7 +86,7 @@ vl1d.lat_fifo_stall:
     The number of cycles the UTCL1-to-UTCL2 latency-hiding FIFO was full, per normalization
     unit. This FIFO queues requests to the L2 translation cache (UTCL2).
 vl1d.misses_under_translation_miss:
-  name: vL1D Misses under Translation Miss
+  name: UTCL1 Misses under Translation Miss
   formula: SUM(TCP_UTCL1_TRANSLATION_MISS_UNDER_MISS_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-

@@ -1,5 +1,5 @@
 sl1d.hits_per_req:
-  name: sL1D Hits per Request
+  name: sL1D Hit Rate
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
   unit: Percent
   description: >-
@@ -7,6 +7,14 @@ sl1d.hits_per_req:
     efficient reuse of constant and uniform data. Low rates may suggest excessive
     unique constant data or poor temporal locality.
   peak: 100
+sl1d.load_bw:
+  name: sL1D Load Bandwidth
+  formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    Bytes loaded by scalar memory instructions, from the dwords each instruction
+    loads. Bounds-check reductions are ignored.
+  peak: '$sqc_per_gpu * 64 * $max_sclk / 1000'
 sl1d.req:
   name: sL1D Requests
   formula: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
@@ -14,11 +22,3 @@ sl1d.req:
   description: >-
     Scalar data cache requests after bank serialization, normalized by the chosen
     unit.
-sl1d.req_bw:
-  name: Dcache Request Bandwidth
-  formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
-  unit: GB/s
-  description: >-
-    Bytes loaded by scalar memory instructions, from the dwords each instruction
-    loads. Bounds-check reductions are ignored.
-  peak: '$sqc_per_gpu * 64 * $max_sclk / 1000'

@@ -17,7 +17,7 @@ txa.async_load_inst:
   name: TXA Async Load Instruction
   formula: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of async load requests.
+  description: Number of async load instructions processed by TXA.
 txa.async_store_bw:
   name: TXA Async Store Bandwidth
   formula: SUM(TX_VCA_ASYNC_STORE_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -27,7 +27,7 @@ txa.async_store_inst:
   name: TXA Async Store Instruction
   formula: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of async store requests.
+  description: Number of async store instructions processed by TXA.
 txa.block_load_inst:
   name: TXA Block Load Instruction
   formula: SUM(TX_VCA_BLOCK_LOAD_WAVEFRONTS_sum) / SUM($denom)
@@ -134,7 +134,7 @@ txa.lds_atomics_insts:
   name: LDS Atomics Instructions
   formula: SUM(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS atomic requests.
+  description: Number of LDS atomic instructions processed by TXA.
 txa.lds_bw_atomics:
   name: LDS Bandwidth - Atomics
   formula: SUM(TX_VCA_LDS_ATOMIC_BANDWIDTH_BYTES_sum) / SUM(End_Timestamp - Start_Timestamp)
@@ -161,12 +161,12 @@ txa.lds_load_insts:
   name: LDS Load Instructions
   formula: SUM(TX_VCA_LDS_LOAD_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS load requests.
+  description: Number of LDS load instructions processed by TXA.
 txa.lds_store_insts:
   name: LDS Store Instructions
   formula: SUM(TX_VCA_LDS_STORE_WAVEFRONTS_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of LDS store requests.
+  description: Number of LDS store instructions processed by TXA.
 txa.req_bus_stall_rate:
   name: TXA Request Bus Stall Rate
   formula: 100 * SUM(TX_VMW_DATA_FIFO_STALL_sum) / (2 * SUM(TX_VMW_GATE_EN1_sum))
@@ -190,27 +190,26 @@ txa.stall_rate:
   formula: 100 * SUM(TX_VCA_ADDRESSER_STALLED_CYCLES_sum) / SUM(TX_VMW_GATE_EN1_sum)
   unit: Percent
   description: Percentage of cycles the TXA is stalled by the GL0 cache.
-txa.tdm_async_barrier_inst:
-  name: TDM Async Barrier Instruction
+txa.tdm_async_barrier_req:
+  name: TDM Async Barrier Requests
   formula: SUM(TX_VCA_TENSOR_ASYNC_BARRIER_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Number of TDM async barrier instructions processed by TXA.
-txa.tdm_async_cluster_load_insts:
-  name: TDM Async Cluster Load Instructions
+  description: Number of TDM async barrier requests processed by TXA.
+txa.tdm_async_cluster_load_req:
+  name: TDM Async Cluster Load Requests
   formula: SUM(TX_VCA_TENSOR_ASYNC_CLUSTER_LOAD_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    Number of TDM async cluster load instructions processed by TXA.
-txa.tdm_async_load_insts:
-  name: TDM Async Load Instructions
+  description: Number of TDM async cluster load requests processed by TXA.
+txa.tdm_async_load_req:
+  name: TDM Async Load Requests
   formula: SUM(TX_VCA_TENSOR_ASYNC_LOAD_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total TDM load requests.
-txa.tdm_async_store_insts:
-  name: TDM Async Store Instructions
+  description: Number of TDM async load requests processed by TXA.
+txa.tdm_async_store_req:
+  name: TDM Async Store Requests
   formula: SUM(TX_VCA_TENSOR_ASYNC_STORE_DMA_REQUEST_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: Total TDM store requests.
+  description: Number of TDM async store requests processed by TXA.
 txa.tdm_insts:
   name: TDM Instructions
   formula: SUM(TX_VCA_TENSOR_DMA_WAVEFRONT_sum) / SUM($denom)

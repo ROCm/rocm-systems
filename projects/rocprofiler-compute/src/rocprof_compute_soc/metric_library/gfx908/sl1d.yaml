@@ -24,9 +24,9 @@ sl1d.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
   unit: Percent
   description: >-
-    The percent of sL1D requests that hit on a previously loaded line the cache. Calculated
-    as the ratio of the number of sL1D requests that hit over the number of all sL1D
-    requests.
+    The percent of sL1D requests that hit on a previously loaded line the cache.
+    Calculated as the number of sL1D hits over the number of hits and misses, excluding
+    duplicate misses.
   peak: 100
 sl1d.hit_rate_incl_dup:
   name: sL1D Hit Rate (Including Duplicate Misses)
@@ -34,8 +34,8 @@ sl1d.hit_rate_incl_dup:
   unit: Percent
   description: >-
     Indicates the percent of sL1D requests that hit on a previously loaded line the
-    cache. The ratio of the number of sL1D requests that hit over the number of all
-    sL1D requests.
+    cache. Calculated as the number of sL1D hits over the number of hits and misses,
+    including duplicate misses.
 sl1d.hits:
   name: sL1D Hits
   formula: SUM(SQC_DCACHE_HITS) / SUM($denom)
@@ -44,7 +44,7 @@ sl1d.hits:
     The total number of sL1D requests that hit on a previously loaded cache line,
     per normalization unit.
 sl1d.hits_per_req:
-  name: sL1D Hits per Request
+  name: sL1D Hit Rate
   formula: 100 * SUM(SQC_DCACHE_HITS) / SUM(SQC_DCACHE_REQ)
   unit: Percent
   description: >-

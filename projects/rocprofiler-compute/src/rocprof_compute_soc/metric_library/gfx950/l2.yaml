@@ -103,5 +103,5 @@ l2.wr_data_fifo_full_rate:
   formula: 100 * SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    Percentage of L2 busy time the source data FIFO was full. A rate >= 10% indicates L2
+    Percentage of L2 busy time the write data FIFO was full. A rate >= 10% indicates L2
     write data path bottleneck.
