@@ -23,6 +23,7 @@ _jax_thread_local = threading.local()
 def patch_jax_entry_points() -> None:
     """Wrap JAX compiled-call and primitive-dispatch entry points."""
     _wrap_jit_compiled_call()
+    _wrap_primitive_bind_with_trace()
 
 
 def _resolve_jax() -> bool:
@@ -87,6 +88,14 @@ def _compiled_function_name(compiled: object) -> str:
     return "<unknown>"
 
 
+def _primitive_name(primitive: object) -> str:
+    """Name for a jax.{name} marker from the Primitive instance."""
+    name = getattr(primitive, "name", None)
+    if isinstance(name, str) and name:
+        return name
+    return "<unknown>"
+
+
 def _run_with_jax_range(
     marker: str,
     original: Callable[..., Any],
@@ -145,6 +154,44 @@ def _wrap_jit_compiled_call() -> None:
     )
 
 
+def _roctx_bind_with_trace(primitive: object, *args: Any, **kwargs: Any) -> object:
+    """Run bind_with_trace under jax.{name}, skipping a nested JAX range."""
+    marker = f"jax.{_primitive_name(primitive)}"
+    return _run_with_jax_range(
+        marker, _CoreState.bind_with_trace, primitive, *args, **kwargs
+    )
+
+
+_roctx_bind_with_trace._roctx_wrapped = True
+
+
+def _wrap_primitive_bind_with_trace() -> None:
+    """Replace Primitive.bind_with_trace with _roctx_bind_with_trace."""
+    primitive = _CoreState.primitive
+    bind_with_trace = getattr(primitive, "bind_with_trace", None)
+    if bind_with_trace is None:
+        console_warning(
+            "ml api trace",
+            "jax Primitive is not available; skipping primitive instrumentation.",
+        )
+        return
+    if getattr(bind_with_trace, "_roctx_wrapped", False):
+        return
+    try:
+        _CoreState.bind_with_trace = bind_with_trace
+        primitive.bind_with_trace = _roctx_bind_with_trace
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch Primitive.bind_with_trace: {exc}",
+        )
+        return
+    console_log(
+        "ml api trace",
+        "Wrapped Primitive.bind_with_trace with ROCTX markers",
+    )
+
+
 class _JaxState:
     """Resolved JAX entry-point handles, populated by _resolve_jax()."""
 
@@ -154,6 +201,7 @@ class _JaxState:
         self.shard_map: Any = None
         self.primitive: Any = None
         self.compiled_call: Any = None
+        self.bind_with_trace: Any = None
 
 
 _CoreState = _JaxState()

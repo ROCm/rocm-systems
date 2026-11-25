@@ -8,6 +8,8 @@ import sys
 import types
 from typing import List
 
+import pytest
+
 from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backends import jax as jax_backend
 
@@ -41,8 +43,20 @@ def fake_compiled_type():
     return FakeCompiled
 
 
+def fake_primitive_type():
+    class FakePrimitive:
+        def __init__(self, name):
+            self.name = name
+
+        def bind_with_trace(self, *args, **kwargs):
+            return None
+
+    return FakePrimitive
+
+
 def install_fake_jax(monkeypatch, jax_package_init=FAKE_JAX_PACKAGE_INIT):
     compiled_type = fake_compiled_type()
+    primitive_type = fake_primitive_type()
 
     def fake_jit(fun, *args, **kwargs):
         name = getattr(fun, "__name__", "<unknown>")
@@ -53,13 +67,18 @@ def install_fake_jax(monkeypatch, jax_package_init=FAKE_JAX_PACKAGE_INIT):
     jax_mod.jit = fake_jit
     jax_mod.pmap = None
     jax_mod.shard_map = None
+    extend = types.ModuleType("jax.extend")
+    extend_core = types.ModuleType("jax.extend.core")
+    extend_core.Primitive = primitive_type
     monkeypatch.setitem(sys.modules, "jax", jax_mod)
+    monkeypatch.setitem(sys.modules, "jax.extend", extend)
+    monkeypatch.setitem(sys.modules, "jax.extend.core", extend_core)
     monkeypatch.setattr(
         jax_backend.importlib.util,
         "find_spec",
         lambda name, package=None: types.SimpleNamespace() if name == "jax" else None,
     )
-    return jax_mod, compiled_type
+    return jax_mod, compiled_type, primitive_type
 
 
 def reset_jax_core_state():
@@ -69,11 +88,11 @@ def reset_jax_core_state():
 
 def install_jax_backend(monkeypatch, python_tier=True):
     reset_jax_core_state()
-    jax_mod, compiled_type = install_fake_jax(monkeypatch)
+    jax_mod, compiled_type, primitive_type = install_fake_jax(monkeypatch)
     monkeypatch.setattr(marker_ranges, "ensure_python_tier", lambda: python_tier)
     monkeypatch.setattr(marker_ranges, "add_framework_root", lambda path: None)
     jax_backend.JaxBackend().install()
-    return jax_mod, compiled_type
+    return jax_mod, compiled_type, primitive_type
 
 
 def record_scopes(monkeypatch):
@@ -161,7 +180,7 @@ def test_jax_backend_registers_framework_root(monkeypatch):
 
 
 def test_jax_jit_call_emits_jit_marker(monkeypatch):
-    jax_mod, compiled_type = install_jax_backend(monkeypatch)
+    jax_mod, compiled_type, _primitive_type = install_jax_backend(monkeypatch)
     pushes = record_scopes(monkeypatch)
 
     def train_step(value):
@@ -183,7 +202,7 @@ def test_compiled_function_name_falls_back_to_wrapped_then_unknown():
 
 
 def test_jax_jit_wrap_is_idempotent(monkeypatch):
-    jax_mod, compiled_type = install_jax_backend(monkeypatch)
+    jax_mod, compiled_type, _primitive_type = install_jax_backend(monkeypatch)
     wrapped_once = compiled_type.__call__
     jax_backend.patch_jax_entry_points()
     assert compiled_type.__call__ is wrapped_once
@@ -198,7 +217,7 @@ def test_jax_jit_wrap_is_idempotent(monkeypatch):
 
 
 def test_jax_inner_jit_skips_second_marker(monkeypatch):
-    _jax_mod, compiled_type = install_jax_backend(monkeypatch)
+    _jax_mod, compiled_type, _primitive_type = install_jax_backend(monkeypatch)
     pushes = record_scopes(monkeypatch)
     inner = compiled_type("matmul_relu")
     outer = compiled_type("train_step", body=lambda *args, **kwargs: inner())
@@ -207,7 +226,7 @@ def test_jax_inner_jit_skips_second_marker(monkeypatch):
 
 
 def test_jax_range_restores_depth_after_exception(monkeypatch):
-    _jax_mod, compiled_type = install_jax_backend(monkeypatch)
+    _jax_mod, compiled_type, _primitive_type = install_jax_backend(monkeypatch)
     pushes = record_scopes(monkeypatch)
 
     def boom(*args, **kwargs):
@@ -220,3 +239,24 @@ def test_jax_range_restores_depth_after_exception(monkeypatch):
     pushes.clear()
     assert compiled_type("ok", body=lambda *args, **kwargs: 1)() == 1
     assert [item["marker"] for item in pushes] == ["jax.jit.ok"]
+
+
+@pytest.mark.parametrize("primitive_name", ["dot_general", "reduce_sum"])
+def test_jax_primitive_emits_named_marker(monkeypatch, primitive_name):
+    _jax_mod, _compiled_type, primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+    primitive_type(primitive_name).bind_with_trace(None, (), (), {})
+    assert [item["marker"] for item in pushes] == [f"jax.{primitive_name}"]
+    assert pushes[0]["backend"] == "jax"
+
+
+def test_jax_primitive_skips_when_range_open(monkeypatch):
+    _jax_mod, compiled_type, primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+    primitive = primitive_type("dot_general")
+    compiled = compiled_type(
+        "train_step",
+        body=lambda *args, **kwargs: primitive.bind_with_trace(None, (), (), {}),
+    )
+    compiled()
+    assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
