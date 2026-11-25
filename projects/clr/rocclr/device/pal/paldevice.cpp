@@ -8,6 +8,7 @@
 #include "platform/kernel.hpp"
 #include "os/os.hpp"
 #include "device/device.hpp"
+#include "device/devhostcall.hpp"
 #include "device/devrpc.hpp"
 #include "device/pal/paldefs.hpp"
 #include "device/pal/palmemory.hpp"
