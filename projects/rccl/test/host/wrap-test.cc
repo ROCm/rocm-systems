@@ -9230,6 +9230,44 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250CeRegisteredWindowEndsAt4M) {
       });
 }
 
+// gfx1250 DPX and SPX, registered buffers: RCCL_FORCE_CE_ALLREDUCE=1 allows CE but does not widen the 4M
+// CE-registered window, so Ring keeps 8M and above; RCCL_CE_AR_REG_MAX_MSG_BYTES widens it.
+TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250ForceCeAllReduceKeepsCeRegisteredWindow) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllReduce_Gfx1250ForceCeAllReduceKeepsCeRegisteredWindow",
+      []() {
+        int64_t forceCeAr = -1;
+        int64_t ceArRegMax = -1;
+        g_loadParam = [&forceCeAr, &ceArRegMax](const char* env, int64_t def) -> int64_t {
+          if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return forceCeAr;
+          if (std::strcmp(env, "RCCL_CE_AR_REG_MAX_MSG_BYTES") == 0) return ceArRegMax;
+          return def;
+        };
+        const int ceReg = (int)rcclAddonAlgos_t::RCCL_CE_REGISTERED;
+        RegisteredAr ar(16);
+        for (rcclTuningPartition partition : {RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}) {
+          const char* name = partition == RCCL_TUNING_PARTITION_DPX ? "DPX" : "SPX";
+          ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", partition);
+          ASSERT_NE(nullptr, ar.comm_->archThresholds);
+          forceCeAr = 1;
+          EXPECT_EQ(ceReg, ar.Select(4 * kMiB, /*capturing=*/false, true, ncclMax).algo) << name << " force, 4M";
+          for (size_t bytes : {8 * kMiB, 256 * kMiB}) {
+            EXPECT_EQ(NCCL_ALGO_RING, ar.Select(bytes, /*capturing=*/false, true, ncclMax).algo)
+                << name << " force, " << bytes;
+          }
+          forceCeAr = -1;
+          ceArRegMax = 256 * kMiB;
+          for (size_t bytes : {8 * kMiB, 256 * kMiB}) {
+            EXPECT_EQ(ceReg, ar.Select(bytes, /*capturing=*/false, true, ncclMax).algo)
+                << name << " RCCL_CE_AR_REG_MAX_MSG_BYTES=256M, " << bytes;
+          }
+          EXPECT_EQ(NCCL_ALGO_RING, ar.Select(512 * kMiB, /*capturing=*/false, true, ncclMax).algo)
+              << name << " RCCL_CE_AR_REG_MAX_MSG_BYTES=256M, 512M";
+          ceArRegMax = -1;
+        }
+      });
+}
+
 // gfx1250 SPX keeps the AllGather CE-registered window to 32M, for types DDA cannot run; DPX closes it.
 TEST(WrapMicrotestIsolated, AllGatherCeRegisteredWindow_Gfx1250SpxTo32MDpxClosed) {
   RUN_ISOLATED_TEST(
