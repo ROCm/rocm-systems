@@ -1761,7 +1761,9 @@ typedef enum {
                                    temperature reading by the chip */
   AMDSMI_TEMP_LOWEST,         //!< Historical min temperature
   AMDSMI_TEMP_HIGHEST,        //!< Historical max temperature
-  AMDSMI_TEMP_SHUTDOWN,       //!< Shutdown temperature
+  AMDSMI_TEMP_SHUTDOWN,       /**< Shutdown temperature. Reads the same value as
+                                   ::AMDSMI_TEMP_EMERGENCY, which is how amdgpu
+                                   reports the ASIC shutdown limit */
   AMDSMI_TEMP_LAST = AMDSMI_TEMP_SHUTDOWN
 } amdsmi_temperature_metric_t;
 

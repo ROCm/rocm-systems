@@ -152,6 +152,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Hardened the `@<path>` file loader shared by `--ampp-configure` and `--power-stabilization-configure`**.  
   - The loader now requires a regular file (rejecting symlinks, so not `/dev/stdin`), enforces a 1 MiB cap against bytes actually read, and guards against `UnicodeDecodeError`/`RecursionError`.
 
+- **`amdsmi_get_temp_metric()` now reports `AMDSMI_TEMP_SHUTDOWN` as the amdgpu emergency limit**.  
+  - `AMDSMI_TEMP_SHUTDOWN` reads the same value as `AMDSMI_TEMP_EMERGENCY` (`temp<N>_emergency`), which is how the amdgpu driver reports the ASIC shutdown limit. It previously returned `AMDSMI_STATUS_INTERNAL_EXCEPTION`. It returns `AMDSMI_STATUS_NOT_SUPPORTED` where the GPU has no such limit, as `AMDSMI_TEMP_EMERGENCY` does.
+
 ### Removed
 
 - **Removed the ``FW`` block from ``amd-smi static --nic``** (breaking).  
@@ -212,7 +215,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A temperature type with no sensor on the GPU now returns `AMDSMI_STATUS_NOT_SUPPORTED`, and no longer logs `Exception caught: map::at`.
 
 - **Fixed `amdsmi_get_temp_metric()` and `amdsmi_get_gpu_volt_metric()` returning `AMDSMI_STATUS_INTERNAL_EXCEPTION` for an unknown metric**.  
-  - A metric outside the enum now returns `AMDSMI_STATUS_INVAL`.
+  - A metric outside the enum now returns `AMDSMI_STATUS_INVAL` for a GPU sensor.
 
 - **Fixed device discovery failing with `Exception caught: map::at` on an unrecognized hwmon sensor**.  
   - A temperature or voltage label the library does not know, or a labelled `temp<N>` between 8 and 99, is now ignored and the other sensors keep working.

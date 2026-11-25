@@ -37,6 +37,13 @@ namespace {
 constexpr int64_t kEdgeMilliC = 45000;
 constexpr int64_t kVddgfxMilliV = 800;
 
+// One public metric: its name for the log, the hwmon file it reads and the value written there.
+struct MetricFile {
+  const char* name;
+  const char* file;
+  int64_t value;
+};
+
 // A fake GPU with an hwmon node, registered with RocmSMI and AMDSmiSystem so the public API can
 // reach it. `extra_files` are added to the hwmon directory, e.g. an unrecognized label.
 class FakeHwmonGpu {
@@ -171,16 +178,73 @@ TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricNeverReportsInternalException) {
   }
 }
 
-// A metric outside the enum is a bad argument. It used to reach a monitor-file lookup with no
-// valid entry and throw.
-TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricUnknownMetricIsInvalidArgs) {
+// The first value past the public enum is a bad argument. It used to reach a monitor-file lookup
+// with no valid entry and throw. Larger values are not tried: loading an out-of-range enum is
+// undefined behavior that UBSan reports. There is no voltage counterpart, since
+// AMDSMI_VOLT_LAST + 1 is 8, outside that enum's 3-bit range.
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricPastLastMetricIsInvalidArgs) {
   FakeHwmonGpu gpu;
 
-  for (const uint32_t metric : {static_cast<uint32_t>(AMDSMI_TEMP_HIGHEST) + 1, 99U, 0xFFFFFFFFU}) {
+  const uint32_t metric = static_cast<uint32_t>(AMDSMI_TEMP_LAST) + 1;
+  int64_t temperature = 0;
+  EXPECT_EQ(TempMetric(gpu, AMDSMI_TEMPERATURE_TYPE_EDGE, metric, &temperature, AMDSMI_STATUS_INVAL,
+                       "type=EDGE, metric=" + std::to_string(metric)),
+            AMDSMI_STATUS_INVAL);
+}
+
+// amdgpu exposes the ASIC shutdown limit as temp#_emergency, so SHUTDOWN reads the same file.
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricShutdownReadsEmergency) {
+  FakeHwmonGpu gpu(std::map<std::string, std::string>{{"temp1_emergency", "105000\n"}});
+
+  int64_t shutdown = 0;
+  EXPECT_EQ(TempMetric(gpu, AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMP_SHUTDOWN, &shutdown,
+                       AMDSMI_STATUS_SUCCESS, "type=EDGE, metric=SHUTDOWN"),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(shutdown, 105);
+
+  int64_t emergency = 0;
+  EXPECT_EQ(TempMetric(gpu, AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMP_EMERGENCY, &emergency,
+                       AMDSMI_STATUS_SUCCESS, "type=EDGE, metric=EMERGENCY"),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(emergency, shutdown);
+}
+
+// Every public temperature metric reads its own hwmon file. A metric added to the enum without a
+// file here fails the lookup. SHUTDOWN shares the emergency file.
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__TempMetricEveryPublicMetricReadsItsFile) {
+  const std::map<uint32_t, MetricFile> kMetricFiles = {
+      {AMDSMI_TEMP_CURRENT, {"CURRENT", "temp1_input", kEdgeMilliC}},
+      {AMDSMI_TEMP_MAX, {"MAX", "temp1_max", 90000}},
+      {AMDSMI_TEMP_MIN, {"MIN", "temp1_min", 10000}},
+      {AMDSMI_TEMP_MAX_HYST, {"MAX_HYST", "temp1_max_hyst", 85000}},
+      {AMDSMI_TEMP_MIN_HYST, {"MIN_HYST", "temp1_min_hyst", 15000}},
+      {AMDSMI_TEMP_CRITICAL, {"CRITICAL", "temp1_crit", 100000}},
+      {AMDSMI_TEMP_CRITICAL_HYST, {"CRITICAL_HYST", "temp1_crit_hyst", 95000}},
+      {AMDSMI_TEMP_EMERGENCY, {"EMERGENCY", "temp1_emergency", 105000}},
+      {AMDSMI_TEMP_EMERGENCY_HYST, {"EMERGENCY_HYST", "temp1_emergency_hyst", 102000}},
+      {AMDSMI_TEMP_CRIT_MIN, {"CRIT_MIN", "temp1_lcrit", 5000}},
+      {AMDSMI_TEMP_CRIT_MIN_HYST, {"CRIT_MIN_HYST", "temp1_lcrit_hyst", 6000}},
+      {AMDSMI_TEMP_OFFSET, {"OFFSET", "temp1_offset", 2000}},
+      {AMDSMI_TEMP_LOWEST, {"LOWEST", "temp1_lowest", 20000}},
+      {AMDSMI_TEMP_HIGHEST, {"HIGHEST", "temp1_highest", 70000}},
+      {AMDSMI_TEMP_SHUTDOWN, {"SHUTDOWN", "temp1_emergency", 105000}},
+  };
+  std::map<std::string, std::string> files;
+  for (const auto& [metric, metric_file] : kMetricFiles) {
+    files[metric_file.file] = std::to_string(metric_file.value) + "\n";
+  }
+  FakeHwmonGpu gpu(files);
+
+  for (uint32_t metric = AMDSMI_TEMP_FIRST; metric <= AMDSMI_TEMP_LAST; ++metric) {
+    const auto expected = kMetricFiles.find(metric);
+    ASSERT_NE(expected, kMetricFiles.end()) << "temperature metric " << metric << " has no file";
+    SCOPED_TRACE(std::string("temperature metric ") + expected->second.name);
     int64_t temperature = 0;
-    EXPECT_EQ(TempMetric(gpu, AMDSMI_TEMPERATURE_TYPE_EDGE, metric, &temperature,
-                         AMDSMI_STATUS_INVAL, "type=EDGE, metric=" + std::to_string(metric)),
-              AMDSMI_STATUS_INVAL);
+    EXPECT_EQ(
+        TempMetric(gpu, AMDSMI_TEMPERATURE_TYPE_EDGE, metric, &temperature, AMDSMI_STATUS_SUCCESS,
+                   std::string("type=EDGE, metric=") + expected->second.name),
+        AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(temperature, expected->second.value / 1000);
   }
 }
 
@@ -195,14 +259,34 @@ TEST(GpuUnit, HWMON_SENSOR_LOOKUP__VoltMetricUnlabeledTypeIsNotSupported) {
             AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
-TEST(GpuUnit, HWMON_SENSOR_LOOKUP__VoltMetricUnknownMetricIsInvalidArgs) {
-  FakeHwmonGpu gpu;
+// Every public voltage metric reads its own hwmon file, so none can fall to the rsmi default
+// branch for an unknown metric. A metric added to the enum without a file here fails the lookup.
+TEST(GpuUnit, HWMON_SENSOR_LOOKUP__VoltMetricEveryPublicMetricReadsItsFile) {
+  const std::map<uint32_t, MetricFile> kMetricFiles = {
+      {AMDSMI_VOLT_CURRENT, {"CURRENT", "in0_input", kVddgfxMilliV}},
+      {AMDSMI_VOLT_MAX, {"MAX", "in0_max", 900}},
+      {AMDSMI_VOLT_MIN_CRIT, {"MIN_CRIT", "in0_lcrit", 600}},
+      {AMDSMI_VOLT_MIN, {"MIN", "in0_min", 700}},
+      {AMDSMI_VOLT_MAX_CRIT, {"MAX_CRIT", "in0_crit", 1000}},
+      {AMDSMI_VOLT_AVERAGE, {"AVERAGE", "in0_average", 810}},
+      {AMDSMI_VOLT_LOWEST, {"LOWEST", "in0_lowest", 650}},
+      {AMDSMI_VOLT_HIGHEST, {"HIGHEST", "in0_highest", 950}},
+  };
+  std::map<std::string, std::string> files;
+  for (const auto& [metric, metric_file] : kMetricFiles) {
+    files[metric_file.file] = std::to_string(metric_file.value) + "\n";
+  }
+  FakeHwmonGpu gpu(files);
 
-  for (const uint32_t metric : {static_cast<uint32_t>(AMDSMI_VOLT_HIGHEST) + 1, 99U, 0xFFFFFFFFU}) {
+  for (uint32_t metric = AMDSMI_VOLT_FIRST; metric <= AMDSMI_VOLT_LAST; ++metric) {
+    const auto expected = kMetricFiles.find(metric);
+    ASSERT_NE(expected, kMetricFiles.end()) << "voltage metric " << metric << " has no file";
+    SCOPED_TRACE(std::string("voltage metric ") + expected->second.name);
     int64_t voltage = 0;
-    EXPECT_EQ(VoltMetric(gpu, AMDSMI_VOLT_TYPE_VDDGFX, metric, &voltage, AMDSMI_STATUS_INVAL,
-                         "type=VDDGFX, metric=" + std::to_string(metric)),
-              AMDSMI_STATUS_INVAL);
+    EXPECT_EQ(VoltMetric(gpu, AMDSMI_VOLT_TYPE_VDDGFX, metric, &voltage, AMDSMI_STATUS_SUCCESS,
+                         std::string("type=VDDGFX, metric=") + expected->second.name),
+              AMDSMI_STATUS_SUCCESS);
+    EXPECT_EQ(voltage, expected->second.value);
   }
 }
 
