@@ -140,20 +140,6 @@ def pk_rtz_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
     )
 
 
-def pk_u8_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve V_CVT_PK_U8_F32's stages."""
-    return _resolve_with_source_modifiers(
-        'amdgpu::conversion_pk_u8', is_vop3, has_abs, inst
-    )
-
-
-def pack_b32_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve V_PACK_B32_F16's stages."""
-    return _resolve_with_source_modifiers(
-        'amdgpu::conversion_pack_b32_f16', is_vop3, has_abs, inst
-    )
-
-
 # OCP 8-bit float formats in shared/conversion.h, for targets whose
 # fp8_formats.fp8_policy selects them.
 _FP8_FORMATS = {'fp8': 'amdgpu::conversion::Fp8', 'bf8': 'amdgpu::conversion::Bf8'}

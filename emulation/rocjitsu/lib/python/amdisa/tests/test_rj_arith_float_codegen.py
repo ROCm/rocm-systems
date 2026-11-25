@@ -3127,6 +3127,55 @@ def test_cdna_half_unary_uses_the_decoded_route(arch):
             assert api in text[start:end]
 
 
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_bit_packing_reuses_guest_policy(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_bit_pack
+
+    half = gen_bit_pack(
+        context(arch, 'V_PACK_B32_F16', ['dst'], ['a', 'b'], is_vop3=True)
+    )
+    assert 'rj_arith_v_pack_b32_f16_w64' in half
+    assert 'RJ_ARITH_FP_IEEE_MODE' in half
+    assert 'wf.fp_denorm_mode_f16_f64()' in half
+    assert 'RJ_ARITH_ALU_HIGH_B' in half
+    byte = gen_bit_pack(
+        context(arch, 'V_CVT_PK_U8_F32', ['dst'], ['a', 'b', 'c'], is_vop3=True)
+    )
+    assert 'wf.fp_round_mode_f32()' in byte
+    assert 'RJ_ARITH_ALU_ABS_A' in byte
+    if arch.startswith('cdna'):
+        accum = gen_bit_pack(
+            context(arch, 'V_CVT_PKACCUM_U8_F32', ['dst'], ['a', 'b'], is_vop3=True)
+        )
+        assert 'rj_arith_v_cvt_pkaccum_u8_f32_w64' in accum
+        assert 'dst, a, b, dst' in accum
+        assert 'fp_round_mode' not in accum
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_older_normalized_layout_and_sdwa_policy(arch):
+    from amdisa.codegen.execute.rj_arith_float import gen_normalized
+
+    cdna = arch in ('cdna1', 'cdna2')
+    legacy_e32 = cdna or arch in ('rdna1', 'rdna2')
+    for vop3 in (False, True):
+        body = gen_normalized(
+            context(arch, 'V_CVT_NORM_I16_F16', ['dst'], ['a'], is_vop3=vop3)
+        )
+        assert 'RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body
+        assert ('execute_normalized_sdwa' in body) == (legacy_e32 and not vop3)
+        assert ('auto word_source' in body) == (not legacy_e32 and not vop3)
+        assert_routes_to(body, 'rj_arith_v_cvt_norm_i16_f16', CONVERSION_SUFFIX[arch])
+        assert '_gfx942' not in body
+        for half in (False, True):
+            name = 'V_CVT_PKNORM_U16_' + ('F16' if half else 'F32')
+            packed = gen_normalized(
+                context(arch, name, ['dst'], ['a', 'b'], is_vop3=vop3)
+            )
+            assert 'rj_arith_v_cvt_pk_norm_u16_' in packed
+            assert ('execute_float_pack' in packed) == half
+
+
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
 @pytest.mark.parametrize('name', sorted(CDNA_MATH_F32))
 @pytest.mark.parametrize('vop3', [False, True])
