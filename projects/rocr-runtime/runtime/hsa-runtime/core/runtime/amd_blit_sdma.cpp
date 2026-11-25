@@ -1914,16 +1914,12 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
   // GFX13 or later use a different packet format with an additional COMPRESSION dword.
   const bool isGFX13Plus = (agent_->supported_isas()[0]->GetMajorVersion() >= 13);
 
-  // Determine packet size based on architecture (in dwords)
-  const size_t packet_size_dwords = isGFX13Plus ? sizeof(SDMA_PKT_COPY_LINEAR_RECT_GFX13) / 4 :
-                                                   sizeof(SDMA_PKT_COPY_LINEAR_RECT) / 4;
-
   // Use dword buffer to accommodate different packet sizes
   std::vector<uint32_t> pkts;
-  auto append = [&](size_t size) {
-    assert((size == (packet_size_dwords * 4)) && "SDMA packet size missmatch");
+  auto append = [&](size_t sizeInBytes) {
+    assert(sizeInBytes % 4 == 0 && "SDMA packet size must be DWORD aligned");
     size_t offset = pkts.size();
-    pkts.resize(offset + packet_size_dwords);
+    pkts.resize(offset + sizeInBytes / 4);
     return &pkts[offset];
   };
   const size_t max_copy_size = MaxSingleLinearCopySize();
@@ -2011,7 +2007,7 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCopyRectCommand(
 
   std::vector<core::Signal*> gang_signals(0);
 
-  return SubmitCommand(&pkts[0], pkts.size() * sizeof(uint32_t), size, dep_signals,
+  return SubmitCommand(pkts.data(), pkts.size() * sizeof(uint32_t), size, dep_signals,
                        out_signal, gang_signals);
 }
 

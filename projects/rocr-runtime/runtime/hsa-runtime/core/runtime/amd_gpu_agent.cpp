@@ -593,7 +593,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       int gran_accvgprs = ((gran_vgprs + 1) * 8) / 4 - 1;
       header->max_scratch_backing_memory_byte_size = uint64_t(gran_accvgprs) << 32;
     }
-    header->wavefront_size = supported_isas()[0]->GetMajorVersion() >= 10 ? AMD_POWERTWO_32 : AMD_POWERTWO_64;
+    header->wavefront_size = supported_isas()[0]->GetWavefront().IsWavefrontSize64() ? AMD_POWERTWO_64 : AMD_POWERTWO_32;
     header->workitem_vgpr_count = asic_shader->num_vgprs;
   }
 
