@@ -42,7 +42,7 @@ namespace rocshmem {
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The value of \p dest.
+ * @return The value of \p dest.
  */
 __device__ ATTR_NO_INLINE float rocshmem_ctx_float_atomic_fetch(
     rocshmem_ctx_t ctx, float *source, int pe);
@@ -185,8 +185,6 @@ __host__ ptrdiff_t rocshmem_ptrdiff_atomic_fetch(
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_atomic_set(
     rocshmem_ctx_t ctx, float *dest, float value, int pe);
@@ -333,7 +331,7 @@ __host__ void rocshmem_ptrdiff_atomic_set(
  * @param[in] val     The value to be atomically swapped.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The old value of \p dest.
+ * @return The old value of \p dest.
  */
 __device__ ATTR_NO_INLINE int rocshmem_ctx_int_atomic_compare_swap(
     rocshmem_ctx_t ctx, int *dest, int cond, int value, int pe);
@@ -603,7 +601,7 @@ __host__ ptrdiff_t rocshmem_ptrdiff_atomic_swap(
                       heap.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The old value of \p dest before it was incremented by 1.
+ * @return The old value of \p dest before it was incremented by 1.
  */
 __device__ ATTR_NO_INLINE int rocshmem_ctx_int_atomic_fetch_inc(
     rocshmem_ctx_t ctx, int *dest, int pe);
@@ -727,8 +725,6 @@ __host__ ptrdiff_t rocshmem_ptrdiff_atomic_fetch_inc(
  * @param[in] dest    Destination address. Must be an address on the symmetric
                       heap.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_int_atomic_inc(
     rocshmem_ctx_t ctx, int *dest, int pe);
@@ -855,7 +851,7 @@ __host__ void rocshmem_ptrdiff_atomic_inc(
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
  *
- * @return            The old value of \p dest before the \p val was added.
+ * @return The old value of \p dest before the \p val was added.
  */
 __device__ ATTR_NO_INLINE int rocshmem_ctx_int_atomic_fetch_add(
     rocshmem_ctx_t ctx, int *dest, int value, int pe);
@@ -980,8 +976,6 @@ __host__ ptrdiff_t rocshmem_ptrdiff_atomic_fetch_add(
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_int_atomic_add(
     rocshmem_ctx_t ctx, int *dest, int value, int pe);
@@ -1187,8 +1181,6 @@ __host__ uint64_t rocshmem_uint64_atomic_fetch_and(
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_uint_atomic_and(
     rocshmem_ctx_t ctx, unsigned int *dest, unsigned int value, int pe);
@@ -1349,8 +1341,6 @@ __host__ uint64_t rocshmem_uint64_atomic_fetch_or(
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_uint_atomic_or(
     rocshmem_ctx_t ctx, unsigned int *dest, unsigned int value, int pe);
@@ -1511,8 +1501,6 @@ __host__ uint64_t rocshmem_uint64_atomic_fetch_xor(
                       heap.
  * @param[in] val     The value to be atomically added.
  * @param[in] pe      PE of the remote process.
- *
- * @return void
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_uint_atomic_xor(
     rocshmem_ctx_t ctx, unsigned int *dest, unsigned int value, int pe);

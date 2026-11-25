@@ -69,6 +69,7 @@ target_sources(
         ${CMAKE_CURRENT_SOURCE_DIR}/path.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/regex_utility.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/setup.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/spin_mutex.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/static_object.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/string_utility.hpp
         ${CMAKE_CURRENT_SOURCE_DIR}/synchronized.hpp

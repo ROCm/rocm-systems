@@ -167,7 +167,7 @@ HIP_TEST_CASE(Unit_hipMemExportToShareableHandle_Capture) {
  *    - Host specific (LINUX)
  *    - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemExportFabricHandleToStdout_Positive_Basic") {
+HIP_TEST_CASE(Unit_hipMemExportFabricHandleToStdout_Positive_Basic) {
   CTX_CREATE();
 
   hipDevice_t device;

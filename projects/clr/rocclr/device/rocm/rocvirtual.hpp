@@ -280,6 +280,8 @@ class VirtualGPU : public device::VirtualDevice {
   //! signal is proven free before its reuse.
   class HwQueueTracker {
    public:
+    static constexpr uint32_t kInvalidAbceRing = std::numeric_limits<uint32_t>::max();
+
     HwQueueTracker(const VirtualGPU& gpu) : gpu_(gpu) {}
 
     virtual ~HwQueueTracker();
@@ -313,11 +315,15 @@ class VirtualGPU : public device::VirtualDevice {
     void ProcessSignalTiming(ProfilingSignal* signal);
 
     //! Update current active engine
-    void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
+    void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) {
+      engine_ = engine;
+      abce_ring_ = kInvalidAbceRing;
+    }
     HwQueueEngine GetActiveEngine() const { return engine_; }
 
     //! Returns the last submitted signal for a wait
-    std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute);
+    std::vector<hsa_signal_t>& WaitingSignal(HwQueueEngine engine = HwQueueEngine::Compute,
+                                             uint32_t abce_ring = kInvalidAbceRing);
 
     //! Resets current signal back to the previous one. It's necessary in a case of ROCr failure.
     virtual void ResetCurrentSignal() = 0;
@@ -371,7 +377,7 @@ class VirtualGPU : public device::VirtualDevice {
     virtual void PreparePooledSignals(const std::vector<ProfilingSignal*>& /*signals*/) {}
 
     //! Puts a signal in the current slot whose memory suits the use
-    virtual void PlaceForUse(bool /*timing_only*/) {}
+    virtual void PlaceForUse(bool /*host_memory*/) {}
 
     //! Moves current_id_ to the slot of the next use and makes its signal reusable
     virtual void AcquireSlot() = 0;
@@ -423,6 +429,7 @@ class VirtualGPU : public device::VirtualDevice {
     void ReleaseAllPins();
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
+    uint32_t abce_ring_ = kInvalidAbceRing;  //!< Exact coordinator ring for the last ABCE copy
     std::stack<ProfilingSignal*> signal_pool_irq_;   //!< The pool of free signals with interrupts
     std::stack<ProfilingSignal*> signal_pool_;       //!< The pool of free signals without interrupt
     std::vector<ProfilingSignal*> signal_list_;      //!< The pool of all signals for processing
@@ -526,8 +533,11 @@ class VirtualGPU : public device::VirtualDevice {
    private:
     void PreparePooledSignals(const std::vector<ProfilingSignal*>& signals) override;
     //! A timing-only use gets a host-memory signal, whose timestamps the host reads without
-    //! crossing the bus; any other use, which a GPU waiter or a sync may read, a device one
-    void PlaceForUse(bool timing_only) override;
+    //! crossing the bus. So does an SDMA use: a GPU waiter then polls the signal across the bus,
+    //! which costs less than the reads and flush a device-memory signal adds to the submission
+    //! and the synchronize. Any other use, which a GPU waiter or a sync may read, gets a
+    //! device-memory signal.
+    void PlaceForUse(bool host_memory) override;
     //! Advances current_id_ to an armed slot
     void AcquireSlot() override;
     void ArmForUse(ProfilingSignal* signal, hsa_signal_value_t init_val, uint64_t aql_slot,
@@ -1052,6 +1062,9 @@ class VirtualGPU : public device::VirtualDevice {
  private:
   //! Release pinned memory after previously submitted work on the queue has completed.
   void SchedulePinnedMemoryRelease(amd::HostQueue& queue, std::vector<amd::Memory*> pinned_memory);
+
+  //! Apply and consume a pending system-scope request without changing queue fence state.
+  void applySystemScopeRequest(uint16_t& header);
 
   //! Apply fence-scope adjustments to the AQL header (system scope promotion,
   //! consecutive-system-scope optimization, fence_state_ tracking).

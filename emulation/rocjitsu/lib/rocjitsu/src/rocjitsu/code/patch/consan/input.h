@@ -59,10 +59,11 @@ struct InputProgram {
   std::vector<uint64_t> exit_offsets;
   std::vector<NativeLdsAccess> accesses;
   std::vector<BarrierFacts> barriers;
+  bool repeated = false;
 };
 
 /// @brief Build an owning, qualified input program for the bounded native LDS profile.
-/// @details The closed, acyclic reachable CFG admits a deliberately explicit
+/// @details A closed acyclic CFG, or a qualified single-block barrier loop, admits an explicit
 /// integer/argument/output instruction subset. Unsupported memory or sync is a
 /// preparation failure, never an omitted operation interpreted as no ordering.
 /// The profile must match a supported table entry; copies/temporaries are valid.
@@ -71,5 +72,14 @@ struct InputProgram {
                                                           const TargetProfile &target,
                                                           std::string_view entry, InputError &error,
                                                           const InputLimits &limits = {});
+
+/// @brief Qualify one selected entry inside an intact multi-entry source image.
+/// @details Generic SBI independently proves disjoint ownership for the whole
+/// image. This analysis rejects selected control flow that enters a sibling.
+[[nodiscard]] FailureOr<InputProgram> build_image_entry_program(std::span<const uint8_t> image,
+                                                                const TargetProfile &target,
+                                                                std::string_view entry,
+                                                                InputError &error,
+                                                                const InputLimits &limits = {});
 
 } // namespace rocjitsu::consan

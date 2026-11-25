@@ -43,8 +43,9 @@ int main(int argc, char **argv) {
 
 template <typename T> __global__ void vector_add(const T *A, const T *B, T *C, int N) {
   int i = blockIdx.x * blockDim.x + threadIdx.x;
-  if (i < N)
+  if (i < N) {
     C[i] = A[i] + B[i];
+  }
 }
 
 template <typename T>
@@ -84,8 +85,9 @@ TEST(HipVectorAddTest, CorrectResult) {
 
   int errors = 0;
   for (int i = 0; i < N; ++i) {
-    if (std::fabs(h_C[i] - h_ref[i]) > 1e-5f)
+    if (std::fabs(h_C[i] - h_ref[i]) > 1e-5f) {
       ++errors;
+    }
   }
   EXPECT_EQ(errors, 0) << errors << "/" << N << " elements differ";
 }
@@ -101,7 +103,8 @@ TEST(HipVectorAddTest, PackedF64) {
   }
   ASSERT_NO_FATAL_FAILURE(run_vector_add(a, b, output));
   for (int i = 0; i < N; ++i) {
-    for (int lane = 0; lane < 2; ++lane)
+    for (int lane = 0; lane < 2; ++lane) {
       ASSERT_EQ(output[i][lane], a[i][lane] + b[i][lane]) << "pair " << i << ", lane " << lane;
+    }
   }
 }

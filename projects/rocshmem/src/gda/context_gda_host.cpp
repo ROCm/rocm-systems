@@ -89,6 +89,24 @@ __host__ void GDAHostContext::getmem(void *dest, const void *source,
   host_interface->getmem(dest, source, nelems, pe, context_window_info);
 }
 
+__host__ void GDAHostContext::putmem_signal(void *dest, const void *source,
+                                            size_t nelems, uint64_t *sig_addr,
+                                            uint64_t signal, int sig_op,
+                                            int pe) {
+  host_interface->putmem_signal(dest, source, nelems, sig_addr, signal, sig_op,
+                                pe, context_window_info);
+}
+
+__host__ uint64_t GDAHostContext::signal_fetch(const uint64_t *sig_addr) {
+  return host_interface->signal_fetch(sig_addr, context_window_info);
+}
+
+__host__ void GDAHostContext::signal_wait_until(uint64_t *sig_addr, int cmp,
+                                                uint64_t cmp_value) {
+  host_interface->signal_wait_until(sig_addr, cmp, cmp_value,
+                                    context_window_info);
+}
+
 __host__ void GDAHostContext::fence() {
   host_interface->fence(context_window_info);
 }

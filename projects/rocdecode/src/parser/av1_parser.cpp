@@ -164,6 +164,12 @@ ParserResult Av1VideoParser::ParsePictureData(const uint8_t *p_stream, uint32_t 
 
         // Init Roc decoder for the first time or reconfigure the existing decoder
         if (new_seq_activated_) {
+            // Display the pending frames first: a reconfigure replaces the decode surfaces
+            // that hold them.
+            if ((ret = FlushDpb()) != PARSER_OK) {
+                FunctionExitLog(g_rocdec_logger);
+                return ret;
+            }
             if ((ret = NotifyNewSequence(&seq_header_, &frame_header_)) != PARSER_OK) {
                 FunctionExitLog(g_rocdec_logger);
                 return ret;
@@ -1259,7 +1265,8 @@ ParserResult Av1VideoParser::ParseUncompressedHeader(uint8_t *p_stream, size_t s
         }
     }
 
-    if ( pic_width_ != p_frame_header->frame_size.frame_width || pic_height_ != p_frame_header->frame_size.frame_height) {
+    // pic_width_ holds the upscaled width: with super-resolution, frame_width is smaller on every frame.
+    if (pic_width_ != p_frame_header->frame_size.upscaled_width || pic_height_ != p_frame_header->frame_size.frame_height) {
         pic_width_ = p_frame_header->frame_size.upscaled_width;
         pic_height_ = p_frame_header->frame_size.frame_height;
         new_seq_activated_ = true;

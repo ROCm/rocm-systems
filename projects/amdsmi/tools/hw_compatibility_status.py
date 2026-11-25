@@ -71,6 +71,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import warnings
 
 
 # ----------------------------------------------------------------------------
@@ -134,6 +135,12 @@ except ImportError as e:
     print("Install the amdsmi Python bindings (e.g. via the ROCm/amd-smi packages),")
     print("or invoke this script with the interpreter that already has them.")
     sys.exit(1)
+
+
+# The v1 driver info call is made on purpose, to report that the API still exists.
+warnings.filterwarnings(
+    "ignore", message=r"amdsmi_get_gpu_driver_info\(\) is deprecated", category=DeprecationWarning
+)
 
 
 def is_root():
@@ -470,11 +477,11 @@ def run_tests():
     test_api("amdsmi_get_gpu_kfd_info", lambda: amdsmi.amdsmi_get_gpu_kfd_info(gpu_handle))
 
     # ========================================================================
-    # SECTION 3: DRIVER & VERSION INFO (8 APIs)
+    # SECTION 3: DRIVER & VERSION INFO (9 APIs)
     # ========================================================================
     print()
     print("=" * 70)
-    print("SECTION 3: DRIVER & VERSION INFO (8 APIs)")
+    print("SECTION 3: DRIVER & VERSION INFO (9 APIs)")
     print("=" * 70)
     print()
 
@@ -483,6 +490,10 @@ def run_tests():
     )
 
     test_api("amdsmi_get_gpu_driver_info", lambda: amdsmi.amdsmi_get_gpu_driver_info(gpu_handle))
+
+    test_api(
+        "amdsmi_get_gpu_driver_info_v2", lambda: amdsmi.amdsmi_get_gpu_driver_info_v2(gpu_handle)
+    )
 
     test_api("amdsmi_get_version", lambda: amdsmi.amdsmi_get_version())
 

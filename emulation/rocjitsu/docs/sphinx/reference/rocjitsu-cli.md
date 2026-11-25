@@ -2,7 +2,7 @@
 myst:
     html_meta:
         "description": "rocjitsu CLI reference covering command-line options, execution modes, environment variables, socket path resolution, RPC opcodes, and daemon lifecycle."
-        "keywords": "rocJITsu, CLI, ROCm, daemon, attach, local, RPC, environment variables, socket, GPU emulation"
+        "keywords": "rocjitsu, CLI, ROCm, daemon, attach, local, RPC, environment variables, socket, GPU emulation"
 ---
 
 # rocjitsu CLI reference
@@ -28,7 +28,7 @@ rocjitsu --config <config.json> [--node <id>] --vfio-socket <path> [--vfio-socke
 | `--check-vfio-user` | Exit successfully only when the selected binary includes VFIO-user support. |
 | `--help`, `-h` | Print usage information and exit. |
 | `--version`, `-v` | Print the version string and exit. |
-| `--` | Separator between rocJITsu options and the target application command line. |
+| `--` | Separator between rocjitsu options and the target application command line. |
 
 ## Execution modes
 
@@ -82,7 +82,7 @@ rocjitsu --config tests/fixtures/fabric_node_projection.json --node tray7 \
   --vfio-socket /tmp/rocjitsu-vfio/gpu1.sock
 ```
 
-rocJITsu exposes each configured local GPU as a PCI function to an external
+rocjitsu exposes each configured local GPU as a PCI function to an external
 VMM. The guest AMDGPU driver owns queue setup through BAR and DMA operations;
 the PCI adapter routes that state into the same GPU VM, command processor, MES,
 SDMA scheduler, and compute units used by the other front ends. See

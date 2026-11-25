@@ -19,14 +19,17 @@ constexpr uint32_t unorm_from_f32(uint32_t bits, uint32_t width) {
   assert(supports_unorm_width(width));
   const uint32_t maximum = (uint32_t{1} << width) - 1;
   const uint32_t magnitude = bits & 0x7fffffff;
-  if ((bits >> 31) || magnitude > 0x7f800000)
+  if ((bits >> 31) || magnitude > 0x7f800000) {
     return 0;
-  if (magnitude >= 0x3f800000)
+  }
+  if (magnitude >= 0x3f800000) {
     return maximum;
+  }
   const uint32_t exponent = magnitude >> 23;
   // Below 2^(-width-1), the result rounds to zero, including all subnormals.
-  if (exponent + width < 126)
+  if (exponent + width < 126) {
     return 0;
+  }
   // x = significand * 2^(exponent-150). The product uses at most 40 bits.
   const uint64_t product = uint64_t{(magnitude & 0x7fffff) | 0x800000} * maximum;
   const uint32_t shift = 150 - exponent; // 24..(24+width), hence at most 40.

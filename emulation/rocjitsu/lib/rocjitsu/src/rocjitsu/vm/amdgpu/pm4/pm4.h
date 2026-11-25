@@ -86,8 +86,9 @@ enum class Pm4Opcode : uint32_t {
 class Pm4ScratchPool : public std::enable_shared_from_this<Pm4ScratchPool> {
 public:
   explicit Pm4ScratchPool(uint32_t slots) {
-    for (uint32_t i = slots; i; --i)
+    for (uint32_t i = slots; i; --i) {
       free_.push_back(i - 1);
+    }
   }
   bool available(uint32_t count) {
     std::lock_guard lock(mutex_);
@@ -129,6 +130,8 @@ struct Pm4IndirectBuffer {
   /// Nonzero only for a root ring frame; nested IBs always use linear addresses.
   uint64_t ring_base = 0;
   uint32_t ring_bytes = 0;
+  /// DRM asks the kernel to reset this ring's compute wave IDs before this IB.
+  bool reset_gds_wave_id = false;
 };
 
 /// @brief Shared launch/wave failure status; wake the CP to cancel the owning queue.
@@ -137,8 +140,9 @@ struct Pm4FailureState {
   std::function<void()> wake;
   void fail() {
     failed.store(true, std::memory_order_release);
-    if (wake)
+    if (wake) {
       wake();
+    }
   }
 };
 

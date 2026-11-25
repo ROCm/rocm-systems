@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -14,13 +15,15 @@ namespace rocjitsu {
 std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
                                          std::string_view target_id) {
   const IsaTargetDescriptor *target = registry.find(target_id);
-  if (target == nullptr)
+  if (target == nullptr) {
     return nullptr;
-  const IsaGpuTargetDescription *binding = registry.find_gpu_target_by_code_object_id(target_id);
-  if (binding != nullptr && target->variant_decoder_factory != nullptr)
+  }
+  const IsaTargetBinding *binding = registry.find_target(target_id);
+  if (binding != nullptr && target->variant_decoder_factory != nullptr) {
     return target->variant_decoder_factory(*binding);
+  }
   if (target->variant_decoder_factory != nullptr) {
-    binding = registry.find_default_gpu_target(*target);
+    binding = registry.find_default_target(*target);
     return binding == nullptr ? nullptr : target->variant_decoder_factory(*binding);
   }
   return target->decoder_factory();
@@ -29,20 +32,24 @@ std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
 std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
                                          rj_code_target_id_t target_id) {
   const IsaTargetDescriptor *target = registry.find(target_id);
-  const IsaGpuTargetDescription *binding = registry.find_gpu_target(target_id);
-  if (target == nullptr || binding == nullptr)
+  const IsaTargetBinding *binding = registry.find_target(target_id);
+  if (target == nullptr || binding == nullptr) {
     return nullptr;
+  }
   return target->variant_decoder_factory == nullptr ? target->decoder_factory()
                                                     : target->variant_decoder_factory(*binding);
 }
 
-std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry, rj_code_arch_t arch) {
+std::unique_ptr<Decoder> Decoder::create(const IsaTargetRegistry &registry,
+                                         rocjitsu::IsaFamily arch) {
   const IsaTargetDescriptor *target = registry.find(arch);
-  if (target == nullptr)
+  if (target == nullptr) {
     return nullptr;
-  if (target->variant_decoder_factory == nullptr)
+  }
+  if (target->variant_decoder_factory == nullptr) {
     return target->decoder_factory();
-  const IsaGpuTargetDescription *binding = registry.find_default_gpu_target(*target);
+  }
+  const IsaTargetBinding *binding = registry.find_default_target(*target);
   return binding == nullptr ? nullptr : target->variant_decoder_factory(*binding);
 }
 
@@ -53,25 +60,29 @@ Decoder::~Decoder() {
 }
 
 void Decoder::disable_pool() {
-  if (pool_)
+  if (pool_) {
     Instruction::invalidate_allocator_pool(pool_.get());
+  }
 }
 
 DecodeResult Decoder::decode(const rj_code_binary_inst_t *inst, uint64_t src_loc,
                              const DecodeErrorEmitter &emit_error) {
   DecodeResult decoded = decode(inst, emit_error);
-  if (decoded.succeeded())
+  if (decoded.succeeded()) {
     decoded.value()->src_loc_ = src_loc;
+  }
   return decoded;
 }
 
 DecodeResult Decoder::decode_window(std::span<const rj_code_binary_inst_t> words, uint64_t src_loc,
                                     const DecodeErrorEmitter &emit_error) {
-  if (words.empty())
+  if (words.empty()) {
     return emit_error.emit() << "empty decode window";
+  }
   const std::size_t maximum_words = max_instruction_words();
-  if (maximum_words == 0)
+  if (maximum_words == 0) {
     return emit_error.emit() << "decoder reported a zero-width decode window";
+  }
 
   // Allocate only at the tail; full windows keep the raw-pointer decode path.
   std::vector<rj_code_binary_inst_t> window;
@@ -84,20 +95,24 @@ DecodeResult Decoder::decode_window(std::span<const rj_code_binary_inst_t> words
   }
 
   DecodeResult result = decode(decode_words, src_loc, emit_error);
-  if (result.failed())
+  if (result.failed()) {
     return Result::failure();
+  }
   Instruction &decoded = *result.value();
   const int decoded_size = decoded.size();
   if (decoded_size <= 0 || decoded_size % sizeof(rj_code_binary_inst_t) != 0 ||
-      static_cast<std::size_t>(decoded_size) / sizeof(rj_code_binary_inst_t) > maximum_words)
+      static_cast<std::size_t>(decoded_size) / sizeof(rj_code_binary_inst_t) > maximum_words) {
     return emit_error.emit() << "decoder exceeded the maximum instruction size";
-  if (static_cast<std::size_t>(decoded_size) > words.size_bytes())
+  }
+  if (static_cast<std::size_t>(decoded_size) > words.size_bytes()) {
     return emit_error.emit() << "truncated instruction encoding";
+  }
 
   // External decoders can retain the input pointer. Preserve that contract
   // instead of returning a pointer into the tail buffer.
-  if (needs_padding && decoded.raw_encoding_ == window.data())
+  if (needs_padding && decoded.raw_encoding_ == window.data()) {
     decoded.raw_encoding_ = words.data();
+  }
   return result;
 }
 
@@ -110,14 +125,18 @@ void Decoder::activate_pool(AllocFn alloc, DeallocFn dealloc, void *pool) {
 Result Decoder::validate_instruction_operands(const Instruction &inst,
                                               const DecodeErrorEmitter &emit_error) {
   for (int index = 0; index < inst.num_src_operands(); ++index) {
-    if (const Operand *operand = inst.src_operand(index))
-      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+    if (const Operand *operand = inst.src_operand(index)) {
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]] {
         return Result::failure();
+      }
+    }
   }
   for (int index = 0; index < inst.num_dst_operands(); ++index) {
-    if (const Operand *operand = inst.dst_operand(index))
-      if (operand->validate_encoding(emit_error).failed()) [[unlikely]]
+    if (const Operand *operand = inst.dst_operand(index)) {
+      if (operand->validate_encoding(emit_error).failed()) [[unlikely]] {
         return Result::failure();
+      }
+    }
   }
   return Result::success();
 }

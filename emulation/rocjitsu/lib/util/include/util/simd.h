@@ -46,11 +46,13 @@ template <typename Float> inline Float rndne_scalar(Float value) {
   const U bits = std::bit_cast<U>(value);
   const U magnitude = bits & ~kSign;
   const U sign = bits & kSign;
-  if (magnitude >= kInfinity)
+  if (magnitude >= kInfinity) {
     return std::bit_cast<Float>(bits | (magnitude > kInfinity ? U(1) << (kFraction - 1) : 0));
+  }
   const unsigned exponent = static_cast<unsigned>(magnitude >> kFraction);
-  if (exponent >= kBias + kFraction)
+  if (exponent >= kBias + kFraction) {
     return value;
+  }
   if (exponent < kBias) {
     const U rounded = magnitude > (U(kBias - 1) << kFraction) ? U(kBias) << kFraction : 0;
     return std::bit_cast<Float>(sign | rounded);
@@ -59,8 +61,9 @@ template <typename Float> inline Float rndne_scalar(Float value) {
   const U unit = U(1) << shift;
   const U fraction = magnitude & (unit - 1);
   U rounded = magnitude & ~(unit - 1);
-  if (fraction > unit / 2 || (fraction == unit / 2 && (rounded & unit) != 0))
+  if (fraction > unit / 2 || (fraction == unit / 2 && (rounded & unit) != 0)) {
     rounded += unit;
+  }
   return std::bit_cast<Float>(sign | rounded);
 }
 
@@ -106,9 +109,11 @@ template <class Mask> [[gnu::always_inline]] inline uint64_t simd_mask_to_bits(c
     return static_cast<uint64_t>(mask.__to_bitset().to_ullong());
   } else {
     uint64_t bits = 0;
-    for (std::size_t i = 0; i < W; ++i)
-      if (mask[i])
+    for (std::size_t i = 0; i < W; ++i) {
+      if (mask[i]) {
         bits |= uint64_t{1} << i;
+      }
+    }
     return bits;
   }
 }
@@ -127,28 +132,13 @@ template <class Simd>
     return Mask::__from_bitset(std::bitset<W>(bits));
   } else {
     Mask mask(false);
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       mask[i] = ((bits >> i) & 1u) != 0;
+    }
     return mask;
   }
 }
 
-/// Expand the low native<uint32_t>::size() bits into 0/1 uint32_t lanes. This
-/// is the numeric form needed by carry-in arithmetic; selection paths should
-/// use simd_mask_from_bits directly. AVX-512 materializes the lanes with a
-/// k-mask zero-masked broadcast; narrower targets use vector bit tests.
-[[gnu::always_inline]] inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t bits) {
-  using U = native<uint32_t>;
-  static_assert(U::size() <= 32);
-#if RJ_HOST_HAS_AVX512F
-  static_assert(U::size() == 16);
-  return std::bit_cast<U>(_mm512_maskz_set1_epi32(static_cast<__mmask16>(bits), 1));
-#else
-  const U lane_bits([](auto i) { return uint32_t{1} << i; });
-  const U lane_indices([](auto i) { return static_cast<uint32_t>(i); });
-  return (U(static_cast<uint32_t>(bits)) & lane_bits) >> lane_indices;
-#endif
-}
 #else
 // Fallback definitions so `if constexpr (has_stdx_simd)` discarded
 // branches compile out even in non-template callers (e.g. gtest TEST
@@ -164,7 +154,6 @@ template <class T> native<T> load(const uint32_t *) { return {}; }
 template <class T> native<T> broadcast(uint32_t) { return {}; }
 template <class Mask> uint64_t simd_mask_to_bits(const Mask &) { return 0; }
 template <class Simd> bool simd_mask_from_bits(uint64_t) { return false; }
-inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t) { return {}; }
 inline native<float> native_fma(native<float>, native<float>, native<float>) { return {}; }
 template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
 template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
@@ -202,8 +191,9 @@ template <class T, class Fn> native<T> map_native64_scalar(native<T> v, Fn fn) {
   alignas(native<T>) T in[W];
   alignas(native<T>) T out[W];
   v.copy_to(in, stdx::vector_aligned);
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     out[i] = fn(in[i]);
+  }
   return native<T>(out, stdx::vector_aligned);
 }
 
@@ -215,8 +205,9 @@ template <class T, class Fn> native<T> map_native_scalar(native<T> a, native<T> 
   alignas(native<T>) T out[W];
   a.copy_to(in_a, stdx::vector_aligned);
   b.copy_to(in_b, stdx::vector_aligned);
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     out[i] = fn(in_a[i], in_b[i]);
+  }
   return native<T>(out, stdx::vector_aligned);
 }
 
@@ -231,8 +222,9 @@ native<T> map_native_scalar(native<T> a, native<T> b, native<T> c, Fn fn) {
   a.copy_to(in_a, stdx::vector_aligned);
   b.copy_to(in_b, stdx::vector_aligned);
   c.copy_to(in_c, stdx::vector_aligned);
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     out[i] = fn(in_a[i], in_b[i], in_c[i]);
+  }
   return native<T>(out, stdx::vector_aligned);
 }
 
@@ -245,8 +237,9 @@ native<To> map_native_convert_scalar(native<From> v, Fn fn) {
   alignas(native<From>) From in[W];
   alignas(native<To>) To out[W];
   v.copy_to(in, stdx::vector_aligned);
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     out[i] = fn(in[i]);
+  }
   return native<To>(out, stdx::vector_aligned);
 }
 
@@ -258,8 +251,9 @@ template <class T, class Fn> native<T> map_native64_scalar(native<T> a, native<T
   alignas(native<T>) T out[W];
   a.copy_to(in_a, stdx::vector_aligned);
   b.copy_to(in_b, stdx::vector_aligned);
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     out[i] = fn(in_a[i], in_b[i]);
+  }
   return native<T>(out, stdx::vector_aligned);
 }
 
@@ -271,10 +265,11 @@ template <class T> native<T> load(const uint32_t *p) {
   static_assert(sizeof(T) == sizeof(uint32_t));
   static_assert(sizeof(Val) == sizeof(Bits));
   Bits bits(p, stdx::element_aligned);
-  if constexpr (std::is_same_v<T, uint32_t>)
+  if constexpr (std::is_same_v<T, uint32_t>) {
     return bits;
-  else
+  } else {
     return std::bit_cast<Val>(bits);
+  }
 }
 
 /// Broadcast `broadcast_bits` (bit-cast to T) to every lane of
@@ -282,10 +277,11 @@ template <class T> native<T> load(const uint32_t *p) {
 template <class T> native<T> broadcast(uint32_t broadcast_bits) {
   using Val = native<T>;
   static_assert(sizeof(T) == sizeof(uint32_t));
-  if constexpr (std::is_same_v<T, uint32_t>)
+  if constexpr (std::is_same_v<T, uint32_t>) {
     return Val(broadcast_bits);
-  else
+  } else {
     return Val(std::bit_cast<T>(broadcast_bits));
+  }
 }
 
 /// Store `v` into contiguous uint32_t storage at `dst`, blending in only
@@ -299,10 +295,11 @@ template <class T> void masked_store(uint32_t *dst, native<T> v, uint64_t mask) 
   constexpr std::size_t W = Bits::size();
   const uint64_t full = util::mask<uint64_t>(static_cast<int>(W));
   Bits bits = [&] {
-    if constexpr (std::is_same_v<T, uint32_t>)
+    if constexpr (std::is_same_v<T, uint32_t>) {
       return v;
-    else
+    } else {
       return std::bit_cast<Bits>(v);
+    }
   }();
   if ((mask & full) == full) {
     bits.copy_to(dst, stdx::element_aligned);
@@ -310,9 +307,11 @@ template <class T> void masked_store(uint32_t *dst, native<T> v, uint64_t mask) 
   }
   alignas(Bits) uint32_t buf[W];
   bits.copy_to(buf, stdx::vector_aligned);
-  for (std::size_t i = 0; i < W; ++i)
-    if (mask & (1ULL << i))
+  for (std::size_t i = 0; i < W; ++i) {
+    if (mask & (1ULL << i)) {
       dst[i] = buf[i];
+    }
+  }
 }
 
 /// Same as masked_store, but writes to a caller-supplied uint32_t buffer
@@ -321,10 +320,11 @@ template <class T> void masked_store(uint32_t *dst, native<T> v, uint64_t mask) 
 template <class T> void blit_to_buffer(uint32_t (&buf)[native<T>::size()], native<T> v) {
   using Bits = stdx::native_simd<uint32_t>;
   Bits bits = [&] {
-    if constexpr (std::is_same_v<T, uint32_t>)
+    if constexpr (std::is_same_v<T, uint32_t>) {
       return v;
-    else
+    } else {
       return std::bit_cast<Bits>(v);
+    }
   }();
   bits.copy_to(buf, stdx::vector_aligned);
 }
@@ -342,13 +342,15 @@ template <class T> native<T> load64(const uint32_t *lo, const uint32_t *hi) {
   static_assert(sizeof(native<T>) == sizeof(U64));
   constexpr std::size_t W = U64::size();
   alignas(U64) uint64_t buf[W];
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     buf[i] = (static_cast<uint64_t>(hi[i]) << 32) | lo[i];
+  }
   U64 bits(buf, stdx::vector_aligned);
-  if constexpr (std::is_same_v<T, uint64_t>)
+  if constexpr (std::is_same_v<T, uint64_t>) {
     return bits;
-  else
+  } else {
     return std::bit_cast<native<T>>(bits);
+  }
 }
 
 /// Broadcast `broadcast_bits` (bit-cast to T) to every lane of `native<T>` for a
@@ -357,10 +359,11 @@ template <class T> native<T> load64(const uint32_t *lo, const uint32_t *hi) {
 template <class T> native<T> broadcast64(uint64_t broadcast_bits) {
   static_assert(sizeof(T) == sizeof(uint64_t));
   using Val = native<T>;
-  if constexpr (std::is_same_v<T, uint64_t>)
+  if constexpr (std::is_same_v<T, uint64_t>) {
     return Val(broadcast_bits);
-  else
+  } else {
     return Val(std::bit_cast<T>(broadcast_bits));
+  }
 }
 
 /// Store `v` (a 64-bit lane type) into the split lo/hi 32-bit lane arrays,
@@ -374,18 +377,20 @@ template <class T> void masked_store64(uint32_t *lo, uint32_t *hi, native<T> v, 
   static_assert(sizeof(native<T>) == sizeof(U64));
   constexpr std::size_t W = U64::size();
   U64 bits = [&] {
-    if constexpr (std::is_same_v<T, uint64_t>)
+    if constexpr (std::is_same_v<T, uint64_t>) {
       return v;
-    else
+    } else {
       return std::bit_cast<U64>(v);
+    }
   }();
   alignas(U64) uint64_t buf[W];
   bits.copy_to(buf, stdx::vector_aligned);
-  for (std::size_t i = 0; i < W; ++i)
+  for (std::size_t i = 0; i < W; ++i) {
     if (mask & (1ULL << i)) {
       lo[i] = static_cast<uint32_t>(buf[i]);
       hi[i] = static_cast<uint32_t>(buf[i] >> 32);
     }
+  }
 }
 
 /// A `native_width64`-wide SIMD of a 32-bit lane type (e.g. narrow32<float>,
@@ -407,8 +412,9 @@ template <class T> narrow32<T> load_narrow(const uint32_t *p) {
     return narrow32<uint32_t>(p, stdx::element_aligned);
   } else {
     alignas(narrow32<T>) T buf[native_width64];
-    for (std::size_t i = 0; i < native_width64; ++i)
+    for (std::size_t i = 0; i < native_width64; ++i) {
       buf[i] = std::bit_cast<T>(p[i]);
+    }
     return narrow32<T>(buf, stdx::vector_aligned);
   }
 }
@@ -418,10 +424,11 @@ template <class T> narrow32<T> load_narrow(const uint32_t *p) {
 /// operand resolves to a scalar/immediate rather than per-lane storage.
 template <class T> narrow32<T> broadcast_narrow(uint32_t broadcast_bits) {
   static_assert(sizeof(T) == sizeof(uint32_t));
-  if constexpr (std::is_same_v<T, uint32_t>)
+  if constexpr (std::is_same_v<T, uint32_t>) {
     return narrow32<T>(broadcast_bits);
-  else
+  } else {
     return narrow32<T>(std::bit_cast<T>(broadcast_bits));
+  }
 }
 
 /// Store `v` (native_width64 lanes of a 32-bit type) into contiguous uint32_t
@@ -435,13 +442,16 @@ template <class T> void masked_store_narrow(uint32_t *dst, narrow32<T> v, uint64
   alignas(narrow32<T>) T buf[W];
   v.copy_to(buf, stdx::vector_aligned);
   if ((mask & full) == full) {
-    for (std::size_t i = 0; i < W; ++i)
+    for (std::size_t i = 0; i < W; ++i) {
       dst[i] = std::bit_cast<uint32_t>(buf[i]);
+    }
     return;
   }
-  for (std::size_t i = 0; i < W; ++i)
-    if (mask & (1ULL << i))
+  for (std::size_t i = 0; i < W; ++i) {
+    if (mask & (1ULL << i)) {
       dst[i] = std::bit_cast<uint32_t>(buf[i]);
+    }
+  }
 }
 
 template <typename Pred>
@@ -451,9 +461,11 @@ inline native<double> replace_f64_lanes(native<double> dst, native<double> repla
   alignas(64) double repl[W];
   dst.copy_to(out, stdx::element_aligned);
   replacement.copy_to(repl, stdx::element_aligned);
-  for (std::size_t i = 0; i < W; ++i)
-    if (pred(i))
+  for (std::size_t i = 0; i < W; ++i) {
+    if (pred(i)) {
       out[i] = repl[i];
+    }
+  }
   native<double> result;
   result.copy_from(out, stdx::element_aligned);
   return result;
@@ -464,42 +476,11 @@ inline native<double> ordered_clamp_f64_simd(native<double> v, double lo, double
   alignas(64) double lanes[W];
   v.copy_to(lanes, stdx::element_aligned);
   for (double &lane : lanes) {
-    if (lane < lo)
+    if (lane < lo) {
       lane = lo;
-    else if (lane > hi)
+    } else if (lane > hi) {
       lane = hi;
-  }
-  native<double> result;
-  result.copy_from(lanes, stdx::element_aligned);
-  return result;
-}
-
-inline native<double> cvt_i32_f64_saturate_input_simd(native<double> s) {
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double lanes[W];
-  s.copy_to(lanes, stdx::element_aligned);
-  for (double &lane : lanes) {
-    if (std::isnan(lane))
-      lane = 0.0;
-    else if (lane >= 2147483648.0)
-      lane = 2147483647.0;
-    else if (lane < -2147483648.0)
-      lane = -2147483648.0;
-  }
-  native<double> result;
-  result.copy_from(lanes, stdx::element_aligned);
-  return result;
-}
-
-inline native<double> cvt_u32_f64_saturate_input_simd(native<double> s) {
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double lanes[W];
-  s.copy_to(lanes, stdx::element_aligned);
-  for (double &lane : lanes) {
-    if (std::isnan(lane) || lane < 0.0)
-      lane = 0.0;
-    else if (lane >= 4294967296.0)
-      lane = 4294967295.0;
+    }
   }
   native<double> result;
   result.copy_from(lanes, stdx::element_aligned);
@@ -514,10 +495,11 @@ inline native<double> sqrt_f64_simd(native<double> a) {
   a.copy_to(in, stdx::element_aligned);
   r.copy_to(out, stdx::element_aligned);
   for (std::size_t i = 0; i < W; ++i) {
-    if (std::isnan(in[i]))
+    if (std::isnan(in[i])) {
       out[i] = in[i];
-    else if (in[i] < 0.0)
+    } else if (in[i] < 0.0) {
       out[i] = std::numeric_limits<double>::quiet_NaN();
+    }
   }
   r.copy_from(out, stdx::element_aligned);
   return r;
@@ -638,8 +620,9 @@ inline native<uint32_t> f32_to_f16_simd(native<float> val) {
 /// Vectorized counterpart of `f32_to_f16_mode`.
 inline native<uint32_t> f32_to_f16_mode_simd(native<float> val, bool fp16_ovfl) {
   native<uint32_t> out = f32_to_f16_simd(val);
-  if (!fp16_ovfl)
+  if (!fp16_ovfl) {
     return out;
+  }
 
   using U = native<uint32_t>;
   const U f = std::bit_cast<U>(val);
@@ -720,8 +703,9 @@ native<Float> round_fixup_simd(native<Float> a, Round round) {
     ai.copy_to(ai_lanes, stdx::element_aligned);
     for (std::size_t i = 0; i < F::size(); ++i) {
       const Bits rb = std::bit_cast<Bits>(r_lanes[i]);
-      if ((rb & ~kSign) == 0)
+      if ((rb & ~kSign) == 0) {
         r_lanes[i] = std::bit_cast<Float>(ai_lanes[i] & kSign);
+      }
     }
     r.copy_from(r_lanes, stdx::element_aligned);
   } else {
@@ -867,42 +851,6 @@ inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
       a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
 }
 
-/// Branchless SWAR population count over a uint32 vector. Each lane holds
-/// std::popcount(lane) in [0, 32], bit-identical to the scalar std::popcount.
-/// Used by the bit-scan VOP1/VOP3 SIMD fast paths (bcnt / ffbh / ffbl / cls).
-inline native<uint32_t> popcount_u32_simd(native<uint32_t> x) {
-  using U = native<uint32_t>;
-  x = x - ((x >> 1) & U(0x55555555u));
-  x = (x & U(0x33333333u)) + ((x >> 2) & U(0x33333333u));
-  x = (x + (x >> 4)) & U(0x0F0F0F0Fu);
-  x = x + (x >> 8);
-  x = x + (x >> 16);
-  return x & U(0x3Fu);
-}
-
-/// Count leading zeros over a uint32 vector. RAW count: a zero input yields 32
-/// (callers blend the AMD `0xFFFFFFFF`-on-zero sentinel themselves). Computed
-/// as 32 - popcount(MSB-smear), so a lane with its MSB at bit b yields 31 - b.
-inline native<uint32_t> clz_u32_simd(native<uint32_t> x) {
-  using U = native<uint32_t>;
-  U s = x;
-  s = s | (s >> 1);
-  s = s | (s >> 2);
-  s = s | (s >> 4);
-  s = s | (s >> 8);
-  s = s | (s >> 16);
-  return U(32u) - popcount_u32_simd(s);
-}
-
-/// Count trailing zeros over a uint32 vector. RAW count: a zero input yields 32
-/// (callers blend the AMD `0xFFFFFFFF`-on-zero sentinel themselves). Computed as
-/// popcount((x & -x) - 1): isolate the lowest set bit, then count the bits below.
-inline native<uint32_t> ctz_u32_simd(native<uint32_t> x) {
-  using U = native<uint32_t>;
-  U lowbit = x & (~x + U(1u));
-  return popcount_u32_simd(lowbit - U(1u));
-}
-
 /// @brief Widen unsigned E5M3 scale values from the low byte of each lane.
 inline native<float> fp8_e5m3_to_f32_simd(native<uint32_t> value) {
   using U = native<uint32_t>;
@@ -975,10 +923,12 @@ template <typename V> V ieee_maximum_simd(V a, V b) {
 #if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   if constexpr (std::is_same_v<typename V::value_type, double>) {
     return map_native64_scalar<double>(a, b, [](double lhs, double rhs) {
-      if (std::isnan(lhs) || std::isnan(rhs))
+      if (std::isnan(lhs) || std::isnan(rhs)) {
         return std::numeric_limits<double>::quiet_NaN();
-      if (lhs == rhs)
+      }
+      if (lhs == rhs) {
         return std::signbit(lhs) ? rhs : lhs;
+      }
       return lhs > rhs ? lhs : rhs;
     });
   } else
@@ -998,10 +948,12 @@ template <typename V> V ieee_minimum_simd(V a, V b) {
 #if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
   if constexpr (std::is_same_v<typename V::value_type, double>) {
     return map_native64_scalar<double>(a, b, [](double lhs, double rhs) {
-      if (std::isnan(lhs) || std::isnan(rhs))
+      if (std::isnan(lhs) || std::isnan(rhs)) {
         return std::numeric_limits<double>::quiet_NaN();
-      if (lhs == rhs)
+      }
+      if (lhs == rhs) {
         return std::signbit(lhs) ? lhs : rhs;
+      }
       return lhs < rhs ? lhs : rhs;
     });
   } else
@@ -1024,8 +976,9 @@ template <typename V> V ieee_minimum_simd(V a, V b) {
 inline float round_to_nearest_even(float value) {
   const float lower = std::floor(value);
   const float fraction = value - lower;
-  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0))
+  if (fraction > 0.5f || (fraction == 0.5f && (static_cast<int32_t>(lower) & int32_t{1}) != 0)) {
     return lower + 1.0f;
+  }
   return lower;
 }
 
@@ -1041,37 +994,9 @@ inline native<float> round_to_nearest_even_simd(native<float> value) {
   return lower;
 }
 
-/// Round a normalized value scaled by 32767 or 65535 to the nearest integer,
-/// with ties to even. Clamp inputs to [minimum, 1] and convert NaNs to zero.
-/// An FP32 product can round onto an integer midpoint. The FMA residual
-/// distinguishes these false ties so the conversion rounds only once.
-inline native<float> round_normalized_simd(native<float> f, float scale, float minimum) {
-  using F = native<float>;
-  stdx::where(f < F(minimum), f) = F(minimum);
-  stdx::where(f > F(1.0f), f) = F(1.0f);
-  stdx::where(stdx::isnan(f), f) = F(0.0f);
-  const F product = f * F(scale);
-  const F residual = stdx::fma(f, F(scale), -product);
-  const F lower = stdx::floor(product);
-  const auto midpoint = product == lower + F(0.5f);
-  F rounded = rndne_simd(product);
-  stdx::where(midpoint && (residual < F(0.0f)), rounded) = lower;
-  stdx::where(midpoint && (residual > F(0.0f)), rounded) = lower + F(1.0f);
-  return rounded;
-}
-
-/// Convert to signed normalized integers in [-32767, 32767]; NaNs become zero.
-inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<int32_t>>(round_normalized_simd(f, 32767.0f, -1.0f));
-}
-/// Convert to unsigned normalized integers in [0, 65535]; NaNs become zero.
-inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<uint32_t>>(round_normalized_simd(f, 65535.0f, 0.0f));
-}
-
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
-/// significand m with |m| in [0.5, 1) such that input = m * 2^e (e via
-/// frexp_exp_f32_simd). Normal lanes force the exponent field to 126 and keep
+/// significand m with |m| in [0.5, 1) such that input = m * 2^e.
+/// Normal lanes force the exponent field to 126 and keep
 /// the mantissa; ±0 / Inf / NaN pass through unchanged (matching glibc frexp,
 /// which the scalar body calls unguarded); denormals are renormalized via the
 /// highest-set-bit index p = floor(log2(M)) (M < 2^24, so the int->float cast is
@@ -1098,27 +1023,6 @@ inline native<float> frexp_mant_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>(out);
 }
 
-/// Vector port of the f32 `std::frexp` exponent over raw float bits, returned as
-/// the raw bits of the int32 result. Normal lanes give E - 126; denormals give
-/// p - 148 (p = floor(log2(M))); ±0 / Inf / NaN give 0 (the scalar body only
-/// calls frexp on finite non-zero inputs, leaving exp = 0 otherwise). Negative
-/// results carry the correct two's-complement bits. Bit-identical to the scalar
-/// v_frexp_exp_i32_f32 body.
-inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
-  using U = native<uint32_t>;
-  U E = (v >> 23) & U(0xFFu);
-  U M = v & U(0x7FFFFFu);
-  U normal = E - U(126u);
-  const native<float> mf = stdx::static_simd_cast<native<float>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
-  U dn = p - U(148u);
-  U out = normal;
-  stdx::where(E == 0u, out) = U(0u);             // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0u) && (M != 0u), out) = dn; // denormal exponent
-  stdx::where(E == 255u, out) = U(0u);           // Inf / NaN -> 0
-  return out;
-}
-
 /// 64-bit-lane port of the f64 `std::frexp` mantissa over native<double>. Same
 /// structure as frexp_mant_f32_simd at f64 widths (11 exp bits bias 1023, 52
 /// mantissa bits): normal lanes force the exponent field to 1022; denormals
@@ -1137,13 +1041,15 @@ inline native<double> frexp_mant_f64_simd(native<double> x) {
     uint64_t E = (bits >> 52) & 0x7FFull;
     uint64_t M = bits & kMant;
     if (E == 0ull) {
-      if (M == 0ull)
+      if (M == 0ull) {
         return bits;
+      }
       uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
       return sign | (1022ull << 52) | ((M << (52ull - p)) & kMant);
     }
-    if (E == 2047ull)
+    if (E == 2047ull) {
       return M == 0ull ? bits : bits | kQuiet;
+    }
     return sign | (1022ull << 52) | M;
   });
   return std::bit_cast<native<double>>(out);
@@ -1177,13 +1083,15 @@ inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
     uint64_t E = (bits >> 52) & 0x7FFull;
     uint64_t M = bits & 0x000FFFFFFFFFFFFFull;
     if (E == 0ull) {
-      if (M == 0ull)
+      if (M == 0ull) {
         return 0ull;
+      }
       uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
       return static_cast<uint64_t>(static_cast<int64_t>(p) - 1073);
     }
-    if (E == 2047ull)
+    if (E == 2047ull) {
       return 0ull;
+    }
     return static_cast<uint64_t>(static_cast<int64_t>(E) - 1022);
   });
 #else
@@ -1201,115 +1109,6 @@ inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
 #endif
 }
 
-/// Sum of the four per-byte absolute differences of two uint32 lanes (the core
-/// of v_sad_u8 / v_sad_hi_u8). Each byte difference is in [0,255], so the sum is
-/// in [0,1020]; bit-identical to the scalar byte loop.
-inline native<uint32_t> sad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
-  using U = native<uint32_t>;
-  U r(0u);
-  for (int i = 0; i < 4; ++i) {
-    U ai = (a >> (i * 8)) & U(0xFFu);
-    U bi = (b >> (i * 8)) & U(0xFFu);
-    U d = ai - bi;
-    stdx::where(bi > ai, d) = bi - ai; // |ai - bi|
-    r += d;
-  }
-  return r;
-}
-
-/// Masked per-byte SAD (v_msad_u8): like sad_bytes_u32_simd but a byte whose
-/// reference (src1) value is zero contributes nothing. Bit-identical to scalar.
-inline native<uint32_t> msad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
-  using U = native<uint32_t>;
-  U r(0u);
-  for (int i = 0; i < 4; ++i) {
-    U ai = (a >> (i * 8)) & U(0xFFu);
-    U bi = (b >> (i * 8)) & U(0xFFu);
-    U d = ai - bi;
-    stdx::where(bi > ai, d) = bi - ai;
-    stdx::where(bi == 0u, d) = 0u; // skip masked-out (zero reference) bytes
-    r += d;
-  }
-  return r;
-}
-
-/// Per-byte unsigned lerp (v_lerp_u8): out_byte = (a + b + (c & 1)) >> 1,
-/// computed independently per byte and repacked. Bit-identical to the scalar.
-inline native<uint32_t> lerp_u8_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
-  using U = native<uint32_t>;
-  U r(0u);
-  for (int i = 0; i < 4; ++i) {
-    const int sh = i * 8;
-    U ab = (a >> sh) & U(0xFFu);
-    U bb = (b >> sh) & U(0xFFu);
-    U round_up = (c >> sh) & U(1u);
-    r = r | (((ab + bb + round_up) >> 1) << sh);
-  }
-  return r;
-}
-
-/// Byte permute (v_perm_b32): build each output byte from a selector byte of
-/// src2 indexing the 8 bytes of the {src0:src1} 64-bit source (src1 = low word).
-/// Selector 0..7 picks a source byte; 8..11 sign-extend source bytes 1, 3, 5,
-/// and 7; 12 yields zero; and every selector >= 13 yields 0xFF.
-inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
-  using U = native<uint32_t>;
-  U srcbyte[8];
-  for (int k = 0; k < 4; ++k)
-    srcbyte[k] = (b >> (k * 8)) & U(0xFFu); // bytes 0..3 from the low word (src1)
-  for (int k = 0; k < 4; ++k)
-    srcbyte[k + 4] = (a >> (k * 8)) & U(0xFFu); // bytes 4..7 from the high word (src0)
-  U r(0u);
-  for (int i = 0; i < 4; ++i) {
-    U sel = (c >> (i * 8)) & U(0xFFu);
-    U byte(0u);
-    for (int k = 0; k < 8; ++k)
-      stdx::where(sel == U(static_cast<uint32_t>(k)), byte) = srcbyte[k];
-    for (int k = 0; k < 4; ++k)
-      stdx::where(sel == U(static_cast<uint32_t>(k + 8)), byte) =
-          (srcbyte[k * 2 + 1] >> 7) * U(0xFFu);
-    stdx::where(sel >= U(13u), byte) = U(0xFFu);
-    r = r | (byte << (i * 8));
-  }
-  return r;
-}
-
-/// High 32 bits of the 64-bit UNSIGNED product a*b (v_mul_hi_u32 semantics).
-///
-/// Computed purely with 32-bit-lane SIMD ops via the 16x16 partial-product
-/// decomposition, deliberately avoiding `fixed_size_simd<uint64_t, N>`: clang +
-/// libstdc++ miscompile the 64-bit-lane multiply/shift of an over-native-width
-/// `fixed_size_simd` (the high half comes out wrong), so the int64-widening
-/// approach diverges from the scalar `(uint64)a * b >> 32` at every SIMD width.
-/// This decomposition uses only native<uint32_t> arithmetic, so it is
-/// bit-identical to the scalar reference on every host. aHi/bHi/aLo/bLo are the
-/// 16-bit halves; each 16x16 partial fits in 32 bits and the carry chain stays
-/// below 2^32 (cross <= 3*0xFFFF), so no intermediate overflows.
-inline native<uint32_t> mul_hi_u32_simd(native<uint32_t> a, native<uint32_t> b) {
-  using U = native<uint32_t>;
-  const U aLo = a & U(0xFFFFu), aHi = a >> 16;
-  const U bLo = b & U(0xFFFFu), bHi = b >> 16;
-  const U lolo = aLo * bLo;
-  const U hilo = aHi * bLo;
-  const U lohi = aLo * bHi;
-  const U hihi = aHi * bHi;
-  const U cross = (lolo >> 16) + (hilo & U(0xFFFFu)) + (lohi & U(0xFFFFu));
-  return hihi + (hilo >> 16) + (lohi >> 16) + (cross >> 16);
-}
-
-/// High 32 bits of the 64-bit SIGNED product a*b (v_mul_hi_i32 semantics).
-/// Derived from the unsigned high word with the standard signed correction
-/// `hi_s = hi_u - (a<0 ? b : 0) - (b<0 ? a : 0)`. Same clang/libstdc++
-/// motivation as `mul_hi_u32_simd`: no `fixed_size_simd<int64_t, N>`.
-inline native<uint32_t> mul_hi_i32_simd(native<uint32_t> a, native<uint32_t> b) {
-  using U = native<uint32_t>;
-  U hi = mul_hi_u32_simd(a, b);
-  // Sign correction in the uint domain (the negative test is the high bit, so
-  // the where-mask type matches `hi` and avoids a signed/unsigned mask mismatch).
-  stdx::where((a >> 31) != U(0u), hi) = hi - b;
-  stdx::where((b >> 31) != U(0u), hi) = hi - a;
-  return hi;
-}
 #endif // RJ_HOST_HAS_STDX_SIMD
 
 #if !RJ_HOST_HAS_STDX_SIMD
@@ -1323,8 +1122,6 @@ inline native<double> trunc_simd(native<double>) { return {}; }
 inline native<double> ceil_simd(native<double>) { return {}; }
 inline native<double> floor_simd(native<double>) { return {}; }
 inline native<double> rndne_simd(native<double>) { return {}; }
-inline native<uint32_t> mul_hi_u32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
-inline native<uint32_t> mul_hi_i32_simd(native<uint32_t>, native<uint32_t>) { return {}; }
 #endif
 
 } // namespace util

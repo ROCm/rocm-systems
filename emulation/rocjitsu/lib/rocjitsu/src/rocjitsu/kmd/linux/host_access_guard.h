@@ -44,8 +44,9 @@ inline HostAccessGuardState &host_access_guard_state() {
 /// @param[in] fault_address si_addr, kept for classifying the refusal.
 inline void divert_host_fault_to_guard(int signal, const void *fault_address) {
   HostAccessGuardState &state = host_access_guard_state();
-  if (!state.armed)
+  if (!state.armed) {
     return;
+  }
   state.armed = false;
   state.fault_address = fault_address;
   // The handler runs with this signal blocked, and siglongjmp here does not
@@ -100,7 +101,9 @@ inline void host_fault_handler(int signal_number, siginfo_t *info, void *context
 /// linked by tools and tests that never preload the interposer, and a guard
 /// that only worked when it happened to be present would fail exactly where a
 /// bad address is most likely -- in a test.
+/// Builds with host fault recovery disabled leave the host's actions intact.
 inline void install_host_access_guard() {
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
   static std::once_flag once;
   std::call_once(once, [] {
     struct sigaction action {};
@@ -113,6 +116,7 @@ inline void install_host_access_guard() {
     // reaches an emulated access identically.
     sigaction(SIGBUS, &action, &previous_host_fault_action(SIGBUS));
   });
+#endif
 }
 
 /// @brief Run @p access, reporting whether the host memory under it faulted.
@@ -139,7 +143,10 @@ inline void install_host_access_guard() {
 ///
 /// @param[in] access Invoked once; must not itself arm a guard.
 /// @returns true when @p access completed, false when it faulted.
+/// With host fault recovery disabled, calls @p access directly. A host fault
+/// follows the process's ordinary signal disposition instead of returning false.
 template <typename F> [[nodiscard]] inline bool with_host_access_guard(F &&access) {
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
   // Nothing of this frame is held across the jump. A local live over sigsetjmp
   // has an indeterminate value after siglongjmp unless it is volatile -- the
   // compiler is free to leave it in a register the jump restores -- so the
@@ -149,11 +156,15 @@ template <typename F> [[nodiscard]] inline bool with_host_access_guard(F &&acces
   // savemask 0 on purpose: saving the signal mask costs a sigprocmask syscall
   // on every armed access, which is the cost this whole mechanism exists to
   // avoid. The handler restores what needs restoring instead.
-  if (sigsetjmp(host_access_guard_state().landing, /*savemask=*/0) != 0)
+  if (sigsetjmp(host_access_guard_state().landing, /*savemask=*/0) != 0) {
     return false;
+  }
   host_access_guard_state().armed = true;
+#endif
   access();
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
   host_access_guard_state().armed = false;
+#endif
   return true;
 }
 

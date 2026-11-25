@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_register.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/operand.h"
@@ -23,8 +23,9 @@ inline void execute_ds_permute(Wavefront &wave, Wave32 wave32, Wave64 wave64, ui
                                const Operand &destination, const Operand &address,
                                const Operand &data, uint16_t offset) {
   const uint64_t exec_mask = wave.exec();
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, address, exec_mask);
   uint64_t source_mask = exec_mask;
@@ -33,11 +34,13 @@ inline void execute_ds_permute(Wavefront &wave, Wave32 wave32, Wave64 wave64, ui
       source_mask = 0;
       const unsigned group = ds_permute_group_width(wave.cu().arch(), wave.wf_size());
       for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
-        if (!((exec_mask >> lane) & 1))
+        if (!((exec_mask >> lane) & 1)) {
           continue;
+        }
         const unsigned source = ds_permute_lane(lane, a.data[lane], offset, group);
-        if (FetchInactive || ((exec_mask >> source) & 1))
+        if (FetchInactive || ((exec_mask >> source) & 1)) {
           source_mask |= 1ULL << source;
+        }
       }
     }
   }
@@ -58,17 +61,20 @@ inline void execute_ds_permute(Wavefront &wave, Wave32 wave32, Wave64 wave64, ui
 inline void execute_ds_swizzle(Wavefront &wave, uint64_t flags, const Operand &destination,
                                const Operand &source, uint16_t offset) {
   const uint64_t exec_mask = wave.exec();
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   uint64_t source_mask = exec_mask;
   if (wave.cu().observes_register_access()) {
     source_mask = 0;
     for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
-      if (!((exec_mask >> lane) & 1))
+      if (!((exec_mask >> lane) & 1)) {
         continue;
+      }
       const unsigned selected = ds_swizzle_lane(lane, offset);
-      if ((exec_mask >> selected) & 1)
+      if ((exec_mask >> selected) & 1) {
         source_mask |= 1ULL << selected;
+      }
     }
   }
   RegisterAccess registers(wave);

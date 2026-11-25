@@ -92,10 +92,6 @@ def generate_signal_api():
 def fetch_api_dec(suffix):
     return f"__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_fetch{suffix}(const uint64_t *sig_addr);\n"
 
-def generate_fetch_api():
-    suffixes = ["", "_wg", "_wave"]
-    return "".join([fetch_api_dec(suffix) for suffix in suffixes])
-
 def signal_op_dec(operation):
     return (
         f"__device__ ATTR_NO_INLINE void rocshmem_ctx_signal_{operation}(\n"
@@ -153,8 +149,6 @@ def add_misc_apis():
  * @param[in] sig_op    Signal operation (ROCSHMEM_SIGNAL_SET or
  * ROCSHMEM_SIGNAL_ADD)
  * @param[in] pe        PE of the remote process
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
@@ -166,8 +160,6 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
  * @param[in] sig_addr  Address of signal variable on remote PE
  * @param[in] signal    Value to add to the signal variable
  * @param[in] pe        PE of the remote process
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_signal_add_kernel(uint64_t *sig_addr,
                                                           uint64_t signal,
@@ -179,8 +171,6 @@ __global__ ATTR_NO_INLINE void rocshmem_signal_add_kernel(uint64_t *sig_addr,
  * @param[in] sig_addr  Address of signal variable on remote PE
  * @param[in] signal    Value to store in the signal variable
  * @param[in] pe        PE of the remote process
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_signal_set_kernel(uint64_t *sig_addr,
                                                           uint64_t signal,
@@ -192,8 +182,6 @@ __global__ ATTR_NO_INLINE void rocshmem_signal_set_kernel(uint64_t *sig_addr,
  * @param[in] sig_addr  Address of signal variable on the symmetric heap
  * @param[in] cmp       Comparison operator
  * @param[in] cmp_value Value to compare against
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_signal_wait_until_kernel(
     uint64_t *sig_addr, int cmp, uint64_t cmp_value);

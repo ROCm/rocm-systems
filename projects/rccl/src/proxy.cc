@@ -837,6 +837,8 @@ static ncclResult_t removeOp(struct ncclProxyProgressState* state, struct ncclPr
   return ncclSuccess;
 }
 
+// Keep this hot loop on a 64-byte boundary.
+__attribute__((aligned(64)))
 static ncclResult_t progressOps(struct ncclProxyState* proxyState, struct ncclProxyProgressState* state,
                                 struct ncclProxyArgs* opStart, int* idle) {
   struct ncclProxyArgs* prevOp = NULL;

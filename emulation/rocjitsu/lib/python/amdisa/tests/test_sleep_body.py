@@ -49,6 +49,14 @@ class TestSleepBody:
         assert 'simm16.encoding_value_' in body
         assert '0x7Fu' in body
 
+    @pytest.mark.parametrize('arch', ['rdna4', 'cdna5'])
+    def test_gfx12_immediate_sleep_can_wait_for_wakeup(self, arch):
+        body = _body('S_SLEEP', arch)
+        assert 'simm16.encoding_value_' in body
+        assert 'kSleepForever' in body
+        assert '0x8000u' in body
+        assert 'kSleepForever' not in _body('S_SLEEP_VAR', arch)
+
     def test_sleep_var_takes_its_count_from_a_scalar(self):
         """S_SLEEP_VAR is the same delay with the 7-bit count in an operand."""
         body = _body('S_SLEEP_VAR')

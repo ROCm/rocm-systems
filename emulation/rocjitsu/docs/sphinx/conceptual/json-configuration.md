@@ -1,12 +1,12 @@
 ---
 myst:
     html_meta:
-        "description": "JSON topology configuration for rocJITsu, covering config file structure, range expansion syntax, pattern link expressions, KFD device fields, FlatBuffers validation, and pre-built configs."
-        "keywords": "rocJITsu, ROCm, JSON, topology, configuration, FlatBuffers, simulation, GPU emulation, CDNA, RDNA"
+        "description": "JSON topology configuration for rocjitsu, covering config file structure, range expansion syntax, pattern link expressions, KFD device fields, FlatBuffers validation, and pre-built configs."
+        "keywords": "rocjitsu, ROCm, JSON, topology, configuration, FlatBuffers, simulation, GPU emulation, CDNA, RDNA"
 ---
 # JSON topology configuration
 
-rocJITsu describes GPU topologies declaratively in JSON. A single
+rocjitsu describes GPU topologies declaratively in JSON. A single
 configuration file defines the simulation parameters, the component
 hierarchy (SoC, XCDs, shader engines, compute units, caches, and
 memory), and the link connectivity between components. The VM creation
@@ -16,7 +16,7 @@ hierarchy, and load any program binaries before returning a ready-to-run
 virtual machine handle.
 
 For CMake-level build options that affect the configuration subsystem,
-see [Install and build rocJITsu](../install/install.md). For a step-by-step
+see [Install and build rocjitsu](../install/install.md). For a step-by-step
 guide to writing or modifying a topology file, see
 [Configure a simulated GPU topology](../how-to/configure-topology.md).
 
@@ -91,7 +91,7 @@ for coverage, per-CU controls and launch-mode restrictions.
 
 `exec_mode` is matched literally. Only `"clocked"` selects cycle-accurate
 mode. If the field is omitted or set to `"functional"`, `"cycle"`, or any
-other value, rocJITsu runs in functional mode.
+other value, rocjitsu runs in functional mode.
 
 
 ## Component hierarchy and range expansion

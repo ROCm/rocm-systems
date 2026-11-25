@@ -11,6 +11,8 @@
 #include "simdojo/sim/event_queue.h"
 #include "simdojo/sim/exec_mode.h"
 #include "simdojo/sim/message.h"
+#include "util/diagnostic.h"
+#include "util/result.h"
 
 #include <atomic>
 #include <cassert>
@@ -86,8 +88,9 @@ public:
   /// @brief Full hierarchical path name (e.g., "soc.subsystem0.unit3").
   /// @returns Dot-separated path from the root to this node.
   std::string full_path() const {
-    if (!parent_)
+    if (!parent_) {
       return name_;
+    }
     return parent_->full_path() + "." + name_;
   }
 
@@ -115,7 +118,9 @@ public:
   ~Component() override = default;
 
   /// @brief Called once before simulation starts.
-  virtual void initialize() {}
+  /// @details On failure, shutdown() releases any partially initialized resources.
+  /// Lifecycle hooks and event callbacks must not throw.
+  virtual util::Result initialize(util::DiagnosticEmitter = {}) { return util::Result::success(); }
 
   /// @brief Called after initialize to kick off steady-state execution.
   ///
@@ -343,8 +348,9 @@ public:
   /// @brief The peer port at the other end of the link.
   /// @returns Pointer to the peer port, or nullptr if unconnected.
   Port *peer() const {
-    if (link_ == nullptr)
+    if (link_ == nullptr) {
       return nullptr;
+    }
     return (link_->src() == this) ? link_->dst() : link_->src();
   }
 

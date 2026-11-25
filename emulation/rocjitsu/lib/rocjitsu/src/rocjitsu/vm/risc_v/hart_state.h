@@ -14,6 +14,10 @@ namespace risc_v {
 
 class Memory;
 
+constexpr uint16_t kCsrFflags = 0x001;
+constexpr uint16_t kCsrFrm = 0x002;
+constexpr uint16_t kCsrFcsr = 0x003;
+
 /// @brief RISC-V hart architectural state.
 ///
 /// Derives from ThreadContext so that execute() methods can
@@ -28,12 +32,14 @@ struct HartState : public ThreadContext {
   bool reservation_valid = false;
   uint64_t reservation_addr = 0;
 
+  uint8_t fcsr = 0;
   std::unordered_map<uint16_t, uint64_t> csrs;
 
   int64_t read_xreg(int idx) const { return (idx == 0) ? 0 : xreg[idx]; }
   void write_xreg(int idx, int64_t val) {
-    if (idx != 0)
+    if (idx != 0) {
       xreg[idx] = val;
+    }
   }
 
   uint64_t read_freg(int idx) const { return freg[idx]; }

@@ -170,6 +170,7 @@ set(SRC_FILES
   algorithms/dda/all_reduce/all_reduce_dda_ll.h
   algorithms/dda/all_reduce/all_reduce_dda_ll128.h
   algorithms/dda/all_reduce/all_reduce_dda_ll128_twoshot.h
+  algorithms/dda/all_reduce/all_reduce_dda_ll128_peerpar.h
   algorithms/dda/all_reduce/all_reduce_dda_ll_spread.h
   algorithms/dda/all_reduce/all_reduce_dda_ll_twoshot.h
   algorithms/dda/alltoall/alltoall_dda.h
@@ -183,6 +184,9 @@ set(SRC_FILES
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128.h
+  algorithms/gin/gin_all_gather.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll128_peerpar.h
+  algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll_spread.h
   algorithms/gin/gin_alltoall.h
   algorithms/gin/gin_all_reduce.h
   algorithms/gin/gin_all_reduce_policy.h
@@ -219,6 +223,7 @@ set(SRC_FILES
   algorithms/dda/all_reduce/dda_all_reduce.h
   algorithms/dda/alltoall/dda_alltoall.h
   algorithms/dda/broadcast/dda_broadcast.h
+  algorithms/dda/broadcast/broadcast_dda_fabric_ll128_twoshot.h
   algorithms/dda/dda_init_detail.h
   algorithms/dda/reduce_scatter/dda_reduce_scatter.h
   include/debug.h
@@ -481,6 +486,7 @@ set(SRC_FILES
   include/trees.h
   include/tuner.h
   include/tuning.h
+  include/tuning_mask.h
   include/utils.h
   include/warp_speed_plan.h
   init.cc
@@ -696,6 +702,7 @@ if(ENABLE_ROCSHMEM_GIN)
     src/gin/gin_anvil_sdma_factory.cc
     src/gin/gin_anvil_ipc_table_host.cc
     src/gin/gin_anvil_conn_check_device.cc
+    src/algorithms/gin/sdma/gin_all_gather_sdma.cu
     src/algorithms/gin/sdma/gin_alltoall_sdma.cu
     src/algorithms/gin/sdma/gin_all_reduce_sdma.cu
   )
@@ -1056,6 +1063,7 @@ if(ENABLE_DEVICE_LINKER)
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_reduce_scatter_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_all_gather_ipc\\.cu\\.cpp$")
   list(FILTER HIP_SOURCES EXCLUDE REGEX "dda_alltoall_ipc\\.cu\\.cpp$")
+  list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_all_gather_sdma\\.cu\\.cpp$")
   # Contains the GIN-SDMA alltoall __global__ kernel and its launch site, so it
   # needs full HIP compilation rather than --offload-host-only.
   list(FILTER HIP_SOURCES EXCLUDE REGEX "gin_alltoall_sdma\\.cu\\.cpp$")
@@ -1525,7 +1533,9 @@ endif()
 
 if (ROCM_VERSION VERSION_GREATER_EQUAL "60200")
   target_compile_options(rccl PRIVATE --offload-compress)    # Compress GPU code at compile time.
-  target_link_libraries(rccl PRIVATE --offload-compress)     # Compress GPU code at link time.
+  if(NOT ENABLE_DEVICE_LINKER)  # The device linker compresses through RULE_LAUNCH_LINK, below.
+    target_link_libraries(rccl PRIVATE --offload-compress)   # Compress GPU code at link time.
+  endif()
   message(STATUS "--offload-compress enabled - ROCm version >= 6.2.0")
 else()
   message(STATUS "--offload-compress disabled - ROCm version < 6.2.0")
@@ -1748,7 +1758,58 @@ if(ENABLE_DEVICE_LINKER)
   # device_linker_build compiles DDA sources that pull in comm.h -> rma/rma.h,
   # so it needs the rma_tmp.h symlink in place before it runs.
   add_dependencies(device_linker_build rma_header_symlinks)
-  target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
+  # clang-linker-wrapper links the device image from the device code the
+  # DEVICE_LINKER_OBJECTS carry, and registers it. The new driver is the default
+  # in newer compilers; ROCm 7.0 needs it named.
+  set(_dl_device_link_flags -fgpu-rdc --hip-link --offload-new-driver ${DL_OFFLOAD_ARCH_FLAGS})
+  if(NOT BUILD_SHARED_LIBS)
+    # A static library has no link step, and a consumer's ordinary link would
+    # not run clang-linker-wrapper. Do the device link here as a relocatable
+    # link, which leaves one object carrying the image and its registration,
+    # and archive that in librccl.a in place of the DEVICE_LINKER_OBJECTS.
+    set(_dl_archive_object "${DEVICE_BUILD_DIR}/rccl_device.o")
+    # rocSHMEM's device code has to join this link, as it joins librccl.so's.
+    # Whole-archive: some members (e.g. the one defining logd_constants) are
+    # referenced only by other rocSHMEM host code, so this link would skip them
+    # and the consumer's link would pull them in with nothing to register
+    # their device variables.
+    set(_dl_archive_inputs ${DEVICE_LINKER_OBJECTS})
+    set(_dl_archive_link_inputs ${DEVICE_LINKER_OBJECTS})
+    if(ENABLE_ROCSHMEM)
+      list(APPEND _dl_archive_inputs ${ROCSHMEM_LIBRARY})
+      list(APPEND _dl_archive_link_inputs
+           -Wl,--whole-archive ${ROCSHMEM_LIBRARY} -Wl,--no-whole-archive)
+    endif()
+    set(_dl_archive_env "")
+    if(ENABLE_COMPRESS)
+      set(_dl_archive_env ${CMAKE_COMMAND} -E env OFFLOAD_BUNDLER_COMPRESS=1)
+    endif()
+    # The flags CMake puts on librccl.so's link line, so the device code is
+    # optimized (and instrumented) the same way in both builds.
+    string(TOUPPER "${CMAKE_BUILD_TYPE}" _dl_build_type)
+    separate_arguments(_dl_archive_cxx_flags UNIX_COMMAND
+      "${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_dl_build_type}}")
+    add_custom_command(
+      OUTPUT  ${_dl_archive_object}
+      COMMAND ${_dl_archive_env} ${CMAKE_CXX_COMPILER} ${_dl_archive_cxx_flags} -r
+              ${_dl_device_link_flags} ${_dl_archive_link_inputs} -o ${_dl_archive_object}
+      DEPENDS ${_dl_archive_inputs} device_linker_build
+      COMMENT "DL relocatable device link for librccl.a"
+      VERBATIM
+    )
+    set_source_files_properties(${_dl_archive_object} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+    target_sources(rccl PRIVATE ${_dl_archive_object})
+  else()
+    target_link_libraries(rccl PRIVATE ${DEVICE_LINKER_OBJECTS})
+    target_link_options(rccl PRIVATE ${_dl_device_link_flags})
+    add_custom_command(TARGET rccl POST_BUILD
+      COMMAND ${Python3_EXECUTABLE}
+              ${PROJECT_SOURCE_DIR}/cmake/scripts/check_single_device_image.py
+              $<TARGET_FILE:rccl>
+      COMMENT "Verifying librccl.so has one device image"
+      VERBATIM
+    )
+  endif()
 endif()
 
 ## Set RCCL linked libraries
@@ -1835,16 +1896,35 @@ endif()
 if(ENABLE_ROCSHMEM)
   # librocshmem.a is compiled with -fgpu-rdc (relocatable device code).
   # --hip-link tells amdclang++ to perform the RDC device-link step as part
-  # of the final librccl.so link.
-  target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  # of the final librccl.so link. With the device linker that link is already
+  # --hip-link, and rocSHMEM's device code joins RCCL's in its one image.
+  # A static librccl.a already carries all of librocshmem.a in rccl_device.o, so
+  # linking it again would export it to consumers and duplicate its symbols.
+  if(NOT ENABLE_DEVICE_LINKER OR BUILD_SHARED_LIBS)
+    target_link_libraries(rccl PRIVATE ${ROCSHMEM_LIBRARY})
+  endif()
   target_link_libraries(rccl PRIVATE ${HSAKMT_LIBRARY})
-  # Full target IDs, not bare names
-  set(_rocshmem_offload_arch_flags "")
-  foreach(_gpu_raw ${GPU_TARGETS})
-    list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu_raw}")
-  endforeach()
-  list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
-  target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
+  if(NOT ENABLE_DEVICE_LINKER)
+    # Full target IDs, not bare names
+    set(_rocshmem_offload_arch_flags "")
+    foreach(_gpu_raw ${GPU_TARGETS})
+      list(APPEND _rocshmem_offload_arch_flags "--offload-arch=${_gpu_raw}")
+    endforeach()
+    list(REMOVE_DUPLICATES _rocshmem_offload_arch_flags)
+    target_link_options(rccl PRIVATE -fgpu-rdc --hip-link ${_rocshmem_offload_arch_flags})
+  elseif(NOT TARGET rocshmem_ext AND EXISTS "${ROCSHMEM_LIBRARY}")
+    # A pre-built rocSHMEM. The new-driver link takes device code only from new-driver
+    # objects, so one built by ROCm 7.0's default old driver would leave its device
+    # symbols undefined.
+    execute_process(COMMAND "${DL_OBJDUMP}" --offloading "${ROCSHMEM_LIBRARY}"
+      OUTPUT_VARIABLE _rocshmem_offloading ERROR_QUIET)
+    if(NOT _rocshmem_offloading MATCHES "OFFLOADING IMAGE")
+      message(FATAL_ERROR
+        "${ROCSHMEM_LIBRARY} has no new-driver device code, which the device linker needs. "
+        "Rebuild rocSHMEM with -DCMAKE_CXX_FLAGS=--offload-new-driver, or unset "
+        "ROCSHMEM_INSTALL_DIR to let RCCL build it.")
+    endif()
+  endif()
 elseif(ENABLE_ROCSHMEM_GIN)
   # GIN is self-contained: all rocshmem host code it needs is compiled directly
   # into librccl.so (SDMA and the GDA factory + mlx5 provider via src/gin).
@@ -1958,7 +2038,14 @@ if (HAVE_KERNARG_PRELOAD AND NOT ENABLE_DEVICE_LINKER AND NOT DISABLE_KERNARG_PR
 endif()
 
 ## Track linking time
-set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${CMAKE_COMMAND} -E time")
+set(_rccl_link_launcher "${CMAKE_COMMAND} -E time")
+if(ENABLE_DEVICE_LINKER AND ENABLE_COMPRESS)
+  # The link bundles the device image. ROCm 7.0's clang fails that link under
+  # --offload-compress (ld.lld: unknown argument '-compress'), while the bundler's
+  # own switch works with every toolchain.
+  set(_rccl_link_launcher "${CMAKE_COMMAND} -E env OFFLOAD_BUNDLER_COMPRESS=1 ${_rccl_link_launcher}")
+endif()
+set_property(TARGET rccl PROPERTY RULE_LAUNCH_LINK "${_rccl_link_launcher}")
 
 ## Setup librccl.so version
 rocm_set_soversion(rccl "1.0")

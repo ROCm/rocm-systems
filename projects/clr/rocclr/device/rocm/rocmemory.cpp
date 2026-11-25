@@ -850,7 +850,7 @@ void Buffer::destroy() {
       }
     }
 
-    if (needUnlockHostMem) {
+    if (needUnlockHostMem && HostLockOwner()) {
       if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
         if (dev().agent_profile() != HSA_PROFILE_FULL) Hsa::memory_unlock(owner()->getHostMem());
       }
@@ -1194,8 +1194,36 @@ bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
     owner()->setHostMem(deviceMemory_);
   } else if (owner()->getSvmPtr() != owner()->getHostMem()) {
     if (memFlags & (CL_MEM_USE_HOST_PTR | CL_MEM_ALLOC_HOST_PTR)) {
-      deviceMemory_ =
-          dev().hostLock(owner()->getHostMem(), owner()->getSize(), getHostMemorySegment(memFlags));
+      // HIP's context always spans every device, so one device can lock every agent in a
+      // single call and the rest reuse that mapping; OpenCL's context can be a genuine
+      // subset, so it keeps locking per-device.
+      const bool shareLock = amd::IS_HIP && owner()->getContext().devices().size() > 1;
+
+      // addDeviceMemory() holds owner()->lockMemoryOps() for this whole call, so the first
+      // device to reach here for a given owner is always fully initialized by the time any
+      // other device gets here.
+      roc::Memory* first =
+          shareLock ? static_cast<roc::Memory*>(owner()->getOriginalDeviceMemory()) : nullptr;
+
+      if (first != nullptr && first != this && first->HostLockAllAgents()) {
+        // Reuse the first device's mapping; it remains the sole unlock owner.
+        assert(first->HostLockOwner() && "An all-agent lock must have an unlock owner!");
+        deviceMemory_ = reinterpret_cast<void*>(first->virtualAddress());
+        assert(!HostLockOwner() && "Only the locking device may unlock the range!");
+      } else {
+        // Only the first device for this owner ever attempts the group lock, so a failed
+        // attempt is never retried by a sibling.
+        const bool tryAllAgents = shareLock && (first == nullptr || first == this);
+        deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
+                                       getHostMemorySegment(memFlags), tryAllAgents);
+        const bool lockedAllAgents = tryAllAgents && deviceMemory_ != nullptr;
+        if (deviceMemory_ == nullptr && tryAllAgents) {
+          // Group lock failed; fall back to locking just this device.
+          deviceMemory_ = dev().hostLock(owner()->getHostMem(), owner()->getSize(),
+                                         getHostMemorySegment(memFlags));
+        }
+        setHostLockState(deviceMemory_ != nullptr, lockedAllAgents);
+      }
     } else {
       deviceMemory_ = owner()->getHostMem();
     }

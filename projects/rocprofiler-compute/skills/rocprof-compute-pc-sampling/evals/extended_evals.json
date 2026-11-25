@@ -1,0 +1,34 @@
+{
+  "evaluations": [
+    {
+      "id": "pcs-export-disassembly",
+      "skill_should_trigger": true,
+      "prompt": "Profile my kernel with PC sampling, then export the annotated disassembly with sample counts to a file.\n\nThe application is ./vrandom_access.cpp, a single-file HIP program that is not built yet. It takes no arguments and runs in a few seconds. Tell me where the export was written.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "reports the directory where the per-kernel annotated disassembly was written"
+      ],
+      "logs_contain": ["--pc-sampling", "--output-format"]
+    },
+    {
+      "id": "pcs-which-instruction-stalls",
+      "skill_should_trigger": true,
+      "prompt": "Which instruction in my MI300 kernel stalls the most?\n\nThe application is ./vrandom_access.cpp, a single-file HIP program that is not built yet. It takes no arguments and runs in a few seconds. Answer with the instruction and its stall reason.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "names the instruction with the most samples and the stall reason the report gives for it"
+      ],
+      "logs_contain": ["rocprofv3-avail", "--experimental", "--pc-sampling", "rocprof-compute analyze"]
+    },
+    {
+      "id": "pcs-source-line-attribution",
+      "skill_should_trigger": true,
+      "prompt": "Map the hottest GPU instructions in my kernel back to my HIP source lines.\n\nThe application is ./vrandom_access.cpp, a single-file HIP program that is not built yet. It takes no arguments and runs in a few seconds. Build it however you need. Answer with the source lines of the hottest instructions.",
+      "workspace": "evals/samples",
+      "expected_behavior": [
+        "builds the application with debug info before collecting PC samples"
+      ],
+      "logs_contain": ["hipcc", "--pc-sampling", "rocprof-compute analyze"]
+    }
+  ]
+}

@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -44,7 +45,8 @@ static_assert(std::is_same_v<decltype(rj_code_inst_next(nullptr)), const rj_code
 
 TEST(DecoderCApiTest, InvalidInstructionReturnsErrorAndClearsOutput) {
   rj_code_decoder_t *decoder = nullptr;
-  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_CDNA5, &decoder), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_TARGET_GFX1250, &decoder),
+            ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(decoder, nullptr);
 
   auto *instruction = reinterpret_cast<rj_code_inst_t *>(static_cast<uintptr_t>(1));
@@ -61,7 +63,7 @@ TEST(DecoderCApiTest, InvalidArgumentsClearWritableOutputs) {
   EXPECT_EQ(instruction, nullptr);
 
   auto *decoder = reinterpret_cast<rj_code_decoder_t *>(static_cast<uintptr_t>(1));
-  EXPECT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_INVALID, &decoder),
+  EXPECT_EQ(rj_code_decoder_create(ROCJITSU_CODE_TARGET_INVALID, &decoder),
             ROCJITSU_STATUS_INVALID_ARGUMENT);
   EXPECT_EQ(decoder, nullptr);
 
@@ -76,7 +78,7 @@ TEST(DecoderCApiTest, InvalidArgumentsClearWritableOutputs) {
 
 TEST(DecoderCApiTest, StandaloneInstructionsAreCallerOwned) {
   rj_code_decoder_t *decoder = nullptr;
-  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_CDNA3, &decoder), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_TARGET_GFX942, &decoder), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(decoder, nullptr);
 
   rj_code_inst_t *instruction = nullptr;
@@ -103,7 +105,7 @@ TEST(DecoderCApiTest, StandaloneInstructionsAreCallerOwned) {
 }
 
 TEST(DecoderCApiTest, StandaloneInstructionIgnoresAmbientDecoderPool) {
-  auto pooled_decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto pooled_decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(pooled_decoder, nullptr);
   pooled_decoder->enable_pool();
   const auto *active_pool =
@@ -111,7 +113,7 @@ TEST(DecoderCApiTest, StandaloneInstructionIgnoresAmbientDecoderPool) {
   ASSERT_NE(active_pool, nullptr);
 
   rj_code_decoder_t *decoder = nullptr;
-  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_CDNA3, &decoder), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_TARGET_GFX942, &decoder), ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(decoder, nullptr);
 
   rj_code_inst_t *instruction = nullptr;
@@ -136,7 +138,7 @@ TEST(DecoderCApiTest, StandaloneInstructionIgnoresAmbientDecoderPool) {
 }
 
 TEST(DecoderCApiTest, RejectedInstructionRestoresAmbientAllocator) {
-  auto pooled_decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto pooled_decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(pooled_decoder, nullptr);
   pooled_decoder->enable_pool();
   const rocjitsu::Instruction::AllocFn alloc_fn = rocjitsu::Instruction::alloc_fn_;
@@ -145,7 +147,8 @@ TEST(DecoderCApiTest, RejectedInstructionRestoresAmbientAllocator) {
   ASSERT_NE(pool, nullptr);
 
   rj_code_decoder_t *decoder = nullptr;
-  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_CDNA5, &decoder), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_TARGET_GFX1250, &decoder),
+            ROCJITSU_STATUS_SUCCESS);
   auto *instruction = reinterpret_cast<rj_code_inst_t *>(static_cast<uintptr_t>(1));
   EXPECT_EQ(rj_code_decoder_decode(decoder, &kCdnaSEndpgm, &instruction), ROCJITSU_STATUS_ERROR);
   EXPECT_EQ(instruction, nullptr);
@@ -156,7 +159,7 @@ TEST(DecoderCApiTest, RejectedInstructionRestoresAmbientAllocator) {
 }
 
 TEST(DecoderCApiTest, HeapAllocationScopeForgetsDestroyedPool) {
-  auto pooled_decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto pooled_decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(pooled_decoder, nullptr);
   pooled_decoder->enable_pool();
   ASSERT_NE(rocjitsu::Instruction::alloc_pool_, nullptr);
@@ -167,7 +170,7 @@ TEST(DecoderCApiTest, HeapAllocationScopeForgetsDestroyedPool) {
   }
   EXPECT_EQ(rocjitsu::Instruction::alloc_pool_, nullptr);
 
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<rocjitsu::Instruction> instruction(decode_valid(*decoder, &kCdnaSEndpgm));
   ASSERT_NE(instruction, nullptr);
@@ -175,7 +178,7 @@ TEST(DecoderCApiTest, HeapAllocationScopeForgetsDestroyedPool) {
 }
 
 TEST(DecoderPoolTest, AllocatesOnlyOnFirstEnablement) {
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(decoder, nullptr);
   EXPECT_EQ(rocjitsu::DecoderPoolTestAccess::pool(*decoder), nullptr);
   {
@@ -200,7 +203,7 @@ TEST(DecoderPoolTest, AllocatesOnlyOnFirstEnablement) {
 }
 
 TEST(DecoderPoolTest, ReenablePreservesPoolAndOutstandingInstruction) {
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(decoder, nullptr);
   decoder->enable_pool();
   auto *pool = static_cast<rocjitsu::Decoder::Pool *>(rocjitsu::Instruction::alloc_pool_);
@@ -227,7 +230,7 @@ TEST(DecoderPoolTest, ReenablePreservesPoolAndOutstandingInstruction) {
 }
 
 TEST(DecoderPoolTest, UnusedDecoderDoesNotInvalidateAnotherPool) {
-  auto pooled_decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  auto pooled_decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
   ASSERT_NE(pooled_decoder, nullptr);
   pooled_decoder->enable_pool();
   auto *pool = static_cast<rocjitsu::Decoder::Pool *>(rocjitsu::Instruction::alloc_pool_);
@@ -235,7 +238,7 @@ TEST(DecoderPoolTest, UnusedDecoderDoesNotInvalidateAnotherPool) {
   auto alloc_fn = rocjitsu::Instruction::alloc_fn_;
   auto dealloc_fn = rocjitsu::Instruction::dealloc_fn_;
   {
-    auto unused = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+    auto unused = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
     ASSERT_NE(unused, nullptr);
     unused->disable_pool();
     EXPECT_EQ(rocjitsu::Instruction::alloc_pool_, pool);
@@ -247,7 +250,7 @@ TEST(DecoderPoolTest, UnusedDecoderDoesNotInvalidateAnotherPool) {
   EXPECT_EQ(rocjitsu::Instruction::dealloc_fn_, dealloc_fn);
   {
     rocjitsu::Instruction::ScopedHeapAllocation heap_allocation;
-    auto unused = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+    auto unused = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
     ASSERT_NE(unused, nullptr);
     unused->disable_pool();
   }
@@ -271,7 +274,7 @@ TEST(DecoderPoolTest, UnusedDecoderPreservesNullContextAllocatorHooks) {
   rocjitsu::Instruction::dealloc_fn_ = dealloc_fn;
   ASSERT_EQ(rocjitsu::Instruction::alloc_pool_, nullptr);
   {
-    auto unused = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+    auto unused = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
     ASSERT_NE(unused, nullptr);
     unused->disable_pool();
     EXPECT_EQ(rocjitsu::Instruction::alloc_pool_, nullptr);
@@ -283,7 +286,7 @@ TEST(DecoderPoolTest, UnusedDecoderPreservesNullContextAllocatorHooks) {
   EXPECT_EQ(rocjitsu::Instruction::dealloc_fn_, dealloc_fn);
   {
     rocjitsu::Instruction::ScopedHeapAllocation heap_allocation;
-    auto unused = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+    auto unused = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna3);
     ASSERT_NE(unused, nullptr);
     unused->disable_pool();
   }
@@ -293,7 +296,7 @@ TEST(DecoderPoolTest, UnusedDecoderPreservesNullContextAllocatorHooks) {
 }
 
 TEST(Cdna1Decode, RejectsUnassignedImageAndFlatSegmentOpcodes) {
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna1);
   ASSERT_NE(decoder, nullptr);
   std::array<uint32_t, 2> image{0xf0001100u, 0};
   ASSERT_TRUE(decoder->decode(image.data()).succeeded());
@@ -308,8 +311,8 @@ TEST(Cdna1Decode, RejectsUnassignedImageAndFlatSegmentOpcodes) {
 }
 
 TEST(Cdna1Decode, FloatAtomicReturnRequiresCdna2) {
-  auto mi100 = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
-  auto mi200 = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  auto mi100 = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna1);
+  auto mi200 = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(mi100 && mi200);
   for (uint32_t op : {77u, 78u}) {
     for (bool buffer : {false, true}) {
@@ -324,7 +327,7 @@ TEST(Cdna1Decode, FloatAtomicReturnRequiresCdna2) {
 }
 
 TEST(Cdna1Decode, InterpolationSeparatesAttributeChannelAndHalf) {
-  auto decoder = rocjitsu::Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna1);
   ASSERT_NE(decoder, nullptr);
   for (uint32_t channel = 0; channel != 4; ++channel) {
     for (uint32_t high = 0; high != 2; ++high) {
@@ -333,8 +336,9 @@ TEST(Cdna1Decode, InterpolationSeparatesAttributeChannelAndHalf) {
       ASSERT_TRUE(result.succeeded());
       std::string expected = "v_interp_p1ll_f16 v5, v2, attr7.";
       expected += "xyzw"[channel];
-      if (high)
+      if (high) {
         expected += " high";
+      }
       EXPECT_EQ(result.value()->disassemble(), expected);
     }
   }

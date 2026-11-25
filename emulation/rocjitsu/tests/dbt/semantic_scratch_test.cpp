@@ -18,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -66,16 +67,17 @@ std::vector<std::unique_ptr<BasicBlock>> build_scratch_test_blocks() {
   constexpr auto end = cdna3::build_sopp(cdna3::kSEndpgmSopp);
   constexpr std::array words = {move[0], end[0]};
   ScratchTestCodeObject code(words);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
-  return build_valid_blocks(code, *decoder, ROCJITSU_CODE_ARCH_CDNA3);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
+  return build_valid_blocks(code, *decoder, rocjitsu::IsaFamily::Cdna3);
 }
 
 std::vector<BasicBlock *>
 scratch_test_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   std::vector<BasicBlock *> scope;
   scope.reserve(blocks.size());
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     scope.push_back(block.get());
+  }
   return scope;
 }
 
@@ -170,9 +172,9 @@ TEST(SemanticExpansion, UnavailableLivenessReturnsInternalFailureWithoutOutput) 
   constexpr auto end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
   constexpr std::array words = {compound[0], compound[1], end[0]};
   ScratchTestCodeObject code(words);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = build_valid_blocks(code, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  auto blocks = build_valid_blocks(code, *decoder, rocjitsu::IsaFamily::Cdna4);
   ASSERT_FALSE(blocks.empty());
   ASSERT_FALSE(blocks.front()->instructions().empty());
   const Instruction &inst = *blocks.front()->instructions().begin();
@@ -180,9 +182,9 @@ TEST(SemanticExpansion, UnavailableLivenessReturnsInternalFailureWithoutOutput) 
   TranslationContext context(/*vgprs=*/8, /*agprs=*/0, /*accum_base=*/0,
                              /*sgprs=*/8, /*private_bytes=*/32);
 
-  const auto result = expand_cdna4_v_lshl_add_u64_for_rdna(inst, ROCJITSU_CODE_ARCH_RDNA4, 0,
-                                                           scratch_test_text(code), liveness,
-                                                           context, nullptr, nullptr);
+  const auto result = expand_cdna4_v_lshl_add_u64_for_rdna(
+      inst, static_cast<uint32_t>(rocjitsu::IsaFamily::Rdna4), 0, scratch_test_text(code), liveness,
+      context, nullptr, nullptr);
 
   EXPECT_EQ(result.status, ExpandStatus::Failed);
   EXPECT_TRUE(result.internal_error);
@@ -279,14 +281,14 @@ TEST(SemanticScratchAllocator, GprIndexModeWriteBypassesKernelUnusedTier) {
   constexpr auto end = cdna4::build_sopp(cdna4::kSEndpgmSopp);
   constexpr std::array words = {setreg[0], move[0], end[0]};
   ScratchTestCodeObject code(words);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
-  auto blocks = build_valid_blocks(code, *decoder, ROCJITSU_CODE_ARCH_CDNA4);
+  auto blocks = build_valid_blocks(code, *decoder, rocjitsu::IsaFamily::Cdna4);
   ASSERT_EQ(blocks.size(), 1u);
   auto scope = scratch_test_scope(blocks);
 
   LivenessAnalysisOptions options;
-  options.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  options.arch = rocjitsu::IsaFamily::Cdna4;
   options.text = scratch_test_text(code);
   const ExecMaskAnalysis exec{KernelBlockScope(scope), /*wave_size=*/64};
   const LivenessAnalysis liveness{KernelBlockScope(scope), 64,
@@ -386,8 +388,9 @@ TEST(SemanticScratchAllocator, RejectsSpillVictimInDynamicStackKernel) {
 TEST(SemanticScratchAllocator, AllowsFreeWindowInDynamicStackKernel) {
   auto blocks = build_scratch_test_blocks();
   std::vector<BasicBlock *> scope;
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     scope.push_back(block.get());
+  }
   const Instruction &inst = *blocks.front()->instructions().begin();
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
   LivenessAnalysis liveness(scope, 64, std::make_unique<ExecMaskAnalysis>(exec));

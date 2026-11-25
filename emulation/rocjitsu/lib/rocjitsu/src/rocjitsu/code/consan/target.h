@@ -5,6 +5,7 @@
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <algorithm>
 #include <array>
@@ -19,7 +20,7 @@ class TargetProfile {
 public:
   uint32_t id;
   std::string_view name;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   rj_code_target_id_t public_id;
   uint32_t elf_machine;
   uint32_t default_wave_size;
@@ -31,35 +32,35 @@ public:
 inline constexpr std::array kNativeLdsTargets = {
     TargetProfile{.id = 942,
                   .name = "gfx942",
-                  .arch = ROCJITSU_CODE_ARCH_CDNA3,
+                  .arch = rocjitsu::IsaFamily::Cdna3,
                   .public_id = ROCJITSU_CODE_TARGET_GFX942,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX942,
                   .default_wave_size = 64,
                   .wave64 = true},
     TargetProfile{.id = 950,
                   .name = "gfx950",
-                  .arch = ROCJITSU_CODE_ARCH_CDNA4,
+                  .arch = rocjitsu::IsaFamily::Cdna4,
                   .public_id = ROCJITSU_CODE_TARGET_GFX950,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX950,
                   .default_wave_size = 64,
                   .wave64 = true},
     TargetProfile{.id = 1100,
                   .name = "gfx1100",
-                  .arch = ROCJITSU_CODE_ARCH_RDNA3,
+                  .arch = rocjitsu::IsaFamily::Rdna3,
                   .public_id = ROCJITSU_CODE_TARGET_GFX1100,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1100,
                   .default_wave_size = 32,
                   .wave64 = true},
     TargetProfile{.id = 1201,
                   .name = "gfx1201",
-                  .arch = ROCJITSU_CODE_ARCH_RDNA4,
+                  .arch = rocjitsu::IsaFamily::Rdna4,
                   .public_id = ROCJITSU_CODE_TARGET_GFX1201,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1201,
                   .default_wave_size = 32,
                   .wave64 = true},
     TargetProfile{.id = 1250,
                   .name = "gfx1250",
-                  .arch = ROCJITSU_CODE_ARCH_CDNA5,
+                  .arch = rocjitsu::IsaFamily::Cdna5,
                   .public_id = ROCJITSU_CODE_TARGET_GFX1250,
                   .elf_machine = EF_AMDGPU_MACH_AMDGCN_GFX1250,
                   .default_wave_size = 32,
@@ -71,21 +72,29 @@ static_assert(std::ranges::none_of(kNativeLdsTargets, [](const TargetProfile &ta
 }));
 
 inline constexpr const TargetProfile *target_profile(uint32_t id) {
-  for (const TargetProfile &target : kNativeLdsTargets)
-    if (target.id == id)
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    if (target.id == id) {
       return &target;
+    }
+  }
   return nullptr;
 }
 
 inline constexpr const TargetProfile *target_profile(std::string_view name) {
-  for (const TargetProfile &target : kNativeLdsTargets)
-    if (target.name == name)
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    if (target.name == name) {
       return &target;
+    }
+  }
   return nullptr;
 }
 
 inline constexpr bool supports_wave(const TargetProfile &target, uint32_t wave_size) {
   return wave_size == target.default_wave_size || (target.wave64 && wave_size == 64);
+}
+
+inline constexpr bool uses_split_workgroup_barrier(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
 } // namespace rocjitsu::consan

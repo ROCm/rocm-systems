@@ -11,6 +11,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -57,8 +58,9 @@ template <typename Entry, size_t N>
 std::optional<EncodingWords> find_test_encoding(const Entry (&encodings)[N],
                                                 std::string_view mnemonic) {
   for (const auto &encoding : encodings) {
-    if (encoding.mnemonic == mnemonic)
+    if (encoding.mnemonic == mnemonic) {
       return encoding.words;
+    }
   }
   return std::nullopt;
 }
@@ -105,7 +107,7 @@ std::optional<EncodingWords> gfx1250_encoding(std::string_view mnemonic) {
 
 class ScalarSccProfile {
 public:
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   std::string_view name;
   EncodingLookup find_encoding;
   WrexecDialect wrexec_dialect;
@@ -113,16 +115,16 @@ public:
 };
 
 const std::array<ScalarSccProfile, 10> kScalarSccProfiles{{
-    {ROCJITSU_CODE_ARCH_CDNA1, "cdna1", cdna1_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_CDNA2, "cdna2", cdna2_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_CDNA3, "cdna3", cdna3_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_CDNA4, "cdna4", cdna4_encoding, WrexecDialect::Andn, false},
-    {ROCJITSU_CODE_ARCH_RDNA1, "rdna1", rdna1_encoding, WrexecDialect::Andn, true},
-    {ROCJITSU_CODE_ARCH_RDNA2, "rdna2", rdna2_encoding, WrexecDialect::Andn, true},
-    {ROCJITSU_CODE_ARCH_RDNA3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_RDNA3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_RDNA4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
-    {ROCJITSU_CODE_ARCH_CDNA5, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Cdna1, "cdna1", cdna1_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Cdna2, "cdna2", cdna2_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Cdna3, "cdna3", cdna3_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Cdna4, "cdna4", cdna4_encoding, WrexecDialect::Andn, false},
+    {rocjitsu::IsaFamily::Rdna1, "rdna1", rdna1_encoding, WrexecDialect::Andn, true},
+    {rocjitsu::IsaFamily::Rdna2, "rdna2", rdna2_encoding, WrexecDialect::Andn, true},
+    {rocjitsu::IsaFamily::Rdna3, "rdna3", rdna3_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Rdna3_5, "rdna3_5", rdna3_5_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Rdna4, "rdna4", rdna4_encoding, WrexecDialect::AndNot, true},
+    {rocjitsu::IsaFamily::Cdna5, "gfx1250", gfx1250_encoding, WrexecDialect::AndNot, true},
 }};
 
 EncodingWords require_encoding(const ScalarSccProfile &profile, std::string_view mnemonic) {
@@ -137,8 +139,9 @@ EncodingWords require_encoding(const ScalarSccProfile &profile, std::string_view
 std::optional<std::string_view> first_supported(const ScalarSccProfile &profile,
                                                 std::initializer_list<std::string_view> mnemonics) {
   for (const auto mnemonic : mnemonics) {
-    if (profile.find_encoding(mnemonic))
+    if (profile.find_encoding(mnemonic)) {
       return mnemonic;
+    }
   }
   return std::nullopt;
 }
@@ -199,19 +202,22 @@ public:
     config.vgprs_per_wf = 256;
     config.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, std::string(profile.name), config, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(profile.arch);
-    if (cu)
+    if (cu) {
       wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf, wave_size);
+    }
   }
 
   ~ScalarSccFixture() {
     // A wave frees its SGPR/VGPR blocks when it halts (s_endpgm-equivalent
     // termination), so halt the resident wave to release its resources rather
     // than a CU-wide reset.
-    if (wf && !wf->is_halted())
+    if (wf && !wf->is_halted()) {
       wf->halt();
+    }
   }
 
   bool ready() const { return cu != nullptr && decoder != nullptr && wf != nullptr; }
@@ -248,12 +254,68 @@ public:
   amdgpu::Wavefront *wf = nullptr;
 };
 
+TEST(ScalarSccTest, Gfx10SubvectorLoopUsesOnlyExecAndItsScratchSgpr) {
+  for (const auto &profile : kScalarSccProfiles) {
+    if (profile.arch != rocjitsu::IsaFamily::Rdna1 && profile.arch != rocjitsu::IsaFamily::Rdna2) {
+      continue;
+    }
+    ScalarSccFixture f(profile, "subvector", 64);
+    ASSERT_TRUE(f.ready());
+    // GFX10: s_subvector_loop_begin s2, +4 and s_subvector_loop_end s2, -3.
+    const auto begin =
+        f.decode(encode_sopk(profile, "s_subvector_loop_begin", 2, 4), "s_subvector_loop_begin");
+    const auto end =
+        f.decode(encode_sopk(profile, "s_subvector_loop_end", 2, 0xfffd), "s_subvector_loop_end");
+    ASSERT_TRUE(begin && end);
+    EXPECT_EQ(begin->branch_offset_bytes(), 16);
+    EXPECT_EQ(end->branch_offset_bytes(), -12);
+    EXPECT_NE(begin->flags() & COND_BRANCH, 0u);
+    EXPECT_NE(end->flags() & COND_BRANCH, 0u);
+    const RegisterRef scratch{RegClass::SGPR, 2, 1};
+    EXPECT_EQ(InstDefUse(*begin, 64).uses.contains(scratch),
+              profile.arch == rocjitsu::IsaFamily::Rdna1);
+    EXPECT_TRUE(InstDefUse(*end, 64).uses.contains(scratch));
+    EXPECT_EQ(begin->disassemble(), "s_subvector_loop_begin s2, 4");
+    const auto execute = [&](Instruction &inst, uint64_t pc) {
+      f.wf->pc = pc;
+      EXPECT_TRUE(f.cu->execute_instruction(&inst, *f.wf).succeeded());
+      return f.wf->pc + inst.size();
+    };
+
+    const auto temp = f.sgpr_base() + 2;
+    f.cu->write_sgpr(temp, 0xdeadbeef);
+    f.wf->write_exec(0);
+    EXPECT_EQ(execute(*begin, 0x1000), 0x1014u);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 0xdeadbeefu);
+
+    constexpr uint64_t mask = 0x0000000b00000005ull;
+    f.wf->write_exec(mask);
+    EXPECT_EQ(execute(*begin, 0x1000), 0x1004u);
+    EXPECT_EQ(f.wf->exec_raw(), 5u);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 11u);
+    EXPECT_EQ(execute(*end, 0x100c), 0x1004u);
+    EXPECT_EQ(f.wf->exec_raw(), 11ull << 32);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 5u);
+    EXPECT_EQ(execute(*end, 0x100c), 0x1010u);
+    EXPECT_EQ(f.wf->exec_raw(), mask);
+
+    auto andexec =
+        f.decode(encode_sop1(profile, "s_and_saveexec_b32", 2, 128), "s_and_saveexec_b32");
+    ASSERT_TRUE(andexec);
+    EXPECT_EQ(execute(*andexec, 0x1010), 0x1014u);
+    EXPECT_EQ(f.wf->exec_raw(), 11ull << 32);
+    EXPECT_EQ(f.cu->read_sgpr(temp), 5u);
+    EXPECT_FALSE(f.wf->read_scc());
+  }
+}
+
 TEST(ScalarSccTest, Gfx10WaitRegisterValueIsDynamicAndWraps) {
   using amdgpu::WaitCounterKind;
   using amdgpu::WaitCounterPolicy;
   for (const auto &profile : kScalarSccProfiles) {
-    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+    if (profile.arch != rocjitsu::IsaFamily::Rdna1 && profile.arch != rocjitsu::IsaFamily::Rdna2) {
       continue;
+    }
     ScalarSccFixture f(profile, "wait_register");
     ASSERT_TRUE(f.ready());
     const auto dynamic = f.decode(encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/0, /*simm16=*/1),
@@ -291,7 +353,7 @@ TEST(ScalarSccTest, Gfx10WaitRegisterValueIsDynamicAndWraps) {
 
 TEST(ScalarSccTest, Rdna2HwregsUseTheExecutingWavesState) {
   const auto profile =
-      std::ranges::find(kScalarSccProfiles, ROCJITSU_CODE_ARCH_RDNA2, &ScalarSccProfile::arch);
+      std::ranges::find(kScalarSccProfiles, rocjitsu::IsaFamily::Rdna2, &ScalarSccProfile::arch);
   ASSERT_NE(profile, kScalarSccProfiles.end());
   ScalarSccFixture f(*profile, "hwreg");
   ASSERT_TRUE(f.ready());
@@ -376,8 +438,9 @@ TEST(ScalarSccTest, CdnaForkConsumesOneSharedLiteralWord) {
       {0x9480ffffu, 0, 0x100, 0x100},     // One literal shared by both sources.
   };
   for (const auto &profile : kScalarSccProfiles) {
-    if (profile.arch > ROCJITSU_CODE_ARCH_CDNA4)
+    if (profile.arch > rocjitsu::IsaFamily::Cdna4) {
       continue;
+    }
     SCOPED_TRACE(profile.name);
     ScalarSccFixture f(profile, "fork_literal");
     ASSERT_TRUE(f.ready());
@@ -397,6 +460,25 @@ TEST(ScalarSccTest, CdnaForkConsumesOneSharedLiteralWord) {
   }
 }
 
+TEST(ScalarSccTest, Cdna1ConditionalDebugBranchesReadBothStatusFlags) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "debug_branches");
+  ASSERT_TRUE(f.ready());
+  constexpr std::array names{"s_cbranch_cdbgsys", "s_cbranch_cdbguser", "s_cbranch_cdbgsys_or_user",
+                             "s_cbranch_cdbgsys_and_user"};
+  for (unsigned flags = 0; flags < 4; ++flags) {
+    f.wf->set_status_raw(flags << 20);
+    const std::array expected{bool(flags & 2), bool(flags & 1), flags != 0, flags == 3};
+    for (unsigned i = 0; i < names.size(); ++i) {
+      auto branch = f.decode({0xbf970002u + (i << 16), 0}, names[i]);
+      ASSERT_TRUE(branch);
+      EXPECT_TRUE(branch->writes_pc());
+      f.wf->pc = 0x100;
+      ASSERT_TRUE(f.cu->execute_instruction(branch.get(), *f.wf).succeeded());
+      EXPECT_EQ(f.wf->pc + branch->size(), expected[i] ? 0x10cu : 0x104u);
+    }
+  }
+}
+
 TEST(ScalarSccTest, Cdna1RestrictsShaderWritesToTrapTemporaryPairs) {
   ScalarSccFixture f(kScalarSccProfiles.front(), "trap_temporaries");
   ASSERT_TRUE(f.ready());
@@ -411,7 +493,7 @@ TEST(ScalarSccTest, Cdna1RestrictsShaderWritesToTrapTemporaryPairs) {
   ASSERT_TRUE(f.cu->execute_instruction(mov.get(), *f.wf).succeeded());
   EXPECT_EQ(f.wf->ttmp(0), 1u);
   EXPECT_EQ(f.wf->ttmp(1), 0u);
-  auto rfe = f.decode({0xbe801f00u, 0}, "s_rfe_b64"); // s[0:1]
+  auto rfe = f.decode({0x95800200u, 0}, "s_rfe_restore_b64"); // s[0:1], s2
   ASSERT_TRUE(rfe);
   f.cu->write_sgpr(f.sgpr_base(), 0x100);
   f.cu->write_sgpr(f.sgpr_base() + 1, 0);
@@ -439,8 +521,9 @@ TEST(ScalarSccTest, Cdna1TrapDrainsCountersBeforeEnteringConfiguredHandler) {
   EXPECT_FALSE(f.wf->in_trap_handler());
   EXPECT_EQ(f.wf->pc, trap_pc);
   f.wf->release_wait_counter(amdgpu::WaitCounterType::VMCNT);
-  for (unsigned i = 0; i < 3 && !f.wf->in_trap_handler(); ++i)
+  for (unsigned i = 0; i < 3 && !f.wf->in_trap_handler(); ++i) {
     f.cu->step();
+  }
   ASSERT_TRUE(f.wf->in_trap_handler());
   ASSERT_EQ(f.wf->pc, handler);
   f.cu->step();
@@ -478,13 +561,32 @@ TEST(ScalarSccTest, Cdna1TrapRetiresImplicitMemoryWaitOnlyOnHandlerEntry) {
     ASSERT_NE(f.wf->memory_wait_scoreboard(), nullptr);
     ASSERT_FALSE(f.wf->memory_wait_scoreboard()->empty());
     const uint64_t consumer = install_handler ? handler : program + 12;
-    for (unsigned i = 0; i < 8 && f.wf->pc != consumer; ++i)
+    for (unsigned i = 0; i < 8 && f.wf->pc != consumer; ++i) {
       f.cu->step();
+    }
     ASSERT_EQ(f.wf->pc, consumer);
     f.cu->step();
     EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 9), 123u);
     EXPECT_EQ(f.cu->memory_wait_diagnostic_count(), install_handler ? 0u : 1u);
   }
+}
+
+TEST(ScalarSccTest, Cdna1ShaderHaltStopsNextInstruction) {
+  ScalarSccFixture f(kScalarSccProfiles.front(), "shader_halt");
+  ASSERT_TRUE(f.ready());
+  f.cu->set_functional_quantum(1);
+  f.wf->pc = 0x1000;
+  f.gpu_mem.write32(0x1000, 0xbf8f0003u); // s_setprio 3
+  f.gpu_mem.write32(0x1004, 0xbf8d0001u); // s_sethalt 1
+  f.gpu_mem.write32(0x1008, 0xb004007bu); // s_movk_i32 s4,123
+  f.cu->step();
+  EXPECT_EQ((f.wf->status_raw() >> 3) & 3u, 3u);
+  f.cu->step();
+  EXPECT_TRUE(f.wf->debug_halted());
+  EXPECT_TRUE(f.wf->status_halt());
+  f.cu->step();
+  EXPECT_EQ(f.wf->pc, 0x1008u);
+  EXPECT_EQ(f.cu->read_sgpr(f.sgpr_base() + 4), 0u);
 }
 
 class WrexecPair {
@@ -638,11 +740,12 @@ void run_wrexec_scc_cases(const ScalarSccProfile &profile, const WrexecPair &pai
 
 TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
   for (const auto &profile : kScalarSccProfiles) {
-    if (!profile.has_wrexec_b32)
+    if (!profile.has_wrexec_b32) {
       continue;
+    }
     SCOPED_TRACE(profile.name);
     // The CDNA5 ISA exposes these B32 operations on wave32.
-    const uint32_t wave_size = profile.arch == ROCJITSU_CODE_ARCH_CDNA5 ? 32 : 64;
+    const uint32_t wave_size = profile.arch == rocjitsu::IsaFamily::Cdna5 ? 32 : 64;
     ScalarSccFixture fixture(profile, "b32_exec", wave_size);
     ASSERT_TRUE(fixture.ready());
     const char *wrexec = profile.wrexec_dialect == WrexecDialect::Andn ? "s_andn1_wrexec_b32"
@@ -665,8 +768,9 @@ TEST(ScalarSccTest, B32ExecInstructionsPreserveTheOtherHalfOfAWave) {
 
 TEST(ScalarSccTest, Gfx10WaitUsesTheRegisterAndForgetsEarlierCounterLimits) {
   for (const auto &profile : kScalarSccProfiles) {
-    if (profile.arch != ROCJITSU_CODE_ARCH_RDNA1 && profile.arch != ROCJITSU_CODE_ARCH_RDNA2)
+    if (profile.arch != rocjitsu::IsaFamily::Rdna1 && profile.arch != rocjitsu::IsaFamily::Rdna2) {
       continue;
+    }
     ScalarSccFixture f(profile, "gfx10_wait");
     ASSERT_TRUE(f.ready());
     auto vm = f.decode(encode_sopk(profile, "s_waitcnt_vmcnt", /*sdst=*/4, /*simm16=*/2),
@@ -691,8 +795,9 @@ TEST(ScalarSccTest, WrexecWritesDestinationExecAndScc) {
     for (const auto &candidate : kWrexecPairs) {
       const bool expected = profile_expects_wrexec_pair(profile, candidate);
       const bool available = expect_wrexec_availability(profile, candidate);
-      if (expected && available)
+      if (expected && available) {
         run_wrexec_scc_cases(profile, candidate);
+      }
     }
   }
 }
@@ -702,8 +807,9 @@ TEST(ScalarSccTest, WrexecRegisterDefUseMatchesArchitectureMatrix) {
     for (const auto &candidate : kWrexecPairs) {
       const bool expected = profile_expects_wrexec_pair(profile, candidate);
       const bool available = expect_wrexec_availability(profile, candidate);
-      if (expected && available)
+      if (expected && available) {
         expect_wrexec_def_use(profile, candidate);
+      }
     }
   }
 }
@@ -807,10 +913,11 @@ void run_saveexec_case(ScalarSccFixture &fixture, const ScalarSccProfile &profil
 
   const uint32_t sb = fixture.sgpr_base();
   fixture.cu->write_sgpr(sb, static_cast<uint32_t>(src));
-  if (is_b64)
+  if (is_b64) {
     fixture.cu->write_sgpr(sb + 1, static_cast<uint32_t>(src >> 32));
-  else
+  } else {
     fixture.cu->write_sgpr(sb + sdst + 1, kHighSentinel);
+  }
 
   const uint64_t initial_raw_exec =
       is_b64 ? old_exec : (static_cast<uint64_t>(kHighSentinel) << 32) | old_exec;
@@ -850,8 +957,9 @@ TEST(ScalarSccTest, SaveexecSupportsAliasedSourceAndDestination) {
 
     for (const bool is_b64 : {false, true}) {
       const std::string mnemonic = std::string(variant.mnemonic_stem) + (is_b64 ? "_b64" : "_b32");
-      if (!profile.find_encoding(mnemonic))
+      if (!profile.find_encoding(mnemonic)) {
         continue;
+      }
 
       run_saveexec_case(fixture, profile, variant, is_b64, kOldExec, kSource, /*sdst=*/0);
       ++(is_b64 ? b64_coverage : b32_coverage);
@@ -877,8 +985,9 @@ TEST(ScalarSccTest, SaveexecBooleanMatrixPreservesExecAndWritesScc) {
       for (const bool is_b64 : {false, true}) {
         const std::string mnemonic =
             std::string(variant.mnemonic_stem) + (is_b64 ? "_b64" : "_b32");
-        if (!profile.find_encoding(mnemonic))
+        if (!profile.find_encoding(mnemonic)) {
           continue;
+        }
 
         const uint64_t width_mask = is_b64 ? ~uint64_t{0} : uint64_t{0xFFFFFFFFu};
         ASSERT_NE(
@@ -943,8 +1052,9 @@ void run_addk_scc_cases(const ScalarSccProfile &profile) {
 }
 
 TEST(ScalarSccTest, AddkUsesSignedOverflowAndFeedsSccConsumer) {
-  for (const auto &profile : kScalarSccProfiles)
+  for (const auto &profile : kScalarSccProfiles) {
     run_addk_scc_cases(profile);
+  }
 }
 
 void run_mulk_cases(const ScalarSccProfile &profile) {
@@ -981,8 +1091,9 @@ void run_mulk_cases(const ScalarSccProfile &profile) {
 }
 
 TEST(ScalarSccTest, MulkUsesOldDestinationAndSignedImmediate) {
-  for (const auto &profile : kScalarSccProfiles)
+  for (const auto &profile : kScalarSccProfiles) {
     run_mulk_cases(profile);
+  }
 }
 
 TEST(ScalarSccTest, AddkAndMulkRegisterDestinationRead) {
@@ -1091,8 +1202,9 @@ void run_sop2_scc_cases(const ScalarSccProfile &profile) {
 }
 
 TEST(ScalarSccTest, Sop2SccModesFeedSccConsumer) {
-  for (const auto &profile : kScalarSccProfiles)
+  for (const auto &profile : kScalarSccProfiles) {
     run_sop2_scc_cases(profile);
+  }
 }
 
 void run_sop2_carry_input_cases(const ScalarSccProfile &profile) {
@@ -1144,8 +1256,9 @@ void run_sop2_carry_input_cases(const ScalarSccProfile &profile) {
 }
 
 TEST(ScalarSccTest, Sop2CarryInputReadsAndWritesScc) {
-  for (const auto &profile : kScalarSccProfiles)
+  for (const auto &profile : kScalarSccProfiles) {
     run_sop2_carry_input_cases(profile);
+  }
 }
 
 void run_sopc_sopk_compare_scc_cases(const ScalarSccProfile &profile) {
@@ -1179,8 +1292,9 @@ void run_sopc_sopk_compare_scc_cases(const ScalarSccProfile &profile) {
     fixture.expect_scc_consumer(test_case.expected_scc, test_case.mnemonic);
   }
 
-  if (!profile.find_encoding("s_cmpk_eq_i32"))
+  if (!profile.find_encoding("s_cmpk_eq_i32")) {
     return;
+  }
 
   class SopkCase {
   public:
@@ -1205,8 +1319,9 @@ void run_sopc_sopk_compare_scc_cases(const ScalarSccProfile &profile) {
 }
 
 TEST(ScalarSccTest, SopcAndSopkCompareFeedSccConsumer) {
-  for (const auto &profile : kScalarSccProfiles)
+  for (const auto &profile : kScalarSccProfiles) {
     run_sopc_sopk_compare_scc_cases(profile);
+  }
 }
 
 class ScalarUnarySccCase {
@@ -1222,10 +1337,12 @@ void run_scalar_unary_preserves_scc(const ScalarSccProfile &profile,
                                     const std::array<ScalarUnarySccCase, N> &cases,
                                     std::string_view test_name) {
   bool has_supported_case = false;
-  for (const auto &test_case : cases)
+  for (const auto &test_case : cases) {
     has_supported_case |= profile.find_encoding(test_case.mnemonic).has_value();
-  if (!has_supported_case)
+  }
+  if (!has_supported_case) {
     return;
+  }
 
   ScalarSccFixture fixture(profile, test_name);
   ASSERT_TRUE(fixture.ready()) << profile.name;
@@ -1233,8 +1350,9 @@ void run_scalar_unary_preserves_scc(const ScalarSccProfile &profile,
   constexpr uint32_t kHighDestinationSentinel = 0xA5A55A5Au;
 
   for (const auto &test_case : cases) {
-    if (!profile.find_encoding(test_case.mnemonic))
+    if (!profile.find_encoding(test_case.mnemonic)) {
       continue;
+    }
     const auto words = encode_sop1(profile, test_case.mnemonic, /*sdst=*/2, /*ssrc0=*/0);
     for (bool initial_scc : std::array<bool, 2>{false, true}) {
       auto inst = fixture.decode(words, test_case.mnemonic);
@@ -1285,8 +1403,9 @@ TEST(ScalarSccTest, ScalarCvtPreservesScc) {
       {"s_cvt_hi_f32_f16", one_f16 << 16, one_f32},
   }};
 
-  for (const auto &profile : kScalarSccProfiles)
+  for (const auto &profile : kScalarSccProfiles) {
     run_scalar_unary_preserves_scc(profile, cases, "scalar_cvt_scc");
+  }
 }
 
 TEST(ScalarSccTest, ScalarScanPreservesScc) {
@@ -1311,8 +1430,9 @@ TEST(ScalarSccTest, ScalarScanPreservesScc) {
       {"s_cls_i32_i64", 0xFFFFFFFFFFFFFFFFULL, 0xFFFFFFFFu},
   }};
 
-  for (const auto &profile : kScalarSccProfiles)
+  for (const auto &profile : kScalarSccProfiles) {
     run_scalar_unary_preserves_scc(profile, cases, "scalar_scan_scc");
+  }
 }
 
 TEST(ScalarSccTest, ScalarMiscUnaryPreservesScc) {
@@ -1329,8 +1449,9 @@ TEST(ScalarSccTest, ScalarMiscUnaryPreservesScc) {
       {"s_rndne_f16", 0x3E00u, 0x4000u},
   }};
 
-  for (const auto &profile : kScalarSccProfiles)
+  for (const auto &profile : kScalarSccProfiles) {
     run_scalar_unary_preserves_scc(profile, cases, "scalar_misc_unary_scc");
+  }
 }
 
 void run_scalar_scan_carry_chain(const ScalarSccProfile &profile) {
@@ -1379,8 +1500,9 @@ void run_scalar_scan_carry_chain(const ScalarSccProfile &profile) {
 }
 
 TEST(ScalarSccTest, ScalarScanDoesNotBreakAddcCarryChain) {
-  for (const auto &profile : kScalarSccProfiles)
+  for (const auto &profile : kScalarSccProfiles) {
     run_scalar_scan_carry_chain(profile);
+  }
 }
 
 } // namespace

@@ -72,10 +72,9 @@ class RuntimeIntegration(unittest.TestCase):
                 cases = [
                     ('grouped_disjoint', 1),
                     ('grouped_race', 3),
-                    ('grouped_repeat', 2 if gpu == 'gfx1250' else 1),
+                    ('grouped_repeat', 2),
+                    ('grouped_barrier', 2),
                 ]
-                if gpu == 'gfx1250':
-                    cases.append(('grouped_barrier', 2))
                 for case, number in cases:
                     with self.subTest(gpu=gpu, wave_size=wave_size, case=case):
                         args = argparse.Namespace(

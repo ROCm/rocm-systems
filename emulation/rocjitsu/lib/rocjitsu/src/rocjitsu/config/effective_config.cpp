@@ -52,18 +52,21 @@ FailureOr<std::string> json_with_cpu_thread_budget(std::string_view json, uint32
                                                    const util::DiagnosticEmitter &emit_error) {
   FailureOr<std::string> rewritten =
       set_top_level_field(json, kBudgetField, std::to_string(budget), emit_error);
-  if (rewritten.failed())
+  if (rewritten.failed()) {
     return Result::failure();
+  }
 
   FailureOr<uint32_t> applied = with_parsed_simulation_config_json(
       rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error,
       [](const fb::SimulationConfig *config) -> FailureOr<uint32_t> {
         return config->cpu_thread_budget();
       });
-  if (applied.failed())
+  if (applied.failed()) {
     return Result::failure();
-  if (applied.value() != budget)
+  }
+  if (applied.value() != budget) {
     return emit_error.emit() << "cannot apply cpu_thread_budget to the simulation config";
+  }
   return std::move(rewritten.value());
 }
 
@@ -73,8 +76,9 @@ FailureOr<std::string> json_with_launch_overrides(std::string_view json,
   std::string rewritten(json);
   if (overrides.cpu_thread_budget) {
     auto result = json_with_cpu_thread_budget(rewritten, *overrides.cpu_thread_budget, emit_error);
-    if (result.failed())
+    if (result.failed()) {
       return Result::failure();
+    }
     rewritten = std::move(result.value());
   }
   if (overrides.wait_checking) {
@@ -82,8 +86,9 @@ FailureOr<std::string> json_with_launch_overrides(std::string_view json,
                         : *overrides.wait_checking == WaitChecking::On ? "\"on\""
                                                                        : "\"all\"";
     auto result = set_top_level_field(rewritten, "wait_checking", value, emit_error);
-    if (result.failed())
+    if (result.failed()) {
       return Result::failure();
+    }
     rewritten = std::move(result.value());
     auto applied = with_parsed_simulation_config_json(
         rewritten, rocjitsu::kEmbeddedSchema, emit_error,
@@ -92,15 +97,18 @@ FailureOr<std::string> json_with_launch_overrides(std::string_view json,
                      ? parse_wait_checking(config->wait_checking()->string_view())
                      : std::nullopt;
         });
-    if (applied.failed())
+    if (applied.failed()) {
       return Result::failure();
-    if (applied.value() != overrides.wait_checking)
+    }
+    if (applied.value() != overrides.wait_checking) {
       return emit_error.emit() << "cannot apply wait_checking to the simulation config";
+    }
   }
   if (!overrides.local_node.empty()) {
     auto result = json_with_local_node(rewritten, overrides.local_node, emit_error);
-    if (result.failed())
+    if (result.failed()) {
       return Result::failure();
+    }
     rewritten = std::move(result.value());
   }
   return rewritten;
@@ -108,38 +116,46 @@ FailureOr<std::string> json_with_launch_overrides(std::string_view json,
 
 FailureOr<std::string> json_with_local_node(std::string_view json, std::string_view node_id,
                                             const util::DiagnosticEmitter &emit_error) {
-  if (node_id.empty())
+  if (node_id.empty()) {
     return emit_error.emit() << "local node ID must be nonempty";
+  }
   auto configured = with_parsed_simulation_config_json(
       std::string(json), rocjitsu::kEmbeddedSchema, emit_error,
       [](const fb::SimulationConfig *config) -> FailureOr<std::string> {
         return config->local_node() ? config->local_node()->str() : std::string{};
       });
-  if (configured.failed())
+  if (configured.failed()) {
     return Result::failure();
-  if (!configured.value().empty() && configured.value() != node_id)
+  }
+  if (!configured.value().empty() && configured.value() != node_id) {
     return emit_error.emit() << "local node argument disagrees with config.local_node";
+  }
   FailureOr<std::string> rewritten =
       set_top_level_field(json, kNodeField, json_string(node_id), emit_error);
-  if (rewritten.failed())
+  if (rewritten.failed()) {
     return Result::failure();
+  }
   try {
     auto graph =
         load_system_graph_from_string(rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error);
-    if (graph.failed())
+    if (graph.failed()) {
       return Result::failure();
+    }
     auto node = graph.value().select_node(emit_error, node_id);
-    if (node.failed())
+    if (node.failed()) {
       return Result::failure();
+    }
     auto applied = with_parsed_simulation_config_json(
         rewritten.value(), rocjitsu::kEmbeddedSchema, emit_error,
         [](const fb::SimulationConfig *config) -> FailureOr<std::string> {
           return config->local_node() ? config->local_node()->str() : std::string{};
         });
-    if (applied.failed())
+    if (applied.failed()) {
       return Result::failure();
-    if (applied.value() != node_id)
+    }
+    if (applied.value() != node_id) {
       return emit_error.emit() << "cannot apply local_node to the simulation config";
+    }
   } catch (const std::exception &error) {
     // Graph construction and JSON parsing still allocate and may throw.
     // Keep their existing launch-override containment until those are migrated.
@@ -152,20 +168,23 @@ FailureOr<std::string> write_effective_config(const std::string &source_path,
                                               const LaunchOverrides &overrides, pid_t pid,
                                               const util::DiagnosticEmitter &emit_error) {
   FailureOr<std::string> source_json = read_config_file(source_path, emit_error);
-  if (source_json.failed())
+  if (source_json.failed()) {
     return Result::failure();
+  }
   FailureOr<std::string> json =
       json_with_launch_overrides(source_json.value(), overrides, emit_error);
-  if (json.failed())
+  if (json.failed()) {
     return Result::failure();
+  }
   std::string effective_json = std::move(json.value());
 
   const std::filesystem::path directory(rocjitsu::rpc_invocation_runtime_dir(pid));
   std::error_code directory_error;
   std::filesystem::create_directories(directory, directory_error);
-  if (directory_error)
+  if (directory_error) {
     return emit_error.emit() << "cannot create runtime directory " << directory.string() << ": "
                              << directory_error.message();
+  }
 
   const std::filesystem::path target = directory / kEffectiveConfigName;
   const std::filesystem::path temporary = target.string() + ".tmp";

@@ -245,6 +245,14 @@ constexpr __host__ __device__ int ncclSymkAlltoAllLLRemotePeer(int worldRank, in
 
 // Max blocks for the hierarchical LSA AllGather kernel.
 constexpr int ncclSymkAgHierMaxBlocks = 72;
+// Largest chunk a block of the hierarchical LSA AllGather pushes.
+constexpr size_t ncclSymkAgHierMaxChunkBytes = 256 << 10;
+
+// AllGather_HierLsaST block count. nBytes is per rank.
+constexpr int ncclSymkAgHierBlocksForSize(int nRanks, size_t nBytes) {
+  if (size_t(nRanks) * nBytes >= (size_t(1) << 30)) return ncclSymkAgHierMaxBlocks;
+  return 64;
+}
 
 // Max blocks for the hierarchical TDM AllGather kernel.
 constexpr int ncclSymkAgHierTmaMaxBlocks = 48;
@@ -259,6 +267,23 @@ constexpr __host__ __device__ int ncclSymkAgHierG0Blocks(int nBlocks, int nGroup
 constexpr __host__ __device__ int ncclSymkAgHierGroupBlocks(int nBlocks, int nGroups) {
   int n = (nBlocks - ncclSymkAgHierG0Blocks(nBlocks, nGroups)) / (nGroups - 1);
   return n > 1 ? n : 1;
+}
+
+// One block's row of hierPushFlags. Words [0, nGroups) are the push flags; group 0 raises none, so its
+// word keeps the block's chunk count across launches. The rest count launches: the close word those
+// whose local copy and forwards this block has finished, the arrive word those this rank has entered,
+// and target word g those entered by the rank this block pushes to for group g.
+constexpr __host__ __device__ int ncclSymkAgHierCloseWord(int nGroups) {
+  return nGroups;
+}
+constexpr __host__ __device__ int ncclSymkAgHierArriveWord(int nGroups) {
+  return nGroups + 1;
+}
+constexpr __host__ __device__ int ncclSymkAgHierTargetWord(int nGroups, int group) {
+  return nGroups + 2 + group;
+}
+constexpr __host__ __device__ int ncclSymkAgHierFlagStride(int nGroups) {
+  return 2 * nGroups + 2;
 }
 
 // [RCCL] Launch width for the GIN and Tma symmetric kernels. The rest default to ncclSymkMaxThreads.
@@ -288,10 +313,7 @@ enum ncclSymkKernelId {
   ncclSymkKernelId_AllGather_ST,
   ncclSymkKernelId_AllGather_TmaSTMC,
   ncclSymkKernelId_AllGather_STMC,
-  ncclSymkKernelId_AllGather_RailRing_LsaST,
   ncclSymkKernelId_AllGather_RailRing_LsaSTMC,
-  ncclSymkKernelId_AllGather_HierLsaST,
-  ncclSymkKernelId_AllGather_HierLsaTmaST,
 
   ncclSymkKernelId_ReduceScatter_LL,
   ncclSymkKernelId_ReduceScatter_TmaLD,
@@ -326,6 +348,12 @@ enum ncclSymkKernelId {
   // Append new kernels so existing tuning IDs remain stable.
   ncclSymkKernelId_AlltoAll_LL,
 
+  // RCCL's own kernels follow NCCL's, so NCCL's kernels have the same ids, tuning ids and algorithm-registry bits as
+  // upstream NCCL. Add RCCL kernels at the end of this list.
+  ncclSymkKernelId_AllGather_RailRing_LsaST,
+  ncclSymkKernelId_AllGather_HierLsaST,
+  ncclSymkKernelId_AllGather_HierLsaTmaST,
+
   ncclSymkKernelId_Count
 };
 
@@ -336,14 +364,15 @@ constexpr char const* ncclSymKernelStr[] = {
   // Must align with enum ncclSymkKernelId definition in src/include/sym_kernels.h
   "AllReduce_AGxLL_R", "AllReduce_AGxLLMC_R", "AllReduce_RSxTmaLD_AGxTmaST", "AllReduce_RSxLD_AGxST",
   "AllReduce_RSxLDMC_AGxSTMC", "AllGather_LL", "AllGather_LLMC", "AllGather_TmaST", "AllGather_ST", "AllGather_TmaSTMC",
-  "AllGather_STMC", "AllGather_RailRing_LsaST", "AllGather_RailRing_LsaSTMC", "AllGather_HierLsaST",
-  "AllGather_HierLsaTmaST", "ReduceScatter_LL", "ReduceScatter_TmaLD", "ReduceScatter_LD", "ReduceScatter_LDMC",
-  "ReduceScatter_RailA2A_LsaLD", "ReduceScatter_RailA2A_LsaLDMC",
+  "AllGather_STMC", "AllGather_RailRing_LsaSTMC", "ReduceScatter_LL", "ReduceScatter_TmaLD", "ReduceScatter_LD",
+  "ReduceScatter_LDMC", "ReduceScatter_RailA2A_LsaLD", "ReduceScatter_RailA2A_LsaLDMC",
   // Genk kernels
   "AllReduce_Ring_Simple", "AllReduce_Tree_Simple", "AllGather_Ring_Simple", "ReduceScatter_Ring_Simple",
   "Broadcast_Ring_Simple", "Reduce_Ring_Simple", "AllReduce_Ring_LL", "AllReduce_Tree_LL", "AllGather_Ring_LL",
   "ReduceScatter_Ring_LL", "Broadcast_Ring_LL", "Reduce_Ring_LL", "AllReduce_Ring_LL128", "AllReduce_Tree_LL128",
-  "AllGather_Ring_LL128", "ReduceScatter_Ring_LL128", "Broadcast_Ring_LL128", "Reduce_Ring_LL128", "AlltoAll_LL"
+  "AllGather_Ring_LL128", "ReduceScatter_Ring_LL128", "Broadcast_Ring_LL128", "Reduce_Ring_LL128", "AlltoAll_LL",
+  // RCCL kernels, which follow NCCL's
+  "AllGather_RailRing_LsaST", "AllGather_HierLsaST", "AllGather_HierLsaTmaST"
 };
 
 // Per-channel view of the finalized topology ring for this rank. index is this rank's position in the ring when rank
@@ -419,6 +448,8 @@ struct ncclSymkDevComm {
   // Per block of the hierarchical AllGather, a row of flags, one per package group, that the pushing
   // block on another rank raises after each chunk.
   ncclDevResourceHandle hierPushFlags;
+  // 0 selects ncclSymkAgHierMaxChunkBytes.
+  uint32_t hierMaxChunkBytes;
   // Profiler counters (host-pinned), indexed by channel id and per-channel entry.
   // workPhases holds per-phase timestamps published behind a fence.
   struct ncclDevProfiler* workStarted;
@@ -434,6 +465,8 @@ struct ncclSymkState {
   bool ginBackendUnsupported;
   int maxGinInboxBlocks;
   int alltoAllLLMaxResidentCtas;
+  // Rows of hierPushFlags, so the most blocks a hierarchical AllGather launch may use.
+  int agHierMaxBlocks;
 #if !defined(NCCL_OS_WINDOWS)
   struct {
     ncclDevResourceHandle bufHandle;
@@ -559,9 +592,15 @@ bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedO
                        size_t nElts);
 bool ncclSymkAlltoAllLLForced(struct ncclComm* comm);
 ncclSymkKernelMask ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
-                                size_t nElts, bool symAligned16B = true);
+                                size_t nElts, bool symAligned16B = true, bool ginWindowsUnregistered = false);
+// Whether the hierarchical LSA AllGather kernel can run on this arch and partition mode.
+bool ncclSymkAgHierAvailable(struct ncclComm* comm);
+// Packages the hierarchical LSA AllGather kernel spans on this comm, or 0 where it can't run.
+int ncclSymkAgHierGroups(struct ncclComm* comm);
 // How many of nBlocks the hierarchical LSA AllGather kernel puts to work; the rest would sit out.
 int ncclSymkAgHierLaunchBlocks(struct ncclComm* comm, int nBlocks);
+int ncclSymkAgHierMaxBlocksLimit();
+size_t ncclSymkAgHierMaxChunkBytesLimit();
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 bool ncclSymkIsGfx950(struct ncclComm* comm);

@@ -309,7 +309,7 @@ class TestEvaluationPipeline:
             raw_pmc_df,
             sys_vars,
             "gfx1250",
-            ["$GRBM_GUI_ACTIVE_PER_XCD"],
+            {"GRBM_GUI_ACTIVE_PER_XCD"},
         )
 
         pd.testing.assert_series_equal(

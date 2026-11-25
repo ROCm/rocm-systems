@@ -125,10 +125,9 @@ inline constexpr uint32_t kProbeMarkerMovS6 = 0xbe860080u; // s_mov_b32 s6, 0
 
 inline uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
-  names.resize(offset + name.size() + 1);
-  if (!name.empty()) {
-    std::memcpy(names.data() + offset, name.data(), name.size());
-  }
+  for (char byte : name)
+    names.push_back(static_cast<uint8_t>(byte));
+  names.push_back('\0');
   return offset;
 }
 
@@ -210,8 +209,9 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
   ehdr.e_shentsize = sizeof(Elf64_Shdr);
   ehdr.e_shnum = section_count;
   ehdr.e_shstrndx = 5;
-  if (wrap_section_header_table)
+  if (wrap_section_header_table) {
     ehdr.e_shoff = UINT64_MAX - 8; // e_shoff + e_shnum * sizeof(Elf64_Shdr) overflows
+  }
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
   std::array<Elf64_Phdr, phdr_count> phdrs{};
@@ -320,8 +320,9 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
   shdrs[5].sh_size = shstrtab.size();
   shdrs[5].sh_addralign = 1;
 
-  if (wrap_symtab_range)
+  if (wrap_symtab_range) {
     shdrs[3].sh_offset = UINT64_MAX - 4; // sh_offset + sh_size overflows
+  }
 
   std::memcpy(image.data() + shoff, shdrs.data(), shdrs.size() * sizeof(Elf64_Shdr));
   return image;
@@ -712,8 +713,9 @@ inline std::vector<uint8_t> make_gfx1200_probe_elf(std::string_view symbol,
 // Copy a named section's bytes out of a reparsed code object as 32-bit words.
 inline std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::string_view name) {
   for (const auto &sec : obj.all_sections()) {
-    if (sec->name() != name)
+    if (sec->name() != name) {
       continue;
+    }
     std::vector<uint32_t> words(sec->size() / sizeof(uint32_t));
     std::memcpy(words.data(), sec->data(), words.size() * sizeof(uint32_t));
     return words;
@@ -725,8 +727,9 @@ inline std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::str
 // which are byte payloads rather than instruction words.
 inline std::vector<uint8_t> section_bytes(const AmdGpuCodeObject &obj, std::string_view name) {
   for (const auto &sec : obj.all_sections()) {
-    if (sec->name() != name)
+    if (sec->name() != name) {
       continue;
+    }
     const auto *data = reinterpret_cast<const uint8_t *>(sec->data());
     return std::vector<uint8_t>(data, data + sec->size());
   }
@@ -735,8 +738,9 @@ inline std::vector<uint8_t> section_bytes(const AmdGpuCodeObject &obj, std::stri
 
 // Read back the (single) kernel's scratch size from a patched ELF.
 inline uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
-  if (obj.text_sections().empty())
+  if (obj.text_sections().empty()) {
     return 0xFFFFFFFFu;
+  }
   const Section *text = obj.text_sections().front();
   const auto kernels = scan_kernel_descriptors(
       {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
@@ -747,14 +751,16 @@ inline uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
 /// @brief .text-relative entry of a patched object's single kernel, or nullopt
 ///        unless exactly one kernel is found.
 inline std::optional<uint64_t> patched_entry_text_offset(const AmdGpuCodeObject &obj) {
-  if (obj.text_sections().empty())
+  if (obj.text_sections().empty()) {
     return std::nullopt;
+  }
   const Section *text = obj.text_sections().front();
   const auto kernels = scan_kernel_descriptors(
       {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
       text->sectionOffset(), text->size());
-  if (kernels.size() != 1)
+  if (kernels.size() != 1) {
     return std::nullopt;
+  }
   return kernels.front().entry_text_offset;
 }
 

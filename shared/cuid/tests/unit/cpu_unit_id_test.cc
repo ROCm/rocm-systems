@@ -6,9 +6,11 @@
 // one socket a different primary CUID per discovery path.
 
 #include <gtest/gtest.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include <cstring>
+#include <fstream>
 #include <map>
 #include <set>
 #include <string>
@@ -16,6 +18,7 @@
 
 #include "src/cuid_cpu.h"
 #include "src/cuid_util.h"
+#include "test_common.h"
 
 namespace {
 
@@ -33,7 +36,9 @@ std::string PrimaryOf(const amdcuid_cpu_info& info) {
 // package's lowest is 0); the next case catches that.
 TEST(cuidtst, CpuUnitIdIsZeroForAWholePackage) {
   std::vector<DevicePtr> cpus;
-  ASSERT_EQ(CuidCpu::discover(cpus), AMDCUID_STATUS_SUCCESS);
+  const amdcuid_status_t status = CuidCpu::discover(cpus);
+  if (status == AMDCUID_STATUS_UNSUPPORTED) GTEST_SKIP() << "CPU vendor has no CUID";
+  ASSERT_EQ(status, AMDCUID_STATUS_SUCCESS);
   if (cpus.empty()) GTEST_SKIP() << "no CPU discovered";
 
   for (const auto& device : cpus) {
@@ -46,7 +51,9 @@ TEST(cuidtst, CpuUnitIdIsZeroForAWholePackage) {
 
 TEST(cuidtst, OneSocketHasOneIdentityWhicheverCpuFoundIt) {
   std::vector<DevicePtr> cpus;
-  ASSERT_EQ(CuidCpu::discover(cpus), AMDCUID_STATUS_SUCCESS);
+  const amdcuid_status_t status = CuidCpu::discover(cpus);
+  if (status == AMDCUID_STATUS_UNSUPPORTED) GTEST_SKIP() << "CPU vendor has no CUID";
+  ASSERT_EQ(status, AMDCUID_STATUS_SUCCESS);
   if (cpus.empty()) GTEST_SKIP() << "no CPU discovered";
 
   std::vector<std::string> paths;
@@ -113,4 +120,118 @@ TEST(cuidtst, TwoSocketsGetDistinctTemporaryCuids) {
                         sizeof(expected.UUIDv8_representation.bytes)),
             0)
       << "socket 0 does not match the zero-Routing-ID structure TV-CPU pins";
+}
+
+// A package ID that is not a 16-bit decimal is refused, never truncated or
+// thrown through the C API.
+TEST(cuidtstUnprivileged, CpuLookupRefusesAMalformedPackageId) {
+#ifndef __x86_64__
+  GTEST_SKIP() << "no CPUID, so no CPU CUID";
+#endif
+  for (const char* package : {"x1", "70000", "-1", "1x"}) {
+    const ScopedTempDir dir("cuid_cpu_");
+    ASSERT_FALSE(dir.path().empty());
+    ASSERT_EQ(mkdir((dir.path() + "/topology").c_str(), 0700), 0);
+    std::ofstream(dir.path() + "/topology/physical_package_id") << package << "\n";
+    std::ofstream(dir.path() + "/topology/core_id") << "0\n";
+    amdcuid_cpu_info info{};
+    amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
+    EXPECT_NO_THROW(status = CuidCpu::discover_single(&info, dir.path())) << package;
+    if (status == AMDCUID_STATUS_UNSUPPORTED) GTEST_SKIP() << "CPU vendor has no CUID";
+    EXPECT_EQ(status, AMDCUID_STATUS_INVALID_FORMAT) << package;
+  }
+}
+
+// Packages come from sysfs, each with its own family, model and stepping from
+// its first /proc/cpuinfo block. A logical CPU with a bad package ID, or a
+// package whose first block is malformed (package 2, even with a good second
+// block), is left out; the others are still listed.
+TEST(cuidtstUnprivileged, CpuPackagesComeFromSysfsWithTheirOwnSignature) {
+#ifndef __x86_64__
+  GTEST_SKIP() << "no CPUID, so no CPU CUID";
+#endif
+  const ScopedTempDir dir("cuid_cpus_");
+  ASSERT_FALSE(dir.path().empty());
+  const std::string base = dir.path() + "/cpu";
+  ASSERT_EQ(mkdir(base.c_str(), 0700), 0);
+  for (const auto& c :
+       {std::make_pair("cpu0", "0"), std::make_pair("cpu1", "0"), std::make_pair("cpu4", "1"),
+        std::make_pair("cpu5", "-1"), std::make_pair("cpu7", "2")}) {
+    const std::string cpu = base + "/" + c.first;
+    ASSERT_EQ(mkdir(cpu.c_str(), 0700), 0);
+    ASSERT_EQ(mkdir((cpu + "/topology").c_str(), 0700), 0);
+    std::ofstream(cpu + "/topology/physical_package_id") << c.second << "\n";
+  }
+  ASSERT_EQ(mkdir((base + "/cpu6").c_str(), 0700), 0);
+  const std::string cpuinfo = dir.path() + "/cpuinfo";
+  std::ofstream(cpuinfo) << "processor\t: 0\nphysical id\t: 0\ncpu family\t: 25\nmodel\t\t: 1\n"
+                            "stepping\t: 1\n\nprocessor\t: 4\nphysical id\t: 1\ncpu family\t: 25\n"
+                            "model\t\t: 1\nstepping\t: 2\n\nprocessor\t: 7\nphysical id\t: 2\n"
+                            "cpu family\t: 25\nmodel\t\t: x\nstepping\t: 1\n\nprocessor\t: 8\n"
+                            "physical id\t: 2\ncpu family\t: 25\nmodel\t\t: 1\nstepping\t: 1\n\n";
+
+  std::vector<DevicePtr> cpus;
+  const amdcuid_status_t status = CuidCpu::discover(base, cpuinfo, cpus);
+  if (status == AMDCUID_STATUS_UNSUPPORTED) GTEST_SKIP() << "CPU vendor has no CUID";
+  ASSERT_EQ(status, AMDCUID_STATUS_SUCCESS);
+  ASSERT_EQ(cpus.size(), 2u);
+  for (size_t i = 0; i < cpus.size(); ++i) {
+    uint16_t package = 0xFFFF, device_id = 0;
+    uint8_t stepping = 0;
+    std::string path;
+    ASSERT_EQ(cpus[i]->get_physical_id(package), AMDCUID_STATUS_SUCCESS);
+    ASSERT_EQ(cpus[i]->get_device_id(device_id), AMDCUID_STATUS_SUCCESS);
+    ASSERT_EQ(cpus[i]->get_revision_id(stepping), AMDCUID_STATUS_SUCCESS);
+    ASSERT_EQ(cpus[i]->get_device_path(path), AMDCUID_STATUS_SUCCESS);
+    EXPECT_EQ(package, i);
+    EXPECT_EQ(device_id, 0x1901);
+    EXPECT_EQ(stepping, i + 1);
+    EXPECT_EQ(path, i == 0 ? "/sys/devices/system/cpu/cpu0" : "/sys/devices/system/cpu/cpu4");
+  }
+}
+
+// The public lookup reports why a CPU path names no component, rather than
+// DEVICE_NOT_FOUND for every failure.
+TEST(cuidtstUnprivileged, CpuPathLookupReportsTheFailure) {
+#ifndef __x86_64__
+  GTEST_SKIP() << "no CPUID, so no CPU CUID";
+#endif
+  const ScopedTempDir dir("cuid_cpu_");
+  ASSERT_FALSE(dir.path().empty());
+  const std::string cpu = dir.path() + "/cpu99999";
+  ASSERT_EQ(mkdir(cpu.c_str(), 0700), 0);
+  ASSERT_EQ(mkdir((cpu + "/topology").c_str(), 0700), 0);
+  std::ofstream(cpu + "/topology/physical_package_id") << "70000\n";
+  std::ofstream(cpu + "/topology/core_id") << "0\n";
+  amdcuid_id_t handle{};
+  const amdcuid_status_t status =
+      amdcuid_get_handle_by_dev_path(cpu.c_str(), AMDCUID_DEVICE_TYPE_CPU, &handle);
+  if (status == AMDCUID_STATUS_UNSUPPORTED) GTEST_SKIP() << "CPU vendor has no CUID";
+  EXPECT_EQ(status, AMDCUID_STATUS_INVALID_FORMAT);
+}
+
+// A POWER /proc/cpuinfo names the machine in "model" and has no "physical id";
+// discovery must report no CPU components, never throw through the C API
+// (ROCm/rocm-systems#14177).
+TEST(cuidtstUnprivileged, CpuDiscoveryWithAPowerCpuinfoDoesNotThrow) {
+  const ScopedTempDir dir("cuid_cpus_");
+  ASSERT_FALSE(dir.path().empty());
+  const std::string base = dir.path() + "/cpu";
+  ASSERT_EQ(mkdir(base.c_str(), 0700), 0);
+  for (const auto& c : {std::make_pair("cpu0", "-1"), std::make_pair("cpu8", "0")}) {
+    const std::string cpu = base + "/" + c.first;
+    ASSERT_EQ(mkdir(cpu.c_str(), 0700), 0);
+    ASSERT_EQ(mkdir((cpu + "/topology").c_str(), 0700), 0);
+    std::ofstream(cpu + "/topology/physical_package_id") << c.second << "\n";
+  }
+  const std::string cpuinfo = dir.path() + "/cpuinfo";
+  std::ofstream(cpuinfo) << "processor\t: 0\ncpu\t\t: POWER10 (architected), altivec supported\n"
+                            "revision\t: 2.0 (pvr 0080 0200)\n\nprocessor\t: 8\n"
+                            "cpu\t\t: POWER10 (architected), altivec supported\n\n"
+                            "platform\t: pSeries\nmodel\t\t: IBM,9105-42A\n";
+  std::vector<DevicePtr> cpus;
+  amdcuid_status_t status = AMDCUID_STATUS_SUCCESS;
+  EXPECT_NO_THROW(status = CuidCpu::discover(base, cpuinfo, cpus));
+  EXPECT_NE(status, AMDCUID_STATUS_SUCCESS);
+  EXPECT_TRUE(cpus.empty());
 }

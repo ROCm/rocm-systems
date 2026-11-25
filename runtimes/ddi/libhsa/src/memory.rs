@@ -21,6 +21,7 @@ pub(crate) mod advice;
 pub(crate) mod compute_copy;
 pub(crate) mod copy_svm;
 pub(crate) mod interop;
+pub(crate) mod prefetch;
 pub(crate) mod svm;
 use copy_svm::*;
 pub(crate) use copy_svm::{copy, image_copy_borrow, image_device_address};
@@ -145,6 +146,15 @@ pub(crate) enum AsyncCopyProfiling {
     Enabled,
 }
 
+/// Unlock identifies the host address, so every alias shares one release count.
+#[derive(Clone, Copy)]
+enum HostLockState {
+    /// Successful lock calls not yet matched by an unlock.
+    Locked(usize),
+    /// Final cleanup started; aliases reject access until cleanup succeeds.
+    Retiring,
+}
+
 /// HSA memory handles and metadata around rocddi allocation owners.
 pub(crate) struct MemoryState {
     /// Ordinary HSA allocations keyed by host address.
@@ -155,6 +165,8 @@ pub(crate) struct MemoryState {
     pub(crate) interop_allocations: HashMap<usize, Memory>,
     /// Host ranges locked for GPU access.
     pub(crate) locked_allocations: Vec<LockedMemory>,
+    /// Counts and cleanup state shared by registrations of one host address.
+    host_locks: HashMap<usize, HostLockState>,
     /// Outstanding asynchronous copy borrows per allocation address.
     async_copy_borrows: HashMap<usize, usize>,
     /// Prevents unsafe reuse after uncertain asynchronous copy retirement.
@@ -167,6 +179,8 @@ pub(crate) struct MemoryState {
     pub(crate) vmem_handles: HashMap<u64, VmemHandle>,
     /// Active virtual-memory mappings ordered by base address.
     pub(crate) vmem_mappings: BTreeMap<usize, VmemMapping>,
+    /// Most recently issued prefetch destinations until native work retires.
+    pub(crate) pending_prefetches: prefetch::PendingPrefetches,
     /// Prefetch and copy workers joined before memory owners are released.
     pub(crate) workers: Vec<thread::JoinHandle<()>>,
 }
@@ -179,12 +193,14 @@ impl MemoryState {
             ipc_allocations: HashMap::new(),
             interop_allocations: HashMap::new(),
             locked_allocations: Vec::new(),
+            host_locks: HashMap::new(),
             async_copy_borrows: HashMap::new(),
             health,
             async_copy_profiling: AsyncCopyProfiling::Disabled,
             vmem_reservations: BTreeMap::new(),
             vmem_handles: HashMap::new(),
             vmem_mappings: BTreeMap::new(),
+            pending_prefetches: prefetch::PendingPrefetches::default(),
             workers: Vec::new(),
         }
     }
@@ -225,7 +241,9 @@ impl MemoryState {
 
     /// Releases HSA metadata after queues, copies, and signal users stop.
     pub(crate) fn clear(&mut self) {
+        self.pending_prefetches = prefetch::PendingPrefetches::default();
         self.locked_allocations.clear();
+        self.host_locks.clear();
         // Mappings borrow handles and reservations. Release them first, then
         // the physical handles and finally their reserved address ranges.
         self.vmem_mappings.clear();
@@ -475,9 +493,11 @@ impl Memory {
 /// ranges need only the pointer metadata, hence the optional owner.
 pub(crate) struct LockedMemory {
     /// Native registration when the host range needed one.
-    allocation: Option<Allocation>,
+    pub(crate) allocation: Option<Allocation>,
     /// Host and agent aliases reported by pointer queries.
     pub(crate) description: PointerDescription,
+    /// Native cleanup completed, but the group still needs an address tombstone.
+    pub(crate) retired: bool,
 }
 
 /// Reserved virtual-address interval and the mappings currently occupying it.
@@ -748,6 +768,7 @@ impl LockedMemory {
     ) -> Self {
         Self {
             allocation,
+            retired: false,
             description: PointerDescription {
                 pointer_type: POINTER_TYPE_LOCKED,
                 agent_base: device_base,

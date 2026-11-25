@@ -462,40 +462,6 @@ get_basic_block_file_line_info(module_t* module, procedure_t* func)
 //
 //  We create a new name that embeds the file and line information in the name
 //
-std::vector<statement_t>
-get_source_code(module_t* module, procedure_t* func)
-{
-    ROCPROFSYS_ADD_LOG_ENTRY("Getting source code for", get_name(func));
-
-    std::vector<statement_t> _lines{};
-    if(!module || !func)
-    {
-        return _lines;
-    }
-    auto*                        _cfg = func->getCFG();
-    std::set<BPatch_basicBlock*> _basic_blocks{};
-    _cfg->getAllBasicBlocks(_basic_blocks);
-
-    for(auto&& itr : _basic_blocks)
-    {
-        // NOLINTNEXTLINE(misc-const-correctness) - decltype(_base_addr) below must stay
-        // non-const, or the loop counter can't be incremented
-        auto       _base_addr = itr->getStartAddress();
-        auto const _last_addr = itr->getEndAddress();
-        for(decltype(_base_addr) _addr = _base_addr; _addr <= _last_addr; ++_addr)
-        {
-            std::vector<statement_t> _src{};
-            if(module->getSourceLines(_addr, _src))
-            {
-                for(auto&& iitr : _src)
-                {
-                    _lines.emplace_back(iitr);
-                }
-            }
-        }
-    }
-    return _lines;
-}
 
 //======================================================================================//
 //
@@ -822,94 +788,16 @@ rocprofsys_get_link_map(const char* _lib, const std::string& _exclude_linked_by,
 //
 //  Get the path of a loaded dynamic binary
 //
-std::optional<std::string>
-rocprofsys_get_loaded_path(const char* _name, std::vector<int>&& _open_modes)
-{
-    if(_open_modes.empty())
-    {
-        _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
-    }
-
-    void* _handle = nullptr;
-    bool  _noload = false;
-    for(auto const _mode : _open_modes)
-    {
-        _handle = dlopen(_name, _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle)
-        {
-            break;
-        }
-    }
-
-    if(_handle)
-    {
-        struct link_map* _link_map = nullptr;
-        dlinfo(_handle, RTLD_DI_LINKMAP, &_link_map);
-        if(_link_map != nullptr && !std::string_view{ _link_map->l_name }.empty())
-        {
-            return rocprofsys::path::realpath(_link_map->l_name);
-        }
-        if(!_noload)
-        {
-            dlclose(_handle);
-        }
-    }
-
-    return std::optional<std::string>{};
-}
 
 //======================================================================================//
 //
 //  Get the path of a loaded dynamic binary
 //
-std::optional<std::string>
-rocprofsys_get_origin(const char* _name, std::vector<int>&& _open_modes)
-{
-    if(_open_modes.empty())
-    {
-        _open_modes = { (RTLD_LAZY | RTLD_NOLOAD) };
-    }
-
-    void* _handle = nullptr;
-    bool  _noload = false;
-    for(auto const _mode : _open_modes)
-    {
-        _handle = dlopen(_name, _mode);
-        _noload = (_mode & RTLD_NOLOAD) == RTLD_NOLOAD;
-        if(_handle)
-        {
-            break;
-        }
-    }
-
-    if(_handle)
-    {
-        char _buffer[PATH_MAX + 1];
-        memset(_buffer, '\0', PATH_MAX * sizeof(char));
-        dlinfo(_handle, RTLD_DI_ORIGIN, _buffer);
-        if(strnlen(_buffer, PATH_MAX + 1) <= PATH_MAX)
-        {
-            return rocprofsys::path::realpath(_buffer);
-        }
-        if(!_noload)
-        {
-            dlclose(_handle);
-        }
-    }
-
-    return std::optional<std::string>{};
-}
 
 //======================================================================================//
 //
 //  Error callback routine.
 //
-void
-errorFunc(error_level_t level, int num, const char* const* params)
-{
-    error_func_real(level, num, params);
-}
 
 //======================================================================================//
 //
@@ -962,19 +850,6 @@ error_func_real(error_level_t level, int num, const char* const* params)
 //
 //  Just log it
 //
-void
-error_func_fake(error_level_t level, int num, const char* const* params)
-{
-    char line[4096];
-
-    const char* msg = bpatch->getEnglishErrorString(num);
-    bpatch->formatErrorString(line, sizeof(line), msg, params);
-
-    // just log it
-    ROCPROFSYS_ADD_LOG_ENTRY("Dyninst error function called with level", level,
-                             ":: ID# =", num, "::", line)
-        .force(level < BPatchInfo);
-}
 
 #include "internal_libs.hpp"
 

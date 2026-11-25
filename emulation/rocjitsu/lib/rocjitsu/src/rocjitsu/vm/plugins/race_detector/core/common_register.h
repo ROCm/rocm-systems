@@ -50,6 +50,9 @@ enum class MemoryEventType {
   /// defaultMemoryOrder return those of a tensor DMA store (TENSORCNT, TENSOR).
   LDS_TO_GLOBAL,
 
+  /// GFX10 DS_ORDERED_COUNT holds its contributing VGPR lane until EXPCNT retires.
+  GDS_ORDERED_COUNT_SOURCE,
+
   /// A completed GFX10 VALU operand read, visible to peer writes until a barrier.
   LDS_OPERAND_READ,
 
@@ -66,6 +69,10 @@ public:
   bool read_modify_write = false;
   // A nonzero width proves all atomic elements have this width and natural alignment.
   uint8_t aligned_atomic_bytes = 0;
+  /// The access is an arrival at an LDS barrier cell (CDNA5 ISA 11.2.2). It
+  /// updates the cell atomically, so it conflicts only with non-atomic writes
+  /// of the cell, never with reads of it.
+  bool barrier_arrive = false;
 
   MemoryOrderClass order(MemoryOrderClass wholeEventOrder) const {
     return uses_flat_lds ? MemoryOrderClass::LDS : wholeEventOrder;
@@ -93,13 +100,15 @@ public:
 /// different completion classes is not ordered as a whole.
 inline MemoryOrderClass
 memoryOrderForObligations(std::span<const amdgpu::MemoryCounterObligation> obligations) {
-  if (obligations.empty())
+  if (obligations.empty()) {
     return MemoryOrderClass::UNORDERED;
+  }
 
   const MemoryOrderClass order = obligations.front().completion_class();
   for (const auto obligation : obligations) {
-    if (obligation.completion_class() != order)
+    if (obligation.completion_class() != order) {
       return MemoryOrderClass::UNORDERED;
+    }
   }
   return order;
 }
@@ -125,6 +134,11 @@ inline bool isFromLds(MemoryEventType t) {
 /// True if the event touches LDS (read or write).
 inline bool isLdsInvolved(MemoryEventType t) { return isToLds(t) || isFromLds(t); }
 
+inline bool isFromVgpr(MemoryEventType t) {
+  return t == MemoryEventType::VGPR_TO_GLOBAL || t == MemoryEventType::VGPR_TO_LDS ||
+         t == MemoryEventType::GDS_ORDERED_COUNT_SOURCE;
+}
+
 /// True if the event doesn't touch LDS — safe to trim at WAVE_COMPLETE.
 inline bool isWaveLocal(MemoryEventType t) { return !isLdsInvolved(t); }
 
@@ -144,7 +158,9 @@ inline amdgpu::WaitCounterType defaultWaitCounterType(MemoryEventType t) {
     return amdgpu::WaitCounterType::LGKMCNT;
   case MemoryEventType::LDS_TO_GLOBAL:
     return amdgpu::WaitCounterType::TENSORCNT;
-  case MemoryEventType::LDS_OPERAND_READ: // Synchronous reads have no counter.
+  case MemoryEventType::GDS_ORDERED_COUNT_SOURCE:
+    return amdgpu::WaitCounterType::EXPCNT;
+  case MemoryEventType::LDS_OPERAND_READ:
     break;
   }
   assert(false && "invalid memory event type");
@@ -165,6 +181,7 @@ inline MemoryOrderClass defaultMemoryOrder(MemoryEventType t) {
   case MemoryEventType::GLOBAL_TO_SGPR:
   case MemoryEventType::GLOBAL_TO_TTMP:
   case MemoryEventType::SCALAR_TO_GLOBAL:
+  case MemoryEventType::GDS_ORDERED_COUNT_SOURCE:
     return MemoryOrderClass::UNORDERED;
   case MemoryEventType::LDS_TO_GLOBAL:
     return MemoryOrderClass::TENSOR;
@@ -186,8 +203,9 @@ public:
       amdgpu::WaitCounterType wait_counter_type, MemoryOrderClass memory_order,
       std::optional<amdgpu::WaitCounterType> additional_wait_counter_type = std::nullopt)
       : obligations_{amdgpu::MemoryCounterObligation{wait_counter_type, memory_order}, {}} {
-    if (additional_wait_counter_type)
+    if (additional_wait_counter_type) {
       obligations_[count_++] = {*additional_wait_counter_type, memory_order};
+    }
   }
 
   /// @brief The default counter and order for an event type.

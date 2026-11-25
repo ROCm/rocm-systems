@@ -36,8 +36,9 @@ TEST_F(HsaTest, GpuAgentFound) {
       [](hsa_agent_t agent, void *data) -> hsa_status_t {
         hsa_device_type_t type;
         hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-        if (type == HSA_DEVICE_TYPE_GPU)
+        if (type == HSA_DEVICE_TYPE_GPU) {
           ++*static_cast<int *>(data);
+        }
         return HSA_STATUS_SUCCESS;
       },
       &gpu_count);
@@ -53,8 +54,9 @@ TEST_F(HsaTest, SdmaPublishesCompletePackets) {
                 [](hsa_agent_t agent, void *data) -> hsa_status_t {
                   hsa_device_type_t type;
                   hsa_status_t status = hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-                  if (status == HSA_STATUS_SUCCESS && type == HSA_DEVICE_TYPE_GPU)
+                  if (status == HSA_STATUS_SUCCESS && type == HSA_DEVICE_TYPE_GPU) {
                     *static_cast<hsa_agent_t *>(data) = agent;
+                  }
                   return status;
                 },
                 &gpu),
@@ -91,8 +93,9 @@ TEST_F(HsaTest, SdmaPublishesCompletePackets) {
     hsa_signal_store_screlease(queue->doorbell_signal, cursor);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     while (hsa_queue_load_read_index_scacquire(queue.get()) < cursor &&
-           std::chrono::steady_clock::now() < deadline)
+           std::chrono::steady_clock::now() < deadline) {
       std::this_thread::yield();
+    }
     ASSERT_EQ(hsa_queue_load_read_index_scacquire(queue.get()), cursor);
     EXPECT_EQ(values[destination], iteration);
     EXPECT_EQ(values[1 - destination], iteration - 1);
@@ -110,8 +113,9 @@ TEST_F(HsaTest, SdmaSwapExchangesBuffersAndCompletes) {
                   hsa_device_type_t type;
                   const hsa_status_t status =
                       hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type);
-                  if (status == HSA_STATUS_SUCCESS && type == HSA_DEVICE_TYPE_GPU)
+                  if (status == HSA_STATUS_SUCCESS && type == HSA_DEVICE_TYPE_GPU) {
                     *static_cast<hsa_agent_t *>(data) = agent;
+                  }
                   return status;
                 },
                 &gpu),
@@ -124,13 +128,15 @@ TEST_F(HsaTest, SdmaSwapExchangesBuffersAndCompletes) {
                   hsa_amd_segment_t segment;
                   hsa_status_t status = hsa_amd_memory_pool_get_info(
                       candidate, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment);
-                  if (status != HSA_STATUS_SUCCESS || segment != HSA_AMD_SEGMENT_GLOBAL)
+                  if (status != HSA_STATUS_SUCCESS || segment != HSA_AMD_SEGMENT_GLOBAL) {
                     return status;
+                  }
                   bool allocatable = false;
                   status = hsa_amd_memory_pool_get_info(
                       candidate, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &allocatable);
-                  if (status == HSA_STATUS_SUCCESS && allocatable)
+                  if (status == HSA_STATUS_SUCCESS && allocatable) {
                     *static_cast<hsa_amd_memory_pool_t *>(data) = candidate;
+                  }
                   return status;
                 },
                 &pool),
@@ -170,8 +176,10 @@ TEST_F(HsaTest, SdmaSwapExchangesBuffersAndCompletes) {
   ASSERT_EQ(hsa_amd_memory_async_batch_copy(&operation, 1, 0, nullptr), HSA_STATUS_SUCCESS);
 
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-  while (hsa_signal_load_scacquire(completion) != 0 && std::chrono::steady_clock::now() < deadline)
+  while (hsa_signal_load_scacquire(completion) != 0 &&
+         std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
+  }
   ASSERT_EQ(hsa_signal_load_scacquire(completion), 0) << "SDMA swap completion remains pending";
   std::array<uint8_t, kBytes> actual_a;
   std::array<uint8_t, kBytes> actual_b;

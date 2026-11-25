@@ -3,6 +3,7 @@
 
 #include "rocjitsu/daemon/rj_daemon.h"
 
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
 #include "rocjitsu/kmd/linux/kfd_ioctl_utils.h"
 #include "rocjitsu/kmd/linux/memory_backing.h"
 #include "rocjitsu/kmd/linux/rpc.h"
@@ -34,8 +35,8 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 #include <sys/un.h>
-#include <system_error>
 #include <thread>
 #include <unistd.h>
 #include <utility>
@@ -61,46 +62,53 @@ namespace {
 using namespace rocjitsu;
 
 bool checked_product(size_t lhs, size_t rhs, size_t *product) {
-  if (lhs != 0 && rhs > std::numeric_limits<size_t>::max() / lhs)
+  if (lhs != 0 && rhs > std::numeric_limits<size_t>::max() / lhs) {
     return false;
+  }
   *product = lhs * rhs;
   return true;
 }
 
 bool validate_ioctl_payload(uint32_t command, const void *buffer, size_t buffer_size) {
   size_t argument_size = 0;
-  if (buffer_size < ioctl_arg_size(command))
+  if (buffer_size < ioctl_arg_size(command)) {
     return false;
-  if (!validate_ioctl_arg_size(command, buffer, argument_size) || buffer_size < argument_size)
+  }
+  if (!validate_ioctl_arg_size(command, buffer, argument_size) || buffer_size < argument_size) {
     return false;
+  }
 
   size_t inline_size = 0;
   switch (canonical_ioctl_request(command)) {
   case AMDKFD_IOC_SET_CU_MASK: {
     const kfd_ioctl_set_cu_mask_args *args =
         static_cast<const kfd_ioctl_set_cu_mask_args *>(buffer);
-    if (args->num_cu_mask == 0 || args->num_cu_mask % 32 != 0 || args->cu_mask_ptr == 0)
+    if (args->num_cu_mask == 0 || args->num_cu_mask % 32 != 0 || args->cu_mask_ptr == 0) {
       return false;
+    }
     inline_size = (std::min(args->num_cu_mask, 1024u) / 32) * sizeof(uint32_t);
     break;
   }
   case AMDKFD_IOC_WAIT_EVENTS: {
     const auto *args = static_cast<const kfd_ioctl_wait_events_args *>(buffer);
-    if (!checked_product(args->num_events, sizeof(kfd_event_data), &inline_size))
+    if (!checked_product(args->num_events, sizeof(kfd_event_data), &inline_size)) {
       return false;
+    }
     break;
   }
   case AMDKFD_IOC_MAP_MEMORY_TO_GPU:
   case AMDKFD_IOC_UNMAP_MEMORY_FROM_GPU: {
     const auto *args = static_cast<const kfd_ioctl_map_memory_to_gpu_args *>(buffer);
-    if (!checked_product(args->n_devices, sizeof(uint32_t), &inline_size))
+    if (!checked_product(args->n_devices, sizeof(uint32_t), &inline_size)) {
       return false;
+    }
     break;
   }
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW: {
     const auto *args = static_cast<const kfd_ioctl_get_process_apertures_new_args *>(buffer);
-    if (!checked_product(args->num_of_nodes, sizeof(kfd_process_device_apertures), &inline_size))
+    if (!checked_product(args->num_of_nodes, sizeof(kfd_process_device_apertures), &inline_size)) {
       return false;
+    }
     break;
   }
   case AMDKFD_IOC_DBG_TRAP: {
@@ -118,24 +126,28 @@ bool validate_ioctl_payload(uint32_t command, const void *buffer, size_t buffer_
       break;
     case KFD_IOC_DBG_TRAP_GET_DEVICE_SNAPSHOT:
       if (!checked_product(args->device_snapshot.num_devices, args->device_snapshot.entry_size,
-                           &inline_size))
+                           &inline_size)) {
         return false;
+      }
       break;
     case KFD_IOC_DBG_TRAP_GET_QUEUE_SNAPSHOT:
       if (!checked_product(args->queue_snapshot.num_queues, args->queue_snapshot.entry_size,
-                           &inline_size))
+                           &inline_size)) {
         return false;
+      }
       break;
     case KFD_IOC_DBG_TRAP_QUERY_EXCEPTION_INFO:
       inline_size = args->query_exception_info.info_size;
       break;
     case KFD_IOC_DBG_TRAP_SUSPEND_QUEUES:
-      if (!checked_product(args->suspend_queues.num_queues, sizeof(uint32_t), &inline_size))
+      if (!checked_product(args->suspend_queues.num_queues, sizeof(uint32_t), &inline_size)) {
         return false;
+      }
       break;
     case KFD_IOC_DBG_TRAP_RESUME_QUEUES:
-      if (!checked_product(args->resume_queues.num_queues, sizeof(uint32_t), &inline_size))
+      if (!checked_product(args->resume_queues.num_queues, sizeof(uint32_t), &inline_size)) {
         return false;
+      }
       break;
     default:
       break;
@@ -155,8 +167,9 @@ bool send_with_fd_exact(int socket, const void *data, size_t size, util::UniqueH
   do {
     sent = rpc_send_msg(socket, data, size, &raw_fd, 1);
   } while (sent < 0 && errno == EINTR);
-  if (sent <= 0)
+  if (sent <= 0) {
     return false;
+  }
   auto bytes_sent = static_cast<size_t>(sent);
   return bytes_sent == size ||
          rpc_send_exact(socket, static_cast<const uint8_t *>(data) + bytes_sent, size - bytes_sent);
@@ -183,14 +196,18 @@ bool receive_header_with_fds(int socket, RpcHeader *header, ReceivedFds *fds) {
   do {
     header_bytes = rpc_recv_msg(socket, header, sizeof(*header), received_fds, &received_fd_count);
   } while (header_bytes < 0 && errno == EINTR);
-  if (received_fd_count > 0)
+  if (received_fd_count > 0) {
     fds->notifier.reset(received_fds[0]);
-  if (received_fd_count > 1)
+  }
+  if (received_fd_count > 1) {
     fds->target_mem.reset(received_fds[1]);
-  if (received_fd_count > 2)
+  }
+  if (received_fd_count > 2) {
     fds->target_proc.reset(received_fds[2]);
-  if (header_bytes <= 0)
+  }
+  if (header_bytes <= 0) {
     return false;
+  }
   const size_t bytes_received = static_cast<size_t>(header_bytes);
   return bytes_received == sizeof(*header) ||
          rpc_recv_exact(socket, reinterpret_cast<uint8_t *>(header) + bytes_received,
@@ -210,19 +227,22 @@ rj_client_pid_t peer_pid_for_socket(int fd) {
 void close_client(rj_daemon_t *daemon, int client_fd) {
   std::lock_guard lock(daemon->clients_mutex);
   auto position = std::ranges::find(daemon->client_fds, client_fd);
-  if (position != daemon->client_fds.end())
+  if (position != daemon->client_fds.end()) {
     daemon->client_fds.erase(position);
+  }
   ::close(client_fd);
 }
 
 void interrupt_transport(rj_daemon_t *daemon) {
   daemon->stop_requested.store(true, std::memory_order_release);
-  if (daemon->listen_fd >= 0)
+  if (daemon->listen_fd >= 0) {
     ::shutdown(daemon->listen_fd, SHUT_RDWR);
+  }
 
   std::lock_guard lock(daemon->clients_mutex);
-  for (int fd : daemon->client_fds)
+  for (int fd : daemon->client_fds) {
     ::shutdown(fd, SHUT_RDWR);
+  }
 }
 
 void mark_error(rj_daemon_t *daemon) {
@@ -233,8 +253,9 @@ void mark_error(rj_daemon_t *daemon) {
                                                std::memory_order_acq_rel)) {
   }
   daemon->status.notify_all();
-  if (state == RJ_DAEMON_STATUS_STOPPING || state == RJ_DAEMON_STATUS_STOPPED)
+  if (state == RJ_DAEMON_STATUS_STOPPING || state == RJ_DAEMON_STATUS_STOPPED) {
     return;
+  }
   interrupt_transport(daemon);
   rj_vm_request_exit(daemon->vm, "daemon transport failure");
 }
@@ -261,8 +282,9 @@ public:
       while (!stop.stop_requested() && !daemon_->stop_requested.load(std::memory_order_acquire)) {
         RpcHeader header{};
         ReceivedFds input_fds;
-        if (!receive_header_with_fds(client_fd_, &header, &input_fds))
+        if (!receive_header_with_fds(client_fd_, &header, &input_fds)) {
           break;
+        }
 
         if (header.reserved != 0 ||
             handle_request(header, input_fds) == RequestDisposition::Disconnect) {
@@ -306,8 +328,9 @@ private:
   }
 
   RequestDisposition handle_handshake(const RpcHeader &header, const ReceivedFds &input_fds) {
-    if (process_id_ != 0 || header.payload_bytes != 0 || input_fds.notifier)
+    if (process_id_ != 0 || header.payload_bytes != 0 || input_fds.notifier) {
       return RequestDisposition::Disconnect;
+    }
 
     if (rj_vm_device_open(daemon_->vm, client_pid_, &process_id_) != ROCJITSU_STATUS_SUCCESS) {
       RpcHeader response{};
@@ -328,10 +351,12 @@ private:
       return RequestDisposition::Disconnect;
     }
     std::vector<RpcGpuInfo> extra_infos(gpu_count - 1);
-    for (uint32_t ordinal = 1; ordinal < gpu_count; ++ordinal)
+    for (uint32_t ordinal = 1; ordinal < gpu_count; ++ordinal) {
       if (rj_vm_gpu_info_at(daemon_->vm, ordinal, &extra_infos[ordinal - 1]) !=
-          ROCJITSU_STATUS_SUCCESS)
+          ROCJITSU_STATUS_SUCCESS) {
         return RequestDisposition::Disconnect;
+      }
+    }
     handshake.extra_gpu_infos = static_cast<uint32_t>(extra_infos.size());
 
     const char *topology = nullptr;
@@ -365,8 +390,9 @@ private:
   }
 
   RequestDisposition handle_close(const RpcHeader &header, const ReceivedFds &input_fds) {
-    if (process_id_ == 0 || header.payload_bytes != 0 || input_fds.notifier)
+    if (process_id_ == 0 || header.payload_bytes != 0 || input_fds.notifier) {
       return RequestDisposition::Disconnect;
+    }
 
     const int close_result = close_device();
     RpcHeader response{};
@@ -382,8 +408,9 @@ private:
       return RequestDisposition::Disconnect;
     }
     RpcMmapRequest request{};
-    if (!rpc_recv_exact(client_fd_, &request, sizeof(request)))
+    if (!rpc_recv_exact(client_fd_, &request, sizeof(request))) {
       return RequestDisposition::Disconnect;
+    }
 
     rj_vm_map_t map{};
     map.addr = request.addr;
@@ -391,8 +418,9 @@ private:
     map.prot = static_cast<uint32_t>(request.prot);
     map.flags = static_cast<uint32_t>(request.flags);
     map.offset = request.offset;
-    if (rj_vm_device_map_as(daemon_->vm, process_id_, &map) != ROCJITSU_STATUS_SUCCESS)
+    if (rj_vm_device_map_as(daemon_->vm, process_id_, &map) != ROCJITSU_STATUS_SUCCESS) {
       return RequestDisposition::Disconnect;
+    }
 
     RpcHeader response{};
     response.opcode = header.opcode;
@@ -423,8 +451,9 @@ private:
       return RequestDisposition::Disconnect;
     }
     RpcMunmapRequest request{};
-    if (!rpc_recv_exact(client_fd_, &request, sizeof(request)))
+    if (!rpc_recv_exact(client_fd_, &request, sizeof(request))) {
       return RequestDisposition::Disconnect;
+    }
     // RPC_MMAP installs independent views in the two processes. A client VA
     // cannot identify a daemon mapping. Let the interposer unmap its local
     // view and report the host VMA change for any affected SVM policy.
@@ -443,11 +472,13 @@ private:
   RequestDisposition handle_host_vma_replaced(const RpcHeader &header,
                                               const ReceivedFds &input_fds) {
     if (process_id_ == 0 || header.payload_bytes != sizeof(RpcHostVmaReplacedRequest) ||
-        input_fds.notifier)
+        input_fds.notifier) {
       return RequestDisposition::Disconnect;
+    }
     RpcHostVmaReplacedRequest request{};
-    if (!rpc_recv_exact(client_fd_, &request, sizeof(request)))
+    if (!rpc_recv_exact(client_fd_, &request, sizeof(request))) {
       return RequestDisposition::Disconnect;
+    }
     auto *driver = daemon_->vm->vm->driver();
     RpcHeader response{};
     response.opcode = header.opcode;
@@ -462,19 +493,22 @@ private:
 
   RequestDisposition handle_gem_va(const RpcHeader &header, ReceivedFds &input_fds) {
     if (process_id_ == 0 || header.payload_bytes != sizeof(RpcGemVaRequest) ||
-        input_fds.target_mem || input_fds.target_proc)
+        input_fds.target_mem || input_fds.target_proc) {
       return RequestDisposition::Disconnect;
+    }
     RpcGemVaRequest request{};
-    if (!rpc_recv_exact(client_fd_, &request, sizeof(request)))
+    if (!rpc_recv_exact(client_fd_, &request, sizeof(request))) {
       return RequestDisposition::Disconnect;
+    }
     const bool mapping =
         request.operation == RPC_GEM_VA_MAP || request.operation == RPC_GEM_VA_REPLACE;
     if ((mapping && !input_fds.notifier) || (!mapping && input_fds.notifier) ||
         request.operation > RPC_GEM_VA_REPLACE || request.drm_file_id == 0 ||
         request.map_size == 0 || request.map_size > SIZE_MAX ||
         request.va_address > UINT64_MAX - request.map_size || request.offset_in_bo > INT64_MAX ||
-        (request.va_address | request.map_size | request.offset_in_bo) & 4095)
+        (request.va_address | request.map_size | request.offset_in_bo) & 4095) {
       return RequestDisposition::Disconnect;
+    }
 
     RpcHeader response{};
     response.opcode = header.opcode;
@@ -517,20 +551,26 @@ private:
               updated.push_back(entry);
               continue;
             }
-            if (entry.va_address < request.va_address)
+            if (entry.va_address < request.va_address) {
               updated.push_back({entry.drm_file_id, entry.va_address,
                                  request.va_address - entry.va_address, entry.backing});
-            if (end < old_end)
+            }
+            if (end < old_end) {
               updated.push_back({entry.drm_file_id, end, old_end - end, entry.backing});
+            }
           }
+          auto mapping_lock = host_mapping_lock().lock_exclusive();
           void *host = map_memory_backing(nullptr, request.map_size, PROT_READ | PROT_WRITE,
                                           MAP_SHARED, input_fds.notifier.get(),
                                           static_cast<off_t>(request.offset_in_bo));
+          mapping_lock.unlock();
           if (host == MAP_FAILED) {
             response.result = -errno;
           } else {
-            std::shared_ptr<void> backing(
-                host, [size = request.map_size](void *ptr) { ::munmap(ptr, size); });
+            std::shared_ptr<void> backing(host, [size = request.map_size](void *ptr) {
+              auto lock = host_mapping_lock().lock_exclusive();
+              ::syscall(SYS_munmap, ptr, size);
+            });
             auto transaction = driver->begin_gem_va_transaction(process_id_);
             response.result =
                 transaction
@@ -541,11 +581,13 @@ private:
               updated.push_back(
                   {request.drm_file_id, request.va_address, request.map_size, std::move(backing)});
               gem_va_mappings_.swap(updated);
-              for (const auto &old : updated)
+              for (const auto &old : updated) {
                 if (std::ranges::none_of(gem_va_mappings_, [&](const GemVaMapping &current) {
                       return current.backing.get() == old.backing.get();
-                    }))
+                    })) {
                   transaction->release_backing(old.backing.get());
+                }
+              }
             }
           }
         }
@@ -575,13 +617,15 @@ private:
             entry->map_size = old_end - end;
           } else {
             entry->map_size = request.va_address - old.va_address;
-            if (end < old_end)
+            if (end < old_end) {
               gem_va_mappings_.push_back({old.drm_file_id, end, old_end - end, old.backing});
+            }
           }
           if (std::ranges::none_of(gem_va_mappings_, [&](const GemVaMapping &item) {
                 return item.backing.get() == old.backing.get();
-              }))
+              })) {
             transaction->release_backing(old.backing.get());
+          }
         }
       }
     }
@@ -591,11 +635,13 @@ private:
 
   RequestDisposition handle_query_mtype(const RpcHeader &header, const ReceivedFds &input_fds) {
     if (process_id_ == 0 || header.payload_bytes != sizeof(RpcQueryMtypeRequest) ||
-        input_fds.notifier || input_fds.target_mem || input_fds.target_proc)
+        input_fds.notifier || input_fds.target_mem || input_fds.target_proc) {
       return RequestDisposition::Disconnect;
+    }
     RpcQueryMtypeRequest request{};
-    if (!rpc_recv_exact(client_fd_, &request, sizeof(request)))
+    if (!rpc_recv_exact(client_fd_, &request, sizeof(request))) {
       return RequestDisposition::Disconnect;
+    }
     RpcHeader response{};
     response.opcode = header.opcode;
     response.request_id = header.request_id;
@@ -612,8 +658,9 @@ private:
       return RequestDisposition::Disconnect;
     }
     std::vector<uint8_t> payload(header.payload_bytes);
-    if (!rpc_recv_exact(client_fd_, payload.data(), payload.size()))
+    if (!rpc_recv_exact(client_fd_, payload.data(), payload.size())) {
       return RequestDisposition::Disconnect;
+    }
     auto *request = reinterpret_cast<RpcIoctlRequest *>(payload.data());
     const size_t available_arguments = payload.size() - sizeof(RpcIoctlRequest);
     void *arguments = payload.data() + sizeof(RpcIoctlRequest);
@@ -632,14 +679,17 @@ private:
     // Borrowed, not adopted: the driver dups it if the session needs to keep it
     // (rj_vm.cpp passes it by value), so this side always closes its own copy.
     command.in_proc_handle = input_fds.target_proc.get();
-    if (rj_vm_execute_as(daemon_->vm, process_id_, &command) != ROCJITSU_STATUS_SUCCESS)
+    if (rj_vm_execute_as(daemon_->vm, process_id_, &command) != ROCJITSU_STATUS_SUCCESS) {
       return RequestDisposition::Disconnect;
+    }
     // The VM clears each handle it took ownership of; drop ours to match, so
     // RAII does not close a descriptor the debug session now owns.
-    if (command.in_handle < 0)
+    if (command.in_handle < 0) {
       static_cast<void>(input_fds.notifier.release());
-    if (command.in_mem_handle < 0)
+    }
+    if (command.in_mem_handle < 0) {
       static_cast<void>(input_fds.target_mem.release());
+    }
     // EXPORT_DMABUF returns a new descriptor in the daemon's fd table. Own it
     // immediately, including on an invalid reply or a failed socket send.
     util::UniqueHandle exported_dmabuf;
@@ -649,11 +699,13 @@ private:
       export_mapping_flags =
           daemon_->vm->vm->driver()->mapping_flags_for_handle(process_id_, export_args->handle);
       exported_dmabuf = util::UniqueHandle(export_args->dmabuf_fd);
-      if (!exported_dmabuf)
+      if (!exported_dmabuf) {
         return RequestDisposition::Disconnect;
+      }
     }
-    if (command.buf_size > available_arguments)
+    if (command.buf_size > available_arguments) {
       return RequestDisposition::Disconnect;
+    }
 
     RpcHeader response{};
     response.opcode = RPC_IOCTL;
@@ -689,8 +741,9 @@ private:
       rj_handle_t shared_fd = -1;
       if (rj_vm_dup_shared_mem_as(daemon_->vm, process_id_, shared_offset, &shared_fd) !=
               ROCJITSU_STATUS_SUCCESS ||
-          shared_fd < 0)
+          shared_fd < 0) {
         return RequestDisposition::Disconnect;
+      }
       util::UniqueHandle owned_shared(shared_fd);
       std::vector<uint8_t> response_buffer(sizeof(response) + command.buf_size);
       std::memcpy(response_buffer.data(), &response, sizeof(response));
@@ -707,8 +760,9 @@ private:
   }
 
   int close_device() {
-    if (process_id_ == 0)
+    if (process_id_ == 0) {
       return 0;
+    }
     try {
       if (auto *driver = daemon_->vm->vm->driver()) {
         if (auto transaction = driver->begin_gem_va_transaction(process_id_)) {
@@ -721,8 +775,9 @@ private:
             gem_va_mappings_.erase(gem_va_mappings_.begin() + index);
             if (std::ranges::none_of(gem_va_mappings_, [&](const GemVaMapping &entry) {
                   return entry.backing.get() == mapping.backing.get();
-                }))
+                })) {
               transaction->release_backing(mapping.backing.get());
+            }
           }
         }
       }
@@ -730,8 +785,9 @@ private:
       // A partial page-table mutation can throw. The process owns its backing
       // until final close, which must still be attempted after that failure.
     }
-    if (rj_vm_device_close(daemon_->vm, process_id_) != ROCJITSU_STATUS_SUCCESS)
+    if (rj_vm_device_close(daemon_->vm, process_id_) != ROCJITSU_STATUS_SUCCESS) {
       return -(errno != 0 ? errno : EIO);
+    }
     process_id_ = 0;
     // The process retains any view whose explicit unmap failed until its last
     // close has removed the remaining PTEs, including across a close retry.
@@ -754,10 +810,12 @@ void handle_client(int client_fd, rj_daemon_t *daemon, std::stop_token stop) {
 void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
   // The accept thread starts before rj_daemon_start publishes its handle.
   // Do not admit a client until startup has committed that publication.
-  while (daemon->status.load(std::memory_order_acquire) == RJ_DAEMON_STATUS_STARTING)
+  while (daemon->status.load(std::memory_order_acquire) == RJ_DAEMON_STATUS_STARTING) {
     daemon->status.wait(RJ_DAEMON_STATUS_STARTING, std::memory_order_acquire);
-  if (daemon->status.load(std::memory_order_acquire) != RJ_DAEMON_STATUS_RUNNING)
+  }
+  if (daemon->status.load(std::memory_order_acquire) != RJ_DAEMON_STATUS_RUNNING) {
     return;
+  }
 
   struct ClientThread {
     std::jthread thread;
@@ -772,8 +830,9 @@ void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
 
       const int client_fd = accept4(daemon->listen_fd, nullptr, nullptr, SOCK_CLOEXEC);
       if (client_fd < 0) {
-        if (errno == EINTR)
+        if (errno == EINTR) {
           continue;
+        }
         break;
       }
 
@@ -802,15 +861,18 @@ void accept_clients(rj_daemon_t *daemon, std::stop_token stop) {
     mark_error(daemon);
   }
 
-  if (!daemon->stop_requested.load(std::memory_order_acquire))
+  if (!daemon->stop_requested.load(std::memory_order_acquire)) {
     mark_error(daemon);
+  }
 
-  for (auto &client : client_threads)
+  for (auto &client : client_threads) {
     client.thread.request_stop();
+  }
   {
     std::lock_guard lock(daemon->clients_mutex);
-    for (int fd : daemon->client_fds)
+    for (int fd : daemon->client_fds) {
       ::shutdown(fd, SHUT_RDWR);
+    }
   }
   client_threads.clear();
 }
@@ -835,8 +897,9 @@ rj_status_t teardown(rj_daemon_t *daemon) {
   // joining their threads. Transport shutdown alone only interrupts socket I/O.
   rj_vm_close_all_devices(daemon->vm);
   daemon->accept_thread.request_stop();
-  if (daemon->accept_thread.joinable())
+  if (daemon->accept_thread.joinable()) {
     daemon->accept_thread.join();
+  }
 
   if (daemon->listen_fd >= 0) {
     ::close(daemon->listen_fd);
@@ -846,30 +909,34 @@ rj_status_t teardown(rj_daemon_t *daemon) {
 
   rj_vm_request_exit(daemon->vm, "daemon shutdown");
   daemon->engine_thread.request_stop();
-  if (daemon->engine_thread.joinable())
+  if (daemon->engine_thread.joinable()) {
     daemon->engine_thread.join();
+  }
   if (daemon->trace_fabric_effects) {
     auto *fabric = daemon->vm->vm ? daemon->vm->vm->fabric_endpoint() : nullptr;
     if (!fabric) {
       util::Logger::warn("kfd: fabric effect trace unavailable during teardown");
     } else {
       const auto diagnostics = fabric->diagnostics();
-      for (const auto &route : diagnostics.directed_effects)
+      for (const auto &route : diagnostics.directed_effects) {
         util::Logger::warn(std::format("kfd: committed fabric effects {} -> {}: reads={}, "
                                        "writes={}, read_bytes={}, write_bytes={}",
                                        route.requester_gpu_id, route.owner_gpu_id, route.reads,
                                        route.writes, route.read_bytes, route.write_bytes));
-      for (const auto &effect : diagnostics.committed_effects)
+      }
+      for (const auto &effect : diagnostics.committed_effects) {
         util::Logger::warn(std::format("kfd: committed fabric effect request={} {} -> {}: op={}, "
                                        "backing_id={}, offset={}, bytes={}",
                                        effect.request_id, effect.requester_gpu_id,
                                        effect.owner_gpu_id, effect.write ? "write" : "read",
                                        effect.backing_id, effect.backing_offset, effect.bytes));
-      for (const auto &domain : diagnostics.scoped_maintenance)
+      }
+      for (const auto &domain : diagnostics.scoped_maintenance) {
         util::Logger::warn(std::format("kfd: scoped cache maintenance domain={} gpu_id={} "
                                        "successes={} admission_timeouts={}",
                                        domain.domain_index, domain.gpu_id, domain.successes,
                                        domain.admission_timeouts));
+      }
       util::Logger::warn(std::format("kfd: fabric effect trace captured={}, dropped={}",
                                      diagnostics.committed_effects.size(),
                                      diagnostics.effect_trace_dropped));
@@ -889,20 +956,25 @@ rj_status_t teardown(rj_daemon_t *daemon) {
 bool remove_stale_socket(const rj_daemon_t *daemon, const sockaddr_un &address,
                          socklen_t address_length) {
   struct stat before {};
-  if (::lstat(daemon->socket_path.c_str(), &before) != 0 || !S_ISSOCK(before.st_mode))
+  if (::lstat(daemon->socket_path.c_str(), &before) != 0 || !S_ISSOCK(before.st_mode)) {
     return false;
+  }
 
   util::UniqueHandle probe(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC | SOCK_NONBLOCK, 0));
-  if (probe.get() < 0)
+  if (probe.get() < 0) {
     return false;
-  if (::connect(probe.get(), reinterpret_cast<const sockaddr *>(&address), address_length) == 0)
+  }
+  if (::connect(probe.get(), reinterpret_cast<const sockaddr *>(&address), address_length) == 0) {
     return false;
-  if (errno != ECONNREFUSED && errno != ENOENT)
+  }
+  if (errno != ECONNREFUSED && errno != ENOENT) {
     return false;
+  }
 
   struct stat current {};
-  if (::lstat(daemon->socket_path.c_str(), &current) != 0)
+  if (::lstat(daemon->socket_path.c_str(), &current) != 0) {
     return errno == ENOENT;
+  }
   if (!S_ISSOCK(current.st_mode) || current.st_dev != before.st_dev ||
       current.st_ino != before.st_ino) {
     return false;
@@ -911,25 +983,29 @@ bool remove_stale_socket(const rj_daemon_t *daemon, const sockaddr_un &address,
 }
 
 rj_status_t bind_socket(rj_daemon_t *daemon) {
-  if (daemon->socket_path.empty())
+  if (daemon->socket_path.empty()) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
   sockaddr_un address{};
   const auto path_length = daemon->socket_path.size();
-  if (path_length >= sizeof(address.sun_path))
+  if (path_length >= sizeof(address.sun_path)) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
 
   std::filesystem::path path(daemon->socket_path);
   if (const auto parent = path.parent_path(); !parent.empty()) {
     std::error_code error;
     std::filesystem::create_directories(parent, error);
-    if (error)
+    if (error) {
       return ROCJITSU_STATUS_ERROR;
+    }
   }
 
   util::UniqueHandle socket_fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
-  if (socket_fd.get() < 0)
+  if (socket_fd.get() < 0) {
     return ROCJITSU_STATUS_ERROR;
+  }
 
   address.sun_family = AF_UNIX;
   std::memcpy(address.sun_path, daemon->socket_path.data(), path_length);
@@ -949,41 +1025,55 @@ rj_status_t bind_socket(rj_daemon_t *daemon) {
   daemon->socket_device = socket_stat.st_dev;
   daemon->socket_inode = socket_stat.st_ino;
 
-  if (::listen(socket_fd.get(), 16) != 0)
+  if (::listen(socket_fd.get(), 16) != 0) {
     return ROCJITSU_STATUS_ERROR;
+  }
   daemon->listen_fd = socket_fd.release();
   return ROCJITSU_STATUS_SUCCESS;
+}
+
+// Fail before unwinding startup can join an engine that has not been stopped.
+void start_daemon_threads(rj_daemon_t *state) noexcept {
+  state->engine_thread = std::jthread([state] {
+    const rj_status_t run_status = rj_vm_run(state->vm, nullptr);
+    if (run_status != ROCJITSU_STATUS_SUCCESS ||
+        !state->stop_requested.load(std::memory_order_acquire)) {
+      mark_error(state);
+    }
+  });
+  state->accept_thread =
+      std::jthread([state](std::stop_token stop) { accept_clients(state, stop); });
 }
 
 } // namespace
 
 rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_path,
                                          const rj_daemon_options_t *options, rj_daemon_t **daemon) {
-  if (daemon)
+  if (daemon) {
     *daemon = nullptr;
-  if (!json || !socket_path || !daemon)
+  }
+  if (!json || !socket_path || !daemon) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
   if (options && (options->struct_size != sizeof(*options) ||
                   (options->flags & ~RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) != 0 ||
                   options->fabric_trace_capacity > RJ_DAEMON_FABRIC_TRACE_MAX_CAPACITY ||
                   (options->fabric_trace_capacity != 0 &&
-                   (options->flags & RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) == 0)))
+                   (options->flags & RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) == 0))) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
+  }
   const size_t socket_path_length = std::strlen(socket_path);
-  if (socket_path_length == 0 || socket_path_length >= sizeof(sockaddr_un::sun_path))
+  if (socket_path_length == 0 || socket_path_length >= sizeof(sockaddr_un::sun_path)) {
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-
-  std::unique_ptr<rj_daemon_t> created;
-  try {
-    created = std::make_unique<rj_daemon_t>();
-    created->socket_path = socket_path;
-  } catch (const std::bad_alloc &) {
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
   }
 
+  auto created = std::make_unique<rj_daemon_t>();
+  created->socket_path = socket_path;
+
   rj_status_t status = rj_vm_create_from_string(json, RJ_VM_MODE_DAEMON, &created->vm);
-  if (status != ROCJITSU_STATUS_SUCCESS)
+  if (status != ROCJITSU_STATUS_SUCCESS) {
     return status;
+  }
 
   if (options && (options->flags & RJ_DAEMON_OPTION_TRACE_FABRIC_EFFECTS) != 0) {
     auto *fabric = created->vm->vm ? created->vm->vm->fabric_endpoint() : nullptr;
@@ -1023,23 +1113,7 @@ rj_status_t rj_daemon_start_with_options(const char *json, const char *socket_pa
     return status;
   }
 
-  try {
-    created->engine_thread = std::jthread([state = created.get()] {
-      const rj_status_t run_status = rj_vm_run(state->vm, nullptr);
-      if (run_status != ROCJITSU_STATUS_SUCCESS ||
-          !state->stop_requested.load(std::memory_order_acquire)) {
-        mark_error(state);
-      }
-    });
-    created->accept_thread = std::jthread(
-        [state = created.get()](std::stop_token stop) { accept_clients(state, stop); });
-  } catch (const std::system_error &) {
-    teardown(created.get());
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  } catch (const std::bad_alloc &) {
-    teardown(created.get());
-    return ROCJITSU_STATUS_OUT_OF_RESOURCES;
-  }
+  start_daemon_threads(created.get());
 
   rj_daemon_status_t expected = RJ_DAEMON_STATUS_STARTING;
   if (!created->status.compare_exchange_strong(expected, RJ_DAEMON_STATUS_RUNNING,
@@ -1058,11 +1132,13 @@ rj_status_t rj_daemon_start(const char *json, const char *socket_path, rj_daemon
 }
 
 rj_status_t rj_daemon_stop(rj_daemon_t *daemon) {
-  if (!daemon)
+  if (!daemon) {
     return ROCJITSU_STATUS_SUCCESS;
+  }
   const rj_status_t status = teardown(daemon);
-  if (status != ROCJITSU_STATUS_SUCCESS)
+  if (status != ROCJITSU_STATUS_SUCCESS) {
     return status;
+  }
   delete daemon;
   return ROCJITSU_STATUS_SUCCESS;
 }
