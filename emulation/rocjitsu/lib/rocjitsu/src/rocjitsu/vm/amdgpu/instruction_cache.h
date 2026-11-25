@@ -97,8 +97,9 @@ public:
   /// This path is used by translated PCI/VFIO address spaces.  Lines from a
   /// replaced root or a reused address-space slot cannot alias because both
   /// the handle generation and translation epoch participate in the tag.
-  [[nodiscard, gnu::always_inline]] VmAccessOutcome
-  fetch(const GpuVmAccess &access, uint64_t pc, uint8_t *dst, uint32_t byte_count = kFetchBytes) {
+  [[nodiscard]] RJ_ALWAYS_INLINE VmAccessOutcome fetch(const GpuVmAccess &access, uint64_t pc,
+                                                       uint8_t *dst,
+                                                       uint32_t byte_count = kFetchBytes) {
     synchronize_coherence_epoch();
     const uint32_t line_offset = static_cast<uint32_t>(pc) & (kLineSize - 1);
     if (access.info().legacy_cache_compatible && byte_count && byte_count <= kLineSize) {

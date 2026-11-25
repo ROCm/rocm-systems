@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/stream.h"
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/control_flow.h"
@@ -28,7 +29,7 @@ bool has_committed_generations(rocjitsu::IsaFamily arch) {
 std::optional<RegisterRef> first_intersection(const RegisterSet &a, const RegisterSet &b) {
   std::optional<RegisterRef> first;
   // Keep the optional assignment together with RegisterRef construction.
-  (a & b).for_each([&](RegisterRef ref) __attribute__((always_inline)) {
+  (a & b).for_each([&](RegisterRef ref) RJ_ALWAYS_INLINE_LAMBDA {
     if (!first) {
       first = ref;
     }

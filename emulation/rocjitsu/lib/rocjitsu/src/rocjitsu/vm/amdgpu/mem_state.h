@@ -10,6 +10,7 @@
 /// pipeline subclasses own the initiate/complete logic that operates
 /// on this state.
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
@@ -570,10 +571,7 @@ public:
     std::vector<TranslatedMemoryRequest> requests = std::move(translated.requests);
     std::vector<uint8_t> reordered_data = std::move(translated.reordered_data);
     // Inline destruction here so the compiler can discard cleanup of the moved buffers.
-#if defined(__clang__)
-    [[clang::always_inline]]
-#endif
-    this->~VectorMemState();
+    RJ_ALWAYS_INLINE_CALLS this->~VectorMemState();
     VectorMemState *fresh = std::construct_at(this, pipeline);
     fresh->response_data = std::move(response);
     fresh->store_data = std::move(store);

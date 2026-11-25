@@ -270,8 +270,8 @@ public:
     const auto i = static_cast<size_t>(counter);
     return issued_[i] - retired_[i];
   }
-  [[gnu::always_inline]] void access(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
-                                     WriteOrder ordered_write_order = kUnordered) {
+  RJ_ALWAYS_INLINE void access(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
+                               WriteOrder ordered_write_order = kUnordered) {
     if (!lanes || !bytes) {
       return;
     }

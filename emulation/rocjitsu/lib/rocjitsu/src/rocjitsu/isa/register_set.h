@@ -12,6 +12,7 @@
 
 #pragma once
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/cdna_isa_base.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
@@ -251,8 +252,8 @@ template <RegisterSetWordType wordType> struct WordArrayOps final : WordOps<word
   // value other than kContinue; otherwise return kContinue after the last word.
   // Full words need no range mask. Inline to retain the caller's capacity bounds.
   template <typename WordType, size_t NumWords, typename Operation>
-  [[gnu::always_inline]] static inline bool
-  visit_range(WordType (&words)[NumWords], size_t startBit, size_t endBit, Operation operation) {
+  RJ_ALWAYS_INLINE static inline bool visit_range(WordType (&words)[NumWords], size_t startBit,
+                                                  size_t endBit, Operation operation) {
     // Prologue: initial partial word.
     size_t word = startBit / kWordBits;
     const size_t firstBitInWord = startBit % kWordBits;
@@ -428,7 +429,7 @@ public:
   /// @brief Add `ref`. For ordinary classes this marks every 32-bit lane it
   /// covers; for special classes it marks the singleton (index/width ignored).
   // Keep constant register classes and widths visible in iteration callbacks.
-  [[gnu::always_inline]] inline void expand(RegisterRef ref);
+  RJ_ALWAYS_INLINE inline void expand(RegisterRef ref);
 
   /// @brief Remove `ref`. For ordinary classes this clears every lane it
   /// covers; for special classes it clears the singleton (index/width ignored).
@@ -441,7 +442,7 @@ public:
   /// lane must be present; for special classes only membership is checked.
   // Inline the class/width dispatch and expose the read-only contract so
   // iteration can omit mutation checks around callbacks using contains().
-  [[nodiscard, gnu::pure, gnu::always_inline]] inline bool contains(RegisterRef ref) const;
+  [[nodiscard, gnu::pure]] RJ_ALWAYS_INLINE inline bool contains(RegisterRef ref) const;
 
   /// @brief Return true if any lane covered by `ref` is present.
   ///
@@ -551,11 +552,8 @@ private:
   // Clang needs a call-site hint for larger callbacks, such as string formatting.
   // Their callees still follow the compiler's normal inlining decisions.
   template <RegClass cls, typename F>
-  [[gnu::always_inline]] static inline void emit_register(F &f, uint16_t index) {
-#if defined(__clang__)
-    [[clang::always_inline]]
-#endif
-    f(RegisterRef{cls, index, 1});
+  RJ_ALWAYS_INLINE static inline void emit_register(F &f, uint16_t index) {
+    RJ_ALWAYS_INLINE_CALLS f(RegisterRef{cls, index, 1});
   }
 
   // Keep the class constant even when this helper is not inlined.

@@ -717,8 +717,8 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t elem_bits, u
 }
 
 template <uint32_t M, uint32_t K>
-[[gnu::always_inline]] inline InputLoc swmmac_a_input_loc(uint32_t row, uint32_t compressed_k,
-                                                          uint32_t elem_bits) {
+RJ_ALWAYS_INLINE inline InputLoc swmmac_a_input_loc(uint32_t row, uint32_t compressed_k,
+                                                    uint32_t elem_bits) {
   if (M == 16 && K == 32) {
     const uint32_t group = compressed_k / 2u;
     const uint32_t slot = compressed_k & 1u;
@@ -735,8 +735,8 @@ template <uint32_t M, uint32_t K>
 }
 
 template <uint32_t M, uint32_t K>
-[[gnu::always_inline]] inline InputLoc
-swmmac_a_input_loc(uint32_t wave_size, uint32_t row, uint32_t compressed_k, uint32_t elem_bits) {
+RJ_ALWAYS_INLINE inline InputLoc swmmac_a_input_loc(uint32_t wave_size, uint32_t row,
+                                                    uint32_t compressed_k, uint32_t elem_bits) {
   require_gfx12_wmma_wave_size(wave_size);
   if (wave_size == WMMA_WAVE32) {
     return swmmac_a_input_loc<M, K>(row, compressed_k, elem_bits);
@@ -758,8 +758,8 @@ swmmac_a_input_loc(uint32_t wave_size, uint32_t row, uint32_t compressed_k, uint
 }
 
 template <uint32_t N, uint32_t K>
-[[gnu::always_inline]] inline InputLoc swmmac_b_input_loc(uint32_t col, uint32_t dense_k,
-                                                          uint32_t elem_bits) {
+RJ_ALWAYS_INLINE inline InputLoc swmmac_b_input_loc(uint32_t col, uint32_t dense_k,
+                                                    uint32_t elem_bits) {
   if (N == 16 && K == 128 && elem_bits == 8) {
     // Hardware-reference gfx1250 Tensile kernels require this 32-element
     // SWMMAC B ordering. It differs from both dense K=128 WMMA and the public
@@ -783,8 +783,8 @@ template <uint32_t N, uint32_t K>
 }
 
 template <uint32_t N, uint32_t K>
-[[gnu::always_inline]] inline InputLoc swmmac_b_input_loc(uint32_t wave_size, uint32_t col,
-                                                          uint32_t dense_k, uint32_t elem_bits) {
+RJ_ALWAYS_INLINE inline InputLoc swmmac_b_input_loc(uint32_t wave_size, uint32_t col,
+                                                    uint32_t dense_k, uint32_t elem_bits) {
   require_gfx12_wmma_wave_size(wave_size);
   if (wave_size == WMMA_WAVE32) {
     return swmmac_b_input_loc<N, K>(col, dense_k, elem_bits);

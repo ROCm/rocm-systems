@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/analysis/waitcheck/state.h"
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
@@ -74,8 +75,8 @@ bool WaitcheckStateOps::register_set_less(const RegisterSet &lhs, const Register
   lhs_regs.reserve(lhs.size());
   rhs_regs.reserve(rhs.size());
   // Inline these callbacks to avoid packing RegisterRef through the aggregate ABI.
-  lhs.for_each([&](RegisterRef ref) __attribute__((always_inline)) { lhs_regs.push_back(ref); });
-  rhs.for_each([&](RegisterRef ref) __attribute__((always_inline)) { rhs_regs.push_back(ref); });
+  lhs.for_each([&](RegisterRef ref) RJ_ALWAYS_INLINE_LAMBDA { lhs_regs.push_back(ref); });
+  rhs.for_each([&](RegisterRef ref) RJ_ALWAYS_INLINE_LAMBDA { rhs_regs.push_back(ref); });
   auto less = [](RegisterRef lhs_ref, RegisterRef rhs_ref) {
     return std::make_tuple(static_cast<uint8_t>(lhs_ref.cls), lhs_ref.index, lhs_ref.width) <
            std::make_tuple(static_cast<uint8_t>(rhs_ref.cls), rhs_ref.index, rhs_ref.width);

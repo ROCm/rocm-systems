@@ -111,6 +111,12 @@ namespace rocjitsu::amdgpu {
 - If you need performance and the STL is a poor fit, build custom data structures
   in `util`.
 - Never use `#define`, C conventions, or macros unless absolutely necessary.
+- Spell forced inlining with the `RJ_ALWAYS_INLINE*` macros from
+  `rocjitsu/base/rj_compiler.h`, never with the attribute written out. There are
+  three, one per position, because no single spelling is accepted in all three:
+  the GNU attribute is the only one that works after a lambda's parameter list,
+  and a statement takes a different attribute again. Other attributes, such as
+  `[[nodiscard]]` or `gnu::pure`, are written directly as usual.
 - When you must use C standard library headers, prefer the `<c*>` variants.
 
 ```cpp
@@ -119,6 +125,10 @@ namespace rocjitsu::amdgpu {
 
 template <typename ValueType> // not template <class ValueType>
 class Container {};
+
+RJ_ALWAYS_INLINE inline uint32_t lane_offset(uint32_t lane); // declaration
+regs.for_each([&](RegisterRef r) RJ_ALWAYS_INLINE_LAMBDA { use(r); }); // lambda
+RJ_ALWAYS_INLINE_CALLS format_into(buffer, wave); // one statement's calls
 ```
 
 - Use `auto` only when the type is obvious from the immediate context (e.g. the

@@ -50,9 +50,8 @@ public:
   /// asynchronous operations and debugger execution. The allocation guard also
   /// bypasses an unrelated decoder pool installed by the caller.
   /// @param enabled False bypasses reuse and table allocation while debugging.
-  [[gnu::always_inline]] DecodeResult decode(Decoder &decoder, uint64_t pc, uint32_t vmid,
-                                             Words words, const DecodeErrorEmitter &emit_error,
-                                             bool enabled = true) {
+  RJ_ALWAYS_INLINE DecodeResult decode(Decoder &decoder, uint64_t pc, uint32_t vmid, Words words,
+                                       const DecodeErrorEmitter &emit_error, bool enabled = true) {
     if (enabled && entries_) {
       auto &entry = entries_->slots[pc_index(pc)];
       if (entry.instruction && entry.vmid == vmid &&
@@ -73,8 +72,8 @@ public:
 
   /// Return an instruction after issue finishes. A deferred pipeline may already
   /// own it, and tensor DMA retains its continuation outside this cache.
-  [[gnu::always_inline]] void return_completed(uint64_t pc, uint32_t vmid, Words words,
-                                               DecodeResult &decoded) {
+  RJ_ALWAYS_INLINE void return_completed(uint64_t pc, uint32_t vmid, Words words,
+                                         DecodeResult &decoded) {
     if (decoded.failed()) {
       return;
     }
@@ -133,9 +132,8 @@ private:
     return raw >= begin && raw - begin < words.size_bytes();
   }
 
-  [[gnu::always_inline]] void put(uint64_t pc, uint32_t vmid, Words words,
-                                  std::unique_ptr<Instruction> &instruction,
-                                  bool from_pc_slot = false) {
+  RJ_ALWAYS_INLINE void put(uint64_t pc, uint32_t vmid, Words words,
+                            std::unique_ptr<Instruction> &instruction, bool from_pc_slot = false) {
     // A callback can clear the table during issue.
     if (!entries_) {
       return;

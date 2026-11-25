@@ -35,6 +35,59 @@
 #define RJ_NOINLINE
 #endif
 
+// The three forced-inlining macros below cover the three positions the
+// annotation can occupy. They are separate macros because no single spelling
+// works in all three: the C++ attribute `[[gnu::always_inline]]` binds to the
+// type in a lambda declarator rather than to the call operator, and MSVC puts a
+// lambda's attributes before the parameter list and uses a different attribute
+// before a statement. Clang is tested before _MSC_VER throughout, so that
+// clang-cl, which defines _MSC_VER, gets the same GNU attribute as every other
+// Clang driver and stays usable in all three positions.
+
+/// @brief Force a helper to inline into its performance-sensitive caller.
+/// @details Goes before a function declaration, where it pairs with `inline`:
+/// @code
+///   RJ_ALWAYS_INLINE inline uint32_t lane_offset(uint32_t lane);
+/// @endcode
+#if defined(__GNUC__) || defined(__clang__)
+#define RJ_ALWAYS_INLINE __attribute__((always_inline))
+#elif defined(_MSC_VER)
+#define RJ_ALWAYS_INLINE [[msvc::forceinline]]
+#else
+#define RJ_ALWAYS_INLINE
+#endif
+
+/// @brief Force a lambda's call operator to inline into its caller.
+/// @details Goes after the parameter list, which is where GCC and Clang accept
+/// the GNU attribute on a lambda:
+/// @code
+///   regs.for_each([&](RegisterRef ref) RJ_ALWAYS_INLINE_LAMBDA { use(ref); });
+/// @endcode
+/// MSVC spells its lambda attributes before the parameter list instead, so this
+/// expands to nothing there and the call operator follows the usual heuristic.
+#if defined(__GNUC__) || defined(__clang__)
+#define RJ_ALWAYS_INLINE_LAMBDA __attribute__((always_inline))
+#else
+#define RJ_ALWAYS_INLINE_LAMBDA
+#endif
+
+/// @brief Force the calls in one statement to inline, leaving their callees to
+/// the compiler's normal decisions.
+/// @details Goes before a statement, and is the call-site counterpart of
+/// RJ_ALWAYS_INLINE: it annotates a call rather than a declaration, which is
+/// what Clang needs for callbacks too large for its inlining heuristic.
+/// @code
+///   RJ_ALWAYS_INLINE_CALLS f(RegisterRef{cls, index, 1});
+/// @endcode
+/// GCC has no equivalent, so this expands to nothing there.
+#if defined(__clang__)
+#define RJ_ALWAYS_INLINE_CALLS [[clang::always_inline]]
+#elif defined(_MSC_VER)
+#define RJ_ALWAYS_INLINE_CALLS [[msvc::forceinline_calls]]
+#else
+#define RJ_ALWAYS_INLINE_CALLS
+#endif
+
 /// @brief Suppress specific compiler warnings around third-party headers.
 ///
 /// Usage:

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/register_modifiers.h"
 #include "rocjitsu/isa/isa_family.h"
@@ -3105,7 +3106,7 @@ constinit thread_local ComputeUnitCore::InstructionVmSnapshot
     *ComputeUnitCore::instruction_vm_snapshot_ = nullptr;
 
 template <bool EnableAsync>
-[[gnu::always_inline]] inline ComputeUnitCore::IssueOutcome
+RJ_ALWAYS_INLINE inline ComputeUnitCore::IssueOutcome
 ComputeUnitCore::issue_instruction_impl(Wavefront *active, MaybeAsyncWindow<EnableAsync> window,
                                         MaybeAsyncWindowStorage<EnableAsync> storage) {
   uint32_t vmid = active->process_id();
@@ -4085,9 +4086,9 @@ ComputeUnitCore::IssueOutcome ComputeUnitCore::issue_instruction(Wavefront *acti
 }
 
 template <bool EnableAsync>
-[[gnu::always_inline]] inline bool
-ComputeUnitCore::step_impl(MmaAdmissionCache *admission, uint32_t async_wave_size,
-                           bool has_accvgprs, uint64_t selected_slots, uint64_t *issued) {
+RJ_ALWAYS_INLINE inline bool ComputeUnitCore::step_impl(MmaAdmissionCache *admission,
+                                                        uint32_t async_wave_size, bool has_accvgprs,
+                                                        uint64_t selected_slots, uint64_t *issued) {
   // A wave reaching s_endpgm in this loop retires its workgroup; the guard sends
   // the CP its completion after the lock is released. See WaveStateGuard.
   WaveStateGuard wave_state_lock(*this);
