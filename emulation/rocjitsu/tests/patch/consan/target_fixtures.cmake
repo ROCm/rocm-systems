@@ -7,6 +7,15 @@ set(_uniform_store_cases
     uniform_store_write
     uniform_store_varying
 )
+foreach(_bits IN ITEMS 8 16)
+    foreach(_half IN ITEMS low high)
+        list(
+            APPEND _uniform_store_cases
+            uniform_b${_bits}_${_half}_read
+            uniform_b${_bits}_${_half}_varying
+        )
+    endforeach()
+endforeach()
 foreach(_bits IN ITEMS 64 96 128)
     list(
         APPEND _uniform_store_cases
@@ -133,6 +142,12 @@ foreach(
                     set(_source fixtures/uniform_multiword.s)
                     set(_includes fixtures/lds_fixture_macros.s)
                     set(_layout_options -DCONSAN_WIDTH=${CMAKE_MATCH_1})
+                    if(_case MATCHES "^uniform_b(8|16)_")
+                        set(_source fixtures/uniform_subword.s)
+                        if(_case MATCHES "_high_")
+                            list(APPEND _layout_options -DCONSAN_STORE_HIGH=1)
+                        endif()
+                    endif()
                 endif()
                 if(_case MATCHES "_varying$")
                     list(APPEND _layout_options -DCONSAN_VARYING_VALUE=1)
@@ -358,6 +373,9 @@ foreach(
                 endif()
             endforeach()
         endif()
+        foreach(_name IN ITEMS flat-store-overlap flat-store-helper)
+            list(APPEND _flat_options_${_name} -DFLAT_COLLIDING_WRITERS=1)
+        endforeach()
         set(_atomic_specs)
         set(_atomic_forms u32 u64 f32 cas)
         if(_legacy OR _gpu STREQUAL "gfx1250")

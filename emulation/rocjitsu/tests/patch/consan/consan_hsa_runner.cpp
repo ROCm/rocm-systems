@@ -141,6 +141,7 @@ int run(int argc, char **argv) {
     }
   }
   const uint32_t flat_width = mode == "flat_b64_values" ? 8 : mode == "flat_b128_values" ? 16 : 0;
+  const bool uniform_subword = mode.starts_with("uniform_b8_") || mode.starts_with("uniform_b16_");
   const bool flat_half = mode == "flat_half_values";
   const bool atomic_cas = mode == "atomic_cas_count";
   const bool atomic_wide = mode == "atomic_u64_count" || mode == "atomic_f64_count";
@@ -158,8 +159,9 @@ int run(int argc, char **argv) {
                               : mode == "wide_b96"                                             ? 12
                               : mode == "wide_b128"                                            ? 16
                                                                                                : 0;
-  if (!flat_width && !flat_half && !atomic_wide && !atomic_cas && !defined && !synchronized &&
-      !grouped && wide_width == 0 && !d16 && !transpose_bits && mode != "observe") {
+  if (!uniform_subword && !flat_width && !flat_half && !atomic_wide && !atomic_cas && !defined &&
+      !synchronized && !grouped && wide_width == 0 && !d16 && !transpose_bits &&
+      mode != "observe") {
     return 3;
   }
   std::string_view target = "gfx1100";
@@ -212,12 +214,13 @@ int run(int argc, char **argv) {
   }
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
   const uint32_t output_words =
-      transpose_bits ? 4u * threads * workgroups
-      : flat_width   ? (2 * flat_width / 4) * wave_count * workgroups
-      : flat_half    ? 6u * wave_count * workgroups
-                     : std::max(((wide_width || d16 || atomic_cas) ? 4u : (atomic_wide ? 2u : 1u)) *
-                                    wave_count * workgroups,
-                                2u);
+      uniform_subword  ? 4u
+      : transpose_bits ? 4u * threads * workgroups
+      : flat_width     ? (2 * flat_width / 4) * wave_count * workgroups
+      : flat_half      ? 6u * wave_count * workgroups
+                  : std::max(((wide_width || d16 || atomic_cas) ? 4u : (atomic_wide ? 2u : 1u)) *
+                                 wave_count * workgroups,
+                             2u);
   const size_t output_bytes = output_words * sizeof(uint32_t);
   if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type)) {
     return 3;
@@ -467,6 +470,13 @@ int run(int argc, char **argv) {
     std::memcpy(last_output.data(), output, output_bytes);
     std::cout << "launch=" << index + 1 << " input=" << input << " output=" << last_output[0] << ','
               << last_output[1] << '\n';
+    if (uniform_subword) {
+      const std::array<uint32_t, 4> expected =
+          rocjitsu::consan::test::uniform_subword_output(mode, target);
+      if (!std::equal(expected.begin(), expected.end(), last_output.begin())) {
+        result = 23;
+      }
+    }
     if (defined) {
       for (uint32_t wave = 0; wave < wave_count; ++wave) {
         const uint32_t expected = mode == "atomic_f32_count"

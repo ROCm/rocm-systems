@@ -37,6 +37,7 @@
 #include <cstring>
 #include <fstream>
 #include <iterator>
+#include <span>
 #include <tuple>
 
 namespace rocjitsu::consan {
@@ -598,6 +599,8 @@ protected:
   void check_flat_width(std::string_view form, const std::vector<std::string> &expected_issues,
                         const std::vector<uint32_t> &value_output);
   void check_atomic_peers(const std::string &form, uint32_t width);
+  void check_uniform_store(std::string_view fixture, std::string_view mnemonic,
+                           std::span<const uint32_t> expected);
 };
 
 TEST_P(ConSanTargetSim, PublicationBarrierBlocksAnEarlyConsumer) {
@@ -1193,9 +1196,46 @@ private:
   Masks &masks_;
 };
 
+void ConSanTargetSim::check_uniform_store(std::string_view fixture, std::string_view mnemonic,
+                                          std::span<const uint32_t> expected) {
+  SCOPED_TRACE(std::string(fixture));
+  const test::TargetMode target = GetParam();
+  const uint32_t words = static_cast<uint32_t>(expected.size() / 2);
+  RunResult before, after;
+  GuestIssueTrace::Masks original_masks, prepared_masks;
+  ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, 2 * target.wave_size, true,
+                              words, false, 1,
+                              std::make_unique<GuestIssueTrace>(mnemonic, original_masks)));
+  ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, 2 * target.wave_size,
+                              true, words, false, 1,
+                              std::make_unique<GuestIssueTrace>(mnemonic, prepared_masks)));
+  EXPECT_EQ(original_masks[0],
+            (std::vector<uint64_t>{target.wave_size == 64 ? uint64_t{3} << 62 : 3}));
+  EXPECT_TRUE(original_masks[1].empty());
+  EXPECT_EQ(prepared_masks, original_masks);
+  expect_guest_state(before, after);
+  EXPECT_EQ(before.full_output, (std::vector<uint32_t>(expected.begin(), expected.end())));
+}
+
+TEST_P(ConSanTargetSim, UniformStoreSubwordSelectsTheProvenHalf) {
+  const test::TargetMode target = GetParam();
+  const std::string_view gpu = target.target;
+  const bool legacy = gpu == "gfx942" || gpu == "gfx950";
+  for (const unsigned bits : {8u, 16u}) {
+    for (const bool high : {false, true}) {
+      const std::string mnemonic = std::string(legacy ? "ds_write_b" : "ds_store_b") +
+                                   std::to_string(bits) + (high ? "_d16_hi" : "");
+      for (const char *variant : {"read", "varying"}) {
+        const std::string fixture =
+            "uniform_b" + std::to_string(bits) + (high ? "_high_" : "_low_") + variant;
+        check_uniform_store(fixture, mnemonic, test::uniform_subword_output(fixture, gpu));
+      }
+    }
+  }
+}
+
 TEST_P(ConSanTargetSim, UniformStoreWideTuplesIssueOnceAndPreserveEveryWord) {
   const test::TargetMode target = GetParam();
-  const uint32_t threads = 2 * target.wave_size;
   const bool legacy =
       std::string_view(target.target) == "gfx942" || std::string_view(target.target) == "gfx950";
   for (uint32_t bits : {64u, 96u, 128u}) {
@@ -1203,23 +1243,11 @@ TEST_P(ConSanTargetSim, UniformStoreWideTuplesIssueOnceAndPreserveEveryWord) {
         std::string(legacy ? "ds_write_b" : "ds_store_b") + std::to_string(bits);
     for (const char *variant : {"read", "varying"}) {
       const std::string fixture = "uniform_b" + std::to_string(bits) + "_" + variant;
-      SCOPED_TRACE(fixture);
-      RunResult before, after;
-      GuestIssueTrace::Masks original_masks, prepared_masks;
-      ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
-                                  1, std::make_unique<GuestIssueTrace>(mnemonic, original_masks)));
-      ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
-                                  false, 1,
-                                  std::make_unique<GuestIssueTrace>(mnemonic, prepared_masks)));
-      EXPECT_EQ(original_masks[0],
-                (std::vector<uint64_t>{target.wave_size == 64 ? uint64_t{3} << 62 : 3}));
-      EXPECT_TRUE(original_masks[1].empty());
-      EXPECT_EQ(prepared_masks, original_masks);
-      expect_guest_state(before, after);
       const uint32_t third = bits >= 96 ? 0x13579bdfu : 0x76543210u;
       const uint32_t fourth = bits == 128 ? 0xfedcba98u : 0xa5a5a5a5u;
-      EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 0x89abcdefu, third, fourth, 8,
-                                                           0x89abcdefu, third, fourth}));
+      const std::array<uint32_t, 8> expected = {7, 0x89abcdefu, third, fourth,
+                                                8, 0x89abcdefu, third, fourth};
+      check_uniform_store(fixture, mnemonic, expected);
     }
   }
 }
@@ -1337,9 +1365,11 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
                                 std::make_unique<GuestIssueTrace>(mnemonic, after_masks)));
     expect_guest_state(before, after);
     EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 8}));
+    const uint64_t flat_mask =
+        form == "store-overlap" || form == "store-helper" ? high | (high >> 1) : high;
     EXPECT_TRUE(before_masks[store ? 1 : 0].empty());
     EXPECT_EQ(before_masks[store ? 0 : 1],
-              empty ? std::vector<uint64_t>{} : std::vector<uint64_t>{high});
+              empty ? std::vector<uint64_t>{} : std::vector<uint64_t>{flat_mask});
     EXPECT_EQ(after_masks, before_masks);
     ASSERT_EQ(after.manifest.sites.size(), 2u);
     EXPECT_EQ(after.manifest.sites[0].access,
@@ -1362,7 +1392,7 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
       EXPECT_EQ(after.manifest.sites[wave].width, wave && scenario == "tail" ? 8u : 4u);
       EXPECT_EQ(records[wave].wave, wave);
       EXPECT_EQ(records[wave].site, wave);
-      EXPECT_EQ(records[wave].mask, high);
+      EXPECT_EQ(records[wave].mask, wave == 0 && store ? flat_mask : high);
       const uint32_t second_offset =
           oob ? 1024 : (scenario == "adjacent" || scenario == "tail" ? 1016 : 1020);
       EXPECT_EQ(records[wave].offset, wave ? second_offset : 1020u);

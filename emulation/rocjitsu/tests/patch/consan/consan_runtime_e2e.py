@@ -32,6 +32,12 @@ CASES = (
     'uniform_store_write',
     'uniform_store_varying',
     *(
+        f'uniform_b{bits}_{half}_{variant}'
+        for bits in (8, 16)
+        for half in ('low', 'high')
+        for variant in ('read', 'varying')
+    ),
+    *(
         f'uniform_b{bits}_{case}'
         for bits in (64, 96, 128)
         for case in ('read', 'varying')
@@ -125,6 +131,7 @@ CASES = (
     'wide_u16',
     'wide_i16',
     'wide_b64',
+    'wide_dual_b32_normal_collision',
     *(
         f'wide_dual_b{bits}_{spacing}_{scenario}'
         for bits in (32, 64)
@@ -409,7 +416,11 @@ class Driver:
         if fixture_name.startswith('transpose_'):
             mode = fixture_name
         if fixture_name.startswith('uniform_b'):
-            mode = 'wide_' + fixture_name.split('_')[1]
+            mode = (
+                fixture_name
+                if uniform_store_width(fixture_name) < 4
+                else 'wide_' + fixture_name.split('_')[1]
+            )
         if fixture_name.startswith('uniform_store_'):
             mode = 'defined'
         if fixture_name.startswith('atomic_'):
@@ -872,10 +883,13 @@ class Driver:
                 # Its low dword is allocator-dependent; it is never an exact LDS observation.
                 assert (record['width'], record['mask']) == (4, high)
                 continue
+            writer_collision = (
+                flat_store and scenario in ('overlap', 'helper') and wave == 0
+            )
             assert (record['width'], record['offset'], record['mask']) == (
                 8 if wave and scenario == 'tail' else 4,
                 1016 if wave and scenario in ('adjacent', 'tail') else 1020,
-                high,
+                high | (high >> 1) if writer_collision else high,
             )
 
     def assert_observations(self, decoded, fixture):
@@ -928,6 +942,8 @@ class Driver:
             'empty': 0,
         }
         kinds = {site['id']: site['access'] for site in decoded['sites']}
+        store_width = uniform_store_width(fixture)
+        subword = store_width < 4
         for index, execution in enumerate(decoded['executions']):
             assert execution['serial'] == index + 1
             assert execution['argument_u32'] == 7 + 16 * index
@@ -962,7 +978,10 @@ class Driver:
                 sequences = set()
                 for record in row['records']:
                     assert record['commit'] == 0x43534143
-                    width = uniform_store_width(fixture) if record['site'] < 2 else 4
+                    if subword:
+                        width = (4, 2, store_width, store_width, 4)[record['site']]
+                    else:
+                        width = store_width if record['site'] < 2 else 4
                     assert record['width'] == width and record['flags'] == 1
                     assert record['site'] in kinds
                     assert record['mask'] > 0
@@ -979,22 +998,36 @@ class Driver:
                         wave_count
                         if self.args.fixture_kind == 'hip' and fixture == 'read_read'
                         else (
-                            3 if fixture.startswith('uniform_b') else expected[fixture]
+                            (7 if subword else 3)
+                            if fixture.startswith('uniform_b')
+                            else expected[fixture]
                         )
                     )
                 )
             )
             assert len(observations) == count, observations
             if fixture.startswith('uniform_'):
-                width = uniform_store_width(fixture)
                 writer_mask, peer_mask = uniform_store_masks(self.args.wave_size)
-                expected_rows = [(0, 2, 0, writer_mask, 0)]
-                if width > 4:
-                    expected_rows.append((0, 1, 1, writer_mask, 0))
-                peer_kind = 2 if fixture == 'uniform_store_write' else 1
-                expected_rows.append(
-                    (1, peer_kind, len(expected_rows), peer_mask, width - 4)
-                )
+                if subword:
+                    first_lane = writer_mask & -writer_mask
+                    expected_rows = [
+                        (0, kind, site, mask, offset)
+                        for site, kind in ((0, 2), (1, 1))
+                        for mask, offset in ((first_lane, 32), (first_lane << 1, 36))
+                    ]
+                    expected_rows += [
+                        (0, 2, 2, writer_mask, 0),
+                        (0, 1, 3, writer_mask, 0),
+                        (1, 1, 4, peer_mask, 0),
+                    ]
+                else:
+                    expected_rows = [(0, 2, 0, writer_mask, 0)]
+                    if store_width > 4:
+                        expected_rows.append((0, 1, 1, writer_mask, 0))
+                    peer_kind = 2 if fixture == 'uniform_store_write' else 1
+                    expected_rows.append(
+                        (1, peer_kind, len(expected_rows), peer_mask, store_width - 4)
+                    )
                 assert [
                     (wave, kind, record['site'], record['mask'], record['offset'])
                     for wave, kind, record in observations
@@ -1097,6 +1130,22 @@ class Driver:
         width = 4 if '_b32_' in fixture else 8
         scale = width * (64 if '_stride64_' in fixture else 1)
         offsets = [3 * scale, 5 * scale]
+        if fixture.endswith('_collision'):
+            (site,) = decoded['sites']
+            assert (site['access'], site['width'], site['range_offsets']) == (
+                2,
+                4,
+                offsets,
+            )
+            (execution,) = decoded['executions']
+            (row,) = execution['rows']
+            assert row['status'] == ROW_ENTERED | ROW_EXITED and row['loss'] == 0
+            assert row['final_sequence'] == 1
+            assert sorted(
+                (rec['site'], rec['sequence'], rec['offset'], rec['width'], rec['mask'])
+                for rec in row['records']
+            ) == [(0, 1, 8, 4, 1), (0, 1, 16, 4, 2)]
+            return
         values = fixture.endswith('_values_high')
         mask = 1 << (self.args.wave_size - 1) if values else 1
         if values:

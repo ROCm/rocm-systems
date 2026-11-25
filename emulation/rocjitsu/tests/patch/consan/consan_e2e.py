@@ -67,20 +67,24 @@ class AnalysisDriver(Driver):
             '--suppress-uniform-store-collisions',
         ]
         enabled = json.loads(self.run('analyze-uniform-store', enabled_command, 1))
+        width = uniform_store_width(case)
+        store_site = 2 if width < 4 else 0
+        peer_site = 4 if width < 4 else (2 if width > 4 else 1)
         for policy, result in ((False, default), (True, enabled)):
             assert result['suppress_uniform_store_collisions'] is policy
             (entry,) = result['entries']
             proofs = [
                 proof
                 for proof in entry.get('uniform_store_proofs', [])
-                if proof['site'] == 0
+                if proof['site'] == store_site
             ]
             proven = not case.endswith('_varying')
             assert len(proofs) == int(proven)
             if proven:
                 assert proofs[0]['source'] == 'block_local_broadcast'
                 assert (
-                    proofs[0]['original_offset'] == raw['sites'][0]['original_offset']
+                    proofs[0]['original_offset']
+                    == raw['sites'][store_site]['original_offset']
                 )
             (execution,) = result['executions']
             suppressed = int(policy and proven)
@@ -92,9 +96,9 @@ class AnalysisDriver(Driver):
                         row[count],
                     ) == (1, suppressed, 1 - suppressed)
                 assert row['cross_wave_pairs'] == 1
-            width = uniform_store_width(case)
-            peer_site = 2 if width > 4 else 1
-            assert execution['valid_observations'] == peer_site + 1
+            assert execution['valid_observations'] == (
+                7 if width < 4 else peer_site + 1
+            )
             assert execution['cross_wave_lane_pairs'] == 2
             assert len(execution['collision_examples']) == 1 - suppressed
             (pair,) = execution['cross_wave_examples']
@@ -104,13 +108,13 @@ class AnalysisDriver(Driver):
             )
             writer_mask, peer_mask = uniform_store_masks(self.args.wave_size)
             for endpoint, wave, site, mask, offset, size, access in (
-                (writer, 0, 0, writer_mask, 0, width, 'write'),
+                (writer, 0, store_site, writer_mask, 0, width, 'write'),
                 (
                     peer,
                     1,
                     peer_site,
                     peer_mask,
-                    width - 4,
+                    max(0, width - 4),
                     4,
                     'write' if case == 'uniform_store_write' else 'read',
                 ),
@@ -135,6 +139,41 @@ class AnalysisDriver(Driver):
         )
         clear_examples(enabled)
         assert enabled == hidden
+
+    def assert_unproven_store_collision(self, capture, default):
+        enabled = json.loads(
+            self.run(
+                'analyze-unproven-store',
+                [self.args.analyze, capture, '--suppress-uniform-store-collisions'],
+                1,
+            )
+        )
+        assert default['suppress_uniform_store_collisions'] is False
+        assert enabled == default | {'suppress_uniform_store_collisions': True}
+        (entry,) = default['entries']
+        assert not entry.get('uniform_store_proofs')
+        (execution,) = default['executions']
+        for row in (default, execution):
+            for count in ('collision_groups', 'collision_lane_pairs'):
+                assert (
+                    row['raw_' + count],
+                    row['suppressed_' + count],
+                    row[count],
+                ) == (1, 0, 1)
+        (collision,) = execution['collision_examples']
+        assert collision['lane_pairs'] == 1
+        if self.args.case == 'wide_dual_b32_normal_collision':
+            first, second = sorted(
+                (collision['first'], collision['second']),
+                key=lambda endpoint: endpoint['mask'],
+            )
+            assert (first['offset'], first['range_id'], first['mask']) == (28, 1, 1)
+            assert (second['offset'], second['range_id'], second['mask']) == (28, 0, 2)
+            assert first['site'] == second['site'] == 0
+        else:
+            (peer,) = execution['cross_wave_examples']
+            assert collision['first'] in (peer['first'], peer['second'])
+            assert execution['cross_wave_lane_pairs'] == peer['lane_pairs'] == 2
 
     def execute(self):
         assert build_root(self.args.analyze) == build_root(self.args.prepare)
@@ -206,6 +245,9 @@ class AnalysisDriver(Driver):
         dual = case.startswith('wide_dual_')
         if dual:
             pairs = 2 if case.endswith('_overlap') else 0
+        flat_collision = case in ('flat_store_overlap', 'flat_store_helper')
+        if flat_collision or case == 'wide_dual_b32_normal_collision':
+            collisions = 1
         if case.startswith('loop_'):
             pairs = 2 * {
                 'loop_no_b0': 3,
@@ -406,7 +448,7 @@ class AnalysisDriver(Driver):
                     assert finding['ordering'] == (
                         'ordered' if ordered else 'unordered'
                     )
-                    assert finding['lane_pairs'] == 1
+                    assert finding['lane_pairs'] == (2 if flat_collision else 1)
                     first, second = sorted(
                         (finding['first'], finding['second']),
                         key=lambda endpoint: endpoint['wave'],
@@ -445,7 +487,12 @@ class AnalysisDriver(Driver):
                         assert (endpoint['offset'], endpoint['width']) == (
                             (1016, 8) if tail else (1020, 4)
                         )
-                        assert endpoint['mask'] == 1 << (self.args.wave_size - 1)
+                        high = 1 << (self.args.wave_size - 1)
+                        assert endpoint['mask'] == (
+                            high | (high >> 1)
+                            if flat_collision and endpoint['wave'] == 0
+                            else high
+                        )
                         assert (
                             endpoint['original_offset']
                             == raw['sites'][endpoint['site']]['original_offset']
@@ -725,6 +772,8 @@ class AnalysisDriver(Driver):
                 assert analyzed['valid_observations'] == 1
         if case.startswith('uniform_'):
             self.assert_uniform_store_policy(capture, raw, result)
+        if flat_collision or case == 'wide_dual_b32_normal_collision':
+            self.assert_unproven_store_collision(capture, result)
         hidden = json.loads(
             self.run(
                 'analyze-no-examples',

@@ -160,6 +160,85 @@ TEST(ConSanInput, MultiwordProofRequiresEveryWordOfTheDecodedStoreTuple) {
   }
 }
 
+TEST(ConSanInput, SubwordProofFollowsSelectedBytesAcrossD16LoadsAndByteShifts) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx1250", 32}, "width-flat-load-backward");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
+  const TargetProfile &target = *target_profile(1250);
+  InputError error;
+  const FailureOr<InputProgram> baseline =
+      build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  constexpr uint8_t addr = 1;
+  constexpr uint8_t data = 2;
+  constexpr uint32_t broadcast_addr =
+      cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = cdna5::OPR_SRC_POS_INT_MIN, .vdst = addr})[0];
+  constexpr uint32_t broadcast_data =
+      cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 4, .vdst = data})[0];
+  const auto shift = [](uint16_t opcode, uint8_t amount, uint8_t dst = 2) {
+    return cdna5::build_vop2(opcode,
+                             {.src0 = static_cast<uint16_t>(cdna5::OPR_SRC_POS_INT_MIN + amount),
+                              .vsrc1 = data,
+                              .vdst = dst})[0];
+  };
+  const auto check = [&](uint16_t load_opcode, std::initializer_list<uint32_t> setup,
+                         uint16_t store_opcode, bool proved, uint8_t address = 1,
+                         uint8_t payload = 2) {
+    std::vector<uint32_t> code = {broadcast_addr, broadcast_data};
+    const std::array<uint32_t, 2> load =
+        cdna5::build_vds(load_opcode, {.addr = addr, .vdst = data});
+    code.insert(code.end(), load.begin(), load.end());
+    code.push_back(cdna5::build_sopp(cdna5::kSWaitDscntSopp, {.simm16 = 0})[0]);
+    code.insert(code.end(), setup);
+    const std::array<uint32_t, 2> store =
+        cdna5::build_vds(store_opcode, {.addr = address, .data0 = payload});
+    code.insert(code.end(), store.begin(), store.end());
+    code.push_back(cdna5::build_sopp(cdna5::kSEndpgmSopp)[0]);
+    std::vector<uint8_t> candidate = image;
+    ASSERT_LE(entry + code.size() * sizeof(uint32_t), candidate.size());
+    std::memcpy(candidate.data() + entry, code.data(), code.size() * sizeof(uint32_t));
+    const FailureOr<InputProgram> input =
+        build_input_program(candidate, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    ASSERT_EQ(input.value().accesses.size(), 2u);
+    EXPECT_EQ(input.value().accesses.back().uniform_store_proof,
+              proved ? UniformStoreProof::BlockLocalBroadcast : UniformStoreProof::None);
+  };
+  constexpr uint16_t load_high = cdna5::kDsLoadU16D16HiVds;
+  constexpr uint16_t load_low = cdna5::kDsLoadU16D16Vds;
+  constexpr uint16_t store_byte = cdna5::kDsStoreB8Vds;
+  constexpr uint16_t store_half = cdna5::kDsStoreB16Vds;
+  constexpr uint16_t store_byte_high = cdna5::kDsStoreB8D16HiVds;
+  constexpr uint16_t store_half_high = cdna5::kDsStoreB16D16HiVds;
+  constexpr uint32_t left = shift(cdna5::kVLshlrevB32Vop2, 8);
+  constexpr uint32_t right = shift(cdna5::kVLshrrevB32Vop2, 8);
+  // Loading the high half leaves bytes 0 and 1 uniform. Shifting by a byte
+  // moves exactly one of these into the selected half of each store below.
+  check(load_high, {right}, store_byte, true);
+  check(load_high, {right}, store_half, false);
+  check(load_high, {left}, store_byte_high, true);
+  check(load_high, {left}, store_half_high, false);
+  check(load_low, {left}, store_byte_high, false);
+  check(load_low, {right}, store_byte, false);
+  check(load_high, {shift(cdna5::kVLshrrevB32Vop2, 7)}, store_byte, false);
+  check(load_high, {shift(cdna5::kVLshrrevB32Vop2, 8, 3)}, store_byte, true, addr, 3);
+  check(load_high, {}, cdna5::kDsStoreB32Vds, false);
+  // A half-uniform ADDR is insufficient, even when its selected data is proved.
+  check(load_high, {}, store_half, false, data, data);
+  // A later whole-word write or EXEC expansion invalidates every byte.
+  constexpr uint32_t varying =
+      cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = cdna5::OPR_SRC_VGPR_MIN, .vdst = data})[0];
+  constexpr uint32_t set_exec =
+      cdna5::build_sop1(cdna5::kSMovB32Sop1,
+                        {.ssrc0 = cdna5::OPR_SSRC_NEG_INT_MIN, .sdst = cdna5::OPR_SDST_EXEC_LO})[0];
+  check(load_high, {right, varying}, store_byte, false);
+  check(load_high, {right, set_exec}, store_byte, false);
+}
+
 TEST(ConSanInput, Wave64UniformStoreRequiresTheSameExecBitsAndVgprBank) {
   const std::filesystem::path fixture =
       test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
