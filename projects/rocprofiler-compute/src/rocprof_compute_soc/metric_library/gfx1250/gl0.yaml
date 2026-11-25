@@ -345,7 +345,7 @@ gl0.utcl1_req_stall:
     Percentage of VMW-busy cycles UTCL0 is stalled sending to UTCL1.
 gl0.util:
   name: GL0 Utilization
-  formula: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  formula: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
     Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
