@@ -6298,7 +6298,7 @@ void add_vop3_dpp16_footprint_case(std::vector<std::vector<uint32_t>> &cases, co
   cases.emplace_back(words.begin(), words.end());
 }
 
-TEST(MemoryWaitFootprintTest, Gfx1030HalfArithmeticReadsOnlySelectedBytes) {
+TEST(MemoryWaitFootprintTest, Gfx10HalfArithmeticReadsOnlySelectedBytes) {
   std::vector<std::vector<uint32_t>> cases;
   for (unsigned opcode : {50u, 51u, 52u, 53u}) {
     const uint32_t compact = (opcode << 25) | (2u << 17) | (4u << 9);
@@ -6307,8 +6307,10 @@ TEST(MemoryWaitFootprintTest, Gfx1030HalfArithmeticReadsOnlySelectedBytes) {
     cases.push_back({compact | 250u, 0xff00e403u}); // DPP16
     cases.push_back({compact | 249u, 0x06050603u}); // SDWA SRC0 WORD_1
   }
-  for (unsigned wave_size : {32u, 64u}) {
-    check_vector_footprints(rocjitsu::IsaFamily::Rdna2, wave_size, 16, cases);
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    for (unsigned wave_size : {32u, 64u}) {
+      check_vector_footprints(arch, wave_size, 16, cases);
+    }
   }
 }
 
@@ -9223,6 +9225,19 @@ TEST(MemoryWaitFootprintTest, DirectAluFamiliesMatchObservedAccesses) {
     EXPECT_TRUE(decoded.value()->flags() & DIRECT_REGISTER_ACCESSES) << decoded.value()->mnemonic();
   }
   check_vector_footprints(rocjitsu::IsaFamily::Cdna4, 64, 16, cases);
+}
+
+// Plain conditional moves observe only the selected input in each active lane.
+TEST(MemoryWaitFootprintTest, OlderConditionalMoveReadsSelectedLanes) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3_5}) {
+    const uint32_t word = arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2
+                              ? 0x00040300U
+                              : 0x02040300U;
+    check_vector_footprints(arch, 64, 4, {{word}}, 0, 0,
+                            [](Wavefront &wf) { wf.set_vcc(0xaaaaaaaaaaaaaaaaULL); });
+  }
 }
 
 // Selected SDWA bytes must have exactly the same lane dependencies as execution.

@@ -3272,8 +3272,12 @@ TEST(RaceDetector, SplitBarrier_RejectsMoreWavesThanARoundCanTrack) {
         waves, /*vgprCount=*/1, /*sgprCount=*/1, Dim3d(0), [](RaceViolation) {},
         counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna5), /*ldsSizeBytes=*/64 * 1024);
   };
-  EXPECT_NO_THROW(make(RaceDetector::kMaxWaves));
-  EXPECT_THROW(make(RaceDetector::kMaxWaves + 1), std::length_error);
+  EXPECT_TRUE(RaceDetector::validate_wave_count(RaceDetector::kMaxWaves).succeeded());
+  make(RaceDetector::kMaxWaves);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(RaceDetector::validate_wave_count(RaceDetector::kMaxWaves + 1, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "race detector supports at most 64 waves in a workgroup, got 65");
 }
 
 // A round that sets no wave's completion bit, because every member's bit is

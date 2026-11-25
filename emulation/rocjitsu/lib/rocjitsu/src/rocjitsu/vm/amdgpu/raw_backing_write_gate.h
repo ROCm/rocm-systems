@@ -108,14 +108,10 @@ public:
         return std::nullopt;
       }
     }
-    try {
-      const uint64_t id = shard.next_id;
-      shard.active.push_back({requested, id});
-      ++shard.next_id;
-      return Permit(this, index, id);
-    } catch (const std::bad_alloc &) {
-      return std::nullopt;
-    }
+    const uint64_t id = shard.next_id;
+    shard.active.push_back({requested, id});
+    ++shard.next_id;
+    return Permit(this, index, id);
   }
 
   [[nodiscard]] std::optional<Closed> try_close(uint64_t begin, uint64_t size) noexcept {
@@ -134,14 +130,10 @@ public:
         }
       }
     }
-    try {
-      const uint64_t id = next_id_;
-      closed_.push_back({requested, id});
-      ++next_id_;
-      return Closed(this, id);
-    } catch (const std::bad_alloc &) {
-      return std::nullopt;
-    }
+    const uint64_t id = next_id_;
+    closed_.push_back({requested, id});
+    ++next_id_;
+    return Closed(this, id);
   }
 
 private:

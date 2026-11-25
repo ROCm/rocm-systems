@@ -94,11 +94,12 @@ util::FailureOr<std::string> formatTrace(
 /// `access_pc`, the conflicting event, and that event's completion and
 /// synchronization observed by the detector, with counter names for `arch`.
 /// Wave-local GDS source locks supply their producing instruction directly.
-/// @throws std::out_of_range if `events` no longer holds the conflicting event.
-/// @throws std::invalid_argument for an architecture without a wait-counter model.
-/// @throws std::logic_error if the event is already retired.
-std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
-                                  uint64_t access_pc, rocjitsu::IsaFamily arch);
+/// Returns failure with a diagnostic for unavailable or retired events, unknown
+/// memory operations, or an architecture without a wait-counter model.
+util::FailureOr<std::string> formatRaceDescription(const RaceViolation &violation,
+                                                   const EventRegistry &events, uint64_t access_pc,
+                                                   rocjitsu::IsaFamily arch,
+                                                   util::DiagnosticEmitter diagnostic = {});
 
 struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns
@@ -154,10 +155,11 @@ class RaceDetectorPlugin : public ExecutionPlugin,
                            public AmdgpuMixedFlatLdsObserver,
                            public AmdgpuMemoryCancellationObserver {
 public:
+  RaceDetectorPlugin();
   /// @param config_json Plugin JSON with an optional integer trace_context in
   ///        [2, kTraceHistorySize]. Null or empty uses the default context.
-  /// @throws std::invalid_argument for malformed configuration.
-  explicit RaceDetectorPlugin(const char *config_json = nullptr);
+  /// Returns failure with a diagnostic for malformed configuration.
+  util::Result initialize(const char *config_json, util::DiagnosticEmitter diagnostic = {});
   ~RaceDetectorPlugin() override;
 
   bool observes_sgpr_reads() const override { return true; }
@@ -232,6 +234,7 @@ public:
 
 private:
   size_t trace_context_ = kDefaultTraceContext;
+  bool initialization_failed_ = false;
 
   struct WorkgroupKey {
     uint32_t dispatch_id;

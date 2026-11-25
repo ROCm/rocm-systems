@@ -138,9 +138,11 @@ public:
   /// order. Each admitted backing effect quiesces all supplied domains on the
   /// fabric owner thread. An empty list retains the manual endpoint's
   /// direct-backing behavior.
-  explicit FabricEndpoint(
-      std::vector<config::SystemPeerRoute> routes,
-      std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains = {});
+  /// @returns Null and emits a diagnostic if the supplied domains are invalid.
+  [[nodiscard]] static std::unique_ptr<FabricEndpoint>
+  create(std::vector<config::SystemPeerRoute> routes,
+         std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains = {},
+         util::DiagnosticEmitter emit_error = {});
   ~FabricEndpoint() override;
 
   FabricEndpoint(const FabricEndpoint &) = delete;
@@ -198,6 +200,9 @@ public:
 private:
   friend class VirtualMachine;
 
+  FabricEndpoint(std::vector<config::SystemPeerRoute> routes,
+                 std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains);
+
   class Request;
   class State;
   struct Route;
@@ -217,8 +222,10 @@ private:
   void finish(uint64_t request_id, amdgpu::VmAccessOutcome outcome);
   void send_next(const Route &route, WireMessage &message);
   /// Configure the KFD-backed production provider before wiring the endpoint.
-  void configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain> domains,
-                                 amdgpu::PreparedWritebackResolver resolver);
+  [[nodiscard]] util::Result
+  configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain> domains,
+                            amdgpu::PreparedWritebackResolver resolver,
+                            util::DiagnosticEmitter emit_error);
 
   std::vector<config::SystemPeerRoute> routes_;
   std::vector<Route> wired_routes_;
