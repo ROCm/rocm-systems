@@ -23,6 +23,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -100,6 +101,89 @@ TEST_F(ConSanPrepareImage, WholeImageHasIndependentEntryPlansAndNativeSibling) {
     extensions_found = true;
   }
   EXPECT_TRUE(extensions_found);
+}
+
+TEST_F(ConSanPrepareImage, PreservesNativeVgprsAboveSelectedLimit) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() /
+      "multi-entry-native-wide-vgprs.hsaco";
+  const std::vector<uint8_t> baseline = test::read_fixture(path);
+  ASSERT_FALSE(baseline.empty());
+  for (const uint32_t count : {384u, 1024u}) {
+    SCOPED_TRACE(count);
+    std::vector<uint8_t> original = baseline;
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("mk_c"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    KernelDescriptorInfo kernel = *sibling;
+    RJ_AMDHSA_BITS_SET(kernel.descriptor.compute_pgm_rsrc1,
+                       amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, count / 16 - 1);
+    std::memcpy(original.data() + kernel.descriptor_file_offset, &kernel.descriptor,
+                sizeof(kernel.descriptor));
+    ASSERT_TRUE(
+        amdhsa::update_resource_metadata(original, kernel, kernel.descriptor, std::nullopt, count)
+            .succeeded());
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, kernel, nullptr, MetadataPolicy::Native);
+    ASSERT_TRUE(metadata.succeeded());
+    EXPECT_EQ(metadata.value().vgprs, count);
+    ASSERT_TRUE(inspect_native_image(original, "gfx1250").succeeded());
+    const std::array<std::string_view, 2> selected = {"mk_a", "mk_b"};
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, *target_profile("gfx1250"), selected, error_);
+    EXPECT_TRUE(artifact.succeeded()) << error_.message;
+    if (artifact.failed())
+      continue;
+    const ImageEntryFacts &native = artifact.value().facts.entries.back();
+    ASSERT_EQ(native.binding.name, "mk_c");
+    EXPECT_EQ(native.disposition, EntryDisposition::Native);
+    EXPECT_EQ(native.original_vgprs, count);
+    EXPECT_EQ(native.binding.prepared_vgprs, count);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(artifact.value().facts);
+    ASSERT_TRUE(encoded.succeeded());
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value(), artifact.value().facts);
+
+    // Counts can fit the target while exceeding an individual descriptor.
+    KernelDescriptorInfo undersized = kernel;
+    RJ_AMDHSA_BITS_SET(undersized.descriptor.compute_pgm_rsrc1,
+                       amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, count / 16 - 2);
+    std::vector<uint8_t> invalid_original = original;
+    std::memcpy(invalid_original.data() + kernel.descriptor_file_offset, &undersized.descriptor,
+                sizeof(undersized.descriptor));
+    EXPECT_TRUE(
+        inspect_metadata(invalid_original, undersized, nullptr, MetadataPolicy::Native).failed());
+    EXPECT_TRUE(inspect_native_image(invalid_original, "gfx1250").failed());
+    EXPECT_TRUE(
+        prepare_image(invalid_original, *target_profile("gfx1250"), selected, error_).failed());
+
+    std::vector<uint8_t> changed = artifact.value().image;
+    // Preserve the prepared entry address; only shrink its register allocation.
+    const size_t rsrc1_offset = native.binding.prepared_descriptor_offset +
+                                offsetof(amdhsa::kernel_descriptor_t, compute_pgm_rsrc1);
+    std::memcpy(changed.data() + rsrc1_offset, &undersized.descriptor.compute_pgm_rsrc1,
+                sizeof(undersized.descriptor.compute_pgm_rsrc1));
+    ImageFacts facts = artifact.value().facts;
+    facts.prepared.sha256 = digest(changed);
+    for (ImageEntryFacts &entry : facts.entries)
+      if (entry.selected)
+        entry.selected->prepared = facts.prepared;
+    ASSERT_TRUE(validate_image_facts(facts).succeeded());
+    EXPECT_TRUE(verify_artifact_images(facts, original, changed, diagnostic.emitter()).failed());
+    EXPECT_NE(diagnostic.message().find("metadata"), std::string::npos);
+  }
 }
 
 TEST_F(ConSanPrepareImage, SelectedCodeCanBranchPastNativeEntries) {
@@ -393,6 +477,198 @@ TEST_F(ConSanPrepareImage, InvalidOrIncompleteSelectionPublishesNoResult) {
     }
   }
   EXPECT_TRUE(prepare_image(original_, target, selected, error_).failed());
+}
+#endif
+
+#ifdef CONSAN_FIXTURE_DIR
+TEST(ConSanPrepareImageCdna, NativeSgprMetadataIncludesReservedRegisters) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    const std::vector<uint8_t> original = test::read_fixture(
+        test::target_fixture_path({.target = name, .wave_size = 64}, "cdna-multi-0"));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const std::array<std::string_view, 2> both = {"sel", "sib"};
+    ASSERT_TRUE(prepare_image(original, target, both, error).succeeded()) << error.message;
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("sib"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, *sibling, nullptr, MetadataPolicy::Native);
+    ASSERT_TRUE(metadata.succeeded());
+    const uint32_t allocated =
+        (RJ_AMDHSA_BITS_GET(sibling->descriptor.compute_pgm_rsrc1,
+                            amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +
+         1) *
+        8;
+    EXPECT_EQ(metadata.value().sgprs, 11u);
+    EXPECT_LE(metadata.value().sgprs, allocated);
+    EXPECT_GT(metadata.value().sgprs, ordinary_sgpr_bound(target.arch, allocated));
+    const std::array<std::string_view, 1> selected = {"sel"};
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, selected, error);
+    EXPECT_TRUE(artifact.succeeded()) << error.message;
+    if (artifact.failed())
+      continue;
+    const ImageEntryFacts *native =
+        find_image_entry(artifact.value().facts, sibling->descriptor_file_offset);
+    ASSERT_NE(native, nullptr);
+    EXPECT_EQ(native->disposition, EntryDisposition::Native);
+    EXPECT_EQ(native->binding.prepared_sgprs, metadata.value().sgprs);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(artifact.value().facts);
+    ASSERT_TRUE(encoded.succeeded());
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value());
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value(), artifact.value().facts);
+  }
+}
+
+TEST(ConSanPrepareImageCdna, NativeVgprMetadataIncludesAccumulatorRegisters) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    const std::vector<uint8_t> original = test::read_fixture(
+        test::target_fixture_path({.target = name, .wave_size = 64}, "cdna-multi-1"));
+    ASSERT_FALSE(original.empty());
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("sib"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    const uint32_t accumulator_base =
+        (RJ_AMDHSA_BITS_GET(sibling->descriptor.compute_pgm_rsrc3,
+                            amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+         1) *
+        4;
+    EXPECT_EQ(accumulator_base, 4u);
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, *sibling, nullptr, MetadataPolicy::Native);
+    EXPECT_TRUE(metadata.succeeded());
+    EXPECT_TRUE(inspect_metadata(original, *sibling).failed());
+    InputError error;
+    const std::array<std::string_view, 1> selected = {"sel"};
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, selected, error);
+    EXPECT_TRUE(artifact.succeeded()) << error.message;
+    if (artifact.failed() || metadata.failed())
+      continue;
+    EXPECT_EQ(metadata.value().vgprs, 5u);
+    EXPECT_GT(metadata.value().vgprs, accumulator_base);
+    const ImageEntryFacts *native =
+        find_image_entry(artifact.value().facts, sibling->descriptor_file_offset);
+    ASSERT_NE(native, nullptr);
+    EXPECT_EQ(native->binding.prepared_vgprs, metadata.value().vgprs);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+  }
+}
+
+TEST(ConSanPrepareImageCdna, NativeUnifiedVgprMetadataUsesFullDescriptorCapacity) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    const std::vector<uint8_t> original = test::read_fixture(
+        test::target_fixture_path({.target = name, .wave_size = 64}, "cdna-multi-2"));
+    ASSERT_FALSE(original.empty());
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("sib"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    const uint32_t accumulator_base =
+        (RJ_AMDHSA_BITS_GET(sibling->descriptor.compute_pgm_rsrc3,
+                            amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
+         1) *
+        4;
+    const uint32_t allocated =
+        (RJ_AMDHSA_BITS_GET(sibling->descriptor.compute_pgm_rsrc1,
+                            amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT) +
+         1) *
+        descriptor_vgpr_granularity_for_wavefront(target.arch, 64);
+    EXPECT_EQ(accumulator_base, 192u);
+    EXPECT_EQ(allocated, 384u);
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, *sibling, nullptr, MetadataPolicy::Native);
+    ASSERT_TRUE(metadata.succeeded());
+    EXPECT_EQ(metadata.value().vgprs, 384u);
+    const std::array<std::string_view, 1> selected = {"sel"};
+    InputError error;
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, selected, error);
+    EXPECT_TRUE(artifact.succeeded()) << error.message;
+    if (artifact.failed())
+      continue;
+    const ImageEntryFacts *native =
+        find_image_entry(artifact.value().facts, sibling->descriptor_file_offset);
+    ASSERT_NE(native, nullptr);
+    EXPECT_EQ(native->disposition, EntryDisposition::Native);
+    EXPECT_EQ(native->original_vgprs, 384u);
+    EXPECT_EQ(native->binding.prepared_vgprs, 384u);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded =
+        encode_image_facts(artifact.value().facts, diagnostic.emitter());
+    ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), diagnostic.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+    EXPECT_EQ(decoded.value(), artifact.value().facts);
+  }
+}
+
+TEST(ConSanPrepareImageCdna, NativeMetadataRejectsCountsAboveDescriptorCapacity) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    for (const bool vector : {false, true}) {
+      SCOPED_TRACE(vector);
+      std::vector<uint8_t> image = test::read_fixture(test::target_fixture_path(
+          {.target = name, .wave_size = 64}, vector ? "cdna-multi-1" : "cdna-multi-0"));
+      ASSERT_FALSE(image.empty());
+      const FailureOr<amdhsa::MetadataDocument> document = amdhsa::MetadataDocument::parse(image);
+      ASSERT_TRUE(document.succeeded());
+      const amdhsa::MetadataValue *entries = document.value().root().field("amdhsa.kernels");
+      ASSERT_NE(entries, nullptr);
+      const amdhsa::MetadataValue *sibling = nullptr;
+      for (const amdhsa::MetadataValue &entry : entries->array)
+        if (entry.text_field_is(".name", "sib"))
+          sibling = &entry;
+      ASSERT_NE(sibling, nullptr);
+      const amdhsa::MetadataValue *count = sibling->field(vector ? ".vgpr_count" : ".sgpr_count");
+      ASSERT_NE(count, nullptr);
+      ASSERT_EQ(count->integer_bytes, 0u);
+      const size_t payload_offset = document.value().payload().data() - image.data();
+      image[payload_offset + count->offset] = vector ? 9 : 17;
+      EXPECT_TRUE(inspect_native_image(image, name).failed());
+      InputError error;
+      const std::array<std::string_view, 1> selected = {"sel"};
+      EXPECT_TRUE(prepare_image(image, *target_profile(name), selected, error).failed());
+    }
+  }
 }
 #endif
 

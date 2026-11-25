@@ -176,6 +176,35 @@ foreach(
             )
             list(APPEND _target_fixtures ${_image})
         endforeach()
+        if(_legacy)
+            foreach(_native_agpr IN ITEMS 0 1 2)
+                set(_bundle ${_directory}/cdna-multi-${_native_agpr}.bundle)
+                set(_image ${_directory}/cdna-multi-${_native_agpr}.hsaco)
+                add_custom_command(
+                    OUTPUT ${_bundle}
+                    COMMAND
+                        ${CMAKE_CXX_COMPILER_LAUNCHER} ${AMDCXX} -x hip
+                        --offload-arch=${_gpu} --rocm-path=${ROCM_PATH}
+                        --cuda-device-only -O2 -mcode-object-version=5 -mllvm
+                        -amdgpu-enable-vopd=0
+                        -DCONSAN_NATIVE_AGPR=${_native_agpr}
+                        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/cdna_multi_entry.hip
+                        -o ${_bundle}
+                    DEPENDS fixtures/cdna_multi_entry.hip ${AMDCXX}
+                    VERBATIM
+                )
+                add_custom_command(
+                    OUTPUT ${_image}
+                    COMMAND
+                        ${ROCM_PATH}/lib/llvm/bin/clang-offload-bundler --type=o
+                        --unbundle --targets=hipv4-amdgcn-amd-amdhsa--${_gpu}
+                        --input=${_bundle} --output=${_image}
+                    DEPENDS ${_bundle}
+                    VERBATIM
+                )
+                list(APPEND _target_fixtures ${_image})
+            endforeach()
+        endif()
         set(_atomic_specs)
         set(_atomic_forms u32 u64 f32 cas)
         if(_legacy OR _gpu STREQUAL "gfx1250")

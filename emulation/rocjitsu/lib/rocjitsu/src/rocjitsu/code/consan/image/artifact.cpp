@@ -289,7 +289,8 @@ FailureOr<InspectedImage> inspect_image(const ImageFacts &facts, std::span<const
     if (metadata.value().sgprs != expected_sgprs || metadata.value().vgprs != expected_vgprs) {
       return diagnostic.emit() << "artifact metadata resources differ from facts";
     }
-    if (prepared && (target->arch == IsaFamily::Cdna3 || target->arch == IsaFamily::Cdna4)) {
+    if (prepared && row.disposition == EntryDisposition::Selected &&
+        (target->arch == IsaFamily::Cdna3 || target->arch == IsaFamily::Cdna4)) {
       const uint32_t allocated_sgprs =
           (RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
                               amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +

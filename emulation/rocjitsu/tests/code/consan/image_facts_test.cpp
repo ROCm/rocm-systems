@@ -209,6 +209,94 @@ TEST(ConSanImageFacts, NativeKernargAlignmentPreservesSmallPowersOfTwo) {
   }
 }
 
+TEST(ConSanImageFacts, NativeVgprsPreserveTheGfx1250AddressableRange) {
+  for (const uint32_t vgprs : {384u, 1024u}) {
+    SCOPED_TRACE(vgprs);
+    ImageFacts image = example_image();
+    ImageEntryFacts &native = image.entries.back();
+    native.original_vgprs = vgprs;
+    native.binding.prepared_vgprs = vgprs;
+    util::StringDiagnostic diagnostic;
+    ASSERT_TRUE(validate_image_facts(image, diagnostic.emitter()).succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded = encode_image_facts(image, diagnostic.emitter());
+    ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), diagnostic.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+    EXPECT_EQ(decoded.value(), image);
+    const FailureOr<std::vector<uint8_t>> reencoded = encode_image_facts(decoded.value());
+    ASSERT_TRUE(reencoded.succeeded());
+    EXPECT_EQ(reencoded.value(), encoded.value());
+  }
+}
+
+TEST(ConSanImageFacts, NativeVgprsRejectCountsAboveTheTargetRange) {
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    SCOPED_TRACE(target.name);
+    ImageFacts image =
+        qualified_image(target, target.default_wave_size, ScopeKind::NativeLdsNoSynchronization);
+    ImageEntryFacts &native = image.entries.back();
+    const uint32_t vgprs = target.id == 1250                      ? 1025
+                           : target.id == 942 || target.id == 950 ? 513
+                                                                  : 257;
+    native.original_vgprs = vgprs;
+    native.binding.prepared_vgprs = vgprs;
+    EXPECT_TRUE(validate_image_facts(image).failed());
+    EXPECT_TRUE(encode_image_facts(image).failed());
+  }
+}
+
+TEST(ConSanImageFacts, SelectedVgprsRetainTheInstrumentationLimit) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &selected = image.entries.front();
+  selected.original_vgprs = 256;
+  selected.binding.prepared_vgprs = 256;
+  selected.selected->entry = selected.binding;
+  ASSERT_TRUE(validate_manifest(*selected.selected).succeeded());
+  ASSERT_TRUE(validate_image_facts(image).succeeded());
+  selected.original_vgprs = 257;
+  selected.binding.prepared_vgprs = 257;
+  selected.selected->entry = selected.binding;
+  EXPECT_TRUE(validate_manifest(*selected.selected).failed());
+  EXPECT_TRUE(validate_image_facts(image).failed());
+  EXPECT_TRUE(encode_image_facts(image).failed());
+}
+
+TEST(ConSanImageFacts, NativeCdnaVgprsPreserveTheUnifiedAllocationRange) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    for (const uint32_t vgprs : {384u, 512u}) {
+      SCOPED_TRACE(vgprs);
+      ImageFacts image = qualified_image(target, 64, ScopeKind::NativeLdsNoSynchronization);
+      ImageEntryFacts &native = image.entries.back();
+      native.original_vgprs = vgprs;
+      native.binding.prepared_vgprs = vgprs;
+      util::StringDiagnostic diagnostic;
+      ASSERT_TRUE(validate_image_facts(image, diagnostic.emitter()).succeeded())
+          << diagnostic.message();
+      const FailureOr<std::vector<uint8_t>> encoded =
+          encode_image_facts(image, diagnostic.emitter());
+      ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+      const FailureOr<ImageFacts> decoded =
+          decode_image_facts(encoded.value(), diagnostic.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+      EXPECT_EQ(decoded.value(), image);
+    }
+  }
+}
+
+TEST(ConSanImageFacts, NativeVgprsCannotGrowWithinTheTargetRange) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &native = image.entries.back();
+  native.original_vgprs = 384;
+  native.binding.prepared_vgprs = 400;
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(validate_image_facts(image, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "native entry changes ABI or resources");
+  EXPECT_TRUE(encode_image_facts(image).failed());
+}
+
 TEST(ConSanImageFacts, RejectsZeroAndNonPowerOfTwoKernargAlignment) {
   for (const uint32_t alignment : {0u, 3u}) {
     SCOPED_TRACE(alignment);

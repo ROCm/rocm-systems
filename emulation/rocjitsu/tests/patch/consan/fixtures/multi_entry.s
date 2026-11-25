@@ -27,6 +27,9 @@
 #ifndef MK_NATIVE_SCALAR
 #define MK_NATIVE_SCALAR 0
 #endif
+#ifndef MK_NATIVE_VGPRS
+#define MK_NATIVE_VGPRS 16
+#endif
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
 
 .macro wait_all
@@ -204,7 +207,7 @@ mk_c:
 #elif MK_EXTENDED_ABI
   descriptor mk_c, 24, 24, 32, 64, 68
 #else
-  descriptor mk_c, 24, 24, 16, 64
+  descriptor mk_c, 24, 24, MK_NATIVE_VGPRS, 64
 #endif
 #endif
 
@@ -303,7 +306,7 @@ amdhsa.kernels:
     .private_segment_fixed_size: 0
 #endif
     .sgpr_count: 24
-    .vgpr_count: 16
+    .vgpr_count: MK_NATIVE_VGPRS
 #endif
     .wavefront_size: 32
     .max_flat_workgroup_size: 64

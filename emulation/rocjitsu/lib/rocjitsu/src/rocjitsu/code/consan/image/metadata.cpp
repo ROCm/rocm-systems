@@ -109,7 +109,19 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel,
       vgprs && *vgprs != 0 &&
       (policy == MetadataPolicy::Native ? *vgprs <= allocated_vgpr_units * granule
                                         : (*vgprs + granule - 1) / granule == allocated_vgpr_units);
-  if (target->arch == rocjitsu::IsaFamily::Cdna3 || target->arch == rocjitsu::IsaFamily::Cdna4) {
+  const bool is_cdna =
+      target->arch == rocjitsu::IsaFamily::Cdna3 || target->arch == rocjitsu::IsaFamily::Cdna4;
+  if (is_cdna && policy == MetadataPolicy::Native) {
+    // Compiler metadata includes special SGPRs in the total allocation.
+    const uint32_t allocated_sgprs =
+        (RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc1,
+                            rocjitsu::amdhsa::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT) +
+         1) *
+        8;
+    if (!sgprs || *sgprs > allocated_sgprs)
+      return false;
+  }
+  if (is_cdna && policy == MetadataPolicy::Selected) {
     const uint32_t accumulator_base =
         (RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc3,
                             rocjitsu::amdhsa::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET) +
