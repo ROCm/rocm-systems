@@ -36,7 +36,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed MI200 profiling collecting the L2-Fabric write counters twice under two names, which took one extra profiling pass.
 
-* Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life reading far above the real wave count.
+* Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life not tracking the real wave count.
 
 * Fixed the peak of the `L2 Cache BW` metric in the `System Speed-of-Light` panel on MI200 (gfx90a). The peak was half the intended value, so the metric could exceed its peak.
 
