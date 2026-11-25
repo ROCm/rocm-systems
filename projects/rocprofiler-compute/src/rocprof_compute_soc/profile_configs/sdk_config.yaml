@@ -2212,6 +2212,7 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      - gfx1201
       block: SQ
       event: 24
     - architectures:
@@ -3712,6 +3713,7 @@ rocprofiler-sdk:
       - gfx1151
       - gfx1152
       - gfx1153
+      - gfx1201
       - gfx1250
       expression: reduce(SQ_WAVE_CYCLES,sum)
   - name: CPC_GUS_READ_REQUEST_SENT_sum
@@ -15551,7 +15553,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx1201
       - gfx1250
       block: SQG
       event: 16
@@ -21782,7 +21783,6 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
-      - gfx1201
       - gfx1250
       expression: reduce(SQG_WAVE_CYCLES,sum)
   - name: SQG_MSG_sum

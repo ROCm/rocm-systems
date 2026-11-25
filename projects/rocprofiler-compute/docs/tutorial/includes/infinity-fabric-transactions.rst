@@ -267,7 +267,7 @@ substantial change in the L2-Fabric metrics:
    ├─────────┼───────────────────────┼────────────────┼────────────────┼────────────────┼──────────────────┤
    │ 17.2.2  │ Remote Read Traffic   │         100.00 │         100.00 │         100.00 │ Pct              │
    ├─────────┼───────────────────────┼────────────────┼────────────────┼────────────────┼──────────────────┤
-   │ 17.2.3  │ Uncached Read Traffic │         200.00 │         200.00 │         200.00 │ Pct              │
+   │ 17.2.3  │ Uncached Read Traffic │         100.00 │         100.00 │         100.00 │ Pct              │
    ╘═════════╧═══════════════════════╧════════════════╧════════════════╧════════════════╧══════════════════╛
    17.4 L2 - Fabric Interface Stalls
    ╒═════════╤═══════════════════════════════╤════════════════════════╤═══════════════╤═══════╤═══════╤═══════╤════════╕
@@ -296,16 +296,14 @@ substantial change in the L2-Fabric metrics:
 
 First, we see that while we still observe approximately the same number
 of 64B Read Requests (**17.5.2**), we now see an even larger number of
-Uncached Read Requests (**17.5.3**). Some simple division reveals:
+Uncached Read Requests (**17.5.1**). Some simple division reveals:
 
 .. math::
 
-   342177894.00 / 671088949.00 ≈ 2
+   1342177894.00 / 671088949.00 ≈ 2
 
 That is, each 64B Read Request is *also* counted as two Uncached Read
 Requests, as reflected in the :ref:`request-flow diagram <l2-request-flow>`.
-This is also why the Uncached Read Traffic metric (**17.2.3**) is at the
-counter-intuitive value of 200%!
 
 In addition, observe that:
 
@@ -361,7 +359,7 @@ fine-grained memory using the ``hipHostMalloc`` API:
    ├─────────┼───────────────────────┼────────────────┼────────────────┼────────────────┼──────────────────┤
    │ 17.2.2  │ Remote Read Traffic   │         100.00 │         100.00 │         100.00 │ Pct              │
    ├─────────┼───────────────────────┼────────────────┼────────────────┼────────────────┼──────────────────┤
-   │ 17.2.3  │ Uncached Read Traffic │         200.00 │         200.00 │         200.00 │ Pct              │
+   │ 17.2.3  │ Uncached Read Traffic │         100.00 │         100.00 │         100.00 │ Pct              │
    ╘═════════╧═══════════════════════╧════════════════╧════════════════╧════════════════╧══════════════════╛
    17.4 L2 - Fabric Interface Stalls
    ╒═════════╤═══════════════════════════════╤════════════════════════╤═══════════════╤═══════╤═══════╤═══════╤════════╕

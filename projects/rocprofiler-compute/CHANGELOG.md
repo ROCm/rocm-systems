@@ -9,6 +9,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Memory chart values in `--output-format db` and `csv` keep their full precision instead of whole numbers.
+
 * The Memory Chart Compute Unit box uses the metric names of the other panels: *VGPRs*, *SGPRs*, *Wavefront Occupancy*, *Scratch Allocation* and *LDS Allocation*, and adds *AGPRs* on GPUs that report them.
   * *Wavefront Occupancy* is a percent of all CUs, as in the System Speed of Light panel, so it is lower than before when CUs are idle.
   * *Scratch Allocation* is in bytes per work-item, as in the wavefront panel.
@@ -22,11 +24,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
+* Fixed Uncached Read Traffic (17.2.3) going above 100% on gfx908, gfx90a, gfx942 and gfx950.
+
 * Fixed MI200 profiling collecting the L2-Fabric write counters twice under two names, which took one extra profiling pass.
 
-* Fixed the percent of peak of *L2 Cache BW* in the System Speed of Light panel on MI200 (gfx90a). It was twice the real value.
+* Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life reading far above the real wave count.
 
-* The Memory Chart no longer rounds values to whole numbers before showing them, for example *L2 Hit* shows 33.6% instead of 34.0%. `--decimal` sets the decimals of the tables, not of the chart.
+* Fixed the percent of peak of *L2 Cache BW* in the System Speed of Light panel on MI200 (gfx90a), which was twice the real value.
+
+* Fixed Memory Chart values being rounded to whole numbers, for example *L2 Hit* showed 34.0% for 33.6%; `--decimal` now sets the decimals of tables only.
 
 ### Upcoming changes
 

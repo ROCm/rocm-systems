@@ -6,7 +6,9 @@ the chart, where each block goes, which metric each block and arrow shows, and h
 draw them. The analysis supplies the values.
 
 Other tools that draw the chart, such as ROCm Optiq, read the same format from the
-analysis database.
+analysis database. The analysis stores each value unrounded: [`units.py`](units.py) sets how
+many decimals the terminal chart shows for each unit, and other renderers choose their
+own.
 
 ## Example
 

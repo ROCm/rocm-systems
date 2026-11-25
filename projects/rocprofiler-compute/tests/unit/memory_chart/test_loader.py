@@ -51,12 +51,20 @@ NESTED = {
 ABOVE = {"id": "outer", "title": "Outer", "column": 4, "row": -1, "style": "panel"}
 
 
+def panel_tables(arch):
+    """The memory chart table configs of an arch."""
+    return [
+        table
+        for source in PanelConfigs.for_arch(arch)["data source"]
+        for table in source.values()
+    ]
+
+
 def panel_metric_ids(arch):
     """Memory chart metric ids of an arch."""
     return {
         metric_id
-        for source in PanelConfigs.for_arch(arch)["data source"]
-        for table in source.values()
+        for table in panel_tables(arch)
         for metric_id in metric_ids_by_name(table).values()
     }
 
@@ -126,8 +134,7 @@ def test_panel_formulas_leave_rounding_to_the_display(arch):
     different number than the same metric elsewhere, such as in membw guidance."""
     rounded = [
         name
-        for source in PanelConfigs.for_arch(arch)["data source"]
-        for table in source.values()
+        for table in panel_tables(arch)
         for name, metric in (table.get("metric") or {}).items()
         if "ROUND(" in str(metric.get("value"))
     ]

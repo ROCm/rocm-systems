@@ -633,17 +633,6 @@ def show_all(
                         else:
                             run_data.dfs[table_config["id"]].index = initial_index
 
-                processed_df = process_table_data(
-                    args,
-                    runs,
-                    table_config,
-                    table_type,
-                    comparable_columns,
-                )
-
-                if processed_df.empty:
-                    continue
-
                 # For the memory chart panel, collect all tables and merge
                 # into a single chart; skip individual table output.
                 # Gate to architectures with a chart layout; others fall back to
@@ -655,13 +644,28 @@ def show_all(
                 )
 
                 if is_mem_chart and len(runs) == 1:
-                    # The chart rounds each value once, for display, so it reads the
-                    # evaluated table rather than the one rounded to --decimal.
+                    # The chart reads the evaluated table and rounds each value
+                    # once, for display; process_table_data formats tables only.
                     # Metric tables are indexed by Metric_ID.
                     table_df = first_run.dfs[table_config["id"]]
-                    if table_df.index.name == "Metric_ID" and "Value" in table_df:
+                    if (
+                        not table_df.empty
+                        and table_df.index.name == "Metric_ID"
+                        and "Value" in table_df.columns
+                    ):
                         mem_chart_data.update(zip(table_df.index, table_df["Value"]))
                     # Skip individual table output; merged chart emitted below
+                    continue
+
+                processed_df = process_table_data(
+                    args,
+                    runs,
+                    table_config,
+                    table_type,
+                    comparable_columns,
+                )
+
+                if processed_df.empty:
                     continue
 
                 panel_content += format_table_output(
