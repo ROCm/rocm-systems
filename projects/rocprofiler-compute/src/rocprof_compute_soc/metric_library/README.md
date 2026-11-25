@@ -58,7 +58,8 @@ compute.salu_util:
 
 ## Descriptions
 
-A description says what the metric counts, following these rules:
+A description says what the metric counts. It follows the
+[writing style rules](../../../CONTRIBUTING.md#writing-style) and these rules:
 
 1. **Accuracy.** It matches the formula, the unit and the event definitions of the
    counters.
@@ -69,18 +70,16 @@ A description says what the metric counts, following these rules:
    formula means the same.
 4. **Rates.** Measured byte rates say "divided by total duration"; FLOP and IOP rates
    say "per second". A peak bandwidth says which peak it gives.
-5. **Normalization.** A normalized metric, whose unit is `(<Quantity> + $normUnit)`, does
-   not name the normalization; the unit shows it, for example "Bytes per kernel".
-6. **Percentages.** A percentage starts with "Percentage of".
-7. **Terms.** "wavefront", not "wave"; "for example", not "e.g." or "for instance";
+5. **Percentages.** A percentage starts with "Percentage of".
+6. **Terms.** "wavefront", not "wave"; "for example", not "e.g." or "for instance";
    "Graphics Level Arbiter", not "Graphic Level Arbiter"; "Scalable Data SOC (SDP)".
-8. **Library text only.** No sentence about how a panel shows the metric ("also
+7. **Library text only.** No sentence about how a panel shows the metric ("also
    presented as a percent of the peak"), no see-reference, no `Equation:` sentence
    (`formula` holds the equation) and no TODO note. A note about the formula is a YAML
    comment next to it.
-9. **Spelling and grammar.** Correct English spelling and grammar.
-10. **Characters.** Plain ASCII (`->` for an arrow, no trademark mark), ending with a
-    period.
+8. **Spelling and grammar.** Correct English spelling and grammar.
+9. **Characters.** Plain ASCII (`->` for an arrow, no trademark mark), ending with a
+   period.
 
 ## Sets
 
