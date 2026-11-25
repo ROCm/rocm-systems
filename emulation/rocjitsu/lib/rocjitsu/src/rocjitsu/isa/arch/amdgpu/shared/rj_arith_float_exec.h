@@ -8,7 +8,6 @@
 #include "rj_arith/detail/rj_arith_math.h"
 #include "rj_arith/internal/compatibility.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/alu_exceptions.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/conversion.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/isa_family.h"
@@ -999,8 +998,8 @@ struct HalfUnaryWriter {
   }
 };
 
-// SDWA receives an already scaled half result. Its writer only finalizes OMOD,
-// applies clamp and places bytes; it does not multiply the result again.
+// Place bytes from a library-finalized SDWA half result; ordinary encodings retain
+// the usual half destination policy. Arithmetic and output controls stay in rj-arith.
 template <typename Inst> inline auto sdwa_half_math_writer(Inst &inst) {
   return [&inst](Wavefront &wave, RegisterAccess &registers, const Operand &destination,
                  uint64_t exec_mask, auto invoke, uint8_t byte_mask) {
@@ -1018,7 +1017,7 @@ template <typename Inst> inline auto sdwa_half_math_writer(Inst &inst) {
     }
     for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
       if (exec_mask & (uint64_t{1} << lane)) {
-        sdwa::write_lane<sdwa::ResultFormat::F16>(inst, wave, destination, lane, result[lane]);
+        sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
       }
     }
     return !wave.instruction_execution_failed();
@@ -1453,6 +1452,105 @@ inline void execute_packed_fmac_sdwa(Inst &inst, Wavefront &wave, Wave32Function
   if (!wave.instruction_execution_failed()) {
     wave.set_trapsts(wave.trapsts() | causes);
     wave.raise_alu_causes(causes);
+  }
+}
+
+// Round and apply output modifiers in rj-arith before SDWA byte placement.
+// Stage results so aliased source/destination windows stay valid.
+template <typename Inst>
+inline void execute_float_round_sdwa(Inst &inst, Wavefront &wave, FloatUnary32Function wave32,
+                                     FloatUnary64Function wave64, uint64_t flags,
+                                     const Operand &destination, const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  flags = float32_flags(wave, flags, true);
+  uint32_t result[64]{}, causes = 0;
+  uint32_t *d = result;
+  const uint64_t modifiers = sdwa_float_modifiers(inst);
+  const int error = wave.wf_size() == 32
+                        ? wave32(flags, uint32_t(exec_mask), modifiers, &d, &a.data, &causes)
+                        : wave64(flags, exec_mask, modifiers, &d, &a.data, &causes);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask & (1ULL << lane)) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
+  }
+}
+
+// Extract an exponent from a staged SDWA source and publish integer-selected bytes.
+// Capture all inputs before publishing an overlapping destination; FP output modifiers do not
+// apply.
+template <typename Inst>
+inline void execute_exponent_sdwa(Inst &inst, Wavefront &wave, FloatUnary32Function wave32,
+                                  FloatUnary64Function wave64, uint64_t flags,
+                                  const Operand &destination, const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  flags = float32_flags(wave, flags, true) & ~RJ_ARITH_FP_ROUND_MASK;
+  uint32_t result[64]{}, state = 0;
+  uint32_t *d = result;
+  const int error = wave.wf_size() == 32
+                        ? wave32(flags, uint32_t(exec_mask), 0, &d, &a.data, &state)
+                        : wave64(flags, exec_mask, 0, &d, &a.data, &state);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask >> lane & 1) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
+  }
+}
+
+// Apply inherited SDWA output in rj-arith, then place selected destination bytes.
+// Source/destination overlap preserves the captured inputs.
+template <typename Inst>
+inline void execute_float_unary_sdwa(Inst &inst, Wavefront &wave, FloatUnary32Function wave32,
+                                     FloatUnary64Function wave64, uint64_t flags,
+                                     const Operand &destination, const Operand &source) {
+  if (!wave.exec()) {
+    return;
+  }
+  const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
+  RegisterAccess registers(wave);
+  VectorInput32 a(registers, wave, source, wave.exec());
+  if (wave.instruction_execution_failed()) {
+    return;
+  }
+  flags = float32_flags(wave, flags, true);
+  uint32_t result[64]{}, causes = 0;
+  uint32_t *d = result;
+  const uint64_t modifiers = RJ_ARITH_ALU_SDWA | sdwa_float_modifiers(inst);
+  const int error = wave.wf_size() == 32
+                        ? wave32(flags, uint32_t(exec_mask), modifiers, &d, &a.data, &causes)
+                        : wave64(flags, exec_mask, modifiers, &d, &a.data, &causes);
+  if (error != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
+    if (exec_mask >> lane & 1) {
+      sdwa::write_lane<sdwa::ResultFormat::NONE>(inst, wave, destination, lane, result[lane]);
+    }
   }
 }
 

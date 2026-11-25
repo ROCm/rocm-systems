@@ -102,39 +102,6 @@ TEST_F(SimdCoverage, AllBooleanTruthTables) {
   }
 }
 
-template <typename T> void check_div_scale_vectors() {
-  using Bits = typename DivisionFormat<T>::Bits;
-  using V = util::native<T>;
-  using B = util::native<Bits>;
-  std::mt19937_64 rng(381);
-  for (uint32_t mode = 0; mode < 16; ++mode) {
-    for (unsigned iteration = 0; iteration < 4000; ++iteration) {
-      B db([&](auto) { return Bits(rng()); }), nb([&](auto) { return Bits(rng()); });
-      if (iteration < 16) {
-        constexpr Bits corners[] = {0,
-                                    DivisionFormat<T>::sign,
-                                    1,
-                                    DivisionFormat<T>::infinity,
-                                    DivisionFormat<T>::infinity | 1,
-                                    DivisionFormat<T>::sign | DivisionFormat<T>::infinity,
-                                    DivisionFormat<T>::fraction_mask};
-        db = B(corners[iteration % 7]);
-        nb = B(corners[(iteration / 2) % 7]);
-      }
-      V d = std::bit_cast<V>(db), n = std::bit_cast<V>(nb), value = iteration & 1 ? d : n;
-      auto [actual, mask] = div_scale_simd<T>(value, d, n, mode & 3, mode >> 2);
-      for (unsigned i = 0; i < V::size(); ++i) {
-        auto expected = div_scale<T>(value[i], d[i], n[i], mode & 3, mode >> 2);
-        ASSERT_EQ(std::bit_cast<Bits>(T(actual[i])), std::bit_cast<Bits>(expected.value))
-            << mode << ":" << iteration;
-        ASSERT_EQ((mask >> i) & 1u, expected.post_scale) << mode << ":" << iteration;
-      }
-    }
-  }
-}
-TEST_F(SimdCoverage, DivisionScaleF32EveryMode) { check_div_scale_vectors<float>(); }
-TEST_F(SimdCoverage, DivisionScaleF64EveryMode) { check_div_scale_vectors<double>(); }
-
 TEST_F(SimdCoverage, WordPathsPreserveHalvesMasksAndAliasing) {
   WordInst inst;
   inst.inst_.opsel = 1 | 8;
@@ -198,60 +165,6 @@ TEST_F(SimdCoverage, DecodedTrue16MovePreservesScalarAndVectorSelectors) {
       }
     }
   }
-}
-
-template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
-  SCOPED_TRACE(int(Op));
-  SCOPED_TRACE(Bf16);
-  using V = util::narrow32<uint32_t>;
-  std::mt19937 rng(871);
-  constexpr uint16_t corners[] = {0,      0x8000, 1,      0x83ff, 0x3c00, 0xbc00, 0x7bff, 0x7c00,
-                                  0xfc00, 0x7e01, 0x7c01, 0x7f80, 0xff80, 0x3f80, 0xbf80, 0x7fc1};
-  for (uint32_t mode = 0; mode < 32; ++mode) {
-    wf.set_mode_raw(((mode & 3) << 2) | (((mode >> 2) & 3) << 6) |
-                    ((mode & 16) ? Wavefront::FP16_OVFL_BIT : 0));
-    for (unsigned iteration = 0; iteration < 400; ++iteration) {
-      auto generate = [&]() {
-        return iteration < 64 ? uint32_t(corners[rng() % std::size(corners)])
-                              : (uint32_t(rng()) & 0xffffu);
-      };
-      V a([&](auto) { return generate(); }), b([&](auto) { return generate(); }),
-          c([&](auto) { return generate(); });
-      fp_mode::ScopedEnvironment environment(0);
-      V actual = packed_float_half_simd<Op, Bf16>(a, b, c, wf, iteration & 1);
-      for (unsigned i = 0; i < V::size(); ++i) {
-        uint16_t expected;
-        if constexpr (Bf16) {
-          float af = util::bf16_to_f32(a[i]), bf = util::bf16_to_f32(b[i]),
-                cf = util::bf16_to_f32(c[i]);
-          if constexpr (Op == PackedFloatOp::ADD) {
-            expected = fp_mode::packed_add_bf16(af, bf, wf.fp16_ovfl());
-          } else if constexpr (Op == PackedFloatOp::MUL) {
-            expected = fp_mode::packed_mul_bf16(af, bf, wf.fp16_ovfl());
-          } else if constexpr (Op == PackedFloatOp::FMA) {
-            expected = fp_mode::packed_fma_bf16(af, bf, cf, wf.fp16_ovfl());
-          } else {
-            expected = fp_mode::packed_select_bf16(af, bf, Op == PackedFloatOp::MIN);
-          }
-          expected = fp_mode::clamp_bf16(expected, iteration & 1, floating_clamp_nan_to_zero(wf));
-        } else if constexpr (Op == PackedFloatOp::FMA) {
-          expected = fp_mode::fma_f16(a[i], b[i], c[i], false, false, false, false, false, false,
-                                      wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
-                                      iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
-                                      fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
-        }
-        ASSERT_EQ(actual[i], expected)
-            << mode << ":" << iteration << " inputs=" << a[i] << "," << b[i] << "," << c[i];
-      }
-    }
-  }
-}
-TEST_F(SimdCoverage, PackedBf16Numerics) {
-  check_packed_half<PackedFloatOp::ADD, true>(*wf);
-  check_packed_half<PackedFloatOp::MUL, true>(*wf);
-  check_packed_half<PackedFloatOp::FMA, true>(*wf);
-  check_packed_half<PackedFloatOp::MIN, true>(*wf);
-  check_packed_half<PackedFloatOp::MAX, true>(*wf);
 }
 
 struct Slot {
@@ -543,24 +456,6 @@ TEST_F(SimdCoverage, CompareWriterUsesOldExecAndPreservesVcc) {
       [&](uint64_t result) { wf->set_exec(result); })));
   EXPECT_EQ(wf->exec(), 0x5555u);
   EXPECT_EQ(wf->vcc(), 0x1234567887654321ULL);
-}
-
-TEST_F(SimdCoverage, DivisionScalePathReturnsAndPreservesInactiveMaskBits) {
-  WordInst inst;
-  for (uint32_t lane = 0; lane < 32; ++lane) {
-    put(0, lane, 0x3f800000u);
-    put(1, lane, 0x3f800000u);
-    put(2, lane, 0x40000000u);
-    put(3, lane, 0xdeadbeefu);
-  }
-  wf->set_exec(0x55555555u);
-  wf->set_vcc_raw(0xabcdef01ffffffffULL);
-  uint64_t result = 0;
-  ASSERT_TRUE((try_execute_div_scale_simd<float>(inst, *wf, [&](uint64_t v) { result = v; })));
-  EXPECT_EQ(result, 0xabcdef01aaaaaaaaULL);
-  for (uint32_t lane = 0; lane < 32; ++lane) {
-    EXPECT_EQ(get(3, lane), lane % 2 ? 0xdeadbeefu : 0x3f800000u);
-  }
 }
 
 // Opt-in simulator host timing. Alternate scalar/SIMD order with matched inputs

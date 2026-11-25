@@ -1198,6 +1198,7 @@ std::vector<ArithmeticCase> vopd_mul_dx9_cases() {
            {{6, expected}, {7, expected}},
            mode,
            mode == 0xf0u ? expect_simd_path(amdgpu::SimdFastPath::VOPD) : expect_simd_fallback()});
+      cases.back().arith_dispatch = arch == rocjitsu::IsaFamily::Rdna3_5;
     };
     add("Preserve", 0x00000001u, 0x4b000000u, 0x00800000u, 0xf0u);
     add("PreserveNegative", 0x80000001u, 0x4b000000u, 0x80800000u, 0xf0u);
@@ -5948,42 +5949,6 @@ INSTANTIATE_TEST_SUITE_P(Fp8, ValuConversionTest, testing::ValuesIn(fp8_cases())
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
-
-TEST(ValuFpModeHelpers, PackedF16NanSelection) {
-  using namespace amdgpu::fp_mode;
-  // Physical gfx1100/gfx1201 captures, with IEEE disabled/enabled. Entries
-  // give arithmetic and min/max outputs for legacy-off, legacy-on and newer.
-  struct Case {
-    uint16_t a, b;
-    std::array<uint16_t, 3> arithmetic, select;
-  };
-  constexpr Case cases[] = {
-      {0x7fc1, 0xff80, {0x7fc1, 0x7fc1, 0x7fc1}, {0x7fc1, 0x7fc1, 0x7fc1}},
-      {0xff80, 0x7fc1, {0xff80, 0xff80, 0xff80}, {0xff80, 0xff80, 0xff80}},
-      {0x7c01, 0xff80, {0x7c01, 0x7e01, 0x7e01}, {0x7c01, 0x7e01, 0x7e01}},
-      {0x7fc1, 0xfc02, {0x7fc1, 0x7fc1, 0x7fc1}, {0x7fc1, 0xfe02, 0x7fc1}},
-      {0x3c00, 0x7c01, {0x7c01, 0x7e01, 0x7e01}, {0x3c00, 0x7e01, 0x3c00}},
-  };
-  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4}) {
-    for (bool ieee : {false, true}) {
-      const unsigned profile = arch == rocjitsu::IsaFamily::Rdna4 ? 2 : unsigned(ieee);
-      for (auto op :
-           {PackedBinaryOp::ADD, PackedBinaryOp::MUL, PackedBinaryOp::MIN, PackedBinaryOp::MAX}) {
-        for (const auto &test : cases) {
-          SCOPED_TRACE(::testing::Message() << int(arch) << ':' << ieee << ':' << int(op) << ':'
-                                            << test.a << ':' << test.b);
-          const uint16_t expected =
-              (op == PackedBinaryOp::ADD || op == PackedBinaryOp::MUL ? test.arithmetic
-                                                                      : test.select)[profile];
-          EXPECT_EQ(packed_binary_f16(op, test.a, test.b, 0, 3, false, false, false, arch, ieee),
-                    expected);
-          EXPECT_EQ(packed_binary_f16(op, test.a, test.b, 0, 3, true, false, true, arch, ieee),
-                    expected > 0x7c00u ? 0 : 0x3c00u);
-        }
-      }
-    }
-  }
-}
 
 TEST(ValuFpModeHelpers, RoundingAndSignedZero) {
   using amdgpu::fp_mode::Arithmetic;

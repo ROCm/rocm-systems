@@ -7,10 +7,11 @@
 #ifndef RJ_ARITH_TRIG_COEFFICIENTS_H_
 #define RJ_ARITH_TRIG_COEFFICIENTS_H_
 
-#include "common/bits.h"
+#include "common/isa.h"
 #include <stdint.h>
 
-namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::trig {
+// Read-only integer data is ISA-independent; share it without sharing CPU-compiled functions.
+namespace rocjitsu::arith::trig_data {
 
 // Captured rocjitsu RDNA3/4 coefficients in units of 2^-26, transposed for
 // SIMD gathers. Rows hold constant, linear, quadratic and cubic terms.
@@ -31,6 +32,10 @@ static constexpr int32_t coefficients[4][32] = {
      -1118, -1082, -1042, -1002, -958,  32,    98,    162,   226,   290,   352,
      414,   476,   536,   594,   652,   708,   762,   814,   864,   912}};
 
+} // namespace rocjitsu::arith::trig_data
+
+namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::trig {
+using rocjitsu::arith::trig_data::coefficients;
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE::trig
 
 #endif

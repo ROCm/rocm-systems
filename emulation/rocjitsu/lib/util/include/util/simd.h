@@ -4,11 +4,6 @@
 #ifndef UTIL_SIMD_H_
 #define UTIL_SIMD_H_
 
-#include "util/amdgpu_exp.h"
-#include "util/amdgpu_log.h"
-#include "util/amdgpu_rcp.h"
-#include "util/amdgpu_rsq.h"
-#include "util/amdgpu_sqrt.h"
 #include "util/bit.h"
 #include "util/host_target.h"
 #include "util/simd_control.h"
@@ -487,24 +482,6 @@ inline native<double> ordered_clamp_f64_simd(native<double> v, double lo, double
   return result;
 }
 
-inline native<double> sqrt_f64_simd(native<double> a) {
-  native<double> r = stdx::sqrt(a);
-  constexpr std::size_t W = native<double>::size();
-  alignas(64) double in[W];
-  alignas(64) double out[W];
-  a.copy_to(in, stdx::element_aligned);
-  r.copy_to(out, stdx::element_aligned);
-  for (std::size_t i = 0; i < W; ++i) {
-    if (std::isnan(in[i])) {
-      out[i] = in[i];
-    } else if (in[i] < 0.0) {
-      out[i] = std::numeric_limits<double>::quiet_NaN();
-    }
-  }
-  r.copy_from(out, stdx::element_aligned);
-  return r;
-}
-
 /// Vectorized, bit-exact port of `f16_to_f32` (util/data_types.h). Each lane's
 /// low 16 bits hold the f16; high bits are ignored. All branch selection is
 /// done with `where`-masks in the uint32 domain. Bit-identical to the scalar
@@ -825,32 +802,6 @@ inline double ceil_scalar(double a) { return quiet_snan_scalar(a, std::ceil(a));
 inline float trunc_scalar(float a) { return quiet_snan_scalar(a, std::trunc(a)); }
 inline double trunc_scalar(double a) { return quiet_snan_scalar(a, std::trunc(a)); }
 
-/// Native-width adapters for the shared integer transcendental mappings.
-inline native<float> rcp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rcp_f32(value, quiet_snan); });
-}
-
-inline native<float> rsq_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_rsq_f32(value, quiet_snan); });
-}
-
-inline native<float> sqrt_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_sqrt_f32(value, quiet_snan); });
-}
-
-inline native<float> log_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_log_f32(value, quiet_snan); });
-}
-
-inline native<float> exp_f32_simd(native<float> a, bool quiet_snan = true) {
-  return map_native_convert_scalar<float, float>(
-      a, [quiet_snan](float value) { return amdgpu_exp_f32(value, quiet_snan); });
-}
-
 /// @brief Widen unsigned E5M3 scale values from the low byte of each lane.
 inline native<float> fp8_e5m3_to_f32_simd(native<uint32_t> value) {
   using U = native<uint32_t>;
@@ -1023,90 +974,123 @@ inline native<float> frexp_mant_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>(out);
 }
 
-/// 64-bit-lane port of the f64 `std::frexp` mantissa over native<double>. Same
-/// structure as frexp_mant_f32_simd at f64 widths (11 exp bits bias 1023, 52
-/// mantissa bits): normal lanes force the exponent field to 1022; denormals
-/// renormalize via p = floor(log2(M)) read from double(M)'s exponent (M < 2^53,
-/// exact); ±0 / Inf pass through; NaN is quieted (mantissa MSB set). Bit-identical
-/// to the scalar v_frexp_mant_f64 body.
-inline native<double> frexp_mant_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  U out = map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
-    constexpr uint64_t kSign = 0x8000000000000000ull;
-    constexpr uint64_t kMant = 0x000FFFFFFFFFFFFFull;
-    constexpr uint64_t kQuiet = 0x0008000000000000ull;
-    uint64_t sign = bits & kSign;
-    uint64_t E = (bits >> 52) & 0x7FFull;
-    uint64_t M = bits & kMant;
-    if (E == 0ull) {
-      if (M == 0ull) {
-        return bits;
-      }
-      uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
-      return sign | (1022ull << 52) | ((M << (52ull - p)) & kMant);
-    }
-    if (E == 2047ull) {
-      return M == 0ull ? bits : bits | kQuiet;
-    }
-    return sign | (1022ull << 52) | M;
-  });
-  return std::bit_cast<native<double>>(out);
-#else
-  U sign = v & U(0x8000000000000000ull);
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull); // 52 mantissa bits
-  U normal = sign | (U(1022ull) << 52) | M;
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = sign | (U(1022ull) << 52) | ((M << (U(52ull) - p)) & U(0xFFFFFFFFFFFFFull));
+/// Vector port of the f32 `std::frexp` exponent over raw float bits, returned as
+/// the raw bits of the int32 result. Normal lanes give E - 126; denormals give
+/// p - 148 (p = floor(log2(M))); ±0 / Inf / NaN give 0 (the scalar body only
+/// calls frexp on finite non-zero inputs, leaving exp = 0 otherwise). Negative
+/// results carry the correct two's-complement bits. Bit-identical to the scalar
+/// v_frexp_exp_i32_f32 body.
+inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
+  using U = native<uint32_t>;
+  U E = (v >> 23) & U(0xFFu);
+  U M = v & U(0x7FFFFFu);
+  U normal = E - U(126u);
+  const native<float> mf = stdx::static_simd_cast<native<float>>(M);
+  const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
+  U dn = p - U(148u);
   U out = normal;
-  stdx::where(E == 0ull, out) = v;                   // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn; // denormal -> renormalized
-  stdx::where(E == 2047ull, out) = v;                // Inf passes through unchanged
-  stdx::where((E == 2047ull) && (M != 0ull), out) = v | U(0x0008000000000000ull); // quiet NaN
-  return std::bit_cast<native<double>>(out);
-#endif
+  stdx::where(E == 0u, out) = U(0u);             // ±0 (M==0); overwritten if denormal
+  stdx::where((E == 0u) && (M != 0u), out) = dn; // denormal exponent
+  stdx::where(E == 255u, out) = U(0u);           // Inf / NaN -> 0
+  return out;
 }
 
-/// 64-bit-lane port of the f64 `std::frexp` exponent. Returns each int32 result
-/// in the low 32 bits of a native<uint64_t> lane (sign-extended), so the CVT
-/// f64->b32 glue narrows it with one static_simd_cast. Normal lanes give
-/// E - 1022; denormals p - 1073; ±0 / Inf / NaN give 0 (the scalar guards
-/// frexp to finite non-zero inputs). Bit-identical to v_frexp_exp_i32_f64.
-inline native<uint64_t> frexp_exp_f64_simd(native<double> x) {
-  using U = native<uint64_t>;
-  U v = std::bit_cast<U>(x);
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  return map_native64_scalar<uint64_t>(v, [](uint64_t bits) -> uint64_t {
-    uint64_t E = (bits >> 52) & 0x7FFull;
-    uint64_t M = bits & 0x000FFFFFFFFFFFFFull;
-    if (E == 0ull) {
-      if (M == 0ull) {
-        return 0ull;
-      }
-      uint64_t p = 63u - static_cast<uint64_t>(std::countl_zero(M));
-      return static_cast<uint64_t>(static_cast<int64_t>(p) - 1073);
+/// Masked per-byte SAD (v_msad_u8): like sad_bytes_u32_simd but a byte whose
+/// reference (src1) value is zero contributes nothing. Bit-identical to scalar.
+inline native<uint32_t> msad_bytes_u32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    U ai = (a >> (i * 8)) & U(0xFFu);
+    U bi = (b >> (i * 8)) & U(0xFFu);
+    U d = ai - bi;
+    stdx::where(bi > ai, d) = bi - ai;
+    stdx::where(bi == 0u, d) = 0u; // skip masked-out (zero reference) bytes
+    r += d;
+  }
+  return r;
+}
+
+/// Per-byte unsigned lerp (v_lerp_u8): out_byte = (a + b + (c & 1)) >> 1,
+/// computed independently per byte and repacked. Bit-identical to the scalar.
+inline native<uint32_t> lerp_u8_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
+  using U = native<uint32_t>;
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    const int sh = i * 8;
+    U ab = (a >> sh) & U(0xFFu);
+    U bb = (b >> sh) & U(0xFFu);
+    U round_up = (c >> sh) & U(1u);
+    r = r | (((ab + bb + round_up) >> 1) << sh);
+  }
+  return r;
+}
+
+/// Byte permute (v_perm_b32): build each output byte from a selector byte of
+/// src2 indexing the 8 bytes of the {src0:src1} 64-bit source (src1 = low word).
+/// Selector 0..7 picks a source byte; 8..11 sign-extend source bytes 1, 3, 5,
+/// and 7; 12 yields zero; and every selector >= 13 yields 0xFF.
+inline native<uint32_t> perm_b32_simd(native<uint32_t> a, native<uint32_t> b, native<uint32_t> c) {
+  using U = native<uint32_t>;
+  U srcbyte[8];
+  for (int k = 0; k < 4; ++k) {
+    srcbyte[k] = (b >> (k * 8)) & U(0xFFu); // bytes 0..3 from the low word (src1)
+  }
+  for (int k = 0; k < 4; ++k) {
+    srcbyte[k + 4] = (a >> (k * 8)) & U(0xFFu); // bytes 4..7 from the high word (src0)
+  }
+  U r(0u);
+  for (int i = 0; i < 4; ++i) {
+    U sel = (c >> (i * 8)) & U(0xFFu);
+    U byte(0u);
+    for (int k = 0; k < 8; ++k) {
+      stdx::where(sel == U(static_cast<uint32_t>(k)), byte) = srcbyte[k];
     }
-    if (E == 2047ull) {
-      return 0ull;
+    for (int k = 0; k < 4; ++k) {
+      stdx::where(sel == U(static_cast<uint32_t>(k + 8)), byte) =
+          (srcbyte[k * 2 + 1] >> 7) * U(0xFFu);
     }
-    return static_cast<uint64_t>(static_cast<int64_t>(E) - 1022);
-  });
-#else
-  U E = (v >> 52) & U(0x7FFull);
-  U M = v & U(0xFFFFFFFFFFFFFull);
-  U normal = E - U(1022ull);
-  const native<double> mf = stdx::static_simd_cast<native<double>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 52) - U(1023ull);
-  U dn = p - U(1073ull);
-  U out = normal;
-  stdx::where(E == 0ull, out) = U(0ull);
-  stdx::where((E == 0ull) && (M != 0ull), out) = dn;
-  stdx::where(E == 2047ull, out) = U(0ull);
-  return out;
-#endif
+    stdx::where(sel >= U(13u), byte) = U(0xFFu);
+    r = r | (byte << (i * 8));
+  }
+  return r;
+}
+
+/// High 32 bits of the 64-bit UNSIGNED product a*b (v_mul_hi_u32 semantics).
+///
+/// Computed purely with 32-bit-lane SIMD ops via the 16x16 partial-product
+/// decomposition, deliberately avoiding `fixed_size_simd<uint64_t, N>`: clang +
+/// libstdc++ miscompile the 64-bit-lane multiply/shift of an over-native-width
+/// `fixed_size_simd` (the high half comes out wrong), so the int64-widening
+/// approach diverges from the scalar `(uint64)a * b >> 32` at every SIMD width.
+/// This decomposition uses only native<uint32_t> arithmetic, so it is
+/// bit-identical to the scalar reference on every host. aHi/bHi/aLo/bLo are the
+/// 16-bit halves; each 16x16 partial fits in 32 bits and the carry chain stays
+/// below 2^32 (cross <= 3*0xFFFF), so no intermediate overflows.
+inline native<uint32_t> mul_hi_u32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  const U aLo = a & U(0xFFFFu), aHi = a >> 16;
+  const U bLo = b & U(0xFFFFu), bHi = b >> 16;
+  const U lolo = aLo * bLo;
+  const U hilo = aHi * bLo;
+  const U lohi = aLo * bHi;
+  const U hihi = aHi * bHi;
+  const U cross = (lolo >> 16) + (hilo & U(0xFFFFu)) + (lohi & U(0xFFFFu));
+  return hihi + (hilo >> 16) + (lohi >> 16) + (cross >> 16);
+}
+
+/// High 32 bits of the 64-bit SIGNED product a*b (v_mul_hi_i32 semantics).
+/// Derived from the unsigned high word with the standard signed correction
+/// `hi_s = hi_u - (a<0 ? b : 0) - (b<0 ? a : 0)`. Same clang/libstdc++
+/// motivation as `mul_hi_u32_simd`: no `fixed_size_simd<int64_t, N>`.
+inline native<uint32_t> mul_hi_i32_simd(native<uint32_t> a, native<uint32_t> b) {
+  using U = native<uint32_t>;
+  U hi = mul_hi_u32_simd(a, b);
+  // Sign correction in the uint domain (the negative test is the high bit, so
+  // the where-mask type matches `hi` and avoids a signed/unsigned mask mismatch).
+  stdx::where((a >> 31) != U(0u), hi) = hi - b;
+  stdx::where((b >> 31) != U(0u), hi) = hi - a;
+  return hi;
 }
 
 #endif // RJ_HOST_HAS_STDX_SIMD
@@ -1122,6 +1106,7 @@ inline native<double> trunc_simd(native<double>) { return {}; }
 inline native<double> ceil_simd(native<double>) { return {}; }
 inline native<double> floor_simd(native<double>) { return {}; }
 inline native<double> rndne_simd(native<double>) { return {}; }
+
 #endif
 
 } // namespace util

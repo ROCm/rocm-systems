@@ -3,6 +3,7 @@
 
 // Dense integer MFMA/WMMA: signedness, lane controls, wrap/saturation and overlap.
 #include "common/cpu.h"
+#include "common/integer.h"
 #include "common/semantics.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
@@ -16,7 +17,8 @@ using namespace rocjitsu::arith::test;
 using Entry = decltype(&rj_arith_v_mfma_i32_16x16x32_i8_w64);
 
 // Use an independent scalar int64 reference for the established integer model.
-template <int M, int K, int Batch, bool Wmma = false, bool Gfx950 = false>
+template <int M, int K, int Batch, bool Wmma = false, int ABlockLanes = 0,
+          bool IgnoreSaturation = false, bool Gfx950 = false>
 void arithmetic(Entry entry) {
   constexpr int Lanes = Wmma ? 32 : 64;
   constexpr int Inputs = M * K * Batch / (4 * Lanes), Outputs = M * M * Batch / Lanes;
@@ -24,7 +26,7 @@ void arithmetic(Entry entry) {
   std::minstd_rand random;
   for (auto &reg : input) {
     for (auto &word : reg) {
-      word = uint32_t(random() >> 15) << 16 | (random() >> 15);
+      word = rocjitsu::arith::test::random_word(random);
     }
   }
   for (int lane = 0; lane < Lanes; ++lane) {
@@ -67,9 +69,12 @@ void arithmetic(Entry entry) {
               int size = int(effective_controls & 7);
               int permutation = int(effective_controls >> 7 & 7);
               if (a && size > 0 && size <= 4) {
-                int n = 64 >> size;
-                source_lane =
-                    source_lane % n + n * (int(effective_controls >> 3 & 15) % (1 << size));
+                int n = ABlockLanes ? ABlockLanes : 64 >> size;
+                if (n <= (64 >> size)) {
+                  int group = n * (1 << size);
+                  source_lane = source_lane / group * group + source_lane % n +
+                                n * (int(effective_controls >> 3 & 15) % (1 << size));
+                }
               }
               if (!a && permutation) {
                 if (permutation <= 2) {
@@ -113,7 +118,9 @@ void arithmetic(Entry entry) {
             c[reg] = storage[2 * Inputs + reg].data();
             d[reg] = storage[aliasing_offset + reg].data();
           }
-          ASSERT_EQ(entry(cpu | semantics, controls, d, a, b, c), RJ_ARITH_SUCCESS);
+          ASSERT_EQ(entry(cpu | semantics | (IgnoreSaturation ? RJ_ARITH_FP16_OVFL : 0), controls,
+                          d, a, b, c),
+                    RJ_ARITH_SUCCESS);
           for (int reg = 0; reg < Outputs; ++reg) {
             for (int lane = 0; lane < Lanes; ++lane) {
               ASSERT_EQ(d[reg][lane], expected[reg][lane])
@@ -212,21 +219,51 @@ TEST(DenseIntegerMatrix, mfma_i32_32x32x16_i8_w64) {
   arithmetic<32, 16, 1, false, false>(rj_arith_v_mfma_i32_32x32x16_i8_w64);
 }
 TEST(DenseIntegerMatrix, mfma_i32_32x32x16_i8_w64_gfx950) {
-  arithmetic<32, 16, 1, false, true>(rj_arith_v_mfma_i32_32x32x16_i8_w64_gfx950);
+  arithmetic<32, 16, 1, false, 0, false, true>(rj_arith_v_mfma_i32_32x32x16_i8_w64_gfx950);
 }
 TEST(DenseIntegerMatrix, mfma_i32_16x16x32_i8_w64) {
   arithmetic<16, 32, 1, false, false>(rj_arith_v_mfma_i32_16x16x32_i8_w64);
 }
 TEST(DenseIntegerMatrix, mfma_i32_16x16x32_i8_w64_gfx950) {
-  arithmetic<16, 32, 1, false, true>(rj_arith_v_mfma_i32_16x16x32_i8_w64_gfx950);
+  arithmetic<16, 32, 1, false, 0, false, true>(rj_arith_v_mfma_i32_16x16x32_i8_w64_gfx950);
 }
 TEST(DenseIntegerMatrix, mfma_i32_16x16x64_i8_w64) {
-  arithmetic<16, 64, 1, false, true>(rj_arith_v_mfma_i32_16x16x64_i8_w64);
+  arithmetic<16, 64, 1, false, 0, false, true>(rj_arith_v_mfma_i32_16x16x64_i8_w64);
 }
 TEST(DenseIntegerMatrix, mfma_i32_32x32x32_i8_w64) {
-  arithmetic<32, 32, 1, false, true>(rj_arith_v_mfma_i32_32x32x32_i8_w64);
+  arithmetic<32, 32, 1, false, 0, false, true>(rj_arith_v_mfma_i32_32x32x32_i8_w64);
 }
 TEST(DenseIntegerMatrix, wmma_i32_16x16x64_iu8_w32) {
   arithmetic<16, 64, 1, true>(rj_arith_v_wmma_i32_16x16x64_iu8_w32);
+}
+TEST(DenseIntegerMatrix, mfma_i32_32x32x4_2b_i8_w64_gfx908) {
+  arithmetic<32, 4, 2, false, 0, true>(rj_arith_v_mfma_i32_32x32x4_2b_i8_w64_gfx908);
+}
+TEST(DenseIntegerMatrix, mfma_i32_16x16x4_4b_i8_w64_gfx908) {
+  arithmetic<16, 4, 4, false, 0, true>(rj_arith_v_mfma_i32_16x16x4_4b_i8_w64_gfx908);
+}
+TEST(DenseIntegerMatrix, mfma_i32_4x4x4_16b_i8_w64_gfx908) {
+  arithmetic<4, 4, 16, false, 0, true>(rj_arith_v_mfma_i32_4x4x4_16b_i8_w64_gfx908);
+}
+TEST(DenseIntegerMatrix, mfma_i32_32x32x8_i8_w64_gfx908) {
+  arithmetic<32, 8, 1, false, 0, true>(rj_arith_v_mfma_i32_32x32x8_i8_w64_gfx908);
+}
+TEST(DenseIntegerMatrix, mfma_i32_16x16x16_i8_w64_gfx908) {
+  arithmetic<16, 16, 1, false, 0, true>(rj_arith_v_mfma_i32_16x16x16_i8_w64_gfx908);
+}
+TEST(DenseIntegerMatrix, mfma_i32_32x32x4_2b_i8_w64_gfx90a) {
+  arithmetic<32, 4, 2, false, 32, true>(rj_arith_v_mfma_i32_32x32x4_2b_i8_w64_gfx90a);
+}
+TEST(DenseIntegerMatrix, mfma_i32_16x16x4_4b_i8_w64_gfx90a) {
+  arithmetic<16, 4, 4, false, 16, true>(rj_arith_v_mfma_i32_16x16x4_4b_i8_w64_gfx90a);
+}
+TEST(DenseIntegerMatrix, mfma_i32_4x4x4_16b_i8_w64_gfx90a) {
+  arithmetic<4, 4, 16, false, 4, true>(rj_arith_v_mfma_i32_4x4x4_16b_i8_w64_gfx90a);
+}
+TEST(DenseIntegerMatrix, mfma_i32_32x32x8_i8_w64_gfx90a) {
+  arithmetic<32, 8, 1, false, 32, true>(rj_arith_v_mfma_i32_32x32x8_i8_w64_gfx90a);
+}
+TEST(DenseIntegerMatrix, mfma_i32_16x16x16_i8_w64_gfx90a) {
+  arithmetic<16, 16, 1, false, 16, true>(rj_arith_v_mfma_i32_16x16x16_i8_w64_gfx90a);
 }
 } // namespace

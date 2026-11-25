@@ -1386,9 +1386,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'tanh': 'amdgpu::transcendental::tanh_f32({0})',
     'log': 'amdgpu::transcendental::log_f32({0})',
     'exp': 'amdgpu::transcendental::exp_f32({0})',
-    'rcp_f64': 'amdgpu::transcendental::rcp_f64({0})',
-    'rsq_f64': 'amdgpu::transcendental::rsq_f64({0})',
-    'sqrt_f64': 'amdgpu::transcendental::sqrt_f64({0})',
     'abs': '[&]() {{ int32_t v = static_cast<int32_t>({0});'
     ' return static_cast<uint32_t>'
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
@@ -1485,14 +1482,12 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return a == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'prng_advance': 'util::prng_advance({0})',
-    'frexp_exp_f32': 'static_cast<uint32_t>(amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).exponent)',
-    'frexp_exp_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint32_t>(exp); }}()',
-    'frexp_mant_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' return std::frexp(s, &exp); }}()',
+    # FP16 mantissa lowering still widens through the shared FP32 model.
+    'frexp_mant_f32': 'amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).mantissa',
+    # Signed 16-bit exponent in the low half.
+    'frexp_exp_f16': '[&]() -> uint32_t {{ float s = {0}; int exp = 0;'
+    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+    ' return static_cast<uint16_t>(exp); }}()',
     'frexp_mant_f32': 'amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).mantissa',
     'log2': 'amdgpu::transcendental::log_f32({0})',
     'cvt_f32_i32': 'std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>({0})))',
@@ -2082,19 +2077,14 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         precision = callee.rsplit('_', 1)[-1]
         operation = callee.removeprefix('pseudo_scalar_').removesuffix(f'_{precision}')
         operation_name = pseudo_scalar_operations[operation]
-        mode_suffix = 'f32' if precision == 'f32' else 'f16_f64'
-        fp16_ovfl = ', wf.fp16_ovfl()' if precision == 'f16' else ''
-        helper = (
-            'amdgpu::transcendental::execute_pseudo_f16'
-            if precision == 'f16'
-            else 'amdgpu::pseudo_scalar::execute_f32'
-        )
+        if precision != 'f32':
+            raise ValueError('F16 pseudo-scalar arithmetic requires rj-arith lowering')
         return (
-            f'{helper}('
+            'amdgpu::pseudo_scalar::execute_f32('
             f'amdgpu::pseudo_scalar::Operation::{operation_name}, {args[0]}, '
-            f'(inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, '
-            f'wf.fp_round_mode_{mode_suffix}(), wf.fp_denorm_mode_{mode_suffix}(), '
-            f'inst_.omod, inst_.clamp{fp16_ovfl})'
+            '(inst_.abs & 1u) != 0, (inst_.neg & 1u) != 0, '
+            'wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), '
+            'inst_.omod, inst_.clamp)'
         )
 
     if len(args) == 1 and callee in (
@@ -2148,11 +2138,7 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         and callee in ('rcp', 'rsq', 'sqrt', 'sin', 'cos')
         and node.ty == SemaType.F16
     ):
-        return (
-            f'amdgpu::transcendental::map_f16<amdgpu::transcendental::HalfOperation::{callee.upper()}>('
-            f'{args[0]}, wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-            'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
-        )
+        raise ValueError('F16 unary math requires rj-arith lowering')
     if len(args) == 1 and callee in ('rcp', 'rsq', 'sqrt') and node.ty == SemaType.F32:
         return (
             f'amdgpu::transcendental::{callee}_f32({args[0]}, '
@@ -2171,12 +2157,7 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     ):
         function = 'log' if callee.startswith('log') else 'exp'
         if node.ty == SemaType.F16:
-            logarithm = 'true' if function == 'log' else 'false'
-            return (
-                f'amdgpu::transcendental::log_exp_f16<{logarithm}>({args[0]}, '
-                'wf.fp_denorm_mode_f16_f64(), wf.fp16_ovfl(), '
-                'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
-            )
+            raise ValueError('F16 unary math requires rj-arith lowering')
         return (
             f'amdgpu::transcendental::{function}_f32({args[0]}, '
             'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'

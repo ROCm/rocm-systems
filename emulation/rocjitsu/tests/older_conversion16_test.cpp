@@ -5,6 +5,7 @@
 // versus preserved-half destinations, source selection, aliases and EXEC.
 
 #include "compute_unit_test_util.h"
+#include "conversion_binding.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -16,7 +17,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
@@ -40,32 +40,51 @@
 namespace rocjitsu::amdgpu {
 namespace {
 
-// Use the inherited raw conversion stages independently of API dispatch.
+// Floating destinations check decoder/API binding against the separately tested
+// scalar conversion APIs; integer destinations use independent bounded arithmetic.
 uint32_t reference(int operation, uint32_t raw, const Wavefront &wave, unsigned omod, bool clamp,
-                   bool absolute, bool negate) {
-  if (operation == 0) {
-    return conversion_to_float<conversion::I16, fp_format::F16>(wave, 0, 0, omod, clamp)(raw);
-  }
-  if (operation == 1) {
-    return conversion_to_float<conversion::U16, fp_format::F16>(wave, 0, 0, omod, clamp)(raw);
-  }
-  if (operation == 4) {
-    return conversion_to_float<fp_format::F32, fp_format::F16>(wave, absolute, negate, omod,
-                                                               clamp)(raw);
-  }
-  if (operation == 5) {
-    return conversion_to_float<fp_format::F16, fp_format::F32>(wave, absolute, negate, omod,
-                                                               clamp)(raw);
+                   bool absolute, bool negate, bool sdwa) {
+  if (operation < 2 || operation >= 4) {
+    const bool wide = operation == 5;
+    const unsigned source_denorm =
+        operation == 4 ? wave.fp_denorm_mode_f32() : wave.fp_denorm_mode_f16_f64();
+    const unsigned destination_denorm =
+        wide ? wave.fp_denorm_mode_f32() : wave.fp_denorm_mode_f16_f64();
+    const unsigned rounding = wide ? wave.fp_round_mode_f32() : wave.fp_round_mode_f16_f64();
+    uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(rounding) << 24);
+    flags |= wave.ieee_mode() ? RJ_ARITH_FP_IEEE_MODE : 0;
+    flags |= wave.dx10_clamp() ? 0 : RJ_ARITH_FP_DX10_CLAMP_OFF;
+    flags |= !wide && wave.fp16_ovfl() ? RJ_ARITH_FP16_OVFL : 0;
+    flags |= operation >= 4 && !(source_denorm & 1) ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0;
+    flags |= (destination_denorm & 2) ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+    uint64_t modifiers = (uint64_t(omod) << 6) | (clamp ? RJ_ARITH_ALU_CLAMP : 0) |
+                         (operation >= 4 && absolute ? RJ_ARITH_ALU_ABS_A : 0) |
+                         (operation >= 4 && negate ? RJ_ARITH_ALU_NEG_A : 0);
+    modifiers |= sdwa ? RJ_ARITH_CVT_SDWA : 0;
+    const auto function = operation == 0   ? rj_arith_v_cvt_f16_i16_w32_gfx942
+                          : operation == 1 ? rj_arith_v_cvt_f16_u16_w32_gfx942
+                          : operation == 4 ? rj_arith_v_cvt_f16_f32_w32_gfx942
+                                           : rj_arith_v_cvt_f32_f16_w32;
+    return uint32_t(rocjitsu::test::conversion_binding(function, flags, modifiers, raw));
   }
   raw = (absolute ? raw & 0x7fffU : raw) ^ (negate ? 0x8000U : 0);
-  const float x = util::f16_to_f32(uint16_t(raw));
-  if (std::isnan(x)) {
-    return 0;
+  const unsigned magnitude = raw & 0x7fffU;
+  const unsigned exponent = magnitude >> 10;
+  // Decode the half exactly in FP32; only the bounded integer cast rounds.
+  const float significand = float((raw & 0x3ffU) | (exponent ? 0x400U : 0));
+  float x = exponent == 31 ? std::numeric_limits<float>::infinity()
+                           : std::ldexp(significand, exponent ? int(exponent) - 25 : -24);
+  if (exponent == 31 && (raw & 0x3ffU)) {
+    x = std::numeric_limits<float>::quiet_NaN();
   }
-  if (operation == 2) {
-    return uint16_t(int16_t(std::clamp(x, -32768.0f, 32767.0f)));
+  if (raw & 0x8000U) {
+    x = -x;
   }
-  return uint16_t(std::clamp(x, 0.0f, 65535.0f));
+  // Integer conversions truncate after saturation; the bounded cast is defined for every input.
+  const float bounded = std::isnan(x) ? 0.0f
+                                      : std::clamp(x, operation == 2 ? -32768.0f : 0.0f,
+                                                   operation == 2 ? 32767.0f : 65535.0f);
+  return uint16_t(int32_t(bounded));
 }
 
 // Restore the caller's test override even when an assertion exits the test.
@@ -319,13 +338,11 @@ TEST(OlderConversion16, Arithmetic) {
                   } else {
                     expected = reference(operation, raw, *wave, vop3 || sdwa ? sample.omod : 0,
                                          (vop3 || sdwa) && sample.clamp, vop3 && sample.absolute,
-                                         vop3 && sample.negate);
+                                         vop3 && sample.negate, sdwa);
                   }
                   // Legacy SDWA scaling quiets a widened signaling NaN even with IEEE clear.
-                  if (sdwa && operation == 5 &&
-                      fp_mode::effective_omod(family.arch, wave->fp_denorm_mode_f32(),
-                                              wave->ieee_mode(), sample.omod) &&
-                      (expected & 0x7fffffffU) > 0x7f800000U) {
+                  if (sdwa && operation == 5 && sample.omod && !wave->ieee_mode() &&
+                      !(wave->fp_denorm_mode_f32() & 2) && (expected & 0x7fffffffU) > 0x7f800000U) {
                     expected |= 0x00400000U;
                   }
                   if (sdwa || (high_half && operation != 5)) {
