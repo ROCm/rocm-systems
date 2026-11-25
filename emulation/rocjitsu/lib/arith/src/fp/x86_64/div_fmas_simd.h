@@ -78,11 +78,12 @@ inline DivisionVector128<Ops> division_vector_sub(DivisionVector128<Ops> a,
 }
 
 // Return lanes whose value sum * 2^exponent stays below the smallest normal after rounding to
-// nearest at normal precision, as division_round judges tininess. Only a value one binade below
-// the smallest normal, at or above the midpoint under it, rounds up to it.
+// the selected direction at normal precision. Only a value in the preceding binade
+// can round up to the smallest normal.
 template <int Width, typename Ops>
 inline typename Ops::Mask division_vector_tiny(DivisionVector128<Ops> sum, typename Ops::V highest,
-                                               typename Ops::V exponent) {
+                                               typename Ops::V exponent, unsigned rounding = 0,
+                                               typename Ops::V sign = Ops::set(0)) {
   using F = IeeeFormat<Width>;
   auto zero = Ops::set(0), one = Ops::set(1);
   auto normal_shift = Ops::sub(highest, Ops::set(F::fraction));
@@ -92,6 +93,19 @@ inline typename Ops::Mask division_vector_tiny(DivisionVector128<Ops> sum, typen
   auto at_midpoint = Ops::either(
       Ops::ugt(sum.hi, midpoint.hi),
       Ops::both(Ops::eq(sum.hi, midpoint.hi), Ops::inverse(Ops::ugt(midpoint.lo, sum.lo))));
+  if (rounding != 0) {
+    // Directed rounding reaches the normal range only when rounding away from
+    // zero, above the largest value representable in the preceding binade.
+    auto largest =
+        division_vector_sub<Ops>(division_vector_left<Ops>({one, zero}, Ops::add(highest, one)),
+                                 division_vector_left<Ops>({one, zero}, normal_shift));
+    auto above = Ops::either(Ops::ugt(sum.hi, largest.hi),
+                             Ops::both(Ops::eq(sum.hi, largest.hi), Ops::ugt(sum.lo, largest.lo)));
+    auto outward = rounding == 1   ? Ops::eq(sign, zero)
+                   : rounding == 2 ? Ops::inverse(Ops::eq(sign, zero))
+                                   : Ops::eq(one, zero);
+    at_midpoint = Ops::both(above, outward);
+  }
   auto edge = Ops::both(Ops::eq(Ops::add(highest, exponent), Ops::set(uint64_t(-F::bias))),
                         Ops::both(Ops::gt(normal_shift, zero), at_midpoint));
   return Ops::both(Ops::gt(Ops::set(uint64_t(1 - F::bias)), Ops::add(highest, exponent)),
@@ -104,10 +118,11 @@ template <int Width, typename Ops>
 inline typename Ops::V division_vector_fmas(typename Ops::V a, typename Ops::V b, typename Ops::V c,
                                             typename Ops::Mask post, uint32_t mode, uint64_t flags,
                                             typename Ops::Mask active, uint32_t *causes,
-                                            bool quiet_nan) {
+                                            bool quiet_nan, bool gradual_before_omod) {
   using F = IeeeFormat<Width>;
   using V = typename Ops::V;
   using U = DivisionVector128<Ops>;
+  const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   auto zero = Ops::set(0), one = Ops::set(1), signbit = Ops::set(F::sign),
        inf = Ops::set(F::infinity), hidden = Ops::set(uint64_t(1) << F::fraction),
        fracmask = Ops::sub(hidden, one);
@@ -156,7 +171,9 @@ inline typename Ops::V division_vector_fmas(typename Ops::V a, typename Ops::V b
       Ops::either(Ops::ugt(product.hi, addend.hi),
                   Ops::both(Ops::eq(product.hi, addend.hi), Ops::ugt(product.lo, addend.lo)));
   auto equal = Ops::both(Ops::eq(product.hi, addend.hi), Ops::eq(product.lo, addend.lo));
-  auto sign = Ops::select(same, psign, Ops::select(equal, zero, Ops::select(larger, psign, csign)));
+  auto sign = Ops::select(
+      same, psign,
+      Ops::select(equal, rounding == 2 ? signbit : zero, Ops::select(larger, psign, csign)));
   U sum = {Ops::add(product.lo, addend.lo), Ops::add(product.hi, addend.hi)};
   sum.hi = Ops::add(sum.hi, Ops::select(Ops::ugt(product.lo, sum.lo), one, zero));
   auto pminus = division_vector_sub<Ops>(product, addend),
@@ -171,7 +188,7 @@ inline typename Ops::V division_vector_fmas(typename Ops::V a, typename Ops::V b
   exponent = Ops::add(Ops::sub(exponent, Ops::set(126)), adjustment);
   auto highest = division_vector_top<Ops>(sum);
   auto shift = Ops::sub(highest, Ops::set(F::fraction));
-  bool omod = (mode & RJ_ARITH_ALU_OMOD_MASK) != 0;
+  bool omod = (mode & RJ_ARITH_ALU_OMOD_MASK) != 0 && !gradual_before_omod;
   if (!omod) {
     auto tiny_shift = Ops::sub(Ops::set(uint64_t(1 - F::bias - F::fraction)), exponent);
     shift = Ops::select(Ops::gt(tiny_shift, shift), tiny_shift, shift);
@@ -189,8 +206,15 @@ inline typename Ops::V division_vector_fmas(typename Ops::V a, typename Ops::V b
                             Ops::inverse(Ops::eq(sum.hi, restored.hi)));
   auto guard = Ops::inverse(Ops::eq(Ops::band(guard_value.lo, one), zero));
   auto odd = Ops::inverse(Ops::eq(Ops::band(kept, one), zero));
-  kept = Ops::add(kept, Ops::select(Ops::both(positive, Ops::both(guard, Ops::either(sticky, odd))),
-                                    one, zero));
+  // Guest rounding changes only the increment predicate, not the fused arithmetic.
+  auto increment = Ops::both(guard, Ops::either(sticky, odd));
+  if (rounding != 0) {
+    auto toward_sign = rounding == 1   ? Ops::eq(sign, zero)
+                       : rounding == 2 ? Ops::inverse(Ops::eq(sign, zero))
+                                       : Ops::eq(one, zero);
+    increment = Ops::both(Ops::either(guard, sticky), toward_sign);
+  }
+  kept = Ops::add(kept, Ops::select(Ops::both(positive, increment), one, zero));
   auto result_exponent = Ops::add(Ops::add(exponent, shift), Ops::set(F::fraction));
   auto carry = Ops::ugt(kept, Ops::sub(Ops::shl(hidden, one), one));
   kept = Ops::select(carry, Ops::shr(kept, one), kept);
@@ -199,7 +223,16 @@ inline typename Ops::V division_vector_fmas(typename Ops::V a, typename Ops::V b
       sign, Ops::bor(Ops::shl(Ops::add(result_exponent, Ops::set(F::bias)), Ops::set(F::fraction)),
                      Ops::band(kept, fracmask)));
   result = Ops::select(Ops::ugt(hidden, kept), Ops::bor(sign, kept), result);
-  result = Ops::select(Ops::gt(result_exponent, Ops::set(F::bias)), Ops::bor(sign, inf), result);
+  // Directed overflow saturates toward finite values when the rounding direction requires it.
+  auto overflow_magnitude = [&](V result_sign) {
+    auto infinity = rounding == 0   ? Ops::eq(zero, zero)
+                    : rounding == 1 ? Ops::eq(result_sign, zero)
+                    : rounding == 2 ? Ops::inverse(Ops::eq(result_sign, zero))
+                                    : Ops::eq(one, zero);
+    return Ops::select(infinity, inf, Ops::sub(inf, one));
+  };
+  result = Ops::select(Ops::gt(result_exponent, Ops::set(F::bias)),
+                       Ops::bor(sign, overflow_magnitude(sign)), result);
   if (omod) {
     result = Ops::select(Ops::gt(Ops::set(uint64_t(1 - F::bias)), result_exponent), zero, result);
   }
@@ -207,9 +240,10 @@ inline typename Ops::V division_vector_fmas(typename Ops::V a, typename Ops::V b
   // A flushing output also flushes a value that reaches the smallest normal only on the
   // subnormal grid. Only the binade below the smallest normal can; lower ones stay subnormal and
   // are flushed below.
-  if (!omod && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+  if (!omod && !gradual_before_omod && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
       Ops::any(Ops::eq(Ops::add(highest, exponent), Ops::set(uint64_t(-F::bias))))) {
-    result = Ops::select(division_vector_tiny<Width, Ops>(sum, highest, exponent), sign, result);
+    result = Ops::select(division_vector_tiny<Width, Ops>(sum, highest, exponent, rounding, sign),
+                         sign, result);
   }
 
   // Reuse the scalar division_round classifier's discarded bits and tininess
@@ -265,8 +299,9 @@ inline typename Ops::V division_vector_fmas(typename Ops::V a, typename Ops::V b
       scaled = Ops::select(Ops::eq(e, hidden), outsign, Ops::sub(result, hidden));
     } else {
       auto increment = Ops::set(uint64_t(output_scale) << F::fraction);
-      scaled = Ops::select(Ops::inverse(Ops::ugt(Ops::sub(inf, increment), e)),
-                           Ops::bor(outsign, inf), Ops::add(result, increment));
+      scaled =
+          Ops::select(Ops::inverse(Ops::ugt(Ops::sub(inf, increment), e)),
+                      Ops::bor(outsign, overflow_magnitude(outsign)), Ops::add(result, increment));
     }
     result = Ops::select(Ops::eq(e, inf), result, scaled);
     result = Ops::select(Ops::eq(e, zero), zero, result);
@@ -290,7 +325,7 @@ template <int Width, typename Ops>
 inline void division_vector_run(uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                                 const uint32_t *const *a, const uint32_t *const *b,
                                 const uint32_t *const *c, uint32_t condition, uint64_t flags,
-                                uint32_t *state, bool quiet_nan) {
+                                uint32_t *state, bool quiet_nan, bool gradual_before_omod) {
   using F = IeeeFormat<Width>;
   uint32_t staged[2][32], causes = 0;
   for (int lane = 0; lane < 32; lane += Ops::lanes) {
@@ -312,7 +347,8 @@ inline void division_vector_run(uint32_t exec_mask, uint32_t mode, uint32_t *con
     }
     auto result = division_vector_fmas<Width, Ops>(
         inputs[0], inputs[1], inputs[2], Ops::lane_mask(condition >> lane), mode, flags,
-        Ops::lane_mask(exec_mask >> lane), state ? &causes : nullptr, quiet_nan);
+        Ops::lane_mask(exec_mask >> lane), state ? &causes : nullptr, quiet_nan,
+        gradual_before_omod);
     Ops::store_words(staged[0] + lane, result);
     if constexpr (Width == 64) {
       Ops::store_words(staged[1] + lane, Ops::shr(result, Ops::set(32)));

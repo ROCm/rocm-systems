@@ -16,18 +16,22 @@ template <typename T> struct NamedChoice {
 
 template <typename T>
 std::optional<T> find_choice(std::span<const NamedChoice<T>> choices, std::string_view name) {
-  for (const NamedChoice<T> &choice : choices)
-    if (choice.name == name)
+  for (const NamedChoice<T> &choice : choices) {
+    if (choice.name == name) {
       return choice.value;
+    }
+  }
   return std::nullopt;
 }
 
 template <typename T>
 std::optional<std::string_view> choice_name(std::span<const NamedChoice<T>> choices,
                                             const T &value) {
-  for (const NamedChoice<T> &choice : choices)
-    if (choice.value == value)
+  for (const NamedChoice<T> &choice : choices) {
+    if (choice.value == value) {
       return choice.name;
+    }
+  }
   return std::nullopt;
 }
 

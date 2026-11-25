@@ -5332,6 +5332,13 @@ typedef enum {
    * this queue. Unsupported queue types return HSA_STATUS_ERROR_INVALID_ARGUMENT.
    */
   HSA_AMD_QUEUE_INFO_WRITE_POINTER,
+  /*
+   * Bytes the KMD writes into the end of every submitted span on a Windows
+   * native SDMA user queue (gfx12+ with HWS). A producer that does not leave
+   * them free has its own last packet overwritten. Unsupported queue types
+   * return HSA_STATUS_ERROR_INVALID_ARGUMENT. The type is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_SUBMISSION_TAIL_BYTES,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,

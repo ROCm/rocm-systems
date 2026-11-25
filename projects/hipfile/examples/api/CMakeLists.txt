@@ -14,5 +14,6 @@ foreach(example ${API_EXAMPLES})
         DEPS hipfile
         SRCS "${example}.cpp"
         SYSINCLS ${HIPFILE_INCLUDE_PATH}
+        NO_SAFE_BUFFERS
     )
 endforeach()

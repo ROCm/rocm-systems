@@ -14,31 +14,40 @@ namespace rocjitsu::amdgpu {
 template <typename Inst>
 void ds_wordwise_register_modifiers(const Inst &inst, RegisterModifiers &modifiers) {
   modifiers.wordwise_source0 = &inst.data0;
-  if constexpr (requires { inst.data1; })
+  if constexpr (requires { inst.data1; }) {
     modifiers.wordwise_source1 = &inst.data1;
+  }
 }
 
 template <bool Wordwise, uint8_t ResultBytes = 0xf, uint8_t LastResultBytes = ResultBytes,
           typename Inst>
 void buffer_register_modifiers(const Inst &inst, RegisterModifiers &modifiers) {
-  if constexpr (Wordwise)
+  if constexpr (Wordwise) {
     modifiers.wordwise_source0 = &inst.vdata;
-  if constexpr (requires { inst.rsrc; })
+  }
+  if constexpr (requires { inst.rsrc; }) {
     modifiers.buffer_resource = &inst.rsrc;
-  else
+  } else {
     modifiers.buffer_resource = &inst.srsrc;
-  if constexpr (requires { inst.vaddr; })
+  }
+  if constexpr (requires { inst.vaddr; }) {
     modifiers.buffer_address = &inst.vaddr;
-  if constexpr (requires { inst.inst_.tfe; })
+  }
+  if constexpr (requires { inst.inst_.tfe; }) {
     modifiers.buffer_tfe = inst.inst_.tfe;
-  if constexpr (requires { inst.inst_.format; })
+  }
+  if constexpr (requires { inst.inst_.format; }) {
     modifiers.encoded_buffer_format = inst.inst_.format;
-  if constexpr (requires { inst.soffset; })
+  }
+  if constexpr (requires { inst.soffset; }) {
     modifiers.buffer_offset = &inst.soffset;
-  if constexpr (ResultBytes != 0xf)
+  }
+  if constexpr (ResultBytes != 0xf) {
     modifiers.memory_result_bytes = ResultBytes;
-  if constexpr (LastResultBytes != 0xf)
+  }
+  if constexpr (LastResultBytes != 0xf) {
     modifiers.memory_result_last_bytes = LastResultBytes;
+  }
 }
 
 // Visit contiguous result words with the same byte mask. The payload may end
@@ -46,8 +55,9 @@ void buffer_register_modifiers(const Inst &inst, RegisterModifiers &modifiers) {
 template <typename Visit>
 void for_each_memory_result_range(RegisterRef reg, const RegisterModifiers &modifiers,
                                   bool sram_ecc, Visit visit) {
-  if (reg.width == 0)
+  if (reg.width == 0) {
     return;
+  }
   const uint8_t bytes = modifiers.memory_result_bytes;
   const uint8_t tail = modifiers.memory_result_last_bytes;
   if (reg.cls != RegClass::VGPR || sram_ecc || (bytes == 0xf && tail == 0xf)) {
@@ -62,12 +72,14 @@ void for_each_memory_result_range(RegisterRef reg, const RegisterModifiers &modi
   if (payload && bytes == tail) {
     visit(reg, bytes);
   } else if (payload) {
-    if (--reg.width)
+    if (--reg.width) {
       visit(reg, bytes);
+    }
     visit(RegisterRef{reg.cls, static_cast<uint16_t>(reg.index + reg.width), 1}, tail);
   }
-  if (suffix)
+  if (suffix) {
     visit(RegisterRef{reg.cls, static_cast<uint16_t>(reg.index + payload), suffix}, 0xf);
+  }
 }
 
 } // namespace rocjitsu::amdgpu

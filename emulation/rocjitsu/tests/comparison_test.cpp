@@ -39,18 +39,19 @@ template <typename Fmt> double decode(typename Fmt::Lane bits, bool flush) {
   const uint64_t exponent = (bits & Fmt::kInfinity) >> Fmt::kMantissaBits;
   const uint64_t mantissa = bits & ((typename Fmt::Lane{1} << Fmt::kMantissaBits) - 1);
   double value;
-  if (exponent == Fmt::kExponentMax)
+  if (exponent == Fmt::kExponentMax) {
     value = mantissa ? std::numeric_limits<double>::quiet_NaN()
                      : std::numeric_limits<double>::infinity();
-  else if (exponent == 0)
+  } else if (exponent == 0) {
     value =
         flush ? 0.0
               : std::ldexp(static_cast<double>(mantissa), 2 - (1 << (Fmt::kExponentBits - 1)) -
                                                               static_cast<int>(Fmt::kMantissaBits));
-  else
+  } else {
     value = std::ldexp(static_cast<double>(mantissa | (uint64_t{1} << Fmt::kMantissaBits)),
                        static_cast<int>(exponent) - ((1 << (Fmt::kExponentBits - 1)) - 1) -
                            static_cast<int>(Fmt::kMantissaBits));
+  }
   return negative ? -value : value;
 }
 
@@ -124,9 +125,10 @@ template <typename Fmt> void expect_matches_reference(uint64_t a, uint64_t b) {
   for (const bool flush : {false, true}) {
     const double da = decode<Fmt>(static_cast<typename Fmt::Lane>(a), flush);
     const double db = decode<Fmt>(static_cast<typename Fmt::Lane>(b), flush);
-    for (unsigned opcode = 0; opcode < 16; ++opcode)
+    for (unsigned opcode = 0; opcode < 16; ++opcode) {
       ASSERT_EQ(fns[opcode](a, b, denorm::Policy{flush}), reference(opcode, da, db))
           << "opcode " << opcode << " a 0x" << std::hex << a << " b 0x" << b << " flush " << flush;
+    }
   }
 }
 
@@ -135,27 +137,32 @@ template <typename Fmt> void expect_matches_reference(uint64_t a, uint64_t b) {
 // ---------------------------------------------------------------------------
 
 TEST(ComparisonTest, F16EveryEncodingAgainstSpecials) {
-  for (uint64_t a = 0; a <= 0xffffu; ++a)
+  for (uint64_t a = 0; a <= 0xffffu; ++a) {
     for (const uint64_t b : specials<fmt::F16>()) {
       expect_matches_reference<fmt::F16>(a, b);
       expect_matches_reference<fmt::F16>(b, a);
     }
+  }
 }
 
 template <typename Fmt> void check_specials_and_random() {
   const auto values = specials<Fmt>();
-  for (const uint64_t a : values)
-    for (const uint64_t b : values)
+  for (const uint64_t a : values) {
+    for (const uint64_t b : values) {
       expect_matches_reference<Fmt>(a, b);
+    }
+  }
   std::mt19937_64 rng(0x5eed);
   for (int i = 0; i < 20000; ++i) {
     // Clear random exponent bits half the time, so subnormals are common.
     uint64_t a = rng() & Fmt::kBits;
     uint64_t b = rng() & Fmt::kBits;
-    if (i & 1)
+    if (i & 1) {
       a &= ~static_cast<uint64_t>(Fmt::kInfinity);
-    if (i & 2)
+    }
+    if (i & 2) {
       b &= ~static_cast<uint64_t>(Fmt::kInfinity);
+    }
     expect_matches_reference<Fmt>(a, b);
   }
 }
@@ -224,13 +231,15 @@ template <typename Fmt, typename Rel, typename V> void expect_simd_matches_scala
   using L = typename Fmt::Lane;
   constexpr std::size_t W = V::size();
   std::vector<L> values;
-  for (const uint64_t v : specials<Fmt>())
+  for (const uint64_t v : specials<Fmt>()) {
     values.push_back(static_cast<L>(v));
+  }
   std::mt19937_64 rng(0xc0ffee);
-  while (values.size() % W != 0 || values.size() < 4 * W)
+  while (values.size() % W != 0 || values.size() < 4 * W) {
     values.push_back(static_cast<L>(rng()) & ~Fmt::kInfinity);
-  for (const denorm::Policy policy : {kKeep, kFlush})
-    for (std::size_t rotate = 0; rotate < W; ++rotate)
+  }
+  for (const denorm::Policy policy : {kKeep, kFlush}) {
+    for (std::size_t rotate = 0; rotate < W; ++rotate) {
       for (std::size_t base = 0; base < values.size(); base += W) {
         alignas(64) std::array<L, W> a{};
         alignas(64) std::array<L, W> b{};
@@ -241,10 +250,13 @@ template <typename Fmt, typename Rel, typename V> void expect_simd_matches_scala
         const V va(a.data(), util::stdx::element_aligned);
         const V vb(b.data(), util::stdx::element_aligned);
         const uint64_t bits = util::simd_mask_to_bits(cmp::evaluate<Fmt, Rel>(va, vb, policy));
-        for (std::size_t i = 0; i < W; ++i)
+        for (std::size_t i = 0; i < W; ++i) {
           ASSERT_EQ(((bits >> i) & 1u) != 0, (cmp::evaluate<Fmt, Rel>(a[i], b[i], policy)))
               << "lane " << i << " a 0x" << std::hex << a[i] << " b 0x" << b[i];
+        }
       }
+    }
+  }
 }
 
 template <typename Fmt, typename V> void expect_every_simd_relation_matches_scalar() {

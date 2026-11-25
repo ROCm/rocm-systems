@@ -167,29 +167,31 @@ public:
   /// acquire a maintenance lease, enter an effect, or access backing/VM.
   void invalidate_range_after_external_write(uint64_t addr, uint32_t size, uint32_t vmid);
 
-  void initialize() override {
+  util::Result initialize(util::DiagnosticEmitter = {}) override {
     for (const std::unique_ptr<simdojo::Port> &port : ports()) {
       if (port->direction() == simdojo::PortDirection::IN && !port->recv_event()->has_handler()) {
         port->recv_event()->set_handler([this](simdojo::Tick, simdojo::Message *message) {
           simdojo::MessageHeader &header = message->header();
           auto *data = reinterpret_cast<uint8_t *>(message->payload());
           VmAccessOutcome outcome = VmAccessOutcome::Malformed;
-          if (header.op == simdojo::MessageOp::READ)
+          if (header.op == simdojo::MessageOp::READ) {
             outcome = read(header.addr, data, header.size_bytes, header.vmid);
-          else if (header.op == simdojo::MessageOp::WRITE)
+          } else if (header.op == simdojo::MessageOp::WRITE) {
             outcome = write(header.addr, data, header.size_bytes, header.vmid);
-          else if (header.op == simdojo::MessageOp::ATOMIC) {
+          } else if (header.op == simdojo::MessageOp::ATOMIC) {
             auto *mutation = reinterpret_cast<simdojo::MemoryAtomicMutation *>(message->payload());
             outcome = mutation != nullptr
                           ? atomic_modify(header.addr, header.size_bytes, *mutation, header.vmid)
                           : VmAccessOutcome::Malformed;
           }
-          if (header.completion_status != nullptr)
+          if (header.completion_status != nullptr) {
             *header.completion_status = message_status(outcome);
+          }
           header.op = simdojo::MessageOp::RESPONSE;
         });
       }
     }
+    return util::Result::success();
   }
 
   simdojo::Port *req_port() { return req_; }
@@ -204,18 +206,19 @@ public:
       simdojo::MessageHeader &header = message->header();
       auto *data = reinterpret_cast<uint8_t *>(message->payload());
       VmAccessOutcome outcome = VmAccessOutcome::Malformed;
-      if (header.op == simdojo::MessageOp::READ)
+      if (header.op == simdojo::MessageOp::READ) {
         outcome = read(header.addr, data, header.size_bytes, header.vmid);
-      else if (header.op == simdojo::MessageOp::WRITE)
+      } else if (header.op == simdojo::MessageOp::WRITE) {
         outcome = write(header.addr, data, header.size_bytes, header.vmid);
-      else if (header.op == simdojo::MessageOp::ATOMIC) {
+      } else if (header.op == simdojo::MessageOp::ATOMIC) {
         auto *mutation = reinterpret_cast<simdojo::MemoryAtomicMutation *>(message->payload());
         outcome = mutation != nullptr
                       ? atomic_modify(header.addr, header.size_bytes, *mutation, header.vmid)
                       : VmAccessOutcome::Malformed;
       }
-      if (header.completion_status != nullptr)
+      if (header.completion_status != nullptr) {
         *header.completion_status = message_status(outcome);
+      }
       header.op = simdojo::MessageOp::RESPONSE;
     });
     cpl_ports_.push_back(raw);

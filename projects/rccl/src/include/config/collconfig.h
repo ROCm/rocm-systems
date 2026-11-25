@@ -9,6 +9,7 @@
 
 #include "nccl.h"
 #include "nccl_common.h"
+#include "tuning_mask.h"
 #include <stdint.h>
 
 // Config option resolve and setting helper macro
@@ -50,7 +51,7 @@ bool ncclCollConfigHasAlgSelection(const ncclCollConfig_t* config);
 
 bool ncclCollConfigNeedAggIsolate(const ncclCollConfig_t* config);
 
-ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t func, uint64_t* outMask);
+ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t func, rcclTuningMask* outMask);
 
 // Resolve the effective per-call CTAPolicy from a per-call value, the comm-level policy, and whether
 // an NCCL_CTA_POLICY env override is present (it is folded into commPolicy at comm init). When the

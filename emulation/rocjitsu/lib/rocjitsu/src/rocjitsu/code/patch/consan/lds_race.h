@@ -19,7 +19,6 @@ class Instruction;
 namespace rocjitsu::consan {
 struct InputError;
 struct InputProgram;
-struct PreparedArtifact;
 
 /// @brief A decoder-qualified physical access; addresses remain runtime operands.
 struct NativeLdsAccess {
@@ -30,6 +29,7 @@ struct NativeLdsAccess {
   uint16_t immediate_bytes = 0;
   // Byte count set by decoding; zero is unspecified and cannot qualify a site.
   uint32_t width = 0;
+  LdsRangeRecipe lds_ranges{};
 };
 
 /// @brief Qualify LDS scope and select sites without owning binary/CFG machinery.
@@ -60,7 +60,7 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
 
 /// @brief Check decoded LDS multiplicity and original bytes independently of emission.
 [[nodiscard]] Result validate_lds_race_accesses(const InputProgram &program,
-                                                const PreparedArtifact &artifact,
+                                                const Manifest &manifest,
                                                 std::span<BasicBlock *const> blocks,
                                                 std::span<const uint8_t> prepared_text,
                                                 InputError &error);

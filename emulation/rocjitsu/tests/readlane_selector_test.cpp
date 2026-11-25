@@ -36,13 +36,15 @@ protected:
     decoder = Decoder::create(GetParam());
     wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(wf->vgpr_alloc().base, lane, 0xa5000000u + lane);
+    }
   }
 
   void TearDown() override {
-    if (wf)
+    if (wf) {
       wf->halt();
+    }
   }
 
   amdgpu::GpuMemory mem{"readlane_mem"};
@@ -69,8 +71,9 @@ TEST_P(ReadlaneSelectorTest, ReadlaneMasksInline64AndLiteralIndices) {
   wf->set_exec(0); // READLANE ignores EXEC, even for inactive source lanes.
   for (uint32_t selector : {192u, 255u}) {
     if (selector == 255 && GetParam() != rocjitsu::IsaFamily::Rdna3 &&
-        GetParam() != rocjitsu::IsaFamily::Rdna4)
+        GetParam() != rocjitsu::IsaFamily::Rdna4) {
       continue; // Literal lane indices are only qualified on these two targets.
+    }
     // v_readlane_b32 s4, v0, 64 / literal 95, followed by s_endpgm.
     std::array<uint32_t, 4> words{gfx9() ? 0xd2890004u : 0xd7600004u, 256u | (selector << 9), 95,
                                   0xbfb00000};
@@ -169,9 +172,10 @@ TEST_P(ReadlaneSelectorTest, WritelaneUsesVccSourceAndLaneIndexWithEmptyExec) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, lane),
                 lane == 5 ? (src == 106 ? 0xcafebabeu : 0xdeadbeefu) : 0xa5000000u + lane);
+    }
     EXPECT_EQ(wf->vcc(), initial);
     // v_writelane_b32 v0, 42, vcc_lo/hi. Each encoding uses one scalar source.
     const uint64_t index = wf->wf_size() + 5u;
@@ -180,8 +184,9 @@ TEST_P(ReadlaneSelectorTest, WritelaneUsesVccSourceAndLaneIndexWithEmptyExec) {
     inst.reset(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, lane), lane == 5 ? 42u : 0xa5000000u + lane);
+    }
     EXPECT_EQ(wf->vcc(), src == 106 ? index : index << 32);
     EXPECT_EQ(wf->exec(), 0u);
   }

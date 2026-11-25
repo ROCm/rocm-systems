@@ -28,17 +28,51 @@ struct sqlite_api_policy
     using database_t  = sqlite3*;
     using statement_t = sqlite3_stmt*;
 
-    static constexpr int result_ok   = SQLITE_OK;
-    static constexpr int result_row  = SQLITE_ROW;
-    static constexpr int result_done = SQLITE_DONE;
-    static constexpr int column_null = SQLITE_NULL;
+    static constexpr int result_ok        = SQLITE_OK;
+    static constexpr int result_row       = SQLITE_ROW;
+    static constexpr int result_done      = SQLITE_DONE;
+    static constexpr int result_interrupt = SQLITE_INTERRUPT;
+    static constexpr int column_null      = SQLITE_NULL;
 
     static int open(const char* path, database_t* out_db) noexcept
     {
-        return sqlite3_open(path, out_db);
+#if defined(PH_USE_NOMUTEX_OPTIMIZATION)
+        constexpr int flags =
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_NOMUTEX;
+#else
+        constexpr int flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+#endif
+        const int rc = sqlite3_open_v2(path, out_db, flags, nullptr);
+        // Several connections share one file, and a writer may still be
+        // closing it. Without a wait the next statement fails at once.
+        if(rc == SQLITE_OK && out_db != nullptr && *out_db != nullptr)
+        {
+            sqlite3_busy_timeout(*out_db, 5000);
+        }
+        return rc;
+    }
+
+    /** Opens an existing database without creating or writing it. */
+    static int open_readonly(const char* path, database_t* out_db) noexcept
+    {
+#if defined(PH_USE_NOMUTEX_OPTIMIZATION)
+        constexpr int flags = SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX;
+#else
+        constexpr int flags = SQLITE_OPEN_READONLY;
+#endif
+        return sqlite3_open_v2(path, out_db, flags, nullptr);
     }
 
     static int close(database_t db) noexcept { return sqlite3_close(db); }
+
+    /** Aborts a statement running on @p db. Safe to call from another thread. */
+    static void interrupt(database_t db) noexcept
+    {
+        if(db != nullptr)
+        {
+            sqlite3_interrupt(db);
+        }
+    }
 
     static int exec(database_t db, const char* sql) noexcept
     {

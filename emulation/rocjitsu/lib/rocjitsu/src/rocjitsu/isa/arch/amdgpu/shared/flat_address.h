@@ -58,29 +58,34 @@ inline constexpr bool flat_in_shared_aperture(uint64_t pointer, uint64_t base, u
 /// Pure address translation shared by execution and pre-execution wait planning.
 inline FlatAddress translate_flat_address(const Wavefront &wf, uint64_t address, unsigned lane,
                                           FlatPrivateLayout layout, int32_t segment_offset = 0) {
-  if (layout == FlatPrivateLayout::None)
+  if (layout == FlatPrivateLayout::None) {
     return {address + segment_offset};
+  }
   uint64_t offset;
   if (layout == FlatPrivateLayout::EncodedLane) {
-    if (!wf.scratch_lane_size())
+    if (!wf.scratch_lane_size()) {
       return {address + segment_offset};
+    }
     const unsigned shift = wf.wf_size() == 64 ? 51 : 52;
     const uint64_t mask = uint64_t{wf.wf_size() - 1} << shift;
     const uint64_t base = wf.scratch_base() & ~mask;
     const uint64_t without_lane = address & ~mask;
-    if (without_lane < base || without_lane - base > UINT32_MAX)
+    if (without_lane < base || without_lane - base > UINT32_MAX) {
       return {address + segment_offset};
+    }
     offset = without_lane - base;
     lane = (address & mask) >> shift;
   } else if (wf.flat_pointer32()) {
     const uint64_t base = wf.private_aperture_base();
-    if (!base || address < base || address > wf.private_aperture_limit())
+    if (!base || address < base || address > wf.private_aperture_limit()) {
       return {address + segment_offset};
+    }
     offset = address - base;
   } else {
     const uint32_t private_hi = wf.private_aperture_base() >> 32;
-    if (!private_hi || static_cast<uint32_t>(address >> 32) != private_hi)
+    if (!private_hi || static_cast<uint32_t>(address >> 32) != private_hi) {
       return {address + segment_offset};
+    }
     offset = static_cast<uint32_t>(address);
   }
   // The private swizzle takes the low 32-bit lane offset.
