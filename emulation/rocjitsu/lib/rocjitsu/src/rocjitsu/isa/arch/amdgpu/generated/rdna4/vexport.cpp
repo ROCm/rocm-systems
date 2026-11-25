@@ -33,14 +33,16 @@ ExportVexport::ExportVexport(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::EXPORT);
 }
 
 namespace detail {
 DecodeResult decodeExportVexport(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Vexport::validate_encoding(
       "export", reinterpret_cast<const Vexport::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ExportVexport>(opcode);
 }
 } // namespace detail

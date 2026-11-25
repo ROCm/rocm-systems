@@ -23,8 +23,9 @@ public:
       : ucli::Flag(std::move(info)), requirement_(std::move(requirement)) {}
   const std::string &value() const { return value_; }
   util::Result set_value(std::string value, util::DiagnosticEmitter diagnostic) {
-    if (value.empty())
+    if (value.empty()) {
       return diagnostic.emit() << requirement_;
+    }
     value_ = std::move(value);
     return util::Result::success();
   }
@@ -44,16 +45,18 @@ public:
       : ucli::Flag(std::move(info)), requirement_(std::move(requirement)) {}
   const std::vector<std::string> &values() const { return values_; }
   util::Result add_value(std::string value, util::DiagnosticEmitter diagnostic) {
-    if (value.empty())
+    if (value.empty()) {
       return diagnostic.emit() << requirement_;
+    }
     values_.push_back(std::move(value));
     return util::Result::success();
   }
   std::string format_value() const override {
     std::string text;
     for (const std::string &value : values_) {
-      if (!text.empty())
+      if (!text.empty()) {
         text += ",";
+      }
       text += value;
     }
     return text;
@@ -74,8 +77,9 @@ public:
       : ucli::Flag(std::move(info)), maximum_(maximum) {}
   std::optional<uint32_t> value() const { return value_; }
   util::Result set_value(std::optional<uint32_t> value, util::DiagnosticEmitter diagnostic) {
-    if (value && *value > maximum_)
+    if (value && *value > maximum_) {
       return diagnostic.emit() << "expected an unsigned integer at most " << maximum_;
+    }
     value_ = value;
     return util::Result::success();
   }
@@ -84,10 +88,12 @@ public:
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override {
     auto parsed = ucli::parse_uint(text, diagnostic);
-    if (parsed.failed())
+    if (parsed.failed()) {
       return util::Result::failure();
-    if (parsed.value() > maximum_)
+    }
+    if (parsed.value() > maximum_) {
       return diagnostic.emit() << "expected an unsigned integer at most " << maximum_;
+    }
     return set_value(static_cast<uint32_t>(parsed.value()), diagnostic);
   }
   std::optional<uint32_t> value_;
@@ -107,14 +113,16 @@ public:
   util::Result set_value(std::optional<config::WaitChecking> value,
                          util::DiagnosticEmitter diagnostic) {
     if (value && *value != config::WaitChecking::Off && *value != config::WaitChecking::On &&
-        *value != config::WaitChecking::All)
+        *value != config::WaitChecking::All) {
       return diagnostic.emit() << "requires on, off, or all";
+    }
     value_ = value;
     return util::Result::success();
   }
   std::string format_value() const override {
-    if (!value_)
+    if (!value_) {
       return "unset";
+    }
     switch (*value_) {
     case config::WaitChecking::Off:
       return "off";
@@ -129,8 +137,9 @@ public:
 private:
   util::Result parse_value(std::string_view text, util::DiagnosticEmitter diagnostic) override {
     const auto value = config::parse_wait_checking(text);
-    if (!value)
+    if (!value) {
       return diagnostic.emit() << "requires on, off, or all";
+    }
     return set_value(value, diagnostic);
   }
   std::optional<config::WaitChecking> value_;
@@ -209,8 +218,9 @@ struct LaunchFlags {
             .add_flags("Launch modes",
                        {daemon, attach, fabric_effect_trace, vfio_socket, vfio_ready_fd},
                        diagnostic)
-            .failed())
+            .failed()) {
       return util::Result::failure();
+    }
     return command.add_flags("Information", {check_vfio_user, version, help}, diagnostic);
   }
 };

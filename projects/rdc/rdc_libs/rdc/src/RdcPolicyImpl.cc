@@ -195,9 +195,14 @@ rdc_status_t RdcPolicyImpl::rdc_policy_register(rdc_gpu_group_t group_id,
                                                 rdc_policy_register_callback callback)
 
 {
-  rdc_status_t status = RDC_ST_NOT_FOUND;
-
   std::lock_guard<std::mutex> guard(policy_mutex_);
+
+  // A missing group returns RDC_ST_GROUP_NOT_FOUND.
+  rdc_group_info_t group_info;
+  rdc_status_t status = group_settings_->rdc_group_gpu_get_info(group_id, &group_info);
+  if (status != RDC_ST_OK) {
+    return status;
+  }
 
   auto run = callbacks_.find(group_id);
   if (run != callbacks_.end()) {

@@ -217,12 +217,13 @@ TEST(MathOutputControls, OverflowAndSignalingNan) {
       }
     }
     for (auto call : {rj_arith_v_fract_f32_w32, rj_arith_v_fract_f16_w32}) {
-      const bool half = call == rj_arith_v_fract_f16_w32;
-      a[0] = half ? 0x7c01 : 0x7f800001;
-      d[0] = 0;
-      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, 0, destination, source, &status),
-                0);
-      EXPECT_EQ(d[0], a[0]);
+      for (auto semantics : hardware_semantics()) {
+        const bool half = call == rj_arith_v_fract_f16_w32;
+        a[0] = half ? 0x7c01 : 0x7f800001;
+        d[0] = 0;
+        ASSERT_EQ(call(cpu | semantics, 1, 0, destination, source, &status), 0);
+        EXPECT_EQ(d[0], a[0]);
+      }
     }
     a[0] = 0x813c;
     d[0] = 0;
@@ -282,4 +283,84 @@ TEST(MathOutputControls, TrigDenormalScaling) {
       }
     }
   }
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathTruncF16W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, true>(rj_arith_v_trunc_f16_w32_gfx942, 0);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathTruncF16W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, true>(rj_arith_v_trunc_f16_w64_gfx942, 0);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathTruncF32W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, false>(rj_arith_v_trunc_f32_w32_gfx942, 0);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathTruncF32W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, false>(rj_arith_v_trunc_f32_w64_gfx942, 0);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathCeilF16W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, true>(rj_arith_v_ceil_f16_w32_gfx942, 1);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathCeilF16W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, true>(rj_arith_v_ceil_f16_w64_gfx942, 1);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathCeilF32W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, false>(rj_arith_v_ceil_f32_w32_gfx942, 1);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathCeilF32W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, false>(rj_arith_v_ceil_f32_w64_gfx942, 1);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathRndneF16W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, true>(rj_arith_v_rndne_f16_w32_gfx942, 2);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathRndneF16W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, true>(rj_arith_v_rndne_f16_w64_gfx942, 2);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathRndneF32W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, false>(rj_arith_v_rndne_f32_w32_gfx942, 2);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathRndneF32W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, false>(rj_arith_v_rndne_f32_w64_gfx942, 2);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathFloorF16W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, true>(rj_arith_v_floor_f16_w32_gfx942, 3);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathFloorF16W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, true>(rj_arith_v_floor_f16_w64_gfx942, 3);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathFloorF32W32Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<32, false>(rj_arith_v_floor_f32_w32_gfx942, 3);
+}
+
+// Share the arithmetic contract while checking the CDNA NaN-policy difference.
+TEST(MathFloorF32W64Gfx942, Arithmetic) {
+  rocjitsu::arith::test::check_cdna_integral_unary<64, false>(rj_arith_v_floor_f32_w64_gfx942, 3);
 }

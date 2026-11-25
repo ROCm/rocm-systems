@@ -50,6 +50,7 @@ from rocprof_compute_soc.soc_base import iter_analysis_config_metrics
 from utils import file_io, parser, schema
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.metrics.expression import build_metric_value_string
+from utils.utils_analysis import pass_tables_on_rows
 from utils.utils_common import canonical_config_arch
 
 # Changes at least this large go in the delta table.
@@ -520,9 +521,7 @@ def compute_dispatch_stats_for_workload(
         workload.roofline_peaks,
         filtered,
         debug=False,
-        pass_tables=[
-            table.loc[filtered.index] for table in workload.pass_tables.values()
-        ],
+        pass_tables=pass_tables_on_rows(workload.pass_tables, filtered),
     )
     return (
         _read_stat_column(arch_config, "Median"),

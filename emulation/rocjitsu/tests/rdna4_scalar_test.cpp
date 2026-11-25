@@ -4,17 +4,19 @@
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <gtest/gtest.h>
+#include <string_view>
 
 namespace rocjitsu {
 namespace {
 class ScalarExecution : public ::testing::Test {
 protected:
-  void initialize(rj_code_arch_t arch) {
+  void initialize(rocjitsu::IsaFamily arch) {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 2;
@@ -44,26 +46,30 @@ protected:
 
 class Rdna4Scalar : public ScalarExecution {
 protected:
-  void SetUp() override { initialize(ROCJITSU_CODE_ARCH_RDNA4); }
+  void SetUp() override { initialize(rocjitsu::IsaFamily::Rdna4); }
 
   void check_workgroup_barrier(std::span<const uint32_t> code, std::array<uint32_t, 2> expected) {
     constexpr uint64_t pc = 0x1000;
-    for (size_t i = 0; i < code.size(); ++i)
+    for (size_t i = 0; i < code.size(); ++i) {
       memory.write32(pc + i * 4, code[i]);
+    }
     cu->begin_workgroup(0, 0, 2);
     wave->pc = pc;
     auto *peer = cu->dispatch_wf(0, pc, 106, 16);
     ASSERT_NE(peer, nullptr);
     const std::array waves{wave, peer};
     std::array<uint32_t, 2> results{0xffffffffu, 0xffffffffu};
-    for (auto *member : waves)
+    for (auto *member : waves) {
       cu->write_sgpr(member->sgpr_alloc().base, 0xffffffffu);
+    }
     for (unsigned tick = 0; tick < 64 && !cu->is_idle(); ++tick) {
       cu->step();
       // Wave retirement releases and clears its registers. Capture s0 at ENDPGM.
-      for (size_t i = 0; i < waves.size(); ++i)
-        if (!waves[i]->is_halted() && waves[i]->pc == pc + code.size_bytes() - sizeof(uint32_t))
+      for (size_t i = 0; i < waves.size(); ++i) {
+        if (!waves[i]->is_halted() && waves[i]->pc == pc + code.size_bytes() - sizeof(uint32_t)) {
           results[i] = cu->read_sgpr(waves[i]->sgpr_alloc().base);
+        }
+      }
     }
     EXPECT_TRUE(wave->is_halted());
     EXPECT_TRUE(peer->is_halted());
@@ -74,21 +80,23 @@ protected:
 };
 
 class ScalarFloatingPoint : public ScalarExecution,
-                            public ::testing::WithParamInterface<rj_code_arch_t> {
+                            public ::testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override { initialize(GetParam()); }
 
   void set_mode(uint32_t mode) {
     // GFX11.5 has a selectable IEEE arithmetic mode. GFX12 uses IEEE NaN propagation.
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
       mode |= amdgpu::Wavefront::IEEE_BIT;
+    }
     wave->set_mode_raw(mode);
   }
 };
 
 // Expected bit patterns were measured on gfx1201. Exercise the shared GFX11.5 implementation too.
 INSTANTIATE_TEST_SUITE_P(Architectures, ScalarFloatingPoint,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4));
 
 TEST_P(ScalarFloatingPoint, UnsignedConversionUsesAll32BitsAndFlagsNegativeInputs) {
   struct Case {
@@ -210,6 +218,55 @@ TEST_F(Rdna4Scalar, ScalarConversionExceptionMasksMatchGfx1201) {
   ASSERT_NO_FATAL_FAILURE(execute(*wave, 0xbe826800)); // s_cvt_f16_f32 s2,s0
   EXPECT_EQ(cu->read_sgpr(base + 2), 0x7c00u);
   EXPECT_EQ(wave->trapsts(), 0x28u);
+}
+
+// gfx1201 (R9700, 2026-11-18) judges UNDERFLOW after rounding with an unbounded exponent: a
+// product or conversion stored as the minimum normal still underflows when the unbounded
+// rounding stays below it, in the scalar and vector ALUs alike. The upward-rounded
+// conversion reaches 2^-14 and raises only INEXACT.
+TEST_F(Rdna4Scalar, UnderflowFollowsUnboundedExponentRounding) {
+  const auto base = wave->sgpr_alloc().base;
+  struct Case {
+    const char *mnemonic;
+    uint32_t word, mode, a, b, expected, causes;
+  };
+  constexpr std::array cases{
+      Case{"s_mul_f32", 0xa2020100, 0xf0, 0x3f7fffff, 0x00800000, 0x00800000, 0x30},
+      Case{"s_mul_f32", 0xa2020100, 0xf5, 0x3f7fffff, 0x00800000, 0x00800000, 0x30},
+      Case{"s_mul_f32", 0xa2020100, 0xfa, 0x3f7fffff, 0x00800000, 0x007fffff, 0x30},
+      Case{"s_mul_f32", 0xa2020100, 0xf0, 0x00800001, 0x3f7fffff, 0x00800000, 0x20},
+      Case{"s_cvt_f16_f32", 0xbe826800, 0xf0, 0x387fef00, 0, 0x400, 0x30},
+      Case{"s_cvt_f16_f32", 0xbe826800, 0xf5, 0x387fef00, 0, 0x400, 0x20},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(::testing::Message() << test.mnemonic << " mode 0x" << std::hex << test.mode);
+    wave->set_mode_raw(test.mode);
+    wave->set_trapsts(0);
+    cu->write_sgpr(base, test.a);
+    cu->write_sgpr(base + 1, test.b);
+    cu->write_sgpr(base + 2, 0xdeadbeef);
+    ASSERT_NO_FATAL_FAILURE(execute(*wave, test.word));
+    EXPECT_EQ(cu->read_sgpr(base + 2), test.expected);
+    EXPECT_EQ(wave->trapsts(), test.causes);
+  }
+
+  // V_MUL_F32 v2, v0, v1 on one lane: the same rule, through the vector Compatibility path.
+  const auto vb = wave->vgpr_alloc().base;
+  wave->set_exec(1u << 3);
+  for (const auto &test : cases) {
+    if (std::string_view(test.mnemonic) != "s_mul_f32") {
+      continue;
+    }
+    SCOPED_TRACE(::testing::Message() << "v_mul_f32 mode 0x" << std::hex << test.mode);
+    wave->set_mode_raw(test.mode);
+    wave->set_trapsts(0);
+    cu->write_vgpr(vb, 3, test.a);
+    cu->write_vgpr(vb + 1, 3, test.b);
+    cu->write_vgpr(vb + 2, 3, 0xdeadbeef);
+    ASSERT_NO_FATAL_FAILURE(execute(*wave, 0x10040300));
+    EXPECT_EQ(cu->read_vgpr(vb + 2, 3), test.expected);
+    EXPECT_EQ(wave->trapsts(), test.causes);
+  }
 }
 
 TEST_F(Rdna4Scalar, Wave64NarrowMaskUpdatesPreserveHighWordAndTestLowWord) {

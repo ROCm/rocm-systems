@@ -1239,6 +1239,9 @@ contract:
   Contract_DriverArray_HipArrayGetDescriptor_InvalidArgs_AreRejected:
     <<: *level_0
     tags: [driver_array, image, P0]
+  Contract_DriverArray_HipArrayGetPlane_InvalidArgs_AreRejected:
+    <<: *level_0
+    tags: [driver_array, image, P0]
   Contract_DriverArray_HipArray3DCreate_Default_ReturnsUsableArray:
     <<: *level_0
     tags: [driver_array, image, P0]

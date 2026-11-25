@@ -678,6 +678,105 @@ fn svm_attributes_preserve_the_flexible_array_contract() {
 }
 
 #[test]
+fn svm_attributes_retry_transient_eagain() {
+    for operation in [uapi::SVM_OP_SET_ATTR, uapi::SVM_OP_GET_ATTR] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let kfd = endpoint(Arc::new(move |call| {
+            let Call::Svm(args, attributes) = call else {
+                panic!("unexpected SVM retry call")
+            };
+            assert_eq!(args.start_address, 0x10000);
+            assert_eq!(args.size, 4096);
+            assert_eq!(args.operation, operation);
+            assert_eq!(args.attribute_count, 1);
+            assert_eq!(
+                attributes[0].attribute_type,
+                uapi::SVM_ATTR_PREFETCH_LOCATION
+            );
+            assert_eq!(attributes[0].value, 42);
+            if observed.fetch_add(1, Ordering::Relaxed) < 2 {
+                Err(io::Error::from_raw_os_error(errno::EAGAIN))
+            } else {
+                Ok(())
+            }
+        }));
+        let mut attributes = [uapi::SvmAttribute {
+            attribute_type: uapi::SVM_ATTR_PREFETCH_LOCATION,
+            value: 42,
+        }];
+        kfd.svm_attributes(0x10000, 4096, operation, &mut attributes)
+            .unwrap();
+        assert_eq!(calls.load(Ordering::Relaxed), 3);
+    }
+}
+
+#[test]
+fn checked_prefetch_reports_incomplete_placement_without_retry() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let observed = calls.clone();
+    let kfd = endpoint(Arc::new(move |call| {
+        let Call::Svm(args, _) = call else {
+            panic!("unexpected checked prefetch call")
+        };
+        assert_eq!(args.operation, uapi::SVM_OP_PREFETCH_CHECKED);
+        assert_eq!(observed.fetch_add(1, Ordering::Relaxed), 0);
+        Err(io::Error::from_raw_os_error(errno::EAGAIN))
+    }));
+    let mut attributes = [uapi::SvmAttribute {
+        attribute_type: uapi::SVM_ATTR_PREFETCH_LOCATION,
+        value: 42,
+    }];
+    assert_eq!(
+        kfd.svm_attributes(
+            0x10000,
+            4096,
+            uapi::SVM_OP_PREFETCH_CHECKED,
+            &mut attributes
+        )
+        .unwrap_err()
+        .raw_os_error(),
+        Some(errno::EAGAIN)
+    );
+    assert_eq!(calls.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn svm_retries_preserve_outputs_and_return_interruptions_or_other_errors() {
+    for failure in [errno::EINTR, errno::EIO, errno::EBUSY] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let observed = calls.clone();
+        let kfd = endpoint(Arc::new(move |call| {
+            let Call::Svm(args, attributes) = call else {
+                panic!("unexpected SVM retry call")
+            };
+            assert_eq!(args.operation, uapi::SVM_OP_GET_ATTR);
+            let attempt = observed.fetch_add(1, Ordering::Relaxed);
+            assert!(attempt < 2, "only EAGAIN may be retried");
+            assert_eq!(attributes[0].value, u32::try_from(attempt).unwrap());
+            attributes[0].value += 1;
+            Err(io::Error::from_raw_os_error(if attempt == 0 {
+                errno::EAGAIN
+            } else {
+                failure
+            }))
+        }));
+        let mut attributes = [uapi::SvmAttribute {
+            attribute_type: uapi::SVM_ATTR_SET_FLAGS,
+            value: 0,
+        }];
+        assert_eq!(
+            kfd.svm_attributes(0x10000, 4096, uapi::SVM_OP_GET_ATTR, &mut attributes)
+                .unwrap_err()
+                .raw_os_error(),
+            Some(failure)
+        );
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        assert_eq!(attributes[0].value, 2);
+    }
+}
+
+#[test]
 fn svm_attributes_reject_invalid_ranges_before_ioctl() {
     let kfd = endpoint(Arc::new(|_| panic!("invalid SVM request reached KFD")));
     let mut attribute = [uapi::SvmAttribute {
@@ -1234,4 +1333,50 @@ fn ambiguous_runtime_enable_requires_cleanup_without_replaying_enable() {
     kfd.close().unwrap();
     assert!(kfd.file.is_none());
     assert_eq!(*modes.lock().unwrap(), [1, 0]);
+}
+
+#[test]
+fn core_runtime_info_uses_effective_registration_and_rejects_uncertain_enablement() {
+    for failure in [
+        None,
+        Some(errno::EINTR),
+        Some(errno::EIO),
+        Some(errno::EBUSY),
+    ] {
+        let kfd = endpoint(Arc::new(move |call| match call {
+            Call::RuntimeEnable(args) if args.mode_mask != 0 => {
+                failure.map_or(Ok(()), |code| Err(io::Error::from_raw_os_error(code)))
+            }
+            Call::RuntimeEnable(_) => Ok(()),
+            _ => panic!("unexpected core runtime ioctl"),
+        }));
+        {
+            let mut runtime = kfd.runtime_guard().unwrap();
+            kfd.configure_debugger_locked(
+                &mut runtime,
+                Some(DebuggerRegistration {
+                    address: 0x4000,
+                    setup_ttmp: true,
+                    mode: DebuggerRegistrationMode::Prefer,
+                }),
+            )
+            .unwrap();
+        }
+        assert_eq!(kfd.core_runtime_info().unwrap().runtime_state, 0);
+        assert_eq!(kfd.core_runtime_info().unwrap().r_debug, 0);
+        let _ = kfd.enable_runtime();
+        match failure {
+            None => {
+                let info = kfd.core_runtime_info().unwrap();
+                assert_eq!(
+                    (info.runtime_state, info.r_debug, info.ttmp_setup),
+                    (1, 0x4000, 1)
+                );
+            }
+            Some(errno::EBUSY) => assert_eq!(kfd.core_runtime_info().unwrap().runtime_state, 0),
+            Some(_) => assert!(kfd.core_runtime_info().is_err()),
+        }
+        kfd.disable_runtime().unwrap();
+        assert_eq!(kfd.core_runtime_info().unwrap().r_debug, 0);
+    }
 }

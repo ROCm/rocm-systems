@@ -14,7 +14,6 @@ import pytest
 from amdisa.codegen.execute import float_fract, float_ldexp
 from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS, lower_sema_block
 from amdisa.codegen.execute.simd_codegen import (
-    SIMD_VOP1_UNARY,
     local_coverage_probe,
     simd_probe_line,
 )
@@ -25,12 +24,9 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_bitop3,
     gen_vector_cvt_pk,
     gen_vector_div_fixup,
-    gen_vector_mad_32_16,
     gen_vector_movrel,
-    gen_vector_mullit,
     gen_vector_perm_pk16,
     gen_vector_permlane,
-    gen_vector_qsad,
     gen_vector_sat_pack,
     gen_vector_swaprel,
     gen_vector_trig_preop,
@@ -47,14 +43,10 @@ from amdisa.semantics import derive_semantics
 
 def test_cls_i32_codegen():
     semantic = _INLINE_UNARY_OPS['cls_i32']
-    simd = SIMD_VOP1_UNARY['v_cls_i32_vop1'][2]
-
-    for emitted in (semantic, simd):
-        assert '0xFFFFFFFFu' in emitted or 'static_cast<uint32_t>(-1)' in emitted
-        assert 'countl_zero' in emitted or 'clz_u32_simd' in emitted
-        assert 'countl_zero(abs_val)) - 1' not in emitted
-        assert 'countl_zero(a)) - 1' not in emitted
-        assert 'clz_u32_simd(u) - 1' not in emitted
+    assert '0xFFFFFFFFu' in semantic or 'static_cast<uint32_t>(-1)' in semantic
+    assert 'countl_zero' in semantic
+    assert 'countl_zero(abs_val)) - 1' not in semantic
+    assert 'countl_zero(a)) - 1' not in semantic
 
 
 def test_permlane_uses_opsel_fi_and_bound_ctrl_bits():
@@ -132,23 +124,13 @@ def test_saturating_pack_vop3_writes_the_opsel_destination_half():
     assert 'write_lane(vdst, lane, result)' in i4
 
 
-def test_perm_and_qsad_codegen_cover_multiword_results():
+def test_perm_codegen_covers_multiword_results():
     perm = gen_vector_perm_pk16(['vdst'], ['src0', 'src1', 'src2'], 'b6', True)
-    qsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'sad_pk_u16', True, True)
-    mqsad = gen_vector_qsad(['vdst'], ['src0', 'src1', 'src2'], 'msad_u32', True, True)
-
     assert 'uint32_t packed[3]' in perm
     assert 'source_bit = index * 6u' in perm
     assert 'Operand dst_word = vdst;' in perm
     assert 'dst_word.encoding_value_' in perm
     assert 'read_lane64(src1, lane)' in perm
-    assert '(window + byte) * 8' in qsad
-    assert 'write_lane64(vdst, lane, packed_result)' in qsad
-    assert 'inst_.clamp ? std::min(value, 0xffffu) : (value & 0xffffu)' in qsad
-    assert 'if (b != 0)' in mqsad
-    assert 'accum[window] = amdgpu::RegisterAccess(wf).read_lane' in mqsad
-    assert 'if (std::optional<uint64_t> constant = src2.const_value())' in mqsad
-    assert 'vop3_integer_add<uint32_t>(accum[window], sum, inst_.clamp)' in mqsad
 
 
 @pytest.mark.parametrize(
@@ -156,7 +138,6 @@ def test_perm_and_qsad_codegen_cover_multiword_results():
     [
         (gen_vector_movrel, (['vdst'], ['src0'], 'unknown')),
         (gen_vector_perm_pk16, (['vdst'], ['src0', 'src1', 'src2'], 'unknown', True)),
-        (gen_vector_qsad, (['vdst'], ['src0', 'src1', 'src2'], 'unknown', True)),
     ],
 )
 def test_unsupported_vector_special_operations_fail_during_generation(generator, args):
@@ -164,31 +145,8 @@ def test_unsupported_vector_special_operations_fail_during_generation(generator,
         generator(*args)
 
 
-def test_mullit_and_trig_preop_preserve_special_fp_rules():
-    mullit = gen_vector_mullit(
-        ['vdst'], ['src0', 'src1', 'src2'], is_vop3=True, has_abs=True
-    )
+def test_trig_preop_preserves_special_fp_rules():
     trig = gen_vector_trig_preop(['vdst'], ['src0', 'src1'], is_vop3=True, has_abs=True)
-
-    # ABS/NEG on the raw bits, then the MODE-aware helper, then OMOD and CLAMP
-    # on the result bits. The helper owns input flushing and output rounding.
-    for i in range(3):
-        assert (
-            f'amdgpu::source_modifier::apply<amdgpu::fp_format::F32>('
-            f'amdgpu::RegisterAccess(wf).read_lane(src{i}, lane), {i}, inst_.abs, '
-            'inst_.neg)'
-        ) in mullit
-    assert (
-        'amdgpu::output_modifier_policy<amdgpu::fp_format::F32>'
-        '(wf, inst_.omod, inst_.clamp)'
-    ) in mullit
-    assert (
-        'amdgpu::output_modifier::apply<amdgpu::fp_format::F32>('
-        'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
-        'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(), '
-        'output_policy.omod != 0), output_policy)'
-    ) in mullit
-    assert 'std::isnan' not in mullit
     assert '0xA2F983u' in trig
     assert 'kTwoOverPiChunks' in trig
     assert 'kChunkBits = 24u' in trig
@@ -656,18 +614,6 @@ def test_gfx1250_bitop3_b16_uses_true16_helpers():
     assert 'write_vop3_true16_dst(vdst, wf, lane, inst_.opsel, result, true)' in body
 
 
-def test_vop3_mad_32_16_uses_true16_sources_for_src0_src1_only():
-    body = gen_vector_mad_32_16(
-        ['vdst'], ['src0', 'src1', 'src2'], 'u32', is_vop3=True, opsel='inst_.opsel'
-    )
-
-    assert 'uint32_t opsel = inst_.opsel;' in body
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in body
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in body
-    assert 'read_vop3_true16_src(src2' not in body
-    assert 'uint32_t s2 = amdgpu::RegisterAccess(wf).read_lane(src2, lane);' in body
-
-
 def test_vop3_div_fixup_f16_uses_true16_sources_and_destination():
     body = gen_vector_div_fixup(['vdst'], ['src0', 'src1', 'src2'], 'f16', is_vop3=True)
 
@@ -738,12 +684,6 @@ def test_pknorm_f16_spelling_matches_pk_norm(op):
 
 
 def test_true16_special_vop3_simd_routes_use_true16_glue():
-    assert simd_probe_line('v_mad_u32_u16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01'
-    )
-    assert simd_probe_line('v_mad_i32_i16_vop3').startswith(
-        '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01'
-    )
     assert simd_probe_line('v_pack_b32_f16_vop3').startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC'
     )
@@ -809,33 +749,6 @@ def test_packed_integer_vop3_modifiers_precede_conversion(op, has_abs):
         )
         assert modifiers in cpp
         assert cpp.index(modifiers) < cpp.index(f'amdgpu::cvt_{op}(f0)')
-
-
-@pytest.mark.parametrize('name', ['v_cvt_i32_f64', 'v_cvt_u32_f64'])
-def test_f64_to_integer_simd_defers_source_modifiers_to_scalar(name):
-    vop3 = simd_probe_line(f'{name}_vop3')
-    # The glue carries no modifiers, so a modified encoding runs the scalar body.
-    assert vop3.startswith('  if (!inst.inst_.abs && !inst.inst_.neg) {\n')
-    assert '  ROCJITSU_TRY_SIMD_CVT_F64_TO_B32(' in vop3
-    assert 'apply_vop3_src_mod_f64' not in vop3
-    assert 'inst_.abs' not in simd_probe_line(f'{name}_vop1')
-
-
-@pytest.mark.parametrize(
-    ('name', 'operation'),
-    [
-        ('v_cvt_floor_i32_f32', 'FloorI32'),
-        ('v_cvt_flr_i32_f32', 'FloorI32'),
-        ('v_cvt_nearest_i32_f32', 'NearestI32'),
-        ('v_cvt_rpi_i32_f32', 'NearestI32'),
-    ],
-)
-def test_floor_nearest_simd_uses_shared_raw_bit_conversion(name, operation):
-    # Both forms pass the scalar body's FloorI32/NearestI32 stage object; for
-    # VOP3 it holds ABS/NEG, so a modified encoding stays on the SIMD path.
-    probe = '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
-    assert simd_probe_line(f'{name}_vop1') == probe
-    assert simd_probe_line(f'{name}_vop3') == probe
 
 
 @pytest.mark.parametrize('dtype', ['f32', 'f16'])

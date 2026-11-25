@@ -21,20 +21,24 @@ bool mimg_has_status(const MimgMachineInst *inst, bool sampler) {
   // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
   // can still return status for samplers. Both share one DWORD.
   bool status = false;
-  if constexpr (requires { inst->tfe; })
+  if constexpr (requires { inst->tfe; }) {
     status = inst->tfe && inst->dmask;
-  if constexpr (requires { inst->lwe; })
+  }
+  if constexpr (requires { inst->lwe; }) {
     status = status || (sampler && inst->lwe);
+  }
   return status;
 }
 template <typename MimgMachineInst>
 uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4, bool d16_allowed,
                          bool status_allowed, bool sampler) {
   uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
-  if (d16_allowed && inst->d16)
+  if (d16_allowed && inst->d16) {
     words = (words + 1) / 2;
-  if (status_allowed && mimg_has_status(inst, sampler))
+  }
+  if (status_allowed && mimg_has_status(inst, sampler)) {
     ++words;
+  }
   return words * 32;
 }
 } // namespace
@@ -52,11 +56,14 @@ ImageLoadVimage::ImageLoadVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -76,8 +83,9 @@ void ImageLoadVimage::append_src_operand(std::string &out, uint8_t operand_index
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -87,23 +95,27 @@ void ImageLoadVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageLoadVimage::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -116,8 +128,9 @@ DecodeResult decodeImageLoadVimage(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_load", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadVimage>(opcode);
 }
 } // namespace detail
@@ -135,11 +148,14 @@ ImageLoadMipVimage::ImageLoadMipVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadMipVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -160,8 +176,9 @@ void ImageLoadMipVimage::append_src_operand(std::string &out, uint8_t operand_in
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -172,25 +189,29 @@ void ImageLoadMipVimage::implicit_uses(RegisterSet &uses) const {
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageLoadMipVimage::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count =
           (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                            : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -203,8 +224,9 @@ DecodeResult decodeImageLoadMipVimage(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_load_mip", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMipVimage>(opcode);
 }
 } // namespace detail
@@ -222,11 +244,14 @@ ImageLoadPckVimage::ImageLoadPckVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadPckVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -246,8 +271,9 @@ void ImageLoadPckVimage::append_src_operand(std::string &out, uint8_t operand_in
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -257,23 +283,27 @@ void ImageLoadPckVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageLoadPckVimage::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -286,8 +316,9 @@ DecodeResult decodeImageLoadPckVimage(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_load_pck", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadPckVimage>(opcode);
 }
 } // namespace detail
@@ -305,11 +336,14 @@ ImageLoadPckSgnVimage::ImageLoadPckSgnVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadPckSgnVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -329,8 +363,9 @@ void ImageLoadPckSgnVimage::append_src_operand(std::string &out, uint8_t operand
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -340,23 +375,27 @@ void ImageLoadPckSgnVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageLoadPckSgnVimage::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -369,8 +408,9 @@ DecodeResult decodeImageLoadPckSgnVimage(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_load_pck_sgn", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadPckSgnVimage>(opcode);
 }
 } // namespace detail
@@ -388,11 +428,14 @@ ImageLoadMipPckVimage::ImageLoadMipPckVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadMipPckVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -413,8 +456,9 @@ void ImageLoadMipPckVimage::append_src_operand(std::string &out, uint8_t operand
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -425,25 +469,29 @@ void ImageLoadMipPckVimage::implicit_uses(RegisterSet &uses) const {
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageLoadMipPckVimage::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count =
           (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                            : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -456,8 +504,9 @@ DecodeResult decodeImageLoadMipPckVimage(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_load_mip_pck", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMipPckVimage>(opcode);
 }
 } // namespace detail
@@ -475,11 +524,14 @@ ImageLoadMipPckSgnVimage::ImageLoadMipPckSgnVimage(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false))
+  if (mimg_has_status(&inst_, false)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LOADCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_LOAD_MIP_PCK_SGN);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Load);
 }
 
 bool ImageLoadMipPckSgnVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -500,8 +552,9 @@ void ImageLoadMipPckSgnVimage::append_src_operand(std::string &out, uint8_t oper
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -512,25 +565,29 @@ void ImageLoadMipPckSgnVimage::implicit_uses(RegisterSet &uses) const {
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
   implicit_preservation_uses(uses);
 }
 
 bool ImageLoadMipPckSgnVimage::implicit_preservation_uses(RegisterSet &preservation_uses) const {
   const uint32_t components = amdgpu::image_result_components(inst_.dmask, true);
-  if (inst_.d16 && (components & 1u))
+  if (inst_.d16 && (components & 1u)) {
     if (auto r = vdata.to_register_ref()) {
       const RegisterRef preserved{r->cls, static_cast<uint16_t>(r->index + components / 2), 1};
       const auto registers = amdgpu::gfx12_image_address_registers(inst_);
       const uint32_t count =
           (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                            : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-      for (uint32_t index = 0; index < count; ++index)
-        if (registers[index] == preserved.index)
+      for (uint32_t index = 0; index < count; ++index) {
+        if (registers[index] == preserved.index) {
           return true;
+        }
+      }
       preservation_uses.expand(preserved);
     }
+  }
   return true;
 }
 
@@ -543,8 +600,9 @@ DecodeResult decodeImageLoadMipPckSgnVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_load_mip_pck_sgn", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageLoadMipPckSgnVimage>(opcode);
 }
 } // namespace detail
@@ -565,6 +623,8 @@ ImageStoreVimage::ImageStoreVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 bool ImageStoreVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -584,8 +644,9 @@ void ImageStoreVimage::append_src_operand(std::string &out, uint8_t operand_inde
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -595,8 +656,9 @@ void ImageStoreVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStoreVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -608,8 +670,9 @@ DecodeResult decodeImageStoreVimage(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_store", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStoreVimage>(opcode);
 }
 } // namespace detail
@@ -630,6 +693,8 @@ ImageStoreMipVimage::ImageStoreMipVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 bool ImageStoreMipVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -650,8 +715,9 @@ void ImageStoreMipVimage::append_src_operand(std::string &out, uint8_t operand_i
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -662,8 +728,9 @@ void ImageStoreMipVimage::implicit_uses(RegisterSet &uses) const {
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStoreMipVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -675,8 +742,9 @@ DecodeResult decodeImageStoreMipVimage(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_store_mip", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStoreMipVimage>(opcode);
 }
 } // namespace detail
@@ -697,6 +765,8 @@ ImageStorePckVimage::ImageStorePckVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 bool ImageStorePckVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -716,8 +786,9 @@ void ImageStorePckVimage::append_src_operand(std::string &out, uint8_t operand_i
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -727,8 +798,9 @@ void ImageStorePckVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStorePckVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -740,8 +812,9 @@ DecodeResult decodeImageStorePckVimage(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_store_pck", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStorePckVimage>(opcode);
 }
 } // namespace detail
@@ -762,6 +835,8 @@ ImageStoreMipPckVimage::ImageStoreMipPckVimage(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::STORECNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_STORE_MIP_PCK);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Store);
 }
 
 bool ImageStoreMipPckVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -782,8 +857,9 @@ void ImageStoreMipPckVimage::append_src_operand(std::string &out, uint8_t operan
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -794,8 +870,9 @@ void ImageStoreMipPckVimage::implicit_uses(RegisterSet &uses) const {
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = (0u + (inst_.a16 ? (amdgpu::image_coordinate_count(inst_.dim) + 1u + 1) / 2
                                           : amdgpu::image_coordinate_count(inst_.dim) + 1u));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageStoreMipPckVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -807,8 +884,9 @@ DecodeResult decodeImageStoreMipPckVimage(const MachineInst *opcode,
                                           const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_store_mip_pck", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageStoreMipPckVimage>(opcode);
 }
 } // namespace detail
@@ -832,19 +910,23 @@ ImageAtomicSwapVimage::ImageAtomicSwapVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicSwapVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -864,8 +946,9 @@ void ImageAtomicSwapVimage::append_src_operand(std::string &out, uint8_t operand
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -875,8 +958,9 @@ void ImageAtomicSwapVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicSwapVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -888,8 +972,9 @@ DecodeResult decodeImageAtomicSwapVimage(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_swap", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSwapVimage>(opcode);
 }
 } // namespace detail
@@ -913,19 +998,23 @@ ImageAtomicCmpswapVimage::ImageAtomicCmpswapVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_CMPSWAP);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicCmpswapVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -945,8 +1034,9 @@ void ImageAtomicCmpswapVimage::append_src_operand(std::string &out, uint8_t oper
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -956,8 +1046,9 @@ void ImageAtomicCmpswapVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicCmpswapVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -969,8 +1060,9 @@ DecodeResult decodeImageAtomicCmpswapVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_cmpswap", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicCmpswapVimage>(opcode);
 }
 } // namespace detail
@@ -994,19 +1086,23 @@ ImageAtomicAddUintVimage::ImageAtomicAddUintVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_ADD_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicAddUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1026,8 +1122,9 @@ void ImageAtomicAddUintVimage::append_src_operand(std::string &out, uint8_t oper
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1037,8 +1134,9 @@ void ImageAtomicAddUintVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicAddUintVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1050,8 +1148,9 @@ DecodeResult decodeImageAtomicAddUintVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_add_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicAddUintVimage>(opcode);
 }
 } // namespace detail
@@ -1075,19 +1174,23 @@ ImageAtomicSubUintVimage::ImageAtomicSubUintVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_SUB_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicSubUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1107,8 +1210,9 @@ void ImageAtomicSubUintVimage::append_src_operand(std::string &out, uint8_t oper
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1118,8 +1222,9 @@ void ImageAtomicSubUintVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicSubUintVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1131,8 +1236,9 @@ DecodeResult decodeImageAtomicSubUintVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_sub_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicSubUintVimage>(opcode);
 }
 } // namespace detail
@@ -1156,19 +1262,23 @@ ImageAtomicMinIntVimage::ImageAtomicMinIntVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MIN_INT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMinIntVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1188,8 +1298,9 @@ void ImageAtomicMinIntVimage::append_src_operand(std::string &out, uint8_t opera
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1199,8 +1310,9 @@ void ImageAtomicMinIntVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicMinIntVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1212,8 +1324,9 @@ DecodeResult decodeImageAtomicMinIntVimage(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_min_int", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicMinIntVimage>(opcode);
 }
 } // namespace detail
@@ -1237,19 +1350,23 @@ ImageAtomicMinUintVimage::ImageAtomicMinUintVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MIN_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMinUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1269,8 +1386,9 @@ void ImageAtomicMinUintVimage::append_src_operand(std::string &out, uint8_t oper
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1280,8 +1398,9 @@ void ImageAtomicMinUintVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicMinUintVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1293,8 +1412,9 @@ DecodeResult decodeImageAtomicMinUintVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_min_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicMinUintVimage>(opcode);
 }
 } // namespace detail
@@ -1318,19 +1438,23 @@ ImageAtomicMaxIntVimage::ImageAtomicMaxIntVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MAX_INT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMaxIntVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1350,8 +1474,9 @@ void ImageAtomicMaxIntVimage::append_src_operand(std::string &out, uint8_t opera
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1361,8 +1486,9 @@ void ImageAtomicMaxIntVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicMaxIntVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1374,8 +1500,9 @@ DecodeResult decodeImageAtomicMaxIntVimage(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_max_int", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicMaxIntVimage>(opcode);
 }
 } // namespace detail
@@ -1399,19 +1526,23 @@ ImageAtomicMaxUintVimage::ImageAtomicMaxUintVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MAX_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMaxUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1431,8 +1562,9 @@ void ImageAtomicMaxUintVimage::append_src_operand(std::string &out, uint8_t oper
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1442,8 +1574,9 @@ void ImageAtomicMaxUintVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicMaxUintVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1455,8 +1588,9 @@ DecodeResult decodeImageAtomicMaxUintVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_max_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicMaxUintVimage>(opcode);
 }
 } // namespace detail
@@ -1480,19 +1614,23 @@ ImageAtomicAndVimage::ImageAtomicAndVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_AND);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicAndVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1512,8 +1650,9 @@ void ImageAtomicAndVimage::append_src_operand(std::string &out, uint8_t operand_
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1523,8 +1662,9 @@ void ImageAtomicAndVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicAndVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1536,8 +1676,9 @@ DecodeResult decodeImageAtomicAndVimage(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_and", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicAndVimage>(opcode);
 }
 } // namespace detail
@@ -1561,19 +1702,23 @@ ImageAtomicOrVimage::ImageAtomicOrVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_OR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicOrVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1593,8 +1738,9 @@ void ImageAtomicOrVimage::append_src_operand(std::string &out, uint8_t operand_i
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1604,8 +1750,9 @@ void ImageAtomicOrVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicOrVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1617,8 +1764,9 @@ DecodeResult decodeImageAtomicOrVimage(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_or", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicOrVimage>(opcode);
 }
 } // namespace detail
@@ -1642,19 +1790,23 @@ ImageAtomicXorVimage::ImageAtomicXorVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_XOR);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicXorVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1674,8 +1826,9 @@ void ImageAtomicXorVimage::append_src_operand(std::string &out, uint8_t operand_
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1685,8 +1838,9 @@ void ImageAtomicXorVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicXorVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1698,8 +1852,9 @@ DecodeResult decodeImageAtomicXorVimage(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_xor", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicXorVimage>(opcode);
 }
 } // namespace detail
@@ -1723,19 +1878,23 @@ ImageAtomicIncUintVimage::ImageAtomicIncUintVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_INC_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicIncUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1755,8 +1914,9 @@ void ImageAtomicIncUintVimage::append_src_operand(std::string &out, uint8_t oper
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1766,8 +1926,9 @@ void ImageAtomicIncUintVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicIncUintVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1779,8 +1940,9 @@ DecodeResult decodeImageAtomicIncUintVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_inc_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicIncUintVimage>(opcode);
 }
 } // namespace detail
@@ -1804,19 +1966,23 @@ ImageAtomicDecUintVimage::ImageAtomicDecUintVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_DEC_UINT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicDecUintVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1836,8 +2002,9 @@ void ImageAtomicDecUintVimage::append_src_operand(std::string &out, uint8_t oper
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -1847,8 +2014,9 @@ void ImageAtomicDecUintVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicDecUintVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1860,8 +2028,9 @@ DecodeResult decodeImageAtomicDecUintVimage(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_dec_uint", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicDecUintVimage>(opcode);
 }
 } // namespace detail
@@ -1881,6 +2050,8 @@ ImageGetResinfoVimage::ImageGetResinfoVimage(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_GET_RESINFO);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Other);
 }
 
 bool ImageGetResinfoVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -1891,8 +2062,9 @@ void ImageGetResinfoVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = (inst_.dmask) ? (1u) : 0u;
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageGetResinfoVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -1904,8 +2076,9 @@ DecodeResult decodeImageGetResinfoVimage(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_get_resinfo", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageGetResinfoVimage>(opcode);
 }
 } // namespace detail
@@ -1923,6 +2096,8 @@ ImageBvhIntersectRayVimage::ImageBvhIntersectRayVimage(const MachineInst *inst)
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -1930,8 +2105,9 @@ DecodeResult decodeImageBvhIntersectRayVimage(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_bvh_intersect_ray", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageBvhIntersectRayVimage>(opcode);
 }
 } // namespace detail
@@ -1950,6 +2126,8 @@ ImageBvh64IntersectRayVimage::ImageBvh64IntersectRayVimage(const MachineInst *in
   num_dst_ = 1;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH64_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -1958,8 +2136,9 @@ DecodeResult decodeImageBvh64IntersectRayVimage(const MachineInst *opcode,
   Result validation =
       Vimage::validate_encoding("image_bvh64_intersect_ray",
                                 reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageBvh64IntersectRayVimage>(opcode);
 }
 } // namespace detail
@@ -1977,6 +2156,8 @@ ImageBvhDualIntersectRayVimage::ImageBvhDualIntersectRayVimage(const MachineInst
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH_DUAL_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -1985,8 +2166,9 @@ DecodeResult decodeImageBvhDualIntersectRayVimage(const MachineInst *opcode,
   Result validation =
       Vimage::validate_encoding("image_bvh_dual_intersect_ray",
                                 reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageBvhDualIntersectRayVimage>(opcode);
 }
 } // namespace detail
@@ -2004,6 +2186,8 @@ ImageBvh8IntersectRayVimage::ImageBvh8IntersectRayVimage(const MachineInst *inst
   num_dst_ = 2;
   vaddr.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_BVH8_INTERSECT_RAY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Bvh);
 }
 
 namespace detail {
@@ -2011,8 +2195,9 @@ DecodeResult decodeImageBvh8IntersectRayVimage(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_bvh8_intersect_ray", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageBvh8IntersectRayVimage>(opcode);
 }
 } // namespace detail
@@ -2036,19 +2221,23 @@ ImageAtomicAddFltVimage::ImageAtomicAddFltVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_ADD_FLT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicAddFltVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -2068,8 +2257,9 @@ void ImageAtomicAddFltVimage::append_src_operand(std::string &out, uint8_t opera
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -2079,8 +2269,9 @@ void ImageAtomicAddFltVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicAddFltVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -2092,8 +2283,9 @@ DecodeResult decodeImageAtomicAddFltVimage(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_add_flt", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicAddFltVimage>(opcode);
 }
 } // namespace detail
@@ -2117,19 +2309,23 @@ ImageAtomicMinFltVimage::ImageAtomicMinFltVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MIN_FLT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMinFltVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -2149,8 +2345,9 @@ void ImageAtomicMinFltVimage::append_src_operand(std::string &out, uint8_t opera
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -2160,8 +2357,9 @@ void ImageAtomicMinFltVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicMinFltVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -2173,8 +2371,9 @@ DecodeResult decodeImageAtomicMinFltVimage(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_min_flt", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicMinFltVimage>(opcode);
 }
 } // namespace detail
@@ -2198,19 +2397,23 @@ ImageAtomicMaxFltVimage::ImageAtomicMaxFltVimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_MAX_FLT);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicMaxFltVimage::should_print_src_operand(uint8_t operand_index) const {
@@ -2230,8 +2433,9 @@ void ImageAtomicMaxFltVimage::append_src_operand(std::string &out, uint8_t opera
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -2241,8 +2445,9 @@ void ImageAtomicMaxFltVimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicMaxFltVimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -2254,8 +2459,9 @@ DecodeResult decodeImageAtomicMaxFltVimage(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_max_flt", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicMaxFltVimage>(opcode);
 }
 } // namespace detail
@@ -2279,19 +2485,23 @@ ImageAtomicPkAddF16Vimage::ImageAtomicPkAddF16Vimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_PK_ADD_F16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicPkAddF16Vimage::should_print_src_operand(uint8_t operand_index) const {
@@ -2311,8 +2521,9 @@ void ImageAtomicPkAddF16Vimage::append_src_operand(std::string &out, uint8_t ope
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -2322,8 +2533,9 @@ void ImageAtomicPkAddF16Vimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicPkAddF16Vimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -2335,8 +2547,9 @@ DecodeResult decodeImageAtomicPkAddF16Vimage(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_pk_add_f16", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicPkAddF16Vimage>(opcode);
 }
 } // namespace detail
@@ -2360,19 +2573,23 @@ ImageAtomicPkAddBf16Vimage::ImageAtomicPkAddBf16Vimage(const MachineInst *inst)
   src_operands_[3] = &gpumem_in;
   num_src_ = 4;
   num_dst_ = 1;
-  if (amdgpu::gfx12_atomic_returns(inst_.th))
+  if (amdgpu::gfx12_atomic_returns(inst_.th)) {
     dst_operands_[num_dst_++] = &vdata_return;
+  }
   vaddr.apply_fieldless_caps(false, false, false);
   gpumem.apply_fieldless_caps(false, false, false);
   gpumem_in.apply_fieldless_caps(false, false, false);
-  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th))
+  if (mimg_has_status(&inst_, false) && amdgpu::gfx12_atomic_returns(inst_.th)) {
     flags_ |= CONDITIONAL_LAST_VGPR_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::WaitCounterType::LOADCNT
                                               : amdgpu::WaitCounterType::STORECNT),
       (amdgpu::gfx12_atomic_returns(inst_.th) ? amdgpu::MemoryCompletionClass::VMEM
                                               : amdgpu::MemoryCompletionClass::UNORDERED)}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::IMAGE_ATOMIC_PK_ADD_BF16);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::Image, amdgpu::MemoryKind::Atomic);
 }
 
 bool ImageAtomicPkAddBf16Vimage::should_print_src_operand(uint8_t operand_index) const {
@@ -2392,8 +2609,9 @@ void ImageAtomicPkAddBf16Vimage::append_src_operand(std::string &out, uint8_t op
   }
   out += "[";
   for (uint32_t index = 0; index < count; ++index) {
-    if (index != 0)
+    if (index != 0) {
       out += ", ";
+    }
     out += "v" + std::to_string(registers[index]);
   }
   out += "]";
@@ -2403,8 +2621,9 @@ void ImageAtomicPkAddBf16Vimage::implicit_uses(RegisterSet &uses) const {
   Vimage::implicit_uses(uses);
   const auto registers = amdgpu::gfx12_image_address_registers(inst_);
   const uint32_t count = amdgpu::image_coordinate_register_count(inst_.dim, bool(inst_.a16));
-  for (uint32_t index = 0; index < count; ++index)
+  for (uint32_t index = 0; index < count; ++index) {
     uses.expand(RegisterRef{RegClass::VGPR, static_cast<uint16_t>(registers[index]), 1});
+  }
 }
 
 bool ImageAtomicPkAddBf16Vimage::tracks_explicit_source(uint8_t operand_index) const {
@@ -2416,8 +2635,9 @@ DecodeResult decodeImageAtomicPkAddBf16Vimage(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Vimage::validate_encoding(
       "image_atomic_pk_add_bf16", reinterpret_cast<const Vimage::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ImageAtomicPkAddBf16Vimage>(opcode);
 }
 } // namespace detail

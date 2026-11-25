@@ -209,6 +209,10 @@ parse_program_counter(const json_t& j)
     {
         pc.line_number = j["line_number"].get<size_t>();
     }
+    if(j.contains("event_id") && j["event_id"].is_number())
+    {
+        pc.event_id = j["event_id"].get<size_t>();
+    }
     if(j.contains("extdata") && j["extdata"].is_string())
     {
         pc.extdata = j["extdata"].get<std::string>();

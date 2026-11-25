@@ -1,0 +1,21 @@
+{
+    "_comment": "NeMo-RL Qwen3-32B GB200 async-1off topology: 4 trainer nodes and 4 generator nodes at 4 GPUs per node.",
+    "train": {
+        "num_gpus": 16,
+        "tp_size": 2,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 4,
+        "fsdp_size": 1,
+        "dp_size": 2
+    },
+    "generation": {
+        "num_gpus": 16,
+        "tp_size": 1,
+        "cp_size": 1,
+        "ep_size": 1,
+        "pp_size": 1,
+        "fsdp_size": 1,
+        "dp_size": 16
+    }
+}

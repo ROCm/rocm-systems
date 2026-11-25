@@ -3,6 +3,7 @@
 
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
@@ -105,7 +106,7 @@ TEST(DecoderWindow, RejectsTruncationEvenWhenPaddingDecodes) {
 }
 
 TEST(DecoderWindow, DecodesExactTailAndRejectsMissingLiteral) {
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 1> nop{0xbf800000};
   EXPECT_TRUE(decoder->decode_window(nop).succeeded());
@@ -120,7 +121,7 @@ TEST(DecoderWindow, DecodesExactTailAndRejectsMissingLiteral) {
 }
 
 TEST(DecoderWindow, PreservesFourWordGfx1250EncodingAtStreamEnd) {
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 4> words{0xcc3a0200, 0x42020d04, 0xcc336008, 0x04223110};
   DecodeResult result = decoder->decode_window(words, 16);
@@ -136,7 +137,7 @@ TEST(DecoderWindow, PreservesFourWordGfx1250EncodingAtStreamEnd) {
 }
 
 TEST(DecoderWindow, PreservesDecoderDiagnostics) {
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   const std::array<uint32_t, 4> invalid{0xffffffff, 0xffffffff, 0xffffffff, 0xffffffff};
   util::StringDiagnostic direct;

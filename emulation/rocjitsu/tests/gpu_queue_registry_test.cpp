@@ -18,7 +18,6 @@
 #include <memory>
 #include <mutex>
 #include <span>
-#include <stdexcept>
 #include <thread>
 
 namespace rocjitsu::amdgpu {
@@ -31,8 +30,9 @@ class IdentityTranslator final : public AddressSpaceTranslator {
 public:
   VmTranslationResult translate(uint64_t address, std::size_t size,
                                 VmAccessKind /*access*/) const override {
-    if (size == 0)
+    if (size == 0) {
       return {.outcome = VmAccessOutcome::Malformed, .translation = {}};
+    }
     return {
         .outcome = VmAccessOutcome::Complete,
         .translation = {.domain = VmMemoryDomain::System,
@@ -59,8 +59,6 @@ struct BindingControl {
   std::atomic<QueuePrepareCloseStatus> prepare_status{QueuePrepareCloseStatus::Ready};
   std::atomic<QueueSubmissionStatus> submit_status{QueueSubmissionStatus::Accepted};
   std::atomic<int> destructions{0};
-  std::atomic<bool> throw_submit{false};
-  std::atomic<bool> throw_reconfigure{false};
   std::mutex mutex;
   std::condition_variable condition;
   bool submit_entered = false;
@@ -102,8 +100,6 @@ public:
   }
 
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &) override {
-    if (control_->throw_reconfigure.load())
-      throw std::runtime_error("reconfigure failure");
     std::unique_lock lock(control_->mutex);
     control_->reconfigure_entered = true;
     control_->condition.notify_all();
@@ -112,8 +108,6 @@ public:
   }
 
   QueueSubmissionStatus submit_producer(uint64_t) override {
-    if (control_->throw_submit.load())
-      throw std::runtime_error("submit failure");
     std::unique_lock lock(control_->mutex);
     control_->submit_entered = true;
     control_->condition.notify_all();
@@ -126,7 +120,7 @@ private:
 };
 
 struct FactoryControl {
-  enum class Result { Bind, Reject, Throw };
+  enum class Result { Bind, Reject };
 
   explicit FactoryControl(std::shared_ptr<BindingControl> binding_control)
       : binding(std::move(binding_control)) {}
@@ -163,13 +157,13 @@ public:
       std::unique_lock lock(control_->mutex);
       control_->entered = true;
       control_->condition.notify_all();
-      if (control_->block)
+      if (control_->block) {
         control_->condition.wait(lock, [this] { return control_->released; });
+      }
     }
-    if (control_->result == FactoryControl::Result::Throw)
-      throw std::runtime_error("factory failure");
-    if (control_->result == FactoryControl::Result::Reject)
+    if (control_->result == FactoryControl::Result::Reject) {
       return {};
+    }
     return {.status = QueueBindingCreateStatus::Bound,
             .binding = std::make_unique<TestQueueBinding>(control_->binding)};
   }
@@ -182,8 +176,9 @@ template <typename Predicate>
 bool wait_until(Predicate predicate, std::chrono::milliseconds timeout = 2s) {
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   while (!predicate()) {
-    if (std::chrono::steady_clock::now() >= deadline)
+    if (std::chrono::steady_clock::now() >= deadline) {
       return false;
+    }
     std::this_thread::yield();
   }
   return true;
@@ -222,14 +217,6 @@ TEST_F(GpuQueueRegistryTest, RegistrationFailuresRollBackAddressSpaceRetention) 
   auto rejected = factory_control();
   rejected->result = FactoryControl::Result::Reject;
   EXPECT_FALSE(registry_.register_queue(request(std::make_shared<TestQueueFactory>(rejected))));
-  ASSERT_TRUE(gpu_vm_.lookup(address_space_));
-  EXPECT_EQ(gpu_vm_.lookup(address_space_)->queue_references, 0u);
-
-  auto throwing = factory_control();
-  throwing->result = FactoryControl::Result::Throw;
-  EXPECT_THROW(
-      (void)registry_.register_queue(request(std::make_shared<TestQueueFactory>(throwing))),
-      std::runtime_error);
   ASSERT_TRUE(gpu_vm_.lookup(address_space_));
   EXPECT_EQ(gpu_vm_.lookup(address_space_)->queue_references, 0u);
 
@@ -344,8 +331,9 @@ TEST_F(GpuQueueRegistryTest, CloseWaitsForAnAdmittedProducerSubmission) {
   auto submit =
       std::async(std::launch::async, [&] { return registry_.submit_producer(handle, 17); });
   const bool entered = control->wait_for_submit(2s);
-  if (!entered)
+  if (!entered) {
     control->release_submit();
+  }
   ASSERT_TRUE(entered);
 
   auto close = std::async(std::launch::async, [&] {
@@ -377,8 +365,9 @@ TEST_F(GpuQueueRegistryTest, CloseWaitsForAnAdmittedReconfiguration) {
         {.ring_base_address = 0x1000, .ring_size_bytes = 4096, .scheduling_percentage = 100});
   });
   const bool entered = control->wait_for_reconfigure(2s);
-  if (!entered)
+  if (!entered) {
     control->release_reconfigure();
+  }
   ASSERT_TRUE(entered);
 
   auto close = std::async(std::launch::async, [&] {
@@ -394,20 +383,6 @@ TEST_F(GpuQueueRegistryTest, CloseWaitsForAnAdmittedReconfiguration) {
   EXPECT_TRUE(close.get());
 }
 
-TEST_F(GpuQueueRegistryTest, ThrowingOperationsReleaseTheirLeases) {
-  auto control = std::make_shared<BindingControl>();
-  control->throw_submit = true;
-  control->throw_reconfigure = true;
-  auto factory = factory_control(control);
-  const QueueHandle handle =
-      registry_.register_queue(request(std::make_shared<TestQueueFactory>(factory)));
-  ASSERT_TRUE(handle);
-
-  EXPECT_THROW((void)registry_.submit_producer(handle, 1), std::runtime_error);
-  EXPECT_THROW((void)registry_.reconfigure_queue(handle, {}), std::runtime_error);
-  EXPECT_TRUE(registry_.unregister_queue(handle, QueueCloseMode::ForceCancel));
-}
-
 TEST_F(GpuQueueRegistryTest, CloseAllFencesAndRollsBackAnInFlightRegistration) {
   auto blocked = factory_control();
   blocked->block = true;
@@ -415,8 +390,9 @@ TEST_F(GpuQueueRegistryTest, CloseAllFencesAndRollsBackAnInFlightRegistration) {
     return registry_.register_queue(request(std::make_shared<TestQueueFactory>(blocked)));
   });
   const bool factory_entered = blocked->wait_for_entry(2s);
-  if (!factory_entered)
+  if (!factory_entered) {
     blocked->release();
+  }
   ASSERT_TRUE(factory_entered);
 
   const uint64_t initial_epoch = registry_.lifecycle_epoch();

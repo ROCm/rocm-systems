@@ -67,10 +67,12 @@ class MemoryFragment : public TestBase {
 
   // GPU->CPU coherence worker for a single "under test" pool. When grant_cpu
   // is set (device memory), CPU access to the fragment is requested.
+  // num_elements ints are allocated and updated by the GPU; a system buffer
+  // above one fragment block is a dedicated allocation, not a fragment.
   void FragmentCoherenceOnPool(const char* label, hsa_agent_t cpuAgent,
                                hsa_agent_t gpuAgent,
                                hsa_amd_memory_pool_t under_test_pool,
-                               bool grant_cpu);
+                               bool grant_cpu, int num_elements);
 };
 
 #endif  // ROCRTST_SUITES_FUNCTIONAL_MEMORY_FRAGMENT_H_

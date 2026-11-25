@@ -13,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -66,24 +67,26 @@ struct BenchFixture {
 
   BenchFixture() : gpu_mem("wmma_simd_bench_mem"), l2("wmma_simd_bench_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    cfg.arch = rocjitsu::IsaFamily::Cdna5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_wmma_simd", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
-    if (wf)
+    if (wf) {
       vbase = wf->vgpr_alloc().base;
+    }
   }
 
   // Pack `regs` words of small floats (bit_width 16/32 per element) into the
   // VGPR range [vbase+off ..). Both modes read the same bytes, so the exact WMMA
   // lane layout is irrelevant to the A/B comparison.
   template <typename Gen> void seed(uint32_t off, uint32_t regs, uint32_t bit_width, Gen gen) {
-    for (uint32_t reg = 0; reg < regs; ++reg)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint32_t word = 0;
         if (bit_width == 32) {
@@ -95,58 +98,69 @@ struct BenchFixture {
         }
         cu->write_vgpr(vbase + off + reg, lane, word);
       }
+    }
   }
 
   // Pack `regs` words of small bf16 values into the VGPR range.
   template <typename Gen> void seed_bf16(uint32_t off, uint32_t regs, Gen gen) {
-    for (uint32_t reg = 0; reg < regs; ++reg)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint16_t lo = util::f32_to_bf16(gen());
         uint16_t hi = util::f32_to_bf16(gen());
         cu->write_vgpr(vbase + off + reg, lane, lo | (static_cast<uint32_t>(hi) << 16));
       }
+    }
   }
 
   // Pack `regs` words of small fp8 (e4m3) codes into the VGPR range. Both modes
   // read the same bytes, so the codes are equally valid for the bf8 paths.
   template <typename Gen> void seed_f8(uint32_t off, uint32_t regs, Gen gen) {
-    for (uint32_t reg = 0; reg < regs; ++reg)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint32_t word = 0;
-        for (uint32_t byte = 0; byte < 4; ++byte)
+        for (uint32_t byte = 0; byte < 4; ++byte) {
           word |= static_cast<uint32_t>(util::f32_to_fp8_e4m3(gen())) << (byte * 8);
+        }
         cu->write_vgpr(vbase + off + reg, lane, word);
       }
+    }
   }
 
   template <typename Gen> void seed_i8(uint32_t off, uint32_t regs, Gen gen) {
-    for (uint32_t reg = 0; reg < regs; ++reg)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint32_t word = 0;
-        for (uint32_t byte = 0; byte < 4; ++byte)
+        for (uint32_t byte = 0; byte < 4; ++byte) {
           word |= (static_cast<uint32_t>(static_cast<uint8_t>(gen())) << (byte * 8));
+        }
         cu->write_vgpr(vbase + off + reg, lane, word);
       }
+    }
   }
 
   void seed_words(uint32_t off, uint32_t regs, uint32_t value) {
-    for (uint32_t reg = 0; reg < regs; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         cu->write_vgpr(vbase + off + reg, lane, value);
+      }
+    }
   }
 
   std::vector<uint32_t> snapshot_out(uint32_t out_regs = OUT_REGS) const {
     std::vector<uint32_t> out(out_regs * WF_SIZE);
-    for (uint32_t reg = 0; reg < out_regs; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < out_regs; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         out[reg * WF_SIZE + lane] = cu->read_vgpr(vbase + S2_OFF + reg, lane);
+      }
+    }
     return out;
   }
 };
 
 double rel_err(float a, float b) {
-  if (!std::isfinite(a) || !std::isfinite(b))
+  if (!std::isfinite(a) || !std::isfinite(b)) {
     return 0.0;
+  }
   return std::abs(static_cast<double>(a) - b) / (std::abs(a) + 1e-6);
 }
 
@@ -200,11 +214,13 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
 
   auto time_block = [&](bool force_scalar, int iterations) -> Clock::duration::rep {
     util::set_force_scalar_for_testing(force_scalar);
-    for (int i = 0; i < 25; ++i)
+    for (int i = 0; i < 25; ++i) {
       run();
+    }
     auto t0 = Clock::now();
-    for (int i = 0; i < iterations; ++i)
+    for (int i = 0; i < iterations; ++i) {
       run();
+    }
     auto t1 = Clock::now();
     util::set_force_scalar_for_testing(false);
     return std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
@@ -229,8 +245,9 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
 // Mixed BF16/F32 WMMA includes decode dispatch and register access.
 TEST(WmmaSimdBenchmark, DecodedBf16F32_16x16x32_bf16) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
+  if (util::native<float>::size() != 16) {
     GTEST_SKIP() << "the BF16F32 fast path requires 16-lane native SIMD";
+  }
   BenchFixture fx;
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr uint32_t M = 16, N = 16, K = 32;
@@ -241,7 +258,7 @@ TEST(WmmaSimdBenchmark, DecodedBf16F32_16x16x32_bf16) {
   const auto words = cdna5::build_vop3p(
       cdna5::kVWmmaBf16f3216x16x32Bf16Vop3p,
       {.vdst = S2_OFF, .src0 = 256 + S0_OFF, .src1 = 256 + S1_OFF, .src2 = 256 + INDEX_OFF});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
@@ -276,7 +293,7 @@ TEST(WmmaSimdBenchmark, DecodedScaleF32_16x16x128_fp4) {
                                                                           .opsel_hi = 0});
   matrix[0] |= 1u << 14;
   const std::array<uint32_t, 4> words = {prefix[0], prefix[1], matrix[0], matrix[1]};
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
@@ -296,7 +313,7 @@ TEST(WmmaSimdBenchmark, DecodedScaleF32_32x16x128_fp4) {
   fx.seed_words(S1_OFF, 8, packed_fp4_one);
   fx.seed_words(S2_OFF, kM32OutRegs, 0);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   for (const auto &[prefix_op, label] : std::array<std::pair<uint16_t, const char *>, 2>{
            {{0x35, "decoded v_wmma_scale_f32_32x16x128_fp4"},

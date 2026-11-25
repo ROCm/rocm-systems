@@ -14,8 +14,10 @@
 #include "common/validation.h"
 #include "conversion/conversion32.h"
 #include "conversion/float_conversion.h"
+#include "fp/rounding_status.h"
 #include "rj_arith/detail/rj_arith_scalar.h"
 #include "scalar/fp_status.h"
+#include "scalar/gfx1150_policy.h"
 
 #include <stdint.h>
 
@@ -122,16 +124,23 @@ int run(uint64_t flags, uint32_t mode, uint32_t *d, uint32_t a, uint32_t b = 0) 
   return RJ_ARITH_SUCCESS;
 }
 
-// Reproduce the inherited gfx12 scalar conversion causes, without host FP-state changes.
+// Reproduce the scalar conversion causes, without host FP-state changes. gfx12 uses the
+// shared hardware rule; Inherited keeps gfx1150 on the stored-result rule.
 // Packed RTZ conversion deliberately leaves FP status unchanged on gfx12.
-template <Convert Op> uint32_t conversion_causes(uint64_t flags, uint32_t a, uint32_t result) {
+template <Convert Op, bool FractionalInexact = false, bool Inherited = false>
+uint32_t conversion_causes(uint64_t flags, uint32_t a, uint32_t result) {
   using namespace rocjitsu::arith;
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   if constexpr (Op == Convert::PackedHalfRtz) {
     return 0;
   } else if constexpr (Op == Convert::SignedToFloat || Op == Convert::UnsignedToFloat) {
+    // Every 32-bit integer is exact in FP64; only INEXACT can occur.
     const double exact = Op == Convert::SignedToFloat ? double(int32_t(a)) : double(a);
-    return scalar_result_causes<false>(exact, result, rounding);
+    if constexpr (Inherited) {
+      return scalar_result_causes<false>(exact, result, rounding);
+    } else {
+      return a ? rounding_causes<false>(double_bits(exact), result, rounding) : 0;
+    }
   } else {
     constexpr bool half = Op == Convert::HalfToFloat || Op == Convert::HighHalfToFloat;
     constexpr uint32_t normal = half ? 0x400 : 0x800000;
@@ -151,8 +160,18 @@ template <Convert Op> uint32_t conversion_causes(uint64_t flags, uint32_t a, uin
       if (!__builtin_isfinite(exact) || exact < low || __builtin_trunc(exact) > high) {
         return RJ_ARITH_EXCEPTION_INVALID;
       }
-    } else if (__builtin_isfinite(exact)) {
-      causes |= scalar_result_causes<!half>(exact, result, rounding);
+      // gfx1150 reports discarded fractional bits; gfx12 suppresses this cause.
+      if constexpr (FractionalInexact) {
+        if (__builtin_trunc(exact) != exact) {
+          causes |= RJ_ARITH_EXCEPTION_INEXACT;
+        }
+      }
+    } else if constexpr (Inherited) {
+      if (__builtin_isfinite(exact)) {
+        causes |= scalar_result_causes<!half>(exact, result, rounding);
+      }
+    } else if (__builtin_isfinite(exact) && exact != 0) {
+      causes |= rounding_causes<!half>(double_bits(exact), result, rounding);
     }
     return causes;
   }
@@ -200,6 +219,53 @@ int run_gfx1250(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t
     flags &= ~(RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
   }
   return run<Op, true>(flags, 0, d, a, b);
+}
+
+// Retain gfx1150 conversion rounding, IEEE NaNs and both packed-input causes.
+template <Convert Op>
+int run_gfx1150(uint64_t flags, uint64_t mode, uint32_t *d, uint32_t a, uint32_t b,
+                uint32_t *status) {
+  using namespace rocjitsu::arith;
+  using namespace conversion_detail;
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  if (int error = prepare_gfx1150_scalar(flags)) {
+    return error;
+  }
+  constexpr bool rounded =
+      Op == Convert::SignedToFloat || Op == Convert::UnsignedToFloat || Op == Convert::FloatToHalf;
+  if (int error = validate(flags, mode,
+                           RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+                               RJ_ARITH_FP_IEEE_MODE | (rounded ? RJ_ARITH_FP_ROUND_MASK : 0))) {
+    return error;
+  }
+  const bool quiet = flags & RJ_ARITH_FP_IEEE_MODE;
+  if constexpr (Op == Convert::SignedToFloat || Op == Convert::UnsignedToFloat) {
+    using From = std::conditional_t<Op == Convert::SignedToFloat, model::I32, model::U32>;
+    *d = float_policy<From, fmt::F32>(flags, 0, quiet)(a);
+  } else if constexpr (Op == Convert::FloatToHalf) {
+    *d = float_policy<fmt::F32, fmt::F16>(flags, 0, quiet)(a);
+  } else if constexpr (Op == Convert::HalfToFloat || Op == Convert::HighHalfToFloat) {
+    const uint32_t input = Op == Convert::HighHalfToFloat ? a >> 16 : a;
+    *d = float_policy<fmt::F16, fmt::F32>(flags, 0, quiet)(input & 0xffff);
+  } else if constexpr (Op == Convert::PackedHalfRtz) {
+    flags = (flags & ~RJ_ARITH_FP_ROUND_MASK) | RJ_ARITH_FP_ROUND_ZERO;
+    auto policy = float_policy<fmt::F32, fmt::F16>(flags, 0, quiet);
+    *d = policy(a) | (policy(b) << 16);
+  } else {
+    // Integer destinations use the same truncating, saturating raw-bit policy.
+    if (int error = run<Op>(flags & ~RJ_ARITH_FP_IEEE_MODE, uint32_t(mode), d, a, b)) {
+      return error;
+    }
+  }
+  if (compatibility) {
+    if constexpr (Op == Convert::PackedHalfRtz) {
+      *status |= conversion_causes<Convert::FloatToHalf, false, true>(flags, a, *d & 0xffff) |
+                 conversion_causes<Convert::FloatToHalf, false, true>(flags, b, *d >> 16);
+    } else {
+      *status |= conversion_causes<Op, true, true>(flags, a, *d);
+    }
+  }
+  return RJ_ARITH_SUCCESS;
 }
 
 } // namespace
@@ -315,4 +381,52 @@ int rj_arith_s_cvt_pk_rtz_f16_f32_gfx1250(uint64_t flags, uint64_t instruction_f
                                           uint32_t a, uint32_t b,
                                           [[maybe_unused]] uint32_t *excp_flag_user) {
   return run_gfx1250<Convert::PackedHalfRtz>(flags, instruction_flags, d, a, b);
+}
+
+// Convert gfx1150 scalar operands with explicit guest controls and inherited status.
+int rj_arith_s_cvt_f32_i32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status) {
+  return run_gfx1150<Convert::SignedToFloat>(flags, instruction_flags, d, a, 0, fp_status);
+}
+
+// Convert gfx1150 scalar operands with explicit guest controls and inherited status.
+int rj_arith_s_cvt_f32_u32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status) {
+  return run_gfx1150<Convert::UnsignedToFloat>(flags, instruction_flags, d, a, 0, fp_status);
+}
+
+// Convert gfx1150 scalar operands with explicit guest controls and inherited status.
+int rj_arith_s_cvt_i32_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status) {
+  return run_gfx1150<Convert::FloatToSigned>(flags, instruction_flags, d, a, 0, fp_status);
+}
+
+// Convert gfx1150 scalar operands with explicit guest controls and inherited status.
+int rj_arith_s_cvt_u32_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status) {
+  return run_gfx1150<Convert::FloatToUnsigned>(flags, instruction_flags, d, a, 0, fp_status);
+}
+
+// Convert gfx1150 scalar operands with explicit guest controls and inherited status.
+int rj_arith_s_cvt_f16_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status) {
+  return run_gfx1150<Convert::FloatToHalf>(flags, instruction_flags, d, a, 0, fp_status);
+}
+
+// Convert gfx1150 scalar operands with explicit guest controls and inherited status.
+int rj_arith_s_cvt_f32_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                   uint32_t a, uint32_t *fp_status) {
+  return run_gfx1150<Convert::HalfToFloat>(flags, instruction_flags, d, a, 0, fp_status);
+}
+
+// Convert gfx1150 scalar operands with explicit guest controls and inherited status.
+int rj_arith_s_cvt_hi_f32_f16_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                      uint32_t a, uint32_t *fp_status) {
+  return run_gfx1150<Convert::HighHalfToFloat>(flags, instruction_flags, d, a, 0, fp_status);
+}
+
+// Convert gfx1150 scalar operands with explicit guest controls and inherited status.
+int rj_arith_s_cvt_pk_rtz_f16_f32_gfx1150(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                          uint32_t a, uint32_t b, uint32_t *fp_status) {
+  return run_gfx1150<Convert::PackedHalfRtz>(flags, instruction_flags, d, a, b, fp_status);
 }

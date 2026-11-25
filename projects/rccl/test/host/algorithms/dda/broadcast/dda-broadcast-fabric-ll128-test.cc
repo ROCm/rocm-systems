@@ -19,6 +19,7 @@
 
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
+#include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128_twoshot.h"
 
 #include "fakes/param_redirect.h"
 
@@ -31,11 +32,104 @@
 namespace {
 
 using RcclUnitTesting::DdaFabricMockComm;
+using dda::common::ddaLL128BcTwoShotChunkSlices;
+using dda::common::ddaLL128BcTwoShotSlotSlices;
 
 void* const kSendbuff = reinterpret_cast<void*>(0x1000);
 void* const kRecvbuff = reinterpret_cast<void*>(0x2000);
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x88);
 const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
+// A slice carries 1920 payload bytes in 2 KiB on the wire.
+constexpr size_t kSliceData = 1920;
+constexpr size_t kSliceWire = 2048;
+
+// ---------------------------------------------------------------------------
+// Pure-host geometry helpers (no comm, no fake machinery needed)
+// ---------------------------------------------------------------------------
+
+TEST(DdaBroadcastLL128GeomHelpers, ChunkSlicesRoundsUpAcrossPeers) {
+  // 4 ranks => 3 peers; 10 total slices => ceil(10/3)=4 per chunk
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(10, 4), 4u);
+  // Exact division
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(9, 4), 3u);
+  // Single slice always rounds to 1
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(1, 4), 1u);
+  // 2 ranks => 1 peer; chunkSlices == totalSlices
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(5, 2), 5u);
+}
+
+TEST(DdaBroadcastLL128GeomHelpers, ChunkSlicesMinIsOne) {
+  EXPECT_GE(ddaLL128BcTwoShotChunkSlices(0, 4), 1u);
+}
+
+TEST(DdaBroadcastLL128GeomHelpers, ChunkSlicesFewerSlicesThanPeers) {
+  // Sizes where totalSlices < nPeers: every peer still gets cs >= 1 (ceil rounds up).
+  // nRanks=4 => nPeers=3
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(1, 4), 1u);  // ceil(1/3)=1
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(2, 4), 1u);  // ceil(2/3)=1
+  // nRanks=16 => nPeers=15; sparse distribution
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(1,  16), 1u);  // ceil(1/15)=1
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(7,  16), 1u);  // ceil(7/15)=1
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(14, 16), 1u);  // ceil(14/15)=1
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(15, 16), 1u);  // ceil(15/15)=1 (exact)
+  EXPECT_EQ(ddaLL128BcTwoShotChunkSlices(16, 16), 2u);  // ceil(16/15)=2 (crosses boundary)
+}
+
+TEST(DdaBroadcastLL128GeomHelpers, SlotSlicesZeroWhenBankTooSmall) {
+  // 4 ranks, 1 chunk slice => need (nRanks+1)=5 slots, each kSliceWire bytes
+  const size_t exact = 5 * kSliceWire;
+  EXPECT_EQ(ddaLL128BcTwoShotSlotSlices(exact, 4, 1), 1u);
+  EXPECT_EQ(ddaLL128BcTwoShotSlotSlices(exact - 1, 4, 1), 0u);
+}
+
+TEST(DdaBroadcastLL128GeomHelpers, SlotSlicesScalesWithChunkSlices) {
+  // 4 ranks, chunkSlices=3 => need 5*3*kSliceWire bank
+  const size_t bank = 5 * 3 * kSliceWire;
+  EXPECT_EQ(ddaLL128BcTwoShotSlotSlices(bank, 4, 9), 3u);
+  EXPECT_EQ(ddaLL128BcTwoShotSlotSlices(bank - 1, 4, 9), 0u);
+}
+
+
+TEST(DdaBroadcastLL128GeomHelpers, SlotSlicesRootGatherSlotAllocatedFullChunk) {
+  // The kernel writes only 1 padding slice into the root's gather slot (Q5/O1),
+  // but ddaLL128BcTwoShotSlotSlices reserves a full cs-wide slot for it because
+  // the formula uses totalSlotsNeeded = nRanks + 1 (conservative).
+  // This test pins that behaviour: a bank sized for the true kernel minimum
+  // (scatter slot + nPeers gather slots + 1 padding slice = cs*nRanks + 1 wire-slices)
+  // must be rejected; only cs*(nRanks+1) is accepted.
+  constexpr size_t cs = 3;
+  constexpr size_t nRanks = 4;  // nPeers = 3
+  // totalSlices = cs * nPeers so ddaLL128BcTwoShotChunkSlices returns exactly cs.
+  constexpr size_t totalSlices = cs * (nRanks - 1);
+  // Minimum bank the kernel actually uses: cs*nRanks scatter/gather + 1 root padding.
+  constexpr size_t kernelMin  = (cs * nRanks + 1) * kSliceWire;
+  // Minimum bank the formula requires: cs*(nRanks+1).
+  constexpr size_t formulaMin = cs * (nRanks + 1) * kSliceWire;
+  EXPECT_EQ(ddaLL128BcTwoShotSlotSlices(formulaMin,     nRanks, totalSlices), cs);
+  EXPECT_EQ(ddaLL128BcTwoShotSlotSlices(formulaMin - 1, nRanks, totalSlices), 0u);
+  // kernelMin < formulaMin when cs > 1: the formula is conservative by cs-1 slices.
+  EXPECT_LT(kernelMin, formulaMin);
+  EXPECT_EQ(ddaLL128BcTwoShotSlotSlices(kernelMin,      nRanks, totalSlices), 0u);
+}
+
+TEST(DdaBroadcastLL128GeomHelpers, SlotSlicesCs1HasNoConservatism) {
+  // When cs=1 (totalSlices <= nPeers), kernelMin == formulaMin: no wasted capacity.
+  constexpr size_t nRanks = 4;
+  // Any totalSlices in [1, nPeers] yields cs=1; use totalSlices=1 (most sparse case).
+  constexpr size_t kernelMin  = (1 * nRanks + 1) * kSliceWire;  // (cs*nRanks + 1) * wire
+  constexpr size_t formulaMin = 1 * (nRanks + 1) * kSliceWire;  // cs*(nRanks+1) * wire
+  static_assert(kernelMin == formulaMin, "cs=1 must have zero conservatism");
+  EXPECT_EQ(ddaLL128BcTwoShotSlotSlices(formulaMin,     nRanks, 1), 1u);
+  EXPECT_EQ(ddaLL128BcTwoShotSlotSlices(formulaMin - 1, nRanks, 1), 0u);
+}
+
+// ---------------------------------------------------------------------------
+// Eligibility + launch fixture
+// ---------------------------------------------------------------------------
+
+
+
+
 constexpr int kRank = 5;
 constexpr int kOtherRoot = 0;
 // Payload per slice: gfx9 64B lines on wave64, gfx1250 128B lines on wave32.
@@ -66,6 +160,10 @@ class DdaBroadcastFabricLL128Microtest : public ::testing::Test {
     comm().WarpSize = 64;
     comm().rank = kRank;
     comm().addonStopEvent = kStopEvent;
+    comm().cuCount = 128;
+    // Allow ncclInt8 through the two-shot datatype gate so grid tests can use
+    // large byte counts (>= kDdaLL128BcTwoShotMin) without hitting ncclInvalidArgument.
+    g_rcclDdaDatatypeSupported = [](const ncclComm*, ncclDataType_t) { return true; };
   }
 
   void TearDown() override {
@@ -123,7 +221,7 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ThreadsOverrideMustBeAnArchWarpM
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_NonRootGroupsAreWarpsOfArchSlices) {
   const std::pair<size_t, unsigned> gfx9[] = {
-      {16, 1}, {kGfx9Group, 1}, {kGfx9Group + 16, 2}, {8 * kGfx9Group, 8}, {20 * kGfx9Group, 20}};
+      {16, 1}, {kGfx9Group, 1}, {kGfx9Group + 16, 2}, {8 * kGfx9Group, 8}, {9 * kGfx9Group, 9}};
   for (const auto& [bytes, groups] : gfx9) {
     const DdaLaunch launch = RunOne(kOtherRoot, bytes);
     EXPECT_EQ(launch.grid.x, groups) << "gfx950 bytes " << bytes;
@@ -140,14 +238,16 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_NonRootGroupsAreWarpsOfArchSlice
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_NonRootGroupsCappedByBudget) {
+  // 9 * kGfx9Group = 258048 < kDdaLL128BcTwoShotMin=262144: stays in one-shot.
+  // 9 natural groups are capped to 3 by the budget.
   params_["RCCL_DDA_BC_MAX_BLOCKS"] = 3;
-  EXPECT_EQ(RunOne(kOtherRoot, 20 * kGfx9Group).grid.x, 3u);
+  EXPECT_EQ(RunOne(kOtherRoot, 9 * kGfx9Group).grid.x, 3u);
   EXPECT_EQ(RunOne(kOtherRoot, 2 * kGfx9Group).grid.x, 2u);
 }
 
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_RootGetsOneColumnPerPeerAndGroupRows) {
   const std::tuple<int, size_t, unsigned, unsigned> cases[] = {
-      {8, 16, 7, 1},       {8, 8 * kGfx9Group, 7, 8},   {8, 40 * kGfx9Group, 7, 36},
+      {8, 16, 7, 1},       {8, 8 * kGfx9Group, 7, 8},   {8, 9 * kGfx9Group, 7, 9},
       {2, 8 * kGfx9Group, 1, 8}, {144, 8 * kGfx9Group, 143, 1}};
   for (const auto& [nRanks, bytes, x, y] : cases) {
     comm().nRanks = nRanks;
@@ -372,6 +472,25 @@ TEST_F(DdaBroadcastFabricLL128Microtest, Launch_PassesBuffersBytesRanksEpochAndB
 TEST_F(DdaBroadcastFabricLL128Microtest, Launch_LaunchErrorIsReported) {
   g_hipGetLastError = [] { return hipErrorLaunchFailure; };
   EXPECT_EQ(Run(kOtherRoot, 16), ncclUnhandledCudaError);
+}
+
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ArchTableThreadsUsedWhenEnvAbsent) {
+  // The seam is consulted by the two-shot path (bytes >= kDdaLL128BcTwoShotMin = 262144).
+  // 10 * kGfx1250Group = 307200 > 262144 to ensure the two-shot path is taken.
+  g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 256; };
+  EXPECT_EQ(RunOne(kOtherRoot, 10 * kGfx1250Group).block.x, 256u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_EnvVarOverridesArchTable) {
+  g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 256; };
+  params_["RCCL_DDA_LL128_BC_THREADS"] = 384;
+  EXPECT_EQ(RunOne(kOtherRoot, 16).block.x, 384u);
+}
+
+TEST_F(DdaBroadcastFabricLL128Microtest, Launch_ArchTableZeroFallsBackToDefault) {
+  g_rcclDdaFabricBcLL128Threads = [](const ncclComm*) { return 0; };
+  EXPECT_EQ(RunOne(kOtherRoot, 16).block.x, 512u);
 }
 
 }  // namespace

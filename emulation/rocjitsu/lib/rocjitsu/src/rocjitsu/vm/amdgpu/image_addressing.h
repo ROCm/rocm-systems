@@ -4,6 +4,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstdint>
 #include <optional>
@@ -11,7 +12,7 @@
 namespace rocjitsu::amdgpu {
 /// @brief Tiling identity shared with the device configuration exposed to ROCr.
 struct ImageAddressConfig {
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID; ///< Addressing generation.
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid; ///< Addressing generation.
   uint32_t gb_addr_config = 0; ///< GB_ADDR_CONFIG value shared with KFD and DRM.
 };
 
@@ -33,10 +34,10 @@ struct ImageLayout {
 };
 
 /// @brief Default tiling identity for a standalone CU without a device description.
-ImageAddressConfig default_image_address_config(rj_code_arch_t arch);
+ImageAddressConfig default_image_address_config(rocjitsu::IsaFamily arch);
 
 /// @brief Check a linear row pitch, allowing hardware-qualified rounding on gfx1100 and gfx1201.
-bool supports_linear_image_pitch(rj_code_arch_t arch, uint32_t width, uint32_t pitch,
+bool supports_linear_image_pitch(rocjitsu::IsaFamily arch, uint32_t width, uint32_t pitch,
                                  uint32_t element_bytes);
 
 /// @brief Resolve a single-sample thin-image view once before processing its texels.

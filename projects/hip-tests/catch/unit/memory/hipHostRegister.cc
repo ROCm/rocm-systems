@@ -963,6 +963,64 @@ HIP_TEST_CASE(Unit_hipHostRegister_with_fine_grain) {
   free(hostPtr);
 #endif
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Restricts the process to a two-device subset of the machine's visible GPUs via
+ * HIP_VISIBLE_DEVICES (so the context used by hipHostRegister has more than one device,
+ * exercising the multi-device shared-lock path, while at least one real GPU on the
+ * machine is left entirely out of the context). Verifies end to end, in a child process,
+ * that a single hipHostRegister call still gives every device in that subset a correctly
+ * mapped, shared pointer: every device observes the same device pointer, a kernel on
+ * every device can read/write through it, and hipHostUnregister followed immediately by
+ * re-registering the same range works cleanly with no leaked or double-released lock.
+ * Run in a child process because HIP_VISIBLE_DEVICES is only read once, at HIP's first
+ * initialization in the process.
+ * Known limitation: the excluded GPU is outside HIP_VISIBLE_DEVICES, so this test can't
+ * directly confirm it received no mapping -- only that the visible subset shares one.
+ * Test source
+ * ------------------------
+ *    - catch\unit\memory\hipHostRegister.cc
+ *    - catch\unit\memory\hipHostRegisterSharedLockSubset_Exe.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.6
+ */
+#if (HT_AMD == 1) && (HT_LINUX == 1)
+HIP_TEST_CASE(Unit_hipHostRegister_SharedLockDeviceSubset) {
+  int totalDevices = HipTest::getDeviceCount();
+  if (totalDevices < 3) {
+    WARN("Skipping test: need at least 3 visible GPUs to form a genuine subset context "
+         "(found "
+         << totalDevices << ").");
+    return;
+  }
+
+  // Save any pre-existing HIP_VISIBLE_DEVICES so it can be restored afterwards.
+  const char* prevVisibleDevices = getenv("HIP_VISIBLE_DEVICES");
+  const bool hadPrevVisibleDevices = (prevVisibleDevices != nullptr);
+  const std::string prevVisibleDevicesValue = hadPrevVisibleDevices ? prevVisibleDevices : "";
+
+  // Restrict the child process to the first two visible devices, so its context has
+  // more than one device (exercises the shared/all-agent lock path) while leaving at
+  // least one real GPU out of the context entirely.
+  setenv("HIP_VISIBLE_DEVICES", "0,1", 1);
+  hip::SpawnProc proc("hipHostRegisterSharedLockSubset_Exe", true, true);
+  int exitCode = proc.run();
+  INFO(proc.getOutput());
+
+  // Restore before REQUIRE so a failing assertion can't leak the override.
+  if (hadPrevVisibleDevices) {
+    setenv("HIP_VISIBLE_DEVICES", prevVisibleDevicesValue.c_str(), 1);
+  } else {
+    unsetenv("HIP_VISIBLE_DEVICES");
+  }
+
+  REQUIRE(exitCode == 1);
+}
+#endif
+
 /**
  * End doxygen group MemoryTest.
  * @}

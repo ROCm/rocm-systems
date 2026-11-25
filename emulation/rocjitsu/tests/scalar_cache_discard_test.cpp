@@ -4,6 +4,7 @@
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
@@ -15,7 +16,7 @@
 
 namespace rocjitsu {
 namespace {
-class ScalarCacheDiscard : public testing::TestWithParam<rj_code_arch_t> {};
+class ScalarCacheDiscard : public testing::TestWithParam<rocjitsu::IsaFamily> {};
 
 TEST_P(ScalarCacheDiscard, AddressedLinesAndWaitMetadataIgnoreExec) {
   amdgpu::GpuMemory memory{"discard_memory"};
@@ -36,8 +37,8 @@ TEST_P(ScalarCacheDiscard, AddressedLinesAndWaitMetadataIgnoreExec) {
   const unsigned base = wave->sgpr_alloc().base;
   cu->write_sgpr(base, 0x4000);
   cu->write_sgpr(base + 1, 0);
-  for (unsigned address_offset : {4u, 60u, 68u})
-    for (unsigned lines : {1u, 2u})
+  for (unsigned address_offset : {4u, 60u, 68u}) {
+    for (unsigned lines : {1u, 2u}) {
       for (unsigned mode = 0; mode < 3; ++mode) {
         SCOPED_TRACE(testing::Message() << "lines=" << lines << " address_mode=" << mode);
         cache.invalidate_all();
@@ -76,6 +77,8 @@ TEST_P(ScalarCacheDiscard, AddressedLinesAndWaitMetadataIgnoreExec) {
           EXPECT_EQ(value, (i >= first_line && i < first_line + lines ? 200 : 100) + i);
         }
       }
+    }
+  }
   wave->halt();
 }
 
@@ -114,7 +117,7 @@ TEST(ScalarCacheDiscardCache, ProcessTagsAndAbsentLinesDoNotReadOrWriteMemory) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Architectures, ScalarCacheDiscard,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4));
 } // namespace
 } // namespace rocjitsu

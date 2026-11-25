@@ -4,7 +4,6 @@
 #include "library/perf.hpp"
 #include "common/clocks.hpp"
 #include "common/result.hpp"
-#include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"

@@ -122,6 +122,7 @@ class Driver:
             'RJ_CONSAN_PLUGIN_PATH',
             'RJ_CONSAN_ARTIFACT_DIR',
             'RJ_CONSAN_CAPTURE_PATH',
+            'RJ_CONSAN_SELECTION_PROFILE',
             'CONSAN_PROCESS_MAPS',
         ):
             self.environment.pop(name, None)
@@ -187,9 +188,7 @@ class Driver:
         fixture_name = {
             'repeat': 'disjoint',
             'repeat_race': 'race',
-            'grouped_repeat': (
-                'grouped_barrier' if args.target == 'gfx1250' else 'grouped_disjoint'
-            ),
+            'grouped_repeat': 'grouped_barrier',
             'grouped_oversized': 'grouped_disjoint',
             'grouped_edge': 'grouped_disjoint',
             'single_missing_id': 'disjoint',
@@ -346,7 +345,17 @@ class Driver:
                 'original-baseline',
                 [args.runner, original, entry, launches, mode, '--baseline'],
             )
-        self.run('prepare', [args.prepare, original, args.target, entry, artifact])
+        preparation = self.run(
+            'prepare', [args.prepare, original, args.target, entry, artifact]
+        )
+        profile = next(
+            token.split('=', 1)[1]
+            for token in preparation.split()
+            if token.startswith('selection_profile=')
+        )
+        assert len(profile) == 64 and all(
+            char in '0123456789abcdef' for char in profile
+        )
         for name in ('prepared.hsaco', 'facts.bin', 'ready'):
             self.inputs[name] = identity(artifact / name)
         capture = self.directory / 'capture.bin'
@@ -355,6 +364,7 @@ class Driver:
             'RJ_CONSAN_PLUGIN_PATH': str(args.plugin),
             'RJ_CONSAN_ARTIFACT_DIR': str(artifact),
             'RJ_CONSAN_CAPTURE_PATH': str(capture),
+            'RJ_CONSAN_SELECTION_PROFILE': profile,
             'CONSAN_PROCESS_MAPS': str(self.directory / 'process-maps.txt'),
         }
         options = {

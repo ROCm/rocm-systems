@@ -628,12 +628,12 @@ std::vector<TesterFactory> Tester::create(TesterArguments args) {
     case HostPutmemSignalTestType:
       test_name = "Host_Putmem_Signal";
       if (BackendType::GDA_BACKEND == backend_type)
-        testers.push_back(new HostRmaTester(args));
+        PUSH_TESTER(HostRmaTester(args));
       break;
     case HostPutmemSignalAddTestType:
       test_name = "Host_Putmem_Signal_Add";
       if (BackendType::GDA_BACKEND == backend_type)
-        testers.push_back(new HostRmaTester(args));
+        PUSH_TESTER(HostRmaTester(args));
       break;
     case HostCtxPutmemTestType:
       test_name = "Host_Ctx_Putmem";

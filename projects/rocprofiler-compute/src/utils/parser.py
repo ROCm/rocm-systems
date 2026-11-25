@@ -22,6 +22,7 @@ from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
+from utils.utils_analysis import pass_tables_on_rows
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
@@ -605,7 +606,7 @@ def load_table_data(
         workload.roofline_peaks,
         filtered_pmc,
         args.debug_metric_expression,
-        [table.loc[filtered_pmc.index] for table in workload.pass_tables.values()],
+        pass_tables_on_rows(workload.pass_tables, filtered_pmc),
     )
 
 

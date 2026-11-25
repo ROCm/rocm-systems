@@ -10,6 +10,7 @@ use crate::elf::{LoadSegment, align_up};
 use crate::target::gfx1250::TrampolinePlan;
 use rocddi::device::Device;
 use rocddi::device::gpu::CopyFailure;
+use rocddi::device::gpu::diagnostic::DiagnosticMemory;
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
 use crate::{CodeObject, Error, Symbol, SymbolKind, SymbolLinkage, SymbolTableOrder, Target};
@@ -35,9 +36,9 @@ struct PendingImage {
     /// Relocated source for a borrowed destination; never aliases its host mapping.
     bytes: Option<Vec<u8>>,
     /// Owned executable backing survives all clones of the publication work.
-    _allocation: Option<Allocation>,
+    allocation: Option<Allocation>,
     /// The full-range cache operation also publishes optional entry stubs.
-    _trampoline: Option<Allocation>,
+    trampoline: Option<Allocation>,
     /// Publication and native-retirement state.
     state: AtomicU8,
 }
@@ -200,6 +201,44 @@ pub struct LoadedImage {
 }
 
 impl LoadedImage {
+    /// Borrows executable allocations and the retained source ELF for a fatal
+    /// diagnostic. Source bytes use their own host address, as advertised by
+    /// memory-backed loader URIs; they never substitute for device contents.
+    ///
+    /// # Errors
+    /// Returns a native lifetime or invalid-range failure.
+    #[allow(unsafe_code)]
+    pub fn diagnostic_memories(&self) -> Result<Vec<DiagnosticMemory<'_>>, rocddi::Error> {
+        let publication = self.publication.as_ref().map(|work| &*work.0);
+        let mut memory = Vec::with_capacity(3);
+        memory.push(
+            if let Some(allocation) = publication.and_then(|work| work.allocation.as_ref()) {
+                allocation.diagnostic_memory()?
+            } else {
+                // SAFETY: Borrowed image constructors require callers to retain
+                // destination storage through this owner's life.
+                unsafe {
+                    DiagnosticMemory::borrow(self, self.device_base, self.host_base, self.size)?
+                }
+            },
+        );
+        if let Some(trampoline) = publication.and_then(|work| work.trampoline.as_ref()) {
+            memory.push(trampoline.diagnostic_memory()?);
+        }
+        let source = self.code_object();
+        // SAFETY: This image retains the immutable source Arc. Its actual host
+        // address is the address published in the memory-backed debugger URI.
+        memory.push(unsafe {
+            DiagnosticMemory::borrow(
+                self,
+                source.as_ptr() as u64,
+                Some(source.as_ptr() as usize),
+                source.len() as u64,
+            )?
+        });
+        Ok(memory)
+    }
+
     /// Clones pending publication work without exposing staging as destination memory.
     #[must_use]
     pub fn publication(&self) -> Option<ImagePublication> {
@@ -561,8 +600,8 @@ fn load_image_impl(
         destination: device_base,
         size: load_size as u64,
         bytes,
-        _allocation: allocation,
-        _trampoline: trampoline,
+        allocation,
+        trampoline,
         state: AtomicU8::new(PUBLICATION_PENDING),
     })));
     symbols.retain_mut(|symbol| {
@@ -593,6 +632,133 @@ fn load_image_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn diagnostic_source_keeps_its_uri_address_and_full_elf_contents()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use rocddi::device::gpu::diagnostic::DiagnosticReader;
+
+        let mut elf = crate::test_support::gfx1201_code_object();
+        // This tail is not part of the device load image. A debugger still
+        // needs the original ELF, including its nonloaded metadata.
+        elf.extend_from_slice(b"source-only diagnostic sentinel");
+        let device_bytes = [0xa5_u8; 128];
+        let reader = DiagnosticReader::new()?;
+        for host_visible in [true, false] {
+            let source: Arc<[u8]> = elf.clone().into();
+            let source_address = source.as_ptr() as u64;
+            let weak_source = Arc::downgrade(&source);
+            let image = LoadedImage {
+                publication: None,
+                host_base: host_visible.then_some(device_bytes.as_ptr() as usize),
+                device_base: 0x1234_0000,
+                size: device_bytes.len() as u64,
+                virtual_base: 0,
+                code_object: source,
+                segments: Vec::new(),
+            };
+            assert_eq!(weak_source.strong_count(), 1);
+            let regions = image.diagnostic_memories()?;
+            assert_eq!(regions.len(), 2);
+            assert_eq!(regions[0].address(), image.device_base());
+            assert_eq!(regions[0].size(), device_bytes.len() as u64);
+            let mut actual_device = [0; 128];
+            if host_visible {
+                reader.read(regions[0], 0, &mut actual_device)?;
+                assert_eq!(actual_device, device_bytes);
+            } else {
+                assert!(regions[0].host_address().is_none());
+                assert!(reader.read(regions[0], 0, &mut actual_device).is_err());
+            }
+            assert_eq!(regions[1].address(), source_address);
+            assert_eq!(regions[1].size(), elf.len() as u64);
+            let mut actual_source = vec![0; elf.len()];
+            reader.read(regions[1], 0, &mut actual_source)?;
+            assert_eq!(actual_source, elf.as_slice());
+            drop(image);
+            assert!(weak_source.upgrade().is_none());
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    #[ignore = "requires a GFX1201 GPU, KFD, and a bound DRM render node"]
+    fn diagnostic_regions_include_retained_native_trampoline()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use rocddi::device::gpu::diagnostic::DiagnosticReader;
+        use rocddi::memory::host::host_page_size;
+        use rocddi::session::{DriverContextLifetime, Session};
+
+        let mut session = Session::new(DriverContextLifetime::Process)?;
+        let mut selected = None;
+        session.enumerate(&mut |endpoint| {
+            if endpoint
+                .gpu()
+                .is_some_and(|gpu| (gpu.gfx_major, gpu.gfx_minor, gpu.gfx_stepping) == (12, 0, 1))
+            {
+                selected = Some(endpoint);
+            }
+            Ok(())
+        })?;
+        let endpoint = selected.ok_or_else(|| std::io::Error::other("GFX1201 unavailable"))?;
+        let device = session.activate(&endpoint)?;
+        let page = host_page_size()?;
+        let access = DeviceAccess::READ | DeviceAccess::WRITE | DeviceAccess::EXECUTE;
+        let main = device.allocate(MemoryKind::System, page, page, access)?;
+        let trampoline = device.allocate(MemoryKind::System, page, page, access)?;
+        let main_info = main.info();
+        let trampoline_info = trampoline.info();
+        for (info, value) in [(main_info, 0xa5), (trampoline_info, 0x5a)] {
+            let host = info
+                .host_address
+                .ok_or_else(|| std::io::Error::other("System allocation has no host alias"))?;
+            // SAFETY: These live System allocations retain page writable bytes.
+            // No GPU work is submitted; all access remains on this test thread.
+            unsafe { std::ptr::write_bytes(host as *mut u8, value, usize::try_from(page)?) };
+        }
+        let source: Arc<[u8]> = crate::test_support::gfx1201_code_object().into();
+        let image = LoadedImage {
+            publication: Some(ImagePublication(Arc::new(PendingImage {
+                device: device.clone(),
+                peers: Vec::new(),
+                destination: main_info.device_address,
+                size: page,
+                bytes: None,
+                allocation: Some(main),
+                trampoline: Some(trampoline),
+                state: AtomicU8::new(PUBLICATION_PENDING),
+            }))),
+            host_base: main_info.host_address,
+            device_base: main_info.device_address,
+            size: page,
+            virtual_base: 0,
+            code_object: source.clone(),
+            segments: Vec::new(),
+        };
+        let regions = image.diagnostic_memories()?;
+        assert_eq!(regions.len(), 3);
+        let reader = DiagnosticReader::new()?;
+        for (region, info, value) in [
+            (regions[0], main_info, 0xa5),
+            (regions[1], trampoline_info, 0x5a),
+        ] {
+            assert_eq!(region.address(), info.device_address);
+            assert_eq!(region.size(), page);
+            let mut bytes = vec![0; usize::try_from(page)?];
+            reader.read(region, 0, &mut bytes)?;
+            assert!(bytes.iter().all(|byte| *byte == value));
+        }
+        assert_eq!(regions[2].address(), source.as_ptr() as u64);
+        let mut bytes = vec![0; source.len()];
+        reader.read(regions[2], 0, &mut bytes)?;
+        assert_eq!(bytes, source.as_ref());
+        drop(image);
+        drop(device);
+        session.destroy()?;
+        Ok(())
+    }
 
     fn copy_failure(operands_may_be_live: bool) -> CopyFailure {
         CopyFailure {

@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -24,7 +25,7 @@ protected:
   void SetUp() override {
     cache_.set_backing_memory(&memory_);
     amdgpu::ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_RDNA2;
+    config.arch = rocjitsu::IsaFamily::Rdna2;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256; // The wave below requests 16 registers from this block.
@@ -40,14 +41,16 @@ protected:
     wave_->set_lds_size(1024);
   }
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
   }
   auto execute(const std::array<uint32_t, 2> &words) {
     auto result = decoder_->decode_window(words);
     EXPECT_TRUE(result.succeeded());
-    if (result.failed())
+    if (result.failed()) {
       return std::unique_ptr<Instruction>{};
+    }
     auto inst = std::move(result).value();
     EXPECT_TRUE(cu_->execute_instruction(inst.get(), *wave_).succeeded());
     return inst;
@@ -118,8 +121,9 @@ TEST_F(Rdna2MemoryTest, PermuteIsLocalToEachHalfOfWave64) {
     write_vector(1, 100 + lane, lane);
   }
   ASSERT_TRUE(execute(rdna2::build_ds(rdna2::kDsBpermuteB32, {.addr = 0, .data0 = 1, .vdst = 2})));
-  for (unsigned lane = 0; lane < 64; ++lane)
+  for (unsigned lane = 0; lane < 64; ++lane) {
     EXPECT_EQ(read_vector(2, lane), lane < 32 ? 100u : 132u);
+  }
 }
 
 TEST_F(Rdna2MemoryTest, DualStoresAndAtomicsRespectWorkgroupBounds) {
@@ -160,8 +164,9 @@ TEST_F(Rdna2MemoryTest, BufferLoadChecksWholeVgprTupleBeforeIssuingMemoryRequest
   amdgpu::GlobalMemPipeline global(&cu_->l1_vector(), &cache_);
   constexpr uint32_t sentinel = 0xfeedbeef;
   constexpr uint32_t format = 60; // GFX10 8_8_8_8_UINT.
-  for (unsigned word = 0; word < 4; ++word)
+  for (unsigned word = 0; word < 4; ++word) {
     memory_.write32(0x4000 + 4 * word, 0x76543210);
+  }
   write_scalar(0, 0x4000);
   write_scalar(1, 0);
   write_scalar(2, 256);
@@ -175,8 +180,9 @@ TEST_F(Rdna2MemoryTest, BufferLoadChecksWholeVgprTupleBeforeIssuingMemoryRequest
         SCOPED_TRACE(testing::Message() << "typed=" << load.typed << " op=" << load.opcode
                                         << " D16=" << load.packed_d16 << " TFE=" << unsigned(tfe)
                                         << " first=" << unsigned(first));
-        for (unsigned reg = first; reg < 16; ++reg)
+        for (unsigned reg = first; reg < 16; ++reg) {
           write_vector(reg, sentinel);
+        }
         const auto words =
             load.typed ? rdna2::build_mtbuf(load.opcode, {.format = format,
                                                           .vdata = first,
@@ -197,8 +203,9 @@ TEST_F(Rdna2MemoryTest, BufferLoadChecksWholeVgprTupleBeforeIssuingMemoryRequest
         ASSERT_EQ(global.issue(inst.release(), *wave_), amdgpu::VmAccessOutcome::Complete);
         EXPECT_EQ(wave_->exec(), 1u);
         if (overflow) {
-          for (unsigned reg = first; reg < 16; ++reg)
+          for (unsigned reg = first; reg < 16; ++reg) {
             EXPECT_EQ(read_vector(reg), sentinel);
+          }
         } else {
           EXPECT_EQ(read_vector(first), load.first_value);
           if (tfe) {
@@ -219,10 +226,11 @@ TEST_F(Rdna2MemoryTest, DsAndGdsNullifyTheWholeReturnBeforeChangingStorage) {
   for (uint8_t indexed_gds : {0, 1}) {
     SCOPED_TRACE(unsigned(indexed_gds));
     const auto backing = [&](auto action) {
-      if (indexed_gds)
+      if (indexed_gds) {
         gds_->access_gds(wave_->cu().arch(), 0, [&](amdgpu::Lds &b) { action(b, 128u); });
-      else
+      } else {
         action(wave_->lds(), 1024u);
+      }
     };
     backing([](auto &b, uint32_t base) {
       b.write32(base, 10);
@@ -239,7 +247,17 @@ TEST_F(Rdna2MemoryTest, DsAndGdsNullifyTheWholeReturnBeforeChangingStorage) {
       auto *d = inst->data_as<amdgpu::VectorMemState>();
       EXPECT_EQ(d->exec_mask, active ? 1u : 0u);
       EXPECT_EQ(d->lane_mask, active ? 1u : 0u);
-      ASSERT_EQ(local.issue(inst.release(), *wave_), amdgpu::VmAccessOutcome::Complete);
+      ASSERT_EQ(local.issue_deferred(inst, *wave_), amdgpu::VmAccessOutcome::Complete);
+      if (!active) {
+        ASSERT_TRUE(inst);
+        inst->retire_data();
+        EXPECT_EQ(inst->data(), nullptr);
+        ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wave_).succeeded());
+        ASSERT_EQ(inst->data(), d);
+        EXPECT_EQ(d->exec_mask, 0u);
+        EXPECT_EQ(d->lane_mask, 0u);
+        ASSERT_EQ(local.issue_deferred(inst, *wave_), amdgpu::VmAccessOutcome::Complete);
+      }
     };
     write_vector(15, 0xfeedbeef);
     ASSERT_NO_FATAL_FAILURE(check(rdna2::kDsRead2B32, 15, false));
@@ -578,15 +596,17 @@ TEST(Rdna2MemoryDispatchTest, PrivateViolationSurvivesWaitAndClearsThroughTrapst
     auto props = f.mem->read32(kernel + offsetof(kernel_descriptor_t, kernel_code_properties));
     RJ_AMDHSA_BITS_SET(props, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32, width == 32);
     f.mem->write16(kernel + offsetof(kernel_descriptor_t, kernel_code_properties), props);
-    for (unsigned i = 0; i < 7; ++i)
+    for (unsigned i = 0; i < 7; ++i) {
       f.mem->write32(0x4000 + 4 * i, 0xdeadbeef);
+    }
     test::AqlQueue queue(f.mem, f.cp());
     queue.dispatch(kernel, 1, width);
     f.run_until_idle();
     ASSERT_TRUE(f.cu()->is_idle());
     constexpr std::array<unsigned, 7> expected{0, 0, 1, 1, 0, 0x12345678, 0};
-    for (unsigned i = 0; i < expected.size(); ++i)
+    for (unsigned i = 0; i < expected.size(); ++i) {
       EXPECT_EQ(f.mem->read32(0x4000 + 4 * i), expected[i]) << "output " << i;
+    }
   }
 }
 
@@ -608,8 +628,9 @@ TEST_F(Rdna2MemoryTest, IndexedGdsSignalsRejectedAddressesAtCompletion) {
         op, {.offset1 = offset1, .gds = 1, .addr = 0, .data0 = 1, .data1 = 2, .vdst = dst}));
     ASSERT_TRUE(inst && inst->data());
     auto &data = *inst->data_as<amdgpu::VectorMemState>();
-    if (data.gds_m0)
+    if (data.gds_m0) {
       amdgpu::LocalMemPipeline::capture_gds_violations(data, *wave_);
+    }
     EXPECT_EQ(data.address_range_violation_lanes, fault ? exec : 0u);
     // Check the memory pipeline's completion independently of the routing observation.
     data.address_range_violation_lanes = 0;
@@ -683,7 +704,7 @@ TEST_F(Rdna2MemoryTest, IndexedGdsUsesDeviceBackingAndSnapshotsTheM0Window) {
   EXPECT_EQ(wave_->lds().read32(1024), 0xccccu);
 
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_RDNA2;
+  config.arch = rocjitsu::IsaFamily::Rdna2;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 16;

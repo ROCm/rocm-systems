@@ -361,6 +361,14 @@ impl HsaSession {
                 gpus,
             },
             config: HsaConfig {
+                core_dump: crate::core_dump::Config::from_environment(),
+                queue_fault_message_enabled: config::queue_fault_message_enabled(
+                    std::env::var("HSA_ENABLE_QUEUE_FAULT_MESSAGE")
+                        .ok()
+                        .as_deref(),
+                ),
+                yielding_poll_enabled: std::env::var_os("HSA_ENABLE_YIELDING_POLL")
+                    .is_some_and(|value| value == "1"),
                 sdma_enabled: config::sdma_enabled(
                     std::env::var("HSA_ENABLE_SDMA").ok().as_deref(),
                 ),
@@ -374,7 +382,9 @@ impl HsaSession {
             debugger: pending.debugger.take(),
             logging: Arc::new(LogOutput::new()),
             next_handle: 0x4853_4101_0000_0000,
-            queue_state: QueueState::new(),
+            queue_state: QueueState::new(config::counted_queue_limit(
+                std::env::var("GPU_MAX_HW_QUEUES").ok().as_deref(),
+            )),
             loader: LoaderState::new(),
             image_state: ImageState::new(),
             memory_state: MemoryState::new(health.clone()),

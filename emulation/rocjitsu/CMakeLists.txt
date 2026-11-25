@@ -112,6 +112,22 @@ option(
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
 option(
+    ROCJITSU_ENABLE_INTERPOSER
+    "Include the Linux LD_PRELOAD interposer in librocjitsu"
+    ON
+)
+option(
+    RJ_ENABLE_HOST_FAULT_RECOVERY
+    "Recover invalid host memory accesses using SIGSEGV and SIGBUS handlers"
+    ON
+)
+# GNU-unique symbols make glibc retain a DSO after dlclose. All objects in
+# an unloadable explicit library, including its static dependencies, must use
+# ordinary C++ symbol binding instead.
+if(NOT ROCJITSU_ENABLE_INTERPOSER AND NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+    add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,GNU>:-fno-gnu-unique>)
+endif()
+option(
     ROCJITSU_ENABLE_PERFSIM_PLUGIN
     "Build the optional RocJITsu adapter for an external Perfsim observer plugin"
     OFF
@@ -362,6 +378,13 @@ set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
 
+if(NOT ROCJITSU_ENABLE_INTERPOSER)
+    add_compile_definitions(RJ_DISABLE_INTERPOSER)
+endif()
+if(NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+    add_compile_definitions(RJ_DISABLE_HOST_FAULT_RECOVERY)
+endif()
+
 include(rj_flatbuffers)
 
 # Set include paths before adding subdirectories so all targets can find them.
@@ -432,7 +455,7 @@ function(rj_configure_shared_interposer target)
     )
 
     # Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ROCJITSU_ENABLE_INTERPOSER)
         target_sources(
             ${target}
             PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
@@ -495,6 +518,27 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    option(
+        RJ_INSTALL_MINIDEBUGINFO
+        "Compress private symbols in the installed Release librocjitsu.so"
+        ON
+    )
+    if(
+        RJ_INSTALL_MINIDEBUGINFO
+        AND NOT THEROCK_SPLIT_DEBUG_INFO
+        AND CMAKE_OBJCOPY
+        AND CMAKE_READELF
+    )
+        configure_file(
+            cmake/rj_install_minidebuginfo.cmake.in
+            rj_install_minidebuginfo.cmake
+            @ONLY
+        )
+        install(
+            SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/rj_install_minidebuginfo.cmake"
+        )
+    endif()
+
     # The translator ships alongside the hook: both must resolve to the SAME
     # shared object, or the cache identity they derive from it would differ and
     # neither could read what the other wrote.
@@ -503,6 +547,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
+
+# Ship the standalone host CLI for offline code-object mutation workflows.
+install(TARGETS rj_code_mutate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # rj_pretranslate ships because the tier it fills is only worth having if an

@@ -161,6 +161,22 @@ translated store into a dirty cache line that could write back to a replacement
 backing. Unsupported or uncacheable translations continue through
 `GpuVmAccess` without a translated-local fill.
 
+Each CU also has a bounded cache of decoded instructions. It checks the complete
+freshly fetched word window and VMID before reuse; it does not bypass instruction
+fetch or code-coherence checks. Ordinary memory instructions return to this cache
+only after synchronous writeback and wait-counter release. Retry and deferred
+completion retain exclusive ownership in the pipeline. Tensor DMA continuations
+and debugger execution do not use decoded reuse.
+
+Retired scalar/vector memory state is hidden from observers and releases its VM
+snapshot and image-sampling state immediately. The next execution acquires that
+storage exclusively, resets all semantic fields from constructor defaults, then
+publishes the prepared state. Only cleared transfer/request buffers survive
+retirement, each capped at 4 KiB of capacity. The six retained vector buffers use
+at most 24 KiB per entry (6 MiB for all 256 slots in a CU), plus fixed state and
+decoded-object storage. Oversized buffers are released at retirement; this host
+allocation policy does not limit simulated transfer sizes.
+
 ### SDMA queue execution
 
 `SdmaQueueScheduler` is owned by the SoC and runs one dedicated worker for all SDMA

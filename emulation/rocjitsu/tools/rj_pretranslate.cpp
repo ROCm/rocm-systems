@@ -18,8 +18,8 @@
 
 #include "rocjitsu/cli.h"
 #include "rocjitsu/code/dbt/gfx1250_b0_a0_cache.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_library.h"
 #include "rocjitsu/code/dbt/translation_store.h"
-#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -41,8 +41,9 @@ constexpr uint64_t kMaxInputBytes = 4ull << 30;
 
 [[nodiscard]] bool read_file(const char *path, std::vector<uint8_t> &out) {
   const int fd = open(path, O_RDONLY | O_CLOEXEC);
-  if (fd < 0)
+  if (fd < 0) {
     return false;
+  }
   struct stat info {};
   if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) ||
       static_cast<uint64_t>(info.st_size) > kMaxInputBytes) {
@@ -99,18 +100,15 @@ Outcome pretranslate_one(const char *path, rocjitsu::TranslationStore &store, bo
     return Outcome::kAlreadyHeld;
   }
 
-  uint8_t *translated = nullptr;
-  size_t translated_size = 0;
+  std::vector<uint8_t> translated;
   // The info block is required by the entry point rather than optional, and this
   // tool has no use for what it reports: the store keys on the source bytes it
   // already holds. Diagnostics are declined for the same reason -- a scan over an
   // install tree meets many objects this translator will refuse, and the refusal
   // itself is the answer.
-  rj_gfx1250_b0_to_a0_translation_info_t info{};
-  const rj_status_t status = rj_gfx1250_b0_to_a0_translate(
-      source.data(), source.size(), &translated, &translated_size, &info, nullptr, nullptr);
-  if (status != ROCJITSU_STATUS_SUCCESS || translated == nullptr || translated_size == 0) {
-    rj_gfx1250_b0_to_a0_free(translated);
+  rocjitsu::Gfx1250B0ToA0TranslationInfo info{};
+  const rj_status_t status = rocjitsu::translate_gfx1250_b0_to_a0(source, translated, info);
+  if (status != ROCJITSU_STATUS_SUCCESS || translated.empty()) {
     // A verdict on the bytes, not a malfunction: a scan over an install tree
     // will hand this tool plenty of objects for other targets.
     if (status == ROCJITSU_STATUS_INVALID_CODE_OBJECT ||
@@ -122,8 +120,7 @@ Outcome pretranslate_one(const char *path, rocjitsu::TranslationStore &store, bo
     return Outcome::kFailed;
   }
 
-  store.store(key, {translated, translated_size}, rocjitsu::kGfx1250B0A0Identity);
-  rj_gfx1250_b0_to_a0_free(translated);
+  store.store(key, translated, rocjitsu::kGfx1250B0A0Identity);
 
   // Read it back. The store is best effort by design: it declines quietly when
   // an entry is too large or the filesystem is too full, which is right for a
@@ -135,7 +132,7 @@ Outcome pretranslate_one(const char *path, rocjitsu::TranslationStore &store, bo
     return Outcome::kFailed;
   }
 
-  std::printf("write   %s (%zu -> %zu bytes)\n", path, source.size(), translated_size);
+  std::printf("write   %s (%zu -> %zu bytes)\n", path, source.size(), translated.size());
   return Outcome::kWritten;
 }
 
@@ -164,12 +161,14 @@ int main(int argc, char **argv) {
   if (command
           .add_flags("Translation store", {root_flag, force_flag, portable, fail_flag}, diagnostic)
           .failed() ||
-      command.add_flag(help, diagnostic).failed())
+      command.add_flag(help, diagnostic).failed()) {
     return 2;
+  }
   std::vector<std::string_view> arguments(argv + 1, argv + argc);
   auto parsed = parse(command, arguments, diagnostic);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return 2;
+  }
   const auto usage = [&] {
     std::fprintf(
         stderr,
@@ -187,8 +186,9 @@ int main(int argc, char **argv) {
   }
   std::string root = root_flag->value();
 
-  if (root.empty())
+  if (root.empty()) {
     root = rocjitsu::shared_translation_root(rocjitsu::gfx1250_b0_a0_translator_anchor());
+  }
   if (root.empty()) {
     std::fprintf(stderr, "cannot locate the translator's install prefix; pass --store-root\n");
     return 1;

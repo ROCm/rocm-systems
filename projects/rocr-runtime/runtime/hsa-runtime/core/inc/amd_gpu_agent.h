@@ -595,6 +595,10 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Remove a destroyed AQL queue from agent-owned tracking.
   void UnregisterAqlQueue(core::Queue* queue);
 
+  /// @brief Warn once per agent that no second-level trap handler is bound.
+  /// Called from queue creation, not from agent init.
+  void WarnIfNoSecondLevelTrapHandler();
+
   /// @brief Check if the accelerator is ready to be used.
   /// @return HSA_STATUS_SUCCESS if the accelerator is ready, HSA_STATUS_ERROR_RESOURCE_NOT_READY otherwise.
   hsa_status_t CheckAcceleratorReadiness();
@@ -776,6 +780,13 @@ class GpuAgent : public GpuAgentInt {
   void* trap_code_buf_;
 
   size_t trap_code_buf_size_;
+
+  // @brief Set by BindTrapHandler when no trap handler could be bound because the
+  // driver does not report support for exception debugging.
+  bool trap_handler_unavailable_ = false;
+
+  // @brief Limits WarnIfNoSecondLevelTrapHandler to one message per agent.
+  std::atomic<bool> queue_exception_warned_{false};
 
   // @brief Mappings from doorbell index to queue, for trap handler.
   // Correlates with output of s_sendmsg(MSG_GET_DOORBELL) for queue identification.

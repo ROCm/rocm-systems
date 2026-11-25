@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "dbt_translate.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -38,16 +39,17 @@ struct CodeObjectInspection {
   std::string disassembly;
 };
 
-[[nodiscard]] std::unique_ptr<Decoder> create_inspection_decoder(rj_code_target_id_t target,
-                                                                 rj_code_arch_t fallback_arch) {
-  if (target != ROCJITSU_CODE_TARGET_INVALID)
+[[nodiscard]] std::unique_ptr<Decoder>
+create_inspection_decoder(rj_code_target_id_t target, rocjitsu::IsaFamily fallback_arch) {
+  if (target != ROCJITSU_CODE_TARGET_INVALID) {
     return Decoder::create(default_isa_target_registry(), target);
+  }
   return Decoder::create(fallback_arch);
 }
 
 [[nodiscard]] rj_code_target_id_t target_for_machine(uint32_t machine) {
-  const IsaGpuTargetDescription *target =
-      default_isa_target_registry().find_gpu_target_by_elf_machine(machine & EF_AMDGPU_MACH);
+  const IsaTargetBinding *target =
+      default_isa_target_registry().find_target_by_elf_machine(machine & EF_AMDGPU_MACH);
   return target == nullptr ? ROCJITSU_CODE_TARGET_INVALID : target->public_id;
 }
 
@@ -63,21 +65,23 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
 
 [[nodiscard]] CodeObjectInspection inspect_code_object(const AmdGpuCodeObject &obj,
                                                        rj_code_target_id_t target,
-                                                       rj_code_arch_t fallback_arch,
+                                                       rocjitsu::IsaFamily fallback_arch,
                                                        const std::string &label,
                                                        bool include_disassembly) {
   CodeObjectInspection inspection;
   inspection.report.available = true;
 
   std::ostringstream os;
-  if (include_disassembly)
+  if (include_disassembly) {
     os << "--- " << label << " ---\n";
+  }
 
   auto decoder = create_inspection_decoder(target, fallback_arch);
   inspection.report.decoder_available = decoder != nullptr;
   if (!decoder) {
-    if (include_disassembly)
+    if (include_disassembly) {
       os << "decoder unavailable\n";
+    }
     for (const auto *section : obj.text_sections()) {
       CodeSectionReport section_report;
       section_report.name = section->name();
@@ -93,8 +97,9 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
     section_report.name = section->name();
     section_report.size_bytes = section->size();
 
-    if (include_disassembly)
+    if (include_disassembly) {
       os << "section " << section->name() << " size=" << section->size() << "\n";
+    }
 
     const auto *words = reinterpret_cast<const uint32_t *>(section->data());
     const size_t word_count = section->size() / sizeof(uint32_t);
@@ -104,7 +109,7 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
       // Linked gfx1250 objects use zero-filled holes between independently
       // aligned function bodies. BasicBlock::build() treats these words as
       // padding rather than instructions, so host validation must do the same.
-      if (fallback_arch == ROCJITSU_CODE_ARCH_CDNA5 && words[pc] == 0) {
+      if (fallback_arch == rocjitsu::IsaFamily::Cdna5 && words[pc] == 0) {
         ++pc;
         continue;
       }
@@ -128,8 +133,9 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
         os << "  0x" << std::hex << std::setw(4) << std::setfill('0') << pc * 4 << ": " << std::dec
            << std::setfill(' ') << inst->disassemble() << " [";
         for (uint32_t i = 0; i < inst_words && pc + i < word_count; ++i) {
-          if (i != 0)
+          if (i != 0) {
             os << ' ';
+          }
           os << std::hex << std::setw(8) << std::setfill('0') << words[pc + i];
         }
         os << std::dec << std::setfill(' ') << "]\n";
@@ -166,8 +172,9 @@ void record_decode_failure(CodeSectionReport &section_report, size_t byte_offset
   for (const auto &section : report.sections) {
     inst_count += section.instruction_count;
     failures += section.decode_failure_count;
-    if (first_failed_section == nullptr && section.has_first_decode_failure)
+    if (first_failed_section == nullptr && section.has_first_decode_failure) {
       first_failed_section = &section;
+    }
   }
 
   if (inst_count == 0) {
@@ -209,8 +216,9 @@ std::string describe_byte_difference(std::span<const uint8_t> first,
 
   const size_t common_size = std::min(first.size(), second.size());
   size_t offset = 0;
-  while (offset < common_size && first[offset] == second[offset])
+  while (offset < common_size && first[offset] == second[offset]) {
     ++offset;
+  }
 
   if (offset < common_size) {
     const std::string size_change =
@@ -254,10 +262,12 @@ std::string find_idempotence_difference(std::span<const ExecutableSectionBytes> 
   if (removed && added) {
     return std::format("executable sections changed: removed '{}', added '{}'", *removed, *added);
   }
-  if (removed)
+  if (removed) {
     return std::format("executable section '{}' was removed", *removed);
-  if (added)
+  }
+  if (added) {
     return std::format("executable section '{}' was added", *added);
+  }
 
   for (size_t index = 0; index < first_sections.size(); ++index) {
     if (first_sections[index].name != second_sections[index].name) {
@@ -286,8 +296,9 @@ namespace {
 collect_executable_sections(const AmdGpuCodeObject &object) {
   std::vector<detail::ExecutableSectionBytes> sections;
   for (const std::unique_ptr<Section> &section : object.all_sections()) {
-    if ((section->flags() & SHF_EXECINSTR) == 0)
+    if ((section->flags() & SHF_EXECINSTR) == 0) {
       continue;
+    }
     sections.push_back(
         {section->name(), {reinterpret_cast<const uint8_t *>(section->data()), section->size()}});
   }
@@ -306,35 +317,40 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
 [[nodiscard]] std::string disassemble_source_instruction(const AmdGpuCodeObject &obj,
                                                          uint64_t offset,
                                                          rj_code_target_id_t target,
-                                                         rj_code_arch_t fallback_arch) {
+                                                         rocjitsu::IsaFamily fallback_arch) {
   auto decoder = create_inspection_decoder(target, fallback_arch);
-  if (!decoder)
+  if (!decoder) {
     return "<decoder unavailable>";
+  }
 
   const auto &text_sections = obj.text_sections();
-  if (text_sections.empty())
+  if (text_sections.empty()) {
     return "<source section unavailable>";
+  }
 
   // BinaryTranslator source offsets are relative to the original .text section.
   // Use the primary .text section so relocated local-cave bytes are not treated
   // as source instructions when a translated object is inspected again.
   const auto *text = text_sections.front();
-  if (offset % sizeof(uint32_t) != 0)
+  if (offset % sizeof(uint32_t) != 0) {
     return "<source offset unaligned>";
-  if (offset + sizeof(uint32_t) > text->size())
+  }
+  if (offset + sizeof(uint32_t) > text->size()) {
     return "<source offset out of range>";
+  }
 
   const auto *words = reinterpret_cast<const uint32_t *>(text->data());
   util::StringDiagnostic decode_error;
   DecodeResult decoded = decoder->decode(&words[offset / sizeof(uint32_t)], decode_error.emitter());
-  if (decoded.failed())
+  if (decoded.failed()) {
     return std::string("<decode error: ") + decode_error.message() + ">";
+  }
   return decoded.value()->disassemble();
 }
 
 [[nodiscard]] std::vector<std::string> disassemble_words(std::span<const uint32_t> words,
                                                          rj_code_target_id_t target,
-                                                         rj_code_arch_t fallback_arch) {
+                                                         rocjitsu::IsaFamily fallback_arch) {
   std::vector<std::string> lines;
   auto decoder = create_inspection_decoder(target, fallback_arch);
   if (!decoder) {
@@ -363,8 +379,8 @@ collect_executable_sections(const AmdGpuCodeObject &object) {
 
 [[nodiscard]] InstructionTranslationReport
 build_instruction_report(const TranslationTraceEvent &trace, const AmdGpuCodeObject &source,
-                         rj_code_target_id_t guest_target, rj_code_arch_t guest_arch,
-                         rj_code_target_id_t host_target, rj_code_arch_t host_arch) {
+                         rj_code_target_id_t guest_target, rocjitsu::IsaFamily guest_arch,
+                         rj_code_target_id_t host_target, rocjitsu::IsaFamily host_arch) {
   InstructionTranslationReport report;
   report.source_offset = trace.source_offset;
   report.source_size = trace.source_size;
@@ -402,8 +418,9 @@ struct SelectedInput {
 
     selected.code_object =
         selected.executable->code_object(options.input_target, options.code_object_index);
-    if (selected.code_object != nullptr)
+    if (selected.code_object != nullptr) {
       return selected;
+    }
 
     // A standalone code object is also a valid one-object Executable. On a
     // failed selection, distinguish concrete metadata disagreement from an
@@ -472,18 +489,21 @@ std::optional<std::string_view> translation_request_error(const TranslateOptions
       options.output_revision == ProcessorRevision::Gfx1250B0) {
     return "gfx1250 A0-to-B0 translation is not supported";
   }
-  if (options.verify_idempotence && options.guest_arch != options.host_arch)
+  if (options.verify_idempotence && options.guest_arch != options.host_arch) {
     return "--verify-idempotence requires matching input and output architectures";
-  if (options.verify_idempotence && options.skip_failed_kernels)
+  }
+  if (options.verify_idempotence && options.skip_failed_kernels) {
     return "--verify-idempotence cannot be combined with --skip-failed-kernels";
+  }
   if (options.verify_rewrite_discharge &&
       !(input_is_gfx1250 && output_is_gfx1250 &&
         options.input_revision == ProcessorRevision::Gfx1250B0 &&
         options.output_revision == ProcessorRevision::Gfx1250A0)) {
     return "--verify-rewrite-discharge requires gfx1250 b0-to-a0 translation";
   }
-  if (options.verify_rewrite_discharge && options.skip_failed_kernels)
+  if (options.verify_rewrite_discharge && options.skip_failed_kernels) {
     return "--verify-rewrite-discharge cannot be combined with --skip-failed-kernels";
+  }
   return std::nullopt;
 }
 

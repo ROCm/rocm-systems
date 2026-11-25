@@ -271,9 +271,7 @@ __launch_bounds__(kDdaLL128RsMaxThreads)
     ddaLL128StoreRegs<int8_t>(dstBytes + sliceByte, acc, eltInSlice, lane, flagLane);
   }
 
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
-  asm volatile("s_wait_storecnt 0x0" ::: "memory");
-#endif
+  ddaLL128WaitStores();
 
   ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag32);
 }

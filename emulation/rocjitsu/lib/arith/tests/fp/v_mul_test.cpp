@@ -38,6 +38,22 @@ TEST(FpMulF16W64Gfx11, Arithmetic) {
       rj_arith_v_mul_f16_w64, [](double x, double y) { return x * y; }, /*gfx12=*/false);
 }
 
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpMulF16W32Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
+      rj_arith_v_mul_f16_w32_gfx10, [](double x, double y) { return x * y; },
+      /*gfx12=*/false, /*fp_status_supported=*/false,
+      /*compatibility_status=*/false, /*half_exact=*/false);
+}
+
+// RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
+TEST(FpMulF16W64Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
+      rj_arith_v_mul_f16_w64_gfx10, [](double x, double y) { return x * y; },
+      /*gfx12=*/false, /*fp_status_supported=*/false,
+      /*compatibility_status=*/false, /*half_exact=*/false);
+}
+
 namespace {
 
 // Selected gfx1201 default-mode FP exception contributions.
@@ -159,8 +175,10 @@ TEST(FpMulF64W64Gfx11, Arithmetic) {
       rj_arith_v_mul_f64_w64, [](double x, double y) { return x * y; }, /*gfx12=*/false);
 }
 
-// Reject unqualified status domains before touching outputs; Compatibility
-// uses the inherited classifier even where explicit mode 3 is unqualified.
+// Reject unqualified status domains before touching outputs; on gfx12 Compatibility reports
+// the shared hardware classifier even where explicit mode 3 is unqualified: CLAMP suppresses
+// every cause, while an output modifier suppresses only UNDERFLOW and INEXACT and leaves the
+// operand causes in place (gfx1201 captures).
 TEST(FpMulF32, ReportingDomain) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
@@ -181,12 +199,171 @@ TEST(FpMulF32, ReportingDomain) {
           ASSERT_EQ(call(cpu | fp | RJ_ARITH_SEMANTICS_COMPATIBILITY, 1, instruction_flags, r.v + 2,
                          r.v, r.v + 1, &status),
                     RJ_ARITH_SUCCESS);
-          const uint32_t causes =
-              call == rj_arith_v_mul_f32_w32_gfx12 && (instruction_flags & RJ_ARITH_ALU_OMOD_MASK)
-                  ? 8U
-                  : 0x28U;
+          // The inherited RDNA3 classifier reads the raw operands, so neither CLAMP nor an
+          // output modifier changes what this overflowing product reports there.
+          const uint32_t causes = call != rj_arith_v_mul_f32_w32_gfx12 ? 0x28U
+                                  : instruction_flags & RJ_ARITH_ALU_CLAMP
+                                      ? 0U
+                                      : ((instruction_flags & RJ_ARITH_ALU_OMOD_MASK) ? 8U : 0x28U);
           EXPECT_EQ(status, 0x80000000U | causes);
         }
+      }
+    }
+  }
+}
+
+namespace {
+
+// gfx1201 V_MUL_F32 captures (R9700, 2026-11-18, ~/scratch/trap-status/s1-valu/hw1201:
+// EXCP_FLAG_USER cleared before and read after one lane's instruction). MODE words carry
+// the F32 rounding field in bits [1:0] and the F32 denormal field in bits [5:4].
+// The rows pin the shared classifier where a stored-result or native-nearest rule differs:
+// the tininess midpoint under every rounding mode, the sign-dependent direction of guest
+// rounding, flushed denormal inputs, NaN suppression of INPUT_DENORM, OVERFLOW before and
+// after an output modifier, and CLAMP suppressing every cause.
+struct MulCapture {
+  uint32_t mode, a, b, modifiers, d, causes;
+};
+
+const MulCapture mul_f32_captures[] = {
+    // (1 - 2^-24) * 2^-126 stores the minimum normal in nearest/up modes yet is tiny.
+    {0xf0, 0x3f7fffff, 0x00800000, 0, 0x00800000, 0x30},
+    {0xf5, 0x3f7fffff, 0x00800000, 0, 0x00800000, 0x30},
+    {0xfa, 0x3f7fffff, 0x00800000, 0, 0x007fffff, 0x30},
+    {0xff, 0x3f7fffff, 0x00800000, 0, 0x007fffff, 0x30},
+    {0x00, 0x3f7fffff, 0x00800000, 0, 0x00000000, 0x30},
+    {0xf0, 0x00ffffff, 0x3f000000, 0, 0x00800000, 0x30},
+    // (1 + 2^-23)(1 - 2^-24) * 2^-126 rounds to the minimum normal from above: not tiny.
+    {0xf0, 0x00800001, 0x3f7fffff, 0, 0x00800000, 0x20},
+    {0xf0, 0x3f800000, 0x00800000, 0, 0x00800000, 0x00},
+    // The signed product picks the direction: upward rounding of a negative tiny product
+    // truncates below the minimum normal, of a positive one reaches it.
+    {0xf5, 0x807fffff, 0x3f800001, 0, 0x807fffff, 0x32},
+    {0x15, 0x807fffff, 0x3f800001, 0, 0x80000000, 0x32},
+    {0xf5, 0x007fffff, 0x3f800001, 0, 0x00800000, 0x22},
+    {0xf5, 0x007fffff, 0x3f800001, RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_B, 0x807fffff, 0x32},
+    {0xf0, 0x807fffff, 0x3f800001, 0, 0x80800000, 0x22},
+    // Input flushing turns the denormal factor into zero; nothing is raised.
+    {0xf0, 0x00000001, 0x3f000000, 0, 0x00000000, 0x32},
+    {0x00, 0x00000001, 0x3f000000, 0, 0x00000000, 0x00},
+    {0x50, 0x00000001, 0x3f000000, 0, 0x00000000, 0x32},
+    // NaN operands suppress INPUT_DENORM; signaling NaNs and 0 * inf raise INVALID.
+    {0xf0, 0x00000001, 0x7fc00000, 0, 0x7fc00000, 0x00},
+    {0xf0, 0x7f800001, 0x00000001, 0, 0x7fc00001, 0x01},
+    {0xf0, 0x00000000, 0x7f800000, 0, 0xffc00000, 0x01},
+    // Overflow in every rounding mode, before or after an output modifier; OMOD drops
+    // UNDERFLOW and INEXACT.
+    {0xf0, 0x7f7fffff, 0x40000000, 0, 0x7f800000, 0x28},
+    {0xff, 0x7f7fffff, 0x40000000, 0, 0x7f7fffff, 0x28},
+    {0xf0, 0x7f000000, 0x3f800001, RJ_ARITH_ALU_OMOD_2, 0x7f800000, 0x08},
+    {0xf0, 0x7f7fffff, 0x40000000, RJ_ARITH_ALU_OMOD_HALF, 0x7f800000, 0x08},
+    {0xf0, 0x3f7fffff, 0x00800000, RJ_ARITH_ALU_OMOD_2, 0x00000000, 0x00},
+    {0xf0, 0x00000001, 0x3f000000, RJ_ARITH_ALU_OMOD_2, 0x00000000, 0x02},
+    // CLAMP suppresses every cause.
+    {0xf0, 0x7f7fffff, 0x40000000, RJ_ARITH_ALU_CLAMP, 0x3f800000, 0x00},
+    {0xf0, 0x00000000, 0x7f800000, RJ_ARITH_ALU_CLAMP, 0x00000000, 0x00},
+    {0xf0, 0x7f800001, 0x00000001, RJ_ARITH_ALU_CLAMP, 0x00000000, 0x00},
+};
+
+// Translate a captured MODE word into the FP32 flags rocjitsu passes.
+uint64_t mul_capture_flags(uint32_t mode) {
+  uint64_t flags = uint64_t(mode & 3) << 24;
+  if (!((mode >> 4) & 1)) {
+    flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
+  if (!((mode >> 4) & 2)) {
+    flags |= RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  }
+  return flags;
+}
+
+// Check captured values and causes under Compatibility on a lane in a later SIMD chunk, and
+// under explicit mode 3 where it is qualified (default MODE, no OMOD/CLAMP), which must
+// report the same bits. Only the gfx12 entry points carry this classifier: gfx11 has no
+// status capture, because TRAPSTS.EXCP does not latch there with exceptions disabled.
+template <int Lanes, typename Call> void check_mul_captures(Call call, bool gfx12) {
+  using namespace rocjitsu::arith::test;
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  constexpr int lane = Lanes - 13;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const auto &test : mul_f32_captures) {
+      const uint64_t fp = mul_capture_flags(test.mode) | (gfx12 ? 0 : RJ_ARITH_FP_IEEE_MODE);
+      SCOPED_TRACE(::testing::Message()
+                   << std::hex << cpu << " mode 0x" << test.mode << ": 0x" << test.a << ", 0x"
+                   << test.b << " mods 0x" << test.modifiers);
+      const bool qualified = !mul_capture_flags(test.mode) &&
+                             !(test.modifiers & (RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP));
+      for (uint64_t semantics :
+           {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+        if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL && (!gfx12 || !qualified)) {
+          continue;
+        }
+        Registers<3, Lanes> r;
+        r.v[0][lane] = test.a;
+        r.v[1][lane] = test.b;
+        r.v[2][lane] = 0xdeadbeefU;
+        uint32_t status = 0x80000000U;
+        ASSERT_EQ(call(cpu | semantics | fp, Mask(1) << lane, test.modifiers, r.v + 2, r.v, r.v + 1,
+                       &status),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[2][lane], test.d);
+        EXPECT_EQ(status, 0x80000000U | test.causes);
+      }
+    }
+  }
+}
+
+} // namespace
+
+TEST(FpMulF32Gfx12, Gfx1201StatusCaptures) {
+  check_mul_captures<32>(rj_arith_v_mul_f32_w32_gfx12, /*gfx12=*/true);
+  check_mul_captures<64>(rj_arith_v_mul_f32_w64_gfx12, /*gfx12=*/true);
+}
+
+namespace {
+
+// RDNA3 Compatibility causes, which keep the inherited classifier until a gfx1100 capture
+// establishes the gfx1201 rule there. Both rows differ from that rule, so unifying the two
+// architectures changes what an RDNA3 guest with the matching trap enabled runs into:
+// decoded MUL passes these causes to TRAPSTS and trap delivery.
+struct Gfx11Cause {
+  uint64_t fp;
+  uint32_t a, b, modifiers, causes;
+};
+
+const Gfx11Cause gfx11_inherited_causes[] = {
+    // A clamped multiply that overflows in IEEE mode still reports it; the gfx1201 rule
+    // suppresses every cause under CLAMP.
+    {RJ_ARITH_FP_IEEE_MODE, 0x7f7fffff, 0x40000000, RJ_ARITH_ALU_CLAMP,
+     RJ_ARITH_EXCEPTION_OVERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+    // An inexact product scaled by an output modifier still reports INEXACT; the gfx1201
+    // rule keeps only OVERFLOW there.
+    {RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 0x3f800001, 0x3f800001, RJ_ARITH_ALU_OMOD_2,
+     RJ_ARITH_EXCEPTION_INEXACT},
+};
+
+} // namespace
+
+// Pin the two causes above on the RDNA3 entry points, and check the gfx12 entry points give
+// the requalified answer for the same inputs, so re-unifying the two is a test failure
+// rather than a silent change in RDNA3 trap delivery.
+TEST(FpMulF32Gfx11, KeepsInheritedCompatibilityCauses) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (const Gfx11Cause &test : gfx11_inherited_causes) {
+      SCOPED_TRACE(::testing::Message() << std::hex << cpu << ": 0x" << test.a << ", 0x" << test.b
+                                        << " mods 0x" << test.modifiers);
+      for (bool gfx12 : {false, true}) {
+        Registers<3, 32> r;
+        r.v[0][0] = test.a;
+        r.v[1][0] = test.b;
+        r.v[2][0] = 0xdeadbeefU;
+        uint32_t status = 0x80000000U;
+        auto call = gfx12 ? rj_arith_v_mul_f32_w32_gfx12 : rj_arith_v_mul_f32_w32;
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | test.fp, 1, test.modifiers, r.v + 2,
+                       r.v, r.v + 1, &status),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(status, 0x80000000U | (gfx12 ? 0U : test.causes)) << "gfx12 " << gfx12;
       }
     }
   }
@@ -236,12 +413,15 @@ TEST(FpMulF32, DirectedRounding) {
   check_mul_rounding<64>(rj_arith_v_mul_f32_w64_gfx12);
 }
 
-// Compatibility preserves intermediate overflow; Loose can keep the finite wide product.
-TEST(FpMulF16, CompatibilityOmodRounding) {
+// Hardware rounds to FP16 before OMOD, so 65504 * 2 halves to infinity (or, rounding toward
+// zero or down, to 65504 / 2); Loose can keep the finite wide product. Expected results are
+// gfx1201 captures (rj-valu-audit-local hw-r9700-wide v_mul_f16__div2, 2026-11-18).
+TEST(FpMulF16, OmodRounding) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
     for (auto call : {rj_arith_v_mul_f16_w32, rj_arith_v_mul_f16_w32_gfx12}) {
-      for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+      for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                                 RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
         for (uint64_t rounding :
              {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
           Registers<3, 32> r;
@@ -288,7 +468,8 @@ TEST(FpMulF16, TinyAfterRounding) {
       {0x9873, 0x2b31, 0, RJ_ARITH_ALU_OMOD_HALF, {0x8400, not_captured, not_captured, 0x8000}},
   };
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
       for (const auto &test : cases) {
         for (unsigned rounding = 0; rounding < 4; ++rounding) {
           if (test.expected[rounding] == not_captured) {
@@ -336,12 +517,12 @@ TEST(FpMulF64, GuestRounding) {
                 {0x7ff0000000000000ULL, 0x7ff0000000000000ULL, 0x7fefffffffffffffULL,
                  0x7fefffffffffffffULL}}};
   for (const auto &sample : cases) {
-    for (auto call : {rj_arith_v_mul_f64_w32, rj_arith_v_mul_f64_w32_gfx12}) {
-      check_binary64_rounding<32>(call, sample.a, sample.b, sample.expected);
-    }
-    for (auto call : {rj_arith_v_mul_f64_w64, rj_arith_v_mul_f64_w64_gfx12}) {
-      check_binary64_rounding<64>(call, sample.a, sample.b, sample.expected);
-    }
+    check_binary64_rounding<32>(rj_arith_v_mul_f64_w32, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, sample.a, sample.b, sample.expected);
+    check_binary64_rounding<64>(rj_arith_v_mul_f64_w64, sample.a, sample.b, sample.expected, 0, 0,
+                                false);
+    check_binary64_rounding<64>(rj_arith_v_mul_f64_w64_gfx12, sample.a, sample.b, sample.expected);
   }
 }
 
@@ -366,15 +547,15 @@ TEST(FpMulF64, TinyAfterRounding) {
                            0x000fffffffffffffULL};
   const uint64_t not_tiny_flushed[] = {0x0010000000000000ULL, 0x0010000000000000ULL, 0, 0};
   const uint64_t not_tiny_doubled[] = {0x0020000000000000ULL, 0x0020000000000000ULL, 0, 0};
-  for (auto call : {rj_arith_v_mul_f64_w32, rj_arith_v_mul_f64_w32_gfx12}) {
-    check_binary64_rounding<32>(call, tiny, 0x0010000000000000ULL, zero, 0,
-                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
-    check_binary64_rounding<32>(call, not_tiny, 0x0010000000000001ULL, not_tiny_flushed, 0,
-                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
-  }
-  for (auto call : {rj_arith_v_mul_f64_w64, rj_arith_v_mul_f64_w64_gfx12}) {
-    check_binary64_rounding<64>(call, tiny, 0x0010000000000000ULL, zero, 0,
-                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
+  for (bool gfx12 : {false, true}) {
+    auto w32 = gfx12 ? rj_arith_v_mul_f64_w32_gfx12 : rj_arith_v_mul_f64_w32;
+    auto w64 = gfx12 ? rj_arith_v_mul_f64_w64_gfx12 : rj_arith_v_mul_f64_w64;
+    check_binary64_rounding<32>(w32, tiny, 0x0010000000000000ULL, zero, 0,
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, gfx12);
+    check_binary64_rounding<32>(w32, not_tiny, 0x0010000000000001ULL, not_tiny_flushed, 0,
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, gfx12);
+    check_binary64_rounding<64>(w64, tiny, 0x0010000000000000ULL, zero, 0,
+                                RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, gfx12);
   }
   check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, tiny, 0x0010000000000000ULL, kept);
   check_binary64_rounding<32>(rj_arith_v_mul_f64_w32_gfx12, tiny, 0x0010000000000000ULL, zero,
@@ -448,25 +629,107 @@ const CapturedGfx11 mul_f64_lanes[] = {
 
 } // namespace
 
-// Compatibility reproduces captured gfx1100 FP16 MUL lanes.
+// Compatibility and strict exact reproduce captured gfx1100 FP16 MUL lanes.
 TEST(FpMulF16Gfx11, CapturedSignalingNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_lanes);
 }
 
-// Compatibility reproduces captured gfx1100 clamped FP16 MUL NaN lanes.
+// Compatibility and strict exact reproduce captured gfx1100 clamped FP16 MUL NaN lanes.
 TEST(FpMulF16Gfx11, CapturedClampedNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_clamp_lanes);
-  check_captured_gfx11<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_clamp_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_clamp_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_clamp_lanes);
 }
 
-// Compatibility reproduces captured gfx1100 FP64 MUL NaN lanes.
+namespace {
+
+// gfx1100 (W7900, mkm2) Track C hw1100-wide corpus, 2026-11-18, dispatch MODE with DX10_CLAMP
+// set and FP16 output denormals flushed (OMOD active on gfx11): 1.5 * 65504 overflows FP16
+// before div:2 and halves to infinity. A kernel that halves the wide product first fails.
+const CapturedGfx11 mul_f16_omod_lanes[] = {
+    {"OverflowBeforeHalving", RJ_ARITH_ALU_OMOD_HALF, 0x150, 0x530d3e00, 0x848d7bff, 0, 0xa5a57c00},
+};
+
+// gfx1201 (RX 9070 XT, rj-valu-audit-local hw, 2026-11-05; directed-rounding and FP16_OVFL
+// rows from the R9700 hw-r9700-wide corpus, 2026-11-18), FP16 denormals kept. The first NaN
+// source wins and is quieted; 1.5 * 65504 overflows before div:2 except when rounding down,
+// where the product rounds to 65504 and halves to 32752; FP16_OVFL saturates 65504 * 1 mul:2
+// instead of producing infinity; high-half selectors keep the low destination half.
+const CapturedGfx11 mul_f16_gfx12_lanes[] = {
+    {"FirstSignalingNanQuieted", 0, 0xf0, 0xd6f47c01, 0xb2b87e00, 0, 0xa5a57e01},
+    {"FirstNegativeNanWins", 0, 0xf0, 0x0badfe00, 0x8b8f7e00, 0, 0xa5a5fe00},
+    {"SecondNan", 0, 0xf0, 0x42620400, 0x62bb7e00, 0, 0xa5a57e00},
+    {"SecondSignalingNanQuieted", 0, 0xf0, 0x740b0400, 0xcc677c01, 0, 0xa5a57e01},
+    {"OverflowBeforeHalving", RJ_ARITH_ALU_OMOD_HALF, 0xf0, 0x530d3e00, 0x848d7bff, 0, 0xa5a57c00},
+    {"OverflowBeforeHalvingRoundUp", RJ_ARITH_ALU_OMOD_HALF, 0xf5, 0x530d3e00, 0x848d7bff, 0,
+     0xa5a57c00},
+    {"RoundedDownThenHalved", RJ_ARITH_ALU_OMOD_HALF, 0xfa, 0x530d3e00, 0x848d7bff, 0, 0xa5a577ff},
+    {"Fp16OvflSaturatesMul2", RJ_ARITH_ALU_OMOD_2, 0x8000f0, 0x7f7c7bff, 0xa29a3c00, 0, 0xa5a57bff},
+    {"HighHalves", RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D, 0xf0,
+     0x07010000, 0x57460000, 0, 0x225ea5a5},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce the captured gfx1100 OMOD overflow lane.
+TEST(FpMulF16Gfx11, CapturedOmodOverflow) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 16>(rj_arith_v_mul_f16_w32, mul_f16_omod_lanes);
+  check_captured_gfx11_exact<64, 16>(rj_arith_v_mul_f16_w64, mul_f16_omod_lanes);
+}
+
+// Compatibility and strict exact reproduce captured gfx1201 FP16 MUL lanes.
+TEST(FpMulF16Gfx12, CapturedNanPriorityRoundingAndOmod) {
+  using rocjitsu::arith::test::check_captured_gfx12_exact;
+  check_captured_gfx12_exact<32, 16>(rj_arith_v_mul_f16_w32_gfx12, mul_f16_gfx12_lanes);
+  check_captured_gfx12_exact<64, 16>(rj_arith_v_mul_f16_w64_gfx12, mul_f16_gfx12_lanes);
+}
+
+// Compatibility and strict exact reproduce captured gfx1100 FP64 MUL NaN lanes.
 TEST(FpMulF64Gfx11, CapturedNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 64>(rj_arith_v_mul_f64_w32, mul_f64_lanes);
-  check_captured_gfx11<64, 64>(rj_arith_v_mul_f64_w64, mul_f64_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_mul_f64_w32, mul_f64_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_mul_f64_w64, mul_f64_lanes);
+}
+
+namespace {
+
+// gfx1100 (W7900, mkm2) lanes: hw1100-noieee (2026-09-25, MODE.IEEE clear) for the OMOD rows,
+// hw2-gfx1100 (2026-10-06, MODE.IEEE set) for the IEEE row and the Track C hw1100-wide corpus
+// (2026-11-18) for directed rounding. RDNA3 applies OMOD only with output denormals flushed and
+// IEEE clear: mul:2 of 1.0 * min normal stays min normal with denormals kept (0x1f0) or IEEE
+// set (0x300), while min normal squared under mul:2 with flushing is still flushed. Max * max
+// toward -inf or zero stays finite.
+const CapturedGfx11 mul_f64_rules[] = {
+    {"Mul2MinNormalDenormalsKept", RJ_ARITH_ALU_OMOD_2, 0x1f0, 0x3ff0000000000000,
+     0x0010000000000000, 0, 0x0010000000000000},
+    {"Mul2NegMinNormalDenormalsKept", RJ_ARITH_ALU_OMOD_2, 0x1f0, 0xbff0000000000000,
+     0x0010000000000000, 0, 0x8010000000000000},
+    {"Mul2MinNormalIeeeFlush", RJ_ARITH_ALU_OMOD_2, 0x300, 0x3ff0000000000000, 0x0010000000000000,
+     0, 0x0010000000000000},
+    {"Mul2TinyProductFlushed", RJ_ARITH_ALU_OMOD_2, 0x100, 0x0010000000000000, 0x0010000000000000,
+     0, 0},
+    {"Mul2HalfTimesMinNormalFlushed", RJ_ARITH_ALU_OMOD_2, 0x100, 0x3fe0000000000000,
+     0x0010000000000000, 0, 0},
+    {"MaxSquaredRoundDown", 0, 0x1fa, 0x7fefffffffffffff, 0x7fefffffffffffff, 0,
+     0x7fefffffffffffff},
+    {"MaxSquaredRoundZero", 0, 0x1ff, 0x7fefffffffffffff, 0x7fefffffffffffff, 0,
+     0x7fefffffffffffff},
+    {"NegativeProductRoundUp", 0, 0x1f5, 0xbff8000000000000, 0x7fefffffffffffff, 0,
+     0xffefffffffffffff},
+    {"HalfBelowOneTimesMax", 0, 0x1f0, 0x3fdfffffffffffff, 0x7fefffffffffffff, 0,
+     0x7fdffffffffffffe},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce the captured RDNA3 OMOD gate, tininess and rounding.
+TEST(FpMulF64Gfx11, CapturedOmodTininessAndRounding) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_mul_f64_w32, mul_f64_rules);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_mul_f64_w64, mul_f64_rules);
 }
 
 // Compatibility retains a normal FP16 product recovered by narrowing before OMOD.
@@ -515,6 +778,31 @@ TEST(FpMulF32Gfx12, CompatibilityDppWave64Causes) {
         EXPECT_EQ(r.v[2][lane], expected) << "lane=" << lane;
       }
       r.expect_preserved(before, 2, 1);
+    }
+  }
+}
+
+// Neither strict mode borrows another target's qualification.
+TEST(FpMulF32Gfx1250, NumericAndFpStatusQualification) {
+  for (auto cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    uint32_t a[64] = {0x7f800123}, b[64] = {0x3f800000}, out[64] = {};
+    const uint32_t *x = a, *y = b;
+    uint32_t *d = out;
+    for (auto semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                           RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      const uint64_t flags = cpu | semantics;
+      const int expected = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                               ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
+                               : RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+      for (bool wave64 : {false, true}) {
+        uint32_t status = 0x80;
+        out[0] = 0xdeadbeef;
+        const int error = wave64 ? rj_arith_v_mul_f32_w64_gfx1250(flags, 1, 0, &d, &x, &y, &status)
+                                 : rj_arith_v_mul_f32_w32_gfx1250(flags, 1, 0, &d, &x, &y, &status);
+        EXPECT_EQ(error, expected);
+        EXPECT_EQ(out[0], 0xdeadbeefU);
+        EXPECT_EQ(status, 0x80U);
+      }
     }
   }
 }

@@ -638,7 +638,7 @@ def test_calc_builtin_vars_processes_per_xcd_first():
             return_value=mock_builtin_vars,
         ):
             db_analysis.calc_builtin_vars(
-                pmc_df, sys_info, ["$PER_XCD_VAR", "$DERIVED_VAR"]
+                pmc_df, sys_info, {"PER_XCD_VAR", "DERIVED_VAR"}
             )
 
     # Verify PER_XCD var was computed
@@ -670,7 +670,7 @@ def test_calc_builtin_vars_with_dataframe_expressions():
             return_value=mock_builtin_vars,
         ):
             db_analysis.calc_builtin_vars(
-                pmc_df, sys_info, ["$TOTAL_COUNT", "$SCALED_TOTAL"]
+                pmc_df, sys_info, {"TOTAL_COUNT", "SCALED_TOTAL"}
             )
 
     assert sys_info["TOTAL_COUNT"] == 60
@@ -685,7 +685,7 @@ def test_calc_builtin_vars_uses_gfx1250_gui_active_sum():
     db_analysis.calc_builtin_vars(
         pmc_df,
         sys_info,
-        ["$GRBM_GUI_ACTIVE_PER_XCD"],
+        {"GRBM_GUI_ACTIVE_PER_XCD"},
     )
 
     pd.testing.assert_series_equal(

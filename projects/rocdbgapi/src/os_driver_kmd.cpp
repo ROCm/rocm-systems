@@ -1491,7 +1491,7 @@ kmd_driver_t::enable_debug (os_exception_mask_t exceptions_reported,
 
   dbgapi_assert (!is_debug_enabled () && "debug is already enabled");
 
-  std::vector<const kmd::agent_t *> activated (m_agents.size ());
+  std::vector<const kmd::agent_t *> activated;
   auto rollback = utils::make_scope_exit (
     [&activated, this] ()
     {

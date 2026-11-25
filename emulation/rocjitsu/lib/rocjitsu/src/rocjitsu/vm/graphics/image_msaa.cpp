@@ -141,8 +141,9 @@ uint64_t gfx11_msaa_address(uint64_t base, uint32_t x, uint32_t y, uint32_t laye
       x | (uint64_t{y} << 16) | (uint64_t{layer} << 32) | (uint64_t{sample} << 48);
   const auto &masks = kSelectors[swizzle >= 28][sample_log2 - 1][elem];
   uint32_t offset = 0;
-  for (uint32_t bit = 0; bit < block_log2; ++bit)
+  for (uint32_t bit = 0; bit < block_log2; ++bit) {
     offset |= (std::popcount(inputs & masks[bit]) & 1u) << bit;
+  }
   return (base + (block << block_log2)) ^ offset;
 }
 

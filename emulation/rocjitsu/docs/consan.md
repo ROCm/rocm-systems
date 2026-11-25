@@ -40,7 +40,7 @@ The three-stage split has three purposes:
   evidence's contract.
 
 ```text
-             Original code object + target/entry
+             Original code object + target/selected entries
                               |
                               v
 +------------------------------------------------------------+
@@ -77,13 +77,17 @@ The three-stage split has three purposes:
 
 ### Offline preparation
 
-The compiler qualifies the exact original image and entry, plans probes and
-resources, and rewrites code while preserving the original operations. Its
+The compiler inventories the exact original image, qualifies each selected entry,
+and plans its probes, bootstrap and resources. One transactional rewrite produces
+a coherent replacement that preserves unselected native entries. Its
 artifact directory contains:
 
 - `prepared.hsaco`: the instrumented code object.
-- `facts.bin`: image identities and static instruction facts, including each
-  observation site's read/write kind and width.
+- `facts.bin`: exact image and selection identities, an owning entry table with
+  selected/native dispositions and ABI/resources, and each selected entry's
+  instruction facts including observation read/write kind and width. Native rows
+  retain their reachable code ranges for byte preservation checks; entry-address
+  order does not determine ownership of intervening instructions.
 - `ready`: a marker published after the artifact files close successfully.
 
 The preparation tool embeds probe bodies compiled at build time for each
@@ -106,6 +110,23 @@ report storage; GPU probes publish site identities, effective LDS addresses,
 widths, and lane masks. An independent host snapshot lets GPU report storage be
 reused while capture writing continues. Explicit finish drains these handoffs
 and closes the capture.
+
+A module binds every image entry after successful freeze. The actual kernel object
+selects an entry binding; selected dispatches use that entry's original argument
+ABI and prepared resource plan. Known unselected entries retain their original
+packet, resources and completion signal and are native/uncovered. Unknown kernel
+objects are rejected. One module, a controlled queue, nonoverlap and dedicated
+completion signals remain required, including for native siblings.
+Admission recognizes a native completion already visible to the application even
+if the observer has not yet processed it. The observer retains its signal lease
+until its wait returns, so callers still drain before releasing that signal.
+
+The capture header owns the immutable image/entry facts. Each selected execution
+references its original descriptor offset within that exact image. Guest probe
+entry IDs remain local zero; host EntryKeys distinguish entries. Report generation
+increases across all uses of a slot, including a change of entry. Native dispatches
+are omitted from the selected-execution capture and require separate application
+accounting. No cross-dispatch LDS candidate is formed.
 
 The runtime neither compiles nor diagnoses races. Its transport completion does
 not synchronize guest LDS accesses.
@@ -170,14 +191,18 @@ gfx1250 wave32.
 ### Analysis and admission
 
 Preparation accepts a limited instruction/access subset with no synchronization,
-or multiple qualified full-workgroup barriers on **gfx1250 wave32**. Other barrier
-forms and atomics are rejected. Exact
+or qualified full-workgroup barriers on the supported target/wave profiles.
+Other barrier forms and atomics are rejected. Exact
 conditions are defined by [compiler qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp)
 and [runtime admission](../lib/rocjitsu/src/rocjitsu/hooks/consan/hsa_plugin.cpp).
 
-The input code object must contain exactly one kernel, matching the requested
-entry. Selecting an entry does not exclude sibling kernels from this requirement;
-provide a code object containing only the selected kernel.
+Entries in one image must have disjoint, closed scopes and the same target/wave
+mode. Shared code, cross-entry control flow, calls and unknown ownership reject
+preparation. Each selected entry has its own original ABI, bootstrap, resources
+and static site mapping. Unselected native siblings remain in the whole image;
+this does not provide arbitrary native queue or HIP application integration.
+The multi-entry simulator fixture qualifies gfx1250 wave32; single-entry coverage
+on other modes does not establish their multi-entry execution qualification.
 
 The forms are `ds_store_b16`, `ds_load_u16`, `ds_load_i16`, and
 `ds_store_b32/b64/b128` or `ds_load_b32/b64/b128` on gfx1100/gfx1201/gfx1250.
@@ -213,8 +238,16 @@ including partial final waves. Multi-group launches require the original
 kernel's workgroup-X input, which entry snapshots preserve before guest
 instructions can overwrite it.
 
-Barrier qualification recognizes an original LDS drain followed by a matching
-full-workgroup signal/wait pair. It requires at least two waves per workgroup.
+Barrier qualification recognizes an original LDS drain followed by a
+full-workgroup barrier: `s_barrier` on gfx942/gfx950/gfx1100, or a matching
+signal/wait pair on gfx1201/gfx1250. It requires at least two waves per workgroup.
+Legacy barriers require an original `s_waitcnt` with a zero LGKM threshold
+immediately before `s_barrier`. Preparation rejects sequences with an intervening
+instruction, including a global store or `s_waitcnt_vscnt`, even if an earlier
+wait drained LDS.
+Split-barrier drains may use `s_wait_dscnt` or a combined load/DS or store/DS
+wait, provided the DS threshold is zero. The additional load/store threshold
+may be nonzero.
 In acyclic flow, every path to an exit must pass through each barrier group.
 A barrier loop may instead use one basic block with a conditional self-backedge
 and a forward exit, with all barrier groups inside that block. A preheader may
@@ -284,7 +317,7 @@ were safe.
 ## How to use
 
 This example runs a **gfx1250 wave32** assembly fixture with 64 threads in one
-workgroup through the rocJitsu simulator; no physical gfx1250 GPU is required.
+workgroup through the rocjitsu simulator; no physical gfx1250 GPU is required.
 The AMDHSA code-object-v5 image, entry, target, and wave mode must match the
 simulator configuration. A runner option does not change an image's wave mode.
 
@@ -364,12 +397,24 @@ export RJ_CONSAN_CAPTURE_PATH="$consan_example/capture.bin"
 ### 1. Offline preparation
 
 ```bash
-"$consan_prepare" \
-  "$consan_original" gfx1250 lds_producer_consumer "$RJ_CONSAN_ARTIFACT_DIR"
+consan_preparation=$("$consan_prepare" \
+  "$consan_original" gfx1250 "$RJ_CONSAN_ARTIFACT_DIR" --entry lds_producer_consumer)
+export RJ_CONSAN_SELECTION_PROFILE=$(printf '%s\n' "$consan_preparation" | \
+  sed -n 's/^selection_profile=//p')
 ```
 
 The artifact destination must be new. The runtime verifies that this artifact
-matches the exact original image and qualified entry.
+matches the exact original image and the independently configured selection
+profile. `RJ_CONSAN_SELECTION_PROFILE` must be the 64 hexadecimal digits printed
+by the intended preparation command. Missing/malformed or different profile
+configuration rejects loading; the runtime does not infer a variant by symbol
+name or copy its expected profile from the artifact it is checking. The old
+single-entry positional CLI remains an explicit convenience that emits the same
+new image-facts format.
+
+The saved producer contract changed with image entry routing. Regenerate prepared
+artifacts and captures together; historical facts/captures are not accepted as
+compatible merely because guest records still use local entry ID zero.
 
 ### 2. Execution and capture
 
@@ -433,6 +478,38 @@ rejects malformed names with input-error exit 2 before writing JSON. Binary
 capture retains the original name bytes. ASCII and valid UTF-8 names keep their
 original spelling.
 
+## Multiple disjoint entries
+
+Use repeated `--entry` options to select entries in one whole image:
+
+```bash
+"$consan_prepare" original.hsaco gfx1250 new-artifact-directory --entry mk_a --entry mk_b
+```
+
+A/B share one prepared ELF and one image table; an unselected C retains its native
+ABI/resources. Keep the printed selection profile with the exact original and
+prepared identities in the launch configuration. The HSA runtime's argument
+alignment query is distinct from the AMDHSA metadata requirement: the pinned
+ROCR code-object-v5 loader reports 16-byte alignment even for metadata alignment
+8. Replacement preserves the HSA query rather than projecting the metadata value.
+
+The registered `ConSanMultiEntrySim.SelectedAB` integration control runs the
+[whole A/B/C assembly fixture](../tests/patch/consan/fixtures/multi_entry.s) with
+one real load, A→B→C→A dispatches, different A/B argument/resource demands,
+independent guarded CPU output oracles, selected facts/observation attribution,
+and native accounting. It removes original/prepared artifacts before fresh-process
+analysis. `ConSanMultiEntrySim.WrongProfile` checks that a different configured
+profile cannot publish a successful capture. Run these with the required test
+dependencies built; they do not establish toy Llama or physical-GPU support.
+
+The analyzer reports an image entry/disposition table and each selected
+execution's EntryKey/name. Decoder checks reject unknown/native keys and
+inconsistent facts/extents. Local guest ID zero does not independently prove
+entry provenance if a fabricated key selects another entry with an identical
+layout; correct attribution depends on the runtime's validated kernel-object
+binding. Checksums preserve recorded bytes, without providing a security
+attestation of guest identity.
+
 ## Extending ConSan
 
 Preparation uses the shared `Instrumentor` and `TrampolineBuilder` with
@@ -462,7 +539,7 @@ currently accepts those costs rather than selecting a different policy when
 an input exceeds the resource or branch-distance limits.
 
 The callable path uses register backups instead of introducing a private frame.
-It requires one kernel with enumerable register uses, zero VGPR banks at gfx1250
+It requires each selected kernel to have enumerable register uses, zero VGPR banks at gfx1250
 call sites, a bank-preserving probe body, and enough registers for the combined
 probe and preservation plan. An input exceeding that plan is rejected during
 preparation. Entry stubs and per-site trampolines use SOPP branches, whose
@@ -483,7 +560,7 @@ A new analysis primarily extends **compiler facts/probes and offline diagnosis**
 together. Define its question, scope, required evidence, and behavior under loss:
 
 - **Compiler:** select operations and lower probes while preserving guest state
-  and executing each original operation once. Reuse rocJitsu's code-object
+  and executing each original operation once. Reuse rocjitsu's code-object
   parsing, ISA decoders/builders, and ELF rewriting/relocation through the
   [shared DBI machinery](dbi-design.md).
 - **Offline analyzer:** qualify the saved evidence and implement checks,
@@ -516,3 +593,60 @@ the prepared guest wait while retaining its callback checks that instrumentation
 does not substitute for guest synchronization. These scheduling controls provide
 simulator evidence; physical hardware may schedule unsynchronized accesses
 differently.
+
+## Fault injection
+
+The independent offline `rj_code_mutate` CLI and its fault-injection library can
+remove a qualified complete barrier from an AMDGPU code object. They use
+Instrumentor's instruction-replacement path and do not require the ConSan
+compiler, runtime, or analyzer. See the [command-line usage](fault-injection.md#command-line-usage)
+and [Fault injection](fault-injection.md) for the library interface, current
+features, target/wave coverage, and limitations.
+
+Treat the mutant as a new original image: perform a **fresh ConSan prepare**,
+then execution/capture → analyze. Do not reuse pristine prepared artifacts or
+capture bindings. Drop uses branch-to-NOP trampolines, so emitted ELF file
+offsets and CFG block boundaries can differ from the pristine image. Preparation
+must discover the mutant's entries and instructions. Preparation may reject a
+target or program profile that the mutation library admits.
+
+Fresh preparation currently requires a **single-kernel code object**. A
+sibling-preserving multi-kernel mutant cannot use this path. Remaining barriers
+must satisfy ConSan's qualified gfx1250 wave32 workgroup-barrier profile; other
+barrier forms remain unsupported. The mutant must also satisfy ConSan's other
+target, entry, instruction, native-LDS and resource restrictions, enforced by
+[input qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/input.cpp) and
+the [LDS classifier](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp).
+Acyclic trampoline returns can be admitted. Apart from ConSan's qualified
+conditional single-block barrier loop, CFG cycles remain rejected. Native LDS
+access PCs must increase along each path within an iteration; the qualified
+loop uses repeated epochs. Mutation admission and detector admission remain
+independent decisions.
+
+For this example, reuse the paths and plugin environment from
+[Build and setup](#build-and-setup). Replace `original.hsaco` and `my_kernel`
+with a `gfx1250` workload's input and exact entry containing an admitted
+complete barrier:
+
+```bash
+consan_mutant="$consan_example/mutant.hsaco"
+"$consan_build/tools/rj_code_mutate" \
+  --input original.hsaco --kernel my_kernel --kind DropBarrier \
+  --ordinal 0 --output "$consan_mutant"
+export RJ_CONSAN_ARTIFACT_DIR="$consan_example/mutant-artifact"
+export RJ_CONSAN_CAPTURE_PATH="$consan_example/mutant-capture.bin"
+"$consan_prepare" \
+  "$consan_mutant" gfx1250 my_kernel "$RJ_CONSAN_ARTIFACT_DIR"
+```
+
+If preparation admits the mutant, continue with [execution and capture](#2-execution-and-capture)
+using the workload's launch code to load `consan_mutant` and its matching entry.
+Keep the new artifact and capture bindings above, then run the existing
+[offline diagnosis](#3-offline-diagnosis) command. The plugin's original image
+is now the mutant; it must not bind the pristine image or its prepared artifact.
+
+Mutation success reports emission after input qualification. It establishes
+neither execution nor detector qualification: removing a barrier does not prove
+that a race occurs, that a particular execution observes it, or that ConSan
+reports it. Qualify those stages separately using the normal capture and analysis
+workflow.

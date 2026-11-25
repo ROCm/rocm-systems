@@ -23,11 +23,12 @@ THE SOFTWARE.
 // rdc_link_status_get() copies each GPU's XGMI link states from
 // amdsmi_get_gpu_xgmi_link_status(). A failed call can leave that output unset
 // or partly set. rdcd used to copy it anyway: it reported the previous GPU's
-// links, or a garbage link count wrote past the link_states array.
+// links, or a garbage link count wrote past the link_states array. Both
+// rdc_link_status_get() and rdc_device_topology_get() must also go on past a
+// GPU that AMD SMI cannot identify.
 //
-// librdc cannot be loaded without a GPU (it initializes amdsmi when loaded), so
-// this binary builds RdcTopologyLinkImpl.cc itself, with the amdsmi calls that
-// file makes replaced by the fakes below.
+// This binary builds RdcTopologyLinkImpl.cc itself, with the amdsmi calls that
+// file makes replaced by the fakes below, so it needs neither a GPU nor librdc.
 
 #include <gtest/gtest.h>
 
@@ -51,6 +52,8 @@ struct LinkQuery {
   amdsmi_status_t status;
   bool writes_output;
   amdsmi_xgmi_link_status_t output;
+  // false: a GPU AMD SMI cannot identify, whose handle lookup fails with NOT_FOUND.
+  bool available = true;
 };
 
 // One entry per GPU. The fake processor handle of GPU i points at entry i.
@@ -106,7 +109,7 @@ namespace amd {
 namespace rdc {
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle) {
-  if (gpu_id >= g_queries.size()) {
+  if (gpu_id >= g_queries.size() || !g_queries[gpu_id].available) {
     return AMDSMI_STATUS_NOT_FOUND;
   }
   *processor_handle = &g_queries[gpu_id];
@@ -124,25 +127,34 @@ amdsmi_status_t amdsmi_get_gpu_xgmi_link_status(amdsmi_processor_handle processo
   return query->status;
 }
 
-// Only rdc_device_topology_get() calls these, and no test here calls it.
-amdsmi_status_t amdsmi_topo_get_numa_node_number(amdsmi_processor_handle, uint32_t*) {
-  return AMDSMI_STATUS_NOT_SUPPORTED;
+// Only rdc_device_topology_get() calls these: every two GPUs are one XGMI hop apart.
+amdsmi_status_t amdsmi_topo_get_numa_node_number(amdsmi_processor_handle, uint32_t* numa_node) {
+  *numa_node = 0;
+  return AMDSMI_STATUS_SUCCESS;
 }
 amdsmi_status_t amdsmi_topo_get_link_weight(amdsmi_processor_handle, amdsmi_processor_handle,
-                                            uint64_t*) {
-  return AMDSMI_STATUS_NOT_SUPPORTED;
+                                            uint64_t* weight) {
+  *weight = 15;
+  return AMDSMI_STATUS_SUCCESS;
 }
 amdsmi_status_t amdsmi_get_minmax_bandwidth_between_processors(amdsmi_processor_handle,
-                                                               amdsmi_processor_handle, uint64_t*,
-                                                               uint64_t*) {
-  return AMDSMI_STATUS_NOT_SUPPORTED;
+                                                               amdsmi_processor_handle,
+                                                               uint64_t* min_bandwidth,
+                                                               uint64_t* max_bandwidth) {
+  *min_bandwidth = 1;
+  *max_bandwidth = 2;
+  return AMDSMI_STATUS_SUCCESS;
 }
 amdsmi_status_t amdsmi_topo_get_link_type(amdsmi_processor_handle, amdsmi_processor_handle,
-                                          uint64_t*, amdsmi_link_type_t*) {
-  return AMDSMI_STATUS_NOT_SUPPORTED;
+                                          uint64_t* hops, amdsmi_link_type_t* type) {
+  *hops = 1;
+  *type = AMDSMI_LINK_TYPE_XGMI;
+  return AMDSMI_STATUS_SUCCESS;
 }
-amdsmi_status_t amdsmi_is_P2P_accessible(amdsmi_processor_handle, amdsmi_processor_handle, bool*) {
-  return AMDSMI_STATUS_NOT_SUPPORTED;
+amdsmi_status_t amdsmi_is_P2P_accessible(amdsmi_processor_handle, amdsmi_processor_handle,
+                                         bool* accessible) {
+  *accessible = true;
+  return AMDSMI_STATUS_SUCCESS;
 }
 
 TEST(RdcLinkStatus, CopiesLinkStates) {
@@ -187,6 +199,59 @@ TEST(RdcLinkStatus, FailedQueryReportsNoLinks) {
   EXPECT_EQ(results->gpus[2].num_of_links, 0u);
   ASSERT_EQ(results->gpus[3].num_of_links, 1u);
   EXPECT_EQ(results->gpus[3].link_states[0], RDC_LINK_STATE_UP);
+}
+
+TEST(RdcLinkStatus, UnavailableGpuReportsNoLinks) {
+  // GPU 1 keeps its index while AMD SMI cannot identify it; the GPUs after it
+  // still report their links.
+  g_queries = {{AMDSMI_STATUS_SUCCESS, true, make_links({AMDSMI_XGMI_LINK_UP})},
+               {AMDSMI_STATUS_SUCCESS, true, make_links({AMDSMI_XGMI_LINK_UP}), false},
+               {AMDSMI_STATUS_SUCCESS, true, make_links({AMDSMI_XGMI_LINK_DOWN})}};
+  auto results = get_link_status();
+
+  ASSERT_EQ(results->num_of_gpus, 3);
+  for (uint32_t i = 0; i < 3; i++) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(results->gpus[i].gpu_index, i);
+    EXPECT_EQ(results->gpus[i].link_types, RDC_IOLINK_TYPE_XGMI);
+  }
+  ASSERT_EQ(results->gpus[0].num_of_links, 1u);
+  EXPECT_EQ(results->gpus[0].link_states[0], RDC_LINK_STATE_UP);
+  EXPECT_EQ(results->gpus[1].num_of_links, 0u);
+  ASSERT_EQ(results->gpus[2].num_of_links, 1u);
+  EXPECT_EQ(results->gpus[2].link_states[0], RDC_LINK_STATE_DOWN);
+}
+
+TEST(RdcDeviceTopology, UnavailableGpuReadsNotAvailable) {
+  // GPU 1 keeps its index while AMD SMI cannot identify it: its entry reads N/A
+  // (the largest values and an undefined link type), and GPU 0's link to the
+  // GPU after it still reads. The call zeroes the result first, so the link type
+  // and P2P checks below hold either way; the others need the N/A entry.
+  g_queries = {{AMDSMI_STATUS_SUCCESS, true, {}},
+               {AMDSMI_STATUS_SUCCESS, true, {}, false},
+               {AMDSMI_STATUS_SUCCESS, true, {}}};
+  amd::rdc::RdcTopologyLinkImpl impl(nullptr, std::make_shared<FakeMetricFetcher>());
+  auto results = std::make_unique<rdc_device_topology_t>();
+  ASSERT_EQ(impl.rdc_device_topology_get(0, results.get()), RDC_ST_OK);
+
+  ASSERT_EQ(results->num_of_gpus, 3u);
+  const rdc_topology_link_info_t& unavailable = results->link_infos[1];
+  EXPECT_EQ(unavailable.gpu_index, 1u);
+  EXPECT_EQ(unavailable.weight, UINT64_MAX);
+  EXPECT_EQ(unavailable.min_bandwidth, UINT64_MAX);
+  EXPECT_EQ(unavailable.max_bandwidth, UINT64_MAX);
+  EXPECT_EQ(unavailable.hops, UINT64_MAX);
+  EXPECT_EQ(unavailable.link_type, RDC_IOLINK_TYPE_UNDEFINED);
+  EXPECT_FALSE(unavailable.is_p2p_accessible);
+  // link_infos[i] is the link from GPU 0 to GPU i; GPU 0's own entry reads N/A.
+  EXPECT_EQ(results->link_infos[0].gpu_index, 0u);
+  EXPECT_EQ(results->link_infos[0].weight, UINT64_MAX);
+  const rdc_topology_link_info_t& after = results->link_infos[2];
+  EXPECT_EQ(after.gpu_index, 2u);
+  EXPECT_EQ(after.weight, 15u);
+  EXPECT_EQ(after.hops, 1u);
+  EXPECT_EQ(after.link_type, RDC_IOLINK_TYPE_XGMI);
+  EXPECT_TRUE(after.is_p2p_accessible);
 }
 
 TEST(RdcLinkStatus, NotSupportedKeepsDisabledLinks) {

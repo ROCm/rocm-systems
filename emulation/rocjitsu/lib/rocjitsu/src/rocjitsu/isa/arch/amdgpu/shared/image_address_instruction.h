@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/arch/amdgpu/shared/image_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/instruction.h"
 
@@ -31,25 +32,28 @@ class ImageAddressInstruction : public Encoding {
   static constexpr bool gfx12 = requires(typename Encoding::OpEncoding e) { e.vaddr0; };
 
   bool reads_address_inputs() const {
-    if constexpr (Form.kind == ImageAddressKind::ResourceInfo && requires { this->inst_.dim; })
+    if constexpr (Form.kind == ImageAddressKind::ResourceInfo && requires { this->inst_.dim; }) {
       return this->inst_.dmask != 0;
+    }
     return true;
   }
 
   bool scattered() const {
-    if constexpr (requires { this->inst_.nsa; })
+    if constexpr (requires { this->inst_.nsa; }) {
       return this->inst_.nsa != 0;
+    }
     return gfx12;
   }
 
   ImageAddressRegisters selectors() const {
     const auto &e = this->inst_;
-    if constexpr (requires { e.vaddr0; })
+    if constexpr (requires { e.vaddr0; }) {
       return gfx12_image_address_registers(e);
-    else if constexpr (requires { e.nsa; })
+    } else if constexpr (requires { e.nsa; }) {
       return mimg_image_address_registers(e.nsa, !gfx10, e.vaddr, this->raw_encoding());
-    else
+    } else {
       return contiguous_image_address_registers(e.vaddr);
+    }
   }
 
   // BVH explicitly names the base of each vector (node, extent, origin,
@@ -59,12 +63,15 @@ class ImageAddressInstruction : public Encoding {
   }
 
   unsigned print_group_width(unsigned group, unsigned words) const {
-    if (!scattered())
+    if (!scattered()) {
       return words;
-    if constexpr (gfx10)
+    }
+    if constexpr (gfx10) {
       return 1;
-    if constexpr (ray)
+    }
+    if constexpr (ray) {
       return ray_group_width(group);
+    }
     constexpr unsigned last = gfx12 && !requires { this->inst_.vaddr4; } ? 3 : 4;
     return group == last ? words - group : 1;
   }
@@ -78,9 +85,11 @@ class ImageAddressInstruction : public Encoding {
       unsigned words = 0;
       for (unsigned group = 0; group < 5; ++group) {
         const auto width = ray_group_width(group);
-        if (!gfx10 && scattered())
-          for (unsigned i = 0; i < width; ++i)
+        if (!gfx10 && scattered()) {
+          for (unsigned i = 0; i < width; ++i) {
             m.image_coordinates[words + i] = bases[group] + i;
+          }
+        }
         words += width;
       }
       m.image_prefix_words = words;
@@ -105,9 +114,11 @@ class ImageAddressInstruction : public Encoding {
 
   std::optional<RegisterRef> preserved_half() const {
     const unsigned components = image_result_components(this->inst_.dmask, !gfx10);
-    if (this->inst_.d16 && (components & 1u))
-      if (auto reg = this->dst_operand(0)->to_register_ref())
+    if (this->inst_.d16 && (components & 1u)) {
+      if (auto reg = this->dst_operand(0)->to_register_ref()) {
         return RegisterRef{reg->cls, static_cast<uint16_t>(reg->index + components / 2), 1};
+      }
+    }
     return std::nullopt;
   }
 
@@ -116,35 +127,45 @@ public:
   void amdgpu_register_modifiers(RegisterModifiers &m) const override {
     Encoding::amdgpu_register_modifiers(m);
     address(m);
-    if constexpr (Form.sample_result)
-      if (this->inst_.d16)
+    if constexpr (Form.sample_result) {
+      if (this->inst_.d16) {
         m.set_packed_image_result(image_result_components(this->inst_.dmask, !gfx10));
+      }
+    }
   }
   bool tracks_explicit_source(uint8_t index) const override {
     return index != 0 && reads_address_inputs() && Encoding::tracks_explicit_source(index);
   }
   void implicit_uses(RegisterSet &uses) const override {
     Encoding::implicit_uses(uses);
-    if (!reads_address_inputs())
+    if (!reads_address_inputs()) {
       return;
+    }
     RegisterModifiers m;
     const auto words = address(m);
-    for (unsigned i = 0; i < words; ++i)
-      if (m.image_coordinates[i] < 256)
+    for (unsigned i = 0; i < words; ++i) {
+      if (m.image_coordinates[i] < 256) {
         uses.expand({RegClass::VGPR, static_cast<uint16_t>(m.image_coordinates[i]), 1});
-    if constexpr (Form.sample_result)
-      if (const auto preserved = preserved_half())
+      }
+    }
+    if constexpr (Form.sample_result) {
+      if (const auto preserved = preserved_half()) {
         uses.expand(*preserved);
+      }
+    }
   }
   bool implicit_preservation_uses(RegisterSet &uses) const override {
-    if constexpr (!Form.sample_result)
+    if constexpr (!Form.sample_result) {
       return Encoding::implicit_preservation_uses(uses);
+    }
     if (const auto preserved = preserved_half()) {
       RegisterModifiers m;
       const auto words = address(m);
-      for (unsigned i = 0; i < words; ++i)
-        if (m.image_coordinates[i] == preserved->index)
+      for (unsigned i = 0; i < words; ++i) {
+        if (m.image_coordinates[i] == preserved->index) {
           return true; // The address still reads this register.
+        }
+      }
       uses.expand(*preserved);
     }
     return true;
@@ -160,20 +181,23 @@ public:
     RegisterModifiers m;
     const auto words = address(m);
     const bool list = scattered() && !(gfx12 && words == 1);
-    if (list)
+    if (list) {
       out += '[';
+    }
     for (unsigned i = 0, group = 0; i < words; ++group) {
       const unsigned width = print_group_width(group, words);
-      if (i)
+      if (i) {
         out += ", ";
+      }
       const auto first = m.image_coordinates[i];
       out += width == 1
                  ? "v" + std::to_string(first)
                  : "v[" + std::to_string(first) + ":" + std::to_string(first + width - 1) + "]";
       i += width;
     }
-    if (list)
+    if (list) {
       out += ']';
+    }
   }
 };
 

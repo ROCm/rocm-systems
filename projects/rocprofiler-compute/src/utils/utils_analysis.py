@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import re
+from collections import ChainMap
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1752,7 +1753,7 @@ def add_unit_counter(df: pd.DataFrame) -> None:
 def impute_counters_iteration_multiplex(
     df: pd.DataFrame,
     workload_dir: Path,
-) -> tuple[pd.DataFrame, dict[str, pd.DataFrame]]:
+) -> Tuple[pd.DataFrame, Dict[str, ChainMap]]:
     """Fill in the counters each launch did not collect under iteration
     multiplexing.
 
@@ -1873,13 +1874,17 @@ def impute_counters_iteration_multiplex(
     # Pass tables join their pieces by the original row labels, so reset
     # the labels last
     imputed_df = pd.concat(group_dfs)
-    dispatch_df = imputed_df.drop(columns=counter_columns)
+    merged_df = imputed_df.reset_index(drop=True)
+    dispatches = merged_df.drop(columns=counter_columns)
     # A kernel that never collected a pass has empty counters in its table
     pass_tables = {
-        f"pass_{number}": dispatch_df.join(pd.concat(pieces)).reset_index(drop=True)
+        f"pass_{number}": ChainMap(
+            pd.concat(pieces).reindex(imputed_df.index).reset_index(drop=True),
+            dispatches,
+        )
         for number, pieces in enumerate(pass_pieces.values())
     }
-    return imputed_df.reset_index(drop=True), pass_tables
+    return merged_df, pass_tables
 
 
 def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) -> None:
@@ -1986,25 +1991,30 @@ def process_rocpd_csv(
 def split_counters_by_pass(
     counter_rows: pd.DataFrame,
     merged_df: pd.DataFrame,
-) -> dict[str, pd.DataFrame]:
+) -> Dict[str, ChainMap]:
     """Return one table per pass, keyed by Pass_Key.
 
     Each table has the rows of merged_df, its dispatch columns, and only the
     counters and timestamps that pass collected. A dispatch the pass did not see
     has empty counters there.
+
+    A table is a ChainMap: table[column] reads the pass's own counters and
+    timestamps first, then the dispatch columns, which all passes share.
     """
     if counter_rows.empty or "Pass_Key" not in counter_rows.columns:
         return {}
     counter_rows = counter_rows.assign(
         Merged_Row=counter_rows.groupby(_MERGE_KEYS).ngroup()
     )
+    counter_names = set(counter_rows["Counter_Name"])
     dispatch_columns = [
         column
         for column in merged_df.columns
-        if column not in set(counter_rows["Counter_Name"])
+        if column not in counter_names
         and column not in ("Start_Timestamp", "End_Timestamp")
     ]
-    pass_tables: dict[str, pd.DataFrame] = {}
+    dispatches = merged_df[dispatch_columns]
+    pass_tables: Dict[str, ChainMap] = {}
     for pass_key, rows in counter_rows.groupby("Pass_Key", sort=False):
         counters = rows.pivot_table(
             index="Merged_Row",
@@ -2013,10 +2023,27 @@ def split_counters_by_pass(
             aggfunc="first",
         )
         timestamps = rows.groupby("Merged_Row")[["Start_Timestamp", "End_Timestamp"]]
-        pass_tables[str(pass_key)] = (
-            merged_df[dispatch_columns].join(timestamps.first()).join(counters)
-        )
+        pass_counters = timestamps.first().join(counters).reindex(merged_df.index)
+        pass_tables[str(pass_key)] = ChainMap(pass_counters, dispatches)
     return pass_tables
+
+
+def pass_tables_on_rows(
+    pass_tables: Dict[str, ChainMap], rows: pd.DataFrame
+) -> List[ChainMap]:
+    """Return the pass tables cut to the rows of rows, part of the merged table.
+
+    The pass tables share one dispatches table, so it is cut once.
+    """
+    if not pass_tables:
+        return []
+    _counters, dispatches = next(iter(pass_tables.values())).maps
+    dispatches_on_rows = dispatches.loc[rows.index]
+    tables_on_rows = []
+    for table in pass_tables.values():
+        counters = table.maps[0]
+        tables_on_rows.append(ChainMap(counters.loc[rows.index], dispatches_on_rows))
+    return tables_on_rows
 
 
 def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:

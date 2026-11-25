@@ -203,6 +203,34 @@ impl KfdHostAlias {
         (self.address - self.source.host_address) as u64
     }
 
+    #[allow(unsafe_code)]
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        self.source
+            .vm
+            .kfd()
+            .check_process()
+            .map_err(|source| super::super::native_error("diagnostic host backing", source))?;
+        if !self.active {
+            return Err(error(
+                ErrorKind::Unsupported,
+                "diagnostic backing has retired or is uncertain",
+            ));
+        }
+        let info = self.cached_info();
+        // SAFETY: This borrow retains the host mapping and excludes native
+        // cleanup. Registered callers retain their originally borrowed pages.
+        unsafe {
+            crate::device::gpu::diagnostic::DiagnosticMemory::borrow(
+                self,
+                info.device_address,
+                info.host_address,
+                info.size,
+            )
+        }
+    }
+
     pub(crate) fn check(&self) -> Result<(), Error> {
         if !self.active {
             return Err(error(ErrorKind::Unsupported, "host alias was released"));

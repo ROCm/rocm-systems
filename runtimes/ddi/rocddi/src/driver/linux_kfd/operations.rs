@@ -847,14 +847,47 @@ impl AllocationOperations for LinuxKfdDriver {
             // SAFETY: Raw callers retain these pages through cleanup; owned
             // registrations transfer a lease into the native allocation.
             let pages = unsafe { memory::BorrowedHostPages::new(address, policy) };
-            LinuxAllocation::create_with_peers(
+            let mut rejected = None;
+            let result = memory::KfdAllocation::create_with_peers_recover_userptr(
                 device.vm.clone(),
                 peers.iter().map(|peer| peer.vm.clone()),
                 desc,
                 memory::BufferKind::Userptr(pages),
                 permissions,
                 backing,
-            )
+                &mut rejected,
+            );
+            match result {
+                Ok(allocation) => LinuxAllocation::from_kfd(allocation),
+                Err(error) => {
+                    let Some(rejected) = rejected else {
+                        return Err(error);
+                    };
+                    let page = os_memory::page_size().map_err(|source| {
+                        native_error("SVM host registration page size", source)
+                    })?;
+                    let host_base = address & !(page - 1);
+                    if policy == HostMappingPolicy::Uncached
+                        || host_base as u64 % desc.alignment != 0
+                    {
+                        return Err(error);
+                    }
+                    // Advice can leave SVM state after a USERPTR BO retires.
+                    // Only a proven pre-allocation collision transfers the
+                    // original lease here; partial/native failures cannot
+                    // start another registration. SVM preserves ordinary
+                    // policy, but cannot supply uncached or an aligned alias.
+                    LinuxAllocation::create_svm_registered_host(
+                        device.vm.clone(),
+                        peers.iter().map(|peer| peer.vm.clone()),
+                        desc,
+                        address,
+                        policy,
+                        permissions,
+                        rejected.backing,
+                    )
+                }
+            }
         }
     }
 }
@@ -960,12 +993,23 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
     ) -> Result<(), Error> {
         mapping.set_permissions(permissions)
     }
+    fn diagnostic_virtual_host_mapping(
+        mapping: &KfdVirtualHostMapping,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        mapping.diagnostic_memory()
+    }
     fn free_virtual_host_mapping(mapping: &mut KfdVirtualHostMapping) -> Result<(), Error> {
         mapping.free()
     }
 }
 
 impl UserQueueResource for KfdQueue {
+    fn core_snapshot(
+        &mut self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        KfdQueue::core_snapshot(self)
+    }
+
     type DeviceState = DeviceState;
 
     fn check(&self) -> Result<(), Error> {

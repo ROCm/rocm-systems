@@ -20,11 +20,15 @@ function(rj_arith_add_test target source)
     endif()
 endfunction()
 
+rj_arith_add_test(rj_arith_gfx1250_binary_test fp/gfx1250_binary_test.cpp)
+
+rj_arith_add_test(rj_arith_packed_u64_gfx1251_test integer/packed_u64_gfx1251_test.cpp)
 rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
 rj_arith_add_test(rj_arith_mfma_floating_test mfma/mfma_floating_test.cpp)
 rj_arith_add_test(rj_arith_mfma_fp8_test mfma/mfma_fp8_test.cpp)
+rj_arith_add_test(rj_arith_mfma_gfx942_exact_test mfma/gfx942_exact_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_f32_test wmma/gfx1250_f32_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_fp8_test wmma/gfx1250_fp8_test.cpp)
 rj_arith_add_test(rj_arith_wmma_gfx1250_half_test wmma/gfx1250_half_test.cpp)
@@ -108,6 +112,7 @@ foreach(
         v_div_scale
         v_fma_dx9_zero
         v_fma
+        v_fma64_variants
         v_mad_f16
         v_fma_mix
         v_fma_mix_bf16
@@ -127,6 +132,7 @@ foreach(
         v_minmax_maxmin
         v_minmax_maxmin_num
         v_mul_dx9_zero_f32
+        v_mul_legacy_f32
         v_mul
         v_mad_mix
         v_mad_mix_gfx908
@@ -210,14 +216,26 @@ endforeach()
 foreach(
     family
     IN
-    ITEMS round root_reciprocal log_exp decompose trig rcp_iflag preop
+    ITEMS
+        cdna_preop
+        bf16_gfx1250
+        tanh_gfx1250
+        round
+        root_reciprocal
+        log_exp
+        decompose
+        trig
+        rcp_iflag
+        preop
+        cdna_half
+        cdna_unary
 )
     set(target "rj_arith_math_${family}_test")
     rj_arith_add_test(${target} math/${family}_test.cpp)
 endforeach()
 
 # VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
-foreach(family IN ITEMS alu fused dot)
+foreach(family IN ITEMS alu fused dot gfx1250)
     set(target "rj_arith_dual_${family}_test")
     rj_arith_add_test(${target} dual/${family}_test.cpp)
 endforeach()
@@ -226,7 +244,9 @@ endforeach()
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 target_compile_definitions(
     rj_arith_cpu_test
-    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_cpu
+    PRIVATE
+        RJ_ARITH_IMPL_NAMESPACE=test_cpu
+        "$<FILTER:$<TARGET_PROPERTY:rj_arith,COMPILE_DEFINITIONS>,INCLUDE,^RJ_ARITH_HAVE_>"
 )
 add_subdirectory(headers)
 
@@ -267,7 +287,9 @@ foreach(
         integer_ordering
         class
         float_equality
+        float_gfx908
         float_ordered
+        float_gfx1150
         float_unordered
 )
     set(target "rj_arith_compare_${family}_test")
@@ -323,6 +345,7 @@ foreach(
         state
         relative
         pseudo
+        gfx1150_fp
 )
     set(target "rj_arith_scalar_${family}_test")
     rj_arith_add_test(${target} scalar/${family}_test.cpp)

@@ -8,8 +8,6 @@ on:
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-benchmarks.yml"
   pull_request:
-    branches:
-      - "develop"
     types:
       - labeled
       - synchronize
@@ -28,7 +26,7 @@ on:
         required: false
         type: string
       pull_request_number:
-        description: "Optional open, same-repository PR from the selected side branch to develop"
+        description: "Optional open, same-repository PR from the selected side branch, including stacked PRs"
         required: false
         type: string
       publish_results:
@@ -207,7 +205,8 @@ jobs:
             PR_JSON="$(gh api \
               "repos/${GITHUB_REPOSITORY}/pulls/${REQUESTED_PULL_REQUEST}")"
             PR_STATE="$(jq -r '.state' <<< "${PR_JSON}")"
-            PR_BASE="$(jq -r '.base.ref' <<< "${PR_JSON}")"
+            PR_BASE="$(jq -r '.base.ref // ""' <<< "${PR_JSON}")"
+            PR_BASE_REPOSITORY="$(jq -r '.base.repo.full_name // ""' <<< "${PR_JSON}")"
             PR_HEAD_REPOSITORY="$(jq -r '.head.repo.full_name // ""' <<< "${PR_JSON}")"
             PR_HEAD_BRANCH="$(jq -r '.head.ref' <<< "${PR_JSON}")"
             PR_HEAD_SHA="$(jq -r '.head.sha' <<< "${PR_JSON}")"
@@ -215,8 +214,12 @@ jobs:
             if [[ "${PR_STATE}" != open ]]; then
               fail "PR #${REQUESTED_PULL_REQUEST} is '${PR_STATE}'; benchmarking requires an open PR."
             fi
-            if [[ "${PR_BASE}" != "${BASE_BRANCH}" ]]; then
-              fail "PR #${REQUESTED_PULL_REQUEST} targets '${PR_BASE}'; benchmarking requires base branch '${BASE_BRANCH}'. Stacked PR bases are not supported."
+            if [[ "${PR_BASE_REPOSITORY}" != "${GITHUB_REPOSITORY}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} base repository is '${PR_BASE_REPOSITORY}'; benchmarking requires '${GITHUB_REPOSITORY}'."
+            fi
+            if [[ -z "${PR_BASE}" || "${PR_BASE}" == -* ]] \
+               || ! git check-ref-format "refs/heads/${PR_BASE}"; then
+              fail "The PR base must be a valid branch name."
             fi
             if [[ "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" ]]; then
               fail "PR #${REQUESTED_PULL_REQUEST} head repository is '${PR_HEAD_REPOSITORY}'; benchmarking requires '${GITHUB_REPOSITORY}'."
@@ -259,7 +262,7 @@ jobs:
       BENCHMARK_SHA: ${{ needs.source-metadata.outputs.source_sha }}
       BENCHMARK_BRANCH: ${{ needs.source-metadata.outputs.source_branch }}
     runs-on: rocjitsu-benchmark
-    timeout-minutes: 120
+    timeout-minutes: 240
     permissions:
       contents: read
     outputs:
@@ -435,7 +438,8 @@ jobs:
 
       - name: Run performance suite
         if: ${{ success() && steps.prepare.outcome == 'success' && steps.rdna.outcome == 'success' }}
-        timeout-minutes: 60
+        # Sequential cases include cold compilation and CPU validation.
+        timeout-minutes: 180
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
         run: |

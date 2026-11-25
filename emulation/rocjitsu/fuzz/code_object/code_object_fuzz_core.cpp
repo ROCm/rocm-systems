@@ -61,8 +61,9 @@ template <typename T> void write_at(std::vector<uint8_t> &image, uint64_t offset
 void write_bytes(std::vector<uint8_t> &image, uint64_t offset, const void *data, std::size_t size) {
   assert(offset <= image.size() && size <= image.size() - offset &&
          "code-object fuzz seed write exceeds image");
-  if (size != 0)
+  if (size != 0) {
     std::copy_n(static_cast<const uint8_t *>(data), size, image.begin() + offset);
+  }
 }
 
 std::vector<uint8_t> make_device_elf(uint32_t machine_flag) {
@@ -280,8 +281,9 @@ private:
 };
 
 void inspect_object(const AmdGpuCodeObject &object, RunStats &stats) {
-  if (!object.is_valid())
+  if (!object.is_valid()) {
     return;
+  }
   ++stats.code_objects_valid;
   stats.sections += object.all_sections().size();
   stats.text_sections += object.text_sections().size();
@@ -297,8 +299,9 @@ void inspect_object(const AmdGpuCodeObject &object, RunStats &stats) {
   // loader campaign.
   const IsaTargetDescriptor *target = default_isa_target_registry().find(object.target_id());
   uint64_t metadata_checksum = object.mem_size();
-  if (target != nullptr)
-    metadata_checksum ^= object.min_kernel_sgpr_count(target->architecture_id).value_or(0);
+  if (target != nullptr) {
+    metadata_checksum ^= object.min_kernel_sgpr_count(target->family).value_or(0);
+  }
   LoadSink sink(image);
   object.load_to_memory(&sink, 0x100000);
   stats.load_segments += sink.loads();
@@ -309,8 +312,9 @@ void inspect_object(const AmdGpuCodeObject &object, RunStats &stats) {
 
 void inspect_executable(std::span<const uint8_t> bytes, RunStats &stats) {
   Executable executable(bytes);
-  if (!executable.is_valid())
+  if (!executable.is_valid()) {
     return;
+  }
   ++stats.executables_valid;
   stats.sections += executable.all_sections().size();
   for (int32_t raw_target = 0; raw_target < ROCJITSU_CODE_TARGET_NUM_TARGETS; ++raw_target) {
@@ -319,29 +323,34 @@ void inspect_executable(std::span<const uint8_t> bytes, RunStats &stats) {
     stats.bundled_code_objects += count;
     for (uint32_t index = 0; index < count; ++index) {
       const AmdGpuCodeObject *object = executable.code_object(target, index);
-      if (object == nullptr || !object->is_valid() || object->target_id() != target)
+      if (object == nullptr || !object->is_valid() || object->target_id() != target) {
         invariant_failure("executable exposed an inconsistent code object");
+      }
       inspect_object(*object, stats);
     }
-    if (executable.code_object(target, count) != nullptr)
+    if (executable.code_object(target, count) != nullptr) {
       invariant_failure("executable accepted an out-of-range code-object index");
+    }
   }
   const rj_code_target_id_t invalid_target = ROCJITSU_CODE_TARGET_INVALID;
   const uint32_t invalid_count = executable.num_code_objects(invalid_target);
   stats.bundled_code_objects += invalid_count;
   for (uint32_t index = 0; index < invalid_count; ++index) {
     const AmdGpuCodeObject *object = executable.code_object(invalid_target, index);
-    if (object == nullptr || !object->is_valid() || object->target_id() != invalid_target)
+    if (object == nullptr || !object->is_valid() || object->target_id() != invalid_target) {
       invariant_failure("executable exposed an inconsistent code object");
+    }
     inspect_object(*object, stats);
   }
-  if (executable.code_object(invalid_target, invalid_count) != nullptr)
+  if (executable.code_object(invalid_target, invalid_count) != nullptr) {
     invariant_failure("executable accepted an out-of-range code-object index");
+  }
 }
 
 void overwrite_integer(std::vector<uint8_t> &bytes, SplitMix64 &random, std::size_t width) {
-  if (bytes.size() < width)
+  if (bytes.size() < width) {
     return;
+  }
   const std::size_t offset = random.below(bytes.size() - width + 1);
   const uint64_t value = random.next();
   std::memcpy(bytes.data() + offset, &value, width);
@@ -352,12 +361,14 @@ void mutate(std::vector<uint8_t> &bytes, SplitMix64 &random) {
   for (std::size_t edit = 0; edit < edits; ++edit) {
     switch (random.below(8)) {
     case 0:
-      if (!bytes.empty())
+      if (!bytes.empty()) {
         bytes[random.below(bytes.size())] ^= static_cast<uint8_t>(1u << random.below(8));
+      }
       break;
     case 1:
-      if (!bytes.empty())
+      if (!bytes.empty()) {
         bytes[random.below(bytes.size())] = static_cast<uint8_t>(random.next());
+      }
       break;
     case 2:
       overwrite_integer(bytes, random, 2);
@@ -369,8 +380,9 @@ void mutate(std::vector<uint8_t> &bytes, SplitMix64 &random) {
       overwrite_integer(bytes, random, 8);
       break;
     case 5:
-      if (bytes.size() > 1)
+      if (bytes.size() > 1) {
         bytes.resize(1 + random.below(bytes.size()));
+      }
       break;
     case 6: {
       const std::size_t room = kMaxInputSize - bytes.size();
@@ -384,8 +396,9 @@ void mutate(std::vector<uint8_t> &bytes, SplitMix64 &random) {
       if (!bytes.empty()) {
         const std::size_t at = random.below(bytes.size());
         const std::size_t count = std::min<std::size_t>(bytes.size() - at, 1 + random.below(32));
-        for (std::size_t byte = 0; byte < count; ++byte)
+        for (std::size_t byte = 0; byte < count; ++byte) {
           bytes[at + byte] = static_cast<uint8_t>(random.next());
+        }
       }
       break;
     }
@@ -397,8 +410,9 @@ void mutate(std::vector<uint8_t> &bytes, SplitMix64 &random) {
 bool load_segment_in_bounds(std::span<const uint8_t> image, std::uintptr_t data_address,
                             std::size_t size) {
   const std::uintptr_t image_begin = reinterpret_cast<std::uintptr_t>(image.data());
-  if (data_address < image_begin)
+  if (data_address < image_begin) {
     return false;
+  }
   const std::uintptr_t offset = data_address - image_begin;
   return offset <= image.size() && size <= image.size() - offset;
 }
@@ -417,8 +431,9 @@ RunStats &operator+=(RunStats &left, const RunStats &right) {
 
 util::FailureOr<RunStats> run_input(std::span<const uint8_t> bytes,
                                     util::DiagnosticEmitter diagnostic) {
-  if (bytes.size() > kMaxInputSize)
+  if (bytes.size() > kMaxInputSize) {
     return diagnostic.emit() << "code-object fuzz input exceeds size limit";
+  }
   RunStats stats{.inputs = 1};
   AmdGpuCodeObject object(bytes.data(), bytes.size());
   inspect_object(object, stats);
@@ -446,14 +461,16 @@ std::vector<uint8_t> generate_input(uint64_t seed) {
   SplitMix64 random(seed);
   if ((random.next() & 15) == 0) {
     std::vector<uint8_t> bytes(1 + random.below(4096));
-    for (uint8_t &byte : bytes)
+    for (uint8_t &byte : bytes) {
       byte = static_cast<uint8_t>(random.next());
+    }
     return bytes;
   }
   std::vector<std::vector<uint8_t>> seeds = seed_corpus();
   std::vector<uint8_t> bytes = seeds[random.below(seeds.size())];
-  if ((random.next() & 31) != 0)
+  if ((random.next() & 31) != 0) {
     mutate(bytes, random);
+  }
   return bytes;
 }
 

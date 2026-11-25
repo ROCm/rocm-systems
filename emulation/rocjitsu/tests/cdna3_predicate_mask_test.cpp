@@ -6,6 +6,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -42,15 +43,16 @@ struct Fixture {
   explicit Fixture(unsigned sgprs = SGPRS_PER_WF, unsigned wave_slots = 1)
       : gpu_mem("cdna3_predicate_mask_mem"), l2("cdna3_predicate_mask_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    cfg.arch = rocjitsu::IsaFamily::Cdna3;
     cfg.num_wf_slots = wave_slots;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_cdna3_predicate_mask", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+    }
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna3);
     wf = cu->dispatch_wf(0, 0, sgprs, VGPRS_PER_WF);
   }
 
@@ -220,12 +222,14 @@ TEST(Cdna3ScalarControlTest, WakeupOnlyInterruptsSleepInTheIssuingWorkgroup) {
   ASSERT_NE(other_group, nullptr);
   ASSERT_NE(other_dispatch, nullptr);
   other_dispatch->set_dispatch_id(fx.wf->dispatch_id() + 1);
-  for (auto *wave : {peer, other_group, other_dispatch})
+  for (auto *wave : {peer, other_group, other_dispatch}) {
     wave->set_sleep_cycles(64);
+  }
   fx.execute({0xbf830000, 0}); // s_wakeup without IN_TG
   EXPECT_EQ(peer->sleep_cycles(), 64u);
-  for (auto *wave : {fx.wf, peer})
+  for (auto *wave : {fx.wf, peer}) {
     wave->set_workgroup_dispatch(fx.wf->dispatch_id(), 2);
+  }
   fx.execute({0xbf830000, 0});
   EXPECT_EQ(peer->sleep_cycles(), 0u);
   EXPECT_EQ(other_group->sleep_cycles(), 64u);
@@ -266,10 +270,12 @@ struct ForceScalarGuard {
 uint64_t expected_ge_mask(uint64_t exec, const Fixture &fx, uint32_t lhs_reg, uint32_t rhs_reg) {
   uint64_t mask = 0;
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    if (((exec >> lane) & 1ULL) == 0)
+    if (((exec >> lane) & 1ULL) == 0) {
       continue;
-    if (fx.read_vgpr(lhs_reg, lane) >= fx.read_vgpr(rhs_reg, lane))
+    }
+    if (fx.read_vgpr(lhs_reg, lane) >= fx.read_vgpr(rhs_reg, lane)) {
       mask |= 1ULL << lane;
+    }
   }
   return mask;
 }
@@ -520,8 +526,9 @@ TEST(Cdna3VectorStateTest, Xf32MfmaQuantizesMultiplicandsBeforeAccumulation) {
           fx.write_vgpr(item, lane, sample.a[k]);
           fx.write_vgpr(2 + item, lane, sample.b[k]);
         }
-        for (uint32_t reg = 0; reg < sample.size * sample.size / WF_SIZE; ++reg)
+        for (uint32_t reg = 0; reg < sample.size * sample.size / WF_SIZE; ++reg) {
           fx.write_vgpr(32 + reg, lane, 0x3f693ce1u);
+        }
       }
       fx.execute({0xd3800010u | (sample.opcode << 16), 0x04820500u});
       EXPECT_EQ(fx.read_vgpr(16, 0), sample.result);
@@ -578,8 +585,9 @@ TEST(Cdna3PredicateMaskTest, Vop3CndmaskReadsArbitrarySgprPair) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
 
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     fx.write_vgpr(33, lane, DST_SENTINEL);
+  }
   fx.wf->set_exec(kExec);
   fx.write_sgpr_pair(2, kSel);
 
@@ -648,8 +656,9 @@ TEST(Cdna3PredicateMaskTest, Vop3CompareU64WithScalarSource) {
 
   uint64_t expected = 0;
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-    if (((kExec >> lane) & 1ULL) && (lane % 4 == 0))
+    if (((kExec >> lane) & 1ULL) && (lane % 4 == 0)) {
       expected |= 1ULL << lane;
+    }
   }
 
   fx.execute(kCmpEqU64S0);
@@ -687,8 +696,9 @@ TEST(Cdna3PredicateMaskTest, VopcGtU64E32ScalarSourceWritesExpectedVcc) {
 
     uint64_t expected = 0;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      if (((kExec >> lane) & 1ULL) && kModulus > fx.read_vgpr64(8, lane))
+      if (((kExec >> lane) & 1ULL) && kModulus > fx.read_vgpr64(8, lane)) {
         expected |= 1ULL << lane;
+      }
     }
 
     fx.execute(kCmpGtU64Vcc);
@@ -735,8 +745,9 @@ TEST(Cdna3PredicateMaskTest, AddmodCompareCndmaskLshlAddSequence) {
     fx.wf->set_vcc(0);
     fx.write_sgpr_pair(2, kModulus);
     fx.write_vgpr(1, 0, static_cast<uint32_t>(kNegMod));
-    for (uint32_t lane = 1; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 1; lane < WF_SIZE; ++lane) {
       fx.write_vgpr(1, lane, static_cast<uint32_t>(kNegMod));
+    }
 
     fx.execute(kCmpGtU64Vcc);
     fx.execute(kCndHigh);
@@ -801,8 +812,9 @@ TEST(Cdna3PredicateMaskTest, AddmodFullLshlAddReductionSequence) {
     fx.wf->set_exec(kExec);
     fx.wf->set_vcc(0);
     fx.write_sgpr_pair(2, kModulus);
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.write_vgpr(1, lane, static_cast<uint32_t>(kNegMod));
+    }
 
     fx.execute(kAddInputs);
     fx.execute(kCmpGtU64Vcc);

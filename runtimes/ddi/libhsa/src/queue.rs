@@ -261,6 +261,32 @@ pub(crate) struct Queue {
     teardown_started: bool,
 }
 
+impl Queue {
+    /// Borrows fatal queue state and scratch while the registry excludes teardown.
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<
+        (
+            rocddi::device::gpu::diagnostic::CoreQueueSnapshot<'_>,
+            Vec<rocddi::device::gpu::diagnostic::DiagnosticMemory<'_>>,
+        ),
+        rocddi::Error,
+    > {
+        self.native.inactivate()?;
+        self.inactivated = true;
+        // SAFETY: Both parts remain borrowed from the retained owner. No backing
+        // is replaced or released; capture only stops execution and reads bytes.
+        let (native, backing) = unsafe { self.native.parts_mut() };
+        let scratch = backing
+            .scratch
+            .iter()
+            .chain(&backing.uncertain_scratch)
+            .map(Allocation::diagnostic_memory)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok((native.core_snapshot()?, scratch))
+    }
+}
+
 /// External GPU addresses retained by the native queue through retirement.
 pub(crate) struct QueueBacking {
     /// Inactive signal owned by this queue backing.
@@ -595,7 +621,7 @@ pub(crate) struct QueueState {
     pub(crate) counted_queue_pools: HashMap<(u64, u32), Vec<CountedHardwareQueue>>,
     /// Public counted queue pointers already released by the caller.
     pub(crate) released_counted_queues: HashSet<usize>,
-    /// Maximum counted queues accepted by this HSA generation.
+    /// Maximum counted hardware queues per agent and priority.
     pub(crate) counted_queue_limit: usize,
     /// Ring size selected for counted hardware queues.
     pub(crate) counted_queue_size: u32,
@@ -603,7 +629,7 @@ pub(crate) struct QueueState {
 
 impl QueueState {
     /// Initializes empty queue registries and the next queue ID.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(counted_queue_limit: usize) -> Self {
         Self {
             next_queue_id: 0,
             queue_event: None,
@@ -616,7 +642,7 @@ impl QueueState {
             counted_queues: HashMap::new(),
             counted_queue_pools: HashMap::new(),
             released_counted_queues: HashSet::new(),
-            counted_queue_limit: 4,
+            counted_queue_limit,
             counted_queue_size: 16_384,
         }
     }

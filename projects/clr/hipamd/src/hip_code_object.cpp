@@ -598,6 +598,17 @@ hipError_t StatCO::GetGlobalVar(const void* hostVar, int deviceId, hipDeviceptr_
 
   const auto it = vars_.find(hostVar);
   if (it == vars_.end()) {
+    // Managed variables are not in vars_; a host reference to one is its managed storage.
+    for (const auto& [_, managed_vars] : managedVars_) {
+      for (Var* var : managed_vars) {
+        if (*static_cast<void**>(var->GetManagedVarPtr()) == hostVar) {
+          IHIP_RETURN_ONFAIL(var->EnsureManagedVarIsMapped());
+          *dev_ptr = *static_cast<void**>(var->GetManagedVarPtr());
+          *size_ptr = var->GetSize();
+          return hipSuccess;
+        }
+      }
+    }
     return hipErrorInvalidSymbol;
   }
 

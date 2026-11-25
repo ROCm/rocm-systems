@@ -11,6 +11,7 @@
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decode_result.h"
 #include "rocjitsu/isa/execution_backend.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/arena_alloc.h"
 
 #include <cstddef>
@@ -81,14 +82,15 @@ public:
                              const DecodeErrorEmitter &emit_error = {});
 
   /// @brief Create a decoder for the given architecture.
-  static std::unique_ptr<Decoder> create(rj_code_arch_t arch);
+  static std::unique_ptr<Decoder> create(rocjitsu::IsaFamily arch);
 
   /// @brief Create a decoder from an explicitly scoped registry and open ID.
   static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry,
                                          std::string_view target_id);
 
   /// @brief Create a decoder from a built-in architecture in a scoped registry.
-  static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry, rj_code_arch_t arch);
+  static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry,
+                                         rocjitsu::IsaFamily arch);
 
   /// @brief Create a decoder for a concrete public GPU target.
   static std::unique_ptr<Decoder> create(const IsaTargetRegistry &registry,
@@ -103,8 +105,9 @@ public:
   /// this pool is active, before the decoder is destroyed.
   /// @throws std::bad_alloc if the initial pool allocation fails.
   void enable_pool() {
-    if (!pool_)
+    if (!pool_) {
       pool_ = std::make_unique<Pool>();
+    }
     activate_pool([](void *p, size_t s) -> void * { return static_cast<Pool *>(p)->allocate(s); },
                   [](void *p, void *ptr) { static_cast<Pool *>(p)->deallocate(ptr); }, pool_.get());
   }
@@ -141,14 +144,17 @@ public:
                       const DecodeErrorEmitter &emit_error) override {
     ScopedIsaExecutionBackend scope(execution_backend_);
     DecodeResult result = Isa::Decoder::decode(inst, emit_error);
-    if (result.failed()) [[unlikely]]
+    if (result.failed()) [[unlikely]] {
       return Result::failure();
+    }
     const uint64_t missing_features = result.value()->required_isa_features() & ~isa_features_;
-    if (missing_features != 0) [[unlikely]]
+    if (missing_features != 0) [[unlikely]] {
       return emit_error.emit() << "instruction requires unavailable target ISA features (mask "
                                << missing_features << ")";
-    if (validate_instruction_operands(*result.value(), emit_error).failed()) [[unlikely]]
+    }
+    if (validate_instruction_operands(*result.value(), emit_error).failed()) [[unlikely]] {
       return Result::failure();
+    }
     return result;
   }
 

@@ -1,14 +1,14 @@
 ---
 myst:
     html_meta:
-        "description": "Install and build rocJITsu, the AMD ROCm Just-in-Time Suite for GPU emulation, binary translation, and instrumentation."
-        "keywords": "rocJITsu, ROCm, install, build, CMake, GPU emulation, binary translation"
+        "description": "Install and build rocjitsu, the AMD ROCm Just-in-Time Suite for GPU emulation, binary translation, and instrumentation."
+        "keywords": "rocjitsu, ROCm, install, build, CMake, GPU emulation, binary translation"
 ---
-# Install and build rocJITsu
+# Install and build rocjitsu
 
 ## Prerequisites
 
-rocJITsu requires:
+rocjitsu requires:
 
 -   **CMake** 3.22 or later (3.28 or later when
     `ROCJITSU_ENABLE_VFIO=ON`)
@@ -33,8 +33,8 @@ download is needed.
 
 ### Source download
 
-rocJITsu lives in the `rocm-systems` super-repository. Use a sparse
-checkout to download only the rocJITsu project:
+rocjitsu lives in the `rocm-systems` super-repository. Use a sparse
+checkout to download only the rocjitsu project:
 
 ``` shell
 git clone --filter=blob:none --sparse \
@@ -74,7 +74,7 @@ error. An explicitly empty CMake value (`-DROCM_PATH=`) disables the
 environment and `/opt/rocm` fallbacks. Some test tools and libraries can
 still be found through normal system search paths.
 
-`ROCM_PATH` does not select the compiler used to build rocJITsu. Use
+`ROCM_PATH` does not select the compiler used to build rocjitsu. Use
 `CMAKE_C_COMPILER` and `CMAKE_CXX_COMPILER`, or the `CC` and `CXX`
 environment variables, to select those compilers.
 
@@ -131,7 +131,7 @@ inside the source tree by default. To relocate the download directory
 | Option | Default | Description |
 |--------|---------|-------------|
 | `RJ_SANITIZER` | *(empty)* | Enable a sanitizer build. Accepted values: `asan`, `ubsan`, `tsan`, `msan`. |
-| `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers. For detached rocJITsu checkouts, use a matching revision. |
+| `RJ_RUNTIME_API_HEADERS_SOURCE_DIR` | `../../runtimes/api-headers` | Source directory of the shared runtime API headers. For detached rocjitsu checkouts, use a matching revision. |
 | `LTO` | `OFF` | Enable link-time optimization (IPO) for `Release` and `RelWithDebInfo` configurations. Incompatible with `RJ_SANITIZER`; setting both causes a fatal error. |
 | `ROCJITSU_ENABLE_VFIO` | `OFF` | Build Linux VFIO-user support. Requires CMake 3.28 or later and Linux 6.1 or later UAPI headers. |
 | `RJ_ENABLE_EXPENSIVE_CHECKS` | `OFF` | Enable expensive exhaustive test suites such as MFMA and WMMA SIMD bit-exactness checks. |
@@ -139,7 +139,7 @@ inside the source tree by default. To relocate the download directory
 
 ### Sanitizer builds
 
-rocJITsu supports four sanitizer modes. Each is activated by passing the
+rocjitsu supports four sanitizer modes. Each is activated by passing the
 corresponding value to `RJ_SANITIZER`. Sanitizer builds are incompatible
 with `LTO`.
 
@@ -173,7 +173,7 @@ cmake --build build
 
 ### Clang-tidy setup
 
-Configure a Clang build and generate the schema headers. From the RocJITsu
+Configure a Clang build and generate the schema headers. From the rocjitsu
 source directory, point `run-clang-tidy` at the directory containing
 `compile_commands.json` and select the source paths to check. This example checks the simulator and its project headers.
 
@@ -198,7 +198,7 @@ pre-commit run --all-files
 
 ## Container setup for PyTorch workloads
 
-To run PyTorch workloads under rocJITsu, use a container with AMD ROCm
+To run PyTorch workloads under rocjitsu, use a container with AMD ROCm
 and PyTorch pre-installed:
 
 ``` shell
@@ -207,7 +207,7 @@ docker run -it --name rocjitsu-dev \
   rocm/pytorch:latest bash
 ```
 
-Inside the container, build rocJITsu and launch a workload in daemon
+Inside the container, build rocjitsu and launch a workload in daemon
 mode:
 
 ``` shell

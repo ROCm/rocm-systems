@@ -15,6 +15,7 @@ from utils.logger import console_debug, console_error, console_warning
 from utils.metrics.evaluation_pipeline import eval_metric
 from utils.mi_gpu_spec import mi_gpu_specs, roofline_column
 from utils.specs import MachineSpecs
+from utils.utils_analysis import pass_tables_on_rows
 from utils.utils_common import _workload_base_dir
 
 # Log-axis extent for ceiling math.
@@ -379,9 +380,7 @@ def _evaluate_kernel_tables(
         workload.roofline_peaks,
         kernel_pmc_df,
         debug=False,
-        pass_tables=[
-            table.loc[kernel_pmc_df.index] for table in workload.pass_tables.values()
-        ],
+        pass_tables=pass_tables_on_rows(workload.pass_tables, kernel_pmc_df),
     )
     return kernel_dfs
 

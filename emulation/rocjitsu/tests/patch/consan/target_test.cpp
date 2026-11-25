@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/isa_family.h"
 #include "target_fixture.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -12,6 +13,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
+#include "util/diagnostic.h"
 
 #include <gtest/gtest.h>
 
@@ -105,8 +107,9 @@ TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
         prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
     ASSERT_TRUE(artifact.succeeded()) << error.message;
     ASSERT_EQ(artifact.value().manifest.sites.size(), 2u);
-    for (const SiteFacts &site : artifact.value().manifest.sites)
+    for (const SiteFacts &site : artifact.value().manifest.sites) {
       EXPECT_EQ(site.width, width);
+    }
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
   }
   for (const char *name : {"excluded-b8", "excluded-b96", "excluded-partial"}) {
@@ -121,52 +124,66 @@ TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
   }
 }
 
-TEST(ConSanBarrierStatic, QualifiedGfx1250PairPreservesOriginalOperations) {
+TEST_P(ConSanTargetStatic, QualifiedBarriersPreserveOriginalOperations) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  const bool split =
+      target.arch == rocjitsu::IsaFamily::Rdna4 || target.arch == rocjitsu::IsaFamily::Cdna5;
   for (const char *fixture : {"native-15", "native-16", "native-20", "native-21", "native-24"}) {
     SCOPED_TRACE(fixture);
     const std::vector<uint8_t> original =
-        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+        test::read_fixture(test::target_fixture_path(mode, fixture));
     ASSERT_FALSE(original.empty());
     InputError error;
     const FailureOr<PreparedArtifact> artifact =
-        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+        prepare(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(artifact.succeeded()) << error.message;
     EXPECT_EQ(artifact.value().manifest.scope, ScopeKind::NativeLdsWorkgroupBarrier);
     EXPECT_EQ(artifact.value().manifest.sites.size(),
               std::string_view(fixture) == "native-24" ? 3u : 2u);
     EXPECT_EQ(artifact.value().manifest.barriers.size(),
               std::string_view(fixture) == "native-24" ? 2u : 1u);
-    ContractError contract_error;
+    util::StringDiagnostic contract_error;
     const FailureOr<std::vector<uint8_t>> encoded =
-        encode_manifest(artifact.value().manifest, &contract_error);
-    ASSERT_TRUE(encoded.succeeded()) << contract_error.message;
-    const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), &contract_error);
-    ASSERT_TRUE(decoded.succeeded()) << contract_error.message;
+        encode_manifest(artifact.value().manifest, contract_error.emitter());
+    ASSERT_TRUE(encoded.succeeded()) << contract_error.message();
+    const FailureOr<Manifest> decoded = decode_manifest(encoded.value(), contract_error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << contract_error.message();
     EXPECT_EQ(decoded.value(), artifact.value().manifest);
     for (const BarrierFacts &barrier : artifact.value().manifest.barriers) {
-      // The shared instrumentor leaves the signal at its original PC and moves
-      // the completing wait to the start of an AfterInst trampoline.
-      EXPECT_EQ(barrier.prepared_signal, barrier.original_signal);
       EXPECT_EQ(barrier.completion_probe, barrier.prepared_wait + 4);
-      EXPECT_NE(barrier.prepared_wait - barrier.prepared_signal,
-                barrier.original_wait - barrier.original_signal);
+      if (split) {
+        // Only the completing wait moves to the AfterInst trampoline.
+        EXPECT_EQ(barrier.prepared_signal, barrier.original_signal);
+        EXPECT_NE(barrier.prepared_wait - barrier.prepared_signal,
+                  barrier.original_wait - barrier.original_signal);
+      } else {
+        // The single legacy barrier both signals and completes the group.
+        EXPECT_EQ(barrier.original_signal, barrier.original_wait);
+        EXPECT_EQ(barrier.prepared_signal, barrier.prepared_wait);
+        EXPECT_NE(barrier.prepared_wait, barrier.original_wait);
+      }
     }
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
   }
 }
 
-TEST(ConSanBarrierStatic, BarrierFactsRequireQualifiedMappingsScopeAndLaunch) {
+TEST_P(ConSanTargetStatic, BarrierFactsRequireQualifiedMappingsScopeAndLaunch) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
   const std::vector<uint8_t> original =
-      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-15"));
+      test::read_fixture(test::target_fixture_path(mode, "native-15"));
   ASSERT_FALSE(original.empty());
   InputError error;
   const FailureOr<PreparedArtifact> artifact =
-      prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+      prepare(original, target, "lds_producer_consumer", error);
   ASSERT_TRUE(artifact.succeeded()) << error.message;
   const Manifest &manifest = artifact.value().manifest;
-  ContractError contract_error;
-  EXPECT_TRUE(plan_launch(manifest, {{32, 1, 1}, {32, 1, 1}}, 128, 0, &contract_error).failed());
-  EXPECT_EQ(contract_error.code, ContractErrorCode::UnsupportedLaunch);
+  util::StringDiagnostic contract_error;
+  EXPECT_TRUE(plan_launch(manifest, {{mode.wave_size, 1, 1}, {mode.wave_size, 1, 1}}, 128, 0,
+                          contract_error.emitter())
+                  .failed());
+  EXPECT_EQ(contract_error.message(), "barrier profile requires at least two waves per workgroup");
   Manifest invalid = manifest;
   invalid.barriers.front().original_signal += 4;
   EXPECT_TRUE(validate_manifest(invalid).failed());
@@ -174,35 +191,141 @@ TEST(ConSanBarrierStatic, BarrierFactsRequireQualifiedMappingsScopeAndLaunch) {
   invalid.scope = ScopeKind::NativeLdsNoSynchronization;
   EXPECT_TRUE(validate_manifest(invalid).failed());
   invalid = manifest;
-  invalid.target = 1201;
+  const bool split =
+      target.arch == rocjitsu::IsaFamily::Rdna4 || target.arch == rocjitsu::IsaFamily::Cdna5;
+  invalid.target = split ? 1100 : 1201;
   EXPECT_TRUE(validate_manifest(invalid).failed());
 }
 
-TEST(ConSanBarrierStatic, RejectMismatchedMissingDrainAndNonconvergentGroups) {
+TEST_P(ConSanTargetStatic, RejectMismatchedMissingDrainAndNonconvergentGroups) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
   for (const char *fixture : {"native-17", "native-18", "native-19", "native-22", "native-23"}) {
     SCOPED_TRACE(fixture);
     const std::vector<uint8_t> original =
-        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+        test::read_fixture(test::target_fixture_path(mode, fixture));
     ASSERT_FALSE(original.empty());
     InputError error;
-    EXPECT_TRUE(
-        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error).failed());
+    EXPECT_TRUE(prepare(original, target, "lds_producer_consumer", error).failed());
     EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
   }
 }
 
-TEST(ConSanBarrierStatic, MaximumWorkgroupMustPermitTwoWavesBeforePreparation) {
-  const TargetProfile &target = *target_profile("gfx1250");
-  for (const uint32_t maximum : {31u, 32u, 33u}) {
+TEST_P(ConSanTargetStatic, OriginalDrainMustWaitForAllPriorLds) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  const bool split =
+      target.arch == rocjitsu::IsaFamily::Rdna4 || target.arch == rocjitsu::IsaFamily::Cdna5;
+  const std::vector<uint8_t> original =
+      test::read_fixture(test::target_fixture_path(mode, "native-15"));
+  ASSERT_FALSE(original.empty());
+  InputError error;
+  const FailureOr<InputProgram> input =
+      build_input_program(original, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(input.succeeded()) << error.message;
+  ASSERT_EQ(input.value().barriers.size(), 1u);
+  const BarrierFacts &barrier = input.value().barriers.front();
+  const uint64_t drain_offset = input.value().text_file_offset + barrier.original_drain;
+  const uint32_t drain = *wire::read_u32(original, drain_offset);
+  // The split DS counter is the immediate. Legacy LGKM starts at bit four on
+  // RDNA3 and bit eight on CDNA3/4; increasing that threshold leaves LDS pending.
+  const uint32_t pending =
+      split ? 1u : (target.arch == rocjitsu::IsaFamily::Rdna3 ? 1u << 4 : 1u << 8);
+  std::vector<uint8_t> changed = original;
+  ASSERT_TRUE(wire::write_u32(changed, drain_offset, drain | pending));
+  EXPECT_TRUE(build_input_program(changed, target, "lds_producer_consumer", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
+  EXPECT_EQ(error.text_offset, barrier.original_signal);
+  if (!split) {
+    // Waiting for every counter is stronger than waiting only for LGKM.
+    changed = original;
+    ASSERT_TRUE(wire::write_u32(changed, drain_offset, drain & 0xffff0000u));
+    EXPECT_TRUE(prepare(changed, target, "lds_producer_consumer", error).succeeded())
+        << error.message;
+  }
+}
+
+TEST(ConSanBarrierStatic, CombinedDrainsRequireZeroDsThreshold) {
+  for (const test::TargetMode mode : {test::TargetMode{.target = "gfx1201", .wave_size = 32},
+                                      {.target = "gfx1201", .wave_size = 64},
+                                      {.target = "gfx1250", .wave_size = 32}}) {
+    SCOPED_TRACE(mode.target);
+    SCOPED_TRACE(mode.wave_size);
+    const TargetProfile &target = *target_profile(mode.target);
+    const bool rdna = target.arch == rocjitsu::IsaFamily::Rdna4;
+    for (const char *fixture : {"native-15", "native-27"}) {
+      SCOPED_TRACE(fixture);
+      const std::vector<uint8_t> original =
+          test::read_fixture(test::target_fixture_path(mode, fixture));
+      ASSERT_FALSE(original.empty());
+      InputError error;
+      const FailureOr<InputProgram> input =
+          build_input_program(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(input.succeeded()) << error.message;
+      for (const uint32_t opcode :
+           {rdna ? rdna4::kSWaitLoadcntDscntSopp : cdna5::kSWaitLoadcntDscntSopp,
+            rdna ? rdna4::kSWaitStorecntDscntSopp : cdna5::kSWaitStorecntDscntSopp}) {
+        SCOPED_TRACE(opcode);
+        for (const uint32_t other_threshold : {0u, 3u, 63u}) {
+          for (const uint32_t ds_threshold : {0u, 1u, 63u}) {
+            SCOPED_TRACE(other_threshold);
+            SCOPED_TRACE(ds_threshold);
+            std::vector<uint8_t> changed = original;
+            const FailureOr<uint32_t> drain =
+                build_sopp_encoding(target.arch, opcode, (other_threshold << 8) | ds_threshold);
+            ASSERT_TRUE(drain.succeeded());
+            for (const BarrierFacts &barrier : input.value().barriers) {
+              ASSERT_TRUE(wire::write_u32(
+                  changed, input.value().text_file_offset + barrier.original_drain, drain.value()));
+            }
+            const FailureOr<InputProgram> qualified =
+                build_input_program(changed, target, "lds_producer_consumer", error);
+            if (ds_threshold != 0) {
+              EXPECT_TRUE(qualified.failed());
+              EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
+              continue;
+            }
+            EXPECT_TRUE(qualified.succeeded()) << error.message;
+            if (qualified.failed()) {
+              continue;
+            }
+            EXPECT_EQ(qualified.value().repeated, input.value().repeated);
+            const FailureOr<PreparedArtifact> artifact =
+                prepare(changed, target, "lds_producer_consumer", error);
+            ASSERT_TRUE(artifact.succeeded()) << error.message;
+            EXPECT_TRUE(validate_prepared(changed, artifact.value(), error).succeeded())
+                << error.message;
+          }
+        }
+      }
+      std::vector<uint8_t> missing_ds = original;
+      const FailureOr<uint32_t> store_only = build_sopp_encoding(
+          target.arch, rdna ? rdna4::kSWaitStorecntSopp : cdna5::kSWaitStorecntSopp, 0);
+      ASSERT_TRUE(store_only.succeeded());
+      for (const BarrierFacts &barrier : input.value().barriers) {
+        ASSERT_TRUE(wire::write_u32(missing_ds,
+                                    input.value().text_file_offset + barrier.original_drain,
+                                    store_only.value()));
+      }
+      EXPECT_TRUE(build_input_program(missing_ds, target, "lds_producer_consumer", error).failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
+    }
+  }
+}
+
+TEST_P(ConSanTargetStatic, MaximumWorkgroupMustPermitTwoWavesBeforePreparation) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  for (const uint32_t maximum : {mode.wave_size - 1, mode.wave_size, mode.wave_size + 1}) {
     SCOPED_TRACE(maximum);
     const std::string fixture = "native-barrier-max" + std::to_string(maximum);
     const std::vector<uint8_t> original =
-        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, fixture));
+        test::read_fixture(test::target_fixture_path(mode, fixture));
     ASSERT_FALSE(original.empty());
     InputError error;
     const FailureOr<InputProgram> input =
         build_input_program(original, target, "lds_producer_consumer", error);
-    if (maximum <= 32) {
+    if (maximum <= mode.wave_size) {
       EXPECT_TRUE(input.failed());
       EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry) << error.message;
       EXPECT_TRUE(prepare(original, target, "lds_producer_consumer", error).failed());
@@ -214,13 +337,13 @@ TEST(ConSanBarrierStatic, MaximumWorkgroupMustPermitTwoWavesBeforePreparation) {
           prepare(original, target, "lds_producer_consumer", error);
       ASSERT_TRUE(artifact.succeeded()) << error.message;
       EXPECT_EQ(artifact.value().manifest.entry.maximum_workgroup_size, maximum);
-      EXPECT_TRUE(
-          plan_launch(artifact.value().manifest, {{33, 1, 1}, {33, 1, 1}}, 128, 0).succeeded());
+      EXPECT_TRUE(plan_launch(artifact.value().manifest, {{maximum, 1, 1}, {maximum, 1, 1}}, 128, 0)
+                      .succeeded());
     }
   }
   // The minimum only belongs to barrier scope: one-wave no-sync kernels remain valid.
-  const std::vector<uint8_t> no_barrier =
-      test::read_fixture(test::target_fixture_path({"gfx1250", 32}, "native-no-barrier-max32"));
+  const std::vector<uint8_t> no_barrier = test::read_fixture(
+      test::target_fixture_path(mode, "native-no-barrier-max" + std::to_string(mode.wave_size)));
   ASSERT_FALSE(no_barrier.empty());
   InputError error;
   EXPECT_TRUE(prepare(no_barrier, target, "lds_producer_consumer", error).succeeded())
@@ -290,25 +413,70 @@ TEST(ConSanBarrierStatic, DiagnoseInterveningBarrierWithoutMemoryOperations) {
       << error.message;
 }
 
-TEST(ConSanBarrierStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles) {
-  for (const char *name : {"native-25", "native-26", "native-27", "native-30", "native-31"}) {
-    SCOPED_TRACE(name);
-    std::vector<uint8_t> original =
-        test::read_fixture(test::target_fixture_path({"gfx1250", 32}, name));
+TEST_P(ConSanTargetStatic, LoopLaneSelectorsAvoidScalarReadModifyReadHazards) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  const std::unique_ptr<Decoder> decoder =
+      Decoder::create(default_isa_target_registry(), target.public_id);
+  ASSERT_TRUE(decoder);
+  for (const char *fixture : {"native-27", "native-32", "native-42"}) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, fixture));
+    ASSERT_FALSE(original.empty());
     InputError error;
     const FailureOr<InputProgram> input =
-        build_input_program(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+        build_input_program(original, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    const AmdGpuCodeObject object(original.data(), original.size());
+    const std::array entries{input.value().kernel.entry_text_offset};
+    const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
+        BasicBlock::build_reachable(object, *decoder, target.arch, entries);
+    ASSERT_TRUE(blocks.succeeded());
+    uint32_t vector_selectors = 0;
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
+      for (const Instruction &instruction : block->instructions()) {
+        if (instruction.mnemonic() != "v_cmp_eq_u32_e32") {
+          continue;
+        }
+        const Operand *selector = instruction.src_operand(0);
+        ASSERT_NE(selector, nullptr);
+        // RDNA4 requires an explicit wait when SALU rewrites an SGPR pair
+        // previously read by VALU. Keep both rotating selectors in VGPRs.
+        const std::optional<RegisterRef> source = selector->to_register_ref();
+        EXPECT_FALSE(source && source->cls == RegClass::SGPR);
+        if (selector->decoded_vgpr()) {
+          ++vector_selectors;
+        }
+      }
+    }
+    EXPECT_EQ(vector_selectors, 2u);
+  }
+}
+
+TEST_P(ConSanTargetStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  for (const char *name :
+       {"native-25", "native-26", "native-27", "native-30", "native-31", "native-42"}) {
+    SCOPED_TRACE(name);
+    std::vector<uint8_t> original = test::read_fixture(test::target_fixture_path(mode, name));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<InputProgram> input =
+        build_input_program(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(input.succeeded()) << error.message;
     ASSERT_TRUE(input.value().repeated);
     const AmdGpuCodeObject object(original.data(), original.size());
-    const std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    const std::unique_ptr<Decoder> decoder =
+        Decoder::create(default_isa_target_registry(), target.public_id);
     ASSERT_TRUE(decoder);
     const std::array entries{input.value().kernel.entry_text_offset};
     const FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
-        BasicBlock::build_reachable(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, entries);
+        BasicBlock::build_reachable(object, *decoder, target.arch, entries);
     ASSERT_TRUE(blocks.succeeded());
     const Instruction *backedge = nullptr;
-    for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
       for (const Instruction &instruction : block->instructions()) {
         const std::optional<int64_t> branch = instruction.branch_offset_bytes();
         if (branch && *branch <= -static_cast<int64_t>(instruction.size())) {
@@ -316,9 +484,10 @@ TEST(ConSanBarrierStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles)
           backedge = &instruction;
         }
       }
+    }
     ASSERT_NE(backedge, nullptr);
     const FailureOr<PreparedArtifact> artifact =
-        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error);
+        prepare(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(artifact.succeeded()) << error.message;
     EXPECT_EQ(artifact.value().manifest.scope, ScopeKind::NativeLdsWorkgroupBarrierLoop);
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
@@ -334,8 +503,7 @@ TEST(ConSanBarrierStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles)
                           4;
     wire::write_u32(original, input.value().text_file_offset + backedge->src_loc(),
                     (backedge->raw_encoding()[0] & 0xffff0000u) | static_cast<uint16_t>(delta));
-    EXPECT_TRUE(
-        prepare(original, *target_profile("gfx1250"), "lds_producer_consumer", error).failed());
+    EXPECT_TRUE(prepare(original, target, "lds_producer_consumer", error).failed());
     EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
   }
 }
@@ -354,20 +522,22 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
     ASSERT_TRUE(input.succeeded()) << error.message;
     const std::span<const uint8_t> text =
         std::span(original).subspan(input.value().text_file_offset, input.value().text_bytes);
-    if (original_text.empty())
+    if (original_text.empty()) {
       original_text.assign(text.begin(), text.end());
-    else
+    } else {
       EXPECT_TRUE(std::ranges::equal(original_text, text));
+    }
     const FailureOr<PreparedArtifact> prepared =
         prepare(original, target, "lds_producer_consumer", error);
     ASSERT_TRUE(prepared.succeeded()) << error.message;
-    ContractError image_error;
+    util::StringDiagnostic image_error;
     ASSERT_TRUE(verify_artifact_images(prepared.value().manifest, original, prepared.value().image,
-                                       &image_error)
+                                       image_error.emitter())
                     .succeeded())
-        << image_error.message;
-    if (fixture == "native-1")
+        << image_error.message();
+    if (fixture == "native-1") {
       continue;
+    }
 
     const std::string expected = std::string("amdgcn-amd-amdhsa-unknown-") + mode.target;
     std::vector<std::string> invalid;
@@ -407,7 +577,8 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
           Manifest manifest = prepared.value().manifest;
           manifest.prepared.sha256 = digest(image);
           ASSERT_TRUE(match_images(manifest, original, image).succeeded());
-          EXPECT_TRUE(verify_artifact_images(manifest, original, image, &image_error).failed());
+          EXPECT_TRUE(
+              verify_artifact_images(manifest, original, image, image_error.emitter()).failed());
         } else {
           EXPECT_TRUE(build_input_program(image, target, "lds_producer_consumer", error).failed());
           EXPECT_NE(error.message.find("metadata"), std::string::npos);
@@ -420,8 +591,9 @@ TEST_P(ConSanTargetStatic, EquivalentMetadataEnvironmentsPreserveTargetAndAbiVal
 TEST_P(ConSanTargetStatic, PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinarySgprs) {
   const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);
-  if (target.id != 942 && target.id != 950)
+  if (target.id != 942 && target.id != 950) {
     return;
+  }
   const std::vector<uint8_t> original =
       test::read_fixture(test::target_fixture_path(mode, "native-1"));
   InputError error;
@@ -440,12 +612,13 @@ TEST_P(ConSanTargetStatic, PreparedCdnaDescriptorMustAllocateItsDeclaredOrdinary
                        granules - 1);
     ASSERT_TRUE(wire::write_u32(artifact.image, offset, changed));
     artifact.manifest.prepared.sha256 = digest(artifact.image);
-    ContractError image_error;
+    util::StringDiagnostic image_error;
     ASSERT_TRUE(match_images(artifact.manifest, original, artifact.image).succeeded());
-    EXPECT_EQ(verify_artifact_images(artifact.manifest, original, artifact.image, &image_error)
-                  .succeeded(),
-              granules * 8 >= required + 6) // Six ABI special-register tail slots.
-        << "granules=" << granules << ": " << image_error.message;
+    EXPECT_EQ(
+        verify_artifact_images(artifact.manifest, original, artifact.image, image_error.emitter())
+            .succeeded(),
+        granules * 8 >= required + 6) // Six ABI special-register tail slots.
+        << "granules=" << granules << ": " << image_error.message();
   }
 }
 
@@ -490,11 +663,11 @@ TEST_P(ConSanTargetStatic, AssemblyLoweringPreservesConcreteIdentityAndLoadableI
     ASSERT_TRUE(prepared.succeeded()) << error.message;
     EXPECT_EQ(prepared.value().manifest.target, target->id);
     EXPECT_EQ(prepared.value().manifest.wave_size, mode.wave_size);
-    ContractError image_error;
+    util::StringDiagnostic image_error;
     EXPECT_TRUE(verify_artifact_images(prepared.value().manifest, original, prepared.value().image,
-                                       &image_error)
+                                       image_error.emitter())
                     .succeeded())
-        << image_error.message;
+        << image_error.message();
     const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(prepared.value().manifest);
     ASSERT_TRUE(encoded.succeeded());
     const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
@@ -511,8 +684,8 @@ TEST_P(ConSanTargetStatic, GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoun
   const FailureOr<InputProgram> input =
       build_input_program(original, *target_profile(mode.target), "lds_producer_consumer", error);
   ASSERT_TRUE(input.succeeded()) << error.message;
-  if (target->arch == ROCJITSU_CODE_ARCH_CDNA3 || target->arch == ROCJITSU_CODE_ARCH_CDNA4 ||
-      target->arch == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (target->arch == rocjitsu::IsaFamily::Cdna3 || target->arch == rocjitsu::IsaFamily::Cdna4 ||
+      target->arch == rocjitsu::IsaFamily::Rdna3) {
     const uint64_t offset =
         input.value().text_file_offset + input.value().accesses[0].original_offset;
     std::vector<uint8_t> gds = original;
@@ -524,8 +697,9 @@ TEST_P(ConSanTargetStatic, GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoun
             .failed());
     EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess) << error.message;
   }
-  if (target->id != 942 && target->id != 950)
+  if (target->id != 942 && target->id != 950) {
     return;
+  }
   FailureOr<PreparedArtifact> prepared =
       prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
   ASSERT_TRUE(prepared.succeeded()) << error.message;
@@ -546,9 +720,10 @@ TEST_P(ConSanTargetStatic, GdsAndAccumulatorAliasingAreRejectedAtTheirActualBoun
   std::memcpy(artifact.image.data() + kernels[0].descriptor_file_offset, &descriptor,
               sizeof(descriptor));
   artifact.manifest.prepared.sha256 = digest(artifact.image);
-  ContractError image_error;
+  util::StringDiagnostic image_error;
   EXPECT_TRUE(
-      verify_artifact_images(artifact.manifest, original, artifact.image, &image_error).failed());
+      verify_artifact_images(artifact.manifest, original, artifact.image, image_error.emitter())
+          .failed());
 }
 
 TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
@@ -571,8 +746,9 @@ TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
     EXPECT_EQ(input.value().wave_size, mode.wave_size);
     ASSERT_FALSE(input.value().accesses.empty());
     uint32_t reads = 0, writes = 0;
-    for (const NativeLdsAccess &site : input.value().accesses)
+    for (const NativeLdsAccess &site : input.value().accesses) {
       (site.kind == AccessKind::Read ? reads : writes)++;
+    }
     EXPECT_GT(reads, 0u);
     EXPECT_EQ(writes != 0, fixture != 3);
     const FailureOr<PreparedArtifact> prepared =
@@ -583,7 +759,7 @@ TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
 }
 
 TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts) {
-  for (const test::TargetMode mode : test::kTargetModes)
+  for (const test::TargetMode mode : test::kTargetModes) {
     for (const char *fixture : {"native-2", "native-no-workgroup-id"}) {
       SCOPED_TRACE(mode.target);
       SCOPED_TRACE(mode.wave_size);
@@ -598,11 +774,11 @@ TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts
       ASSERT_TRUE(artifact.succeeded()) << error.message;
       const bool identity = std::string_view(fixture) == "native-2";
       const bool ttmp =
-          target.arch == ROCJITSU_CODE_ARCH_RDNA4 || target.arch == ROCJITSU_CODE_ARCH_CDNA5;
+          target.arch == rocjitsu::IsaFamily::Rdna4 || target.arch == rocjitsu::IsaFamily::Cdna5;
       const uint32_t selector = ttmp ? 117u : 15u;
       EXPECT_EQ(artifact.value().manifest.entry.workgroup_id_scalar,
                 identity ? selector : UINT32_MAX);
-      ContractError contract_error;
+      util::StringDiagnostic contract_error;
       const uint32_t threads = 2 * mode.wave_size + 1;
       EXPECT_EQ(plan_launch(artifact.value().manifest, {{4 * threads, 1, 1}, {threads, 1, 1}}, 8, 0)
                     .succeeded(),
@@ -612,10 +788,13 @@ TEST(ConSanBoundedStatic, BindOriginalWorkgroupInputAndRejectForgedIdentityFacts
       Manifest forged = artifact.value().manifest;
       forged.entry.workgroup_id_scalar = identity ? UINT32_MAX : selector;
       ASSERT_TRUE(match_images(forged, original, artifact.value().image).succeeded());
-      EXPECT_TRUE(verify_artifact_images(forged, original, artifact.value().image, &contract_error)
-                      .failed());
-      EXPECT_EQ(contract_error.code, ContractErrorCode::IdentityMismatch);
+      EXPECT_TRUE(
+          verify_artifact_images(forged, original, artifact.value().image, contract_error.emitter())
+              .failed());
+      EXPECT_EQ(contract_error.message(),
+                "artifact workgroup-X input differs from its binding facts");
     }
+  }
 }
 
 TEST_P(ConSanTargetStatic, BoundedWorkgroupFixturesRetainQualifiedLdsSites) {
