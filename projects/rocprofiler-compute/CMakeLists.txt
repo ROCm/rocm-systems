@@ -1133,6 +1133,14 @@ add_test(
 )
 
 add_test(
+    NAME test_ml_api_tracing_inject_roctx_jax
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_ml_api_tracing_inject_roctx_jax.xml ${COV_OPTION}
+        tests/unit/ml_api_tracing/inject_roctx/backends/test_jax.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
     NAME test_ml_api_tracing_inject_roctx_torch
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest
@@ -1407,6 +1415,7 @@ if(${ENABLE_COVERAGE})
         test_ml_api_tracing_inject_roctx_marker_ranges
         test_ml_api_tracing_inject_roctx_launch
         test_ml_api_tracing_inject_roctx_triton
+        test_ml_api_tracing_inject_roctx_jax
         test_ml_api_tracing_inject_roctx_torch
         test_ml_api_tracing_inject_roctx_torch_trace_collector
         test_ml_api_tracing_profiling_orchestrator
