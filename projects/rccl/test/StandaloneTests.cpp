@@ -313,9 +313,6 @@ namespace RcclUnitTesting
   {
     int numDevices;
     HIPCALL(hipGetDeviceCount(&numDevices));
-    if (numDevices < 1) {
-      GTEST_SKIP() << "No devices available.";
-    }
 
     const int numRanks = numDevices < 2 ? 1 : 2;
     const int numJoined = optOut ? numRanks - 1 : numRanks;
@@ -353,11 +350,13 @@ namespace RcclUnitTesting
   }
 
   /**
-   * \brief Partial split: the rank that passes NCCL_SPLIT_NOCOLOR gets no comm and must not crash
-   *        (its init job used to store the device's shared memory size into that missing comm).
+   * \brief Partial split: the rank that passes NCCL_SPLIT_NOCOLOR gets no comm and must not crash.
    * ******************************************************************************************/
   TEST(Standalone, SplitComms_NoColorRank)
   {
+    if (ShouldSkipForNoGpu())
+      GTEST_SKIP() << "Requires a GPU";
+
     RUN_ISOLATED_TEST("SplitComms_NoColorRank", []() { SplitCommsLastRankOptOut(true); });
   }
 
@@ -366,6 +365,9 @@ namespace RcclUnitTesting
    * ******************************************************************************************/
   TEST(Standalone, SplitComms_AllRanksJoin)
   {
+    if (ShouldSkipForNoGpu())
+      GTEST_SKIP() << "Requires a GPU";
+
     RUN_ISOLATED_TEST("SplitComms_AllRanksJoin", []() { SplitCommsLastRankOptOut(false); });
   }
 
