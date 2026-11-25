@@ -12,6 +12,7 @@
 #include "hip_event.hpp"
 #include "hip_mempool_impl.hpp"
 #include <algorithm>
+#include <cstring>
 
 namespace hip {
 
@@ -2151,14 +2152,16 @@ hipError_t hipGraphAddDependencies_v2(hipGraph_t graph, const hipGraphNode_t* fr
     size_t dependency = 0;
 
     while (dependency < numDependencies) {
-      const hipGrahpEdgeData& edgeData = edgeData[dependency];
-      hipGrahpEdgeData zeroedEdgeData = {};
+      const hipGraphEdgeData& data = edgeData[dependency];
+      hipGraphEdgeData zeroedData = {};
 
       // at the time of this writing only hipGraphKernelNodePortDefault (0) type is supported
-      // (the hipGrahpEdgeData::reserved bytes must be zero too)
-      if (std::memcmp(&edgeData, &zeroedEdgeData, sizeof(hipGrahpEdgeData))) {
+      // (the hipGraphEdgeData::reserved bytes must be zero too)
+      if (std::memcmp(&data, &zeroedData, sizeof(hipGraphEdgeData))) {
         HIP_RETURN(hipErrorInvalidValue);
       }
+
+      dependency++;
     }
   }
   HIP_RETURN(hipGraphAddDependencies_common(graph, from, to, numDependencies));
@@ -2461,19 +2464,25 @@ hipError_t hipGraphRemoveDependencies_v2(hipGraph_t graph, const hipGraphNode_t*
                                          size_t numDependencies)
 {
   HIP_INIT_API(hipGraphRemoveDependencies_v2, graph, from, to, edgeData, numDependencies);
-   if (edgeData) {
+  if (edgeData) {
     // TODO g-h-c check equivalent CUDA error codes
     size_t dependency = 0;
 
+    if (!to || !from) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+
     while (dependency < numDependencies) {
-      const hipGrahpEdgeData& edgeData = edgeData[dependency];
-      hipGrahpEdgeData zeroedEdgeData = {};
+      const hipGraphEdgeData& data = edgeData[dependency];
+      hipGraphEdgeData zeroedData = {};
 
       // at the time of this writing only hipGraphKernelNodePortDefault (0) type is supported
-      // (the hipGrahpEdgeData::reserved bytes must be zero too)
-      if (std::memcmp(&edgeData, &zeroedEdgeData, sizeof(hipGrahpEdgeData))) {
+      // (the hipGraphEdgeData::reserved bytes must be zero too)
+      if (std::memcmp(&data, &zeroedData, sizeof(hipGraphEdgeData))) {
         HIP_RETURN(hipErrorInvalidValue);
       }
+
+      dependency++;
     }
   }
   HIP_RETURN(hipGraphRemoveDependencies_common(graph, from, to, numDependencies));
@@ -2482,6 +2491,30 @@ hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode
                             size_t* numEdges) {
   HIP_INIT_API(hipGraphGetEdges, graph, from, to, numEdges);
   HIP_RETURN(hipGraphGetEdges_common(graph, from, to, numEdges));
+}
+
+hipError_t hipGraphGetEdges_v2(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
+                               hipGraphEdgeData *edgeData, size_t* numEdges)
+{
+  HIP_INIT_API(hipGraphGetEdges_v2, graph, from, to, edgeData, numEdges);
+  hipError_t result;
+  size_t edgeDataSize = 0;
+
+  if (edgeData) {
+    edgeDataSize = numEdges? *numEdges : 0;
+
+    if (!to || !from) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
+
+  result = hipGraphGetEdges_common(graph, from, to, numEdges);
+
+  if (!result) {
+    std::fill_n(edgeData, edgeDataSize, hipGraphEdgeData {});
+  }
+
+  HIP_RETURN(result);
 }
 
 hipError_t hipGraphNodeGetDependencies_common(hipGraphNode_t node, hipGraphNode_t* pDependencies,
