@@ -89,7 +89,9 @@ Set pools
 pool, create it with ``hipMemPoolCreate()`` and allocate from it with
 ``hipMallocFromPoolAsync()``.
 
-Unlike NVIDIA CUDA, where stream-ordered memory allocation can be implicit, HIP is explicit. This requires managing memory allocation for each stream in HIP while ensuring precise control over memory usage and synchronization.
+Unlike NVIDIA CUDA, where stream-ordered memory allocation can be implicit,
+HIP on AMD requires explicit stream management for each allocation, ensuring
+precise control over memory usage and synchronization..
 
 .. literalinclude:: ../../../tools/example_codes/memory_pool.hip
     :start-after: // [sphinx-start]
