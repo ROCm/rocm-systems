@@ -73,9 +73,10 @@ Executable::Executable(const std::string &path) {
 }
 
 Executable::Executable(std::span<const uint8_t> image) {
-  if (!image.empty())
+  if (!image.empty()) {
     image_.assign(reinterpret_cast<const char *>(image.data()),
                   reinterpret_cast<const char *>(image.data()) + image.size());
+  }
   parse_image();
 }
 
@@ -123,22 +124,25 @@ Executable::~Executable() = default;
 
 uint32_t Executable::num_code_objects(rj_code_target_id_t target) const {
   auto it = code_objs_by_target_.find(target);
-  if (it == code_objs_by_target_.end())
+  if (it == code_objs_by_target_.end()) {
     return 0;
+  }
   return static_cast<uint32_t>(it->second.size());
 }
 
 AmdGpuCodeObject *Executable::code_object(rj_code_target_id_t target, uint32_t index) {
   auto it = code_objs_by_target_.find(target);
-  if (it == code_objs_by_target_.end() || index >= it->second.size())
+  if (it == code_objs_by_target_.end() || index >= it->second.size()) {
     return nullptr;
+  }
   return it->second[index];
 }
 
 const AmdGpuCodeObject *Executable::code_object(rj_code_target_id_t target, uint32_t index) const {
   auto it = code_objs_by_target_.find(target);
-  if (it == code_objs_by_target_.end() || index >= it->second.size())
+  if (it == code_objs_by_target_.end() || index >= it->second.size()) {
     return nullptr;
+  }
   return it->second[index];
 }
 
@@ -183,10 +187,12 @@ void Executable::load_fat_binary() {
 
   for (size_t section_index = 0; section_index < section_hdrs->size(); ++section_index) {
     const Elf64_Shdr &shdr = (*section_hdrs)[section_index];
-    if (shdr.sh_type == SHT_NULL)
+    if (shdr.sh_type == SHT_NULL) {
       continue;
-    if (shdr.sh_name >= shstrtab.sh_size)
+    }
+    if (shdr.sh_name >= shstrtab.sh_size) {
       continue;
+    }
     if (!fits_in_bounds(shdr.sh_offset, shdr.sh_size, image_.size())) {
       is_valid_ = false;
       return;
@@ -198,14 +204,16 @@ void Executable::load_fat_binary() {
 
     if (sec_name == ".hip_fatbin") {
       std::unique_ptr<char[]> sec_data(std::make_unique<char[]>(shdr.sh_size));
-      if (shdr.sh_size != 0)
+      if (shdr.sh_size != 0) {
         std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+      }
       auto section =
           std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr, section_index);
       load_hip_fatbin(*section);
       sections_.emplace_back(std::move(section));
-      if (!is_valid_)
+      if (!is_valid_) {
         return;
+      }
     }
   }
 }
@@ -268,8 +276,9 @@ void Executable::load_hip_fatbin(const Section &fatbin_section) {
 
     auto parts_view = info.bundle_entry_id | std::views::split('-');
     std::vector<std::string> parts;
-    for (const auto &v : parts_view)
+    for (const auto &v : parts_view) {
       parts.emplace_back(v.begin(), v.end());
+    }
 
     if (parts.size() <= 5) {
       is_valid_ = false;

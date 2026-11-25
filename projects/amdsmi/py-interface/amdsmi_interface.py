@@ -3186,8 +3186,8 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     """
     Retrieves a GPU's Component Unified ID together with its provenance.
 
-    Built from several queries, so not atomic under a concurrent rekey or
-    topology change.
+    Built from several queries, so not atomic under a concurrent topology
+    change.
 
     Parameters:
         processor_handle (amdsmi_processor_handle_t): The processor handle.
@@ -3195,17 +3195,20 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     Returns:
         Dict[str, Any]: with keys
 
-            primary (str): the canonical CUID, or "" when the caller lacks the
-                privilege to read it. The primary payload embeds the raw serial
-                number, so it is CAP_SYS_ADMIN-gated at the source; an empty
-                value is not an error.
-            derived (str): the derived CUID. This is the value to record.
-            component_type (str): the on-wire Component Type by name (PLATFORM,
+            primary (str): the primary CUID. Always "" in this release: every
+                CUID is temporary, and a temporary CUID has no primary. An
+                empty value is not an error.
+            derived (str): the component's CUID: its DerivedID when it has a
+                permanent CUID, otherwise its temporary CUID (always, in this
+                release). It names the component without disclosing its serial.
+            component_type (str): the component's type, reported beside the
+                CUID rather than decoded from it, by name (PLATFORM,
                 CPU, GPU, NIC, NPU, STORAGE, MEMORY, GENPCIE, GENC, RACKTRAY,
                 RACK, OTHER), or UNKNOWN.
             source (str): which stage of the staged lookup answered: DRIVER,
                 LIBRARY or UNKNOWN.
-            auxiliary (bool): True for a temporary CUID, built from the
+            auxiliary (bool): True for a temporary CUID (amd-smi shows it as
+                `temporary`), built from the
                 machine ID and world-readable device information. Such a value
                 changes when the machine ID changes and is not unique across
                 nodes.
@@ -4453,6 +4456,15 @@ def amdsmi_get_gpu_process_list_by_pid(processor_handles: list) -> list:
 
 
 def amdsmi_get_gpu_driver_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """Deprecated: use amdsmi_get_gpu_driver_info_v2() instead.
+
+    This API is planned for removal in a future major release.
+    """
+    warnings.warn(
+        "amdsmi_get_gpu_driver_info() is deprecated, use amdsmi_get_gpu_driver_info_v2() instead",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
@@ -4471,6 +4483,67 @@ def amdsmi_get_gpu_driver_info(processor_handle: processor_handle_t) -> Dict[str
             driver_info[key] = "N/A"
 
     return driver_info
+
+
+_DRIVER_PACKAGE_NAMES = {
+    amdsmi_wrapper.AMDSMI_DRIVER_PACKAGE_DKMS: "amdgpu-dkms",
+    amdsmi_wrapper.AMDSMI_DRIVER_PACKAGE_KMOD: "amdgpu-kmod",
+}
+
+
+def amdsmi_get_gpu_driver_info_v2(processor_handle: processor_handle_t) -> Dict[str, str]:
+    """
+    Retrieves the GPU driver information, the parts of the amdgpu version and
+    the build of the driver package.
+
+    The package is the installed amdgpu-dkms or amdgpu-kmod package that has the
+    kernel version of the loaded driver. Without one, driver_package and
+    driver_build_version are "N/A" and driver_full_version is driver_version.
+
+    A call may wait up to about 5 seconds for rpm, as described for
+    amdsmi_get_gpu_driver_info_v2() in amdsmi.h. An answer from rpm is kept
+    until the process exits. A failed lookup is asked again after 5 seconds.
+
+    An amdgpu-kmod driver has a three-part version such as 6.16.13 and no
+    amdgpu_driver_version. On WSL both version values are the WDDM driver
+    version.
+
+    Parameters:
+        processor_handle (processor_handle_t): The GPU to query.
+
+    Returns:
+        dict: "N/A" for any value that is not available.
+            - driver_name, driver_version, driver_date: as amdsmi_get_gpu_driver_info().
+            - driver_kernel_version: kernel version of the amdgpu source, such as 6.19.14.
+            - amdgpu_driver_version: amdgpu release, such as 31400000.
+            - driver_build_version: build of the package, such as 2370381.
+            - driver_full_version: driver_version followed by the build, such as
+              6.19.14.31400000-2370381.
+            - driver_package: "amdgpu-dkms" or "amdgpu-kmod".
+
+    Raises:
+        AmdSmiParameterException: If processor_handle is not a processor handle.
+        AmdSmiLibraryException: If the query fails. AMDSMI_STATUS_NOT_SUPPORTED
+            when the loaded library predates this call.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    info = amdsmi_wrapper.amdsmi_driver_info_v2_t()
+    get_driver_info = _amdsmi_entry_point("amdsmi_get_gpu_driver_info_v2")
+    _check_res(get_driver_info(processor_handle, ctypes.byref(info)))
+
+    driver_info = {
+        "driver_name": info.driver_name.decode("utf-8"),
+        "driver_version": info.driver_version.decode("utf-8"),
+        "driver_date": info.driver_date.decode("utf-8"),
+        "driver_kernel_version": info.driver_kernel_version.decode("utf-8"),
+        "amdgpu_driver_version": info.amdgpu_driver_version.decode("utf-8"),
+        "driver_build_version": info.driver_build_version.decode("utf-8"),
+        "driver_full_version": info.driver_full_version.decode("utf-8"),
+        "driver_package": _DRIVER_PACKAGE_NAMES.get(info.driver_package, ""),
+    }
+    return {key: value or "N/A" for key, value in driver_info.items()}
 
 
 def amdsmi_get_power_info(processor_handle: processor_handle_t) -> Dict[str, ctypes.c_uint32]:

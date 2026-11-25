@@ -51,13 +51,15 @@ using KD = rocjitsu::amdhsa::kernel_descriptor_t;
 // CPU golden reference.
 
 void cpu_matmul(const float *A, const float *B, float *C, unsigned N) {
-  for (unsigned i = 0; i < N; ++i)
+  for (unsigned i = 0; i < N; ++i) {
     for (unsigned j = 0; j < N; ++j) {
       float sum = 0.0f;
-      for (unsigned k = 0; k < N; ++k)
+      for (unsigned k = 0; k < N; ++k) {
         sum += A[i * N + k] * B[k * N + j];
+      }
       C[i * N + j] = sum;
     }
+  }
 }
 
 // Helpers.
@@ -74,22 +76,25 @@ std::vector<std::unique_ptr<Instruction>> decode_all(const CodeObject &co) {
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, &data[pc]));
       EXPECT_NE(inst, nullptr);
       ++pc;
-      if (inst && inst->size() == 8)
+      if (inst && inst->size() == 8) {
         ++pc;
-      if (inst)
+      }
+      if (inst) {
         insts.push_back(std::move(inst));
+      }
     }
   }
   return insts;
 }
 
 KD read_kernel_descriptor(const CodeObject &co) {
-  for (const auto *sec : co.rodata_sections())
+  for (const auto *sec : co.rodata_sections()) {
     if (sec->size() >= sizeof(KD)) {
       KD kd;
       std::memcpy(&kd, sec->data(), sizeof(kd));
       return kd;
     }
+  }
   ADD_FAILURE() << "No .rodata section with kernel descriptor found";
   return {};
 }
@@ -181,8 +186,9 @@ struct KernelExecFixture {
 
   /// Read back an NxN output matrix from GPU memory.
   void read_result(float *C_out, unsigned N) {
-    for (unsigned i = 0; i < N * N; ++i)
+    for (unsigned i = 0; i < N * N; ++i) {
       C_out[i] = std::bit_cast<float>(mem()->read32(C_ADDR + i * sizeof(float)));
+    }
   }
 };
 
@@ -208,11 +214,12 @@ TEST(MatmulCodeObjectTest, MfmaLoadsAndDecodes) {
   EXPECT_GT(insts.size(), 0u);
 
   bool has_mfma = false;
-  for (const auto &inst : insts)
+  for (const auto &inst : insts) {
     if (inst->mnemonic().starts_with("v_mfma_")) {
       has_mfma = true;
       break;
     }
+  }
   EXPECT_TRUE(has_mfma) << "MFMA kernel does not contain any v_mfma instructions";
 }
 
@@ -227,10 +234,12 @@ TEST(MatmulCodeObjectTest, NaiveUsesVALU) {
   bool has_vadd = false;
   for (const auto &inst : insts) {
     const auto &m = inst->mnemonic();
-    if (m.starts_with("v_mul_") || m.starts_with("v_fmac_") || m.starts_with("v_fma_"))
+    if (m.starts_with("v_mul_") || m.starts_with("v_fmac_") || m.starts_with("v_fma_")) {
       has_vmul = true;
-    if (m.starts_with("v_add_"))
+    }
+    if (m.starts_with("v_add_")) {
       has_vadd = true;
+    }
   }
   EXPECT_TRUE(has_vmul) << "Naive kernel should contain vector multiply/FMA";
   EXPECT_TRUE(has_vadd) << "Naive kernel should contain vector add";
@@ -244,9 +253,11 @@ TEST(MatmulCodeObjectTest, MfmaHasMultipleMfmaInstructions) {
 
   auto insts = decode_all(*co);
   size_t mfma_count = 0;
-  for (const auto &inst : insts)
-    if (inst->mnemonic().starts_with("v_mfma_"))
+  for (const auto &inst : insts) {
+    if (inst->mnemonic().starts_with("v_mfma_")) {
       ++mfma_count;
+    }
+  }
   EXPECT_GE(mfma_count, 1u) << "Expected at least 1 MFMA instruction";
 }
 

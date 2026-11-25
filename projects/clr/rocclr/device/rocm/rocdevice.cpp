@@ -3611,7 +3611,7 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
   auto* signal = reinterpret_cast<ProfilingSignal*>(hw_event);
   // A signal in device memory loads across the bus, and callers such as WaitActiveStreams check
   // the same finished command on every launch
-  uint64_t completion = signal->use_completion_.load(std::memory_order_acquire);
+  const uint64_t completion = signal->use_completion_.load(std::memory_order_acquire);
   if ((completion & ProfilingSignal::kUseCompleteBit) != 0) {
     return true;
   }
@@ -3623,18 +3623,21 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
     bool active_wait =
         !((policy == amd::SyncPolicy::Blocking) & kHipEventBlockingSync) && ActiveWait();
     bool yield = (policy == amd::SyncPolicy::Yield);
-    // Not cached: after a GPU error the wait gives up and returns true with the use unfinished
-    return WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
+    const bool waited =
+        WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
+    // After a GPU error, with HIP_SKIP_ABORT_ON_GPU_ERROR, the wait gives up and returns true
+    // with the use unfinished
+    if (waited && !(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
+      signal->MarkUseComplete(completion);
+    }
+    return waited;
   }
 
   ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", signal->signal_.handle);
   if (Hsa::signal_load_relaxed(signal->signal_) != 0) {
     return false;
   }
-  // Fails if a new use started since the load, which must not be marked
-  signal->use_completion_.compare_exchange_strong(
-      completion, completion | ProfilingSignal::kUseCompleteBit, std::memory_order_release,
-      std::memory_order_relaxed);
+  signal->MarkUseComplete(completion);
   return true;
 }
 
@@ -4609,10 +4612,13 @@ uint8_t* Device::CreateBarrierPacket(int num_deps) const {
 
 // ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                 const std::vector<void*>& hw_events, bool profiled) const {
+                                 const std::vector<void*>& hw_events, bool profiled,
+                                 void* external_hw_event) const {
   // Starts no use: the set comes new from CreateHwEvents or re-armed by ResetHwEvents, which did
   for (const auto& patch : patches) {
-    auto* ps = reinterpret_cast<ProfilingSignal*>(hw_events[patch.hw_event_index]);
+    const bool external = (patch.hw_event_index == HwEventPatch::kExternalHwEvent);
+    auto* ps = reinterpret_cast<ProfilingSignal*>(external ? external_hw_event
+                                                           : hw_events[patch.hw_event_index]);
     hsa_signal_t sig = ps->signal_;
 
     // Patch the flat buffer copy (dispatched to GPU) directly.

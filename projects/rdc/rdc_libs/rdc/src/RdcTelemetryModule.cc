@@ -32,23 +32,33 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-// Return all supported fields
+// Return all supported fields, at most MAX_NUM_FIELDS (the size of field_ids), and
+// RDC_ST_MAX_LIMIT when the libraries support more. A library that fails adds none.
 rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS],
                                                             uint32_t* field_count) {
   if (field_count == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
-  auto ite = telemetry_modules_.begin();
+  rdc_status_t result = RDC_ST_OK;
   *field_count = 0;
-  for (; ite != telemetry_modules_.end(); ite++) {
+  // Each library may write MAX_NUM_FIELDS IDs, more than field_ids has room left for.
+  std::vector<uint32_t> library_ids(MAX_NUM_FIELDS);
+  for (auto& library : telemetry_modules_) {
     uint32_t count = 0;
-    rdc_status_t status = (*ite)->rdc_telemetry_fields_query(&(field_ids[*field_count]), &count);
-    if (status == RDC_ST_OK) {
-      *field_count += count;
+    if (library->rdc_telemetry_fields_query(library_ids.data(), &count) != RDC_ST_OK) {
+      continue;
     }
+    count = std::min<uint32_t>(count, MAX_NUM_FIELDS);
+    const uint32_t room = MAX_NUM_FIELDS - *field_count;
+    if (count > room) {
+      count = room;
+      result = RDC_ST_MAX_LIMIT;
+    }
+    std::copy_n(library_ids.begin(), count, field_ids + *field_count);
+    *field_count += count;
   }
 
-  return RDC_ST_OK;
+  return result;
 }
 
 rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_watch(rdc_gpu_field_t* fields,
@@ -61,14 +71,20 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_watch(rdc_gpu_field_t* fie
   std::vector<rdc_gpu_field_value_t> unsupport_fields;
   get_fields_for_module(fields, fields_count, fields_in_module, unsupport_fields);
 
+  // Every library gets its fields; the first failure is returned.
+  rdc_status_t result = RDC_ST_OK;
   auto ite = fields_in_module.begin();
   for (; ite != fields_in_module.end(); ite++) {
     if (ite->second.size() > 0) {
-      ite->first->rdc_telemetry_fields_watch(&ite->second[0], ite->second.size());
+      rdc_status_t status =
+          ite->first->rdc_telemetry_fields_watch(&ite->second[0], ite->second.size());
+      if (result == RDC_ST_OK) {
+        result = status;
+      }
     }
   }
 
-  return RDC_ST_OK;
+  return result;
 }
 
 rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
@@ -81,14 +97,20 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_unwatch(rdc_gpu_field_t* f
   std::vector<rdc_gpu_field_value_t> unsupport_fields;
   get_fields_for_module(fields, fields_count, fields_in_module, unsupport_fields);
 
+  // Every library gets its fields; the first failure is returned.
+  rdc_status_t result = RDC_ST_OK;
   auto ite = fields_in_module.begin();
   for (; ite != fields_in_module.end(); ite++) {
     if (ite->second.size() > 0) {
-      ite->first->rdc_telemetry_fields_unwatch(&ite->second[0], ite->second.size());
+      rdc_status_t status =
+          ite->first->rdc_telemetry_fields_unwatch(&ite->second[0], ite->second.size());
+      if (result == RDC_ST_OK) {
+        result = status;
+      }
     }
   }
 
-  return RDC_ST_OK;
+  return result;
 }
 
 RdcTelemetryModule::RdcTelemetryModule(std::list<RdcTelemetryPtr> telemetry_modules)
@@ -99,7 +121,7 @@ RdcTelemetryModule::RdcTelemetryModule(std::list<RdcTelemetryPtr> telemetry_modu
     uint32_t field_count = 0;
     rdc_status_t status = (*ite)->rdc_telemetry_fields_query(field_ids, &field_count);
     if (status == RDC_ST_OK) {
-      for (uint32_t index = 0; index < field_count; index++) {
+      for (uint32_t index = 0; index < field_count && index < MAX_NUM_FIELDS; index++) {
         fields_id_module_.insert({field_ids[index], (*ite)});
       }
     }
@@ -140,13 +162,18 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_value_get(rdc_gpu_field_t*
   std::vector<rdc_gpu_field_value_t> unsupport_fields;
   get_fields_for_module(fields, fields_count, fields_to_fetch, unsupport_fields);
 
+  // Every library gets its fields; the first failure is returned.
+  rdc_status_t result = RDC_ST_OK;
   for (auto& [module, due] : fields_to_fetch) {
     // A library takes at most MAX_NUM_FIELDS fields per call, but the watches due in one
     // update can hold more.
     for (size_t first = 0; first < due.size(); first += MAX_NUM_FIELDS) {
       const size_t n = std::min<size_t>(MAX_NUM_FIELDS, due.size() - first);
-      module->rdc_telemetry_fields_value_get(&due[first], static_cast<uint32_t>(n), callback,
-                                             user_data);
+      rdc_status_t status = module->rdc_telemetry_fields_value_get(
+          &due[first], static_cast<uint32_t>(n), callback, user_data);
+      if (result == RDC_ST_OK) {
+        result = status;
+      }
     }
   }
 
@@ -155,7 +182,7 @@ rdc_status_t RdcTelemetryModule::rdc_telemetry_fields_value_get(rdc_gpu_field_t*
     callback(unsupport_fields.data(), static_cast<uint32_t>(unsupport_fields.size()), user_data);
   }
 
-  return RDC_ST_OK;
+  return result;
 }
 
 }  // namespace rdc

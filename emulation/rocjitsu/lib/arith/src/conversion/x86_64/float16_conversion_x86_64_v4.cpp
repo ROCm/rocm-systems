@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // AVX-512 FP16/BF16 conversions preserving inherited NaN, subnormal and overflow rules.
+#include "common/alu.h"
+#include "common/sdwa_output.h"
 #include "conversion/float16_conversion_impl.h"
 #include "conversion/x86_64/lanes.h"
 #include "rj_arith/detail/rj_arith_common.h"
@@ -125,12 +127,17 @@ void float16_conversion_x86_64_v4(Float16Format format, Float16Conversion op, ui
                                   uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
                                   const uint32_t *b, const uint32_t *c) {
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
+  const auto output = sdwa_output_policy(flags, uint32_t(rdna3_output_modifiers(flags, mode)));
   for (int lane = 0; lane < 32; lane += 16) {
     auto av = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(a + lane));
     __m512i value;
     if (op == Float16Conversion::Widen) {
       value = mode & RJ_ARITH_ALU_HIGH_A ? _mm512_and_si512(av, _mm512_set1_epi32(int(0xffff0000U)))
                                          : _mm512_slli_epi32(av, 16);
+      if (mode & RJ_ARITH_CVT_SDWA) {
+        using V = conversion_simd::Lanes<32>;
+        value = sdwa_output_f32(V(value), output).bits;
+      }
     } else {
       auto bv = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(b + lane));
       if (op == Float16Conversion::Stochastic) {

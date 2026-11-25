@@ -57,11 +57,9 @@ namespace kfd
 {
 namespace
 {
-// The reader issues the unified-profiler ioctls, which need this exact ABI. All
-// dispatch-log ABI is unshipped and replaced in place, so a different profiler ABI
-// -- older OR newer -- may re-lay-out the fixed-offset args this TU reads, and
-// must not be silently accepted. Matches the stream ABI's exact-equality check.
-constexpr uint32_t kProfilerAbiVersion = KFD_IOC_PROFILER_VERSION_NUM;
+// Profiler ABI is backward compatible from v6 (dlog layout) on; a literal so a header bump
+// can't raise it. ABI alone does not imply dlog: dispatch_log_stream_format gates per GPU.
+constexpr uint32_t kMinProfilerAbiVersion = 6;
 
 // Translation-unit-owned state. Not exposed as bare globals; only the accessor
 // functions below read it. Reset by shutdown_kfd_profiler().
@@ -150,6 +148,28 @@ discover_stream_dispatch_log_gpus(const char* nodes_path)
     return gpu_ids;
 }
 
+std::unordered_set<uint32_t>
+discover_dispatch_log_gpus(uint32_t profiler_abi_version, const char* nodes_path)
+{
+    if(profiler_abi_version < kMinProfilerAbiVersion)
+    {
+        ROCP_INFO << fmt::format(
+            "KFD dispatch-log: profiler ABI version {} < minimum {}, using HSA timestamps",
+            profiler_abi_version,
+            kMinProfilerAbiVersion);
+        return {};
+    }
+
+    // ABI probe passed; discover which GPUs expose the stream dispatch-log.
+    auto gpu_ids = discover_stream_dispatch_log_gpus(nodes_path);
+    if(gpu_ids.empty())
+    {
+        ROCP_INFO
+            << "KFD dispatch-log: no GPU exposes dispatch_log_stream_format, using HSA timestamps";
+    }
+    return gpu_ids;
+}
+
 // F15: is any registered context actually tracing kernel dispatch? Same predicate
 // as the interposition arm (buffer OR callback kernel-dispatch tracing).
 bool
@@ -189,24 +209,9 @@ init_kfd_profiler()
         return;
     }
 
-    st.abi_version = args.version;
-    if(st.abi_version != kProfilerAbiVersion)
-    {
-        ROCP_INFO << fmt::format(
-            "KFD dispatch-log: profiler ABI version {} != required {}, using HSA timestamps",
-            st.abi_version,
-            kProfilerAbiVersion);
-        return;
-    }
-
-    // ABI probe passed; discover which GPUs expose the stream dispatch-log.
-    st.supported_gpu_ids = discover_stream_dispatch_log_gpus(kTopologyNodesPath);
-    if(st.supported_gpu_ids.empty())
-    {
-        ROCP_INFO
-            << "KFD dispatch-log: no GPU exposes dispatch_log_stream_format, using HSA timestamps";
-        return;
-    }
+    st.abi_version       = args.version;
+    st.supported_gpu_ids = discover_dispatch_log_gpus(st.abi_version, kTopologyNodesPath);
+    if(st.supported_gpu_ids.empty()) return;
 
     st.probe_ok = true;
     ROCP_INFO << fmt::format("KFD dispatch-log: supported (ABI version {}, {} supported GPU(s))",

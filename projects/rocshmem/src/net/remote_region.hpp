@@ -33,11 +33,11 @@ namespace net {
  *
  * Transport-neutral by design: it carries only the peer's registered base VA
  * and a network key, in plain integer types, so it pulls in no libibverbs /
- * libfabric / LCI headers. Concrete conduits fill it from their own registration
+ * libfabric / LCI headers. Concrete backends fill it from their own registration
  * exchange:
  *   - verbs : remote_base = peer heap VA,  key = ibv_mr::rkey (32-bit, widened)
  *   - ofi   : remote_base = peer heap VA,  key = fi_mr key   (may be 64-bit)
- * The LCI conduit uses its own opaque remote-MR handle (rmr_t) and does not use
+ * The LCI backend uses its own opaque remote-MR handle (rmr_t) and does not use
  * this struct.
  *
  * Because rocSHMEM's heap is symmetric, a local symmetric VA maps to a peer VA

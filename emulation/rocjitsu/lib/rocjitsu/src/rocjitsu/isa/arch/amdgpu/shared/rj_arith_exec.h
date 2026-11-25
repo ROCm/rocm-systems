@@ -24,8 +24,9 @@ using WmmaFunction = int (*)(uint64_t, uint64_t, uint32_t *const *, const uint32
                                                const uint32_t **pointers) {
   for (uint32_t reg = 0; reg < region.reg_count(); ++reg) {
     auto lanes = region.lanes(reg);
-    if (lanes.failed())
+    if (lanes.failed()) {
       return false;
+    }
     pointers[reg] = lanes.value().data();
   }
   return true;
@@ -36,23 +37,27 @@ using WmmaFunction = int (*)(uint64_t, uint64_t, uint32_t *const *, const uint32
 template <uint32_t MaxRegisters = 8, typename Invoke>
 inline void commit_matrix_result(Wavefront &wave, RegisterAccess &registers, uint32_t destination,
                                  uint32_t result_registers, uint8_t write_bytes, Invoke &&invoke) {
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   const uint32_t lanes = wave.wf_size();
   const uint64_t all_lanes = lanes == 64 ? ~uint64_t{0} : 0xffffffffu;
   std::array<uint32_t *, MaxRegisters> d{};
   std::array<std::array<uint32_t, 64>, MaxRegisters> results{};
-  for (uint32_t reg = 0; reg < result_registers; ++reg)
+  for (uint32_t reg = 0; reg < result_registers; ++reg) {
     d[reg] = results[reg].data();
+  }
   if (invoke(d.data()) != RJ_ARITH_SUCCESS) {
     wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
   // Acquiring a write region notifies plugins, so it must follow successful evaluation.
   auto output = registers.write_vgpr_region(destination, result_registers, all_lanes, write_bytes);
-  for (uint32_t reg = 0; reg < result_registers; ++reg)
-    for (uint32_t lane = 0; lane < lanes; ++lane)
+  for (uint32_t reg = 0; reg < result_registers; ++reg) {
+    for (uint32_t lane = 0; lane < lanes; ++lane) {
       output.set_lane(reg, lane, results[reg][lane]);
+    }
+  }
 }
 
 // RDNA3/RDNA4 redirect a source tuple outside the architectural allocation to v0
@@ -72,11 +77,13 @@ inline void exec_wmma(Wavefront &wave, WmmaFunction function, uint64_t flags,
                       uint32_t result_registers, std::optional<uint32_t> constant_c,
                       uint8_t write_bytes = 0xf, uint32_t factor_lanes = 0) {
   RegisterAccess registers(wave);
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   // An invalid destination suppresses the instruction, including operand observations.
-  if (!wave.vgpr_alloc().contains(destination, result_registers))
+  if (!wave.vgpr_alloc().contains(destination, result_registers)) {
     return;
+  }
   const uint32_t lanes = wave.wf_size();
   assert(lanes == 32 || lanes == 64);
   assert(factor_registers > 0 && factor_registers <= 8);
@@ -90,8 +97,9 @@ inline void exec_wmma(Wavefront &wave, WmmaFunction function, uint64_t flags,
                                              factor_registers, input_lanes);
   std::array<const uint32_t *, 8> a{}, b{}, c{};
   std::array<uint32_t, 64> broadcast{};
-  if (!read_matrix_pointers(a_region, a.data()) || !read_matrix_pointers(b_region, b.data()))
+  if (!read_matrix_pointers(a_region, a.data()) || !read_matrix_pointers(b_region, b.data())) {
     return;
+  }
   // Keep the region alive through the call: invalid source views may own their
   // zero backing storage. A constant accumulator is not a register read.
   std::optional<RegisterAccess::VgprReadRegion> c_region;
@@ -101,8 +109,9 @@ inline void exec_wmma(Wavefront &wave, WmmaFunction function, uint64_t flags,
   } else {
     c_region.emplace(registers.read_vgpr_region(
         matrix_source_base(wave, source_c, result_registers), result_registers, all_lanes));
-    if (!read_matrix_pointers(*c_region, c.data()))
+    if (!read_matrix_pointers(*c_region, c.data())) {
       return;
+    }
   }
   // WMMA has no execution mask. Partial/observed stores retain staged commits.
   if (write_bytes == 0xf) {
@@ -111,8 +120,9 @@ inline void exec_wmma(Wavefront &wave, WmmaFunction function, uint64_t flags,
           return function(flags, instruction_flags, d, a.data(), b.data(), c.data());
         });
     if (status) {
-      if (*status != RJ_ARITH_SUCCESS)
+      if (*status != RJ_ARITH_SUCCESS) {
         wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      }
       return;
     }
   }
