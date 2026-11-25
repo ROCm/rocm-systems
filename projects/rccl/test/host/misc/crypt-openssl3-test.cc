@@ -14,8 +14,8 @@
 //
 // The suite compiles the hipified crypt.cc directly (via CRYPT_CC_PATH) with the
 // OpenSSL 3 backend, which librccl only gets from TLS_BACKEND=OPENSSL3. crypt.cc
-// dlopens libssl.so.3, so building needs just the OpenSSL 3 headers; without
-// them the tests skip. Both ends of a connection run in this process over a
+// dlopens libssl.so.3, so building needs just the OpenSSL 3 headers. CMake builds
+// this binary only when TLS_BACKEND=OPENSSL3. Both ends of a connection run in this process over a
 // socketpair and are stepped in turn, non-blocking. No GPU, no librccl.so.
 
 #include <gtest/gtest.h>
@@ -26,11 +26,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#if __has_include(<openssl/opensslv.h>)
-#include <openssl/opensslv.h>
-#endif
-#if defined(OPENSSL_VERSION_MAJOR) && OPENSSL_VERSION_MAJOR == 3 && !defined(NCCL_TLS_BACKEND_OPENSSL3)
-#define NCCL_TLS_BACKEND_OPENSSL3 1
+#if !defined(NCCL_TLS_BACKEND_OPENSSL3)
+#error "crypt-openssl3-test.cc needs NCCL_TLS_BACKEND_OPENSSL3 (configure with TLS_BACKEND=OPENSSL3)"
 #endif
 
 #include CRYPT_CC_PATH
@@ -82,11 +79,8 @@ class CryptPskHandshakeTest : public ::testing::Test {
   void* libssl_ = nullptr;
 
   void SetUp() override {
-#if !defined(NCCL_TLS_BACKEND_OPENSSL3)
-    GTEST_SKIP() << "built without the OpenSSL 3 headers, so crypt.cc has no TLS backend";
-#endif
     libssl_ = dlopen("libssl.so.3", RTLD_NOW | RTLD_LOCAL);
-    if (libssl_ == nullptr) GTEST_SKIP() << "libssl.so.3 is not loadable: " << dlerror();
+    ASSERT_NE(nullptr, libssl_) << "TLS_BACKEND=OPENSSL3 but libssl.so.3 is not loadable: " << dlerror();
     ncclEncryptionConfig_t config = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
     config.mode = NCCL_ENCRYPTION_MODE_PSK;
     config.psk = "crypt-test pre-shared key, at least 32 bytes long";
@@ -122,7 +116,6 @@ TEST_F(CryptPskHandshakeTest, PskPeersConnect) {
   EXPECT_EQ(NCCL_CRYPT_HELLO_VERDICT_READY, verdict);
 }
 
-#if defined(NCCL_TLS_BACKEND_OPENSSL3)
 struct ImpostorOutcome {
   ncclResult_t clientRes = ncclInProgress;
   bool impostorHandshakeDone = false;
@@ -191,6 +184,5 @@ TEST_F(CryptImpostorTest, ClientRejectsNonPskHandshakeWithoutVerification) {
   EXPECT_EQ(ncclRemoteError, out.clientRes) << "the client completed a TLS handshake that did not use the PSK";
   EXPECT_LE(out.leaked, 0) << "a server without the PSK decrypted the client's socket hello";
 }
-#endif
 
 }  // namespace
