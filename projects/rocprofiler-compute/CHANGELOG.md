@@ -34,6 +34,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed Memory Chart values that were rounded twice and so differed from the same metric elsewhere, for example L2 Hit showed 34.0% while the memory bandwidth analysis showed 34.2%; `--decimal` now sets the decimals of tables only.
 
+* Fixed Wavefront Occupancy in the System Speed-of-Light panel on gfx1250, which counted wavefronts per CU but compared them with the peak of all CUs.
+
 ### Upcoming changes
 
 ### Known issues
