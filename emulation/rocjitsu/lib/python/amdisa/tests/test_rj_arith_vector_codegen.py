@@ -75,7 +75,9 @@ def test_binary_bindings_have_both_wave_apis_and_clamp(arch, name):
 
 def test_unmigrated_routing_and_operand_shapes_keep_existing_path():
     for arch in ('rdna1', 'rdna2', 'rdna3_5', 'cdna1', 'cdna2'):
-        assert gen_vector32(context(arch, 'V_MOV_B32', ['dst'], ['a'], False)) is None
+        assert (
+            gen_vector32(context(arch, 'V_MOV_B32', ['dst'], ['a'], False)) is not None
+        )
     assert (
         gen_vector32(context('rdna4', 'V_AND_B32', ['dst', 'scc'], ['a', 'b'], False))
         is None
@@ -623,7 +625,9 @@ def test_routing_migration_preserves_integer_conversions(arch, name):
             assert body is None
 
 
-@pytest.mark.parametrize('arch', ['rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize(
+    'arch', ['rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'cdna3', 'cdna4', 'cdna5']
+)
 def test_vop3_move_source_modifiers_follow_architecture(arch):
     body = gen_vector32(context(arch, 'V_MOV_B32', ['dst'], ['a'], True))
     for modifier in ('RJ_ARITH_ALU_ABS_A', 'RJ_ARITH_ALU_NEG_A'):
@@ -1006,3 +1010,37 @@ def test_older_saturation_retains_word_or_selected_half_policy(arch):
         gen_vector32(context(arch, 'V_ADD_NC_U32', ['dst'], ['a', 'b'], True))
         is not None
     )
+
+
+def test_gfx1150_half_conditional_keeps_selected_half_controls():
+    body = gen_vector32(
+        context('rdna3_5', 'V_CNDMASK_B16', ['d'], ['a', 'b', 'mask'], True)
+    )
+    assert 'execute_conditional<true>' in body
+    assert 'RJ_ARITH_ALU_HIGH_A' in body and 'RJ_ARITH_ALU_HIGH_D' in body
+    assert 'read_wave_mask_scalar(mask, wf)' in body
+    assert (
+        gen_vector32(
+            context('rdna3_5', 'V_CNDMASK_B32', ['d'], ['a', 'b', 'mask'], True)
+        )
+        is not None
+    )
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+@pytest.mark.parametrize('vop3', [False, True])
+def test_older_word_routing_reuses_apis_without_enabling_neighboring_arithmetic(
+    arch, vop3
+):
+    move = gen_vector32(context(arch, 'V_MOV_B32', ['d'], ['a'], vop3))
+    sources = ['a', 'b', 'mask'] if vop3 else ['a', 'b']
+    select = gen_vector32(context(arch, 'V_CNDMASK_B32', ['d'], sources, vop3))
+    assert ('rj_arith_v_mov_b32_w64,' if vop3 else 'execute_move32') in move
+    sign_controls = vop3 and arch.startswith('rdna')
+    assert ('inst_.abs' in move) == sign_controls
+    assert ('inst_.neg' in move) == sign_controls
+    assert 'rj_arith_v_cndmask_b32_w32,' in select
+    assert 'rj_arith_v_cndmask_b32_w64,' in select
+    assert ('read_wave_mask_scalar(mask, wf)' in select) == vop3
+    assert ('inst_.abs' in select) == vop3
+    assert gen_vector32(context(arch, 'V_AND_B32', ['d'], ['a', 'b'], vop3)) is not None

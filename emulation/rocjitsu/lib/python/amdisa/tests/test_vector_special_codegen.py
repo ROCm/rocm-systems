@@ -26,7 +26,6 @@ from amdisa.codegen.execute.vector_special import (
     gen_vector_div_fixup,
     gen_vector_movrel,
     gen_vector_perm_pk16,
-    gen_vector_permlane,
     gen_vector_sat_pack,
     gen_vector_swaprel,
     gen_vector_trig_preop,
@@ -49,19 +48,6 @@ def test_cls_i32_codegen():
     assert 'countl_zero(a)) - 1' not in semantic
 
 
-def test_permlane_uses_opsel_fi_and_bound_ctrl_bits():
-    cpp = gen_vector_permlane(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'imm',
-        cross=False,
-        op_sel_expr='inst_.opsel',
-    )
-
-    assert 'bool fi = (inst_.opsel & 0x1u) != 0;' in cpp
-    assert 'bool bound_ctrl = (inst_.opsel & 0x2u) != 0;' in cpp
-
-
 def test_relative_vgpr_ops_use_unsigned_packed_m0_fields():
     move = gen_vector_movrel(
         ['vdst'],
@@ -79,13 +65,13 @@ def test_relative_vgpr_ops_use_unsigned_packed_m0_fields():
         assert 'wf.m0() & 0x3ffu' in cpp
         assert '(wf.m0() >> 16) & 0x3ffu' in cpp
         assert 'resolved_vgpr_offset(wf' in cpp
-    assert 'read_lane(rel_src, lane)' in move
+    assert 'amdgpu::arith::execute_move32' in move
     assert 'DppPlan rel_dpp_plan' in move
     assert 'apply_dpp(\n        rel_src, rel_dpp_plan' in move
     assert 'apply_dpp8(rel_src' in move
     assert 'stage_source(rel_src' in move
     assert 'rel_staged_src_binding(rel_src' in move
-    assert 'write_lane(rel_src, lane, dst_value)' in swap
+    assert 'amdgpu::arith::execute_swap<false>' in swap
     assert 'std::optional<uint32_t>' in move
     assert 'Operand rel_src' in move
     assert 'Operand rel_dst' in move
@@ -154,39 +140,6 @@ def test_trig_preop_two_over_pi_table_integrity():
         hashlib.sha256(table_bytes).hexdigest()
         == '6945fb5ae75f6a3e8dec95553821e5886324e9e96181eb7944d828f508eee5b9'
     )
-
-
-def test_permlane_imm_selectors_are_four_bits_per_lane():
-    cpp = gen_vector_permlane(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'imm',
-        cross=False,
-    )
-
-    assert 'uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;' in cpp
-    assert 'sub * 2' not in cpp
-
-    assert 'uint64_t exec = wf.exec();' in cpp
-    assert '!(exec & (1ULL << lane))' in cpp
-    assert 'bool src_active = (exec & (1ULL << src_lane)) != 0;' in cpp
-    assert '!src_active && !fi' in cpp
-    assert 'bound_ctrl' in cpp
-
-
-def test_permlanex16_fetches_from_other_half_row():
-    cpp = gen_vector_permlane(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'var',
-        cross=True,
-    )
-
-    assert (
-        'valu_permutation_source(amdgpu::ValuPermutation::X16, lane, sel, 16, wf.wf_size())'
-        in cpp
-    )
-    assert 'sel ^ 0x10' not in cpp
 
 
 def test_permlane_is_not_shared_across_profiles():
@@ -478,7 +431,7 @@ def test_gfx1250_non_true16_simd_probe_can_still_be_shared():
     )
 
     assert not codegen._requires_arch_local_execute(mov_b32, 'ENC_VOP1')
-    assert codegen._can_force_shared_simd_probe(mov_b32, 'ENC_VOP1')
+    assert not codegen._can_force_shared_simd_probe(mov_b32, 'ENC_VOP1')
 
 
 def test_gfx1250_true16_e32_dst_reg_uses_physical_vgpr():

@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx10_interp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/signaling_compare.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
@@ -41,13 +42,15 @@ void VInterpMovF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 
 void VNopVop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_nop_vop3(*this, wf); }
 
-void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mov_b32_vop3(*this, wf); }
+void VMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::arith::execute_unary32(
+      wf, rj_arith_v_mov_b32_w32, rj_arith_v_mov_b32_w64, wf.cu().arithmetic_flags(),
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u),
+      vdst, src0);
+}
 
 void VReadfirstlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint64_t exec = wf.exec();
-  uint32_t lane = exec ? static_cast<uint32_t>(std::countr_zero(exec)) : 0;
-  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar_selected_lane(src0, lane);
-  amdgpu::RegisterAccess(wf).write_scalar(vdst, val);
+  amdgpu::arith::execute_read_lane<true>(wf, wf.cu().arithmetic_flags(), vdst, src0);
 }
 
 void VCvtI32F64Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -394,14 +397,7 @@ void VMovreldB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) {
-      continue;
-    }
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(src0, lane));
-  }
+  amdgpu::arith::execute_move32(*this, wf, rel_dst, src0);
 }
 
 void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -414,14 +410,7 @@ void VMovrelsB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
                            .has_value();
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) {
-      continue;
-    }
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
+  amdgpu::arith::execute_move32(*this, wf, vdst, rel_src);
 }
 
 void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -447,14 +436,7 @@ void VMovrelsdB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) {
-      continue;
-    }
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
+  amdgpu::arith::execute_move32(*this, wf, rel_dst, rel_src);
 }
 
 void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -480,14 +462,7 @@ void VMovrelsd2B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   Operand rel_src(src0.size_bits(), OperandType::OPR_VGPR,
                   static_cast<int>(rel_src_valid ? rel_src_index : 0u));
   Operand rel_dst(vdst.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));
-  uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) {
-      continue;
-    }
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));
-  }
+  amdgpu::arith::execute_move32(*this, wf, rel_dst, rel_src);
 }
 
 void VCvtF16U16Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -702,7 +677,15 @@ void VCvtNormU16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_cndmask_b32_vop3(*this, wf);
+  if (!wf.exec()) {
+    return;
+  }
+  uint64_t modifiers =
+      ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.abs & 2) ? RJ_ARITH_ALU_ABS_B : 0u) |
+      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) | ((inst_.neg & 2) ? RJ_ARITH_ALU_NEG_B : 0u);
+  amdgpu::arith::execute_conditional<false>(
+      *this, wf, rj_arith_v_cndmask_b32_w32, rj_arith_v_cndmask_b32_w64, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, amdgpu::read_wave_mask_scalar(src2, wf));
 }
 
 void VAddF32Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_add_f32_vop3(*this, wf); }
@@ -1644,15 +1627,12 @@ void VDivFixupF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VReadlaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
-  amdgpu::RegisterAccess(wf).write_scalar(
-      vdst, amdgpu::RegisterAccess(wf).read_scalar_selected_lane(src0, lane));
+  const uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
+  amdgpu::arith::execute_read_lane<false>(wf, wf.cu().arithmetic_flags(), vdst, src0, lane);
 }
 
 void VWritelaneB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t val = amdgpu::RegisterAccess(wf).read_scalar(src0);
-  uint32_t lane = amdgpu::RegisterAccess(wf).read_scalar(src1);
-  amdgpu::RegisterAccess(wf).write_scalar_selected_lane(vdst, lane, val);
+  amdgpu::arith::execute_write_lane(wf, wf.cu().arithmetic_flags(), vdst, src0, src1);
 }
 
 void VLdexpF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
@@ -1766,69 +1746,17 @@ void VSubNcI32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPermlane16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  bool fi = (inst_.op_sel & 0x1u) != 0;
-  bool bound_ctrl = (inst_.op_sel & 0x2u) != 0;
-  uint64_t exec = wf.exec();
-  uint32_t snap[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
-  }
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) {
-      continue;
-    }
-    uint32_t sub = lane & 0xF;
-    uint32_t sel_word = (sub < 8u) ? amdgpu::RegisterAccess(wf).read_scalar(src1)
-                                   : amdgpu::RegisterAccess(wf).read_scalar(src2);
-    uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;
-    uint32_t src_lane = amdgpu::valu_permutation_source(amdgpu::ValuPermutation::Perm16, lane, sel,
-                                                        16, wf.wf_size());
-    if (src_lane >= wf.wf_size()) {
-      continue;
-    }
-    bool src_active = (exec & (1ULL << src_lane)) != 0;
-    if (!src_active && !fi) {
-      if (bound_ctrl) {
-        amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
-      }
-      continue;
-    }
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                               snap[src_lane]);
-  }
+  const uint64_t modifiers = amdgpu::vop3_opsel(inst_) & 3;
+  amdgpu::arith::execute_permlane16<false, false>(
+      wf, rj_arith_v_permlane16_b32_w32, rj_arith_v_permlane16_b32_w64, wf.cu().arithmetic_flags(),
+      modifiers, vdst, src0, src1, &src2);
 }
 
 void VPermlanex16B32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  bool fi = (inst_.op_sel & 0x1u) != 0;
-  bool bound_ctrl = (inst_.op_sel & 0x2u) != 0;
-  uint64_t exec = wf.exec();
-  uint32_t snap[64];
-  for (uint32_t i = 0; i < wf.wf_size(); ++i) {
-    snap[i] = amdgpu::RegisterAccess(wf).read_lane(src0, i);
-  }
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane))) {
-      continue;
-    }
-    uint32_t sub = lane & 0xF;
-    uint32_t sel_word = (sub < 8u) ? amdgpu::RegisterAccess(wf).read_scalar(src1)
-                                   : amdgpu::RegisterAccess(wf).read_scalar(src2);
-    uint32_t sel = (sel_word >> ((sub & 7u) * 4u)) & 0xF;
-    uint32_t src_lane =
-        amdgpu::valu_permutation_source(amdgpu::ValuPermutation::X16, lane, sel, 16, wf.wf_size());
-    if (src_lane >= wf.wf_size()) {
-      continue;
-    }
-    bool src_active = (exec & (1ULL << src_lane)) != 0;
-    if (!src_active && !fi) {
-      if (bound_ctrl) {
-        amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane, 0);
-      }
-      continue;
-    }
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(*this, wf, vdst, lane,
-                                                               snap[src_lane]);
-  }
+  const uint64_t modifiers = amdgpu::vop3_opsel(inst_) & 3;
+  amdgpu::arith::execute_permlane16<true, false>(
+      wf, rj_arith_v_permlanex16_b32_w32, rj_arith_v_permlanex16_b32_w64,
+      wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, &src2);
 }
 
 void VAddNcI32Vop3::execute_impl(amdgpu::Wavefront &wf) {

@@ -9227,6 +9227,19 @@ TEST(MemoryWaitFootprintTest, DirectAluFamiliesMatchObservedAccesses) {
   check_vector_footprints(rocjitsu::IsaFamily::Cdna4, 64, 16, cases);
 }
 
+// Plain conditional moves observe only the selected input in each active lane.
+TEST(MemoryWaitFootprintTest, OlderConditionalMoveReadsSelectedLanes) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3_5}) {
+    const uint32_t word = arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2
+                              ? 0x00040300U
+                              : 0x02040300U;
+    check_vector_footprints(arch, 64, 4, {{word}}, 0, 0,
+                            [](Wavefront &wf) { wf.set_vcc(0xaaaaaaaaaaaaaaaaULL); });
+  }
+}
+
 // Selected SDWA bytes must have exactly the same lane dependencies as execution.
 TEST(MemoryWaitFootprintTest, CdnaConditionalSdwaMatchesWaitFootprints) {
   for (auto arch :

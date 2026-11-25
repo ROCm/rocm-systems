@@ -38,7 +38,21 @@ INTEGER32_ARCHITECTURES = INTEGER_ARCHITECTURES + (
     'rdna3_5',
 )
 # Routing and conversions migrate independently of integer arithmetic.
-ROUTING_ARCHITECTURES = INTEGER_ARCHITECTURES
+ROUTING_ARCHITECTURES = (
+    'cdna1',
+    'cdna2',
+    'cdna3',
+    'cdna4',
+    'cdna5',
+    'rdna1',
+    'rdna2',
+    'rdna3',
+    'rdna3_5',
+    'rdna4',
+)
+WORD_ROUTING_NAMES = {'V_MOV_B32', 'V_CNDMASK_B32'}
+HALF_CONDITIONAL_ARCHITECTURES = (*INTEGER_ARCHITECTURES, 'rdna3_5')
+SCREEN_PARTITION_ARCHITECTURES = ('cdna1', 'cdna2', 'cdna3', 'cdna4')
 
 
 # These integer APIs use one 32-bit VGPR for each result and source.
@@ -185,23 +199,23 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
         and mnemonic == 'V_SAT_PK_U8_I16'
     )
-    architectures = (
-        HALF_INTEGER_ARCHITECTURES
-        if mnemonic in WIDEN16_NAMES
-        else INTEGER32_ARCHITECTURES
-    )
+    if mnemonic in WIDEN16_NAMES:
+        architectures = HALF_INTEGER_ARCHITECTURES
+    elif mnemonic == 'V_SCREEN_PARTITION_4SE_B32':
+        architectures = SCREEN_PARTITION_ARCHITECTURES
+    elif mnemonic == 'V_CNDMASK_B16':
+        architectures = HALF_CONDITIONAL_ARCHITECTURES
+    elif mnemonic in WORD_ROUTING_NAMES:
+        architectures = ROUTING_ARCHITECTURES
+    else:
+        architectures = INTEGER32_ARCHITECTURES
     if (
         arch not in architectures and not older_saturation
     ) or mnemonic not in VECTOR32_NAMES:
         return None
     if (
-        mnemonic in CONDITIONAL_NAMES | {'V_MOV_B32'}
-        and arch not in ROUTING_ARCHITECTURES
-    ):
-        return None
-    if (
         mnemonic in SATURATE_NAMES
-        and arch not in ROUTING_ARCHITECTURES
+        and arch not in INTEGER_ARCHITECTURES
         and not older_saturation
     ):
         return None
@@ -214,7 +228,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     if mnemonic == 'V_MOV_B32' and not is_vop3 and len(dst) == len(src) == 1:
         return f'  amdgpu::arith::execute_move32(*this, wf, {dst[0]}, {src[0]});'
     if mnemonic == 'V_SCREEN_PARTITION_4SE_B32':
-        if arch not in ('cdna3', 'cdna4') or len(dst) != 1 or len(src) != 1:
+        if len(dst) != 1 or len(src) != 1:
             return None
         # These CDNA targets only execute Wave64. Decoder operands retain DPP/SDWA routing.
         return (
@@ -298,7 +312,11 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         if is_vop3 and mnemonic not in UNMODIFIED_MULTIPLIES and mnemonic != 'V_MOV_B32'
         else '0u'
     )
-    if mnemonic == 'V_MOV_B32' and is_vop3 and arch in ('rdna3', 'rdna4', 'cdna5'):
+    if (
+        mnemonic == 'V_MOV_B32'
+        and is_vop3
+        and arch in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'cdna5')
+    ):
         modifiers = '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
     extra = ''
     if mnemonic in ('V_ALIGNBIT_B32', 'V_ALIGNBYTE_B32') and arch in (

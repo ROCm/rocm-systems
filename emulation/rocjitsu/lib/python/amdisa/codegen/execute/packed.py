@@ -452,39 +452,6 @@ def gen_pk_lshl_add_u64(dst: list[str], src: list[str]) -> str:
     )
 
 
-def gen_pk_mov_b32(
-    dst: list[str],
-    src: list[str],
-    opsel_exprs: tuple[str, str] = ('', ''),
-) -> str:
-    """Generate V_PK_MOV_B32: move two 32-bit values based on op_sel."""
-    d, s0, s1 = dst[0], src[0], src[1]
-    L = []
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    for var, src in [('s0', s0), ('s1', s1)]:
-        L.append(
-            f'    uint64_t {var}_pair_w = amdgpu::RegisterAccess(wf).read_lane64({src}, lane);'
-        )
-        L.append(f'    uint32_t {var}_lo_w = static_cast<uint32_t>({var}_pair_w);')
-        L.append(
-            f'    uint32_t {var}_hi_w = static_cast<uint32_t>({var}_pair_w >> 32);'
-        )
-    opsel, opsel_hi = opsel_exprs
-    s0_lo = _pk_f32_word_expr('s0', 'lo')
-    s0_hi = _pk_f32_word_expr('s0', 'hi')
-    s1_lo = _pk_f32_word_expr('s1', 'lo')
-    s1_hi = _pk_f32_word_expr('s1', 'hi')
-    L.append(f'    uint32_t lo = ({opsel} & 1) ? {s0_hi} : {s0_lo};')
-    L.append(f'    uint32_t hi = ({opsel} & 2) ? {s1_hi} : {s1_lo};')
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane64({d}, lane, static_cast<uint64_t>(lo) | (static_cast<uint64_t>(hi) << 32));'
-    )
-    L.append('  }')
-    return '\n'.join(L)
-
-
 # FP8 DOT4 semantic operation -> (src0 is FP8, src1 is FP8), as for FP8 WMMA.
 _FP8_DOT4_FP8_SOURCES = {
     'fp8_fp8': ('true', 'true'),

@@ -2077,7 +2077,8 @@ public:
     if (!base) {
       return std::nullopt;
     }
-    if (!cu_->valid_operand_vgpr_range(wavefront(), *base, reg_count) && uses_vgpr0_fallback()) {
+    // Only gfx10 needs this extra allocation check before acquiring its fallback view.
+    if (uses_vgpr0_fallback() && !cu_->valid_operand_vgpr_range(wavefront(), *base, reg_count)) {
       return std::nullopt; // A partial tuple can require noncontiguous source registers.
     }
     if (auto mapped = remapped_valu_source(op, *base, reg_count)) {
