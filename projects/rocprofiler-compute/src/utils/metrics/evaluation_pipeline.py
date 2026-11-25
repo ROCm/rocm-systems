@@ -4,7 +4,7 @@
 """High-level metric-evaluation pipeline."""
 
 from collections import ChainMap
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Union
 
 import numpy as np
 import pandas as pd
@@ -41,8 +41,12 @@ def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> Dict[str, f
     }
 
 
-def create_sys_vars(sys_info: pd.Series) -> Dict[str, Union[int, float]]:
-    """Create variables from sys.info."""
+def create_sys_vars(
+    sys_info: pd.Series, warn: Optional[Callable[[str], None]] = None
+) -> Dict[str, Union[int, float]]:
+    """Create variables from sys.info, reporting missing ones through warn
+    (console_warning by default)."""
+    warn = warn or console_warning
     sys_vars_collection = {}
     sys_info_dict = sys_info.to_dict()
 
@@ -71,7 +75,7 @@ def create_sys_vars(sys_info: pd.Series) -> Dict[str, Union[int, float]]:
     for var_name, var_type in required_sys_vars:
         raw_value = sys_info_dict.get(var_name)
         if pd.isna(raw_value) or var_type(raw_value) == 0:
-            console_warning(
+            warn(
                 f"{var_name} is not available in sysinfo.csv, please provide the "
                 "correct value using --specs-correction"
             )
@@ -97,6 +101,7 @@ def calc_builtin_vars(
     sys_vars: Dict[str, Union[int, float]],
     gpu_arch: str,
     collectable_names: Set[str],
+    warn: Optional[Callable[[str], None]] = None,
 ) -> Dict[str, Optional[Union[str, float, int]]]:
     """Evaluate the named collectables on raw_pmc_df, each after the
     collectables it uses."""
@@ -106,7 +111,7 @@ def calc_builtin_vars(
         if name not in collectable_names:
             continue
         result = MetricEvaluator(
-            raw_pmc_df, {**sys_vars, **values}, {}
+            raw_pmc_df, {**sys_vars, **values}, {}, warn
         ).eval_expression(build_eval_string(formula))
         # Keep a numeric type when the collectable has no value
         if np.isscalar(result) and result == "N/A":
@@ -125,11 +130,14 @@ def eval_metric(
     raw_pmc_df: pd.DataFrame,
     debug: bool,
     pass_tables: Optional[List[ChainMap]] = None,
+    warn: Optional[Callable[[str], None]] = None,
 ) -> None:
     """Execute the expr string for each metric in the df.
 
     A metric reads the first table in pass_tables that has all of its
-    counters. When none has them all, it reads raw_pmc_df.
+    counters. When none has them all, it reads raw_pmc_df. Missing system
+    values and metrics that fail to evaluate are reported through warn
+    (console_warning by default).
     """
     # confirm no illogical counter values
     gui_active_counter = next(
@@ -144,7 +152,7 @@ def eval_metric(
         console_warning(f"Detected {gui_active_counter} == 0")
         console_error("Halting execution for warning above.")
 
-    sys_vars = create_sys_vars(sys_info)
+    sys_vars = create_sys_vars(sys_info, warn)
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
     expressions = [
         expr
@@ -198,7 +206,7 @@ def eval_metric(
         used_collectables,
     )
     table_values = [
-        calc_builtin_vars(table, sys_vars, gpu_arch, collectable_names)
+        calc_builtin_vars(table, sys_vars, gpu_arch, collectable_names, warn)
         for table, collectable_names in zip(tables, collectables_by_table)
     ]
     # On raw_pmc_df a collectable takes its value from the first pass table
@@ -212,10 +220,10 @@ def eval_metric(
     # table's evaluator comes last.
     evaluators = [
         *(
-            MetricEvaluator(table, {**sys_vars, **values}, empirical_peaks)
+            MetricEvaluator(table, {**sys_vars, **values}, empirical_peaks, warn)
             for table, values in zip(tables[:-1], table_values[:-1])
         ),
-        MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks),
+        MetricEvaluator(raw_pmc_df, sys_vars, empirical_peaks, warn),
     ]
 
     if debug:
