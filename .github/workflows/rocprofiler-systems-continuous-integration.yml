@@ -19,6 +19,7 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
       - 'projects/rocprofiler-systems/**'
+      - 'profilers/profiler-hub/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -32,10 +33,13 @@ on:
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/CMakePresets.json'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-continuous-integration.yml'
       - 'projects/rocprofiler-systems/**'
+      - 'profilers/profiler-hub/**'
       - '!**/*.md'
       - '!**/*.rtf'
       - '!**/*.rst'
@@ -49,6 +53,8 @@ on:
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/CMakePresets.json'
+      - '!profilers/profiler-hub/build/**'
+      - '!profilers/profiler-hub/docs/**'
 
 permissions:
   contents: read
