@@ -232,10 +232,10 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
   if (ordered.failed()) {
     return Result::failure();
   }
-  std::unordered_map<const BasicBlock *, std::optional<uint64_t>> latest_access;
-  latest_access.reserve(ordered.value().size());
+  std::unordered_map<const BasicBlock *, const Instruction *> latest_observation;
+  latest_observation.reserve(ordered.value().size());
   for (const BasicBlock *block : ordered.value()) {
-    latest_access.emplace(block, std::nullopt);
+    latest_observation.emplace(block, nullptr);
   }
   const auto root =
       std::ranges::find(scope, program.kernel.entry_text_offset, &BasicBlock::start_offset);
@@ -278,7 +278,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         aperture.intersect(it->second);
       first = false;
     }
-    std::optional<uint64_t> latest = latest_access.find(block)->second;
+    const Instruction *latest = latest_observation.at(block);
     for (const Instruction &instruction : block->instructions()) {
       if (instruction_count++ >= limits.instructions) {
         return reject(error, InputErrorCode::ResourceLimit, "instruction analysis budget exceeded");
@@ -300,16 +300,22 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
               .failed()) {
         return Result::failure();
       }
-      // The analyzer's site IDs follow source-PC order. Acyclic control flow
-      // may return from a cave, but native accesses must retain that same order
-      // on every path; a larger predecessor PC would invert valid record sequences.
-      for (size_t index = previous_accesses; index < program.accesses.size(); ++index) {
-        const uint64_t access = program.accesses[index].original_offset;
-        if (latest && access <= *latest) {
+      // Replay orders LDS sites by PC and counts preceding barrier completions
+      // to derive each site's phase. Follow both across the call and return.
+      const amdgpu::Operation operation = instruction.amdgpu_operation();
+      const bool caller_barrier = call.caller && (operation == amdgpu::Operation::S_BARRIER ||
+                                                  operation == amdgpu::Operation::S_BARRIER_WAIT);
+      if (program.accesses.size() != previous_accesses || caller_barrier) {
+        if (latest && offset <= latest->src_loc()) {
+          if (caller_barrier || latest->is_barrier())
+            return reject(
+                error, InputErrorCode::UnsupportedFlow,
+                "observed LDS accesses and barrier completions must follow source PC order",
+                offset);
           return reject(error, InputErrorCode::UnsupportedFlow,
-                        "MVP requires increasing LDS access order along every CFG path", access);
+                        "MVP requires increasing LDS access order along every CFG path", offset);
         }
-        latest = access;
+        latest = &instruction;
       }
       const InstDefUse effects(instruction, program.wave_size);
       aperture.transfer(instruction, effects, exec.before(instruction));
@@ -334,8 +340,8 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       if (successor == block) {
         continue;
       }
-      std::optional<uint64_t> &incoming = latest_access.find(successor)->second;
-      if (latest && (!incoming || *latest > *incoming)) {
+      const Instruction *&incoming = latest_observation.at(successor);
+      if (latest && (!incoming || latest->src_loc() > incoming->src_loc())) {
         incoming = latest;
       }
     }

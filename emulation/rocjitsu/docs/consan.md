@@ -269,10 +269,12 @@ The saved site retains the calling kernel as its owner and identifies the helper
 premise at the original instruction PC. Other specializations, ambiguous
 function symbols and additional calls have no helper-contract qualification.
 
-Observed access PCs must increase along the executed path through the caller
-and helper. For example, when a caller reads LDS after returning from
-`lds_store_at<unsigned>`, the helper's store must have a lower original PC
-than that read. Preparation rejects the opposite layout.
+The original PCs of observed LDS accesses and workgroup barrier completions
+must increase along the executed path through the caller and helper. Replay
+uses those PCs to assign each access to its barrier phase. For example, a
+helper load that executes before a caller barrier must have a lower PC than
+the barrier completion. A helper store that executes before a caller LDS read
+must likewise have a lower PC than that read.
 
 Append `--flat-policy=strict` to the prepare command to observe proven sites
 only. Known global/private accesses and unresolved pointers are excluded under

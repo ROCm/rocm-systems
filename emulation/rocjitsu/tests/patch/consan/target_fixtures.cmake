@@ -277,6 +277,21 @@ foreach(
                 flat-${_direction}-helperstrict
             )
         endforeach()
+        if(_gpu STREQUAL "gfx950" OR _gpu STREQUAL "gfx1250")
+            list(
+                APPEND _flat_specs
+                "flat-load-helper-barrier-after-call:32:0:0:0:0"
+                "flat-store-helper-barrier-before-call:32:0:0:0:0"
+            )
+            set(_flat_options_flat-load-helper-barrier-after-call
+                ${_flat_options_flat-load-helper}
+                -DHELPER_BARRIER_AFTER_CALL=1
+            )
+            set(_flat_options_flat-store-helper-barrier-before-call
+                ${_flat_options_flat-store-helper}
+                -DHELPER_BARRIER_BEFORE_CALL=1
+            )
+        endif()
         if(_gpu STREQUAL "gfx950")
             list(APPEND _flat_specs "flat-store-helper-after-caller:32:0:0:0:0")
             set(_flat_options_flat-store-helper-after-caller

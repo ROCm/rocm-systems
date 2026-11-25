@@ -106,6 +106,16 @@ CONSAN_KERNEL:
 #endif
 .endm
 
+.macro flat_barrier
+  flat_wait_memory
+#if CONSAN_GFX12
+  s_barrier_signal -1
+  s_barrier_wait -1
+#else
+  s_barrier
+#endif
+.endm
+
 .macro group_flat_pointer
 #if defined(FLAT_SCALAR) || defined(FLAT_BACKWARD)
   // The scalar low word changes after dispatch. Make its signed displacement
@@ -176,6 +186,9 @@ CONSAN_KERNEL:
   s_add_u32 s5, s5, 0
 #endif
 
+#ifdef HELPER_BARRIER_BEFORE_CALL
+  flat_barrier
+#endif
   v_cmp_eq_u32 MASK_VCC, (CONSAN_WAVE_SIZE-1), v12
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   v_cmp_eq_u32 MASK_VCC, 0, v6
@@ -200,13 +213,7 @@ CONSAN_KERNEL:
 #endif
   MASK_MOVE MASK_EXEC, MASK_PEER_SAVE
 #ifdef FLAT_ORDERED
-  flat_wait_memory
-#if CONSAN_GFX12
-  s_barrier_signal -1
-  s_barrier_wait -1
-#else
-  s_barrier
-#endif
+  flat_barrier
 #endif
 
 #ifdef FLAT_EMPTY
@@ -249,6 +256,9 @@ CONSAN_KERNEL:
   GLOBAL_STORE v1, v8, s[6:7]
   MASK_MOVE MASK_EXEC, MASK_SAVE
   consan_wait_stores
+#ifdef HELPER_BARRIER_AFTER_CALL
+  flat_barrier
+#endif
   s_endpgm
 .Lkernel_end:
 .size CONSAN_KERNEL, .Lkernel_end-CONSAN_KERNEL

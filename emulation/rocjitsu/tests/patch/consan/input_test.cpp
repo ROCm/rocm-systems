@@ -391,6 +391,42 @@ TEST(ConSanInput, HelperStoreMustPrecedeItsLaterObservedCallerSiteInSourceOrder)
   EXPECT_EQ(error.message, "MVP requires increasing LDS access order along every CFG path");
 }
 
+TEST(ConSanInput, LocalHelperAndCallerBarrierMustFollowTheirSourcePcOrder) {
+  for (const test::TargetMode mode : {test::TargetMode{"gfx950", 64}, {"gfx1250", 32}}) {
+    SCOPED_TRACE(mode.target);
+    const TargetProfile &profile = *target_profile(mode.target);
+    for (const bool load : {true, false}) {
+      SCOPED_TRACE(load);
+      const std::filesystem::path fixture = test::target_fixture_path(
+          mode, load ? "width-flat-load-helperordered" : "width-flat-store-helperordered");
+      if (fixture.empty())
+        GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+      InputError error;
+      const std::vector<uint8_t> ordered = test::read_fixture(fixture);
+      ASSERT_FALSE(ordered.empty());
+      const FailureOr<PreparedArtifact> accepted =
+          prepare(ordered, profile, "lds_producer_consumer", error);
+      ASSERT_TRUE(accepted.succeeded()) << error.message;
+      const Manifest &manifest = accepted.value().manifest;
+      ASSERT_EQ(manifest.barriers.size(), 1u);
+      ASSERT_EQ(manifest.sites.size(), 2u);
+      EXPECT_LT(manifest.sites.front().original_offset, manifest.barriers.front().original_wait);
+      EXPECT_LT(manifest.barriers.front().original_wait, manifest.sites.back().original_offset);
+      EXPECT_EQ(load ? manifest.sites.back().assumption : manifest.sites.front().assumption,
+                load ? FlatAssumption::HelperLoadAt : FlatAssumption::HelperStoreAt);
+
+      const std::vector<uint8_t> crossed = test::read_fixture(
+          test::target_fixture_path(mode, load ? "width-flat-load-helper-barrier-after-call"
+                                               : "width-flat-store-helper-barrier-before-call"));
+      ASSERT_FALSE(crossed.empty());
+      EXPECT_TRUE(prepare(crossed, profile, "lds_producer_consumer", error).failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+      EXPECT_EQ(error.message,
+                "observed LDS accesses and barrier completions must follow source PC order");
+    }
+  }
+}
+
 TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
   const auto decoder = Decoder::create(IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
