@@ -3,6 +3,7 @@
 
 #include "hsa/hsa_api_trace.h"
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/code/consan/application_catalog.h"
 #include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/consan/image/artifact.h"
 #include "rocjitsu/code/consan/target.h"
@@ -10,6 +11,7 @@
 #include "rocjitsu/hooks/consan/runtime_core.h"
 #include "rocjitsu/hooks/consan/testing.h"
 #include "util/diagnostic.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <atomic>
@@ -80,12 +82,31 @@ struct EntryBinding {
   std::shared_ptr<const Manifest> facts;
 };
 
+// One capture owner per exact original image, shared by all executable loads.
+// Its writer outlives module teardown and every independently copied snapshot.
+struct ImageCapture {
+  ApplicationImage specification;
+  LoadedArtifact artifact;
+  std::vector<uint8_t> original;
+  std::shared_ptr<const ImageFacts> facts;
+  SnapshotWriter writer;
+  std::string partial_path;
+  uint64_t submitted = 0;
+  bool started = false;
+  int output = -1;
+};
+
+struct CompletedExecution {
+  std::shared_ptr<ImageCapture> image;
+  std::optional<OwnedSnapshot> snapshot;
+};
+
 // Admitted code/binding across launches, retained through executable lifetime.
 // Launch snapshots lease the immutable facts independently of this object.
 struct Module {
   hsa_executable_t executable{};
   hsa_agent_t agent{};
-  LoadedArtifact artifact;
+  std::shared_ptr<ImageCapture> capture;
   std::shared_ptr<const ImageFacts> facts;
   std::shared_ptr<const LoadedNativeImage> native_image;
   std::vector<EntryBinding> entries;
@@ -98,6 +119,7 @@ struct ReportSlot {
   void *memory = nullptr;
   size_t capacity = 0;
   uint32_t generation = 0;
+  uint64_t agent = 0;
   bool leased = false;
 };
 
@@ -135,11 +157,20 @@ class Runtime {
 public:
   Runtime(const CoreApiTable &core, const AmdExtTable &amd, const char *artifacts,
           const char *capture, const Digest &expected_profile, bool application_profile,
-          std::vector<std::shared_ptr<const LoadedNativeImage>> native_images)
-      : core_(core), amd_{}, artifact_path_(artifacts), capture_path_(capture),
-        expected_profile_(expected_profile), application_profile_(application_profile),
-        native_images_(std::move(native_images)) {
+          std::vector<std::shared_ptr<const LoadedNativeImage>> native_images,
+          std::vector<std::shared_ptr<ImageCapture>> selected_images, bool catalog_mode)
+      : core_(core), amd_{}, artifact_path_(artifacts), application_profile_(application_profile),
+        catalog_mode_(catalog_mode), native_images_(std::move(native_images)),
+        selected_images_(std::move(selected_images)) {
     std::memcpy(&amd_, &amd, std::min(sizeof(amd_), size_t{amd.version.minor_id}));
+    if (!artifact_path_.empty()) {
+      auto image = std::make_shared<ImageCapture>();
+      image->specification.path = artifact_path_;
+      image->specification.kind = ApplicationImageKind::Selected;
+      image->specification.selection_profile = expected_profile;
+      image->specification.capture_path = capture;
+      selected_images_.push_back(std::move(image));
+    }
   }
 
   const CoreApiTable &core() const { return core_; }
@@ -251,57 +282,129 @@ public:
   hsa_status_t load(hsa_executable_t executable, hsa_agent_t agent, hsa_code_object_reader_t reader,
                     const char *options, hsa_loaded_code_object_t *loaded) {
     Blob original;
+    bool owns_transaction = false;
     {
       std::lock_guard lock(mutex_);
+      ++load_callers_;
+    }
+    const auto leave = [this, &owns_transaction](Runtime *) {
+      std::lock_guard lock(mutex_);
+      if (owns_transaction)
+        loading_ = false;
+      --load_callers_;
+      condition_.notify_all();
+    };
+    std::unique_ptr<Runtime, decltype(leave)> transaction(this, leave);
+    {
+      std::unique_lock lock(mutex_);
+      if (application_profile_)
+        condition_.wait(lock,
+                        [&] { return !loading_ || closed_ || status_ != RuntimeStatus::Success; });
+      if (closed_)
+        return HSA_STATUS_ERROR_INVALID_EXECUTABLE;
       const std::unordered_map<uint64_t, Blob>::iterator found = readers_.find(reader.handle);
-      if (closed_ || status_ != RuntimeStatus::Success || (!application_profile_ && module_ever_) ||
-          loading_ || find_module_locked(executable) != nullptr || native_modules_.size() >= 16 ||
+      if (status_ != RuntimeStatus::Success || (!application_profile_ && module_ever_) ||
+          loading_ || find_module_locked(executable) != nullptr ||
+          selected_modules_.size() + native_modules_.size() >= kApplicationCatalogImages ||
           found == readers_.end()) {
         return reject_locked("load requires a tracked original reader and one admitted module");
       }
       original = found->second;
       loading_ = true;
+      owns_transaction = true;
     }
     auto module = std::make_shared<Module>();
     util::StringDiagnostic artifact_diagnostic;
     const std::string target = agent_target(agent);
     const Digest original_digest = digest(*original);
+    // Prepared probes require the selected wrapper/context. Check every
+    // configured prepared identity before either native lookup or fallback.
+    if (std::ranges::any_of(selected_images_, [&](const std::shared_ptr<ImageCapture> &image) {
+          return image->facts && image->facts->prepared.sha256 == original_digest;
+        })) {
+      std::lock_guard lock(mutex_);
+      return reject_locked("configured prepared image cannot be loaded as an original image");
+    }
+    bool known_identity = false;
     for (const std::shared_ptr<const LoadedNativeImage> &native : native_images_) {
-      if (native->inventory.identity.sha256 == original_digest && native->original == *original) {
-        module->native_image = native;
-        break;
+      if (native->inventory.identity.sha256 == original_digest) {
+        known_identity = true;
+        if (native->original == *original) {
+          module->native_image = native;
+          break;
+        }
       }
     }
     if (module->native_image) {
       const TargetProfile *profile = target_profile(target);
       if (profile == nullptr || profile->id != module->native_image->inventory.target) {
         std::lock_guard lock(mutex_);
-        loading_ = false;
         return reject_locked("known native image does not match the actual GPU agent");
       }
     } else {
-      {
-        std::lock_guard lock(mutex_);
-        if (module_ever_ || artifact_path_.empty()) {
-          loading_ = false;
-          return reject_locked("image is not an allowed native image or the single selected image");
+      for (const std::shared_ptr<ImageCapture> &image : selected_images_) {
+        known_identity |= image->specification.original.sha256 == original_digest;
+        if (image->original.empty() || (image->specification.original.sha256 == original_digest &&
+                                        image->original == *original)) {
+          module->capture = image;
+          break;
         }
       }
-      FailureOr<LoadedArtifact> artifact = load_artifact(
-          artifact_path_, *original, target, expected_profile_, artifact_diagnostic.emitter());
-      if (artifact.failed()) {
-        std::lock_guard lock(mutex_);
-        loading_ = false;
-        return reject_locked(artifact_diagnostic.message());
+      if (!module->capture) {
+        uint64_t retained = 0;
+        for (const std::shared_ptr<const LoadedNativeImage> &native : native_images_)
+          retained += native->original.size();
+        for (const std::shared_ptr<ImageCapture> &image : selected_images_)
+          retained += image->original.size();
+        if (!catalog_mode_ || known_identity ||
+            native_images_.size() + selected_images_.size() >= kApplicationCatalogImages ||
+            original->size() > kApplicationCatalogImageBytes - retained) {
+          std::lock_guard lock(mutex_);
+          return reject_locked(
+              "unlisted image has invalid identity or exceeds native admission budget");
+        }
+        FailureOr<NativeImageInventory> inventory =
+            inspect_native_image(*original, target, artifact_diagnostic.emitter());
+        if (inventory.failed()) {
+          std::lock_guard lock(mutex_);
+          return reject_locked(artifact_diagnostic.message());
+        }
+        module->native_image = std::make_shared<const LoadedNativeImage>(
+            LoadedNativeImage{.inventory = std::move(inventory.value()), .original = *original});
+        native_images_.push_back(module->native_image);
+        util::Logger::warn("ConSan image is outside provided_application_images: executing "
+                           "the exact original natively without analysis coverage");
       }
-      module->artifact = std::move(artifact.value());
-      module->facts = std::make_shared<const ImageFacts>(std::move(module->artifact.facts));
+      if (module->capture) {
+        const std::shared_ptr<ImageCapture> image = module->capture;
+        if (image->facts) {
+          const TargetProfile *profile = target_profile(target);
+          if (profile == nullptr || profile->id != image->facts->target) {
+            std::lock_guard lock(mutex_);
+            return reject_locked("selected image target differs from the actual GPU agent");
+          }
+        } else {
+          FailureOr<LoadedArtifact> artifact =
+              load_artifact(image->specification.path, *original, target,
+                            image->specification.selection_profile, artifact_diagnostic.emitter());
+          if (artifact.failed()) {
+            std::lock_guard lock(mutex_);
+            return reject_locked(artifact_diagnostic.message());
+          }
+          image->artifact = std::move(artifact.value());
+          image->facts = std::make_shared<const ImageFacts>(std::move(image->artifact.facts));
+          image->original = *original;
+          image->specification.original = image->facts->original;
+          image->specification.target = image->facts->target;
+        }
+        module->facts = image->facts;
+      }
     }
     module->executable = executable;
     module->agent = agent;
     hsa_code_object_reader_t prepared{};
     const std::vector<uint8_t> &image =
-        module->native_image ? module->native_image->original : module->artifact.prepared;
+        module->native_image ? module->native_image->original : module->capture->artifact.prepared;
     hsa_status_t status =
         core_.hsa_code_object_reader_create_from_memory_fn(image.data(), image.size(), &prepared);
     if (status == HSA_STATUS_SUCCESS) {
@@ -313,13 +416,14 @@ public:
       }
     }
     std::lock_guard lock(mutex_);
-    loading_ = false;
     // Keep prepared storage through executable destruction even when loader
     // failure has partially installed state in the application's executable.
     if (module->native_image)
       native_modules_.push_back(std::move(module));
     else {
-      module_ = std::move(module);
+      if (!module_)
+        module_ = module;
+      selected_modules_.push_back(std::move(module));
       module_ever_ = true;
     }
     if (status != HSA_STATUS_SUCCESS) {
@@ -424,9 +528,10 @@ public:
                       symbols.contains(entry.symbol.handle);
              });
     };
-    if ((module_ && collides(module_)) || std::ranges::any_of(native_modules_, collides))
+    if (std::ranges::any_of(selected_modules_, collides) ||
+        std::ranges::any_of(native_modules_, collides))
       return reject_locked("loaded entry identity collides with another admitted module");
-    if (module->facts && !started_ && !start_locked(*module->facts)) {
+    if (module->capture && !module->capture->started && !start_locked(*module->capture)) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
     module->entries = std::move(bindings);
@@ -437,8 +542,11 @@ public:
                            void *value) {
     {
       std::lock_guard lock(mutex_);
-      if (module_ && value != nullptr) {
-        for (const EntryBinding &entry : module_->entries) {
+      for (const std::shared_ptr<Module> &module : selected_modules_) {
+        if (value == nullptr) {
+          break;
+        }
+        for (const EntryBinding &entry : module->entries) {
           if (symbol.handle != entry.symbol.handle) {
             continue;
           }
@@ -485,8 +593,11 @@ public:
     const hsa_status_t status = core_.hsa_executable_destroy_fn(executable);
     if (status == HSA_STATUS_SUCCESS) {
       std::lock_guard lock(mutex_);
+      std::erase_if(selected_modules_, [executable](const std::shared_ptr<Module> &module) {
+        return module->executable.handle == executable.handle;
+      });
       if (module_ && module_->executable.handle == executable.handle) {
-        module_.reset();
+        module_ = selected_modules_.empty() ? nullptr : selected_modules_.front();
       }
       std::erase_if(native_modules_, [executable](const std::shared_ptr<Module> &module) {
         return module->executable.handle == executable.handle;
@@ -715,19 +826,24 @@ public:
         return static_cast<int>(status_);
       }
       closed_ = true;
+      condition_.notify_all();
       condition_.wait(lock, [&] {
-        return queue_creations_ == 0 && native_queue_calls_ == 0 && callbacks_ == 0;
+        return load_callers_ == 0 && !loading_ && queue_creations_ == 0 &&
+               native_queue_calls_ == 0 && callbacks_ == 0;
       });
       if (!started_ && !workers_started_) {
-        if (output_ >= 0) {
-          const int closed = ::close(output_);
-          output_ = -1;
+        for (const std::shared_ptr<ImageCapture> &image : selected_images_) {
+          if (image->output < 0) {
+            continue;
+          }
+          const int closed = ::close(image->output);
+          image->output = -1;
           if (closed != 0) {
             fail_locked(RuntimeStatus::CloseFailed, "failed partial capture close");
           }
         }
         finished_ = true;
-        if (status_ == RuntimeStatus::Success) {
+        if (!catalog_mode_ && status_ == RuntimeStatus::Success) {
           fail_locked(RuntimeStatus::InvalidFacts, "finish has no admitted artifact/capture");
         }
         return static_cast<int>(status_);
@@ -751,8 +867,12 @@ public:
     if (collector_.joinable()) {
       collector_.join();
     } else if (started_) {
-      writer_.cancel(status_);
-      (void)writer_.finish();
+      for (const std::shared_ptr<ImageCapture> &image : selected_images_) {
+        if (image->started) {
+          image->writer.cancel(status_);
+          (void)image->writer.finish();
+        }
+      }
     }
     std::lock_guard lock(mutex_);
     for (ReportSlot &slot : slots_) {
@@ -790,11 +910,16 @@ public:
     }
     if (collector_.joinable()) {
       collector_.join();
-    } else if (output_ >= 0) {
-      const int closed = ::close(output_);
-      output_ = -1;
-      if (closed != 0) {
-        diagnostic("failed abandoned partial capture close");
+    } else {
+      for (const std::shared_ptr<ImageCapture> &image : selected_images_) {
+        if (image->output < 0) {
+          continue;
+        }
+        const int closed = ::close(image->output);
+        image->output = -1;
+        if (closed != 0) {
+          diagnostic("failed abandoned partial capture close");
+        }
       }
     }
     return true;
@@ -802,8 +927,9 @@ public:
 
 private:
   std::shared_ptr<Module> find_module_locked(hsa_executable_t executable) {
-    if (module_ && module_->executable.handle == executable.handle)
-      return module_;
+    for (const std::shared_ptr<Module> &module : selected_modules_)
+      if (module->executable.handle == executable.handle)
+        return module;
     for (const std::shared_ptr<Module> &module : native_modules_)
       if (module->executable.handle == executable.handle)
         return module;
@@ -900,12 +1026,11 @@ private:
     return (status == HSA_STATUS_SUCCESS || status == HSA_STATUS_INFO_BREAK) && pool_.handle != 0;
   }
 
-  bool allocate_locked(size_t bytes, void **memory) {
+  bool allocate_locked(size_t bytes, void **memory, hsa_agent_t agent) {
     if (amd_.hsa_amd_memory_pool_allocate_fn(pool_, bytes, 0, memory) != HSA_STATUS_SUCCESS) {
       return false;
     }
-    if (amd_.hsa_amd_agents_allow_access_fn(1, &module_->agent, nullptr, *memory) !=
-        HSA_STATUS_SUCCESS) {
+    if (amd_.hsa_amd_agents_allow_access_fn(1, &agent, nullptr, *memory) != HSA_STATUS_SUCCESS) {
       (void)amd_.hsa_amd_memory_pool_free_fn(*memory);
       *memory = nullptr;
       return false;
@@ -940,79 +1065,89 @@ private:
            size <= info.sizeInBytes - (address - base);
   }
 
-  bool start_locked(const ImageFacts &facts) {
-    if (!find_pool_locked()) {
+  bool start_locked(ImageCapture &image) {
+    if (pool_.handle == 0 && !find_pool_locked()) {
       fail_locked(RuntimeStatus::InvalidFacts, "CPU fine-grained kernarg pool unavailable");
       return false;
     }
     CaptureHeader header;
-    header.image = facts;
+    header.image = *image.facts;
     header.execution_conditions = capture_execution_conditions(
         application_profile_ ? ExecutionMode::Application : ExecutionMode::Controlled);
-    const FailureOr<std::vector<uint8_t>> encoded_facts = encode_image_facts(facts);
+    const FailureOr<std::vector<uint8_t>> encoded_facts = encode_image_facts(*image.facts);
     if (encoded_facts.failed()) {
       fail_locked(RuntimeStatus::InvalidFacts, "cannot encode capture facts");
       return false;
     }
-    planned_capture_bytes_ = 64 + encoded_facts.value().size() + 64;
-    size_t offset = 0;
-    while (offset < header.run_identity.size()) {
-      const ssize_t count =
-          ::getrandom(header.run_identity.data() + offset, header.run_identity.size() - offset, 0);
-      if (count < 0 && errno == EINTR) {
-        continue;
-      }
-      if (count <= 0) {
-        fail_locked(RuntimeStatus::InvalidFacts, "cannot obtain a capture run identity");
-        return false;
-      }
-      offset += static_cast<size_t>(count);
+    const uint64_t prefix_bytes = 64 + encoded_facts.value().size() + 64;
+    if (prefix_bytes > CaptureLimits{}.file_bytes - planned_capture_bytes_) {
+      fail_locked(RuntimeStatus::InvalidFacts, "application capture prefix budget exhausted");
+      return false;
     }
-    partial_path_ = capture_path_ + ".partial." + std::to_string(::getpid());
-    output_ = ::open(partial_path_.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
-    if (output_ < 0) {
+    if (!run_identity_ready_) {
+      size_t offset = 0;
+      while (offset < run_identity_.size()) {
+        const ssize_t count =
+            ::getrandom(run_identity_.data() + offset, run_identity_.size() - offset, 0);
+        if (count < 0 && errno == EINTR)
+          continue;
+        if (count <= 0) {
+          fail_locked(RuntimeStatus::InvalidFacts, "cannot obtain a capture run identity");
+          return false;
+        }
+        offset += static_cast<size_t>(count);
+      }
+      run_identity_ready_ = true;
+    }
+    header.run_identity = run_identity_;
+    image.partial_path =
+        image.specification.capture_path + ".partial." + std::to_string(::getpid());
+    image.output =
+        ::open(image.partial_path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0600);
+    if (image.output < 0) {
       fail_locked(RuntimeStatus::WriteFailed, "cannot create the partial capture file");
       return false;
     }
+    ImageCapture *owner = &image;
     CaptureSink sink{
-        .write = [this](std::span<const uint8_t> bytes) -> int64_t {
+        .write = [owner](std::span<const uint8_t> bytes) -> int64_t {
           ssize_t count;
           do {
-            count = ::write(output_, bytes.data(), bytes.size());
+            count = ::write(owner->output, bytes.data(), bytes.size());
           } while (count < 0 && errno == EINTR);
           return count;
         },
         .close =
-            [this] {
-              const bool flushed = ::fsync(output_) == 0;
-              const bool closed = ::close(output_) == 0;
-              output_ = -1;
+            [owner] {
+              const bool flushed = ::fsync(owner->output) == 0;
+              const bool closed = ::close(owner->output) == 0;
+              owner->output = -1;
               return flushed && closed;
             },
         .publish =
-            [this] {
+            [owner] {
               // link publishes without overwriting an existing user file. Only the
               // already-closed complete inode can receive the final capture name.
-              if (::link(partial_path_.c_str(), capture_path_.c_str()) != 0) {
+              if (::link(owner->partial_path.c_str(), owner->specification.capture_path.c_str()) !=
+                  0) {
                 return false;
               }
-              (void)::unlink(partial_path_.c_str());
+              (void)::unlink(owner->partial_path.c_str());
               return true;
             },
     };
-    const RuntimeStatus status = writer_.start(header, std::move(sink));
+    const RuntimeStatus status = image.writer.start(header, std::move(sink));
     if (status != RuntimeStatus::Success) {
-      writer_.cancel(status);
-      (void)writer_.finish();
+      image.writer.cancel(status);
+      (void)image.writer.finish();
       fail_locked(status, "capture prefix write failed");
       return false;
     }
-    started_ = true;
-    // Uncaught exceptions terminate the process: merely stopping a worker
-    // cannot recover an interrupted ownership handoff. Status failures remain
-    // handled by the loops without requiring exception recovery.
+    planned_capture_bytes_ += prefix_bytes;
+    image.started = started_ = true;
     start_observer_locked();
-    collector_ = std::thread([this] { collector_loop(); });
+    if (!collector_.joinable())
+      collector_ = std::thread([this] { collector_loop(); });
     return true;
   }
 
@@ -1073,7 +1208,7 @@ private:
   bool prepare_selected_locked(const std::shared_ptr<Launch> &launch, const EntryBinding *binding,
                                hsa_kernel_dispatch_packet_t &packet,
                                const LaunchDimensions &dimensions) {
-    if (launch->module != module_) {
+    if (!launch->module->capture || !launch->module->capture->started) {
       reject_packet_locked(packet, "selected dispatch does not own the prepared image");
       return false;
     }
@@ -1105,9 +1240,10 @@ private:
         slots_.size() < (application_profile_ ? CaptureLimits{}.executions : 16)) {
       ReportSlot slot;
       slot.capacity = layout.value().report_bytes;
-      if (allocate_locked(slot.capacity, &slot.memory)) {
+      if (allocate_locked(slot.capacity, &slot.memory, launch->module->agent)) {
         const auto free = [this](void *memory) { (void)amd_.hsa_amd_memory_pool_free_fn(memory); };
         std::unique_ptr<void, decltype(free)> uninstalled(slot.memory, free);
+        slot.agent = launch->module->agent.handle;
         slots_.push_back(slot);
         (void)uninstalled.release();
         launch->slot = static_cast<uint32_t>(slots_.size());
@@ -1121,7 +1257,7 @@ private:
     const bool reused = slot.generation != 0 && slot.capacity >= layout.value().report_bytes;
     if (slot.capacity < layout.value().report_bytes) {
       void *replacement = nullptr;
-      if (!allocate_locked(layout.value().report_bytes, &replacement)) {
+      if (!allocate_locked(layout.value().report_bytes, &replacement, launch->module->agent)) {
         reject_packet_locked(packet, "report growth allocation failed before submission");
         return false;
       }
@@ -1130,18 +1266,27 @@ private:
       (void)amd_.hsa_amd_memory_pool_free_fn(slot.memory);
       slot.memory = replacement;
       slot.capacity = layout.value().report_bytes;
+      slot.agent = launch->module->agent.handle;
+    }
+    if (slot.agent != launch->module->agent.handle) {
+      if (amd_.hsa_amd_agents_allow_access_fn(1, &launch->module->agent, nullptr, slot.memory) !=
+          HSA_STATUS_SUCCESS) {
+        reject_packet_locked(packet, "report pool is inaccessible to the selected agent");
+        return false;
+      }
+      slot.agent = launch->module->agent.handle;
     }
     slot.leased = true;
     if (slot.generation == UINT32_MAX || (reinterpret_cast<uintptr_t>(slot.memory) % 64) != 0 ||
-        !allocate_locked(layout.value().wrapper_bytes, &launch->wrapper) ||
+        !allocate_locked(layout.value().wrapper_bytes, &launch->wrapper, launch->module->agent) ||
         reinterpret_cast<uintptr_t>(launch->wrapper) % binding->kernarg_alignment != 0 ||
-        !allocate_locked(kContextBytes, &launch->context) ||
+        !allocate_locked(kContextBytes, &launch->context, launch->module->agent) ||
         core_.hsa_signal_create_fn(1, 0, nullptr, &launch->proxy) != HSA_STATUS_SUCCESS) {
       reject_packet_locked(packet, "wrapper/context/proxy allocation failed before submission");
       return false;
     }
-    const uint64_t serial = statistics_.submitted + 1;
-    launch->serial = serial;
+    launch->serial = statistics_.submitted + 1;
+    const uint64_t serial = launch->module->capture->submitted + 1;
     const FailureOr<TransportImage> transport = initialize_transport(
         facts, dimensions, layout.value().group_bytes, layout.value().private_bytes, serial,
         reinterpret_cast<uint64_t>(slot.memory));
@@ -1198,6 +1343,7 @@ private:
                     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     pending_.push_back(launch);
     ++statistics_.submitted;
+    ++launch->module->capture->submitted;
     planned_capture_bytes_ += capture_bytes;
     if (reused)
       ++statistics_.reused;
@@ -1282,7 +1428,8 @@ private:
             binding = &entry;
           }
       };
-      find(module_);
+      for (const std::shared_ptr<Module> &module : selected_modules_)
+        find(module);
       for (const std::shared_ptr<Module> &module : native_modules_)
         find(module);
       const std::array<uint32_t, 3> workgroup = {packet.workgroup_size_x, packet.workgroup_size_y,
@@ -1609,10 +1756,12 @@ private:
         if (copied == RuntimeStatus::Success) {
           slots_[launch->slot - 1].leased = false;
           ++statistics_.copied;
-          completed_.emplace(launch->serial, std::move(snapshot));
+          completed_.emplace(launch->serial, CompletedExecution{.image = launch->module->capture,
+                                                                .snapshot = std::move(snapshot)});
         } else {
           fail_locked(copied, "independent host snapshot failed; slice remains retained");
-          completed_.emplace(launch->serial, std::nullopt);
+          completed_.emplace(launch->serial, CompletedExecution{.image = launch->module->capture,
+                                                                .snapshot = std::nullopt});
         }
         if (signal_destroyed != HSA_STATUS_SUCCESS || wrapper_freed != HSA_STATUS_SUCCESS ||
             context_freed != HSA_STATUS_SUCCESS)
@@ -1627,26 +1776,26 @@ private:
   void collector_loop() {
     uint64_t next_serial = 1;
     for (;;) {
-      std::optional<OwnedSnapshot> snapshot;
+      CompletedExecution completed;
       {
         std::unique_lock lock(mutex_);
         condition_.wait(lock, [&] { return stop_ || completed_.contains(next_serial); });
-        const std::map<uint64_t, std::optional<OwnedSnapshot>>::iterator found =
-            completed_.find(next_serial);
+        const std::map<uint64_t, CompletedExecution>::iterator found = completed_.find(next_serial);
         if (found == completed_.end()) {
           if (stop_)
             break;
           continue;
         }
-        snapshot = std::move(found->second);
+        completed = std::move(found->second);
         completed_.erase(found);
       }
       // Completion may arrive out of order. The stream and its storage
       // generations retain submission order without blocking observation/copy.
-      if (!snapshot)
-        writer_.cancel(RuntimeStatus::CopyFailed);
-      const RuntimeStatus written =
-          snapshot ? writer_.append(*snapshot) : RuntimeStatus::CopyFailed;
+      if (!completed.snapshot)
+        completed.image->writer.cancel(RuntimeStatus::CopyFailed);
+      const RuntimeStatus written = completed.snapshot
+                                        ? completed.image->writer.append(*completed.snapshot)
+                                        : RuntimeStatus::CopyFailed;
       {
         std::lock_guard lock(mutex_);
         if (written == RuntimeStatus::Success) {
@@ -1664,30 +1813,39 @@ private:
       std::lock_guard lock(mutex_);
       status = status_;
     }
-    if (status != RuntimeStatus::Success) {
-      writer_.cancel(status);
-    }
-    const RuntimeStatus closed = writer_.finish();
-    if (closed != RuntimeStatus::Success) {
-      std::lock_guard lock(mutex_);
-      fail_locked(closed, "capture End/close/publication failed");
+    for (const std::shared_ptr<ImageCapture> &image : selected_images_) {
+      if (!image->started) {
+        continue;
+      }
+      if (status != RuntimeStatus::Success) {
+        image->writer.cancel(status);
+      }
+      const RuntimeStatus closed = image->writer.finish();
+      if (closed != RuntimeStatus::Success) {
+        std::lock_guard lock(mutex_);
+        fail_locked(closed, "capture End/close/publication failed");
+      }
     }
   }
 
   // Saved, unhooked function tables used for forwarding and conditional restore.
   CoreApiTable core_;
   AmdExtTable amd_;
-  std::string artifact_path_, capture_path_, partial_path_;
-  Digest expected_profile_{};
+  std::string artifact_path_;
   const bool application_profile_;
-  const std::vector<std::shared_ptr<const LoadedNativeImage>> native_images_;
+  const bool catalog_mode_;
+  std::vector<std::shared_ptr<const LoadedNativeImage>> native_images_;
   std::mutex mutex_;
   std::mutex finish_mutex_;
   std::condition_variable condition_;
   std::unordered_map<uint64_t, Blob> readers_;
   std::unordered_map<uint64_t, Signal> signals_;
   std::shared_ptr<Module> module_;
+  std::vector<std::shared_ptr<Module>> selected_modules_;
   std::vector<std::shared_ptr<Module>> native_modules_;
+  std::vector<std::shared_ptr<ImageCapture>> selected_images_;
+  std::array<uint8_t, 16> run_identity_{};
+  bool run_identity_ready_ = false;
   hsa_amd_memory_pool_t pool_{};
   std::vector<std::unique_ptr<QueueState>> queues_;
   uint32_t queue_creations_ = 0;
@@ -1703,9 +1861,8 @@ private:
   bool queue_cleanup_failed_ = false;
   std::vector<ReportSlot> slots_;
   std::deque<std::shared_ptr<Launch>> pending_;
-  std::map<uint64_t, std::optional<OwnedSnapshot>> completed_;
+  std::map<uint64_t, CompletedExecution> completed_;
   std::thread observer_, collector_;
-  SnapshotWriter writer_;
   rj_consan_statistics statistics_{};
   // Collector-handled launches, including failed snapshot/write attempts.
   uint64_t processed_ = 0;
@@ -1715,9 +1872,9 @@ private:
   RuntimeStatus status_ = RuntimeStatus::Success;
   // closed_ ends admission; stop_ requests worker exit; finished_ ends the finish
   // operation. Whether that operation succeeded is retained separately in status_.
+  uint32_t load_callers_ = 0;
   bool loading_ = false, started_ = false, closed_ = false, stop_ = false, finished_ = false,
        active_gpu_ = false, queue_ever_ = false, module_ever_ = false;
-  int output_ = -1;
 };
 
 // HIP's earlier-registered exit handlers still call these hooks before ROCR
@@ -1888,6 +2045,74 @@ bool install(HsaApiTable *table) {
   }
   std::vector<std::shared_ptr<const LoadedNativeImage>> native_images;
   const char *native_paths = std::getenv("RJ_CONSAN_NATIVE_IMAGES");
+  const char *catalog_path = std::getenv("RJ_CONSAN_APPLICATION_CATALOG");
+  std::vector<std::shared_ptr<ImageCapture>> selected_images;
+  if (catalog_path != nullptr) {
+    if (application == nullptr || *catalog_path == '\0' || artifacts != nullptr ||
+        capture != nullptr || native_paths != nullptr ||
+        std::getenv("RJ_CONSAN_SELECTION_PROFILE") != nullptr) {
+      diagnostic(
+          "application catalog requires application mode and excludes legacy image settings");
+      return false;
+    }
+    util::StringDiagnostic catalog_diagnostic;
+    const FailureOr<ApplicationCatalog> catalog =
+        load_application_catalog(catalog_path, catalog_diagnostic.emitter());
+    if (catalog.failed()) {
+      diagnostic(catalog_diagnostic.message());
+      return false;
+    }
+    uint64_t prepared_bytes = 0;
+    for (const ApplicationImage &specification : catalog.value().images) {
+      const std::filesystem::path original_path =
+          specification.kind == ApplicationImageKind::Selected
+              ? std::filesystem::path(specification.path) / "original.hsaco"
+              : std::filesystem::path(specification.path);
+      FailureOr<LoadedNativeImage> original =
+          load_native_image(original_path, catalog_diagnostic.emitter());
+      if (original.failed()) {
+        diagnostic(catalog_diagnostic.message());
+        return false;
+      }
+      if (original.value().inventory.identity != specification.original ||
+          original.value().inventory.target != specification.target) {
+        diagnostic("application catalog original identity or target differs");
+        return false;
+      }
+      if (specification.kind == ApplicationImageKind::Native) {
+        native_images.push_back(
+            std::make_shared<const LoadedNativeImage>(std::move(original.value())));
+        continue;
+      }
+      const TargetProfile *target = target_profile(specification.target);
+      FailureOr<LoadedArtifact> artifact =
+          load_artifact(specification.path, original.value().original, target->name,
+                        specification.selection_profile, catalog_diagnostic.emitter());
+      if (artifact.failed()) {
+        diagnostic(catalog_diagnostic.message());
+        return false;
+      }
+      if (artifact.value().prepared.size() > kApplicationCatalogImageBytes - prepared_bytes) {
+        diagnostic("application catalog prepared images exceed aggregate byte budget");
+        return false;
+      }
+      prepared_bytes += artifact.value().prepared.size();
+      auto image = std::make_shared<ImageCapture>();
+      image->specification = specification;
+      image->original = std::move(original.value().original);
+      image->artifact = std::move(artifact.value());
+      image->facts = std::make_shared<const ImageFacts>(std::move(image->artifact.facts));
+      selected_images.push_back(std::move(image));
+    }
+    for (const std::shared_ptr<ImageCapture> &selected : selected_images) {
+      if (std::ranges::any_of(catalog.value().images, [&](const ApplicationImage &image) {
+            return image.original.sha256 == selected->facts->prepared.sha256;
+          })) {
+        diagnostic("application catalog original aliases a selected prepared image");
+        return false;
+      }
+    }
+  }
   if (native_paths != nullptr) {
     if (application == nullptr || *native_paths == '\0') {
       diagnostic("native image configuration requires the application profile");
@@ -1928,7 +2153,7 @@ bool install(HsaApiTable *table) {
     }
   }
   const bool selected = artifacts != nullptr && *artifacts != '\0';
-  if (!selected && native_images.empty()) {
+  if (!selected && selected_images.empty() && native_images.empty()) {
     diagnostic("configure RJ_CONSAN_ARTIFACT_DIR or application-profile RJ_CONSAN_NATIVE_IMAGES");
     return false;
   }
@@ -1964,7 +2189,8 @@ bool install(HsaApiTable *table) {
     expected_profile[index] = static_cast<uint8_t>((high << 4) | low);
   }
   runtime = new Runtime(core, amd, selected ? artifacts : "", capture ? capture : "",
-                        expected_profile, application != nullptr, std::move(native_images));
+                        expected_profile, application != nullptr, std::move(native_images),
+                        std::move(selected_images), catalog_path != nullptr);
   CoreApiTable &patched = *table->core_;
   lifecycle_core_table.store(&patched, std::memory_order_release);
   if (application != nullptr)

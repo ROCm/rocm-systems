@@ -18,6 +18,22 @@
 namespace rocjitsu::consan {
 namespace {
 
+TEST(ConSanNativeInventory, RejectsPreparedWrapperSectionsWithoutAConfiguredIdentity) {
+  std::ifstream original_file(CONSAN_ORIGINAL_FIXTURE, std::ios::binary);
+  const std::vector<uint8_t> original = {std::istreambuf_iterator<char>(original_file),
+                                         std::istreambuf_iterator<char>()};
+  ASSERT_TRUE(inspect_native_image(original, "gfx1100").succeeded());
+  const std::filesystem::path prepared =
+      std::filesystem::path(CONSAN_ARTIFACT_FIXTURE) / "prepared.hsaco";
+  std::ifstream file(prepared, std::ios::binary);
+  const std::vector<uint8_t> bytes = {std::istreambuf_iterator<char>(file),
+                                      std::istreambuf_iterator<char>()};
+  util::StringDiagnostic error;
+  EXPECT_TRUE(inspect_native_image(bytes, "gfx1100", error.emitter()).failed());
+  EXPECT_NE(error.message().find("reserved prepared kernarg wrapper section"), std::string::npos);
+  EXPECT_TRUE(load_native_image(prepared).failed());
+}
+
 // This constructs only structural bindings over a real three-entry ELF. It is
 // deliberately not an AOT result or evidence of probe execution: the verifier
 // has no decoder and cannot certify the producer's instrumentation algorithm.

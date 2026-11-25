@@ -14,7 +14,7 @@ struct LoadedArtifact {
   std::vector<uint8_t> prepared;
 };
 
-/// @brief Original bindings for an explicitly configured native image.
+/// @brief Original bindings for one admitted native image.
 /// @details This inventory has no selected manifests or detector coverage and
 /// cannot be published as a prepared artifact or selected-execution capture.
 struct NativeImageInventory {

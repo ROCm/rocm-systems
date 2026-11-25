@@ -8,6 +8,7 @@ add_library(
     STATIC
     contract.cpp
     capture.cpp
+    application_catalog.cpp
     image/facts.cpp
 )
 target_include_directories(

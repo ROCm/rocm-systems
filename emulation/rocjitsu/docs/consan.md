@@ -141,6 +141,46 @@ identity includes the per-entry scopes. Analysis renders an explicit
 `native_lds_single_range_mixed_scopes` scope for these images. Mixing execution-trace and LDS
 entries in one selected image remains invalid.
 
+#### Application image catalogs
+
+The C++ `ApplicationCatalog` interface describes exact selected and native
+images. `encode_application_catalog()` produces the bounded binary catalog;
+`decode_application_catalog()` and `load_application_catalog()` validate its
+producer contract, checksum, paths, identities, targets and extent budgets.
+`rj_consan_prepare --producer-contract` prints the producer token, and
+`rj_consan_prepare --validate-application-catalog FILE` validates a saved catalog.
+A selected record names its artifact directory, selection profile and capture
+path; the directory must also own its exact `original.hsaco`. A native record
+names the exact original HSACO and supplies no selected profile or capture.
+
+Enable `RJ_CONSAN_APPLICATION_PROFILE=1` and set
+`RJ_CONSAN_APPLICATION_CATALOG` to the absolute catalog path alongside
+`HSA_TOOLS_LIB`. Catalog configuration excludes the legacy artifact,
+selection-profile, native-images and capture-path variables. Installation
+validates original bytes and selected artifacts before installing hooks. An
+invalid catalog is an error, never a native fallback.
+
+An image absent from the catalog can run as its exact original after bounded
+native metadata admission. The runtime warns once for that image identity;
+it never treats the image as selected or invents analysis facts. Unsupported
+native metadata and exhausted retention budgets remain admission errors.
+Images carrying the reserved `.rocjitsu.kernarg` prepared-wrapper section are
+rejected as native inputs: their probes require a selected wrapper/context,
+even when their identity is absent from the catalog. Catalog admission
+establishes only the configured image scope; persistent owning reasons for
+late images require a runtime ledger.
+
+Each selected image has one capture shared by repeated loads of that same
+image. Different images retain independent entry-key namespaces and execution
+serials, and all captures share one application run identity. The collector
+retains each snapshot's owning image through executable destruction and writes
+it into that image's capture. Native-only images retain their original bytes
+and create no selected capture. Configured images that were never loaded do
+not create captures; a loaded but unexecuted image creates no executions.
+The adapter binds one code image per HSA executable. Distinct images and
+repeated loads use separate executables; load transactions and finalization
+retain both active and queued callers until their ownership is settled.
+
 The compiler inventories the exact original image, qualifies each selected entry,
 and plans its probes, bootstrap and resources. One transactional rewrite produces
 a coherent replacement that preserves unselected native entries. Its
@@ -418,11 +458,9 @@ The LDS and execution-trace analyzers select their checks from the saved scope;
 queue restrictions and host signal forwarding do not establish guest LDS
 ordering. LDS barrier ordering still requires the GPU barrier observations.
 
-This format separation does not itself enable a new runtime path. The current
-application adapter continues to admit selected execution-trace entries only;
-selected LDS application admission is a separate runtime capability. The shared
-capture codecs and analyzers can represent and validate either transport for a
-qualified scope without falsely claiming conditions enforced by the other mode.
+The application adapter admits both qualified LDS and execution-trace entries.
+The shared capture codecs and analyzers validate either transport for its saved
+scope without claiming execution conditions enforced by the other mode.
 
 The producer contract changed with this interpretation. Regenerate prepared
 artifacts and captures together; older producer contracts are rejected rather

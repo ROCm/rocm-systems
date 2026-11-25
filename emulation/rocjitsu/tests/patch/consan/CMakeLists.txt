@@ -476,6 +476,7 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
             CONSAN_ARTIFACT_FIXTURE="${_artifact}"
             CONSAN_MULTI_ORIGINAL_FIXTURE="${_fixture_dir}/multi-entry.hsaco"
             CONSAN_MULTI_ARTIFACT_FIXTURE="${_multi_artifact}"
+            CONSAN_APPLICATION_BARRIER_ORIGINAL="${_fixture_dir}/targets/gfx1100/wave32/native-15.hsaco"
             CONSAN_APPLICATION_BARRIER_ARTIFACT="${_application_barrier_artifact}"
             CONSAN_APPLICATION_LOOP_ARTIFACT="${_application_loop_artifact}"
             CONSAN_NATIVE_SHAPE_ORIGINAL_FIXTURE="${_fixture_dir}/multi-entry-abi.hsaco"

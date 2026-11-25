@@ -362,6 +362,32 @@ FailureOr<NativeImageInventory> inspect_native_image(std::span<const uint8_t> or
   if (!sections) {
     return diagnostic.emit() << "invalid native image section table";
   }
+  if (header.e_shstrndx != SHN_UNDEF) {
+    if (header.e_shstrndx >= sections->size()) {
+      return diagnostic.emit() << "invalid native image section-name table";
+    }
+    const Elf64_Shdr &strings = (*sections)[header.e_shstrndx];
+    if (strings.sh_type != SHT_STRTAB ||
+        !util::is_range_in_bounds(strings.sh_offset, strings.sh_size, original.size())) {
+      return diagnostic.emit() << "invalid native image section-name strings";
+    }
+    for (const Elf64_Shdr &section : *sections) {
+      if (section.sh_name >= strings.sh_size) {
+        return diagnostic.emit() << "invalid native image section name";
+      }
+      const char *begin =
+          reinterpret_cast<const char *>(original.data() + strings.sh_offset + section.sh_name);
+      const size_t available = strings.sh_size - section.sh_name;
+      const void *end = std::memchr(begin, 0, available);
+      if (end == nullptr) {
+        return diagnostic.emit() << "unterminated native image section name";
+      }
+      if (std::string_view(begin, static_cast<const char *>(end) - begin) == ".rocjitsu.kernarg") {
+        return diagnostic.emit()
+               << "native image carries a reserved prepared kernarg wrapper section";
+      }
+    }
+  }
   std::optional<Elf64_Shdr> text;
   size_t text_index = 0;
   for (size_t index = 0; index < sections->size(); ++index) {
