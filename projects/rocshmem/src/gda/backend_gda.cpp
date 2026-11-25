@@ -2364,6 +2364,17 @@ void GDABackend::select_gid_index(NicDevice &nic) {
     }
   }
 
+  int32_t forced_gid_index = envvar::gda::gid_index;
+  if (forced_gid_index >= 0) {
+    if (forced_gid_index >= gid_tbl_entries) {
+      LOG_ERROR_EXIT("ROCSHMEM_GDA_GID_INDEX=%d is out of range: NIC has %zd GID entries",
+                     forced_gid_index, gid_tbl_entries);
+    }
+    selected_gid_index = forced_gid_index;
+    selected_gid_type  = gid_entries[forced_gid_index].gid_type;
+    selected_gid       = gid_entries[forced_gid_index].gid;
+  }
+
   nic.gid_index = selected_gid_index;
   nic.gid_type  = selected_gid_type;
   nic.gid       = selected_gid;

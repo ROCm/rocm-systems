@@ -564,6 +564,7 @@ namespace envvar {
     extern const var<std::string> provider;
     extern const var<bool> alternate_qp_ports;
     extern const var<uint8_t> traffic_class;
+    extern const var<int32_t> gid_index;
     extern const var<bool> pcie_relaxed_ordering;
     extern const var<bool> enable_dmabuf;
     extern const var<bool> override_nic_firmware_check;

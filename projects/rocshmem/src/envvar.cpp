@@ -191,6 +191,9 @@ namespace envvar {
     const var<uint8_t> traffic_class("TRAFFIC_CLASS",
       "When using an NIC with an Ethernet link layer, this sets the traffic class for the QPs.",
       0);
+    const var<int32_t> gid_index("GID_INDEX",
+      "GID table index to use on every RoCE NIC. -1 (default) auto-selects the first non-link-local GID, preferring RoCEv2.",
+      -1);
     const var<bool> pcie_relaxed_ordering("PCIE_RELAXED_ORDERING",
       "Enables PCIe Relaxed Ordering when registering the symmetric heap with the RDMA NICs. 0: Disabled; 1: Enabled",
       false);
