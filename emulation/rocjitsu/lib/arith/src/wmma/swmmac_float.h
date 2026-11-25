@@ -23,18 +23,23 @@ struct SwmmacFloatInputs {
 // Updates only input.acc; input arrays must already include any A modifiers.
 void swmmac_float_accumulate(uint32_t mode, SwmmacFloatInputs &input);
 
-// Accumulate decoded sparse inputs with loose arithmetic and write D in
-// 32-lane sections; input.acc is also updated. Packed outputs narrow at each
-// DOT4 stage; saturate controls finite FP16 overflow.
-template <bool Bf16, bool Packed>
-void swmmac_float_x86_64_v3(uint32_t mode, uint32_t *const *d, SwmmacFloatInputs &input,
-                            bool saturate);
+// Raw SIMD backend signatures. Public entry points validate mode and adapt tied D
+// into 32-lane sections. All input arrays may overlap the destination registers.
+using Swmmac16Backend = void(uint32_t, uint32_t *const *, const uint32_t *const *,
+                             const uint32_t *const *, const uint32_t *const *, bool);
+using Swmmac8Backend = void(uint32_t, uint32_t *const *, const uint32_t *const *,
+                            const uint32_t *const *, const uint32_t *const *);
 
-// Accumulate decoded sparse inputs with loose arithmetic and write D in
-// 32-lane sections; input.acc is also updated. Packed outputs narrow at each
-// DOT4 stage; saturate controls finite FP16 overflow.
-template <bool Bf16, bool Packed>
-void swmmac_float_x86_64_v4(uint32_t mode, uint32_t *const *d, SwmmacFloatInputs &input,
-                            bool saturate);
+// SIMD backends consume packed architectural operands after public validation.
+template <bool Bf16, int WaveSize, bool Packed> Swmmac16Backend swmmac16_x86_64_v3;
+template <bool Bf8A, bool Bf8B, int WaveSize> Swmmac8Backend swmmac8_x86_64_v3;
+template <bool Bf16, int WaveSize, bool Packed> Swmmac16Backend swmmac16_x86_64_v4;
+template <bool Bf8A, bool Bf8B, int WaveSize> Swmmac8Backend swmmac8_x86_64_v4;
+
+// Try the native FP8 pair-dot under eligible host controls and input accumulators.
+// A decline leaves all destination registers untouched.
+template <bool Bf8A, bool Bf8B, int Wave>
+bool swmmac_fp8_x86_64_v4_bf16(uint32_t, uint32_t *const *, const uint32_t *const *,
+                               const uint32_t *const *, const uint32_t *const *);
 
 } // namespace rocjitsu::arith

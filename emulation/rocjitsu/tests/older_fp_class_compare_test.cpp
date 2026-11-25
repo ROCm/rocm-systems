@@ -24,6 +24,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -38,36 +39,36 @@ namespace {
 // Raw encodings distinguish all ten classes without host floating-point arithmetic.
 TEST(OlderClassCompare, MasksAndAliasing) {
   struct Family {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     const IsaExecutionBackend *backend;
     std::array<uint32_t, 2> instructions[3];
   };
   const Family families[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1,
+      {rocjitsu::IsaFamily::Cdna1,
        &cdna1::execution_backend(),
        {{cdna1::build_vopc(cdna1::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 2})[0], 0},
         cdna1::build_vop3(cdna1::kVCmpClassF64Vop3, {.vdst = 0, .src0 = 0, .src1 = 258}),
         cdna1::build_vop3(cdna1::kVCmpxClassF16Vop3,
                           {.vdst = 0, .op_sel = 3, .src0 = 256, .src1 = 258, .neg = 1})}},
-      {ROCJITSU_CODE_ARCH_CDNA2,
+      {rocjitsu::IsaFamily::Cdna2,
        &cdna2::execution_backend(),
        {{cdna2::build_vopc(cdna2::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 2})[0], 0},
         cdna2::build_vop3(cdna2::kVCmpClassF64Vop3, {.vdst = 0, .src0 = 0, .src1 = 258}),
         cdna2::build_vop3(cdna2::kVCmpxClassF16Vop3,
                           {.vdst = 0, .op_sel = 3, .src0 = 256, .src1 = 258, .neg = 1})}},
-      {ROCJITSU_CODE_ARCH_RDNA1,
+      {rocjitsu::IsaFamily::Rdna1,
        &rdna1::execution_backend(),
        {{rdna1::build_vopc(rdna1::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 2})[0], 0},
         rdna1::build_vop3(rdna1::kVCmpClassF64Vop3, {.vdst = 0, .src0 = 0, .src1 = 258}),
         rdna1::build_vop3(rdna1::kVCmpxClassF16Vop3,
                           {.vdst = 126, .op_sel = 0, .src0 = 256, .src1 = 258, .neg = 1})}},
-      {ROCJITSU_CODE_ARCH_RDNA2,
+      {rocjitsu::IsaFamily::Rdna2,
        &rdna2::execution_backend(),
        {{rdna2::build_vopc(rdna2::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 2})[0], 0},
         rdna2::build_vop3(rdna2::kVCmpClassF64Vop3, {.vdst = 0, .src0 = 0, .src1 = 258}),
         rdna2::build_vop3(rdna2::kVCmpxClassF16Vop3,
                           {.vdst = 126, .op_sel = 0, .src0 = 256, .src1 = 258, .neg = 1})}},
-      {ROCJITSU_CODE_ARCH_RDNA3_5,
+      {rocjitsu::IsaFamily::Rdna3_5,
        &rdna3_5::execution_backend(),
        {{rdna3_5::build_vopc(rdna3_5::kVCmpClassF32Vopc, {.src0 = 256, .vsrc1 = 2})[0], 0},
         rdna3_5::build_vop3(rdna3_5::kVCmpClassF64Vop3, {.vdst = 0, .src0 = 0, .src1 = 258}),
@@ -83,8 +84,8 @@ TEST(OlderClassCompare, MasksAndAliasing) {
   for (const auto &family : families) {
     ScopedIsaExecutionBackend backend(family.backend);
     const bool cdna =
-        family.arch == ROCJITSU_CODE_ARCH_CDNA1 || family.arch == ROCJITSU_CODE_ARCH_CDNA2;
-    const bool high_half = cdna || family.arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+        family.arch == rocjitsu::IsaFamily::Cdna1 || family.arch == rocjitsu::IsaFamily::Cdna2;
+    const bool high_half = cdna || family.arch == rocjitsu::IsaFamily::Rdna3_5;
     for (unsigned lanes : {32U, 64U}) {
       if (lanes == 32 && cdna) {
         continue;
@@ -156,7 +157,7 @@ TEST(OlderClassCompare, MasksAndAliasing) {
 TEST(OlderClassCompare, Gfx1150DppRowMask) {
   ScopedIsaExecutionBackend backend(&rdna3_5::execution_backend());
   ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  config.arch = rocjitsu::IsaFamily::Rdna3_5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 104;
   config.vgprs_per_wf = 8;

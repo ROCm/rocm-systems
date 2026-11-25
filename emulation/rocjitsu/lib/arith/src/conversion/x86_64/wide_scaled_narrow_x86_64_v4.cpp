@@ -23,6 +23,9 @@ void wide_scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSou
   constexpr int elements = Gfx1250 ? (bits == 6 ? 16 : 8) : 32;
   constexpr int words = elements * bits / 32;
   for (int lane = 0; lane < lanes; lane += 16) {
+    if (uint16_t(exec_mask >> lane) == 0) {
+      continue;
+    }
     auto raw_scale = _mm512_loadu_si512(scale + lane);
     auto exponent = _mm512_and_si512(_mm512_srli_epi32(raw_scale, 23), _mm512_set1_epi32(255));
     auto nan_scale = _mm512_cmpeq_epi32_mask(exponent, _mm512_set1_epi32(255));

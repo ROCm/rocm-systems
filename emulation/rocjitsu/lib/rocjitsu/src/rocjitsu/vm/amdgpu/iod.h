@@ -45,7 +45,7 @@ public:
     msc_->set_legacy_maintenance_memory(memory);
   }
 
-  void initialize() override;
+  util::Result initialize(util::DiagnosticEmitter emit_error = {}) override;
 
   /// @brief Create a completer port for an XCD's L2 req connection.
   simdojo::Port *create_cpl_port(const std::string &xcd_name);

@@ -72,16 +72,20 @@ static_assert(std::ranges::none_of(kNativeLdsTargets, [](const TargetProfile &ta
 }));
 
 inline constexpr const TargetProfile *target_profile(uint32_t id) {
-  for (const TargetProfile &target : kNativeLdsTargets)
-    if (target.id == id)
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    if (target.id == id) {
       return &target;
+    }
+  }
   return nullptr;
 }
 
 inline constexpr const TargetProfile *target_profile(std::string_view name) {
-  for (const TargetProfile &target : kNativeLdsTargets)
-    if (target.name == name)
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    if (target.name == name) {
       return &target;
+    }
+  }
   return nullptr;
 }
 

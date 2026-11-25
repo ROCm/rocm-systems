@@ -80,18 +80,18 @@ ncclResult_t ncclParseCollConfig(const ncclCollConfig_t* config, ncclCollConfig_
   return ncclSuccess;
 }
 
-ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t func, uint64_t* outMask) {
-  // Each set bit keeps that algorithm in the filter; 0 == no selection == automatic (the
-  // consumers skip narrowing when the mask is 0).
-  *outMask = 0;
+ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t func, rcclTuningMask* outMask) {
+  // Each set bit keeps that algorithm in the filter; empty == no selection == automatic (the
+  // consumers skip narrowing when the mask is empty).
+  *outMask = rcclTuningMask();
   if (!ncclCollConfigHasAlgSelection(config)) return ncclSuccess; // no selection (incl. NULL) -> automatic
   const char* sel = config->algSelection;
   // A non-empty selection that cannot be honored -- bad syntax, or nothing valid/matching for this
   // collective -- is governed by forceAlgSelection: true -> hard error; false -> fall back to automatic.
-  uint64_t mask = 0;
+  rcclTuningMask mask{};
   ncclResult_t r = ncclAlgParse(sel, &mask);
   if (r == ncclSuccess) mask &= ncclAlgValidForFuncMask(func);
-  if (r != ncclSuccess || mask == 0) {
+  if (r != ncclSuccess || mask.none()) {
     if (config->forceAlgSelection) {
       WARN("config->algSelection \"%s\" cannot be honored for %s (set forceAlgSelection=0 to if need to allow fall "
            "back to automatic selection)",
@@ -100,7 +100,7 @@ ncclResult_t ncclCollConfigGetAlgMask(const ncclCollConfig_t* config, ncclFunc_t
     }
     INFO(NCCL_TUNING, "config->algSelection \"%s\" cannot be honored for %s; falling back to automatic selection", sel,
          ncclFuncToString(func));
-    return ncclSuccess; // *outMask stays 0 -> no filtering
+    return ncclSuccess; // *outMask stays empty -> no filtering
   }
   *outMask = mask;
   return ncclSuccess;

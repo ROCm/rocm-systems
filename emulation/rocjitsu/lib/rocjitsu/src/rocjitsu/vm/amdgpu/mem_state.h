@@ -69,10 +69,11 @@ enum MemPipelineTag : uint8_t {
 constexpr size_t kMaxRetainedMemoryBufferBytes = 4096;
 
 template <typename Element> void clear_reusable_memory_buffer(std::vector<Element> &buffer) {
-  if (buffer.capacity() > kMaxRetainedMemoryBufferBytes / sizeof(Element))
+  if (buffer.capacity() > kMaxRetainedMemoryBufferBytes / sizeof(Element)) {
     std::vector<Element>().swap(buffer);
-  else
+  } else {
     buffer.clear();
+  }
 }
 
 /// @brief One physical-transfer request prepared from a vector memory operation.
@@ -226,8 +227,9 @@ public:
   void assign(size_t count, uint64_t value) {
     if (count <= kInlineCapacity) {
       overflow_.clear();
-      for (size_t i = 0; i < count; ++i)
+      for (size_t i = 0; i < count; ++i) {
         inline_[i] = value;
+      }
       size_ = count;
       return;
     }
@@ -383,10 +385,12 @@ public:
            reports_buffer_residency();
   }
   [[nodiscard]] uint64_t feedback_write_lanes() const {
-    if (texel_status)
+    if (texel_status) {
       return texel_status->written_lanes();
-    if (image_status)
+    }
+    if (image_status) {
       return image_status->written_misses() | image_status->written_warnings();
+    }
     return buffer_missing_lanes;
   }
 
@@ -565,7 +569,11 @@ public:
     std::vector<uint8_t> ds2_store = std::move(ds2_store_data);
     std::vector<TranslatedMemoryRequest> requests = std::move(translated.requests);
     std::vector<uint8_t> reordered_data = std::move(translated.reordered_data);
-    std::destroy_at(this);
+    // Inline destruction here so the compiler can discard cleanup of the moved buffers.
+#if defined(__clang__)
+    [[clang::always_inline]]
+#endif
+    this->~VectorMemState();
     VectorMemState *fresh = std::construct_at(this, pipeline);
     fresh->response_data = std::move(response);
     fresh->store_data = std::move(store);
@@ -584,11 +592,13 @@ public:
     block_dword_mask = mask;
     element_lane_masks.assign(kBlockDwordCount, 0);
     for (uint32_t i = 0; i < kBlockDwordCount; ++i) {
-      if (block_dword_enabled(i))
+      if (block_dword_enabled(i)) {
         element_lane_masks[i] = lane_mask;
+      }
     }
-    if (mask == 0)
+    if (mask == 0) {
       lane_mask = 0;
+    }
   }
 
   /// Whether the captured block mask enables this DWORD. Other instructions
@@ -623,12 +633,15 @@ public:
 
   /// Number of consecutive VGPRs written starting at dst_reg_base.
   [[nodiscard]] uint32_t destination_vgpr_count() const {
-    if (compact_wave64_global_transpose())
+    if (compact_wave64_global_transpose()) {
       return num_elems / 2;
-    if (bvh)
+    }
+    if (bvh) {
       return 4;
-    if (buffer_components)
+    }
+    if (buffer_components) {
       return buffer_d16 ? (buffer_components + 1) / 2 : buffer_components;
+    }
     const uint32_t result_bytes = atomic_op == AtomicOp::NONE ? num_elems * elem_size : elem_size;
     constexpr uint32_t kBytesPerVgpr = sizeof(uint32_t);
     return std::max(1u, (result_bytes + kBytesPerVgpr - 1u) / kBytesPerVgpr);
@@ -638,8 +651,9 @@ public:
   /// offsets into one memory access, including reads with two result words.
   /// Their two-address DS specification also uses only DATA0 for such writes.
   [[nodiscard]] bool has_second_ds_address(rocjitsu::IsaFamily arch, uint64_t lanes) const {
-    if (!ds2_active || !lanes)
+    if (!ds2_active || !lanes) {
       return false;
+    }
     const unsigned lane = std::countr_zero(lanes);
     return !isa_properties(arch).coincident_ds_ignores_data1 ||
            per_lane_addr[lane] != ds2_per_lane_addr[lane];
@@ -660,10 +674,13 @@ static_assert(std::is_nothrow_constructible_v<VectorMemState, MemPipelineTag>);
 /// Later architectures suppress the LDS write for lanes that did not request data.
 inline uint64_t lds_destination_write_mask(const VectorMemState &state, rocjitsu::IsaFamily arch) {
   uint64_t mask = arch_is_cdna_4_or_lower(arch) ? state.exec_mask : state.lane_mask;
-  if (state.lds_per_lane_addr)
-    for (uint32_t lane = 0; lane < state.wf_size; ++lane)
-      if (state.per_lane_lds_addr[lane] == kInvalidLdsAddress)
+  if (state.lds_per_lane_addr) {
+    for (uint32_t lane = 0; lane < state.wf_size; ++lane) {
+      if (state.per_lane_lds_addr[lane] == kInvalidLdsAddress) {
         mask &= ~(uint64_t{1} << lane);
+      }
+    }
+  }
   return mask;
 }
 
@@ -675,12 +692,14 @@ inline void prepare_lds_destination(VectorMemState &state, uint32_t allocation_b
   state.lds_base = allocation_base;
   state.lds_per_lane_addr = true;
   const auto allocation = LdsAllocationRange::from_size(allocation_base, allocation_size);
-  if (!state.is_load && !state.lds_dst)
+  if (!state.is_load && !state.lds_dst) {
     state.lds_allocation = allocation; // LDS-to-buffer source, captured with its payload.
+  }
   state.per_lane_lds_addr.fill(kInvalidLdsAddress);
   for (uint32_t lane = 0; lane < state.wf_size; ++lane) {
-    if (!(state.exec_mask & (uint64_t{1} << lane)))
+    if (!(state.exec_mask & (uint64_t{1} << lane))) {
       continue;
+    }
     const int64_t relative = offset + static_cast<int64_t>(lane) * lane_stride;
     const uint64_t address = static_cast<uint64_t>(allocation_base) + relative;
     if (relative < 0 ||
