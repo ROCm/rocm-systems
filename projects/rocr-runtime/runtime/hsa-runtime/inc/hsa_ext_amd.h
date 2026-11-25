@@ -2455,6 +2455,17 @@ typedef enum {
  */
 #define HSA_AMD_MEMORY_COPY_OP_VERSION 1
 
+/**
+ * @brief Largest value ::hsa_amd_memory_copy_op_t::num_entries can carry.
+ *
+ * The field is 16 bits wide, so this is the entry count ceiling for every
+ * multi-entry operation.  A caller holding a larger count must split the
+ * request across several operations: assigning it to the field truncates, and
+ * a count that truncates to zero selects the scalar form of the operation
+ * rather than failing, because the list and scalar pointers share a union.
+ */
+#define HSA_AMD_MEMORY_COPY_OP_MAX_ENTRIES 65535
+
 /*
 [Provisional API]
 Pitched memory descriptor.
@@ -2523,14 +2534,14 @@ typedef struct hsa_amd_memory_copy_rect_ptr_s {
  *   dst_list         -- caller-owned array of num_entries destination pointers
  *   dst_agent_list   -- caller-owned array of num_entries destination agents
  *   size_list        -- caller-owned array of num_entries copy sizes in bytes
- *   num_entries         -- number of entries (>= 1, <= 65536)
+ *   num_entries         -- number of entries (>= 1, <= HSA_AMD_MEMORY_COPY_OP_MAX_ENTRIES)
  *
  * LINEAR_BROADCAST (single source -> multiple destinations):
  *   src, src_agent    -- source pointer and agent (must be GPU)
  *   dst_list          -- caller-owned array of num_entries destination pointers
  *   dst_agent_list    -- caller-owned array of num_entries destination agents
  *   size              -- copy size in bytes (same for every destination)
- *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= 65536)
+ *   num_entries          -- number of entries in dst_list / dst_agent_list (>= 1, <= HSA_AMD_MEMORY_COPY_OP_MAX_ENTRIES)
  *
  * LINEAR_SWAP (exchange contents of two buffers, multi-entry when num_entries > 0):
  *   src_list         -- caller-owned array of num_entries source pointers
@@ -2538,7 +2549,7 @@ typedef struct hsa_amd_memory_copy_rect_ptr_s {
  *   dst_list         -- caller-owned array of num_entries destination pointers
  *   dst_agent_list   -- caller-owned array of num_entries destination agents
  *   size_list        -- caller-owned array of num_entries swap sizes in bytes
- *   num_entries      -- number of entries (>= 1, <= 65536)
+ *   num_entries      -- number of entries (>= 1, <= HSA_AMD_MEMORY_COPY_OP_MAX_ENTRIES)
  *
  * LINEAR_SWAP (single, when num_entries == 0):
  *   src, src_agent  -- first buffer pointer and agent (modified in place)
