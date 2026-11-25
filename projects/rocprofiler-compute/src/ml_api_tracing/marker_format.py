@@ -62,6 +62,14 @@ def cap_args(blob: str, max_len: int = _MAX_ARGS_LEN) -> str:
     return truncated + ("...)" if balanced else "...")
 
 
+def format_args_blob(parts: List[str]) -> str:
+    """Join argument parts into a capped, encoded (a, b) marker blob,
+    or n/a if empty."""
+    if not parts:
+        return "n/a"
+    return encode_args(cap_args("(" + ", ".join(parts) + ")"))
+
+
 def render_dtype_shape(obj: object) -> Optional[str]:
     """Return dtype[dims] for an object with shape and dtype, else None."""
     try:

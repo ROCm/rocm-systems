@@ -25,7 +25,7 @@ from ml_api_tracing.inject_roctx.backends.torch_wraps import (
     EXTRA_STRUCTURAL_WRAPS,
     TENSOR_METHOD_WRAPS,
 )
-from ml_api_tracing.marker_format import cap_args, encode_args, render_dtype_shape
+from ml_api_tracing.marker_format import format_args_blob, render_dtype_shape
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "torch"
@@ -120,9 +120,7 @@ def format_wrap_args(args: Tuple[object, ...], kwargs: Dict[str, object]) -> str
         if rendered is None:
             continue
         items.append(f"{name}={rendered}")
-    if not items:
-        return "n/a"
-    return encode_args(cap_args("(" + ", ".join(items) + ")"))
+    return format_args_blob(items)
 
 
 # Structural wrappers for entry points the ATen dispatcher does not record.

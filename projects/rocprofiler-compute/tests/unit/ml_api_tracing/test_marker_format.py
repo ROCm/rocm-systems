@@ -15,6 +15,7 @@ from ml_api_tracing.marker_format import (
     decode_marker_name,
     encode_args,
     encode_marker_name,
+    format_args_blob,
     parse_marker_function,
     render_dtype_shape,
     split_operator_args,
@@ -352,3 +353,34 @@ def test_render_dtype_shape_returns_none_without_readable_metadata(obj):
 def test_render_dtype_shape_empty_shape_is_scalar_brackets():
     obj = SimpleNamespace(shape=(), dtype=FakeDType("torch.float64"))
     assert render_dtype_shape(obj) == "float64[]"
+
+
+def test_format_args_blob_empty_is_n_a():
+    assert format_args_blob([]) == "n/a"
+
+
+def test_format_args_blob_joins_two_parts():
+    assert (
+        format_args_blob(["float32[2x4]", "bias=float32[2x4]"])
+        == "(float32[2x4], bias=float32[2x4])"
+    )
+
+
+def test_format_args_blob_caps_long_part():
+    blob = format_args_blob(["x" * 600])
+    assert blob.startswith("(")
+    assert blob.endswith("...)")
+    assert len(blob) == 516
+
+
+def test_format_args_blob_encodes_delimiters_after_cap():
+    blob = format_args_blob(["a|;%\r\nb"])
+    assert "%7C" in blob
+    assert "%3B" in blob
+    assert "%25" in blob
+    assert "%0D" in blob
+    assert "%0A" in blob
+    assert "|" not in blob
+    assert ";" not in blob
+    assert "\r" not in blob
+    assert "\n" not in blob
