@@ -232,7 +232,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/mad64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/cndmask_x86_64_v4.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_round_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_unary_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v4.cpp
