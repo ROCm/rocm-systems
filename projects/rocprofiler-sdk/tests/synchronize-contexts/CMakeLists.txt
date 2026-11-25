@@ -27,9 +27,9 @@
 # assertion; the application supplies the GPU work. They meet at sync_test_workload.h, so
 # no tool here includes HIP and no application here includes rocprofiler.
 #
-# Five tools, one per record route or asserted property. Two applications, differing only
+# Six tools, one per record route or asserted property. Two applications, differing only
 # in the GPU work they offer -- one lane on the default stream, or many lanes each with
-# its own stream -- so the four single-lane tools share one binary.
+# its own stream -- so the five single-lane tools share one binary.
 #
 cmake_minimum_required(VERSION 3.24 FATAL_ERROR)
 
@@ -102,6 +102,7 @@ synchronize_contexts_add_client(counter-window counter_window_client.cpp)
 synchronize_contexts_add_client(signal-less-window signal_less_window_client.cpp)
 synchronize_contexts_add_client(no-late-records no_late_records_client.cpp)
 synchronize_contexts_add_client(concurrent-windows concurrent_windows_client.cpp)
+synchronize_contexts_add_client(device-counting-window device_counting_window_client.cpp)
 
 # Every tool prints its verdict under the same tag, so one expression covers all six
 # tests. No pass expression: a matched one makes the exit status advisory, and these tests
@@ -135,6 +136,23 @@ rocprofiler_add_integration_execute_test(
     LABELS "integration-tests;synchronize-contexts"
     PRELOAD "$<TARGET_FILE:synchronize-contexts-counter-window-client>"
     FAIL_REGULAR_EXPRESSION "${SYNC_CTX_FAIL_REGEX}")
+
+#
+# Device counting samples are asked for by the tool rather than produced by a dispatch,
+# and are drained by their own code: a route no other test here reaches.
+#
+# The skip expression reads the tool's own summary. A run that delivered no sample never
+# reached the route; the cost is that it also swallows a failing run on such a machine.
+#
+rocprofiler_add_integration_execute_test(
+    synchronize-contexts-device-counting-window
+    COMMAND $<TARGET_FILE:synchronize-contexts-serial-testapp>
+    DEPENDS synchronize-contexts-device-counting-window-client
+    TIMEOUT 300
+    LABELS "integration-tests;synchronize-contexts"
+    PRELOAD "$<TARGET_FILE:synchronize-contexts-device-counting-window-client>"
+    FAIL_REGULAR_EXPRESSION "${SYNC_CTX_FAIL_REGEX}"
+    SKIP_REGULAR_EXPRESSION "device counting summary: samples=0,")
 
 #
 # Signal-less kernel-dispatch completion: a third route, where a dispatch completes from a
