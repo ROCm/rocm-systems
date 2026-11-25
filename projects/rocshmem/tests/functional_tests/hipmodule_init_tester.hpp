@@ -41,8 +41,7 @@ class HipModuleInitTester : public Tester {
  protected:
   virtual void resetBuffers(size_t size) override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void verifyResults(size_t size) override;
 
@@ -51,7 +50,7 @@ class HipModuleInitTester : public Tester {
   int n_pes;
   hipModule_t test_module;
   hipFunction_t kernel_func;
-  int *device_result;
+  int* device_result;
 };
 
 #include "hipmodule_init_tester.cpp"

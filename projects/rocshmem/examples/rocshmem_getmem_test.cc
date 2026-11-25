@@ -60,70 +60,67 @@
 
 using namespace rocshmem;
 
-__global__ void simple_getmem_test(int *src, int *dst, size_t nelem)
-{
+__global__ void simple_getmem_test(int* src, int* dst, size_t nelem) {
+  int threadId = blockIdx.x * blockDim.x + threadIdx.x;
+  if (threadId == 0) {
+    int my_pe = rocshmem_my_pe();
+    int peer  = my_pe ? 0 : 1;
+    rocshmem_getmem(dst, src, nelem * sizeof(int), peer);
+    rocshmem_quiet();
+  }
 
-    int threadId = blockIdx.x * blockDim.x + threadIdx.x;
-    if (threadId == 0) {
-        int my_pe = rocshmem_my_pe();
-        int peer =  my_pe ? 0 : 1;
-        rocshmem_getmem(dst, src, nelem * sizeof(int), peer);
-        rocshmem_quiet();
-    }
-
-    __syncthreads();
+  __syncthreads();
 }
 
 #define MAX_ELEM 256
 
-int main (int argc, char **argv)
-{
-    int nelem = MAX_ELEM;
+int main(int argc, char** argv) {
+  int nelem = MAX_ELEM;
 
-    if (argc > 1) {
-        nelem = atoi(argv[1]);
-    }
+  if (argc > 1) {
+    nelem = atoi(argv[1]);
+  }
 
-    CHECK_HIP(hipSetDevice(get_launcher_local_rank()));
+  CHECK_HIP(hipSetDevice(get_launcher_local_rank()));
 
-    rocshmem_init();
+  rocshmem_init();
 
-    [[maybe_unused]] int my_pe = rocshmem_my_pe();
-    [[maybe_unused]] int npes =  rocshmem_n_pes();
+  [[maybe_unused]] int my_pe = rocshmem_my_pe();
+  [[maybe_unused]] int npes  = rocshmem_n_pes();
 
-    int *src = (int *)rocshmem_malloc(nelem * sizeof(int));
-    int *dst = (int *)rocshmem_malloc(nelem * sizeof(int));
-    if (NULL == src || NULL == dst) {
-        std::cout << "Error allocating memory from symmetric heap" << std::endl;
-        std::cout << "source: " << src << ", dest: " << dst << ", size: "
-          << sizeof(int) * nelem << std::endl;
-        rocshmem_global_exit(1);
-    }
+  int* src = (int*)rocshmem_malloc(nelem * sizeof(int));
+  int* dst = (int*)rocshmem_malloc(nelem * sizeof(int));
+  if (NULL == src || NULL == dst) {
+    std::cout << "Error allocating memory from symmetric heap" << std::endl;
+    std::cout << "source: " << src << ", dest: " << dst << ", size: " << sizeof(int) * nelem
+              << std::endl;
+    rocshmem_global_exit(1);
+  }
 
-    for (int i=0; i<nelem; i++) {
-        src[i] = 0;
-        dst[i] = 1;
-    }
-    CHECK_HIP(hipDeviceSynchronize());
+  for (int i = 0; i < nelem; i++) {
+    src[i] = 0;
+    dst[i] = 1;
+  }
+  CHECK_HIP(hipDeviceSynchronize());
 
-    int threadsPerBlock=256;
-    simple_getmem_test<<<dim3(1), dim3(threadsPerBlock), 0, 0>>>(src, dst, nelem);
-    rocshmem_barrier_all();
-    CHECK_HIP(hipDeviceSynchronize());
+  int threadsPerBlock = 256;
+  simple_getmem_test<<<dim3(1), dim3(threadsPerBlock), 0, 0>>>(src, dst, nelem);
+  rocshmem_barrier_all();
+  CHECK_HIP(hipDeviceSynchronize());
 
-    bool pass = true;
-    for (int i=0; i<nelem; i++) {
-        if (dst[i] != 0) {
-            pass = false;
+  bool pass = true;
+  for (int i = 0; i < nelem; i++) {
+    if (dst[i] != 0) {
+      pass = false;
 #if VERBOSE
-            printf("[%d] Error in element %d expected 0 got %d\n", my_pe, i, dst[i]);
+      printf("[%d] Error in element %d expected 0 got %d\n", my_pe, i, dst[i]);
 #endif
-        }
     }
-    printf("Test %s \t %s\n", argv[0], pass ? "[PASS]" : "[FAIL]");
+  }
+  printf("Test %s \t %s\n", argv[0], pass ? "[PASS]" : "[FAIL]");
 
-    rocshmem_free(src);
-    rocshmem_free(dst);
-    rocshmem_finalize();
-    return 0;
+  rocshmem_free(src);
+  rocshmem_free(dst);
+  rocshmem_finalize();
+  return 0;
 }

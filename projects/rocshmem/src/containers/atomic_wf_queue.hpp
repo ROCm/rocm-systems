@@ -39,9 +39,8 @@ namespace rocshmem {
 
 template <typename TYPE>
 class AtomicWFQueue {
-
   using MutexProxyType = ABQLBlockMutexProxy;
-  using MutexType = ABQLBlockMutex;
+  using MutexType      = ABQLBlockMutex;
 
   /**
    * @brief A lock guard for ticket-based locks that follows the design of
@@ -124,7 +123,7 @@ class AtomicWFQueue {
    */
   __device__ TYPE dequeue();
 
-   /**
+  /**
    * @brief Inserts a new element at the end of the AtomicWFQueue.
    *
    * This function adds the specified value to the end of the AtomicWFQueue,
@@ -193,9 +192,7 @@ class AtomicWFQueue {
    *
    * @return The maximum capacity of the AtomicWFQueue.
    */
-  __host__ __device__ int get_queue_size() {
-    return size_;
-  }
+  __host__ __device__ int get_queue_size() { return size_; }
 
   /**
    * @brief Retrieves the current number of elements in the AtomicWFQueue.
@@ -205,9 +202,7 @@ class AtomicWFQueue {
    *
    * @return The current number of elements in the AtomicWFQueue.
    */
-  __host__ __device__ int get_curr_size() {
-    return curr_size_;
-  }
+  __host__ __device__ int get_curr_size() { return curr_size_; }
 
   /**
    * @brief Retrieves the tail index of the AtomicWFQueue.
@@ -218,9 +213,7 @@ class AtomicWFQueue {
    *
    * @return The index of the tail in the AtomicWFQueue.
    */
-  __host__ __device__ int get_tail() {
-    return tail_;
-  }
+  __host__ __device__ int get_tail() { return tail_; }
 
   /**
    * @brief Retrieves the head index of the AtomicWFQueue.
@@ -231,30 +224,23 @@ class AtomicWFQueue {
    *
    * @return The index of the head in the AtomicWFQueue.
    */
-  __host__ __device__ int get_head() {
-    return head_;
-  }
+  __host__ __device__ int get_head() { return head_; }
 
  private:
-
   __device__ int atomic_load(const int* address) {
-    return atomic::load<atomic::memory_scope::device,
-                        atomic::memory_order::seq_cst>(address);
+    return atomic::load<atomic::memory_scope::device, atomic::memory_order::seq_cst>(address);
   }
 
   __device__ void atomic_store(int* address, const int val) {
-    atomic::store<atomic::memory_scope::device,
-                  atomic::memory_order::seq_cst>(address, val);
+    atomic::store<atomic::memory_scope::device, atomic::memory_order::seq_cst>(address, val);
   }
 
   __device__ void atomic_add(int* address, const int val) {
-    atomic::fetch_add<atomic::memory_scope::device,
-                      atomic::memory_order::seq_cst>(address, val);
+    atomic::fetch_add<atomic::memory_scope::device, atomic::memory_order::seq_cst>(address, val);
   }
 
   __device__ void atomic_sub(int* address, const int val) {
-    atomic::fetch_sub<atomic::memory_scope::device,
-                      atomic::memory_order::seq_cst>(address, val);
+    atomic::fetch_sub<atomic::memory_scope::device, atomic::memory_order::seq_cst>(address, val);
   }
 
   /**
@@ -266,9 +252,7 @@ class AtomicWFQueue {
    *
    * @return true if the AtomicWFQueue is full, false otherwise.
    */
-  __device__ bool is_full() {
-    return atomic_load(&curr_size_) == size_;
-  }
+  __device__ bool is_full() { return atomic_load(&curr_size_) == size_; }
 
   /**
    * @brief Checks if the AtomicWFQueue is empty.
@@ -279,10 +263,7 @@ class AtomicWFQueue {
    *
    * @return true if the AtomicWFQueue is empty, false otherwise.
    */
-  __device__ bool is_empty() {
-    return atomic_load(&curr_size_) == 0;
-  }
-
+  __device__ bool is_empty() { return atomic_load(&curr_size_) == 0; }
 
   /**
    * @brief Internal memory allocator used to create internal structures of
@@ -312,8 +293,8 @@ class AtomicWFQueue {
 
   /**
    * @brief Pointer to AtomicWFQueue memory
-  */
-  TYPE *queue_{nullptr};
+   */
+  TYPE* queue_{nullptr};
 
   /**
    * @brief Mutex protecting the AtomicWFQueue mutations during dequeue.
@@ -329,13 +310,12 @@ class AtomicWFQueue {
 template <typename TYPE>
 class AtomicWFQueueProxy {
   using AtomicWFQueueT = AtomicWFQueue<TYPE>;
-  using ProxyT = DeviceProxy<AtomicWFQueueT>;
+  using ProxyT         = DeviceProxy<AtomicWFQueueT>;
 
  public:
   __host__ __device__ AtomicWFQueueT* get() { return proxy_.get(); }
 
-  explicit AtomicWFQueueProxy(const MemoryAllocator& alloc = HIPAllocator(),
-                              size_t num_elems = 1)
+  explicit AtomicWFQueueProxy(const MemoryAllocator& alloc = HIPAllocator(), size_t num_elems = 1)
       : allocator_{alloc}, proxy_{num_elems, allocator_} {
     new (proxy_.get()) AtomicWFQueueT(allocator_);
   }

@@ -30,51 +30,52 @@
 namespace rocshmem {
 namespace net {
 
-IbCtrl::~IbCtrl() { destroy(); }
+IbCtrl::~IbCtrl() {
+  destroy();
+}
 
-bool IbCtrl::open(Ibv *ibv, const char *dev_name, uint8_t port_hint) {
-  ibv_ = ibv;
+bool IbCtrl::open(Ibv* ibv, const char* dev_name, uint8_t port_hint) {
+  ibv_      = ibv;
   dev_.port = port_hint;
 
-  int num = 0;
-  struct ibv_device **list = ibv_->get_device_list(&num);
+  int num                  = 0;
+  struct ibv_device** list = ibv_->get_device_list(&num);
   if (!list || num == 0) {
     LOG_ERROR("verbs: no RDMA devices found");
     return false;
   }
 
-  struct ibv_device *chosen = nullptr;
+  struct ibv_device* chosen = nullptr;
   for (int i = 0; i < num; i++) {
-    const char *name = ibv_->get_device_name(list[i]);
+    const char* name = ibv_->get_device_name(list[i]);
     if (dev_name && name && strstr(name, dev_name) == nullptr) {
       continue;  // name filter given and did not match
     }
-    struct ibv_context *ctx = ibv_->open_device(list[i]);
+    struct ibv_context* ctx = ibv_->open_device(list[i]);
     if (!ctx) {
       continue;
     }
     struct ibv_port_attr pa;
     memset(&pa, 0, sizeof(pa));
-    if (ibv_->query_port(ctx, dev_.port, &pa) == 0 &&
-        pa.state == IBV_PORT_ACTIVE) {
-      chosen = list[i];
-      dev_.ctx = ctx;
+    if (ibv_->query_port(ctx, dev_.port, &pa) == 0 && pa.state == IBV_PORT_ACTIVE) {
+      chosen         = list[i];
+      dev_.ctx       = ctx;
       dev_.port_attr = pa;
-      dev_.mtu = pa.active_mtu;
-      dev_.is_roce = (pa.link_layer == IBV_LINK_LAYER_ETHERNET);
+      dev_.mtu       = pa.active_mtu;
+      dev_.is_roce   = (pa.link_layer == IBV_LINK_LAYER_ETHERNET);
       break;
     }
     ibv_->close_device(ctx);
   }
 
   if (!chosen) {
-    LOG_ERROR("verbs: no device with an ACTIVE port%s%s",
-              dev_name ? " matching " : "", dev_name ? dev_name : "");
+    LOG_ERROR("verbs: no device with an ACTIVE port%s%s", dev_name ? " matching " : "",
+              dev_name ? dev_name : "");
     ibv_->free_device_list(list);
     return false;
   }
-  LOG_INFO("verbs: using %s port %u (%s)", ibv_->get_device_name(chosen),
-           dev_.port, dev_.is_roce ? "RoCE" : "IB");
+  LOG_INFO("verbs: using %s port %u (%s)", ibv_->get_device_name(chosen), dev_.port,
+           dev_.is_roce ? "RoCE" : "IB");
   ibv_->free_device_list(list);
 
   dev_.pd = ibv_->alloc_pd(dev_.ctx);
@@ -95,7 +96,7 @@ bool IbCtrl::select_gid() {
   }
 
   // Explicit override, mirroring perftest's `-x <gid_index>` for hard cases.
-  if (const char *env = getenv("ROCSHMEM_ROCE_GID_INDEX")) {
+  if (const char* env = getenv("ROCSHMEM_ROCE_GID_INDEX")) {
     dev_.gid_index = atoi(env);
     ibv_->query_gid(dev_.ctx, dev_.port, dev_.gid_index, &dev_.gid);
     return true;
@@ -109,10 +110,10 @@ bool IbCtrl::select_gid() {
     // skip fe80::/10 link-local GIDs (not routable across the rail-optimized
     // /31 RoCE fabric between nodes), then prefer RoCEv2 over RoCEv1. This
     // lands on the IPv4-mapped RoCEv2 GID (::ffff:a.b.c.d), the routable one.
-    int selected = -1;
+    int selected           = -1;
     uint32_t selected_type = IBV_GID_TYPE_ROCE_V1;
     for (int i = 0; i < n; i++) {
-      const auto &e = entries[i];
+      const auto& e = entries[i];
       if (e.port_num != dev_.port) {
         continue;
       }
@@ -132,9 +133,9 @@ bool IbCtrl::select_gid() {
         continue;
       }
       if (selected < 0 || e.gid_type > selected_type) {
-        selected = static_cast<int>(e.gid_index);
+        selected      = static_cast<int>(e.gid_index);
         selected_type = e.gid_type;
-        dev_.gid = e.gid;
+        dev_.gid      = e.gid;
       }
     }
     if (selected >= 0) {
@@ -150,8 +151,7 @@ bool IbCtrl::select_gid() {
   return true;
 }
 
-bool IbCtrl::create_queues(const LaneMap &lm, int cq_depth,
-                           int qp_send_depth) {
+bool IbCtrl::create_queues(const LaneMap& lm, int cq_depth, int qp_send_depth) {
   lm_ = lm;
   cqs_.assign(static_cast<size_t>(lm_.num_ctx), nullptr);
   qps_.assign(static_cast<size_t>(lm_.num_lanes()), nullptr);
@@ -168,12 +168,12 @@ bool IbCtrl::create_queues(const LaneMap &lm, int cq_depth,
     for (int pe = 0; pe < lm_.num_pes; pe++) {
       struct ibv_qp_init_attr qa;
       memset(&qa, 0, sizeof(qa));
-      qa.send_cq = cqs_[ctx];
-      qa.recv_cq = cqs_[ctx];
-      qa.qp_type = IBV_QPT_RC;
-      qa.sq_sig_all = 0;  // backend signals selectively
-      qa.cap.max_send_wr = static_cast<uint32_t>(qp_send_depth);
-      qa.cap.max_recv_wr = 1;
+      qa.send_cq          = cqs_[ctx];
+      qa.recv_cq          = cqs_[ctx];
+      qa.qp_type          = IBV_QPT_RC;
+      qa.sq_sig_all       = 0;  // backend signals selectively
+      qa.cap.max_send_wr  = static_cast<uint32_t>(qp_send_depth);
+      qa.cap.max_recv_wr  = 1;
       qa.cap.max_send_sge = 1;
       qa.cap.max_recv_sge = 1;
       // Per-WQE inline capacity is vendor-specific and small (mlx5 ~28B,
@@ -183,7 +183,7 @@ bool IbCtrl::create_queues(const LaneMap &lm, int cq_depth,
       // this where the hardware allows.
       qa.cap.max_inline_data = 16;
 
-      int lane = lm_.lane(ctx, pe);
+      int lane   = lm_.lane(ctx, pe);
       qps_[lane] = ibv_->create_qp(dev_.pd, &qa);
       if (!qps_[lane]) {
         LOG_ERROR("verbs: create_qp failed (lane %d)", lane);
@@ -199,17 +199,16 @@ bool IbCtrl::create_queues(const LaneMap &lm, int cq_depth,
   return true;
 }
 
-bool IbCtrl::to_init(struct ibv_qp *qp) {
+bool IbCtrl::to_init(struct ibv_qp* qp) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
-  attr.qp_state = IBV_QPS_INIT;
-  attr.pkey_index = 0;
-  attr.port_num = dev_.port;
-  attr.qp_access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE |
-                         IBV_ACCESS_REMOTE_READ | IBV_ACCESS_REMOTE_ATOMIC;
-  int mask = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT |
-             IBV_QP_ACCESS_FLAGS;
-  int rc = ibv_->modify_qp(qp, &attr, mask);
+  attr.qp_state        = IBV_QPS_INIT;
+  attr.pkey_index      = 0;
+  attr.port_num        = dev_.port;
+  attr.qp_access_flags = IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ |
+                         IBV_ACCESS_REMOTE_ATOMIC;
+  int mask             = IBV_QP_STATE | IBV_QP_PKEY_INDEX | IBV_QP_PORT | IBV_QP_ACCESS_FLAGS;
+  int rc               = ibv_->modify_qp(qp, &attr, mask);
   if (rc != 0) {
     LOG_ERROR("verbs: modify_qp->INIT failed (%d)", rc);
     return false;
@@ -217,31 +216,31 @@ bool IbCtrl::to_init(struct ibv_qp *qp) {
   return true;
 }
 
-bool IbCtrl::to_rtr(struct ibv_qp *qp, const DestInfo &remote) {
+bool IbCtrl::to_rtr(struct ibv_qp* qp, const DestInfo& remote) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
-  attr.qp_state = IBV_QPS_RTR;
-  attr.path_mtu = dev_.mtu;
-  attr.dest_qp_num = remote.qpn;
-  attr.rq_psn = remote.psn;
+  attr.qp_state           = IBV_QPS_RTR;
+  attr.path_mtu           = dev_.mtu;
+  attr.dest_qp_num        = remote.qpn;
+  attr.rq_psn             = remote.psn;
   attr.max_dest_rd_atomic = 16;
-  attr.min_rnr_timer = 12;
+  attr.min_rnr_timer      = 12;
 
-  attr.ah_attr.port_num = dev_.port;
-  attr.ah_attr.sl = 0;
+  attr.ah_attr.port_num      = dev_.port;
+  attr.ah_attr.sl            = 0;
   attr.ah_attr.src_path_bits = 0;
-  attr.ah_attr.dlid = remote.lid;  // 0 on RoCE
+  attr.ah_attr.dlid          = remote.lid;  // 0 on RoCE
   // RoCE (and best practice on IB with GRH) uses a global route.
   attr.ah_attr.is_global = 1;
   memcpy(attr.ah_attr.grh.dgid.raw, remote.gid, 16);
-  attr.ah_attr.grh.sgid_index = static_cast<uint8_t>(dev_.gid_index);
-  attr.ah_attr.grh.hop_limit = 255;
+  attr.ah_attr.grh.sgid_index    = static_cast<uint8_t>(dev_.gid_index);
+  attr.ah_attr.grh.hop_limit     = 255;
   attr.ah_attr.grh.traffic_class = 0;
-  attr.ah_attr.grh.flow_label = 0;
+  attr.ah_attr.grh.flow_label    = 0;
 
-  int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN |
-             IBV_QP_RQ_PSN | IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
-  int rc = ibv_->modify_qp(qp, &attr, mask);
+  int mask = IBV_QP_STATE | IBV_QP_AV | IBV_QP_PATH_MTU | IBV_QP_DEST_QPN | IBV_QP_RQ_PSN |
+             IBV_QP_MAX_DEST_RD_ATOMIC | IBV_QP_MIN_RNR_TIMER;
+  int rc   = ibv_->modify_qp(qp, &attr, mask);
   if (rc != 0) {
     LOG_ERROR("verbs: modify_qp->RTR failed (%d)", rc);
     return false;
@@ -249,18 +248,18 @@ bool IbCtrl::to_rtr(struct ibv_qp *qp, const DestInfo &remote) {
   return true;
 }
 
-bool IbCtrl::to_rts(struct ibv_qp *qp) {
+bool IbCtrl::to_rts(struct ibv_qp* qp) {
   struct ibv_qp_attr attr;
   memset(&attr, 0, sizeof(attr));
-  attr.qp_state = IBV_QPS_RTS;
-  attr.timeout = 14;
-  attr.retry_cnt = 7;
-  attr.rnr_retry = 7;
-  attr.sq_psn = psn_;
+  attr.qp_state      = IBV_QPS_RTS;
+  attr.timeout       = 14;
+  attr.retry_cnt     = 7;
+  attr.rnr_retry     = 7;
+  attr.sq_psn        = psn_;
   attr.max_rd_atomic = 16;
-  int mask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT |
-             IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN | IBV_QP_MAX_QP_RD_ATOMIC;
-  int rc = ibv_->modify_qp(qp, &attr, mask);
+  int mask = IBV_QP_STATE | IBV_QP_TIMEOUT | IBV_QP_RETRY_CNT | IBV_QP_RNR_RETRY | IBV_QP_SQ_PSN |
+             IBV_QP_MAX_QP_RD_ATOMIC;
+  int rc   = ibv_->modify_qp(qp, &attr, mask);
   if (rc != 0) {
     LOG_ERROR("verbs: modify_qp->RTS failed (%d)", rc);
     return false;
@@ -268,26 +267,26 @@ bool IbCtrl::to_rts(struct ibv_qp *qp) {
   return true;
 }
 
-bool IbCtrl::connect_qp(int lane, const DestInfo &remote) {
+bool IbCtrl::connect_qp(int lane, const DestInfo& remote) {
   return to_rtr(qps_[lane], remote) && to_rts(qps_[lane]);
 }
 
-void IbCtrl::fill_local_dest(std::vector<DestInfo> &out) const {
+void IbCtrl::fill_local_dest(std::vector<DestInfo>& out) const {
   out.assign(static_cast<size_t>(lm_.num_lanes()), DestInfo{});
   for (int lane = 0; lane < lm_.num_lanes(); lane++) {
     DestInfo d;
     memset(&d, 0, sizeof(d));
-    d.qpn = qps_[lane]->qp_num;
-    d.psn = psn_;
-    d.lid = dev_.port_attr.lid;
-    d.port = dev_.port;
+    d.qpn       = qps_[lane]->qp_num;
+    d.psn       = psn_;
+    d.lid       = dev_.port_attr.lid;
+    d.port      = dev_.port;
     d.gid_index = static_cast<uint8_t>(dev_.gid_index);
     memcpy(d.gid, dev_.gid.raw, 16);
     out[lane] = d;
   }
 }
 
-bool IbCtrl::connect(int my_pe, const std::vector<DestInfo> &global) {
+bool IbCtrl::connect(int my_pe, const std::vector<DestInfo>& global) {
   const int lanes = lm_.num_lanes();
   for (int ctx = 0; ctx < lm_.num_ctx; ctx++) {
     for (int pe = 0; pe < lm_.num_pes; pe++) {
@@ -296,9 +295,8 @@ bool IbCtrl::connect(int my_pe, const std::vector<DestInfo> &global) {
       }
       int my_lane = lm_.lane(ctx, pe);
       // Peer pe's QP that targets me lives at its lane (ctx, my_pe).
-      int peer_lane = lm_.lane(ctx, my_pe);
-      const DestInfo &remote =
-          global[static_cast<size_t>(pe) * lanes + peer_lane];
+      int peer_lane          = lm_.lane(ctx, my_pe);
+      const DestInfo& remote = global[static_cast<size_t>(pe) * lanes + peer_lane];
       if (!connect_qp(my_lane, remote)) {
         return false;
       }
@@ -311,13 +309,13 @@ void IbCtrl::destroy() {
   if (!ibv_) {
     return;
   }
-  for (auto *qp : qps_) {
+  for (auto* qp : qps_) {
     if (qp) {
       ibv_->destroy_qp(qp);
     }
   }
   qps_.clear();
-  for (auto *cq : cqs_) {
+  for (auto* cq : cqs_) {
     if (cq) {
       ibv_->destroy_cq(cq);
     }

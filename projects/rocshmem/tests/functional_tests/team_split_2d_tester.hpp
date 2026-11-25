@@ -38,8 +38,7 @@ class TeamSplit2DTester : public Tester {
  protected:
   virtual void resetBuffers(size_t size) override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void verifyResults(size_t size) override;
   virtual void preLaunchKernel() override;
@@ -48,7 +47,7 @@ class TeamSplit2DTester : public Tester {
   rocshmem_team_t team_world_dup, x_team, y_team;
   int my_pe, n_pes;
   const int xrange = 2;
-  int test_failed = 0;
+  int test_failed  = 0;
 };
 
 #include "team_split_2d_tester.cpp"

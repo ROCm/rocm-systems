@@ -40,19 +40,19 @@ namespace rocshmem {
 struct QueuePairInitInfo {
   uintptr_t heap_laddr;
   uintptr_t heap_raddr;
-  size_t    heap_size;
-  uint32_t  heap_lkey;
-  uint32_t  heap_rkey;
+  size_t heap_size;
+  uint32_t heap_lkey;
+  uint32_t heap_rkey;
 
-  uint64_t             *fetching_atomic;
-  uint64_t             *nonfetching_atomic;
-  uint32_t             fetching_atomic_lkey;
-  uint32_t             nonfetching_atomic_lkey;
-  FreeList<uint64_t*>  *fetching_atomic_freelist;
-  const BufferInfo     *local_buffers;
-  size_t               num_user_buffers;
-  const SymmBufferInfo *symm_buffers;
-  const int            *symm_count;
+  uint64_t* fetching_atomic;
+  uint64_t* nonfetching_atomic;
+  uint32_t fetching_atomic_lkey;
+  uint32_t nonfetching_atomic_lkey;
+  FreeList<uint64_t*>* fetching_atomic_freelist;
+  const BufferInfo* local_buffers;
+  size_t num_user_buffers;
+  const SymmBufferInfo* symm_buffers;
+  const int* symm_count;
 };
 
 /*
@@ -60,15 +60,15 @@ struct QueuePairInitInfo {
  */
 template <typename Provider>
 class alignas(ALIGNMENT) QueuePairDevice : public QueuePairSHMEM<Provider> {
-/**
- * @name Provider-Defined Members
- *
- * Members that are defined based on specializations of QueuePairTraits<Provider>.
- * Each Provider must supply their own definitions.
- *
- * @{
- */
-public:
+  /**
+   * @name Provider-Defined Members
+   *
+   * Members that are defined based on specializations of QueuePairTraits<Provider>.
+   * Each Provider must supply their own definitions.
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Type alias for QueuePairTraits<Provider>.
    */
@@ -89,16 +89,14 @@ public:
    * of each Provider subclass.
    */
   static constexpr endian::Order ProviderEndianness = Traits::Endianness;
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Non-static Data Members
- *
- * @{
- */
-protected:
+  /**
+   * @name Non-static Data Members
+   *
+   * @{
+   */
+ protected:
   /*
    * @brief Cached heap info for this QP.
    *
@@ -129,7 +127,7 @@ protected:
   using FreeListT = FreeList<uint64_t*>;
   FreeListT* fetching_atomic_freelist;
 
-private:
+ private:
   // Used by get_laddr
   const BufferInfo* local_buffers;
   size_t num_user_buffers;
@@ -142,7 +140,7 @@ private:
    * specialized to this QP, so a match yields the remote address and keys with
    * no further dereference. Null when symmetric registration is unavailable.
    */
-  const SymmBufferInfo *symm_buffers;
+  const SymmBufferInfo* symm_buffers;
 
   /**
    * @brief Shared registration count (number of live entries per slice).
@@ -150,17 +148,15 @@ private:
    * Single device int shared by all QPs; register/unregister publish updates
    * here. One load per non-heap lookup (null when registration unavailable).
    */
-  const int *symm_count;
-/**@}*/
+  const int* symm_count;
+  /**@}*/
 
-
-
-/**
- * @name Internal
- *
- * @{
- */
-protected:
+  /**
+   * @name Internal
+   *
+   * @{
+   */
+ protected:
   /*
    * @brief Provider is a friend of QueuePairDevice<Provider>.
    */
@@ -186,20 +182,16 @@ protected:
     }
   }
 
-private:
-  __device__ Provider& provider() {
-    return static_cast<Provider&>(*this);
-  }
-/**@}*/
+ private:
+  __device__ Provider& provider() { return static_cast<Provider&>(*this); }
+  /**@}*/
 
-
-
-/**
- * @name Constructors and Destructors
- *
- * @{
- */
-protected:
+  /**
+   * @name Constructors and Destructors
+   *
+   * @{
+   */
+ protected:
   /**
    * @brief Constructor.
    *
@@ -207,21 +199,21 @@ protected:
    * @param[in] init_info Initialization information for this QP.
    */
   __host__ explicit QueuePairDevice(uint32_t qpn, QueuePairInitInfo&& init_info)
-    : heap{.local_base  = init_info.heap_laddr,
-           .remote_base = init_info.heap_raddr,
-           .length      = init_info.heap_size,
-           .lkey        = to_provider_endianness(init_info.heap_lkey),
-           .rkey        = to_provider_endianness(init_info.heap_rkey)},
-      qp_num{qpn},
-      fetching_atomic{init_info.fetching_atomic},
-      nonfetching_atomic{init_info.nonfetching_atomic},
-      fetching_atomic_lkey{to_provider_endianness(init_info.fetching_atomic_lkey)},
-      nonfetching_atomic_lkey{to_provider_endianness(init_info.nonfetching_atomic_lkey)},
-      fetching_atomic_freelist{init_info.fetching_atomic_freelist},
-      local_buffers{init_info.local_buffers},
-      num_user_buffers{init_info.num_user_buffers},
-      symm_buffers{init_info.symm_buffers},
-      symm_count{init_info.symm_count} { }
+      : heap{.local_base  = init_info.heap_laddr,
+             .remote_base = init_info.heap_raddr,
+             .length      = init_info.heap_size,
+             .lkey        = to_provider_endianness(init_info.heap_lkey),
+             .rkey        = to_provider_endianness(init_info.heap_rkey)},
+        qp_num{qpn},
+        fetching_atomic{init_info.fetching_atomic},
+        nonfetching_atomic{init_info.nonfetching_atomic},
+        fetching_atomic_lkey{to_provider_endianness(init_info.fetching_atomic_lkey)},
+        nonfetching_atomic_lkey{to_provider_endianness(init_info.nonfetching_atomic_lkey)},
+        fetching_atomic_freelist{init_info.fetching_atomic_freelist},
+        local_buffers{init_info.local_buffers},
+        num_user_buffers{init_info.num_user_buffers},
+        symm_buffers{init_info.symm_buffers},
+        symm_count{init_info.symm_count} {}
 
   /**
    * @brief Convenience Constructor for GIN. Unspecified values are nullptr or 0.
@@ -235,31 +227,36 @@ protected:
    * @param[in] nonfetching_atomic Single location used for the return values of nonfetching AMOs.
    * @param[in] nonfetching_atomic_lkey LKey for nonfetching_atomic.
    */
-  __host__ explicit QueuePairDevice(uint32_t qpn,
-                                    uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey)
-    : QueuePairDevice{qpn, QueuePairInitInfo{
-          .heap_laddr = 0, .heap_raddr = 0, .heap_size = 0, .heap_lkey = 0, .heap_rkey = 0,
-          .fetching_atomic      = nullptr, .nonfetching_atomic      = nonfetching_atomic,
-          .fetching_atomic_lkey = 0,       .nonfetching_atomic_lkey = nonfetching_atomic_lkey,
-          .fetching_atomic_freelist = nullptr,
-          .local_buffers = nullptr, .num_user_buffers = 0,
-          .symm_buffers  = nullptr, .symm_count       = nullptr}} { }
+  __host__ explicit QueuePairDevice(uint32_t qpn, uint64_t* nonfetching_atomic,
+                                    uint32_t nonfetching_atomic_lkey)
+      : QueuePairDevice{qpn, QueuePairInitInfo{.heap_laddr               = 0,
+                                               .heap_raddr               = 0,
+                                               .heap_size                = 0,
+                                               .heap_lkey                = 0,
+                                               .heap_rkey                = 0,
+                                               .fetching_atomic          = nullptr,
+                                               .nonfetching_atomic       = nonfetching_atomic,
+                                               .fetching_atomic_lkey     = 0,
+                                               .nonfetching_atomic_lkey  = nonfetching_atomic_lkey,
+                                               .fetching_atomic_freelist = nullptr,
+                                               .local_buffers            = nullptr,
+                                               .num_user_buffers         = 0,
+                                               .symm_buffers             = nullptr,
+                                               .symm_count               = nullptr}} {}
 
   __host__ QueuePairDevice(const QueuePairDevice& other)            = delete;
   __host__ QueuePairDevice& operator=(const QueuePairDevice& other) = delete;
   __host__ QueuePairDevice(QueuePairDevice&& other) noexcept        = default;
   __host__ QueuePairDevice& operator=(QueuePairDevice&& other)      = default;
   __host__ ~QueuePairDevice()                                       = default;
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Address Management
- *
- * @{
- */
-public:
+  /**
+   * @name Address Management
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Resolve the local (origin) virtual address and LKey of a symmetric address.
    *
@@ -273,8 +270,8 @@ public:
    * @return {laddr, lkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned LKey value is ProviderEndianness.
    */
-  __device__ __forceinline__
-  std::tuple<uintptr_t, uint32_t> get_laddr_info(const void *addr, bool inlined = false) const;
+  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_laddr_info(
+      const void* addr, bool inlined = false) const;
 
   /**
    * @brief Resolve the remote (target) virtual address and RKey of a symmetric address.
@@ -288,8 +285,7 @@ public:
    * @return {raddr, rkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned RKey value is ProviderEndianness.
    */
-  __device__ __forceinline__
-  std::tuple<uintptr_t, uint32_t> get_raddr_info(const void *addr) const;
+  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_raddr_info(const void* addr) const;
 
   /*
    * @brief Query whether data can be inlined into a WQE.
@@ -319,7 +315,8 @@ public:
    * discarded at compile time, so a provider never emits copy code for widths it
    * cannot inline. Non-power-of-two sizes fall back to a correct byte copy.
    */
-  static __device__ __forceinline__ void copy_inline_payload(uint8_t* dst, uintptr_t laddr, size_t size);
+  static __device__ __forceinline__ void copy_inline_payload(uint8_t* dst, uintptr_t laddr,
+                                                             size_t size);
 
   /**
    * @brief Convert value to ProviderEndianness, byteswapping if necessary.
@@ -333,14 +330,13 @@ public:
   static __host__ __device__ __forceinline__ constexpr T to_provider_endianness(T val) {
     return endian::from_native<ProviderEndianness, T>(val);
   }
-/**@}*/
+  /**@}*/
 };
 
-
-
 template <typename Provider>
-__device__ __forceinline__ void
-QueuePairDevice<Provider>::copy_inline_payload(uint8_t* dst, uintptr_t laddr, size_t size) {
+__device__ __forceinline__ void QueuePairDevice<Provider>::copy_inline_payload(uint8_t* dst,
+                                                                               uintptr_t laddr,
+                                                                               size_t size) {
   constexpr size_t kMax = Traits::InlineThreshold;
   static_assert(kMax <= 32, "inline payload fast-path only covers widths up to 32B");
   const uint8_t* src = reinterpret_cast<const uint8_t*>(laddr);
@@ -348,27 +344,81 @@ QueuePairDevice<Provider>::copy_inline_payload(uint8_t* dst, uintptr_t laddr, si
   // Fast path: exact power-of-two width -> one native load/store (the hot case,
   // e.g. aligned 4B/8B scalar _p). Arms wider than kMax are pruned at compile time.
   // __builtin_memcpy_inline guarantees inline expansion (never a libcall/loop).
-  if constexpr (kMax >= 1)  { if (size == 1)  { __builtin_memcpy_inline(dst, src, 1);  return; } }
-  if constexpr (kMax >= 2)  { if (size == 2)  { __builtin_memcpy_inline(dst, src, 2);  return; } }
-  if constexpr (kMax >= 4)  { if (size == 4)  { __builtin_memcpy_inline(dst, src, 4);  return; } }
-  if constexpr (kMax >= 8)  { if (size == 8)  { __builtin_memcpy_inline(dst, src, 8);  return; } }
-  if constexpr (kMax >= 16) { if (size == 16) { __builtin_memcpy_inline(dst, src, 16); return; } }
-  if constexpr (kMax >= 32) { if (size == 32) { __builtin_memcpy_inline(dst, src, 32); return; } }
+  if constexpr (kMax >= 1) {
+    if (size == 1) {
+      __builtin_memcpy_inline(dst, src, 1);
+      return;
+    }
+  }
+  if constexpr (kMax >= 2) {
+    if (size == 2) {
+      __builtin_memcpy_inline(dst, src, 2);
+      return;
+    }
+  }
+  if constexpr (kMax >= 4) {
+    if (size == 4) {
+      __builtin_memcpy_inline(dst, src, 4);
+      return;
+    }
+  }
+  if constexpr (kMax >= 8) {
+    if (size == 8) {
+      __builtin_memcpy_inline(dst, src, 8);
+      return;
+    }
+  }
+  if constexpr (kMax >= 16) {
+    if (size == 16) {
+      __builtin_memcpy_inline(dst, src, 16);
+      return;
+    }
+  }
+  if constexpr (kMax >= 32) {
+    if (size == 32) {
+      __builtin_memcpy_inline(dst, src, 32);
+      return;
+    }
+  }
 
   // Residual (non-power-of-two) sizes: cover with two overlapping constant-width
   // copies of the first and last K bytes (K = largest power of two < size). Both
   // widths are compile-time constant -> single wide ops, never a byte loop, and
   // the overlap stays within [0, size) so nothing is read past the source.
-  if constexpr (kMax >= 16) { if (size > 16) { __builtin_memcpy_inline(dst, src, 16); __builtin_memcpy_inline(dst + size - 16, src + size - 16, 16); return; } }
-  if constexpr (kMax >= 8)  { if (size > 8)  { __builtin_memcpy_inline(dst, src, 8);  __builtin_memcpy_inline(dst + size - 8,  src + size - 8,  8);  return; } }
-  if constexpr (kMax >= 4)  { if (size > 4)  { __builtin_memcpy_inline(dst, src, 4);  __builtin_memcpy_inline(dst + size - 4,  src + size - 4,  4);  return; } }
-  if constexpr (kMax >= 2)  { if (size > 2)  { __builtin_memcpy_inline(dst, src, 2);  __builtin_memcpy_inline(dst + size - 2,  src + size - 2,  2);  return; } }
+  if constexpr (kMax >= 16) {
+    if (size > 16) {
+      __builtin_memcpy_inline(dst, src, 16);
+      __builtin_memcpy_inline(dst + size - 16, src + size - 16, 16);
+      return;
+    }
+  }
+  if constexpr (kMax >= 8) {
+    if (size > 8) {
+      __builtin_memcpy_inline(dst, src, 8);
+      __builtin_memcpy_inline(dst + size - 8, src + size - 8, 8);
+      return;
+    }
+  }
+  if constexpr (kMax >= 4) {
+    if (size > 4) {
+      __builtin_memcpy_inline(dst, src, 4);
+      __builtin_memcpy_inline(dst + size - 4, src + size - 4, 4);
+      return;
+    }
+  }
+  if constexpr (kMax >= 2) {
+    if (size > 2) {
+      __builtin_memcpy_inline(dst, src, 2);
+      __builtin_memcpy_inline(dst + size - 2, src + size - 2, 2);
+      return;
+    }
+  }
   __builtin_memcpy_inline(dst, src, 1);  // size == 1 remainder
 }
 
 template <typename Provider>
 __device__ __forceinline__ std::tuple<uintptr_t, uint32_t>
-QueuePairDevice<Provider>::get_laddr_info(const void *addr, bool inlined) const {
+QueuePairDevice<Provider>::get_laddr_info(const void* addr, bool inlined) const {
   uintptr_t laddr = reinterpret_cast<uintptr_t>(addr);
   /* Check for inlined RDMA_WRITE */
   if (inlined) {
@@ -401,8 +451,8 @@ QueuePairDevice<Provider>::get_laddr_info(const void *addr, bool inlined) const 
 }
 
 template <typename Provider>
-__device__ __forceinline__
-std::tuple<uintptr_t, uint32_t> QueuePairDevice<Provider>::get_raddr_info(const void *addr) const {
+__device__ __forceinline__ std::tuple<uintptr_t, uint32_t>
+QueuePairDevice<Provider>::get_raddr_info(const void* addr) const {
   uintptr_t laddr = reinterpret_cast<uintptr_t>(addr);
   /* Check symmetric heap */
   if (is_ptr_in_range(heap.local_base, heap.length, laddr)) [[likely]] {

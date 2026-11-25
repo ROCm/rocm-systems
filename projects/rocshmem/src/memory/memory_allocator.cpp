@@ -30,13 +30,9 @@
 
 namespace rocshmem {
 
-MemoryAllocator::MemoryAllocator(hipError_t (*hip_alloc_fn)(void**, size_t,
-                                                            unsigned),
-                                 hipError_t (*hip_free_fn)(void*),
-                                 unsigned flags)
-    : _hip_alloc_with_flags(hip_alloc_fn),
-      _flags(flags),
-      _hip_free(hip_free_fn) {}
+MemoryAllocator::MemoryAllocator(hipError_t (*hip_alloc_fn)(void**, size_t, unsigned),
+                                 hipError_t (*hip_free_fn)(void*), unsigned flags)
+    : _hip_alloc_with_flags(hip_alloc_fn), _flags(flags), _hip_free(hip_free_fn) {}
 
 MemoryAllocator::MemoryAllocator(hipError_t (*hip_alloc_fn)(void**, size_t),
                                  hipError_t (*hip_free_fn)(void*))
@@ -46,19 +42,15 @@ MemoryAllocator::MemoryAllocator(std::function<void*(size_t)> alloc_fn,
                                  std::function<void(void*)> free_fn)
     : _alloc(alloc_fn), _free(free_fn) {}
 
-MemoryAllocator::MemoryAllocator(
-    std::function<int(void**, size_t, size_t)> posix_align_fn,
-    std::function<void(void*)> free_fn, size_t alignment)
-    : _alloc_posix_memalign(posix_align_fn),
-      _alignment(alignment),
-      _free(free_fn) {}
+MemoryAllocator::MemoryAllocator(std::function<int(void**, size_t, size_t)> posix_align_fn,
+                                 std::function<void(void*)> free_fn, size_t alignment)
+    : _alloc_posix_memalign(posix_align_fn), _alignment(alignment), _free(free_fn) {}
 
 void MemoryAllocator::allocate(void** void_ptr, size_t size) {
   assert(void_ptr);
 
   if (_alloc) {
-    *(reinterpret_cast<char**>(void_ptr)) =
-        reinterpret_cast<char*>(_alloc(size));
+    *(reinterpret_cast<char**>(void_ptr)) = reinterpret_cast<char*>(_alloc(size));
     assert(*reinterpret_cast<char**>(void_ptr));
     return;
   }

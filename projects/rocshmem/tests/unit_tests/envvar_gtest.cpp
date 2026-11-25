@@ -28,14 +28,8 @@
 
 using namespace rocshmem;
 
-using VarTypes = ::testing::Types<bool,
-                                  uint8_t,
-                                  uint32_t,
-                                  size_t,
-                                  int64_t,
-                                  std::string,
-                                  envvar::types::socket_family,
-                                  envvar::types::debug_level>;
+using VarTypes = ::testing::Types<bool, uint8_t, uint32_t, size_t, int64_t, std::string,
+                                  envvar::types::socket_family, envvar::types::debug_level>;
 
 TYPED_TEST_SUITE(EnvVarUnsetTestFixture, VarTypes);
 TYPED_TEST_SUITE(EnvVarSetTestFixture, VarTypes);

@@ -57,11 +57,9 @@ class ProfilerProxy {
  public:
   ProfilerProxy() = default;
 
-  explicit ProfilerProxy(size_t num_blocks,
-                         const HIPAllocator& alloc = HIPAllocator())
-    : alloc_{alloc}, proxy_{num_blocks, alloc_}, num_elem_{num_blocks} {
-
-    auto *stat{proxy_.get()};
+  explicit ProfilerProxy(size_t num_blocks, const HIPAllocator& alloc = HIPAllocator())
+      : alloc_{alloc}, proxy_{num_blocks, alloc_}, num_elem_{num_blocks} {
+    auto* stat{proxy_.get()};
     assert(stat);
 
     // TODO(bpotter) This may need to be aligned properly for placement new
@@ -79,7 +77,7 @@ class ProfilerProxy {
   ProfilerProxy& operator=(ProfilerProxy&& other) = default;
 
   ~ProfilerProxy() {
-    auto *stat{proxy_.get()};
+    auto* stat{proxy_.get()};
     assert(stat);
 
     for (size_t i{0}; i < num_elem_; i++) {
@@ -87,7 +85,7 @@ class ProfilerProxy {
     }
   }
 
-  __host__ __device__ ROStats *get(size_t i = 0) {
+  __host__ __device__ ROStats* get(size_t i = 0) {
     assert(i < num_elem_);
     return proxy_.get() + i;
   }

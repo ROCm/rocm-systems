@@ -50,7 +50,7 @@
  */
 struct LLMoEBuffer {
   // Number of signaling elements = number of experts
-  int num_sig_elems {0};
+  int num_sig_elems{0};
 
   /**
    * Dispatch buffers
@@ -59,9 +59,9 @@ struct LLMoEBuffer {
    * - Recv buffer: [num_experts * num_tokens, hidden + 1
    * - Recv count buffer: [num_experts]
    */
-  void*    dispatch_send_buffer {nullptr};
-  void*    dispatch_recv_buffer {nullptr};
-  int64_t* dispatch_recv_count_buffer {nullptr};
+  void* dispatch_send_buffer{nullptr};
+  void* dispatch_recv_buffer{nullptr};
+  int64_t* dispatch_recv_count_buffer{nullptr};
 
   /**
    * Combine buffers
@@ -70,9 +70,9 @@ struct LLMoEBuffer {
    * - Recv buffer: [num_experts * num_tokens, hidden + 1]
    * - Recv flag buffer: [num_experts]
    */
-  void*    combine_send_buffer {nullptr};
-  void*    combine_recv_buffer {nullptr};
-  int64_t* combine_recv_flag_buffer {nullptr};
+  void* combine_send_buffer{nullptr};
+  void* combine_recv_buffer{nullptr};
+  int64_t* combine_recv_flag_buffer{nullptr};
 
   std::pair<int64_t*, int> clean_meta() {
     ASSERT(dispatch_recv_count_buffer == combine_recv_flag_buffer);
@@ -87,42 +87,32 @@ struct LLMoEBuffer {
  */
 template <typename T>
 struct LLMoEBufferLayout {
-  size_t total_bytes {0};
+  size_t total_bytes{0};
   LLMoEBuffer buffers[2];
 
-  template <typename out_ptr_t = void*,
-            typename count_ptr_t = uint8_t*,
-            typename in_ptr_t = void*>
+  template <typename out_ptr_t = void*, typename count_ptr_t = uint8_t*, typename in_ptr_t = void*>
   out_ptr_t advance(const in_ptr_t& ptr, size_t count) {
-      return reinterpret_cast<out_ptr_t>(
-          reinterpret_cast<count_ptr_t>(ptr) + count);
+    return reinterpret_cast<out_ptr_t>(reinterpret_cast<count_ptr_t>(ptr) + count);
   }
 
   LLMoEBufferLayout(void* rdma_buffer, const int num_tokens, const int hidden,
-      [[maybe_unused]] const int num_ranks, const int num_experts) {
-
+                    [[maybe_unused]] const int num_ranks, const int num_experts) {
     // Message sizes
     size_t num_bytes_per_dispatch_msg = sizeof(int) + hidden * sizeof(T);
     size_t num_bytes_per_combine_msg  = sizeof(int) + hidden * sizeof(T);
 
     // Send buffers sizes
-    size_t dispatch_send_buffer_bytes = num_tokens *
-                                        num_bytes_per_dispatch_msg;
-    size_t combine_send_buffer_bytes  = num_experts * num_tokens *
-                                        num_bytes_per_combine_msg;
-    size_t send_buffer_bytes = std::max(dispatch_send_buffer_bytes,
-                                        combine_send_buffer_bytes);
+    size_t dispatch_send_buffer_bytes = num_tokens * num_bytes_per_dispatch_msg;
+    size_t combine_send_buffer_bytes  = num_experts * num_tokens * num_bytes_per_combine_msg;
+    size_t send_buffer_bytes = std::max(dispatch_send_buffer_bytes, combine_send_buffer_bytes);
 
     ASSERT(send_buffer_bytes % sizeof(int) == 0);
     total_bytes += send_buffer_bytes * 2;
 
     // receive buffers sizes
-    size_t dispatch_recv_buffer_bytes = num_experts * num_tokens *
-                                        num_bytes_per_dispatch_msg;
-    size_t combine_recv_buffer_bytes  = num_experts * num_tokens *
-                                        num_bytes_per_combine_msg;
-    size_t recv_buffer_bytes = std::max(dispatch_recv_buffer_bytes,
-                                        combine_recv_buffer_bytes);
+    size_t dispatch_recv_buffer_bytes = num_experts * num_tokens * num_bytes_per_dispatch_msg;
+    size_t combine_recv_buffer_bytes  = num_experts * num_tokens * num_bytes_per_combine_msg;
+    size_t recv_buffer_bytes = std::max(dispatch_recv_buffer_bytes, combine_recv_buffer_bytes);
     ASSERT(recv_buffer_bytes % sizeof(int) == 0);
     total_bytes += recv_buffer_bytes * 2;
 
@@ -131,22 +121,16 @@ struct LLMoEBufferLayout {
     total_bytes += signaling_buffer_bytes * 2;
 
     // Assign pointers
-    for (int i = 0; i < 2; ++ i) {
-        buffers[i] = {
-            num_experts,
-            advance(rdma_buffer, send_buffer_bytes * i),
-            advance(rdma_buffer,
-                    send_buffer_bytes * 2 + recv_buffer_bytes * i),
-            advance<int64_t*>(rdma_buffer,
-                    send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
-                    signaling_buffer_bytes * i),
-            advance(rdma_buffer, send_buffer_bytes * i),
-            advance(rdma_buffer,
-                    send_buffer_bytes * 2 + recv_buffer_bytes * i),
-            advance<int64_t*>(rdma_buffer,
-                    send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
-                    signaling_buffer_bytes * i)
-        };
+    for (int i = 0; i < 2; ++i) {
+      buffers[i] = {num_experts,
+                    advance(rdma_buffer, send_buffer_bytes * i),
+                    advance(rdma_buffer, send_buffer_bytes * 2 + recv_buffer_bytes * i),
+                    advance<int64_t*>(rdma_buffer, send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                                                       signaling_buffer_bytes * i),
+                    advance(rdma_buffer, send_buffer_bytes * i),
+                    advance(rdma_buffer, send_buffer_bytes * 2 + recv_buffer_bytes * i),
+                    advance<int64_t*>(rdma_buffer, send_buffer_bytes * 2 + recv_buffer_bytes * 2 +
+                                                       signaling_buffer_bytes * i)};
     }
   }
 };
@@ -156,9 +140,9 @@ struct LLMoEBufferLayout {
  * - Used for allocating rocSHMEM symmetric memory buffer
  */
 template <typename T>
-size_t get_rdma_size_hint(int num_max_dispatch_tokens_per_rank, int hidden,
-    int num_ranks, int num_experts) {
-  LLMoEBufferLayout<T> ll_buffer_layout(nullptr, num_max_dispatch_tokens_per_rank,
-                        hidden, num_ranks, num_experts);
+size_t get_rdma_size_hint(int num_max_dispatch_tokens_per_rank, int hidden, int num_ranks,
+                          int num_experts) {
+  LLMoEBufferLayout<T> ll_buffer_layout(nullptr, num_max_dispatch_tokens_per_rank, hidden,
+                                        num_ranks, num_experts);
   return ll_buffer_layout.total_bytes;
 }

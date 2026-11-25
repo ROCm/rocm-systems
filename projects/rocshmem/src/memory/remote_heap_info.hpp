@@ -52,9 +52,7 @@ class CommunicatorMPI {
   /**
    * @brief Primary constructor
    */
-  CommunicatorMPI(char* heap_base, size_t heap_size,
-                  MPI_Comm comm)
-    : comm_{comm} {
+  CommunicatorMPI(char* heap_base, size_t heap_size, MPI_Comm comm) : comm_{comm} {
     mpilib_ftable_.Comm_rank(comm_, &my_pe_);
     mpilib_ftable_.Comm_size(comm_, &num_pes_);
     heap_window_info_ = WindowInfoMPI(comm_, heap_base, heap_size);
@@ -84,8 +82,8 @@ class CommunicatorMPI {
    * @brief Performs MPI_Allgather on recvbuf
    */
   void allgather(void* recvbuf) {
-    mpilib_ftable_.Allgather(MPI_IN_PLACE, sizeof(void*), MPI_CHAR, recvbuf,
-                             sizeof(void*), MPI_CHAR, comm_);
+    mpilib_ftable_.Allgather(MPI_IN_PLACE, sizeof(void*), MPI_CHAR, recvbuf, sizeof(void*),
+                             MPI_CHAR, comm_);
   }
 
   /**
@@ -115,16 +113,14 @@ class CommunicatorMPI {
   WindowInfoMPI heap_window_info_{};
 };
 
-
 class CommunicatorTCP {
  public:
-
   /**
    * @brief Primary constructor
    */
-  CommunicatorTCP(char* heap_base, size_t heap_size,
-                  TcpBootstrap* bootstrap) : bootstrap_{bootstrap} {
-    my_pe_ = bootstrap_->getRank();
+  CommunicatorTCP(char* heap_base, size_t heap_size, TcpBootstrap* bootstrap)
+      : bootstrap_{bootstrap} {
+    my_pe_   = bootstrap_->getRank();
     num_pes_ = bootstrap_->getNranks();
 
     heap_window_info_ = WindowInfo(heap_base, heap_size);
@@ -148,14 +144,12 @@ class CommunicatorTCP {
   /**
    * @brief Performs MPI_Barrier
    */
-  void barrier() {bootstrap_->barrier(); }
+  void barrier() { bootstrap_->barrier(); }
 
   /**
    * @brief Performs MPI_Allgather on recvbuf
    */
-  void allgather(void* recvbuf) {
-    bootstrap_->allGather(recvbuf, sizeof(void*));
-  }
+  void allgather(void* recvbuf) { bootstrap_->allGather(recvbuf, sizeof(void*)); }
 
   /**
    * @brief Accessor method for heap_window_info_
@@ -205,15 +199,13 @@ class RemoteHeapInfo {
    * @param[in] The identifier for this processing element
    * @param[in] The total number of processing elements
    */
-  RemoteHeapInfo(char* heap_ptr, size_t heap_size,
-                 MPI_Comm comm)
-    : communicator_{heap_ptr, heap_size, comm} {
+  RemoteHeapInfo(char* heap_ptr, size_t heap_size, MPI_Comm comm)
+      : communicator_{heap_ptr, heap_size, comm} {
     init(heap_ptr, heap_size);
   }
 
-  RemoteHeapInfo(char* heap_ptr, size_t heap_size,
-                 TcpBootstrap* bootstrap)
-    : communicator_{heap_ptr, heap_size, bootstrap} {
+  RemoteHeapInfo(char* heap_ptr, size_t heap_size, TcpBootstrap* bootstrap)
+      : communicator_{heap_ptr, heap_size, bootstrap} {
     init(heap_ptr, heap_size);
   }
 
@@ -261,7 +253,7 @@ class RemoteHeapInfo {
   /**
    ** @brief common initialization code
    */
-  void init(char* heap_ptr, [[maybe_unused]] size_t heap_size)  {
+  void init(char* heap_ptr, [[maybe_unused]] size_t heap_size) {
     heap_bases_.resize(communicator_.num_pes());
     for (auto& base : heap_bases_) {
       base = nullptr;

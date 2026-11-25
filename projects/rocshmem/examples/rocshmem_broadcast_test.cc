@@ -60,97 +60,94 @@
 
 using namespace rocshmem;
 
-__global__ void broadcast_test(int *source, int *dest, size_t nelem,
-        int root, rocshmem_team_t team) {
-    __shared__ rocshmem_ctx_t ctx;
-    int64_t ctx_type = 0;
+__global__ void broadcast_test(int* source, int* dest, size_t nelem, int root,
+                               rocshmem_team_t team) {
+  __shared__ rocshmem_ctx_t ctx;
+  int64_t ctx_type = 0;
 
-    rocshmem_wg_ctx_create(ctx_type, &ctx);
-    [[maybe_unused]] int num_pes = rocshmem_ctx_n_pes(ctx);
+  rocshmem_wg_ctx_create(ctx_type, &ctx);
+  [[maybe_unused]] int num_pes = rocshmem_ctx_n_pes(ctx);
 
-    rocshmem_ctx_int_broadcast_wg(ctx, team, dest, source, nelem, root);
+  rocshmem_ctx_int_broadcast_wg(ctx, team, dest, source, nelem, root);
 
-    rocshmem_ctx_quiet(ctx);
-    __syncthreads();
+  rocshmem_ctx_quiet(ctx);
+  __syncthreads();
 
-    rocshmem_wg_ctx_destroy(&ctx);
+  rocshmem_wg_ctx_destroy(&ctx);
 }
 
-static void init_sendbuf(int *source, int nelem, [[maybe_unused]] int my_pe)
-{
-    for (int i = 0; i < nelem; i++) {
-        source[i] = i;
-    }
+static void init_sendbuf(int* source, int nelem, [[maybe_unused]] int my_pe) {
+  for (int i = 0; i < nelem; i++) {
+    source[i] = i;
+  }
 }
 
-static bool check_recvbuf(int *dest, [[maybe_unused]] int nelem, [[maybe_unused]] int my_pe, int npes)
-{
-    bool res=true;
+static bool check_recvbuf(int* dest, [[maybe_unused]] int nelem, [[maybe_unused]] int my_pe,
+                          int npes) {
+  bool res = true;
 
-    for (int i = 0; i < npes; i++) {
-        if (dest[i] != i) {
-            res = false;
+  for (int i = 0; i < npes; i++) {
+    if (dest[i] != i) {
+      res = false;
 #ifdef VERBOSE
-            printf("PE: %d, dest[%d] = %d, expected %d \n", my_pe, i, dest[i], i);
+      printf("PE: %d, dest[%d] = %d, expected %d \n", my_pe, i, dest[i], i);
 #endif
-        }
     }
+  }
 
-    return res;
+  return res;
 }
 
 #define MAX_ELEM 256
 
-int main(int argc, char **argv)
-{
-    int nelem = MAX_ELEM;
+int main(int argc, char** argv) {
+  int nelem = MAX_ELEM;
 
-    if (argc > 1) {
-        nelem = atoi(argv[1]);
-    }
+  if (argc > 1) {
+    nelem = atoi(argv[1]);
+  }
 
-    CHECK_HIP(hipSetDevice(get_launcher_local_rank()));
+  CHECK_HIP(hipSetDevice(get_launcher_local_rank()));
 
-    rocshmem_init();
+  rocshmem_init();
 
-    int my_pe = rocshmem_my_pe();
-    int npes =  rocshmem_n_pes();
+  int my_pe = rocshmem_my_pe();
+  int npes  = rocshmem_n_pes();
 
-    int *source = (int *)rocshmem_malloc(nelem * sizeof(int));
-    int *dest = (int *)rocshmem_malloc(nelem * sizeof(int));
-    if (NULL == source || NULL == dest) {
-        std::cout << "Error allocating memory from symmetric heap" << std::endl;
-        std::cout << "source: " << source << ", dest: " << dest << ", size: "
-          << sizeof(int) * nelem << std::endl;
-        rocshmem_global_exit(1);
-    }
+  int* source = (int*)rocshmem_malloc(nelem * sizeof(int));
+  int* dest   = (int*)rocshmem_malloc(nelem * sizeof(int));
+  if (NULL == source || NULL == dest) {
+    std::cout << "Error allocating memory from symmetric heap" << std::endl;
+    std::cout << "source: " << source << ", dest: " << dest << ", size: " << sizeof(int) * nelem
+              << std::endl;
+    rocshmem_global_exit(1);
+  }
 
-    init_sendbuf(source, nelem, my_pe);
-    for (int i=0; i<nelem; i++) {
-        dest[i] = -1;
-    }
+  init_sendbuf(source, nelem, my_pe);
+  for (int i = 0; i < nelem; i++) {
+    dest[i] = -1;
+  }
 
-    int root = 0;
-    rocshmem_team_t team_reduce_world_dup;
-    team_reduce_world_dup = ROCSHMEM_TEAM_INVALID;
-    rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, npes, nullptr, 0,
-                               &team_reduce_world_dup);
+  int root = 0;
+  rocshmem_team_t team_reduce_world_dup;
+  team_reduce_world_dup = ROCSHMEM_TEAM_INVALID;
+  rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, npes, nullptr, 0, &team_reduce_world_dup);
 
-    CHECK_HIP(hipDeviceSynchronize());
+  CHECK_HIP(hipDeviceSynchronize());
 
-    int threadsPerBlock=256;
-    broadcast_test<<<dim3(1), dim3(threadsPerBlock), 0, 0>>>(source, dest,
-                        nelem, root, team_reduce_world_dup);
-    CHECK_HIP(hipDeviceSynchronize());
+  int threadsPerBlock = 256;
+  broadcast_test<<<dim3(1), dim3(threadsPerBlock), 0, 0>>>(source, dest, nelem, root,
+                                                           team_reduce_world_dup);
+  CHECK_HIP(hipDeviceSynchronize());
 
-    if(my_pe != root) {
-        bool pass = check_recvbuf(dest, nelem, my_pe, npes);
-        printf("Test %s \t nelem %d %s\n", argv[0], nelem, pass ? "[PASS]" : "[FAIL]");
-    }
+  if (my_pe != root) {
+    bool pass = check_recvbuf(dest, nelem, my_pe, npes);
+    printf("Test %s \t nelem %d %s\n", argv[0], nelem, pass ? "[PASS]" : "[FAIL]");
+  }
 
-    rocshmem_free(source);
-    rocshmem_free(dest);
+  rocshmem_free(source);
+  rocshmem_free(dest);
 
-    rocshmem_finalize();
-    return 0;
+  rocshmem_finalize();
+  return 0;
 }

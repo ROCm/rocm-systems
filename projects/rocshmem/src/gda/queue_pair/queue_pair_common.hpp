@@ -24,8 +24,8 @@ namespace rocshmem {
 
 struct BufferInfo {
   uintptr_t addr;
-  size_t    length;
-  uint32_t  lkey;
+  size_t length;
+  uint32_t lkey;
 };
 
 /**
@@ -81,24 +81,20 @@ struct SymmBufferInfo {
  * wg: Thread 0 of WAVE 0 issues WQE
  */
 
-enum class ThreadScope: int {
-  thread,
-  wave,
-  wg
-};
+enum class ThreadScope : int { thread, wave, wg };
 
 class ActiveWFInfo {
  public:
-  uint64_t    activemask{0};                  // Mask of active threads in the wavefront
-  uint64_t    pe_group_mask{0};               // Mask of active threads with the same PE
-  int         pe{-1};                         // PE for the threads in pe_group_mask
-  int         num_pe_group_lanes{0};          // Number of active lanes in pe_group_mask
-  int         pe_group_logical_lane_id{0};    // Logical lane id of this thread in pe_group_mask
-  int         pe_group_first_phys_lane_id{0}; // Physical lane id of first thread in pe_group_mask
-  int         pe_group_last_phys_lane_id{0};  // Physical lane id of last thread in pe_group_mask
-  ThreadScope scope{ThreadScope::thread};     // Threading scope
-  bool        is_pe_group_first{false};       // True if this is the first thread in pe_group_mask
-  bool        is_pe_group_last{false};        // True if this is the last thread in pe_group_mask
+  uint64_t activemask{0};                  // Mask of active threads in the wavefront
+  uint64_t pe_group_mask{0};               // Mask of active threads with the same PE
+  int pe{-1};                              // PE for the threads in pe_group_mask
+  int num_pe_group_lanes{0};               // Number of active lanes in pe_group_mask
+  int pe_group_logical_lane_id{0};         // Logical lane id of this thread in pe_group_mask
+  int pe_group_first_phys_lane_id{0};      // Physical lane id of first thread in pe_group_mask
+  int pe_group_last_phys_lane_id{0};       // Physical lane id of last thread in pe_group_mask
+  ThreadScope scope{ThreadScope::thread};  // Threading scope
+  bool is_pe_group_first{false};           // True if this is the first thread in pe_group_mask
+  bool is_pe_group_last{false};            // True if this is the last thread in pe_group_mask
 
   __device__ explicit ActiveWFInfo(int pe, ThreadScope scope = ThreadScope::thread)
       : pe(pe), scope(scope) {
@@ -107,20 +103,22 @@ class ActiveWFInfo {
 
     // Get mask of active lanes with the same PE
     switch (scope) {
-      case ThreadScope::thread: {
-        pe_group_mask       = __match_any_sync(activemask, pe);
-        num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
-        pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
+    case ThreadScope::thread:
+      {
+        pe_group_mask               = __match_any_sync(activemask, pe);
+        num_pe_group_lanes          = get_active_lane_count(pe_group_mask);
+        pe_group_logical_lane_id    = get_active_lane_num(pe_group_mask);
         pe_group_first_phys_lane_id = get_first_active_lane_id(pe_group_mask);
         pe_group_last_phys_lane_id  = get_last_active_lane_id(pe_group_mask);
         break;
       }
-      // Only thread 0 issues the WQE, so the group is just that thread
-      case ThreadScope::wave:
-      case ThreadScope::wg: {
-        pe_group_mask       = 1;
-        num_pe_group_lanes  = 1;
-        pe_group_logical_lane_id = get_active_lane_num(activemask);
+    // Only thread 0 issues the WQE, so the group is just that thread
+    case ThreadScope::wave:
+    case ThreadScope::wg:
+      {
+        pe_group_mask               = 1;
+        num_pe_group_lanes          = 1;
+        pe_group_logical_lane_id    = get_active_lane_num(activemask);
         pe_group_first_phys_lane_id = 0;
         pe_group_last_phys_lane_id  = 0;
       }
@@ -132,29 +130,29 @@ class ActiveWFInfo {
   // used in CAS based atomic operations at thread scope
   __device__ void update(int _pe, ThreadScope _scope = ThreadScope::thread) {
     // Get active lane mask
-    activemask          = get_active_lane_mask();
-    pe_group_mask       = __match_any_sync(activemask, pe);
-    num_pe_group_lanes  = get_active_lane_count(pe_group_mask);
-    pe_group_logical_lane_id = get_active_lane_num(pe_group_mask);
+    activemask                  = get_active_lane_mask();
+    pe_group_mask               = __match_any_sync(activemask, pe);
+    num_pe_group_lanes          = get_active_lane_count(pe_group_mask);
+    pe_group_logical_lane_id    = get_active_lane_num(pe_group_mask);
     pe_group_first_phys_lane_id = get_first_active_lane_id(pe_group_mask);
     pe_group_last_phys_lane_id  = get_last_active_lane_id(pe_group_mask);
-    is_pe_group_first   = (pe_group_logical_lane_id == 0);
-    is_pe_group_last    = (pe_group_logical_lane_id == num_pe_group_lanes - 1);
-    scope               = _scope;
-    pe                  = _pe;
+    is_pe_group_first           = (pe_group_logical_lane_id == 0);
+    is_pe_group_last            = (pe_group_logical_lane_id == num_pe_group_lanes - 1);
+    scope                       = _scope;
+    pe                          = _pe;
   }
 
   __device__ void printInfo() {
-    printf("PE: %d, Scope: %d, activemask: %llx, "
-           "pe_group_mask: %llx, num_pe_group_lanes: %d, "
-           "thread_id: %u, pe_group_logical_lane_id: %d, "
-           "is_pe_group_first: %d, pe_group_first_phys_lane_id: %d, "
-           "is_pe_group_last: %d, pe_group_last_phys_lane_id: %d\n",
-           pe, static_cast<int>(scope), static_cast<unsigned long long>(activemask),
-           static_cast<unsigned long long>(pe_group_mask), num_pe_group_lanes,
-           threadIdx.x, pe_group_logical_lane_id,
-           static_cast<int>(is_pe_group_first), pe_group_first_phys_lane_id,
-           static_cast<int>(is_pe_group_last), pe_group_last_phys_lane_id);
+    printf(
+        "PE: %d, Scope: %d, activemask: %llx, "
+        "pe_group_mask: %llx, num_pe_group_lanes: %d, "
+        "thread_id: %u, pe_group_logical_lane_id: %d, "
+        "is_pe_group_first: %d, pe_group_first_phys_lane_id: %d, "
+        "is_pe_group_last: %d, pe_group_last_phys_lane_id: %d\n",
+        pe, static_cast<int>(scope), static_cast<unsigned long long>(activemask),
+        static_cast<unsigned long long>(pe_group_mask), num_pe_group_lanes, threadIdx.x,
+        pe_group_logical_lane_id, static_cast<int>(is_pe_group_first), pe_group_first_phys_lane_id,
+        static_cast<int>(is_pe_group_last), pe_group_last_phys_lane_id);
   }
 };
 

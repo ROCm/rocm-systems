@@ -125,8 +125,7 @@ class Array {
    * @param[in] array_size
    * @param[in] allocator
    */
-  Array(size_t array_size, MemoryAllocator allocator,
-        const ObjectStrategy* strategy);
+  Array(size_t array_size, MemoryAllocator allocator, const ObjectStrategy* strategy);
 
   /**
    * @brief

@@ -36,7 +36,6 @@ AmdsmiLoader::AmdsmiLoader()
       shut_down(nullptr),
       get_processor_handle_from_bdf(nullptr),
       get_gpu_fabric_info(nullptr) {
-
   // Try to load the AMD SMI library
   amdsmi_handle = dlopen("libamd_smi.so", RTLD_LAZY);
   if (!amdsmi_handle) {

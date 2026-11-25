@@ -47,9 +47,12 @@ static bool matchIf(const char* string, const char* ref, bool matchExact) {
 }
 
 static bool matchPort(const int port1, const int port2) {
-  if (port1 == -1) return true;
-  if (port2 == -1) return true;
-  if (port1 == port2) return true;
+  if (port1 == -1)
+    return true;
+  if (port2 == -1)
+    return true;
+  if (port1 == port2)
+    return true;
   return false;
 }
 
@@ -57,8 +60,8 @@ namespace rocshmem {
 
 std::string int64ToBusId(int64_t id) {
   char busId[20];
-  std::snprintf(busId, sizeof(busId), "%04lx:%02lx:%02lx.%01lx", (id) >> 20, (id & 0xff000) >> 12, (id & 0xff0) >> 4,
-                (id & 0xf));
+  std::snprintf(busId, sizeof(busId), "%04lx:%02lx:%02lx.%01lx", (id) >> 20, (id & 0xff000) >> 12,
+                (id & 0xff0) >> 4, (id & 0xf));
   return std::string(busId);
 }
 
@@ -67,7 +70,8 @@ int64_t busIdToInt64(const std::string busId) {
   size_t hexOffset = 0;
   for (size_t i = 0; hexOffset < sizeof(hexStr) - 1 && i < busId.length(); ++i) {
     char c = busId[i];
-    if (c == '.' || c == ':') continue;
+    if (c == '.' || c == ':')
+      continue;
     if ((c >= '0' && c <= '9') || (c >= 'A' && c <= 'F') || (c >= 'a' && c <= 'f')) {
       hexStr[hexOffset++] = busId[i];
     } else
@@ -139,8 +143,9 @@ uint64_t computePidHash(void) {
   // Start off with our pid ($$)
   std::snprintf(pname, sizeof(pname), "%ld", (long)getpid());
   int plen = strlen(pname);
-  int len = readlink("/proc/self/ns/pid", pname + plen, sizeof(pname) - 1 - plen);
-  if (len < 0) len = 0;
+  int len  = readlink("/proc/self/ns/pid", pname + plen, sizeof(pname) - 1 - plen);
+  if (len < 0)
+    len = 0;
 
   pname[plen + len] = '\0';
   LOG_TRACE("unique PID '%s'", pname);
@@ -158,27 +163,29 @@ uint64_t getPidHash(void) {
 }
 
 int parseStringList(const char* string, netIf* ifList, int maxList) {
-  if (!string) return 0;
+  if (!string)
+    return 0;
 
   const char* ptr = string;
 
   int ifNum = 0;
-  int ifC = 0;
+  int ifC   = 0;
   char c;
   do {
     c = *ptr;
     if (c == ':') {
       if (ifC > 0) {
         ifList[ifNum].prefix[ifC] = '\0';
-        ifList[ifNum].port = atoi(ptr + 1);
+        ifList[ifNum].port        = atoi(ptr + 1);
         ifNum++;
         ifC = 0;
       }
-      while (c != ',' && c != '\0') c = *(++ptr);
+      while (c != ',' && c != '\0')
+        c = *(++ptr);
     } else if (c == ',' || c == '\0') {
       if (ifC > 0) {
         ifList[ifNum].prefix[ifC] = '\0';
-        ifList[ifNum].port = -1;
+        ifList[ifNum].port        = -1;
         ifNum++;
         ifC = 0;
       }
@@ -193,7 +200,8 @@ int parseStringList(const char* string, netIf* ifList, int maxList) {
 
 bool matchIfList(const char* string, int port, netIf* ifList, int listSize, bool matchExact) {
   // Make an exception for the case where no user list is defined
-  if (listSize == 0) return true;
+  if (listSize == 0)
+    return true;
 
   for (int i = 0; i < listSize; i++) {
     if (matchIf(string, ifList[i].prefix, matchExact) && matchPort(port, ifList[i].port)) {
@@ -207,12 +215,13 @@ bool matchIfList(const char* string, int port, netIf* ifList, int listSize, bool
 void getRandomData(void* buffer, size_t bytes) {
   if (bytes > 0) {
     const size_t one = 1UL;
-    FILE* fp = fopen("/dev/urandom", "r");
+    FILE* fp         = fopen("/dev/urandom", "r");
     if (buffer == NULL || fp == NULL || fread(buffer, bytes, one, fp) != one) {
       ERROR("Failed to read random data\n");
       return;
     }
-    if (fp) fclose(fp);
+    if (fp)
+      fclose(fp);
   }
 }
 
@@ -221,14 +230,16 @@ void getRandomData(void* buffer, size_t bytes) {
 // Throw upon SIGALRM.
 static void sigalrmTimeoutHandler(int) {
   signal(SIGALRM, SIG_IGN);
-  //throw mscclpp::Error("Timer timed out", ErrorCode::Timeout);
+  // throw mscclpp::Error("Timer timed out", ErrorCode::Timeout);
   ERROR("Timer timed out\n");
   return;
 }
 
 namespace rocshmem {
 
-Timer::Timer(int timeout) { set(timeout); }
+Timer::Timer(int timeout) {
+  set(timeout);
+}
 
 Timer::~Timer() {
   if (timeout_ > 0) {
@@ -251,7 +262,9 @@ void Timer::set(int timeout) {
   start_ = std::chrono::steady_clock::now();
 }
 
-void Timer::reset() { set(timeout_); }
+void Timer::reset() {
+  set(timeout_);
+}
 
 void Timer::print(const std::string& name) {
   auto us = elapsed();
@@ -260,7 +273,9 @@ void Timer::print(const std::string& name) {
 
 ScopedTimer::ScopedTimer(const std::string& name) : name_(name) {}
 
-ScopedTimer::~ScopedTimer() { print(name_); }
+ScopedTimer::~ScopedTimer() {
+  print(name_);
+}
 
 std::string getHostName(int maxlen, const char delim) {
   std::string hostname(maxlen + 1, '\0');
@@ -269,8 +284,8 @@ std::string getHostName(int maxlen, const char delim) {
     return nullptr;
   }
   int i = 0;
-  while ((hostname[i] != delim) && (hostname[i] != '\0') &&
-	 (i < maxlen - 1)) i++;
+  while ((hostname[i] != delim) && (hostname[i] != '\0') && (i < maxlen - 1))
+    i++;
   hostname[i] = '\0';
   return hostname.substr(0, i);
 }

@@ -33,8 +33,7 @@ using namespace rocshmem;
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-HostCtxCreateTester::HostCtxCreateTester(TesterArguments args)
-    : Tester(args) {
+HostCtxCreateTester::HostCtxCreateTester(TesterArguments args) : Tester(args) {
   _print_results = false;
 }
 
@@ -50,9 +49,9 @@ void HostCtxCreateTester::preLaunchKernel() {
   }
 }
 
-void HostCtxCreateTester::launchKernel(
-    [[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
-    [[maybe_unused]] int loop, [[maybe_unused]] size_t size) {}
+void HostCtxCreateTester::launchKernel([[maybe_unused]] dim3 gridSize,
+                                       [[maybe_unused]] dim3 blockSize, [[maybe_unused]] int loop,
+                                       [[maybe_unused]] size_t size) {}
 
 void HostCtxCreateTester::postLaunchKernel() {
   rocshmem_ctx_destroy(_ctx);

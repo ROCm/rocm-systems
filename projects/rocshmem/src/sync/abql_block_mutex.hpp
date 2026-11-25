@@ -118,7 +118,7 @@ class ABQLBlockMutexProxy {
 
  public:
   explicit ABQLBlockMutexProxy(const MemoryAllocator& alloc = *get_default_allocator(),
-                               size_t num_elems = 1)
+                               size_t num_elems             = 1)
       : alloc_{alloc}, proxy_{num_elems, alloc_} {}
 
   ABQLBlockMutexProxy(const ABQLBlockMutexProxy& other) = delete;

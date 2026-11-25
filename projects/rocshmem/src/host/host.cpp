@@ -57,15 +57,12 @@ std::vector<int> team_world_ranks(const Team* team_obj) {
 }
 }  // namespace
 
-__host__ HostContextWindowInfo::HostContextWindowInfo(MPI_Comm comm_world,
-                                                      SymmetricHeap* heap) {
-  window_info_ =
-      new WindowInfoMPI(comm_world, heap->get_local_heap_base(), heap->get_size());
+__host__ HostContextWindowInfo::HostContextWindowInfo(MPI_Comm comm_world, SymmetricHeap* heap) {
+  window_info_ = new WindowInfoMPI(comm_world, heap->get_local_heap_base(), heap->get_size());
 }
 
 __host__ HostContextWindowInfo::HostContextWindowInfo(SymmetricHeap* heap) {
-  window_info_ =
-      new WindowInfo(heap->get_local_heap_base(), heap->get_size());
+  window_info_ = new WindowInfo(heap->get_local_heap_base(), heap->get_size());
 }
 
 __host__ HostContextWindowInfo::~HostContextWindowInfo() {
@@ -126,8 +123,7 @@ int HostInterface::find_win_info_in_pool(WindowInfo* window_info) {
   return -1;
 }
 
-__host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
-                                      MPI_Comm rocshmem_comm,
+__host__ HostInterface::HostInterface(HdpPolicy* hdp_policy, MPI_Comm rocshmem_comm,
                                       SymmetricHeap* heap) {
   /*
    * Duplicate a communicator from roc_shem's comm
@@ -146,13 +142,11 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
   /*
    * Allocate and initialize pool of windows for contexts
    */
-  size_t pool_size = envvar::max_num_host_contexts * sizeof(HostContextWindowInfo*);
-  host_window_context_pool_ =
-      reinterpret_cast<HostContextWindowInfo**>(malloc(pool_size));
+  size_t pool_size          = envvar::max_num_host_contexts * sizeof(HostContextWindowInfo*);
+  host_window_context_pool_ = reinterpret_cast<HostContextWindowInfo**>(malloc(pool_size));
 
   for (size_t ctx_i = 0; ctx_i < envvar::max_num_host_contexts; ctx_i++) {
-    host_window_context_pool_[ctx_i] =
-        new HostContextWindowInfo(host_comm_world_, heap);
+    host_window_context_pool_[ctx_i] = new HostContextWindowInfo(host_comm_world_, heap);
   }
 
 #if defined(USE_HDP_FLUSH) && !defined(USE_SINGLE_NODE)
@@ -185,12 +179,11 @@ __host__ void HostInterface::create_hdp_window() {
 }
 #endif  // USE_HDP_FLUSH
 
-__host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
-                                      TcpBootstrap *bootstr,
+__host__ HostInterface::HostInterface(HdpPolicy* hdp_policy, TcpBootstrap* bootstr,
                                       SymmetricHeap* heap) {
   host_bootstrap_ = bootstr;
-  my_pe_ = bootstr->getRank();
-  num_pes_ = bootstr->getNranks();
+  my_pe_          = bootstr->getRank();
+  num_pes_        = bootstr->getNranks();
 
   /*
    * Not sure we need this.
@@ -200,16 +193,14 @@ __host__ HostInterface::HostInterface(HdpPolicy* hdp_policy,
   /*
    * Allocate and initialize pool of windows for contexts
    */
-  size_t pool_size = envvar::max_num_host_contexts * sizeof(HostContextWindowInfo*);
-  host_window_context_pool_ =
-      reinterpret_cast<HostContextWindowInfo**>(malloc(pool_size));
+  size_t pool_size          = envvar::max_num_host_contexts * sizeof(HostContextWindowInfo*);
+  host_window_context_pool_ = reinterpret_cast<HostContextWindowInfo**>(malloc(pool_size));
 
   for (size_t ctx_i = 0; ctx_i < envvar::max_num_host_contexts; ctx_i++) {
-    host_window_context_pool_[ctx_i] =
-        new HostContextWindowInfo(heap);
+    host_window_context_pool_[ctx_i] = new HostContextWindowInfo(heap);
   }
 
-#if defined USE_HDP_FLUSH &&  not defined USE_SINGLE_NODE
+#if defined USE_HDP_FLUSH && not defined USE_SINGLE_NODE
   LOG_ERROR_ABORT("Non-mpi use-cases only supported with coherent heap at the moment");
 #endif
 
@@ -227,39 +218,35 @@ __host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
   // All-gather over whichever bootstrap this interface was built with.
   net::AllgatherFn allgather = [this](void* inout, size_t bpp) {
     if (host_comm_world_ != MPI_COMM_NULL) {
-      mpilib_ftable_.Allgather(MPI_IN_PLACE, static_cast<int>(bpp), MPI_CHAR,
-                               inout, static_cast<int>(bpp), MPI_CHAR,
-                               host_comm_world_);
+      mpilib_ftable_.Allgather(MPI_IN_PLACE, static_cast<int>(bpp), MPI_CHAR, inout,
+                               static_cast<int>(bpp), MPI_CHAR, host_comm_world_);
     } else if (host_bootstrap_ != nullptr) {
       host_bootstrap_->allGather(inout, static_cast<int>(bpp));
     }
   };
 
   // dma-buf export for device pointers (symmetric heap is device memory).
-  net::DmabufFn dmabuf = [](void* addr, size_t len, int* fd,
-                            uint64_t* offset) -> bool {
-    hipError_t e = hipMemGetHandleForAddressRange(
-        fd, addr, len, hipMemRangeHandleTypeDmaBufFd, 0);
-    *offset = 0;
+  net::DmabufFn dmabuf = [](void* addr, size_t len, int* fd, uint64_t* offset) -> bool {
+    hipError_t e = hipMemGetHandleForAddressRange(fd, addr, len, hipMemRangeHandleTypeDmaBufFd, 0);
+    *offset      = 0;
     return e == hipSuccess;
   };
 
   void* heap_base = heap->get_local_heap_base();
   hipPointerAttribute_t attr;
-  bool heap_device = (hipPointerGetAttributes(&attr, heap_base) == hipSuccess &&
-                      attr.type == hipMemoryTypeDevice);
+  bool heap_device =
+      (hipPointerGetAttributes(&attr, heap_base) == hipSuccess && attr.type == hipMemoryTypeDevice);
 
   // Reuse the same NIC selector as the GDA path; empty means auto-detect.
   const std::string& hca = envvar::requested_nic.get_value();
 
   verbs_host_ = std::make_unique<net::VerbsHost>();
-  if (!verbs_host_->init(hdp_policy_, heap_base, heap->get_size(), heap_device,
-                         num_pes_, my_pe_,
-                         static_cast<int>(envvar::max_num_host_contexts),
-                         std::move(allgather), std::move(dmabuf),
-                         hca.empty() ? nullptr : hca.c_str())) {
-    LOG_ERROR_ABORT("ROCSHMEM_HOST_TRANSPORT=verbs selected but host-verbs "
-                    "setup failed");
+  if (!verbs_host_->init(hdp_policy_, heap_base, heap->get_size(), heap_device, num_pes_, my_pe_,
+                         static_cast<int>(envvar::max_num_host_contexts), std::move(allgather),
+                         std::move(dmabuf), hca.empty() ? nullptr : hca.c_str())) {
+    LOG_ERROR_ABORT(
+        "ROCSHMEM_HOST_TRANSPORT=verbs selected but host-verbs "
+        "setup failed");
   }
 }
 
@@ -277,8 +264,7 @@ __host__ void HostInterface::maybe_setup_verbs_host(SymmetricHeap* heap) {
  * ibv_query_device (IBV_ATOMIC_HCA vs IBV_ATOMIC_GLOB). Put/get are byte copies
  * and unaffected; only atomics need this.
  */
-__host__ bool HostInterface::verbs_amo_fetch_add(WindowInfo* window_info,
-                                                 void* dst, uint64_t value,
+__host__ bool HostInterface::verbs_amo_fetch_add(WindowInfo* window_info, void* dst, uint64_t value,
                                                  int pe, uint64_t* fetch_val) {
 #if defined(GDA_MLX5) || defined(GDA_IONIC)
   LOG_ERROR_ABORT("host verbs AMO not implemented for mlx5/ionic");
@@ -291,10 +277,8 @@ __host__ bool HostInterface::verbs_amo_fetch_add(WindowInfo* window_info,
   return true;
 }
 
-__host__ bool HostInterface::verbs_amo_fetch_cas(WindowInfo* window_info,
-                                                 void* dst, uint64_t swap,
-                                                 uint64_t compare, int pe,
-                                                 uint64_t* fetch_val) {
+__host__ bool HostInterface::verbs_amo_fetch_cas(WindowInfo* window_info, void* dst, uint64_t swap,
+                                                 uint64_t compare, int pe, uint64_t* fetch_val) {
 #if defined(GDA_MLX5) || defined(GDA_IONIC)
   LOG_ERROR_ABORT("host verbs AMO not implemented for mlx5/ionic");
 #endif
@@ -313,11 +297,13 @@ __host__ bool HostInterface::verbs_amo_fetch_cas(WindowInfo* window_info,
  * by window subtype like the blocking putmem/amo: served by WindowInfoVerbs on
  * the verbs transport; a non-verbs window aborts rather than silently no-op.
  */
-__host__ void HostInterface::putmem_signal(
-    [[maybe_unused]] void* dest, [[maybe_unused]] const void* source,
-    [[maybe_unused]] size_t nelems, [[maybe_unused]] uint64_t* sig_addr,
-    [[maybe_unused]] uint64_t signal, [[maybe_unused]] int sig_op,
-    [[maybe_unused]] int pe, [[maybe_unused]] WindowInfo* window_info) {
+__host__ void HostInterface::putmem_signal([[maybe_unused]] void* dest,
+                                           [[maybe_unused]] const void* source,
+                                           [[maybe_unused]] size_t nelems,
+                                           [[maybe_unused]] uint64_t* sig_addr,
+                                           [[maybe_unused]] uint64_t signal,
+                                           [[maybe_unused]] int sig_op, [[maybe_unused]] int pe,
+                                           [[maybe_unused]] WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->put_signal(dest, source, nelems, sig_addr, signal, sig_op, pe);
@@ -329,9 +315,8 @@ __host__ void HostInterface::putmem_signal(
       "transport");
 }
 
-__host__ uint64_t HostInterface::signal_fetch(
-    [[maybe_unused]] const uint64_t* sig_addr,
-    [[maybe_unused]] WindowInfo* window_info) {
+__host__ uint64_t HostInterface::signal_fetch([[maybe_unused]] const uint64_t* sig_addr,
+                                              [[maybe_unused]] WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     return w->signal_fetch(sig_addr);
@@ -343,10 +328,10 @@ __host__ uint64_t HostInterface::signal_fetch(
   return 0;
 }
 
-__host__ void HostInterface::signal_wait_until(
-    [[maybe_unused]] uint64_t* sig_addr, [[maybe_unused]] int cmp,
-    [[maybe_unused]] uint64_t cmp_value,
-    [[maybe_unused]] WindowInfo* window_info) {
+__host__ void HostInterface::signal_wait_until([[maybe_unused]] uint64_t* sig_addr,
+                                               [[maybe_unused]] int cmp,
+                                               [[maybe_unused]] uint64_t cmp_value,
+                                               [[maybe_unused]] WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
     w->signal_wait_until(sig_addr, cmp, cmp_value);
@@ -379,8 +364,7 @@ __host__ HostInterface::~HostInterface() {
   }
 }
 
-__host__ void HostInterface::putmem_nbi(void* dest, const void* source,
-                                        size_t nelems, int pe,
+__host__ void HostInterface::putmem_nbi(void* dest, const void* source, size_t nelems, int pe,
                                         WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
@@ -395,8 +379,7 @@ __host__ void HostInterface::putmem_nbi(void* dest, const void* source,
   initiate_put(dest, source, nelems, pe, window_info_mpi);
 }
 
-__host__ void HostInterface::getmem_nbi(void* dest, const void* source,
-                                        size_t nelems, int pe,
+__host__ void HostInterface::getmem_nbi(void* dest, const void* source, size_t nelems, int pe,
                                         WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
@@ -411,8 +394,7 @@ __host__ void HostInterface::getmem_nbi(void* dest, const void* source,
   initiate_get(dest, source, nelems, pe, window_info_mpi);
 }
 
-__host__ void HostInterface::putmem(void* dest, const void* source,
-                                    size_t nelems, int pe,
+__host__ void HostInterface::putmem(void* dest, const void* source, size_t nelems, int pe,
                                     WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
@@ -429,8 +411,7 @@ __host__ void HostInterface::putmem(void* dest, const void* source,
   mpilib_ftable_.Win_flush_local(pe, window_info_mpi->get_win());
 }
 
-__host__ void HostInterface::getmem(void* dest, const void* source,
-                                    size_t nelems, int pe,
+__host__ void HostInterface::getmem(void* dest, const void* source, size_t nelems, int pe,
                                     WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   if (auto* w = dynamic_cast<WindowInfoVerbs*>(window_info)) {
@@ -562,8 +543,7 @@ __host__ void HostInterface::barrier_all(WindowInfo* window_info) {
   return;
 }
 
-__host__ void HostInterface::barrier(rocshmem_team_t team,
-                                     WindowInfo* window_info) {
+__host__ void HostInterface::barrier(rocshmem_team_t team, WindowInfo* window_info) {
   if (team == ROCSHMEM_TEAM_INVALID) {
     return;
   }
@@ -587,8 +567,7 @@ __host__ void HostInterface::barrier_all_on_stream(hipStream_t stream) {
   rocshmem_barrier_all_kernel<<<1, 1, 0, stream>>>();
 }
 
-__host__ void HostInterface::barrier_on_stream(rocshmem_team_t team,
-                                               hipStream_t stream) {
+__host__ void HostInterface::barrier_on_stream(rocshmem_team_t team, hipStream_t stream) {
   // Non-members hold ROCSHMEM_TEAM_INVALID; matching the blocking
   // rocshmem_barrier(team), this is a no-op: nothing is enqueued.
   if (team == ROCSHMEM_TEAM_INVALID) {
@@ -608,8 +587,7 @@ __host__ void HostInterface::sync_all_on_stream(hipStream_t stream) {
   rocshmem_sync_all_kernel<<<1, 1, 0, stream>>>();
 }
 
-__host__ void HostInterface::sync_on_stream(rocshmem_team_t team,
-                                            hipStream_t stream) {
+__host__ void HostInterface::sync_on_stream(rocshmem_team_t team, hipStream_t stream) {
   // Non-members hold ROCSHMEM_TEAM_INVALID; matching the blocking
   // rocshmem_team_sync(team), this is a no-op: nothing is enqueued.
   if (team == ROCSHMEM_TEAM_INVALID) {
@@ -619,21 +597,18 @@ __host__ void HostInterface::sync_on_stream(rocshmem_team_t team,
   rocshmem_team_sync_kernel<<<1, 1, 0, stream>>>(team);
 }
 
-__host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
-                                                   void *dest,
-                                                   const void *source,
-                                                   size_t nelems,
+__host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team, void* dest,
+                                                   const void* source, size_t nelems,
                                                    hipStream_t stream) {
   // Use dynamic block size determination:
   // - Query optimal block size using occupancy API
   // - Limit block size to nelems (number of bytes) to avoid over-subscription
   // - Always use 1 block (single workgroup collective)
   const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
-  int optimal_block_size = 0;
-  int grid_size = 0;
+  int optimal_block_size       = 0;
+  int grid_size                = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
-                                              rocshmem_alltoallmem_kernel,
-                                              lds_stage_bytes, 0));
+                                              rocshmem_alltoallmem_kernel, lds_stage_bytes, 0));
 
   // Limit block size to nelems (bytes) to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -643,27 +618,22 @@ __host__ void HostInterface::alltoallmem_on_stream(rocshmem_team_t team,
   // Launch kernel to do alltoall with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_alltoallmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
-      team, dest, source, nelems);
+  rocshmem_alltoallmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(team, dest, source,
+                                                                                nelems);
 }
 
-__host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
-                                                    void *dest,
-                                                    const void *source,
-                                                    size_t nelems, int pe_root,
+__host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team, void* dest,
+                                                    const void* source, size_t nelems, int pe_root,
                                                     hipStream_t stream) {
   // Use dynamic block size determination:
   // - Query optimal block size using occupancy API
   // - Limit block size to nelems (number of bytes) to avoid over-subscription
   // - Always use 1 block (single workgroup collective)
   const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
-  int optimal_block_size = 0;
-  int grid_size = 0;
-  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size,
-                                              &optimal_block_size,
-                                              rocshmem_broadcastmem_kernel,
-                                              lds_stage_bytes,
-                                              0));
+  int optimal_block_size       = 0;
+  int grid_size                = 0;
+  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
+                                              rocshmem_broadcastmem_kernel, lds_stage_bytes, 0));
 
   // Limit block size to nelems (bytes) to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -673,19 +643,17 @@ __host__ void HostInterface::broadcastmem_on_stream(rocshmem_team_t team,
   // Launch kernel to do broadcast with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_broadcastmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
-      team, dest, source, nelems, pe_root);
+  rocshmem_broadcastmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(team, dest, source,
+                                                                                 nelems, pe_root);
 }
 
-__host__ void HostInterface::getmem_on_stream(void *dest, const void *source,
-                                              size_t nelems, int pe,
+__host__ void HostInterface::getmem_on_stream(void* dest, const void* source, size_t nelems, int pe,
                                               hipStream_t stream) {
   const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
-  int optimal_block_size = 0;
-  int grid_size = 0;
+  int optimal_block_size       = 0;
+  int grid_size                = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
-                                              rocshmem_getmem_kernel,
-                                              lds_stage_bytes, 0));
+                                              rocshmem_getmem_kernel, lds_stage_bytes, 0));
 
   // Limit block size to nelems to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -695,19 +663,17 @@ __host__ void HostInterface::getmem_on_stream(void *dest, const void *source,
   // Launch kernel to do getmem with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_getmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
-      dest, source, nelems, pe);
+  rocshmem_getmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(dest, source, nelems,
+                                                                           pe);
 }
 
-__host__ void HostInterface::putmem_on_stream(void *dest, const void *source,
-                                              size_t nelems, int pe,
+__host__ void HostInterface::putmem_on_stream(void* dest, const void* source, size_t nelems, int pe,
                                               hipStream_t stream) {
   const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
-  int optimal_block_size = 0;
-  int grid_size = 0;
+  int optimal_block_size       = 0;
+  int grid_size                = 0;
   CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
-                                              rocshmem_putmem_kernel,
-                                              lds_stage_bytes, 0));
+                                              rocshmem_putmem_kernel, lds_stage_bytes, 0));
 
   // Limit block size to nelems to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -717,19 +683,18 @@ __host__ void HostInterface::putmem_on_stream(void *dest, const void *source,
   // Launch kernel to do putmem with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_putmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(
-      dest, source, nelems, pe);
+  rocshmem_putmem_kernel<<<gridSize, blockSize, lds_stage_bytes, stream>>>(dest, source, nelems,
+                                                                           pe);
 }
 
-__host__ void HostInterface::putmem_signal_on_stream(
-    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
-    uint64_t signal, int sig_op, int pe, hipStream_t stream) {
+__host__ void HostInterface::putmem_signal_on_stream(void* dest, const void* source, size_t nelems,
+                                                     uint64_t* sig_addr, uint64_t signal,
+                                                     int sig_op, int pe, hipStream_t stream) {
   const size_t lds_stage_bytes = rocshmem_query_lds_stage_bytes();
-  int optimal_block_size = 0;
-  int grid_size = 0;
-  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(
-      &grid_size, &optimal_block_size, rocshmem_putmem_signal_kernel,
-      lds_stage_bytes, 0));
+  int optimal_block_size       = 0;
+  int grid_size                = 0;
+  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
+                                              rocshmem_putmem_signal_kernel, lds_stage_bytes, 0));
 
   // Limit block size to nelems to avoid over-subscription
   int num_threads_per_block = (optimal_block_size > static_cast<int>(nelems))
@@ -743,27 +708,22 @@ __host__ void HostInterface::putmem_signal_on_stream(
       dest, source, nelems, sig_addr, signal, sig_op, pe);
 }
 
-__host__ void HostInterface::signal_add_on_stream(uint64_t *sig_addr,
-                                                  uint64_t signal, int pe,
+__host__ void HostInterface::signal_add_on_stream(uint64_t* sig_addr, uint64_t signal, int pe,
                                                   hipStream_t stream) {
   rocshmem_signal_add_kernel<<<1, 1, 0, stream>>>(sig_addr, signal, pe);
 }
 
-__host__ void HostInterface::signal_set_on_stream(uint64_t *sig_addr,
-                                                  uint64_t signal, int pe,
+__host__ void HostInterface::signal_set_on_stream(uint64_t* sig_addr, uint64_t signal, int pe,
                                                   hipStream_t stream) {
   rocshmem_signal_set_kernel<<<1, 1, 0, stream>>>(sig_addr, signal, pe);
 }
 
-__host__ void HostInterface::signal_wait_until_on_stream(uint64_t *sig_addr,
-                                                         int cmp,
-                                                         uint64_t cmp_value,
-                                                         hipStream_t stream) {
+__host__ void HostInterface::signal_wait_until_on_stream(uint64_t* sig_addr, int cmp,
+                                                         uint64_t cmp_value, hipStream_t stream) {
   // Use a single thread to wait on the signal
   dim3 gridSize(1);
   dim3 blockSize(1);
-  rocshmem_signal_wait_until_kernel<<<gridSize, blockSize, 0, stream>>>(
-      sig_addr, cmp, cmp_value);
+  rocshmem_signal_wait_until_kernel<<<gridSize, blockSize, 0, stream>>>(sig_addr, cmp, cmp_value);
 }
 
 __host__ void HostInterface::barrier_for_sync() {

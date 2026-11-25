@@ -40,22 +40,22 @@ TEST_F(IbvShimTestFixture, AllocPdCreateCqCreateRcQp) {
   ctx_ = ibv_.open_device(device_list_[0]);
   ASSERT_NE(ctx_, nullptr) << "open_device failed on an enumerated device";
 
-  auto *pd = ibv_.alloc_pd(ctx_);
+  auto* pd = ibv_.alloc_pd(ctx_);
   ASSERT_NE(pd, nullptr);
 
-  auto *cq = ibv_.create_cq(ctx_, 64, nullptr, nullptr, 0);
+  auto* cq = ibv_.create_cq(ctx_, 64, nullptr, nullptr, 0);
   ASSERT_NE(cq, nullptr);
 
   struct ibv_qp_init_attr qa;
   std::memset(&qa, 0, sizeof(qa));
-  qa.send_cq = cq;
-  qa.recv_cq = cq;
-  qa.qp_type = IBV_QPT_RC;
-  qa.cap.max_send_wr = 64;
-  qa.cap.max_recv_wr = 1;
+  qa.send_cq          = cq;
+  qa.recv_cq          = cq;
+  qa.qp_type          = IBV_QPT_RC;
+  qa.cap.max_send_wr  = 64;
+  qa.cap.max_recv_wr  = 1;
   qa.cap.max_send_sge = 1;
   qa.cap.max_recv_sge = 1;
-  auto *qp = ibv_.create_qp(pd, &qa);
+  auto* qp            = ibv_.create_qp(pd, &qa);
   ASSERT_NE(qp, nullptr);
 
   // Data-plane fast paths are inline op-table dispatch, not dlsym'd -- confirm

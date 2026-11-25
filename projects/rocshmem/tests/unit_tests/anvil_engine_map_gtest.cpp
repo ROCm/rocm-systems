@@ -30,11 +30,11 @@ using namespace sdma_anvil;
 namespace {
 
 // MI300X engine counts as ROCr reports them.
-constexpr uint32_t kSpxXgmi = 14;
+constexpr uint32_t kSpxXgmi  = 14;
 constexpr uint32_t kSpxTotal = 16;
 constexpr uint32_t kDpxTotal = 8;
 constexpr uint32_t kQpxTotal = 4;
-constexpr uint32_t kCpxXgmi = 0;
+constexpr uint32_t kCpxXgmi  = 0;
 constexpr uint32_t kCpxTotal = 2;
 
 }  // namespace
@@ -87,11 +87,7 @@ TEST(AnvilEngineMap, LeastLoadedWithUnknownEngineCountUsesEngineZero) {
 // fallback. A later edit that reintroduces a second loop has to keep these equal.
 TEST(AnvilEngineMap, LeastLoadedUsableMatchesEveryEvenEngine) {
   const std::vector<std::vector<uint32_t>> loads = {
-      {},
-      {3, 0, 1, 0, 2, 0, 1, 0},
-      {4, 0, 4, 0, 4, 0, 0, 0},
-      {2, 0, 2, 0},
-      {1, 0, 0, 0, 0},
+      {}, {3, 0, 1, 0, 2, 0, 1, 0}, {4, 0, 4, 0, 4, 0, 0, 0}, {2, 0, 2, 0}, {1, 0, 0, 0, 0},
   };
   for (const auto& load : loads) {
     EXPECT_EQ(leastLoadedUsableEngine(load), leastLoadedPreferredEngine(0x55555555u, load));
@@ -175,8 +171,7 @@ TEST(AnvilEngineMap, CpxFoldUsesOnlyEngineZero) {
 }
 
 TEST(AnvilEngineMap, FoldSeparatesPairsWhenMultipleEvenEnginesExist) {
-  EXPECT_NE(foldOamMapEngine(0, 0, 1, kDpxTotal),
-            foldOamMapEngine(0, 1, 1, kDpxTotal));
+  EXPECT_NE(foldOamMapEngine(0, 0, 1, kDpxTotal), foldOamMapEngine(0, 1, 1, kDpxTotal));
 }
 
 TEST(AnvilEngineMap, FoldTreatsUnreadableFunctionAsZero) {

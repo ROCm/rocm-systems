@@ -40,17 +40,14 @@ class ROTeamProxy {
    * Placement new the memory which is allocated by proxy_
    */
   ROTeamProxy(Backend* backend, MPI_Comm comm, int pe, int npes,
-              const HIPAllocator& alloc = HIPAllocator(),
-              size_t num_elems = 1)
-    : alloc_{alloc}, proxy_{num_elems, alloc_} {
-
+              const HIPAllocator& alloc = HIPAllocator(), size_t num_elems = 1)
+      : alloc_{alloc}, proxy_{num_elems, alloc_} {
     mpilib_ftable_.Comm_dup(comm, &team_world_comm_);
 
     TeamInfo wrt_parent(nullptr, 0, 1, npes);
     TeamInfo wrt_world(nullptr, 0, 1, npes);
 
-    new (proxy_.get()) ROTeam(backend, wrt_parent, wrt_world,
-                              npes, pe, team_world_comm_);
+    new (proxy_.get()) ROTeam(backend, wrt_parent, wrt_world, npes, pe, team_world_comm_);
   }
 
   ROTeamProxy(const ROTeamProxy& other) = delete;

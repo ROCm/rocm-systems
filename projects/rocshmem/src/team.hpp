@@ -52,8 +52,7 @@ class TeamInfo {
   /**
    * @brief Primary constructor
    */
-  __host__ __device__ TeamInfo(Team* parent_team, int pe_start, int stride,
-                               int size);
+  __host__ __device__ TeamInfo(Team* parent_team, int pe_start, int stride, int size);
 
   /**
    * @brief The team from which this team was created.
@@ -88,19 +87,18 @@ class Team {
    * @param _my_pe the index of this PE in the team
    * @param _mpi_comm MPI Communicator representing the team
    */
-  Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
-       const TeamInfo& team_info_wrt_world, int num_pes, int my_pe,
-       MPI_Comm mpi_comm);
+  Team(Backend* handle, const TeamInfo& team_info_wrt_parent, const TeamInfo& team_info_wrt_world,
+       int num_pes, int my_pe, MPI_Comm mpi_comm);
 
   /**
    * @brief Non-copyable and non-movable because Team
    * owns a hipMalloc'd TeamInfo block and an MPI
    * communicator that require unique ownership.
    */
-  Team(const Team&) = delete;
+  Team(const Team&)            = delete;
   Team& operator=(const Team&) = delete;
-  Team(Team&&) = delete;
-  Team& operator=(Team&&) = delete;
+  Team(Team&&)                 = delete;
+  Team& operator=(Team&&)      = delete;
 
   /**
    * @brief Destructor.

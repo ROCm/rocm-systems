@@ -60,7 +60,7 @@ inline const unsigned MAX_WG_SIZE{1024};
  *
  * @note Wavefront size on most systems is either 32 or 64.
  */
-#if defined(__gfx90a__) || defined(__gfx942__) || defined (__gfx950__)
+#if defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
 inline const int WF_SIZE{64};
 #else
 inline const int WF_SIZE{32};
@@ -69,8 +69,7 @@ inline const int WF_SIZE{32};
 /**
  * @brief Sentinel value for ipc_sdma_threshold indicating SDMA is disabled.
  */
-inline constexpr size_t SDMA_THRESHOLD_DISABLED =
-    std::numeric_limits<size_t>::max();
+inline constexpr size_t SDMA_THRESHOLD_DISABLED = std::numeric_limits<size_t>::max();
 
 }  // namespace rocshmem
 

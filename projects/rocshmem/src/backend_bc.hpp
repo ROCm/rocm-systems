@@ -98,11 +98,9 @@ class Backend {
    *
    * @param[out] new_team pointer to the new team.
    */
-  virtual void create_new_team(Team* parent_team,
-                               const TeamInfo& team_info_wrt_parent,
-                               const TeamInfo& team_info_wrt_world,
-                               int num_pes, int my_pe_in_new_team,
-                               MPI_Comm team_comm,
+  virtual void create_new_team(Team* parent_team, const TeamInfo& team_info_wrt_parent,
+                               const TeamInfo& team_info_wrt_world, int num_pes,
+                               int my_pe_in_new_team, MPI_Comm team_comm,
                                rocshmem_team_t* new_team) = 0;
 
   /**
@@ -205,8 +203,8 @@ class Backend {
    * @brief Per-symmetric-registration record kept on the host.
    */
   struct SymmRegion {
-    size_t length{0};       // registered length in bytes
-    uintptr_t orig_base{0}; // user's original buffer base address
+    size_t length{0};        // registered length in bytes
+    uintptr_t orig_base{0};  // user's original buffer base address
   };
 
   /**
@@ -231,12 +229,12 @@ class Backend {
   /**
    * @brief Register a user buffer.
    */
-  virtual int buffer_register(void *addr, size_t length);
+  virtual int buffer_register(void* addr, size_t length);
 
   /**
    * @brief Unregister a user buffer.
    */
-  virtual int buffer_unregister(void *addr);
+  virtual int buffer_unregister(void* addr);
 
   /**
    * @brief Unregister all previously registered user buffers.
@@ -257,8 +255,7 @@ class Backend {
    * @param[in]  length          Length in bytes
    * @param[out] registered_addr Filled with the rocSHMEM-managed alias address
    */
-  virtual int buffer_register_symmetric(void *addr, size_t length,
-                                        void **registered_addr);
+  virtual int buffer_register_symmetric(void* addr, size_t length, void** registered_addr);
 
   /**
    * @brief Unregister a symmetric user buffer (collective).
@@ -268,7 +265,7 @@ class Backend {
    * resources and call Backend::buffer_unregister_symmetric for the common
    * portion.
    */
-  virtual int buffer_unregister_symmetric(void *addr);
+  virtual int buffer_unregister_symmetric(void* addr);
 
   /**
    * @brief High level device stats that do not depend on backend type.
@@ -310,7 +307,7 @@ class Backend {
   /**
    * @todo document where this is used
    */
-  TcpBootstrap *backend_bootstr{nullptr};
+  TcpBootstrap* backend_bootstr{nullptr};
 
   /**
    * @brief Object contains the interface and internal data structures
@@ -368,7 +365,7 @@ class Backend {
   /**
    * Fine grained memory allocator for buffers used in collectives Routines
    */
-  HIPAllocator *psync_allocator_{nullptr};
+  HIPAllocator* psync_allocator_{nullptr};
 
  protected:
   /**
@@ -394,7 +391,7 @@ class Backend {
    * populated on entry. Works with either the MPI or TCP bootstrap transport.
    * Shared helper for backends exchanging registration handles.
    */
-  void symm_allgather(void *inout, size_t bytes_per_pe);
+  void symm_allgather(void* inout, size_t bytes_per_pe);
 
   /**
    * @brief Collective agreement across all PEs on a per-PE value.
@@ -458,12 +455,12 @@ class Backend {
    * backend calls ipcPeerPtr().
    */
   struct IpcSymmRecord {
-    int slot{-1};                       // index into ipcImpl.symm_table
-    int num_peers{0};                   // size of the peer arrays
-    int self_index{-1};                 // this PE's own peer index
-    char** dev_peer_bases{nullptr};     // device array[num_peers] (published)
-    std::vector<char*> peer_bases{};    // host copy[num_peers] (for CloseIpcHandle)
-    std::vector<char> local_handle{};   // exported IPC handle (for cleanup)
+    int slot{-1};                      // index into ipcImpl.symm_table
+    int num_peers{0};                  // size of the peer arrays
+    int self_index{-1};                // this PE's own peer index
+    char** dev_peer_bases{nullptr};    // device array[num_peers] (published)
+    std::vector<char*> peer_bases{};   // host copy[num_peers] (for CloseIpcHandle)
+    std::vector<char> local_handle{};  // exported IPC handle (for cleanup)
   };
 
   /**
@@ -503,10 +500,8 @@ class Backend {
    * @param[in] self_index  This PE's index within @p peer_global
    * @return ROCSHMEM_SUCCESS or ROCSHMEM_ERROR (agreed across all PEs)
    */
-  int register_ipc_symm_region(void* symm_addr, void* export_addr,
-                               size_t length,
-                               const std::vector<int>& peer_global,
-                               int self_index);
+  int register_ipc_symm_region(void* symm_addr, void* export_addr, size_t length,
+                               const std::vector<int>& peer_global, int self_index);
 
   /**
    * @brief Tear down an IPC symmetric registration published by
@@ -556,13 +551,13 @@ class Backend {
    * @param[in]  length Length in bytes.
    * @param[out] alias  Filled with the symmetric address to return to caller.
    */
-  hipError_t create_symm_alias(void *addr, size_t length, void **alias);
+  hipError_t create_symm_alias(void* addr, size_t length, void** alias);
 
   /**
    * @brief Release a symmetric address previously produced by
    *        create_symm_alias() (unmaps the alias mapping).
    */
-  void destroy_symm_alias(void *alias, size_t length);
+  void destroy_symm_alias(void* alias, size_t length);
 
   /**
    * @brief Dumps derived class statistics. Default is a no-op.
@@ -578,8 +573,7 @@ class Backend {
   /**
    * @brief initialization code used by all constructors
    */
-  void init (void);
-
+  void init(void);
 
   /**
    * @brief List of ctxs created by the user.

@@ -48,8 +48,7 @@ class WindowInfo {
    * @brief Primary constructor
    */
   WindowInfo(void* start, size_t size)
-      : win_start_{start},
-        win_end_{reinterpret_cast<char*>(start) + size} {}
+      : win_start_{start}, win_end_{reinterpret_cast<char*>(start) + size} {}
 
   /**
    * @brief Destructor
@@ -115,14 +114,12 @@ class WindowInfo {
    * @return Difference between dest and window start
    */
   virtual ptrdiff_t get_offset(const void* dest) {
-    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) >=
-           reinterpret_cast<char*>(win_start_));
-    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) >=
-           reinterpret_cast<char*>(win_start_));
-    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) <
-           reinterpret_cast<char*>(win_end_));
+    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) >= reinterpret_cast<char*>(win_start_));
+    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) >= reinterpret_cast<char*>(win_start_));
+    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) < reinterpret_cast<char*>(win_end_));
 
-    return reinterpret_cast<ptrdiff_t>(reinterpret_cast<char*>(const_cast<void*>(dest)) - reinterpret_cast<char*>(win_start_));
+    return reinterpret_cast<ptrdiff_t>(reinterpret_cast<char*>(const_cast<void*>(dest)) -
+                                       reinterpret_cast<char*>(win_start_));
   }
 
  protected:
@@ -137,8 +134,7 @@ class WindowInfo {
   void* win_end_{nullptr};
 };
 
-
-class WindowInfoMPI: public WindowInfo {
+class WindowInfoMPI : public WindowInfo {
  public:
   /**
    * @brief Default constructor
@@ -148,10 +144,9 @@ class WindowInfoMPI: public WindowInfo {
   /**
    * @brief Primary constructor
    */
-  WindowInfoMPI(MPI_Comm comm, void* start, size_t size)
-      : comm_{comm} {
+  WindowInfoMPI(MPI_Comm comm, void* start, size_t size) : comm_{comm} {
     win_start_ = start;
-    win_end_ = reinterpret_cast<char*>(start) + size;
+    win_end_   = reinterpret_cast<char*>(start) + size;
 
     up_win_ = std::unique_ptr<MPI_Win>(new MPI_Win);
     mpilib_ftable_.Win_create(win_start_, size, 1, MPI_INFO_NULL, comm_, up_win_.get());
@@ -213,12 +208,9 @@ class WindowInfoMPI: public WindowInfo {
    * @return Difference between dest and window start
    */
   ptrdiff_t get_offset(const void* dest) override {
-    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) >=
-           reinterpret_cast<char*>(win_start_));
-    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) >=
-           reinterpret_cast<char*>(win_start_));
-    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) <
-           reinterpret_cast<char*>(win_end_));
+    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) >= reinterpret_cast<char*>(win_start_));
+    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) >= reinterpret_cast<char*>(win_start_));
+    assert(reinterpret_cast<char*>(const_cast<void*>(dest)) < reinterpret_cast<char*>(win_end_));
 
     MPI_Aint dest_disp;
     mpilib_ftable_.Get_address(dest, &dest_disp);
@@ -244,7 +236,6 @@ class WindowInfoMPI: public WindowInfo {
    * or move assigned.
    */
   std::unique_ptr<MPI_Win> up_win_{nullptr};
-
 };
 
 }  // namespace rocshmem

@@ -46,149 +46,126 @@ namespace rocshmem {
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_float_put(
-    rocshmem_ctx_t ctx, float *dest, const float *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_float_put(
-    float *dest, const float *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_float_put(
-    rocshmem_ctx_t ctx, float *dest, const float *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_float_put(float *dest,
-    const float *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_float_put(rocshmem_ctx_t ctx, float* dest,
+                                                      const float* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_float_put(float* dest, const float* source, size_t nelems,
+                                                  int pe);
+__host__ void rocshmem_ctx_float_put(rocshmem_ctx_t ctx, float* dest, const float* source,
+                                     size_t nelems, int pe);
+__host__ void rocshmem_float_put(float* dest, const float* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_double_put(
-    rocshmem_ctx_t ctx, double *dest, const double *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_double_put(
-    double *dest, const double *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_double_put(
-    rocshmem_ctx_t ctx, double *dest, const double *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_double_put(double *dest,
-    const double *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_double_put(rocshmem_ctx_t ctx, double* dest,
+                                                       const double* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_double_put(double* dest, const double* source,
+                                                   size_t nelems, int pe);
+__host__ void rocshmem_ctx_double_put(rocshmem_ctx_t ctx, double* dest, const double* source,
+                                      size_t nelems, int pe);
+__host__ void rocshmem_double_put(double* dest, const double* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_char_put(
-    rocshmem_ctx_t ctx, char *dest, const char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_char_put(
-    char *dest, const char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_char_put(
-    rocshmem_ctx_t ctx, char *dest, const char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_char_put(char *dest,
-    const char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_char_put(rocshmem_ctx_t ctx, char* dest,
+                                                     const char* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_char_put(char* dest, const char* source, size_t nelems,
+                                                 int pe);
+__host__ void rocshmem_ctx_char_put(rocshmem_ctx_t ctx, char* dest, const char* source,
+                                    size_t nelems, int pe);
+__host__ void rocshmem_char_put(char* dest, const char* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_put(
-    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_schar_put(
-    signed char *dest, const signed char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_schar_put(
-    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_schar_put(signed char *dest,
-    const signed char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_put(rocshmem_ctx_t ctx, signed char* dest,
+                                                      const signed char* source, size_t nelems,
+                                                      int pe);
+__device__ ATTR_NO_INLINE void rocshmem_schar_put(signed char* dest, const signed char* source,
+                                                  size_t nelems, int pe);
+__host__ void rocshmem_ctx_schar_put(rocshmem_ctx_t ctx, signed char* dest,
+                                     const signed char* source, size_t nelems, int pe);
+__host__ void rocshmem_schar_put(signed char* dest, const signed char* source, size_t nelems,
+                                 int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_short_put(
-    rocshmem_ctx_t ctx, short *dest, const short *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_short_put(
-    short *dest, const short *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_short_put(
-    rocshmem_ctx_t ctx, short *dest, const short *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_short_put(short *dest,
-    const short *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_short_put(rocshmem_ctx_t ctx, short* dest,
+                                                      const short* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_short_put(short* dest, const short* source, size_t nelems,
+                                                  int pe);
+__host__ void rocshmem_ctx_short_put(rocshmem_ctx_t ctx, short* dest, const short* source,
+                                     size_t nelems, int pe);
+__host__ void rocshmem_short_put(short* dest, const short* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_int_put(
-    rocshmem_ctx_t ctx, int *dest, const int *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_int_put(
-    int *dest, const int *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_int_put(
-    rocshmem_ctx_t ctx, int *dest, const int *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_int_put(int *dest,
-    const int *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int_put(rocshmem_ctx_t ctx, int* dest,
+                                                    const int* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int_put(int* dest, const int* source, size_t nelems,
+                                                int pe);
+__host__ void rocshmem_ctx_int_put(rocshmem_ctx_t ctx, int* dest, const int* source, size_t nelems,
+                                   int pe);
+__host__ void rocshmem_int_put(int* dest, const int* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_long_put(
-    rocshmem_ctx_t ctx, long *dest, const long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_long_put(
-    long *dest, const long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_long_put(
-    rocshmem_ctx_t ctx, long *dest, const long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_long_put(long *dest,
-    const long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_long_put(rocshmem_ctx_t ctx, long* dest,
+                                                     const long* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_long_put(long* dest, const long* source, size_t nelems,
+                                                 int pe);
+__host__ void rocshmem_ctx_long_put(rocshmem_ctx_t ctx, long* dest, const long* source,
+                                    size_t nelems, int pe);
+__host__ void rocshmem_long_put(long* dest, const long* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_put(
-    rocshmem_ctx_t ctx, long long *dest, const long long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_longlong_put(
-    long long *dest, const long long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_longlong_put(
-    rocshmem_ctx_t ctx, long long *dest, const long long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_longlong_put(long long *dest,
-    const long long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_put(rocshmem_ctx_t ctx, long long* dest,
+                                                         const long long* source, size_t nelems,
+                                                         int pe);
+__device__ ATTR_NO_INLINE void rocshmem_longlong_put(long long* dest, const long long* source,
+                                                     size_t nelems, int pe);
+__host__ void rocshmem_ctx_longlong_put(rocshmem_ctx_t ctx, long long* dest,
+                                        const long long* source, size_t nelems, int pe);
+__host__ void rocshmem_longlong_put(long long* dest, const long long* source, size_t nelems,
+                                    int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_put(
-    rocshmem_ctx_t ctx, unsigned char *dest, const unsigned char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uchar_put(
-    unsigned char *dest, const unsigned char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_uchar_put(
-    rocshmem_ctx_t ctx, unsigned char *dest, const unsigned char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_uchar_put(unsigned char *dest,
-    const unsigned char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_put(rocshmem_ctx_t ctx, unsigned char* dest,
+                                                      const unsigned char* source, size_t nelems,
+                                                      int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uchar_put(unsigned char* dest, const unsigned char* source,
+                                                  size_t nelems, int pe);
+__host__ void rocshmem_ctx_uchar_put(rocshmem_ctx_t ctx, unsigned char* dest,
+                                     const unsigned char* source, size_t nelems, int pe);
+__host__ void rocshmem_uchar_put(unsigned char* dest, const unsigned char* source, size_t nelems,
+                                 int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_put(
-    rocshmem_ctx_t ctx, unsigned short *dest, const unsigned short *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ushort_put(
-    unsigned short *dest, const unsigned short *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ushort_put(
-    rocshmem_ctx_t ctx, unsigned short *dest, const unsigned short *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ushort_put(unsigned short *dest,
-    const unsigned short *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_put(rocshmem_ctx_t ctx, unsigned short* dest,
+                                                       const unsigned short* source, size_t nelems,
+                                                       int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ushort_put(unsigned short* dest,
+                                                   const unsigned short* source, size_t nelems,
+                                                   int pe);
+__host__ void rocshmem_ctx_ushort_put(rocshmem_ctx_t ctx, unsigned short* dest,
+                                      const unsigned short* source, size_t nelems, int pe);
+__host__ void rocshmem_ushort_put(unsigned short* dest, const unsigned short* source, size_t nelems,
+                                  int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_put(
-    rocshmem_ctx_t ctx, unsigned int *dest, const unsigned int *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uint_put(
-    unsigned int *dest, const unsigned int *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_uint_put(
-    rocshmem_ctx_t ctx, unsigned int *dest, const unsigned int *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_uint_put(unsigned int *dest,
-    const unsigned int *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_put(rocshmem_ctx_t ctx, unsigned int* dest,
+                                                     const unsigned int* source, size_t nelems,
+                                                     int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint_put(unsigned int* dest, const unsigned int* source,
+                                                 size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint_put(rocshmem_ctx_t ctx, unsigned int* dest,
+                                    const unsigned int* source, size_t nelems, int pe);
+__host__ void rocshmem_uint_put(unsigned int* dest, const unsigned int* source, size_t nelems,
+                                int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_put(
-    rocshmem_ctx_t ctx, unsigned long *dest, const unsigned long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulong_put(
-    unsigned long *dest, const unsigned long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ulong_put(
-    rocshmem_ctx_t ctx, unsigned long *dest, const unsigned long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ulong_put(unsigned long *dest,
-    const unsigned long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_put(rocshmem_ctx_t ctx, unsigned long* dest,
+                                                      const unsigned long* source, size_t nelems,
+                                                      int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulong_put(unsigned long* dest, const unsigned long* source,
+                                                  size_t nelems, int pe);
+__host__ void rocshmem_ctx_ulong_put(rocshmem_ctx_t ctx, unsigned long* dest,
+                                     const unsigned long* source, size_t nelems, int pe);
+__host__ void rocshmem_ulong_put(unsigned long* dest, const unsigned long* source, size_t nelems,
+                                 int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put(
-    rocshmem_ctx_t ctx, unsigned long long *dest, const unsigned long long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulonglong_put(
-    unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ulonglong_put(
-    rocshmem_ctx_t ctx, unsigned long long *dest, const unsigned long long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ulonglong_put(unsigned long long *dest,
-    const unsigned long long *source, size_t nelems, int pe);
-
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put(rocshmem_ctx_t ctx,
+                                                          unsigned long long* dest,
+                                                          const unsigned long long* source,
+                                                          size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulonglong_put(unsigned long long* dest,
+                                                      const unsigned long long* source,
+                                                      size_t nelems, int pe);
+__host__ void rocshmem_ctx_ulonglong_put(rocshmem_ctx_t ctx, unsigned long long* dest,
+                                         const unsigned long long* source, size_t nelems, int pe);
+__host__ void rocshmem_ulonglong_put(unsigned long long* dest, const unsigned long long* source,
+                                     size_t nelems, int pe);
 
 /**
  * @brief Writes contiguous data of \p nelems bytes from \p source on the
@@ -208,14 +185,11 @@ __host__ void rocshmem_ulonglong_put(unsigned long long *dest,
  * @param[in] nelems Size of the transfer in bytes.
  * @param[in] pe     PE of the remote process.
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem(rocshmem_ctx_t ctx,
-                                                    void *dest,
-                                                    const void *source,
-                                                    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void* dest,
+                                                   const void* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_putmem(void *dest, const void *source,
-                                                size_t nelems, int pe);
-
+__device__ ATTR_NO_INLINE void rocshmem_putmem(void* dest, const void* source, size_t nelems,
+                                               int pe);
 
 /**
  * @brief Writes contiguous data of \p nelems bytes from \p source on the
@@ -230,12 +204,10 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem(void *dest, const void *source,
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
  */
-__host__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void *dest,
-                                   const void *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_putmem(rocshmem_ctx_t ctx, void* dest, const void* source, size_t nelems,
+                                  int pe);
 
-__host__ void rocshmem_putmem(void *dest, const void *source, size_t nelems,
-                               int pe);
-
+__host__ void rocshmem_putmem(void* dest, const void* source, size_t nelems, int pe);
 
 /**
  * @name SHMEM_P
@@ -254,154 +226,95 @@ __host__ void rocshmem_putmem(void *dest, const void *source, size_t nelems,
  * @param[in] value  Value to write to dest at \p pe.
  * @param[in] pe     PE of the remote process.
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_float_p(
-    rocshmem_ctx_t ctx, float *dest, float value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_float_p(
-    float *dest, float value, int pe);
-__host__ void rocshmem_ctx_float_p(
-    rocshmem_ctx_t ctx, float *dest, float value,
-    int pe);
-__host__ void rocshmem_float_p(
-    float *dest, float value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_float_p(rocshmem_ctx_t ctx, float* dest, float value,
+                                                    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_float_p(float* dest, float value, int pe);
+__host__ void rocshmem_ctx_float_p(rocshmem_ctx_t ctx, float* dest, float value, int pe);
+__host__ void rocshmem_float_p(float* dest, float value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_double_p(
-    rocshmem_ctx_t ctx, double *dest, double value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_double_p(
-    double *dest, double value, int pe);
-__host__ void rocshmem_ctx_double_p(
-    rocshmem_ctx_t ctx, double *dest, double value,
-    int pe);
-__host__ void rocshmem_double_p(
-    double *dest, double value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_double_p(rocshmem_ctx_t ctx, double* dest, double value,
+                                                     int pe);
+__device__ ATTR_NO_INLINE void rocshmem_double_p(double* dest, double value, int pe);
+__host__ void rocshmem_ctx_double_p(rocshmem_ctx_t ctx, double* dest, double value, int pe);
+__host__ void rocshmem_double_p(double* dest, double value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_char_p(
-    rocshmem_ctx_t ctx, char *dest, char value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_char_p(
-    char *dest, char value, int pe);
-__host__ void rocshmem_ctx_char_p(
-    rocshmem_ctx_t ctx, char *dest, char value,
-    int pe);
-__host__ void rocshmem_char_p(
-    char *dest, char value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_char_p(rocshmem_ctx_t ctx, char* dest, char value,
+                                                   int pe);
+__device__ ATTR_NO_INLINE void rocshmem_char_p(char* dest, char value, int pe);
+__host__ void rocshmem_ctx_char_p(rocshmem_ctx_t ctx, char* dest, char value, int pe);
+__host__ void rocshmem_char_p(char* dest, char value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_p(
-    rocshmem_ctx_t ctx, signed char *dest, signed char value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_schar_p(
-    signed char *dest, signed char value, int pe);
-__host__ void rocshmem_ctx_schar_p(
-    rocshmem_ctx_t ctx, signed char *dest, signed char value,
-    int pe);
-__host__ void rocshmem_schar_p(
-    signed char *dest, signed char value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_p(rocshmem_ctx_t ctx, signed char* dest,
+                                                    signed char value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_schar_p(signed char* dest, signed char value, int pe);
+__host__ void rocshmem_ctx_schar_p(rocshmem_ctx_t ctx, signed char* dest, signed char value,
+                                   int pe);
+__host__ void rocshmem_schar_p(signed char* dest, signed char value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_short_p(
-    rocshmem_ctx_t ctx, short *dest, short value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_short_p(
-    short *dest, short value, int pe);
-__host__ void rocshmem_ctx_short_p(
-    rocshmem_ctx_t ctx, short *dest, short value,
-    int pe);
-__host__ void rocshmem_short_p(
-    short *dest, short value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_short_p(rocshmem_ctx_t ctx, short* dest, short value,
+                                                    int pe);
+__device__ ATTR_NO_INLINE void rocshmem_short_p(short* dest, short value, int pe);
+__host__ void rocshmem_ctx_short_p(rocshmem_ctx_t ctx, short* dest, short value, int pe);
+__host__ void rocshmem_short_p(short* dest, short value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_int_p(
-    rocshmem_ctx_t ctx, int *dest, int value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_int_p(
-    int *dest, int value, int pe);
-__host__ void rocshmem_ctx_int_p(
-    rocshmem_ctx_t ctx, int *dest, int value,
-    int pe);
-__host__ void rocshmem_int_p(
-    int *dest, int value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int_p(rocshmem_ctx_t ctx, int* dest, int value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int_p(int* dest, int value, int pe);
+__host__ void rocshmem_ctx_int_p(rocshmem_ctx_t ctx, int* dest, int value, int pe);
+__host__ void rocshmem_int_p(int* dest, int value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_long_p(
-    rocshmem_ctx_t ctx, long *dest, long value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_long_p(
-    long *dest, long value, int pe);
-__host__ void rocshmem_ctx_long_p(
-    rocshmem_ctx_t ctx, long *dest, long value,
-    int pe);
-__host__ void rocshmem_long_p(
-    long *dest, long value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_long_p(rocshmem_ctx_t ctx, long* dest, long value,
+                                                   int pe);
+__device__ ATTR_NO_INLINE void rocshmem_long_p(long* dest, long value, int pe);
+__host__ void rocshmem_ctx_long_p(rocshmem_ctx_t ctx, long* dest, long value, int pe);
+__host__ void rocshmem_long_p(long* dest, long value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_p(
-    rocshmem_ctx_t ctx, long long *dest, long long value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_longlong_p(
-    long long *dest, long long value, int pe);
-__host__ void rocshmem_ctx_longlong_p(
-    rocshmem_ctx_t ctx, long long *dest, long long value,
-    int pe);
-__host__ void rocshmem_longlong_p(
-    long long *dest, long long value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_p(rocshmem_ctx_t ctx, long long* dest,
+                                                       long long value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_longlong_p(long long* dest, long long value, int pe);
+__host__ void rocshmem_ctx_longlong_p(rocshmem_ctx_t ctx, long long* dest, long long value, int pe);
+__host__ void rocshmem_longlong_p(long long* dest, long long value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_p(
-    rocshmem_ctx_t ctx, unsigned char *dest, unsigned char value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uchar_p(
-    unsigned char *dest, unsigned char value, int pe);
-__host__ void rocshmem_ctx_uchar_p(
-    rocshmem_ctx_t ctx, unsigned char *dest, unsigned char value,
-    int pe);
-__host__ void rocshmem_uchar_p(
-    unsigned char *dest, unsigned char value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_p(rocshmem_ctx_t ctx, unsigned char* dest,
+                                                    unsigned char value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uchar_p(unsigned char* dest, unsigned char value, int pe);
+__host__ void rocshmem_ctx_uchar_p(rocshmem_ctx_t ctx, unsigned char* dest, unsigned char value,
+                                   int pe);
+__host__ void rocshmem_uchar_p(unsigned char* dest, unsigned char value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_p(
-    rocshmem_ctx_t ctx, unsigned short *dest, unsigned short value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ushort_p(
-    unsigned short *dest, unsigned short value, int pe);
-__host__ void rocshmem_ctx_ushort_p(
-    rocshmem_ctx_t ctx, unsigned short *dest, unsigned short value,
-    int pe);
-__host__ void rocshmem_ushort_p(
-    unsigned short *dest, unsigned short value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_p(rocshmem_ctx_t ctx, unsigned short* dest,
+                                                     unsigned short value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ushort_p(unsigned short* dest, unsigned short value,
+                                                 int pe);
+__host__ void rocshmem_ctx_ushort_p(rocshmem_ctx_t ctx, unsigned short* dest, unsigned short value,
+                                    int pe);
+__host__ void rocshmem_ushort_p(unsigned short* dest, unsigned short value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_p(
-    rocshmem_ctx_t ctx, unsigned int *dest, unsigned int value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uint_p(
-    unsigned int *dest, unsigned int value, int pe);
-__host__ void rocshmem_ctx_uint_p(
-    rocshmem_ctx_t ctx, unsigned int *dest, unsigned int value,
-    int pe);
-__host__ void rocshmem_uint_p(
-    unsigned int *dest, unsigned int value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_p(rocshmem_ctx_t ctx, unsigned int* dest,
+                                                   unsigned int value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint_p(unsigned int* dest, unsigned int value, int pe);
+__host__ void rocshmem_ctx_uint_p(rocshmem_ctx_t ctx, unsigned int* dest, unsigned int value,
+                                  int pe);
+__host__ void rocshmem_uint_p(unsigned int* dest, unsigned int value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_p(
-    rocshmem_ctx_t ctx, unsigned long *dest, unsigned long value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulong_p(
-    unsigned long *dest, unsigned long value, int pe);
-__host__ void rocshmem_ctx_ulong_p(
-    rocshmem_ctx_t ctx, unsigned long *dest, unsigned long value,
-    int pe);
-__host__ void rocshmem_ulong_p(
-    unsigned long *dest, unsigned long value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_p(rocshmem_ctx_t ctx, unsigned long* dest,
+                                                    unsigned long value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulong_p(unsigned long* dest, unsigned long value, int pe);
+__host__ void rocshmem_ctx_ulong_p(rocshmem_ctx_t ctx, unsigned long* dest, unsigned long value,
+                                   int pe);
+__host__ void rocshmem_ulong_p(unsigned long* dest, unsigned long value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_p(
-    rocshmem_ctx_t ctx, unsigned long long *dest, unsigned long long value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulonglong_p(
-    unsigned long long *dest, unsigned long long value, int pe);
-__host__ void rocshmem_ctx_ulonglong_p(
-    rocshmem_ctx_t ctx, unsigned long long *dest, unsigned long long value,
-    int pe);
-__host__ void rocshmem_ulonglong_p(
-    unsigned long long *dest, unsigned long long value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_p(rocshmem_ctx_t ctx,
+                                                        unsigned long long* dest,
+                                                        unsigned long long value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulonglong_p(unsigned long long* dest,
+                                                    unsigned long long value, int pe);
+__host__ void rocshmem_ctx_ulonglong_p(rocshmem_ctx_t ctx, unsigned long long* dest,
+                                       unsigned long long value, int pe);
+__host__ void rocshmem_ulonglong_p(unsigned long long* dest, unsigned long long value, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_p(
-    rocshmem_ctx_t ctx, int64_t *dest, int64_t value,
-    int pe);
-__device__ ATTR_NO_INLINE void rocshmem_int64_p(
-    int64_t *dest, int64_t value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int64_p(rocshmem_ctx_t ctx, int64_t* dest,
+                                                    int64_t value, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int64_p(int64_t* dest, int64_t value, int pe);
 
 /**
  * @name SHMEM_GET
@@ -421,149 +334,126 @@ __device__ ATTR_NO_INLINE void rocshmem_int64_p(
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_float_get(
-    rocshmem_ctx_t ctx, float *dest, const float *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_float_get(
-    float *dest, const float *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_float_get(
-    rocshmem_ctx_t ctx, float *dest, const float *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_float_get(float *dest,
-    const float *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_float_get(rocshmem_ctx_t ctx, float* dest,
+                                                      const float* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_float_get(float* dest, const float* source, size_t nelems,
+                                                  int pe);
+__host__ void rocshmem_ctx_float_get(rocshmem_ctx_t ctx, float* dest, const float* source,
+                                     size_t nelems, int pe);
+__host__ void rocshmem_float_get(float* dest, const float* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_double_get(
-    rocshmem_ctx_t ctx, double *dest, const double *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_double_get(
-    double *dest, const double *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_double_get(
-    rocshmem_ctx_t ctx, double *dest, const double *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_double_get(double *dest,
-    const double *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_double_get(rocshmem_ctx_t ctx, double* dest,
+                                                       const double* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_double_get(double* dest, const double* source,
+                                                   size_t nelems, int pe);
+__host__ void rocshmem_ctx_double_get(rocshmem_ctx_t ctx, double* dest, const double* source,
+                                      size_t nelems, int pe);
+__host__ void rocshmem_double_get(double* dest, const double* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_char_get(
-    rocshmem_ctx_t ctx, char *dest, const char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_char_get(
-    char *dest, const char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_char_get(
-    rocshmem_ctx_t ctx, char *dest, const char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_char_get(char *dest,
-    const char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_char_get(rocshmem_ctx_t ctx, char* dest,
+                                                     const char* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_char_get(char* dest, const char* source, size_t nelems,
+                                                 int pe);
+__host__ void rocshmem_ctx_char_get(rocshmem_ctx_t ctx, char* dest, const char* source,
+                                    size_t nelems, int pe);
+__host__ void rocshmem_char_get(char* dest, const char* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_get(
-    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_schar_get(
-    signed char *dest, const signed char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_schar_get(
-    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_schar_get(signed char *dest,
-    const signed char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_get(rocshmem_ctx_t ctx, signed char* dest,
+                                                      const signed char* source, size_t nelems,
+                                                      int pe);
+__device__ ATTR_NO_INLINE void rocshmem_schar_get(signed char* dest, const signed char* source,
+                                                  size_t nelems, int pe);
+__host__ void rocshmem_ctx_schar_get(rocshmem_ctx_t ctx, signed char* dest,
+                                     const signed char* source, size_t nelems, int pe);
+__host__ void rocshmem_schar_get(signed char* dest, const signed char* source, size_t nelems,
+                                 int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_short_get(
-    rocshmem_ctx_t ctx, short *dest, const short *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_short_get(
-    short *dest, const short *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_short_get(
-    rocshmem_ctx_t ctx, short *dest, const short *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_short_get(short *dest,
-    const short *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_short_get(rocshmem_ctx_t ctx, short* dest,
+                                                      const short* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_short_get(short* dest, const short* source, size_t nelems,
+                                                  int pe);
+__host__ void rocshmem_ctx_short_get(rocshmem_ctx_t ctx, short* dest, const short* source,
+                                     size_t nelems, int pe);
+__host__ void rocshmem_short_get(short* dest, const short* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_int_get(
-    rocshmem_ctx_t ctx, int *dest, const int *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_int_get(
-    int *dest, const int *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_int_get(
-    rocshmem_ctx_t ctx, int *dest, const int *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_int_get(int *dest,
-    const int *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int_get(rocshmem_ctx_t ctx, int* dest,
+                                                    const int* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int_get(int* dest, const int* source, size_t nelems,
+                                                int pe);
+__host__ void rocshmem_ctx_int_get(rocshmem_ctx_t ctx, int* dest, const int* source, size_t nelems,
+                                   int pe);
+__host__ void rocshmem_int_get(int* dest, const int* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_long_get(
-    rocshmem_ctx_t ctx, long *dest, const long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_long_get(
-    long *dest, const long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_long_get(
-    rocshmem_ctx_t ctx, long *dest, const long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_long_get(long *dest,
-    const long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_long_get(rocshmem_ctx_t ctx, long* dest,
+                                                     const long* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_long_get(long* dest, const long* source, size_t nelems,
+                                                 int pe);
+__host__ void rocshmem_ctx_long_get(rocshmem_ctx_t ctx, long* dest, const long* source,
+                                    size_t nelems, int pe);
+__host__ void rocshmem_long_get(long* dest, const long* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_get(
-    rocshmem_ctx_t ctx, long long *dest, const long long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_longlong_get(
-    long long *dest, const long long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_longlong_get(
-    rocshmem_ctx_t ctx, long long *dest, const long long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_longlong_get(long long *dest,
-    const long long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_get(rocshmem_ctx_t ctx, long long* dest,
+                                                         const long long* source, size_t nelems,
+                                                         int pe);
+__device__ ATTR_NO_INLINE void rocshmem_longlong_get(long long* dest, const long long* source,
+                                                     size_t nelems, int pe);
+__host__ void rocshmem_ctx_longlong_get(rocshmem_ctx_t ctx, long long* dest,
+                                        const long long* source, size_t nelems, int pe);
+__host__ void rocshmem_longlong_get(long long* dest, const long long* source, size_t nelems,
+                                    int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_get(
-    rocshmem_ctx_t ctx, unsigned char *dest, const unsigned char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uchar_get(
-    unsigned char *dest, const unsigned char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_uchar_get(
-    rocshmem_ctx_t ctx, unsigned char *dest, const unsigned char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_uchar_get(unsigned char *dest,
-    const unsigned char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_get(rocshmem_ctx_t ctx, unsigned char* dest,
+                                                      const unsigned char* source, size_t nelems,
+                                                      int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uchar_get(unsigned char* dest, const unsigned char* source,
+                                                  size_t nelems, int pe);
+__host__ void rocshmem_ctx_uchar_get(rocshmem_ctx_t ctx, unsigned char* dest,
+                                     const unsigned char* source, size_t nelems, int pe);
+__host__ void rocshmem_uchar_get(unsigned char* dest, const unsigned char* source, size_t nelems,
+                                 int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_get(
-    rocshmem_ctx_t ctx, unsigned short *dest, const unsigned short *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ushort_get(
-    unsigned short *dest, const unsigned short *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ushort_get(
-    rocshmem_ctx_t ctx, unsigned short *dest, const unsigned short *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ushort_get(unsigned short *dest,
-    const unsigned short *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_get(rocshmem_ctx_t ctx, unsigned short* dest,
+                                                       const unsigned short* source, size_t nelems,
+                                                       int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ushort_get(unsigned short* dest,
+                                                   const unsigned short* source, size_t nelems,
+                                                   int pe);
+__host__ void rocshmem_ctx_ushort_get(rocshmem_ctx_t ctx, unsigned short* dest,
+                                      const unsigned short* source, size_t nelems, int pe);
+__host__ void rocshmem_ushort_get(unsigned short* dest, const unsigned short* source, size_t nelems,
+                                  int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_get(
-    rocshmem_ctx_t ctx, unsigned int *dest, const unsigned int *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uint_get(
-    unsigned int *dest, const unsigned int *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_uint_get(
-    rocshmem_ctx_t ctx, unsigned int *dest, const unsigned int *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_uint_get(unsigned int *dest,
-    const unsigned int *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_get(rocshmem_ctx_t ctx, unsigned int* dest,
+                                                     const unsigned int* source, size_t nelems,
+                                                     int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint_get(unsigned int* dest, const unsigned int* source,
+                                                 size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint_get(rocshmem_ctx_t ctx, unsigned int* dest,
+                                    const unsigned int* source, size_t nelems, int pe);
+__host__ void rocshmem_uint_get(unsigned int* dest, const unsigned int* source, size_t nelems,
+                                int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_get(
-    rocshmem_ctx_t ctx, unsigned long *dest, const unsigned long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulong_get(
-    unsigned long *dest, const unsigned long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ulong_get(
-    rocshmem_ctx_t ctx, unsigned long *dest, const unsigned long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ulong_get(unsigned long *dest,
-    const unsigned long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_get(rocshmem_ctx_t ctx, unsigned long* dest,
+                                                      const unsigned long* source, size_t nelems,
+                                                      int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulong_get(unsigned long* dest, const unsigned long* source,
+                                                  size_t nelems, int pe);
+__host__ void rocshmem_ctx_ulong_get(rocshmem_ctx_t ctx, unsigned long* dest,
+                                     const unsigned long* source, size_t nelems, int pe);
+__host__ void rocshmem_ulong_get(unsigned long* dest, const unsigned long* source, size_t nelems,
+                                 int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_get(
-    rocshmem_ctx_t ctx, unsigned long long *dest, const unsigned long long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulonglong_get(
-    unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ulonglong_get(
-    rocshmem_ctx_t ctx, unsigned long long *dest, const unsigned long long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ulonglong_get(unsigned long long *dest,
-    const unsigned long long *source, size_t nelems, int pe);
-
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_get(rocshmem_ctx_t ctx,
+                                                          unsigned long long* dest,
+                                                          const unsigned long long* source,
+                                                          size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulonglong_get(unsigned long long* dest,
+                                                      const unsigned long long* source,
+                                                      size_t nelems, int pe);
+__host__ void rocshmem_ctx_ulonglong_get(rocshmem_ctx_t ctx, unsigned long long* dest,
+                                         const unsigned long long* source, size_t nelems, int pe);
+__host__ void rocshmem_ulonglong_get(unsigned long long* dest, const unsigned long long* source,
+                                     size_t nelems, int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems bytes from \p source on \p pe
@@ -582,14 +472,11 @@ __host__ void rocshmem_ulonglong_get(unsigned long long *dest,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_getmem(rocshmem_ctx_t ctx,
-                                                    void *dest,
-                                                    const void *source,
-                                                    size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void* dest,
+                                                   const void* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_getmem(void *dest, const void *source,
-                                                size_t nelems, int pe);
-
+__device__ ATTR_NO_INLINE void rocshmem_getmem(void* dest, const void* source, size_t nelems,
+                                               int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems bytes from \p source on \p pe
@@ -608,12 +495,10 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem(void *dest, const void *source,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__host__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void *dest,
-                                   const void *source, size_t nelems, int pe);
+__host__ void rocshmem_ctx_getmem(rocshmem_ctx_t ctx, void* dest, const void* source, size_t nelems,
+                                  int pe);
 
-__host__ void rocshmem_getmem(void *dest, const void *source, size_t nelems,
-                               int pe);
-
+__host__ void rocshmem_getmem(void* dest, const void* source, size_t nelems, int pe);
 
 /**
  * @name SHMEM_G
@@ -632,123 +517,86 @@ __host__ void rocshmem_getmem(void *dest, const void *source, size_t nelems,
  *
  * @return the value read from remote \p source at \p pe.
  */
-__device__ ATTR_NO_INLINE float rocshmem_ctx_float_g(
-    rocshmem_ctx_t ctx, const float *source, int pe);
-__device__ ATTR_NO_INLINE float rocshmem_float_g(
-    const float *source, int pe);
-__host__ float rocshmem_ctx_float_g(
-    rocshmem_ctx_t ctx, const float *source, int pe);
-__host__ float rocshmem_float_g(
-    const float *source, int pe);
+__device__ ATTR_NO_INLINE float rocshmem_ctx_float_g(rocshmem_ctx_t ctx, const float* source,
+                                                     int pe);
+__device__ ATTR_NO_INLINE float rocshmem_float_g(const float* source, int pe);
+__host__ float rocshmem_ctx_float_g(rocshmem_ctx_t ctx, const float* source, int pe);
+__host__ float rocshmem_float_g(const float* source, int pe);
 
-__device__ ATTR_NO_INLINE double rocshmem_ctx_double_g(
-    rocshmem_ctx_t ctx, const double *source, int pe);
-__device__ ATTR_NO_INLINE double rocshmem_double_g(
-    const double *source, int pe);
-__host__ double rocshmem_ctx_double_g(
-    rocshmem_ctx_t ctx, const double *source, int pe);
-__host__ double rocshmem_double_g(
-    const double *source, int pe);
+__device__ ATTR_NO_INLINE double rocshmem_ctx_double_g(rocshmem_ctx_t ctx, const double* source,
+                                                       int pe);
+__device__ ATTR_NO_INLINE double rocshmem_double_g(const double* source, int pe);
+__host__ double rocshmem_ctx_double_g(rocshmem_ctx_t ctx, const double* source, int pe);
+__host__ double rocshmem_double_g(const double* source, int pe);
 
-__device__ ATTR_NO_INLINE char rocshmem_ctx_char_g(
-    rocshmem_ctx_t ctx, const char *source, int pe);
-__device__ ATTR_NO_INLINE char rocshmem_char_g(
-    const char *source, int pe);
-__host__ char rocshmem_ctx_char_g(
-    rocshmem_ctx_t ctx, const char *source, int pe);
-__host__ char rocshmem_char_g(
-    const char *source, int pe);
+__device__ ATTR_NO_INLINE char rocshmem_ctx_char_g(rocshmem_ctx_t ctx, const char* source, int pe);
+__device__ ATTR_NO_INLINE char rocshmem_char_g(const char* source, int pe);
+__host__ char rocshmem_ctx_char_g(rocshmem_ctx_t ctx, const char* source, int pe);
+__host__ char rocshmem_char_g(const char* source, int pe);
 
-__device__ ATTR_NO_INLINE signed char rocshmem_ctx_schar_g(
-    rocshmem_ctx_t ctx, const signed char *source, int pe);
-__device__ ATTR_NO_INLINE signed char rocshmem_schar_g(
-    const signed char *source, int pe);
-__host__ signed char rocshmem_ctx_schar_g(
-    rocshmem_ctx_t ctx, const signed char *source, int pe);
-__host__ signed char rocshmem_schar_g(
-    const signed char *source, int pe);
+__device__ ATTR_NO_INLINE signed char rocshmem_ctx_schar_g(rocshmem_ctx_t ctx,
+                                                           const signed char* source, int pe);
+__device__ ATTR_NO_INLINE signed char rocshmem_schar_g(const signed char* source, int pe);
+__host__ signed char rocshmem_ctx_schar_g(rocshmem_ctx_t ctx, const signed char* source, int pe);
+__host__ signed char rocshmem_schar_g(const signed char* source, int pe);
 
-__device__ ATTR_NO_INLINE short rocshmem_ctx_short_g(
-    rocshmem_ctx_t ctx, const short *source, int pe);
-__device__ ATTR_NO_INLINE short rocshmem_short_g(
-    const short *source, int pe);
-__host__ short rocshmem_ctx_short_g(
-    rocshmem_ctx_t ctx, const short *source, int pe);
-__host__ short rocshmem_short_g(
-    const short *source, int pe);
+__device__ ATTR_NO_INLINE short rocshmem_ctx_short_g(rocshmem_ctx_t ctx, const short* source,
+                                                     int pe);
+__device__ ATTR_NO_INLINE short rocshmem_short_g(const short* source, int pe);
+__host__ short rocshmem_ctx_short_g(rocshmem_ctx_t ctx, const short* source, int pe);
+__host__ short rocshmem_short_g(const short* source, int pe);
 
-__device__ ATTR_NO_INLINE int rocshmem_ctx_int_g(
-    rocshmem_ctx_t ctx, const int *source, int pe);
-__device__ ATTR_NO_INLINE int rocshmem_int_g(
-    const int *source, int pe);
-__host__ int rocshmem_ctx_int_g(
-    rocshmem_ctx_t ctx, const int *source, int pe);
-__host__ int rocshmem_int_g(
-    const int *source, int pe);
+__device__ ATTR_NO_INLINE int rocshmem_ctx_int_g(rocshmem_ctx_t ctx, const int* source, int pe);
+__device__ ATTR_NO_INLINE int rocshmem_int_g(const int* source, int pe);
+__host__ int rocshmem_ctx_int_g(rocshmem_ctx_t ctx, const int* source, int pe);
+__host__ int rocshmem_int_g(const int* source, int pe);
 
-__device__ ATTR_NO_INLINE long rocshmem_ctx_long_g(
-    rocshmem_ctx_t ctx, const long *source, int pe);
-__device__ ATTR_NO_INLINE long rocshmem_long_g(
-    const long *source, int pe);
-__host__ long rocshmem_ctx_long_g(
-    rocshmem_ctx_t ctx, const long *source, int pe);
-__host__ long rocshmem_long_g(
-    const long *source, int pe);
+__device__ ATTR_NO_INLINE long rocshmem_ctx_long_g(rocshmem_ctx_t ctx, const long* source, int pe);
+__device__ ATTR_NO_INLINE long rocshmem_long_g(const long* source, int pe);
+__host__ long rocshmem_ctx_long_g(rocshmem_ctx_t ctx, const long* source, int pe);
+__host__ long rocshmem_long_g(const long* source, int pe);
 
-__device__ ATTR_NO_INLINE long long rocshmem_ctx_longlong_g(
-    rocshmem_ctx_t ctx, const long long *source, int pe);
-__device__ ATTR_NO_INLINE long long rocshmem_longlong_g(
-    const long long *source, int pe);
-__host__ long long rocshmem_ctx_longlong_g(
-    rocshmem_ctx_t ctx, const long long *source, int pe);
-__host__ long long rocshmem_longlong_g(
-    const long long *source, int pe);
+__device__ ATTR_NO_INLINE long long rocshmem_ctx_longlong_g(rocshmem_ctx_t ctx,
+                                                            const long long* source, int pe);
+__device__ ATTR_NO_INLINE long long rocshmem_longlong_g(const long long* source, int pe);
+__host__ long long rocshmem_ctx_longlong_g(rocshmem_ctx_t ctx, const long long* source, int pe);
+__host__ long long rocshmem_longlong_g(const long long* source, int pe);
 
-__device__ ATTR_NO_INLINE unsigned char rocshmem_ctx_uchar_g(
-    rocshmem_ctx_t ctx, const unsigned char *source, int pe);
-__device__ ATTR_NO_INLINE unsigned char rocshmem_uchar_g(
-    const unsigned char *source, int pe);
-__host__ unsigned char rocshmem_ctx_uchar_g(
-    rocshmem_ctx_t ctx, const unsigned char *source, int pe);
-__host__ unsigned char rocshmem_uchar_g(
-    const unsigned char *source, int pe);
+__device__ ATTR_NO_INLINE unsigned char rocshmem_ctx_uchar_g(rocshmem_ctx_t ctx,
+                                                             const unsigned char* source, int pe);
+__device__ ATTR_NO_INLINE unsigned char rocshmem_uchar_g(const unsigned char* source, int pe);
+__host__ unsigned char rocshmem_ctx_uchar_g(rocshmem_ctx_t ctx, const unsigned char* source,
+                                            int pe);
+__host__ unsigned char rocshmem_uchar_g(const unsigned char* source, int pe);
 
-__device__ ATTR_NO_INLINE unsigned short rocshmem_ctx_ushort_g(
-    rocshmem_ctx_t ctx, const unsigned short *source, int pe);
-__device__ ATTR_NO_INLINE unsigned short rocshmem_ushort_g(
-    const unsigned short *source, int pe);
-__host__ unsigned short rocshmem_ctx_ushort_g(
-    rocshmem_ctx_t ctx, const unsigned short *source, int pe);
-__host__ unsigned short rocshmem_ushort_g(
-    const unsigned short *source, int pe);
+__device__ ATTR_NO_INLINE unsigned short rocshmem_ctx_ushort_g(rocshmem_ctx_t ctx,
+                                                               const unsigned short* source,
+                                                               int pe);
+__device__ ATTR_NO_INLINE unsigned short rocshmem_ushort_g(const unsigned short* source, int pe);
+__host__ unsigned short rocshmem_ctx_ushort_g(rocshmem_ctx_t ctx, const unsigned short* source,
+                                              int pe);
+__host__ unsigned short rocshmem_ushort_g(const unsigned short* source, int pe);
 
-__device__ ATTR_NO_INLINE unsigned int rocshmem_ctx_uint_g(
-    rocshmem_ctx_t ctx, const unsigned int *source, int pe);
-__device__ ATTR_NO_INLINE unsigned int rocshmem_uint_g(
-    const unsigned int *source, int pe);
-__host__ unsigned int rocshmem_ctx_uint_g(
-    rocshmem_ctx_t ctx, const unsigned int *source, int pe);
-__host__ unsigned int rocshmem_uint_g(
-    const unsigned int *source, int pe);
+__device__ ATTR_NO_INLINE unsigned int rocshmem_ctx_uint_g(rocshmem_ctx_t ctx,
+                                                           const unsigned int* source, int pe);
+__device__ ATTR_NO_INLINE unsigned int rocshmem_uint_g(const unsigned int* source, int pe);
+__host__ unsigned int rocshmem_ctx_uint_g(rocshmem_ctx_t ctx, const unsigned int* source, int pe);
+__host__ unsigned int rocshmem_uint_g(const unsigned int* source, int pe);
 
-__device__ ATTR_NO_INLINE unsigned long rocshmem_ctx_ulong_g(
-    rocshmem_ctx_t ctx, const unsigned long *source, int pe);
-__device__ ATTR_NO_INLINE unsigned long rocshmem_ulong_g(
-    const unsigned long *source, int pe);
-__host__ unsigned long rocshmem_ctx_ulong_g(
-    rocshmem_ctx_t ctx, const unsigned long *source, int pe);
-__host__ unsigned long rocshmem_ulong_g(
-    const unsigned long *source, int pe);
+__device__ ATTR_NO_INLINE unsigned long rocshmem_ctx_ulong_g(rocshmem_ctx_t ctx,
+                                                             const unsigned long* source, int pe);
+__device__ ATTR_NO_INLINE unsigned long rocshmem_ulong_g(const unsigned long* source, int pe);
+__host__ unsigned long rocshmem_ctx_ulong_g(rocshmem_ctx_t ctx, const unsigned long* source,
+                                            int pe);
+__host__ unsigned long rocshmem_ulong_g(const unsigned long* source, int pe);
 
 __device__ ATTR_NO_INLINE unsigned long long rocshmem_ctx_ulonglong_g(
-    rocshmem_ctx_t ctx, const unsigned long long *source, int pe);
-__device__ ATTR_NO_INLINE unsigned long long rocshmem_ulonglong_g(
-    const unsigned long long *source, int pe);
-__host__ unsigned long long rocshmem_ctx_ulonglong_g(
-    rocshmem_ctx_t ctx, const unsigned long long *source, int pe);
-__host__ unsigned long long rocshmem_ulonglong_g(
-    const unsigned long long *source, int pe);
-
+    rocshmem_ctx_t ctx, const unsigned long long* source, int pe);
+__device__ ATTR_NO_INLINE unsigned long long rocshmem_ulonglong_g(const unsigned long long* source,
+                                                                  int pe);
+__host__ unsigned long long rocshmem_ctx_ulonglong_g(rocshmem_ctx_t ctx,
+                                                     const unsigned long long* source, int pe);
+__host__ unsigned long long rocshmem_ulonglong_g(const unsigned long long* source, int pe);
 
 /**
  * @name SHMEM_PUT_NBI
@@ -770,149 +618,132 @@ __host__ unsigned long long rocshmem_ulonglong_g(
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_float_put_nbi(
-    rocshmem_ctx_t ctx, float *dest, const float *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_float_put_nbi(
-    float *dest, const float *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_float_put_nbi(
-    rocshmem_ctx_t ctx, float *dest, const float *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_float_put_nbi(
-    float *dest, const float *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_float_put_nbi(rocshmem_ctx_t ctx, float* dest,
+                                                          const float* source, size_t nelems,
+                                                          int pe);
+__device__ ATTR_NO_INLINE void rocshmem_float_put_nbi(float* dest, const float* source,
+                                                      size_t nelems, int pe);
+__host__ void rocshmem_ctx_float_put_nbi(rocshmem_ctx_t ctx, float* dest, const float* source,
+                                         size_t nelems, int pe);
+__host__ void rocshmem_float_put_nbi(float* dest, const float* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_double_put_nbi(
-    rocshmem_ctx_t ctx, double *dest, const double *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_double_put_nbi(
-    double *dest, const double *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_double_put_nbi(
-    rocshmem_ctx_t ctx, double *dest, const double *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_double_put_nbi(
-    double *dest, const double *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_double_put_nbi(rocshmem_ctx_t ctx, double* dest,
+                                                           const double* source, size_t nelems,
+                                                           int pe);
+__device__ ATTR_NO_INLINE void rocshmem_double_put_nbi(double* dest, const double* source,
+                                                       size_t nelems, int pe);
+__host__ void rocshmem_ctx_double_put_nbi(rocshmem_ctx_t ctx, double* dest, const double* source,
+                                          size_t nelems, int pe);
+__host__ void rocshmem_double_put_nbi(double* dest, const double* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_char_put_nbi(
-    rocshmem_ctx_t ctx, char *dest, const char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_char_put_nbi(
-    char *dest, const char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_char_put_nbi(
-    rocshmem_ctx_t ctx, char *dest, const char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_char_put_nbi(
-    char *dest, const char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_char_put_nbi(rocshmem_ctx_t ctx, char* dest,
+                                                         const char* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_char_put_nbi(char* dest, const char* source, size_t nelems,
+                                                     int pe);
+__host__ void rocshmem_ctx_char_put_nbi(rocshmem_ctx_t ctx, char* dest, const char* source,
+                                        size_t nelems, int pe);
+__host__ void rocshmem_char_put_nbi(char* dest, const char* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_put_nbi(
-    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_schar_put_nbi(
-    signed char *dest, const signed char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_schar_put_nbi(
-    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_schar_put_nbi(
-    signed char *dest, const signed char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_put_nbi(rocshmem_ctx_t ctx, signed char* dest,
+                                                          const signed char* source, size_t nelems,
+                                                          int pe);
+__device__ ATTR_NO_INLINE void rocshmem_schar_put_nbi(signed char* dest, const signed char* source,
+                                                      size_t nelems, int pe);
+__host__ void rocshmem_ctx_schar_put_nbi(rocshmem_ctx_t ctx, signed char* dest,
+                                         const signed char* source, size_t nelems, int pe);
+__host__ void rocshmem_schar_put_nbi(signed char* dest, const signed char* source, size_t nelems,
+                                     int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_short_put_nbi(
-    rocshmem_ctx_t ctx, short *dest, const short *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_short_put_nbi(
-    short *dest, const short *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_short_put_nbi(
-    rocshmem_ctx_t ctx, short *dest, const short *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_short_put_nbi(
-    short *dest, const short *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_short_put_nbi(rocshmem_ctx_t ctx, short* dest,
+                                                          const short* source, size_t nelems,
+                                                          int pe);
+__device__ ATTR_NO_INLINE void rocshmem_short_put_nbi(short* dest, const short* source,
+                                                      size_t nelems, int pe);
+__host__ void rocshmem_ctx_short_put_nbi(rocshmem_ctx_t ctx, short* dest, const short* source,
+                                         size_t nelems, int pe);
+__host__ void rocshmem_short_put_nbi(short* dest, const short* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_int_put_nbi(
-    rocshmem_ctx_t ctx, int *dest, const int *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_int_put_nbi(
-    int *dest, const int *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_int_put_nbi(
-    rocshmem_ctx_t ctx, int *dest, const int *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_int_put_nbi(
-    int *dest, const int *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int_put_nbi(rocshmem_ctx_t ctx, int* dest,
+                                                        const int* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int_put_nbi(int* dest, const int* source, size_t nelems,
+                                                    int pe);
+__host__ void rocshmem_ctx_int_put_nbi(rocshmem_ctx_t ctx, int* dest, const int* source,
+                                       size_t nelems, int pe);
+__host__ void rocshmem_int_put_nbi(int* dest, const int* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_long_put_nbi(
-    rocshmem_ctx_t ctx, long *dest, const long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_long_put_nbi(
-    long *dest, const long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_long_put_nbi(
-    rocshmem_ctx_t ctx, long *dest, const long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_long_put_nbi(
-    long *dest, const long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_long_put_nbi(rocshmem_ctx_t ctx, long* dest,
+                                                         const long* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_long_put_nbi(long* dest, const long* source, size_t nelems,
+                                                     int pe);
+__host__ void rocshmem_ctx_long_put_nbi(rocshmem_ctx_t ctx, long* dest, const long* source,
+                                        size_t nelems, int pe);
+__host__ void rocshmem_long_put_nbi(long* dest, const long* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_put_nbi(
-    rocshmem_ctx_t ctx, long long *dest, const long long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_longlong_put_nbi(
-    long long *dest, const long long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_longlong_put_nbi(
-    rocshmem_ctx_t ctx, long long *dest, const long long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_longlong_put_nbi(
-    long long *dest, const long long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_put_nbi(rocshmem_ctx_t ctx, long long* dest,
+                                                             const long long* source, size_t nelems,
+                                                             int pe);
+__device__ ATTR_NO_INLINE void rocshmem_longlong_put_nbi(long long* dest, const long long* source,
+                                                         size_t nelems, int pe);
+__host__ void rocshmem_ctx_longlong_put_nbi(rocshmem_ctx_t ctx, long long* dest,
+                                            const long long* source, size_t nelems, int pe);
+__host__ void rocshmem_longlong_put_nbi(long long* dest, const long long* source, size_t nelems,
+                                        int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_put_nbi(
-    rocshmem_ctx_t ctx, unsigned char *dest, const unsigned char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uchar_put_nbi(
-    unsigned char *dest, const unsigned char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_uchar_put_nbi(
-    rocshmem_ctx_t ctx, unsigned char *dest, const unsigned char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_uchar_put_nbi(
-    unsigned char *dest, const unsigned char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_put_nbi(rocshmem_ctx_t ctx, unsigned char* dest,
+                                                          const unsigned char* source,
+                                                          size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uchar_put_nbi(unsigned char* dest,
+                                                      const unsigned char* source, size_t nelems,
+                                                      int pe);
+__host__ void rocshmem_ctx_uchar_put_nbi(rocshmem_ctx_t ctx, unsigned char* dest,
+                                         const unsigned char* source, size_t nelems, int pe);
+__host__ void rocshmem_uchar_put_nbi(unsigned char* dest, const unsigned char* source,
+                                     size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_put_nbi(
-    rocshmem_ctx_t ctx, unsigned short *dest, const unsigned short *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ushort_put_nbi(
-    unsigned short *dest, const unsigned short *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ushort_put_nbi(
-    rocshmem_ctx_t ctx, unsigned short *dest, const unsigned short *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ushort_put_nbi(
-    unsigned short *dest, const unsigned short *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_put_nbi(rocshmem_ctx_t ctx, unsigned short* dest,
+                                                           const unsigned short* source,
+                                                           size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ushort_put_nbi(unsigned short* dest,
+                                                       const unsigned short* source, size_t nelems,
+                                                       int pe);
+__host__ void rocshmem_ctx_ushort_put_nbi(rocshmem_ctx_t ctx, unsigned short* dest,
+                                          const unsigned short* source, size_t nelems, int pe);
+__host__ void rocshmem_ushort_put_nbi(unsigned short* dest, const unsigned short* source,
+                                      size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_put_nbi(
-    rocshmem_ctx_t ctx, unsigned int *dest, const unsigned int *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uint_put_nbi(
-    unsigned int *dest, const unsigned int *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_uint_put_nbi(
-    rocshmem_ctx_t ctx, unsigned int *dest, const unsigned int *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_uint_put_nbi(
-    unsigned int *dest, const unsigned int *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_put_nbi(rocshmem_ctx_t ctx, unsigned int* dest,
+                                                         const unsigned int* source, size_t nelems,
+                                                         int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint_put_nbi(unsigned int* dest, const unsigned int* source,
+                                                     size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint_put_nbi(rocshmem_ctx_t ctx, unsigned int* dest,
+                                        const unsigned int* source, size_t nelems, int pe);
+__host__ void rocshmem_uint_put_nbi(unsigned int* dest, const unsigned int* source, size_t nelems,
+                                    int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_put_nbi(
-    rocshmem_ctx_t ctx, unsigned long *dest, const unsigned long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulong_put_nbi(
-    unsigned long *dest, const unsigned long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ulong_put_nbi(
-    rocshmem_ctx_t ctx, unsigned long *dest, const unsigned long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ulong_put_nbi(
-    unsigned long *dest, const unsigned long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_put_nbi(rocshmem_ctx_t ctx, unsigned long* dest,
+                                                          const unsigned long* source,
+                                                          size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulong_put_nbi(unsigned long* dest,
+                                                      const unsigned long* source, size_t nelems,
+                                                      int pe);
+__host__ void rocshmem_ctx_ulong_put_nbi(rocshmem_ctx_t ctx, unsigned long* dest,
+                                         const unsigned long* source, size_t nelems, int pe);
+__host__ void rocshmem_ulong_put_nbi(unsigned long* dest, const unsigned long* source,
+                                     size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put_nbi(
-    rocshmem_ctx_t ctx, unsigned long long *dest, const unsigned long long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_nbi(
-    unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ulonglong_put_nbi(
-    rocshmem_ctx_t ctx, unsigned long long *dest, const unsigned long long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ulonglong_put_nbi(
-    unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
-
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_put_nbi(rocshmem_ctx_t ctx,
+                                                              unsigned long long* dest,
+                                                              const unsigned long long* source,
+                                                              size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulonglong_put_nbi(unsigned long long* dest,
+                                                          const unsigned long long* source,
+                                                          size_t nelems, int pe);
+__host__ void rocshmem_ctx_ulonglong_put_nbi(rocshmem_ctx_t ctx, unsigned long long* dest,
+                                             const unsigned long long* source, size_t nelems,
+                                             int pe);
+__host__ void rocshmem_ulonglong_put_nbi(unsigned long long* dest, const unsigned long long* source,
+                                         size_t nelems, int pe);
 
 /**
  * @brief Writes contiguous data of \p nelems bytes from \p source on the
@@ -933,15 +764,11 @@ __host__ void rocshmem_ulonglong_put_nbi(
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx,
-                                                        void *dest,
-                                                        const void *source,
-                                                        size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx, void* dest,
+                                                       const void* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_putmem_nbi(void *dest,
-                                                    const void *source,
-                                                    size_t nelems, int pe);
-
+__device__ ATTR_NO_INLINE void rocshmem_putmem_nbi(void* dest, const void* source, size_t nelems,
+                                                   int pe);
 
 /**
  * @brief Writes contiguous data of \p nelems bytes from \p source on the
@@ -956,13 +783,10 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_nbi(void *dest,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__host__ void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx, void *dest,
-                                       const void *source, size_t nelems,
-                                       int pe);
+__host__ void rocshmem_ctx_putmem_nbi(rocshmem_ctx_t ctx, void* dest, const void* source,
+                                      size_t nelems, int pe);
 
-__host__ void rocshmem_putmem_nbi(void *dest, const void *source,
-                                   size_t nelems, int pe);
-
+__host__ void rocshmem_putmem_nbi(void* dest, const void* source, size_t nelems, int pe);
 
 /**
  * @name SHMEM_GET_NBI
@@ -984,149 +808,132 @@ __host__ void rocshmem_putmem_nbi(void *dest, const void *source,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_float_get_nbi(
-    rocshmem_ctx_t ctx, float *dest, const float *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_float_get_nbi(
-    float *dest, const float *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_float_get_nbi(
-    rocshmem_ctx_t ctx, float *dest, const float *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_float_get_nbi(float *dest,
-    const float *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_float_get_nbi(rocshmem_ctx_t ctx, float* dest,
+                                                          const float* source, size_t nelems,
+                                                          int pe);
+__device__ ATTR_NO_INLINE void rocshmem_float_get_nbi(float* dest, const float* source,
+                                                      size_t nelems, int pe);
+__host__ void rocshmem_ctx_float_get_nbi(rocshmem_ctx_t ctx, float* dest, const float* source,
+                                         size_t nelems, int pe);
+__host__ void rocshmem_float_get_nbi(float* dest, const float* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_double_get_nbi(
-    rocshmem_ctx_t ctx, double *dest, const double *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_double_get_nbi(
-    double *dest, const double *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_double_get_nbi(
-    rocshmem_ctx_t ctx, double *dest, const double *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_double_get_nbi(double *dest,
-    const double *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_double_get_nbi(rocshmem_ctx_t ctx, double* dest,
+                                                           const double* source, size_t nelems,
+                                                           int pe);
+__device__ ATTR_NO_INLINE void rocshmem_double_get_nbi(double* dest, const double* source,
+                                                       size_t nelems, int pe);
+__host__ void rocshmem_ctx_double_get_nbi(rocshmem_ctx_t ctx, double* dest, const double* source,
+                                          size_t nelems, int pe);
+__host__ void rocshmem_double_get_nbi(double* dest, const double* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_char_get_nbi(
-    rocshmem_ctx_t ctx, char *dest, const char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_char_get_nbi(
-    char *dest, const char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_char_get_nbi(
-    rocshmem_ctx_t ctx, char *dest, const char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_char_get_nbi(char *dest,
-    const char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_char_get_nbi(rocshmem_ctx_t ctx, char* dest,
+                                                         const char* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_char_get_nbi(char* dest, const char* source, size_t nelems,
+                                                     int pe);
+__host__ void rocshmem_ctx_char_get_nbi(rocshmem_ctx_t ctx, char* dest, const char* source,
+                                        size_t nelems, int pe);
+__host__ void rocshmem_char_get_nbi(char* dest, const char* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_get_nbi(
-    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_schar_get_nbi(
-    signed char *dest, const signed char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_schar_get_nbi(
-    rocshmem_ctx_t ctx, signed char *dest, const signed char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_schar_get_nbi(signed char *dest,
-    const signed char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_schar_get_nbi(rocshmem_ctx_t ctx, signed char* dest,
+                                                          const signed char* source, size_t nelems,
+                                                          int pe);
+__device__ ATTR_NO_INLINE void rocshmem_schar_get_nbi(signed char* dest, const signed char* source,
+                                                      size_t nelems, int pe);
+__host__ void rocshmem_ctx_schar_get_nbi(rocshmem_ctx_t ctx, signed char* dest,
+                                         const signed char* source, size_t nelems, int pe);
+__host__ void rocshmem_schar_get_nbi(signed char* dest, const signed char* source, size_t nelems,
+                                     int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_short_get_nbi(
-    rocshmem_ctx_t ctx, short *dest, const short *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_short_get_nbi(
-    short *dest, const short *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_short_get_nbi(
-    rocshmem_ctx_t ctx, short *dest, const short *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_short_get_nbi(short *dest,
-    const short *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_short_get_nbi(rocshmem_ctx_t ctx, short* dest,
+                                                          const short* source, size_t nelems,
+                                                          int pe);
+__device__ ATTR_NO_INLINE void rocshmem_short_get_nbi(short* dest, const short* source,
+                                                      size_t nelems, int pe);
+__host__ void rocshmem_ctx_short_get_nbi(rocshmem_ctx_t ctx, short* dest, const short* source,
+                                         size_t nelems, int pe);
+__host__ void rocshmem_short_get_nbi(short* dest, const short* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_int_get_nbi(
-    rocshmem_ctx_t ctx, int *dest, const int *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_int_get_nbi(
-    int *dest, const int *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_int_get_nbi(
-    rocshmem_ctx_t ctx, int *dest, const int *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_int_get_nbi(int *dest,
-    const int *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_int_get_nbi(rocshmem_ctx_t ctx, int* dest,
+                                                        const int* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_int_get_nbi(int* dest, const int* source, size_t nelems,
+                                                    int pe);
+__host__ void rocshmem_ctx_int_get_nbi(rocshmem_ctx_t ctx, int* dest, const int* source,
+                                       size_t nelems, int pe);
+__host__ void rocshmem_int_get_nbi(int* dest, const int* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_long_get_nbi(
-    rocshmem_ctx_t ctx, long *dest, const long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_long_get_nbi(
-    long *dest, const long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_long_get_nbi(
-    rocshmem_ctx_t ctx, long *dest, const long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_long_get_nbi(long *dest,
-    const long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_long_get_nbi(rocshmem_ctx_t ctx, long* dest,
+                                                         const long* source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_long_get_nbi(long* dest, const long* source, size_t nelems,
+                                                     int pe);
+__host__ void rocshmem_ctx_long_get_nbi(rocshmem_ctx_t ctx, long* dest, const long* source,
+                                        size_t nelems, int pe);
+__host__ void rocshmem_long_get_nbi(long* dest, const long* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_get_nbi(
-    rocshmem_ctx_t ctx, long long *dest, const long long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_longlong_get_nbi(
-    long long *dest, const long long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_longlong_get_nbi(
-    rocshmem_ctx_t ctx, long long *dest, const long long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_longlong_get_nbi(long long *dest,
-    const long long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_longlong_get_nbi(rocshmem_ctx_t ctx, long long* dest,
+                                                             const long long* source, size_t nelems,
+                                                             int pe);
+__device__ ATTR_NO_INLINE void rocshmem_longlong_get_nbi(long long* dest, const long long* source,
+                                                         size_t nelems, int pe);
+__host__ void rocshmem_ctx_longlong_get_nbi(rocshmem_ctx_t ctx, long long* dest,
+                                            const long long* source, size_t nelems, int pe);
+__host__ void rocshmem_longlong_get_nbi(long long* dest, const long long* source, size_t nelems,
+                                        int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_get_nbi(
-    rocshmem_ctx_t ctx, unsigned char *dest, const unsigned char *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uchar_get_nbi(
-    unsigned char *dest, const unsigned char *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_uchar_get_nbi(
-    rocshmem_ctx_t ctx, unsigned char *dest, const unsigned char *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_uchar_get_nbi(unsigned char *dest,
-    const unsigned char *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uchar_get_nbi(rocshmem_ctx_t ctx, unsigned char* dest,
+                                                          const unsigned char* source,
+                                                          size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uchar_get_nbi(unsigned char* dest,
+                                                      const unsigned char* source, size_t nelems,
+                                                      int pe);
+__host__ void rocshmem_ctx_uchar_get_nbi(rocshmem_ctx_t ctx, unsigned char* dest,
+                                         const unsigned char* source, size_t nelems, int pe);
+__host__ void rocshmem_uchar_get_nbi(unsigned char* dest, const unsigned char* source,
+                                     size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_get_nbi(
-    rocshmem_ctx_t ctx, unsigned short *dest, const unsigned short *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ushort_get_nbi(
-    unsigned short *dest, const unsigned short *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ushort_get_nbi(
-    rocshmem_ctx_t ctx, unsigned short *dest, const unsigned short *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ushort_get_nbi(unsigned short *dest,
-    const unsigned short *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ushort_get_nbi(rocshmem_ctx_t ctx, unsigned short* dest,
+                                                           const unsigned short* source,
+                                                           size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ushort_get_nbi(unsigned short* dest,
+                                                       const unsigned short* source, size_t nelems,
+                                                       int pe);
+__host__ void rocshmem_ctx_ushort_get_nbi(rocshmem_ctx_t ctx, unsigned short* dest,
+                                          const unsigned short* source, size_t nelems, int pe);
+__host__ void rocshmem_ushort_get_nbi(unsigned short* dest, const unsigned short* source,
+                                      size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_get_nbi(
-    rocshmem_ctx_t ctx, unsigned int *dest, const unsigned int *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_uint_get_nbi(
-    unsigned int *dest, const unsigned int *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_uint_get_nbi(
-    rocshmem_ctx_t ctx, unsigned int *dest, const unsigned int *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_uint_get_nbi(unsigned int *dest,
-    const unsigned int *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_uint_get_nbi(rocshmem_ctx_t ctx, unsigned int* dest,
+                                                         const unsigned int* source, size_t nelems,
+                                                         int pe);
+__device__ ATTR_NO_INLINE void rocshmem_uint_get_nbi(unsigned int* dest, const unsigned int* source,
+                                                     size_t nelems, int pe);
+__host__ void rocshmem_ctx_uint_get_nbi(rocshmem_ctx_t ctx, unsigned int* dest,
+                                        const unsigned int* source, size_t nelems, int pe);
+__host__ void rocshmem_uint_get_nbi(unsigned int* dest, const unsigned int* source, size_t nelems,
+                                    int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_get_nbi(
-    rocshmem_ctx_t ctx, unsigned long *dest, const unsigned long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulong_get_nbi(
-    unsigned long *dest, const unsigned long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ulong_get_nbi(
-    rocshmem_ctx_t ctx, unsigned long *dest, const unsigned long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ulong_get_nbi(unsigned long *dest,
-    const unsigned long *source, size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulong_get_nbi(rocshmem_ctx_t ctx, unsigned long* dest,
+                                                          const unsigned long* source,
+                                                          size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulong_get_nbi(unsigned long* dest,
+                                                      const unsigned long* source, size_t nelems,
+                                                      int pe);
+__host__ void rocshmem_ctx_ulong_get_nbi(rocshmem_ctx_t ctx, unsigned long* dest,
+                                         const unsigned long* source, size_t nelems, int pe);
+__host__ void rocshmem_ulong_get_nbi(unsigned long* dest, const unsigned long* source,
+                                     size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_get_nbi(
-    rocshmem_ctx_t ctx, unsigned long long *dest, const unsigned long long *source,
-    size_t nelems, int pe);
-__device__ ATTR_NO_INLINE void rocshmem_ulonglong_get_nbi(
-    unsigned long long *dest, const unsigned long long *source, size_t nelems, int pe);
-__host__ void rocshmem_ctx_ulonglong_get_nbi(
-    rocshmem_ctx_t ctx, unsigned long long *dest, const unsigned long long *source,
-    size_t nelems, int pe);
-__host__ void rocshmem_ulonglong_get_nbi(unsigned long long *dest,
-    const unsigned long long *source, size_t nelems, int pe);
-
+__device__ ATTR_NO_INLINE void rocshmem_ctx_ulonglong_get_nbi(rocshmem_ctx_t ctx,
+                                                              unsigned long long* dest,
+                                                              const unsigned long long* source,
+                                                              size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ulonglong_get_nbi(unsigned long long* dest,
+                                                          const unsigned long long* source,
+                                                          size_t nelems, int pe);
+__host__ void rocshmem_ctx_ulonglong_get_nbi(rocshmem_ctx_t ctx, unsigned long long* dest,
+                                             const unsigned long long* source, size_t nelems,
+                                             int pe);
+__host__ void rocshmem_ulonglong_get_nbi(unsigned long long* dest, const unsigned long long* source,
+                                         size_t nelems, int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems bytes from \p source on \p pe
@@ -1147,15 +954,11 @@ __host__ void rocshmem_ulonglong_get_nbi(unsigned long long *dest,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_nbi(rocshmem_ctx_t ctx,
-                                                        void *dest,
-                                                        const void *source,
-                                                        size_t nelems, int pe);
+__device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_nbi(rocshmem_ctx_t ctx, void* dest,
+                                                       const void* source, size_t nelems, int pe);
 
-__device__ ATTR_NO_INLINE void rocshmem_getmem_nbi(void *dest,
-                                                    const void *source,
-                                                    size_t nelems, int pe);
-
+__device__ ATTR_NO_INLINE void rocshmem_getmem_nbi(void* dest, const void* source, size_t nelems,
+                                                   int pe);
 
 /**
  * @brief Reads contiguous data of \p nelems bytes from \p source on \p pe
@@ -1176,12 +979,10 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem_nbi(void *dest,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__host__ void rocshmem_ctx_getmem_nbi(rocshmem_ctx_t ctx, void *dest,
-                                       const void *source, size_t nelems,
-                                       int pe);
+__host__ void rocshmem_ctx_getmem_nbi(rocshmem_ctx_t ctx, void* dest, const void* source,
+                                      size_t nelems, int pe);
 
-__host__ void rocshmem_getmem_nbi(void *dest, const void *source,
-                                   size_t nelems, int pe);
+__host__ void rocshmem_getmem_nbi(void* dest, const void* source, size_t nelems, int pe);
 
 /**
  * @brief kernel for performing a getmem RMA operation.
@@ -1193,9 +994,8 @@ __host__ void rocshmem_getmem_nbi(void *dest, const void *source,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
-                                                      const void *source,
-                                                      size_t nelems, int pe);
+__global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void* dest, const void* source, size_t nelems,
+                                                      int pe);
 
 /**
  * @brief kernel for performing a putmem RMA operation.
@@ -1207,9 +1007,8 @@ __global__ ATTR_NO_INLINE void rocshmem_getmem_kernel(void *dest,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  */
-__global__ ATTR_NO_INLINE void rocshmem_putmem_kernel(void *dest,
-                                                      const void *source,
-                                                      size_t nelems, int pe);
+__global__ ATTR_NO_INLINE void rocshmem_putmem_kernel(void* dest, const void* source, size_t nelems,
+                                                      int pe);
 
 /**
  * @brief kernel for performing a quiet operation.

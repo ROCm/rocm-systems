@@ -38,8 +38,7 @@ class LibraryInfoTester : public Tester {
  protected:
   virtual void resetBuffers(size_t size) override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void verifyResults(size_t size) override;
 };

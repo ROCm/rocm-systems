@@ -33,25 +33,24 @@
 
 namespace rocshmem {
 
-class SymmetricHeapTestFixture : public ::testing::Test
-{
-  protected:
-    /**
-     * @brief Symmetric heap object
-     */
-    SymmetricHeap *symmetric_heap_;
+class SymmetricHeapTestFixture : public ::testing::Test {
+ protected:
+  /**
+   * @brief Symmetric heap object
+   */
+  SymmetricHeap* symmetric_heap_;
 
-    void SetUp() override {
-      MPIInstance::mpilib_dl_init();
-      symmetric_heap_ = new SymmetricHeap(MPI_COMM_WORLD);
-    }
+  void SetUp() override {
+    MPIInstance::mpilib_dl_init();
+    symmetric_heap_ = new SymmetricHeap(MPI_COMM_WORLD);
+  }
 
-    void TearDown() override {
-      delete symmetric_heap_;
-      MPIInstance::mpilib_dl_close();
-    }
+  void TearDown() override {
+    delete symmetric_heap_;
+    MPIInstance::mpilib_dl_close();
+  }
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
-#endif // ROCSHMEM_SYMMETRIC_HEAP_GTEST_HPP
+#endif  // ROCSHMEM_SYMMETRIC_HEAP_GTEST_HPP

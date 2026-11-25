@@ -43,11 +43,11 @@ class DefaultObjectStrategy {
   static DefaultObjectStrategy* _instance;
 
   DefaultObjectStrategy() {
-    _os.share_strategy = ShareStrategy(ShareStrategyEnum::PRIVATE);
-    _os.index_strategy_one = IndexStrategy(IndexStrategyEnum::TDBD);
-    _os.index_strategy_two = IndexStrategy(IndexStrategyEnum::TDBD);
+    _os.share_strategy       = ShareStrategy(ShareStrategyEnum::PRIVATE);
+    _os.index_strategy_one   = IndexStrategy(IndexStrategyEnum::TDBD);
+    _os.index_strategy_two   = IndexStrategy(IndexStrategyEnum::TDBD);
     _os.index_strategy_three = IndexStrategy(IndexStrategyEnum::TDBD);
-    _os.index_strategy_four = IndexStrategy(IndexStrategyEnum::TDBD);
+    _os.index_strategy_four  = IndexStrategy(IndexStrategyEnum::TDBD);
   }
 
   ObjectStrategy _os{};

@@ -25,7 +25,6 @@
 #ifndef LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
 #define LIBRARY_SRC_REVERSE_OFFLOAD_COMMANDS_TYPES_HPP_
 
-
 namespace rocshmem {
 
 enum ro_net_cmds {

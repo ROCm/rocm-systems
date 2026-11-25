@@ -43,8 +43,7 @@ namespace net {
  * The RO backend supplies a lambda over its heap allocator's GetDmabufHandle
  * (the same call GDA uses). Return false to fall back to plain ibv_reg_mr.
  */
-using DmabufFn =
-    std::function<bool(void *addr, size_t len, int *fd, uint64_t *offset)>;
+using DmabufFn = std::function<bool(void* addr, size_t len, int* fd, uint64_t* offset)>;
 
 /**
  * @brief Registers the symmetric heap and local return buffers, and holds the
@@ -61,35 +60,35 @@ class MrRegistry {
  public:
   MrRegistry() = default;
   ~MrRegistry();
-  MrRegistry(const MrRegistry &) = delete;
-  MrRegistry &operator=(const MrRegistry &) = delete;
+  MrRegistry(const MrRegistry&)            = delete;
+  MrRegistry& operator=(const MrRegistry&) = delete;
 
   /// Register the local symmetric heap. @p dmabuf may be empty for host memory.
-  bool register_heap(Ibv *ibv, struct ibv_pd *pd, void *base, size_t size,
-                     bool is_device, const DmabufFn &dmabuf);
+  bool register_heap(Ibv* ibv, struct ibv_pd* pd, void* base, size_t size, bool is_device,
+                     const DmabufFn& dmabuf);
 
   /// All-gather peer heap {base,rkey} into the RemoteRegion table.
-  bool exchange_heap(int num_pes, int my_pe, const AllgatherFn &allgather);
+  bool exchange_heap(int num_pes, int my_pe, const AllgatherFn& allgather);
 
   /// Register a local-only buffer (return buffers); returns its lkey (0 on fail).
-  uint32_t register_local(Ibv *ibv, struct ibv_pd *pd, void *addr, size_t len,
-                          bool is_device, const DmabufFn &dmabuf);
+  uint32_t register_local(Ibv* ibv, struct ibv_pd* pd, void* addr, size_t len, bool is_device,
+                          const DmabufFn& dmabuf);
 
-  const RemoteRegion &remote(int pe) const { return remote_[pe]; }
+  const RemoteRegion& remote(int pe) const { return remote_[pe]; }
   uintptr_t local_heap_base() const { return local_base_; }
   uint32_t heap_lkey() const { return heap_lkey_; }
   uint32_t heap_rkey() const { return heap_rkey_; }
 
  private:
-  struct ibv_mr *reg_region(Ibv *ibv, struct ibv_pd *pd, void *addr, size_t len,
-                            bool is_device, const DmabufFn &dmabuf, int access);
+  struct ibv_mr* reg_region(Ibv* ibv, struct ibv_pd* pd, void* addr, size_t len, bool is_device,
+                            const DmabufFn& dmabuf, int access);
 
-  Ibv *ibv_{nullptr};
-  struct ibv_mr *heap_mr_{nullptr};
-  std::vector<struct ibv_mr *> local_mrs_;
+  Ibv* ibv_{nullptr};
+  struct ibv_mr* heap_mr_{nullptr};
+  std::vector<struct ibv_mr*> local_mrs_;
   // dma-buf fds owned by this registry, keyed by the MR they back. Closed when
   // the MR is deregistered so the fd obtained from DmabufFn does not leak.
-  std::unordered_map<struct ibv_mr *, int> dmabuf_fds_;
+  std::unordered_map<struct ibv_mr*, int> dmabuf_fds_;
   std::vector<RemoteRegion> remote_;
   uintptr_t local_base_{0};
   uint32_t heap_lkey_{0};

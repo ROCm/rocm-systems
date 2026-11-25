@@ -53,22 +53,22 @@ struct VMMCommonAllocationInfo {
  */
 inline size_t VMMQueryGranularity(hipMemAllocationHandleType handle_type) {
   hipMemAllocationProp prop = {};
-  prop.type = hipMemAllocationTypeUncached;
-  prop.location.type = hipMemLocationTypeDevice;
+  prop.type                 = hipMemAllocationTypeUncached;
+  prop.location.type        = hipMemLocationTypeDevice;
 
   int device_id = 0;
   if (hipGetDevice(&device_id) != hipSuccess) {
     return 0;
   }
-  prop.location.id = device_id;
+  prop.location.id          = device_id;
   prop.requestedHandleTypes = handle_type;
 
   // Match VMMAllocCommon: allocations are made RDMA-capable.
   prop.allocFlags.gpuDirectRDMACapable = 1;
 
   size_t granularity = 0;
-  if (hipMemGetAllocationGranularity(&granularity, &prop,
-                                     hipMemAllocationGranularityMinimum) != hipSuccess) {
+  if (hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum) !=
+      hipSuccess) {
     return 0;
   }
   return granularity;
@@ -84,21 +84,21 @@ inline size_t VMMQueryGranularity(hipMemAllocationHandleType handle_type) {
  * @return hipError_t Success or error code
  */
 inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandleType handle_type,
-                                 VMMCommonAllocationInfo* alloc_info)
-{
+                                 VMMCommonAllocationInfo* alloc_info) {
   hipError_t err;
   hipMemGenericAllocationHandle_t handle;
   hipMemAllocationProp prop = {};
 
-  prop.type = hipMemAllocationTypeUncached;
+  prop.type          = hipMemAllocationTypeUncached;
   prop.location.type = hipMemLocationTypeDevice;
 
   // Get current device ID
   int device_id;
   err = hipGetDevice(&device_id);
-  if (err != hipSuccess) return err;
+  if (err != hipSuccess)
+    return err;
 
-  prop.location.id = device_id;
+  prop.location.id          = device_id;
   prop.requestedHandleTypes = handle_type;
 
   // Required so VMM allocations are accessible by GPUDirect RDMA-capable NICs
@@ -107,18 +107,20 @@ inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandle
   // Get allocation granularity
   size_t granularity;
   err = hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum);
-  if (err != hipSuccess) return err;
+  if (err != hipSuccess)
+    return err;
 
   // Round up size to granularity
   size_t alloc_size = ((size + granularity - 1) / granularity) * granularity;
 
   // Create memory handle
   err = hipMemCreate(&handle, alloc_size, &prop, 0);
-  if (err != hipSuccess) return err;
+  if (err != hipSuccess)
+    return err;
 
   // Reserve address space
   void* dev_ptr = nullptr;
-  err = hipMemAddressReserve(&dev_ptr, alloc_size, 0, 0, 0);
+  err           = hipMemAddressReserve(&dev_ptr, alloc_size, 0, 0, 0);
   if (err != hipSuccess) {
     (void)hipMemRelease(handle);
     return err;
@@ -135,12 +137,12 @@ inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandle
   // Set access permissions
   hipMemAccessDesc accessDesc[2];
   accessDesc[0].location.type = hipMemLocationTypeDevice;
-  accessDesc[0].location.id = device_id;
-  accessDesc[0].flags = hipMemAccessFlagsProtReadWrite;
+  accessDesc[0].location.id   = device_id;
+  accessDesc[0].flags         = hipMemAccessFlagsProtReadWrite;
 
   accessDesc[1].location.type = hipMemLocationTypeHost;
-  accessDesc[1].location.id = 0;
-  accessDesc[1].flags = hipMemAccessFlagsProtReadWrite;
+  accessDesc[1].location.id   = 0;
+  accessDesc[1].flags         = hipMemAccessFlagsProtReadWrite;
 
   err = hipMemSetAccess(dev_ptr, alloc_size, accessDesc, 2);
   if (err != hipSuccess) {
@@ -152,8 +154,8 @@ inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandle
 
   // Success - populate allocation info and set output pointer
   alloc_info->handle = handle;
-  alloc_info->size = alloc_size;
-  *ptr = dev_ptr;
+  alloc_info->size   = alloc_size;
+  *ptr               = dev_ptr;
 
   return hipSuccess;
 }
@@ -165,8 +167,7 @@ inline hipError_t VMMAllocCommon(void** ptr, size_t size, hipMemAllocationHandle
  * @param alloc_info Allocation information from VMMAllocCommon
  * @return hipError_t Success or error code
  */
-inline hipError_t VMMFreeCommon(void* ptr, const VMMCommonAllocationInfo* alloc_info)
-{
+inline hipError_t VMMFreeCommon(void* ptr, const VMMCommonAllocationInfo* alloc_info) {
   if (ptr == nullptr) {
     return hipSuccess;
   }
@@ -204,10 +205,9 @@ inline hipError_t VMMFreeCommon(void* ptr, const VMMCommonAllocationInfo* alloc_
  * @param dmabuf_offset Output offset within the dmabuf
  * @return hipError_t Success or error code
  */
-inline hipError_t VMMGetDmabufHandleCommon(void *dev_ptr, size_t size,
+inline hipError_t VMMGetDmabufHandleCommon(void* dev_ptr, size_t size,
                                            const VMMCommonAllocationInfo* alloc_info,
-                                           int *dmabuf_fd, uint64_t *dmabuf_offset)
-{
+                                           int* dmabuf_fd, uint64_t* dmabuf_offset) {
   if (dev_ptr == nullptr || dmabuf_fd == nullptr || dmabuf_offset == nullptr) {
     return hipErrorInvalidValue;
   }
@@ -230,7 +230,7 @@ inline hipError_t VMMGetDmabufHandleCommon(void *dev_ptr, size_t size,
   }
 
   // For VMM allocations, the offset is always 0 since we're exporting the base allocation
-  *dmabuf_fd = fd;
+  *dmabuf_fd     = fd;
   *dmabuf_offset = 0;
 
   return hipSuccess;

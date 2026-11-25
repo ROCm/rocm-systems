@@ -30,10 +30,8 @@
 namespace rocshmem {
 
 ROTeam::ROTeam(Backend* backend, const TeamInfo& team_info_wrt_parent,
-               const TeamInfo& team_info_wrt_world, int num_pes, int my_pe,
-               MPI_Comm mpi_comm)
-    : Team(backend, team_info_wrt_parent, team_info_wrt_world, num_pes, my_pe,
-           mpi_comm) {
+               const TeamInfo& team_info_wrt_world, int num_pes, int my_pe, MPI_Comm mpi_comm)
+    : Team(backend, team_info_wrt_parent, team_info_wrt_world, num_pes, my_pe, mpi_comm) {
   type = BackendType::RO_BACKEND;
 
   // Disable allocating ata_buffer for now. It is not

@@ -52,28 +52,28 @@ static void device_properties_init(void) {
   device_prop_t prop;
   hipDeviceProp_t hipprop;
   int has_large_bar = 0;
-  for (int i=0; i<numDevices; i++) {
+  for (int i = 0; i < numDevices; i++) {
     CHECK_HIP(hipGetDeviceProperties(&hipprop, i));
-    prop.warpSize = hipprop.warpSize;
+    prop.warpSize           = hipprop.warpSize;
     prop.maxThreadsPerBlock = hipprop.maxThreadsPerBlock;
-    std::snprintf(prop.gcnArchName, sizeof(prop.gcnArchName), "%s",
-                  hipprop.gcnArchName);
+    std::snprintf(prop.gcnArchName, sizeof(prop.gcnArchName), "%s", hipprop.gcnArchName);
     device_properties.push_back(prop);
 
-    CHECK_HIP(hipDeviceGetAttribute (&has_large_bar, hipDeviceAttributeIsLargeBar, i));
+    CHECK_HIP(hipDeviceGetAttribute(&has_large_bar, hipDeviceAttributeIsLargeBar, i));
     if (has_large_bar == 0) {
       // Large BAR required for IPC operations
-      LOG_WARN("Large BAR support is not enabled on device %d. "
-               "This will impact IPC functionality on some systems.", i);
+      LOG_WARN(
+          "Large BAR support is not enabled on device %d. "
+          "This will impact IPC functionality on some systems.",
+          i);
     }
   }
 }
-hsa_status_t rocm_hsa_amd_memory_pool_callback(
-    hsa_amd_memory_pool_t memory_pool, void* data) {
+hsa_status_t rocm_hsa_amd_memory_pool_callback(hsa_amd_memory_pool_t memory_pool, void* data) {
   hsa_amd_memory_pool_global_flag_t pool_flag{};
 
-  hsa_status_t status{hsa_amd_memory_pool_get_info(
-      memory_pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &pool_flag)};
+  hsa_status_t status{
+      hsa_amd_memory_pool_get_info(memory_pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &pool_flag)};
 
   if (status != HSA_STATUS_SUCCESS) {
     LOG_ERROR("Failure to get pool info: 0x%x", status);
@@ -88,12 +88,10 @@ hsa_status_t rocm_hsa_amd_memory_pool_callback(
   return HSA_STATUS_SUCCESS;
 }
 
-hsa_status_t rocm_hsa_agent_callback(hsa_agent_t agent,
-                                     [[maybe_unused]] void* data) {
+hsa_status_t rocm_hsa_agent_callback(hsa_agent_t agent, [[maybe_unused]] void* data) {
   hsa_device_type_t device_type{};
 
-  hsa_status_t status{
-      hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type)};
+  hsa_status_t status{hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &device_type)};
 
   if (status != HSA_STATUS_SUCCESS) {
     LOG_ERROR("Failure to get device type: 0x%x", status);
@@ -103,15 +101,15 @@ hsa_status_t rocm_hsa_agent_callback(hsa_agent_t agent,
   if (device_type == HSA_DEVICE_TYPE_GPU) {
     gpu_agents.emplace_back();
     gpu_agents.back().agent = agent;
-    status = hsa_amd_agent_iterate_memory_pools(
-        agent, rocm_hsa_amd_memory_pool_callback, &(gpu_agents.back().pool));
+    status = hsa_amd_agent_iterate_memory_pools(agent, rocm_hsa_amd_memory_pool_callback,
+                                                &(gpu_agents.back().pool));
   }
 
   if (device_type == HSA_DEVICE_TYPE_CPU) {
     cpu_agents.emplace_back();
     cpu_agents.back().agent = agent;
-    status = hsa_amd_agent_iterate_memory_pools(
-        agent, rocm_hsa_amd_memory_pool_callback, &(cpu_agents.back().pool));
+    status = hsa_amd_agent_iterate_memory_pools(agent, rocm_hsa_amd_memory_pool_callback,
+                                                &(cpu_agents.back().pool));
   }
 
   return status;
@@ -137,11 +135,9 @@ int rocm_init() {
   return 0;
 }
 
-void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr,
-                                    int gpu_id) {
-  hsa_status_t status{
-      hsa_amd_memory_lock_to_pool(ptr, size, &(gpu_agents[gpu_id].agent), 1,
-                                  cpu_agents[0].pool, 0, gpu_ptr)};
+void rocm_memory_lock_to_fine_grain(void* ptr, size_t size, void** gpu_ptr, int gpu_id) {
+  hsa_status_t status{hsa_amd_memory_lock_to_pool(ptr, size, &(gpu_agents[gpu_id].agent), 1,
+                                                  cpu_agents[0].pool, 0, gpu_ptr)};
 
   if (status != HSA_STATUS_SUCCESS) {
     LOG_ERROR_EXIT("Failed to lock memory pool (%p): 0x%x", ptr, status);

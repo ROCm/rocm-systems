@@ -30,14 +30,14 @@
 using namespace rocshmem;
 
 template <class T>
-__device__ inline T* compute_target_ptr(T* base_ptr, AddrMode addr_mode,
-                                        int wg_idx, int itr, int n_wgs) {
+__device__ inline T* compute_target_ptr(T* base_ptr, AddrMode addr_mode, int wg_idx, int itr,
+                                        int n_wgs) {
   // PerBlock: element = wg_idx, with n_wgs elements per loop
   // PerGrid : single element shared by the whole grid per loop
   if (addr_mode == AddrMode::PerBlock) {
     size_t offset = wg_idx + itr * n_wgs;
     return base_ptr + offset;
-  } else { // PerGrid
+  } else {  // PerGrid
     return base_ptr + itr;
   }
 }
@@ -52,9 +52,9 @@ AMOBitwiseTester<T>::AMOBitwiseTester(TesterArguments args) : Tester(args) {
   n_loops = std::max(args.loop, args.loop_large) + args.skip;
 
   // One return per *thread* per loop
-  CHECK_HIP(hipMalloc((void **)&ret_val, max_msg_size * n_in * n_loops));
+  CHECK_HIP(hipMalloc((void**)&ret_val, max_msg_size * n_in * n_loops));
 
-  dest = (T *) alloc_test_buffer(max_msg_size * n_out * n_loops);
+  dest = (T*)alloc_test_buffer(max_msg_size * n_out * n_loops);
 }
 
 template <typename T>
@@ -66,8 +66,8 @@ AMOBitwiseTester<T>::~AMOBitwiseTester() {
 template <typename T>
 void AMOBitwiseTester<T>::resetBuffers([[maybe_unused]] size_t size) {
   n_loops = num_loops + args.skip;
-  memset(ret_val, 0, max_msg_size * n_in  * n_loops);
-  memset(dest,    0, max_msg_size * n_out * n_loops);
+  memset(ret_val, 0, max_msg_size * n_in * n_loops);
+  memset(dest, 0, max_msg_size * n_out * n_loops);
 }
 
 template <typename G>
@@ -80,17 +80,14 @@ void fail_eq(const G& got, const G& exp) {
 // Map (loop, elem_idx) -> dest[] index for current address mode.
 template <typename T>
 int AMOBitwiseTester<T>::destIndex(int l, int elem_idx) const {
-  return (args.addr_mode == AddrMode::PerBlock)
-           ? l * static_cast<int>(args.num_wgs) + elem_idx
-           : l; // PerGrid has a single element per loop
+  return (args.addr_mode == AddrMode::PerBlock) ? l * static_cast<int>(args.num_wgs) + elem_idx
+                                                : l;  // PerGrid has a single element per loop
 }
 
 // Number of output elements to check per loop for current address mode.
 template <typename T>
 int AMOBitwiseTester<T>::numElems() const {
-  return (args.addr_mode == AddrMode::PerBlock)
-           ? static_cast<int>(args.num_wgs)
-           : 1; // PerGrid
+  return (args.addr_mode == AddrMode::PerBlock) ? static_cast<int>(args.num_wgs) : 1;  // PerGrid
 }
 
 // Return pointer to the start of the ret_val “chunk” for (loop, elem_idx)
@@ -99,12 +96,12 @@ template <typename T>
 std::pair<T*, int> AMOBitwiseTester<T>::retChunk(int l, int elem_idx) const {
   if (args.addr_mode == AddrMode::PerBlock) {
     // One chunk per element (workgroup): wg_size returns
-    T*  p  = ret_val + l * n_in + elem_idx * args.wg_size;
+    T* p   = ret_val + l * n_in + elem_idx * args.wg_size;
     int sz = static_cast<int>(args.wg_size);
     return {p, sz};
   }
   // PerGrid: one big chunk per loop (all threads)
-  T*  p  = ret_val + l * n_in;
+  T* p   = ret_val + l * n_in;
   int sz = static_cast<int>(n_in);
   return {p, sz};
 }
@@ -118,7 +115,8 @@ void AMOBitwiseTester<T>::verifyDestValues() {
     for (int l = 0; l < loops; ++l) {
       for (int elem = 0; elem < n_elems; ++elem) {
         const int idx = destIndex(l, elem);
-        if (dest[idx] != expected) fail_eq(dest[idx], expected);
+        if (dest[idx] != expected)
+          fail_eq(dest[idx], expected);
       }
     }
   };
@@ -127,42 +125,45 @@ void AMOBitwiseTester<T>::verifyDestValues() {
   const T MASK = static_cast<T>(~T{0});
 
   switch (_type) {
-    case AMO_AndTestType:
-    case AMO_FetchAndTestType: {
+  case AMO_AndTestType:
+  case AMO_FetchAndTestType:
+    {
       // Start at 0; 0 & MASK == 0 regardless of writer count.
       check_equal_all(static_cast<T>(0));
       break;
     }
-    case AMO_OrTestType:
-    case AMO_FetchOrTestType: {
+  case AMO_OrTestType:
+  case AMO_FetchOrTestType:
+    {
       // final value is MASK.
       check_equal_all(MASK);
       break;
     }
-    case AMO_XorTestType:
-    case AMO_FetchXorTestType: {
+  case AMO_XorTestType:
+  case AMO_FetchXorTestType:
+    {
       // PerBlock: K = wg_size; PerGrid: K = num_wgs * wg_size
-      const int K = (args.addr_mode == AddrMode::PerBlock)
-                     ? static_cast<int>(args.wg_size)
-                     : static_cast<int>(args.num_wgs * args.wg_size);
+      const int K      = (args.addr_mode == AddrMode::PerBlock)
+                             ? static_cast<int>(args.wg_size)
+                             : static_cast<int>(args.num_wgs * args.wg_size);
       const T expected = (K & 1) ? MASK : static_cast<T>(0);
       check_equal_all(expected);
       break;
     }
-    default:
-      break;
+  default:
+    break;
   }
 }
 
 template <typename T>
 void AMOBitwiseTester<T>::verifyReturnValues() {
   // Only “fetch-*” types produce return values to validate.
-  if (_type == AMO_AndTestType || _type == AMO_OrTestType ||
-      _type == AMO_XorTestType) return;
+  if (_type == AMO_AndTestType || _type == AMO_OrTestType || _type == AMO_XorTestType)
+    return;
 
   const int loops   = static_cast<int>(n_loops);
   const int n_elems = numElems();
-  const T MASK = static_cast<T>(~T{0});
+  const T MASK      = static_cast<T>(~T{0});
 
   for (int l = 0; l < loops; ++l) {
     for (int elem = 0; elem < n_elems; ++elem) {
@@ -175,34 +176,39 @@ void AMOBitwiseTester<T>::verifyReturnValues() {
         masks += (p[i] == MASK);
       }
       if (zeros + masks != cnt) {
-        fail_eq(zeros + masks, cnt); // unexpected values present
+        fail_eq(zeros + masks, cnt);  // unexpected values present
       }
 
       switch (_type) {
-        case AMO_FetchAndTestType:
-          // Old value is 0 (dest stays 0)
-          if (!(zeros == cnt && masks == 0)) fail_eq(zeros, cnt);
-          break;
+      case AMO_FetchAndTestType:
+        // Old value is 0 (dest stays 0)
+        if (!(zeros == cnt && masks == 0))
+          fail_eq(zeros, cnt);
+        break;
 
-        case AMO_FetchOrTestType:
-          // Exactly one 0 (the first OR), rest MASK
-          if (!(zeros == 1 && masks == cnt - 1)) fail_eq(zeros, 1);
-          break;
+      case AMO_FetchOrTestType:
+        // Exactly one 0 (the first OR), rest MASK
+        if (!(zeros == 1 && masks == cnt - 1))
+          fail_eq(zeros, 1);
+        break;
 
-        case AMO_FetchXorTestType: {
+      case AMO_FetchXorTestType:
+        {
           // returns multiset = { ceil(K/2) zeros, floor(K/2) MASKs }
-          const int exp_zeros = (cnt + 1) / 2;   // ceil(cnt/2)
-          const int exp_masks =  cnt      / 2;   // floor(cnt/2)
+          const int exp_zeros = (cnt + 1) / 2;  // ceil(cnt/2)
+          const int exp_masks = cnt / 2;        // floor(cnt/2)
           if (!(zeros == exp_zeros && masks == exp_masks)) {
             fail_eq(zeros, exp_zeros);
           }
           // cross-check
-          if ((cnt & 1) && zeros != masks + 1) fail_eq(zeros, masks + 1);
-          if (!(cnt & 1) && zeros != masks)    fail_eq(zeros, masks);
+          if ((cnt & 1) && zeros != masks + 1)
+            fail_eq(zeros, masks + 1);
+          if (!(cnt & 1) && zeros != masks)
+            fail_eq(zeros, masks);
           break;
         }
-        default:
-          break;
+      default:
+        break;
       }
     }
   }
@@ -218,99 +224,87 @@ void AMOBitwiseTester<T>::verifyResults([[maybe_unused]] size_t size) {
   }
 }
 
-#define AMO_BITWISE_DEF_GEN(T, TNAME)                                         \
-  template <TestType Type>                                                    \
-  __global__ void AMOBitwiseTest_##TNAME(                                     \
-      int loop, int skip, long long int *start_time,                          \
-      long long int *end_time, T *dest, T *ret_val,                           \
-      AddrMode addr_mode, ShmemContextType ctx_type) {                        \
-    __shared__ rocshmem_ctx_t ctx;                                            \
-    int wg_id     = get_flat_grid_id();                                       \
-    int global_id = get_flat_id();                                            \
-    int n_threads = get_flat_grid_size();                                     \
-    int n_wgs     = get_grid_num_blocks();                                    \
-    rocshmem_wg_ctx_create(ctx_type, &ctx);                                   \
-    for (int i = 0; i < loop + skip; i++) {                                   \
-      T *ptr = compute_target_ptr<T>(dest, addr_mode, wg_id, i, n_wgs);       \
-      T ret = 0;                                                              \
-      if (i == skip) {                                                        \
-        start_time[wg_id] = wall_clock64();                                   \
-      }                                                                       \
-      if constexpr (Type == AMO_FetchAndTestType) {                           \
-        ret = rocshmem_ctx_##TNAME##_atomic_fetch_and(ctx, ptr,               \
-                                                      (T)~(T)0, 1);           \
-      } else if constexpr (Type == AMO_AndTestType) {                         \
-        rocshmem_ctx_##TNAME##_atomic_and(ctx, ptr, (T)~(T)0, 1);             \
-      } else if constexpr (Type == AMO_FetchOrTestType) {                     \
-        ret = rocshmem_ctx_##TNAME##_atomic_fetch_or(ctx, ptr,                \
-                                                     (T)~(T)0, 1);            \
-      } else if constexpr (Type == AMO_OrTestType) {                          \
-        rocshmem_ctx_##TNAME##_atomic_or(ctx, ptr, (T)~(T)0, 1);              \
-      } else if constexpr (Type == AMO_FetchXorTestType) {                    \
-        ret = rocshmem_ctx_##TNAME##_atomic_fetch_xor(ctx, ptr,               \
-                                                      (T)~(T)0, 1);           \
-      } else if constexpr (Type == AMO_XorTestType) {                         \
-        rocshmem_ctx_##TNAME##_atomic_xor(ctx, ptr, (T)~(T)0, 1);             \
-      }                                                                       \
-      ret_val[global_id + i * n_threads] = ret;                               \
-    }                                                                         \
-    rocshmem_ctx_quiet(ctx);                                                  \
-    end_time[wg_id] = wall_clock64();                                         \
-    __syncthreads();                                                          \
-    rocshmem_wg_ctx_destroy(&ctx);                                            \
-  }                                                                           \
-  template <>                                                                 \
-  void AMOBitwiseTester<T>::launchKernel(dim3 gridsize, dim3 blocksize,       \
-                                         int loop,                            \
-                                         [[maybe_unused]] size_t size) {      \
-    size_t shared_bytes = 0;                                                  \
-    n_loops = loop + args.skip;                                               \
-    switch (_type) {                                                          \
-      case AMO_FetchAndTestType:                                              \
-        hipLaunchKernelGGL(                                                   \
-            (AMOBitwiseTest_##TNAME<AMO_FetchAndTestType>), gridsize,         \
-            blocksize, shared_bytes, stream, loop, args.skip, start_time,     \
-            end_time, dest, ret_val, args.addr_mode, _shmem_context);         \
-        break;                                                                \
-      case AMO_AndTestType:                                                   \
-        hipLaunchKernelGGL(                                                   \
-            (AMOBitwiseTest_##TNAME<AMO_AndTestType>), gridsize,              \
-            blocksize, shared_bytes, stream, loop, args.skip, start_time,     \
-            end_time, dest, ret_val, args.addr_mode, _shmem_context);         \
-        break;                                                                \
-      case AMO_FetchOrTestType:                                               \
-        hipLaunchKernelGGL(                                                   \
-            (AMOBitwiseTest_##TNAME<AMO_FetchOrTestType>), gridsize,          \
-            blocksize, shared_bytes, stream, loop, args.skip, start_time,     \
-            end_time, dest, ret_val, args.addr_mode, _shmem_context);         \
-        break;                                                                \
-      case AMO_OrTestType:                                                    \
-        hipLaunchKernelGGL(                                                   \
-            (AMOBitwiseTest_##TNAME<AMO_OrTestType>), gridsize,               \
-            blocksize, shared_bytes, stream, loop, args.skip, start_time,     \
-            end_time, dest, ret_val, args.addr_mode, _shmem_context);         \
-        break;                                                                \
-      case AMO_FetchXorTestType:                                              \
-        hipLaunchKernelGGL(                                                   \
-            (AMOBitwiseTest_##TNAME<AMO_FetchXorTestType>), gridsize,         \
-            blocksize, shared_bytes, stream, loop, args.skip, start_time,     \
-            end_time, dest, ret_val, args.addr_mode, _shmem_context);         \
-        break;                                                                \
-      case AMO_XorTestType:                                                   \
-        hipLaunchKernelGGL(                                                   \
-            (AMOBitwiseTest_##TNAME<AMO_XorTestType>), gridsize,              \
-            blocksize, shared_bytes, stream, loop, args.skip, start_time,     \
-            end_time, dest, ret_val, args.addr_mode, _shmem_context);         \
-        break;                                                                \
-      default:                                                                \
-        std::cerr << "Invalid Test: unhandled TestType " << _type             \
-                  << " in AMOBitwiseTester<" #TNAME ">::launchKernel"         \
-                  << std::endl;                                               \
-        exit(-1);                                                             \
-    }                                                                         \
-    num_msgs       = n_loops * gridsize.x * blocksize.x;                      \
-    num_timed_msgs = loop    * gridsize.x * blocksize.x;                      \
-  }                                                                           \
+#define AMO_BITWISE_DEF_GEN(T, TNAME)                                                         \
+  template <TestType Type>                                                                    \
+  __global__ void AMOBitwiseTest_##TNAME(int loop, int skip, long long int* start_time,       \
+                                         long long int* end_time, T* dest, T* ret_val,        \
+                                         AddrMode addr_mode, ShmemContextType ctx_type) {     \
+    __shared__ rocshmem_ctx_t ctx;                                                            \
+    int wg_id     = get_flat_grid_id();                                                       \
+    int global_id = get_flat_id();                                                            \
+    int n_threads = get_flat_grid_size();                                                     \
+    int n_wgs     = get_grid_num_blocks();                                                    \
+    rocshmem_wg_ctx_create(ctx_type, &ctx);                                                   \
+    for (int i = 0; i < loop + skip; i++) {                                                   \
+      T* ptr = compute_target_ptr<T>(dest, addr_mode, wg_id, i, n_wgs);                       \
+      T ret  = 0;                                                                             \
+      if (i == skip) {                                                                        \
+        start_time[wg_id] = wall_clock64();                                                   \
+      }                                                                                       \
+      if constexpr (Type == AMO_FetchAndTestType) {                                           \
+        ret = rocshmem_ctx_##TNAME##_atomic_fetch_and(ctx, ptr, (T) ~(T)0, 1);                \
+      } else if constexpr (Type == AMO_AndTestType) {                                         \
+        rocshmem_ctx_##TNAME##_atomic_and(ctx, ptr, (T) ~(T)0, 1);                            \
+      } else if constexpr (Type == AMO_FetchOrTestType) {                                     \
+        ret = rocshmem_ctx_##TNAME##_atomic_fetch_or(ctx, ptr, (T) ~(T)0, 1);                 \
+      } else if constexpr (Type == AMO_OrTestType) {                                          \
+        rocshmem_ctx_##TNAME##_atomic_or(ctx, ptr, (T) ~(T)0, 1);                             \
+      } else if constexpr (Type == AMO_FetchXorTestType) {                                    \
+        ret = rocshmem_ctx_##TNAME##_atomic_fetch_xor(ctx, ptr, (T) ~(T)0, 1);                \
+      } else if constexpr (Type == AMO_XorTestType) {                                         \
+        rocshmem_ctx_##TNAME##_atomic_xor(ctx, ptr, (T) ~(T)0, 1);                            \
+      }                                                                                       \
+      ret_val[global_id + i * n_threads] = ret;                                               \
+    }                                                                                         \
+    rocshmem_ctx_quiet(ctx);                                                                  \
+    end_time[wg_id] = wall_clock64();                                                         \
+    __syncthreads();                                                                          \
+    rocshmem_wg_ctx_destroy(&ctx);                                                            \
+  }                                                                                           \
+  template <>                                                                                 \
+  void AMOBitwiseTester<T>::launchKernel(dim3 gridsize, dim3 blocksize, int loop,             \
+                                         [[maybe_unused]] size_t size) {                      \
+    size_t shared_bytes = 0;                                                                  \
+    n_loops             = loop + args.skip;                                                   \
+    switch (_type) {                                                                          \
+    case AMO_FetchAndTestType:                                                                \
+      hipLaunchKernelGGL((AMOBitwiseTest_##TNAME<AMO_FetchAndTestType>), gridsize, blocksize, \
+                         shared_bytes, stream, loop, args.skip, start_time, end_time, dest,   \
+                         ret_val, args.addr_mode, _shmem_context);                            \
+      break;                                                                                  \
+    case AMO_AndTestType:                                                                     \
+      hipLaunchKernelGGL((AMOBitwiseTest_##TNAME<AMO_AndTestType>), gridsize, blocksize,      \
+                         shared_bytes, stream, loop, args.skip, start_time, end_time, dest,   \
+                         ret_val, args.addr_mode, _shmem_context);                            \
+      break;                                                                                  \
+    case AMO_FetchOrTestType:                                                                 \
+      hipLaunchKernelGGL((AMOBitwiseTest_##TNAME<AMO_FetchOrTestType>), gridsize, blocksize,  \
+                         shared_bytes, stream, loop, args.skip, start_time, end_time, dest,   \
+                         ret_val, args.addr_mode, _shmem_context);                            \
+      break;                                                                                  \
+    case AMO_OrTestType:                                                                      \
+      hipLaunchKernelGGL((AMOBitwiseTest_##TNAME<AMO_OrTestType>), gridsize, blocksize,       \
+                         shared_bytes, stream, loop, args.skip, start_time, end_time, dest,   \
+                         ret_val, args.addr_mode, _shmem_context);                            \
+      break;                                                                                  \
+    case AMO_FetchXorTestType:                                                                \
+      hipLaunchKernelGGL((AMOBitwiseTest_##TNAME<AMO_FetchXorTestType>), gridsize, blocksize, \
+                         shared_bytes, stream, loop, args.skip, start_time, end_time, dest,   \
+                         ret_val, args.addr_mode, _shmem_context);                            \
+      break;                                                                                  \
+    case AMO_XorTestType:                                                                     \
+      hipLaunchKernelGGL((AMOBitwiseTest_##TNAME<AMO_XorTestType>), gridsize, blocksize,      \
+                         shared_bytes, stream, loop, args.skip, start_time, end_time, dest,   \
+                         ret_val, args.addr_mode, _shmem_context);                            \
+      break;                                                                                  \
+    default:                                                                                  \
+      std::cerr << "Invalid Test: unhandled TestType " << _type                               \
+                << " in AMOBitwiseTester<" #TNAME ">::launchKernel" << std::endl;             \
+      exit(-1);                                                                               \
+    }                                                                                         \
+    num_msgs       = n_loops * gridsize.x * blocksize.x;                                      \
+    num_timed_msgs = loop * gridsize.x * blocksize.x;                                         \
+  }                                                                                           \
   template class AMOBitwiseTester<T>;
 
 AMO_BITWISE_DEF_GEN(unsigned int, uint)

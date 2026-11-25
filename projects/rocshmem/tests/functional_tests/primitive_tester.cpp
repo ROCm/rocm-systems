@@ -32,12 +32,9 @@ using namespace rocshmem;
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <TestType Type>
-__global__ void PrimitiveTest(int loop, int skip,
-                              long long int *start_time,
-                              long long int *end_time, char *source,
-                              char *dest, size_t size,
-                              ShmemContextType ctx_type, int wf_size,
-                              int batch, int *grid_psync) {
+__global__ void PrimitiveTest(int loop, int skip, long long int* start_time,
+                              long long int* end_time, char* source, char* dest, size_t size,
+                              ShmemContextType ctx_type, int wf_size, int batch, int* grid_psync) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
@@ -69,7 +66,7 @@ __global__ void PrimitiveTest(int loop, int skip,
     // Quiet at batch boundaries to allow safe buffer reuse
     if (offset == 0) {
       __syncthreads();
-      if(is_thread_zero_in_block()) {
+      if (is_thread_zero_in_block()) {
         rocshmem_ctx_quiet(ctx);
       }
       __syncthreads();
@@ -101,7 +98,7 @@ __global__ void PrimitiveTest(int loop, int skip,
   }
 
   __syncthreads();
-  if(is_thread_zero_in_block()) {
+  if (is_thread_zero_in_block()) {
     rocshmem_ctx_quiet(ctx);
   }
 
@@ -112,9 +109,9 @@ __global__ void PrimitiveTest(int loop, int skip,
   end_time[wg_id] = wall_clock64();
 
   // Find the earliest start time
-  int num_wfs = (get_flat_block_size() - 1 ) / wf_size + 1;
-  for (int i = num_wfs / 2; i > 0; i >>= 1 ) {
-    if(t_id < i) {
+  int num_wfs = (get_flat_block_size() - 1) / wf_size + 1;
+  for (int i = num_wfs / 2; i > 0; i >>= 1) {
+    if (t_id < i) {
       wf_start_time[t_id] = min(wf_start_time[t_id], wf_start_time[t_id + i]);
     }
   }
@@ -132,16 +129,14 @@ __global__ void PrimitiveTest(int loop, int skip,
  *****************************************************************************/
 PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
   size_t buff_size = max_msg_size * batch_size * args.wg_size * args.num_wgs;
-  char *local = (char *) alloc_test_buffer(buff_size, args.local_buf_type);
-  char *remote = (char *) alloc_test_buffer(buff_size);
+  char* local      = (char*)alloc_test_buffer(buff_size, args.local_buf_type);
+  char* remote     = (char*)alloc_test_buffer(buff_size);
   CHECK_HIP(hipMalloc(&grid_psync, sizeof(int)));
 
   int max_co_resident_wgs_per_cu = 0;
   CHECK_HIP(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &max_co_resident_wgs_per_cu, PrimitiveTest<GetTestType>,
-      args.wg_size, 0));
-  const int max_sustainable_wgs =
-      max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
+      &max_co_resident_wgs_per_cu, PrimitiveTest<GetTestType>, args.wg_size, 0));
+  const int max_sustainable_wgs = max_co_resident_wgs_per_cu * deviceProps.multiProcessorCount;
   if (args.num_wgs > static_cast<unsigned>(max_sustainable_wgs)) {
     std::cerr << "Error: Requested work-groups (" << args.num_wgs
               << ") exceeds max co-resident work-groups (" << max_sustainable_wgs
@@ -150,19 +145,19 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
   }
 
   switch (_type) {
-    case PutTestType:
-    case PutNBITestType:
-    case PTestType:
-      source = local;
-      dest = remote;
-      break;
-    case GetTestType:
-    case GetNBITestType:
-    case GTestType:
-    default:
-      dest = local;
-      source = remote;
-      break;
+  case PutTestType:
+  case PutNBITestType:
+  case PTestType:
+    source = local;
+    dest   = remote;
+    break;
+  case GetTestType:
+  case GetNBITestType:
+  case GTestType:
+  default:
+    dest   = local;
+    source = remote;
+    break;
   }
 
   CHECK_HIP(hipMemsetAsync(source, 'a', buff_size, stream));
@@ -170,23 +165,23 @@ PrimitiveTester::PrimitiveTester(TesterArguments args) : Tester(args) {
 }
 
 PrimitiveTester::~PrimitiveTester() {
-  char *local = nullptr;
-  char *remote = nullptr;
+  char* local  = nullptr;
+  char* remote = nullptr;
 
   switch (_type) {
-    case PutTestType:
-    case PutNBITestType:
-    case PTestType:
-      local = source;
-      remote = dest;
-      break;
-    case GetTestType:
-    case GetNBITestType:
-    case GTestType:
-    default:
-      local = dest;
-      remote = source;
-      break;
+  case PutTestType:
+  case PutNBITestType:
+  case PTestType:
+    local  = source;
+    remote = dest;
+    break;
+  case GetTestType:
+  case GetNBITestType:
+  case GTestType:
+  default:
+    local  = dest;
+    remote = source;
+    break;
   }
 
   free_test_buffer(local, args.local_buf_type);
@@ -201,75 +196,65 @@ void PrimitiveTester::resetBuffers(size_t size) {
   CHECK_HIP(hipStreamSynchronize(stream));
 }
 
-void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                   size_t size) {
+void PrimitiveTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
   size_t shared_bytes = 0;
 
   switch (_type) {
-    case GetTestType:
-      hipLaunchKernelGGL(PrimitiveTest<GetTestType>, gridSize, blockSize,
-                         shared_bytes, stream, loop, args.skip, start_time,
-                         end_time, source, dest, size, _shmem_context,
-                         wf_size, batch_size, grid_psync);
-      break;
-    case GetNBITestType:
-      hipLaunchKernelGGL(PrimitiveTest<GetNBITestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, source, dest, size,
-                         _shmem_context, wf_size, batch_size, grid_psync);
-      break;
-    case PutTestType:
-      hipLaunchKernelGGL(PrimitiveTest<PutTestType>, gridSize, blockSize,
-                         shared_bytes, stream, loop, args.skip, start_time,
-                         end_time, source, dest, size, _shmem_context,
-                         wf_size, batch_size, grid_psync);
-      break;
-    case PutNBITestType:
-      hipLaunchKernelGGL(PrimitiveTest<PutNBITestType>, gridSize,
-                         blockSize, shared_bytes, stream, loop, args.skip,
-                         start_time, end_time, source, dest, size,
-                         _shmem_context, wf_size, batch_size, grid_psync);
-      break;
-    case PTestType:
-      hipLaunchKernelGGL(PrimitiveTest<PTestType>, gridSize, blockSize,
-                         shared_bytes, stream, loop, args.skip, start_time,
-                         end_time, source, dest, size, _shmem_context,
-                         wf_size, batch_size, grid_psync);
-      break;
-    case GTestType:
-      hipLaunchKernelGGL(PrimitiveTest<GTestType>, gridSize, blockSize,
-                         shared_bytes, stream, loop, args.skip, start_time,
-                         end_time, source, dest, size, _shmem_context,
-                         wf_size, batch_size, grid_psync);
-      break;
-    default:
-      std::cerr << "Invalid Test: unhandled TestType " << _type
-                << " in PrimitiveTester::launchKernel" << std::endl;
-      exit(-1);
+  case GetTestType:
+    hipLaunchKernelGGL(PrimitiveTest<GetTestType>, gridSize, blockSize, shared_bytes, stream, loop,
+                       args.skip, start_time, end_time, source, dest, size, _shmem_context, wf_size,
+                       batch_size, grid_psync);
+    break;
+  case GetNBITestType:
+    hipLaunchKernelGGL(PrimitiveTest<GetNBITestType>, gridSize, blockSize, shared_bytes, stream,
+                       loop, args.skip, start_time, end_time, source, dest, size, _shmem_context,
+                       wf_size, batch_size, grid_psync);
+    break;
+  case PutTestType:
+    hipLaunchKernelGGL(PrimitiveTest<PutTestType>, gridSize, blockSize, shared_bytes, stream, loop,
+                       args.skip, start_time, end_time, source, dest, size, _shmem_context, wf_size,
+                       batch_size, grid_psync);
+    break;
+  case PutNBITestType:
+    hipLaunchKernelGGL(PrimitiveTest<PutNBITestType>, gridSize, blockSize, shared_bytes, stream,
+                       loop, args.skip, start_time, end_time, source, dest, size, _shmem_context,
+                       wf_size, batch_size, grid_psync);
+    break;
+  case PTestType:
+    hipLaunchKernelGGL(PrimitiveTest<PTestType>, gridSize, blockSize, shared_bytes, stream, loop,
+                       args.skip, start_time, end_time, source, dest, size, _shmem_context, wf_size,
+                       batch_size, grid_psync);
+    break;
+  case GTestType:
+    hipLaunchKernelGGL(PrimitiveTest<GTestType>, gridSize, blockSize, shared_bytes, stream, loop,
+                       args.skip, start_time, end_time, source, dest, size, _shmem_context, wf_size,
+                       batch_size, grid_psync);
+    break;
+  default:
+    std::cerr << "Invalid Test: unhandled TestType " << _type << " in PrimitiveTester::launchKernel"
+              << std::endl;
+    exit(-1);
   }
 
-  num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;
 }
 
 void PrimitiveTester::verifyResults(size_t size) {
-  int check_id =
-      (_type == GetTestType || _type == GetNBITestType || _type == GTestType)
-          ? 0
-          : 1;
+  int check_id = (_type == GetTestType || _type == GetNBITestType || _type == GTestType) ? 0 : 1;
 
   if (args.myid == check_id) {
-    int start_slot = (batch_size - (args.skip % batch_size)) % batch_size;
-    int verify_iters = std::min(batch_size, num_loops + args.skip);
-    size_t buf_bytes = size * batch_size;
-    size_t concurrency = args.wg_size * args.num_wgs;
-    size_t total = size * verify_iters * concurrency;
-    size_t verify_wg_size = std::min((size_t) 1024, total);
+    int start_slot        = (batch_size - (args.skip % batch_size)) % batch_size;
+    int verify_iters      = std::min(batch_size, num_loops + args.skip);
+    size_t buf_bytes      = size * batch_size;
+    size_t concurrency    = args.wg_size * args.num_wgs;
+    size_t total          = size * verify_iters * concurrency;
+    size_t verify_wg_size = std::min((size_t)1024, total);
     size_t verify_num_wgs = (total + verify_wg_size - 1) / verify_wg_size;
 
-    hipLaunchKernelGGL(verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream,
-                       dest, size, buf_bytes, concurrency,
-                       num_loops, args.skip, batch_size, verification_error);
+    hipLaunchKernelGGL(verify_results_kernel_char, verify_num_wgs, verify_wg_size, 0, stream, dest,
+                       size, buf_bytes, concurrency, num_loops, args.skip, batch_size,
+                       verification_error);
     CHECK_HIP(hipStreamSynchronize(stream));
 
     if (*verification_error) {
@@ -278,11 +263,10 @@ void PrimitiveTester::verifyResults(size_t size) {
           int slot = (start_slot + iter) % batch_size;
           for (size_t i = 0; i < size; i++) {
             if (dest[b * buf_bytes + slot * size + i] != 'a') {
-              std::cerr << "Data validation error at buffer " << b
-                        << " slot " << slot << " idx " << i << std::endl;
+              std::cerr << "Data validation error at buffer " << b << " slot " << slot << " idx "
+                        << i << std::endl;
               std::cerr << " Got " << (int)(unsigned char)dest[b * buf_bytes + slot * size + i]
-                        << ", Expected " << (int)(unsigned char)'a'
-                        << std::endl;
+                        << ", Expected " << (int)(unsigned char)'a' << std::endl;
               exit(-1);
             }
           }

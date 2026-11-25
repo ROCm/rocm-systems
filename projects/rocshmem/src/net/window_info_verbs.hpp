@@ -63,9 +63,8 @@ class WindowInfoVerbs : public WindowInfo {
    *                         ibv_post_send return ENOMEM and later deadlock the
    *                         completion wait).
    */
-  WindowInfoVerbs(net::RmaEngine *rma, HdpPolicy *hdp, int ctx, void *heap_base,
-                  size_t heap_size, void *amo_scratch,
-                  uint32_t amo_scratch_lkey, int sq_depth)
+  WindowInfoVerbs(net::RmaEngine* rma, HdpPolicy* hdp, int ctx, void* heap_base, size_t heap_size,
+                  void* amo_scratch, uint32_t amo_scratch_lkey, int sq_depth)
       : WindowInfo(heap_base, heap_size),
         rma_{rma},
         hdp_{hdp},
@@ -75,12 +74,12 @@ class WindowInfoVerbs : public WindowInfo {
         sq_depth_{sq_depth} {}
 
   // --- blocking RMA (local-complete on return) ----------------------------
-  void put(void *dst, const void *src, size_t n, int pe);
-  void get(void *dst, const void *src, size_t n, int pe);
+  void put(void* dst, const void* src, size_t n, int pe);
+  void get(void* dst, const void* src, size_t n, int pe);
 
   // --- non-blocking RMA (completed by quiet) ------------------------------
-  void put_nbi(void *dst, const void *src, size_t n, int pe);
-  void get_nbi(void *dst, const void *src, size_t n, int pe);
+  void put_nbi(void* dst, const void* src, size_t n, int pe);
+  void get_nbi(void* dst, const void* src, size_t n, int pe);
 
   // --- ordering / completion ----------------------------------------------
   void quiet();
@@ -88,32 +87,31 @@ class WindowInfoVerbs : public WindowInfo {
 
   // --- 8-byte fetching atomics (result returned) --------------------------
   // Wired into HostInterface in a later phase; present so the class is complete.
-  uint64_t amo_fadd(void *dst, uint64_t add, int pe);
-  uint64_t amo_cas(void *dst, uint64_t cmp, uint64_t swp, int pe);
+  uint64_t amo_fadd(void* dst, uint64_t add, int pe);
+  uint64_t amo_cas(void* dst, uint64_t cmp, uint64_t swp, int pe);
 
   // --- put-with-signal + signal query -------------------------------------
   //! Blocking put-with-signal: deliver @p n bytes to @p dst at @p pe, then
   //! update the remote 8-byte signal word @p sig_addr with @p signal according
   //! to @p sig_op (ROCSHMEM_SIGNAL_SET => ordered inline write,
   //! ROCSHMEM_SIGNAL_ADD => fetch-and-add). Local-complete on return.
-  void put_signal(void *dst, const void *src, size_t n, uint64_t *sig_addr,
-                  uint64_t signal, int sig_op, int pe);
+  void put_signal(void* dst, const void* src, size_t n, uint64_t* sig_addr, uint64_t signal,
+                  int sig_op, int pe);
   //! Non-blocking put-with-signal; completed by a later quiet().
-  void put_signal_nbi(void *dst, const void *src, size_t n, uint64_t *sig_addr,
-                      uint64_t signal, int sig_op, int pe);
+  void put_signal_nbi(void* dst, const void* src, size_t n, uint64_t* sig_addr, uint64_t signal,
+                      int sig_op, int pe);
   //! Local read of the signal word (HDP-flushed direct load of fine-grained
   //! host-coherent heap). No fabric op.
-  uint64_t signal_fetch(const uint64_t *sig_addr);
+  uint64_t signal_fetch(const uint64_t* sig_addr);
   //! Spin on the local signal word until (word @p cmp @p cmp_val) holds.
-  void signal_wait_until(const uint64_t *sig_addr, int cmp, uint64_t cmp_val);
+  void signal_wait_until(const uint64_t* sig_addr, int cmp, uint64_t cmp_val);
 
  private:
   //! Reap up to a batch of completions from the context CQ, decrementing
   //! outstanding_ for each (and logging any error status). Returns the count.
   int reap();
   //! Post the signal update (SET or ADD) on @p lane, ordered after the payload.
-  void post_signal(int lane, uint64_t *sig_addr, uint64_t signal, int sig_op,
-                   int pe);
+  void post_signal(int lane, uint64_t* sig_addr, uint64_t signal, int sig_op, int pe);
   //! Spin the context CQ until all posted ops on it have completed.
   void wait_all();
   //! Block until the SQ has room for @p need more posts, so the following
@@ -125,10 +123,10 @@ class WindowInfoVerbs : public WindowInfo {
   //! Lane (QP) for a given peer within this context.
   int lane_for(int pe) const { return rma_->lanes().lane(ctx_, pe); }
 
-  net::RmaEngine *rma_{nullptr};
-  HdpPolicy *hdp_{nullptr};
+  net::RmaEngine* rma_{nullptr};
+  HdpPolicy* hdp_{nullptr};
   int ctx_{0};
-  void *amo_scratch_{nullptr};
+  void* amo_scratch_{nullptr};
   uint32_t amo_scratch_lkey_{0};
   int sq_depth_{0};
   uint64_t outstanding_{0};

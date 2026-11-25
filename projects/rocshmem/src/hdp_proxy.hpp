@@ -38,9 +38,8 @@ class HdpProxy {
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  HdpProxy(const HIPHostAllocator& alloc = HIPHostAllocator(),
-           size_t num_elems = 1)
-    : alloc_{alloc}, proxy_{num_elems, alloc_} {
+  HdpProxy(const HIPHostAllocator& alloc = HIPHostAllocator(), size_t num_elems = 1)
+      : alloc_{alloc}, proxy_{num_elems, alloc_} {
     new (proxy_.get()) HdpPolicy();
   }
 
@@ -56,9 +55,7 @@ class HdpProxy {
    * Since placement new is called in the constructor, then
    * delete must be called manually.
    */
-  ~HdpProxy() {
-    proxy_.get()->~HdpPolicy();
-  }
+  ~HdpProxy() { proxy_.get()->~HdpPolicy(); }
 
   /*
    * @brief Provide access to the memory referenced by the proxy

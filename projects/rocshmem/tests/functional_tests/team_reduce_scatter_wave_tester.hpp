@@ -37,8 +37,8 @@ template <typename T1, ROCSHMEM_OP T2>
 class TeamReduceScatterWaveTester : public Tester {
  public:
   explicit TeamReduceScatterWaveTester(
-      TesterArguments args, std::function<void(T1 &, T1 &)> f1,
-      std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2);
+      TesterArguments args, std::function<void(T1&, T1&)> f1,
+      std::function<std::pair<bool, std::string>(const T1&, const T1&)> f2);
   virtual ~TeamReduceScatterWaveTester();
 
  protected:
@@ -46,15 +46,14 @@ class TeamReduceScatterWaveTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            uint64_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, uint64_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(uint64_t size) override;
 
-  T1 *s_buf;  // source: n_pes * size elements per wave
-  T1 *r_buf;  // dest:   size elements per wave
+  T1* s_buf;  // source: n_pes * size elements per wave
+  T1* r_buf;  // dest:   size elements per wave
 
  private:
   int my_pe = 0;
@@ -65,11 +64,10 @@ class TeamReduceScatterWaveTester : public Tester {
    * The default value for the maximum number of teams is 40.
    */
   int num_teams = 39;
-  rocshmem_team_t *team_reduce_scatter_wave_world_dup;
+  rocshmem_team_t* team_reduce_scatter_wave_world_dup;
 
-  std::function<void(T1 &, T1 &)> init_buf;
-  std::function<std::pair<bool, std::string>(const T1 &, const T1 &)>
-      verify_buf;
+  std::function<void(T1&, T1&)> init_buf;
+  std::function<std::pair<bool, std::string>(const T1&, const T1&)> verify_buf;
 };
 
 #include "team_reduce_scatter_wave_tester.cpp"

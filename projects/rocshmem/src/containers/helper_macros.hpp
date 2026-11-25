@@ -35,18 +35,21 @@
 #include "rocshmem/rocshmem.hpp"
 
 #define BARRIER() rocshmem::rocshmem_wg_barrier_all()
-#define RANK rocshmem::rocshmem_my_pe()
-#define NPES rocshmem::rocshmem_n_pes()
+#define RANK      rocshmem::rocshmem_my_pe()
+#define NPES      rocshmem::rocshmem_n_pes()
 
-#define PE_BITS ((uint64_t)ceil(log(NPES) / log(2)))
+#define PE_BITS  ((uint64_t)ceil(log(NPES) / log(2)))
 #define PE_OF(X) ((X) >> (64 - PE_BITS))
 
-#define _printf \
-  if (RANK == 0) printf
-#define _cout \
-  if (RANK == 0) std::cout
-#define _cerr \
-  if (RANK == 0) std::cerr
+#define _printf  \
+  if (RANK == 0) \
+  printf
+#define _cout    \
+  if (RANK == 0) \
+  std::cout
+#define _cerr    \
+  if (RANK == 0) \
+  std::cerr
 
 #define GIBI 1073741824L
 #define MEBI 1048576

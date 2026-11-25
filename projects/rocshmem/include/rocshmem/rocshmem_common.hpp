@@ -33,10 +33,9 @@ namespace rocshmem {
 #define ATTR_NO_INLINE
 #endif
 
-
 enum ROCSHMEM_STATUS {
   ROCSHMEM_SUCCESS = 0,
-  ROCSHMEM_ERROR = 1,
+  ROCSHMEM_ERROR   = 1,
 };
 
 enum ROCSHMEM_OP {
@@ -51,30 +50,29 @@ enum ROCSHMEM_OP {
 };
 
 enum ROCSHMEM_TILE_ELEMENT_TYPE {
-  ROCSHMEM_TILE_ELEMENT_UNKNOWN = 0,
-  ROCSHMEM_TILE_ELEMENT_INT8 = 1,
-  ROCSHMEM_TILE_ELEMENT_UINT8 = 2,
-  ROCSHMEM_TILE_ELEMENT_INT16 = 3,
-  ROCSHMEM_TILE_ELEMENT_UINT16 = 4,
-  ROCSHMEM_TILE_ELEMENT_INT32 = 5,
-  ROCSHMEM_TILE_ELEMENT_UINT32 = 6,
-  ROCSHMEM_TILE_ELEMENT_INT64 = 7,
-  ROCSHMEM_TILE_ELEMENT_UINT64 = 8,
-  ROCSHMEM_TILE_ELEMENT_FLOAT = 9,
-  ROCSHMEM_TILE_ELEMENT_DOUBLE = 10,
-  ROCSHMEM_TILE_ELEMENT_SHORT = 11,
-  ROCSHMEM_TILE_ELEMENT_USHORT = 12,
-  ROCSHMEM_TILE_ELEMENT_INT = 13,
-  ROCSHMEM_TILE_ELEMENT_UINT = 14,
-  ROCSHMEM_TILE_ELEMENT_LONG = 15,
-  ROCSHMEM_TILE_ELEMENT_ULONG = 16,
-  ROCSHMEM_TILE_ELEMENT_LONGLONG = 17,
+  ROCSHMEM_TILE_ELEMENT_UNKNOWN   = 0,
+  ROCSHMEM_TILE_ELEMENT_INT8      = 1,
+  ROCSHMEM_TILE_ELEMENT_UINT8     = 2,
+  ROCSHMEM_TILE_ELEMENT_INT16     = 3,
+  ROCSHMEM_TILE_ELEMENT_UINT16    = 4,
+  ROCSHMEM_TILE_ELEMENT_INT32     = 5,
+  ROCSHMEM_TILE_ELEMENT_UINT32    = 6,
+  ROCSHMEM_TILE_ELEMENT_INT64     = 7,
+  ROCSHMEM_TILE_ELEMENT_UINT64    = 8,
+  ROCSHMEM_TILE_ELEMENT_FLOAT     = 9,
+  ROCSHMEM_TILE_ELEMENT_DOUBLE    = 10,
+  ROCSHMEM_TILE_ELEMENT_SHORT     = 11,
+  ROCSHMEM_TILE_ELEMENT_USHORT    = 12,
+  ROCSHMEM_TILE_ELEMENT_INT       = 13,
+  ROCSHMEM_TILE_ELEMENT_UINT      = 14,
+  ROCSHMEM_TILE_ELEMENT_LONG      = 15,
+  ROCSHMEM_TILE_ELEMENT_ULONG     = 16,
+  ROCSHMEM_TILE_ELEMENT_LONGLONG  = 17,
   ROCSHMEM_TILE_ELEMENT_ULONGLONG = 18,
 };
 
 constexpr uint64_t ROCSHMEM_TILE_ELEMENT_TYPE_SHIFT = 56;
-constexpr uint64_t ROCSHMEM_TILE_ELEMENT_TYPE_MASK =
-    0xffULL << ROCSHMEM_TILE_ELEMENT_TYPE_SHIFT;
+constexpr uint64_t ROCSHMEM_TILE_ELEMENT_TYPE_MASK  = 0xffULL << ROCSHMEM_TILE_ELEMENT_TYPE_SHIFT;
 
 enum ROCSHMEM_SIGNAL_OPS {
   ROCSHMEM_SIGNAL_SET,
@@ -104,18 +102,15 @@ enum rocshmem_thread_ops {
 /**
  * @brief Bitwise flags to mask configuration parameters.
  */
-enum rocshmem_team_configs {
-  ROCSHMEM_TEAM_DEFAULT_CONFIGS,
-  ROCSHMEM_TEAM_NUM_CONTEXTS
-};
+enum rocshmem_team_configs { ROCSHMEM_TEAM_DEFAULT_CONFIGS, ROCSHMEM_TEAM_NUM_CONTEXTS };
 
 typedef struct {
   int num_contexts;
 } rocshmem_team_config_t;
 
 constexpr size_t ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE = 1024;
-constexpr size_t ROCSHMEM_BARRIER_SYNC_SIZE = 256;
-constexpr size_t ROCSHMEM_REDUCE_SYNC_SIZE = 256;
+constexpr size_t ROCSHMEM_BARRIER_SYNC_SIZE       = 256;
+constexpr size_t ROCSHMEM_REDUCE_SYNC_SIZE        = 256;
 // Internally calls sync function, which matches barrier implementation
 constexpr size_t ROCSHMEM_BCAST_SYNC_SIZE = ROCSHMEM_BARRIER_SYNC_SIZE;
 // The alltoall/fcollect thread-puts fast paths double-buffer their pSync
@@ -125,25 +120,24 @@ constexpr size_t ROCSHMEM_BCAST_SYNC_SIZE = ROCSHMEM_BARRIER_SYNC_SIZE;
 // extra slot the single-buffered algorithms use.
 constexpr size_t ROCSHMEM_ALLTOALL_SYNC_SIZE = 2 * ROCSHMEM_BARRIER_SYNC_SIZE + 1;
 constexpr size_t ROCSHMEM_FCOLLECT_SYNC_SIZE = ROCSHMEM_ALLTOALL_SYNC_SIZE;
-constexpr size_t ROCSHMEM_SYNC_VALUE = 0;
+constexpr size_t ROCSHMEM_SYNC_VALUE         = 0;
 
-const int ROCSHMEM_CTX_ZERO = 0;
-const int ROCSHMEM_CTX_NOSTORE = 1;
+const int ROCSHMEM_CTX_ZERO       = 0;
+const int ROCSHMEM_CTX_NOSTORE    = 1;
 const int ROCSHMEM_CTX_SERIALIZED = 2;
 const int ROCSHMEM_CTX_WG_PRIVATE = 4;
-const int ROCSHMEM_CTX_SHARED = 8;
+const int ROCSHMEM_CTX_SHARED     = 8;
 
 /**
  * @brief GPU side OpenSHMEM context created from each work-groups'
  * rocshmem_wg_handle_t
  */
-typedef struct rocshmem_ctx{
-  void *ctx_opaque;
-  void *team_opaque;
+typedef struct rocshmem_ctx {
+  void* ctx_opaque;
+  void* team_opaque;
 
   __host__ __device__ bool operator==(const struct rocshmem_ctx& other) const {
-    return (ctx_opaque == other.ctx_opaque &&
-            team_opaque == other.team_opaque);
+    return (ctx_opaque == other.ctx_opaque && team_opaque == other.team_opaque);
   }
 
   __host__ __device__ bool operator!=(const struct rocshmem_ctx& other) const {
@@ -154,7 +148,7 @@ typedef struct rocshmem_ctx{
 /**
  * Shmem default context.
  */
-extern "C" __device__  rocshmem_ctx_t __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT;
+extern "C" __device__ rocshmem_ctx_t __attribute__((visibility("default"))) ROCSHMEM_CTX_DEFAULT;
 
 /**
  * A value corresponding to an invalid communication context. This value can be
@@ -165,40 +159,38 @@ extern "C" __device__  rocshmem_ctx_t __attribute__((visibility("default"))) ROC
  */
 extern __constant__ rocshmem_ctx_t ROCSHMEM_CTX_INVALID;
 
-extern __constant__  rocshmem_ctx_t *rocshmem_ctx_array;
+extern __constant__ rocshmem_ctx_t* rocshmem_ctx_array;
 /**
  * Used internally to set default context.
  */
-void set_internal_ctx(rocshmem_ctx_t *ctx);
+void set_internal_ctx(rocshmem_ctx_t* ctx);
 
 /**
  * Used internally to query the loaded backend
  */
-//TODO: this should remain internal?
+// TODO: this should remain internal?
 enum class BackendType { GDA_BACKEND, RO_BACKEND, IPC_BACKEND };
 BackendType rocshmem_query_backend_type();
 
-typedef uint64_t *rocshmem_team_t;
+typedef uint64_t* rocshmem_team_t;
 
 namespace device {
-    extern "C" {
-        extern __constant__ rocshmem_team_t
-            __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
-        extern __constant__ rocshmem_team_t
-            __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED;
-    }
+extern "C" {
+extern __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_WORLD;
+extern __constant__ rocshmem_team_t __attribute__((visibility("default"))) ROCSHMEM_TEAM_SHARED;
 }
+}  // namespace device
 namespace host {
-    extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
-    extern rocshmem_team_t ROCSHMEM_TEAM_SHARED;
-}
+extern rocshmem_team_t ROCSHMEM_TEAM_WORLD;
+extern rocshmem_team_t ROCSHMEM_TEAM_SHARED;
+}  // namespace host
 
 #if __HIP_DEVICE_COMPILE__
-using device::ROCSHMEM_TEAM_WORLD;
 using device::ROCSHMEM_TEAM_SHARED;
+using device::ROCSHMEM_TEAM_WORLD;
 #else
-using host::ROCSHMEM_TEAM_WORLD;
 using host::ROCSHMEM_TEAM_SHARED;
+using host::ROCSHMEM_TEAM_WORLD;
 #endif
 
 /**
@@ -217,7 +209,6 @@ const rocshmem_team_t ROCSHMEM_TEAM_INVALID = nullptr;
  * @brief  Data structure defining the unqiueId
  */
 
-
 /// Unique ID for a process. This is a ROCSHMEM_UNIQUE_ID_BYTES byte array that uniquely identifies a process.
 #define ROCSHMEM_UNIQUE_ID_BYTES 128
 using rocshmem_uniqueid_t = std::array<uint8_t, ROCSHMEM_UNIQUE_ID_BYTES>;
@@ -226,7 +217,7 @@ using rocshmem_uniqueid_t = std::array<uint8_t, ROCSHMEM_UNIQUE_ID_BYTES>;
  * @brief Data structure used for attribute based
  *        initialization
  */
-struct rocshmem_init_attr_t  {
+struct rocshmem_init_attr_t {
   int32_t rank;
   int32_t nranks;
   rocshmem_uniqueid_t uid;

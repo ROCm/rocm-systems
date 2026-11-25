@@ -29,23 +29,18 @@
 
 namespace rocshmem {
 namespace gda {
-  enum class provider : int {
-    UNSET,
-    IONIC,
-    BNXT,
-    MLX5
-  };
+enum class provider : int { UNSET, IONIC, BNXT, MLX5 };
 
-  enum class vendor_id : uint32_t {
-    IONIC = 0x1dd8,
-    BNXT  = 0x14e4,
-    MLX5  = 0x02c9, // PCI-ID is 15b3
-  };
+enum class vendor_id : uint32_t {
+  IONIC = 0x1dd8,
+  BNXT  = 0x14e4,
+  MLX5  = 0x02c9,  // PCI-ID is 15b3
+};
 
-  enum alltoallv_wg_algos {
-    ALLTOALLV_WG_ALGO_GET = 0,
-    ALLTOALLV_WG_ALGO_COPY,
-  };
+enum alltoallv_wg_algos {
+  ALLTOALLV_WG_ALGO_GET = 0,
+  ALLTOALLV_WG_ALGO_COPY,
+};
 }  // namespace gda
 
 using GDAProvider = gda::provider;

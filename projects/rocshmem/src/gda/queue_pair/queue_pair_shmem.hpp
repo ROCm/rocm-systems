@@ -31,14 +31,14 @@ namespace rocshmem {
  */
 template <typename Provider>
 class QueuePairSHMEM : public QueuePairInterface<Provider> {
-/**
- * @name Inherited Members
- *
- * Members that are inherited from QueuePairInterface<Provider>.
- *
- * @{
- */
-public:
+  /**
+   * @name Inherited Members
+   *
+   * Members that are inherited from QueuePairInterface<Provider>.
+   *
+   * @{
+   */
+ public:
   using typename QueuePairInterface<Provider>::Traits;
   using typename QueuePairInterface<Provider>::OpCode;
 
@@ -53,38 +53,32 @@ public:
   using QueuePairInterface<Provider>::atomic_compare_swap;
   using QueuePairInterface<Provider>::atomic_compare_swap_single;
   using QueuePairInterface<Provider>::quiet;
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Internal
- *
- * @{
- */
-protected:
+  /**
+   * @name Internal
+   *
+   * @{
+   */
+ protected:
   /*
    * @brief Provider is a friend of QueuePairSHMEM<Provider>.
    */
   friend Provider;
 
-  __host__  QueuePairSHMEM() = default;
+  __host__ QueuePairSHMEM()   = default;
   __device__ QueuePairSHMEM() = delete;
 
-private:
-  __device__ Provider& provider() {
-    return static_cast<Provider&>(*this);
-  }
-/**@}*/
+ private:
+  __device__ Provider& provider() { return static_cast<Provider&>(*this); }
+  /**@}*/
 
-
-
-/**
- * @name Remote Memory Access (RMA)
- *
- * @{
- */
-public:
+  /**
+   * @name Remote Memory Access (RMA)
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Create and enqueue a non-blocking put work queue entry (WQE).
    *
@@ -99,18 +93,17 @@ public:
    * @tparam PostOptions Options to use when posting these WQEs.
    */
   template <typename... PostOptions>
-  __device__ void put_nbi(void *dest, const void *source, size_t nelems,
-                          const ActiveWFInfo& wf_info,
-                          PostOpt<PostOptions...> post_options = {}) {
-    bool inlined_wqe = Provider::template can_inline<OpCode::RDMA_WRITE>(nelems);
+  __device__ void put_nbi(void* dest, const void* source, size_t nelems,
+                          const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options = {}) {
+    bool inlined_wqe       = Provider::template can_inline<OpCode::RDMA_WRITE>(nelems);
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     auto [s_laddr, s_lkey] = provider().get_laddr_info(source, inlined_wqe);
     provider().put_nbi(d_raddr, d_rkey, s_laddr, s_lkey, nelems, wf_info, post_options);
   }
   template <typename... PostOptions>
-  __device__ void put_nbi_single(void *dest, const void *source, size_t nelems,
+  __device__ void put_nbi_single(void* dest, const void* source, size_t nelems,
                                  PostOpt<PostOptions...> post_options = {}) {
-    bool inlined_wqe = Provider::template can_inline<OpCode::RDMA_WRITE>(nelems);
+    bool inlined_wqe       = Provider::template can_inline<OpCode::RDMA_WRITE>(nelems);
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     auto [s_laddr, s_lkey] = provider().get_laddr_info(source, inlined_wqe);
     provider().put_nbi_single(d_raddr, d_rkey, s_laddr, s_lkey, nelems, post_options);
@@ -130,30 +123,27 @@ public:
    * @tparam PostOptions Options to use when posting these WQEs.
    */
   template <typename... PostOptions>
-  __device__ void get_nbi(void *dest, const void *source, size_t nelems,
-                          const ActiveWFInfo& wf_info,
-                          PostOpt<PostOptions...> post_options = {}) {
+  __device__ void get_nbi(void* dest, const void* source, size_t nelems,
+                          const ActiveWFInfo& wf_info, PostOpt<PostOptions...> post_options = {}) {
     auto [d_laddr, d_lkey] = provider().get_laddr_info(dest);
     auto [s_raddr, s_rkey] = provider().get_raddr_info(source);
     provider().get_nbi(d_laddr, d_lkey, s_raddr, s_rkey, nelems, wf_info, post_options);
   }
   template <typename... PostOptions>
-  __device__ void get_nbi_single(void *dest, const void *source, size_t nelems,
+  __device__ void get_nbi_single(void* dest, const void* source, size_t nelems,
                                  PostOpt<PostOptions...> post_options = {}) {
     auto [d_laddr, d_lkey] = provider().get_laddr_info(dest);
     auto [s_raddr, s_rkey] = provider().get_raddr_info(source);
     provider().get_nbi_single(d_laddr, d_lkey, s_raddr, s_rkey, nelems, post_options);
   }
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Atomic Memory Operations (AMO)
- *
- * @{
- */
-public:
+  /**
+   * @name Atomic Memory Operations (AMO)
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Create and enqueue a blocking atomic fetch-and-add work queue entry (WQE).
    *
@@ -169,20 +159,19 @@ public:
    * @return An atomic value.
    */
   template <typename... PostOptions>
-  __device__ uint64_t atomic_fetch_add(void *dest, uint64_t value,
-                                       const ActiveWFInfo& wf_info,
+  __device__ uint64_t atomic_fetch_add(void* dest, uint64_t value, const ActiveWFInfo& wf_info,
                                        PostOpt<PostOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     return provider().atomic_fetch_add(d_raddr, d_rkey, value, wf_info, post_options);
   }
   template <typename... PostOptions>
-  __device__ uint64_t atomic_fetch_add_single(void *dest, uint64_t value,
+  __device__ uint64_t atomic_fetch_add_single(void* dest, uint64_t value,
                                               PostOpt<PostOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     return provider().atomic_fetch_add_single(d_raddr, d_rkey, value, post_options);
   }
 
-#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
+#if 0  // NON-BLOCKING AMOs NOT YET IMPLEMENTED
   /**
    * @brief Create and enqueue a non-blocking atomic fetch-and-add work queue entry (WQE).
    *
@@ -230,14 +219,13 @@ public:
    * @tparam PostOptions Options to use when posting these WQEs.
    */
   template <typename... PostOptions>
-  __device__ void atomic_add(void *dest, uint64_t value,
-                             const ActiveWFInfo& wf_info,
+  __device__ void atomic_add(void* dest, uint64_t value, const ActiveWFInfo& wf_info,
                              PostOpt<PostOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     provider().atomic_add(d_raddr, d_rkey, value, wf_info, post_options);
   }
   template <typename... PostOptions>
-  __device__ void atomic_add_single(void *dest, uint64_t value,
+  __device__ void atomic_add_single(void* dest, uint64_t value,
                                     PostOpt<PostOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     provider().atomic_add_single(d_raddr, d_rkey, value, post_options);
@@ -259,20 +247,20 @@ public:
    * @return An atomic value.
    */
   template <typename... PostOptions>
-  __device__ uint64_t atomic_compare_swap(void *dest, uint64_t cond, uint64_t value,
+  __device__ uint64_t atomic_compare_swap(void* dest, uint64_t cond, uint64_t value,
                                           const ActiveWFInfo& wf_info,
                                           PostOpt<PostOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     return provider().atomic_compare_swap(d_raddr, d_rkey, cond, value, wf_info, post_options);
   }
   template <typename... PostOptions>
-  __device__ uint64_t atomic_compare_swap_single(void *dest, uint64_t cond, uint64_t value,
+  __device__ uint64_t atomic_compare_swap_single(void* dest, uint64_t cond, uint64_t value,
                                                  PostOpt<PostOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     return provider().atomic_compare_swap_single(d_raddr, d_rkey, cond, value, post_options);
   }
 
-#if 0 // NON-BLOCKING AMOs NOT YET IMPLEMENTED
+#if 0  // NON-BLOCKING AMOs NOT YET IMPLEMENTED
   /**
    * @brief Create and enqueue a non-blocking atomic compare-and-swap work queue entry (WQE).
    *
@@ -327,7 +315,7 @@ public:
    * @return An atomic value.
    */
   template <typename... PostOptions>
-  __device__ void atomic_compare_swap_nofetch(void *dest, uint64_t cond, uint64_t value,
+  __device__ void atomic_compare_swap_nofetch(void* dest, uint64_t cond, uint64_t value,
                                               const ActiveWFInfo& wf_info,
                                               PostOpt<PostOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
@@ -336,14 +324,14 @@ public:
         d_raddr, d_rkey, value, cond, wf_info, post_options);
   }
   template <typename... PostOptions>
-  __device__ void atomic_compare_swap_nofetch_single(void *dest, uint64_t cond, uint64_t value,
+  __device__ void atomic_compare_swap_nofetch_single(void* dest, uint64_t cond, uint64_t value,
                                                      PostOpt<PostOptions...> post_options = {}) {
     auto [d_raddr, d_rkey] = provider().get_raddr_info(dest);
     /* QueuePairInterface doesn't provide atomic_compare_swap_nofetch_single */
     provider().template post_wqe_amo_single<OpCode::ATOMIC_CS, AMOFetchType::NonFetching>(
         d_raddr, d_rkey, value, cond, post_options);
   }
-/**@}*/
+  /**@}*/
 };
 
 }  // namespace rocshmem

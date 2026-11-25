@@ -50,7 +50,7 @@ struct ExtInfo {
   SocketAddress extAddressListen;
 };
 
- void Bootstrap::groupBarrier(const std::vector<int>& ranks) {
+void Bootstrap::groupBarrier(const std::vector<int>& ranks) {
   int dummy = 0;
   for (auto rank : ranks) {
     if (rank != this->getRank()) {
@@ -64,94 +64,95 @@ struct ExtInfo {
   }
 }
 
- void Bootstrap::groupAllGather(void* allData, int size, const std::vector<int>& ranks) {
-   char* data = static_cast<char*>(allData);
-   int rank = this->getRank();
-   int nRanks = ranks.size();
-   int rank_pos = -1;
+void Bootstrap::groupAllGather(void* allData, int size, const std::vector<int>& ranks) {
+  char* data   = static_cast<char*>(allData);
+  int rank     = this->getRank();
+  int nRanks   = ranks.size();
+  int rank_pos = -1;
 
-   // Confirm that rank is in the vectors of ranks
-   for (size_t i = 0; i < ranks.size(); i++) {
-     if (rank == ranks[i]) {
-       rank_pos = i;
-       break;
-     }
-   }
+  // Confirm that rank is in the vectors of ranks
+  for (size_t i = 0; i < ranks.size(); i++) {
+    if (rank == ranks[i]) {
+      rank_pos = i;
+      break;
+    }
+  }
 
-   if (rank_pos == -1) {
-     ERROR("groupAllGather: called with process that is not in list of ranks");
-   }
+  if (rank_pos == -1) {
+    ERROR("groupAllGather: called with process that is not in list of ranks");
+  }
 
-   LOG_TRACE("groupAllGather: rank %d nranks %d size %d", rank, nRanks, size);
+  LOG_TRACE("groupAllGather: rank %d nranks %d size %d", rank, nRanks, size);
 
-   int sendto = (rank_pos + 1 + nRanks) % nRanks;
-   int recvfrom = (rank_pos - 1 + nRanks) % nRanks;
-   for (int i = 0; i < nRanks - 1; i++) {
-     size_t rSlice = (rank_pos - i - 1 + nRanks) % nRanks;
-     size_t sSlice = (rank_pos - i + nRanks) % nRanks;
+  int sendto   = (rank_pos + 1 + nRanks) % nRanks;
+  int recvfrom = (rank_pos - 1 + nRanks) % nRanks;
+  for (int i = 0; i < nRanks - 1; i++) {
+    size_t rSlice = (rank_pos - i - 1 + nRanks) % nRanks;
+    size_t sSlice = (rank_pos - i + nRanks) % nRanks;
 
-     char *tmpsend = data + sSlice * size;
-     char *tmprecv = data + rSlice * size;
-     this->send(tmpsend, size, ranks[sendto], i);
-     this->recv(tmprecv, size, ranks[recvfrom], i);
-   }
+    char* tmpsend = data + sSlice * size;
+    char* tmprecv = data + rSlice * size;
+    this->send(tmpsend, size, ranks[sendto], i);
+    this->recv(tmprecv, size, ranks[recvfrom], i);
+  }
 
-   //LOG_TRACE("groupAllGather: rank %d nranks %d size %d - DONE", rank, nRanks, size);
- }
+  // LOG_TRACE("groupAllGather: rank %d nranks %d size %d - DONE", rank, nRanks, size);
+}
 
- void Bootstrap::groupAlltoall(void* allData, int size, const std::vector<int>& ranks) {
-   char* data = static_cast<char*>(allData);
-   int num_pes = ranks.size();
-   int rank = this->getRank();
-   int rank_pos = -1;
+void Bootstrap::groupAlltoall(void* allData, int size, const std::vector<int>& ranks) {
+  char* data   = static_cast<char*>(allData);
+  int num_pes  = ranks.size();
+  int rank     = this->getRank();
+  int rank_pos = -1;
 
-   // Confirm that rank is in the vectors of ranks
-   for (size_t i = 0; i < ranks.size(); i++) {
-     if (rank == ranks[i]) {
-       rank_pos = i;
-       break;
-     }
-   }
+  // Confirm that rank is in the vectors of ranks
+  for (size_t i = 0; i < ranks.size(); i++) {
+    if (rank == ranks[i]) {
+      rank_pos = i;
+      break;
+    }
+  }
 
-   if (rank_pos == -1) {
-     ERROR("groupAlltoall: called with process that is not in list of ranks");
-   }
+  if (rank_pos == -1) {
+    ERROR("groupAlltoall: called with process that is not in list of ranks");
+  }
 
-   LOG_TRACE("groupAlltoall: rank %d nranks %d size %d", rank, num_pes, size);
+  LOG_TRACE("groupAlltoall: rank %d nranks %d size %d", rank, num_pes, size);
 
-   // Since this is an in-place algorithm, allocate temporary receive buffer
-   char *recv_buf = new char[size * num_pes];
-   std::memset(recv_buf, 0, num_pes * size);
+  // Since this is an in-place algorithm, allocate temporary receive buffer
+  char* recv_buf = new char[size * num_pes];
+  std::memset(recv_buf, 0, num_pes * size);
 
-   // Perform pairwise exchange - local copy is omitted
-   for (int step = 1; step < num_pes; step++) {
-     int sendto   = (rank_pos + step) % num_pes;
-     int recvfrom = (rank_pos + num_pes - step) % num_pes;
+  // Perform pairwise exchange - local copy is omitted
+  for (int step = 1; step < num_pes; step++) {
+    int sendto   = (rank_pos + step) % num_pes;
+    int recvfrom = (rank_pos + num_pes - step) % num_pes;
 
-     char *tmpsend = (char*)data + (ptrdiff_t)sendto * size;
-     char *tmprecv = (char*)recv_buf + (ptrdiff_t)recvfrom * size;
+    char* tmpsend = (char*)data + (ptrdiff_t)sendto * size;
+    char* tmprecv = (char*)recv_buf + (ptrdiff_t)recvfrom * size;
 
-     this->send(tmpsend, size, ranks[sendto], step /* used as tag */);
-     this->recv(tmprecv, size, ranks[recvfrom], step);
-   }
+    this->send(tmpsend, size, ranks[sendto], step /* used as tag */);
+    this->recv(tmprecv, size, ranks[recvfrom], step);
+  }
 
-   //Since this is an in_place all-to-all, copy data back into the user buffer
-   for (int step = 0; step < num_pes; step++) {
-     if (step == rank_pos) continue;
-     std::memcpy(&data[step*size], &recv_buf[step*size], size);
-   }
+  // Since this is an in_place all-to-all, copy data back into the user buffer
+  for (int step = 0; step < num_pes; step++) {
+    if (step == rank_pos)
+      continue;
+    std::memcpy(&data[step * size], &recv_buf[step * size], size);
+  }
 
-   //LOG_TRACE("groupAlltoall: rank %d nranks %d size %d DONE ", rank, num_pes, size);
-   delete[] recv_buf;
- }
+  // LOG_TRACE("groupAlltoall: rank %d nranks %d size %d DONE ", rank, num_pes, size);
+  delete[] recv_buf;
+}
 
- void Bootstrap::send(const std::vector<char>& data, int peer, int tag) {
+void Bootstrap::send(const std::vector<char>& data, int peer, int tag) {
   size_t size = data.size();
   send((void*)&size, sizeof(size_t), peer, tag);
   send((void*)data.data(), data.size(), peer, tag + 1);
 }
 
- void Bootstrap::recv(std::vector<char>& data, int peer, int tag) {
+void Bootstrap::recv(std::vector<char>& data, int peer, int tag) {
   size_t size;
   recv((void*)&size, sizeof(size_t), peer, tag);
   data.resize(size);
@@ -162,7 +163,8 @@ struct UniqueIdInternal {
   uint64_t magic;
   union SocketAddress addr;
 };
-static_assert(sizeof(UniqueIdInternal) <= sizeof(rocshmem_uniqueid_t), "UniqueIdInternal is too large to fit into rocshmem_uniqueid_t");
+static_assert(sizeof(UniqueIdInternal) <= sizeof(rocshmem_uniqueid_t),
+              "UniqueIdInternal is too large to fit into rocshmem_uniqueid_t");
 
 class TcpBootstrap::Impl {
  public:
@@ -251,13 +253,19 @@ TcpBootstrap::Impl::Impl(int rank, int nRanks)
       abortFlagStorage_(new uint32_t(0)),
       abortFlag_(abortFlagStorage_.get()) {}
 
-rocshmem_uniqueid_t TcpBootstrap::Impl::getUniqueId() const { return getUniqueId(uniqueId_); }
+rocshmem_uniqueid_t TcpBootstrap::Impl::getUniqueId() const {
+  return getUniqueId(uniqueId_);
+}
 
-int TcpBootstrap::Impl::getRank() { return rank_; }
+int TcpBootstrap::Impl::getRank() {
+  return rank_;
+}
 
-int TcpBootstrap::Impl::getNranks() { return nRanks_; }
+int TcpBootstrap::Impl::getNranks() {
+  return nRanks_;
+}
 
-std::vector<int>  TcpBootstrap::Impl::getLocalRanks() {
+std::vector<int> TcpBootstrap::Impl::getLocalRanks() {
   // Ensure localRanks_ is populated
   if (localRanks_.empty() && nRanksPerNode_ == 0) {
     getNranksPerNode();  // This populates localRanks_
@@ -265,7 +273,7 @@ std::vector<int>  TcpBootstrap::Impl::getLocalRanks() {
   return localRanks_;
 }
 
-std::vector<int>  TcpBootstrap::Impl::getIpcCapableRanks() {
+std::vector<int> TcpBootstrap::Impl::getIpcCapableRanks() {
 #ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
   // Lazy initialization: detect IPC-capable ranks on first call
   if (ipcCapableRanks_.empty()) {
@@ -275,8 +283,10 @@ std::vector<int>  TcpBootstrap::Impl::getIpcCapableRanks() {
 #else
   // This function should not be called without HAVE_AMDSMI_GPU_FABRIC_INFO
   // Callers should check allocator type and call getLocalRanks() instead
-  fprintf(stderr, "ROCSHMEM_ERROR: getIpcCapableRanks() called but HAVE_AMDSMI_GPU_FABRIC_INFO is not defined.\n"
-                  "This is a programming error. Use getLocalRanks() instead.\n");
+  fprintf(stderr,
+          "ROCSHMEM_ERROR: getIpcCapableRanks() called but HAVE_AMDSMI_GPU_FABRIC_INFO is not "
+          "defined.\n"
+          "This is a programming error. Use getLocalRanks() instead.\n");
   abort();
 #endif
 }
@@ -307,10 +317,10 @@ void TcpBootstrap::Impl::initialize(const std::string& ifIpPortTrio, int64_t tim
     }
   }
   std::string ipPortPair = ifIpPortTrio;
-  std::string interface = "";
+  std::string interface  = "";
   if (nColons == 2) {
     // we know the <interface>
-    interface = ifIpPortTrio.substr(0, ipPortPair.find_first_of(':'));
+    interface  = ifIpPortTrio.substr(0, ipPortPair.find_first_of(':'));
     ipPortPair = ifIpPortTrio.substr(ipPortPair.find_first_of(':') + 1);
   }
 
@@ -339,8 +349,10 @@ TcpBootstrap::Impl::~Impl() {
   }
 }
 
-void TcpBootstrap::Impl::getRemoteAddresses(Socket* listenSock, std::vector<SocketAddress>& rankAddresses,
-                                            std::vector<SocketAddress>& rankAddressesRoot, int& rank) {
+void TcpBootstrap::Impl::getRemoteAddresses(Socket* listenSock,
+                                            std::vector<SocketAddress>& rankAddresses,
+                                            std::vector<SocketAddress>& rankAddressesRoot,
+                                            int& rank) {
   ExtInfo info;
   SocketAddress zero;
   std::memset(&zero, 0, sizeof(SocketAddress));
@@ -355,7 +367,8 @@ void TcpBootstrap::Impl::getRemoteAddresses(Socket* listenSock, std::vector<Sock
   }
 
   if (this->nRanks_ != info.nRanks) {
-    ERROR("Bootstrap Root : mismatch in rank count from procs %d : %d\n", this->nRanks_, info.nRanks);
+    ERROR("Bootstrap Root : mismatch in rank count from procs %d : %d\n", this->nRanks_,
+          info.nRanks);
     return;
   }
 
@@ -374,8 +387,8 @@ void TcpBootstrap::Impl::getRemoteAddresses(Socket* listenSock, std::vector<Sock
 
   // Save the connection handle for that rank
   rankAddressesRoot[info.rank] = info.extAddressListenRoot;
-  rankAddresses[info.rank] = info.extAddressListen;
-  rank = info.rank;
+  rankAddresses[info.rank]     = info.extAddressListen;
+  rank                         = info.rank;
 }
 
 void TcpBootstrap::Impl::sendHandleToPeer(int peer, const std::vector<SocketAddress>& rankAddresses,
@@ -387,23 +400,25 @@ void TcpBootstrap::Impl::sendHandleToPeer(int peer, const std::vector<SocketAddr
 }
 
 void TcpBootstrap::Impl::assignPortToUniqueId(UniqueIdInternal& uniqueId) {
-  std::unique_ptr<Socket> socket = std::make_unique<Socket>(&uniqueId.addr, uniqueId.magic, SocketTypeBootstrap);
+  std::unique_ptr<Socket> socket =
+      std::make_unique<Socket>(&uniqueId.addr, uniqueId.magic, SocketTypeBootstrap);
   socket->bind();
   uniqueId.addr = socket->getAddr();
 }
 
 void TcpBootstrap::Impl::bootstrapCreateRoot() {
-  listenSockRoot_ = std::make_unique<Socket>(&uniqueId_.addr, uniqueId_.magic, SocketTypeBootstrap, abortFlag_, 0);
+  listenSockRoot_ = std::make_unique<Socket>(&uniqueId_.addr, uniqueId_.magic, SocketTypeBootstrap,
+                                             abortFlag_, 0);
   listenSockRoot_->bindAndListen();
   uniqueId_.addr = listenSockRoot_->getAddr();
 
   rootThread_ = std::thread([this]() {
-      // try {
-      bootstrapRoot();
-      //} catch (const std::exception& e) {
-      //if (abortFlag_ && *abortFlag_) r;
-      //throw e;
-      //}
+    // try {
+    bootstrapRoot();
+    //} catch (const std::exception& e) {
+    // if (abortFlag_ && *abortFlag_) r;
+    // throw e;
+    //}
   });
 }
 
@@ -508,7 +523,7 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
     return timeout;
   };
 
-  info.rank = rank_;
+  info.rank   = rank_;
   info.nRanks = nRanks_;
 
   uint64_t magic = uniqueId_.magic;
@@ -526,10 +541,10 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
     // stagger connection times to avoid an overload of the root
     auto randomSleep = [](int rank) {
       timespec tv;
-      tv.tv_sec = rank / 1000;
+      tv.tv_sec  = rank / 1000;
       tv.tv_nsec = 1000000 * (rank % 1000);
-      LOG_TRACE("rank %d delaying connection to root by %ld sec %ld nsec", rank,
-            tv.tv_sec, tv.tv_nsec);
+      LOG_TRACE("rank %d delaying connection to root by %ld sec %ld nsec", rank, tv.tv_sec,
+                tv.tv_nsec);
       (void)nanosleep(&tv, NULL);
     };
     if (nRanks_ > 128) {
@@ -539,7 +554,7 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
     // send info on my listening socket to root
     {
       Socket sock(&uniqueId_.addr, magic, SocketTypeBootstrap, abortFlag_);
-      //TIMEOUT(sock.connect(getLeftTime()));
+      // TIMEOUT(sock.connect(getLeftTime()));
       sock.connect(getLeftTime());
       netSend(&sock, &info, sizeof(info));
     }
@@ -547,19 +562,19 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
     // get info on my "next" rank in the bootstrap ring from root
     {
       Socket sock(nullptr, ROCSHMEM_SOCKET_MAGIC, SocketTypeUnknown, abortFlag_);
-      //TIMEOUT(sock.accept(&lsock, getLeftTime()));
+      // TIMEOUT(sock.accept(&lsock, getLeftTime()));
       sock.accept(&lsock, getLeftTime());
       netRecv(&sock, &nextAddr, sizeof(SocketAddress));
     }
   }
 
   ringSendSocket_ = std::make_unique<Socket>(&nextAddr, magic, SocketTypeBootstrap, abortFlag_);
-  //TIMEOUT(ringSendSocket_->connect(getLeftTime()));
+  // TIMEOUT(ringSendSocket_->connect(getLeftTime()));
   ringSendSocket_->connect(getLeftTime());
   // Accept the connect request from the previous rank in the AllGather ring
-  ringRecvSocket_ = std::make_unique<Socket>(nullptr, ROCSHMEM_SOCKET_MAGIC, SocketTypeUnknown,
-                                             abortFlag_);
-  //TIMEOUT(ringRecvSocket_->accept(listenSock_.get(), getLeftTime()));
+  ringRecvSocket_ =
+      std::make_unique<Socket>(nullptr, ROCSHMEM_SOCKET_MAGIC, SocketTypeUnknown, abortFlag_);
+  // TIMEOUT(ringRecvSocket_->accept(listenSock_.get(), getLeftTime()));
   ringRecvSocket_->accept(listenSock_.get(), getLeftTime());
 
   // AllGather all listen handlers
@@ -570,9 +585,10 @@ void TcpBootstrap::Impl::establishConnections(int64_t timeoutSec) {
 }
 
 int TcpBootstrap::Impl::getNranksPerNode() {
-  if (nRanksPerNode_ > 0) return nRanksPerNode_;
+  if (nRanksPerNode_ > 0)
+    return nRanksPerNode_;
   int nRanksPerNode = 0;
-  bool useIpv4 = peerCommAddresses_[rank_].sa.sa_family == AF_INET;
+  bool useIpv4      = peerCommAddresses_[rank_].sa.sa_family == AF_INET;
   for (int i = 0; i < nRanks_; i++) {
     if (useIpv4) {
       if (peerCommAddresses_[i].sin.sin_addr.s_addr ==
@@ -582,8 +598,7 @@ int TcpBootstrap::Impl::getNranksPerNode() {
       }
     } else {
       if (std::memcmp(&(peerCommAddresses_[i].sin6.sin6_addr),
-                      &(peerCommAddresses_[rank_].sin6.sin6_addr),
-                      sizeof(in6_addr)) == 0) {
+                      &(peerCommAddresses_[rank_].sin6.sin6_addr), sizeof(in6_addr)) == 0) {
         localRanks_.push_back(i);
         nRanksPerNode++;
       }
@@ -604,10 +619,9 @@ std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
     return ipcCapableRanks;
   }
 
-  LOG_TRACE("Rank %d: ppod_id[0-3]=%02x%02x%02x%02x, vpod_id=%u",
-            rank_, localPodIds.physicalPodId[0], localPodIds.physicalPodId[1],
-            localPodIds.physicalPodId[2], localPodIds.physicalPodId[3],
-            localPodIds.virtualPodId);
+  LOG_TRACE("Rank %d: ppod_id[0-3]=%02x%02x%02x%02x, vpod_id=%u", rank_,
+            localPodIds.physicalPodId[0], localPodIds.physicalPodId[1],
+            localPodIds.physicalPodId[2], localPodIds.physicalPodId[3], localPodIds.virtualPodId);
 
   // AllGather pod IDs across all ranks using Bootstrap's allGather
   std::vector<PodIds> allPodIds(nRanks_);
@@ -626,7 +640,7 @@ std::vector<int> TcpBootstrap::Impl::detectIpcCapableRanks() {
 
 void TcpBootstrap::Impl::allGather(void* allData, int size) {
   char* data = static_cast<char*>(allData);
-  int rank = rank_;
+  int rank   = rank_;
   int nRanks = nRanks_;
 
   LOG_TRACE("allGather: rank %d nranks %d size %d", rank, nRanks, size);
@@ -645,7 +659,7 @@ void TcpBootstrap::Impl::allGather(void* allData, int size) {
     netRecv(ringRecvSocket_.get(), data + rSlice * size, size);
   }
 
-  //LOG_TRACE("allGather: rank %d nranks %d size %d - DONE", rank, nRanks, size);
+  // LOG_TRACE("allGather: rank %d nranks %d size %d - DONE", rank, nRanks, size);
 }
 
 std::shared_ptr<Socket> TcpBootstrap::Impl::getPeerSendSocket(int peer, int tag) {
@@ -668,8 +682,8 @@ std::shared_ptr<Socket> TcpBootstrap::Impl::getPeerRecvSocket(int peer, int tag)
     return it->second;
   }
   for (;;) {
-    auto sock = std::make_shared<Socket>(nullptr, ROCSHMEM_SOCKET_MAGIC, SocketTypeUnknown,
-                                         abortFlag_);
+    auto sock =
+        std::make_shared<Socket>(nullptr, ROCSHMEM_SOCKET_MAGIC, SocketTypeUnknown, abortFlag_);
     sock->accept(listenSock_.get());
     int recvPeer, recvTag;
     netRecv(sock.get(), &recvPeer, sizeof(int));
@@ -693,7 +707,8 @@ bool TcpBootstrap::Impl::netRecv(Socket* sock, void* data, int size) {
   // Treat an out-of-range length as a protocol violation and fail closed by
   // dropping the message so the caller can discard this connection.
   if (recvSize < 0 || recvSize > size) {
-    LOG_WARN("netRecv: invalid message length %d (expected 0..%d); dropping connection", recvSize, size);
+    LOG_WARN("netRecv: invalid message length %d (expected 0..%d); dropping connection", recvSize,
+             size);
     return false;
   }
   sock->recv(data, recvSize);
@@ -710,7 +725,9 @@ void TcpBootstrap::Impl::recv(void* data, int size, int peer, int tag) {
   netRecv(sock.get(), data, size);
 }
 
-void TcpBootstrap::Impl::barrier() { allGather(barrierArr_.data(), sizeof(int)); }
+void TcpBootstrap::Impl::barrier() {
+  allGather(barrierArr_.data(), sizeof(int));
+}
 
 void TcpBootstrap::Impl::close() {
   listenSockRoot_.reset(nullptr);
@@ -721,42 +738,64 @@ void TcpBootstrap::Impl::close() {
   peerRecvSockets_.clear();
 }
 
- rocshmem_uniqueid_t TcpBootstrap::createUniqueId() { return Impl::createUniqueId(); }
+rocshmem_uniqueid_t TcpBootstrap::createUniqueId() {
+  return Impl::createUniqueId();
+}
 
- TcpBootstrap::TcpBootstrap(int rank, int nRanks) { pimpl_ = std::make_unique<Impl>(rank, nRanks); }
+TcpBootstrap::TcpBootstrap(int rank, int nRanks) {
+  pimpl_ = std::make_unique<Impl>(rank, nRanks);
+}
 
- rocshmem_uniqueid_t TcpBootstrap::getUniqueId() const { return pimpl_->getUniqueId(); }
+rocshmem_uniqueid_t TcpBootstrap::getUniqueId() const {
+  return pimpl_->getUniqueId();
+}
 
- int TcpBootstrap::getRank() { return pimpl_->getRank(); }
+int TcpBootstrap::getRank() {
+  return pimpl_->getRank();
+}
 
- int TcpBootstrap::getNranks() { return pimpl_->getNranks(); }
+int TcpBootstrap::getNranks() {
+  return pimpl_->getNranks();
+}
 
- int TcpBootstrap::getNranksPerNode() { return pimpl_->getNranksPerNode(); }
+int TcpBootstrap::getNranksPerNode() {
+  return pimpl_->getNranksPerNode();
+}
 
- std::vector<int> TcpBootstrap::getLocalRanks() { return pimpl_->getLocalRanks(); }
+std::vector<int> TcpBootstrap::getLocalRanks() {
+  return pimpl_->getLocalRanks();
+}
 
- std::vector<int> TcpBootstrap::getIpcCapableRanks() { return pimpl_->getIpcCapableRanks(); }
+std::vector<int> TcpBootstrap::getIpcCapableRanks() {
+  return pimpl_->getIpcCapableRanks();
+}
 
- void TcpBootstrap::send(void* data, int size, int peer, int tag) {
+void TcpBootstrap::send(void* data, int size, int peer, int tag) {
   pimpl_->send(data, size, peer, tag);
 }
 
- void TcpBootstrap::recv(void* data, int size, int peer, int tag) {
+void TcpBootstrap::recv(void* data, int size, int peer, int tag) {
   pimpl_->recv(data, size, peer, tag);
 }
 
- void TcpBootstrap::allGather(void* allData, int size) { pimpl_->allGather(allData, size); }
+void TcpBootstrap::allGather(void* allData, int size) {
+  pimpl_->allGather(allData, size);
+}
 
- void TcpBootstrap::initialize(rocshmem_uniqueid_t uniqueId, int64_t timeoutSec) {
+void TcpBootstrap::initialize(rocshmem_uniqueid_t uniqueId, int64_t timeoutSec) {
   pimpl_->initialize(uniqueId, timeoutSec);
 }
 
- void TcpBootstrap::initialize(const std::string& ipPortPair, int64_t timeoutSec) {
+void TcpBootstrap::initialize(const std::string& ipPortPair, int64_t timeoutSec) {
   pimpl_->initialize(ipPortPair, timeoutSec);
 }
 
- void TcpBootstrap::barrier() { pimpl_->barrier(); }
+void TcpBootstrap::barrier() {
+  pimpl_->barrier();
+}
 
- TcpBootstrap::~TcpBootstrap() { pimpl_->close(); }
+TcpBootstrap::~TcpBootstrap() {
+  pimpl_->close();
+}
 
 }  // namespace rocshmem

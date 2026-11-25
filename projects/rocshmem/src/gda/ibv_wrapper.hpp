@@ -37,129 +37,128 @@ class IBVWrapper;
 extern IBVWrapper ibv;
 
 class IBVWrapper {
-  public:
-    explicit IBVWrapper();
-    virtual ~IBVWrapper();
+ public:
+  explicit IBVWrapper();
+  virtual ~IBVWrapper();
 
-    bool is_initialized{false};
+  bool is_initialized{false};
 
-    int is_dmabuf_supported();
+  int is_dmabuf_supported();
 
-    struct ibv_device** get_device_list(int *num_devices);
-    void free_device_list(struct ibv_device **list);
+  struct ibv_device** get_device_list(int* num_devices);
+  void free_device_list(struct ibv_device** list);
 
-    struct ibv_context* open_device(struct ibv_device *device);
-    int close_device(struct ibv_context *context);
+  struct ibv_context* open_device(struct ibv_device* device);
+  int close_device(struct ibv_context* context);
 
-    const char* get_device_name(struct ibv_device *device);
-    int query_device(struct ibv_context *context, struct ibv_device_attr *device_attr);
-    int query_port(struct ibv_context *context, uint8_t port_num,
-                   struct ibv_port_attr *port_attr);
-    ssize_t query_gid_table(struct ibv_context *context, struct ibv_gid_entry *entries,
-                            size_t max_entries, uint32_t flags);
-    int query_gid(struct ibv_context *context, uint8_t port_num, int index, union ibv_gid *gid);
+  const char* get_device_name(struct ibv_device* device);
+  int query_device(struct ibv_context* context, struct ibv_device_attr* device_attr);
+  int query_port(struct ibv_context* context, uint8_t port_num, struct ibv_port_attr* port_attr);
+  ssize_t query_gid_table(struct ibv_context* context, struct ibv_gid_entry* entries,
+                          size_t max_entries, uint32_t flags);
+  int query_gid(struct ibv_context* context, uint8_t port_num, int index, union ibv_gid* gid);
 
-    struct ibv_pd* alloc_pd(struct ibv_context *context);
-    struct ibv_pd* alloc_parent_domain(struct ibv_context *context,
-                                       struct ibv_parent_domain_init_attr *attr);
-    int dealloc_pd(struct ibv_pd *pd);
+  struct ibv_pd* alloc_pd(struct ibv_context* context);
+  struct ibv_pd* alloc_parent_domain(struct ibv_context* context,
+                                     struct ibv_parent_domain_init_attr* attr);
+  int dealloc_pd(struct ibv_pd* pd);
 
-    struct ibv_mr* reg_mr(struct ibv_pd *pd, void *addr, size_t length, int access, HIPAllocator *allocator = nullptr);
-    struct ibv_mr* reg_mr_iova2(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, int access);
-    struct ibv_mr* reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access);
-    int dereg_mr(struct ibv_mr *mr);
+  struct ibv_mr* reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access,
+                        HIPAllocator* allocator = nullptr);
+  struct ibv_mr* reg_mr_iova2(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova,
+                              int access);
+  struct ibv_mr* reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova,
+                               int fd, int access);
+  int dereg_mr(struct ibv_mr* mr);
 
-    struct ibv_cq_ex* create_cq_ex(struct ibv_context *context,
-                                   struct ibv_cq_init_attr_ex *cq_attr);
-    struct ibv_cq* cq_ex_to_cq(struct ibv_cq_ex *cq);
-    int destroy_cq(struct ibv_cq *cq);
+  struct ibv_cq_ex* create_cq_ex(struct ibv_context* context, struct ibv_cq_init_attr_ex* cq_attr);
+  struct ibv_cq* cq_ex_to_cq(struct ibv_cq_ex* cq);
+  int destroy_cq(struct ibv_cq* cq);
 
-    struct ibv_qp* create_qp_ex(struct ibv_context *context,
-                                struct ibv_qp_init_attr_ex *qp_init_attr);
-    int modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
-    int destroy_qp(struct ibv_qp *qp);
+  struct ibv_qp* create_qp_ex(struct ibv_context* context,
+                              struct ibv_qp_init_attr_ex* qp_init_attr);
+  int modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask);
+  int destroy_qp(struct ibv_qp* qp);
 
-    uint16_t flow_label_to_udp_sport(uint32_t fl);
+  uint16_t flow_label_to_udp_sport(uint32_t fl);
 
-    struct ibv_ah* create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr);
-    int destroy_ah(struct ibv_ah *ah);
+  struct ibv_ah* create_ah(struct ibv_pd* pd, struct ibv_ah_attr* attr);
+  int destroy_ah(struct ibv_ah* ah);
 
-  private:
-    struct ibv_funcs_t {
-      struct ibv_device** (*get_device_list)(int *num_devices);
-      void (*free_device_list)(struct ibv_device **list);
+ private:
+  struct ibv_funcs_t {
+    struct ibv_device** (*get_device_list)(int* num_devices);
+    void (*free_device_list)(struct ibv_device** list);
 
-      struct ibv_context* (*open_device)(struct ibv_device *device);
-      int (*close_device)(struct ibv_context *context);
+    struct ibv_context* (*open_device)(struct ibv_device* device);
+    int (*close_device)(struct ibv_context* context);
 
-      const char* (*get_device_name)(struct ibv_device *device);
-      int (*query_device)(struct ibv_context *context, struct ibv_device_attr *device_attr);
-      int (*query_port)(struct ibv_context *context, uint8_t port_num,
-                        struct ibv_port_attr *port_attr);
-      ssize_t (*query_gid_table)(struct ibv_context *context,
-                                 struct ibv_gid_entry *entries, size_t max_entries,
-                                 uint32_t flags, size_t entry_size);
+    const char* (*get_device_name)(struct ibv_device* device);
+    int (*query_device)(struct ibv_context* context, struct ibv_device_attr* device_attr);
+    int (*query_port)(struct ibv_context* context, uint8_t port_num,
+                      struct ibv_port_attr* port_attr);
+    ssize_t (*query_gid_table)(struct ibv_context* context, struct ibv_gid_entry* entries,
+                               size_t max_entries, uint32_t flags, size_t entry_size);
 
-      int (*query_gid)(struct ibv_context *context, uint8_t port_num, int index, union ibv_gid *gid);
+    int (*query_gid)(struct ibv_context* context, uint8_t port_num, int index, union ibv_gid* gid);
 
-      struct ibv_pd* (*alloc_pd)(struct ibv_context *context);
-      struct ibv_pd* (*alloc_parent_domain)(struct ibv_context *context,
-                                             struct ibv_parent_domain_init_attr *attr);
-      int (*dealloc_pd)(struct ibv_pd *pd);
+    struct ibv_pd* (*alloc_pd)(struct ibv_context* context);
+    struct ibv_pd* (*alloc_parent_domain)(struct ibv_context* context,
+                                          struct ibv_parent_domain_init_attr* attr);
+    int (*dealloc_pd)(struct ibv_pd* pd);
 
-      struct ibv_mr* (*reg_mr)(struct ibv_pd *pd, void *addr, size_t length, int access);
-      struct ibv_mr* (*reg_dmabuf_mr)(struct ibv_pd *pd, uint64_t offset,
-                                      size_t length, uint64_t iova,
-                                      int fd, int access);
-      struct ibv_mr* (*reg_mr_iova2)(struct ibv_pd *pd, void *addr, size_t length,
-                                     uint64_t iova, unsigned int access);
-      int (*dereg_mr)(struct ibv_mr *mr);
+    struct ibv_mr* (*reg_mr)(struct ibv_pd* pd, void* addr, size_t length, int access);
+    struct ibv_mr* (*reg_dmabuf_mr)(struct ibv_pd* pd, uint64_t offset, size_t length,
+                                    uint64_t iova, int fd, int access);
+    struct ibv_mr* (*reg_mr_iova2)(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova,
+                                   unsigned int access);
+    int (*dereg_mr)(struct ibv_mr* mr);
 
-      struct ibv_cq_ex* (*create_cq_ex)(struct ibv_context *context,
-                                        struct ibv_cq_init_attr_ex *cq_attr);
-      int (*destroy_cq)(struct ibv_cq *cq);
+    struct ibv_cq_ex* (*create_cq_ex)(struct ibv_context* context,
+                                      struct ibv_cq_init_attr_ex* cq_attr);
+    int (*destroy_cq)(struct ibv_cq* cq);
 
-      struct ibv_qp* (*create_qp)(struct ibv_pd *pd, struct ibv_qp_init_attr *qp_init_attr);
-      int (*modify_qp)(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
-      int (*destroy_qp)(struct ibv_qp *qp);
+    struct ibv_qp* (*create_qp)(struct ibv_pd* pd, struct ibv_qp_init_attr* qp_init_attr);
+    int (*modify_qp)(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask);
+    int (*destroy_qp)(struct ibv_qp* qp);
 
-      struct ibv_ah* (*create_ah)(struct ibv_pd *pd, struct ibv_ah_attr *attr);
-      int (*destroy_ah)(struct ibv_ah *ah);
-    };
+    struct ibv_ah* (*create_ah)(struct ibv_pd* pd, struct ibv_ah_attr* attr);
+    int (*destroy_ah)(struct ibv_ah* ah);
+  };
 
-    /**
-     * @brief External handle to the ibv function table
-     */
-    struct ibv_funcs_t ibv;
+  /**
+   * @brief External handle to the ibv function table
+   */
+  struct ibv_funcs_t ibv;
 
-    /**
-     * @brief handle used for the dlopen of the InfiniBand Verbs library
-     */
-    void *ibv_handle = nullptr;
+  /**
+   * @brief handle used for the dlopen of the InfiniBand Verbs library
+   */
+  void* ibv_handle = nullptr;
 
-    /**
-     * @brief initialize function table
-     */
-    int init_function_table();
+  /**
+   * @brief initialize function table
+   */
+  int init_function_table();
 
-    /**
-     * @brief dmabuf support initialization
-     */
-    void init_dmabuf_support_flag();
+  /**
+   * @brief dmabuf support initialization
+   */
+  void init_dmabuf_support_flag();
 
-    /**
-     * @brief dmabuf support state
-     */
-    int dmabuf_is_supported = -1;
+  /**
+   * @brief dmabuf support state
+   */
+  int dmabuf_is_supported = -1;
 
-    /**
-     * @brief dmabuf map so we can close fds
-     *        The key is ibv_mr pointer
-     *        The value is the fd
-     */
-    std::map<uintptr_t, int> dmabuf_fd_map;
+  /**
+   * @brief dmabuf map so we can close fds
+   *        The key is ibv_mr pointer
+   *        The value is the fd
+   */
+  std::map<uintptr_t, int> dmabuf_fd_map;
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
-#endif  /* LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_ */
+#endif /* LIBRARY_SRC_GDA_IBV_WRAPPER_HPP_ */

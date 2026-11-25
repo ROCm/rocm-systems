@@ -32,7 +32,7 @@
 #include <dlfcn.h>
 #include <sys/utsname.h>
 #include <cstring>
-#include <unistd.h> // close(fd)
+#include <unistd.h>  // close(fd)
 
 namespace rocshmem {
 
@@ -70,7 +70,7 @@ void IBVWrapper::init_dmabuf_support_flag() {
   const char kernel_opt2[] = "CONFIG_PCI_P2PDMA=y";
   int found_opt1           = 0;
   int found_opt2           = 0;
-  FILE *fp;
+  FILE* fp;
   struct utsname utsname;
   char kernel_conf_file[128];
   char buf[256];
@@ -92,12 +92,10 @@ void IBVWrapper::init_dmabuf_support_flag() {
     return;
   }
 
-  snprintf(kernel_conf_file, sizeof(kernel_conf_file),
-           "/boot/config-%s", utsname.release);
+  snprintf(kernel_conf_file, sizeof(kernel_conf_file), "/boot/config-%s", utsname.release);
   fp = fopen(kernel_conf_file, "r");
   if (fp == NULL) {
-    LOG_TRACE("could not open kernel conf file %s error: %m",
-            kernel_conf_file);
+    LOG_TRACE("could not open kernel conf file %s error: %m", kernel_conf_file);
     dmabuf_is_supported = 0;
     return;
   }
@@ -134,7 +132,7 @@ int IBVWrapper::init_function_table() {
   DLSYM_HELPER(ibv, ibv_, ibv_handle, query_device);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, query_port);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, query_gid);
-  DLSYM_HELPER(ibv, _ibv_, ibv_handle, query_gid_table); // This is not a typo
+  DLSYM_HELPER(ibv, _ibv_, ibv_handle, query_gid_table);  // This is not a typo
   DLSYM_HELPER(ibv, ibv_, ibv_handle, alloc_pd);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, dealloc_pd);
   DLSYM_HELPER(ibv, ibv_, ibv_handle, reg_mr);
@@ -150,35 +148,34 @@ int IBVWrapper::init_function_table() {
   return ROCSHMEM_SUCCESS;
 }
 
-struct ibv_device** IBVWrapper::get_device_list(int *num_devices) {
+struct ibv_device** IBVWrapper::get_device_list(int* num_devices) {
   return ibv.get_device_list(num_devices);
 }
 
-void IBVWrapper::free_device_list(struct ibv_device **list) {
+void IBVWrapper::free_device_list(struct ibv_device** list) {
   ibv.free_device_list(list);
 }
 
-struct ibv_context* IBVWrapper::open_device(struct ibv_device *device) {
+struct ibv_context* IBVWrapper::open_device(struct ibv_device* device) {
   return ibv.open_device(device);
-
 }
 
-int IBVWrapper::close_device(struct ibv_context *context) {
+int IBVWrapper::close_device(struct ibv_context* context) {
   return ibv.close_device(context);
 }
 
-const char* IBVWrapper::get_device_name(struct ibv_device *device) {
+const char* IBVWrapper::get_device_name(struct ibv_device* device) {
   return ibv.get_device_name(device);
 }
 
-int IBVWrapper::query_device(struct ibv_context *context, struct ibv_device_attr *device_attr) {
+int IBVWrapper::query_device(struct ibv_context* context, struct ibv_device_attr* device_attr) {
   return ibv.query_device(context, device_attr);
 }
 
 int IBVWrapper::query_port(struct ibv_context* context, uint8_t port_num,
                            struct ibv_port_attr* port_attr) {
   // Passthrough function for ibv_query_port macro in verbs.h
-  struct verbs_context *vctx = verbs_get_ctx_op(context, query_port);
+  struct verbs_context* vctx = verbs_get_ctx_op(context, query_port);
 
   if (!vctx) {
     int rc;
@@ -192,33 +189,33 @@ int IBVWrapper::query_port(struct ibv_context* context, uint8_t port_num,
   return vctx->query_port(context, port_num, port_attr, sizeof(*port_attr));
 }
 
-ssize_t IBVWrapper::query_gid_table(struct ibv_context *context,
-                                    struct ibv_gid_entry *entries,
+ssize_t IBVWrapper::query_gid_table(struct ibv_context* context, struct ibv_gid_entry* entries,
                                     size_t max_entries, uint32_t flags) {
   // Passthrough function for ibv_query_gid_table macro in verbs.h
   return ibv.query_gid_table(context, entries, max_entries, flags, sizeof(*entries));
 }
 
-int IBVWrapper::query_gid(struct ibv_context *context, uint8_t port_num, int index,
-                          union ibv_gid *gid) {
+int IBVWrapper::query_gid(struct ibv_context* context, uint8_t port_num, int index,
+                          union ibv_gid* gid) {
   return ibv.query_gid(context, port_num, index, gid);
 }
 
-struct ibv_pd* IBVWrapper::alloc_pd(struct ibv_context *context) {
+struct ibv_pd* IBVWrapper::alloc_pd(struct ibv_context* context) {
   return ibv.alloc_pd(context);
 }
 
-struct ibv_pd * IBVWrapper::alloc_parent_domain(struct ibv_context *context,
-                                                struct ibv_parent_domain_init_attr *attr) {
+struct ibv_pd* IBVWrapper::alloc_parent_domain(struct ibv_context* context,
+                                               struct ibv_parent_domain_init_attr* attr) {
   // Passthrough function for ibv_alloc_parent_domain macro in verbs.h
   return ibv_alloc_parent_domain(context, attr);
 }
 
-int IBVWrapper::dealloc_pd(struct ibv_pd *pd) {
+int IBVWrapper::dealloc_pd(struct ibv_pd* pd) {
   return ibv.dealloc_pd(pd);
 }
 
-struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access, HIPAllocator *allocator) {
+struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access,
+                                  HIPAllocator* allocator) {
   hipPointerAttribute_t attr;
   bool is_device_ptr = false;
 
@@ -227,30 +224,30 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
   is_device_ptr = attr.type == hipMemoryTypeDevice;
 
   if (is_dmabuf_supported() && is_device_ptr) {
-    struct ibv_mr *mr;
+    struct ibv_mr* mr;
     uint64_t offset = 0;
-    int fd = 0;
+    int fd          = 0;
 
     LOG_TRACE("Using ibv_reg_dmabuf_mr()");
 
     // Use provided allocator or fall back to default allocator
     HIPAllocator* alloc = (allocator != nullptr) ? allocator : get_default_allocator();
-    hipError_t err = alloc->GetDmabufHandle(addr, length, &fd, &offset);
+    hipError_t err      = alloc->GetDmabufHandle(addr, length, &fd, &offset);
     if (err != hipSuccess) {
       LOG_ERROR("Failed to get dmabuf handle: %s", hipGetErrorString(err));
       return nullptr;
     }
 
-    mr = ibv.reg_dmabuf_mr(pd, offset, length, (uint64_t) addr, fd, access);
+    mr = ibv.reg_dmabuf_mr(pd, offset, length, (uint64_t)addr, fd, access);
 
-    dmabuf_fd_map[(uintptr_t) mr] = fd;
+    dmabuf_fd_map[(uintptr_t)mr] = fd;
 
     return mr;
   } else {
     LOG_TRACE("Using ibv_reg_mr(%p, %zd)", addr, length);
 
     // Passthrough function for ibv_reg_mr macro in verbs.h
-    int is_access_const = __builtin_constant_p(((int)(access) & IBV_ACCESS_OPTIONAL_RANGE) == 0);
+    int is_access_const = __builtin_constant_p(((int)(access)&IBV_ACCESS_OPTIONAL_RANGE) == 0);
 
     if (is_access_const && (access & IBV_ACCESS_OPTIONAL_RANGE) == 0)
       return ibv.reg_mr(pd, addr, length, (int)access);
@@ -259,16 +256,18 @@ struct ibv_mr* IBVWrapper::reg_mr(struct ibv_pd* pd, void* addr, size_t length, 
   }
 }
 
-struct ibv_mr* IBVWrapper::reg_mr_iova2(struct ibv_pd *pd, void *addr, size_t length, uint64_t iova, int access) {
+struct ibv_mr* IBVWrapper::reg_mr_iova2(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova,
+                                        int access) {
   return ibv.reg_mr_iova2(pd, addr, length, iova, access);
 }
 
-struct ibv_mr* IBVWrapper::reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset, size_t length, uint64_t iova, int fd, int access) {
+struct ibv_mr* IBVWrapper::reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offset, size_t length,
+                                         uint64_t iova, int fd, int access) {
   return ibv.reg_dmabuf_mr(pd, offset, length, iova, fd, access);
 }
 
-int IBVWrapper::dereg_mr(struct ibv_mr *mr) {
-  auto it = dmabuf_fd_map.find((uintptr_t) mr);
+int IBVWrapper::dereg_mr(struct ibv_mr* mr) {
+  auto it = dmabuf_fd_map.find((uintptr_t)mr);
   if (it != dmabuf_fd_map.end()) {
     close(it->second);
     dmabuf_fd_map.erase(it);
@@ -276,29 +275,29 @@ int IBVWrapper::dereg_mr(struct ibv_mr *mr) {
   return ibv.dereg_mr(mr);
 }
 
-struct ibv_cq_ex *IBVWrapper::create_cq_ex(struct ibv_context *context,
-                                           struct ibv_cq_init_attr_ex *cq_attr) {
+struct ibv_cq_ex* IBVWrapper::create_cq_ex(struct ibv_context* context,
+                                           struct ibv_cq_init_attr_ex* cq_attr) {
   // Passthrough function for ibv_create_cq_ex macro in verbs.h
   return ibv_create_cq_ex(context, cq_attr);
 }
 
-struct ibv_cq* IBVWrapper::cq_ex_to_cq(struct ibv_cq_ex *cq) {
+struct ibv_cq* IBVWrapper::cq_ex_to_cq(struct ibv_cq_ex* cq) {
   // Passthrough function for ibv_create_cq_ex macro in verbs.h
   return ibv_cq_ex_to_cq(cq);
 }
 
-int IBVWrapper::destroy_cq(struct ibv_cq *cq) {
+int IBVWrapper::destroy_cq(struct ibv_cq* cq) {
   return ibv.destroy_cq(cq);
 }
 
-struct ibv_qp * IBVWrapper::create_qp_ex(struct ibv_context *context,
-                                         struct ibv_qp_init_attr_ex *qp_init_attr_ex) {
+struct ibv_qp* IBVWrapper::create_qp_ex(struct ibv_context* context,
+                                        struct ibv_qp_init_attr_ex* qp_init_attr_ex) {
   // Passthrough function for ibv_create_qp_ex macro in verbs.h
-  struct verbs_context *vctx;
+  struct verbs_context* vctx;
   uint32_t mask = qp_init_attr_ex->comp_mask;
 
   if (mask == IBV_QP_INIT_ATTR_PD)
-    return ibv.create_qp(qp_init_attr_ex->pd, (struct ibv_qp_init_attr *)qp_init_attr_ex);
+    return ibv.create_qp(qp_init_attr_ex->pd, (struct ibv_qp_init_attr*)qp_init_attr_ex);
 
   vctx = verbs_get_ctx_op(context, create_qp_ex);
   if (!vctx) {
@@ -308,11 +307,11 @@ struct ibv_qp * IBVWrapper::create_qp_ex(struct ibv_context *context,
   return vctx->create_qp_ex(context, qp_init_attr_ex);
 }
 
-int IBVWrapper::modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask) {
+int IBVWrapper::modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask) {
   return ibv.modify_qp(qp, attr, attr_mask);
 }
 
-int IBVWrapper::destroy_qp(struct ibv_qp *qp) {
+int IBVWrapper::destroy_qp(struct ibv_qp* qp) {
   return ibv.destroy_qp(qp);
 }
 
@@ -321,12 +320,12 @@ uint16_t IBVWrapper::flow_label_to_udp_sport(uint32_t fl) {
   return ibv_flow_label_to_udp_sport(fl);
 }
 
-struct ibv_ah* IBVWrapper::create_ah(struct ibv_pd *pd, struct ibv_ah_attr *attr) {
+struct ibv_ah* IBVWrapper::create_ah(struct ibv_pd* pd, struct ibv_ah_attr* attr) {
   return ibv.create_ah(pd, attr);
 }
 
-int IBVWrapper::destroy_ah(struct ibv_ah *ah) {
+int IBVWrapper::destroy_ah(struct ibv_ah* ah) {
   return ibv.destroy_ah(ah);
 }
 
-} // namespace rocshmem
+}  // namespace rocshmem

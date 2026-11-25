@@ -24,20 +24,19 @@
 
 /* Declare the template with a generic implementation */
 template <typename T>
-__device__ void wg_team_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
-                                  [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelems,
+__device__ void wg_team_broadcast([[maybe_unused]] rocshmem_ctx_t ctx,
+                                  [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] T* dest,
+                                  [[maybe_unused]] const T* source, [[maybe_unused]] int nelems,
                                   [[maybe_unused]] int pe_root) {
   return;
 }
 
 /* Define templates to call ROCSHMEM */
-#define TEAM_BROADCAST_DEF_GEN(T, TNAME)                                      \
-  template <>                                                                 \
-  __device__ void wg_team_broadcast<T>(                                       \
-      rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
-      int nelems, int pe_root) {                                              \
-    rocshmem_ctx_##TNAME##_broadcast_wg(ctx, team, dest, source, nelems,      \
-                                         pe_root);                            \
+#define TEAM_BROADCAST_DEF_GEN(T, TNAME)                                                   \
+  template <>                                                                              \
+  __device__ void wg_team_broadcast<T>(rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, \
+                                       const T* source, int nelems, int pe_root) {         \
+    rocshmem_ctx_##TNAME##_broadcast_wg(ctx, team, dest, source, nelems, pe_root);         \
   }
 
 TEAM_BROADCAST_DEF_GEN(float, float)
@@ -61,11 +60,9 @@ rocshmem_team_t team_bcast_world_dup;
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <typename T1>
-__global__ void TeamBroadcastTest(int loop, int skip, long long int *start_time,
-                                  long long int *end_time, T1 *source_buf,
-                                  T1 *dest_buf, int size,
-                                  ShmemContextType ctx_type,
-                                  rocshmem_team_t *teams) {
+__global__ void TeamBroadcastTest(int loop, int skip, long long int* start_time,
+                                  long long int* end_time, T1* source_buf, T1* dest_buf, int size,
+                                  ShmemContextType ctx_type, rocshmem_team_t* teams) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
@@ -87,10 +84,10 @@ __global__ void TeamBroadcastTest(int loop, int skip, long long int *start_time,
     }
 
     wg_team_broadcast<T1>(ctx, teams[wg_id],
-                          dest_buf,         // T* dest
-                          source_buf,       // const T* source
-                          size,             // int nelems
-                          0);               // int PE_root
+                          dest_buf,    // T* dest
+                          source_buf,  // const T* source
+                          size,        // int nelems
+                          0);          // int PE_root
   }
 
   __syncthreads();
@@ -106,25 +103,23 @@ __global__ void TeamBroadcastTest(int loop, int skip, long long int *start_time,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 template <typename T1>
-TeamBroadcastTester<T1>::TeamBroadcastTester(TesterArguments args)
-    : Tester(args){
+TeamBroadcastTester<T1>::TeamBroadcastTester(TesterArguments args) : Tester(args) {
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // Total number of elements in src buffer
-  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs ;
-  int buff_size = total_elems * sizeof(T1);
+  int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs;
+  int buff_size   = total_elems * sizeof(T1);
 
-  source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
-  dest_buf = (T1 *)alloc_test_buffer(buff_size);
+  source_buf = (T1*)alloc_test_buffer(buff_size, args.local_buf_type);
+  dest_buf   = (T1*)alloc_test_buffer(buff_size);
 
   char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
     num_teams = atoi(value);
   }
 
-  CHECK_HIP(hipMalloc(&team_bcast_world_dup,
-                      sizeof(rocshmem_team_t) * num_teams));
+  CHECK_HIP(hipMalloc(&team_bcast_world_dup, sizeof(rocshmem_team_t) * num_teams));
 }
 
 template <typename T1>
@@ -141,7 +136,7 @@ void TeamBroadcastTester<T1>::preLaunchKernel() {
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_bcast_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                 &team_bcast_world_dup[team_i]);
+                                &team_bcast_world_dup[team_i]);
     if (team_bcast_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
       printf("Team %d is invalid!\n", team_i);
       abort();
@@ -150,18 +145,16 @@ void TeamBroadcastTester<T1>::preLaunchKernel() {
 }
 
 template <typename T1>
-void TeamBroadcastTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
-                                           int loop, size_t size) {
+void TeamBroadcastTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
   size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   int num_elems = size / sizeof(T1);
 
-  hipLaunchKernelGGL(TeamBroadcastTest<T1>, gridSize, blockSize,
-                     shared_bytes, stream, loop, args.skip,
-                     start_time, end_time, source_buf, dest_buf,
-                     num_elems, _shmem_context, team_bcast_world_dup);
+  hipLaunchKernelGGL(TeamBroadcastTest<T1>, gridSize, blockSize, shared_bytes, stream, loop,
+                     args.skip, start_time, end_time, source_buf, dest_buf, num_elems,
+                     _shmem_context, team_bcast_world_dup);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
@@ -174,27 +167,23 @@ void TeamBroadcastTester<T1>::postLaunchKernel() {
 
 template <typename T1>
 void TeamBroadcastTester<T1>::resetBuffers(size_t size) {
-
-  int num_elems = size / sizeof(T1);
+  int num_elems                  = size / sizeof(T1);
   [[maybe_unused]] int buff_size = num_elems * sizeof(T1) * args.num_wgs;
-  int idx = 0;
+  int idx                        = 0;
 
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for (unsigned int i = 0; i < static_cast<unsigned int>(num_elems); i++) {
       idx = wg_id * num_elems + i;
-      if constexpr (std::is_same<T1, char>::value ||
-                    std::is_same<T1, signed char>::value ||
+      if constexpr (std::is_same<T1, char>::value || std::is_same<T1, signed char>::value ||
                     std::is_same<T1, unsigned char>::value) {
         source_buf[idx] = static_cast<T1>('a' + n_pes + wg_id + my_pe);
-        dest_buf[idx] = static_cast<T1>('a' + wg_id);
-      }
-      else if constexpr (std::is_floating_point<T1>::value) {
+        dest_buf[idx]   = static_cast<T1>('a' + wg_id);
+      } else if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + n_pes + wg_id + my_pe);
-        dest_buf[idx] = static_cast<T1>(3.14 + wg_id);
-      }
-      else if constexpr (std::is_integral<T1>::value) {
+        dest_buf[idx]   = static_cast<T1>(3.14 + wg_id);
+      } else if constexpr (std::is_integral<T1>::value) {
         source_buf[idx] = static_cast<T1>(n_pes + wg_id + my_pe);
-        dest_buf[idx] = static_cast<T1>(wg_id);
+        dest_buf[idx]   = static_cast<T1>(wg_id);
       }
     }
   }
@@ -202,9 +191,8 @@ void TeamBroadcastTester<T1>::resetBuffers(size_t size) {
 
 template <typename T1>
 void TeamBroadcastTester<T1>::verifyResults(size_t size) {
-
   int num_elems = size / sizeof(T1);
-  int idx = 0;
+  int idx       = 0;
   T1 expected;
 
   // Verify correctness: all PEs (including root) receive source
@@ -212,21 +200,18 @@ void TeamBroadcastTester<T1>::verifyResults(size_t size) {
   for (unsigned int wg_id = 0; wg_id < args.num_wgs; wg_id++) {
     for (int i = 0; i < num_elems; i++) {
       idx = wg_id * num_elems + i;
-      if constexpr (std::is_same<T1, char>::value ||
-                    std::is_same<T1, signed char>::value ||
+      if constexpr (std::is_same<T1, char>::value || std::is_same<T1, signed char>::value ||
                     std::is_same<T1, unsigned char>::value) {
         expected = static_cast<T1>('a' + wg_id + n_pes);
-      }
-      else if constexpr (std::is_floating_point<T1>::value) {
+      } else if constexpr (std::is_floating_point<T1>::value) {
         expected = static_cast<T1>(3.14 + wg_id + n_pes);
-      }
-      else if constexpr (std::is_integral<T1>::value) {
+      } else if constexpr (std::is_integral<T1>::value) {
         expected = static_cast<T1>(wg_id + n_pes);
       }
       if (dest_buf[idx] != expected) {
         std::cerr << "Data validation error at idx " << idx << std::endl;
-        std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
-        << ", Expected " << expected << std::endl;
+        std::cerr << "PE " << my_pe << " Got " << dest_buf[idx] << ", Expected " << expected
+                  << std::endl;
         exit(-1);
       }
     }

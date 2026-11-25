@@ -52,8 +52,8 @@ class SdmaImpl {
   uint64_t sdmaDirty{0};
   size_t sdmaThreshold{256};  // Use SDMA for transfers >= 256B
   int numChannels{1};
-  int sdmaChannel{0};       // Per-context base channel (= ctx_id % numChannels)
-  int sdmaChannelStride{0}; // 0 = use sdmaChannel as-is; 1 = add wf_id offset
+  int sdmaChannel{0};        // Per-context base channel (= ctx_id % numChannels)
+  int sdmaChannelStride{0};  // 0 = use sdmaChannel as-is; 1 = add wf_id offset
 
   // Device resources - 2D array: [shm_size * numChannels], indexed by the IPC pod position that
   // isIpcAvailable hands every caller, so a pod spanning several hosts stays in bounds.
@@ -61,11 +61,11 @@ class SdmaImpl {
   // A peer on this host uses Anvil's per-device queues; a peer on another host of the pod uses
   // queues of its own (Anvil remote-peer queues), written through its fabric-mapped memory.
   sdma_anvil::SdmaQueueDeviceHandle** deviceHandles_d{nullptr};
-  int shm_size{0};     // IPC pod size: the slot count per channel and the agreement group
+  int shm_size{0};  // IPC pod size: the slot count per channel and the agreement group
   int my_pe{0};
-  int pod_rank{0};     // index in the IPC pod (0..shm_size-1); not the world rank, my_pe
-  int local_size{0};   // pod ranks on this host
-  int local_rank{0};   // this rank's position among them
+  int pod_rank{0};    // index in the IPC pod (0..shm_size-1); not the world rank, my_pe
+  int local_size{0};  // pod ranks on this host
+  int local_rank{0};  // this rank's position among them
   // Host-side key of the queues this init connected (sdma_policy.cpp); 0 = none.
   int wiringId{0};
 
@@ -93,11 +93,11 @@ class SdmaImpl {
   //   When all WGs share one context, the offset spreads N*W wavefronts across
   //   W channels, reducing per-channel CAS contention from N*W to N.
   template <MemcpyKind Kind = MemcpyKind::Put>
-  __device__ sdma_anvil::SdmaQueueDeviceHandle* sdmaCopy(void* dst, void* src,
-                                                    size_t size, int local_pe) {
-    int effective_channel = (sdmaChannel +
-        sdmaChannelStride * (get_flat_block_id() / WF_SIZE)) % numChannels;
-    int idx = local_pe * numChannels + effective_channel;
+  __device__ sdma_anvil::SdmaQueueDeviceHandle* sdmaCopy(void* dst, void* src, size_t size,
+                                                         int local_pe) {
+    int effective_channel =
+        (sdmaChannel + sdmaChannelStride * (get_flat_block_id() / WF_SIZE)) % numChannels;
+    int idx                                   = local_pe * numChannels + effective_channel;
     sdma_anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[idx];
     if (handle != nullptr) {
       // Flush GL0/GL1 → GL2 before submitting the SDMA descriptor.
@@ -105,16 +105,15 @@ class SdmaImpl {
       // the SDMA engine reads from GL2, but __syncthreads() in the caller only
       // drains stores to GL0 without flushing to GL2.  Agent scope is sufficient
       // because SDMA probes GL2 via the coherence protocol on the same die.
-      atomic::threadfence<atomic::memory_scope::device,
-                          atomic::memory_order::release>();
+      atomic::threadfence<atomic::memory_scope::device, atomic::memory_order::release>();
       sdma_anvil::put(*handle, dst, src, size);
       // Mark (local_pe, effective_channel) dirty so sdmaQuiet drains the right
       // channel.  Blocking copies drain inline via quietAll, so the dirty bit
       // is unnecessary and would only cause a redundant poll in a later fence.
       if constexpr (!is_blocking(Kind)) {
         uint64_t bit = 1ULL << (idx & 63);
-        atomic::fetch_or<atomic::memory_scope::device,
-                         atomic::memory_order::relaxed>(&sdmaDirty, bit);
+        atomic::fetch_or<atomic::memory_scope::device, atomic::memory_order::relaxed>(&sdmaDirty,
+                                                                                      bit);
       }
     }
     return handle;
@@ -123,7 +122,8 @@ class SdmaImpl {
   // Dirty bits that copies to local_pe can have set.
   __device__ __forceinline__ uint64_t sdmaPeMask(int local_pe) const {
     uint64_t mask = 0;
-    for (int ch = 0; ch < numChannels; ch++) mask |= 1ULL << ((local_pe * numChannels + ch) & 63);
+    for (int ch = 0; ch < numChannels; ch++)
+      mask |= 1ULL << ((local_pe * numChannels + ch) & 63);
     return mask;
   }
 
@@ -134,7 +134,8 @@ class SdmaImpl {
       int bit = __builtin_ffsll(bits) - 1;
       for (int slot = bit; slot < numSlots; slot += 64) {
         sdma_anvil::SdmaQueueDeviceHandle* handle = deviceHandles_d[slot];
-        if (handle != nullptr) sdma_anvil::quiet(*handle);
+        if (handle != nullptr)
+          sdma_anvil::quiet(*handle);
       }
       bits &= ~(1ULL << bit);
     }
@@ -144,8 +145,9 @@ class SdmaImpl {
   // The caller must use rocshmem_ctx_fence(ctx, pe) for it to read sdmaDirty from
   // the same context (and SdmaImpl) that submitted the puts.
   __device__ void sdmaQuietMask(uint64_t mask) {
-    sdmaDrainBits(atomic::fetch_and<atomic::memory_scope::device,
-                                    atomic::memory_order::relaxed>(&sdmaDirty, ~mask) & mask);
+    sdmaDrainBits(atomic::fetch_and<atomic::memory_scope::device, atomic::memory_order::relaxed>(
+                      &sdmaDirty, ~mask) &
+                  mask);
   }
 
   // Wait for SDMA completions for a specific PE across all channels.
@@ -153,8 +155,8 @@ class SdmaImpl {
 
   // Wait for all SDMA completions across all PEs and channels.
   __device__ void sdmaQuietAll() {
-    sdmaDrainBits(atomic::exchange<atomic::memory_scope::device,
-                                   atomic::memory_order::relaxed>(&sdmaDirty, 0ULL));
+    sdmaDrainBits(atomic::exchange<atomic::memory_scope::device, atomic::memory_order::relaxed>(
+        &sdmaDirty, 0ULL));
   }
 };
 #endif  // USE_SDMA

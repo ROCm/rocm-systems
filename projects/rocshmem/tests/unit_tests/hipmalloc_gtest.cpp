@@ -27,19 +27,19 @@
 using namespace rocshmem;
 
 TEST_F(HipMallocTestFixture, normal_1GBx256) {
-    void* ptr{nullptr};
-    size_t gb {1073741824};
-    for (int i{0}; i < 256; i++) {
-        hip_allocator_.allocate(&ptr, gb);
-        hip_allocator_.deallocate(ptr);
-    }
+  void* ptr{nullptr};
+  size_t gb{1073741824};
+  for (int i{0}; i < 256; i++) {
+    hip_allocator_.allocate(&ptr, gb);
+    hip_allocator_.deallocate(ptr);
+  }
 }
 
 TEST_F(HipMallocTestFixture, fine_1GBx256) {
-    void* ptr{nullptr};
-    size_t gb {1073741824};
-    for (int i{0}; i < 256; i++) {
-        hip_allocator_fg_.allocate(&ptr, gb);
-        hip_allocator_fg_.deallocate(ptr);
-    }
+  void* ptr{nullptr};
+  size_t gb{1073741824};
+  for (int i{0}; i < 256; i++) {
+    hip_allocator_fg_.allocate(&ptr, gb);
+    hip_allocator_fg_.deallocate(ptr);
+  }
 }

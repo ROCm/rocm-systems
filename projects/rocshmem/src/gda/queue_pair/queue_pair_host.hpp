@@ -38,20 +38,18 @@ namespace rocshmem {
 
 struct BufferHostInfo {
   struct ibv_mr* mr;
-  BufferInfo*    info_ptr;
+  BufferInfo* info_ptr;
 
-  BufferHostInfo(struct ibv_mr* mr, BufferInfo* info_ptr) : mr{mr}, info_ptr{info_ptr} { }
+  BufferHostInfo(struct ibv_mr* mr, BufferInfo* info_ptr) : mr{mr}, info_ptr{info_ptr} {}
 };
 
 template <typename Iter>
 class iterator_freelist {
-private:
+ private:
   std::vector<Iter> container{};
 
   /* Reserve space in container for std::distance(first, last) elements */
-  void reserve(Iter first, Iter last) {
-    container.reserve(std::distance(first, last));
-  }
+  void reserve(Iter first, Iter last) { container.reserve(std::distance(first, last)); }
 
   void init(Iter first, Iter last) {
     /* Push back iterators in range [first, last) to container in reverse order
@@ -61,7 +59,7 @@ private:
     }
   }
 
-public:
+ public:
   using value_type      = Iter;
   using difference_type = typename std::iterator_traits<Iter>::difference_type;
   using size_type       = typename decltype(container)::size_type;
@@ -76,19 +74,13 @@ public:
 
   /* Initialize freelist with iterators in range [first, std::next(first, count)) */
   iterator_freelist(Iter first, size_type count)
-    : iterator_freelist{first, std::next(first, count)} { }
+      : iterator_freelist{first, std::next(first, count)} {}
 
-  bool empty() const {
-    return container.empty();
-  }
+  bool empty() const { return container.empty(); }
 
-  size_type size() const {
-    return container.size();
-  }
+  size_type size() const { return container.size(); }
 
-  Iter top() {
-    return container.back();
-  }
+  Iter top() { return container.back(); }
 
   void push(Iter value) {
     std::greater<Iter> compare{};
@@ -102,9 +94,7 @@ public:
     }
   }
 
-  void pop() {
-    container.pop_back();
-  }
+  void pop() { container.pop_back(); }
 
   void reset(Iter first, Iter last) {
     container.clear();
@@ -112,24 +102,20 @@ public:
     init(first, last);
   }
 
-  void reset(Iter first, size_type count) {
-    reset(first, std::next(first, count));
-  }
+  void reset(Iter first, size_type count) { reset(first, std::next(first, count)); }
 };
-
-
 
 /*
  * @brief QueuePairHost manages local buffer registration and
  * the atomic fetch buffers for a device QueuePair.
  */
 class QueuePairHost {
-/**
- * @name Constructors and Destructors
- *
- * @{
- */
-public:
+  /**
+   * @name Constructors and Destructors
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Constructor.
    *
@@ -175,16 +161,14 @@ public:
    * Cleans up all resources allocated by *this.
    */
   __host__ ~QueuePairHost();
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Buffer Registration
- *
- * @{
- */
-public:
+  /**
+   * @name Buffer Registration
+   *
+   * @{
+   */
+ public:
   /**
    * @brief Register buffer for use as local address in rocSHMEM routines
    *
@@ -194,7 +178,7 @@ public:
    * @retval ROCSHMEM_SUCCESS Buffer registered successfully.
    * @retval ROCSHMEM_ERROR Buffer could not be registered.
    */
-  __host__ int buffer_register(void *addr, size_t length);
+  __host__ int buffer_register(void* addr, size_t length);
 
   /**
    * @brief Unregister buffer.
@@ -204,7 +188,7 @@ public:
    *
    * @retval ROCSHMEM_SUCCESS Buffer unregistered successfully.
    */
-  __host__ int buffer_unregister(void *addr);
+  __host__ int buffer_unregister(void* addr);
 
   /**
    * @brief Unregister all registered buffers.
@@ -212,28 +196,24 @@ public:
    * @retval ROCSHMEM_SUCCESS Buffers unregistered successfully.
    */
   __host__ int buffer_unregister_all();
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Internal
- *
- * @{
- */
-private:
+  /**
+   * @name Internal
+   *
+   * @{
+   */
+ private:
   template <typename T>
   __host__ std::tuple<T*, struct ibv_mr*> allocate_and_register(size_t count, int access);
-/**@}*/
+  /**@}*/
 
-
-
-/**
- * @name Non-static Data Members
- *
- * @{
- */
-public:
+  /**
+   * @name Non-static Data Members
+   *
+   * @{
+   */
+ public:
   // Used by get_laddr
   BufferInfo* buffer_info{nullptr};
   size_t num_user_buffers{0};
@@ -255,13 +235,13 @@ public:
   struct ibv_pd* pd;
   struct ibv_mr* fetching_atomic_mr{nullptr};
   struct ibv_mr* nonfetching_atomic_mr{nullptr};
-/**@}*/
+  /**@}*/
 };
 
 template <typename T>
-__host__ std::tuple<T*, struct ibv_mr*>
-QueuePairHost::allocate_and_register(size_t count, int access) {
-  void* ptr = nullptr;
+__host__ std::tuple<T*, struct ibv_mr*> QueuePairHost::allocate_and_register(size_t count,
+                                                                             int access) {
+  void* ptr   = nullptr;
   size_t size = sizeof(T) * count;
   allocator.allocate(&ptr, size);
   CHECK_HIP(hipMemset(ptr, 0, size));

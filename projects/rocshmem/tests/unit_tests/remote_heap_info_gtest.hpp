@@ -35,33 +35,30 @@
 
 namespace rocshmem {
 
-class RemoteHeapInfoTestFixture : public ::testing::Test
-{
-    /**
-     * @brief Helper type for heap memory
-     */
-    using HEAP_T = HeapMemoryType;
+class RemoteHeapInfoTestFixture : public ::testing::Test {
+  /**
+   * @brief Helper type for heap memory
+   */
+  using HEAP_T = HeapMemoryType;
 
-    /**
-     * @brief Helper type for RemoteHeapInfo with MPI
-     */
-    using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
+  /**
+   * @brief Helper type for RemoteHeapInfo with MPI
+   */
+  using MPI_T = RemoteHeapInfo<CommunicatorMPI>;
 
-  protected:
-    /**
-     * @brief Heap memory object
-     */
-    HIPAllocator alloc_{};
-    HEAP_T heap_mem_{alloc_};
+ protected:
+  /**
+   * @brief Heap memory object
+   */
+  HIPAllocator alloc_{};
+  HEAP_T heap_mem_{alloc_};
 
-    /**
-     * @brief Remote heap info with MPI Communicator
-     */
-    MPI_T mpi_ {heap_mem_.get_ptr(),
-                heap_mem_.get_size(),
-                MPI_COMM_WORLD};
+  /**
+   * @brief Remote heap info with MPI Communicator
+   */
+  MPI_T mpi_{heap_mem_.get_ptr(), heap_mem_.get_size(), MPI_COMM_WORLD};
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
-#endif // ROCSHMEM_REMOTE_HEAP_INFO_GTEST_HPP
+#endif  // ROCSHMEM_REMOTE_HEAP_INFO_GTEST_HPP

@@ -33,11 +33,11 @@
 namespace rocshmem {
 
 class HipMallocTestFixture : public ::testing::Test {
-  public:
-    HIPAllocator hip_allocator_ {};
-    HIPAllocatorFinegrained hip_allocator_fg_ {};
+ public:
+  HIPAllocator hip_allocator_{};
+  HIPAllocatorFinegrained hip_allocator_fg_{};
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
 #endif  // ROCSHMEM_HIPMALLOC_GTEST_HPP

@@ -23,20 +23,19 @@
  *****************************************************************************/
 
 template <typename T>
-__device__ void wave_broadcast([[maybe_unused]] rocshmem_ctx_t ctx, [[maybe_unused]] rocshmem_team_t team,
-                                  [[maybe_unused]] T *dest, [[maybe_unused]] const T *source, [[maybe_unused]] int nelems,
-                                  [[maybe_unused]] int pe_root) {
+__device__ void wave_broadcast([[maybe_unused]] rocshmem_ctx_t ctx,
+                               [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] T* dest,
+                               [[maybe_unused]] const T* source, [[maybe_unused]] int nelems,
+                               [[maybe_unused]] int pe_root) {
   return;
 }
 
 /* Define templates to call ROCSHMEM */
-#define BROADCAST_WAVE_DEF_GEN(T, TNAME)                                      \
-  template <>                                                                 \
-  __device__ void wave_broadcast<T>(                                          \
-      rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, const T *source,    \
-      int nelems, int pe_root) {                                              \
-    rocshmem_ctx_##TNAME##_broadcast_wave(ctx, team, dest, source, nelems,    \
-                                         pe_root);                            \
+#define BROADCAST_WAVE_DEF_GEN(T, TNAME)                                                \
+  template <>                                                                           \
+  __device__ void wave_broadcast<T>(rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest, \
+                                    const T* source, int nelems, int pe_root) {         \
+    rocshmem_ctx_##TNAME##_broadcast_wave(ctx, team, dest, source, nelems, pe_root);    \
   }
 
 BROADCAST_WAVE_DEF_GEN(float, float)
@@ -50,12 +49,10 @@ BROADCAST_WAVE_DEF_GEN(long long, longlong)
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <typename T1>
-__global__ void BroadcastWaveTestKernel(int loop, int skip, long long int *start_time,
-                                  long long int *end_time, T1 *source_buf,
-                                  T1 *dest_buf, int size,
-                                  ShmemContextType ctx_type,
-                                  rocshmem_team_t *teams, int wf_size,
-                                  int num_waves_per_wg) {
+__global__ void BroadcastWaveTestKernel(int loop, int skip, long long int* start_time,
+                                        long long int* end_time, T1* source_buf, T1* dest_buf,
+                                        int size, ShmemContextType ctx_type, rocshmem_team_t* teams,
+                                        int wf_size, int num_waves_per_wg) {
   extern __shared__ rocshmem_ctx_t ctx_array[];
 
   int t_id       = get_flat_block_id();
@@ -67,27 +64,25 @@ __global__ void BroadcastWaveTestKernel(int loop, int skip, long long int *start
   // All threads in the WG collectively create one context per wave.
   // Each iteration is WG-collective so __syncthreads() guards each call.
   for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
-    rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type,
-                                &ctx_array[wf_i]);
+    rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type, &ctx_array[wf_i]);
     __syncthreads();
   }
 
   // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0. The
   // staged LDS region sits right after the per-wave ctx slots in the dynamic
   // shared buffer; memcpy_wave_lds_stage splits it evenly across the block's waves.
-  uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
+  uint8_t* tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
   rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   // Each wave uses its own buffer slice
-  T1 *my_source = source_buf + flat_wf_id * size;
-  T1 *my_dest   = dest_buf   + flat_wf_id * size;
+  T1* my_source = source_buf + flat_wf_id * size;
+  T1* my_dest   = dest_buf + flat_wf_id * size;
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip && t_id % wf_size == 0) {
       start_time[flat_wf_id] = wall_clock64();
     }
-    wave_broadcast<T1>(ctx_array[wf_id], teams[flat_wf_id], my_dest, my_source,
-                       size, 0);
+    wave_broadcast<T1>(ctx_array[wf_id], teams[flat_wf_id], my_dest, my_source, size, 0);
   }
 
   __syncthreads();
@@ -107,17 +102,16 @@ __global__ void BroadcastWaveTestKernel(int loop, int skip, long long int *start
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 template <typename T1>
-BroadcastWaveTester<T1>::BroadcastWaveTester(TesterArguments args)
-    : Tester(args){
+BroadcastWaveTester<T1>::BroadcastWaveTester(TesterArguments args) : Tester(args) {
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   // One buffer slice per wave (num_wgs * num_warps total waves)
   int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs * num_warps;
-  int buff_size = total_elems * sizeof(T1);
+  int buff_size   = total_elems * sizeof(T1);
 
-  source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
-  dest_buf = (T1 *)alloc_test_buffer(buff_size);
+  source_buf = (T1*)alloc_test_buffer(buff_size, args.local_buf_type);
+  dest_buf   = (T1*)alloc_test_buffer(buff_size);
 
   char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
@@ -126,13 +120,12 @@ BroadcastWaveTester<T1>::BroadcastWaveTester(TesterArguments args)
 
   // Need one team per wave
   int total_waves = num_warps * args.num_wgs;
-  if (num_teams < total_waves){
+  if (num_teams < total_waves) {
     printf("not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
     exit(0);
   }
 
-  CHECK_HIP(hipMalloc(&bcast_wave_world_dup,
-                      sizeof(rocshmem_team_t) * total_waves));
+  CHECK_HIP(hipMalloc(&bcast_wave_world_dup, sizeof(rocshmem_team_t) * total_waves));
 }
 
 template <typename T1>
@@ -150,7 +143,7 @@ void BroadcastWaveTester<T1>::preLaunchKernel() {
   for (int team_i = 0; team_i < total_waves; team_i++) {
     bcast_wave_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                 &bcast_wave_world_dup[team_i]);
+                                &bcast_wave_world_dup[team_i]);
     if (bcast_wave_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
       printf("Team %d is invalid!\n", team_i);
       abort();
@@ -159,20 +152,16 @@ void BroadcastWaveTester<T1>::preLaunchKernel() {
 }
 
 template <typename T1>
-void BroadcastWaveTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
-                                           int loop, size_t size) {
-  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) +
-                        rocshmem_query_lds_stage_bytes();
+void BroadcastWaveTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
+  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) + rocshmem_query_lds_stage_bytes();
 
   int num_elems = size / sizeof(T1);
 
-  hipLaunchKernelGGL(BroadcastWaveTestKernel<T1>, gridSize, blockSize,
-                     shared_bytes, stream, loop, args.skip,
-                     start_time, end_time, source_buf, dest_buf,
-                     num_elems, _shmem_context, bcast_wave_world_dup, wf_size,
-                     num_warps);
+  hipLaunchKernelGGL(BroadcastWaveTestKernel<T1>, gridSize, blockSize, shared_bytes, stream, loop,
+                     args.skip, start_time, end_time, source_buf, dest_buf, num_elems,
+                     _shmem_context, bcast_wave_world_dup, wf_size, num_warps);
 
-  num_msgs = (loop + args.skip) * gridSize.x * num_warps;
+  num_msgs       = (loop + args.skip) * gridSize.x * num_warps;
   num_timed_msgs = loop * gridSize.x * num_warps;
 }
 
@@ -186,7 +175,7 @@ void BroadcastWaveTester<T1>::postLaunchKernel() {
 
 template <typename T1>
 void BroadcastWaveTester<T1>::resetBuffers(size_t size) {
-  int num_elems = size / sizeof(T1);
+  int num_elems   = size / sizeof(T1);
   int total_waves = args.num_wgs * num_warps;
 
   for (int wave_id = 0; wave_id < total_waves; wave_id++) {
@@ -205,7 +194,7 @@ void BroadcastWaveTester<T1>::resetBuffers(size_t size) {
 
 template <typename T1>
 void BroadcastWaveTester<T1>::verifyResults(size_t size) {
-  int num_elems = size / sizeof(T1);
+  int num_elems   = size / sizeof(T1);
   int total_waves = args.num_wgs * num_warps;
 
   for (int wave_id = 0; wave_id < total_waves; wave_id++) {
@@ -218,10 +207,9 @@ void BroadcastWaveTester<T1>::verifyResults(size_t size) {
         expected = static_cast<T1>('a' + wave_id + n_pes);
       }
       if (dest_buf[idx] != expected) {
-        std::cerr << "Data validation error at wave " << wave_id
-                  << " idx " << i << std::endl;
-        std::cerr << "PE " << my_pe << " Got " << dest_buf[idx]
-                  << ", Expected " << expected << std::endl;
+        std::cerr << "Data validation error at wave " << wave_id << " idx " << i << std::endl;
+        std::cerr << "PE " << my_pe << " Got " << dest_buf[idx] << ", Expected " << expected
+                  << std::endl;
         exit(-1);
       }
     }

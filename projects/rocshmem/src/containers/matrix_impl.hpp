@@ -34,8 +34,8 @@
 namespace rocshmem {
 
 template <typename TYPE>
-Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
-                     MemoryAllocator allocator, const IndexStrategy strategy)
+Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns, MemoryAllocator allocator,
+                     const IndexStrategy strategy)
     : _number_rows(number_rows),
       _number_columns(number_columns),
       _allocator(allocator),
@@ -45,7 +45,7 @@ Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
    * TYPE pointers.
    */
   size_t flat_c_array_dimensions = _number_rows * _number_columns;
-  size_t size_bytes = flat_c_array_dimensions * sizeof(TYPE*);
+  size_t size_bytes              = flat_c_array_dimensions * sizeof(TYPE*);
   _allocator.allocate(reinterpret_cast<void**>(&_flat_c_array), size_bytes);
 
   /*
@@ -53,8 +53,7 @@ Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
    * with a valid TYPE.
    */
   for (size_t i = 0; i < flat_c_array_dimensions; i++) {
-    _allocator.allocate(reinterpret_cast<void**>(&_flat_c_array[i]),
-                        sizeof(TYPE));
+    _allocator.allocate(reinterpret_cast<void**>(&_flat_c_array[i]), sizeof(TYPE));
 
     if constexpr (one_generic_constructor_parameter<TYPE>::value &&
                   requires_internal_allocator<TYPE>::value) {
@@ -71,9 +70,8 @@ Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
 }
 
 template <typename TYPE>
-Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
-                     size_t TYPE_constructor_param, MemoryAllocator allocator,
-                     const IndexStrategy strategy)
+Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns, size_t TYPE_constructor_param,
+                     MemoryAllocator allocator, const IndexStrategy strategy)
     : _number_rows(number_rows),
       _number_columns(number_columns),
       _allocator(allocator),
@@ -83,7 +81,7 @@ Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
    * TYPE pointers.
    */
   size_t flat_c_array_dimensions = _number_rows * _number_columns;
-  size_t size_bytes = flat_c_array_dimensions * sizeof(TYPE*);
+  size_t size_bytes              = flat_c_array_dimensions * sizeof(TYPE*);
   _allocator.allocate(reinterpret_cast<void**>(&_flat_c_array), size_bytes);
 
   /*
@@ -91,8 +89,7 @@ Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
    * with a valid TYPE.
    */
   for (size_t i = 0; i < flat_c_array_dimensions; i++) {
-    _allocator.allocate(reinterpret_cast<void**>(&_flat_c_array[i]),
-                        sizeof(TYPE));
+    _allocator.allocate(reinterpret_cast<void**>(&_flat_c_array[i]), sizeof(TYPE));
 
     /*
      * If type traits match, construct the TYPE with placement new.
@@ -108,8 +105,8 @@ Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
 
 template <typename TYPE>
 Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
-                     std::vector<size_t> TYPE_constructor_param,
-                     MemoryAllocator allocator, const IndexStrategy strategy)
+                     std::vector<size_t> TYPE_constructor_param, MemoryAllocator allocator,
+                     const IndexStrategy strategy)
     : _number_rows(number_rows),
       _number_columns(number_columns),
       _allocator(allocator),
@@ -133,16 +130,14 @@ Matrix<TYPE>::Matrix(size_t number_rows, size_t number_columns,
    * with a valid TYPE.
    */
   for (size_t i = 0; i < flat_c_array_dimensions; i++) {
-    _allocator.allocate(reinterpret_cast<void**>(&_flat_c_array[i]),
-                        sizeof(TYPE));
+    _allocator.allocate(reinterpret_cast<void**>(&_flat_c_array[i]), sizeof(TYPE));
 
     /*
      * If type traits match, construct the TYPE with placement new.
      */
     if constexpr (one_generic_constructor_parameter<TYPE>::value &&
                   requires_internal_allocator<TYPE>::value) {
-      new (_flat_c_array[i])
-          TYPE(TYPE_constructor_param[i], allocator, strategy);
+      new (_flat_c_array[i]) TYPE(TYPE_constructor_param[i], allocator, strategy);
     } else if constexpr (one_generic_constructor_parameter<TYPE>::value) {
       new (_flat_c_array[i]) TYPE(TYPE_constructor_param[i], strategy);
     }
@@ -171,8 +166,7 @@ Matrix<TYPE>::~Matrix() {
 }
 
 template <typename TYPE>
-__host__ __device__ TYPE* Matrix<TYPE>::access(size_t row_index,
-                                               size_t col_index) {
+__host__ __device__ TYPE* Matrix<TYPE>::access(size_t row_index, size_t col_index) {
   assert(row_index < _number_rows);
   assert(col_index < _number_columns);
   size_t offset = row_index * _number_columns + col_index;

@@ -44,20 +44,19 @@ class PutmemOnStreamTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
  private:
-  char *source_buf;
-  char *dest_buf;
+  char* source_buf;
+  char* dest_buf;
   int my_pe;
   int n_pes;
   size_t buf_size;
-  int num_streams = 1;
+  int num_streams         = 1;
   bool use_default_stream = false;
   int pe_target;  // Target PE to put to
   std::vector<hipStream_t> streams;
@@ -68,4 +67,3 @@ class PutmemOnStreamTester : public Tester {
 #include "putmem_on_stream_tester.cpp"
 
 #endif
-

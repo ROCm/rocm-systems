@@ -31,14 +31,12 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void BarrierAllTest(int loop, int skip, long long int *start_time,
-                               long long int *end_time, TestType type,
-                               int wf_size) {
+__global__ void BarrierAllTest(int loop, int skip, long long int* start_time,
+                               long long int* end_time, TestType type, int wf_size) {
   [[maybe_unused]] __shared__ rocshmem_ctx_t ctx;
   int t_id  = get_flat_block_id();
   int wg_id = get_flat_grid_id();
   int wf_id = t_id / wf_size;
-
 
   for (int i = 0; i < loop + skip; i++) {
     if (hipThreadIdx_x == 0 && i == skip) {
@@ -47,33 +45,33 @@ __global__ void BarrierAllTest(int loop, int skip, long long int *start_time,
 
     if (is_block_zero_in_grid()) {
       switch (type) {
-        case BarrierAllTestType:
-          if(t_id == 0) {
-            /**
-              * The function `rocshmem_barrier_all` should be called from only
-              * one thread within the grid to avoid undefined behavior.
-              */
-            rocshmem_barrier_all();
-          }
-          break;
-        case WAVEBarrierAllTestType:
-          if(wf_id == 0) {
-            /**
-              * The function `rocshmem_barrier_all_wave` should be called from only
-              * one wavefront within the grid to avoid undefined behavior.
-              */
-            rocshmem_barrier_all_wave();
-          }
-          break;
-        case WGBarrierAllTestType:
+      case BarrierAllTestType:
+        if (t_id == 0) {
           /**
-            * The function `rocshmem_barrier_all_wg` should be called from only
-            * one workgroup within the grid to avoid undefined behavior.
-            */
-          rocshmem_barrier_all_wg();
-          break;
-        default:
-          break;
+           * The function `rocshmem_barrier_all` should be called from only
+           * one thread within the grid to avoid undefined behavior.
+           */
+          rocshmem_barrier_all();
+        }
+        break;
+      case WAVEBarrierAllTestType:
+        if (wf_id == 0) {
+          /**
+           * The function `rocshmem_barrier_all_wave` should be called from only
+           * one wavefront within the grid to avoid undefined behavior.
+           */
+          rocshmem_barrier_all_wave();
+        }
+        break;
+      case WGBarrierAllTestType:
+        /**
+         * The function `rocshmem_barrier_all_wg` should be called from only
+         * one workgroup within the grid to avoid undefined behavior.
+         */
+        rocshmem_barrier_all_wg();
+        break;
+      default:
+        break;
       }
     }
     __syncthreads();
@@ -82,7 +80,6 @@ __global__ void BarrierAllTest(int loop, int skip, long long int *start_time,
   if (hipThreadIdx_x == 0) {
     end_time[wg_id] = wall_clock64();
   }
-
 }
 
 /******************************************************************************
@@ -96,10 +93,10 @@ void BarrierAllTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                     [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(BarrierAllTest, gridSize, blockSize, shared_bytes, stream,
-                     loop, args.skip, start_time, end_time, _type, wf_size);
+  hipLaunchKernelGGL(BarrierAllTest, gridSize, blockSize, shared_bytes, stream, loop, args.skip,
+                     start_time, end_time, _type, wf_size);
 
-  num_msgs = (loop + args.skip);
+  num_msgs       = (loop + args.skip);
   num_timed_msgs = loop;
 }
 

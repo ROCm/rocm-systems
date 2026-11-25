@@ -36,10 +36,10 @@ namespace rocshmem {
 
 // What one rank reports after trying to wire its SDMA queues. Exchanged as an int.
 enum SdmaInitStatus : int {
-  kSdmaReady = 0,          // every connect() succeeded
+  kSdmaReady         = 0,  // every connect() succeeded
   kSdmaDisabledByEnv = 1,  // ROCSHMEM_SDMA_ENABLED=0 on this rank, nothing was wired
   kSdmaConnectFailed = 2,  // a connect() failed on this rank
-  kSdmaBadChannels = 3,    // ROCSHMEM_SDMA_NUM_CHANNELS out of range on this rank, nothing wired
+  kSdmaBadChannels   = 3,  // ROCSHMEM_SDMA_NUM_CHANNELS out of range on this rank, nothing wired
 };
 
 enum class SdmaDecision {
@@ -53,7 +53,8 @@ enum class SdmaDecision {
 // This rank's status before any queue is wired. Queues are wired only on kSdmaReady. A bad channel
 // count is reported even with SDMA disabled, so the group still aborts on it.
 inline int initialSdmaStatus(bool enabled, int channels) {
-  if (channels < 1 || channels > 8) return kSdmaBadChannels;
+  if (channels < 1 || channels > 8)
+    return kSdmaBadChannels;
   return enabled ? kSdmaReady : kSdmaDisabledByEnv;
 }
 
@@ -72,8 +73,9 @@ inline SdmaAgreement agreeSdmaStatus(const int* statuses, int n) {
   std::string failed;
   std::string disabled;
   int numReady = 0;
-  auto append = [](std::string& list, int rank) {
-    if (!list.empty()) list += ',';
+  auto append  = [](std::string& list, int rank) {
+    if (!list.empty())
+      list += ',';
     list += std::to_string(rank);
   };
   for (int i = 0; i < n; ++i) {
@@ -89,17 +91,17 @@ inline SdmaAgreement agreeSdmaStatus(const int* statuses, int n) {
   }
   if (!badChannels.empty()) {
     out.decision = SdmaDecision::kAbortBadChannels;
-    out.ranks = badChannels;
+    out.ranks    = badChannels;
   } else if (!failed.empty()) {
     out.decision = SdmaDecision::kFallbackConnectFailed;
-    out.ranks = failed;
+    out.ranks    = failed;
   } else if (numReady == n) {
     out.decision = SdmaDecision::kCommit;
   } else if (numReady == 0) {
     out.decision = SdmaDecision::kAllDisabled;
   } else {
     out.decision = SdmaDecision::kFallbackEnvMismatch;
-    out.ranks = disabled;
+    out.ranks    = disabled;
   }
   return out;
 }
@@ -108,8 +110,9 @@ inline SdmaAgreement agreeSdmaStatus(const int* statuses, int n) {
 // real connect failure does not happen. Read with getenv rather than envvar so it stays out of the
 // documented variables, the help output and rocshmem_info. Returns -1 when unset or not a rank.
 inline int parseForcedFailureLocalRank(const char* value) {
-  if (value == nullptr || *value == '\0') return -1;
-  char* end = nullptr;
+  if (value == nullptr || *value == '\0')
+    return -1;
+  char* end       = nullptr;
   const long rank = std::strtol(value, &end, 10);
   return (*end == '\0' && rank >= 0 && rank <= INT_MAX) ? static_cast<int>(rank) : -1;
 }

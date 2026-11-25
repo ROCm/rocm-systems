@@ -22,38 +22,38 @@ using namespace rocshmem;
 
 template <typename T>
 class SymmetricTensorBuffer {
-public:
-    SymmetricTensorBuffer() = default;
-    ~SymmetricTensorBuffer() { dealloc(); }
+ public:
+  SymmetricTensorBuffer() = default;
+  ~SymmetricTensorBuffer() { dealloc(); }
 
-    void reset(size_t capacity) {
-        dealloc();
-        alloc(capacity * sizeof(T));
-        _capacity = capacity;
+  void reset(size_t capacity) {
+    dealloc();
+    alloc(capacity * sizeof(T));
+    _capacity = capacity;
+  }
+
+  T* get() { return _data; }
+  size_t size() { return _capacity; }
+  void free() { dealloc(); }
+
+ private:
+  void dealloc() {
+    if (_capacity) {
+      rocshmem_free((void*)_data);
     }
+    _capacity = 0;
+  }
 
-    T* get() { return _data; }
-    size_t size() { return _capacity; }
-    void free() { dealloc(); }
-
-private:
-    void dealloc() {
-        if (_capacity) {
-            rocshmem_free((void*)_data);
-        }
-        _capacity = 0;
+  void alloc(size_t size) {
+    _data = (T*)rocshmem_malloc(size);
+    if (!_data) {
+      std::cerr << "rocshmem_malloc failed for " << size << " bytes\n";
+      exit(EXIT_FAILURE);
     }
+  }
 
-    void alloc(size_t size) {
-        _data = (T*)rocshmem_malloc(size);
-        if (!_data) {
-            std::cerr << "rocshmem_malloc failed for " << size << " bytes\n";
-            exit(EXIT_FAILURE);
-        }
-    }
-
-    T* _data = nullptr;
-    size_t _capacity = 0;
+  T* _data         = nullptr;
+  size_t _capacity = 0;
 };
 
 /******************************************************************************
@@ -63,7 +63,7 @@ private:
 // Simple 2D tensor implementation for testing
 template <typename T>
 struct Tensor2D {
-  using element_type = T;
+  using element_type        = T;
   static constexpr int ndim = 2;
 
   T* data;
@@ -72,30 +72,26 @@ struct Tensor2D {
   int row_stride;
   int col_stride;
 
-  __device__ Tensor2D(T* data_, int rows_, int cols_,
-                      int row_stride_ = -1, int col_stride_ = 1)
+  __device__ Tensor2D(T* data_, int rows_, int cols_, int row_stride_ = -1, int col_stride_ = 1)
       : data(data_), rows(rows_), cols(cols_), col_stride(col_stride_) {
     // Default row_stride is cols (contiguous row-major layout)
     row_stride = (row_stride_ == -1) ? cols : row_stride_;
   }
 
   __device__ T* data_handle() const { return data; }
-  __device__ int stride(int dim) const {
-    return (dim == 0) ? row_stride : col_stride;
-  }
+  __device__ int stride(int dim) const { return (dim == 0) ? row_stride : col_stride; }
 };
 
 // Simple 1D tensor implementation for testing
 template <typename T>
 struct Tensor1D {
-  using element_type = T;
+  using element_type        = T;
   static constexpr int ndim = 1;
 
   T* data;
   int stride_0;
 
-  __device__ Tensor1D(T* data_, int stride_0_)
-      : data(data_), stride_0(stride_0_) {}
+  __device__ Tensor1D(T* data_, int stride_0_) : data(data_), stride_0(stride_0_) {}
 
   __device__ T* data_handle() const { return data; }
   __device__ int stride(int dim) const { return stride_0; }
@@ -121,14 +117,12 @@ struct Tuple1D {
 // Test type values come from TestType enum in tester.hpp
 
 template <TestType Type>
-__global__ void TileRMATest(int loop, int skip, long long int *start_time,
-                            long long int *end_time, float *source,
-                            float *dest, int tile_extent_0, int tile_extent_1,
-                            ShmemContextType ctx_type, int wf_size,
-                            int start_coord_offset = 0) {
+__global__ void TileRMATest(int loop, int skip, long long int* start_time, long long int* end_time,
+                            float* source, float* dest, int tile_extent_0, int tile_extent_1,
+                            ShmemContextType ctx_type, int wf_size, int start_coord_offset = 0) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
-  int t_id = get_flat_block_id();
+  int t_id  = get_flat_block_id();
   int wf_id = t_id / wf_size;
   rocshmem_wg_ctx_create(ctx_type, &ctx);
 
@@ -145,22 +139,19 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
   //   tile_extent_0 * (2 * tile_extent_1) elements
   int matrix_size = tile_extent_0 * tile_extent_1;
   int slot_stride;
-  if constexpr (Type == TilePutRowMajorTestType    ||
-                Type == TileGetRowMajorTestType     ||
-                Type == TilePutWaveRowMajorTestType ||
-                Type == TileGetWaveRowMajorTestType ||
-                Type == TilePutWGRowMajorTestType   ||
-                Type == TileGetWGRowMajorTestType) {
+  if constexpr (Type == TilePutRowMajorTestType || Type == TileGetRowMajorTestType ||
+                Type == TilePutWaveRowMajorTestType || Type == TileGetWaveRowMajorTestType ||
+                Type == TilePutWGRowMajorTestType || Type == TileGetWGRowMajorTestType) {
     slot_stride = tile_extent_0 * (2 * tile_extent_1);
-  } else if constexpr (Type == TilePutRowMajorStartCoordTestType    ||
-                       Type == TileGetRowMajorStartCoordTestType     ||
+  } else if constexpr (Type == TilePutRowMajorStartCoordTestType ||
+                       Type == TileGetRowMajorStartCoordTestType ||
                        Type == TilePutWaveRowMajorStartCoordTestType ||
                        Type == TileGetWaveRowMajorStartCoordTestType ||
-                       Type == TilePutWGRowMajorStartCoordTestType   ||
+                       Type == TilePutWGRowMajorStartCoordTestType ||
                        Type == TileGetWGRowMajorStartCoordTestType) {
     // Extra border of start_coord_offset in each dim; row_stride = 2*(t1+off)
-    int t0 = tile_extent_0 + start_coord_offset;
-    int t1 = tile_extent_1 + start_coord_offset;
+    int t0      = tile_extent_0 + start_coord_offset;
+    int t1      = tile_extent_1 + start_coord_offset;
     slot_stride = t0 * (2 * t1);
   } else {
     slot_stride = matrix_size;
@@ -169,22 +160,16 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
 
   // For collective operations, all threads in the collective share the same tile
   // For thread-level operations, each thread has its own tile
-  if constexpr (Type == TilePutWaveContiguousTestType     ||
-                Type == TileGetWaveContiguousTestType     ||
-                Type == TilePutWaveRowMajorTestType       ||
-                Type == TilePutWaveColumnMajorTestType    ||
-                Type == TileGetWaveRowMajorTestType       ||
-                Type == TileGetWaveColumnMajorTestType    ||
+  if constexpr (Type == TilePutWaveContiguousTestType || Type == TileGetWaveContiguousTestType ||
+                Type == TilePutWaveRowMajorTestType || Type == TilePutWaveColumnMajorTestType ||
+                Type == TileGetWaveRowMajorTestType || Type == TileGetWaveColumnMajorTestType ||
                 Type == TilePutWaveRowMajorStartCoordTestType ||
                 Type == TileGetWaveRowMajorStartCoordTestType) {
     // Wave-collective: all threads in wave use same offset (wave ID)
     offset = slot_stride * (get_flat_id() / wf_size);
-  } else if constexpr (Type == TilePutWGContiguousTestType     ||
-                       Type == TileGetWGContiguousTestType     ||
-                       Type == TilePutWGRowMajorTestType       ||
-                       Type == TilePutWGColumnMajorTestType    ||
-                       Type == TileGetWGRowMajorTestType       ||
-                       Type == TileGetWGColumnMajorTestType    ||
+  } else if constexpr (Type == TilePutWGContiguousTestType || Type == TileGetWGContiguousTestType ||
+                       Type == TilePutWGRowMajorTestType || Type == TilePutWGColumnMajorTestType ||
+                       Type == TileGetWGRowMajorTestType || Type == TileGetWGColumnMajorTestType ||
                        Type == TilePutWGRowMajorStartCoordTestType ||
                        Type == TileGetWGRowMajorStartCoordTestType) {
     // Workgroup-collective: all threads in wg use same offset (workgroup ID)
@@ -205,200 +190,200 @@ __global__ void TileRMATest(int loop, int skip, long long int *start_time,
     }
 
     if constexpr (Type == TilePutContiguousTestType) {
-        // Fully contiguous: rows=tile_extent_0, cols=tile_extent_1, row_stride=tile_extent_1
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutRowMajorTestType) {
-        // Row-major with gaps: rows=tile_extent_0, cols=tile_extent_1, row_stride=2*tile_extent_1
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutColumnMajorTestType) {
-        // Column-major: rows=tile_extent_0, cols=tile_extent_1, row_stride=1, col_stride=tile_extent_0
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutArbitraryTestType) {
-        // Arbitrary strides: rows=tile_extent_0, cols=tile_extent_1, row_stride=257, col_stride=3
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 257, 3);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 257, 3);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutWaveContiguousTestType) {
-        // Wave-collective with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutWGContiguousTestType) {
-        // Workgroup-collective with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutWGRowMajorTestType) {
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutWGColumnMajorTestType) {
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetContiguousTestType) {
-        // Thread-level get with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetWGContiguousTestType) {
-        // Workgroup-collective get with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetWGRowMajorTestType) {
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetWGColumnMajorTestType) {
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetWaveContiguousTestType) {
-        // Wave-collective get with contiguous layout
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutWaveRowMajorTestType) {
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutWaveColumnMajorTestType) {
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetWaveRowMajorTestType) {
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetWaveColumnMajorTestType) {
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetRowMajorTestType) {
-        // Row-major get with gaps: rows=tile_extent_0, cols=tile_extent_1, row_stride=2*tile_extent_1
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetColumnMajorTestType) {
-        // Column-major get: rows=tile_extent_0, cols=tile_extent_1, row_stride=1, col_stride=tile_extent_0
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetArbitraryTestType) {
-        // Arbitrary strides get: rows=tile_extent_0, cols=tile_extent_1, row_stride=257, col_stride=3
-        Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 257, 3);
-        Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 257, 3);
-        Tuple2D start(0, 0);
-        Tuple2D boundary(tile_extent_0, tile_extent_1);
-        rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePut1DTestType) {
-        // 1D tensor put
-        Tensor1D<float> src_tensor(source + offset, 1);
-        Tensor1D<float> dst_tensor(dest + offset, 1);
-        Tuple1D start(0);
-        Tuple1D boundary(matrix_size);
-        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGet1DTestType) {
-        // 1D tensor get
-        Tensor1D<float> src_tensor(source + offset, 1);
-        Tensor1D<float> dst_tensor(dest + offset, 1);
-        Tuple1D start(0);
-        Tuple1D boundary(matrix_size);
-        rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutRowMajorStartCoordTestType) {
-        int t0 = tile_extent_0 + start_coord_offset;
-        int t1 = tile_extent_1 + start_coord_offset;
-        Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
-        Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
-        Tuple2D start(start_coord_offset, start_coord_offset);
-        Tuple2D boundary(t0, t1);
-        rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetRowMajorStartCoordTestType) {
-        int t0 = tile_extent_0 + start_coord_offset;
-        int t1 = tile_extent_1 + start_coord_offset;
-        Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
-        Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
-        Tuple2D start(start_coord_offset, start_coord_offset);
-        Tuple2D boundary(t0, t1);
-        rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutWaveRowMajorStartCoordTestType) {
-        int t0 = tile_extent_0 + start_coord_offset;
-        int t1 = tile_extent_1 + start_coord_offset;
-        Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
-        Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
-        Tuple2D start(start_coord_offset, start_coord_offset);
-        Tuple2D boundary(t0, t1);
-        rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetWaveRowMajorStartCoordTestType) {
-        int t0 = tile_extent_0 + start_coord_offset;
-        int t1 = tile_extent_1 + start_coord_offset;
-        Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
-        Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
-        Tuple2D start(start_coord_offset, start_coord_offset);
-        Tuple2D boundary(t0, t1);
-        rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TilePutWGRowMajorStartCoordTestType) {
-        int t0 = tile_extent_0 + start_coord_offset;
-        int t1 = tile_extent_1 + start_coord_offset;
-        Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
-        Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
-        Tuple2D start(start_coord_offset, start_coord_offset);
-        Tuple2D boundary(t0, t1);
-        rocshmem_ctx_tile_put_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      } else if constexpr (Type == TileGetWGRowMajorStartCoordTestType) {
-        int t0 = tile_extent_0 + start_coord_offset;
-        int t1 = tile_extent_1 + start_coord_offset;
-        Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
-        Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
-        Tuple2D start(start_coord_offset, start_coord_offset);
-        Tuple2D boundary(t0, t1);
-        rocshmem_ctx_tile_get_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
-      }
+      // Fully contiguous: rows=tile_extent_0, cols=tile_extent_1, row_stride=tile_extent_1
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutRowMajorTestType) {
+      // Row-major with gaps: rows=tile_extent_0, cols=tile_extent_1, row_stride=2*tile_extent_1
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutColumnMajorTestType) {
+      // Column-major: rows=tile_extent_0, cols=tile_extent_1, row_stride=1, col_stride=tile_extent_0
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutArbitraryTestType) {
+      // Arbitrary strides: rows=tile_extent_0, cols=tile_extent_1, row_stride=257, col_stride=3
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 257, 3);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 257, 3);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWaveContiguousTestType) {
+      // Wave-collective with contiguous layout
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWGContiguousTestType) {
+      // Workgroup-collective with contiguous layout
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWGRowMajorTestType) {
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWGColumnMajorTestType) {
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetContiguousTestType) {
+      // Thread-level get with contiguous layout
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWGContiguousTestType) {
+      // Workgroup-collective get with contiguous layout
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWGRowMajorTestType) {
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWGColumnMajorTestType) {
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWaveContiguousTestType) {
+      // Wave-collective get with contiguous layout
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWaveRowMajorTestType) {
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWaveColumnMajorTestType) {
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWaveRowMajorTestType) {
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWaveColumnMajorTestType) {
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetRowMajorTestType) {
+      // Row-major get with gaps: rows=tile_extent_0, cols=tile_extent_1, row_stride=2*tile_extent_1
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 2 * tile_extent_1);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetColumnMajorTestType) {
+      // Column-major get: rows=tile_extent_0, cols=tile_extent_1, row_stride=1, col_stride=tile_extent_0
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 1, tile_extent_0);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetArbitraryTestType) {
+      // Arbitrary strides get: rows=tile_extent_0, cols=tile_extent_1, row_stride=257, col_stride=3
+      Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1, 257, 3);
+      Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1, 257, 3);
+      Tuple2D start(0, 0);
+      Tuple2D boundary(tile_extent_0, tile_extent_1);
+      rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePut1DTestType) {
+      // 1D tensor put
+      Tensor1D<float> src_tensor(source + offset, 1);
+      Tensor1D<float> dst_tensor(dest + offset, 1);
+      Tuple1D start(0);
+      Tuple1D boundary(matrix_size);
+      rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGet1DTestType) {
+      // 1D tensor get
+      Tensor1D<float> src_tensor(source + offset, 1);
+      Tensor1D<float> dst_tensor(dest + offset, 1);
+      Tuple1D start(0);
+      Tuple1D boundary(matrix_size);
+      rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutRowMajorStartCoordTestType) {
+      int t0 = tile_extent_0 + start_coord_offset;
+      int t1 = tile_extent_1 + start_coord_offset;
+      Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
+      Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
+      Tuple2D start(start_coord_offset, start_coord_offset);
+      Tuple2D boundary(t0, t1);
+      rocshmem_ctx_tile_put(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetRowMajorStartCoordTestType) {
+      int t0 = tile_extent_0 + start_coord_offset;
+      int t1 = tile_extent_1 + start_coord_offset;
+      Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
+      Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
+      Tuple2D start(start_coord_offset, start_coord_offset);
+      Tuple2D boundary(t0, t1);
+      rocshmem_ctx_tile_get(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWaveRowMajorStartCoordTestType) {
+      int t0 = tile_extent_0 + start_coord_offset;
+      int t1 = tile_extent_1 + start_coord_offset;
+      Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
+      Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
+      Tuple2D start(start_coord_offset, start_coord_offset);
+      Tuple2D boundary(t0, t1);
+      rocshmem_ctx_tile_put_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWaveRowMajorStartCoordTestType) {
+      int t0 = tile_extent_0 + start_coord_offset;
+      int t1 = tile_extent_1 + start_coord_offset;
+      Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
+      Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
+      Tuple2D start(start_coord_offset, start_coord_offset);
+      Tuple2D boundary(t0, t1);
+      rocshmem_ctx_tile_get_wave(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TilePutWGRowMajorStartCoordTestType) {
+      int t0 = tile_extent_0 + start_coord_offset;
+      int t1 = tile_extent_1 + start_coord_offset;
+      Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
+      Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
+      Tuple2D start(start_coord_offset, start_coord_offset);
+      Tuple2D boundary(t0, t1);
+      rocshmem_ctx_tile_put_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    } else if constexpr (Type == TileGetWGRowMajorStartCoordTestType) {
+      int t0 = tile_extent_0 + start_coord_offset;
+      int t1 = tile_extent_1 + start_coord_offset;
+      Tensor2D<float> src_tensor(source + offset, t0, t1, 2 * t1);
+      Tensor2D<float> dst_tensor(dest + offset, t0, t1, 2 * t1);
+      Tuple2D start(start_coord_offset, start_coord_offset);
+      Tuple2D boundary(t0, t1);
+      rocshmem_ctx_tile_get_wg(ctx, dst_tensor, src_tensor, start, boundary, 1, 0);
+    }
   }
 
   __syncthreads();
@@ -449,9 +434,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
       std::cerr << "Warning: tile_put/get_arbitrary: -s " << args.max_msg_size
                 << " exceeds the arbitrary-stride column limit (row_stride=257, col_stride=3"
                 << " -> max " << ARBITRARY_MAX_COLS << " cols)."
-                << " Effective max tile size is " << effective << " bytes ("
-                << tile_extent_0 << " rows x " << ARBITRARY_MAX_COLS
-                << " cols x " << sizeof(float) << " bytes).\n";
+                << " Effective max tile size is " << effective << " bytes (" << tile_extent_0
+                << " rows x " << ARBITRARY_MAX_COLS << " cols x " << sizeof(float) << " bytes).\n";
     }
     tile_extent_1 = ARBITRARY_MAX_COLS;
   }
@@ -461,9 +445,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   // (tile_extent_0 rows × increasing columns), so sweep from one row up to
   // the full tile. For strided layouts the buffer footprint depends on fixed
   // stride constants, so pin to a single point (the full tile size) for now.
-  size_t tile_size_bytes =
-      static_cast<size_t>(tile_extent_0) * tile_extent_1 * sizeof(float);
-  size_t row_bytes = static_cast<size_t>(tile_extent_0) * sizeof(float);
+  size_t tile_size_bytes = static_cast<size_t>(tile_extent_0) * tile_extent_1 * sizeof(float);
+  size_t row_bytes       = static_cast<size_t>(tile_extent_0) * sizeof(float);
 
   // Sweep from one column to the full tile for all layouts.
   // Strided layouts (row-major: stride=2*t1, col-major: col_stride=t0,
@@ -475,18 +458,18 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
 
   // Set start_coord_offset for non-zero start_coord test variants.
   switch (_type) {
-    case TilePutRowMajorStartCoordTestType:
-    case TileGetRowMajorStartCoordTestType:
-    case TilePutWaveRowMajorStartCoordTestType:
-    case TileGetWaveRowMajorStartCoordTestType:
-    case TilePutWGRowMajorStartCoordTestType:
-    case TileGetWGRowMajorStartCoordTestType:
-      start_coord_offset = DEFAULT_START_COORD_OFFSET;
-      this->args.min_msg_size = tile_size_bytes;
-      break;
-    default:
-      start_coord_offset = 0;
-      break;
+  case TilePutRowMajorStartCoordTestType:
+  case TileGetRowMajorStartCoordTestType:
+  case TilePutWaveRowMajorStartCoordTestType:
+  case TileGetWaveRowMajorStartCoordTestType:
+  case TilePutWGRowMajorStartCoordTestType:
+  case TileGetWGRowMajorStartCoordTestType:
+    start_coord_offset      = DEFAULT_START_COORD_OFFSET;
+    this->args.min_msg_size = tile_size_bytes;
+    break;
+  default:
+    start_coord_offset = 0;
+    break;
   }
 
   // Buffer footprint per tile slot — accounts for strided layouts that need
@@ -495,140 +478,140 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
   int t1_alloc = tile_extent_1 + start_coord_offset;
   size_t buffer_elements_per_thread;
   switch (_type) {
-    case TilePutRowMajorTestType:
-    case TileGetRowMajorTestType:
-    case TilePutWaveRowMajorTestType:
-    case TileGetWaveRowMajorTestType:
-    case TilePutWGRowMajorTestType:
-    case TileGetWGRowMajorTestType:
-      // row_stride = 2 * tile_extent_1
-      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * (2 * tile_extent_1);
-      break;
-    case TilePutRowMajorStartCoordTestType:
-    case TileGetRowMajorStartCoordTestType:
-    case TilePutWaveRowMajorStartCoordTestType:
-    case TileGetWaveRowMajorStartCoordTestType:
-    case TilePutWGRowMajorStartCoordTestType:
-    case TileGetWGRowMajorStartCoordTestType:
-      // row_stride = 2 * (tile_extent_1 + start_coord_offset)
-      buffer_elements_per_thread = static_cast<size_t>(t0_alloc) * (2 * t1_alloc);
-      break;
-    case TilePutColumnMajorTestType:
-    case TileGetColumnMajorTestType:
-    case TilePutWaveColumnMajorTestType:
-    case TileGetWaveColumnMajorTestType:
-    case TilePutWGColumnMajorTestType:
-    case TileGetWGColumnMajorTestType:
-      // col_stride = tile_extent_0; contiguous in col direction
-      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
-      break;
-    case TilePutArbitraryTestType:
-    case TileGetArbitraryTestType:
-      // row_stride = 257 (fixed constant), col_stride = 3
-      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * 257;
-      break;
-    default:
-      // Contiguous, wave, wg, 1D: tile_extent_0 * tile_extent_1
-      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
-      break;
+  case TilePutRowMajorTestType:
+  case TileGetRowMajorTestType:
+  case TilePutWaveRowMajorTestType:
+  case TileGetWaveRowMajorTestType:
+  case TilePutWGRowMajorTestType:
+  case TileGetWGRowMajorTestType:
+    // row_stride = 2 * tile_extent_1
+    buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * (2 * tile_extent_1);
+    break;
+  case TilePutRowMajorStartCoordTestType:
+  case TileGetRowMajorStartCoordTestType:
+  case TilePutWaveRowMajorStartCoordTestType:
+  case TileGetWaveRowMajorStartCoordTestType:
+  case TilePutWGRowMajorStartCoordTestType:
+  case TileGetWGRowMajorStartCoordTestType:
+    // row_stride = 2 * (tile_extent_1 + start_coord_offset)
+    buffer_elements_per_thread = static_cast<size_t>(t0_alloc) * (2 * t1_alloc);
+    break;
+  case TilePutColumnMajorTestType:
+  case TileGetColumnMajorTestType:
+  case TilePutWaveColumnMajorTestType:
+  case TileGetWaveColumnMajorTestType:
+  case TilePutWGColumnMajorTestType:
+  case TileGetWGColumnMajorTestType:
+    // col_stride = tile_extent_0; contiguous in col direction
+    buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
+    break;
+  case TilePutArbitraryTestType:
+  case TileGetArbitraryTestType:
+    // row_stride = 257 (fixed constant), col_stride = 3
+    buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * 257;
+    break;
+  default:
+    // Contiguous, wave, wg, 1D: tile_extent_0 * tile_extent_1
+    buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
+    break;
   }
 
   // For now, allocate one buffer per thread to keep it simple
   // TODO: Optimize to allocate only num_tiles (wave/wg count) for collective ops
   size_t total_threads = args.num_wgs * args.num_threads;
-  size_t num_elements = buffer_elements_per_thread * total_threads;
+  size_t num_elements  = buffer_elements_per_thread * total_threads;
 
   // Allocate using rocshmem symmetric heap
-  local_alloc = new SymmetricTensorBuffer<float>();
+  local_alloc  = new SymmetricTensorBuffer<float>();
   remote_alloc = new SymmetricTensorBuffer<float>();
 
   local_alloc->reset(num_elements);
   remote_alloc->reset(num_elements);
 
-  float *local = local_alloc->get();
-  float *remote = remote_alloc->get();
+  float* local  = local_alloc->get();
+  float* remote = remote_alloc->get();
 
   // For put operations, local is source, remote is dest
   // For get operations, remote is source, local is dest
   switch (_type) {
-    case TilePutContiguousTestType:
-    case TilePutRowMajorTestType:
-    case TilePutColumnMajorTestType:
-    case TilePutArbitraryTestType:
-    case TilePutWaveContiguousTestType:
-    case TilePutWGContiguousTestType:
-    case TilePut1DTestType:
-    case TilePutWaveRowMajorTestType:
-    case TilePutWaveColumnMajorTestType:
-    case TilePutWGRowMajorTestType:
-    case TilePutWGColumnMajorTestType:
-    case TilePutRowMajorStartCoordTestType:
-    case TilePutWaveRowMajorStartCoordTestType:
-    case TilePutWGRowMajorStartCoordTestType:
-      source = local;
-      dest = remote;
-      break;
-    case TileGetContiguousTestType:
-    case TileGetRowMajorTestType:
-    case TileGetColumnMajorTestType:
-    case TileGetArbitraryTestType:
-    case TileGetWGContiguousTestType:
-    case TileGetWaveContiguousTestType:
-    case TileGet1DTestType:
-    case TileGetWaveRowMajorTestType:
-    case TileGetWaveColumnMajorTestType:
-    case TileGetWGRowMajorTestType:
-    case TileGetWGColumnMajorTestType:
-    case TileGetRowMajorStartCoordTestType:
-    case TileGetWaveRowMajorStartCoordTestType:
-    case TileGetWGRowMajorStartCoordTestType:
-    default:
-      dest = local;
-      source = remote;
-      break;
+  case TilePutContiguousTestType:
+  case TilePutRowMajorTestType:
+  case TilePutColumnMajorTestType:
+  case TilePutArbitraryTestType:
+  case TilePutWaveContiguousTestType:
+  case TilePutWGContiguousTestType:
+  case TilePut1DTestType:
+  case TilePutWaveRowMajorTestType:
+  case TilePutWaveColumnMajorTestType:
+  case TilePutWGRowMajorTestType:
+  case TilePutWGColumnMajorTestType:
+  case TilePutRowMajorStartCoordTestType:
+  case TilePutWaveRowMajorStartCoordTestType:
+  case TilePutWGRowMajorStartCoordTestType:
+    source = local;
+    dest   = remote;
+    break;
+  case TileGetContiguousTestType:
+  case TileGetRowMajorTestType:
+  case TileGetColumnMajorTestType:
+  case TileGetArbitraryTestType:
+  case TileGetWGContiguousTestType:
+  case TileGetWaveContiguousTestType:
+  case TileGet1DTestType:
+  case TileGetWaveRowMajorTestType:
+  case TileGetWaveColumnMajorTestType:
+  case TileGetWGRowMajorTestType:
+  case TileGetWGColumnMajorTestType:
+  case TileGetRowMajorStartCoordTestType:
+  case TileGetWaveRowMajorStartCoordTestType:
+  case TileGetWGRowMajorStartCoordTestType:
+  default:
+    dest   = local;
+    source = remote;
+    break;
   }
 
   // Initialize source buffer with pattern
   int row_stride, col_stride, init_rows, init_cols;
   switch (_type) {
-    case TilePutRowMajorTestType:
-    case TileGetRowMajorTestType:
-      row_stride = 2 * tile_extent_1;
-      col_stride = 1;
-      init_rows = tile_extent_0;
-      init_cols = tile_extent_1;
-      break;
-    case TilePutColumnMajorTestType:
-    case TileGetColumnMajorTestType:
-      row_stride = 1;
-      col_stride = tile_extent_0;
-      init_rows = tile_extent_0;
-      init_cols = tile_extent_1;
-      break;
-    case TilePutArbitraryTestType:
-    case TileGetArbitraryTestType:
-      row_stride = 257;
-      col_stride = 3;
-      init_rows = tile_extent_0;
-      init_cols = tile_extent_1;
-      break;
-    case TilePutRowMajorStartCoordTestType:
-    case TileGetRowMajorStartCoordTestType:
-    case TilePutWaveRowMajorStartCoordTestType:
-    case TileGetWaveRowMajorStartCoordTestType:
-    case TilePutWGRowMajorStartCoordTestType:
-    case TileGetWGRowMajorStartCoordTestType:
-      row_stride = 2 * t1_alloc;
-      col_stride = 1;
-      init_rows = t0_alloc;
-      init_cols = t1_alloc;
-      break;
-    default:
-      row_stride = tile_extent_1;
-      col_stride = 1;
-      init_rows = tile_extent_0;
-      init_cols = tile_extent_1;
-      break;
+  case TilePutRowMajorTestType:
+  case TileGetRowMajorTestType:
+    row_stride = 2 * tile_extent_1;
+    col_stride = 1;
+    init_rows  = tile_extent_0;
+    init_cols  = tile_extent_1;
+    break;
+  case TilePutColumnMajorTestType:
+  case TileGetColumnMajorTestType:
+    row_stride = 1;
+    col_stride = tile_extent_0;
+    init_rows  = tile_extent_0;
+    init_cols  = tile_extent_1;
+    break;
+  case TilePutArbitraryTestType:
+  case TileGetArbitraryTestType:
+    row_stride = 257;
+    col_stride = 3;
+    init_rows  = tile_extent_0;
+    init_cols  = tile_extent_1;
+    break;
+  case TilePutRowMajorStartCoordTestType:
+  case TileGetRowMajorStartCoordTestType:
+  case TilePutWaveRowMajorStartCoordTestType:
+  case TileGetWaveRowMajorStartCoordTestType:
+  case TilePutWGRowMajorStartCoordTestType:
+  case TileGetWGRowMajorStartCoordTestType:
+    row_stride = 2 * t1_alloc;
+    col_stride = 1;
+    init_rows  = t0_alloc;
+    init_cols  = t1_alloc;
+    break;
+  default:
+    row_stride = tile_extent_1;
+    col_stride = 1;
+    init_rows  = tile_extent_0;
+    init_cols  = tile_extent_1;
+    break;
   }
 
   for (size_t tile_id = 0; tile_id < total_threads; tile_id++) {
@@ -636,8 +619,8 @@ TileRMATester::TileRMATester(TesterArguments args) : Tester(args) {
     for (int row = 0; row < init_rows; row++) {
       for (int col = 0; col < init_cols; col++) {
         size_t tile_linear_idx = row * init_cols + col;
-        size_t buffer_idx = base_offset + row * row_stride + col * col_stride;
-        source[buffer_idx] = static_cast<float>(tile_linear_idx % 256);
+        size_t buffer_idx      = base_offset + row * row_stride + col * col_stride;
+        source[buffer_idx]     = static_cast<float>(tile_linear_idx % 256);
       }
     }
   }
@@ -659,29 +642,29 @@ void TileRMATester::resetBuffers(uint64_t size) {
   int t1_alloc = tile_extent_1 + start_coord_offset;
   size_t buffer_elements_per_thread;
   switch (_type) {
-    case TilePutRowMajorTestType:
-    case TileGetRowMajorTestType:
-      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * (2 * tile_extent_1);
-      break;
-    case TilePutRowMajorStartCoordTestType:
-    case TileGetRowMajorStartCoordTestType:
-    case TilePutWaveRowMajorStartCoordTestType:
-    case TileGetWaveRowMajorStartCoordTestType:
-    case TilePutWGRowMajorStartCoordTestType:
-    case TileGetWGRowMajorStartCoordTestType:
-      buffer_elements_per_thread = static_cast<size_t>(t0_alloc) * (2 * t1_alloc);
-      break;
-    case TilePutArbitraryTestType:
-    case TileGetArbitraryTestType:
-      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * 257;
-      break;
-    default:
-      buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
-      break;
+  case TilePutRowMajorTestType:
+  case TileGetRowMajorTestType:
+    buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * (2 * tile_extent_1);
+    break;
+  case TilePutRowMajorStartCoordTestType:
+  case TileGetRowMajorStartCoordTestType:
+  case TilePutWaveRowMajorStartCoordTestType:
+  case TileGetWaveRowMajorStartCoordTestType:
+  case TilePutWGRowMajorStartCoordTestType:
+  case TileGetWGRowMajorStartCoordTestType:
+    buffer_elements_per_thread = static_cast<size_t>(t0_alloc) * (2 * t1_alloc);
+    break;
+  case TilePutArbitraryTestType:
+  case TileGetArbitraryTestType:
+    buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * 257;
+    break;
+  default:
+    buffer_elements_per_thread = static_cast<size_t>(tile_extent_0) * tile_extent_1;
+    break;
   }
 
   size_t total_threads = args.num_wgs * args.num_threads;
-  size_t buff_size = buffer_elements_per_thread * total_threads * sizeof(float);
+  size_t buff_size     = buffer_elements_per_thread * total_threads * sizeof(float);
   memset(dest, 0, buff_size);
 
   // Re-initialize source using the current iteration's tile dimensions so that
@@ -691,7 +674,8 @@ void TileRMATester::resetBuffers(uint64_t size) {
   int t1 = tile_extent_1;
   if (size > 0) {
     int derived = static_cast<int>(size / (tile_extent_0 * sizeof(float)));
-    if (derived >= 1 && derived <= tile_extent_1) t1 = derived;
+    if (derived >= 1 && derived <= tile_extent_1)
+      t1 = derived;
   }
   if ((_type == TilePutArbitraryTestType || _type == TileGetArbitraryTestType) &&
       t1 > ARBITRARY_MAX_COLS) {
@@ -701,51 +685,52 @@ void TileRMATester::resetBuffers(uint64_t size) {
   int src_row_stride, src_col_stride;
   size_t src_elements_per_slot;
   switch (_type) {
-    case TilePutRowMajorTestType:
-    case TileGetRowMajorTestType:
-    case TilePutWaveRowMajorTestType:
-    case TileGetWaveRowMajorTestType:
-    case TilePutWGRowMajorTestType:
-    case TileGetWGRowMajorTestType:
-      src_row_stride = 2 * t1;
-      src_col_stride = 1;
-      src_elements_per_slot = static_cast<size_t>(tile_extent_0) * (2 * t1);
-      break;
-    case TilePutColumnMajorTestType:
-    case TileGetColumnMajorTestType:
-    case TilePutWaveColumnMajorTestType:
-    case TileGetWaveColumnMajorTestType:
-    case TilePutWGColumnMajorTestType:
-    case TileGetWGColumnMajorTestType:
-      src_row_stride = 1;
-      src_col_stride = tile_extent_0;
-      src_elements_per_slot = static_cast<size_t>(tile_extent_0) * t1;
-      break;
-    case TilePutArbitraryTestType:
-    case TileGetArbitraryTestType:
-      src_row_stride = 257;
-      src_col_stride = 3;
-      src_elements_per_slot = static_cast<size_t>(tile_extent_0) * 257;
-      break;
-    case TilePutRowMajorStartCoordTestType:
-    case TileGetRowMajorStartCoordTestType:
-    case TilePutWaveRowMajorStartCoordTestType:
-    case TileGetWaveRowMajorStartCoordTestType:
-    case TilePutWGRowMajorStartCoordTestType:
-    case TileGetWGRowMajorStartCoordTestType: {
+  case TilePutRowMajorTestType:
+  case TileGetRowMajorTestType:
+  case TilePutWaveRowMajorTestType:
+  case TileGetWaveRowMajorTestType:
+  case TilePutWGRowMajorTestType:
+  case TileGetWGRowMajorTestType:
+    src_row_stride        = 2 * t1;
+    src_col_stride        = 1;
+    src_elements_per_slot = static_cast<size_t>(tile_extent_0) * (2 * t1);
+    break;
+  case TilePutColumnMajorTestType:
+  case TileGetColumnMajorTestType:
+  case TilePutWaveColumnMajorTestType:
+  case TileGetWaveColumnMajorTestType:
+  case TilePutWGColumnMajorTestType:
+  case TileGetWGColumnMajorTestType:
+    src_row_stride        = 1;
+    src_col_stride        = tile_extent_0;
+    src_elements_per_slot = static_cast<size_t>(tile_extent_0) * t1;
+    break;
+  case TilePutArbitraryTestType:
+  case TileGetArbitraryTestType:
+    src_row_stride        = 257;
+    src_col_stride        = 3;
+    src_elements_per_slot = static_cast<size_t>(tile_extent_0) * 257;
+    break;
+  case TilePutRowMajorStartCoordTestType:
+  case TileGetRowMajorStartCoordTestType:
+  case TilePutWaveRowMajorStartCoordTestType:
+  case TileGetWaveRowMajorStartCoordTestType:
+  case TilePutWGRowMajorStartCoordTestType:
+  case TileGetWGRowMajorStartCoordTestType:
+    {
       // StartCoord variants don't sweep message size; use full t0_alloc x t1_alloc
-      int t0a = tile_extent_0 + start_coord_offset;
-      int t1a = tile_extent_1 + start_coord_offset;
-      src_row_stride = 2 * t1a;
-      src_col_stride = 1;
+      int t0a               = tile_extent_0 + start_coord_offset;
+      int t1a               = tile_extent_1 + start_coord_offset;
+      src_row_stride        = 2 * t1a;
+      src_col_stride        = 1;
       src_elements_per_slot = static_cast<size_t>(t0a) * (2 * t1a);
       break;
     }
-    default:
-      src_row_stride = t1;
-      src_col_stride = 1;
-      src_elements_per_slot = static_cast<size_t>(tile_extent_0) * t1;
-      break;
+  default:
+    src_row_stride        = t1;
+    src_col_stride        = 1;
+    src_elements_per_slot = static_cast<size_t>(tile_extent_0) * t1;
+    break;
   }
 
   // For StartCoord variants init_rows/init_cols cover the full tensor including border
@@ -761,15 +746,14 @@ void TileRMATester::resetBuffers(uint64_t size) {
     for (int row = 0; row < init_rows; row++) {
       for (int col = 0; col < init_cols; col++) {
         size_t tile_linear_idx = row * init_cols + col;
-        size_t buffer_idx = base_offset + row * src_row_stride + col * src_col_stride;
-        source[buffer_idx] = static_cast<float>(tile_linear_idx % 256);
+        size_t buffer_idx      = base_offset + row * src_row_stride + col * src_col_stride;
+        source[buffer_idx]     = static_cast<float>(tile_linear_idx % 256);
       }
     }
   }
 }
 
-void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                                 uint64_t size) {
+void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop, uint64_t size) {
   size_t shared_bytes = rocshmem_query_lds_stage_bytes();
 
   // Derive tile dimensions for this iteration from the current message size so
@@ -793,107 +777,105 @@ void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
     ke_tile_extent_1 = ARBITRARY_MAX_COLS;
   }
 
-#define LAUNCH_TILE_RMA_TEST(SPECIFIC_TYPE)                                    \
-  hipLaunchKernelGGL(TileRMATest<SPECIFIC_TYPE>, gridSize, blockSize,         \
-                     shared_bytes, stream, loop, args.skip, start_time,        \
-                     end_time, source, dest, ke_tile_extent_0, ke_tile_extent_1, \
-                     _shmem_context, wf_size)
+#define LAUNCH_TILE_RMA_TEST(SPECIFIC_TYPE)                                                       \
+  hipLaunchKernelGGL(TileRMATest<SPECIFIC_TYPE>, gridSize, blockSize, shared_bytes, stream, loop, \
+                     args.skip, start_time, end_time, source, dest, ke_tile_extent_0,             \
+                     ke_tile_extent_1, _shmem_context, wf_size)
 
-#define LAUNCH_TILE_RMA_TEST_SC(SPECIFIC_TYPE)                                 \
-  hipLaunchKernelGGL(TileRMATest<SPECIFIC_TYPE>, gridSize, blockSize,         \
-                     shared_bytes, stream, loop, args.skip, start_time,        \
-                     end_time, source, dest, ke_tile_extent_0, ke_tile_extent_1, \
-                     _shmem_context, wf_size, start_coord_offset)
+#define LAUNCH_TILE_RMA_TEST_SC(SPECIFIC_TYPE)                                                    \
+  hipLaunchKernelGGL(TileRMATest<SPECIFIC_TYPE>, gridSize, blockSize, shared_bytes, stream, loop, \
+                     args.skip, start_time, end_time, source, dest, ke_tile_extent_0,             \
+                     ke_tile_extent_1, _shmem_context, wf_size, start_coord_offset)
 
   switch (_type) {
-    case TilePutContiguousTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutContiguousTestType);
-      break;
-    case TilePutRowMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutRowMajorTestType);
-      break;
-    case TilePutColumnMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutColumnMajorTestType);
-      break;
-    case TilePutArbitraryTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutArbitraryTestType);
-      break;
-    case TilePutWaveContiguousTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutWaveContiguousTestType);
-      break;
-    case TilePutWGContiguousTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutWGContiguousTestType);
-      break;
-    case TileGetContiguousTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetContiguousTestType);
-      break;
-    case TileGetWGContiguousTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetWGContiguousTestType);
-      break;
-    case TileGetWaveContiguousTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetWaveContiguousTestType);
-      break;
-    case TileGetRowMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetRowMajorTestType);
-      break;
-    case TileGetColumnMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetColumnMajorTestType);
-      break;
-    case TileGetArbitraryTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetArbitraryTestType);
-      break;
-    case TilePut1DTestType:
-      LAUNCH_TILE_RMA_TEST(TilePut1DTestType);
-      break;
-    case TileGet1DTestType:
-      LAUNCH_TILE_RMA_TEST(TileGet1DTestType);
-      break;
-    case TilePutWaveRowMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutWaveRowMajorTestType);
-      break;
-    case TilePutWaveColumnMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutWaveColumnMajorTestType);
-      break;
-    case TileGetWaveRowMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetWaveRowMajorTestType);
-      break;
-    case TileGetWaveColumnMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetWaveColumnMajorTestType);
-      break;
-    case TilePutWGRowMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutWGRowMajorTestType);
-      break;
-    case TilePutWGColumnMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TilePutWGColumnMajorTestType);
-      break;
-    case TileGetWGRowMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetWGRowMajorTestType);
-      break;
-    case TileGetWGColumnMajorTestType:
-      LAUNCH_TILE_RMA_TEST(TileGetWGColumnMajorTestType);
-      break;
-    case TilePutRowMajorStartCoordTestType:
-      LAUNCH_TILE_RMA_TEST_SC(TilePutRowMajorStartCoordTestType);
-      break;
-    case TileGetRowMajorStartCoordTestType:
-      LAUNCH_TILE_RMA_TEST_SC(TileGetRowMajorStartCoordTestType);
-      break;
-    case TilePutWaveRowMajorStartCoordTestType:
-      LAUNCH_TILE_RMA_TEST_SC(TilePutWaveRowMajorStartCoordTestType);
-      break;
-    case TileGetWaveRowMajorStartCoordTestType:
-      LAUNCH_TILE_RMA_TEST_SC(TileGetWaveRowMajorStartCoordTestType);
-      break;
-    case TilePutWGRowMajorStartCoordTestType:
-      LAUNCH_TILE_RMA_TEST_SC(TilePutWGRowMajorStartCoordTestType);
-      break;
-    case TileGetWGRowMajorStartCoordTestType:
-      LAUNCH_TILE_RMA_TEST_SC(TileGetWGRowMajorStartCoordTestType);
-      break;
-    default:
-      std::cerr << "Invalid Test: unhandled TestType " << _type
-                << " in TileRMATester::launchKernel" << std::endl;
-      exit(-1);
+  case TilePutContiguousTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutContiguousTestType);
+    break;
+  case TilePutRowMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutRowMajorTestType);
+    break;
+  case TilePutColumnMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutColumnMajorTestType);
+    break;
+  case TilePutArbitraryTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutArbitraryTestType);
+    break;
+  case TilePutWaveContiguousTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutWaveContiguousTestType);
+    break;
+  case TilePutWGContiguousTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutWGContiguousTestType);
+    break;
+  case TileGetContiguousTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetContiguousTestType);
+    break;
+  case TileGetWGContiguousTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetWGContiguousTestType);
+    break;
+  case TileGetWaveContiguousTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetWaveContiguousTestType);
+    break;
+  case TileGetRowMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetRowMajorTestType);
+    break;
+  case TileGetColumnMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetColumnMajorTestType);
+    break;
+  case TileGetArbitraryTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetArbitraryTestType);
+    break;
+  case TilePut1DTestType:
+    LAUNCH_TILE_RMA_TEST(TilePut1DTestType);
+    break;
+  case TileGet1DTestType:
+    LAUNCH_TILE_RMA_TEST(TileGet1DTestType);
+    break;
+  case TilePutWaveRowMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutWaveRowMajorTestType);
+    break;
+  case TilePutWaveColumnMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutWaveColumnMajorTestType);
+    break;
+  case TileGetWaveRowMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetWaveRowMajorTestType);
+    break;
+  case TileGetWaveColumnMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetWaveColumnMajorTestType);
+    break;
+  case TilePutWGRowMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutWGRowMajorTestType);
+    break;
+  case TilePutWGColumnMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TilePutWGColumnMajorTestType);
+    break;
+  case TileGetWGRowMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetWGRowMajorTestType);
+    break;
+  case TileGetWGColumnMajorTestType:
+    LAUNCH_TILE_RMA_TEST(TileGetWGColumnMajorTestType);
+    break;
+  case TilePutRowMajorStartCoordTestType:
+    LAUNCH_TILE_RMA_TEST_SC(TilePutRowMajorStartCoordTestType);
+    break;
+  case TileGetRowMajorStartCoordTestType:
+    LAUNCH_TILE_RMA_TEST_SC(TileGetRowMajorStartCoordTestType);
+    break;
+  case TilePutWaveRowMajorStartCoordTestType:
+    LAUNCH_TILE_RMA_TEST_SC(TilePutWaveRowMajorStartCoordTestType);
+    break;
+  case TileGetWaveRowMajorStartCoordTestType:
+    LAUNCH_TILE_RMA_TEST_SC(TileGetWaveRowMajorStartCoordTestType);
+    break;
+  case TilePutWGRowMajorStartCoordTestType:
+    LAUNCH_TILE_RMA_TEST_SC(TilePutWGRowMajorStartCoordTestType);
+    break;
+  case TileGetWGRowMajorStartCoordTestType:
+    LAUNCH_TILE_RMA_TEST_SC(TileGetWGRowMajorStartCoordTestType);
+    break;
+  default:
+    std::cerr << "Invalid Test: unhandled TestType " << _type << " in TileRMATester::launchKernel"
+              << std::endl;
+    exit(-1);
   }
 
 #undef LAUNCH_TILE_RMA_TEST
@@ -903,57 +885,56 @@ void TileRMATester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
   // wg transfers one tile per workgroup, thread transfers one tile per thread.
   size_t tiles_per_loop;
   switch (_type) {
-    case TilePutWaveContiguousTestType:
-    case TileGetWaveContiguousTestType:
-    case TilePutWaveRowMajorTestType:
-    case TilePutWaveColumnMajorTestType:
-    case TileGetWaveRowMajorTestType:
-    case TileGetWaveColumnMajorTestType:
-    case TilePutWaveRowMajorStartCoordTestType:
-    case TileGetWaveRowMajorStartCoordTestType:
-      tiles_per_loop = gridSize.x * num_warps;
-      break;
-    case TilePutWGContiguousTestType:
-    case TileGetWGContiguousTestType:
-    case TilePutWGRowMajorTestType:
-    case TilePutWGColumnMajorTestType:
-    case TileGetWGRowMajorTestType:
-    case TileGetWGColumnMajorTestType:
-    case TilePutWGRowMajorStartCoordTestType:
-    case TileGetWGRowMajorStartCoordTestType:
-      tiles_per_loop = gridSize.x;
-      break;
-    default:
-      tiles_per_loop = gridSize.x * blockSize.x;
-      break;
+  case TilePutWaveContiguousTestType:
+  case TileGetWaveContiguousTestType:
+  case TilePutWaveRowMajorTestType:
+  case TilePutWaveColumnMajorTestType:
+  case TileGetWaveRowMajorTestType:
+  case TileGetWaveColumnMajorTestType:
+  case TilePutWaveRowMajorStartCoordTestType:
+  case TileGetWaveRowMajorStartCoordTestType:
+    tiles_per_loop = gridSize.x * num_warps;
+    break;
+  case TilePutWGContiguousTestType:
+  case TileGetWGContiguousTestType:
+  case TilePutWGRowMajorTestType:
+  case TilePutWGColumnMajorTestType:
+  case TileGetWGRowMajorTestType:
+  case TileGetWGColumnMajorTestType:
+  case TilePutWGRowMajorStartCoordTestType:
+  case TileGetWGRowMajorStartCoordTestType:
+    tiles_per_loop = gridSize.x;
+    break;
+  default:
+    tiles_per_loop = gridSize.x * blockSize.x;
+    break;
   }
-  num_msgs = (loop + args.skip) * tiles_per_loop;
+  num_msgs       = (loop + args.skip) * tiles_per_loop;
   num_timed_msgs = loop * tiles_per_loop;
-
 }
 
 void TileRMATester::verifyResults(uint64_t size) {
   int check_id;
   switch (_type) {
-    case TileGetContiguousTestType:
-    case TileGetRowMajorTestType:
-    case TileGetColumnMajorTestType:
-    case TileGetArbitraryTestType:
-    case TileGetWGContiguousTestType:
-    case TileGetWaveContiguousTestType:
-    case TileGet1DTestType:
-    case TileGetWaveRowMajorTestType:
-    case TileGetWaveColumnMajorTestType:
-    case TileGetWGRowMajorTestType:
-    case TileGetWGColumnMajorTestType:
-    case TileGetRowMajorStartCoordTestType:
-    case TileGetWaveRowMajorStartCoordTestType:
-    case TileGetWGRowMajorStartCoordTestType:
-      check_id = 0;
-      break;
-    default:
-      check_id = 1;
-      break;
+  case TileGetContiguousTestType:
+  case TileGetRowMajorTestType:
+  case TileGetColumnMajorTestType:
+  case TileGetArbitraryTestType:
+  case TileGetWGContiguousTestType:
+  case TileGetWaveContiguousTestType:
+  case TileGet1DTestType:
+  case TileGetWaveRowMajorTestType:
+  case TileGetWaveColumnMajorTestType:
+  case TileGetWGRowMajorTestType:
+  case TileGetWGColumnMajorTestType:
+  case TileGetRowMajorStartCoordTestType:
+  case TileGetWaveRowMajorStartCoordTestType:
+  case TileGetWGRowMajorStartCoordTestType:
+    check_id = 0;
+    break;
+  default:
+    check_id = 1;
+    break;
   }
 
   if (args.myid == check_id) {
@@ -973,102 +954,102 @@ void TileRMATester::verifyResults(uint64_t size) {
     }
 
     // For StartCoord variants use the full allocated tensor dimensions
-    int t0_verify = t0 + start_coord_offset;
-    int t1_verify = t1 + start_coord_offset;
+    int t0_verify            = t0 + start_coord_offset;
+    int t1_verify            = t1 + start_coord_offset;
     bool is_start_coord_test = (start_coord_offset > 0);
 
     int row_stride, col_stride;
     switch (_type) {
-      case TilePutRowMajorTestType:
-      case TileGetRowMajorTestType:
-      case TilePutWaveRowMajorTestType:
-      case TileGetWaveRowMajorTestType:
-      case TilePutWGRowMajorTestType:
-      case TileGetWGRowMajorTestType:
-        row_stride = 2 * t1;
-        col_stride = 1;
-        break;
-      case TilePutRowMajorStartCoordTestType:
-      case TileGetRowMajorStartCoordTestType:
-      case TilePutWaveRowMajorStartCoordTestType:
-      case TileGetWaveRowMajorStartCoordTestType:
-      case TilePutWGRowMajorStartCoordTestType:
-      case TileGetWGRowMajorStartCoordTestType:
-        row_stride = 2 * t1_verify;
-        col_stride = 1;
-        break;
-      case TilePutColumnMajorTestType:
-      case TileGetColumnMajorTestType:
-      case TilePutWaveColumnMajorTestType:
-      case TileGetWaveColumnMajorTestType:
-      case TilePutWGColumnMajorTestType:
-      case TileGetWGColumnMajorTestType:
-        row_stride = 1;
-        col_stride = t0;
-        break;
-      case TilePutArbitraryTestType:
-      case TileGetArbitraryTestType:
-        row_stride = 257;
-        col_stride = 3;
-        break;
-      default:
-        row_stride = t1;
-        col_stride = 1;
-        break;
+    case TilePutRowMajorTestType:
+    case TileGetRowMajorTestType:
+    case TilePutWaveRowMajorTestType:
+    case TileGetWaveRowMajorTestType:
+    case TilePutWGRowMajorTestType:
+    case TileGetWGRowMajorTestType:
+      row_stride = 2 * t1;
+      col_stride = 1;
+      break;
+    case TilePutRowMajorStartCoordTestType:
+    case TileGetRowMajorStartCoordTestType:
+    case TilePutWaveRowMajorStartCoordTestType:
+    case TileGetWaveRowMajorStartCoordTestType:
+    case TilePutWGRowMajorStartCoordTestType:
+    case TileGetWGRowMajorStartCoordTestType:
+      row_stride = 2 * t1_verify;
+      col_stride = 1;
+      break;
+    case TilePutColumnMajorTestType:
+    case TileGetColumnMajorTestType:
+    case TilePutWaveColumnMajorTestType:
+    case TileGetWaveColumnMajorTestType:
+    case TilePutWGColumnMajorTestType:
+    case TileGetWGColumnMajorTestType:
+      row_stride = 1;
+      col_stride = t0;
+      break;
+    case TilePutArbitraryTestType:
+    case TileGetArbitraryTestType:
+      row_stride = 257;
+      col_stride = 3;
+      break;
+    default:
+      row_stride = t1;
+      col_stride = 1;
+      break;
     }
 
     size_t num_tiles_transferred;
     switch (_type) {
-      case TilePutWaveContiguousTestType:
-      case TileGetWaveContiguousTestType:
-      case TilePutWaveRowMajorTestType:
-      case TilePutWaveColumnMajorTestType:
-      case TileGetWaveRowMajorTestType:
-      case TileGetWaveColumnMajorTestType:
-      case TilePutWaveRowMajorStartCoordTestType:
-      case TileGetWaveRowMajorStartCoordTestType:
-        num_tiles_transferred = (args.num_wgs * args.num_threads) / wf_size;
-        break;
-      case TilePutWGContiguousTestType:
-      case TileGetWGContiguousTestType:
-      case TilePutWGRowMajorTestType:
-      case TilePutWGColumnMajorTestType:
-      case TileGetWGRowMajorTestType:
-      case TileGetWGColumnMajorTestType:
-      case TilePutWGRowMajorStartCoordTestType:
-      case TileGetWGRowMajorStartCoordTestType:
-        num_tiles_transferred = args.num_wgs;
-        break;
-      default:
-        num_tiles_transferred = args.num_wgs * args.num_threads;
-        break;
+    case TilePutWaveContiguousTestType:
+    case TileGetWaveContiguousTestType:
+    case TilePutWaveRowMajorTestType:
+    case TilePutWaveColumnMajorTestType:
+    case TileGetWaveRowMajorTestType:
+    case TileGetWaveColumnMajorTestType:
+    case TilePutWaveRowMajorStartCoordTestType:
+    case TileGetWaveRowMajorStartCoordTestType:
+      num_tiles_transferred = (args.num_wgs * args.num_threads) / wf_size;
+      break;
+    case TilePutWGContiguousTestType:
+    case TileGetWGContiguousTestType:
+    case TilePutWGRowMajorTestType:
+    case TilePutWGColumnMajorTestType:
+    case TileGetWGRowMajorTestType:
+    case TileGetWGColumnMajorTestType:
+    case TilePutWGRowMajorStartCoordTestType:
+    case TileGetWGRowMajorStartCoordTestType:
+      num_tiles_transferred = args.num_wgs;
+      break;
+    default:
+      num_tiles_transferred = args.num_wgs * args.num_threads;
+      break;
     }
 
     size_t buffer_elements_per_thread;
     switch (_type) {
-      case TilePutRowMajorTestType:
-      case TileGetRowMajorTestType:
-      case TilePutWaveRowMajorTestType:
-      case TileGetWaveRowMajorTestType:
-      case TilePutWGRowMajorTestType:
-      case TileGetWGRowMajorTestType:
-        buffer_elements_per_thread = static_cast<size_t>(t0) * (2 * t1);
-        break;
-      case TilePutRowMajorStartCoordTestType:
-      case TileGetRowMajorStartCoordTestType:
-      case TilePutWaveRowMajorStartCoordTestType:
-      case TileGetWaveRowMajorStartCoordTestType:
-      case TilePutWGRowMajorStartCoordTestType:
-      case TileGetWGRowMajorStartCoordTestType:
-        buffer_elements_per_thread = static_cast<size_t>(t0_verify) * (2 * t1_verify);
-        break;
-      case TilePutArbitraryTestType:
-      case TileGetArbitraryTestType:
-        buffer_elements_per_thread = static_cast<size_t>(t0) * 257;
-        break;
-      default:
-        buffer_elements_per_thread = static_cast<size_t>(t0) * t1;
-        break;
+    case TilePutRowMajorTestType:
+    case TileGetRowMajorTestType:
+    case TilePutWaveRowMajorTestType:
+    case TileGetWaveRowMajorTestType:
+    case TilePutWGRowMajorTestType:
+    case TileGetWGRowMajorTestType:
+      buffer_elements_per_thread = static_cast<size_t>(t0) * (2 * t1);
+      break;
+    case TilePutRowMajorStartCoordTestType:
+    case TileGetRowMajorStartCoordTestType:
+    case TilePutWaveRowMajorStartCoordTestType:
+    case TileGetWaveRowMajorStartCoordTestType:
+    case TilePutWGRowMajorStartCoordTestType:
+    case TileGetWGRowMajorStartCoordTestType:
+      buffer_elements_per_thread = static_cast<size_t>(t0_verify) * (2 * t1_verify);
+      break;
+    case TilePutArbitraryTestType:
+    case TileGetArbitraryTestType:
+      buffer_elements_per_thread = static_cast<size_t>(t0) * 257;
+      break;
+    default:
+      buffer_elements_per_thread = static_cast<size_t>(t0) * t1;
+      break;
     }
 
     // For StartCoord tests: verify only the transferred subregion [off..t0+off) x [off..t1+off).
@@ -1083,12 +1064,11 @@ void TileRMATester::verifyResults(uint64_t size) {
       for (int row = verify_row_start; row < verify_row_start + verify_rows; row++) {
         for (int col = verify_col_start; col < verify_col_start + verify_cols; col++) {
           size_t tile_linear_idx = (size_t)(row) * (is_start_coord_test ? t1_verify : t1) + col;
-          size_t buffer_idx = base_offset + row * row_stride + col * col_stride;
-          float expected = static_cast<float>(tile_linear_idx % 256);
+          size_t buffer_idx      = base_offset + row * row_stride + col * col_stride;
+          float expected         = static_cast<float>(tile_linear_idx % 256);
           if (dest[buffer_idx] != expected) {
-            std::cerr << "Data validation error at buffer idx " << buffer_idx
-                      << " (tile pos [" << row << "," << col << "], tile_id=" << tile_id << ")"
-                      << std::endl;
+            std::cerr << "Data validation error at buffer idx " << buffer_idx << " (tile pos ["
+                      << row << "," << col << "], tile_id=" << tile_id << ")" << std::endl;
             std::cerr << " Got " << dest[buffer_idx] << ", Expected " << expected << std::endl;
             exit(-1);
           }

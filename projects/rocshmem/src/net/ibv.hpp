@@ -59,8 +59,8 @@ class Ibv {
   Ibv() = default;
   ~Ibv();
 
-  Ibv(const Ibv &) = delete;
-  Ibv &operator=(const Ibv &) = delete;
+  Ibv(const Ibv&)            = delete;
+  Ibv& operator=(const Ibv&) = delete;
 
   /// dlopen libibverbs and resolve the control-plane symbols.
   /// @return true on success; false if the library or a symbol is missing.
@@ -70,86 +70,74 @@ class Ibv {
   bool available() const { return handle_ != nullptr; }
 
   // --- device / context ---------------------------------------------------
-  struct ibv_device **get_device_list(int *num_devices);
-  void free_device_list(struct ibv_device **list);
-  const char *get_device_name(struct ibv_device *device);
-  struct ibv_context *open_device(struct ibv_device *device);
-  int close_device(struct ibv_context *context);
+  struct ibv_device** get_device_list(int* num_devices);
+  void free_device_list(struct ibv_device** list);
+  const char* get_device_name(struct ibv_device* device);
+  struct ibv_context* open_device(struct ibv_device* device);
+  int close_device(struct ibv_context* context);
 
-  int query_device(struct ibv_context *context,
-                   struct ibv_device_attr *device_attr);
-  int query_port(struct ibv_context *context, uint8_t port_num,
-                 struct ibv_port_attr *port_attr);
-  int query_gid(struct ibv_context *context, uint8_t port_num, int index,
-                union ibv_gid *gid);
+  int query_device(struct ibv_context* context, struct ibv_device_attr* device_attr);
+  int query_port(struct ibv_context* context, uint8_t port_num, struct ibv_port_attr* port_attr);
+  int query_gid(struct ibv_context* context, uint8_t port_num, int index, union ibv_gid* gid);
   /// Query the GID table (needed to distinguish RoCE v1/v2 via gid_type).
   /// @return number of entries filled, or -1 if unsupported.
-  int query_gid_table(struct ibv_context *context, struct ibv_gid_entry *entries,
+  int query_gid_table(struct ibv_context* context, struct ibv_gid_entry* entries,
                       size_t max_entries);
 
   // --- protection domain / memory ----------------------------------------
-  struct ibv_pd *alloc_pd(struct ibv_context *context);
-  int dealloc_pd(struct ibv_pd *pd);
+  struct ibv_pd* alloc_pd(struct ibv_context* context);
+  int dealloc_pd(struct ibv_pd* pd);
 
-  struct ibv_mr *reg_mr(struct ibv_pd *pd, void *addr, size_t length,
-                        int access);
-  struct ibv_mr *reg_dmabuf_mr(struct ibv_pd *pd, uint64_t offset,
-                               size_t length, uint64_t iova, int fd,
-                               int access);
-  int dereg_mr(struct ibv_mr *mr);
+  struct ibv_mr* reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access);
+  struct ibv_mr* reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova,
+                               int fd, int access);
+  int dereg_mr(struct ibv_mr* mr);
 
   // --- completion / queue pairs ------------------------------------------
-  struct ibv_cq *create_cq(struct ibv_context *context, int cqe,
-                           void *cq_context, struct ibv_comp_channel *channel,
-                           int comp_vector);
-  int destroy_cq(struct ibv_cq *cq);
+  struct ibv_cq* create_cq(struct ibv_context* context, int cqe, void* cq_context,
+                           struct ibv_comp_channel* channel, int comp_vector);
+  int destroy_cq(struct ibv_cq* cq);
 
-  struct ibv_qp *create_qp(struct ibv_pd *pd,
-                           struct ibv_qp_init_attr *qp_init_attr);
-  int modify_qp(struct ibv_qp *qp, struct ibv_qp_attr *attr, int attr_mask);
-  int destroy_qp(struct ibv_qp *qp);
+  struct ibv_qp* create_qp(struct ibv_pd* pd, struct ibv_qp_init_attr* qp_init_attr);
+  int modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask);
+  int destroy_qp(struct ibv_qp* qp);
 
   // --- data plane (inline op-table dispatch; no dlsym) --------------------
   /// Post a send work-request chain on @p qp.
-  int post_send(struct ibv_qp *qp, struct ibv_send_wr *wr,
-                struct ibv_send_wr **bad_wr) {
+  int post_send(struct ibv_qp* qp, struct ibv_send_wr* wr, struct ibv_send_wr** bad_wr) {
     return qp->context->ops.post_send(qp, wr, bad_wr);
   }
   /// Reap up to @p num_entries completions from @p cq.
-  int poll_cq(struct ibv_cq *cq, int num_entries, struct ibv_wc *wc) {
+  int poll_cq(struct ibv_cq* cq, int num_entries, struct ibv_wc* wc) {
     return cq->context->ops.poll_cq(cq, num_entries, wc);
   }
 
  private:
   struct Table {
-    struct ibv_device **(*get_device_list)(int *){nullptr};
-    void (*free_device_list)(struct ibv_device **){nullptr};
-    const char *(*get_device_name)(struct ibv_device *){nullptr};
-    struct ibv_context *(*open_device)(struct ibv_device *){nullptr};
-    int (*close_device)(struct ibv_context *){nullptr};
-    int (*query_device)(struct ibv_context *, struct ibv_device_attr *){nullptr};
-    int (*query_port)(struct ibv_context *, uint8_t,
-                      struct ibv_port_attr *){nullptr};
-    int (*query_gid)(struct ibv_context *, uint8_t, int,
-                     union ibv_gid *){nullptr};
-    ssize_t (*query_gid_table)(struct ibv_context *, struct ibv_gid_entry *,
-                               size_t, uint32_t, size_t){nullptr};
-    struct ibv_pd *(*alloc_pd)(struct ibv_context *){nullptr};
-    int (*dealloc_pd)(struct ibv_pd *){nullptr};
-    struct ibv_mr *(*reg_mr)(struct ibv_pd *, void *, size_t, int){nullptr};
-    struct ibv_mr *(*reg_dmabuf_mr)(struct ibv_pd *, uint64_t, size_t, uint64_t,
-                                    int, int){nullptr};
-    int (*dereg_mr)(struct ibv_mr *){nullptr};
-    struct ibv_cq *(*create_cq)(struct ibv_context *, int, void *,
-                                struct ibv_comp_channel *, int){nullptr};
-    int (*destroy_cq)(struct ibv_cq *){nullptr};
-    struct ibv_qp *(*create_qp)(struct ibv_pd *,
-                                struct ibv_qp_init_attr *){nullptr};
-    int (*modify_qp)(struct ibv_qp *, struct ibv_qp_attr *, int){nullptr};
-    int (*destroy_qp)(struct ibv_qp *){nullptr};
+    struct ibv_device** (*get_device_list)(int*){nullptr};
+    void (*free_device_list)(struct ibv_device**){nullptr};
+    const char* (*get_device_name)(struct ibv_device*){nullptr};
+    struct ibv_context* (*open_device)(struct ibv_device*){nullptr};
+    int (*close_device)(struct ibv_context*){nullptr};
+    int (*query_device)(struct ibv_context*, struct ibv_device_attr*){nullptr};
+    int (*query_port)(struct ibv_context*, uint8_t, struct ibv_port_attr*){nullptr};
+    int (*query_gid)(struct ibv_context*, uint8_t, int, union ibv_gid*){nullptr};
+    ssize_t (*query_gid_table)(struct ibv_context*, struct ibv_gid_entry*, size_t, uint32_t,
+                               size_t){nullptr};
+    struct ibv_pd* (*alloc_pd)(struct ibv_context*){nullptr};
+    int (*dealloc_pd)(struct ibv_pd*){nullptr};
+    struct ibv_mr* (*reg_mr)(struct ibv_pd*, void*, size_t, int){nullptr};
+    struct ibv_mr* (*reg_dmabuf_mr)(struct ibv_pd*, uint64_t, size_t, uint64_t, int, int){nullptr};
+    int (*dereg_mr)(struct ibv_mr*){nullptr};
+    struct ibv_cq* (*create_cq)(struct ibv_context*, int, void*, struct ibv_comp_channel*,
+                                int){nullptr};
+    int (*destroy_cq)(struct ibv_cq*){nullptr};
+    struct ibv_qp* (*create_qp)(struct ibv_pd*, struct ibv_qp_init_attr*){nullptr};
+    int (*modify_qp)(struct ibv_qp*, struct ibv_qp_attr*, int){nullptr};
+    int (*destroy_qp)(struct ibv_qp*){nullptr};
   } t_;
 
-  void *handle_{nullptr};
+  void* handle_{nullptr};
 };
 
 }  // namespace net

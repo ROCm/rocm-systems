@@ -18,7 +18,8 @@ namespace rocshmem {
 
 class QueuePairMLX5;
 
-template <> struct QueuePairTraits<QueuePairMLX5> {
+template <>
+struct QueuePairTraits<QueuePairMLX5> {
   enum class OpCode : uint8_t {
     RDMA_WRITE = MLX5_OPCODE_RDMA_WRITE,
     RDMA_READ  = MLX5_OPCODE_RDMA_READ,
@@ -48,7 +49,7 @@ template <> struct QueuePairTraits<QueuePairMLX5> {
 };
 
 class QueuePairMLX5 : public QueuePairDevice<QueuePairMLX5> {
-private:
+ private:
   gda_mlx5_device_sq sq;
   gda_mlx5_device_cq cq;
 
@@ -57,17 +58,17 @@ private:
   static constexpr int LOCK_S_SLEEP_DELAY = 2;
 #endif
 
-public:
+ public:
   __host__ explicit QueuePairMLX5(uint32_t qpn, QueuePairInitInfo&& init_info,
                                   gda_mlx5_device_sq&& sq, gda_mlx5_device_cq&& cq)
-    : QueuePairDevice{qpn, std::move(init_info)},
-      sq{std::move(sq)}, cq{std::move(cq)} { }
+      : QueuePairDevice{qpn, std::move(init_info)}, sq{std::move(sq)}, cq{std::move(cq)} {}
 
-  __host__ explicit QueuePairMLX5(uint32_t qpn,
-                                  uint64_t *nonfetching_atomic, uint32_t nonfetching_atomic_lkey,
-                                  gda_mlx5_device_sq&& sq, gda_mlx5_device_cq&& cq)
-    : QueuePairDevice{qpn, nonfetching_atomic, nonfetching_atomic_lkey},
-      sq{std::move(sq)}, cq{std::move(cq)} { }
+  __host__ explicit QueuePairMLX5(uint32_t qpn, uint64_t* nonfetching_atomic,
+                                  uint32_t nonfetching_atomic_lkey, gda_mlx5_device_sq&& sq,
+                                  gda_mlx5_device_cq&& cq)
+      : QueuePairDevice{qpn, nonfetching_atomic, nonfetching_atomic_lkey},
+        sq{std::move(sq)},
+        cq{std::move(cq)} {}
 
   __host__ QueuePairMLX5(const QueuePairMLX5& other)            = delete;
   __host__ QueuePairMLX5& operator=(const QueuePairMLX5& other) = delete;
@@ -75,30 +76,27 @@ public:
   __host__ QueuePairMLX5& operator=(QueuePairMLX5&& other)      = default;
   __host__ ~QueuePairMLX5()                                     = default;
 
-public:
+ public:
   template <OpCode Op, typename... Options>
-  __device__ __noinline__
-  void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
-                    uintptr_t raddr, uint32_t rkey, size_t size,
-                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                                            uint32_t rkey, size_t size, const ActiveWFInfo& wf_info,
+                                            PostOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
-  __device__ __noinline__
-  void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                           uintptr_t raddr, uint32_t rkey, size_t size,
-                           PostOpt<Options...> = {});
+  __device__ __noinline__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                                                   uint32_t rkey, size_t size,
+                                                   PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __noinline__
-  amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                uint64_t swap_add, uint64_t compare,
-                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __noinline__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                                        uint64_t swap_add, uint64_t compare,
+                                                        const ActiveWFInfo& wf_info,
+                                                        PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __noinline__
-  amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                       uint64_t swap_add, uint64_t compare,
-                                       PostOpt<Options...> = {});
+  __device__ __noinline__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                                               uint64_t swap_add, uint64_t compare,
+                                                               PostOpt<Options...> = {});
 
   __device__ __noinline__ void quiet_single();
 
@@ -106,7 +104,7 @@ public:
 
   __device__ __forceinline__ bool poll_cq_once(uint64_t target);
 
-private:
+ private:
 #if GDA_MLX5_LOCK_USE_S_WAKEUP
   static __device__ __forceinline__ void amdgcn_s_wakeup() {
     /* why doesn't __builtin_amdgcn_s_wakeup() exist?
@@ -137,8 +135,8 @@ private:
   __device__ void post_ringdb_unlock(int wqe_count, const gda_mlx5_wqe& wqe);
 
 #if defined(BUILD_DEBUG_DEVICE)
-  __device__ __noinline__ void print_cqe_error(const mlx5_cqe64* cqe,
-                                               uint8_t opcode, uint8_t owner);
+  __device__ __noinline__ void print_cqe_error(const mlx5_cqe64* cqe, uint8_t opcode,
+                                               uint8_t owner);
 #endif
 };
 
@@ -175,10 +173,11 @@ __device__ void QueuePairMLX5::post_ringdb_unlock(int wqe_count, const gda_mlx5_
 
 // can be called with all active lanes using any number of different QPs, don't assume anything
 template <QueuePairMLX5::OpCode Op, typename... Options>
-__device__ __noinline__ void QueuePairMLX5::post_wqe_rma(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info, PostOpt<Options...>) {
-  using PostOptions = PostOpt<Options...>;
+__device__ __noinline__ void QueuePairMLX5::post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                                                         uintptr_t raddr, uint32_t rkey,
+                                                         size_t size, const ActiveWFInfo& wf_info,
+                                                         PostOpt<Options...>) {
+  using PostOptions   = PostOpt<Options...>;
   uint32_t byte_count = static_cast<uint32_t>(size);
   if (wf_info.is_pe_group_last) {
     // acquire SQ lock and poll until we have enough WQEBB for all lanes using this QP
@@ -199,8 +198,9 @@ __device__ __noinline__ void QueuePairMLX5::post_wqe_rma(
   uint8_t fm_ce_se = PostOptions::signal_completion(wf_info) ? MLX5_WQE_CTRL_CQ_UPDATE : 0;
 
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, fm_ce_se,
-                   raddr, rkey, laddr, lkey, byte_count, send_inline};
+  gda_mlx5_wqe wqe{
+      wqe_idx,    static_cast<uint8_t>(Op), qp_num, fm_ce_se, raddr, rkey, laddr, lkey, byte_count,
+      send_inline};
 
   // copy to SQ
   sq.buf[sq_idx] = wqe;
@@ -214,9 +214,10 @@ __device__ __noinline__ void QueuePairMLX5::post_wqe_rma(
 
 // precondition: called with all active lanes using different QPs
 template <QueuePairMLX5::OpCode Op, typename... Options>
-__device__ __noinline__ void QueuePairMLX5::post_wqe_rma_single(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size, PostOpt<Options...>) {
-  using PostOptions = PostOpt<Options...>;
+__device__ __noinline__ void QueuePairMLX5::post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                                                uintptr_t raddr, uint32_t rkey,
+                                                                size_t size, PostOpt<Options...>) {
+  using PostOptions   = PostOpt<Options...>;
   uint32_t byte_count = static_cast<uint32_t>(size);
   // acquire SQ lock and poll until we have enough space for at least one WQEBB
   lock_pollcq<PostOptions>(1);
@@ -232,8 +233,9 @@ __device__ __noinline__ void QueuePairMLX5::post_wqe_rma_single(
   uint8_t fm_ce_se = PostOptions::signal_completion_single() ? MLX5_WQE_CTRL_CQ_UPDATE : 0;
 
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, fm_ce_se,
-                   raddr, rkey, laddr, lkey, byte_count, send_inline};
+  gda_mlx5_wqe wqe{
+      wqe_idx,    static_cast<uint8_t>(Op), qp_num, fm_ce_se, raddr, rkey, laddr, lkey, byte_count,
+      send_inline};
 
   // copy to SQ
   sq.buf[sq_idx] = wqe;
@@ -259,7 +261,8 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
   uint64_t* atomic_laddr = get_atomic_addr<Fetch>();
   uint32_t atomic_lkey   = get_atomic_lkey<Fetch>();
   if constexpr (Fetch == AMOFetchType::Blocking) {
-    uint32_t atomic_idx = (fetching_atomic_idx + wf_info.pe_group_logical_lane_id) % FETCHING_ATOMIC_CNT;
+    uint32_t atomic_idx =
+        (fetching_atomic_idx + wf_info.pe_group_logical_lane_id) % FETCHING_ATOMIC_CNT;
     atomic_laddr += atomic_idx;
   }
 
@@ -271,8 +274,16 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
   uint8_t fm_ce_se = PostOptions::signal_completion(wf_info) ? MLX5_WQE_CTRL_CQ_UPDATE : 0;
 
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, fm_ce_se,
-                   raddr, rkey, swap_add, compare, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+  gda_mlx5_wqe wqe{wqe_idx,
+                   static_cast<uint8_t>(Op),
+                   qp_num,
+                   fm_ce_se,
+                   raddr,
+                   rkey,
+                   swap_add,
+                   compare,
+                   reinterpret_cast<uintptr_t>(atomic_laddr),
+                   atomic_lkey};
 
   // copy to SQ
   sq.buf[sq_idx] = wqe;
@@ -322,8 +333,16 @@ __device__ __noinline__ QueuePairMLX5::amo_ret_t<Fetch> QueuePairMLX5::post_wqe_
   uint8_t fm_ce_se = PostOptions::signal_completion_single() ? MLX5_WQE_CTRL_CQ_UPDATE : 0;
 
   // construct the WQE on the stack
-  gda_mlx5_wqe wqe{wqe_idx, static_cast<uint8_t>(Op), qp_num, fm_ce_se,
-                   raddr, rkey, swap_add, compare, reinterpret_cast<uintptr_t>(atomic_laddr), atomic_lkey};
+  gda_mlx5_wqe wqe{wqe_idx,
+                   static_cast<uint8_t>(Op),
+                   qp_num,
+                   fm_ce_se,
+                   raddr,
+                   rkey,
+                   swap_add,
+                   compare,
+                   reinterpret_cast<uintptr_t>(atomic_laddr),
+                   atomic_lkey};
 
   // copy to SQ
   sq.buf[sq_idx] = wqe;
@@ -363,11 +382,11 @@ __device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(uint64_t target) {
 
   struct mlx5_cqe64* cqe = cq.buf;
 
-  uint32_t wqecnt_sig_op_own = __scoped_atomic_load_n(reinterpret_cast<uint32_t*>(&cqe->wqe_counter),
-                                                      __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
+  uint32_t wqecnt_sig_op_own = __scoped_atomic_load_n(
+      reinterpret_cast<uint32_t*>(&cqe->wqe_counter), __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
   __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
-  uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
-  uint16_t sq_head = endian::from_be(be_wqe_counter);
+  uint8_t opcode        = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
+  uint16_t sq_head      = endian::from_be(be_wqe_counter);
 
   uint16_t sq_tail = static_cast<uint16_t>(sq_post);
 
@@ -407,13 +426,13 @@ __device__ inline void QueuePairMLX5::poll_cq_until(uint16_t requested_available
     /* Update the SQ head
      * This param provides us the sq_wqebb_counter; all our WQEs are exactly one WQEBB (64B) */
     // 32-bit load: big-endian 16-bit field, then two 8-bit fields
-    uint32_t wqecnt_sig_op_own = __scoped_atomic_load_n(reinterpret_cast<uint32_t*>(&cqe->wqe_counter),
-                                                        __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
+    uint32_t wqecnt_sig_op_own = __scoped_atomic_load_n(
+        reinterpret_cast<uint32_t*>(&cqe->wqe_counter), __ATOMIC_ACQUIRE, __MEMORY_SCOPE_SYSTEM);
     // GPU is little-endian, so wqe_counter is loaded into the low half of wqecnt_sig_op_own
     __be16 be_wqe_counter = static_cast<__be16>(wqecnt_sig_op_own);
     /* GPU is little-endian, so op_own is loaded into the top byte of wqecnt_sig_op_own;
      * opcode is the top 4 bits of op_own */
-    uint8_t opcode = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
+    uint8_t opcode   = static_cast<uint8_t>(wqecnt_sig_op_own >> 28);
     uint16_t sq_head = endian::from_be(be_wqe_counter);
 
     // sq_tail is the least significant bits of the post counter
@@ -444,7 +463,7 @@ __device__ inline void QueuePairMLX5::poll_cq_until(uint16_t requested_available
      * in some marginal cases it's maybe possible to see consumed_slots > sq_depth,
      * but in that case available_slots will be very large, > requested_available_slots,
      * and the loop will continue for another iteration */
-    uint16_t consumed_slots  = posted   - completed;
+    uint16_t consumed_slots  = posted - completed;
     uint16_t available_slots = sq_depth - consumed_slots;
 
     /* continue until both:
@@ -458,8 +477,8 @@ __device__ inline void QueuePairMLX5::poll_cq_until(uint16_t requested_available
   }
 }
 
-__device__ __forceinline__ void QueuePairMLX5::ring_doorbell(
-    uint64_t sq_post, const gda_mlx5_wqe& wqe) {
+__device__ __forceinline__ void QueuePairMLX5::ring_doorbell(uint64_t sq_post,
+                                                             const gda_mlx5_wqe& wqe) {
   // sq_wqebb_counter is the least significant bits of the post counter
   uint16_t sq_wqebb_counter = static_cast<uint16_t>(sq_post);
   // gda_mlx5_db_register constructor extracts first 8 bytes of WQE
@@ -474,8 +493,8 @@ __device__ __forceinline__ void QueuePairMLX5::ring_doorbell(
   // ring doorbell by storing first 8B of WQE to the doorbell register
   __scoped_atomic_store_n(&bf->db_reg.val, db_val.val, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
 
-  LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)",
-             sq.dbrec, be_sq_wqebb_counter, sq_wqebb_counter, &bf->db_reg, db_val.val,
+  LOGD_TRACE("SQ: posted WQEs with dbrec(%p)=%x (%hu), dbreg(%p)=%lx (%x, %x)", sq.dbrec,
+             be_sq_wqebb_counter, sq_wqebb_counter, &bf->db_reg, db_val.val,
              db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
 }
 
@@ -505,10 +524,10 @@ __device__ __forceinline__ void QueuePairMLX5::release_lock(uint32_t* lock) {
 }
 
 #if defined(BUILD_DEBUG_DEVICE)
-__device__ inline __noinline__ void QueuePairMLX5::print_cqe_error(
-    const mlx5_cqe64* cqe, uint8_t opcode, uint8_t owner) {
+__device__ inline __noinline__ void QueuePairMLX5::print_cqe_error(const mlx5_cqe64* cqe,
+                                                                   uint8_t opcode, uint8_t owner) {
   const mlx5_err_cqe* err_cqe = reinterpret_cast<const mlx5_err_cqe*>(cqe);
-  uint8_t syndrome = 0x0;
+  uint8_t syndrome            = 0x0;
 
   switch (opcode) {
   case MLX5_CQE_RESP_WR_IMM:
@@ -575,10 +594,11 @@ __device__ inline __noinline__ void QueuePairMLX5::print_cqe_error(
   case MLX5_CQE_RESP_ERR:
     LOGD_ERROR("CQ: unexpected responder error (%x)", opcode);
     break;
-  case MLX5_CQE_INVALID: {
-    LOGD_ERROR("CQ: invalid completion (%x), check owner bit = %u?", opcode, owner);
-    break;
-  }
+  case MLX5_CQE_INVALID:
+    {
+      LOGD_ERROR("CQ: invalid completion (%x), check owner bit = %u?", opcode, owner);
+      break;
+    }
   default:
     LOGD_ERROR("CQ: unknown completion type (%x)", opcode);
     break;

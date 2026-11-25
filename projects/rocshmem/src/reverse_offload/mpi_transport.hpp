@@ -39,69 +39,61 @@ namespace rocshmem {
 class HostInterface;
 
 class MPITransport : public Transport {
-public:
+ public:
   explicit MPITransport(MPI_Comm com, Queue* queue);
 
   virtual ~MPITransport();
 
-  void initTransport(int num_queues, BackendProxy *proxy) override;
+  void initTransport(int num_queues, BackendProxy* proxy) override;
 
   void finalizeTransport() override;
 
-  void createNewTeam(ROBackend *backend, Team *parent_team,
-                     const TeamInfo& team_info_wrt_parent,
-                     const TeamInfo& team_info_wrt_world, int num_pes,
-                     int my_pe_in_new_team, MPI_Comm new_team_comm,
-                     rocshmem_team_t *new_team) override;
+  void createNewTeam(ROBackend* backend, Team* parent_team, const TeamInfo& team_info_wrt_parent,
+                     const TeamInfo& team_info_wrt_world, int num_pes, int my_pe_in_new_team,
+                     MPI_Comm new_team_comm, rocshmem_team_t* new_team) override;
 
-  void barrier(int contextId, volatile char *status, bool blocking,
-               MPI_Comm team, bool quiet) override;
+  void barrier(int contextId, volatile char* status, bool blocking, MPI_Comm team,
+               bool quiet) override;
 
-  void team_reduction(void *dst, void *src, int size, int win_id,
-                      int contextId, MPI_Comm team, ROCSHMEM_OP op,
-                      ro_net_types type, volatile char *status,
+  void team_reduction(void* dst, void* src, int size, int win_id, int contextId, MPI_Comm team,
+                      ROCSHMEM_OP op, ro_net_types type, volatile char* status,
                       bool blocking) override;
 
-  void team_reduce_scatter(void *dst, void *src, int nreduce, int win_id,
-                           int contextId, MPI_Comm team, ROCSHMEM_OP op,
-                           ro_net_types type, volatile char *status,
+  void team_reduce_scatter(void* dst, void* src, int nreduce, int win_id, int contextId,
+                           MPI_Comm team, ROCSHMEM_OP op, ro_net_types type, volatile char* status,
                            bool blocking) override;
 
-  void team_broadcast(void *dst, void *src, int size, int win_id,
-                      int contextId, MPI_Comm team, int PE_root,
-                      ro_net_types type, volatile char *status,
+  void team_broadcast(void* dst, void* src, int size, int win_id, int contextId, MPI_Comm team,
+                      int PE_root, ro_net_types type, volatile char* status,
                       bool blocking) override;
 
-  void alltoall(void *dst, void *src, int size, int win_id, int contextId,
-                MPI_Comm team, void *ata_buffptr, ro_net_types type,
-                volatile char *status, bool blocking) override;
+  void alltoall(void* dst, void* src, int size, int win_id, int contextId, MPI_Comm team,
+                void* ata_buffptr, ro_net_types type, volatile char* status,
+                bool blocking) override;
 
-  void fcollect(void *dst, void *src, int size, int win_id, int contextId,
-                MPI_Comm team, void *ata_buffptr, ro_net_types type,
-                volatile char *status, bool blocking) override;
+  void fcollect(void* dst, void* src, int size, int win_id, int contextId, MPI_Comm team,
+                void* ata_buffptr, ro_net_types type, volatile char* status,
+                bool blocking) override;
 
-  void putMem(void *dst, void *src, int size, int pe, int win_id,
-              int contextId, volatile char *status, bool blocking,
-              bool inline_data = false) override;
+  void putMem(void* dst, void* src, int size, int pe, int win_id, int contextId,
+              volatile char* status, bool blocking, bool inline_data = false) override;
 
-  void amoFOP(void *dst, void *src, void *val, int pe, int win_id,
-              int contextId, volatile char *status, bool blocking,
-              ROCSHMEM_OP op, ro_net_types type) override;
+  void amoFOP(void* dst, void* src, void* val, int pe, int win_id, int contextId,
+              volatile char* status, bool blocking, ROCSHMEM_OP op, ro_net_types type) override;
 
-  void amoFCAS(void *dst, void *src, void *val, int pe, int win_id,
-               int contextId, volatile char *status, bool blocking, void *cond,
-               ro_net_types type) override;
+  void amoFCAS(void* dst, void* src, void* val, int pe, int win_id, int contextId,
+               volatile char* status, bool blocking, void* cond, ro_net_types type) override;
 
-  void getMem(void *dst, void *src, int size, int pe, int win_id,
-              int contextId, volatile char *status, bool blocking) override;
+  void getMem(void* dst, void* src, int size, int pe, int win_id, int contextId,
+              volatile char* status, bool blocking) override;
 
-  void quiet(int contextId, volatile char *status) override;
+  void quiet(int contextId, volatile char* status) override;
 
   void progress() override;
 
   int numOutstandingRequests() override;
 
-  void insertRequest(const queue_element_t *element, int queue_id) override;
+  void insertRequest(const queue_element_t* element, int queue_id) override;
 
   bool readyForFinalize() override { return !transport_up; }
 
@@ -109,18 +101,16 @@ public:
 
   MPI_Comm get_world_comm() override { return ro_net_comm_world; }
 
-  HostInterface *host_interface{nullptr};
+  HostInterface* host_interface{nullptr};
 
-private:
+ private:
   struct CommKey {
     CommKey(int _start, int _logPstride, int _size)
         : start(_start), logPstride(_logPstride), size(_size) {}
 
-    bool operator<(const CommKey &key) const {
-      return start < key.start ||
-             (start == key.start && logPstride < key.logPstride) ||
-             (start == key.start && logPstride == key.logPstride &&
-              size < key.size);
+    bool operator<(const CommKey& key) const {
+      return start < key.start || (start == key.start && logPstride < key.logPstride) ||
+             (start == key.start && logPstride == key.logPstride && size < key.size);
     }
 
     int start{-1};
@@ -129,15 +119,15 @@ private:
   };
 
   struct RequestProperties {
-    RequestProperties(volatile char *_status, int _contextId, bool _blocking,
-                      void *_src, bool _inline_data)
+    RequestProperties(volatile char* _status, int _contextId, bool _blocking, void* _src,
+                      bool _inline_data)
         : status(_status),
           contextId(_contextId),
           blocking(_blocking),
           src(_src),
           inline_data(_inline_data) {}
 
-    RequestProperties(volatile char *_status, int _contextId, bool _blocking)
+    RequestProperties(volatile char* _status, int _contextId, bool _blocking)
         : status(_status),
           contextId(_contextId),
           blocking(_blocking),
@@ -147,7 +137,7 @@ private:
     volatile char* status{nullptr};
     int contextId{-1};
     bool blocking{};
-    void *src{nullptr};
+    void* src{nullptr};
     bool inline_data{};
   };
 
@@ -164,14 +154,14 @@ private:
 
   MPI_Op get_mpi_op(ROCSHMEM_OP op);
 
-  Queue *queue{nullptr};
+  Queue* queue{nullptr};
 
   std::unique_ptr<MPI_Request[]> raw_requests();
 
   // Unordered vector of in-flight MPI Requests. Can complete out of order.
   std::vector<Request> requests{};
 
-  std::vector<std::vector<volatile char *> > waiting_quiet{};
+  std::vector<std::vector<volatile char*>> waiting_quiet{};
 
   std::vector<int> outstanding{};
 
@@ -187,7 +177,7 @@ private:
 
   std::atomic<bool> transport_up{false};
 
-  BackendProxy *backend_proxy{nullptr};
+  BackendProxy* backend_proxy{nullptr};
 
   std::thread progress_thread{};
 

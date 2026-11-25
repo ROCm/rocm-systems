@@ -33,31 +33,30 @@
 
 namespace rocshmem {
 
-class DLMallocTestFixture : public ::testing::Test
-{
-    /**
-     * @brief Helper type for heap memory
-     */
-    using HEAP_T = HeapMemoryType;
+class DLMallocTestFixture : public ::testing::Test {
+  /**
+   * @brief Helper type for heap memory
+   */
+  using HEAP_T = HeapMemoryType;
 
-    /**
-     * @brief Helper type for allocation strategy
-     */
-    using STRAT_T = DLAllocatorStrategy<HEAP_T>;
+  /**
+   * @brief Helper type for allocation strategy
+   */
+  using STRAT_T = DLAllocatorStrategy<HEAP_T>;
 
-  protected:
-    /**
-     * @brief Heap memory object
-     */
-    HIPAllocator alloc_{};
-    HEAP_T heap_mem_{alloc_};
+ protected:
+  /**
+   * @brief Heap memory object
+   */
+  HIPAllocator alloc_{};
+  HEAP_T heap_mem_{alloc_};
 
-    /**
-     * @brief Allocation strategy object
-     */
-    STRAT_T strat_ {&heap_mem_};
+  /**
+   * @brief Allocation strategy object
+   */
+  STRAT_T strat_{&heap_mem_};
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
-#endif // ROCSHMEM_DLMALLOC_GTEST_HPP
+#endif  // ROCSHMEM_DLMALLOC_GTEST_HPP

@@ -31,9 +31,8 @@ using namespace rocshmem;
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void ShmemPtrTest(int loop, int skip, long long int *start_time,
-                             long long int *end_time, char *dest, int wf_size,
-                             ShmemContextType ctx_type, int *available) {
+__global__ void ShmemPtrTest(int loop, int skip, long long int* start_time, long long int* end_time,
+                             char* dest, int wf_size, ShmemContextType ctx_type, int* available) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
   int t_id  = get_flat_block_id();
@@ -50,24 +49,23 @@ __global__ void ShmemPtrTest(int loop, int skip, long long int *start_time,
    */
   __shared__ long long int wf_start_time[32];
 
-
   /**
    * Calculate start index for each thread within the grid
    */
   dest += get_flat_id();
 
-  char *local_addr = dest;
-  void *remote_addr = rocshmem_ptr((void *)local_addr, 1);
+  char* local_addr  = dest;
+  void* remote_addr = rocshmem_ptr((void*)local_addr, 1);
   if (remote_addr != NULL) {
     *available = 1;
   }
 
-  if(*available) {
+  if (*available) {
     for (int i = 0; i < loop + skip; i++) {
       if (i == skip) {
         __syncthreads();
         // Ensures all RMA calls from the skip loops are completed
-        if(is_thread_zero_in_block()) {
+        if (is_thread_zero_in_block()) {
           rocshmem_ctx_quiet(ctx);
         }
         __syncthreads();
@@ -75,12 +73,12 @@ __global__ void ShmemPtrTest(int loop, int skip, long long int *start_time,
         wf_start_time[wf_id] = wall_clock64();
       }
 
-      ((char *)remote_addr)[0] = '1';
+      ((char*)remote_addr)[0] = '1';
     }
   }
 
   __syncthreads();
-  if(is_thread_zero_in_block()) {
+  if (is_thread_zero_in_block()) {
     rocshmem_ctx_quiet(ctx);
   }
 
@@ -91,17 +89,17 @@ __global__ void ShmemPtrTest(int loop, int skip, long long int *start_time,
   end_time[wg_id] = wall_clock64();
 
   // Find the earliest start time
-  int num_wfs = (get_flat_block_size() - 1 ) / wf_size + 1;
-  for (int i = num_wfs / 2; i > 0; i >>= 1 ) {
-    if(t_id < i) {
+  int num_wfs = (get_flat_block_size() - 1) / wf_size + 1;
+  for (int i = num_wfs / 2; i > 0; i >>= 1) {
+    if (t_id < i) {
       wf_start_time[t_id] = min(wf_start_time[t_id], wf_start_time[t_id + i]);
     }
   }
 
   // For data validation in remote PE
-  if( get_flat_id() == 0 ) {
-    int *store_avail = (int*)(dest + get_flat_grid_size());
-    *store_avail = *available;
+  if (get_flat_id() == 0) {
+    int* store_avail = (int*)(dest + get_flat_grid_size());
+    *store_avail     = *available;
     rocshmem_ctx_int_put(ctx, store_avail, store_avail, 1, 1);
   }
 
@@ -119,8 +117,8 @@ __global__ void ShmemPtrTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 ShmemPtrTester::ShmemPtrTester(TesterArguments args) : Tester(args) {
   size_t buff_size = args.wg_size * args.num_wgs + sizeof(int);
-  CHECK_HIP(hipMalloc((void **)&_available, sizeof(int)));
-  dest = (char *) alloc_test_buffer(buff_size);
+  CHECK_HIP(hipMalloc((void**)&_available, sizeof(int)));
+  dest = (char*)alloc_test_buffer(buff_size);
 }
 
 ShmemPtrTester::~ShmemPtrTester() {
@@ -138,11 +136,10 @@ void ShmemPtrTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                   [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(ShmemPtrTest, gridSize, blockSize, shared_bytes,
-                     stream, loop, args.skip, start_time, end_time,
-                     dest, wf_size, _type, _available);
+  hipLaunchKernelGGL(ShmemPtrTest, gridSize, blockSize, shared_bytes, stream, loop, args.skip,
+                     start_time, end_time, dest, wf_size, _type, _available);
 
-  num_msgs = (loop + args.skip) * gridSize.x * blockSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x * blockSize.x;
   num_timed_msgs = loop * gridSize.x * blockSize.x;
 }
 
@@ -152,11 +149,10 @@ void ShmemPtrTester::verifyResults([[maybe_unused]] size_t size) {
       _print_results = false;
       std::cout << "rocshmem ptr not available\n" << std::endl;
     }
-  }
-  else {
+  } else {
     size_t buff_size = args.wg_size * args.num_wgs;
-    int *available = (int*)(dest + buff_size);
-    if(*available == 1) {
+    int* available   = (int*)(dest + buff_size);
+    if (*available == 1) {
       for (size_t i = 0; i < buff_size; i++) {
         if (dest[i] != '1') {
           std::cerr << "Data validation error at idx " << i << std::endl;

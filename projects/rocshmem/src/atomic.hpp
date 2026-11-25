@@ -39,9 +39,9 @@ enum class memory_scope : int {
   device    = __MEMORY_SCOPE_DEVICE,
   system    = __MEMORY_SCOPE_SYSTEM,
 #if defined(__MEMORY_SCOPE_CLUSTR)
-  cluster   = __MEMORY_SCOPE_CLUSTR,
+  cluster = __MEMORY_SCOPE_CLUSTR,
 #else
-  cluster   = __MEMORY_SCOPE_DEVICE,
+  cluster = __MEMORY_SCOPE_DEVICE,
 #endif
 };
 
@@ -58,7 +58,9 @@ enum class memory_order : int {
 // value type is fixed by the object pointer alone (C++17-safe stand-in for
 // std::type_identity, which is C++20).
 template <typename T>
-struct type_identity { using type = T; };
+struct type_identity {
+  using type = T;
+};
 
 template <typename T>
 using type_identity_t = typename type_identity<T>::type;
@@ -73,11 +75,20 @@ using type_identity_t = typename type_identity<T>::type;
 // atomic_storage_t<T> is the type actually handed to the builtin: T itself for
 // integers and pointers, or a same-size unsigned integer for float/double on
 // compilers that need the workaround.
-template <typename T> struct atomic_storage { using type = T; };
+template <typename T>
+struct atomic_storage {
+  using type = T;
+};
 
 #ifndef ROCSHMEM_HAVE_FLOAT_SCOPED_ATOMIC_N
-template <> struct atomic_storage<float>    { using type = uint32_t; };
-template <> struct atomic_storage<double>   { using type = uint64_t; };
+template <>
+struct atomic_storage<float> {
+  using type = uint32_t;
+};
+template <>
+struct atomic_storage<double> {
+  using type = uint64_t;
+};
 #endif
 
 template <typename T>
@@ -94,149 +105,113 @@ __host__ __device__ __forceinline__ To atomic_bit_cast(const From& from) {
   }
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-T load(const T* address) {
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ T load(const T* address) {
   using U = atomic_storage_t<T>;
-  U bits = __scoped_atomic_load_n(reinterpret_cast<const U*>(address),
-                                  static_cast<int>(order),
-                                  static_cast<int>(scope));
+  U bits  = __scoped_atomic_load_n(reinterpret_cast<const U*>(address), static_cast<int>(order),
+                                   static_cast<int>(scope));
   return atomic_bit_cast<T>(bits);
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-void store(T* address, type_identity_t<T> value) {
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ void store(T* address, type_identity_t<T> value) {
   using U = atomic_storage_t<T>;
-  __scoped_atomic_store_n(reinterpret_cast<U*>(address),
-                          atomic_bit_cast<U>(value),
-                          static_cast<int>(order),
-                          static_cast<int>(scope));
+  __scoped_atomic_store_n(reinterpret_cast<U*>(address), atomic_bit_cast<U>(value),
+                          static_cast<int>(order), static_cast<int>(scope));
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-T exchange(T* obj, type_identity_t<T> desired) {
-  using U = atomic_storage_t<T>;
-  U old_bits = __scoped_atomic_exchange_n(reinterpret_cast<U*>(obj),
-                                          atomic_bit_cast<U>(desired),
-                                          static_cast<int>(order),
-                                          static_cast<int>(scope));
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ T exchange(T* obj, type_identity_t<T> desired) {
+  using U    = atomic_storage_t<T>;
+  U old_bits = __scoped_atomic_exchange_n(reinterpret_cast<U*>(obj), atomic_bit_cast<U>(desired),
+                                          static_cast<int>(order), static_cast<int>(scope));
   return atomic_bit_cast<T>(old_bits);
 }
 
-template <memory_scope scope   = memory_scope::system,
-          memory_order success = memory_order::seq_cst,
+template <memory_scope scope = memory_scope::system, memory_order success = memory_order::seq_cst,
           memory_order failure = memory_order::seq_cst, typename T>
-__host__ __device__
-bool compare_exchange_weak(T* obj, T& expected, type_identity_t<T> desired) {
-  using U = atomic_storage_t<T>;
+__host__ __device__ bool compare_exchange_weak(T* obj, T& expected, type_identity_t<T> desired) {
+  using U         = atomic_storage_t<T>;
   U expected_bits = atomic_bit_cast<U>(expected);
-  bool result = __scoped_atomic_compare_exchange_n(reinterpret_cast<U*>(obj),
-                                                   &expected_bits,
-                                                   atomic_bit_cast<U>(desired), true,
-                                                   static_cast<int>(success),
-                                                   static_cast<int>(failure),
-                                                   static_cast<int>(scope));
+  bool result     = __scoped_atomic_compare_exchange_n(
+      reinterpret_cast<U*>(obj), &expected_bits, atomic_bit_cast<U>(desired), true,
+      static_cast<int>(success), static_cast<int>(failure), static_cast<int>(scope));
   expected = atomic_bit_cast<T>(expected_bits);
   return result;
 }
 
-template <memory_scope scope   = memory_scope::system,
-          memory_order success = memory_order::seq_cst,
+template <memory_scope scope = memory_scope::system, memory_order success = memory_order::seq_cst,
           memory_order failure = memory_order::seq_cst, typename T>
-__host__ __device__
-bool compare_exchange_strong(T* obj, T& expected, type_identity_t<T> desired) {
-  using U = atomic_storage_t<T>;
+__host__ __device__ bool compare_exchange_strong(T* obj, T& expected, type_identity_t<T> desired) {
+  using U         = atomic_storage_t<T>;
   U expected_bits = atomic_bit_cast<U>(expected);
-  bool result = __scoped_atomic_compare_exchange_n(reinterpret_cast<U*>(obj),
-                                                   &expected_bits,
-                                                   atomic_bit_cast<U>(desired), false,
-                                                   static_cast<int>(success),
-                                                   static_cast<int>(failure),
-                                                   static_cast<int>(scope));
+  bool result     = __scoped_atomic_compare_exchange_n(
+      reinterpret_cast<U*>(obj), &expected_bits, atomic_bit_cast<U>(desired), false,
+      static_cast<int>(success), static_cast<int>(failure), static_cast<int>(scope));
   expected = atomic_bit_cast<T>(expected_bits);
   return result;
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-T fetch_add(T* obj, type_identity_t<T> arg) {
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ T fetch_add(T* obj, type_identity_t<T> arg) {
   // __scoped_atomic_fetch_add does not scale the addend by sizeof(T) for
   // pointer types (unlike __hip_atomic_fetch_add), so pointer atomics would
   // silently change behavior. Reject them until a scaled path is needed.
-  static_assert(!std::is_pointer_v<T>,
-                "atomic::fetch_add does not support pointer element types");
-  return __scoped_atomic_fetch_add(obj, arg, static_cast<int>(order),
-                                   static_cast<int>(scope));
+  static_assert(!std::is_pointer_v<T>, "atomic::fetch_add does not support pointer element types");
+  return __scoped_atomic_fetch_add(obj, arg, static_cast<int>(order), static_cast<int>(scope));
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-T fetch_sub(T* obj, type_identity_t<T> arg) {
-  static_assert(!std::is_pointer_v<T>,
-                "atomic::fetch_sub does not support pointer element types");
-  return __scoped_atomic_fetch_sub(obj, arg, static_cast<int>(order),
-                                   static_cast<int>(scope));
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ T fetch_sub(T* obj, type_identity_t<T> arg) {
+  static_assert(!std::is_pointer_v<T>, "atomic::fetch_sub does not support pointer element types");
+  return __scoped_atomic_fetch_sub(obj, arg, static_cast<int>(order), static_cast<int>(scope));
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-T fetch_and(T* obj, type_identity_t<T> arg) {
-  return __scoped_atomic_fetch_and(obj, arg, static_cast<int>(order),
-                                   static_cast<int>(scope));
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ T fetch_and(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_and(obj, arg, static_cast<int>(order), static_cast<int>(scope));
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-T fetch_or(T* obj, type_identity_t<T> arg) {
-  return __scoped_atomic_fetch_or(obj, arg, static_cast<int>(order),
-                                  static_cast<int>(scope));
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ T fetch_or(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_or(obj, arg, static_cast<int>(order), static_cast<int>(scope));
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-T fetch_xor(T* obj, type_identity_t<T> arg) {
-  return __scoped_atomic_fetch_xor(obj, arg, static_cast<int>(order),
-                                   static_cast<int>(scope));
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ T fetch_xor(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_xor(obj, arg, static_cast<int>(order), static_cast<int>(scope));
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-T fetch_max(T* obj, type_identity_t<T> arg) {
-  return __scoped_atomic_fetch_max(obj, arg, static_cast<int>(order),
-                                   static_cast<int>(scope));
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ T fetch_max(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_max(obj, arg, static_cast<int>(order), static_cast<int>(scope));
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst, typename T>
-__host__ __device__
-T fetch_min(T* obj, type_identity_t<T> arg) {
-  return __scoped_atomic_fetch_min(obj, arg, static_cast<int>(order),
-                                   static_cast<int>(scope));
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst,
+          typename T>
+__host__ __device__ T fetch_min(T* obj, type_identity_t<T> arg) {
+  return __scoped_atomic_fetch_min(obj, arg, static_cast<int>(order), static_cast<int>(scope));
 }
 
-template <memory_scope scope = memory_scope::system,
-          memory_order order = memory_order::seq_cst>
+template <memory_scope scope = memory_scope::system, memory_order order = memory_order::seq_cst>
 __device__ __forceinline__ void threadfence() {
-  __scoped_atomic_thread_fence(static_cast<int>(order),
-                               static_cast<int>(scope));
+  __scoped_atomic_thread_fence(static_cast<int>(order), static_cast<int>(scope));
 }
 
-} // namespace atomic
-} // namespace detail
+}  // namespace atomic
+}  // namespace detail
 
 namespace atomic = detail::atomic;
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_ATOMIC_HPP_

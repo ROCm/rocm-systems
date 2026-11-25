@@ -39,16 +39,15 @@ class SignalingOperationsTester : public Tester {
  protected:
   virtual void resetBuffers(size_t size) override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void verifyResults(size_t size) override;
 
   int sig_op;
-  char *s_buf = nullptr;
-  char *r_buf = nullptr;
-  uint64_t *sig_addr;
-  uint64_t *fetched_value;
+  char* s_buf = nullptr;
+  char* r_buf = nullptr;
+  uint64_t* sig_addr;
+  uint64_t* fetched_value;
 };
 
 #endif

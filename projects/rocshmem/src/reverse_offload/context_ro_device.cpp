@@ -44,13 +44,9 @@
 
 namespace rocshmem {
 
-__host__ ROContext::ROContext(Backend *b,
-                              size_t block_id,
-                              bool default_ctx)
-    : Context(b),
-      is_default_ctx{default_ctx} {
-
-  ROBackend *backend{static_cast<ROBackend *>(b)};
+__host__ ROContext::ROContext(Backend* b, size_t block_id, bool default_ctx)
+    : Context(b), is_default_ctx{default_ctx} {
+  ROBackend* backend{static_cast<ROBackend*>(b)};
   if (is_default_ctx) {
     block_handle = backend->default_block_handle_proxy_.get();
   } else {
@@ -61,57 +57,49 @@ __host__ ROContext::ROContext(Backend *b,
 
   ipcImpl_.initFrom(b->ipcImpl);
   ipcImpl_.assignSdmaChannel(block_id);
-
 }
 
-__device__ void ROContext::putmem(void *dest, const void *source, size_t nelems,
-                                  int pe) {
+__device__ void ROContext::putmem(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    uint64_t L_offset =
-        reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy<MemcpyKind::PutBlocking>(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                     const_cast<void *>(source), nelems, local_pe);
+                                              const_cast<void*>(source), nelems, local_pe);
   } else {
     bool must_send_message = wf_coal_.coalesce(pe, source, dest, &nelems);
     if (!must_send_message) {
       return;
     }
-    build_queue_element(RO_NET_PUT, dest, const_cast<void *>(source), nelems,
-                        pe, 0, 0, 0, nullptr, nullptr, NULL,
-                        ro_net_win_id, block_handle, true, get_status_flag(),
+    build_queue_element(RO_NET_PUT, dest, const_cast<void*>(source), nelems, pe, 0, 0, 0, nullptr,
+                        nullptr, NULL, ro_net_win_id, block_handle, true, get_status_flag(),
                         is_default_ctx);
   }
 }
 
-__device__ void ROContext::getmem(void *dest, const void *source, size_t nelems,
-                                  int pe) {
+__device__ void ROContext::getmem(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    const char *src_typed = reinterpret_cast<const char *>(source);
-    uint64_t L_offset =
-        const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
+    const char* src_typed = reinterpret_cast<const char*>(source);
+    uint64_t L_offset     = const_cast<char*>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy<MemcpyKind::GetBlocking>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems,
+                                              local_pe);
   } else {
     bool must_send_message = wf_coal_.coalesce(pe, source, dest, &nelems);
     if (!must_send_message) {
       return;
     }
-    build_queue_element(RO_NET_GET, dest, const_cast<void *>(source), nelems,
-                        pe, 0, 0, 0, nullptr, nullptr, NULL,
-                        ro_net_win_id, block_handle, true, get_status_flag(),
+    build_queue_element(RO_NET_GET, dest, const_cast<void*>(source), nelems, pe, 0, 0, 0, nullptr,
+                        nullptr, NULL, ro_net_win_id, block_handle, true, get_status_flag(),
                         is_default_ctx);
   }
 }
 
-__device__ void ROContext::putmem_nbi(void *dest, const void *source,
-                                      size_t nelems, int pe) {
+__device__ void ROContext::putmem_nbi(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    uint64_t L_offset =
-        reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                     const_cast<void *>(source), nelems, local_pe);
+                                      const_cast<void*>(source), nelems, local_pe);
   } else {
     bool must_send_message = wf_coal_.coalesce(pe, source, dest, &nelems);
     if (!must_send_message) {
@@ -121,14 +109,13 @@ __device__ void ROContext::putmem_nbi(void *dest, const void *source,
   }
 }
 
-__device__ void ROContext::getmem_nbi(void *dest, const void *source,
-                                      size_t nelems, int pe) {
+__device__ void ROContext::getmem_nbi(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    const char *src_typed = reinterpret_cast<const char *>(source);
-    uint64_t L_offset =
-        const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
+    const char* src_typed = reinterpret_cast<const char*>(source);
+    uint64_t L_offset     = const_cast<char*>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems,
+                                      local_pe);
   } else {
     bool must_send_message = wf_coal_.coalesce(pe, source, dest, &nelems);
     if (!must_send_message) {
@@ -138,10 +125,10 @@ __device__ void ROContext::getmem_nbi(void *dest, const void *source,
   }
 }
 
-__device__ void ROContext::post_network_nbi(ro_net_cmds cmd, void *dest, const void *source, size_t nelems,
-                                            int pe) {
-  build_queue_element(cmd, dest, const_cast<void *>(source), nelems, pe, 0, 0, 0, nullptr, nullptr, NULL,
-                      ro_net_win_id, block_handle, false);
+__device__ void ROContext::post_network_nbi(ro_net_cmds cmd, void* dest, const void* source,
+                                            size_t nelems, int pe) {
+  build_queue_element(cmd, dest, const_cast<void*>(source), nelems, pe, 0, 0, 0, nullptr, nullptr,
+                      NULL, ro_net_win_id, block_handle, false);
   // Each lane's element is already published by build_queue_element, so one release bump covers the wave.
   if (elect_queue_lane()) {
     atomic::fetch_add<atomic::memory_scope::device, atomic::memory_order::release>(
@@ -179,9 +166,8 @@ __device__ void ROContext::fence([[maybe_unused]] int pe) {
 __device__ void ROContext::quiet() {
   uint64_t posted{atomic::load<atomic::memory_scope::device, atomic::memory_order::acquire>(
       &block_handle->nbi_posted)};
-  build_queue_element(RO_NET_QUIET, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                      nullptr, NULL, ro_net_win_id, block_handle,
-                      true, get_status_flag(), is_default_ctx);
+  build_queue_element(RO_NET_QUIET, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, NULL,
+                      ro_net_win_id, block_handle, true, get_status_flag(), is_default_ctx);
   record_nbi_fenced(posted);
   ipcImpl_.ipcQuiet();
 }
@@ -191,162 +177,148 @@ __device__ void ROContext::pe_quiet([[maybe_unused]] size_t pe) {
   quiet();
 }
 
-__device__ void *ROContext::shmem_ptr(const void *dest, int pe) {
-  void *ret = nullptr;
+__device__ void* ROContext::shmem_ptr(const void* dest, int pe) {
+  void* ret = nullptr;
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    void *dst = const_cast<void *>(dest);
-    uint64_t L_offset =
-        reinterpret_cast<char *>(dst) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ret = ipcImpl_.ipc_bases[local_pe] + L_offset;
+    void* dst         = const_cast<void*>(dest);
+    uint64_t L_offset = reinterpret_cast<char*>(dst) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ret               = ipcImpl_.ipc_bases[local_pe] + L_offset;
   }
   return ret;
 }
 
 __device__ void ROContext::barrier_all() {
-  build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0,
-                      nullptr, nullptr, NULL, ro_net_win_id,
-                      block_handle, true, get_status_flag(), is_default_ctx);
+  build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, NULL,
+                      ro_net_win_id, block_handle, true, get_status_flag(), is_default_ctx);
 }
 
 __device__ void ROContext::barrier_all_wave() {
   if (is_thread_zero_in_wave()) {
-    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0,
-                        nullptr, nullptr, NULL, ro_net_win_id,
-                        block_handle, true, get_status_flag(), is_default_ctx);
+    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, NULL,
+                        ro_net_win_id, block_handle, true, get_status_flag(), is_default_ctx);
   }
 }
 
 __device__ void ROContext::barrier_all_wg() {
   if (is_thread_zero_in_block()) {
-    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0,
-                        nullptr, nullptr, NULL, ro_net_win_id,
-                        block_handle, true, get_status_flag(), is_default_ctx);
+    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, NULL,
+                        ro_net_win_id, block_handle, true, get_status_flag(), is_default_ctx);
   }
   __syncthreads();
 }
 
 __device__ void ROContext::barrier(rocshmem_team_t team) {
-  ROTeam *team_obj = reinterpret_cast<ROTeam *>(team);
-  build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                      nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
-                      true, get_status_flag(), is_default_ctx);
+  ROTeam* team_obj = reinterpret_cast<ROTeam*>(team);
+  build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr,
+                      (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                      get_status_flag(), is_default_ctx);
 }
 
 __device__ void ROContext::barrier_wave(rocshmem_team_t team) {
-  ROTeam *team_obj = reinterpret_cast<ROTeam *>(team);
+  ROTeam* team_obj = reinterpret_cast<ROTeam*>(team);
   if (is_thread_zero_in_wave()) {
-    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                        nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
-                        true, get_status_flag(), is_default_ctx);
+    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr,
+                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                        get_status_flag(), is_default_ctx);
   }
 }
 
 __device__ void ROContext::barrier_wg(rocshmem_team_t team) {
-  ROTeam *team_obj = reinterpret_cast<ROTeam *>(team);
+  ROTeam* team_obj = reinterpret_cast<ROTeam*>(team);
   if (is_thread_zero_in_block()) {
-    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                        nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
-                        true, get_status_flag(), is_default_ctx);
+    build_queue_element(RO_NET_BARRIER, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr,
+                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                        get_status_flag(), is_default_ctx);
   }
   __syncthreads();
 }
 
 __device__ void ROContext::sync_all() {
-  build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0,
-                      nullptr, nullptr, NULL, ro_net_win_id,
-                      block_handle, true, get_status_flag(), is_default_ctx);
+  build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, NULL,
+                      ro_net_win_id, block_handle, true, get_status_flag(), is_default_ctx);
 }
 
 __device__ void ROContext::sync_all_wave() {
   if (is_thread_zero_in_wave()) {
-    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0,
-                        nullptr, nullptr, NULL, ro_net_win_id,
-                        block_handle, true, get_status_flag(), is_default_ctx);
+    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, NULL,
+                        ro_net_win_id, block_handle, true, get_status_flag(), is_default_ctx);
   }
 }
 
 __device__ void ROContext::sync_all_wg() {
   if (is_thread_zero_in_block()) {
-    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0,
-                        nullptr, nullptr, NULL, ro_net_win_id,
-                        block_handle, true, get_status_flag(), is_default_ctx);
+    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, NULL,
+                        ro_net_win_id, block_handle, true, get_status_flag(), is_default_ctx);
   }
   __syncthreads();
 }
 
 __device__ void ROContext::sync(rocshmem_team_t team) {
-  ROTeam *team_obj = reinterpret_cast<ROTeam *>(team);
-  build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                      nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
-                      true, get_status_flag(), is_default_ctx);
+  ROTeam* team_obj = reinterpret_cast<ROTeam*>(team);
+  build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr,
+                      (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                      get_status_flag(), is_default_ctx);
 }
 
 __device__ void ROContext::sync_wave(rocshmem_team_t team) {
-  ROTeam *team_obj = reinterpret_cast<ROTeam *>(team);
+  ROTeam* team_obj = reinterpret_cast<ROTeam*>(team);
   if (is_thread_zero_in_wave()) {
-    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                        nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
-                        true, get_status_flag(), is_default_ctx);
+    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr,
+                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                        get_status_flag(), is_default_ctx);
   }
 }
 
 __device__ void ROContext::sync_wg(rocshmem_team_t team) {
-  ROTeam *team_obj = reinterpret_cast<ROTeam *>(team);
+  ROTeam* team_obj = reinterpret_cast<ROTeam*>(team);
   if (is_thread_zero_in_block()) {
-    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                        nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle,
-                        true, get_status_flag(), is_default_ctx);
+    build_queue_element(RO_NET_SYNC, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr,
+                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
+                        get_status_flag(), is_default_ctx);
   }
   __syncthreads();
 }
 
-__device__ void ROContext::putmem_wg(void *dest, const void *source,
-                                     size_t nelems, int pe) {
+__device__ void ROContext::putmem_wg(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    uint64_t L_offset =
-        reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy_wg<MemcpyKind::PutBlocking>(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                        const_cast<void *>(source), nelems, local_pe);
+                                                 const_cast<void*>(source), nelems, local_pe);
   } else {
     if (is_thread_zero_in_block()) {
-      build_queue_element(RO_NET_PUT, dest, const_cast<void *>(source), nelems,
-                          pe, 0, 0, 0, nullptr, nullptr, NULL,
-                          ro_net_win_id, block_handle, true, get_status_flag(),
+      build_queue_element(RO_NET_PUT, dest, const_cast<void*>(source), nelems, pe, 0, 0, 0, nullptr,
+                          nullptr, NULL, ro_net_win_id, block_handle, true, get_status_flag(),
                           is_default_ctx);
     }
   }
   __syncthreads();
 }
 
-__device__ void ROContext::getmem_wg(void *dest, const void *source,
-                                     size_t nelems, int pe) {
+__device__ void ROContext::getmem_wg(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    const char *src_typed = reinterpret_cast<const char *>(source);
-    uint64_t L_offset =
-        const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
+    const char* src_typed = reinterpret_cast<const char*>(source);
+    uint64_t L_offset     = const_cast<char*>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy_wg<MemcpyKind::GetBlocking>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset,
+                                                 nelems, local_pe);
   } else {
     if (is_thread_zero_in_block()) {
-      build_queue_element(RO_NET_GET, dest, const_cast<void *>(source), nelems,
-                          pe, 0, 0, 0, nullptr, nullptr, NULL,
-                          ro_net_win_id, block_handle, true, get_status_flag(),
+      build_queue_element(RO_NET_GET, dest, const_cast<void*>(source), nelems, pe, 0, 0, 0, nullptr,
+                          nullptr, NULL, ro_net_win_id, block_handle, true, get_status_flag(),
                           is_default_ctx);
     }
   }
   __syncthreads();
 }
 
-__device__ void ROContext::putmem_nbi_wg(void *dest, const void *source,
-                                         size_t nelems, int pe) {
+__device__ void ROContext::putmem_nbi_wg(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    uint64_t L_offset =
-        reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy_wg<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                        const_cast<void *>(source), nelems, local_pe);
+                                         const_cast<void*>(source), nelems, local_pe);
   } else {
     if (is_thread_zero_in_block()) {
       post_network_nbi(RO_NET_PUT_NBI, dest, source, nelems, pe);
@@ -355,14 +327,13 @@ __device__ void ROContext::putmem_nbi_wg(void *dest, const void *source,
   __syncthreads();
 }
 
-__device__ void ROContext::getmem_nbi_wg(void *dest, const void *source,
-                                         size_t nelems, int pe) {
+__device__ void ROContext::getmem_nbi_wg(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    const char *src_typed = reinterpret_cast<const char *>(source);
-    uint64_t L_offset =
-        const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ipcImpl_.ipcCopy_wg<MemcpyKind::Get>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems, local_pe);
+    const char* src_typed = reinterpret_cast<const char*>(source);
+    uint64_t L_offset     = const_cast<char*>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy_wg<MemcpyKind::Get>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems,
+                                         local_pe);
   } else {
     if (is_thread_zero_in_block()) {
       post_network_nbi(RO_NET_GET_NBI, dest, source, nelems, pe);
@@ -371,51 +342,43 @@ __device__ void ROContext::getmem_nbi_wg(void *dest, const void *source,
   __syncthreads();
 }
 
-__device__ void ROContext::putmem_wave(void *dest, const void *source,
-                                       size_t nelems, int pe) {
+__device__ void ROContext::putmem_wave(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    uint64_t L_offset =
-        reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy_wave<MemcpyKind::PutBlocking>(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                          const_cast<void *>(source), nelems, local_pe);
+                                                   const_cast<void*>(source), nelems, local_pe);
   } else {
     if (is_thread_zero_in_wave()) {
-      build_queue_element(RO_NET_PUT, dest, const_cast<void *>(source), nelems,
-                          pe, 0, 0, 0, nullptr, nullptr, NULL,
-                          ro_net_win_id, block_handle, true, get_status_flag(),
+      build_queue_element(RO_NET_PUT, dest, const_cast<void*>(source), nelems, pe, 0, 0, 0, nullptr,
+                          nullptr, NULL, ro_net_win_id, block_handle, true, get_status_flag(),
                           is_default_ctx);
     }
   }
 }
 
-__device__ void ROContext::getmem_wave(void *dest, const void *source,
-                                       size_t nelems, int pe) {
+__device__ void ROContext::getmem_wave(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    const char *src_typed = reinterpret_cast<const char *>(source);
-    uint64_t L_offset =
-        const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    const char* src_typed = reinterpret_cast<const char*>(source);
+    uint64_t L_offset     = const_cast<char*>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy_wave<MemcpyKind::GetBlocking>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset,
-                          nelems, local_pe);
+                                                   nelems, local_pe);
   } else {
     if (is_thread_zero_in_wave()) {
-      build_queue_element(RO_NET_GET, dest, const_cast<void *>(source), nelems,
-                          pe, 0, 0, 0, nullptr, nullptr, NULL,
-                          ro_net_win_id, block_handle, true, get_status_flag(),
+      build_queue_element(RO_NET_GET, dest, const_cast<void*>(source), nelems, pe, 0, 0, 0, nullptr,
+                          nullptr, NULL, ro_net_win_id, block_handle, true, get_status_flag(),
                           is_default_ctx);
     }
   }
 }
 
-__device__ void ROContext::putmem_nbi_wave(void *dest, const void *source,
-                                           size_t nelems, int pe) {
+__device__ void ROContext::putmem_nbi_wave(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    uint64_t L_offset =
-        reinterpret_cast<char *>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    uint64_t L_offset = reinterpret_cast<char*>(dest) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
     ipcImpl_.ipcCopy_wave<MemcpyKind::Put>(ipcImpl_.ipc_bases[local_pe] + L_offset,
-                          const_cast<void *>(source), nelems, local_pe);
+                                           const_cast<void*>(source), nelems, local_pe);
   } else {
     if (is_thread_zero_in_wave()) {
       post_network_nbi(RO_NET_PUT_NBI, dest, source, nelems, pe);
@@ -423,15 +386,13 @@ __device__ void ROContext::putmem_nbi_wave(void *dest, const void *source,
   }
 }
 
-__device__ void ROContext::getmem_nbi_wave(void *dest, const void *source,
-                                           size_t nelems, int pe) {
+__device__ void ROContext::getmem_nbi_wave(void* dest, const void* source, size_t nelems, int pe) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
-    const char *src_typed = reinterpret_cast<const char *>(source);
-    uint64_t L_offset =
-        const_cast<char *>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
-    ipcImpl_.ipcCopy_wave<MemcpyKind::Get>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset,
-                          nelems, local_pe);
+    const char* src_typed = reinterpret_cast<const char*>(source);
+    uint64_t L_offset     = const_cast<char*>(src_typed) - ipcImpl_.ipc_bases[ipcImpl_.shm_rank];
+    ipcImpl_.ipcCopy_wave<MemcpyKind::Get>(dest, ipcImpl_.ipc_bases[local_pe] + L_offset, nelems,
+                                           local_pe);
   } else {
     if (is_thread_zero_in_wave()) {
       post_network_nbi(RO_NET_GET_NBI, dest, source, nelems, pe);
@@ -439,27 +400,26 @@ __device__ void ROContext::getmem_nbi_wave(void *dest, const void *source,
   }
 }
 
-__device__ void ROContext::putmem_signal(void *dest, const void *source, size_t nelems,
-                                         uint64_t *sig_addr, uint64_t signal, int sig_op,
-                                         int pe) {
+__device__ void ROContext::putmem_signal(void* dest, const void* source, size_t nelems,
+                                         uint64_t* sig_addr, uint64_t signal, int sig_op, int pe) {
   putmem(dest, source, nelems, pe);
   fence();
 
   switch (sig_op) {
-    case ROCSHMEM_SIGNAL_SET:
-      amo_set<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
-      break;
-    case ROCSHMEM_SIGNAL_ADD:
-      amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
-      break;
-    default:
-      LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
-      break;
+  case ROCSHMEM_SIGNAL_SET:
+    amo_set<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
+    break;
+  case ROCSHMEM_SIGNAL_ADD:
+    amo_add<uint64_t>(static_cast<void*>(sig_addr), signal, pe);
+    break;
+  default:
+    LOGD_WARN("[%s] Invalid sig_op value (%d)", __func__, sig_op);
+    break;
   }
 }
 
-__device__ void ROContext::putmem_signal_wg(void *dest, const void *source, size_t nelems,
-                                            uint64_t *sig_addr, uint64_t signal, int sig_op,
+__device__ void ROContext::putmem_signal_wg(void* dest, const void* source, size_t nelems,
+                                            uint64_t* sig_addr, uint64_t signal, int sig_op,
                                             int pe) {
   putmem_wg(dest, source, nelems, pe);
   fence();
@@ -479,8 +439,8 @@ __device__ void ROContext::putmem_signal_wg(void *dest, const void *source, size
   }
 }
 
-__device__ void ROContext::putmem_signal_wave(void *dest, const void *source, size_t nelems,
-                                              uint64_t *sig_addr, uint64_t signal, int sig_op,
+__device__ void ROContext::putmem_signal_wave(void* dest, const void* source, size_t nelems,
+                                              uint64_t* sig_addr, uint64_t signal, int sig_op,
                                               int pe) {
   putmem_wave(dest, source, nelems, pe);
   fence();
@@ -500,43 +460,43 @@ __device__ void ROContext::putmem_signal_wave(void *dest, const void *source, si
   }
 }
 
-__device__ void ROContext::putmem_signal_nbi(void *dest, const void *source, size_t nelems,
-                                             uint64_t *sig_addr, uint64_t signal, int sig_op,
+__device__ void ROContext::putmem_signal_nbi(void* dest, const void* source, size_t nelems,
+                                             uint64_t* sig_addr, uint64_t signal, int sig_op,
                                              int pe) {
   putmem_signal(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }
 
-__device__ void ROContext::putmem_signal_nbi_wg(void *dest, const void *source, size_t nelems,
-                                                uint64_t *sig_addr, uint64_t signal, int sig_op,
+__device__ void ROContext::putmem_signal_nbi_wg(void* dest, const void* source, size_t nelems,
+                                                uint64_t* sig_addr, uint64_t signal, int sig_op,
                                                 int pe) {
   putmem_signal_wg(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }
 
-__device__ void ROContext::putmem_signal_nbi_wave(void *dest, const void *source, size_t nelems,
-                                                  uint64_t *sig_addr, uint64_t signal, int sig_op,
+__device__ void ROContext::putmem_signal_nbi_wave(void* dest, const void* source, size_t nelems,
+                                                  uint64_t* sig_addr, uint64_t signal, int sig_op,
                                                   int pe) {
   putmem_signal_wave(dest, source, nelems, sig_addr, signal, sig_op, pe);
 }
 
-__device__ uint64_t ROContext::signal_fetch(const uint64_t *sig_addr) {
-  uint64_t *dst = const_cast<uint64_t*>(sig_addr);
+__device__ uint64_t ROContext::signal_fetch(const uint64_t* sig_addr) {
+  uint64_t* dst = const_cast<uint64_t*>(sig_addr);
   return amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, constmem.my_pe);
 }
 
-__device__ uint64_t ROContext::signal_fetch_wg(const uint64_t *sig_addr) {
+__device__ uint64_t ROContext::signal_fetch_wg(const uint64_t* sig_addr) {
   if (is_thread_zero_in_block()) {
-    uint64_t *dst = const_cast<uint64_t*>(sig_addr);
+    uint64_t* dst     = const_cast<uint64_t*>(sig_addr);
     wg_signal_scratch = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, constmem.my_pe);
   }
   __syncthreads();
   return wg_signal_scratch;
 }
 
-__device__ uint64_t ROContext::signal_fetch_wave(const uint64_t *sig_addr) {
+__device__ uint64_t ROContext::signal_fetch_wave(const uint64_t* sig_addr) {
   uint64_t value = 0;
   if (is_thread_zero_in_wave()) {
-    uint64_t *dst = const_cast<uint64_t*>(sig_addr);
-    value = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, constmem.my_pe);
+    uint64_t* dst = const_cast<uint64_t*>(sig_addr);
+    value         = amo_fetch_add<uint64_t>(static_cast<void*>(dst), 0, constmem.my_pe);
   }
   __threadfence_block();
   value = __shfl(value, 0);
@@ -561,7 +521,7 @@ __device__ uint64_t active_logical_lane_id() {
 __device__ uint64_t broadcast_lds(bool lowest_active, uint64_t value) {
   constexpr size_t SIZE = 1024 / WF_SIZE;
   __shared__ uint64_t value_per_warp[SIZE];
-  auto wavefront_number {get_flat_block_id() / WF_SIZE};
+  auto wavefront_number{get_flat_block_id() / WF_SIZE};
   if (lowest_active) {
     value_per_warp[wavefront_number] = value;
     __threadfence_block();
@@ -589,9 +549,8 @@ __device__ void ROContext::proxy_fence() {
     // Read before posting: the fence then covers every NBI element counted in this value.
     uint64_t posted{atomic::load<atomic::memory_scope::device, atomic::memory_order::acquire>(
         &block_handle->nbi_posted)};
-    build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr,
-                        nullptr, NULL, ro_net_win_id, block_handle,
-                        true, get_status_flag(), is_default_ctx);
+    build_queue_element(RO_NET_FENCE, nullptr, nullptr, 0, 0, 0, 0, 0, nullptr, nullptr, NULL,
+                        ro_net_win_id, block_handle, true, get_status_flag(), is_default_ctx);
     record_nbi_fenced(posted);
   }
 }
@@ -603,34 +562,35 @@ __device__ void ROContext::record_nbi_fenced(uint64_t posted) {
 }
 
 __device__ int ROContext::broadcastmem_wave([[maybe_unused]] rocshmem_team_t team,
-                                        [[maybe_unused]] void *dest,
-                                        [[maybe_unused]] const void* source,
-                                        [[maybe_unused]] int nelems,
-                                        [[maybe_unused]] int PE_root) {
+                                            [[maybe_unused]] void* dest,
+                                            [[maybe_unused]] const void* source,
+                                            [[maybe_unused]] int nelems,
+                                            [[maybe_unused]] int PE_root) {
   LOGD_WARN("Broadcastmem Wave API not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
 }
 
-__device__ bool enough_space(BlockHandle *h, uint64_t required) {
+__device__ bool enough_space(BlockHandle* h, uint64_t required) {
   return (h->queue_size - (h->write_index - h->read_index)) >= required;
 }
 
-__device__ void acquire_lock(BlockHandle *handle) {
-  while(atomicCAS((uint64_t *)&handle->lock, 0, 1) == 1) ;
+__device__ void acquire_lock(BlockHandle* handle) {
+  while (atomicCAS((uint64_t*)&handle->lock, 0, 1) == 1)
+    ;
 }
 
-__device__ void release_lock(BlockHandle *handle) {
+__device__ void release_lock(BlockHandle* handle) {
   handle->lock = 0;
   __threadfence();
 }
 
-__device__ void wait_until_space_available(BlockHandle *handle, uint64_t required) {
+__device__ void wait_until_space_available(BlockHandle* handle, uint64_t required) {
   while (!enough_space(handle, required)) {
     refresh_volatile_dwordx2(&handle->read_index, handle->host_read_index);
   }
 }
 
-__device__ uint64_t next_write_slot_o_o_o(BlockHandle *handle) {
+__device__ uint64_t next_write_slot_o_o_o(BlockHandle* handle) {
   uint64_t write_slot{0};
   wait_until_space_available(handle, 1);
   write_slot = handle->write_index;
@@ -639,11 +599,11 @@ __device__ uint64_t next_write_slot_o_o_o(BlockHandle *handle) {
   return write_slot % handle->queue_size;
 }
 
-__device__ uint64_t next_write_slot_o_o_m(BlockHandle *handle) {
+__device__ uint64_t next_write_slot_o_o_m(BlockHandle* handle) {
   auto num_active_lanes{number_active_lanes()};
   uint64_t write_slot{0};
-  auto my_active_lane_id {active_logical_lane_id()};
-  bool is_lowest_active_lane {my_active_lane_id == 0};
+  auto my_active_lane_id{active_logical_lane_id()};
+  bool is_lowest_active_lane{my_active_lane_id == 0};
   if (is_lowest_active_lane) {
     wait_until_space_available(handle, num_active_lanes);
     write_slot = handle->write_index;
@@ -655,7 +615,7 @@ __device__ uint64_t next_write_slot_o_o_m(BlockHandle *handle) {
   return write_slot % handle->queue_size;
 }
 
-__device__ uint64_t next_write_slot_o_m_o(BlockHandle *handle) {
+__device__ uint64_t next_write_slot_o_m_o(BlockHandle* handle) {
   uint64_t write_slot{0};
   acquire_lock(handle);
   wait_until_space_available(handle, 1);
@@ -666,11 +626,11 @@ __device__ uint64_t next_write_slot_o_m_o(BlockHandle *handle) {
   return write_slot % handle->queue_size;
 }
 
-__device__ uint64_t next_write_slot_o_m_m(BlockHandle *handle) {
+__device__ uint64_t next_write_slot_o_m_m(BlockHandle* handle) {
   auto num_active_lanes{number_active_lanes()};
   uint64_t write_slot{0};
-  auto my_active_lane_id {active_logical_lane_id()};
-  bool is_lowest_active_lane {my_active_lane_id == 0};
+  auto my_active_lane_id{active_logical_lane_id()};
+  bool is_lowest_active_lane{my_active_lane_id == 0};
   if (is_lowest_active_lane) {
     acquire_lock(handle);
     wait_until_space_available(handle, num_active_lanes);
@@ -684,28 +644,28 @@ __device__ uint64_t next_write_slot_o_m_m(BlockHandle *handle) {
   return write_slot % handle->queue_size;
 }
 
-__device__ uint64_t next_write_slot(BlockHandle *handle) {
-//  return next_write_slot_o_o_o(handle);
-//  return next_write_slot_o_o_m(handle);
-//  return next_write_slot_o_m_o(handle);
+__device__ uint64_t next_write_slot(BlockHandle* handle) {
+  //  return next_write_slot_o_o_o(handle);
+  //  return next_write_slot_o_o_m(handle);
+  //  return next_write_slot_o_m_o(handle);
   return next_write_slot_o_m_m(handle);
 }
 
-__device__ void build_queue_element(
-    ro_net_cmds type, void *dst, void *src, size_t size, int pe,
-    [[maybe_unused]] int logPE_stride, [[maybe_unused]] int PE_size, int PE_root, void *pWrk, [[maybe_unused]] long *pSync,
-    intptr_t team_comm, int ro_net_win_id, BlockHandle *handle,
-    bool blocking, volatile char *status, bool default_ctx, ROCSHMEM_OP op,
-    ro_net_types datatype) {
+__device__ void build_queue_element(ro_net_cmds type, void* dst, void* src, size_t size, int pe,
+                                    [[maybe_unused]] int logPE_stride, [[maybe_unused]] int PE_size,
+                                    int PE_root, void* pWrk, [[maybe_unused]] long* pSync,
+                                    intptr_t team_comm, int ro_net_win_id, BlockHandle* handle,
+                                    bool blocking, volatile char* status, bool default_ctx,
+                                    ROCSHMEM_OP op, ro_net_types datatype) {
   auto write_slot{next_write_slot(handle)};
   auto queue_element = &handle->queue[write_slot];
 
-  queue_element->type = type;
-  queue_element->PE = pe;
-  queue_element->ol1.size = size;
-  queue_element->dst = dst;
+  queue_element->type          = type;
+  queue_element->PE            = pe;
+  queue_element->ol1.size      = size;
+  queue_element->dst           = dst;
   queue_element->ro_net_win_id = ro_net_win_id;
-  if(blocking) {
+  if (blocking) {
     queue_element->status = status;
   }
 
@@ -716,7 +676,7 @@ __device__ void build_queue_element(
   }
 
   if (type == RO_NET_AMO_FOP) {
-    queue_element->op = op;
+    queue_element->op       = op;
     queue_element->datatype = datatype;
   }
   if (type == RO_NET_AMO_FCAS) {
@@ -724,29 +684,29 @@ __device__ void build_queue_element(
     queue_element->datatype = datatype;
   }
   if (type == RO_NET_TEAM_REDUCE) {
-    queue_element->op = op;
-    queue_element->datatype = datatype;
+    queue_element->op        = op;
+    queue_element->datatype  = datatype;
     queue_element->team_comm = team_comm;
   }
   if (type == RO_NET_TEAM_REDUCE_SCATTER) {
-    queue_element->op = op;
-    queue_element->datatype = datatype;
+    queue_element->op        = op;
+    queue_element->datatype  = datatype;
     queue_element->team_comm = team_comm;
   }
   if (type == RO_NET_TEAM_BROADCAST) {
-    queue_element->PE_root = PE_root;
-    queue_element->datatype = datatype;
+    queue_element->PE_root   = PE_root;
+    queue_element->datatype  = datatype;
     queue_element->team_comm = team_comm;
   }
   if (type == RO_NET_ALLTOALL) {
-    queue_element->datatype = datatype;
+    queue_element->datatype  = datatype;
     queue_element->team_comm = team_comm;
-    queue_element->ol2.pWrk = pWrk;
+    queue_element->ol2.pWrk  = pWrk;
   }
   if (type == RO_NET_FCOLLECT) {
-    queue_element->datatype = datatype;
+    queue_element->datatype  = datatype;
     queue_element->team_comm = team_comm;
-    queue_element->ol2.pWrk = pWrk;
+    queue_element->ol2.pWrk  = pWrk;
   }
   if (type == RO_NET_SYNC) {
     queue_element->team_comm = team_comm;
@@ -776,39 +736,35 @@ __device__ void build_queue_element(
   }
 }
 
-__device__ uint64_t *ROContext::get_atomic_ret_buf() {
-  uint64_t *buf_addr{nullptr};
-  if(is_default_ctx) {
+__device__ uint64_t* ROContext::get_atomic_ret_buf() {
+  uint64_t* buf_addr{nullptr};
+  if (is_default_ctx) {
     buf_addr = block_handle->default_ctx_atomic_ret->dequeue();
-  }
-  else {
-    uint64_t *atomic_base_ptr{
-      reinterpret_cast<uint64_t*>(block_handle->atomic_ret)};
+  } else {
+    uint64_t* atomic_base_ptr{reinterpret_cast<uint64_t*>(block_handle->atomic_ret)};
     int thread_id{get_flat_block_id()};
     buf_addr = &atomic_base_ptr[thread_id];
   }
   return buf_addr;
 }
 
-__device__ uint64_t *ROContext::get_g_ret_buf() {
-  uint64_t *buf_addr{nullptr};
-  if(is_default_ctx) {
+__device__ uint64_t* ROContext::get_g_ret_buf() {
+  uint64_t* buf_addr{nullptr};
+  if (is_default_ctx) {
     buf_addr = block_handle->default_ctx_g_ret->dequeue();
-  }
-  else {
-    uint64_t *g_ret{reinterpret_cast<uint64_t*>(block_handle->g_ret)};
+  } else {
+    uint64_t* g_ret{reinterpret_cast<uint64_t*>(block_handle->g_ret)};
     int thread_id{get_flat_block_id()};
     buf_addr = &g_ret[thread_id];
   }
   return buf_addr;
 }
 
-__device__ volatile char *ROContext::get_status_flag() {
-  volatile char *status_addr{nullptr};
-  if(is_default_ctx) {
+__device__ volatile char* ROContext::get_status_flag() {
+  volatile char* status_addr{nullptr};
+  if (is_default_ctx) {
     status_addr = block_handle->default_ctx_status->dequeue();
-  }
-  else {
+  } else {
     volatile char* status{block_handle->status};
     int thread_id{get_flat_block_id()};
     status_addr = &status[thread_id];
@@ -816,15 +772,14 @@ __device__ volatile char *ROContext::get_status_flag() {
   return status_addr;
 }
 
-__device__ void ROContext::alltoallmem_wg(rocshmem_team_t team, void *dest,
-                                    const void *source, int nelems) {
+__device__ void ROContext::alltoallmem_wg(rocshmem_team_t team, void* dest, const void* source,
+                                          int nelems) {
   if (is_thread_zero_in_block()) {
-    ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+    ROTeam* team_obj{reinterpret_cast<ROTeam*>(team)};
 
-    build_queue_element(RO_NET_ALLTOALL, dest, const_cast<void *>(source), nelems, 0,
-                        0, 0, 0, team_obj->ata_buffer, nullptr,
-                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
-                        get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+    build_queue_element(RO_NET_ALLTOALL, dest, const_cast<void*>(source), nelems, 0, 0, 0, 0,
+                        team_obj->ata_buffer, nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id,
+                        block_handle, true, get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
                         RO_NET_CHAR);
   }
   __syncthreads();
@@ -833,7 +788,7 @@ __device__ void ROContext::alltoallmem_wg(rocshmem_team_t team, void *dest,
 __device__ int ROContext::alltoallmem_wave([[maybe_unused]] rocshmem_team_t team,
                                            [[maybe_unused]] void* dest,
                                            [[maybe_unused]] const void* source,
-                                           [[maybe_unused]] int nelems){
+                                           [[maybe_unused]] int nelems) {
   LOGD_WARN("Alltoallmem_wave not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
 }
@@ -843,20 +798,19 @@ __device__ int ROContext::alltoallmem_wave([[maybe_unused]] rocshmem_team_t team
  *****************************************************************************/
 
 __device__ int ROContext::tile_collective_wait([[maybe_unused]] rocshmem_team_t team,
-                                                [[maybe_unused]] uint64_t flags) {
+                                               [[maybe_unused]] uint64_t flags) {
   LOGD_WARN("Tile API not implemented for reverse offload backend");
   return ROCSHMEM_ERROR;
 }
 
-__device__ void ROContext::broadcastmem_wg(rocshmem_team_t team, void *dest,
-                                     const void *source, int nelems, int pe_root) {
+__device__ void ROContext::broadcastmem_wg(rocshmem_team_t team, void* dest, const void* source,
+                                           int nelems, int pe_root) {
   if (is_thread_zero_in_block()) {
-    ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+    ROTeam* team_obj{reinterpret_cast<ROTeam*>(team)};
 
-    build_queue_element(RO_NET_TEAM_BROADCAST, dest, const_cast<void *>(source),
-                        nelems, 0, 0, 0, pe_root, nullptr, nullptr,
-                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
-                        get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+    build_queue_element(RO_NET_TEAM_BROADCAST, dest, const_cast<void*>(source), nelems, 0, 0, 0,
+                        pe_root, nullptr, nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id,
+                        block_handle, true, get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
                         RO_NET_CHAR);
   }
 
@@ -864,22 +818,21 @@ __device__ void ROContext::broadcastmem_wg(rocshmem_team_t team, void *dest,
 }
 
 __device__ int ROContext::fcollectmem_wave([[maybe_unused]] rocshmem_team_t team,
-                                            [[maybe_unused]] void *dest,
-                                            [[maybe_unused]] const void *source,
-                                            [[maybe_unused]] int nelems) {
+                                           [[maybe_unused]] void* dest,
+                                           [[maybe_unused]] const void* source,
+                                           [[maybe_unused]] int nelems) {
   LOGD_WARN("fcollectmem_wave is not available on reverse offload backend");
   return ROCSHMEM_ERROR;
 }
 
-__device__ void ROContext::fcollectmem_wg(rocshmem_team_t team, void *dest,
-                                    const void *source, int nelems) {
+__device__ void ROContext::fcollectmem_wg(rocshmem_team_t team, void* dest, const void* source,
+                                          int nelems) {
   if (is_thread_zero_in_block()) {
-    ROTeam *team_obj{reinterpret_cast<ROTeam *>(team)};
+    ROTeam* team_obj{reinterpret_cast<ROTeam*>(team)};
 
-    build_queue_element(RO_NET_FCOLLECT, dest, const_cast<void *>(source), nelems, 0,
-                        0, 0, 0, team_obj->ata_buffer, nullptr,
-                        (intptr_t)team_obj->mpi_comm, ro_net_win_id, block_handle, true,
-                        get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
+    build_queue_element(RO_NET_FCOLLECT, dest, const_cast<void*>(source), nelems, 0, 0, 0, 0,
+                        team_obj->ata_buffer, nullptr, (intptr_t)team_obj->mpi_comm, ro_net_win_id,
+                        block_handle, true, get_status_flag(), is_default_ctx, ROCSHMEM_SUM,
                         RO_NET_CHAR);
   }
 

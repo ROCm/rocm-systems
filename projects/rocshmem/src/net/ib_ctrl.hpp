@@ -51,12 +51,12 @@ struct DestInfo {
  * @brief The opened HCA/port context a backend posts through.
  */
 struct IbDevice {
-  struct ibv_context *ctx{nullptr};
-  struct ibv_pd *pd{nullptr};
+  struct ibv_context* ctx{nullptr};
+  struct ibv_pd* pd{nullptr};
   uint8_t port{1};
   int gid_index{-1};
-  union ibv_gid gid {};
-  struct ibv_port_attr port_attr {};
+  union ibv_gid gid{};
+  struct ibv_port_attr port_attr{};
   enum ibv_mtu mtu { IBV_MTU_1024 };
   bool is_roce{false};
 };
@@ -75,8 +75,8 @@ class IbCtrl {
  public:
   IbCtrl() = default;
   ~IbCtrl();
-  IbCtrl(const IbCtrl &) = delete;
-  IbCtrl &operator=(const IbCtrl &) = delete;
+  IbCtrl(const IbCtrl&)            = delete;
+  IbCtrl& operator=(const IbCtrl&) = delete;
 
   /**
    * @brief Open an HCA/port and select a GID.
@@ -85,44 +85,44 @@ class IbCtrl {
    *                 device with an ACTIVE port.
    * @param port_hint Physical port to use (default 1).
    */
-  bool open(Ibv *ibv, const char *dev_name, uint8_t port_hint = 1);
+  bool open(Ibv* ibv, const char* dev_name, uint8_t port_hint = 1);
 
   /// Create one CQ per context and one RC QP per lane; QPs left in INIT.
-  bool create_queues(const LaneMap &lm, int cq_depth, int qp_send_depth);
+  bool create_queues(const LaneMap& lm, int cq_depth, int qp_send_depth);
 
   /// Populate this PE's DestInfo for every lane (out sized to num_lanes()).
-  void fill_local_dest(std::vector<DestInfo> &out) const;
+  void fill_local_dest(std::vector<DestInfo>& out) const;
 
   /**
    * @brief Connect every non-self lane to its peer and move it to RTS.
    * @param my_pe  This PE's rank.
    * @param global All-gathered DestInfo laid out global[peer*num_lanes + lane].
    */
-  bool connect(int my_pe, const std::vector<DestInfo> &global);
+  bool connect(int my_pe, const std::vector<DestInfo>& global);
 
   /// Connect a single QP to @p remote and drive it to RTS (INIT -> RTR -> RTS).
-  bool connect_qp(int lane, const DestInfo &remote);
+  bool connect_qp(int lane, const DestInfo& remote);
 
-  struct ibv_qp *qp(int lane) const { return qps_[lane]; }
-  struct ibv_cq *cq(int ctx) const { return cqs_[ctx]; }
+  struct ibv_qp* qp(int lane) const { return qps_[lane]; }
+  struct ibv_cq* cq(int ctx) const { return cqs_[ctx]; }
   int lane_count() const { return lm_.num_lanes(); }
   uint32_t local_psn() const { return psn_; }
-  const IbDevice &dev() const { return dev_; }
+  const IbDevice& dev() const { return dev_; }
   /// Inline-data capacity the driver actually granted on the QPs (bytes).
   uint32_t max_inline_data() const { return max_inline_data_; }
 
  private:
   bool select_gid();
-  bool to_init(struct ibv_qp *qp);
-  bool to_rtr(struct ibv_qp *qp, const DestInfo &remote);
-  bool to_rts(struct ibv_qp *qp);
+  bool to_init(struct ibv_qp* qp);
+  bool to_rtr(struct ibv_qp* qp, const DestInfo& remote);
+  bool to_rts(struct ibv_qp* qp);
   void destroy();
 
-  Ibv *ibv_{nullptr};
+  Ibv* ibv_{nullptr};
   IbDevice dev_{};
   LaneMap lm_{};
-  std::vector<struct ibv_cq *> cqs_;  //!< one per context
-  std::vector<struct ibv_qp *> qps_;  //!< one per lane
+  std::vector<struct ibv_cq*> cqs_;  //!< one per context
+  std::vector<struct ibv_qp*> qps_;  //!< one per lane
   uint32_t psn_{0x1234};
   uint32_t max_inline_data_{0};  //!< inline bytes granted by the driver
 };

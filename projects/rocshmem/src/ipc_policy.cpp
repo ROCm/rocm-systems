@@ -41,23 +41,22 @@ namespace {
 
 // The node-local IPC group of the TcpBootstrap path, as global ranks. Both bootstrap queries
 // memoise their result, so calling this again after ipcHostInit returns the same group.
-std::vector<int> ipcGroupRanks(TcpBootstrap *bootstr) {
+std::vector<int> ipcGroupRanks(TcpBootstrap* bootstr) {
   // For VMM_FABRIC, use pod-based IPC capability detection; otherwise use local ranks
-  const bool use_pod_detection =
-      (get_default_allocator()->get_type() == AllocatorTypeVMMFabric);
+  const bool use_pod_detection = (get_default_allocator()->get_type() == AllocatorTypeVMMFabric);
   return use_pod_detection ? bootstr->getIpcCapableRanks() : bootstr->getLocalRanks();
 }
 
 }  // namespace
 
-__host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+__host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T& heap_bases,
                                      MPI_Comm thread_comm) {
   MPI_Comm shmcomm;
   std::vector<int> ipc_ranks;
 
   // Check if we should use pod-based detection (for VMM Fabric allocator)
-  HIPAllocator *allocator = get_default_allocator();
-  bool use_pod_detection = (allocator->get_type() == AllocatorTypeVMMFabric);
+  HIPAllocator* allocator = get_default_allocator();
+  bool use_pod_detection  = (allocator->get_type() == AllocatorTypeVMMFabric);
 
   if (use_pod_detection) {
     // Use pod-based detection
@@ -75,13 +74,13 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
     // AllGather pod IDs across all ranks
     std::vector<PodIds> allPodIds(all_ranks);
-    mpilib_ftable_.Allgather(&localPodIds, sizeof(PodIds), MPI_CHAR,
-                            allPodIds.data(), sizeof(PodIds), MPI_CHAR, thread_comm);
+    mpilib_ftable_.Allgather(&localPodIds, sizeof(PodIds), MPI_CHAR, allPodIds.data(),
+                             sizeof(PodIds), MPI_CHAR, thread_comm);
 
     // Match IPC-capable ranks
     ipc_ranks = matchIpcCapableRanks(my_rank, allPodIds);
-    shm_size = ipc_ranks.size();
-    shm_rank = std::find(ipc_ranks.begin(), ipc_ranks.end(), my_rank) - ipc_ranks.begin();
+    shm_size  = ipc_ranks.size();
+    shm_rank  = std::find(ipc_ranks.begin(), ipc_ranks.end(), my_rank) - ipc_ranks.begin();
 
     // Create a group and communicator from IPC-capable ranks
     MPI_Group thread_grp, ipc_grp;
@@ -92,8 +91,7 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     mpilib_ftable_.Group_free(&thread_grp);
   } else {
     // Fallback to MPI_COMM_TYPE_SHARED (original implementation)
-    mpilib_ftable_.Comm_split_type(thread_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL,
-                                   &shmcomm);
+    mpilib_ftable_.Comm_split_type(thread_comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shmcomm);
 
     /*
      * Figure out how many local process there are.
@@ -111,14 +109,14 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   /*
    * Allocate a host-side c-array to hold the IPC handles.
    */
-  HIPIpcHandleVec *vec_ipc_handle = allocator->AllocateIpcHandleVec(shm_size);
+  HIPIpcHandleVec* vec_ipc_handle = allocator->AllocateIpcHandleVec(shm_size);
 
   /*
    * Call into the hip runtime to get an IPC handle for my symmetric
    * heap and store that IPC handle into the host-side c-array which was
    * just allocated.
    */
-  char *base_heap = heap_bases[my_pe];
+  char* base_heap = heap_bases[my_pe];
   CHECK_HIP(allocator->GetIpcHandle(base_heap, vec_ipc_handle->GetHandleVecElem(shm_rank)));
 
   /*
@@ -133,9 +131,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    * Allocate device-side array to hold the IPC symmetric heap base
    * addresses.
    */
-  char **ipc_base;
-  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&ipc_base),
-                      shm_size * sizeof(char **)));
+  char** ipc_base;
+  CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&ipc_base), shm_size * sizeof(char**)));
 
   /*
    * For all local processing elements, initialize the device-side array
@@ -143,9 +140,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    */
   for (int i = 0; i < shm_size; i++) {
     if (i != shm_rank) {
-      void **ipc_base_uncast = reinterpret_cast<void **>(&ipc_base[i]);
-      CHECK_HIP(allocator->OpenIpcHandle(ipc_base_uncast,
-                                         vec_ipc_handle->GetHandleVecElem(i)));
+      void** ipc_base_uncast = reinterpret_cast<void**>(&ipc_base[i]);
+      CHECK_HIP(allocator->OpenIpcHandle(ipc_base_uncast, vec_ipc_handle->GetHandleVecElem(i)));
     } else {
       ipc_base[i] = base_heap;
     }
@@ -164,8 +160,9 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
   if (envvar::ro::disable_ipc || envvar::disable_ipc) {
     if (0 == my_pe) {
-      LOG_WARN("ROCSHMEM_RO_DISABLE_IPC and RO_DISABLE_IPC environment variables have been deprecated."
-               "Please use ROCSHMEM_DISABLE_MIXED_IPC as a replacement.");
+      LOG_WARN(
+          "ROCSHMEM_RO_DISABLE_IPC and RO_DISABLE_IPC environment variables have been deprecated."
+          "Please use ROCSHMEM_DISABLE_MIXED_IPC as a replacement.");
     }
   }
   auto disable_ipc = envvar::disable_mixed_ipc || envvar::ro::disable_ipc || envvar::disable_ipc;
@@ -175,40 +172,43 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
     if (use_pod_detection) {
       // In pod detection path, ipc_ranks already contains global ranks
       ipcDetectPattern(ipc_ranks.data(), shm_size);
-      CHECK_HIP(hipMemcpy(pes_with_ipc_avail, ipc_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
+      CHECK_HIP(hipMemcpy(pes_with_ipc_avail, ipc_ranks.data(), shm_size * sizeof(int),
+                          hipMemcpyHostToDevice));
     } else {
       // In fallback path, need to translate from shmcomm ranks to thread_comm ranks
       MPI_Group thread_grp;
       MPI_Group shm_grp;
-      int *host_pes_with_ipc_avail = new int[shm_size];
+      int* host_pes_with_ipc_avail = new int[shm_size];
 
       mpilib_ftable_.Comm_group(thread_comm, &thread_grp);
       mpilib_ftable_.Comm_group(shmcomm, &shm_grp);
-      int *seqranks = new int[shm_size];
-      for(int i = 0; i < shm_size; i++)
+      int* seqranks = new int[shm_size];
+      for (int i = 0; i < shm_size; i++)
         seqranks[i] = i;
-      mpilib_ftable_.Group_translate_ranks(shm_grp, shm_size, seqranks, thread_grp, host_pes_with_ipc_avail);
+      mpilib_ftable_.Group_translate_ranks(shm_grp, shm_size, seqranks, thread_grp,
+                                           host_pes_with_ipc_avail);
       ipcDetectPattern(host_pes_with_ipc_avail, shm_size);
-      CHECK_HIP(hipMemcpy(pes_with_ipc_avail, host_pes_with_ipc_avail, shm_size * sizeof(int), hipMemcpyHostToDevice));
+      CHECK_HIP(hipMemcpy(pes_with_ipc_avail, host_pes_with_ipc_avail, shm_size * sizeof(int),
+                          hipMemcpyHostToDevice));
       // since we delete host_pes_with_ipc_avail, want to make sure the data transfer is complete
       CHECK_HIP(hipStreamSynchronize(0));
 
-      delete [] host_pes_with_ipc_avail;
-      delete [] seqranks;
+      delete[] host_pes_with_ipc_avail;
+      delete[] seqranks;
       mpilib_ftable_.Group_free(&shm_grp);
       mpilib_ftable_.Group_free(&thread_grp);
     }
   }
 
-  shm_comm = shmcomm;
+  shm_comm      = shmcomm;
   owns_shm_comm = true;
 }
 
-__host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                                     TcpBootstrap *bootstr) {
-  HIPAllocator *allocator = get_default_allocator();
+__host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T& heap_bases,
+                                     TcpBootstrap* bootstr) {
+  HIPAllocator* allocator          = get_default_allocator();
   const std::vector<int> shm_ranks = ipcGroupRanks(bootstr);
-  shm_size = shm_ranks.size();
+  shm_size                         = shm_ranks.size();
   if (shm_size == 0) {
     printf("Error in detecting IPC / shared memory rank, shm_size is 0\n");
     abort();
@@ -218,14 +218,14 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
   /*
    * Allocate a host-side c-array to hold the IPC handles.
    */
-  HIPIpcHandleVec *vec_ipc_handle = allocator->AllocateIpcHandleVec(shm_size);
+  HIPIpcHandleVec* vec_ipc_handle = allocator->AllocateIpcHandleVec(shm_size);
 
   /*
    * Call into the hip runtime to get an IPC handle for my symmetric
    * heap and store that IPC handle into the host-side c-array which was
    * just allocated.
    */
-  char *base_heap = heap_bases[my_pe];
+  char* base_heap = heap_bases[my_pe];
   CHECK_HIP(allocator->GetIpcHandle(base_heap, vec_ipc_handle->GetHandleVecElem(shm_rank)));
 
   /*
@@ -239,9 +239,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    * Allocate device-side array to hold the IPC symmetric heap base
    * addresses.
    */
-  char **ipc_base;
-  CHECK_HIP(hipMalloc(reinterpret_cast<void **>(&ipc_base),
-                      shm_size * sizeof(char **)));
+  char** ipc_base;
+  CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&ipc_base), shm_size * sizeof(char**)));
 
   /*
    * For all local processing elements, initialize the device-side array
@@ -249,9 +248,8 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
    */
   for (int i = 0; i < shm_size; i++) {
     if (i != shm_rank) {
-      void **ipc_base_uncast = reinterpret_cast<void **>(&ipc_base[i]);
-      CHECK_HIP(allocator->OpenIpcHandle(ipc_base_uncast,
-                                         vec_ipc_handle->GetHandleVecElem(i)));
+      void** ipc_base_uncast = reinterpret_cast<void**>(&ipc_base[i]);
+      CHECK_HIP(allocator->OpenIpcHandle(ipc_base_uncast, vec_ipc_handle->GetHandleVecElem(i)));
     } else {
       ipc_base[i] = base_heap;
     }
@@ -270,20 +268,22 @@ __host__ void IpcOnImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
 
   if (envvar::ro::disable_ipc || envvar::disable_ipc) {
     if (0 == my_pe) {
-      LOG_WARN("ROCSHMEM_RO_DISABLE_IPC and RO_DISABLE_IPC environment variables have been deprecated."
-               "Please use ROCSHMEM_DISABLE_MIXED_IPC as a replacement.");
+      LOG_WARN(
+          "ROCSHMEM_RO_DISABLE_IPC and RO_DISABLE_IPC environment variables have been deprecated."
+          "Please use ROCSHMEM_DISABLE_MIXED_IPC as a replacement.");
     }
   }
   auto disable_ipc = envvar::disable_mixed_ipc || envvar::ro::disable_ipc || envvar::disable_ipc;
   if (!disable_ipc) {
     CHECK_HIP(hipMalloc(reinterpret_cast<void**>(&pes_with_ipc_avail), shm_size * sizeof(int)));
     ipcDetectPattern(shm_ranks.data(), shm_size);
-    CHECK_HIP(hipMemcpy(pes_with_ipc_avail, shm_ranks.data(), shm_size * sizeof(int), hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemcpy(pes_with_ipc_avail, shm_ranks.data(), shm_size * sizeof(int),
+                        hipMemcpyHostToDevice));
   }
 }
 
 __host__ void IpcOnImpl::ipcHostStop() {
-  HIPAllocator *allocator = get_default_allocator();
+  HIPAllocator* allocator = get_default_allocator();
 
   for (int i = 0; i < shm_size; i++) {
     if (i != shm_rank) {
@@ -302,26 +302,25 @@ __host__ void IpcOnImpl::ipcHostStop() {
   }
 }
 
-
 #if defined(USE_SDMA)
 
-__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
+__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T& heap_bases,
                                        MPI_Comm thread_comm) {
   IpcOnImpl::ipcHostInit(my_pe, heap_bases, thread_comm);
   // shm_comm is the IPC pod, which vmm_fabric can stretch over several hosts. The exchange is raw
   // bytes; MPI_CHAR, like the other byte allgathers here, because rocshmem_mpi.hpp (used when no
   // external MPI is found, as in TheRock CI) does not define MPI_BYTE.
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](void *buf, int bytes) {
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](void* buf, int bytes) {
     mpilib_ftable_.Allgather(MPI_IN_PLACE, bytes, MPI_CHAR, buf, bytes, MPI_CHAR, shm_comm);
   });
 }
 
-__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T &heap_bases,
-                                       TcpBootstrap *bootstrap) {
+__host__ void IpcSdmaImpl::ipcHostInit(int my_pe, const HEAP_BASES_T& heap_bases,
+                                       TcpBootstrap* bootstrap) {
   IpcOnImpl::ipcHostInit(my_pe, heap_bases, bootstrap);
   // shm_ranks is the IPC pod, which vmm_fabric can stretch over several hosts.
   const std::vector<int> shm_ranks = ipcGroupRanks(bootstrap);
-  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](void *buf, int bytes) {
+  sdmaImpl_.sdmaHostInit(my_pe, shm_size, shm_rank, [&](void* buf, int bytes) {
     bootstrap->groupAllGather(buf, bytes, shm_ranks);
   });
 }

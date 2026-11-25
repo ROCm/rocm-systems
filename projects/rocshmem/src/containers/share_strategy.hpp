@@ -41,7 +41,9 @@ class Global {
    * @return
    */
   template <typename T>
-  __host__ T fetch_incr([[maybe_unused]] T *out_ptr) {abort();}
+  __host__ T fetch_incr([[maybe_unused]] T* out_ptr) {
+    abort();
+  }
 };
 
 class Grid {
@@ -54,7 +56,9 @@ class Grid {
    * @return
    */
   template <typename T>
-  __device__ T fetch_incr([[maybe_unused]] T *out_ptr) {abort();}
+  __device__ T fetch_incr([[maybe_unused]] T* out_ptr) {
+    abort();
+  }
 };
 
 class Block {
@@ -70,7 +74,7 @@ class Block {
    * @return
    */
   template <typename T>
-  __device__ T fetch_incr(T *out_ptr) {
+  __device__ T fetch_incr(T* out_ptr) {
     T fetch_value = 0;
 
     auto num_active_lanes = number_active_lanes();
@@ -138,9 +142,9 @@ class Private {
    * @return
    */
   template <typename T>
-  __device__ T fetch_incr(T *out_ptr) {
+  __device__ T fetch_incr(T* out_ptr) {
     auto orig_value = *out_ptr;
-    *out_ptr = orig_value + 1;
+    *out_ptr        = orig_value + 1;
     return orig_value;
   }
 };
@@ -166,24 +170,24 @@ class ShareStrategy {
    * @return
    */
   template <typename T>
-  __device__ T fetch_incr(T *out_ptr, size_t my_pe, size_t num_pes) {
+  __device__ T fetch_incr(T* out_ptr, size_t my_pe, size_t num_pes) {
     T value = 0;
     switch (_sse) {
-      case ShareStrategyEnum::PRIVATE:
-        return _private.fetch_incr(out_ptr);
-      case ShareStrategyEnum::BLOCK:
-        for (size_t i = 0; i < num_pes; i++) {
-          if (i == my_pe) {
-            value = _block.fetch_incr(out_ptr);
-          }
+    case ShareStrategyEnum::PRIVATE:
+      return _private.fetch_incr(out_ptr);
+    case ShareStrategyEnum::BLOCK:
+      for (size_t i = 0; i < num_pes; i++) {
+        if (i == my_pe) {
+          value = _block.fetch_incr(out_ptr);
         }
-        return value;
-      case ShareStrategyEnum::DEVICE:
-        abort();
-        return 0;
-      case ShareStrategyEnum::UNUSED:
-        abort();
-        return 0;
+      }
+      return value;
+    case ShareStrategyEnum::DEVICE:
+      abort();
+      return 0;
+    case ShareStrategyEnum::UNUSED:
+      abort();
+      return 0;
     }
   }
 
@@ -194,16 +198,16 @@ class ShareStrategy {
    */
   __device__ bool uses_designated_send_thread() {
     switch (_sse) {
-      case ShareStrategyEnum::PRIVATE:
-        return false;
-      case ShareStrategyEnum::BLOCK:
-        return true;
-      case ShareStrategyEnum::DEVICE:
-        abort();
-        return false;
-      case ShareStrategyEnum::UNUSED:
-        abort();
-        return false;
+    case ShareStrategyEnum::PRIVATE:
+      return false;
+    case ShareStrategyEnum::BLOCK:
+      return true;
+    case ShareStrategyEnum::DEVICE:
+      abort();
+      return false;
+    case ShareStrategyEnum::UNUSED:
+      abort();
+      return false;
     }
   }
 

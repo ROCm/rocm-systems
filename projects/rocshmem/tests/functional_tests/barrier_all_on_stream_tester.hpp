@@ -38,8 +38,7 @@ enum CollectiveOnStreamOp { BARRIER_ALL_OP, SYNC_ALL_OP };
 
 class BarrierAllOnStreamTester : public Tester {
  public:
-  explicit BarrierAllOnStreamTester(TesterArguments args,
-                                    CollectiveOnStreamOp op = BARRIER_ALL_OP);
+  explicit BarrierAllOnStreamTester(TesterArguments args, CollectiveOnStreamOp op = BARRIER_ALL_OP);
   virtual ~BarrierAllOnStreamTester();
 
  protected:
@@ -47,8 +46,7 @@ class BarrierAllOnStreamTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
@@ -57,7 +55,7 @@ class BarrierAllOnStreamTester : public Tester {
  private:
   int my_pe;
   int n_pes;
-  int num_streams = 1;
+  int num_streams         = 1;
   bool use_default_stream = false;
   std::vector<hipStream_t> streams;
   std::vector<hipEvent_t> start_events_timed;
@@ -68,4 +66,3 @@ class BarrierAllOnStreamTester : public Tester {
 #include "barrier_all_on_stream_tester.cpp"
 
 #endif
-

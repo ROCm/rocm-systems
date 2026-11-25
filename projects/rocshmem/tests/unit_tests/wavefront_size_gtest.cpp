@@ -28,7 +28,7 @@
 
 using namespace rocshmem;
 
-__global__ void check_wf_size(int wf_size_prop, int *ret) {
+__global__ void check_wf_size(int wf_size_prop, int* ret) {
   if (wf_size_prop == WF_SIZE) {
     *ret = 0;
   } else {
@@ -36,11 +36,10 @@ __global__ void check_wf_size(int wf_size_prop, int *ret) {
   }
 }
 
-
 TEST_F(WavefrontSizeTestFixture, constant_matches_runtime) {
   int device_count = 0;
   hipDeviceProp_t prop;
-  int *ret;
+  int* ret;
 
   CHECK_HIP(hipGetDeviceCount(&device_count));
   ASSERT_GT(device_count, 0);
@@ -58,4 +57,3 @@ TEST_F(WavefrontSizeTestFixture, constant_matches_runtime) {
   }
   CHECK_HIP(hipHostFree(ret));
 }
-

@@ -30,12 +30,10 @@
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void RandomAccessTest(int loop, int skip, long long int *start_time,
-                                 long long int *end_time, int *s_buf,
-                                 int *r_buf, int size, OpType type,
-                                 int coal_coef, int num_bins, int num_waves,
-                                 uint32_t *threads_bins, uint32_t *off_bins,
-                                 uint32_t *PE_bins);
+__global__ void RandomAccessTest(int loop, int skip, long long int* start_time,
+                                 long long int* end_time, int* s_buf, int* r_buf, int size,
+                                 OpType type, int coal_coef, int num_bins, int num_waves,
+                                 uint32_t* threads_bins, uint32_t* off_bins, uint32_t* PE_bins);
 
 /******************************************************************************
  * HOST TESTER CLASS
@@ -48,18 +46,17 @@ class RandomAccessTester : public Tester {
  protected:
   virtual void resetBuffers(size_t size) override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void verifyResults(size_t size) override;
 
-  int *r_buf;
-  int *s_buf;
-  int *h_buf;
-  int *h_dev_buf;
-  uint32_t *_threads_bins;
-  uint32_t *_off_bins;
-  uint32_t *_PE_bins;
+  int* r_buf;
+  int* s_buf;
+  int* h_buf;
+  int* h_dev_buf;
+  uint32_t* _threads_bins;
+  uint32_t* _off_bins;
+  uint32_t* _PE_bins;
   int _num_waves;
   int _num_bins;
   static constexpr int space = 16 * 2;

@@ -45,8 +45,7 @@ class TeamSyncTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
@@ -60,7 +59,7 @@ class TeamSyncTester : public Tester {
    * The default value for the maximum number of teams is 40.
    */
   int num_teams = 39;
-  rocshmem_team_t *team_sync_world_dup;
+  rocshmem_team_t* team_sync_world_dup;
 };
 
 #include "team_sync_tester.cpp"

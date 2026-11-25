@@ -43,10 +43,9 @@ class DefaultContextProxy {
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  explicit DefaultContextProxy(ROBackend* backend, [[maybe_unused]] TeamInfo *tinfo,
-                               HIPAllocator alloc = HIPAllocator(),
-                               size_t num_elems = 1)
-  : alloc_{alloc}, proxy_{num_elems, alloc_}, constructed_{true} {
+  explicit DefaultContextProxy(ROBackend* backend, [[maybe_unused]] TeamInfo* tinfo,
+                               HIPAllocator alloc = HIPAllocator(), size_t num_elems = 1)
+      : alloc_{alloc}, proxy_{num_elems, alloc_}, constructed_{true} {
     auto ctx{proxy_.get()};
     new (ctx) ROContext(reinterpret_cast<Backend*>(backend), -1, true);
     rocshmem_ctx_t local{ctx, nullptr};

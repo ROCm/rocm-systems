@@ -43,8 +43,8 @@ static constexpr int INFO_COL = 47;
 
 template <typename T>
 static void print_entry(std::ostream& os, const char* name, const T& info) {
-  os << "# " << std::left << std::setw(NAME_COL) << name
-     << ": " << std::setw(INFO_COL) << info << "#\n";
+  os << "# " << std::left << std::setw(NAME_COL) << name << ": " << std::setw(INFO_COL) << info
+     << "#\n";
 }
 
 static void print_arch_info(std::ostream& os) {
@@ -76,36 +76,33 @@ static void print_arch_info(std::ostream& os) {
 }
 
 static void print_rocm_info(std::ostream& os) {
-  std::string rocm_version = std::to_string(ROCM_VERSION_MAJOR) + "."
-                           + std::to_string(ROCM_VERSION_MINOR) + "."
-                           + std::to_string(ROCM_VERSION_PATCH);
+  std::string rocm_version = std::to_string(ROCM_VERSION_MAJOR) + "." +
+                             std::to_string(ROCM_VERSION_MINOR) + "." +
+                             std::to_string(ROCM_VERSION_PATCH);
   print_entry(os, "ROCm", rocm_version.c_str());
 }
 
 static void print_heap_allocator_info(std::ostream& os) {
-  static const char* names[AllocatorTypeLast + 1] = {
-    "coarsegrained", "finegrained", "uncached",
-    "vmm_posix", "vmm_fabric", "host", "posix", "(unknown)"
-  };
-  AllocatorType t = get_default_allocator()->get_type();
-  int idx = (t >= 0 && t < AllocatorTypeLast) ? static_cast<int>(t)
-                                               : static_cast<int>(AllocatorTypeLast);
+  static const char* names[AllocatorTypeLast + 1] = {"coarsegrained", "finegrained", "uncached",
+                                                     "vmm_posix",     "vmm_fabric",  "host",
+                                                     "posix",         "(unknown)"};
+  AllocatorType t                                 = get_default_allocator()->get_type();
+  int idx =
+      (t >= 0 && t < AllocatorTypeLast) ? static_cast<int>(t) : static_cast<int>(AllocatorTypeLast);
   print_entry(os, "Heap Allocator", names[idx]);
 }
 
 static void print_mpi_info(std::ostream& os) {
 #if defined(OMPI_MAJOR_VERSION)
-  std::string mpi_version = "Open MPI "
-                          + std::to_string(OMPI_MAJOR_VERSION) + "."
-                          + std::to_string(OMPI_MINOR_VERSION) + "."
-                          + std::to_string(OMPI_RELEASE_VERSION);
+  std::string mpi_version = "Open MPI " + std::to_string(OMPI_MAJOR_VERSION) + "." +
+                            std::to_string(OMPI_MINOR_VERSION) + "." +
+                            std::to_string(OMPI_RELEASE_VERSION);
   print_entry(os, "External MPI", mpi_version.c_str());
 #elif defined(MPICH_VERSION)
   print_entry(os, "External MPI", "MPICH " MPICH_VERSION);
 #elif defined(MPI_VERSION)
-  std::string mpi_version = "MPI (unknown vendor) "
-                          + std::to_string(MPI_VERSION) + "."
-                          + std::to_string(MPI_SUBVERSION);
+  std::string mpi_version =
+      "MPI (unknown vendor) " + std::to_string(MPI_VERSION) + "." + std::to_string(MPI_SUBVERSION);
   print_entry(os, "External MPI", mpi_version.c_str());
 #else
   print_entry(os, "External MPI", "No");
@@ -119,15 +116,15 @@ static void parse_config(std::ostream& os) {
 
   // Already printed at the top of the output; suppress duplicates here.
   const std::set<std::string> skip = {
-    "ROCSHMEM_VENDOR_STRING",
-    "ROCSHMEM_VENDOR_MAJOR_VERSION",
-    "ROCSHMEM_VENDOR_MINOR_VERSION",
-    "ROCSHMEM_VENDOR_PATCH_VERSION",
-    "ROCSHMEM_VERSION",
-    "ROCSHMEM_GIT_HASH",
-    "ROCSHMEM_INSTALL_PREFIX",
-    "ROCSHMEM_OFFLOAD_TARGETS",
-    "ROCSHMEM_BUILD_TYPE",
+      "ROCSHMEM_VENDOR_STRING",
+      "ROCSHMEM_VENDOR_MAJOR_VERSION",
+      "ROCSHMEM_VENDOR_MINOR_VERSION",
+      "ROCSHMEM_VENDOR_PATCH_VERSION",
+      "ROCSHMEM_VERSION",
+      "ROCSHMEM_GIT_HASH",
+      "ROCSHMEM_INSTALL_PREFIX",
+      "ROCSHMEM_OFFLOAD_TARGETS",
+      "ROCSHMEM_BUILD_TYPE",
   };
 
   os << "#------------------------------------------------------------------------------#\n";
@@ -147,16 +144,18 @@ static void parse_config(std::ostream& os) {
     size_t def_pos = line.find(define);
     if (def_pos != std::string::npos) {
       std::string rest = line.substr(def_pos + define.length());
-      size_t space = rest.find(' ');
+      size_t space     = rest.find(' ');
       if (space != std::string::npos) {
-        std::string name  = rest.substr(0, space);
-        if (skip.count(name)) continue;
+        std::string name = rest.substr(0, space);
+        if (skip.count(name))
+          continue;
         std::string value = rest.substr(space + 1);
         if (value.size() >= 2 && value.front() == '"' && value.back() == '"')
           value = value.substr(1, value.size() - 2);
         print_entry(os, name.c_str(), value.c_str());
       } else {
-        if (skip.count(rest)) continue;
+        if (skip.count(rest))
+          continue;
         print_entry(os, rest.c_str(), "ON");
       }
     }

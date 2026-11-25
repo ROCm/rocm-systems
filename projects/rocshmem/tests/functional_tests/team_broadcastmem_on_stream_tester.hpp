@@ -44,21 +44,20 @@ class TeamBroadcastmemOnStreamTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
  private:
-  char *source_buf;
-  char *dest_buf;
+  char* source_buf;
+  char* dest_buf;
   int my_pe;
   int n_pes;
   size_t buf_size;
   int num_teams = 1;
-  int pe_root = 0;  // Root PE for broadcast
+  int pe_root   = 0;  // Root PE for broadcast
   std::vector<rocshmem_team_t> team_world_dup;
   std::vector<hipStream_t> streams;
   std::vector<hipEvent_t> start_events_timed;
@@ -68,4 +67,3 @@ class TeamBroadcastmemOnStreamTester : public Tester {
 #include "team_broadcastmem_on_stream_tester.cpp"
 
 #endif
-

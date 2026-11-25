@@ -42,7 +42,7 @@ namespace net {
  * this a callback leaves net/ free of Backend / MPI coupling and gives every
  * net backend both bootstrap modes for free.
  */
-using AllgatherFn = std::function<void(void *inout, size_t bytes_per_pe)>;
+using AllgatherFn = std::function<void(void* inout, size_t bytes_per_pe)>;
 
 /**
  * @brief All-gather one trivially-copyable value per PE.
@@ -55,8 +55,8 @@ using AllgatherFn = std::function<void(void *inout, size_t bytes_per_pe)>;
  * @return Vector of size num_pes; element i is PE i's value.
  */
 template <typename T>
-std::vector<T> allgather_value(const T &mine, int num_pes, int my_pe,
-                               const AllgatherFn &allgather) {
+std::vector<T> allgather_value(const T& mine, int num_pes, int my_pe,
+                               const AllgatherFn& allgather) {
   static_assert(std::is_trivially_copyable<T>::value,
                 "allgather_value payload must be trivially copyable");
   std::vector<T> all(static_cast<size_t>(num_pes));
@@ -73,9 +73,8 @@ std::vector<T> allgather_value(const T &mine, int num_pes, int my_pe,
  * out PE-major (result[pe * per_pe + k]).
  */
 template <typename T>
-std::vector<T> allgather_array(const std::vector<T> &mine, int num_pes,
-                               int my_pe, int per_pe,
-                               const AllgatherFn &allgather) {
+std::vector<T> allgather_array(const std::vector<T>& mine, int num_pes, int my_pe, int per_pe,
+                               const AllgatherFn& allgather) {
   static_assert(std::is_trivially_copyable<T>::value,
                 "allgather_array payload must be trivially copyable");
   std::vector<T> all(static_cast<size_t>(num_pes) * per_pe);

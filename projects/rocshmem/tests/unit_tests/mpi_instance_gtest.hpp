@@ -31,24 +31,19 @@
 
 namespace rocshmem {
 
-class MPIInstanceTestFixture : public ::testing::Test
-{
-  public:
-    MPIInstanceTestFixture() {
-        s_ptr_ = new MPIInstance(MPI_COMM_WORLD);
-    }
+class MPIInstanceTestFixture : public ::testing::Test {
+ public:
+  MPIInstanceTestFixture() { s_ptr_ = new MPIInstance(MPI_COMM_WORLD); }
 
-    ~MPIInstanceTestFixture() {
-        delete s_ptr_;
-    }
+  ~MPIInstanceTestFixture() { delete s_ptr_; }
 
-  protected:
-    /**
-     * @brief A MPI instance object used to initialize MPI
-     */
-    MPIInstance* s_ptr_ {nullptr};
+ protected:
+  /**
+   * @brief A MPI instance object used to initialize MPI
+   */
+  MPIInstance* s_ptr_{nullptr};
 };
 
-} // namespace rocshmem
+}  // namespace rocshmem
 
 #endif  // ROCSHMEM_MPI_INSTANCE_GTEST_HPP

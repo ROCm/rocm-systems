@@ -38,22 +38,21 @@
 namespace rocshmem {
 
 template <typename T>
-__host__ void HostInterface::p(T* dest, T value, int pe,
-                               WindowInfo* window_info) {
+__host__ void HostInterface::p(T* dest, T value, int pe, WindowInfo* window_info) {
   LOG_API("host::p (dest=%p, pe=%d)", dest, pe);
   putmem(dest, &value, sizeof(T), pe, window_info);
 }
 
 template <typename T>
-__host__ void HostInterface::put(T* dest, const T* source, size_t nelems,
-                                 int pe, WindowInfo* window_info) {
+__host__ void HostInterface::put(T* dest, const T* source, size_t nelems, int pe,
+                                 WindowInfo* window_info) {
   LOG_API("host::put (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
   putmem(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
 template <typename T>
-__host__ void HostInterface::put_nbi(T* dest, const T* source, size_t nelems,
-                                     int pe, WindowInfo* window_info) {
+__host__ void HostInterface::put_nbi(T* dest, const T* source, size_t nelems, int pe,
+                                     WindowInfo* window_info) {
   LOG_API("host::put_nbi (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
   putmem_nbi(dest, source, sizeof(T) * nelems, pe, window_info);
 }
@@ -82,21 +81,20 @@ __host__ T HostInterface::g(const T* source, int pe, WindowInfo* window_info) {
 }
 
 template <typename T>
-__host__ void HostInterface::get(T* dest, const T* source, size_t nelems,
-                                 int pe, WindowInfo* window_info) {
+__host__ void HostInterface::get(T* dest, const T* source, size_t nelems, int pe,
+                                 WindowInfo* window_info) {
   LOG_API("host::get (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
   getmem(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
 template <typename T>
-__host__ void HostInterface::get_nbi(T* dest, const T* source, size_t nelems,
-                                     int pe, WindowInfo* window_info) {
+__host__ void HostInterface::get_nbi(T* dest, const T* source, size_t nelems, int pe,
+                                     WindowInfo* window_info) {
   LOG_API("host::get_nbi (dest=%p, source=%p, nelems=%zd, pe=%d)", dest, source, nelems, pe);
   getmem_nbi(dest, source, sizeof(T) * nelems, pe, window_info);
 }
 
-__host__ MPI_Comm HostInterface::get_mpi_comm(int pe_start, int log_pe_stride,
-                                              int pe_size) {
+__host__ MPI_Comm HostInterface::get_mpi_comm(int pe_start, int log_pe_stride, int pe_size) {
   MPI_Comm active_set_comm{};
 
   /*
@@ -143,11 +141,9 @@ __host__ MPI_Comm HostInterface::get_mpi_comm(int pe_start, int log_pe_stride,
 
   mpilib_ftable_.Comm_group(host_comm_world_, &comm_world_group);
 
-  mpilib_ftable_.Group_incl(comm_world_group, pe_size, active_set_ranks.data(),
-                            &active_set_group);
+  mpilib_ftable_.Group_incl(comm_world_group, pe_size, active_set_ranks.data(), &active_set_group);
 
-  mpilib_ftable_.Comm_create_group(host_comm_world_, active_set_group, 0,
-                        &active_set_comm);
+  mpilib_ftable_.Comm_create_group(host_comm_world_, active_set_group, 0, &active_set_comm);
 
   /*
    * Cache the new communicator
@@ -159,10 +155,10 @@ __host__ MPI_Comm HostInterface::get_mpi_comm(int pe_start, int log_pe_stride,
 }
 
 template <typename T>
-__host__ void HostInterface::broadcast_internal(MPI_Comm mpi_comm, T* dest,
-                                                const T* source, int nelems,
-                                                int pe_root) {
-  LOG_API("host::broadcast_internal (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
+__host__ void HostInterface::broadcast_internal(MPI_Comm mpi_comm, T* dest, const T* source,
+                                                int nelems, int pe_root) {
+  LOG_API("host::broadcast_internal (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source,
+          nelems, pe_root);
 
   /*
    * Choose the right pointer for my buffer depending
@@ -191,11 +187,11 @@ __host__ void HostInterface::broadcast_internal(MPI_Comm mpi_comm, T* dest,
 }
 
 template <typename T>
-__host__ void HostInterface::broadcast(T* dest, const T* source, int nelems,
-                                       int pe_root, int pe_start,
-                                       int log_pe_stride, int pe_size,
+__host__ void HostInterface::broadcast(T* dest, const T* source, int nelems, int pe_root,
+                                       int pe_start, int log_pe_stride, int pe_size,
                                        [[maybe_unused]] long* p_sync) {
-  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
+  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems,
+          pe_root);
 
   /*
    * Get an MPI communicator for active set of PEs
@@ -210,10 +206,10 @@ __host__ void HostInterface::broadcast(T* dest, const T* source, int nelems,
 }
 
 template <typename T>
-__host__ void HostInterface::broadcast(rocshmem_team_t team, T* dest,
-                                       const T* source, int nelems,
+__host__ void HostInterface::broadcast(rocshmem_team_t team, T* dest, const T* source, int nelems,
                                        int pe_root) {
-  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems, pe_root);
+  LOG_API("host::broadcast (dest=%p, source=%p, nelems=%d, pe_root=%d)", dest, source, nelems,
+          pe_root);
 
   /*
    * Get the MPI communicator of this team
@@ -228,23 +224,23 @@ __host__ void HostInterface::broadcast(rocshmem_team_t team, T* dest,
 
 __host__ inline MPI_Op HostInterface::get_mpi_op(ROCSHMEM_OP Op) {
   switch (Op) {
-    case ROCSHMEM_SUM:
-      return MPI_SUM;
-    case ROCSHMEM_MAX:
-      return MPI_MAX;
-    case ROCSHMEM_MIN:
-      return MPI_MIN;
-    case ROCSHMEM_PROD:
-      return MPI_PROD;
-    case ROCSHMEM_AND:
-      return MPI_BAND;
-    case ROCSHMEM_OR:
-      return MPI_BOR;
-    case ROCSHMEM_XOR:
-      return MPI_BXOR;
-    default:
-      LOG_ERROR_ABORT("Unknown rocSHMEM op MPI conversion %d", Op);
-      return 0;
+  case ROCSHMEM_SUM:
+    return MPI_SUM;
+  case ROCSHMEM_MAX:
+    return MPI_MAX;
+  case ROCSHMEM_MIN:
+    return MPI_MIN;
+  case ROCSHMEM_PROD:
+    return MPI_PROD;
+  case ROCSHMEM_AND:
+    return MPI_BAND;
+  case ROCSHMEM_OR:
+    return MPI_BOR;
+  case ROCSHMEM_XOR:
+    return MPI_BXOR;
+  default:
+    LOG_ERROR_ABORT("Unknown rocSHMEM op MPI conversion %d", Op);
+    return 0;
   }
 }
 
@@ -275,8 +271,7 @@ GET_MPI_TYPE(signed char, MPI_SIGNED_CHAR)
 GET_MPI_TYPE(unsigned char, MPI_UNSIGNED_CHAR)
 
 template <typename T>
-__host__ void HostInterface::amo_add(void* dst, T value, int pe,
-                                     WindowInfo* window_info) {
+__host__ void HostInterface::amo_add(void* dst, T value, int pe, WindowInfo* window_info) {
   /*
    * Most MPI implementations tend to use active messages to implement
    * MPI_Accumulate. So, to eliminate the potential involvement of the
@@ -286,15 +281,13 @@ __host__ void HostInterface::amo_add(void* dst, T value, int pe,
 }
 
 template <typename T>
-__host__ void HostInterface::amo_cas(void* dst, T value, T cond, int pe,
-                                     WindowInfo* window_info) {
+__host__ void HostInterface::amo_cas(void* dst, T value, T cond, int pe, WindowInfo* window_info) {
   /* Perform the compare and swap and disregard the return value */
   [[maybe_unused]] T ret{amo_fetch_cas(dst, value, cond, pe, window_info)};
 }
 
 template <typename T>
-__host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe,
-                                        WindowInfo* window_info) {
+__host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe, WindowInfo* window_info) {
 #ifdef USE_HOST_VERBS
   /*
    * Verbs host path (ROCSHMEM_HOST_TRANSPORT=verbs). 8-byte integral atomics
@@ -305,8 +298,7 @@ __host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe,
    */
   if constexpr (std::is_integral_v<T> && sizeof(T) == 8) {
     uint64_t vret{};
-    if (verbs_amo_fetch_add(window_info, dst, static_cast<uint64_t>(value), pe,
-                            &vret)) {
+    if (verbs_amo_fetch_add(window_info, dst, static_cast<uint64_t>(value), pe, &vret)) {
       return static_cast<T>(vret);
     }
   }
@@ -317,8 +309,7 @@ __host__ T HostInterface::amo_fetch_add(void* dst, T value, int pe,
   }
 
   /* Calculate offset of remote dest from base address of window */
-  MPI_Aint offset{
-      compute_offset(dst, window_info->get_start(), window_info->get_end())};
+  MPI_Aint offset{compute_offset(dst, window_info->get_start(), window_info->get_end())};
 
   /*
    * Flush the HDP of the remote PE so that the NIC does not
@@ -357,8 +348,7 @@ __host__ T HostInterface::amo_fetch_cas(void* dst, T value, T cond, int pe,
   }
 
   /* Calculate offset of remote dest from base address of window */
-  MPI_Aint offset{
-      compute_offset(dst, window_info->get_start(), window_info->get_end())};
+  MPI_Aint offset{compute_offset(dst, window_info->get_start(), window_info->get_end())};
 
   /*
    * Flush the HDP of the remote PE so that the NIC does not
@@ -378,8 +368,8 @@ __host__ T HostInterface::amo_fetch_cas(void* dst, T value, T cond, int pe,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ void HostInterface::to_all_internal(MPI_Comm mpi_comm, T* dest,
-                                             const T* source, int nreduce) {
+__host__ void HostInterface::to_all_internal(MPI_Comm mpi_comm, T* dest, const T* source,
+                                             int nreduce) {
   LOG_API("host::to_all_internal (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
 
   MPI_Op mpi_op{get_mpi_op(Op)};
@@ -397,16 +387,15 @@ __host__ void HostInterface::to_all_internal(MPI_Comm mpi_comm, T* dest,
   /*
    * Offload the allreduce to MPI
    */
-  mpilib_ftable_.Allreduce((dest == source) ? MPI_IN_PLACE : send_buf, recv_buf, nreduce,
-                           mpi_type, mpi_op, mpi_comm);
+  mpilib_ftable_.Allreduce((dest == source) ? MPI_IN_PLACE : send_buf, recv_buf, nreduce, mpi_type,
+                           mpi_op, mpi_comm);
 
   return;
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ void HostInterface::to_all(T* dest, const T* source, int nreduce,
-                                    int pe_start, int log_pe_stride,
-                                    int pe_size, [[maybe_unused]] T* p_wrk,
+__host__ void HostInterface::to_all(T* dest, const T* source, int nreduce, int pe_start,
+                                    int log_pe_stride, int pe_size, [[maybe_unused]] T* p_wrk,
                                     [[maybe_unused]] long* p_sync) {
   LOG_API("host::to_all (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
 
@@ -423,8 +412,7 @@ __host__ void HostInterface::to_all(T* dest, const T* source, int nreduce,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int HostInterface::reduce(rocshmem_team_t team, T* dest,
-                                    const T* source, int nreduce) {
+__host__ int HostInterface::reduce(rocshmem_team_t team, T* dest, const T* source, int nreduce) {
   LOG_API("host::reduce (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
 
   /*
@@ -439,8 +427,8 @@ __host__ int HostInterface::reduce(rocshmem_team_t team, T* dest,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int HostInterface::reduce_scatter(rocshmem_team_t team, T* dest,
-                                           const T* source, int nreduce) {
+__host__ int HostInterface::reduce_scatter(rocshmem_team_t team, T* dest, const T* source,
+                                           int nreduce) {
   LOG_API("host::reduce_scatter (dest=%p, source=%p, nreduce=%d)", dest, source, nreduce);
 
   Team* team_obj{get_internal_team(team)};
@@ -456,85 +444,71 @@ __host__ int HostInterface::reduce_scatter(rocshmem_team_t team, T* dest,
 
   hdp_policy_->hdp_flush();
 
-  mpilib_ftable_.Reduce_scatter_block(
-      const_cast<T*>(source), dest, nreduce, mpi_type, mpi_op, mpi_comm);
+  mpilib_ftable_.Reduce_scatter_block(const_cast<T*>(source), dest, nreduce, mpi_type, mpi_op,
+                                      mpi_comm);
 
   return ROCSHMEM_SUCCESS;
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int HostInterface::reduce_on_stream(rocshmem_team_t team,
-                                              T *dest,
-                                              const T *source,
-                                              int nreduce,
-                                              hipStream_t stream)
-{
+__host__ int HostInterface::reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
+                                             int nreduce, hipStream_t stream) {
   // Use dynamic block size determination:
   // - Query optimal block size using occupancy API
   // - Limit block size to size (number of bytes) to avoid over-subscription
   // - Always use 1 block (single workgroup collective)
 
   int optimal_block_size = 0;
-  int grid_size = 0;
-  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size,
-                                              &optimal_block_size,
-                                              rocshmem_reduce_on_stream_kernel<T, Op>, 0,
-                                              0));
+  int grid_size          = 0;
+  CHECK_HIP(hipOccupancyMaxPotentialBlockSize(&grid_size, &optimal_block_size,
+                                              rocshmem_reduce_on_stream_kernel<T, Op>, 0, 0));
 
   // Limit block size to size (bytes) to avoid over-subscription
-  int num_threads_per_block = (optimal_block_size > nreduce)
-                                  ? nreduce
-                                  : optimal_block_size;
+  int num_threads_per_block = (optimal_block_size > nreduce) ? nreduce : optimal_block_size;
 
   // Launch kernel to do reduce with given stream
   dim3 gridSize(1);
   dim3 blockSize(num_threads_per_block);
-  rocshmem_reduce_on_stream_kernel<T, Op><<<gridSize, blockSize, 0, stream>>>(team,
-                                                                              dest,
-                                                                              source,
-                                                                              nreduce);
+  rocshmem_reduce_on_stream_kernel<T, Op>
+      <<<gridSize, blockSize, 0, stream>>>(team, dest, source, nreduce);
   hipError_t launch_status = hipGetLastError();
   return launch_status;
-
 }
 
 template <typename T>
-__host__ inline int HostInterface::compare(int cmp, T input_val,
-                                           T target_val) {
+__host__ inline int HostInterface::compare(int cmp, T input_val, T target_val) {
   int cond_satisfied{0};
 
   switch (cmp) {
-    case ROCSHMEM_CMP_EQ:
-      cond_satisfied = (input_val == target_val) ? 1 : 0;
-      break;
-    case ROCSHMEM_CMP_NE:
-      cond_satisfied = (input_val != target_val) ? 1 : 0;
-      break;
-    case ROCSHMEM_CMP_GT:
-      cond_satisfied = (input_val > target_val) ? 1 : 0;
-      break;
-    case ROCSHMEM_CMP_GE:
-      cond_satisfied = (input_val >= target_val) ? 1 : 0;
-      break;
-    case ROCSHMEM_CMP_LT:
-      cond_satisfied = (input_val < target_val) ? 1 : 0;
-      break;
-    case ROCSHMEM_CMP_LE:
-      cond_satisfied = (input_val <= target_val) ? 1 : 0;
-      break;
-    default:
-      assert(cmp >= ROCSHMEM_CMP_EQ && cmp <= ROCSHMEM_CMP_LE);
-      break;
+  case ROCSHMEM_CMP_EQ:
+    cond_satisfied = (input_val == target_val) ? 1 : 0;
+    break;
+  case ROCSHMEM_CMP_NE:
+    cond_satisfied = (input_val != target_val) ? 1 : 0;
+    break;
+  case ROCSHMEM_CMP_GT:
+    cond_satisfied = (input_val > target_val) ? 1 : 0;
+    break;
+  case ROCSHMEM_CMP_GE:
+    cond_satisfied = (input_val >= target_val) ? 1 : 0;
+    break;
+  case ROCSHMEM_CMP_LT:
+    cond_satisfied = (input_val < target_val) ? 1 : 0;
+    break;
+  case ROCSHMEM_CMP_LE:
+    cond_satisfied = (input_val <= target_val) ? 1 : 0;
+    break;
+  default:
+    assert(cmp >= ROCSHMEM_CMP_EQ && cmp <= ROCSHMEM_CMP_LE);
+    break;
   }
 
   return cond_satisfied;
 }
 
 template <typename T>
-__host__ inline int HostInterface::test_and_compare(MPI_Aint offset,
-                                                    MPI_Datatype mpi_type,
-                                                    int cmp, T val,
-                                                    MPI_Win win) {
+__host__ inline int HostInterface::test_and_compare(MPI_Aint offset, MPI_Datatype mpi_type, int cmp,
+                                                    T val, MPI_Win win) {
   T fetched_val{};
 
   /*
@@ -553,8 +527,7 @@ __host__ inline int HostInterface::test_and_compare(MPI_Aint offset,
 }
 
 template <typename T>
-__host__ void HostInterface::wait_until(T *ivars, int cmp, T val,
-                                        WindowInfo* window_info) {
+__host__ void HostInterface::wait_until(T* ivars, int cmp, T val, WindowInfo* window_info) {
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();
@@ -564,8 +537,7 @@ __host__ void HostInterface::wait_until(T *ivars, int cmp, T val,
   /*
    * Find the offset of this memory in the window
    */
-  MPI_Aint offset{
-      compute_offset(ivars, window_info->get_start(), window_info->get_end())};
+  MPI_Aint offset{compute_offset(ivars, window_info->get_start(), window_info->get_end())};
 
   MPI_Datatype mpi_type{get_mpi_type<T>()};
   MPI_Win win{window_info_mpi->get_win()};
@@ -582,12 +554,11 @@ __host__ void HostInterface::wait_until(T *ivars, int cmp, T val,
   }
 }
 
-__host__ size_t status_entry(size_t nelems,
-                             const int *status,
-                             bool* done_flags) {
+__host__ size_t status_entry(size_t nelems, const int* status, bool* done_flags) {
   size_t i{0};
   size_t pos{SIZE_MAX};
-  if (nullptr == status) return 0;
+  if (nullptr == status)
+    return 0;
   while (i < nelems) {
     if (status[i]) {
       done_flags[i] = 1;
@@ -599,10 +570,10 @@ __host__ size_t status_entry(size_t nelems,
   return pos;
 }
 
-__host__ size_t status_entry(size_t nelems,
-                             const int *status) {
+__host__ size_t status_entry(size_t nelems, const int* status) {
   size_t i{0};
-  if (nullptr == status) return 0;
+  if (nullptr == status)
+    return 0;
   while (i < nelems) {
     if (status[i] == 0) {
       return i;
@@ -613,10 +584,8 @@ __host__ size_t status_entry(size_t nelems,
 }
 
 template <typename T>
-__host__ size_t HostInterface::wait_until_any(T* ivars, size_t nelems,
-                                              const int *status,
-                                              int cmp, T val,
-                                              WindowInfo* window_info) {
+__host__ size_t HostInterface::wait_until_any(T* ivars, size_t nelems, const int* status, int cmp,
+                                              T val, WindowInfo* window_info) {
   LOG_API("host::wait_until_any (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
 
   // zero nelems error condition
@@ -645,10 +614,8 @@ __host__ size_t HostInterface::wait_until_any(T* ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ void HostInterface::wait_until_all(T* ivars, size_t nelems,
-                                            const int *status,
-                                            int cmp, T val,
-                                            WindowInfo* window_info) {
+__host__ void HostInterface::wait_until_all(T* ivars, size_t nelems, const int* status, int cmp,
+                                            T val, WindowInfo* window_info) {
   LOG_API("host::wait_until_all (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
 
   // zero nelems error condition
@@ -673,11 +640,9 @@ __host__ void HostInterface::wait_until_all(T* ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ size_t HostInterface::wait_until_some(T* ivars, size_t nelems,
-                                             size_t* indices,
-                                             const int *status,
-                                             int cmp, T val,
-                                             WindowInfo* window_info) {
+__host__ size_t HostInterface::wait_until_some(T* ivars, size_t nelems, size_t* indices,
+                                               const int* status, int cmp, T val,
+                                               WindowInfo* window_info) {
   LOG_API("host::wait_until_some (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
 
   // zero nelems error condition
@@ -692,8 +657,8 @@ __host__ size_t HostInterface::wait_until_some(T* ivars, size_t nelems,
     return 0;
   }
 
-  bool done {false};
-  size_t ncompleted {0};
+  bool done{false};
+  size_t ncompleted{0};
   while (!done) {
     for (size_t i{pos}; i < nelems; i++) {
       // skip entries marked with non-zero status
@@ -701,7 +666,7 @@ __host__ size_t HostInterface::wait_until_some(T* ivars, size_t nelems,
         continue;
       }
       if (test(ivars + i, cmp, val, window_info)) {
-        done = true;
+        done                = true;
         indices[ncompleted] = i;
         ncompleted++;
       }
@@ -711,10 +676,8 @@ __host__ size_t HostInterface::wait_until_some(T* ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ void HostInterface::wait_until_all_vector(T* ivars, size_t nelems,
-                                                   const int *status,
-                                                   int cmp, T* vals,
-                                                   WindowInfo* window_info) {
+__host__ void HostInterface::wait_until_all_vector(T* ivars, size_t nelems, const int* status,
+                                                   int cmp, T* vals, WindowInfo* window_info) {
   LOG_API("host::wait_until_all_vector (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
 
   // zero nelems error condition
@@ -739,10 +702,8 @@ __host__ void HostInterface::wait_until_all_vector(T* ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ size_t HostInterface::wait_until_any_vector(T* ivars, size_t nelems,
-                                                     const int *status,
-                                                     int cmp, T* vals,
-                                                     WindowInfo* window_info) {
+__host__ size_t HostInterface::wait_until_any_vector(T* ivars, size_t nelems, const int* status,
+                                                     int cmp, T* vals, WindowInfo* window_info) {
   LOG_API("host::wait_until_any_vector (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
 
   // zero nelems error condition
@@ -772,10 +733,8 @@ __host__ size_t HostInterface::wait_until_any_vector(T* ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ size_t HostInterface::wait_until_some_vector(T* ivars, size_t nelems,
-                                                      size_t* indices,
-                                                      const int *status,
-                                                      int cmp, T* vals,
+__host__ size_t HostInterface::wait_until_some_vector(T* ivars, size_t nelems, size_t* indices,
+                                                      const int* status, int cmp, T* vals,
                                                       WindowInfo* window_info) {
   LOG_API("host::wait_until_some_vector (ivars=%p, nelems=%zd, cmp=%d)", ivars, nelems, cmp);
 
@@ -791,8 +750,8 @@ __host__ size_t HostInterface::wait_until_some_vector(T* ivars, size_t nelems,
     return 0;
   }
 
-  bool done {false};
-  size_t ncompleted {0};
+  bool done{false};
+  size_t ncompleted{0};
   while (!done) {
     for (size_t i{pos}; i < nelems; i++) {
       // skip entries marked with non-zero status
@@ -800,7 +759,7 @@ __host__ size_t HostInterface::wait_until_some_vector(T* ivars, size_t nelems,
         continue;
       }
       if (test(ivars + i, cmp, vals[i], window_info)) {
-        done = true;
+        done                = true;
         indices[ncompleted] = i;
         ncompleted++;
       }
@@ -810,8 +769,7 @@ __host__ size_t HostInterface::wait_until_some_vector(T* ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ int HostInterface::test(T* ivars, int cmp, T val,
-                                 WindowInfo* window_info) {
+__host__ int HostInterface::test(T* ivars, int cmp, T val, WindowInfo* window_info) {
   WindowInfoMPI* window_info_mpi = dynamic_cast<WindowInfoMPI*>(window_info);
   if (!window_info_mpi) {
     abort();
@@ -821,8 +779,7 @@ __host__ int HostInterface::test(T* ivars, int cmp, T val,
   /*
    * Find the offset of this memory in the window
    */
-  MPI_Aint offset{
-      compute_offset(ivars, window_info->get_start(), window_info->get_end())};
+  MPI_Aint offset{compute_offset(ivars, window_info->get_start(), window_info->get_end())};
 
   MPI_Datatype mpi_type{get_mpi_type<T>()};
 

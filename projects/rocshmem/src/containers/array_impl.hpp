@@ -36,13 +36,9 @@ namespace rocshmem {
 extern __constant__ int* GLOBAL_DEVICE_PRINT_LOCK;
 
 template <typename TYPE>
-Array<TYPE>::Array(size_t array_size, MemoryAllocator allocator,
-                   const ObjectStrategy* strategy)
-    : _allocator(allocator),
-      _size(array_size),
-      _dev_idx(strategy->index_strategy_two) {
-  _allocator.allocate(reinterpret_cast<void**>(&_array),
-                      array_size * sizeof(TYPE));
+Array<TYPE>::Array(size_t array_size, MemoryAllocator allocator, const ObjectStrategy* strategy)
+    : _allocator(allocator), _size(array_size), _dev_idx(strategy->index_strategy_two) {
+  _allocator.allocate(reinterpret_cast<void**>(&_array), array_size * sizeof(TYPE));
 }
 
 template <typename TYPE>
@@ -112,7 +108,7 @@ __device__ void Array<TYPE>::fill(TYPE v, size_t start_index, size_t length) {
   size_t i = start_index + _dev_idx.start();
   while ((i < start_index + length) && (i < _size)) {
     (*this)[i] = v;
-    i = _dev_idx.next(i);
+    i          = _dev_idx.next(i);
   }
 }
 
@@ -135,8 +131,7 @@ template <typename TYPE>
 __device__ void Array<TYPE>::copy(const Array<TYPE>* other,  // NOLINT
                                   size_t start_index, size_t length) {
   assert(other);
-  for (size_t i = start_index + _dev_idx.start(); i < start_index + length;
-       i = _dev_idx.next(i)) {
+  for (size_t i = start_index + _dev_idx.start(); i < start_index + length; i = _dev_idx.next(i)) {
     (*this)[i] = (*other)[i];
   }
 }

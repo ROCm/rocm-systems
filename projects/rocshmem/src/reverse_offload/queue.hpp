@@ -49,7 +49,7 @@ class Queue {
 
   void sfence_flush_hdp();
 
-  void notify(volatile char *status);
+  void notify(volatile char* status);
 
   uint64_t size();
 

@@ -41,60 +41,54 @@ class Transport {
  public:
   virtual ~Transport() = default;
 
-  virtual void initTransport(int num_queues, BackendProxy *proxy) = 0;
+  virtual void initTransport(int num_queues, BackendProxy* proxy) = 0;
 
   virtual void finalizeTransport() = 0;
 
-  virtual void createNewTeam(ROBackend *backend_handle, Team *parent_team,
+  virtual void createNewTeam(ROBackend* backend_handle, Team* parent_team,
                              const TeamInfo& team_info_wrt_parent,
                              const TeamInfo& team_info_wrt_world, int num_pes,
                              int my_pe_in_new_team, MPI_Comm new_team_comm,
-                             rocshmem_team_t *new_team) = 0;
+                             rocshmem_team_t* new_team) = 0;
 
-  virtual void barrier(int wg_id, volatile char *status, bool blocking,
-                       MPI_Comm team, bool quiet) = 0;
+  virtual void barrier(int wg_id, volatile char* status, bool blocking, MPI_Comm team,
+                       bool quiet) = 0;
 
-  virtual void team_reduction(void *dst, void *src, int size, int win_id,
-                              int wg_id, MPI_Comm team, ROCSHMEM_OP op,
-                              ro_net_types type, volatile char *status,
+  virtual void team_reduction(void* dst, void* src, int size, int win_id, int wg_id, MPI_Comm team,
+                              ROCSHMEM_OP op, ro_net_types type, volatile char* status,
                               bool blocking) = 0;
 
-  virtual void team_reduce_scatter(void *dst, void *src, int nreduce,
-                                   int win_id, int wg_id, MPI_Comm team,
-                                   ROCSHMEM_OP op, ro_net_types type,
-                                   volatile char *status, bool blocking) = 0;
+  virtual void team_reduce_scatter(void* dst, void* src, int nreduce, int win_id, int wg_id,
+                                   MPI_Comm team, ROCSHMEM_OP op, ro_net_types type,
+                                   volatile char* status, bool blocking) = 0;
 
-  virtual void team_broadcast(void *dst, void *src, int size, int win_id,
-                              int wg_id, MPI_Comm team, int PE_root,
-                              ro_net_types type, volatile char *status,
+  virtual void team_broadcast(void* dst, void* src, int size, int win_id, int wg_id, MPI_Comm team,
+                              int PE_root, ro_net_types type, volatile char* status,
                               bool blocking) = 0;
 
-  virtual void alltoall(void *dst, void *src, int size, int win_id, int wg_id,
-                        MPI_Comm team, void *ata_buffptr, ro_net_types type,
-                        volatile char *status, bool blocking) = 0;
+  virtual void alltoall(void* dst, void* src, int size, int win_id, int wg_id, MPI_Comm team,
+                        void* ata_buffptr, ro_net_types type, volatile char* status,
+                        bool blocking) = 0;
 
-  virtual void fcollect(void *dst, void *src, int size, int win_id, int wg_id,
-                        MPI_Comm team, void *ata_buffptr, ro_net_types type,
-                        volatile char *status, bool blocking) = 0;
+  virtual void fcollect(void* dst, void* src, int size, int win_id, int wg_id, MPI_Comm team,
+                        void* ata_buffptr, ro_net_types type, volatile char* status,
+                        bool blocking) = 0;
 
-  virtual void putMem(void *dst, void *src, int size, int pe, int win_id,
-                      int wg_id, volatile char *status, bool blocking,
-                      bool inline_data = false) = 0;
+  virtual void putMem(void* dst, void* src, int size, int pe, int win_id, int wg_id,
+                      volatile char* status, bool blocking, bool inline_data = false) = 0;
 
-  virtual void getMem(void *dst, void *src, int size, int pe, int win_id,
-                      int wg_id, volatile char *status, bool blocking) = 0;
+  virtual void getMem(void* dst, void* src, int size, int pe, int win_id, int wg_id,
+                      volatile char* status, bool blocking) = 0;
 
-  virtual void amoFOP(void *dst, void *src, void *val, int pe, int win_id,
-                      int wg_id, volatile char *status, bool blocking,
-                      ROCSHMEM_OP op, ro_net_types type) = 0;
+  virtual void amoFOP(void* dst, void* src, void* val, int pe, int win_id, int wg_id,
+                      volatile char* status, bool blocking, ROCSHMEM_OP op, ro_net_types type) = 0;
 
-  virtual void amoFCAS(void *dst, void *src, void *val, int pe, int win_id,
-                       int wg_id, volatile char *status, bool blocking,
-                       void *cond, ro_net_types type) = 0;
+  virtual void amoFCAS(void* dst, void* src, void* val, int pe, int win_id, int wg_id,
+                       volatile char* status, bool blocking, void* cond, ro_net_types type) = 0;
 
   virtual bool readyForFinalize() = 0;
 
-  virtual void quiet(int wg_id, volatile char *status) = 0;
+  virtual void quiet(int wg_id, volatile char* status) = 0;
 
   virtual void progress() = 0;
 
@@ -114,7 +108,7 @@ class Transport {
 
   virtual void global_exit(int status) = 0;
 
-  virtual void insertRequest(const queue_element_t *element, int queue_id) = 0;
+  virtual void insertRequest(const queue_element_t* element, int queue_id) = 0;
 
  protected:
   int my_pe{-1};

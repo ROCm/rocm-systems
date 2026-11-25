@@ -37,8 +37,8 @@ template <typename T1, ROCSHMEM_OP T2>
 class TeamReductionTester : public Tester {
  public:
   explicit TeamReductionTester(
-      TesterArguments args, std::function<void(T1 &, T1 &)> f1,
-      std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2);
+      TesterArguments args, std::function<void(T1&, T1&)> f1,
+      std::function<std::pair<bool, std::string>(const T1&, const T1&)> f2);
   virtual ~TeamReductionTester();
 
  protected:
@@ -46,25 +46,23 @@ class TeamReductionTester : public Tester {
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
-  T1 *s_buf;
-  T1 *r_buf;
-  T1 *pWrk;
-  long *pSync;
+  T1* s_buf;
+  T1* r_buf;
+  T1* pWrk;
+  long* pSync;
 
  private:
   int my_pe = 0;
   int n_pes = 0;
 
-  std::function<void(T1 &, T1 &)> init_buf;
-  std::function<std::pair<bool, std::string>(const T1 &, const T1 &)>
-      verify_buf;
+  std::function<void(T1&, T1&)> init_buf;
+  std::function<std::pair<bool, std::string>(const T1&, const T1&)> verify_buf;
 };
 
 #include "team_reduction_tester.cpp"

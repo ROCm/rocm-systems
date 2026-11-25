@@ -32,26 +32,25 @@
 
 namespace rocshmem {
 
-__device__ void build_queue_element(
-    ro_net_cmds type, void *dst, void *src, size_t size, int pe,
-    int logPE_stride, int PE_size, int PE_root, void *pWrk, long *pSync,
-    intptr_t team_comm, int ro_net_win_id, BlockHandle *handle,
-    bool blocking, volatile char *status = nullptr, bool default_ctx = false,
-    ROCSHMEM_OP op = ROCSHMEM_SUM, ro_net_types datatype = RO_NET_INT);
+__device__ void build_queue_element(ro_net_cmds type, void* dst, void* src, size_t size, int pe,
+                                    int logPE_stride, int PE_size, int PE_root, void* pWrk,
+                                    long* pSync, intptr_t team_comm, int ro_net_win_id,
+                                    BlockHandle* handle, bool blocking,
+                                    volatile char* status = nullptr, bool default_ctx = false,
+                                    ROCSHMEM_OP op        = ROCSHMEM_SUM,
+                                    ro_net_types datatype = RO_NET_INT);
 
 class ROContext : public Context {
  public:
-  __host__ ROContext(Backend *b, size_t block_id = 0, bool default_ctx = false);
+  __host__ ROContext(Backend* b, size_t block_id = 0, bool default_ctx = false);
 
-  __device__ void putmem(void *dest, const void *source, size_t nelems, int pe);
+  __device__ void putmem(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void getmem(void *dest, const void *source, size_t nelems, int pe);
+  __device__ void getmem(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void putmem_nbi(void *dest, const void *source, size_t nelems,
-                             int pe);
+  __device__ void putmem_nbi(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void getmem_nbi(void *dest, const void *source, size_t nelems,
-                             int pe);
+  __device__ void getmem_nbi(void* dest, const void* source, size_t nelems, int pe);
 
   __device__ void fence();
 
@@ -61,7 +60,7 @@ class ROContext : public Context {
 
   __device__ void pe_quiet(size_t pe);
 
-  __device__ void *shmem_ptr(const void *dest, int pe);
+  __device__ void* shmem_ptr(const void* dest, int pe);
 
   __device__ void barrier_all();
 
@@ -88,186 +87,162 @@ class ROContext : public Context {
   __device__ void sync_wg(rocshmem_team_t team);
 
   template <typename T>
-  __device__ void p(T *dest, T value, int pe);
+  __device__ void p(T* dest, T value, int pe);
 
   template <typename T>
-  __device__ T g(const T *source, int pe);
+  __device__ T g(const T* source, int pe);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce_wg(rocshmem_team_t team, T *dest, const T *source,
-                        int nreduce);
+  __device__ int reduce_wg(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce_scatter_wg(rocshmem_team_t team, T *dest, const T *source,
-                                   int nreduce);
+  __device__ int reduce_scatter_wg(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce_wave(rocshmem_team_t team, T *dest, const T *source,
-                             int nreduce);
+  __device__ int reduce_wave(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T, ROCSHMEM_OP Op>
-  __device__ int reduce_scatter_wave(rocshmem_team_t team, T *dest, const T *source,
-                                     int nreduce);
+  __device__ int reduce_scatter_wave(rocshmem_team_t team, T* dest, const T* source, int nreduce);
 
   template <typename T>
-  __device__ void put(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void put(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void put_nbi(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void put_nbi(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void get(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void get(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void get_nbi(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void get_nbi(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ T amo_fetch_cas(void *dst, T value, T cond, int pe);
+  __device__ T amo_fetch_cas(void* dst, T value, T cond, int pe);
 
   template <typename T>
-  __device__ void amo_cas(void *dst, T value, T cond, int pe);
+  __device__ void amo_cas(void* dst, T value, T cond, int pe);
 
   template <typename T>
-  __device__ T amo_fetch_add(void *dst, T value, int pe);
+  __device__ T amo_fetch_add(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ void amo_add(void *dst, T value, int pe);
+  __device__ void amo_add(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ void amo_set(void *dst, T value, int pe);
+  __device__ void amo_set(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ T amo_swap(void *dst, T value, int pe);
+  __device__ T amo_swap(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ T amo_fetch_and(void *dst, T value, int pe);
+  __device__ T amo_fetch_and(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ void amo_and(void *dst, T value, int pe);
+  __device__ void amo_and(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ T amo_fetch_or(void *dst, T value, int pe);
+  __device__ T amo_fetch_or(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ void amo_or(void *dst, T value, int pe);
+  __device__ void amo_or(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ T amo_fetch_xor(void *dst, T value, int pe);
+  __device__ T amo_fetch_xor(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ void amo_xor(void *dst, T value, int pe);
+  __device__ void amo_xor(void* dst, T value, int pe);
 
   template <typename T>
-  __device__ void broadcast_wg(rocshmem_team_t team, T *dest, const T *source,
-                            int nelems, int pe_root);
+  __device__ void broadcast_wg(rocshmem_team_t team, T* dest, const T* source, int nelems,
+                               int pe_root);
 
   template <typename T>
-  __device__ void broadcast_wg(T *dest, const T *source, int nelems, int pe_root,
-                            int pe_start, int log_pe_stride, int pe_size,
-                            long *p_sync);  // NOLINT(runtime/int)
+  __device__ void broadcast_wg(T* dest, const T* source, int nelems, int pe_root, int pe_start,
+                               int log_pe_stride, int pe_size,
+                               long* p_sync);  // NOLINT(runtime/int)
 
-  __device__ void broadcastmem_wg(rocshmem_team_t team, void *dest, const void *source,
-                            int nelems, int pe_root);
-
-  template <typename T>
-  __device__ int broadcast_wave(rocshmem_team_t team,
-                                T *dest, const T* source, int nelems, int PE_root);
-
-  __device__ int broadcastmem_wave(rocshmem_team_t team,
-                                  void *dest, const void* source, int nelems, int PE_root);
+  __device__ void broadcastmem_wg(rocshmem_team_t team, void* dest, const void* source, int nelems,
+                                  int pe_root);
 
   template <typename T>
-  __device__ void alltoall_wg(rocshmem_team_t team, T *dest, const T *source,
-                           int nelems);
+  __device__ int broadcast_wave(rocshmem_team_t team, T* dest, const T* source, int nelems,
+                                int PE_root);
 
-  __device__ void alltoallmem_wg(rocshmem_team_t team, void *dest, const void *source,
-                                  int nelems);
+  __device__ int broadcastmem_wave(rocshmem_team_t team, void* dest, const void* source, int nelems,
+                                   int PE_root);
 
   template <typename T>
-  __device__ void alltoallv(rocshmem_team_t team,
-                            T *dest, const size_t dest_nelems[],
-                            const size_t dest_displs[],
-                            T *source, const size_t source_nelems[],
+  __device__ void alltoall_wg(rocshmem_team_t team, T* dest, const T* source, int nelems);
+
+  __device__ void alltoallmem_wg(rocshmem_team_t team, void* dest, const void* source, int nelems);
+
+  template <typename T>
+  __device__ void alltoallv(rocshmem_team_t team, T* dest, const size_t dest_nelems[],
+                            const size_t dest_displs[], T* source, const size_t source_nelems[],
                             const size_t source_displs[]);
 
   template <typename T>
-  __device__ int alltoall_wave(rocshmem_team_t team, T* dest,
-                                  const T* source, int nelems);
+  __device__ int alltoall_wave(rocshmem_team_t team, T* dest, const T* source, int nelems);
 
-  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest,
-                                  const void* source, int nelems);
+  __device__ int alltoallmem_wave(rocshmem_team_t team, void* dest, const void* source, int nelems);
 
   template <typename T>
-  __device__ void fcollect_wg(rocshmem_team_t team, T *dest, const T *source,
-                           int nelems);
+  __device__ void fcollect_wg(rocshmem_team_t team, T* dest, const T* source, int nelems);
 
-  __device__ void fcollectmem_wg(rocshmem_team_t team, void *dest,
-                                  const void *source, int nelems);
+  __device__ void fcollectmem_wg(rocshmem_team_t team, void* dest, const void* source, int nelems);
 
   template <typename T>
-  __device__ int fcollect_wave(rocshmem_team_t team, T *dest, const T *source,
-                               int nelems);
+  __device__ int fcollect_wave(rocshmem_team_t team, T* dest, const T* source, int nelems);
 
-  __device__ int fcollectmem_wave(rocshmem_team_t team, void *dest,
-                                  const void *source, int nelems);
+  __device__ int fcollectmem_wave(rocshmem_team_t team, void* dest, const void* source, int nelems);
 
-  __device__ void putmem_wg(void *dest, const void *source, size_t nelems,
-                            int pe);
+  __device__ void putmem_wg(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void getmem_wg(void *dest, const void *source, size_t nelems,
-                            int pe);
+  __device__ void getmem_wg(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void putmem_nbi_wg(void *dest, const void *source, size_t nelems,
-                                int pe);
+  __device__ void putmem_nbi_wg(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void getmem_nbi_wg(void *dest, const void *source, size_t nelems,
-                                int pe);
+  __device__ void getmem_nbi_wg(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void putmem_wave(void *dest, const void *source, size_t nelems,
-                              int pe);
+  __device__ void putmem_wave(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void getmem_wave(void *dest, const void *source, size_t nelems,
-                              int pe);
+  __device__ void getmem_wave(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void putmem_nbi_wave(void *dest, const void *source, size_t nelems,
-                                  int pe);
+  __device__ void putmem_nbi_wave(void* dest, const void* source, size_t nelems, int pe);
 
-  __device__ void getmem_nbi_wave(void *dest, const void *source, size_t nelems,
-                                  int pe);
+  __device__ void getmem_nbi_wave(void* dest, const void* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void put_wg(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void put_wg(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void put_nbi_wg(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void put_nbi_wg(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void get_wg(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void get_wg(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void get_nbi_wg(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void get_nbi_wg(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void put_wave(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void put_wave(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void put_nbi_wave(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void put_nbi_wave(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void get_wave(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void get_wave(T* dest, const T* source, size_t nelems, int pe);
 
   template <typename T>
-  __device__ void get_nbi_wave(T *dest, const T *source, size_t nelems, int pe);
+  __device__ void get_nbi_wave(T* dest, const T* source, size_t nelems, int pe);
 
-#define RO_CONTEXT_PUT_SIGNAL_DEC(SUFFIX)                                                \
-  template <typename T>                                                                  \
-  __device__ void put_signal##SUFFIX(T *dest, const T *source, size_t nelems,            \
-                                     uint64_t *sig_addr, uint64_t signal, int sig_op,    \
-                                     int pe);                                            \
-                                                                                         \
-  __device__ void putmem_signal##SUFFIX(void *dest, const void *source, size_t nelems,   \
-                                        uint64_t *sig_addr, uint64_t signal, int sig_op, \
-                                        int pe);
+#define RO_CONTEXT_PUT_SIGNAL_DEC(SUFFIX)                                                         \
+  template <typename T>                                                                           \
+  __device__ void put_signal##SUFFIX(T* dest, const T* source, size_t nelems, uint64_t* sig_addr, \
+                                     uint64_t signal, int sig_op, int pe);                        \
+                                                                                                  \
+  __device__ void putmem_signal##SUFFIX(void* dest, const void* source, size_t nelems,            \
+                                        uint64_t* sig_addr, uint64_t signal, int sig_op, int pe);
 
   RO_CONTEXT_PUT_SIGNAL_DEC()
   RO_CONTEXT_PUT_SIGNAL_DEC(_wg)
@@ -276,77 +251,77 @@ class ROContext : public Context {
   RO_CONTEXT_PUT_SIGNAL_DEC(_nbi_wg)
   RO_CONTEXT_PUT_SIGNAL_DEC(_nbi_wave)
 
-  __device__ uint64_t signal_fetch(const uint64_t *sig_addr);
-  __device__ uint64_t signal_fetch_wg(const uint64_t *sig_addr);
-  __device__ uint64_t signal_fetch_wave(const uint64_t *sig_addr);
+  __device__ uint64_t signal_fetch(const uint64_t* sig_addr);
+  __device__ uint64_t signal_fetch_wg(const uint64_t* sig_addr);
+  __device__ uint64_t signal_fetch_wave(const uint64_t* sig_addr);
 
   /**************************************************************************
    ****************** TILE API METHODS (NOT IMPLEMENTED) ********************
    *************************************************************************/
 
   // RMA PUT operations - Type-erased interface
-  __device__ int tile_put(void* dst_data, const void* src_data,
-                          const size_t* dst_strides, const size_t* src_strides,
-                          const size_t* start_coord, const size_t* boundary,
-                          int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int tile_put(void* dst_data, const void* src_data, const size_t* dst_strides,
+                          const size_t* src_strides, const size_t* start_coord,
+                          const size_t* boundary, int ndim, size_t element_size, int pe,
+                          uint64_t flags);
 
-  __device__ int tile_put_wave(void* dst_data, const void* src_data,
-                               const size_t* dst_strides, const size_t* src_strides,
-                               const size_t* start_coord, const size_t* boundary,
-                               int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int tile_put_wave(void* dst_data, const void* src_data, const size_t* dst_strides,
+                               const size_t* src_strides, const size_t* start_coord,
+                               const size_t* boundary, int ndim, size_t element_size, int pe,
+                               uint64_t flags);
 
-  __device__ int tile_put_wg(void* dst_data, const void* src_data,
-                             const size_t* dst_strides, const size_t* src_strides,
-                             const size_t* start_coord, const size_t* boundary,
-                             int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int tile_put_wg(void* dst_data, const void* src_data, const size_t* dst_strides,
+                             const size_t* src_strides, const size_t* start_coord,
+                             const size_t* boundary, int ndim, size_t element_size, int pe,
+                             uint64_t flags);
 
   // RMA GET operations - Type-erased interface
-  __device__ int tile_get(void* dst_data, const void* src_data,
-                          const size_t* dst_strides, const size_t* src_strides,
-                          const size_t* start_coord, const size_t* boundary,
-                          int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int tile_get(void* dst_data, const void* src_data, const size_t* dst_strides,
+                          const size_t* src_strides, const size_t* start_coord,
+                          const size_t* boundary, int ndim, size_t element_size, int pe,
+                          uint64_t flags);
 
-  __device__ int tile_get_wave(void* dst_data, const void* src_data,
-                               const size_t* dst_strides, const size_t* src_strides,
-                               const size_t* start_coord, const size_t* boundary,
-                               int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int tile_get_wave(void* dst_data, const void* src_data, const size_t* dst_strides,
+                               const size_t* src_strides, const size_t* start_coord,
+                               const size_t* boundary, int ndim, size_t element_size, int pe,
+                               uint64_t flags);
 
-  __device__ int tile_get_wg(void* dst_data, const void* src_data,
-                             const size_t* dst_strides, const size_t* src_strides,
-                             const size_t* start_coord, const size_t* boundary,
-                             int ndim, size_t element_size, int pe, uint64_t flags);
+  __device__ int tile_get_wg(void* dst_data, const void* src_data, const size_t* dst_strides,
+                             const size_t* src_strides, const size_t* start_coord,
+                             const size_t* boundary, int ndim, size_t element_size, int pe,
+                             uint64_t flags);
 
   // Collective operations - Allgather - Type-erased interface
   __device__ int tile_allgather(rocshmem_team_t team, void* dst_data, const void* src_data,
                                 const size_t* dst_strides, const size_t* src_strides,
-                                const size_t* start_coord, const size_t* boundary,
-                                int ndim, size_t element_size, uint64_t flags);
+                                const size_t* start_coord, const size_t* boundary, int ndim,
+                                size_t element_size, uint64_t flags);
 
   __device__ int tile_allgather_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
                                      const size_t* dst_strides, const size_t* src_strides,
-                                     const size_t* start_coord, const size_t* boundary,
-                                     int ndim, size_t element_size, uint64_t flags);
+                                     const size_t* start_coord, const size_t* boundary, int ndim,
+                                     size_t element_size, uint64_t flags);
 
   __device__ int tile_allgather_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
                                    const size_t* dst_strides, const size_t* src_strides,
-                                   const size_t* start_coord, const size_t* boundary,
-                                   int ndim, size_t element_size, uint64_t flags);
+                                   const size_t* start_coord, const size_t* boundary, int ndim,
+                                   size_t element_size, uint64_t flags);
 
   // Collective operations - Broadcast - Type-erased interface
   __device__ int tile_broadcast(rocshmem_team_t team, void* dst_data, const void* src_data,
                                 const size_t* dst_strides, const size_t* src_strides,
-                                const size_t* start_coord, const size_t* boundary,
-                                int ndim, size_t element_size, int pe_root, uint64_t flags);
+                                const size_t* start_coord, const size_t* boundary, int ndim,
+                                size_t element_size, int pe_root, uint64_t flags);
 
   __device__ int tile_broadcast_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
                                      const size_t* dst_strides, const size_t* src_strides,
-                                     const size_t* start_coord, const size_t* boundary,
-                                     int ndim, size_t element_size, int pe_root, uint64_t flags);
+                                     const size_t* start_coord, const size_t* boundary, int ndim,
+                                     size_t element_size, int pe_root, uint64_t flags);
 
   __device__ int tile_broadcast_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
                                    const size_t* dst_strides, const size_t* src_strides,
-                                   const size_t* start_coord, const size_t* boundary,
-                                   int ndim, size_t element_size, int pe_root, uint64_t flags);
+                                   const size_t* start_coord, const size_t* boundary, int ndim,
+                                   size_t element_size, int pe_root, uint64_t flags);
 
   // Collective wait - No change needed
   __device__ int tile_collective_wait(rocshmem_team_t team, uint64_t flags);
@@ -354,62 +329,63 @@ class ROContext : public Context {
   // SUM Reduction operations - Type-erased interface
   __device__ int tile_sum_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
                                  const size_t* dst_strides, const size_t* src_strides,
-                                 const size_t* start_coord, const size_t* boundary,
-                                 int ndim, size_t element_size, int root, uint64_t flags);
+                                 const size_t* start_coord, const size_t* boundary, int ndim,
+                                 size_t element_size, int root, uint64_t flags);
 
   __device__ int tile_sum_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
                                       const size_t* dst_strides, const size_t* src_strides,
-                                      const size_t* start_coord, const size_t* boundary,
-                                      int ndim, size_t element_size, int root, uint64_t flags);
+                                      const size_t* start_coord, const size_t* boundary, int ndim,
+                                      size_t element_size, int root, uint64_t flags);
 
   __device__ int tile_sum_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
                                     const size_t* dst_strides, const size_t* src_strides,
-                                    const size_t* start_coord, const size_t* boundary,
-                                    int ndim, size_t element_size, int root, uint64_t flags);
+                                    const size_t* start_coord, const size_t* boundary, int ndim,
+                                    size_t element_size, int root, uint64_t flags);
 
   // MAX Reduction operations - Type-erased interface
   __device__ int tile_max_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
                                  const size_t* dst_strides, const size_t* src_strides,
-                                 const size_t* start_coord, const size_t* boundary,
-                                 int ndim, size_t element_size, int root, uint64_t flags);
+                                 const size_t* start_coord, const size_t* boundary, int ndim,
+                                 size_t element_size, int root, uint64_t flags);
 
   __device__ int tile_max_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
                                       const size_t* dst_strides, const size_t* src_strides,
-                                      const size_t* start_coord, const size_t* boundary,
-                                      int ndim, size_t element_size, int root, uint64_t flags);
+                                      const size_t* start_coord, const size_t* boundary, int ndim,
+                                      size_t element_size, int root, uint64_t flags);
 
   __device__ int tile_max_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
                                     const size_t* dst_strides, const size_t* src_strides,
-                                    const size_t* start_coord, const size_t* boundary,
-                                    int ndim, size_t element_size, int root, uint64_t flags);
+                                    const size_t* start_coord, const size_t* boundary, int ndim,
+                                    size_t element_size, int root, uint64_t flags);
 
   // MIN Reduction operations - Type-erased interface
   __device__ int tile_min_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
                                  const size_t* dst_strides, const size_t* src_strides,
-                                 const size_t* start_coord, const size_t* boundary,
-                                 int ndim, size_t element_size, int root, uint64_t flags);
+                                 const size_t* start_coord, const size_t* boundary, int ndim,
+                                 size_t element_size, int root, uint64_t flags);
 
   __device__ int tile_min_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
                                       const size_t* dst_strides, const size_t* src_strides,
-                                      const size_t* start_coord, const size_t* boundary,
-                                      int ndim, size_t element_size, int root, uint64_t flags);
+                                      const size_t* start_coord, const size_t* boundary, int ndim,
+                                      size_t element_size, int root, uint64_t flags);
 
   __device__ int tile_min_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
                                     const size_t* dst_strides, const size_t* src_strides,
-                                    const size_t* start_coord, const size_t* boundary,
-                                    int ndim, size_t element_size, int root, uint64_t flags);
+                                    const size_t* start_coord, const size_t* boundary, int ndim,
+                                    size_t element_size, int root, uint64_t flags);
 
   // Rooted SUM Reduction operations
   // Rooted MAX Reduction operations
   // Rooted MIN Reduction operations
  private:
-  __device__ uint64_t *get_atomic_ret_buf();
+  __device__ uint64_t* get_atomic_ret_buf();
 
-  __device__ uint64_t *get_g_ret_buf();
+  __device__ uint64_t* get_g_ret_buf();
 
-  __device__ volatile char *get_status_flag();
+  __device__ volatile char* get_status_flag();
 
-  __device__ void post_network_nbi(ro_net_cmds cmd, void *dest, const void *source, size_t nelems, int pe);
+  __device__ void post_network_nbi(ro_net_cmds cmd, void* dest, const void* source, size_t nelems,
+                                   int pe);
 
   __device__ bool elect_queue_lane();
 
@@ -417,7 +393,7 @@ class ROContext : public Context {
 
   __device__ void record_nbi_fenced(uint64_t posted);
 
-  BlockHandle *block_handle{nullptr};
+  BlockHandle* block_handle{nullptr};
 
   int ro_net_win_id{-1};
 

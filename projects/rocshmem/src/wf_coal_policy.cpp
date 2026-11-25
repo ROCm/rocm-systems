@@ -56,8 +56,7 @@ namespace rocshmem {
  *   3) The algorithm misses opportunities when threads have coalescable
  *      messages but the message sizes are different.
  */
-__device__ bool WfCoalOn::coalesce(int pe, const void *source, const void *dest,
-                                   size_t *size) {
+__device__ bool WfCoalOn::coalesce(int pe, const void* source, const void* dest, size_t* size) {
   const uint64_t src = (const uint64_t)source;
   const uint64_t dst = (const uint64_t)dest;
 
@@ -65,9 +64,9 @@ __device__ bool WfCoalOn::coalesce(int pe, const void *source, const void *dest,
    * Split 64-bit values into high and low for 32-bit shuffles.
    * Unfortunately, the shuffle operations only support 32-bit widths.
    */
-  uint32_t src_low = uint32_t(src & 0xFFFFFFFF);
+  uint32_t src_low  = uint32_t(src & 0xFFFFFFFF);
   uint32_t src_high = uint32_t((src >> 32) & 0xFFFFFFFF);
-  uint32_t dst_low = uint32_t(dst & 0xFFFFFFFF);
+  uint32_t dst_low  = uint32_t(dst & 0xFFFFFFFF);
   uint32_t dst_high = uint32_t((dst >> 32) & 0xFFFFFFFF);
 
   /**
@@ -81,12 +80,12 @@ __device__ bool WfCoalOn::coalesce(int pe, const void *source, const void *dest,
    * The implementation of __shfl_up comes from the hip header files.
    * In rocm 2.10, the filename is device_functions.h.
    */
-  uint64_t lower_src_low = __shfl_up(src_low, 1);
+  uint64_t lower_src_low  = __shfl_up(src_low, 1);
   uint64_t lower_src_high = __shfl_up(src_high, 1);
-  uint64_t lower_dst_low = __shfl_up(dst_low, 1);
+  uint64_t lower_dst_low  = __shfl_up(dst_low, 1);
   uint64_t lower_dst_high = __shfl_up(dst_high, 1);
-  int lower_pe = __shfl_up(pe, 1);
-  size_t lower_size = __shfl_up((unsigned int)*size, 1);
+  int lower_pe            = __shfl_up(pe, 1);
+  size_t lower_size       = __shfl_up((unsigned int)*size, 1);
 
   /**
    * Recombine the incoming 64-bit values from neighbor.
@@ -118,13 +117,12 @@ __device__ bool WfCoalOn::coalesce(int pe, const void *source, const void *dest,
    * sending a message (which means that it is not coalescable with its
    * lower neighbor).
    */
-  bool coalescable =
-      (mask & (1LL << (wv_id - 1))) &&  // Ensure lower lane is active
-      (lower_size == *size) &&          // Ensure lower lane size is equal
-      ((lower_src + *size) == src) &&   // Ensure I cover lower src
-      ((lower_dst + *size) == dst) &&   // Ensure I cover lower dst
-      (pe == lower_pe) &&               // Must be sending to the same pe
-      (wv_id != 0);                     // Thread_0 is never coalescable
+  bool coalescable = (mask & (1LL << (wv_id - 1))) &&  // Ensure lower lane is active
+                     (lower_size == *size) &&          // Ensure lower lane size is equal
+                     ((lower_src + *size) == src) &&   // Ensure I cover lower src
+                     ((lower_dst + *size) == dst) &&   // Ensure I cover lower dst
+                     (pe == lower_pe) &&               // Must be sending to the same pe
+                     (wv_id != 0);                     // Thread_0 is never coalescable
 
   /**
    * Share the lower neighbor coalescability status with all the active

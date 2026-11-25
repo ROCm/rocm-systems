@@ -29,71 +29,66 @@ using namespace rocshmem;
 /*****************************************************************************
  *************************** Kernel Definitions ******************************
  *****************************************************************************/
-__global__ void lowest_active_lane_kernel(BitwiseDeviceMethods *device_methods,
-                                          WarpMatrix *warp_matrix,
+__global__ void lowest_active_lane_kernel(BitwiseDeviceMethods* device_methods,
+                                          WarpMatrix* warp_matrix,
                                           uint64_t activate_lanes_bitfield) {
   device_methods->lowest_active_lane(warp_matrix, activate_lanes_bitfield);
 }
 
-__global__ void is_lowest_active_lane_kernel(
-    BitwiseDeviceMethods *device_methods, WarpMatrix *warp_matrix,
-    uint64_t activate_lanes_bitfield) {
+__global__ void is_lowest_active_lane_kernel(BitwiseDeviceMethods* device_methods,
+                                             WarpMatrix* warp_matrix,
+                                             uint64_t activate_lanes_bitfield) {
   device_methods->is_lowest_active_lane(warp_matrix, activate_lanes_bitfield);
 }
 
-__global__ void active_logical_lane_id_2_kernel(
-    BitwiseDeviceMethods *device_methods, WarpMatrix *warp_matrix,
-    uint64_t activate_lanes_bitfield) {
-  device_methods->active_logical_lane_id_2(warp_matrix,
-                                           activate_lanes_bitfield);
+__global__ void active_logical_lane_id_2_kernel(BitwiseDeviceMethods* device_methods,
+                                                WarpMatrix* warp_matrix,
+                                                uint64_t activate_lanes_bitfield) {
+  device_methods->active_logical_lane_id_2(warp_matrix, activate_lanes_bitfield);
 }
 
-__global__ void lane_id_kernel(BitwiseDeviceMethods *device_methods,
-                               WarpMatrix *warp_matrix,
+__global__ void lane_id_kernel(BitwiseDeviceMethods* device_methods, WarpMatrix* warp_matrix,
                                uint64_t activate_lanes_bitfield) {
   device_methods->lane_id(warp_matrix, activate_lanes_bitfield);
 }
 
-__global__ void number_active_lanes_kernel(BitwiseDeviceMethods *device_methods,
-                                           WarpMatrix *warp_matrix,
+__global__ void number_active_lanes_kernel(BitwiseDeviceMethods* device_methods,
+                                           WarpMatrix* warp_matrix,
                                            uint64_t activate_lanes_bitfield) {
   device_methods->number_active_lanes(warp_matrix, activate_lanes_bitfield);
 }
 
-__global__ void broadcast_up_value_42_kernel(
-    BitwiseDeviceMethods *device_methods, WarpMatrix *warp_matrix,
-    uint64_t activate_lanes_bitfield) {
+__global__ void broadcast_up_value_42_kernel(BitwiseDeviceMethods* device_methods,
+                                             WarpMatrix* warp_matrix,
+                                             uint64_t activate_lanes_bitfield) {
   device_methods->broadcast_up_value_42(warp_matrix, activate_lanes_bitfield);
 }
 
-__global__ void fetch_incr_lowest_active_lane_kernel(
-    BitwiseDeviceMethods *device_methods, WarpMatrix *warp_matrix,
-    uint64_t activate_lanes_bitfield) {
-  device_methods->fetch_incr_lowest_active_lane(warp_matrix,
-                                                activate_lanes_bitfield);
+__global__ void fetch_incr_lowest_active_lane_kernel(BitwiseDeviceMethods* device_methods,
+                                                     WarpMatrix* warp_matrix,
+                                                     uint64_t activate_lanes_bitfield) {
+  device_methods->fetch_incr_lowest_active_lane(warp_matrix, activate_lanes_bitfield);
 }
 
-__global__ void fetch_incr_active_logical_lane_1_kernel(
-    BitwiseDeviceMethods *device_methods, WarpMatrix *warp_matrix,
-    uint64_t activate_lanes_bitfield) {
-  device_methods->fetch_incr_active_logical_lane_1(warp_matrix,
-                                                   activate_lanes_bitfield);
+__global__ void fetch_incr_active_logical_lane_1_kernel(BitwiseDeviceMethods* device_methods,
+                                                        WarpMatrix* warp_matrix,
+                                                        uint64_t activate_lanes_bitfield) {
+  device_methods->fetch_incr_active_logical_lane_1(warp_matrix, activate_lanes_bitfield);
 }
 
-__global__ void activate_lane_helper_kernel(
-    BitwiseDeviceMethods *device_methods, WarpMatrix *warp_matrix,
-    uint64_t activate_lanes_bitfield) {
-  bool is_an_active_lane =
-      device_methods->activate_lane_helper(activate_lanes_bitfield);
+__global__ void activate_lane_helper_kernel(BitwiseDeviceMethods* device_methods,
+                                            WarpMatrix* warp_matrix,
+                                            uint64_t activate_lanes_bitfield) {
+  bool is_an_active_lane = device_methods->activate_lane_helper(activate_lanes_bitfield);
 
   /*
    * Index into warp matrix to save return value to be read by host.
    */
   if (is_an_active_lane) {
-    size_t warp_index = hipThreadIdx_x / WF_SIZE;
+    size_t warp_index  = hipThreadIdx_x / WF_SIZE;
     size_t block_index = hipBlockIdx_x;
-    auto *elem = warp_matrix->access(warp_index, block_index);
-    *elem = hipThreadIdx_x;
+    auto* elem         = warp_matrix->access(warp_index, block_index);
+    *elem              = hipThreadIdx_x;
   }
 }
 
@@ -160,7 +155,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_0) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 0);
 }
 
@@ -177,7 +172,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_1) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 1);
 }
 
@@ -194,7 +189,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_2) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 2);
 }
 
@@ -211,7 +206,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_3) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 3);
 }
 
@@ -228,7 +223,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_4) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 4);
 }
 
@@ -245,7 +240,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_8) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 8);
 }
 
@@ -262,7 +257,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_12) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 12);
 }
 
@@ -279,7 +274,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_28) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 28);
 }
 
@@ -296,7 +291,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_29) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 29);
 }
 
@@ -313,7 +308,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_30) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 30);
 }
 
@@ -330,7 +325,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_31) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 31);
 }
 
@@ -347,7 +342,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_32) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 32);
 }
 
@@ -364,7 +359,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_33) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 33);
 }
 
@@ -381,7 +376,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_34) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 34);
 }
 
@@ -398,7 +393,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_35) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 35);
 }
 
@@ -415,7 +410,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_44) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 44);
 }
 
@@ -432,7 +427,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_48) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 48);
 }
 
@@ -449,7 +444,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_52) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 52);
 }
 
@@ -466,7 +461,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_56) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 56);
 }
 
@@ -483,7 +478,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_60) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 60);
 }
 
@@ -500,7 +495,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_61) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 61);
 }
 
@@ -517,7 +512,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_62) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 62);
 }
 
@@ -534,7 +529,7 @@ TEST_F(BitwiseTestFixture, activate_lane_helper_64_1_lane_63) {
 
   host_run_device_kernel(activate_lane_helper_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 63);
 }
 
@@ -554,7 +549,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_0) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 0);
 }
 
@@ -571,7 +566,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_1) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 1);
 }
 
@@ -588,7 +583,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_2) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 2);
 }
 
@@ -605,7 +600,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_3) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 3);
 }
 
@@ -622,7 +617,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_4) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 4);
 }
 
@@ -639,7 +634,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_8) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 8);
 }
 
@@ -656,7 +651,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_16) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 16);
 }
 
@@ -673,7 +668,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_16_1_lane_15) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 15);
 }
 
@@ -690,7 +685,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_31) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 31);
 }
 
@@ -707,7 +702,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_32_1_lane_31) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 31);
 }
 
@@ -724,7 +719,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_32) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 32);
 }
 
@@ -741,7 +736,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_36) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 36);
 }
 
@@ -758,7 +753,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_47) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 47);
 }
 
@@ -775,7 +770,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_48) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 48);
 }
 
@@ -792,7 +787,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_49) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 49);
 }
 
@@ -809,7 +804,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_64_1_lane_60) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 60);
 }
 
@@ -824,7 +819,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_128_1) {
 
   host_run_device_kernel(lowest_active_lane_kernel, activate_lanes_bitfield);
 
-  auto *elem = _warp_matrix->access(0, 0);
+  auto* elem = _warp_matrix->access(0, 0);
   ASSERT_EQ(*elem, 31);
 
   elem = _warp_matrix->access(1, 0);
@@ -846,7 +841,7 @@ TEST_F(BitwiseTestFixture, lowest_active_lane_1024_80) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 4);
     }
   }
@@ -870,7 +865,7 @@ TEST_F(BitwiseTestFixture, is_lowest_active_lane_64_1_lane_1) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 1);
     }
   }
@@ -891,7 +886,7 @@ TEST_F(BitwiseTestFixture, is_lowest_active_lane_64_1_lane_2) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 2);
     }
   }
@@ -912,7 +907,7 @@ TEST_F(BitwiseTestFixture, is_lowest_active_lane_64_1_lane_3) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 3);
     }
   }
@@ -933,7 +928,7 @@ TEST_F(BitwiseTestFixture, is_lowest_active_lane_64_1_lane_4) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 4);
     }
   }
@@ -954,7 +949,7 @@ TEST_F(BitwiseTestFixture, is_lowest_active_lane_256_8_lane_40) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 40);
     }
   }
@@ -978,7 +973,7 @@ TEST_F(BitwiseTestFixture, lane_id_1_1_lane_15_inactive_left_zero) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 0);
     }
   }
@@ -999,7 +994,7 @@ TEST_F(BitwiseTestFixture, lane_id_32_1_lane_15) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 15);
     }
   }
@@ -1020,7 +1015,7 @@ TEST_F(BitwiseTestFixture, lane_id_64_1_lane_32) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 32);
     }
   }
@@ -1041,7 +1036,7 @@ TEST_F(BitwiseTestFixture, lane_id_64_1_lane_49) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 49);
     }
   }
@@ -1062,7 +1057,7 @@ TEST_F(BitwiseTestFixture, lane_id_128_2_lane_2) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 1);
     }
   }
@@ -1083,7 +1078,7 @@ TEST_F(BitwiseTestFixture, lane_id_128_2_lane_61) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 61);
     }
   }
@@ -1104,7 +1099,7 @@ TEST_F(BitwiseTestFixture, lane_id_128_2_lane_63) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 63);
     }
   }
@@ -1128,7 +1123,7 @@ TEST_F(BitwiseTestFixture, number_active_lanes_kernel_128_2_num_active_1) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 1);
     }
   }
@@ -1149,7 +1144,7 @@ TEST_F(BitwiseTestFixture, number_active_lanes_kernel_128_2_num_active_52) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 52);
     }
   }
@@ -1170,7 +1165,7 @@ TEST_F(BitwiseTestFixture, number_active_lanes_kernel_128_2_num_active_64) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 64);
     }
   }
@@ -1190,12 +1185,11 @@ TEST_F(BitwiseTestFixture, active_logical_lane_id_kernel_64_1_logic_2_is_29) {
    */
   uint64_t activate_lanes_bitfield = 0x0FC0000020002004;
 
-  host_run_device_kernel(active_logical_lane_id_2_kernel,
-                         activate_lanes_bitfield);
+  host_run_device_kernel(active_logical_lane_id_2_kernel, activate_lanes_bitfield);
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 29);
     }
   }
@@ -1212,12 +1206,11 @@ TEST_F(BitwiseTestFixture, active_logical_lane_id_kernel_64_1_logic_2_is_62) {
    */
   uint64_t activate_lanes_bitfield = 0x4000000000000024;
 
-  host_run_device_kernel(active_logical_lane_id_2_kernel,
-                         activate_lanes_bitfield);
+  host_run_device_kernel(active_logical_lane_id_2_kernel, activate_lanes_bitfield);
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 62);
     }
   }
@@ -1234,12 +1227,11 @@ TEST_F(BitwiseTestFixture, active_logical_lane_id_kernel_768_3_logic_2_is_32) {
    */
   uint64_t activate_lanes_bitfield = 0xFFFF000100001100;
 
-  host_run_device_kernel(active_logical_lane_id_2_kernel,
-                         activate_lanes_bitfield);
+  host_run_device_kernel(active_logical_lane_id_2_kernel, activate_lanes_bitfield);
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 32);
     }
   }
@@ -1263,7 +1255,7 @@ TEST_F(BitwiseTestFixture, broadcast_up_value_42_kernel_64_1_lane_0) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 42);
     }
   }
@@ -1284,7 +1276,7 @@ TEST_F(BitwiseTestFixture, broadcast_up_value_42_kernel_64_1_lane_1) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 42);
     }
   }
@@ -1305,7 +1297,7 @@ TEST_F(BitwiseTestFixture, broadcast_up_value_42_kernel_64_1_lane_16) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 42);
     }
   }
@@ -1326,7 +1318,7 @@ TEST_F(BitwiseTestFixture, broadcast_up_value_42_kernel_64_1_odd_index) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 42);
     }
   }
@@ -1347,7 +1339,7 @@ TEST_F(BitwiseTestFixture, broadcast_up_value_42_kernel_64_1_even_index) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 42);
     }
   }
@@ -1368,7 +1360,7 @@ TEST_F(BitwiseTestFixture, broadcast_up_value_42_kernel_64_1_all) {
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem, 42);
     }
   }
@@ -1388,14 +1380,13 @@ TEST_F(BitwiseTestFixture, fetch_incr_kernel_4_1) {
    */
   uint64_t activate_lanes_bitfield = 0x000000000000000A;
 
-  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel,
-                         activate_lanes_bitfield);
+  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel, activate_lanes_bitfield);
 
   ASSERT_EQ(*_device_methods->_fetch_value, 2);
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem % this->_wf_size, 0);
     }
   }
@@ -1412,14 +1403,13 @@ TEST_F(BitwiseTestFixture, fetch_incr_kernel_64_1) {
    */
   uint64_t activate_lanes_bitfield = 0xFFFFFFFFFFFFFFFF;
 
-  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel,
-                         activate_lanes_bitfield);
+  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel, activate_lanes_bitfield);
 
   ASSERT_EQ(*_device_methods->_fetch_value, 64);
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem % this->_wf_size, 0);
     }
   }
@@ -1436,14 +1426,13 @@ TEST_F(BitwiseTestFixture, fetch_incr_kernel_64_1_top_half) {
    */
   uint64_t activate_lanes_bitfield = 0xFFFFFFFF00000000;
 
-  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel,
-                         activate_lanes_bitfield);
+  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel, activate_lanes_bitfield);
 
   ASSERT_EQ(*_device_methods->_fetch_value, 32);
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem % 32, 0);
     }
   }
@@ -1460,14 +1449,13 @@ TEST_F(BitwiseTestFixture, fetch_incr_kernel_64_1_alternating) {
    */
   uint64_t activate_lanes_bitfield = 0xF0F0F0F0F0F0F0F0;
 
-  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel,
-                         activate_lanes_bitfield);
+  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel, activate_lanes_bitfield);
 
   ASSERT_EQ(*_device_methods->_fetch_value, 32);
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem % 32, 0);
     }
   }
@@ -1484,14 +1472,13 @@ TEST_F(BitwiseTestFixture, fetch_incr_kernel_1024_1024) {
    */
   uint64_t activate_lanes_bitfield = 0xFFFFFFFFFFFFFFFF;
 
-  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel,
-                         activate_lanes_bitfield);
+  host_run_device_kernel(fetch_incr_lowest_active_lane_kernel, activate_lanes_bitfield);
 
   ASSERT_EQ(*_device_methods->_fetch_value, 1024 * 1024);
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem % this->_wf_size, 0);
     }
   }
@@ -1508,14 +1495,13 @@ TEST_F(BitwiseTestFixture, fetch_incr_logical_1_kernel_1024_1024) {
    */
   uint64_t activate_lanes_bitfield = 0xFFFFFFFFFFFFFFFF;
 
-  host_run_device_kernel(fetch_incr_active_logical_lane_1_kernel,
-                         activate_lanes_bitfield);
+  host_run_device_kernel(fetch_incr_active_logical_lane_1_kernel, activate_lanes_bitfield);
 
   ASSERT_EQ(*_device_methods->_fetch_value, 1024 * 1024);
 
   for (size_t i = 0; i < _warp_matrix->rows(); i++) {
     for (size_t j = 0; j < _warp_matrix->columns(); j++) {
-      auto *elem = _warp_matrix->access(i, j);
+      auto* elem = _warp_matrix->access(i, j);
       ASSERT_EQ(*elem % this->_wf_size, 1);
     }
   }

@@ -26,39 +26,38 @@
 #include <random>
 #include <vector>
 
-enum class InitMode {
-  Deterministic,
-  Random
-};
+enum class InitMode { Deterministic, Random };
 
 template <typename T>
 class LLMoEData {
  public:
-
   // LL_DeepEP parameters
-  const int num_tokens {0};
-  const int hidden {0};
-  const int num_topk {0};
-  const int num_experts {0};
+  const int num_tokens{0};
+  const int hidden{0};
+  const int num_topk{0};
+  const int num_experts{0};
 
   // Input data
-  T* X {nullptr};
+  T* X{nullptr};
 
   // Token to expert mapping
-  int64_t *topk_idx {nullptr};
+  int64_t* topk_idx{nullptr};
 
   // Number of tokens assigned to each expert
   std::vector<int> expert_token_count;
 
  private:
-  InitMode init_mode {InitMode::Deterministic};
+  InitMode init_mode{InitMode::Deterministic};
 
  public:
-  LLMoEData(int num_tokens_, int hidden_, int num_topk_,
-    int num_experts_, InitMode init_mode_ = InitMode::Deterministic)
-      : num_tokens(num_tokens_), hidden(hidden_),
-        num_topk(num_topk_), num_experts(num_experts_),
-        expert_token_count(num_experts, 0), init_mode(init_mode_) {}
+  LLMoEData(int num_tokens_, int hidden_, int num_topk_, int num_experts_,
+            InitMode init_mode_ = InitMode::Deterministic)
+      : num_tokens(num_tokens_),
+        hidden(hidden_),
+        num_topk(num_topk_),
+        num_experts(num_experts_),
+        expert_token_count(num_experts, 0),
+        init_mode(init_mode_) {}
 
   ~LLMoEData() {
     if (X) {
@@ -71,8 +70,7 @@ class LLMoEData {
 
   // Function to generate input data
   void generate_data() {
-
-    size_t x_size_bytes = num_tokens * hidden * sizeof(T);
+    size_t x_size_bytes        = num_tokens * hidden * sizeof(T);
     size_t topk_idx_size_bytes = num_tokens * num_topk * sizeof(int64_t);
 
     CHECK_HIP(hipMalloc(&X, x_size_bytes));
@@ -80,21 +78,21 @@ class LLMoEData {
 
     // Launch kernel to fill input data (X)
     int threads_per_block = 1024;
-    int blocks_per_grid = num_tokens; // one block per token
+    int blocks_per_grid   = num_tokens;  // one block per token
 
-    int gpu_id {0};
+    int gpu_id{0};
     CHECK_HIP(hipGetDevice(&gpu_id));
 
     data_kernel<<<blocks_per_grid, threads_per_block>>>(X, hidden, gpu_id);
     CHECK_HIP(hipDeviceSynchronize());
 
     switch (init_mode) {
-      case InitMode::Deterministic:
-        generate_topk_deterministic();
-        break;
-      case InitMode::Random:
-        generate_topk_random();
-        break;
+    case InitMode::Deterministic:
+      generate_topk_deterministic();
+      break;
+    case InitMode::Random:
+      generate_topk_random();
+      break;
     }
 
     // Debug prints
@@ -110,23 +108,19 @@ class LLMoEData {
     std::cout << "  num_experts: " << num_experts << std::endl;
     std::cout << "  num_topk: " << num_topk << std::endl;
     std::cout << "  init_mode: "
-              << (init_mode == InitMode::Deterministic
-                      ? "Deterministic"
-                      : "Random")
-              << std::endl;
+              << (init_mode == InitMode::Deterministic ? "Deterministic" : "Random") << std::endl;
   }
 
   void print_data() {
-    size_t x_size = num_tokens * hidden;
+    size_t x_size        = num_tokens * hidden;
     size_t topk_idx_size = num_tokens * num_topk;
 
     std::vector<T> h_X(x_size);
     std::vector<int64_t> h_topk_idx(topk_idx_size);
 
-    CHECK_HIP(hipMemcpy(h_X.data(), X, x_size * sizeof(T),
-              hipMemcpyDeviceToHost));
-    CHECK_HIP(hipMemcpy(h_topk_idx.data(), topk_idx,
-              topk_idx_size * sizeof(int64_t), hipMemcpyDeviceToHost));
+    CHECK_HIP(hipMemcpy(h_X.data(), X, x_size * sizeof(T), hipMemcpyDeviceToHost));
+    CHECK_HIP(hipMemcpy(h_topk_idx.data(), topk_idx, topk_idx_size * sizeof(int64_t),
+                        hipMemcpyDeviceToHost));
 
     std::cout << "Input Data (X):" << std::endl;
     for (int i = 0; i < num_tokens; i++) {
@@ -184,8 +178,8 @@ class LLMoEData {
         expert_token_count[expert_indices[k]]++;
       }
     }
-    CHECK_HIP(hipMemcpy(topk_idx, h_topk_idx.data(),
-                        topk_idx_size * sizeof(int64_t), hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemcpy(topk_idx, h_topk_idx.data(), topk_idx_size * sizeof(int64_t),
+                        hipMemcpyHostToDevice));
   }
 
   // Generate deterministic top-k indices for each token
@@ -199,7 +193,7 @@ class LLMoEData {
         expert_token_count[h_topk_idx[i * num_topk + k]]++;
       }
     }
-    CHECK_HIP(hipMemcpy(topk_idx, h_topk_idx.data(),
-                        topk_idx_size * sizeof(int64_t), hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemcpy(topk_idx, h_topk_idx.data(), topk_idx_size * sizeof(int64_t),
+                        hipMemcpyHostToDevice));
   }
 };

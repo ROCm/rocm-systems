@@ -44,7 +44,7 @@ namespace rocshmem {
  * be in a header and not cpp because it is a template.
  */
 template <typename T>
-__device__ void Context::p(T *dest, T value, int pe) {
+__device__ void Context::p(T* dest, T value, int pe) {
   ctxStats.incStat(NUM_P);
 
   /*
@@ -55,7 +55,7 @@ __device__ void Context::p(T *dest, T value, int pe) {
 }
 
 template <typename T>
-__device__ T Context::g(T *source, int pe) {
+__device__ T Context::g(T* source, int pe) {
   ctxStats.incStat(NUM_G);
 
   /*
@@ -67,10 +67,9 @@ __device__ T Context::g(T *source, int pe) {
 
 // The only way to get multi-arg templates to feed into a macro
 template <typename T, ROCSHMEM_OP Op>
-__device__ void Context::to_all(T *dest, const T *source, int nreduce,
-                                int PE_start, int logPE_stride, int PE_size,
-                                T *pWrk,
-                                long *pSync) {  // NOLINT(runtime/int)
+__device__ void Context::to_all(T* dest, const T* source, int nreduce, int PE_start,
+                                int logPE_stride, int PE_size, T* pWrk,
+                                long* pSync) {  // NOLINT(runtime/int)
   if (nreduce == 0) {
     return;
   }
@@ -79,13 +78,12 @@ __device__ void Context::to_all(T *dest, const T *source, int nreduce,
     ctxStats.incStat(NUM_TO_ALL);
   }
 
-  DISPATCH(to_all<PAIR(T, Op)>(dest, source, nreduce, PE_start, logPE_stride,
-                               PE_size, pWrk, pSync));
+  DISPATCH(
+      to_all<PAIR(T, Op)>(dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync));
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int Context::reduce_wg(rocshmem_team_t team, T *dest, const T *source,
-                               int nreduce) {
+__device__ int Context::reduce_wg(rocshmem_team_t team, T* dest, const T* source, int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -98,8 +96,8 @@ __device__ int Context::reduce_wg(rocshmem_team_t team, T *dest, const T *source
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int Context::reduce_scatter_wg(rocshmem_team_t team, T *dest,
-                                          const T *source, int nreduce) {
+__device__ int Context::reduce_scatter_wg(rocshmem_team_t team, T* dest, const T* source,
+                                          int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -112,8 +110,7 @@ __device__ int Context::reduce_scatter_wg(rocshmem_team_t team, T *dest,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int Context::reduce_wave(rocshmem_team_t team, T *dest,
-                                    const T *source, int nreduce) {
+__device__ int Context::reduce_wave(rocshmem_team_t team, T* dest, const T* source, int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -126,8 +123,8 @@ __device__ int Context::reduce_wave(rocshmem_team_t team, T *dest,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__device__ int Context::reduce_scatter_wave(rocshmem_team_t team, T *dest,
-                                            const T *source, int nreduce) {
+__device__ int Context::reduce_scatter_wave(rocshmem_team_t team, T* dest, const T* source,
+                                            int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -140,7 +137,7 @@ __device__ int Context::reduce_scatter_wave(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void Context::put(T *dest, const T *source, size_t nelems, int pe) {
+__device__ void Context::put(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -151,8 +148,7 @@ __device__ void Context::put(T *dest, const T *source, size_t nelems, int pe) {
 }
 
 template <typename T>
-__device__ void Context::put_nbi(T *dest, const T *source, size_t nelems,
-                                 int pe) {
+__device__ void Context::put_nbi(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -163,7 +159,7 @@ __device__ void Context::put_nbi(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::get(T *dest, const T *source, size_t nelems, int pe) {
+__device__ void Context::get(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -174,8 +170,7 @@ __device__ void Context::get(T *dest, const T *source, size_t nelems, int pe) {
 }
 
 template <typename T>
-__device__ void Context::get_nbi(T *dest, const T *source, size_t nelems,
-                                 int pe) {
+__device__ void Context::get_nbi(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -186,8 +181,7 @@ __device__ void Context::get_nbi(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::alltoall_wg(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems) {
+__device__ void Context::alltoall_wg(rocshmem_team_t team, T* dest, const T* source, int nelems) {
   if (nelems == 0) {
     return;
   }
@@ -200,8 +194,7 @@ __device__ void Context::alltoall_wg(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ int Context::alltoall_wave(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems) {
+__device__ int Context::alltoall_wave(rocshmem_team_t team, T* dest, const T* source, int nelems) {
   if (nelems == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -214,24 +207,19 @@ __device__ int Context::alltoall_wave(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void Context::alltoallv(rocshmem_team_t team,
-                                   T *dest, const size_t dest_nelems[],
-                                   const size_t dest_displs[],
-                                   T *source, const size_t source_nelems[],
-                                   const size_t source_displs[]) {
-
+__device__ void Context::alltoallv(rocshmem_team_t team, T* dest, const size_t dest_nelems[],
+                                   const size_t dest_displs[], T* source,
+                                   const size_t source_nelems[], const size_t source_displs[]) {
   if (is_thread_zero_in_block()) {
     ctxStats.incStat(NUM_ALLTOALLV);
   }
 
-  DISPATCH(alltoallv<T>(team,
-                        dest, dest_nelems, dest_displs,
-                        source, source_nelems, source_displs));
+  DISPATCH(
+      alltoallv<T>(team, dest, dest_nelems, dest_displs, source, source_nelems, source_displs));
 }
 
 template <typename T>
-__device__ void Context::fcollect_wg(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems) {
+__device__ void Context::fcollect_wg(rocshmem_team_t team, T* dest, const T* source, int nelems) {
   if (nelems == 0) {
     return;
   }
@@ -244,8 +232,7 @@ __device__ void Context::fcollect_wg(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ int Context::fcollect_wave(rocshmem_team_t team, T *dest,
-                                  const T *source, int nelems) {
+__device__ int Context::fcollect_wave(rocshmem_team_t team, T* dest, const T* source, int nelems) {
   if (nelems == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -258,8 +245,8 @@ __device__ int Context::fcollect_wave(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void Context::broadcast_wg(rocshmem_team_t team, T *dest,
-                                   const T *source, int nelems, int pe_root) {
+__device__ void Context::broadcast_wg(rocshmem_team_t team, T* dest, const T* source, int nelems,
+                                      int pe_root) {
   if (nelems == 0) {
     return;
   }
@@ -272,10 +259,9 @@ __device__ void Context::broadcast_wg(rocshmem_team_t team, T *dest,
 }
 
 template <typename T>
-__device__ void Context::broadcast_wg(T *dest, const T *source, int nelems,
-                                   int pe_root, int pe_start, int log_pe_stride,
-                                   int pe_size,
-                                   long *p_sync) {  // NOLINT(runtime/int)
+__device__ void Context::broadcast_wg(T* dest, const T* source, int nelems, int pe_root,
+                                      int pe_start, int log_pe_stride, int pe_size,
+                                      long* p_sync) {  // NOLINT(runtime/int)
   if (nelems == 0) {
     return;
   }
@@ -284,42 +270,40 @@ __device__ void Context::broadcast_wg(T *dest, const T *source, int nelems,
     ctxStats.incStat(NUM_BROADCAST);
   }
 
-  DISPATCH(broadcast_wg<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride,
-                        pe_size, p_sync));
+  DISPATCH(
+      broadcast_wg<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride, pe_size, p_sync));
 }
 
 template <typename T>
-__device__ __forceinline__ int Context::test_value(T value, int cmp,
-                                                   T cmp_value) {
+__device__ __forceinline__ int Context::test_value(T value, int cmp, T cmp_value) {
   switch (cmp) {
-    case ROCSHMEM_CMP_EQ:
-      return value == cmp_value;
-    case ROCSHMEM_CMP_NE:
-      return value != cmp_value;
-    case ROCSHMEM_CMP_GT:
-      return value > cmp_value;
-    case ROCSHMEM_CMP_GE:
-      return value >= cmp_value;
-    case ROCSHMEM_CMP_LT:
-      return value < cmp_value;
-    case ROCSHMEM_CMP_LE:
-      return value <= cmp_value;
-    default:
-      return false;
+  case ROCSHMEM_CMP_EQ:
+    return value == cmp_value;
+  case ROCSHMEM_CMP_NE:
+    return value != cmp_value;
+  case ROCSHMEM_CMP_GT:
+    return value > cmp_value;
+  case ROCSHMEM_CMP_GE:
+    return value >= cmp_value;
+  case ROCSHMEM_CMP_LT:
+    return value < cmp_value;
+  case ROCSHMEM_CMP_LE:
+    return value <= cmp_value;
+  default:
+    return false;
   }
 }
 
 template <typename T>
-__device__ __forceinline__ void Context::wait_until(T *ivars, int cmp,
-                                                    T val) {
+__device__ __forceinline__ void Context::wait_until(T* ivars, int cmp, T val) {
   while (!test(ivars, cmp, val)) {
   }
 }
 
-__device__ __forceinline__ size_t status_entry(size_t nelems,
-                                               const int *status) {
+__device__ __forceinline__ size_t status_entry(size_t nelems, const int* status) {
   size_t i{0};
-  if (nullptr == status) return 0;
+  if (nullptr == status)
+    return 0;
   while (i < nelems) {
     if (status[i]) {
       return i;
@@ -330,10 +314,8 @@ __device__ __forceinline__ size_t status_entry(size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
-size_t Context::wait_until_any(T *ivars, size_t nelems,
-                               const int *status,
-                               int cmp, T val) {
+__device__ __forceinline__ size_t Context::wait_until_any(T* ivars, size_t nelems,
+                                                          const int* status, int cmp, T val) {
   // zero nelems error condition
   if (!nelems) {
     return SIZE_MAX;
@@ -360,10 +342,8 @@ size_t Context::wait_until_any(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
-void Context::wait_until_all(T *ivars, size_t nelems,
-                             const int *status,
-                             int cmp, T val) {
+__device__ __forceinline__ void Context::wait_until_all(T* ivars, size_t nelems, const int* status,
+                                                        int cmp, T val) {
   // zero nelems error condition
   if (!nelems) {
     return;
@@ -386,11 +366,8 @@ void Context::wait_until_all(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
-size_t Context::wait_until_some(T *ivars, size_t nelems,
-                              size_t* indices,
-                              const int *status,
-                              int cmp, T val) {
+__device__ __forceinline__ size_t Context::wait_until_some(T* ivars, size_t nelems, size_t* indices,
+                                                           const int* status, int cmp, T val) {
   // zero nelems error condition
   if (!nelems) {
     return 0;
@@ -403,8 +380,8 @@ size_t Context::wait_until_some(T *ivars, size_t nelems,
     return 0;
   }
 
-  bool done {false};
-  size_t ncompleted {0};
+  bool done{false};
+  size_t ncompleted{0};
   while (!done) {
     for (size_t i{pos}; i < nelems; i++) {
       // skip entries marked with non-zero status
@@ -412,7 +389,7 @@ size_t Context::wait_until_some(T *ivars, size_t nelems,
         continue;
       }
       if (test(ivars + i, cmp, val)) {
-        done = true;
+        done                = true;
         indices[ncompleted] = i;
         ncompleted++;
       }
@@ -422,10 +399,9 @@ size_t Context::wait_until_some(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
-void Context::wait_until_all_vector(T *ivars, size_t nelems,
-                                    const int *status,
-                                    int cmp, T* vals) {
+__device__ __forceinline__ void Context::wait_until_all_vector(T* ivars, size_t nelems,
+                                                               const int* status, int cmp,
+                                                               T* vals) {
   // zero nelems error condition
   if (!nelems) {
     return;
@@ -448,10 +424,9 @@ void Context::wait_until_all_vector(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
-size_t Context::wait_until_any_vector(T *ivars, size_t nelems,
-                                      const int *status,
-                                      int cmp, T* vals) {
+__device__ __forceinline__ size_t Context::wait_until_any_vector(T* ivars, size_t nelems,
+                                                                 const int* status, int cmp,
+                                                                 T* vals) {
   // zero nelems error condition
   if (!nelems) {
     return SIZE_MAX;
@@ -478,11 +453,10 @@ size_t Context::wait_until_any_vector(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
-size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
-                                     size_t* indices,
-                                     const int *status,
-                                     int cmp, T* vals) {
+__device__ __forceinline__ size_t Context::wait_until_some_vector(T* ivars, size_t nelems,
+                                                                  size_t* indices,
+                                                                  const int* status, int cmp,
+                                                                  T* vals) {
   // zero nelems error condition
   if (!nelems) {
     return 0;
@@ -495,8 +469,8 @@ size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
     return 0;
   }
 
-  bool done {false};
-  size_t ncompleted {0};
+  bool done{false};
+  size_t ncompleted{0};
   while (!done) {
     for (size_t i{pos}; i < nelems; i++) {
       // skip entries marked with non-zero status
@@ -504,7 +478,7 @@ size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
         continue;
       }
       if (test(ivars + i, cmp, vals[i])) {
-        done = true;
+        done                = true;
         indices[ncompleted] = i;
         ncompleted++;
       }
@@ -514,14 +488,12 @@ size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__ int Context::test(T *ivars, int cmp,
-                                             T val) {
+__device__ __forceinline__ int Context::test(T* ivars, int cmp, T val) {
   return test_value(uncached_load(ivars), cmp, val);
 }
 
 template <typename T>
-__device__ void Context::put_wg(T *dest, const T *source, size_t nelems,
-                                int pe) {
+__device__ void Context::put_wg(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -532,8 +504,7 @@ __device__ void Context::put_wg(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::put_nbi_wg(T *dest, const T *source, size_t nelems,
-                                    int pe) {
+__device__ void Context::put_nbi_wg(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -544,8 +515,7 @@ __device__ void Context::put_nbi_wg(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::get_wg(T *dest, const T *source, size_t nelems,
-                                int pe) {
+__device__ void Context::get_wg(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -556,8 +526,7 @@ __device__ void Context::get_wg(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::get_nbi_wg(T *dest, const T *source, size_t nelems,
-                                    int pe) {
+__device__ void Context::get_nbi_wg(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -568,8 +537,7 @@ __device__ void Context::get_nbi_wg(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::put_wave(T *dest, const T *source, size_t nelems,
-                                  int pe) {
+__device__ void Context::put_wave(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -580,8 +548,7 @@ __device__ void Context::put_wave(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::put_nbi_wave(T *dest, const T *source, size_t nelems,
-                                      int pe) {
+__device__ void Context::put_nbi_wave(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -592,8 +559,7 @@ __device__ void Context::put_nbi_wave(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::get_wave(T *dest, const T *source, size_t nelems,
-                                  int pe) {
+__device__ void Context::get_wave(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -604,8 +570,7 @@ __device__ void Context::get_wave(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ void Context::get_nbi_wave(T *dest, const T *source, size_t nelems,
-                                      int pe) {
+__device__ void Context::get_nbi_wave(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -616,84 +581,84 @@ __device__ void Context::get_nbi_wave(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__device__ T Context::amo_fetch_add(void *dst, T value, int pe) {
+__device__ T Context::amo_fetch_add(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_FADD);
 
   DISPATCH_RET(amo_fetch_add(dst, value, pe));
 }
 
 template <typename T>
-__device__ void Context::amo_add(void *dst, T value, int pe) {
+__device__ void Context::amo_add(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_ADD);
 
   DISPATCH(amo_add(dst, value, pe));
 }
 
 template <typename T>
-__device__ void Context::amo_set(void *dst, T value, int pe) {
+__device__ void Context::amo_set(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_SET);
 
   DISPATCH(amo_set(dst, value, pe));
 }
 
 template <typename T>
-__device__ T Context::amo_swap(void *dst, T value, int pe) {
+__device__ T Context::amo_swap(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_SWAP);
 
   DISPATCH_RET(amo_swap(dst, value, pe));
 }
 
 template <typename T>
-__device__ T Context::amo_fetch_and(void *dst, T value, int pe) {
+__device__ T Context::amo_fetch_and(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_FETCH_AND);
 
   DISPATCH_RET(amo_fetch_and(dst, value, pe));
 }
 
 template <typename T>
-__device__ void Context::amo_and(void *dst, T value, int pe) {
+__device__ void Context::amo_and(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_AND);
 
   DISPATCH(amo_and(dst, value, pe));
 }
 
 template <typename T>
-__device__ T Context::amo_fetch_or(void *dst, T value, int pe) {
+__device__ T Context::amo_fetch_or(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_FETCH_OR);
 
   DISPATCH_RET(amo_fetch_or(dst, value, pe));
 }
 
 template <typename T>
-__device__ void Context::amo_or(void *dst, T value, int pe) {
+__device__ void Context::amo_or(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_OR);
 
   DISPATCH(amo_or(dst, value, pe));
 }
 
 template <typename T>
-__device__ T Context::amo_fetch_xor(void *dst, T value, int pe) {
+__device__ T Context::amo_fetch_xor(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_FETCH_XOR);
 
   DISPATCH_RET(amo_fetch_xor(dst, value, pe));
 }
 
 template <typename T>
-__device__ void Context::amo_xor(void *dst, T value, int pe) {
+__device__ void Context::amo_xor(void* dst, T value, int pe) {
   ctxStats.incStat(NUM_ATOMIC_XOR);
 
   DISPATCH(amo_xor(dst, value, pe));
 }
 
 template <typename T>
-__device__ T Context::amo_fetch_cas(void *dst, T value, T cond, int pe) {
+__device__ T Context::amo_fetch_cas(void* dst, T value, T cond, int pe) {
   ctxStats.incStat(NUM_ATOMIC_FCSWAP);
 
   DISPATCH_RET(amo_fetch_cas(dst, value, cond, pe));
 }
 
 template <typename T>
-__device__ void Context::amo_cas(void *dst, T value, T cond, int pe) {
+__device__ void Context::amo_cas(void* dst, T value, T cond, int pe) {
   ctxStats.incStat(NUM_ATOMIC_CSWAP);
 
   DISPATCH(amo_cas(dst, value, cond, pe));
@@ -701,8 +666,8 @@ __device__ void Context::amo_cas(void *dst, T value, T cond, int pe) {
 
 #define CONTEXT_PUT_SIGNAL_DEF(SUFFIX, STATS_SUFFIX)                                           \
   template <typename T>                                                                        \
-  __device__ void Context::put_signal##SUFFIX(T *dest, const T *source, size_t nelems,         \
-                                              uint64_t *sig_addr, uint64_t signal, int sig_op, \
+  __device__ void Context::put_signal##SUFFIX(T* dest, const T* source, size_t nelems,         \
+                                              uint64_t* sig_addr, uint64_t signal, int sig_op, \
                                               int pe) {                                        \
     if (nelems == 0) {                                                                         \
       return;                                                                                  \
@@ -713,7 +678,7 @@ __device__ void Context::amo_cas(void *dst, T value, T cond, int pe) {
     DISPATCH(put_signal##SUFFIX(dest, source, nelems, sig_addr, signal, sig_op, pe));          \
   }
 
-CONTEXT_PUT_SIGNAL_DEF(,)
+CONTEXT_PUT_SIGNAL_DEF(, )
 CONTEXT_PUT_SIGNAL_DEF(_wg, _WG)
 CONTEXT_PUT_SIGNAL_DEF(_wave, _WAVE)
 CONTEXT_PUT_SIGNAL_DEF(_nbi, _NBI)
@@ -727,181 +692,205 @@ CONTEXT_PUT_SIGNAL_DEF(_nbi_wave, _NBI_WAVE)
 // RMA PUT operations - Type-erased implementations using DISPATCH_RET
 __device__ inline int Context::tile_put(void* dst_data, const void* src_data,
                                         const size_t* dst_strides, const size_t* src_strides,
-                                        const size_t* start_coord, const size_t* boundary,
-                                        int ndim, size_t element_size, int pe, uint64_t flags) {
-  DISPATCH_RET(tile_put(dst_data, src_data, dst_strides, src_strides,
-                        start_coord, boundary, ndim, element_size, pe, flags));
+                                        const size_t* start_coord, const size_t* boundary, int ndim,
+                                        size_t element_size, int pe, uint64_t flags) {
+  DISPATCH_RET(tile_put(dst_data, src_data, dst_strides, src_strides, start_coord, boundary, ndim,
+                        element_size, pe, flags));
 }
 
 __device__ inline int Context::tile_put_wave(void* dst_data, const void* src_data,
                                              const size_t* dst_strides, const size_t* src_strides,
                                              const size_t* start_coord, const size_t* boundary,
-                                             int ndim, size_t element_size, int pe, uint64_t flags) {
-  DISPATCH_RET(tile_put_wave(dst_data, src_data, dst_strides, src_strides,
-                             start_coord, boundary, ndim, element_size, pe, flags));
+                                             int ndim, size_t element_size, int pe,
+                                             uint64_t flags) {
+  DISPATCH_RET(tile_put_wave(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+                             ndim, element_size, pe, flags));
 }
 
 __device__ inline int Context::tile_put_wg(void* dst_data, const void* src_data,
                                            const size_t* dst_strides, const size_t* src_strides,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe, uint64_t flags) {
-  DISPATCH_RET(tile_put_wg(dst_data, src_data, dst_strides, src_strides,
-                           start_coord, boundary, ndim, element_size, pe, flags));
+  DISPATCH_RET(tile_put_wg(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+                           ndim, element_size, pe, flags));
 }
 
 // RMA GET operations - Type-erased implementations using DISPATCH_RET
 __device__ inline int Context::tile_get(void* dst_data, const void* src_data,
                                         const size_t* dst_strides, const size_t* src_strides,
-                                        const size_t* start_coord, const size_t* boundary,
-                                        int ndim, size_t element_size, int pe, uint64_t flags) {
-  DISPATCH_RET(tile_get(dst_data, src_data, dst_strides, src_strides,
-                        start_coord, boundary, ndim, element_size, pe, flags));
+                                        const size_t* start_coord, const size_t* boundary, int ndim,
+                                        size_t element_size, int pe, uint64_t flags) {
+  DISPATCH_RET(tile_get(dst_data, src_data, dst_strides, src_strides, start_coord, boundary, ndim,
+                        element_size, pe, flags));
 }
 
 __device__ inline int Context::tile_get_wave(void* dst_data, const void* src_data,
                                              const size_t* dst_strides, const size_t* src_strides,
                                              const size_t* start_coord, const size_t* boundary,
-                                             int ndim, size_t element_size, int pe, uint64_t flags) {
-  DISPATCH_RET(tile_get_wave(dst_data, src_data, dst_strides, src_strides,
-                             start_coord, boundary, ndim, element_size, pe, flags));
+                                             int ndim, size_t element_size, int pe,
+                                             uint64_t flags) {
+  DISPATCH_RET(tile_get_wave(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+                             ndim, element_size, pe, flags));
 }
 
 __device__ inline int Context::tile_get_wg(void* dst_data, const void* src_data,
                                            const size_t* dst_strides, const size_t* src_strides,
                                            const size_t* start_coord, const size_t* boundary,
                                            int ndim, size_t element_size, int pe, uint64_t flags) {
-  DISPATCH_RET(tile_get_wg(dst_data, src_data, dst_strides, src_strides,
-                           start_coord, boundary, ndim, element_size, pe, flags));
+  DISPATCH_RET(tile_get_wg(dst_data, src_data, dst_strides, src_strides, start_coord, boundary,
+                           ndim, element_size, pe, flags));
 }
 
 // Allgather operations - Type-erased implementations using DISPATCH_RET
-__device__ inline int Context::tile_allgather(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                              const size_t* dst_strides, const size_t* src_strides,
-                                              const size_t* start_coord, const size_t* boundary,
-                                              int ndim, size_t element_size, uint64_t flags) {
-  DISPATCH_RET(tile_allgather(team, dst_data, src_data, dst_strides, src_strides,
-                              start_coord, boundary, ndim, element_size, flags));
+__device__ inline int Context::tile_allgather(rocshmem_team_t team, void* dst_data,
+                                              const void* src_data, const size_t* dst_strides,
+                                              const size_t* src_strides, const size_t* start_coord,
+                                              const size_t* boundary, int ndim, size_t element_size,
+                                              uint64_t flags) {
+  DISPATCH_RET(tile_allgather(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                              boundary, ndim, element_size, flags));
 }
 
-__device__ inline int Context::tile_allgather_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                   const size_t* dst_strides, const size_t* src_strides,
-                                                   const size_t* start_coord, const size_t* boundary,
-                                                   int ndim, size_t element_size, uint64_t flags) {
-  DISPATCH_RET(tile_allgather_wave(team, dst_data, src_data, dst_strides, src_strides,
-                                   start_coord, boundary, ndim, element_size, flags));
+__device__ inline int Context::tile_allgather_wave(rocshmem_team_t team, void* dst_data,
+                                                   const void* src_data, const size_t* dst_strides,
+                                                   const size_t* src_strides,
+                                                   const size_t* start_coord,
+                                                   const size_t* boundary, int ndim,
+                                                   size_t element_size, uint64_t flags) {
+  DISPATCH_RET(tile_allgather_wave(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                   boundary, ndim, element_size, flags));
 }
 
-__device__ inline int Context::tile_allgather_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                 const size_t* dst_strides, const size_t* src_strides,
+__device__ inline int Context::tile_allgather_wg(rocshmem_team_t team, void* dst_data,
+                                                 const void* src_data, const size_t* dst_strides,
+                                                 const size_t* src_strides,
                                                  const size_t* start_coord, const size_t* boundary,
                                                  int ndim, size_t element_size, uint64_t flags) {
-  DISPATCH_RET(tile_allgather_wg(team, dst_data, src_data, dst_strides, src_strides,
-                                 start_coord, boundary, ndim, element_size, flags));
+  DISPATCH_RET(tile_allgather_wg(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                 boundary, ndim, element_size, flags));
 }
 
 // Broadcast operations - Type-erased implementations using DISPATCH_RET
-__device__ inline int Context::tile_broadcast(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                              const size_t* dst_strides, const size_t* src_strides,
-                                              const size_t* start_coord, const size_t* boundary,
-                                              int ndim, size_t element_size, int pe_root, uint64_t flags) {
-  DISPATCH_RET(tile_broadcast(team, dst_data, src_data, dst_strides, src_strides,
-                              start_coord, boundary, ndim, element_size, pe_root, flags));
+__device__ inline int Context::tile_broadcast(rocshmem_team_t team, void* dst_data,
+                                              const void* src_data, const size_t* dst_strides,
+                                              const size_t* src_strides, const size_t* start_coord,
+                                              const size_t* boundary, int ndim, size_t element_size,
+                                              int pe_root, uint64_t flags) {
+  DISPATCH_RET(tile_broadcast(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                              boundary, ndim, element_size, pe_root, flags));
 }
 
-__device__ inline int Context::tile_broadcast_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                   const size_t* dst_strides, const size_t* src_strides,
-                                                   const size_t* start_coord, const size_t* boundary,
-                                                   int ndim, size_t element_size, int pe_root, uint64_t flags) {
-  DISPATCH_RET(tile_broadcast_wave(team, dst_data, src_data, dst_strides, src_strides,
-                                   start_coord, boundary, ndim, element_size, pe_root, flags));
+__device__ inline int Context::tile_broadcast_wave(
+    rocshmem_team_t team, void* dst_data, const void* src_data, const size_t* dst_strides,
+    const size_t* src_strides, const size_t* start_coord, const size_t* boundary, int ndim,
+    size_t element_size, int pe_root, uint64_t flags) {
+  DISPATCH_RET(tile_broadcast_wave(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                   boundary, ndim, element_size, pe_root, flags));
 }
 
-__device__ inline int Context::tile_broadcast_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                 const size_t* dst_strides, const size_t* src_strides,
+__device__ inline int Context::tile_broadcast_wg(rocshmem_team_t team, void* dst_data,
+                                                 const void* src_data, const size_t* dst_strides,
+                                                 const size_t* src_strides,
                                                  const size_t* start_coord, const size_t* boundary,
-                                                 int ndim, size_t element_size, int pe_root, uint64_t flags) {
-  DISPATCH_RET(tile_broadcast_wg(team, dst_data, src_data, dst_strides, src_strides,
-                                 start_coord, boundary, ndim, element_size, pe_root, flags));
+                                                 int ndim, size_t element_size, int pe_root,
+                                                 uint64_t flags) {
+  DISPATCH_RET(tile_broadcast_wg(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                 boundary, ndim, element_size, pe_root, flags));
 }
 
 // SUM Reduction operations - Type-erased implementations using DISPATCH_RET
-__device__ inline int Context::tile_sum_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                               const size_t* dst_strides, const size_t* src_strides,
-                                               const size_t* start_coord, const size_t* boundary,
-                                               int ndim, size_t element_size, int root, uint64_t flags) {
-  DISPATCH_RET(tile_sum_reduce(team, dst_data, src_data, dst_strides, src_strides,
-                               start_coord, boundary, ndim, element_size, root, flags));
+__device__ inline int Context::tile_sum_reduce(rocshmem_team_t team, void* dst_data,
+                                               const void* src_data, const size_t* dst_strides,
+                                               const size_t* src_strides, const size_t* start_coord,
+                                               const size_t* boundary, int ndim,
+                                               size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_sum_reduce(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                               boundary, ndim, element_size, root, flags));
 }
 
-__device__ inline int Context::tile_sum_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                    const size_t* dst_strides, const size_t* src_strides,
-                                                    const size_t* start_coord, const size_t* boundary,
-                                                    int ndim, size_t element_size, int root, uint64_t flags) {
-  DISPATCH_RET(tile_sum_reduce_wave(team, dst_data, src_data, dst_strides, src_strides,
-                                    start_coord, boundary, ndim, element_size, root, flags));
+__device__ inline int Context::tile_sum_reduce_wave(rocshmem_team_t team, void* dst_data,
+                                                    const void* src_data, const size_t* dst_strides,
+                                                    const size_t* src_strides,
+                                                    const size_t* start_coord,
+                                                    const size_t* boundary, int ndim,
+                                                    size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_sum_reduce_wave(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                    boundary, ndim, element_size, root, flags));
 }
 
-__device__ inline int Context::tile_sum_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                  const size_t* dst_strides, const size_t* src_strides,
+__device__ inline int Context::tile_sum_reduce_wg(rocshmem_team_t team, void* dst_data,
+                                                  const void* src_data, const size_t* dst_strides,
+                                                  const size_t* src_strides,
                                                   const size_t* start_coord, const size_t* boundary,
-                                                  int ndim, size_t element_size, int root, uint64_t flags) {
-  DISPATCH_RET(tile_sum_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
-                                  start_coord, boundary, ndim, element_size, root, flags));
+                                                  int ndim, size_t element_size, int root,
+                                                  uint64_t flags) {
+  DISPATCH_RET(tile_sum_reduce_wg(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                  boundary, ndim, element_size, root, flags));
 }
 
 // MAX Reduction operations - Type-erased implementations using DISPATCH_RET
-__device__ inline int Context::tile_max_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                               const size_t* dst_strides, const size_t* src_strides,
-                                               const size_t* start_coord, const size_t* boundary,
-                                               int ndim, size_t element_size, int root, uint64_t flags) {
-  DISPATCH_RET(tile_max_reduce(team, dst_data, src_data, dst_strides, src_strides,
-                               start_coord, boundary, ndim, element_size, root, flags));
+__device__ inline int Context::tile_max_reduce(rocshmem_team_t team, void* dst_data,
+                                               const void* src_data, const size_t* dst_strides,
+                                               const size_t* src_strides, const size_t* start_coord,
+                                               const size_t* boundary, int ndim,
+                                               size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_max_reduce(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                               boundary, ndim, element_size, root, flags));
 }
 
-__device__ inline int Context::tile_max_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                    const size_t* dst_strides, const size_t* src_strides,
-                                                    const size_t* start_coord, const size_t* boundary,
-                                                    int ndim, size_t element_size, int root, uint64_t flags) {
-  DISPATCH_RET(tile_max_reduce_wave(team, dst_data, src_data, dst_strides, src_strides,
-                                    start_coord, boundary, ndim, element_size, root, flags));
+__device__ inline int Context::tile_max_reduce_wave(rocshmem_team_t team, void* dst_data,
+                                                    const void* src_data, const size_t* dst_strides,
+                                                    const size_t* src_strides,
+                                                    const size_t* start_coord,
+                                                    const size_t* boundary, int ndim,
+                                                    size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_max_reduce_wave(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                    boundary, ndim, element_size, root, flags));
 }
 
-__device__ inline int Context::tile_max_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                  const size_t* dst_strides, const size_t* src_strides,
+__device__ inline int Context::tile_max_reduce_wg(rocshmem_team_t team, void* dst_data,
+                                                  const void* src_data, const size_t* dst_strides,
+                                                  const size_t* src_strides,
                                                   const size_t* start_coord, const size_t* boundary,
-                                                  int ndim, size_t element_size, int root, uint64_t flags) {
-  DISPATCH_RET(tile_max_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
-                                  start_coord, boundary, ndim, element_size, root, flags));
+                                                  int ndim, size_t element_size, int root,
+                                                  uint64_t flags) {
+  DISPATCH_RET(tile_max_reduce_wg(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                  boundary, ndim, element_size, root, flags));
 }
 
 // MIN Reduction operations - Type-erased implementations using DISPATCH_RET
-__device__ inline int Context::tile_min_reduce(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                               const size_t* dst_strides, const size_t* src_strides,
-                                               const size_t* start_coord, const size_t* boundary,
-                                               int ndim, size_t element_size, int root, uint64_t flags) {
-  DISPATCH_RET(tile_min_reduce(team, dst_data, src_data, dst_strides, src_strides,
-                               start_coord, boundary, ndim, element_size, root, flags));
+__device__ inline int Context::tile_min_reduce(rocshmem_team_t team, void* dst_data,
+                                               const void* src_data, const size_t* dst_strides,
+                                               const size_t* src_strides, const size_t* start_coord,
+                                               const size_t* boundary, int ndim,
+                                               size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_min_reduce(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                               boundary, ndim, element_size, root, flags));
 }
 
-__device__ inline int Context::tile_min_reduce_wave(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                    const size_t* dst_strides, const size_t* src_strides,
-                                                    const size_t* start_coord, const size_t* boundary,
-                                                    int ndim, size_t element_size, int root, uint64_t flags) {
-  DISPATCH_RET(tile_min_reduce_wave(team, dst_data, src_data, dst_strides, src_strides,
-                                    start_coord, boundary, ndim, element_size, root, flags));
+__device__ inline int Context::tile_min_reduce_wave(rocshmem_team_t team, void* dst_data,
+                                                    const void* src_data, const size_t* dst_strides,
+                                                    const size_t* src_strides,
+                                                    const size_t* start_coord,
+                                                    const size_t* boundary, int ndim,
+                                                    size_t element_size, int root, uint64_t flags) {
+  DISPATCH_RET(tile_min_reduce_wave(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                    boundary, ndim, element_size, root, flags));
 }
 
-__device__ inline int Context::tile_min_reduce_wg(rocshmem_team_t team, void* dst_data, const void* src_data,
-                                                  const size_t* dst_strides, const size_t* src_strides,
+__device__ inline int Context::tile_min_reduce_wg(rocshmem_team_t team, void* dst_data,
+                                                  const void* src_data, const size_t* dst_strides,
+                                                  const size_t* src_strides,
                                                   const size_t* start_coord, const size_t* boundary,
-                                                  int ndim, size_t element_size, int root, uint64_t flags) {
-  DISPATCH_RET(tile_min_reduce_wg(team, dst_data, src_data, dst_strides, src_strides,
-                                  start_coord, boundary, ndim, element_size, root, flags));
+                                                  int ndim, size_t element_size, int root,
+                                                  uint64_t flags) {
+  DISPATCH_RET(tile_min_reduce_wg(team, dst_data, src_data, dst_strides, src_strides, start_coord,
+                                  boundary, ndim, element_size, root, flags));
 }
 
 template <typename T>
-__device__ int Context::broadcast_wave(rocshmem_team_t team,
-                              T *dest, const T *source, int nelems, int PE_root){
+__device__ int Context::broadcast_wave(rocshmem_team_t team, T* dest, const T* source, int nelems,
+                                       int PE_root) {
   DISPATCH_RET(broadcast_wave<T>(team, dest, source, nelems, PE_root));
 }
 

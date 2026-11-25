@@ -62,8 +62,8 @@ int GDABackend::mlx5_dv_dl_init() {
 
 void GDABackend::mlx5_create_qps(int sq_length) {
   for (size_t i = 0; i < mlx5_qps.size(); i++) {
-    NicDevice &nic = nic_for_qp(i);
-    int err = mlx5dv.create_qp(mlx5_qps[i], nic.context, nic.pd_orig, sq_length);
+    NicDevice& nic = nic_for_qp(i);
+    int err        = mlx5dv.create_qp(mlx5_qps[i], nic.context, nic.pd_orig, sq_length);
     CHECK_ZERO(err, "mlx5dv::create_qp");
   }
 }
@@ -100,17 +100,17 @@ void GDABackend::mlx5_initialize_gpu_qp(QueuePair* gpu_qp, int conn_num) {
   CHECK_HIP(hipGetDevice(&hip_dev_id));
   void* gpu_db_ptr{nullptr};
   // not necessary to switch between BlueFlame buffer halves when using it as a doorbell only
-  rocm_memory_lock_to_fine_grain(qp.uar->reg_addr, MLX5_DB_BLUEFLAME_BUFFER_SIZE,
-                                 &gpu_db_ptr, hip_dev_id);
+  rocm_memory_lock_to_fine_grain(qp.uar->reg_addr, MLX5_DB_BLUEFLAME_BUFFER_SIZE, &gpu_db_ptr,
+                                 hip_dev_id);
 
-  gda_mlx5_wqe*      sq_buf   = reinterpret_cast<gda_mlx5_wqe*>(qp.sq);
+  gda_mlx5_wqe* sq_buf = reinterpret_cast<gda_mlx5_wqe*>(qp.sq);
   // qp.dbrec points to two __be32 values: RQ dbrec at MLX5_RCV_DBR and SQ dbrec at MLX5_SND_DBR
-  __be32*            sq_dbrec = &qp.qp_dbrec[MLX5_SND_DBR];
-  gda_mlx5_doorbell* sq_db    = reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr);
-  uint16_t           sq_depth = static_cast<uint16_t>(qp.sq_depth);
+  __be32* sq_dbrec         = &qp.qp_dbrec[MLX5_SND_DBR];
+  gda_mlx5_doorbell* sq_db = reinterpret_cast<gda_mlx5_doorbell*>(gpu_db_ptr);
+  uint16_t sq_depth        = static_cast<uint16_t>(qp.sq_depth);
 
-  mlx5_cqe64* cq_buf   = reinterpret_cast<mlx5_cqe64*>(qp.cq);
-  __be32*     cq_dbrec = qp.cq_dbrec;
+  mlx5_cqe64* cq_buf = reinterpret_cast<mlx5_cqe64*>(qp.cq);
+  __be32* cq_dbrec   = qp.cq_dbrec;
 
   /* QueuePair is either QueuePairMLX5 or QueuePairMux
    * both have a constructor that accepts rvalue reference QueuePairMLX5&&,

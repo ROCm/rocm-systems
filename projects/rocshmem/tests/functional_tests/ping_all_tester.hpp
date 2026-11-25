@@ -30,8 +30,8 @@
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void PingAllTest(int loop, int skip, long long int *start_time,
-                            long long int *end_time, int *r_buf);
+__global__ void PingAllTest(int loop, int skip, long long int* start_time, long long int* end_time,
+                            int* r_buf);
 
 /******************************************************************************
  * HOST TESTER CLASS
@@ -44,12 +44,11 @@ class PingAllTester : public Tester {
  protected:
   virtual void resetBuffers(size_t size) override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void verifyResults(size_t size) override;
 
-  int *r_buf;
+  int* r_buf;
 };
 
 #endif

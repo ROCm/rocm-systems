@@ -30,7 +30,7 @@
 namespace rocshmem {
 
 struct __attribute__((packed)) TdmTestRecord {
-  int   id;
+  int id;
   float val[7];
 };
 static_assert(sizeof(TdmTestRecord) == 32, "TdmTestRecord must be 32 bytes");
@@ -45,16 +45,14 @@ static constexpr uint32_t TEST_TDM_TILE_BYTES = 4096;
 // ---------------------------------------------------------------------------
 
 template <typename NotifierT>
-__global__
-void tdm_struct_validator(bool* error, const TdmTestRecord* golden,
-                          const TdmTestRecord* dest, size_t count,
-                          NotifierT* notifier) {
+__global__ void tdm_struct_validator(bool* error, const TdmTestRecord* golden,
+                                     const TdmTestRecord* dest, size_t count, NotifierT* notifier) {
   if (!get_flat_id()) {
     uint32_t* sig = reinterpret_cast<uint32_t*>(
-        const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(dest)) +
-        TDM_STRUCT_SIGNAL_OFFSET);
+        const_cast<uint8_t*>(reinterpret_cast<const uint8_t*>(dest)) + TDM_STRUCT_SIGNAL_OFFSET);
     while (detail::atomic::load<detail::atomic::memory_scope::system,
-                                detail::atomic::memory_order::acquire>(sig) == 0) {}
+                                detail::atomic::memory_order::acquire>(sig) == 0) {
+    }
   }
   notifier->sync();
   for (size_t i = get_flat_id(); i < count; i += get_flat_grid_size()) {
@@ -64,8 +62,8 @@ void tdm_struct_validator(bool* error, const TdmTestRecord* golden,
     }
     for (int f = 0; f < 7; f++) {
       if (dest[i].val[f] != golden[i].val[f]) {
-        printf("record[%zu].val[%d] exp=%f got=%f\n",
-               i, f, (double)golden[i].val[f], (double)dest[i].val[f]);
+        printf("record[%zu].val[%d] exp=%f got=%f\n", i, f, (double)golden[i].val[f],
+               (double)dest[i].val[f]);
         *error = true;
       }
     }
@@ -73,9 +71,8 @@ void tdm_struct_validator(bool* error, const TdmTestRecord* golden,
 }
 
 template <typename IpcImplT>
-__global__
-void tdm_struct_put_kernel(IpcImplT* ipc_impl, const TdmTestRecord* src,
-                           TdmTestRecord* remote_dst, size_t count) {
+__global__ void tdm_struct_put_kernel(IpcImplT* ipc_impl, const TdmTestRecord* src,
+                                      TdmTestRecord* remote_dst, size_t count) {
   const size_t bytes = count * sizeof(TdmTestRecord);
 
   extern __shared__ uint8_t tdm_lds[];
@@ -86,8 +83,8 @@ void tdm_struct_put_kernel(IpcImplT* ipc_impl, const TdmTestRecord* src,
 
   if (is_thread_zero_in_block()) {
     ipc_impl->ipcFence();
-    uint32_t* sig = reinterpret_cast<uint32_t*>(
-        reinterpret_cast<uint8_t*>(remote_dst) + TDM_STRUCT_SIGNAL_OFFSET);
+    uint32_t* sig = reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(remote_dst) +
+                                                TDM_STRUCT_SIGNAL_OFFSET);
     ipc_impl->ipcAMOFetchAdd(sig, uint32_t{1});
   }
 }
@@ -106,7 +103,7 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
   TdmStructPutFixture() {
     MPIInstance::mpilib_dl_init();
     hip_allocator_ = get_default_allocator();
-    heap_mem_ = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
+    heap_mem_      = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
@@ -119,16 +116,18 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &sdma_threshold, sizeof(sdma_threshold),
                                 offsetof(constmem_t, ipc_sdma_threshold)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
-    CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
-                        hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT), hipMemcpyHostToDevice));
     hip_allocator_->allocate((void**)&error_dptr_, sizeof(bool));
     CHECK_HIP(hipMemset(error_dptr_, 0, sizeof(bool)));
   }
 
   ~TdmStructPutFixture() override {
-    if (ipc_impl_dptr_) hip_allocator_->deallocate(ipc_impl_dptr_);
-    if (error_dptr_)    hip_allocator_->deallocate(error_dptr_);
-    if (golden_dptr_)   hip_allocator_->deallocate(golden_dptr_);
+    if (ipc_impl_dptr_)
+      hip_allocator_->deallocate(ipc_impl_dptr_);
+    if (error_dptr_)
+      hip_allocator_->deallocate(error_dptr_);
+    if (golden_dptr_)
+      hip_allocator_->deallocate(golden_dptr_);
     ipc_impl_.ipcHostStop();
     delete mpi_;
     delete heap_mem_;
@@ -137,8 +136,7 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
 
   void run_put(size_t record_count) {
     const size_t bytes = record_count * sizeof(TdmTestRecord);
-    assert(bytes + TDM_STRUCT_SIGNAL_OFFSET + sizeof(uint32_t) <=
-           heap_mem_->get_size());
+    assert(bytes + TDM_STRUCT_SIGNAL_OFFSET + sizeof(uint32_t) <= heap_mem_->get_size());
 
     std::vector<TdmTestRecord> host_gold(record_count);
     for (size_t i = 0; i < record_count; i++) {
@@ -146,18 +144,15 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
       for (int f = 0; f < 7; f++)
         host_gold[i].val[f] = static_cast<float>(i * 7 + f) * 0.1f;
     }
-    hip_allocator_->allocate((void**)&golden_dptr_,
-                             record_count * sizeof(TdmTestRecord));
-    CHECK_HIP(hipMemcpy(golden_dptr_, host_gold.data(),
-                        record_count * sizeof(TdmTestRecord),
+    hip_allocator_->allocate((void**)&golden_dptr_, record_count * sizeof(TdmTestRecord));
+    CHECK_HIP(hipMemcpy(golden_dptr_, host_gold.data(), record_count * sizeof(TdmTestRecord),
                         hipMemcpyHostToDevice));
 
     const int my_pe = mpi_->my_pe();
 
     if (my_pe == 0) {
       auto* local_heap = reinterpret_cast<TdmTestRecord*>(ipc_impl_.ipc_bases[0]);
-      CHECK_HIP(hipMemcpy(local_heap, golden_dptr_,
-                          record_count * sizeof(TdmTestRecord),
+      CHECK_HIP(hipMemcpy(local_heap, golden_dptr_, record_count * sizeof(TdmTestRecord),
                           hipMemcpyDeviceToDevice));
       auto* remote_heap = reinterpret_cast<uint8_t*>(ipc_impl_.ipc_bases[1]);
       CHECK_HIP(hipMemset(remote_heap + TDM_STRUCT_SIGNAL_OFFSET, 0, sizeof(uint32_t)));
@@ -178,8 +173,7 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
     } else {
       auto* dest = reinterpret_cast<const TdmTestRecord*>(ipc_impl_.ipc_bases[1]);
       tdm_struct_validator<NotifierT>
-          <<<dim3(1), dim3(64)>>>(error_dptr_, golden_dptr_, dest,
-                                  record_count, notifier_.get());
+          <<<dim3(1), dim3(64)>>>(error_dptr_, golden_dptr_, dest, record_count, notifier_.get());
       CHECK_HIP(hipStreamSynchronize(nullptr));
     }
 
@@ -187,21 +181,20 @@ class TdmStructPutFixture : public ::testing::TestWithParam<size_t> {
 
     if (my_pe == 1) {
       bool host_error = false;
-      CHECK_HIP(hipMemcpy(&host_error, error_dptr_, sizeof(bool),
-                          hipMemcpyDeviceToHost));
+      CHECK_HIP(hipMemcpy(&host_error, error_dptr_, sizeof(bool), hipMemcpyDeviceToHost));
       ASSERT_EQ(host_error, false);
     }
   }
 
  private:
-  HIPAllocator*    hip_allocator_{nullptr};
-  NotifierProxyT   notifier_{};
-  HeapMemoryType*  heap_mem_{nullptr};
-  MPI_T*           mpi_{nullptr};
-  IpcImplT         ipc_impl_{};
-  IpcImplT*        ipc_impl_dptr_{nullptr};
-  bool*            error_dptr_{nullptr};
-  TdmTestRecord*   golden_dptr_{nullptr};
+  HIPAllocator* hip_allocator_{nullptr};
+  NotifierProxyT notifier_{};
+  HeapMemoryType* heap_mem_{nullptr};
+  MPI_T* mpi_{nullptr};
+  IpcImplT ipc_impl_{};
+  IpcImplT* ipc_impl_dptr_{nullptr};
+  bool* error_dptr_{nullptr};
+  TdmTestRecord* golden_dptr_{nullptr};
 };
 
 }  // namespace rocshmem

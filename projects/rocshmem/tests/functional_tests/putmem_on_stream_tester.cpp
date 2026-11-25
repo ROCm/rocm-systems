@@ -33,12 +33,11 @@
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-PutmemOnStreamTester::PutmemOnStreamTester(TesterArguments args)
-    : Tester(args) {
+PutmemOnStreamTester::PutmemOnStreamTester(TesterArguments args) : Tester(args) {
   my_pe = rocshmem_my_pe();
   n_pes = rocshmem_n_pes();
 
-  char *value{nullptr};
+  char* value{nullptr};
   if ((value = getenv("ROCSHMEM_TEST_NUM_STREAMS"))) {
     num_streams = atoi(value);
   } else {
@@ -60,18 +59,17 @@ PutmemOnStreamTester::PutmemOnStreamTester(TesterArguments args)
   if ((value = getenv("ROCSHMEM_TEST_PUTMEM_TARGET"))) {
     pe_target = atoi(value);
     if (pe_target < 0 || pe_target >= n_pes) {
-      std::cerr << "Invalid ROCSHMEM_TEST_PUTMEM_TARGET value. Using next PE."
-                << std::endl;
+      std::cerr << "Invalid ROCSHMEM_TEST_PUTMEM_TARGET value. Using next PE." << std::endl;
       pe_target = (my_pe + 1) % n_pes;
     }
   }
 
   int num_bytes_stream = args.max_msg_size;
-  int total_bytes = num_bytes_stream * num_streams;
-  buf_size = total_bytes;
+  int total_bytes      = num_bytes_stream * num_streams;
+  buf_size             = total_bytes;
 
-  source_buf = (char *) alloc_test_buffer(buf_size, args.local_buf_type);
-  dest_buf = (char *) alloc_test_buffer(buf_size);
+  source_buf = (char*)alloc_test_buffer(buf_size, args.local_buf_type);
+  dest_buf   = (char*)alloc_test_buffer(buf_size);
 
   streams.resize(num_streams);
   start_events_timed.resize(num_streams);
@@ -111,27 +109,26 @@ void PutmemOnStreamTester::postLaunchKernel() {
   }
 
   // Get elapsed time for each stream from HIP events
-  for (uint32_t stream_id = 0; stream_id < static_cast<uint32_t>(num_streams) && stream_id < static_cast<uint32_t>(num_timers);
+  for (uint32_t stream_id = 0; stream_id < static_cast<uint32_t>(num_streams) &&
+                               stream_id < static_cast<uint32_t>(num_timers);
        stream_id++) {
     float elapsed_time_ms = 0.0f;
-    CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms,
-                                  start_events_timed[stream_id],
+    CHECK_HIP(hipEventElapsedTime(&elapsed_time_ms, start_events_timed[stream_id],
                                   stop_events_timed[stream_id]));
 
     // Convert milliseconds to GPU cycles
     // wall_clk_rate is in kHz, so: cycles = ms * wall_clk_rate
     long long int elapsed_cycles =
-        static_cast<long long int>(elapsed_time_ms *
-                                   static_cast<float>(wall_clk_rate));
+        static_cast<long long int>(elapsed_time_ms * static_cast<float>(wall_clk_rate));
 
     start_time[stream_id] = 0;
-    end_time[stream_id] = elapsed_cycles;
+    end_time[stream_id]   = elapsed_cycles;
   }
 
   // Fill remaining timers with zero if num_timers > num_streams
   for (uint32_t i = num_streams; i < static_cast<uint32_t>(num_timers); i++) {
     start_time[i] = 0;
-    end_time[i] = 0;
+    end_time[i]   = 0;
   }
 }
 
@@ -149,15 +146,14 @@ void PutmemOnStreamTester::resetBuffers(size_t size) {
   std::memset(dest_buf, 0, buf_size);
 }
 
-void PutmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_unused]] dim3 blockSize,
-                                        int loop, size_t size) {
+void PutmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize,
+                                        [[maybe_unused]] dim3 blockSize, int loop, size_t size) {
   // Execute warmup iterations (skip)
   for (int i = 0; i < args.skip; i++) {
     for (int stream_id = 0; stream_id < num_streams; stream_id++) {
-      char *stream_source = source_buf + stream_id * size;
-      char *stream_dest = dest_buf + stream_id * size;
-      rocshmem_putmem_on_stream(stream_dest, stream_source, size, pe_target,
-                                streams[stream_id]);
+      char* stream_source = source_buf + stream_id * size;
+      char* stream_dest   = dest_buf + stream_id * size;
+      rocshmem_putmem_on_stream(stream_dest, stream_source, size, pe_target, streams[stream_id]);
     }
   }
 
@@ -169,24 +165,21 @@ void PutmemOnStreamTester::launchKernel([[maybe_unused]] dim3 gridSize, [[maybe_
     for (int stream_id = 0; stream_id < num_streams; stream_id++) {
       // Record start event for this stream on first iteration
       if (i == 0) {
-        CHECK_HIP(hipEventRecord(start_events_timed[stream_id],
-                                 streams[stream_id]));
+        CHECK_HIP(hipEventRecord(start_events_timed[stream_id], streams[stream_id]));
       }
 
-      char *stream_source = source_buf + stream_id * size;
-      char *stream_dest = dest_buf + stream_id * size;
-      rocshmem_putmem_on_stream(stream_dest, stream_source, size, pe_target,
-                                streams[stream_id]);
+      char* stream_source = source_buf + stream_id * size;
+      char* stream_dest   = dest_buf + stream_id * size;
+      rocshmem_putmem_on_stream(stream_dest, stream_source, size, pe_target, streams[stream_id]);
 
       // Record stop event for this stream on last iteration
       if (i == loop - 1) {
-        CHECK_HIP(hipEventRecord(stop_events_timed[stream_id],
-                                 streams[stream_id]));
+        CHECK_HIP(hipEventRecord(stop_events_timed[stream_id], streams[stream_id]));
       }
     }
   }
 
-  num_msgs = (loop + args.skip) * num_streams;
+  num_msgs       = (loop + args.skip) * num_streams;
   num_timed_msgs = loop * num_streams;
 }
 
@@ -204,15 +197,12 @@ void PutmemOnStreamTester::verifyResults(size_t size) {
     for (size_t k = 0; k < size; k++) {
       if (static_cast<unsigned char>(dest_buf[idx + k]) !=
           static_cast<unsigned char>(expected_value)) {
-        std::cerr << "PE " << my_pe << ": Verification failed for stream "
-                  << stream_id << " at byte " << k << std::endl;
-        std::cerr << "Expected value from PE " << pe_source << ": "
-                  << expected_value
-                  << ", Got: " << static_cast<int>(dest_buf[idx + k])
-                  << std::endl;
+        std::cerr << "PE " << my_pe << ": Verification failed for stream " << stream_id
+                  << " at byte " << k << std::endl;
+        std::cerr << "Expected value from PE " << pe_source << ": " << expected_value
+                  << ", Got: " << static_cast<int>(dest_buf[idx + k]) << std::endl;
         rocshmem_global_exit(1);
       }
     }
   }
 }
-

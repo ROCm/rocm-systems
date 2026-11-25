@@ -24,7 +24,6 @@
 
 #include "sdma_policy.hpp"
 
-
 #include <cstdint>
 #include <unordered_map>
 #include <vector>
@@ -71,9 +70,9 @@ uint64_t sdmaRemotePeerKey(const SdmaPeerInfo& p) {
 // Host-side state of one sdmaHostInit, kept out of SdmaImpl so it stays trivially
 // device-constructible. Keyed by SdmaImpl::wiringId.
 struct SdmaWiring {
-  std::vector<SdmaPeerInfo> peers;           // by pod rank
-  std::vector<int> connectedDevs;            // local devices this init connected
-  std::vector<uint64_t> connectedRemotes;    // remote-peer keys this init connected
+  std::vector<SdmaPeerInfo> peers;         // by pod rank
+  std::vector<int> connectedDevs;          // local devices this init connected
+  std::vector<uint64_t> connectedRemotes;  // remote-peer keys this init connected
 };
 
 std::unordered_map<int, SdmaWiring>& sdmaWirings() {
@@ -85,17 +84,16 @@ int sdmaNextWiringId = 0;
 
 }  // namespace
 
-__host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
-                                     const PodAllGather& allGather) {
-  my_pe = pe;
+__host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank, const PodAllGather& allGather) {
+  my_pe    = pe;
   shm_size = pod_sz;
   pod_rank = prank;
 
   // Read configuration from environment variables
-  sdmaEnabled = static_cast<bool>(envvar::sdma::enabled);
+  sdmaEnabled   = static_cast<bool>(envvar::sdma::enabled);
   sdmaThreshold = static_cast<size_t>(envvar::sdma::threshold);
-  numChannels = static_cast<int>(envvar::sdma::num_channels);
-  int status = initialSdmaStatus(sdmaEnabled, numChannels);
+  numChannels   = static_cast<int>(envvar::sdma::num_channels);
+  int status    = initialSdmaStatus(sdmaEnabled, numChannels);
   if (status == kSdmaBadChannels) {
     LOG_ERROR("ROCSHMEM_SDMA_NUM_CHANNELS=%d is out of range [1, 8]", numChannels);
   }
@@ -105,18 +103,20 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
   CHECK_HIP(hipGetDevice(&deviceId));
 
   // Every rank joins the exchange, enabled or not: it is collective over the pod.
-  wiringId = ++sdmaNextWiringId;
+  wiringId           = ++sdmaNextWiringId;
   SdmaWiring& wiring = sdmaWirings()[wiringId];
   wiring.peers.assign(static_cast<size_t>(shm_size), SdmaPeerInfo{-1, 0, 0});
   wiring.peers[static_cast<size_t>(pod_rank)] = SdmaPeerInfo{deviceId, 0, sdmaHostId()};
   allGather(wiring.peers.data(), static_cast<int>(sizeof(SdmaPeerInfo)));
 
   const uint64_t myHost = wiring.peers[static_cast<size_t>(pod_rank)].hostId;
-  local_size = 0;
-  local_rank = 0;
+  local_size            = 0;
+  local_rank            = 0;
   for (int p = 0; p < shm_size; p++) {
-    if (wiring.peers[static_cast<size_t>(p)].hostId != myHost) continue;
-    if (p < pod_rank) local_rank++;
+    if (wiring.peers[static_cast<size_t>(p)].hostId != myHost)
+      continue;
+    if (p < pod_rank)
+      local_rank++;
     local_size++;
   }
   const int remotePeers = shm_size - local_size;
@@ -147,21 +147,26 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
           status = kSdmaConnectFailed;
           break;
         }
-        if (sdma_anvil::anvil.getSdmaQueue(deviceId, dev, numChannels - 1) != nullptr) continue;
-        if (dev != deviceId) sdma_anvil::EnablePeerAccess(deviceId, dev);
+        if (sdma_anvil::anvil.getSdmaQueue(deviceId, dev, numChannels - 1) != nullptr)
+          continue;
+        if (dev != deviceId)
+          sdma_anvil::EnablePeerAccess(deviceId, dev);
         if (!sdma_anvil::anvil.connect(deviceId, dev, numChannels)) {
-          LOG_ERROR("SDMA: connect failed from device %d to %d with %d channel(s)", deviceId,
-                    dev, numChannels);
+          LOG_ERROR("SDMA: connect failed from device %d to %d with %d channel(s)", deviceId, dev,
+                    numChannels);
           status = kSdmaConnectFailed;
           break;
         }
         wiring.connectedDevs.push_back(dev);
       } else {
         const uint64_t key = sdmaRemotePeerKey(peer);
-        if (sdma_anvil::anvil.getRemotePeerQueue(key, numChannels - 1) != nullptr) continue;
+        if (sdma_anvil::anvil.getRemotePeerQueue(key, numChannels - 1) != nullptr)
+          continue;
         if (!sdma_anvil::anvil.connectRemotePeer(deviceId, key, numChannels)) {
-          LOG_ERROR("SDMA: connect failed from device %d to pod rank %d on another host with %d "
-                    "channel(s)", deviceId, p, numChannels);
+          LOG_ERROR(
+              "SDMA: connect failed from device %d to pod rank %d on another host with %d "
+              "channel(s)",
+              deviceId, p, numChannels);
           status = kSdmaConnectFailed;
           break;
         }
@@ -177,36 +182,42 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int pod_sz, int prank,
   std::vector<int> statuses(shm_size, kSdmaDisabledByEnv);
   statuses[pod_rank] = applyForcedFailure(status, local_rank, forcedFailureLocalRank());
   if (statuses[pod_rank] != status) {
-    LOG_ERROR("SDMA: local rank %d reports a failed connect, forced by "
-              "ROCSHMEM_SDMA_FAIL_CONNECT_LOCAL_RANK", local_rank);
+    LOG_ERROR(
+        "SDMA: local rank %d reports a failed connect, forced by "
+        "ROCSHMEM_SDMA_FAIL_CONNECT_LOCAL_RANK",
+        local_rank);
   }
   allGather(statuses.data(), static_cast<int>(sizeof(int)));
   const SdmaAgreement agreed = agreeSdmaStatus(statuses.data(), shm_size);
 
   switch (agreed.decision) {
-    case SdmaDecision::kAbortBadChannels:
-      LOG_ERROR_ABORT("SDMA: ROCSHMEM_SDMA_NUM_CHANNELS is out of range [1, 8] on pod rank(s) "
-                      "%s of %d", agreed.ranks.c_str(), shm_size);
-      return;
-    case SdmaDecision::kCommit:
-      sdmaPublishHandles(deviceId, true);
-      return;
-    case SdmaDecision::kAllDisabled:
-      LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
-      // USE_SDMA testers index deviceHandles_d without checking sdmaEnabled.
-      sdmaPublishHandles(deviceId, false);
-      return;
-    case SdmaDecision::kFallbackConnectFailed:
-      LOG_ERROR("SDMA: connect failed on pod rank(s) %s of %d; all of them fall back to IPC "
-                "memcpy. Each rank needs pod size x ROCSHMEM_SDMA_NUM_CHANNELS = %d SDMA queues; "
-                "lower ROCSHMEM_SDMA_NUM_CHANNELS or the pod size to keep SDMA",
-                agreed.ranks.c_str(), shm_size, shm_size * numChannels);
-      break;
-    case SdmaDecision::kFallbackEnvMismatch:
-      LOG_ERROR("SDMA: ROCSHMEM_SDMA_ENABLED=0 on pod rank(s) %s of %d only; all of them fall "
-                "back to IPC memcpy. Set it the same on every rank", agreed.ranks.c_str(),
-                shm_size);
-      break;
+  case SdmaDecision::kAbortBadChannels:
+    LOG_ERROR_ABORT(
+        "SDMA: ROCSHMEM_SDMA_NUM_CHANNELS is out of range [1, 8] on pod rank(s) "
+        "%s of %d",
+        agreed.ranks.c_str(), shm_size);
+    return;
+  case SdmaDecision::kCommit:
+    sdmaPublishHandles(deviceId, true);
+    return;
+  case SdmaDecision::kAllDisabled:
+    LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
+    // USE_SDMA testers index deviceHandles_d without checking sdmaEnabled.
+    sdmaPublishHandles(deviceId, false);
+    return;
+  case SdmaDecision::kFallbackConnectFailed:
+    LOG_ERROR(
+        "SDMA: connect failed on pod rank(s) %s of %d; all of them fall back to IPC "
+        "memcpy. Each rank needs pod size x ROCSHMEM_SDMA_NUM_CHANNELS = %d SDMA queues; "
+        "lower ROCSHMEM_SDMA_NUM_CHANNELS or the pod size to keep SDMA",
+        agreed.ranks.c_str(), shm_size, shm_size * numChannels);
+    break;
+  case SdmaDecision::kFallbackEnvMismatch:
+    LOG_ERROR(
+        "SDMA: ROCSHMEM_SDMA_ENABLED=0 on pod rank(s) %s of %d only; all of them fall "
+        "back to IPC memcpy. Set it the same on every rank",
+        agreed.ranks.c_str(), shm_size);
+    break;
   }
 
   const size_t released = wiring.connectedDevs.size() + wiring.connectedRemotes.size();
@@ -231,17 +242,17 @@ __host__ void SdmaImpl::sdmaPublishHandles(int deviceId, bool useQueues) {
   int total_handles = shm_size * numChannels;
 
   // Allocate device-side array to hold SDMA queue device handles
-  CHECK_HIP(hipMalloc(&deviceHandles_d,
-                      total_handles * sizeof(sdma_anvil::SdmaQueueDeviceHandle*)));
+  CHECK_HIP(
+      hipMalloc(&deviceHandles_d, total_handles * sizeof(sdma_anvil::SdmaQueueDeviceHandle*)));
 
   // Copy device handles to device memory
   std::vector<sdma_anvil::SdmaQueueDeviceHandle*> handles_h(total_handles, nullptr);
   if (useQueues) {
     const SdmaWiring& wiring = sdmaWirings()[wiringId];
-    const uint64_t myHost = wiring.peers[static_cast<size_t>(pod_rank)].hostId;
+    const uint64_t myHost    = wiring.peers[static_cast<size_t>(pod_rank)].hostId;
     for (int i = 0; i < shm_size; i++) {
       const SdmaPeerInfo& peer = wiring.peers[static_cast<size_t>(i)];
-      const bool local = peer.hostId == myHost;
+      const bool local         = peer.hostId == myHost;
       for (int ch = 0; ch < numChannels; ch++) {
         int idx = i * numChannels + ch;
         sdma_anvil::SdmaQueue* queue =
@@ -260,9 +271,12 @@ __host__ void SdmaImpl::sdmaReleasePeers() {
   // Release only the queues this init connected: the channel maps are process-global, so
   // disconnect() would also destroy queues another user still holds.
   auto it = sdmaWirings().find(wiringId);
-  if (it == sdmaWirings().end()) return;
-  for (int dev : it->second.connectedDevs) sdma_anvil::anvil.disconnectDevice(dev);
-  for (uint64_t key : it->second.connectedRemotes) sdma_anvil::anvil.disconnectRemotePeer(key);
+  if (it == sdmaWirings().end())
+    return;
+  for (int dev : it->second.connectedDevs)
+    sdma_anvil::anvil.disconnectDevice(dev);
+  for (uint64_t key : it->second.connectedRemotes)
+    sdma_anvil::anvil.disconnectRemotePeer(key);
   it->second.connectedDevs.clear();
   it->second.connectedRemotes.clear();
 }

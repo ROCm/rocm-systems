@@ -67,10 +67,10 @@ TEST_F(IbCtrlTestFixture, SelectGidPrefersRoutableRoCEv2OverLinkLocal) {
   int n = ibv_.query_gid_table(ctrl_.dev().ctx, entries.data(), kMax);
   ASSERT_GT(n, 0) << "no GID table entries; cannot verify selection";
 
-  int expected = -1;
+  int expected           = -1;
   uint32_t expected_type = IBV_GID_TYPE_ROCE_V1;
   for (int i = 0; i < n; i++) {
-    const auto &e = entries[i];
+    const auto& e = entries[i];
     if (e.port_num != ctrl_.dev().port) {
       continue;
     }
@@ -88,7 +88,7 @@ TEST_F(IbCtrlTestFixture, SelectGidPrefersRoutableRoCEv2OverLinkLocal) {
       continue;  // link-local, not routable across nodes
     }
     if (expected < 0 || e.gid_type > expected_type) {
-      expected = static_cast<int>(e.gid_index);
+      expected      = static_cast<int>(e.gid_index);
       expected_type = e.gid_type;
     }
   }
@@ -97,7 +97,7 @@ TEST_F(IbCtrlTestFixture, SelectGidPrefersRoutableRoCEv2OverLinkLocal) {
   EXPECT_EQ(ctrl_.dev().gid_index, expected);
 
   // The selected GID itself must not be link-local.
-  const auto &g = ctrl_.dev().gid;
+  const auto& g   = ctrl_.dev().gid;
   bool link_local = (g.raw[0] == 0xfe) && ((g.raw[1] & 0xc0) == 0x80);
   EXPECT_FALSE(link_local) << "selected GID is link-local (not routable)";
 }

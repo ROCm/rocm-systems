@@ -40,36 +40,35 @@
 namespace rocshmem {
 
 class IPCBackend : public Backend {
-
  public:
   /**
    * @copydoc Backend::Backend(unsigned)
    */
   explicit IPCBackend(MPI_Comm comm);
-  explicit IPCBackend(TcpBootstrap *bootstr);
+  explicit IPCBackend(TcpBootstrap* bootstr);
 
   /**
    * @copydoc Backend::~Backend()
    */
   virtual ~IPCBackend();
 
-  __device__ bool create_ctx(int64_t options, rocshmem_ctx_t *ctx);
+  __device__ bool create_ctx(int64_t options, rocshmem_ctx_t* ctx);
 
   /**
    * @brief Destroy a `rocshmem_ctx_t` context and returns it back to the
    * context free list.
    */
-  __device__ void destroy_ctx(rocshmem_ctx_t *ctx);
+  __device__ void destroy_ctx(rocshmem_ctx_t* ctx);
 
   /**
    * @copydoc Backend::ctx_create
    */
-  void ctx_create(int64_t options, void **ctx) override;
+  void ctx_create(int64_t options, void** ctx) override;
 
   /**
    * @copydoc Backend::ctx_destroy
    */
-  void ctx_destroy(Context *ctx) override;
+  void ctx_destroy(Context* ctx) override;
 
   /**
    * @brief Helper to initialize IPC interface.
@@ -79,7 +78,7 @@ class IPCBackend : public Backend {
   /**
    * @brief Helper to initialize IPC interface, non-MPI based version.
    */
-  void initIPC(TcpBootstrap *bootstrap);
+  void initIPC(TcpBootstrap* bootstrap);
 
   /**
    * @brief Allocation and initialization of backend contexts.
@@ -100,11 +99,9 @@ class IPCBackend : public Backend {
   /**
    * @copydoc Backend::create_new_team
    */
-  void create_new_team(Team *parent_team,
-                       const TeamInfo& team_info_wrt_parent,
-                       const TeamInfo& team_info_wrt_world, int num_pes,
-                       int my_pe_in_new_team, MPI_Comm new_team_comm,
-                       rocshmem_team_t *new_team) override;
+  void create_new_team(Team* parent_team, const TeamInfo& team_info_wrt_parent,
+                       const TeamInfo& team_info_wrt_world, int num_pes, int my_pe_in_new_team,
+                       MPI_Comm new_team_comm, rocshmem_team_t* new_team) override;
 
   /**
    * @copydoc Backend::team_destroy(rocshmem_team_t)
@@ -116,15 +113,14 @@ class IPCBackend : public Backend {
    *
    * Collective. Restricted to VMM allocations.
    */
-  int buffer_register_symmetric(void *addr, size_t length,
-                                void **registered_addr) override;
+  int buffer_register_symmetric(void* addr, size_t length, void** registered_addr) override;
 
   /**
    * @copydoc Backend::buffer_unregister_symmetric
    *
    * Collective.
    */
-  int buffer_unregister_symmetric(void *addr) override;
+  int buffer_unregister_symmetric(void* addr) override;
 
   /**
    * @brief Accessor for work/sync bases
@@ -142,50 +138,50 @@ class IPCBackend : public Backend {
   /**
    * @brief Scratchpad for the internal barrier algorithms.
    */
-  int64_t *barrier_sync{nullptr};
+  int64_t* barrier_sync{nullptr};
 
   /**
    * @brief Handle for raw memory for barrier sync
    */
-  long *barrier_pSync_pool{nullptr};
+  long* barrier_pSync_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for reduce sync
    */
-  long *reduce_pSync_pool{nullptr};
+  long* reduce_pSync_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for broadcast sync
    */
-  long *bcast_pSync_pool{nullptr};
+  long* bcast_pSync_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for alltoall sync
    */
-  long *alltoall_pSync_pool{nullptr};
+  long* alltoall_pSync_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for work
    */
-  void *pWrk_pool{nullptr};
+  void* pWrk_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for alltoall
    */
-  void *pAta_pool{nullptr};
+  void* pAta_pool{nullptr};
 
   /**
    * @brief Handle for raw memory for fence/quiet
-  */
-  int *fence_pool{nullptr};
+   */
+  int* fence_pool{nullptr};
 
   /**
    * @brief Check whether all PEs are on a single node
    */
-   static int backend_can_run(MPI_Comm comm, TcpBootstrap *bootstrap);
+  static int backend_can_run(MPI_Comm comm, TcpBootstrap* bootstrap);
 
  protected:
-   /**
+  /**
    * @copydoc Backend::accumulate_ctx_device_stats()
    */
   void accumulate_ctx_device_stats() override;
@@ -197,8 +193,6 @@ class IPCBackend : public Backend {
    * @copydoc Backend::reset_backend_stats()
    */
   void reset_backend_stats() override;
-
-
 
   /**
    * @brief Allocates uncacheable host memory for the hdp policy.
@@ -266,17 +260,17 @@ class IPCBackend : public Backend {
   /**
    * @brief An array of @ref ROContexts that backs the context FreeList.
    */
-  IPCContext *ctx_array{nullptr};
+  IPCContext* ctx_array{nullptr};
 
   /**
    * @brief A free-list containing contexts.
    */
-  FreeListProxy<IPCContext *> ctx_free_list{};
+  FreeListProxy<IPCContext*> ctx_free_list{};
 
   /**
    * @brief The bitmask representing the availability of teams in the pool
    */
-  char *team_pool_bitmask_{nullptr};
+  char* team_pool_bitmask_{nullptr};
 
   /**
    * @brief Bitmask to store the reduced result of bitmasks on pariticipating
@@ -285,7 +279,7 @@ class IPCBackend : public Backend {
    * With no thread-safety for this bitmask, multithreaded creation of teams is
    * not supported.
    */
-  char *team_reduced_bitmask_{nullptr};
+  char* team_reduced_bitmask_{nullptr};
 
   /**
    * @brief Size of the bitmask
@@ -306,13 +300,13 @@ class IPCBackend : public Backend {
    * @brief Temporary buffer pointer pointing to the same address as
    * wrk_sync_pool_, used to calculate the starting addresses of
    * different work and sync buffers.
-  */
-  char *wrk_sync_pool_top_{nullptr};
+   */
+  char* wrk_sync_pool_top_{nullptr};
 
   /**
    * @brief Array containing the addresses of the work/sync buffer bases
    * of other PEs
-  */
+   */
   char** wrk_sync_pool_bases_{nullptr};
 
   /**
@@ -324,7 +318,7 @@ class IPCBackend : public Backend {
   /**
    * @brief Close IPC memory handles for work/sync buffers and deallocate
    * work/sync buffer.
-  */
+   */
   void cleanup_wrk_sync_buffer();
 
   /**
@@ -340,10 +334,9 @@ class IPCBackend : public Backend {
   /**
    * @brief
    */
-  void Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
-                            const TeamInfo& new_team_info_wrt_world,
-                            int num_pes, int my_pe_in_new_team);
-
+  void Allreduce_char_BAND(char* inbuf, char* outbuf, size_t num_bytes,
+                           const TeamInfo& new_team_info_wrt_world, int num_pes,
+                           int my_pe_in_new_team);
 };
 
 }  // namespace rocshmem

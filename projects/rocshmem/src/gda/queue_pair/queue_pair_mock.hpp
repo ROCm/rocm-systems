@@ -19,7 +19,8 @@ namespace rocshmem {
 
 class QueuePairMock;
 
-template <> struct QueuePairTraits<QueuePairMock> {
+template <>
+struct QueuePairTraits<QueuePairMock> {
   /**
    * @brief QueuePair mock object OpCode enumeration.
    */
@@ -40,7 +41,6 @@ template <> struct QueuePairTraits<QueuePairMock> {
    */
   static constexpr size_t InlineMax = sizeof(__uint128_t);
 
-
   /*
    * @brief QueuePair mock object preferred inlining threshold is 8 bytes.
    */
@@ -48,7 +48,7 @@ template <> struct QueuePairTraits<QueuePairMock> {
 };
 
 class QueuePairMock : public QueuePairSHMEM<QueuePairMock> {
-public:
+ public:
   static __device__ inline size_t rma_count{0};
   static __device__ inline size_t rma_inline_count{0};
   static __device__ inline size_t amo_count{0};
@@ -63,7 +63,7 @@ public:
   size_t pending_wqes{0};
   size_t polls{0};
 
-public:
+ public:
   __host__ QueuePairMock()                                      = default;
   __host__ QueuePairMock(const QueuePairMock& other)            = delete;
   __host__ QueuePairMock& operator=(const QueuePairMock& other) = delete;
@@ -71,37 +71,35 @@ public:
   __host__ QueuePairMock& operator=(QueuePairMock&& other)      = default;
   __host__ ~QueuePairMock()                                     = default;
 
-public:
+ public:
   template <OpCode Op, typename... Options>
-  __device__ __forceinline__
-  void post_wqe_rma(uintptr_t laddr, uint32_t lkey,
-                    uintptr_t raddr, uint32_t rkey, size_t size,
-                    const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __forceinline__ void post_wqe_rma(uintptr_t laddr, uint32_t lkey, uintptr_t raddr,
+                                               uint32_t rkey, size_t size,
+                                               const ActiveWFInfo& wf_info,
+                                               PostOpt<Options...> = {});
 
   template <OpCode Op, typename... Options>
-  __device__ __forceinline__
-  void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
-                           uintptr_t raddr, uint32_t rkey, size_t size,
-                           PostOpt<Options...> = {});
+  __device__ __forceinline__ void post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                                      uintptr_t raddr, uint32_t rkey, size_t size,
+                                                      PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __forceinline__
-  amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
-                                uint64_t swap_add, uint64_t compare,
-                                const ActiveWFInfo& wf_info, PostOpt<Options...> = {});
+  __device__ __forceinline__ amo_ret_t<Fetch> post_wqe_amo(uintptr_t raddr, uint32_t rkey,
+                                                           uint64_t swap_add, uint64_t compare,
+                                                           const ActiveWFInfo& wf_info,
+                                                           PostOpt<Options...> = {});
 
   template <OpCode Op, AMOFetchType Fetch, typename... Options>
-  __device__ __forceinline__
-  amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
-                                       uint64_t swap_add, uint64_t compare,
-                                       PostOpt<Options...> = {});
+  __device__ __forceinline__ amo_ret_t<Fetch> post_wqe_amo_single(uintptr_t raddr, uint32_t rkey,
+                                                                  uint64_t swap_add,
+                                                                  uint64_t compare,
+                                                                  PostOpt<Options...> = {});
 
   __device__ __forceinline__ void quiet_single();
 
   __device__ __forceinline__ uint64_t cq_target();
 
   __device__ __forceinline__ bool poll_cq_once(uint64_t target);
-
 
   /**
    * @brief Resolve the local (origin) virtual address and LKey of a symmetric address.
@@ -111,8 +109,8 @@ public:
    *
    * @return {reinterpret_cast<uintptr_t>(addr), 0}
    */
-  __device__ __forceinline__
-  std::tuple<uintptr_t, uint32_t> get_laddr_info(const void *addr, bool inlined = false) const {
+  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_laddr_info(
+      const void* addr, bool inlined = false) const {
     uintptr_t laddr = reinterpret_cast<uintptr_t>(addr);
     return {laddr, 0};
   }
@@ -125,8 +123,8 @@ public:
    *
    * @return {reinterpret_cast<uintptr_t>(addr), 0}
    */
-  __device__ __forceinline__
-  std::tuple<uintptr_t, uint32_t> get_raddr_info(const void *addr) const {
+  __device__ __forceinline__ std::tuple<uintptr_t, uint32_t> get_raddr_info(
+      const void* addr) const {
     uintptr_t laddr = reinterpret_cast<uintptr_t>(addr);
     return {laddr, 0};
   }
@@ -163,19 +161,19 @@ public:
   }
 };
 
-
-
 template <QueuePairMock::OpCode Op, typename... Options>
-__device__ __forceinline__ void QueuePairMock::post_wqe_rma(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    const ActiveWFInfo& wf_info, PostOpt<Options...> options) {
+__device__ __forceinline__ void QueuePairMock::post_wqe_rma(uintptr_t laddr, uint32_t lkey,
+                                                            uintptr_t raddr, uint32_t rkey,
+                                                            size_t size,
+                                                            const ActiveWFInfo& wf_info,
+                                                            PostOpt<Options...> options) {
   if (!laddr || !raddr) {
     return;
   }
 
   if (wf_info.is_pe_group_first) {
-    __scoped_atomic_fetch_add(&rma_count, wf_info.num_pe_group_lanes,
-                              __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    __scoped_atomic_fetch_add(&rma_count, wf_info.num_pe_group_lanes, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_DEVICE);
     posted += wf_info.num_pe_group_lanes;
     if constexpr (PostOpt<Options...>::ThreadSafe) {
       __scoped_atomic_fetch_add(&thread_safe_post_count, wf_info.num_pe_group_lanes,
@@ -199,9 +197,10 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma(
 }
 
 template <QueuePairMock::OpCode Op, typename... Options>
-__device__ __forceinline__ void QueuePairMock::post_wqe_rma_single(
-    uintptr_t laddr, uint32_t lkey, uintptr_t raddr, uint32_t rkey, size_t size,
-    PostOpt<Options...> options) {
+__device__ __forceinline__ void QueuePairMock::post_wqe_rma_single(uintptr_t laddr, uint32_t lkey,
+                                                                   uintptr_t raddr, uint32_t rkey,
+                                                                   size_t size,
+                                                                   PostOpt<Options...> options) {
   if (!laddr || !raddr) {
     return;
   }
@@ -223,7 +222,8 @@ __device__ __forceinline__ void QueuePairMock::post_wqe_rma_single(
     // RDMA_READ:  dest is laddr, src is raddr
     memcpy(reinterpret_cast<void*>(laddr), reinterpret_cast<const void*>(raddr), size);
   } else {
-    static_assert(false, "invalid OpCode: post_wqe_rma_single only supports RDMA_WRITE and RDMA_READ");
+    static_assert(false,
+                  "invalid OpCode: post_wqe_rma_single only supports RDMA_WRITE and RDMA_READ");
   }
 }
 
@@ -238,8 +238,8 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
   }
 
   if (wf_info.is_pe_group_first) {
-    __scoped_atomic_fetch_add(&amo_count, wf_info.num_pe_group_lanes,
-                              __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+    __scoped_atomic_fetch_add(&amo_count, wf_info.num_pe_group_lanes, __ATOMIC_RELAXED,
+                              __MEMORY_SCOPE_DEVICE);
     posted += wf_info.num_pe_group_lanes;
     if constexpr (PostOpt<Options...>::ThreadSafe) {
       __scoped_atomic_fetch_add(&thread_safe_post_count, wf_info.num_pe_group_lanes,
@@ -298,7 +298,8 @@ __device__ __forceinline__ QueuePairMock::amo_ret_t<Fetch> QueuePairMock::post_w
     compare = __scoped_atomic_fetch_add(reinterpret_cast<uint64_t*>(raddr), swap_add,
                                         __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   } else {
-    static_assert(false, "invalid OpCode: post_wqe_amo_single only supports ATOMIC_CS and ATOMIC_FA");
+    static_assert(false,
+                  "invalid OpCode: post_wqe_amo_single only supports ATOMIC_CS and ATOMIC_FA");
   }
 
   if constexpr (Fetch == AMOFetchType::Blocking) {

@@ -33,7 +33,7 @@
 #if !defined(HAVE_EXTERNAL_MPI)
 // Open MPI specific symbols
 struct ompi_internal_symbols_t ompi_symbols_;
-#endif //!defined(HAVE_EXTERNAL_MPI)
+#endif  //! defined(HAVE_EXTERNAL_MPI)
 
 namespace rocshmem {
 
@@ -42,7 +42,7 @@ struct mpilib_funcs_t mpilib_ftable_;
 
 int MPIInstance::mpilib_dl_init() {
   if (mpilib_handle_ != nullptr)
-      return ROCSHMEM_SUCCESS;
+    return ROCSHMEM_SUCCESS;
 
   mpilib_handle_ = dlopen("libmpi.so", RTLD_LAZY);
   if (!mpilib_handle_) {
@@ -128,7 +128,7 @@ int MPIInstance::mpilib_dl_init() {
   DLSYM_VAR_HELPER(ompi_symbols_, mpilib_handle_, ompi_mpi_float);
   DLSYM_VAR_HELPER(ompi_symbols_, mpilib_handle_, ompi_mpi_double);
   DLSYM_VAR_HELPER(ompi_symbols_, mpilib_handle_, ompi_mpi_long_double);
-#endif //!defined(HAVE_EXTERNAL_MPI)
+#endif  //! defined(HAVE_EXTERNAL_MPI)
 
   return ROCSHMEM_SUCCESS;
 }
@@ -143,7 +143,7 @@ void MPIInstance::mpilib_dl_close() {
 MPIInstance::MPIInstance(MPI_Comm comm) {
   int is_init{0};
 
-  assert (nullptr != mpilib_handle_);
+  assert(nullptr != mpilib_handle_);
 
   mpilib_ftable_.Initialized(&is_init);
 
@@ -165,8 +165,12 @@ MPIInstance::~MPIInstance() {
   }
 }
 
-int MPIInstance::get_rank() { return my_rank_; }
+int MPIInstance::get_rank() {
+  return my_rank_;
+}
 
-int MPIInstance::get_nprocs() { return nprocs_; }
+int MPIInstance::get_nprocs() {
+  return nprocs_;
+}
 
 }  // namespace rocshmem

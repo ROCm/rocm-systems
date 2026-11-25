@@ -30,53 +30,47 @@
 #include "default_allocator.hpp"
 
 namespace rocshmem {
-  template <class T>
-  class StdAllocatorHIP {
-  public:
-    typedef T value_type;
+template <class T>
+class StdAllocatorHIP {
+ public:
+  typedef T value_type;
 
-    StdAllocatorHIP()
-    {
-      allocator_ = get_default_allocator();
-    }
+  StdAllocatorHIP() { allocator_ = get_default_allocator(); }
 
-    template <class U>
-    constexpr StdAllocatorHIP(const StdAllocatorHIP<U>&) noexcept
-    {
-      allocator_ = get_default_allocator();
-    }
-
-    [[nodiscard]] T* allocate(size_t n) {
-      if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
-	throw std::bad_array_new_length();
-      }
-
-      T* p{nullptr};
-      allocator_->allocate(reinterpret_cast<void**>(&p), n * sizeof(T));
-      if (p) {
-	return p;
-      }
-
-      throw std::bad_alloc();
-    }
-
-    void deallocate(T* p, [[maybe_unused]] size_t n) noexcept {
-      allocator_->deallocate(p);
-    }
-
-  private:
-    HIPAllocator *allocator_{nullptr};
-  };
-
-  template <class T, class U>
-  bool operator==(const StdAllocatorHIP<T>&, const StdAllocatorHIP<U>&) {
-    return true;
+  template <class U>
+  constexpr StdAllocatorHIP(const StdAllocatorHIP<U>&) noexcept {
+    allocator_ = get_default_allocator();
   }
 
-  template <class T, class U>
-  bool operator!=(const StdAllocatorHIP<T>&, const StdAllocatorHIP<U>&) {
-    return false;
+  [[nodiscard]] T* allocate(size_t n) {
+    if (n > std::numeric_limits<size_t>::max() / sizeof(T)) {
+      throw std::bad_array_new_length();
+    }
+
+    T* p{nullptr};
+    allocator_->allocate(reinterpret_cast<void**>(&p), n * sizeof(T));
+    if (p) {
+      return p;
+    }
+
+    throw std::bad_alloc();
   }
+
+  void deallocate(T* p, [[maybe_unused]] size_t n) noexcept { allocator_->deallocate(p); }
+
+ private:
+  HIPAllocator* allocator_{nullptr};
+};
+
+template <class T, class U>
+bool operator==(const StdAllocatorHIP<T>&, const StdAllocatorHIP<U>&) {
+  return true;
+}
+
+template <class T, class U>
+bool operator!=(const StdAllocatorHIP<T>&, const StdAllocatorHIP<U>&) {
+  return false;
+}
 
 }  // namespace rocshmem
 

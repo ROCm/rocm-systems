@@ -41,7 +41,7 @@ void FreeList<TYPE>::deallocate_all_nodes() {
   // Deallocate any existing nodes
   while (head_ != nullptr) {
     auto temp = head_;
-    head_ = temp->next;
+    head_     = temp->next;
     allocator_.deallocate(temp);
   }
 
@@ -50,7 +50,7 @@ void FreeList<TYPE>::deallocate_all_nodes() {
 
   // Deallocate all recycled nodes
   while (deallocated_nodes_ != nullptr) {
-    auto temp = deallocated_nodes_;
+    auto temp          = deallocated_nodes_;
     deallocated_nodes_ = temp->next;
     allocator_.deallocate(temp);
   }
@@ -68,7 +68,7 @@ template <typename TYPE>
 template <class InputIt>
 bool FreeList<TYPE>::push_back_range(InputIt first, InputIt last) {
   for (auto iter = first; iter != last; iter++) {
-    auto key = *iter;
+    auto key          = *iter;
     const bool result = push_back(key);
     if (!result) {
       return false;
@@ -117,15 +117,14 @@ __host__ bool FreeList<TYPE>::push_back(TYPE&& val) {
 }
 
 template <typename TYPE>
-__device__ typename FreeList<TYPE>::PopBackResult
-FreeList<TYPE>::pop_front() {
+__device__ typename FreeList<TYPE>::PopBackResult FreeList<TYPE>::pop_front() {
   TicketLockGuard<MutexType> guard(*mutex_.get());
 
   if (head_ == nullptr) {
     return {{}, false};
   }
   auto last_node = head_;
-  head_ = head_->next;
+  head_          = head_->next;
 
   // if we removed all nodes, we should reset the tail
   if (head_ == nullptr) {

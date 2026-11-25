@@ -49,9 +49,9 @@ class FreeListTestFixture : public ::testing::Test {
     wf_size = get_wf_size();
   }
 
-  using T = ValueType;
+  using T         = ValueType;
   using Allocator = HIPAllocator;
-  Allocator hip_allocator_ {};
+  Allocator hip_allocator_{};
   const std::size_t num_elements{32};
   std::vector<T> h_input{};
   int wf_size;

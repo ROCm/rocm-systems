@@ -40,21 +40,21 @@
 namespace rocshmem {
 
 template <typename T>
-__host__ void Context::p(T *dest, T value, int pe) {
+__host__ void Context::p(T* dest, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_P);
 
   HOST_DISPATCH(p(dest, value, pe));
 }
 
 template <typename T>
-__host__ T Context::g(const T *source, int pe) {
+__host__ T Context::g(const T* source, int pe) {
   ctxHostStats.incStat(NUM_HOST_G);
 
   HOST_DISPATCH_RET(g(source, pe));
 }
 
 template <typename T>
-__host__ void Context::put(T *dest, const T *source, size_t nelems, int pe) {
+__host__ void Context::put(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -65,7 +65,7 @@ __host__ void Context::put(T *dest, const T *source, size_t nelems, int pe) {
 }
 
 template <typename T>
-__host__ void Context::get(T *dest, const T *source, size_t nelems, int pe) {
+__host__ void Context::get(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -76,8 +76,7 @@ __host__ void Context::get(T *dest, const T *source, size_t nelems, int pe) {
 }
 
 template <typename T>
-__host__ void Context::put_nbi(T *dest, const T *source, size_t nelems,
-                               int pe) {
+__host__ void Context::put_nbi(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -88,8 +87,7 @@ __host__ void Context::put_nbi(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__host__ void Context::get_nbi(T *dest, const T *source, size_t nelems,
-                               int pe) {
+__host__ void Context::get_nbi(T* dest, const T* source, size_t nelems, int pe) {
   if (nelems == 0) {
     return;
   }
@@ -100,107 +98,105 @@ __host__ void Context::get_nbi(T *dest, const T *source, size_t nelems,
 }
 
 template <typename T>
-__host__ T Context::amo_fetch_add(void *dst, T value, int pe) {
+__host__ T Context::amo_fetch_add(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_FADD);
 
   HOST_DISPATCH_RET(amo_fetch_add(dst, value, pe));
 }
 
 template <typename T>
-__host__ void Context::amo_add(void *dst, T value, int pe) {
+__host__ void Context::amo_add(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_ADD);
 
   HOST_DISPATCH(amo_add(dst, value, pe));
 }
 
 template <typename T>
-__host__ void Context::amo_set(void *dst, T value, int pe) {
+__host__ void Context::amo_set(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_ADD);
 
   HOST_DISPATCH(amo_set(dst, value, pe));
 }
 
 template <typename T>
-__host__ T Context::amo_swap(void *dst, T value, int pe) {
+__host__ T Context::amo_swap(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_ADD);
 
   HOST_DISPATCH_RET(amo_swap(dst, value, pe));
 }
 
 template <typename T>
-__host__ T Context::amo_fetch_and(void *dst, T value, int pe) {
+__host__ T Context::amo_fetch_and(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_FETCH_AND);
 
   HOST_DISPATCH_RET(amo_fetch_and(dst, value, pe));
 }
 
 template <typename T>
-__host__ void Context::amo_and(void *dst, T value, int pe) {
+__host__ void Context::amo_and(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_AND);
 
   HOST_DISPATCH(amo_and(dst, value, pe));
 }
 
 template <typename T>
-__host__ T Context::amo_fetch_or(void *dst, T value, int pe) {
+__host__ T Context::amo_fetch_or(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_FETCH_OR);
 
   HOST_DISPATCH_RET(amo_fetch_or(dst, value, pe));
 }
 
 template <typename T>
-__host__ void Context::amo_or(void *dst, T value, int pe) {
+__host__ void Context::amo_or(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_OR);
 
   HOST_DISPATCH(amo_or(dst, value, pe));
 }
 
 template <typename T>
-__host__ T Context::amo_fetch_xor(void *dst, T value, int pe) {
+__host__ T Context::amo_fetch_xor(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_FETCH_XOR);
 
   HOST_DISPATCH_RET(amo_fetch_xor(dst, value, pe));
 }
 
 template <typename T>
-__host__ void Context::amo_xor(void *dst, T value, int pe) {
+__host__ void Context::amo_xor(void* dst, T value, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_XOR);
 
   HOST_DISPATCH(amo_xor(dst, value, pe));
 }
 
 template <typename T>
-__host__ T Context::amo_fetch_cas(void *dst, T value, T cond, int pe) {
+__host__ T Context::amo_fetch_cas(void* dst, T value, T cond, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_FCSWAP);
 
   HOST_DISPATCH_RET(amo_fetch_cas(dst, value, cond, pe));
 }
 
 template <typename T>
-__host__ void Context::amo_cas(void *dst, T value, T cond, int pe) {
+__host__ void Context::amo_cas(void* dst, T value, T cond, int pe) {
   ctxHostStats.incStat(NUM_HOST_ATOMIC_CSWAP);
 
   HOST_DISPATCH(amo_cas(dst, value, cond, pe));
 }
 
 template <typename T>
-__host__ void Context::broadcast(T *dest, const T *source, int nelems,
-                                 int pe_root, int pe_start, int log_pe_stride,
-                                 int pe_size,
-                                 long *p_sync) {  // NOLINT(runtime/int)
+__host__ void Context::broadcast(T* dest, const T* source, int nelems, int pe_root, int pe_start,
+                                 int log_pe_stride, int pe_size,
+                                 long* p_sync) {  // NOLINT(runtime/int)
   if (nelems == 0) {
     return;
   }
 
   ctxHostStats.incStat(NUM_HOST_BROADCAST);
 
-  HOST_DISPATCH(broadcast<T>(dest, source, nelems, pe_root, pe_start,
-                             log_pe_stride, pe_size, p_sync));
+  HOST_DISPATCH(
+      broadcast<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride, pe_size, p_sync));
 }
 
 template <typename T>
-__host__ void Context::broadcast(rocshmem_team_t team, T *dest,
-                                 const T *source, int nelems,
+__host__ void Context::broadcast(rocshmem_team_t team, T* dest, const T* source, int nelems,
                                  int pe_root) {  // NOLINT(runtime/int)
   if (nelems == 0) {
     return;
@@ -212,22 +208,21 @@ __host__ void Context::broadcast(rocshmem_team_t team, T *dest,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ void Context::to_all(T *dest, const T *source, int nreduce,
-                              int PE_start, int logPE_stride, int PE_size,
-                              T *pWrk,
-                              long *pSync) {  // NOLINT(runtime/int)
+__host__ void Context::to_all(T* dest, const T* source, int nreduce, int PE_start, int logPE_stride,
+                              int PE_size, T* pWrk,
+                              long* pSync) {  // NOLINT(runtime/int)
   if (nreduce == 0) {
     return;
   }
 
   ctxHostStats.incStat(NUM_HOST_TO_ALL);
 
-  HOST_DISPATCH(to_all<PAIR(T, Op)>(dest, source, nreduce, PE_start,
-                                    logPE_stride, PE_size, pWrk, pSync));
+  HOST_DISPATCH(
+      to_all<PAIR(T, Op)>(dest, source, nreduce, PE_start, logPE_stride, PE_size, pWrk, pSync));
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
+__host__ int Context::reduce(rocshmem_team_t team, T* dest, const T* source,
                              int nreduce) {  // NOLINT(runtime/int)
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
@@ -239,8 +234,7 @@ __host__ int Context::reduce(rocshmem_team_t team, T *dest, const T *source,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int Context::reduce_scatter(rocshmem_team_t team, T *dest,
-                                     const T *source, int nreduce) {
+__host__ int Context::reduce_scatter(rocshmem_team_t team, T* dest, const T* source, int nreduce) {
   if (nreduce == 0) {
     return ROCSHMEM_SUCCESS;
   }
@@ -251,80 +245,71 @@ __host__ int Context::reduce_scatter(rocshmem_team_t team, T *dest,
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int Context::reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
-                                int nreduce, hipStream_t stream) {
-  if (nreduce == 0) return ROCSHMEM_SUCCESS;
+__host__ int Context::reduce_on_stream(rocshmem_team_t team, T* dest, const T* source, int nreduce,
+                                       hipStream_t stream) {
+  if (nreduce == 0)
+    return ROCSHMEM_SUCCESS;
   ctxHostStats.incStat(NUM_HOST_REDUCE);
 
   HOST_DISPATCH_RET(reduce_on_stream<PAIR(T, Op)>(team, dest, source, nreduce, stream));
-
 }
 
 template <typename T>
-__host__ void Context::wait_until(T *ivars, int cmp, T val) {
+__host__ void Context::wait_until(T* ivars, int cmp, T val) {
   ctxHostStats.incStat(NUM_HOST_WAIT_UNTIL);
 
   HOST_DISPATCH(wait_until<T>(ivars, cmp, val));
 }
 
 template <typename T>
-__host__ size_t Context::wait_until_any(T *ivars, size_t nelems,
-                                        const int* status,
-                                        int cmp, T val) {
+__host__ size_t Context::wait_until_any(T* ivars, size_t nelems, const int* status, int cmp,
+                                        T val) {
   ctxHostStats.incStat(NUM_HOST_WAIT_UNTIL_ANY);
 
   HOST_DISPATCH_RET(wait_until_any<T>(ivars, nelems, status, cmp, val));
 }
 
 template <typename T>
-__host__ void Context::wait_until_all(T *ivars, size_t nelems,
-                                      const int* status,
-                                      int cmp, T val) {
+__host__ void Context::wait_until_all(T* ivars, size_t nelems, const int* status, int cmp, T val) {
   ctxHostStats.incStat(NUM_HOST_WAIT_UNTIL_ALL);
 
   HOST_DISPATCH(wait_until_all<T>(ivars, nelems, status, cmp, val));
 }
 
 template <typename T>
-__host__ size_t Context::wait_until_some(T *ivars, size_t nelems,
-                                         size_t* indices,
-                                         const int* status,
-                                         int cmp, T val) {
+__host__ size_t Context::wait_until_some(T* ivars, size_t nelems, size_t* indices,
+                                         const int* status, int cmp, T val) {
   ctxHostStats.incStat(NUM_HOST_WAIT_UNTIL_SOME);
 
   HOST_DISPATCH_RET(wait_until_some<T>(ivars, nelems, indices, status, cmp, val));
 }
 
 template <typename T>
-__host__ void Context::wait_until_all_vector(T *ivars, size_t nelems,
-                                             const int *status,
-                                             int cmp, T* vals) {
+__host__ void Context::wait_until_all_vector(T* ivars, size_t nelems, const int* status, int cmp,
+                                             T* vals) {
   ctxHostStats.incStat(NUM_HOST_WAIT_UNTIL_ALL_VECTOR);
 
   HOST_DISPATCH(wait_until_all_vector<T>(ivars, nelems, status, cmp, vals));
 }
 
 template <typename T>
-__host__ size_t Context::wait_until_any_vector(T *ivars, size_t nelems,
-                                               const int *status,
-                                               int cmp, T* vals) {
+__host__ size_t Context::wait_until_any_vector(T* ivars, size_t nelems, const int* status, int cmp,
+                                               T* vals) {
   ctxHostStats.incStat(NUM_HOST_WAIT_UNTIL_ANY_VECTOR);
 
   HOST_DISPATCH_RET(wait_until_any_vector<T>(ivars, nelems, status, cmp, vals));
 }
 
 template <typename T>
-__host__ size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
-                                                size_t* indices,
-                                                const int *status,
-                                                int cmp, T* vals) {
+__host__ size_t Context::wait_until_some_vector(T* ivars, size_t nelems, size_t* indices,
+                                                const int* status, int cmp, T* vals) {
   ctxHostStats.incStat(NUM_HOST_WAIT_UNTIL_SOME_VECTOR);
 
   HOST_DISPATCH_RET(wait_until_some_vector<T>(ivars, nelems, indices, status, cmp, vals));
 }
 
 template <typename T>
-__host__ int Context::test(T *ivars, int cmp, T val) {
+__host__ int Context::test(T* ivars, int cmp, T val) {
   ctxHostStats.incStat(NUM_HOST_TEST);
 
   HOST_DISPATCH_RET(test<T>(ivars, cmp, val));

@@ -31,41 +31,42 @@
 #include <hip/hip_runtime.h>
 
 #ifndef CHECK_HIP
-#define CHECK_HIP(condition) {                                            \
-    hipError_t error = condition;                                         \
-    if(error != hipSuccess){                                              \
-        fprintf(stderr, "HIP error: %d line: %s:%d\n",                    \
-                error, __FILE__,  __LINE__);                              \
-        exit(error);                                                      \
-    }                                                                     \
-}
+#define CHECK_HIP(condition)                                                     \
+  {                                                                              \
+    hipError_t error = condition;                                                \
+    if (error != hipSuccess) {                                                   \
+      fprintf(stderr, "HIP error: %d line: %s:%d\n", error, __FILE__, __LINE__); \
+      exit(error);                                                               \
+    }                                                                            \
+  }
 #endif
 
-#define ASSERT(condition) {                                               \
-  if (!(condition)) {                                                     \
-    fprintf(stderr, "Assertion failed: [%s:%d], condition:  %s\n",        \
-            __FILE__, __LINE__, #condition);                              \
-    exit(EXIT_FAILURE);                                                   \
-  }                                                                       \
-}
+#define ASSERT(condition)                                                                \
+  {                                                                                      \
+    if (!(condition)) {                                                                  \
+      fprintf(stderr, "Assertion failed: [%s:%d], condition:  %s\n", __FILE__, __LINE__, \
+              #condition);                                                               \
+      exit(EXIT_FAILURE);                                                                \
+    }                                                                                    \
+  }
 
-#define DEVICE_ASSERT(condition) {                                        \
-  if (!(condition)) {                                                     \
-    printf("Assertion failed: [%s:%d], condition:  %s\n",                 \
-            __FILE__, __LINE__, #condition);                              \
-    abort();                                                              \
-  }                                                                       \
-}
+#define DEVICE_ASSERT(condition)                                                             \
+  {                                                                                          \
+    if (!(condition)) {                                                                      \
+      printf("Assertion failed: [%s:%d], condition:  %s\n", __FILE__, __LINE__, #condition); \
+      abort();                                                                               \
+    }                                                                                        \
+  }
 
 [[maybe_unused]] static int get_launcher_local_rank() {
-    char *local_rank_str = nullptr;
+  char* local_rank_str = nullptr;
 
-    local_rank_str = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
-    if (nullptr != local_rank_str) {
-        return atoi(local_rank_str);
-    }
+  local_rank_str = getenv("OMPI_COMM_WORLD_LOCAL_RANK");
+  if (nullptr != local_rank_str) {
+    return atoi(local_rank_str);
+  }
 
-    return -1;
+  return -1;
 }
 
 #endif /* __ROCSHMEM_EXAMPLES_UTIL_H__ */

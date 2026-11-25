@@ -25,40 +25,35 @@
 /* Declare the template with a generic implementation */
 template <typename T, ROCSHMEM_OP Op>
 __device__ int wave_reduce([[maybe_unused]] rocshmem_ctx_t ctx,
-                                [[maybe_unused]] rocshmem_team_t team,
-                                [[maybe_unused]] T *dest,
-                                [[maybe_unused]] const T *source,
-                                [[maybe_unused]] int nreduce) {
+                           [[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] T* dest,
+                           [[maybe_unused]] const T* source, [[maybe_unused]] int nreduce) {
   return ROCSHMEM_SUCCESS;
 }
 
 /* Define templates to call rocSHMEM */
-#define REDUCTION_WAVE_DEF_GEN(T, TNAME, Op_API, Op)                              \
-  template <>                                                                     \
-  __device__ int wave_reduce<T, Op>(rocshmem_ctx_t ctx,                           \
-                                         rocshmem_team_t team, T *dest,           \
-                                         const T *source, int nreduce) {          \
-    return rocshmem_ctx_##TNAME##_##Op_API##_reduce_wave(ctx, team, dest,         \
-                                                          source, nreduce);       \
+#define REDUCTION_WAVE_DEF_GEN(T, TNAME, Op_API, Op)                                        \
+  template <>                                                                               \
+  __device__ int wave_reduce<T, Op>(rocshmem_ctx_t ctx, rocshmem_team_t team, T * dest,     \
+                                    const T* source, int nreduce) {                         \
+    return rocshmem_ctx_##TNAME##_##Op_API##_reduce_wave(ctx, team, dest, source, nreduce); \
   }
 
-#define ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)              \
-  REDUCTION_WAVE_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM)       \
-  REDUCTION_WAVE_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN)       \
-  REDUCTION_WAVE_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX)       \
+#define ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)        \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, sum, ROCSHMEM_SUM) \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, min, ROCSHMEM_MIN) \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, max, ROCSHMEM_MAX) \
   REDUCTION_WAVE_DEF_GEN(T, TNAME, prod, ROCSHMEM_PROD)
 
-#define BITWISE_REDUCTION_WAVE_DEF_GEN(T, TNAME)            \
-  REDUCTION_WAVE_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)         \
-  REDUCTION_WAVE_DEF_GEN(T, TNAME, and, ROCSHMEM_AND)       \
+#define BITWISE_REDUCTION_WAVE_DEF_GEN(T, TNAME)      \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, or, ROCSHMEM_OR)   \
+  REDUCTION_WAVE_DEF_GEN(T, TNAME, and, ROCSHMEM_AND) \
   REDUCTION_WAVE_DEF_GEN(T, TNAME, xor, ROCSHMEM_XOR)
 
-#define INT_REDUCTION_WAVE_DEF_GEN(T, TNAME)  \
-  ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)      \
+#define INT_REDUCTION_WAVE_DEF_GEN(T, TNAME) \
+  ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)     \
   BITWISE_REDUCTION_WAVE_DEF_GEN(T, TNAME)
 
-#define FLOAT_REDUCTION_WAVE_DEF_GEN(T, TNAME) \
-  ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)
+#define FLOAT_REDUCTION_WAVE_DEF_GEN(T, TNAME) ARITH_REDUCTION_WAVE_DEF_GEN(T, TNAME)
 
 INT_REDUCTION_WAVE_DEF_GEN(int, int)
 INT_REDUCTION_WAVE_DEF_GEN(short, short)
@@ -71,11 +66,10 @@ FLOAT_REDUCTION_WAVE_DEF_GEN(double, double)
  * DEVICE TEST KERNEL
  *****************************************************************************/
 template <typename T1, ROCSHMEM_OP T2>
-__global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
-                               long long int *end_time, T1 *s_buf, T1 *r_buf,
-                               size_t size, [[maybe_unused]] TestType type,
-                               ShmemContextType ctx_type, int wf_size,
-                               rocshmem_team_t *teams, int num_waves_per_wg) {
+__global__ void ReduceWaveTest(int loop, int skip, long long int* start_time,
+                               long long int* end_time, T1* s_buf, T1* r_buf, size_t size,
+                               [[maybe_unused]] TestType type, ShmemContextType ctx_type,
+                               int wf_size, rocshmem_team_t* teams, int num_waves_per_wg) {
   extern __shared__ rocshmem_ctx_t ctx_array[];
 
   int t_id       = get_flat_block_id();
@@ -87,26 +81,24 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
   // All threads in the WG collectively create one context per wave.
   // Each iteration is WG-collective so __syncthreads() guards each call.
   for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
-    rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type,
-                                &ctx_array[wf_i]);
+    rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type, &ctx_array[wf_i]);
     __syncthreads();
   }
 
-  uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
+  uint8_t* tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
   rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   int num_elems = size / sizeof(T1);
 
   // Each wave uses its own buffer slice
-  T1 *my_s_buf = s_buf + flat_wf_id * num_elems;
-  T1 *my_r_buf = r_buf + flat_wf_id * num_elems;
+  T1* my_s_buf = s_buf + flat_wf_id * num_elems;
+  T1* my_r_buf = r_buf + flat_wf_id * num_elems;
 
   for (int i = 0; i < loop + skip; i++) {
     if (i == skip && t_id % wf_size == 0) {
       start_time[flat_wf_id] = wall_clock64();
     }
-    wave_reduce<T1, T2>(ctx_array[wf_id], teams[flat_wf_id],
-                        my_r_buf, my_s_buf, num_elems);
+    wave_reduce<T1, T2>(ctx_array[wf_id], teams[flat_wf_id], my_r_buf, my_s_buf, num_elems);
   }
 
   __syncthreads();
@@ -127,33 +119,31 @@ __global__ void ReduceWaveTest(int loop, int skip, long long int *start_time,
  *****************************************************************************/
 template <typename T1, ROCSHMEM_OP T2>
 ReduceWaveTester<T1, T2>::ReduceWaveTester(
-    TesterArguments args, std::function<void(T1 &, T1 &)> f1,
-    std::function<std::pair<bool, std::string>(const T1 &, const T1 &)> f2)
+    TesterArguments args, std::function<void(T1&, T1&)> f1,
+    std::function<std::pair<bool, std::string>(const T1&, const T1&)> f2)
     : Tester(args), init_buf{f1}, verify_buf{f2} {
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
   int total_elems = (max_msg_size / sizeof(T1)) * args.num_wgs * num_warps;
-  int buff_size = total_elems * sizeof(T1);
+  int buff_size   = total_elems * sizeof(T1);
 
-  s_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
-  r_buf = (T1 *)alloc_test_buffer(buff_size);
+  s_buf = (T1*)alloc_test_buffer(buff_size, args.local_buf_type);
+  r_buf = (T1*)alloc_test_buffer(buff_size);
 
-  char *value{nullptr};
+  char* value{nullptr};
   if ((value = getenv("ROCSHMEM_MAX_NUM_TEAMS"))) {
     num_teams = atoi(value);
   }
 
   // Need one team per wave
   int total_waves = args.num_wgs * num_warps;
-  if (num_teams < total_waves){
-    printf(
-      "not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
+  if (num_teams < total_waves) {
+    printf("not enough teams for each wavefront, try increasing ROCSHMEM_MAX_NUM_TEAMS\n");
     exit(0);
   }
 
-  CHECK_HIP(hipMalloc(&team_reduce_wave_world_dup,
-                      sizeof(rocshmem_team_t) * total_waves));
+  CHECK_HIP(hipMalloc(&team_reduce_wave_world_dup, sizeof(rocshmem_team_t) * total_waves));
 }
 
 template <typename T1, ROCSHMEM_OP T2>
@@ -180,18 +170,14 @@ void ReduceWaveTester<T1, T2>::preLaunchKernel() {
 }
 
 template <typename T1, ROCSHMEM_OP T2>
-void ReduceWaveTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize,
-                                            int loop, size_t size) {
-  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) +
-                        rocshmem_query_lds_stage_bytes();
+void ReduceWaveTester<T1, T2>::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
+  size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) + rocshmem_query_lds_stage_bytes();
 
-  hipLaunchKernelGGL(HIP_KERNEL_NAME(ReduceWaveTest<T1, T2>), gridSize,
-                     blockSize, shared_bytes, stream, loop, args.skip,
-                     start_time, end_time, s_buf, r_buf, size, _type,
-                     _shmem_context, wf_size, team_reduce_wave_world_dup,
-                     num_warps);
+  hipLaunchKernelGGL(HIP_KERNEL_NAME(ReduceWaveTest<T1, T2>), gridSize, blockSize, shared_bytes,
+                     stream, loop, args.skip, start_time, end_time, s_buf, r_buf, size, _type,
+                     _shmem_context, wf_size, team_reduce_wave_world_dup, num_warps);
 
-  num_msgs = (loop + args.skip) * gridSize.x * num_warps;
+  num_msgs       = (loop + args.skip) * gridSize.x * num_warps;
   num_timed_msgs = loop * gridSize.x * num_warps;
 }
 

@@ -26,7 +26,9 @@
 
 using namespace rocshmem;
 
-TEST_F(RemoteHeapInfoTestFixture, MPI_num_pes) { ASSERT_EQ(mpi_.num_pes(), 4); }
+TEST_F(RemoteHeapInfoTestFixture, MPI_num_pes) {
+  ASSERT_EQ(mpi_.num_pes(), 4);
+}
 
 TEST_F(RemoteHeapInfoTestFixture, MPI_barrier) {
   ASSERT_NO_FATAL_FAILURE(mpi_.barrier());

@@ -39,26 +39,25 @@ class SignalWaitUntilOnStreamTester : public Tester {
   explicit SignalWaitUntilOnStreamTester(TesterArguments args);
   virtual ~SignalWaitUntilOnStreamTester();
 
-protected:
+ protected:
   virtual void resetBuffers(size_t size) override;
 
   virtual void preLaunchKernel() override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
 
   virtual void postLaunchKernel() override;
 
   virtual void verifyResults(size_t size) override;
 
  private:
-  uint64_t *sig_addr;
-  uint64_t *source_buf;             // Source buffer in symmetric heap
+  uint64_t* sig_addr;
+  uint64_t* source_buf;  // Source buffer in symmetric heap
   int my_pe;
   int n_pes;
   int num_streams = 1;
-  int pe_target;                    // Target PE to signal next
-  int sig_op = ROCSHMEM_SIGNAL_SET; // Signal operation
+  int pe_target;                     // Target PE to signal next
+  int sig_op = ROCSHMEM_SIGNAL_SET;  // Signal operation
   std::vector<hipStream_t> streams;
   std::vector<hipEvent_t> start_events_timed;
   std::vector<hipEvent_t> stop_events_timed;

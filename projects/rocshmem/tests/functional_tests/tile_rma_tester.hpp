@@ -24,13 +24,12 @@ class TileRMATester : public Tester {
  protected:
   virtual void resetBuffers(uint64_t size) override;
 
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            uint64_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, uint64_t size) override;
 
   virtual void verifyResults(uint64_t size) override;
 
-  float *source = nullptr;
-  float *dest = nullptr;
+  float* source = nullptr;
+  float* dest   = nullptr;
 
   // Default tile dimensions (rows × cols) when no -s is specified.
   static constexpr int DEFAULT_TILE_ROWS = 64;
@@ -49,11 +48,11 @@ class TileRMATester : public Tester {
   // start_coord = (start_coord_offset, start_coord_offset); tensors are
   // allocated with an extra border of this width in each dimension.
   static constexpr int DEFAULT_START_COORD_OFFSET = 4;
-  int start_coord_offset = 0;
+  int start_coord_offset                          = 0;
 
   // Symmetric heap allocations
-  SymmetricTensorBuffer<float> *local_alloc = nullptr;
-  SymmetricTensorBuffer<float> *remote_alloc = nullptr;
+  SymmetricTensorBuffer<float>* local_alloc  = nullptr;
+  SymmetricTensorBuffer<float>* remote_alloc = nullptr;
 };
 
 #endif

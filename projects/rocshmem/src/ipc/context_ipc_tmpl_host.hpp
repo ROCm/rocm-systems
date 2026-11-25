@@ -31,147 +31,148 @@
 namespace rocshmem {
 
 template <typename T>
-__host__ void IPCHostContext::p(T *dest, T value, int pe) {
+__host__ void IPCHostContext::p(T* dest, T value, int pe) {
   host_interface->p<T>(dest, value, pe, context_window_info);
 }
 
 template <typename T>
-__host__ T IPCHostContext::g(const T *source, int pe) {
+__host__ T IPCHostContext::g(const T* source, int pe) {
   return host_interface->g<T>(source, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::put(T *dest, const T *source, size_t nelems, int pe) {
+__host__ void IPCHostContext::put(T* dest, const T* source, size_t nelems, int pe) {
   host_interface->put<T>(dest, source, nelems, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::get(T *dest, const T *source, size_t nelems, int pe) {
+__host__ void IPCHostContext::get(T* dest, const T* source, size_t nelems, int pe) {
   host_interface->get<T>(dest, source, nelems, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::put_nbi(T *dest, const T *source, size_t nelems, int pe) {
+__host__ void IPCHostContext::put_nbi(T* dest, const T* source, size_t nelems, int pe) {
   host_interface->put_nbi<T>(dest, source, nelems, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::get_nbi(T *dest, const T *source, size_t nelems, int pe) {
+__host__ void IPCHostContext::get_nbi(T* dest, const T* source, size_t nelems, int pe) {
   host_interface->get_nbi<T>(dest, source, nelems, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::amo_add(void *dst, T value, int pe) {
+__host__ void IPCHostContext::amo_add(void* dst, T value, int pe) {
   if (is_ipc_non_mpi()) {
     static_assert(sizeof(T) == 4 || sizeof(T) == 8,
                   "amo_add: only 32-bit and 64-bit types supported");
-    ipc_amo_fadd(static_cast<T *>(shmem_ptr(dst, pe)), value, false);
+    ipc_amo_fadd(static_cast<T*>(shmem_ptr(dst, pe)), value, false);
     return;
   }
   host_interface->amo_add(dst, value, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::amo_cas(void *dst, T value, T cond, int pe) {
+__host__ void IPCHostContext::amo_cas(void* dst, T value, T cond, int pe) {
   host_interface->amo_cas(dst, value, cond, pe, context_window_info);
 }
 
 template <typename T>
-__host__ T IPCHostContext::amo_fetch_add(void *dst, T value, int pe) {
+__host__ T IPCHostContext::amo_fetch_add(void* dst, T value, int pe) {
   if (is_ipc_non_mpi()) {
     static_assert(sizeof(T) == 4 || sizeof(T) == 8,
                   "amo_fetch_add: only 32-bit and 64-bit types supported");
-    return ipc_amo_fadd(static_cast<T *>(shmem_ptr(dst, pe)), value);
+    return ipc_amo_fadd(static_cast<T*>(shmem_ptr(dst, pe)), value);
   }
   return host_interface->amo_fetch_add(dst, value, pe, context_window_info);
 }
 
 template <typename T>
-__host__ T IPCHostContext::amo_fetch_cas(void *dst, T value, T cond, int pe) {
+__host__ T IPCHostContext::amo_fetch_cas(void* dst, T value, T cond, int pe) {
   if (is_ipc_non_mpi()) {
     static_assert(sizeof(T) == 4 || sizeof(T) == 8,
                   "amo_fetch_cas: only 32-bit and 64-bit types supported");
-    return ipc_amo_fcas(static_cast<T *>(shmem_ptr(dst, pe)), cond, value);
+    return ipc_amo_fcas(static_cast<T*>(shmem_ptr(dst, pe)), cond, value);
   }
   return host_interface->amo_fetch_cas(dst, value, cond, pe, context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::broadcast(
-    T *dest, const T *source, int nelems, int pe_root, int pe_start,
-    int log_pe_stride, int pe_size,
-    long *p_sync) {  // NOLINT(runtime/int)
-  host_interface->broadcast<T>(dest, source, nelems, pe_root, pe_start,
-                               log_pe_stride, pe_size, p_sync);
+__host__ void IPCHostContext::broadcast(T* dest, const T* source, int nelems, int pe_root,
+                                        int pe_start, int log_pe_stride, int pe_size,
+                                        long* p_sync) {  // NOLINT(runtime/int)
+  host_interface->broadcast<T>(dest, source, nelems, pe_root, pe_start, log_pe_stride, pe_size,
+                               p_sync);
 }
 
 template <typename T>
-__host__ void IPCHostContext::broadcast(rocshmem_team_t team, T *dest,
-                                        const T *source, int nelems,
+__host__ void IPCHostContext::broadcast(rocshmem_team_t team, T* dest, const T* source, int nelems,
                                         int pe_root) {
   host_interface->broadcast<T>(team, dest, source, nelems, pe_root);
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ void IPCHostContext::to_all(T *dest, const T *source, int nreduce,
-                                     int pe_start, int log_pe_stride,
-                                     int pe_size, T *p_wrk,
-                                     long *p_sync) {  // NOLINT(runtime/int)
-  host_interface->to_all<T, Op>(dest, source, nreduce, pe_start, log_pe_stride,
-                                pe_size, p_wrk, p_sync);
+__host__ void IPCHostContext::to_all(T* dest, const T* source, int nreduce, int pe_start,
+                                     int log_pe_stride, int pe_size, T* p_wrk,
+                                     long* p_sync) {  // NOLINT(runtime/int)
+  host_interface->to_all<T, Op>(dest, source, nreduce, pe_start, log_pe_stride, pe_size, p_wrk,
+                                p_sync);
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int IPCHostContext::reduce(rocshmem_team_t team, T *dest,
-                                    const T *source, int nreduce) {
+__host__ int IPCHostContext::reduce(rocshmem_team_t team, T* dest, const T* source, int nreduce) {
   return host_interface->reduce<T, Op>(team, dest, source, nreduce);
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int IPCHostContext::reduce_scatter(rocshmem_team_t team, T *dest,
-                                            const T *source, int nreduce) {
+__host__ int IPCHostContext::reduce_scatter(rocshmem_team_t team, T* dest, const T* source,
+                                            int nreduce) {
   return host_interface->reduce_scatter<T, Op>(team, dest, source, nreduce);
 }
 
 template <typename T, ROCSHMEM_OP Op>
-__host__ int IPCHostContext::reduce_on_stream(rocshmem_team_t team, T *dest,
-                                              const T *source,
-                                              int nreduce,
-                                              hipStream_t stream) {
+__host__ int IPCHostContext::reduce_on_stream(rocshmem_team_t team, T* dest, const T* source,
+                                              int nreduce, hipStream_t stream) {
   return host_interface->reduce_on_stream<T, Op>(team, dest, source, nreduce, stream);
 }
 
 template <typename T>
-__host__ int IPCHostContext::test(T *ivars, int cmp, T val) {
+__host__ int IPCHostContext::test(T* ivars, int cmp, T val) {
   if (is_ipc_non_mpi()) {
     host_interface->hdp_flush();
     T loaded = *static_cast<volatile T*>(ivars);
     switch (cmp) {
-      case ROCSHMEM_CMP_EQ: return loaded == val ? 1 : 0;
-      case ROCSHMEM_CMP_NE: return loaded != val ? 1 : 0;
-      case ROCSHMEM_CMP_GT: return loaded >  val ? 1 : 0;
-      case ROCSHMEM_CMP_GE: return loaded >= val ? 1 : 0;
-      case ROCSHMEM_CMP_LT: return loaded <  val ? 1 : 0;
-      case ROCSHMEM_CMP_LE: return loaded <= val ? 1 : 0;
-      default: return 0;
+    case ROCSHMEM_CMP_EQ:
+      return loaded == val ? 1 : 0;
+    case ROCSHMEM_CMP_NE:
+      return loaded != val ? 1 : 0;
+    case ROCSHMEM_CMP_GT:
+      return loaded > val ? 1 : 0;
+    case ROCSHMEM_CMP_GE:
+      return loaded >= val ? 1 : 0;
+    case ROCSHMEM_CMP_LT:
+      return loaded < val ? 1 : 0;
+    case ROCSHMEM_CMP_LE:
+      return loaded <= val ? 1 : 0;
+    default:
+      return 0;
     }
   }
   return host_interface->test<T>(ivars, cmp, val, context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::wait_until(T *ivars, int cmp, T val) {
+__host__ void IPCHostContext::wait_until(T* ivars, int cmp, T val) {
   if (is_ipc_non_mpi()) {
-    while (!test<T>(ivars, cmp, val)) {}
+    while (!test<T>(ivars, cmp, val)) {
+    }
     return;
   }
   host_interface->wait_until<T>(ivars, cmp, val, context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::wait_until_all(T *ivars, size_t nelems,
-                                             const int* status,
-                                             int cmp, T val) {
+__host__ void IPCHostContext::wait_until_all(T* ivars, size_t nelems, const int* status, int cmp,
+                                             T val) {
   if (is_ipc_non_mpi()) {
     if (!nelems) {
       return;
@@ -193,9 +194,8 @@ __host__ void IPCHostContext::wait_until_all(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ size_t IPCHostContext::wait_until_any(T *ivars, size_t nelems,
-                                               const int* status,
-                                               int cmp, T val) {
+__host__ size_t IPCHostContext::wait_until_any(T* ivars, size_t nelems, const int* status, int cmp,
+                                               T val) {
   if (is_ipc_non_mpi()) {
     if (!nelems) {
       return SIZE_MAX;
@@ -219,10 +219,8 @@ __host__ size_t IPCHostContext::wait_until_any(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ size_t IPCHostContext::wait_until_some(T *ivars, size_t nelems,
-                                                size_t* indices,
-                                                const int* status,
-                                                int cmp, T val) {
+__host__ size_t IPCHostContext::wait_until_some(T* ivars, size_t nelems, size_t* indices,
+                                                const int* status, int cmp, T val) {
   if (is_ipc_non_mpi()) {
     if (!nelems) {
       return 0;
@@ -239,7 +237,7 @@ __host__ size_t IPCHostContext::wait_until_some(T *ivars, size_t nelems,
           continue;
         }
         if (test<T>(ivars + i, cmp, val)) {
-          done = true;
+          done                = true;
           indices[ncompleted] = i;
           ncompleted++;
         }
@@ -247,12 +245,12 @@ __host__ size_t IPCHostContext::wait_until_some(T *ivars, size_t nelems,
     }
     return ncompleted;
   }
-  return host_interface->wait_until_some<T>(ivars, nelems, indices, status, cmp, val, context_window_info);
+  return host_interface->wait_until_some<T>(ivars, nelems, indices, status, cmp, val,
+                                            context_window_info);
 }
 
 template <typename T>
-__host__ void IPCHostContext::wait_until_all_vector(T *ivars, size_t nelems,
-                                                    const int* status,
+__host__ void IPCHostContext::wait_until_all_vector(T* ivars, size_t nelems, const int* status,
                                                     int cmp, T* vals) {
   if (is_ipc_non_mpi()) {
     if (!nelems) {
@@ -275,8 +273,7 @@ __host__ void IPCHostContext::wait_until_all_vector(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__host__ size_t IPCHostContext::wait_until_any_vector(T *ivars, size_t nelems,
-                                                      const int* status,
+__host__ size_t IPCHostContext::wait_until_any_vector(T* ivars, size_t nelems, const int* status,
                                                       int cmp, T* vals) {
   if (is_ipc_non_mpi()) {
     if (!nelems) {
@@ -297,14 +294,13 @@ __host__ size_t IPCHostContext::wait_until_any_vector(T *ivars, size_t nelems,
       }
     }
   }
-  return host_interface->wait_until_any_vector<T>(ivars, nelems, status, cmp, vals, context_window_info);
+  return host_interface->wait_until_any_vector<T>(ivars, nelems, status, cmp, vals,
+                                                  context_window_info);
 }
 
 template <typename T>
-__host__ size_t IPCHostContext::wait_until_some_vector(T *ivars, size_t nelems,
-                                                       size_t* indices,
-                                                       const int* status,
-                                                       int cmp, T* vals) {
+__host__ size_t IPCHostContext::wait_until_some_vector(T* ivars, size_t nelems, size_t* indices,
+                                                       const int* status, int cmp, T* vals) {
   if (is_ipc_non_mpi()) {
     if (!nelems) {
       return 0;
@@ -321,7 +317,7 @@ __host__ size_t IPCHostContext::wait_until_some_vector(T *ivars, size_t nelems,
           continue;
         }
         if (test<T>(ivars + i, cmp, vals[i])) {
-          done = true;
+          done                = true;
           indices[ncompleted] = i;
           ncompleted++;
         }
@@ -329,7 +325,8 @@ __host__ size_t IPCHostContext::wait_until_some_vector(T *ivars, size_t nelems,
     }
     return ncompleted;
   }
-  return host_interface->wait_until_some_vector<T>(ivars, nelems, indices, status, cmp, vals, context_window_info);
+  return host_interface->wait_until_some_vector<T>(ivars, nelems, indices, status, cmp, vals,
+                                                   context_window_info);
 }
 
 }  // namespace rocshmem

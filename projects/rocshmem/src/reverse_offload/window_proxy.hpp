@@ -34,21 +34,19 @@ namespace rocshmem {
 
 class WindowProxy {
  private:
-  using ProxyT = DeviceProxy<WindowInfoMPI *>;
+  using ProxyT = DeviceProxy<WindowInfoMPI*>;
 
  public:
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  WindowProxy(SymmetricHeap *heap, MPI_Comm comm, size_t num_windows,
+  WindowProxy(SymmetricHeap* heap, MPI_Comm comm, size_t num_windows,
               const HostAllocator& alloc = HostAllocator())
-    : alloc_{alloc}, proxy_{num_windows, alloc_}, num_windows_{num_windows} {
-
+      : alloc_{alloc}, proxy_{num_windows, alloc_}, num_windows_{num_windows} {
     WindowInfoMPI** window_info{proxy_.get()};
 
     for (size_t i{0}; i < num_windows_; i++) {
-      window_info[i] =
-          new WindowInfoMPI(comm, heap->get_local_heap_base(), heap->get_size());
+      window_info[i] = new WindowInfoMPI(comm, heap->get_local_heap_base(), heap->get_size());
     }
   }
 
@@ -65,7 +63,7 @@ class WindowProxy {
    * delete must be called manually.
    */
   ~WindowProxy() {
-    auto *window_info{proxy_.get()};
+    auto* window_info{proxy_.get()};
 
     for (size_t i{0}; i < num_windows_; i++) {
       delete window_info[i];
@@ -75,9 +73,10 @@ class WindowProxy {
   /*
    * @brief Provide access to the memory referenced by the proxy
    */
-  __host__ __device__ WindowInfoMPI **get() { return proxy_.get(); }
+  __host__ __device__ WindowInfoMPI** get() { return proxy_.get(); }
 
   __host__ size_t get_num_MPI_windows() { return num_windows_; }
+
  private:
   HostAllocator alloc_{};
   /*

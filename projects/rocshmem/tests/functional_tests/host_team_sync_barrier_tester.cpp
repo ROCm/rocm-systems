@@ -29,9 +29,8 @@
 
 using namespace rocshmem;
 
-HostTeamSyncBarrierTester::HostTeamSyncBarrierTester(TesterArguments args)
-    : Tester(args) {
-  _type = HostTeamSyncBarrierTestType;
+HostTeamSyncBarrierTester::HostTeamSyncBarrierTester(TesterArguments args) : Tester(args) {
+  _type          = HostTeamSyncBarrierTestType;
   _print_results = false;
 }
 
@@ -46,7 +45,7 @@ void HostTeamSyncBarrierTester::launchKernel([[maybe_unused]] dim3 gridSize,
 
 void HostTeamSyncBarrierTester::verifyResults([[maybe_unused]] size_t size) {
   int me = rocshmem_my_pe();
-  int n = rocshmem_n_pes();
+  int n  = rocshmem_n_pes();
   if (n < 2) {
     if (me == 0) {
       std::cerr << "host team sync/barrier test requires >= 2 PEs\n";
@@ -55,10 +54,10 @@ void HostTeamSyncBarrierTester::verifyResults([[maybe_unused]] size_t size) {
   }
 
   // Split WORLD into even ranks, so odd ranks exercise INVALID no-op behavior.
-  int even_size = (n + 1) / 2;
+  int even_size             = (n + 1) / 2;
   rocshmem_team_t even_team = ROCSHMEM_TEAM_INVALID;
-  int rc = rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 2, even_size,
-                                       nullptr, 0, &even_team);
+  int rc =
+      rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 2, even_size, nullptr, 0, &even_team);
   if (rc != ROCSHMEM_SUCCESS) {
     std::cerr << "rocshmem_team_split_strided(even) failed rc=" << rc << "\n";
     abort();
@@ -90,11 +89,9 @@ void HostTeamSyncBarrierTester::verifyResults([[maybe_unused]] size_t size) {
   // Nested split inside the even team: team of size 1 containing even-team PE 0.
   rocshmem_team_t leader_team = ROCSHMEM_TEAM_INVALID;
   if ((me % 2) == 0) {
-    rc = rocshmem_team_split_strided(even_team, 0, 1, 1, nullptr, 0,
-                                     &leader_team);
+    rc = rocshmem_team_split_strided(even_team, 0, 1, 1, nullptr, 0, &leader_team);
     if (rc != ROCSHMEM_SUCCESS) {
-      std::cerr << "rocshmem_team_split_strided(leader) failed rc=" << rc
-                << "\n";
+      std::cerr << "rocshmem_team_split_strided(leader) failed rc=" << rc << "\n";
       abort();
     }
   }

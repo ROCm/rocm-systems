@@ -40,20 +40,20 @@
 
 namespace rocshmem {
 
-#define NET_CHECK(cmd)                                       \
-  {                                                          \
-    if (cmd != MPI_SUCCESS) {                                \
-      LOG_ERROR_ABORT("Unrecoverable error: MPI Failure");   \
-    }                                                        \
+#define NET_CHECK(cmd)                                     \
+  {                                                        \
+    if (cmd != MPI_SUCCESS) {                              \
+      LOG_ERROR_ABORT("Unrecoverable error: MPI Failure"); \
+    }                                                      \
   }
 
 extern rocshmem_ctx_t ROCSHMEM_HOST_CTX_DEFAULT;
 
-rocshmem_team_t get_external_team(IPCTeam *team) {
+rocshmem_team_t get_external_team(IPCTeam* team) {
   return reinterpret_cast<rocshmem_team_t>(team);
 }
 
-static int get_ls_non_zero_bit(char *bitmask, int mask_length) {
+static int get_ls_non_zero_bit(char* bitmask, int mask_length) {
   int position = -1;
 
   for (int bit_i = 0; bit_i < mask_length; bit_i++) {
@@ -67,7 +67,7 @@ static int get_ls_non_zero_bit(char *bitmask, int mask_length) {
   return position;
 }
 
-IPCBackend::IPCBackend(MPI_Comm comm):  Backend(comm) {
+IPCBackend::IPCBackend(MPI_Comm comm) : Backend(comm) {
   type = BackendType::IPC_BACKEND;
 
   initIPC();
@@ -76,25 +76,24 @@ IPCBackend::IPCBackend(MPI_Comm comm):  Backend(comm) {
    * Check if num_pes == ipcImpl.shm_size)
    * All the PEs must be with in a node for IPC backend
    */
-  if(num_pes != ipcImpl.shm_size) {
-    LOG_ERROR_EXIT("IPC Backend selected but some PEs are non-local. This is not a supported configuration. "
-                   "The GDA and RO backends mix off-node and IPC on-node communication as needed.");
+  if (num_pes != ipcImpl.shm_size) {
+    LOG_ERROR_EXIT(
+        "IPC Backend selected but some PEs are non-local. This is not a supported configuration. "
+        "The GDA and RO backends mix off-node and IPC on-node communication as needed.");
   }
 
   /* Initialize the host interface */
-  host_interface = std::make_shared<HostInterface>(hdp_proxy_.get(),
-                                                   backend_comm,
-                                                   &heap);
+  host_interface = std::make_shared<HostInterface>(hdp_proxy_.get(), backend_comm, &heap);
 
   default_host_ctx = std::make_unique<IPCHostContext>(this, 0);
 
   init();
 }
 
-IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
+IPCBackend::IPCBackend(TcpBootstrap* bootstrap) : Backend(bootstrap) {
   type = BackendType::IPC_BACKEND;
 
-  initIPC(bootstrap); // no MPI involved
+  initIPC(bootstrap);  // no MPI involved
 
   /**
    * Check if num_pes == ipcImpl.shm_size)
@@ -103,9 +102,7 @@ IPCBackend::IPCBackend(TcpBootstrap *bootstrap):  Backend(bootstrap) {
   assert(num_pes == ipcImpl.shm_size);
 
   /* Initialize the host interface */
-  host_interface = std::make_shared<HostInterface>(hdp_proxy_.get(),
-                                                   bootstrap,
-                                                   &heap);
+  host_interface = std::make_shared<HostInterface>(hdp_proxy_.get(), bootstrap, &heap);
 
   default_host_ctx = std::make_unique<IPCHostContext>(this, 0);
 
@@ -134,7 +131,7 @@ void IPCBackend::init() {
 
   setup_team_shared();
 
-  TeamInfo *tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
+  TeamInfo* tinfo = team_tracker.get_team_world()->tinfo_wrt_world;
 
   default_context_proxy_ = IPCDefaultContextProxy(this, tinfo);
 
@@ -153,11 +150,11 @@ IPCBackend::~IPCBackend() {
   // Close IPC handles for remote heap bases
   ipcImpl.ipcHostStop();
 
-  auto *team_shared{static_cast<IPCTeam*>(team_tracker.get_team_shared())};
+  auto* team_shared{static_cast<IPCTeam*>(team_tracker.get_team_shared())};
   team_shared->~IPCTeam();
   CHECK_HIP(hipFree(team_shared));
 
-  auto *team_world{static_cast<IPCTeam*>(team_tracker.get_team_world())};
+  auto* team_world{static_cast<IPCTeam*>(team_tracker.get_team_world())};
   team_world->~IPCTeam();
   CHECK_HIP(hipFree(team_world));
 
@@ -176,8 +173,7 @@ int IPCBackend::backend_can_run(MPI_Comm comm, TcpBootstrap* bootstrap) {
    */
   bool use_pod_detection{false};
 #ifdef HAVE_AMDSMI_GPU_FABRIC_INFO
-  use_pod_detection =
-      (get_default_allocator()->get_type() == AllocatorTypeVMMFabric);
+  use_pod_detection = (get_default_allocator()->get_type() == AllocatorTypeVMMFabric);
 #endif
 
   if (comm != MPI_COMM_NULL) {
@@ -192,42 +188,38 @@ int IPCBackend::backend_can_run(MPI_Comm comm, TcpBootstrap* bootstrap) {
       PodIds localPodIds = detectLocalPodIds();
       if (!IS_PODIDS_ZERO(localPodIds)) {
         std::vector<PodIds> allPodIds(comm_size);
-        mpilib_ftable_.Allgather(&localPodIds, sizeof(PodIds), MPI_CHAR,
-                                 allPodIds.data(), sizeof(PodIds), MPI_CHAR,
-                                 comm);
-        group_size =
-            static_cast<int>(matchIpcCapableRanks(my_rank, allPodIds).size());
+        mpilib_ftable_.Allgather(&localPodIds, sizeof(PodIds), MPI_CHAR, allPodIds.data(),
+                                 sizeof(PodIds), MPI_CHAR, comm);
+        group_size = static_cast<int>(matchIpcCapableRanks(my_rank, allPodIds).size());
       }
     } else {
       MPI_Comm shmcomm;
-      mpilib_ftable_.Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0,
-                                     MPI_INFO_NULL, &shmcomm);
+      mpilib_ftable_.Comm_split_type(comm, MPI_COMM_TYPE_SHARED, 0, MPI_INFO_NULL, &shmcomm);
       mpilib_ftable_.Comm_size(shmcomm, &group_size);
       mpilib_ftable_.Comm_free(&shmcomm);
     }
 
-    LOG_INFO("IPC admission (MPI): %s group of %d, world %d",
-             use_pod_detection ? "pod" : "node", group_size, comm_size);
+    LOG_INFO("IPC admission (MPI): %s group of %d, world %d", use_pod_detection ? "pod" : "node",
+             group_size, comm_size);
 
     if (group_size == comm_size) {
       ret = ROCSHMEM_SUCCESS;
     }
   } else if (bootstrap != nullptr) {
-      int world_size = bootstrap->getNranks();
-      /*
-       * getIpcCapableRanks() memoises its result, so the pod-id allGather it
-       * performs here is not repeated by ipcHostInit() later.
-       */
-      int group_size = use_pod_detection
-                           ? static_cast<int>(bootstrap->getIpcCapableRanks().size())
-                           : bootstrap->getNranksPerNode();
+    int world_size = bootstrap->getNranks();
+    /*
+     * getIpcCapableRanks() memoises its result, so the pod-id allGather it
+     * performs here is not repeated by ipcHostInit() later.
+     */
+    int group_size = use_pod_detection ? static_cast<int>(bootstrap->getIpcCapableRanks().size())
+                                       : bootstrap->getNranksPerNode();
 
-      LOG_INFO("IPC admission (bootstrap): %s group of %d, world %d",
-               use_pod_detection ? "pod" : "node", group_size, world_size);
+    LOG_INFO("IPC admission (bootstrap): %s group of %d, world %d",
+             use_pod_detection ? "pod" : "node", group_size, world_size);
 
-      if (group_size == world_size) {
-        ret = ROCSHMEM_SUCCESS;
-      }
+    if (group_size == world_size) {
+      ret = ROCSHMEM_SUCCESS;
+    }
   }
 
   return ret;
@@ -241,8 +233,8 @@ void IPCBackend::setup_ctxs() {
   }
 }
 
-__device__ bool IPCBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t *ctx) {
-  IPCContext *ctx_{nullptr};
+__device__ bool IPCBackend::create_ctx([[maybe_unused]] int64_t options, rocshmem_ctx_t* ctx) {
+  IPCContext* ctx_{nullptr};
 
   auto pop_result = ctx_free_list.get()->pop_front();
   if (!pop_result.success) {
@@ -252,22 +244,22 @@ __device__ bool IPCBackend::create_ctx([[maybe_unused]] int64_t options, rocshme
 
   ctx->ctx_opaque = ctx_;
 
-  ctx_->tinfo = reinterpret_cast<TeamInfo *>(ctx->team_opaque);
+  ctx_->tinfo = reinterpret_cast<TeamInfo*>(ctx->team_opaque);
   return true;
 }
 
-__device__ void IPCBackend::destroy_ctx(rocshmem_ctx_t *ctx) {
-  ctx_free_list.get()->push_back(static_cast<IPCContext *>(ctx->ctx_opaque));
+__device__ void IPCBackend::destroy_ctx(rocshmem_ctx_t* ctx) {
+  ctx_free_list.get()->push_back(static_cast<IPCContext*>(ctx->ctx_opaque));
 }
 
 void IPCBackend::setup_team_world() {
   TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
   TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
 
-  IPCTeam *team_world{nullptr};
+  IPCTeam* team_world{nullptr};
   CHECK_HIP(hipMalloc(&team_world, sizeof(IPCTeam)));
-  new (team_world) IPCTeam(this, team_info_wrt_parent, team_info_wrt_world,
-                             num_pes, my_pe, backend_comm, 0);
+  new (team_world)
+      IPCTeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes, my_pe, backend_comm, 0);
   team_tracker.set_team_world(team_world);
 
   /**
@@ -281,10 +273,10 @@ void IPCBackend::setup_team_shared() {
   TeamInfo team_info_wrt_parent(nullptr, 0, 1, num_pes);
   TeamInfo team_info_wrt_world(nullptr, 0, 1, num_pes);
 
-  IPCTeam *team_shared{nullptr};
+  IPCTeam* team_shared{nullptr};
   CHECK_HIP(hipMalloc(&team_shared, sizeof(IPCTeam)));
-  new (team_shared) IPCTeam(this, team_info_wrt_parent, team_info_wrt_world,
-                             num_pes, my_pe, backend_comm, 1);
+  new (team_shared)
+      IPCTeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes, my_pe, backend_comm, 1);
   team_tracker.set_team_shared(team_shared);
 
   host::ROCSHMEM_TEAM_SHARED = reinterpret_cast<rocshmem_team_t>(team_shared);
@@ -292,10 +284,10 @@ void IPCBackend::setup_team_shared() {
 }
 
 void IPCBackend::team_destroy(rocshmem_team_t team) {
-  IPCTeam *team_obj = get_internal_ipc_team(team);
+  IPCTeam* team_obj = get_internal_ipc_team(team);
 
   /* Mark the pool as available */
-  int bit = team_obj->pool_index_;
+  int bit    = team_obj->pool_index_;
   int byte_i = bit / CHAR_BIT;
   team_pool_bitmask_[byte_i] |= 1 << (bit % CHAR_BIT);
 
@@ -303,22 +295,21 @@ void IPCBackend::team_destroy(rocshmem_team_t team) {
   CHECK_HIP(hipFree(team_obj));
 }
 
-void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_bytes,
-                                      const TeamInfo& new_team_info_wrt_world,
-                                      int num_pes, int my_pe_in_new_team) {
-
+void IPCBackend::Allreduce_char_BAND(char* inbuf, char* outbuf, size_t num_bytes,
+                                     const TeamInfo& new_team_info_wrt_world, int num_pes,
+                                     int my_pe_in_new_team) {
   // Implement an Allreduce outside of MPI. This is specialized for the scenario
   // required for the team creation, i.e. assuming bytes and using BAND operation.
   // Implementation uses an Allgather operation followed a local reduction.
   // Note: Only PEs in the new team call this function.
 
-  char *tmp_buffer = new char[num_pes * num_bytes];
+  char* tmp_buffer = new char[num_pes * num_bytes];
   std::memset(tmp_buffer, 0, num_pes * num_bytes);
-  std::memcpy (&tmp_buffer[my_pe_in_new_team * num_bytes], inbuf, num_bytes);
+  std::memcpy(&tmp_buffer[my_pe_in_new_team * num_bytes], inbuf, num_bytes);
 
   // Fast path: new team is TEAM_WORLD (all PEs in identity order)
-  if (num_pes == backend_bootstr->getNranks() &&
-      new_team_info_wrt_world.pe_start == 0 && new_team_info_wrt_world.stride == 1) {
+  if (num_pes == backend_bootstr->getNranks() && new_team_info_wrt_world.pe_start == 0 &&
+      new_team_info_wrt_world.stride == 1) {
     backend_bootstr->allGather(tmp_buffer, num_bytes);
   } else {
     // Build a vector of world ranks for the new team
@@ -340,22 +331,21 @@ void IPCBackend::Allreduce_char_BAND (char* inbuf, char *outbuf, size_t num_byte
   delete[] tmp_buffer;
 }
 
-void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
-                                const TeamInfo& team_info_wrt_parent,
-                                const TeamInfo& team_info_wrt_world,
-                                int num_pes, int my_pe_in_new_team,
-                                MPI_Comm new_team_comm,
-                                rocshmem_team_t *new_team) {
+void IPCBackend::create_new_team([[maybe_unused]] Team* parent_team,
+                                 const TeamInfo& team_info_wrt_parent,
+                                 const TeamInfo& team_info_wrt_world, int num_pes,
+                                 int my_pe_in_new_team, MPI_Comm new_team_comm,
+                                 rocshmem_team_t* new_team) {
   /**
    * Read the bit mask and find out a common index into
    * the pool of available work arrays.
    */
   if (new_team_comm != MPI_COMM_NULL) {
-    NET_CHECK(mpilib_ftable_.Allreduce(team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_,
-                                       MPI_CHAR, MPI_BAND, new_team_comm));
+    NET_CHECK(mpilib_ftable_.Allreduce(team_pool_bitmask_, team_reduced_bitmask_,
+                                       team_bitmask_size_, MPI_CHAR, MPI_BAND, new_team_comm));
   } else {
-    Allreduce_char_BAND (team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_,
-                         team_info_wrt_world, num_pes, my_pe_in_new_team);
+    Allreduce_char_BAND(team_pool_bitmask_, team_reduced_bitmask_, team_bitmask_size_,
+                        team_info_wrt_world, num_pes, my_pe_in_new_team);
   }
 
   /* Pick the least significant non-zero bit (logical layout) in the reduced
@@ -375,11 +365,10 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
    * Allocate device-side memory for team_world and
    * construct a IPC team in it
    */
-  IPCTeam *new_team_obj;
+  IPCTeam* new_team_obj;
   CHECK_HIP(hipMalloc(&new_team_obj, sizeof(IPCTeam)));
-  new (new_team_obj)
-      IPCTeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes,
-                my_pe_in_new_team, new_team_comm, common_index);
+  new (new_team_obj) IPCTeam(this, team_info_wrt_parent, team_info_wrt_world, num_pes,
+                             my_pe_in_new_team, new_team_comm, common_index);
 
   // Barrier to prevent kernel racing with hipMemsets
   if (new_team_comm != MPI_COMM_NULL) {
@@ -388,8 +377,7 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
     std::vector<int> world_ranks;
     world_ranks.reserve(num_pes);
     for (int i = 0; i < num_pes; i++) {
-      world_ranks.push_back(team_info_wrt_world.pe_start +
-                             i * team_info_wrt_world.stride);
+      world_ranks.push_back(team_info_wrt_world.pe_start + i * team_info_wrt_world.stride);
     }
     backend_bootstr->groupBarrier(world_ranks);
   }
@@ -397,26 +385,25 @@ void IPCBackend::create_new_team([[maybe_unused]] Team *parent_team,
   *new_team = get_external_team(new_team_obj);
 }
 
-void IPCBackend::ctx_create(int64_t options, void **ctx) {
-  IPCHostContext *new_ctx{nullptr};
+void IPCBackend::ctx_create(int64_t options, void** ctx) {
+  IPCHostContext* new_ctx{nullptr};
   new_ctx = new IPCHostContext(this, options);
-  *ctx = new_ctx;
+  *ctx    = new_ctx;
 }
 
-IPCHostContext *get_internal_ipc_net_ctx(Context *ctx) {
-  return reinterpret_cast<IPCHostContext *>(ctx);
+IPCHostContext* get_internal_ipc_net_ctx(Context* ctx) {
+  return reinterpret_cast<IPCHostContext*>(ctx);
 }
 
-void IPCBackend::ctx_destroy(Context *ctx) {
-  IPCHostContext *ro_net_host_ctx{get_internal_ipc_net_ctx(ctx)};
+void IPCBackend::ctx_destroy(Context* ctx) {
+  IPCHostContext* ro_net_host_ctx{get_internal_ipc_net_ctx(ctx)};
   delete ro_net_host_ctx;
 }
 
 void IPCBackend::accumulate_ctx_device_stats() {
   ROCStats tmp;
   for (size_t i = 0; i < envvar::max_num_contexts; i++) {
-    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats),
-                        hipMemcpyDeviceToHost));
+    CHECK_HIP(hipMemcpy(&tmp, &ctx_array[i].ctxStats, sizeof(ROCStats), hipMemcpyDeviceToHost));
     globalStats.hostAccumulateStats(tmp);
   }
 }
@@ -432,20 +419,17 @@ void IPCBackend::reset_backend_stats() {
   default_host_ctx->ctxHostStats.resetStats();
 }
 
-
 void IPCBackend::initIPC() {
-  const auto &heap_bases{heap.get_heap_bases()};
+  const auto& heap_bases{heap.get_heap_bases()};
 
-  ipcImpl.ipcHostInit(my_pe, heap_bases,
-                      backend_comm);
+  ipcImpl.ipcHostInit(my_pe, heap_bases, backend_comm);
   ipcImpl.heap_size = heap.get_size();
 }
 
-void IPCBackend::initIPC(TcpBootstrap *bootstr) {
-  const auto &heap_bases{heap.get_heap_bases()};
+void IPCBackend::initIPC(TcpBootstrap* bootstr) {
+  const auto& heap_bases{heap.get_heap_bases()};
 
-  ipcImpl.ipcHostInit(my_pe, heap_bases,
-                      bootstr);
+  ipcImpl.ipcHostInit(my_pe, heap_bases, bootstr);
   ipcImpl.heap_size = heap.get_size();
 }
 
@@ -476,17 +460,14 @@ void IPCBackend::setup_wrk_sync_buffers() {
    * Size of sync arrays for the teams
    */
   wrk_sync_pool_size_ += sizeof(long) * max_num_teams *
-                           (ROCSHMEM_BARRIER_SYNC_SIZE +
-                            ROCSHMEM_REDUCE_SYNC_SIZE +
-                            ROCSHMEM_BCAST_SYNC_SIZE +
-                            ROCSHMEM_ALLTOALL_SYNC_SIZE);
+                         (ROCSHMEM_BARRIER_SYNC_SIZE + ROCSHMEM_REDUCE_SYNC_SIZE +
+                          ROCSHMEM_BCAST_SYNC_SIZE + ROCSHMEM_ALLTOALL_SYNC_SIZE);
 
   /**
    * Size of work arrays for the teams
    * Accommodate largest possible data type for pWrk
    */
-  wrk_sync_pool_size_ += sizeof(double) * max_num_teams *
-                           ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
+  wrk_sync_pool_size_ += sizeof(double) * max_num_teams * ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE;
 
   /**
    * Size of fence array
@@ -494,22 +475,20 @@ void IPCBackend::setup_wrk_sync_buffers() {
   wrk_sync_pool_size_ += sizeof(int) * num_pes;
 
   /* Round up so the alignment guards in the carve functions cannot overflow it. */
-  wrk_sync_pool_size_ =
-      __builtin_align_up(wrk_sync_pool_size_, wrk_sync_pool_alignment);
+  wrk_sync_pool_size_ = __builtin_align_up(wrk_sync_pool_size_, wrk_sync_pool_alignment);
 
   /**
    * Allocate a buffer of size wrk_sync_pool_size_, using fine-grained
    * memory allocator
    */
-  psync_allocator_->allocate((void**)&wrk_sync_pool_,
-                                    wrk_sync_pool_size_);
+  psync_allocator_->allocate((void**)&wrk_sync_pool_, wrk_sync_pool_size_);
   assert(wrk_sync_pool_);
   wrk_sync_pool_top_ = wrk_sync_pool_;
 
   /*
    * Allocate a c-array to hold the IPC handles
    */
-  HIPIpcHandleVec *ipc_handles = psync_allocator_->AllocateIpcHandleVec(num_pes);
+  HIPIpcHandleVec* ipc_handles = psync_allocator_->AllocateIpcHandleVec(num_pes);
 
   /*
    * Call into the hip runtime to get an IPC handle for the allocated
@@ -523,9 +502,10 @@ void IPCBackend::setup_wrk_sync_buffers() {
   size_t ipc_handle_size = psync_allocator_->GetIpcHandleSize();
   if (backend_comm != MPI_COMM_NULL) {
     mpilib_ftable_.Allgather(MPI_IN_PLACE, ipc_handle_size, MPI_CHAR,
-                             ipc_handles->GetHandleVecElem(0), ipc_handle_size, MPI_CHAR, backend_comm);
+                             ipc_handles->GetHandleVecElem(0), ipc_handle_size, MPI_CHAR,
+                             backend_comm);
   } else {
-    assert (backend_bootstr != nullptr);
+    assert(backend_bootstr != nullptr);
     backend_bootstr->allGather(ipc_handles->GetHandleVecElem(0), ipc_handle_size);
   }
 
@@ -534,7 +514,7 @@ void IPCBackend::setup_wrk_sync_buffers() {
    * work/sync buffers
    */
   psync_allocator_->allocate(reinterpret_cast<void**>(&wrk_sync_pool_bases_),
-			     num_pes * sizeof(char*));
+                             num_pes * sizeof(char*));
   assert(wrk_sync_pool_bases_);
 
   /*
@@ -544,7 +524,7 @@ void IPCBackend::setup_wrk_sync_buffers() {
   for (int i = 0; i < num_pes; i++) {
     if (i != my_pe) {
       CHECK_HIP(psync_allocator_->OpenIpcHandle(reinterpret_cast<void**>(&wrk_sync_pool_bases_[i]),
-                                                       ipc_handles->GetHandleVecElem(i)));
+                                                ipc_handles->GetHandleVecElem(i)));
     } else {
       wrk_sync_pool_bases_[i] = wrk_sync_pool_;
     }
@@ -565,7 +545,7 @@ void IPCBackend::cleanup_wrk_sync_buffer() {
 
 void IPCBackend::setup_fence_buffer() {
   /* Must be carved last (see init()); do not add pool regions after this. */
-  fence_pool = reinterpret_cast<int *>(wrk_sync_pool_top_);
+  fence_pool = reinterpret_cast<int*>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sizeof(int) * num_pes;
 }
 
@@ -586,20 +566,20 @@ void IPCBackend::cleanup_symm_registration() {
    */
   std::vector<uintptr_t> addrs;
   addrs.reserve(ipc_symm_records_.size());
-  for (auto &kv : ipc_symm_records_) {
+  for (auto& kv : ipc_symm_records_) {
     addrs.push_back(kv.first);
   }
   for (auto a : addrs) {
-    buffer_unregister_symmetric(reinterpret_cast<void *>(a));
+    buffer_unregister_symmetric(reinterpret_cast<void*>(a));
   }
 
   free_ipc_symm_table();
 #endif
 }
 
-int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
+int IPCBackend::buffer_register_symmetric([[maybe_unused]] void* addr,
                                           [[maybe_unused]] size_t length,
-                                          [[maybe_unused]] void **registered_addr) {
+                                          [[maybe_unused]] void** registered_addr) {
 #if HIP_VERSION >= 70200000
   if (registered_addr == nullptr) {
     return ROCSHMEM_ERROR;
@@ -625,9 +605,9 @@ int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
    * caller uses for RMA and unregistration, and the local base published into
    * the device translation table.
    */
-  void *alias = nullptr;
-  int register_ok = (Backend::buffer_register_symmetric(addr, length, &alias) ==
-                     ROCSHMEM_SUCCESS) ? 1 : 0;
+  void* alias = nullptr;
+  int register_ok =
+      (Backend::buffer_register_symmetric(addr, length, &alias) == ROCSHMEM_SUCCESS) ? 1 : 0;
   if (!all_pes_succeeded(register_ok)) {
     if (register_ok) {
       Backend::buffer_unregister_symmetric(alias);
@@ -645,8 +625,7 @@ int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
   for (int i = 0; i < num_pes; i++) {
     peer_global[i] = i;
   }
-  if (register_ipc_symm_region(alias, addr, length, peer_global, my_pe) !=
-      ROCSHMEM_SUCCESS) {
+  if (register_ipc_symm_region(alias, addr, length, peer_global, my_pe) != ROCSHMEM_SUCCESS) {
     Backend::buffer_unregister_symmetric(alias);
     return ROCSHMEM_ERROR;
   }
@@ -658,7 +637,7 @@ int IPCBackend::buffer_register_symmetric([[maybe_unused]] void *addr,
 #endif
 }
 
-int IPCBackend::buffer_unregister_symmetric([[maybe_unused]] void *addr) {
+int IPCBackend::buffer_unregister_symmetric([[maybe_unused]] void* addr) {
 #if HIP_VERSION >= 70200000
   if (addr == nullptr || ipcImpl.symm_table == nullptr) {
     return ROCSHMEM_ERROR;
@@ -678,13 +657,12 @@ void IPCBackend::rocshmem_collective_init() {
   /*
    * Allocate heap space for barrier_sync
    */
-  size_t one_sync_size_bytes {sizeof(*barrier_sync)};
-  size_t sync_size_bytes {one_sync_size_bytes * ROCSHMEM_BARRIER_SYNC_SIZE};
+  size_t one_sync_size_bytes{sizeof(*barrier_sync)};
+  size_t sync_size_bytes{one_sync_size_bytes * ROCSHMEM_BARRIER_SYNC_SIZE};
 
   /* Guard: barrier_sync is accessed with 64-bit atomics; keep it 8-byte aligned. */
-  wrk_sync_pool_top_ =
-      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
-  barrier_sync = reinterpret_cast<int64_t*>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ = __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
+  barrier_sync       = reinterpret_cast<int64_t*>(wrk_sync_pool_top_);
   wrk_sync_pool_top_ += sync_size_bytes;
 
   /*
@@ -712,42 +690,34 @@ void IPCBackend::teams_init() {
   auto max_num_teams{team_tracker.get_max_num_teams()};
 
   /* Guard: the pSync pools are accessed with 64-bit atomics; keep them 8-byte aligned. */
-  wrk_sync_pool_top_ =
-      __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
-  barrier_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
-  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE
-                            * max_num_teams;
+  wrk_sync_pool_top_ = __builtin_align_up(wrk_sync_pool_top_, wrk_sync_pool_alignment);
+  barrier_pSync_pool = reinterpret_cast<long*>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BARRIER_SYNC_SIZE * max_num_teams;
 
-  reduce_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
-  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_REDUCE_SYNC_SIZE
-                            * max_num_teams;
+  reduce_pSync_pool = reinterpret_cast<long*>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_REDUCE_SYNC_SIZE * max_num_teams;
 
-  bcast_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
-  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BCAST_SYNC_SIZE
-                            * max_num_teams;
+  bcast_pSync_pool = reinterpret_cast<long*>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_BCAST_SYNC_SIZE * max_num_teams;
 
-  alltoall_pSync_pool = reinterpret_cast<long *>(wrk_sync_pool_top_);
-  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_ALLTOALL_SYNC_SIZE *
-                        max_num_teams;
+  alltoall_pSync_pool = reinterpret_cast<long*>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ += sizeof(long) * ROCSHMEM_ALLTOALL_SYNC_SIZE * max_num_teams;
 
   /* Accommodating for largest possible data type for pWrk */
-  pWrk_pool = reinterpret_cast<void *>(wrk_sync_pool_top_);
-  wrk_sync_pool_top_ += sizeof(double) * ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE
-                            * max_num_teams;
+  pWrk_pool = reinterpret_cast<void*>(wrk_sync_pool_top_);
+  wrk_sync_pool_top_ += sizeof(double) * ROCSHMEM_REDUCE_MIN_WRKDATA_SIZE * max_num_teams;
 
   /**
    * Initialize the sync arrays in the pool with default values.
    */
   long *barrier_pSync, *reduce_pSync, *bcast_pSync, *alltoall_pSync;
   for (int team_i = 0; team_i < max_num_teams; team_i++) {
-    barrier_pSync = reinterpret_cast<long *>(
-        &barrier_pSync_pool[team_i * ROCSHMEM_BARRIER_SYNC_SIZE]);
-    reduce_pSync = reinterpret_cast<long *>(
-        &reduce_pSync_pool[team_i * ROCSHMEM_REDUCE_SYNC_SIZE]);
-    bcast_pSync = reinterpret_cast<long *>(
-        &bcast_pSync_pool[team_i * ROCSHMEM_BCAST_SYNC_SIZE]);
-    alltoall_pSync = reinterpret_cast<long *>(
-        &alltoall_pSync_pool[team_i * ROCSHMEM_ALLTOALL_SYNC_SIZE]);
+    barrier_pSync =
+        reinterpret_cast<long*>(&barrier_pSync_pool[team_i * ROCSHMEM_BARRIER_SYNC_SIZE]);
+    reduce_pSync = reinterpret_cast<long*>(&reduce_pSync_pool[team_i * ROCSHMEM_REDUCE_SYNC_SIZE]);
+    bcast_pSync  = reinterpret_cast<long*>(&bcast_pSync_pool[team_i * ROCSHMEM_BCAST_SYNC_SIZE]);
+    alltoall_pSync =
+        reinterpret_cast<long*>(&alltoall_pSync_pool[team_i * ROCSHMEM_ALLTOALL_SYNC_SIZE]);
 
     for (size_t i = 0; i < ROCSHMEM_BARRIER_SYNC_SIZE; i++) {
       barrier_pSync[i] = ROCSHMEM_SYNC_VALUE;
@@ -774,10 +744,10 @@ void IPCBackend::teams_init() {
    * Description shows only a 2-byte long mask but idea extends to any
    * arbitrary size.
    */
-  team_bitmask_size_ = (max_num_teams % CHAR_BIT) ? (max_num_teams / CHAR_BIT + 1)
-                                             : (max_num_teams / CHAR_BIT);
-  team_pool_bitmask_ = reinterpret_cast<char *>(malloc(team_bitmask_size_));
-  team_reduced_bitmask_ = reinterpret_cast<char *>(malloc(team_bitmask_size_));
+  team_bitmask_size_ =
+      (max_num_teams % CHAR_BIT) ? (max_num_teams / CHAR_BIT + 1) : (max_num_teams / CHAR_BIT);
+  team_pool_bitmask_    = reinterpret_cast<char*>(malloc(team_bitmask_size_));
+  team_reduced_bitmask_ = reinterpret_cast<char*>(malloc(team_bitmask_size_));
 
   memset(team_pool_bitmask_, 0, team_bitmask_size_);
   memset(team_reduced_bitmask_, 0, team_bitmask_size_);

@@ -25,10 +25,9 @@
 /******************************************************************************
  * DEVICE TEST KERNEL
  *****************************************************************************/
-__global__ void TeamSyncTest(int loop, int skip, long long int *start_time,
-                             long long int *end_time,
-                             ShmemContextType ctx_type, TestType type,
-                             int wf_size, rocshmem_team_t *teams) {
+__global__ void TeamSyncTest(int loop, int skip, long long int* start_time, long long int* end_time,
+                             ShmemContextType ctx_type, TestType type, int wf_size,
+                             rocshmem_team_t* teams) {
   __shared__ rocshmem_ctx_t ctx;
   int t_id  = get_flat_block_id();
   int wg_id = get_flat_grid_id();
@@ -42,21 +41,21 @@ __global__ void TeamSyncTest(int loop, int skip, long long int *start_time,
     }
 
     switch (type) {
-      case TeamSyncTestType:
-        if(t_id == 0) {
-          rocshmem_ctx_sync(ctx, teams[wg_id]);
-        }
-        break;
-      case TeamWAVESyncTestType:
-        if(wf_id == 0) {
-          rocshmem_ctx_sync_wave(ctx, teams[wg_id]);
-        }
-        break;
-      case TeamWGSyncTestType:
-        rocshmem_ctx_sync_wg(ctx, teams[wg_id]);
-        break;
-      default:
-        break;
+    case TeamSyncTestType:
+      if (t_id == 0) {
+        rocshmem_ctx_sync(ctx, teams[wg_id]);
+      }
+      break;
+    case TeamWAVESyncTestType:
+      if (wf_id == 0) {
+        rocshmem_ctx_sync_wave(ctx, teams[wg_id]);
+      }
+      break;
+    case TeamWGSyncTestType:
+      rocshmem_ctx_sync_wg(ctx, teams[wg_id]);
+      break;
+    default:
+      break;
     }
     __syncthreads();
   }
@@ -80,8 +79,7 @@ TeamSyncTester::TeamSyncTester(TesterArguments args) : Tester(args) {
     num_teams = atoi(value);
   }
 
-  CHECK_HIP(hipMalloc(&team_sync_world_dup,
-                      sizeof(rocshmem_team_t) * num_teams));
+  CHECK_HIP(hipMalloc(&team_sync_world_dup, sizeof(rocshmem_team_t) * num_teams));
 }
 
 TeamSyncTester::~TeamSyncTester() {
@@ -92,7 +90,7 @@ void TeamSyncTester::preLaunchKernel() {
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_sync_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                 &team_sync_world_dup[team_i]);
+                                &team_sync_world_dup[team_i]);
     if (team_sync_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
       printf("Team %d is invalid!\n", team_i);
       abort();
@@ -100,16 +98,14 @@ void TeamSyncTester::preLaunchKernel() {
   }
 }
 
-void TeamSyncTester::launchKernel(dim3 gridSize, dim3 blockSize,
-                                           int loop, [[maybe_unused]] size_t size) {
+void TeamSyncTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
+                                  [[maybe_unused]] size_t size) {
   size_t shared_bytes = 0;
 
-  hipLaunchKernelGGL(TeamSyncTest, gridSize, blockSize, shared_bytes,
-                     stream, loop, args.skip, start_time, end_time,
-                     _shmem_context, _type, wf_size,
-                     team_sync_world_dup);
+  hipLaunchKernelGGL(TeamSyncTest, gridSize, blockSize, shared_bytes, stream, loop, args.skip,
+                     start_time, end_time, _shmem_context, _type, wf_size, team_sync_world_dup);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 

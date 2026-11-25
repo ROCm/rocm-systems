@@ -53,10 +53,10 @@ namespace rocshmem {
  * The result is written into buf and truncated to at most bufLen bytes,
  * including the terminating NUL.
  */
-const char* SocketToString(union SocketAddress* addr, char* buf,
-                           size_t bufLen,
+const char* SocketToString(union SocketAddress* addr, char* buf, size_t bufLen,
                            const int numericHostForm /*= 1*/) {
-  if (buf == NULL || addr == NULL) return NULL;
+  if (buf == NULL || addr == NULL)
+    return NULL;
   struct sockaddr* saddr = &addr->sa;
   if (saddr->sa_family != AF_INET && saddr->sa_family != AF_INET6) {
     buf[0] = '\0';
@@ -67,7 +67,8 @@ const char* SocketToString(union SocketAddress* addr, char* buf,
    * (When not set, this will still happen in case the node's name cannot be determined.)
    */
   int flag = NI_NUMERICSERV | (numericHostForm ? NI_NUMERICHOST : 0);
-  (void)getnameinfo(saddr, sizeof(union SocketAddress), host, NI_MAXHOST, service, NI_MAXSERV, flag);
+  (void)getnameinfo(saddr, sizeof(union SocketAddress), host, NI_MAXHOST, service, NI_MAXSERV,
+                    flag);
   snprintf(buf, bufLen, "%s<%s>", host, service);
   return buf;
 }
@@ -102,31 +103,37 @@ static int findInterfaces(const char* prefixList, char* names, union SocketAddre
 #endif
   struct netIf userIfs[MAX_IFS];
   bool searchNot = prefixList && prefixList[0] == '^';
-  if (searchNot) prefixList++;
+  if (searchNot)
+    prefixList++;
   bool searchExact = prefixList && prefixList[0] == '=';
-  if (searchExact) prefixList++;
+  if (searchExact)
+    prefixList++;
   int nUserIfs = parseStringList(prefixList, userIfs, MAX_IFS);
 
   int found = 0;
   struct ifaddrs *interfaces, *interface;
   getifaddrs(&interfaces);
   for (interface = interfaces; interface && found < maxIfs; interface = interface->ifa_next) {
-    if (interface->ifa_addr == NULL) continue;
+    if (interface->ifa_addr == NULL)
+      continue;
 
     /* We only support IPv4 & IPv6 */
     int family = interface->ifa_addr->sa_family;
-    if (family != AF_INET && family != AF_INET6) continue;
+    if (family != AF_INET && family != AF_INET6)
+      continue;
 
     LOG_TRACE("Found interface %s:%s", interface->ifa_name,
-          SocketToString((union SocketAddress*)interface->ifa_addr, line, sizeof(line)));
+              SocketToString((union SocketAddress*)interface->ifa_addr, line, sizeof(line)));
 
     /* Allow the caller to force the socket family type */
-    if (sock_family != AF_UNSPEC && family != sock_family) continue;
+    if (sock_family != AF_UNSPEC && family != sock_family)
+      continue;
 
     /* We also need to skip IPv6 loopback interfaces */
     if (family == AF_INET6) {
       struct sockaddr_in6* sa = (struct sockaddr_in6*)(interface->ifa_addr);
-      if (IN6_IS_ADDR_LOOPBACK(&sa->sin6_addr)) continue;
+      if (IN6_IS_ADDR_LOOPBACK(&sa->sin6_addr))
+        continue;
     }
 
     // check against user specified interfaces
@@ -166,23 +173,23 @@ static bool matchSubnet(struct ifaddrs local_if, union SocketAddress* remote) {
   }
 
   if (family == AF_INET) {
-    struct sockaddr_in* local_addr = (struct sockaddr_in*)(local_if.ifa_addr);
-    struct sockaddr_in* mask = (struct sockaddr_in*)(local_if.ifa_netmask);
+    struct sockaddr_in* local_addr  = (struct sockaddr_in*)(local_if.ifa_addr);
+    struct sockaddr_in* mask        = (struct sockaddr_in*)(local_if.ifa_netmask);
     struct sockaddr_in& remote_addr = remote->sin;
     struct in_addr local_subnet, remote_subnet;
-    local_subnet.s_addr = local_addr->sin_addr.s_addr & mask->sin_addr.s_addr;
+    local_subnet.s_addr  = local_addr->sin_addr.s_addr & mask->sin_addr.s_addr;
     remote_subnet.s_addr = remote_addr.sin_addr.s_addr & mask->sin_addr.s_addr;
     return (local_subnet.s_addr ^ remote_subnet.s_addr) ? false : true;
   } else if (family == AF_INET6) {
-    struct sockaddr_in6* local_addr = (struct sockaddr_in6*)(local_if.ifa_addr);
-    struct sockaddr_in6* mask = (struct sockaddr_in6*)(local_if.ifa_netmask);
+    struct sockaddr_in6* local_addr  = (struct sockaddr_in6*)(local_if.ifa_addr);
+    struct sockaddr_in6* mask        = (struct sockaddr_in6*)(local_if.ifa_netmask);
     struct sockaddr_in6& remote_addr = remote->sin6;
-    struct in6_addr& local_in6 = local_addr->sin6_addr;
-    struct in6_addr& mask_in6 = mask->sin6_addr;
-    struct in6_addr& remote_in6 = remote_addr.sin6_addr;
-    bool same = true;
-    int len = 16;                    // IPv6 address is 16 unsigned char
-    for (int c = 0; c < len; c++) {  // Network byte order is big-endian
+    struct in6_addr& local_in6       = local_addr->sin6_addr;
+    struct in6_addr& mask_in6        = mask->sin6_addr;
+    struct in6_addr& remote_in6      = remote_addr.sin6_addr;
+    bool same                        = true;
+    int len                          = 16;  // IPv6 address is 16 unsigned char
+    for (int c = 0; c < len; c++) {         // Network byte order is big-endian
       char c1 = local_in6.s6_addr[c] & mask_in6.s6_addr[c];
       char c2 = remote_in6.s6_addr[c] & mask_in6.s6_addr[c];
       if (c1 ^ c2) {
@@ -201,8 +208,8 @@ static bool matchSubnet(struct ifaddrs local_if, union SocketAddress* remote) {
   }
 }
 
-int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, union SocketAddress* remoteAddr,
-                             int ifNameMaxSize, int maxIfs) {
+int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs,
+                             union SocketAddress* remoteAddr, int ifNameMaxSize, int maxIfs) {
 #ifdef BUILD_DEBUG_TRACE_HOST
   char line[SOCKET_NAME_MAXLEN + 1];
 #endif
@@ -211,11 +218,13 @@ int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, uni
   struct ifaddrs *interfaces, *interface;
   getifaddrs(&interfaces);
   for (interface = interfaces; interface && !found; interface = interface->ifa_next) {
-    if (interface->ifa_addr == NULL) continue;
+    if (interface->ifa_addr == NULL)
+      continue;
 
     /* We only support IPv4 & IPv6 */
     int family = interface->ifa_addr->sa_family;
-    if (family != AF_INET && family != AF_INET6) continue;
+    if (family != AF_INET && family != AF_INET6)
+      continue;
 
     // check against user specified interfaces
     if (!matchSubnet(*interface, remoteAddr)) {
@@ -230,15 +239,16 @@ int FindInterfaceMatchSubnet(char* ifNames, union SocketAddress* localAddrs, uni
     strncpy(ifNames + found * ifNameMaxSize, interface->ifa_name, ifNameMaxSize);
 
     LOG_TRACE("NET : Found interface %s:%s in the same subnet as remote address %s",
-          interface->ifa_name, SocketToString(localAddrs + found, line, sizeof(line)),
-          SocketToString(remoteAddr, line_a, sizeof(line_a)));
+              interface->ifa_name, SocketToString(localAddrs + found, line, sizeof(line)),
+              SocketToString(remoteAddr, line_a, sizeof(line_a)));
     found++;
-    if (found == maxIfs) break;
+    if (found == maxIfs)
+      break;
   }
 
   if (found == 0) {
     ERROR("Net : No interface found in the same subnet as remote address %s\n",
-         SocketToString(remoteAddr, line_a, sizeof(line_a)));
+          SocketToString(remoteAddr, line_a, sizeof(line_a)));
   }
   freeifaddrs(interfaces);
   return found;
@@ -263,7 +273,7 @@ void SocketGetAddrFromString(union SocketAddress* ua, const char* ip_port_pair) 
     struct addrinfo hints, *p;
     int rv;
     memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family   = AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
 
     if ((rv = getaddrinfo(ni.prefix, NULL, &hints, &p)) != 0) {
@@ -281,10 +291,10 @@ void SocketGetAddrFromString(union SocketAddress* ua, const char* ip_port_pair) 
     } else if (p->ai_family == AF_INET6) {
       struct sockaddr_in6& sin6 = ua->sin6;
       std::memcpy(&sin6, p->ai_addr, sizeof(struct sockaddr_in6));
-      sin6.sin6_family = AF_INET6;      // IPv6
-      sin6.sin6_port = htons(ni.port);  // port
-      sin6.sin6_flowinfo = 0;           // needed by IPv6, but possibly obsolete
-      sin6.sin6_scope_id = 0;           // should be global scope, set to 0
+      sin6.sin6_family   = AF_INET6;        // IPv6
+      sin6.sin6_port     = htons(ni.port);  // port
+      sin6.sin6_flowinfo = 0;               // needed by IPv6, but possibly obsolete
+      sin6.sin6_scope_id = 0;               // should be global scope, set to 0
     } else {
       ERROR("Net : unsupported IP family\n");
       return;
@@ -295,14 +305,17 @@ void SocketGetAddrFromString(union SocketAddress* ua, const char* ip_port_pair) 
   } else {
     int i, j = -1, len = strlen(ip_port_pair);
     for (i = 1; i < len; i++) {
-      if (ip_port_pair[i] == '%') j = i;
-      if (ip_port_pair[i] == ']') break;
+      if (ip_port_pair[i] == '%')
+        j = i;
+      if (ip_port_pair[i] == ']')
+        break;
     }
     if (i == len) {
       ERROR("Net : No valid [IPv6]:port pair found\n");
       return;
     }
-    bool global_scope = (j == -1 ? true : false);  // If no % found, global scope; otherwise, link scope
+    bool global_scope =
+        (j == -1 ? true : false);  // If no % found, global scope; otherwise, link scope
 
     char ip_str[NI_MAXHOST], port_str[NI_MAXSERV], if_name[IFNAMSIZ];
     memset(ip_str, '\0', sizeof(ip_str));
@@ -314,21 +327,22 @@ void SocketGetAddrFromString(union SocketAddress* ua, const char* ip_port_pair) 
 
     // If not global scope, we need the intf name
     if (!global_scope)
-        strncpy(if_name, ip_port_pair + j + 1, i - j - 1);
+      strncpy(if_name, ip_port_pair + j + 1, i - j - 1);
 
     struct sockaddr_in6& sin6 = ua->sin6;
-    sin6.sin6_family = AF_INET6;                                      // IPv6
-    inet_pton(AF_INET6, ip_str, &(sin6.sin6_addr));                   // IP address
-    sin6.sin6_port = htons(port);                                     // port
-    sin6.sin6_flowinfo = 0;                                           // needed by IPv6, but possibly obsolete
-    sin6.sin6_scope_id = global_scope ? 0 : if_nametoindex(if_name);  // 0 if global scope; intf index if link scope
+    sin6.sin6_family          = AF_INET6;            // IPv6
+    inet_pton(AF_INET6, ip_str, &(sin6.sin6_addr));  // IP address
+    sin6.sin6_port     = htons(port);                // port
+    sin6.sin6_flowinfo = 0;                          // needed by IPv6, but possibly obsolete
+    sin6.sin6_scope_id =
+        global_scope ? 0 : if_nametoindex(if_name);  // 0 if global scope; intf index if link scope
   }
 }
 
 int FindInterfaces(char* ifNames, union SocketAddress* ifAddrs, int ifNameMaxSize, int maxIfs,
                    const char* inputIfName) {
   static int shownIfName = 0;
-  int nIfs = 0;
+  int nIfs               = 0;
 
   // Allow user to force the INET socket family selection
   int sock_family = envSocketFamily();
@@ -340,34 +354,35 @@ int FindInterfaces(char* ifNames, union SocketAddress* ifAddrs, int ifNameMaxSiz
     nIfs = findInterfaces(inputIfName, ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
   } else if (socketIfname != "") {
     // Specified by user : find or fail
-    if (shownIfName++ == 0) LOG_TRACE("ROCSHMEM_SOCKET_IFNAME set to %s", socketIfname.c_str());
-    nIfs = findInterfaces(socketIfname.c_str(), ifNames, ifAddrs, sock_family,
-                          ifNameMaxSize, maxIfs);
+    if (shownIfName++ == 0)
+      LOG_TRACE("ROCSHMEM_SOCKET_IFNAME set to %s", socketIfname.c_str());
+    nIfs =
+        findInterfaces(socketIfname.c_str(), ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
   } else {
     // Try to automatically pick the right one
     // Look for anything (but not docker or lo)
-    if (nIfs == 0) nIfs = findInterfaces("^docker,lo", ifNames, ifAddrs, sock_family,
-                                         ifNameMaxSize, maxIfs);
+    if (nIfs == 0)
+      nIfs = findInterfaces("^docker,lo", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
     // Finally look for docker, then lo.
-    if (nIfs == 0) nIfs = findInterfaces("docker", ifNames, ifAddrs, sock_family,
-                                         ifNameMaxSize, maxIfs);
-    if (nIfs == 0) nIfs = findInterfaces("lo", ifNames, ifAddrs, sock_family,
-                                         ifNameMaxSize, maxIfs);
+    if (nIfs == 0)
+      nIfs = findInterfaces("docker", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
+    if (nIfs == 0)
+      nIfs = findInterfaces("lo", ifNames, ifAddrs, sock_family, ifNameMaxSize, maxIfs);
   }
   return nIfs;
 }
 
-Socket::Socket(const SocketAddress* addr, uint64_t magic, enum SocketType type, volatile uint32_t* abortFlag,
-               int asyncFlag) {
-  fd_ = -1;
-  acceptFd_ = -1;
+Socket::Socket(const SocketAddress* addr, uint64_t magic, enum SocketType type,
+               volatile uint32_t* abortFlag, int asyncFlag) {
+  fd_             = -1;
+  acceptFd_       = -1;
   connectRetries_ = 0;
-  acceptRetries_ = 0;
-  abortFlag_ = abortFlag;
-  asyncFlag_ = asyncFlag;
-  state_ = SocketStateInitialized;
-  magic_ = magic;
-  type_ = type;
+  acceptRetries_  = 0;
+  abortFlag_      = abortFlag;
+  asyncFlag_      = asyncFlag;
+  state_          = SocketStateInitialized;
+  magic_          = magic;
+  type_           = type;
 
   if (addr) {
     /* IPv4/IPv6 support */
@@ -376,8 +391,10 @@ Socket::Socket(const SocketAddress* addr, uint64_t magic, enum SocketType type, 
     family = addr_.sa.sa_family;
     if (family != AF_INET && family != AF_INET6) {
       char line[SOCKET_NAME_MAXLEN + 1];
-      ERROR("SocketInit: connecting to address %s with family %d is neither AF_INET(%d) nor AF_INET6(%d)\n",
-           SocketToString(&addr_, line, sizeof(line)), family, (int)AF_INET, (int)AF_INET6);
+      ERROR(
+          "SocketInit: connecting to address %s with family %d is neither AF_INET(%d) nor "
+          "AF_INET6(%d)\n",
+          SocketToString(&addr_, line, sizeof(line)), family, (int)AF_INET, (int)AF_INET6);
       return;
     }
     salen_ = (family == AF_INET) ? sizeof(struct sockaddr_in) : sizeof(struct sockaddr_in6);
@@ -406,7 +423,9 @@ Socket::Socket(const SocketAddress* addr, uint64_t magic, enum SocketType type, 
   }
 }
 
-Socket::~Socket() { close(); }
+Socket::~Socket() {
+  close();
+}
 
 void Socket::bind() {
   if (fd_ == -1) {
@@ -431,7 +450,7 @@ void Socket::bind() {
   }
 
   int finTimeout = getTcpFinTimeout();
-  int retrySecs = finTimeout + 1;
+  int retrySecs  = finTimeout + 1;
   int remainSecs = retrySecs;
 
   // addr port should be 0 (Any port)
@@ -508,7 +527,8 @@ void Socket::connect(int64_t timeout) {
       return;
     }
   } while (asyncFlag_ == 0 && (abortFlag_ == NULL || *abortFlag_ == 0) &&
-           (state_ == SocketStateConnecting || state_ == SocketStateConnectPolling || state_ == SocketStateConnected));
+           (state_ == SocketStateConnecting || state_ == SocketStateConnectPolling ||
+            state_ == SocketStateConnected));
 
   if (abortFlag_ && *abortFlag_ != 0) {
     ERROR("aborted\n");
@@ -529,18 +549,18 @@ void Socket::accept(const Socket* listenSocket, int64_t timeout) {
   }
 
   if (acceptFd_ == -1) {
-    fd_ = listenSocket->getFd();
+    fd_             = listenSocket->getFd();
     connectRetries_ = listenSocket->getConnectRetries();
-    acceptRetries_ = listenSocket->getAcceptRetries();
-    abortFlag_ = listenSocket->getAbortFlag();
-    asyncFlag_ = listenSocket->getAsyncFlag();
-    magic_ = listenSocket->getMagic();
-    type_ = listenSocket->getType();
-    addr_ = listenSocket->getAddr();
-    salen_ = listenSocket->getSalen();
+    acceptRetries_  = listenSocket->getAcceptRetries();
+    abortFlag_      = listenSocket->getAbortFlag();
+    asyncFlag_      = listenSocket->getAsyncFlag();
+    magic_          = listenSocket->getMagic();
+    type_           = listenSocket->getType();
+    addr_           = listenSocket->getAddr();
+    salen_          = listenSocket->getSalen();
 
     acceptFd_ = listenSocket->getFd();
-    state_ = SocketStateAccepting;
+    state_    = SocketStateAccepting;
   }
 
   do {
@@ -578,13 +598,13 @@ void Socket::recv(void* ptr, int size) {
 
 void Socket::recvUntilEnd(void* ptr, int size, int* closed) {
   int offset = 0;
-  *closed = 0;
+  *closed    = 0;
   if (state_ != SocketStateReady) {
     ERROR("socket state (%d) is not ready in recvUntilEnd\n", state_);
     return;
   }
 
-  int bytes = 0;
+  int bytes  = 0;
   char* data = (char*)ptr;
 
   do {
@@ -594,7 +614,8 @@ void Socket::recvUntilEnd(void* ptr, int size, int* closed) {
       return;
     }
     if (bytes == -1) {
-      if (errno != EINTR && errno != EWOULDBLOCK && errno != EAGAIN && state_ != SocketStateClosed) {
+      if (errno != EINTR && errno != EWOULDBLOCK && errno != EAGAIN &&
+          state_ != SocketStateClosed) {
         ERROR("recv until end failed errno %d\n", errno);
         return;
       } else {
@@ -610,9 +631,10 @@ void Socket::recvUntilEnd(void* ptr, int size, int* closed) {
 }
 
 void Socket::close() {
-  if (fd_ >= 0) ::close(fd_);
+  if (fd_ >= 0)
+    ::close(fd_);
   state_ = SocketStateClosed;
-  fd_ = -1;
+  fd_    = -1;
 }
 
 void Socket::progressState() {
@@ -635,12 +657,13 @@ void Socket::progressState() {
 
 void Socket::tryAccept() {
   socklen_t socklen = sizeof(union SocketAddress);
-  fd_ = ::accept(acceptFd_, &addr_.sa, &socklen);
+  fd_               = ::accept(acceptFd_, &addr_.sa, &socklen);
   if (fd_ != -1) {
     state_ = SocketStateAccepted;
   } else if (errno == EAGAIN || errno == EWOULDBLOCK || errno == ECONNABORTED || errno == EINTR ||
              errno == ENETDOWN || errno == EPROTO || errno == ENOPROTOOPT || errno == EHOSTDOWN ||
-             errno == ENONET || errno == EHOSTUNREACH || errno == EOPNOTSUPP || errno == ENETUNREACH) {
+             errno == ENONET || errno == EHOSTUNREACH || errno == EOPNOTSUPP ||
+             errno == ENETUNREACH) {
     // Per accept(2) these may be already-pending peer/network errors (e.g. a peer
     // that reset the connection before we accepted it). They are not fatal to the
     // root: retry accepting. The caller's accept loop bounds this via abortFlag_ /
@@ -673,8 +696,10 @@ bool Socket::recvMagic(uint64_t* magic, int* received) {
   while (*received < (int)sizeof(*magic)) {
     int closed = 0;
     socketProgressOpt(ROCSHMEM_SOCKET_RECV, magic, sizeof(*magic), received, 0, &closed);
-    if (closed) return false;
-    if (abortFlag_ && *abortFlag_ != 0) return false;
+    if (closed)
+      return false;
+    if (abortFlag_ && *abortFlag_ != 0)
+      return false;
   }
   return true;
 }
@@ -683,14 +708,15 @@ void Socket::finalizeAccept() {
   uint64_t magic;
   enum SocketType type;
   int received = 0;
-  int closed = 0;
+  int closed   = 0;
   socketProgressOpt(ROCSHMEM_SOCKET_RECV, &magic, sizeof(magic), &received, 0, &closed);
   if (closed) {
     LOG_TRACE("finalizeAccept: peer closed before magic, discarding connection");
     discardAccept();
     return;
   }
-  if (received == 0) return;
+  if (received == 0)
+    return;
   if (!recvMagic(&magic, &received)) {
     LOG_TRACE("finalizeAccept: peer closed or abort mid-magic, discarding connection");
     discardAccept();
@@ -726,7 +752,8 @@ void Socket::startConnect() {
     return;
   } else if (errno == ECONNREFUSED || errno == ETIMEDOUT) {
     usleep(SLEEP_INT);
-    if (++connectRetries_ % 1000 == 0) LOG_TRACE("Call to connect returned %s, retrying", strerror(errno));
+    if (++connectRetries_ % 1000 == 0)
+      LOG_TRACE("Call to connect returned %s, retrying", strerror(errno));
     return;
   } else {
     char line[SOCKET_NAME_MAXLEN + 1];
@@ -738,18 +765,19 @@ void Socket::startConnect() {
 
 void Socket::pollConnect() {
   struct pollfd pfd;
-  int timeout = 1, ret;
+  int timeout    = 1, ret;
   socklen_t rlen = sizeof(int);
 
   memset(&pfd, 0, sizeof(struct pollfd));
-  pfd.fd = fd_;
+  pfd.fd     = fd_;
   pfd.events = POLLOUT;
-  ret = ::poll(&pfd, 1, timeout);
+  ret        = ::poll(&pfd, 1, timeout);
   if (ret == -1) {
     ERROR("poll failed errno %d\n", errno);
     return;
   }
-  if (ret == 0) return;
+  if (ret == 0)
+    return;
 
   /* check socket status */
   if ((ret == 1 && (pfd.revents & POLLOUT)) == 0) {
@@ -770,7 +798,7 @@ void Socket::pollConnect() {
     usleep(SLEEP_INT);
 
     ::close(fd_);
-    fd_ = ::socket(addr_.sa.sa_family, SOCK_STREAM, 0);
+    fd_    = ::socket(addr_.sa.sa_family, SOCK_STREAM, 0);
     state_ = SocketStateConnecting;
   } else if (ret != EINPROGRESS) {
     state_ = SocketStateError;
@@ -782,7 +810,8 @@ void Socket::pollConnect() {
 void Socket::finalizeConnect() {
   int sent = 0;
   socketProgress(ROCSHMEM_SOCKET_SEND, &magic_, sizeof(magic_), &sent);
-  if (sent == 0) return;
+  if (sent == 0)
+    return;
   socketWait(ROCSHMEM_SOCKET_SEND, &magic_, sizeof(magic_), &sent);
   sent = 0;
   socketWait(ROCSHMEM_SOCKET_SEND, &type_, sizeof(type_), &sent);
@@ -790,14 +819,16 @@ void Socket::finalizeConnect() {
 }
 
 void Socket::socketProgressOpt(int op, void* ptr, int size, int* offset, int block, int* closed) {
-  int bytes = 0;
-  *closed = 0;
+  int bytes  = 0;
+  *closed    = 0;
   char* data = (char*)ptr;
 
   do {
-    if (op == ROCSHMEM_SOCKET_RECV) bytes = ::recv(fd_, data + (*offset), size - (*offset), block ? 0 : MSG_DONTWAIT);
+    if (op == ROCSHMEM_SOCKET_RECV)
+      bytes = ::recv(fd_, data + (*offset), size - (*offset), block ? 0 : MSG_DONTWAIT);
     if (op == ROCSHMEM_SOCKET_SEND)
-      bytes = ::send(fd_, data + (*offset), size - (*offset), block ? MSG_NOSIGNAL : MSG_DONTWAIT | MSG_NOSIGNAL);
+      bytes = ::send(fd_, data + (*offset), size - (*offset),
+                     block ? MSG_NOSIGNAL : MSG_DONTWAIT | MSG_NOSIGNAL);
     if (op == ROCSHMEM_SOCKET_RECV && bytes == 0) {
       *closed = 1;
       return;
@@ -829,7 +860,8 @@ void Socket::socketProgress(int op, void* ptr, int size, int* offset) {
 }
 
 void Socket::socketWait(int op, void* ptr, int size, int* offset) {
-  while (*offset < size) socketProgress(op, ptr, size, offset);
+  while (*offset < size)
+    socketProgress(op, ptr, size, offset);
 }
 
 }  // namespace rocshmem

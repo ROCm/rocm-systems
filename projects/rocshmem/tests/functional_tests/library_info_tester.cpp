@@ -33,7 +33,7 @@ using namespace rocshmem;
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 LibraryInfoTester::LibraryInfoTester(TesterArguments args) : Tester(args) {
-  _type = LibraryInfoTestType;
+  _type          = LibraryInfoTestType;
   _print_results = false;
 }
 
@@ -42,39 +42,33 @@ LibraryInfoTester::~LibraryInfoTester() {}
 void LibraryInfoTester::resetBuffers([[maybe_unused]] size_t size) {}
 
 void LibraryInfoTester::launchKernel([[maybe_unused]] dim3 gridSize,
-                                     [[maybe_unused]] dim3 blockSize,
-                                     [[maybe_unused]] int loop,
+                                     [[maybe_unused]] dim3 blockSize, [[maybe_unused]] int loop,
                                      [[maybe_unused]] size_t size) {}
 
 void LibraryInfoTester::verifyResults([[maybe_unused]] size_t size) {
   int major, minor;
   rocshmem_info_get_version(&major, &minor);
   if (major != ROCSHMEM_MAJOR_VERSION || minor != ROCSHMEM_MINOR_VERSION) {
-    std::cerr << "FAIL: rocshmem_info_get_version returned "
-              << major << "." << minor << ", expected "
-              << ROCSHMEM_MAJOR_VERSION << "." << ROCSHMEM_MINOR_VERSION
-              << "\n";
+    std::cerr << "FAIL: rocshmem_info_get_version returned " << major << "." << minor
+              << ", expected " << ROCSHMEM_MAJOR_VERSION << "." << ROCSHMEM_MINOR_VERSION << "\n";
     abort();
   }
 
   char name[ROCSHMEM_MAX_NAME_LEN];
   rocshmem_info_get_name(name);
   if (std::strcmp(name, ROCSHMEM_VENDOR_STRING) != 0) {
-    std::cerr << "FAIL: rocshmem_info_get_name returned \"" << name
-              << "\", expected \"" << ROCSHMEM_VENDOR_STRING << "\"\n";
+    std::cerr << "FAIL: rocshmem_info_get_name returned \"" << name << "\", expected \""
+              << ROCSHMEM_VENDOR_STRING << "\"\n";
     abort();
   }
 
   int vmajor, vminor, vpatch;
   rocshmem_vendor_get_version_info(&vmajor, &vminor, &vpatch);
-  if (vmajor != ROCSHMEM_VENDOR_MAJOR_VERSION ||
-      vminor != ROCSHMEM_VENDOR_MINOR_VERSION ||
+  if (vmajor != ROCSHMEM_VENDOR_MAJOR_VERSION || vminor != ROCSHMEM_VENDOR_MINOR_VERSION ||
       vpatch != ROCSHMEM_VENDOR_PATCH_VERSION) {
-    std::cerr << "FAIL: rocshmem_vendor_get_version_info returned "
-              << vmajor << "." << vminor << "." << vpatch << ", expected "
-              << ROCSHMEM_VENDOR_MAJOR_VERSION << "."
-              << ROCSHMEM_VENDOR_MINOR_VERSION << "."
-              << ROCSHMEM_VENDOR_PATCH_VERSION << "\n";
+    std::cerr << "FAIL: rocshmem_vendor_get_version_info returned " << vmajor << "." << vminor
+              << "." << vpatch << ", expected " << ROCSHMEM_VENDOR_MAJOR_VERSION << "."
+              << ROCSHMEM_VENDOR_MINOR_VERSION << "." << ROCSHMEM_VENDOR_PATCH_VERSION << "\n";
     abort();
   }
 
@@ -82,7 +76,6 @@ void LibraryInfoTester::verifyResults([[maybe_unused]] size_t size) {
     std::cout << "PASS: library info APIs returned expected values\n"
               << "  OpenSHMEM spec version: " << major << "." << minor << "\n"
               << "  Vendor name: " << name << "\n"
-              << "  Vendor version: " << vmajor << "." << vminor << "."
-              << vpatch << "\n";
+              << "  Vendor version: " << vmajor << "." << vminor << "." << vpatch << "\n";
   }
 }

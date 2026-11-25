@@ -110,7 +110,7 @@ class AnvilLib {
   // access to singleton
   static AnvilLib& getInstance();
 
-  AnvilLib(const AnvilLib&) = delete;
+  AnvilLib(const AnvilLib&)            = delete;
   AnvilLib& operator=(const AnvilLib&) = delete;
 
  public:
@@ -153,16 +153,16 @@ class AnvilLib {
    * 6         5 3 2 4 6 1 0 7
    * 7         3 6 4 2 1 5 7 0
    */
-  static constexpr size_t kMi300xOamMapDim = 8;
-  std::array<std::array<int, kMi300xOamMapDim>, kMi300xOamMapDim> mi300xOamMap = {{
-      {0, 7, 6, 1, 2, 4, 5, 3},
-      {7, 0, 1, 5, 4, 2, 3, 6},
-      {5, 1, 0, 6, 7, 3, 2, 4},
-      {1, 6, 5, 0, 3, 7, 4, 2},
-      {2, 4, 7, 3, 0, 5, 6, 1},
-      {4, 2, 3, 7, 6, 0, 1, 5},
-      {5, 3, 2, 4, 6, 1, 0, 7},
-      {3, 6, 4, 2, 1, 5, 7, 0}}};
+  static constexpr size_t kMi300xOamMapDim                                     = 8;
+  std::array<std::array<int, kMi300xOamMapDim>, kMi300xOamMapDim> mi300xOamMap = {
+      {{0, 7, 6, 1, 2, 4, 5, 3},
+       {7, 0, 1, 5, 4, 2, 3, 6},
+       {5, 1, 0, 6, 7, 3, 2, 4},
+       {1, 6, 5, 0, 3, 7, 4, 2},
+       {2, 4, 7, 3, 0, 5, 6, 1},
+       {4, 2, 3, 7, 6, 0, 1, 5},
+       {5, 3, 2, 4, 6, 1, 0, 7},
+       {3, 6, 4, 2, 1, 5, 7, 0}}};
 
   uint32_t numSdmaEngines_{0};
   uint32_t numSdmaXgmiEngines_{0};
@@ -233,7 +233,6 @@ inline void EnablePeerAccess(int const deviceId, int const peerDeviceId) {
               << " (" << hipGetErrorString(error) << ")\n";
   }
 }
-
 
 }  // namespace sdma_anvil
 

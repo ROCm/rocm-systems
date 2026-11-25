@@ -30,30 +30,24 @@ using namespace rocshmem;
 
 /* Declare the template with a generic implementation */
 template <typename T>
-__device__ void wg_team_alltoallv([[maybe_unused]] rocshmem_team_t team,
-                                  [[maybe_unused]] T *dest,
+__device__ void wg_team_alltoallv([[maybe_unused]] rocshmem_team_t team, [[maybe_unused]] T* dest,
                                   [[maybe_unused]] const size_t dest_nelems[],
                                   [[maybe_unused]] const size_t dest_displs[],
-                                  [[maybe_unused]] T *source,
+                                  [[maybe_unused]] T* source,
                                   [[maybe_unused]] const size_t source_nelems[],
                                   [[maybe_unused]] const size_t source_displs[]) {
   return;
 }
 
 /* Define templates to call rocSHMEM */
-#define TEAM_ALLTOALLV_DEF_GEN(T, TNAME)                                   \
-  template <>                                                              \
-  __device__ void wg_team_alltoallv(rocshmem_team_t team,                  \
-                                    T *dest,                               \
-                                    const size_t dest_nelems[],            \
-                                    const size_t dest_displs[],            \
-                                    T *source,                             \
-                                    const size_t source_nelems[],          \
-                                    const size_t source_displs[]) {        \
-    rocshmem_##TNAME##_alltoallv_wg(team,                                  \
-                                    dest, dest_nelems, dest_displs,        \
-                                    source, source_nelems, source_displs); \
-}
+#define TEAM_ALLTOALLV_DEF_GEN(T, TNAME)                                                          \
+  template <>                                                                                     \
+  __device__ void wg_team_alltoallv(rocshmem_team_t team, T* dest, const size_t dest_nelems[],    \
+                                    const size_t dest_displs[], T* source,                        \
+                                    const size_t source_nelems[], const size_t source_displs[]) { \
+    rocshmem_##TNAME##_alltoallv_wg(team, dest, dest_nelems, dest_displs, source, source_nelems,  \
+                                    source_displs);                                               \
+  }
 
 TEAM_ALLTOALLV_DEF_GEN(float, float)
 TEAM_ALLTOALLV_DEF_GEN(double, double)
@@ -74,18 +68,12 @@ TEAM_ALLTOALLV_DEF_GEN(unsigned long long, ulonglong)
  *****************************************************************************/
 
 template <typename T1>
-__global__ void TeamAlltoallvTest(int loop, int skip,
-                                  long long int *start_time,
-                                  long long int *end_time,
-                                  T1 *dest,
-                                  const size_t dest_nelems[],
-                                  const size_t dest_displs[],
-                                  T1 *source,
-                                  const size_t source_nelems[],
-                                  const size_t source_displs[],
+__global__ void TeamAlltoallvTest(int loop, int skip, long long int* start_time,
+                                  long long int* end_time, T1* dest, const size_t dest_nelems[],
+                                  const size_t dest_displs[], T1* source,
+                                  const size_t source_nelems[], const size_t source_displs[],
                                   [[maybe_unused]] ShmemContextType ctx_type,
-                                  rocshmem_team_t *teams) {
-
+                                  rocshmem_team_t* teams) {
   // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0.
   extern __shared__ uint8_t tdm_lds[];
   rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
@@ -96,9 +84,8 @@ __global__ void TeamAlltoallvTest(int loop, int skip,
     if (i == skip && hipThreadIdx_x == 0) {
       start_time[0] = wall_clock64();
     }
-    wg_team_alltoallv<T1>(teams[0],
-                          dest, dest_nelems, dest_displs,
-                          source, source_nelems, source_displs);
+    wg_team_alltoallv<T1>(teams[0], dest, dest_nelems, dest_displs, source, source_nelems,
+                          source_displs);
   }
 
   __syncthreads();
@@ -112,8 +99,7 @@ __global__ void TeamAlltoallvTest(int loop, int skip,
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
 template <typename T1>
-TeamAlltoallvTester<T1>::TeamAlltoallvTester(TesterArguments args)
-    : Tester(args){
+TeamAlltoallvTester<T1>::TeamAlltoallvTester(TesterArguments args) : Tester(args) {
   my_pe = rocshmem_team_my_pe(ROCSHMEM_TEAM_WORLD);
   n_pes = rocshmem_team_n_pes(ROCSHMEM_TEAM_WORLD);
 
@@ -129,13 +115,13 @@ TeamAlltoallvTester<T1>::TeamAlltoallvTester(TesterArguments args)
   int total_elems = num_elems_wg;
   int buff_size   = total_elems * sizeof(T1);
 
-  source_buf = (T1 *)alloc_test_buffer(buff_size, args.local_buf_type);
-  dest_buf   = (T1 *)alloc_test_buffer(buff_size);
+  source_buf = (T1*)alloc_test_buffer(buff_size, args.local_buf_type);
+  dest_buf   = (T1*)alloc_test_buffer(buff_size);
 
   CHECK_HIP(hipMalloc(&source_displs, n_pes * sizeof(size_t)));
-  CHECK_HIP(hipMalloc(&dest_displs  , n_pes * sizeof(size_t)));
+  CHECK_HIP(hipMalloc(&dest_displs, n_pes * sizeof(size_t)));
   CHECK_HIP(hipMalloc(&source_nelems, n_pes * sizeof(size_t)));
-  CHECK_HIP(hipMalloc(&dest_nelems  , n_pes * sizeof(size_t)));
+  CHECK_HIP(hipMalloc(&dest_nelems, n_pes * sizeof(size_t)));
 
   char* value = nullptr;
 
@@ -143,8 +129,7 @@ TeamAlltoallvTester<T1>::TeamAlltoallvTester(TesterArguments args)
     num_teams = atoi(value);
   }
 
-  CHECK_HIP(hipMalloc(&team_alltoallv_world_dup,
-                      sizeof(rocshmem_team_t) * num_teams));
+  CHECK_HIP(hipMalloc(&team_alltoallv_world_dup, sizeof(rocshmem_team_t) * num_teams));
 }
 
 template <typename T1>
@@ -165,7 +150,7 @@ void TeamAlltoallvTester<T1>::preLaunchKernel() {
   for (int team_i = 0; team_i < num_teams; team_i++) {
     team_alltoallv_world_dup[team_i] = ROCSHMEM_TEAM_INVALID;
     rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                 &team_alltoallv_world_dup[team_i]);
+                                &team_alltoallv_world_dup[team_i]);
     if (team_alltoallv_world_dup[team_i] == ROCSHMEM_TEAM_INVALID) {
       std::cout << "Team " << team_i << " is invalid!" << std::endl;
       abort();
@@ -174,11 +159,10 @@ void TeamAlltoallvTester<T1>::preLaunchKernel() {
 }
 
 template <typename T1>
-void TeamAlltoallvTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
-                                          int loop, size_t size) {
+void TeamAlltoallvTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) {
   size_t shared_bytes = rocshmem_query_lds_stage_bytes();
-  int num_elems = size / sizeof(T1);
-  size_t disp = 0;
+  int num_elems       = size / sizeof(T1);
+  size_t disp         = 0;
 
   for (int i = 0; i < n_pes; i++) {
     source_nelems[i] = num_elems;
@@ -188,14 +172,12 @@ void TeamAlltoallvTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
     disp += num_elems;
   }
 
-  hipLaunchKernelGGL(TeamAlltoallvTest<T1>, gridSize, blockSize, shared_bytes,
-                     stream, loop, args.skip, start_time, end_time,
-                     dest_buf, dest_nelems, dest_displs,
-                     source_buf, source_nelems, source_displs,
-                     _shmem_context,
+  hipLaunchKernelGGL(TeamAlltoallvTest<T1>, gridSize, blockSize, shared_bytes, stream, loop,
+                     args.skip, start_time, end_time, dest_buf, dest_nelems, dest_displs,
+                     source_buf, source_nelems, source_displs, _shmem_context,
                      team_alltoallv_world_dup);
 
-  num_msgs = (loop + args.skip) * gridSize.x;
+  num_msgs       = (loop + args.skip) * gridSize.x;
   num_timed_msgs = loop * gridSize.x;
 }
 
@@ -210,20 +192,17 @@ template <typename T1>
 void TeamAlltoallvTester<T1>::resetBuffers(size_t size) {
   int num_elems = size / sizeof(T1);
   int buff_size = num_elems * sizeof(T1) * n_pes;
-  int idx = 0;
+  int idx       = 0;
 
-  for(int pe = 0; pe < n_pes; pe++) {
-    for(int i = 0; i < num_elems; i++) {
+  for (int pe = 0; pe < n_pes; pe++) {
+    for (int i = 0; i < num_elems; i++) {
       idx = pe * num_elems + i;
-      if constexpr (std::is_same<T1, char>::value ||
-                    std::is_same<T1, signed char>::value ||
+      if constexpr (std::is_same<T1, char>::value || std::is_same<T1, signed char>::value ||
                     std::is_same<T1, unsigned char>::value) {
         source_buf[idx] = static_cast<T1>('a' + my_pe + pe);
-      }
-      else if constexpr (std::is_floating_point<T1>::value) {
+      } else if constexpr (std::is_floating_point<T1>::value) {
         source_buf[idx] = static_cast<T1>(3.14 + my_pe + pe);
-      }
-      else if constexpr (std::is_integral<T1>::value) {
+      } else if constexpr (std::is_integral<T1>::value) {
         source_buf[idx] = static_cast<T1>(my_pe + pe);
       }
     }
@@ -236,15 +215,15 @@ template <typename T1>
 void TeamAlltoallvTester<T1>::verifyResults(size_t size) {
   int num_elems = size / sizeof(T1);
 
-  for(int pe = 0; pe < n_pes; pe++) {
-    T1* dst = (T1*) ((char*)dest_buf + (dest_displs[pe] * sizeof(T1)));
-    T1* src = (T1*) &source_buf[pe * num_elems];
+  for (int pe = 0; pe < n_pes; pe++) {
+    T1* dst = (T1*)((char*)dest_buf + (dest_displs[pe] * sizeof(T1)));
+    T1* src = (T1*)&source_buf[pe * num_elems];
 
-    for(size_t i = 0; i < static_cast<size_t>(dest_nelems[pe]); i++) {
+    for (size_t i = 0; i < static_cast<size_t>(dest_nelems[pe]); i++) {
       if (dst[i] != src[i]) {
         std::cerr << "Data validation error at idx " << i << std::endl;
-        std::cerr << "PE " << my_pe << " Got " << dest_buf[i]
-        << ", Expected " << source_buf[i] << std::endl;
+        std::cerr << "PE " << my_pe << " Got " << dest_buf[i] << ", Expected " << source_buf[i]
+                  << std::endl;
         exit(-1);
       }
     }

@@ -37,13 +37,13 @@
 namespace rocshmem {
 
 struct BackendRegister {
-  ROStats *profiler{nullptr};
+  ROStats* profiler{nullptr};
   std::atomic<bool> worker_thread_exit{false};
-  bool *needs_quiet{nullptr};
-  bool *needs_blocking{nullptr};
-  HdpPolicy *hdp_policy{nullptr};
-  WindowInfoMPI **heap_window_info{nullptr};
-  SymmetricHeap *heap_ptr{nullptr};
+  bool* needs_quiet{nullptr};
+  bool* needs_blocking{nullptr};
+  HdpPolicy* hdp_policy{nullptr};
+  WindowInfoMPI** heap_window_info{nullptr};
+  SymmetricHeap* heap_ptr{nullptr};
 };
 
 class BackendProxy {
@@ -53,9 +53,8 @@ class BackendProxy {
   /*
    * Placement new the memory which is allocated by proxy_
    */
-  BackendProxy(const HIPHostAllocator& alloc = HIPHostAllocator(),
-               size_t num_elems = 1)
-    : alloc_{alloc}, proxy_{num_elems, alloc_} {
+  BackendProxy(const HIPHostAllocator& alloc = HIPHostAllocator(), size_t num_elems = 1)
+      : alloc_{alloc}, proxy_{num_elems, alloc_} {
     new (proxy_.get()) BackendRegister();
   }
 
@@ -68,7 +67,7 @@ class BackendProxy {
   /*
    * @brief Provide access to the memory referenced by the proxy
    */
-  __host__ __device__ BackendRegister *get() { return proxy_.get(); }
+  __host__ __device__ BackendRegister* get() { return proxy_.get(); }
 
  private:
   HIPHostAllocator alloc_{};

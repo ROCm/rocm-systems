@@ -56,7 +56,7 @@ TEST_F(SingleHeapTestFixture, alloc_1) {
 
   single_heap_.malloc(&ptr, request_size);
   ASSERT_NE(ptr, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr);
   ASSERT_EQ(single_heap_.get_used(), initial_used);
@@ -69,7 +69,7 @@ TEST_F(SingleHeapTestFixture, alloc_256) {
 
   single_heap_.malloc(&ptr, request_size);
   ASSERT_NE(ptr, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr);
   ASSERT_EQ(single_heap_.get_used(), initial_used);
@@ -82,7 +82,7 @@ TEST_F(SingleHeapTestFixture, alloc_1024) {
 
   single_heap_.malloc(&ptr, request_size);
   ASSERT_NE(ptr, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr);
   ASSERT_EQ(single_heap_.get_used(), initial_used);
@@ -95,7 +95,7 @@ TEST_F(SingleHeapTestFixture, alloc_1MB) {
 
   single_heap_.malloc(&ptr, request_size);
   ASSERT_NE(ptr, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr);
   ASSERT_EQ(single_heap_.get_used(), initial_used);
@@ -108,7 +108,7 @@ TEST_F(SingleHeapTestFixture, alloc_4097) {
 
   single_heap_.malloc(&ptr, request_size);
   ASSERT_NE(ptr, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr);
   ASSERT_EQ(single_heap_.get_used(), initial_used);
@@ -122,11 +122,11 @@ TEST_F(SingleHeapTestFixture, alloc_X2_8191) {
 
   single_heap_.malloc(&ptr_1, request_size);
   ASSERT_NE(ptr_1, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_1) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_1) & (ALIGNMENT - 1), 0);
 
   single_heap_.malloc(&ptr_2, request_size);
   ASSERT_NE(ptr_2, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_2) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_2) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr_1);
   single_heap_.free(ptr_2);
@@ -142,17 +142,17 @@ TEST_F(SingleHeapTestFixture, alloc_X2_free_alloc_free_X2_1MB) {
 
   single_heap_.malloc(&ptr_1, request_size);
   ASSERT_NE(ptr_1, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_1) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_1) & (ALIGNMENT - 1), 0);
 
   single_heap_.malloc(&ptr_2, request_size);
   ASSERT_NE(ptr_1, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_2) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_2) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr_1);
 
   single_heap_.malloc(&ptr_3, request_size);
   ASSERT_NE(ptr_3, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_3) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_3) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr_3);
   single_heap_.free(ptr_2);
@@ -168,17 +168,17 @@ TEST_F(SingleHeapTestFixture, alloc_X2_free_alloc_free_X2_63) {
 
   single_heap_.malloc(&ptr_1, request_size);
   ASSERT_NE(ptr_1, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_1) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_1) & (ALIGNMENT - 1), 0);
 
   single_heap_.malloc(&ptr_2, request_size);
   ASSERT_NE(ptr_1, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_2) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_2) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr_1);
 
   single_heap_.malloc(&ptr_3, request_size);
   ASSERT_NE(ptr_3, nullptr);
-  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_3) & (ALIGNMENT-1), 0);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(ptr_3) & (ALIGNMENT - 1), 0);
 
   single_heap_.free(ptr_3);
   single_heap_.free(ptr_2);

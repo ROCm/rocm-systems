@@ -46,20 +46,19 @@ static constexpr size_t TEST_TDM_PUT_THRESHOLD = 16384;
 
 // PE 1 validator: spins on a signal word, then checks data.
 template <typename NotifierT>
-__global__
-void tdm_wave_validator(bool* error, const uint8_t* golden, const uint8_t* dest,
-                        size_t bytes, NotifierT* notifier) {
+__global__ void tdm_wave_validator(bool* error, const uint8_t* golden, const uint8_t* dest,
+                                   size_t bytes, NotifierT* notifier) {
   if (!get_flat_id()) {
-    uint32_t* sig = reinterpret_cast<uint32_t*>(
-        const_cast<uint8_t*>(dest) + TDM_WAVE_SIGNAL_OFFSET);
+    uint32_t* sig =
+        reinterpret_cast<uint32_t*>(const_cast<uint8_t*>(dest) + TDM_WAVE_SIGNAL_OFFSET);
     while (detail::atomic::load<detail::atomic::memory_scope::system,
-                                detail::atomic::memory_order::acquire>(sig) == 0) {}
+                                detail::atomic::memory_order::acquire>(sig) == 0) {
+    }
   }
   notifier->sync();
   for (size_t i = get_flat_id(); i < bytes; i += get_flat_grid_size()) {
     if (golden[i] != dest[i]) {
-      printf("mismatch@%zu exp=%u got=%u\n", i, (unsigned)golden[i],
-             (unsigned)dest[i]);
+      printf("mismatch@%zu exp=%u got=%u\n", i, (unsigned)golden[i], (unsigned)dest[i]);
       *error = true;
     }
   }
@@ -67,13 +66,12 @@ void tdm_wave_validator(bool* error, const uint8_t* golden, const uint8_t* dest,
 
 // PE 0 sender: each wave puts its own disjoint slice, concurrently.
 template <typename IpcImplT>
-__global__
-void tdm_wave_put_kernel(IpcImplT* ipc_impl, const uint8_t* src,
-                         uint8_t* remote_dst, size_t bytes_per_wave) {
+__global__ void tdm_wave_put_kernel(IpcImplT* ipc_impl, const uint8_t* src, uint8_t* remote_dst,
+                                    size_t bytes_per_wave) {
   extern __shared__ uint8_t tdm_lds[];
   rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
-  const int wave_id = get_flat_block_id() / WF_SIZE;
+  const int wave_id   = get_flat_block_id() / WF_SIZE;
   const size_t offset = static_cast<size_t>(wave_id) * bytes_per_wave;
 
   ipc_impl->template ipcCopy_wave<MemcpyKind::PutBlocking>(
@@ -95,9 +93,8 @@ void tdm_wave_put_kernel(IpcImplT* ipc_impl, const uint8_t* src,
 // ---------------------------------------------------------------------------
 
 // Params: (bytes_per_wave, num_waves).
-class TdmWavePutFixture
-    : public ::testing::TestWithParam<std::tuple<size_t, int>> {
-  using IpcImplT       = IpcImpl;   // whatever IpcImpl is (IpcOnImpl when USE_IPC)
+class TdmWavePutFixture : public ::testing::TestWithParam<std::tuple<size_t, int>> {
+  using IpcImplT       = IpcImpl;  // whatever IpcImpl is (IpcOnImpl when USE_IPC)
   using MPI_T          = RemoteHeapInfo<CommunicatorMPI>;
   using NotifierT      = Notifier<detail::atomic::memory_scope::device>;
   using NotifierProxyT = NotifierProxy<detail::atomic::memory_scope::device>;
@@ -106,7 +103,7 @@ class TdmWavePutFixture
   TdmWavePutFixture() {
     MPIInstance::mpilib_dl_init();
     hip_allocator_ = get_default_allocator();
-    heap_mem_ = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
+    heap_mem_      = new HeapMemoryType(*hip_allocator_, envvar::heap_size.get_value());
     assert(heap_mem_);
     mpi_ = new MPI_T(heap_mem_->get_ptr(), heap_mem_->get_size(), MPI_COMM_WORLD);
     ipc_impl_.ipcHostInit(mpi_->my_pe(), mpi_->get_heap_bases(), MPI_COMM_WORLD);
@@ -123,16 +120,18 @@ class TdmWavePutFixture
     CHECK_HIP(hipMemcpyToSymbol(HIP_SYMBOL(constmem), &put_threshold, sizeof(put_threshold),
                                 offsetof(constmem_t, lds_stage_put_threshold)));
     hip_allocator_->allocate((void**)&ipc_impl_dptr_, sizeof(IpcImplT));
-    CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT),
-                        hipMemcpyHostToDevice));
+    CHECK_HIP(hipMemcpy(ipc_impl_dptr_, &ipc_impl_, sizeof(IpcImplT), hipMemcpyHostToDevice));
     hip_allocator_->allocate((void**)&error_dptr_, sizeof(bool));
     CHECK_HIP(hipMemset(error_dptr_, 0, sizeof(bool)));
   }
 
   ~TdmWavePutFixture() override {
-    if (ipc_impl_dptr_) hip_allocator_->deallocate(ipc_impl_dptr_);
-    if (error_dptr_)    hip_allocator_->deallocate(error_dptr_);
-    if (golden_dptr_)   hip_allocator_->deallocate(golden_dptr_);
+    if (ipc_impl_dptr_)
+      hip_allocator_->deallocate(ipc_impl_dptr_);
+    if (error_dptr_)
+      hip_allocator_->deallocate(error_dptr_);
+    if (golden_dptr_)
+      hip_allocator_->deallocate(golden_dptr_);
     ipc_impl_.ipcHostStop();
     delete mpi_;
     delete heap_mem_;
@@ -141,8 +140,7 @@ class TdmWavePutFixture
 
   void run_put(size_t bytes_per_wave, int num_waves) {
     const size_t bytes = bytes_per_wave * static_cast<size_t>(num_waves);
-    assert(bytes + TDM_WAVE_SIGNAL_OFFSET + sizeof(uint32_t) <=
-           heap_mem_->get_size());
+    assert(bytes + TDM_WAVE_SIGNAL_OFFSET + sizeof(uint32_t) <= heap_mem_->get_size());
 
     // Varies per tile, unlike plain iota, so reordered/duplicated tiles
     // are detected.
@@ -176,8 +174,7 @@ class TdmWavePutFixture
     } else {
       auto* dest = reinterpret_cast<const uint8_t*>(ipc_impl_.ipc_bases[1]);
       tdm_wave_validator<NotifierT>
-          <<<dim3(1), dim3(64)>>>(error_dptr_, golden_dptr_, dest, bytes,
-                                  notifier_.get());
+          <<<dim3(1), dim3(64)>>>(error_dptr_, golden_dptr_, dest, bytes, notifier_.get());
       CHECK_HIP(hipStreamSynchronize(nullptr));
     }
 
@@ -185,21 +182,20 @@ class TdmWavePutFixture
 
     if (my_pe == 1) {
       bool host_error = false;
-      CHECK_HIP(hipMemcpy(&host_error, error_dptr_, sizeof(bool),
-                          hipMemcpyDeviceToHost));
+      CHECK_HIP(hipMemcpy(&host_error, error_dptr_, sizeof(bool), hipMemcpyDeviceToHost));
       ASSERT_EQ(host_error, false);
     }
   }
 
  private:
-  HIPAllocator*    hip_allocator_{nullptr};
-  NotifierProxyT   notifier_{};
-  HeapMemoryType*  heap_mem_{nullptr};
-  MPI_T*           mpi_{nullptr};
-  IpcImplT         ipc_impl_{};
-  IpcImplT*        ipc_impl_dptr_{nullptr};
-  bool*            error_dptr_{nullptr};
-  uint8_t*         golden_dptr_{nullptr};
+  HIPAllocator* hip_allocator_{nullptr};
+  NotifierProxyT notifier_{};
+  HeapMemoryType* heap_mem_{nullptr};
+  MPI_T* mpi_{nullptr};
+  IpcImplT ipc_impl_{};
+  IpcImplT* ipc_impl_dptr_{nullptr};
+  bool* error_dptr_{nullptr};
+  uint8_t* golden_dptr_{nullptr};
 };
 
 }  // namespace rocshmem

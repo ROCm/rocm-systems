@@ -32,9 +32,9 @@
 namespace rocshmem {
 
 namespace host {
-    rocshmem_team_t ROCSHMEM_TEAM_WORLD = nullptr;
-    rocshmem_team_t ROCSHMEM_TEAM_SHARED = nullptr;
-}
+rocshmem_team_t ROCSHMEM_TEAM_WORLD  = nullptr;
+rocshmem_team_t ROCSHMEM_TEAM_SHARED = nullptr;
+}  // namespace host
 
 __host__ __device__ Team* get_internal_team(rocshmem_team_t team) {
   return reinterpret_cast<Team*>(team);
@@ -54,8 +54,7 @@ GDATeam* get_internal_gda_team(rocshmem_team_t team) {
 
 __host__ __device__ int team_translate_pe(rocshmem_team_t src_team, int src_pe,
                                           rocshmem_team_t dst_team) {
-  if (src_team == ROCSHMEM_TEAM_INVALID ||
-      dst_team == ROCSHMEM_TEAM_INVALID) {
+  if (src_team == ROCSHMEM_TEAM_INVALID || dst_team == ROCSHMEM_TEAM_INVALID) {
     return -1;
   }
 
@@ -67,17 +66,12 @@ __host__ __device__ int team_translate_pe(rocshmem_team_t src_team, int src_pe,
   return dst_pe;
 }
 
-__host__ __device__ TeamInfo::TeamInfo(Team* _parent_team, int _pe_start,
-                                       int _stride, int _size)
-    : parent_team(_parent_team),
-      pe_start(_pe_start),
-      stride(_stride),
-      size(_size) {
-}
+__host__ __device__ TeamInfo::TeamInfo(Team* _parent_team, int _pe_start, int _stride, int _size)
+    : parent_team(_parent_team), pe_start(_pe_start), stride(_stride), size(_size) {}
 
 __host__ Team::Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
-                    const TeamInfo& team_info_wrt_world, int _num_pes,
-                    int _my_pe, MPI_Comm _mpi_comm)
+                    const TeamInfo& team_info_wrt_world, int _num_pes, int _my_pe,
+                    MPI_Comm _mpi_comm)
     : world_size(handle->getNumPEs()),
       my_pe_in_world(handle->getMyPE()),
       num_pes(_num_pes),
@@ -91,7 +85,7 @@ __host__ Team::Team(Backend* handle, const TeamInfo& team_info_wrt_parent,
   new (tinfo_wrt_world) TeamInfo(team_info_wrt_world);
 
   if (_mpi_comm != MPI_COMM_NULL) {
-    mpilib_ftable_.Comm_dup (_mpi_comm, &mpi_comm);
+    mpilib_ftable_.Comm_dup(_mpi_comm, &mpi_comm);
   }
 }
 
@@ -127,10 +121,10 @@ __host__ Team::~Team() {
     CHECK_HIP(hipFree(team_info_block_));
     team_info_block_ = nullptr;
     tinfo_wrt_parent = nullptr;
-    tinfo_wrt_world = nullptr;
+    tinfo_wrt_world  = nullptr;
   }
   if (mpi_comm != MPI_COMM_NULL) {
-    mpilib_ftable_.Comm_free (&mpi_comm);
+    mpilib_ftable_.Comm_free(&mpi_comm);
     mpi_comm = MPI_COMM_NULL;
   }
 }

@@ -34,14 +34,13 @@ class QpPingPongTester : public Tester {
 
  protected:
   virtual void resetBuffers(size_t size) override;
-  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                            size_t size) override;
+  virtual void launchKernel(dim3 gridSize, dim3 blockSize, int loop, size_t size) override;
   virtual void verifyResults(size_t size) override;
 
-  int *r_buf;
-  char *data_s_buf;
-  char *data_r_buf;
-  uint64_t *sig_addr;
+  int* r_buf;
+  char* data_s_buf;
+  char* data_r_buf;
+  uint64_t* sig_addr;
 };
 
 #endif

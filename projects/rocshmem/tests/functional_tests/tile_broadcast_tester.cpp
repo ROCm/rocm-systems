@@ -23,7 +23,7 @@ using namespace rocshmem;
 // Simple 2D tensor implementation for testing
 template <typename T>
 struct Tensor2D {
-  using element_type = T;
+  using element_type        = T;
   static constexpr int ndim = 2;
 
   T* data;
@@ -32,17 +32,14 @@ struct Tensor2D {
   int row_stride;
   int col_stride;
 
-  __device__ Tensor2D(T* data_, int rows_, int cols_,
-                      int row_stride_ = -1, int col_stride_ = 1)
+  __device__ Tensor2D(T* data_, int rows_, int cols_, int row_stride_ = -1, int col_stride_ = 1)
       : data(data_), rows(rows_), cols(cols_), col_stride(col_stride_) {
     // Default row_stride is cols (contiguous row-major layout)
     row_stride = (row_stride_ == -1) ? cols : row_stride_;
   }
 
   __device__ T* data_handle() const { return data; }
-  __device__ int stride(int dim) const {
-    return (dim == 0) ? row_stride : col_stride;
-  }
+  __device__ int stride(int dim) const { return (dim == 0) ? row_stride : col_stride; }
 };
 
 // Simple tuple for coordinates
@@ -57,15 +54,11 @@ struct Tuple2D {
  *****************************************************************************/
 
 // Thread-level broadcast test - single WG, single wave
-__global__ void TileBroadcastThreadTest(rocshmem_team_t team,
-                                        float *source, float *dest,
-                                        int tile_extent_0, int tile_extent_1,
-                                        int my_world_pe, int pe_root,
-                                        ShmemContextType ctx_type,
-                                        int loop, int skip,
-                                        long long int *start_time,
-                                        long long int *end_time,
-                                        int *error_flag) {
+__global__ void TileBroadcastThreadTest(rocshmem_team_t team, float* source, float* dest,
+                                        int tile_extent_0, int tile_extent_1, int my_world_pe,
+                                        int pe_root, ShmemContextType ctx_type, int loop, int skip,
+                                        long long int* start_time, long long int* end_time,
+                                        int* error_flag) {
   __shared__ rocshmem_ctx_t ctx;
   int wg_id = get_flat_grid_id();
 
@@ -81,8 +74,7 @@ __global__ void TileBroadcastThreadTest(rocshmem_team_t team,
       start_time[wg_id] = wall_clock64();
     }
     if (threadIdx.x == 0) {
-      rocshmem_ctx_tile_broadcast(ctx, team, dst_tensor, src_tensor,
-                                   start, boundary, pe_root, 0);
+      rocshmem_ctx_tile_broadcast(ctx, team, dst_tensor, src_tensor, start, boundary, pe_root, 0);
     }
     __syncthreads();
   }
@@ -96,7 +88,7 @@ __global__ void TileBroadcastThreadTest(rocshmem_team_t team,
     int matrix_size = tile_extent_0 * tile_extent_1;
     for (int idx = 0; idx < matrix_size; idx++) {
       float expected = pe_root * 100.0f + idx;
-      float actual = dest[idx];
+      float actual   = dest[idx];
       if (actual != expected) {
         printf("Thread-level: PE %d verification failed at [%d]: got %f, expected %f\n",
                my_world_pe, idx, actual, expected);
@@ -110,16 +102,12 @@ __global__ void TileBroadcastThreadTest(rocshmem_team_t team,
 }
 
 // Wave-level broadcast test - each wave uses its own team and context
-__global__ void TileBroadcastWaveTest(rocshmem_team_t *teams,
-                                      float *source, float *dest,
-                                      int tile_extent_0, int tile_extent_1,
-                                      int my_world_pe, int pe_root,
-                                      ShmemContextType ctx_type,
-                                      int wf_size, int num_waves_per_wg,
-                                      int loop, int skip,
-                                      long long int *start_time,
-                                      long long int *end_time,
-                                      int *error_flag) {
+__global__ void TileBroadcastWaveTest(rocshmem_team_t* teams, float* source, float* dest,
+                                      int tile_extent_0, int tile_extent_1, int my_world_pe,
+                                      int pe_root, ShmemContextType ctx_type, int wf_size,
+                                      int num_waves_per_wg, int loop, int skip,
+                                      long long int* start_time, long long int* end_time,
+                                      int* error_flag) {
   extern __shared__ rocshmem_ctx_t ctx_array[];
 
   int t_id       = get_flat_block_id();
@@ -130,17 +118,16 @@ __global__ void TileBroadcastWaveTest(rocshmem_team_t *teams,
 
   // All threads in the WG collectively create one context per wave.
   for (int wf_i = 0; wf_i < num_waves_per_wg; wf_i++) {
-    rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type,
-                                &ctx_array[wf_i]);
+    rocshmem_wg_team_create_ctx(teams[wg_offset + wf_i], ctx_type, &ctx_array[wf_i]);
     __syncthreads();
   }
 
-  int matrix_size = tile_extent_0 * tile_extent_1;
-  float *my_source = source + flat_wf_id * matrix_size;
-  float *my_dest   = dest   + flat_wf_id * matrix_size;
+  int matrix_size  = tile_extent_0 * tile_extent_1;
+  float* my_source = source + flat_wf_id * matrix_size;
+  float* my_dest   = dest + flat_wf_id * matrix_size;
 
   Tensor2D<float> src_tensor(my_source, tile_extent_0, tile_extent_1);
-  Tensor2D<float> dst_tensor(my_dest,   tile_extent_0, tile_extent_1);
+  Tensor2D<float> dst_tensor(my_dest, tile_extent_0, tile_extent_1);
   Tuple2D start_coord(0, 0);
   Tuple2D boundary(tile_extent_0, tile_extent_1);
 
@@ -148,8 +135,7 @@ __global__ void TileBroadcastWaveTest(rocshmem_team_t *teams,
     if (i == skip && t_id % wf_size == 0) {
       start_time[flat_wf_id] = wall_clock64();
     }
-    rocshmem_ctx_tile_broadcast_wave(ctx_array[wf_id], teams[flat_wf_id],
-                                     dst_tensor, src_tensor,
+    rocshmem_ctx_tile_broadcast_wave(ctx_array[wf_id], teams[flat_wf_id], dst_tensor, src_tensor,
                                      start_coord, boundary, pe_root, 0);
   }
   __syncthreads();
@@ -163,7 +149,7 @@ __global__ void TileBroadcastWaveTest(rocshmem_team_t *teams,
   if (t_id % wf_size == 0) {
     for (int idx = 0; idx < matrix_size; idx++) {
       float expected = pe_root * 100.0f + idx;
-      float actual = my_dest[idx];
+      float actual   = my_dest[idx];
       if (actual != expected) {
         printf("Wave-level: PE %d wave %d verification failed at [%d]: got %f, expected %f\n",
                my_world_pe, flat_wf_id, idx, actual, expected);
@@ -182,15 +168,11 @@ __global__ void TileBroadcastWaveTest(rocshmem_team_t *teams,
 }
 
 // Workgroup-level broadcast test - multiple WGs with different teams
-__global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
-                                  float *source, float *dest,
-                                  int tile_extent_0, int tile_extent_1,
-                                  int my_world_pe, int pe_root,
-                                  ShmemContextType ctx_type,
-                                  int loop, int skip,
-                                  long long int *start_time,
-                                  long long int *end_time,
-                                  int *error_flag) {
+__global__ void TileBroadcastTest(rocshmem_team_t* teams, int num_teams, float* source, float* dest,
+                                  int tile_extent_0, int tile_extent_1, int my_world_pe,
+                                  int pe_root, ShmemContextType ctx_type, int loop, int skip,
+                                  long long int* start_time, long long int* end_time,
+                                  int* error_flag) {
   extern __shared__ rocshmem_ctx_t ctx_array[];
   int wg_id = get_flat_grid_id();
 
@@ -199,11 +181,11 @@ __global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
 
   // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0. The
   // staged LDS region sits right after the one ctx slot in the dynamic shared buffer.
-  uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[1]);
+  uint8_t* tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[1]);
   rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   int matrix_size = tile_extent_0 * tile_extent_1;
-  int offset = matrix_size * wg_id;
+  int offset      = matrix_size * wg_id;
 
   Tensor2D<float> src_tensor(source + offset, tile_extent_0, tile_extent_1);
   Tensor2D<float> dst_tensor(dest + offset, tile_extent_0, tile_extent_1);
@@ -214,8 +196,8 @@ __global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
     if (i == skip && threadIdx.x == 0) {
       start_time[wg_id] = wall_clock64();
     }
-    rocshmem_ctx_tile_broadcast_wg(ctx_array[0], my_team, dst_tensor, src_tensor,
-                                    start_coord, boundary, pe_root, 0);
+    rocshmem_ctx_tile_broadcast_wg(ctx_array[0], my_team, dst_tensor, src_tensor, start_coord,
+                                   boundary, pe_root, 0);
     __syncthreads();
   }
 
@@ -227,12 +209,12 @@ __global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
   if (threadIdx.x == 0) {
     for (int i = 0; i < tile_extent_0; i++) {
       for (int j = 0; j < tile_extent_1; j++) {
-        int idx = i * tile_extent_1 + j;
+        int idx        = i * tile_extent_1 + j;
         float expected = pe_root * 100.0f + idx;
-        float actual = dest[offset + idx];
+        float actual   = dest[offset + idx];
         if (actual != expected) {
-          printf("WG %d: PE %d verification failed at [%d,%d]: got %f, expected %f\n",
-                 wg_id, my_world_pe, i, j, actual, expected);
+          printf("WG %d: PE %d verification failed at [%d,%d]: got %f, expected %f\n", wg_id,
+                 my_world_pe, i, j, actual, expected);
           *error_flag = 1;
         }
       }
@@ -248,8 +230,7 @@ __global__ void TileBroadcastTest(rocshmem_team_t *teams, int num_teams,
 /******************************************************************************
  * HOST TESTER CLASS METHODS
  *****************************************************************************/
-TileBroadcastTester::TileBroadcastTester(TesterArguments args)
-    : Tester(args) {
+TileBroadcastTester::TileBroadcastTester(TesterArguments args) : Tester(args) {
   // Wave test needs one team per wave (num_wgs * num_warps); WG test needs
   // one team per WG (num_wgs).  Allocate the larger so one array covers both.
   num_teams = args.num_wgs * num_warps;
@@ -275,20 +256,21 @@ TileBroadcastTester::TileBroadcastTester(TesterArguments args)
   tile_extent_1 = DEFAULT_TILE_COLS;
   if (args.max_msg_size_set) {
     int derived = static_cast<int>(args.max_msg_size / (tile_extent_0 * sizeof(float)));
-    if (derived >= 1) tile_extent_1 = derived;
+    if (derived >= 1)
+      tile_extent_1 = derived;
   }
   // Sweep from one column to the full tile; each doubling step is a valid tile shape.
-  size_t tile_size_bytes = static_cast<size_t>(tile_extent_0) * tile_extent_1 * sizeof(float);
-  size_t row_bytes       = static_cast<size_t>(tile_extent_0) * sizeof(float);
+  size_t tile_size_bytes  = static_cast<size_t>(tile_extent_0) * tile_extent_1 * sizeof(float);
+  size_t row_bytes        = static_cast<size_t>(tile_extent_0) * sizeof(float);
   this->args.min_msg_size = row_bytes;
   max_msg_size            = tile_size_bytes;
 
   // Allocate for the maximum tile size; smaller sweep steps use a subset.
-  int tile_size = tile_extent_0 * tile_extent_1;
+  int tile_size  = tile_extent_0 * tile_extent_1;
   int total_size = tile_size * num_teams;
 
-  source = (float *)rocshmem_malloc(total_size * sizeof(float));
-  dest = (float *)rocshmem_malloc(total_size * sizeof(float));
+  source = (float*)rocshmem_malloc(total_size * sizeof(float));
+  dest   = (float*)rocshmem_malloc(total_size * sizeof(float));
 
   if (!source || !dest) {
     fprintf(stderr, "Failed to allocate symmetric memory for tiles\n");
@@ -318,7 +300,8 @@ void TileBroadcastTester::resetBuffers(size_t size) {
   int t1 = tile_extent_1;
   if (size > 0) {
     int derived = static_cast<int>(size / (tile_extent_0 * sizeof(float)));
-    if (derived >= 1 && derived <= tile_extent_1) t1 = derived;
+    if (derived >= 1 && derived <= tile_extent_1)
+      t1 = derived;
   }
   int tile_size = tile_extent_0 * t1;
 
@@ -327,7 +310,8 @@ void TileBroadcastTester::resetBuffers(size_t size) {
   // must match — use tile_size (= tile_extent_0 * ke_t1) as the per-slot stride.
   int max_tile_size = tile_extent_0 * tile_extent_1;
   int total_size    = max_tile_size * num_teams;
-  for (int i = 0; i < total_size; i++) dest[i] = -1.0f;
+  for (int i = 0; i < total_size; i++)
+    dest[i] = -1.0f;
 
   for (int slot = 0; slot < num_teams; slot++) {
     int base = slot * tile_size;  // stride matches kernel's matrix_size * slot_id
@@ -357,8 +341,7 @@ void TileBroadcastTester::preLaunchKernel() {
 
   for (int i = 0; i < teams_needed; i++) {
     teams[i] = ROCSHMEM_TEAM_INVALID;
-    rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0,
-                                &teams[i]);
+    rocshmem_team_split_strided(ROCSHMEM_TEAM_WORLD, 0, 1, n_pes, nullptr, 0, &teams[i]);
     if (teams[i] == ROCSHMEM_TEAM_INVALID) {
       printf("PE %d: Failed to create team %d\n", args.myid, i);
       rocshmem_global_exit(1);
@@ -366,8 +349,7 @@ void TileBroadcastTester::preLaunchKernel() {
   }
 }
 
-void TileBroadcastTester::launchKernel(dim3 gridSize, dim3 blockSize,
-                                       [[maybe_unused]] int loop,
+void TileBroadcastTester::launchKernel(dim3 gridSize, dim3 blockSize, [[maybe_unused]] int loop,
                                        size_t size) {
   int pe_root = 0;
 
@@ -375,42 +357,38 @@ void TileBroadcastTester::launchKernel(dim3 gridSize, dim3 blockSize,
   int ke_t1 = tile_extent_1;
   if (size > 0) {
     int derived = static_cast<int>(size / (tile_extent_0 * sizeof(float)));
-    if (derived >= 1 && derived <= tile_extent_1) ke_t1 = derived;
+    if (derived >= 1 && derived <= tile_extent_1)
+      ke_t1 = derived;
   }
 
   switch (_type) {
-    case TileBroadcastTestType:
-      hipLaunchKernelGGL(TileBroadcastThreadTest, dim3(1), blockSize, 0, stream,
-                         teams[0], source, dest, tile_extent_0, ke_t1,
-                         args.myid, pe_root, _shmem_context,
-                         loop, args.skip, start_time, end_time, error_flag);
-      break;
+  case TileBroadcastTestType:
+    hipLaunchKernelGGL(TileBroadcastThreadTest, dim3(1), blockSize, 0, stream, teams[0], source,
+                       dest, tile_extent_0, ke_t1, args.myid, pe_root, _shmem_context, loop,
+                       args.skip, start_time, end_time, error_flag);
+    break;
 
-    case TileBroadcastWaveTestType: {
+  case TileBroadcastWaveTestType:
+    {
       size_t wave_shared = num_warps * sizeof(rocshmem_ctx_t);
-      hipLaunchKernelGGL(TileBroadcastWaveTest, gridSize, blockSize,
-                         wave_shared, stream,
-                         teams, source, dest, tile_extent_0, ke_t1,
-                         args.myid, pe_root, _shmem_context,
-                         wf_size, num_warps,
-                         loop, args.skip, start_time, end_time, error_flag);
+      hipLaunchKernelGGL(TileBroadcastWaveTest, gridSize, blockSize, wave_shared, stream, teams,
+                         source, dest, tile_extent_0, ke_t1, args.myid, pe_root, _shmem_context,
+                         wf_size, num_warps, loop, args.skip, start_time, end_time, error_flag);
       break;
     }
 
-    case TileBroadcastWGTestType: {
+  case TileBroadcastWGTestType:
+    {
       size_t wg_shared = sizeof(rocshmem_ctx_t) + rocshmem_query_lds_stage_bytes();
-      hipLaunchKernelGGL(TileBroadcastTest, dim3(args.num_wgs), blockSize,
-                         wg_shared, stream,
-                         teams, args.num_wgs, source, dest,
-                         tile_extent_0, ke_t1,
-                         args.myid, pe_root, _shmem_context,
-                         loop, args.skip, start_time, end_time, error_flag);
+      hipLaunchKernelGGL(TileBroadcastTest, dim3(args.num_wgs), blockSize, wg_shared, stream, teams,
+                         args.num_wgs, source, dest, tile_extent_0, ke_t1, args.myid, pe_root,
+                         _shmem_context, loop, args.skip, start_time, end_time, error_flag);
       break;
     }
 
-    default:
-      fprintf(stderr, "Unknown TileBroadcast test type\n");
-      exit(EXIT_FAILURE);
+  default:
+    fprintf(stderr, "Unknown TileBroadcast test type\n");
+    exit(EXIT_FAILURE);
   }
 
   // One tile per wave (wave variant) or per WG (thread/WG variants) per loop.

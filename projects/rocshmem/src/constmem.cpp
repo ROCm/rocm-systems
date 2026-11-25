@@ -12,7 +12,7 @@
 
 namespace rocshmem {
 
-extern Backend *backend;
+extern Backend* backend;
 
 void init_constant_memory(void) {
   std::string envstr;
@@ -28,31 +28,30 @@ void init_constant_memory(void) {
     constmem_values.alltoall_wg_algo = gda::ALLTOALLV_WG_ALGO_COPY;
   }
 
-  constmem_values.my_pe = backend->getMyPE();
+  constmem_values.my_pe   = backend->getMyPE();
   constmem_values.num_pes = backend->getNumPEs();
 
   constmem_values.ipc_first_pe = backend->ipcImpl.ipc_first_pe;
-  constmem_values.ipc_stride = backend->ipcImpl.ipc_stride;
+  constmem_values.ipc_stride   = backend->ipcImpl.ipc_stride;
   // ipc_shm_size == 0 means IPC disabled (fast early return on device).
   // Non-zero when IPC is available, regardless of stride pattern.
-  constmem_values.ipc_shm_size = (backend->ipcImpl.pes_with_ipc_avail != nullptr)
-                                 ? backend->ipcImpl.shm_size : 0;
+  constmem_values.ipc_shm_size =
+      (backend->ipcImpl.pes_with_ipc_avail != nullptr) ? backend->ipcImpl.shm_size : 0;
 
 #if defined(USE_SDMA)
   // Follow the node-local agreement rather than the environment: after an agreed fallback the env
   // still enables SDMA but the queue handles are null, and every rank must pick the same alltoall.
-  const SdmaImpl &sdma = backend->ipcImpl.sdmaImpl_;
+  const SdmaImpl& sdma = backend->ipcImpl.sdmaImpl_;
   constmem_values.ipc_sdma_threshold =
       sdma.sdmaEnabled ? sdma.sdmaThreshold : SDMA_THRESHOLD_DISABLED;
 #else
   constmem_values.ipc_sdma_threshold = SDMA_THRESHOLD_DISABLED;
 #endif
 
-  constmem_values.heap_base =
-      reinterpret_cast<uintptr_t>(backend->heap.get_local_heap_base());
+  constmem_values.heap_base = reinterpret_cast<uintptr_t>(backend->heap.get_local_heap_base());
   constmem_values.heap_size = backend->heap.get_size();
 
-  constmem_values.lds_stage_tile_bytes = envvar::lds_stage::tile_bytes;
+  constmem_values.lds_stage_tile_bytes    = envvar::lds_stage::tile_bytes;
   constmem_values.lds_stage_put_threshold = envvar::lds_stage::put_threshold;
   constmem_values.lds_stage_get_threshold = envvar::lds_stage::get_threshold;
 
@@ -70,8 +69,7 @@ void init_constant_memory(void) {
 
     int max_shared_mem_per_block = 0;
     CHECK_HIP(hipDeviceGetAttribute(&max_shared_mem_per_block,
-                                     hipDeviceAttributeMaxSharedMemoryPerBlock,
-                                     device_id));
+                                    hipDeviceAttributeMaxSharedMemoryPerBlock, device_id));
 
     constexpr uint32_t element_bytes = 1u << lds_stage::FlatCopyElementLog2;
     // TDM's tile_dim0 is a 16-bit field (see lds_stage.hpp GROUP1), so the
@@ -81,15 +79,13 @@ void init_constant_memory(void) {
     // Reserve 16KB for rocSHMEM's own (small) static __shared__ usage plus
     // headroom for the caller's, then halve the rest for double buffering.
     constexpr size_t reserve_bytes = 16 * 1024;
-    const size_t avail_bytes =
-        (static_cast<size_t>(max_shared_mem_per_block) > reserve_bytes)
-            ? static_cast<size_t>(max_shared_mem_per_block) - reserve_bytes
-            : 0;
+    const size_t avail_bytes = (static_cast<size_t>(max_shared_mem_per_block) > reserve_bytes)
+                                   ? static_cast<size_t>(max_shared_mem_per_block) - reserve_bytes
+                                   : 0;
     const uint32_t avail_tile_bytes =
         static_cast<uint32_t>((avail_bytes / 2) / element_bytes) * element_bytes;
     const uint32_t fittable_tile_bytes =
-        (avail_tile_bytes < max_encodable_tile_bytes) ? avail_tile_bytes
-                                                      : max_encodable_tile_bytes;
+        (avail_tile_bytes < max_encodable_tile_bytes) ? avail_tile_bytes : max_encodable_tile_bytes;
 
     if (constmem_values.lds_stage_tile_bytes == 0) {
       constmem_values.lds_stage_tile_bytes = fittable_tile_bytes;
@@ -100,12 +96,13 @@ void init_constant_memory(void) {
             "disabled. Set ROCSHMEM_LDS_STAGE_TILE_BYTES explicitly to override.",
             max_shared_mem_per_block, reserve_bytes);
       } else {
-        LOG_INFO("LDS-staged copy tile size auto-sized to %u bytes (device max shared mem/block: %d)",
-                 constmem_values.lds_stage_tile_bytes, max_shared_mem_per_block);
+        LOG_INFO(
+            "LDS-staged copy tile size auto-sized to %u bytes (device max shared mem/block: %d)",
+            constmem_values.lds_stage_tile_bytes, max_shared_mem_per_block);
       }
     } else {
       const uint32_t aligned_tile_bytes = constmem_values.lds_stage_tile_bytes -
-                                           (constmem_values.lds_stage_tile_bytes % element_bytes);
+                                          (constmem_values.lds_stage_tile_bytes % element_bytes);
       if (aligned_tile_bytes != constmem_values.lds_stage_tile_bytes) {
         LOG_WARN(
             "ROCSHMEM_LDS_STAGE_TILE_BYTES=%u is not a multiple of the %u-byte "
@@ -171,23 +168,27 @@ extern "C" void rocshmem_gin_init_constmem(int provider, int rank) {
   // Initialize constmem.gda_provider for QP device dispatch
   GDAProvider gda_prov = static_cast<GDAProvider>(provider);
   constmem_t* cm_addr{nullptr};
-  if (hipGetSymbolAddress(reinterpret_cast<void**>(&cm_addr),
-                          HIP_SYMBOL(constmem)) == hipSuccess) {
+  if (hipGetSymbolAddress(reinterpret_cast<void**>(&cm_addr), HIP_SYMBOL(constmem)) == hipSuccess) {
     CHECK_HIP(hipMemcpy(&cm_addr->gda_provider, &gda_prov, sizeof(gda_prov), hipMemcpyDefault));
   }
 
   // Initialize logd_constants for device-side error reporting
-  log_pe_number = rank;
+  log_pe_number      = rank;
   uint32_t log_flags = 0;
-  if (envvar::log_flags.show_error) log_flags |= logd_constants::SHOW_ERROR;
-  if (envvar::log_flags.show_warn)  log_flags |= logd_constants::SHOW_WARN;
-  if (envvar::log_flags.show_info)  log_flags |= logd_constants::SHOW_INFO;
-  if (envvar::log_flags.show_trace) log_flags |= logd_constants::SHOW_TRACE;
-  if (envvar::log_flags.show_color) log_flags |= logd_constants::SHOW_COLOR;
+  if (envvar::log_flags.show_error)
+    log_flags |= logd_constants::SHOW_ERROR;
+  if (envvar::log_flags.show_warn)
+    log_flags |= logd_constants::SHOW_WARN;
+  if (envvar::log_flags.show_info)
+    log_flags |= logd_constants::SHOW_INFO;
+  if (envvar::log_flags.show_trace)
+    log_flags |= logd_constants::SHOW_TRACE;
+  if (envvar::log_flags.show_color)
+    log_flags |= logd_constants::SHOW_COLOR;
   struct logd_constants host_logd{rank, log_flags};
   struct logd_constants* logd_addr{nullptr};
-  if (hipGetSymbolAddress(reinterpret_cast<void**>(&logd_addr),
-                          HIP_SYMBOL(logd_constants)) == hipSuccess) {
+  if (hipGetSymbolAddress(reinterpret_cast<void**>(&logd_addr), HIP_SYMBOL(logd_constants)) ==
+      hipSuccess) {
     CHECK_HIP(hipMemcpy(logd_addr, &host_logd, sizeof(host_logd), hipMemcpyDefault));
   }
 }

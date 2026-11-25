@@ -34,8 +34,7 @@ class BufferRegisterSymmetricTester : public Tester {
 
  protected:
   void resetBuffers(uint64_t size) override;
-  void launchKernel(dim3 gridSize, dim3 blockSize, int loop,
-                    uint64_t size) override;
+  void launchKernel(dim3 gridSize, dim3 blockSize, int loop, uint64_t size) override;
   void verifyResults(uint64_t size) override;
 
  private:
@@ -44,9 +43,9 @@ class BufferRegisterSymmetricTester : public Tester {
 
   bool skip_{false};
   bool pass_{true};
-  void *original_{nullptr};
-  unsigned char *alias_{nullptr};
-  unsigned char *source_{nullptr};
+  void* original_{nullptr};
+  unsigned char* alias_{nullptr};
+  unsigned char* source_{nullptr};
   size_t allocation_size_{0};
   size_t worker_count_{0};
 #if HIP_VERSION >= 70200000
