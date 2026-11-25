@@ -770,17 +770,17 @@ add_custom_target(rocrtst_links ALL DEPENDS ${ROCRTST_LINKS_LIST} )
 # This works for SHARED IMPORTED targets (numa) found via pkg-config
 set_target_properties(${ROCRTST} PROPERTIES
   LINK_FLAGS "-Wl,--enable-new-dtags"
-  INSTALL_RPATH "$ORIGIN/lib;$ORIGIN/../rocm_sysdeps/lib;$ORIGIN/../../lib"
+  INSTALL_RPATH "$ORIGIN/../lib/rocrtst/lib;$ORIGIN/../lib/rocm_sysdeps/lib"
   BUILD_RPATH "$ORIGIN/../../dist/lib/rocm_sysdeps/lib;$ORIGIN/../lib/rocrtst/lib"
 )
 
 install(TARGETS ${ROCRTST}
-        ARCHIVE DESTINATION lib/rocrtst
-        LIBRARY DESTINATION lib/rocrtst
-        RUNTIME DESTINATION lib/rocrtst)
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        RUNTIME DESTINATION bin)
 
 install(TARGETS intercept_queue_logic_test
-        RUNTIME DESTINATION lib/rocrtst)
+        RUNTIME DESTINATION bin)
 
 # Install platform configuration file
 install(FILES ${ROCRTST_ROOT}/config/platform_config.yaml
