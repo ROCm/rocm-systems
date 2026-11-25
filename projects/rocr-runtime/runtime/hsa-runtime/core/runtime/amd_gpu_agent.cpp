@@ -1238,6 +1238,7 @@ hsa_status_t GpuAgent::PostToolsInit() {
   InitAllocators();
   InitScratchPool();
   BindTrapHandler();
+  BindXnack();
   InitDma();
 
   const auto& flag = core::Runtime::runtime_singleton_->flag();
@@ -3680,6 +3681,22 @@ void GpuAgent::BindTrapHandler() {
   [[maybe_unused]] hsa_status_t trap_err =
       driver().SetTrapHandler(node_id(), trap_code_buf_, trap_code_buf_size_, tma_addr, tma_size);
   assert(trap_err == HSA_STATUS_SUCCESS && "SetTrapHandler() failed");
+}
+
+void GpuAgent::BindXnack() {
+  // The XNACK mode decision lives in the driver's BindXnackMode() (run during
+  // driver Init, before the topology snapshot); it sets Runtime::XnackEnabled().
+  // Here we apply that decision to the kernel on the DRM/UKI path, which selects
+  // XNACK per-GPUVM and so needs this node's render device and to run before any
+  // queue is created on it. The kernel op is enable-only, so there is nothing to
+  // do when XNACK is off. On the KFD path driver().SetXnackMode() is a no-op.
+  if (!core::Runtime::runtime_singleton_->XnackEnabled())
+    return;
+
+  // Best-effort: a failure here (e.g. a kernel without the opcode) leaves the
+  // GPUVM in default XNACK- and is already logged by the driver; do not fail
+  // agent init over it.
+  driver().SetXnackMode(node_id(), true);
 }
 
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {

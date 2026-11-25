@@ -20,6 +20,16 @@
 #include "core/inc/amd_gpu_agent.h"
 #include "core/inc/exceptions.h"
 
+// TODO(AILIROCR-565): temporary fallback. Remove once the vendored
+// hsakmt/drm/amdgpu_drm.h is synced to the UKI kernel, which defines this
+// opcode (VM op 3, "xnack control"). The #ifndef makes this a no-op once the
+// synced header provides it. NOTE: the current vendored header uses VM op 3 for
+// AMDGPU_VM_OP_GL2_PERSISTING_L2_CACHE -- the op-3 collision is tracked
+// separately for kernel/header reconciliation.
+#ifndef AMDGPU_VM_OP_STALLING_FAULT
+#define AMDGPU_VM_OP_STALLING_FAULT 3
+#endif
+
 namespace rocr {
 namespace AMD {
 
@@ -112,6 +122,19 @@ int DrmCwsrSetL2Trap(amdgpu_device_handle dev, uint64_t tba_va, uint32_t tba_sz,
   args.in.l2trap.tma_va = tma_va;
   args.in.l2trap.tma_sz = tma_sz;
   return drmIoctl(amdgpu_device_get_fd(dev), DRM_IOCTL_AMDGPU_CWSR, &args);
+}
+
+// Enable XNACK+ (recoverable page faults) for this device's render GPUVM via the
+// DRM VM ioctl. The kernel op is an enable-only latch (no flags, no disable): it
+// waits for the VM to be idle, then switches it into XNACK+ mode. Must be issued
+// before any queue is created on the VM. Returns 0 on success, or -1 with errno
+// set (drmIoctl semantics).
+int DrmVmSetStallingFault(amdgpu_device_handle dev) {
+  if (dev == nullptr) return -EINVAL;
+  union drm_amdgpu_vm args;
+  memset(&args, 0, sizeof(args));
+  args.in.op = AMDGPU_VM_OP_STALLING_FAULT;
+  return drmIoctl(amdgpu_device_get_fd(dev), DRM_IOCTL_AMDGPU_VM, &args);
 }
 
 int DrmQueryInfo(amdgpu_device_handle dev, uint32_t query, uint32_t hw_ip_type,
@@ -636,6 +659,30 @@ hsa_status_t DrmDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
     return HSA_STATUS_SUCCESS;
   }
   debug_print("DrmCwsrSetL2Trap failed: %d (errno %d)\n", result, err);
+  return HSA_STATUS_ERROR;
+}
+
+hsa_status_t DrmDriver::SetXnackMode(uint32_t node_id, bool enable) const {
+  // Enable-only latch: XNACK- is the default, so there is nothing to issue when
+  // the requested mode is XNACK-.
+  if (!enable) return HSA_STATUS_SUCCESS;
+
+  core::Agent* agent = core::Runtime::runtime_singleton_->agent_by_nodeid(node_id);
+  if (agent == nullptr || agent->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+  GpuAgent* gpuAgent = static_cast<GpuAgent*>(agent);
+  amdgpu_device_handle dev = gpuAgent->libDrmDev();
+
+  if (DrmVmSetStallingFault(dev) == 0) return HSA_STATUS_SUCCESS;
+
+  // Non-fatal: a kernel that lacks the opcode (older UKI/dev kernel) leaves the
+  // VM in default XNACK-. Surface it once and continue rather than failing agent
+  // init -- XNACK selection is a best-effort, kernel-dependent feature.
+  const int err = errno;
+  debug_print("DrmDriver::SetXnackMode: DRM_IOCTL_AMDGPU_VM STALLING_FAULT on node %u "
+              "failed (errno %d); GPUVM stays in default XNACK- mode\n",
+              node_id, err);
   return HSA_STATUS_ERROR;
 }
 

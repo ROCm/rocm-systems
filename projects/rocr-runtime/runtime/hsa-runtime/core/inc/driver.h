@@ -451,6 +451,17 @@ public:
     return HSA_STATUS_ERROR;
   }
 
+  /// @brief Select the XNACK (recoverable GPU page-fault) mode for a node's GPUVM.
+  ///
+  /// On the DRM/UKI path, @p enable == true issues AMDGPU_VM_OP_STALLING_FAULT on
+  /// the node's render VM to switch it into XNACK+ mode; the kernel op is an
+  /// enable-only latch, so @p enable == false is a no-op (default XNACK-). Must be
+  /// called before any queue is created on the node. The default (KFD path) is a
+  /// no-op: the KFD driver selects XNACK globally during BindXnackMode().
+  virtual hsa_status_t SetXnackMode(uint32_t /*node_id*/, bool /*enable*/) const {
+    return HSA_STATUS_SUCCESS;
+  }
+
   /// @brief Gets the device handle for a specific node.
   /// @param node_id Node ID of the agent
   /// @param device_handle Device handle
