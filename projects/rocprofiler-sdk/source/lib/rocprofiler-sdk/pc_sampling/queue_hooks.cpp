@@ -62,6 +62,8 @@ kernel_dispatch_phase_exit_hook(const ::rocprofiler::hsa::Queue*              qu
     CHECK(queue);
     const auto* agent = queue->get_agent().get_rocp_agent();
     CHECK(agent);
+    // A marker injected while the session was active owns a CID reference even if a concurrent
+    // context stop has since suspended sampling. Always retire it while the session exists.
     if(!is_pc_sample_service_configured(agent->id)) return;
     hsa::kernel_completion_cb(agent, kernel_packet, *session);
 #else

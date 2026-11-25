@@ -131,15 +131,16 @@ varies:
 * Kernel dispatch tracing and dispatch thread trace observe a local *stop* only: they skip a
   dispatch whose context is forced off, but cannot be added to a context that is not already
   collecting.
-* PC sampling is agent-wide and device counting is not dispatch-scoped, so neither consults the
-  override. A toggle naming such a context reports success and has no effect.
+* PC sampling is agent-wide. After PASS ``PHASE_ENTER``, the SDK applies its override by stopping
+  or starting the replay agent's ROCr session before submitting the pass. The stop includes a
+  buffer flush. Device counting remains agent-wide and does not consult the override.
 
-Because PC sampling ignores the override, it cannot be isolated from dispatch counters by putting
-them on separate passes, and the two must not be combined under replay: on MI2xx and MI3xx,
-collecting them together hits the documented clock-gating conflict. ``rocprofv3`` does not expose
-SPM or PC sampling together with kernel replay — that requires a custom tool. Do not call the global
-``rocprofiler_start_context`` / ``rocprofiler_stop_context`` from inside the replay loop: that would
-leak into non-replayed dispatches.
+PC sampling and dispatch counters must still not collect on the same pass: on MI2xx and MI3xx,
+collecting them together hits the documented clock-gating conflict. A custom tool can put them on
+separate passes by keeping both contexts globally started and locally stopping one before starting
+the other. ``rocprofv3`` does not expose SPM or PC sampling together with kernel replay. Do not call
+the global ``rocprofiler_start_context`` / ``rocprofiler_stop_context`` from inside the replay loop:
+that would leak into non-replayed dispatches.
 
 Doxygen
 -------

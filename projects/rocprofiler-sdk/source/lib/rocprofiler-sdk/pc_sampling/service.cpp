@@ -27,17 +27,91 @@
 
 #    include "lib/common/logging.hpp"
 #    include "lib/common/static_object.hpp"
+#    include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 #    include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #    include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
 #    include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
 
+#    include <condition_variable>
+#    include <mutex>
 #    include <optional>
+#    include <thread>
 
 namespace rocprofiler
 {
 namespace pc_sampling
 {
 using hsa_initialized_t = std::atomic<bool>;
+
+namespace
+{
+using session_ptr_t = std::shared_ptr<PCSAgentSession>;
+
+session_ptr_t
+get_agent_session_shared(rocprofiler_agent_id_t agent_id)
+{
+    return get_global_pc_sampling_sessions().rlock(
+        [agent_id](const auto& sessions) -> session_ptr_t {
+            if(auto it = sessions.find(agent_id); it != sessions.end()) return it->second;
+            return {};
+        });
+}
+
+rocprofiler_status_t
+set_session_active(const session_ptr_t& session, bool active)
+{
+    if(!session) return ROCPROFILER_STATUS_SUCCESS;
+
+    const bool requested  = active;
+    auto       state_lock = std::unique_lock{session->state_mutex};
+    for(;;)
+    {
+        // Read the suspension under the lock. A global start that stalled before taking the
+        // lock must observe a suspension the replay loop already published.
+        const bool effective = requested && !session->replay_suspended.load();
+        if(session->transition_in_progress)
+        {
+            // A tool callback on this thread is inside the ROCr start/stop we are running.
+            // Waiting here deadlocks. An independent caller waits for the real outcome.
+            if(session->transition_owner == std::this_thread::get_id())
+                return ROCPROFILER_STATUS_ERROR;
+            session->state_cv.wait(state_lock, [&]() { return !session->transition_in_progress; });
+            continue;
+        }
+        if(session->active.load() == effective) return ROCPROFILER_STATUS_SUCCESS;
+
+        session->transition_in_progress = true;
+        session->transition_target      = effective;
+        session->transition_owner       = std::this_thread::get_id();
+        state_lock.unlock();
+
+        // Do not hold state_mutex across ROCr calls. Stopping flushes samples and can invoke a
+        // tool buffer callback.
+        auto       transitioned = false;
+        const auto status       = effective ? hsa::pc_sampling_session_start(session.get())
+                                            : hsa::pc_sampling_session_stop(session.get(), &transitioned);
+        if(effective) transitioned = status == ROCPROFILER_STATUS_SUCCESS;
+        state_lock.lock();
+        if(transitioned) session->active.store(effective);
+        session->transition_in_progress = false;
+        session->transition_owner       = {};
+        session->state_cv.notify_all();
+        return status;
+    }
+}
+
+rocprofiler_status_t
+set_service_sessions_active(const context::pc_sampling_service* service, bool active)
+{
+    auto status = ROCPROFILER_STATUS_SUCCESS;
+    for(const auto& [_, session] : service->agent_sessions)
+    {
+        const auto session_status = set_session_active(session, active);
+        if(session_status != ROCPROFILER_STATUS_SUCCESS) status = session_status;
+    }
+    return status;
+}
+}  // namespace
 
 hsa_initialized_t&
 is_hsa_initialized()
@@ -70,7 +144,13 @@ start_service(const context::context* ctx)
 
     if(is_hsa_initialized().load())
     {
-        hsa::pc_sampling_service_start(service);
+        const auto status = set_service_sessions_active(service, true);
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            service->enabled.store(false);
+            set_service_sessions_active(service, false);
+        }
+        return status;
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -92,7 +172,13 @@ stop_service(const context::context* ctx)
 
     if(is_hsa_initialized().load())
     {
-        hsa::pc_sampling_service_stop(service);
+        const auto status = set_service_sessions_active(service, false);
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            service->enabled.store(true);
+            set_service_sessions_active(service, true);
+        }
+        return status;
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -138,7 +224,9 @@ post_hsa_init_start_active_service()
         {
             if(service->enabled.load())
             {
-                hsa::pc_sampling_service_start(service);
+                const auto status = set_service_sessions_active(service, true);
+                ROCP_FATAL_IF(status != ROCPROFILER_STATUS_SUCCESS)
+                    << "Failed to start PC sampling after HSA initialization";
             }
         }
     });
@@ -233,6 +321,40 @@ is_pc_sample_service_configured(rocprofiler_agent_id_t agent_id)
         // then the PC sampling service is configured on this agent.
         return sessions.find(agent_id) != sessions.end();
     });
+}
+
+bool
+is_pc_sample_service_requested(const context::context* ctx)
+{
+    if(!ctx || !ctx->pc_sampler || !ctx->pc_sampler->enabled.load()) return false;
+    if(auto override = kernel_replay::local_context_override({.handle = ctx->context_idx}))
+        return *override;
+    return true;
+}
+
+rocprofiler_status_t
+sync_replay_service(rocprofiler_agent_id_t agent_id)
+{
+    const auto session = get_agent_session_shared(agent_id);
+    if(!session) return ROCPROFILER_STATUS_SUCCESS;
+
+    const auto* ctx = context::get_registered_context(session->context_id);
+    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+    const auto requested = is_pc_sample_service_requested(ctx);
+    session->replay_suspended.store(!requested);
+    return set_session_active(session, requested);
+}
+
+rocprofiler_status_t
+restore_replay_service(rocprofiler_agent_id_t agent_id)
+{
+    const auto session = get_agent_session_shared(agent_id);
+    if(!session) return ROCPROFILER_STATUS_SUCCESS;
+
+    const auto* ctx = context::get_registered_context(session->context_id);
+    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+    session->replay_suspended.store(false);
+    return set_session_active(session, ctx->pc_sampler && ctx->pc_sampler->enabled.load());
 }
 
 PCSAgentSession*

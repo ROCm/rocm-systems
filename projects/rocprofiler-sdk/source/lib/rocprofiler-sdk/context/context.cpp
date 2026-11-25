@@ -650,7 +650,28 @@ start_context(rocprofiler_context_id_t context_id)
 
     if(cfg->device_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-    if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
+    if(status == ROCPROFILER_STATUS_SUCCESS && cfg->pc_sampler)
+        status = rocprofiler::pc_sampling::start_service(cfg);
+    if(status != ROCPROFILER_STATUS_SUCCESS && cfg->pc_sampler)
+    {
+        // start_service already rolled its own enabled flag back. Drop the active slot so a
+        // later rocprofiler_start_context() retries the hardware start instead of taking the
+        // already-active shortcut.
+        if(cfg->dispatch_counter_collection)
+            rocprofiler::counters::stop_context(const_cast<context*>(cfg));
+        if(cfg->dispatch_spm) rocprofiler::spm::stop_context(const_cast<context*>(cfg));
+        if(cfg->device_thread_trace) cfg->device_thread_trace->stop_context();
+        if(cfg->dispatch_thread_trace) cfg->dispatch_thread_trace->stop_context();
+        const context* published = cfg;
+        if(active_contexts.at(idx).compare_exchange_strong(published, nullptr))
+        {
+            auto nactive = get_num_active_contexts().load(std::memory_order_acquire);
+            if(nactive > 0) get_num_active_contexts().fetch_sub(1, std::memory_order_release);
+        }
+        rocprofiler::hsa::queue_interposition::notify_queue_interposition_consumer_context_stopped(
+            cfg);
+        return status;
+    }
 #endif
     if(cfg->device_spm) status = rocprofiler::SPM::spm_start_agent_ctx(cfg);
 
@@ -763,7 +784,16 @@ stop_context(rocprofiler_context_id_t idx)
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     if(_expected->pc_sampler)
     {
-        rocprofiler::pc_sampling::stop_service(_expected);
+        const auto pcs_status = rocprofiler::pc_sampling::stop_service(_expected);
+        if(pcs_status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            // stop_service re-enabled sampling, but phase three already cleared this slot.
+            // Put it back so a later stop can find the context and retry the drain.
+            const context* empty = nullptr;
+            if(slot->compare_exchange_strong(empty, _expected))
+                get_num_active_contexts().fetch_add(1, std::memory_order_release);
+            return pcs_status;
+        }
     }
 #endif
 
