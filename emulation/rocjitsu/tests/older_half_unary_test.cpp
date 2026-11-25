@@ -1,0 +1,373 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// Half-unary arithmetic, guest controls and register layouts across migrated profiles.
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fract.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/transcendental.h"
+#include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/execution_backend.h"
+#include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
+#include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/data_types.h"
+#include "util/simd.h"
+#include <array>
+#include <cmath>
+#include <gtest/gtest.h>
+#include <initializer_list>
+
+namespace rocjitsu::amdgpu {
+namespace {
+// Retain the existing scalar result model, independently of the new dispatch and storage path.
+TEST(OlderHalfUnary, Arithmetic) {
+  struct Family {
+    rocjitsu::IsaFamily arch;
+    const IsaExecutionBackend *backend;
+    struct Operation {
+      int model;
+      uint16_t vop1, vop3;
+    };
+    std::initializer_list<Operation> operations;
+  };
+  // The inherited scalar reference covers the unary family; these rows select
+  // only the instructions migrated in this branch and its prerequisites.
+  const Family families[] = {
+      {rocjitsu::IsaFamily::Cdna1,
+       &cdna1::execution_backend(),
+       {
+           {0, cdna1::kVTruncF16Vop1, cdna1::kVTruncF16Vop3},
+           {1, cdna1::kVCeilF16Vop1, cdna1::kVCeilF16Vop3},
+           {2, cdna1::kVRndneF16Vop1, cdna1::kVRndneF16Vop3},
+           {3, cdna1::kVFloorF16Vop1, cdna1::kVFloorF16Vop3},
+           {4, cdna1::kVFrexpMantF16Vop1, cdna1::kVFrexpMantF16Vop3},
+           {5, cdna1::kVFrexpExpI16F16Vop1, cdna1::kVFrexpExpI16F16Vop3},
+           {13, cdna1::kVFractF16Vop1, cdna1::kVFractF16Vop3},
+       }},
+      {rocjitsu::IsaFamily::Cdna2,
+       &cdna2::execution_backend(),
+       {
+           {0, cdna2::kVTruncF16Vop1, cdna2::kVTruncF16Vop3},
+           {1, cdna2::kVCeilF16Vop1, cdna2::kVCeilF16Vop3},
+           {2, cdna2::kVRndneF16Vop1, cdna2::kVRndneF16Vop3},
+           {3, cdna2::kVFloorF16Vop1, cdna2::kVFloorF16Vop3},
+           {4, cdna2::kVFrexpMantF16Vop1, cdna2::kVFrexpMantF16Vop3},
+           {5, cdna2::kVFrexpExpI16F16Vop1, cdna2::kVFrexpExpI16F16Vop3},
+           {13, cdna2::kVFractF16Vop1, cdna2::kVFractF16Vop3},
+       }},
+      {rocjitsu::IsaFamily::Cdna3,
+       &cdna3::execution_backend(),
+       {
+           {0, cdna3::kVTruncF16Vop1, cdna3::kVTruncF16Vop3},
+           {1, cdna3::kVCeilF16Vop1, cdna3::kVCeilF16Vop3},
+           {2, cdna3::kVRndneF16Vop1, cdna3::kVRndneF16Vop3},
+           {3, cdna3::kVFloorF16Vop1, cdna3::kVFloorF16Vop3},
+           {4, cdna3::kVFrexpMantF16Vop1, cdna3::kVFrexpMantF16Vop3},
+           {5, cdna3::kVFrexpExpI16F16Vop1, cdna3::kVFrexpExpI16F16Vop3},
+           {13, cdna3::kVFractF16Vop1, cdna3::kVFractF16Vop3},
+       }},
+      {rocjitsu::IsaFamily::Cdna4,
+       &cdna4::execution_backend(),
+       {
+           {0, cdna4::kVTruncF16Vop1, cdna4::kVTruncF16Vop3},
+           {1, cdna4::kVCeilF16Vop1, cdna4::kVCeilF16Vop3},
+           {2, cdna4::kVRndneF16Vop1, cdna4::kVRndneF16Vop3},
+           {3, cdna4::kVFloorF16Vop1, cdna4::kVFloorF16Vop3},
+           {4, cdna4::kVFrexpMantF16Vop1, cdna4::kVFrexpMantF16Vop3},
+           {5, cdna4::kVFrexpExpI16F16Vop1, cdna4::kVFrexpExpI16F16Vop3},
+           {13, cdna4::kVFractF16Vop1, cdna4::kVFractF16Vop3},
+       }},
+      {rocjitsu::IsaFamily::Rdna1,
+       &rdna1::execution_backend(),
+       {
+           {0, rdna1::kVTruncF16Vop1, rdna1::kVTruncF16Vop3},
+           {1, rdna1::kVCeilF16Vop1, rdna1::kVCeilF16Vop3},
+           {2, rdna1::kVRndneF16Vop1, rdna1::kVRndneF16Vop3},
+           {3, rdna1::kVFloorF16Vop1, rdna1::kVFloorF16Vop3},
+           {4, rdna1::kVFrexpMantF16Vop1, rdna1::kVFrexpMantF16Vop3},
+           {5, rdna1::kVFrexpExpI16F16Vop1, rdna1::kVFrexpExpI16F16Vop3},
+           {13, rdna1::kVFractF16Vop1, rdna1::kVFractF16Vop3},
+       }},
+      {rocjitsu::IsaFamily::Rdna2,
+       &rdna2::execution_backend(),
+       {
+           {0, rdna2::kVTruncF16Vop1, rdna2::kVTruncF16Vop3},
+           {1, rdna2::kVCeilF16Vop1, rdna2::kVCeilF16Vop3},
+           {2, rdna2::kVRndneF16Vop1, rdna2::kVRndneF16Vop3},
+           {3, rdna2::kVFloorF16Vop1, rdna2::kVFloorF16Vop3},
+           {4, rdna2::kVFrexpMantF16Vop1, rdna2::kVFrexpMantF16Vop3},
+           {5, rdna2::kVFrexpExpI16F16Vop1, rdna2::kVFrexpExpI16F16Vop3},
+           {13, rdna2::kVFractF16Vop1, rdna2::kVFractF16Vop3},
+       }},
+      {rocjitsu::IsaFamily::Rdna3_5,
+       &rdna3_5::execution_backend(),
+       {
+           {0, rdna3_5::kVTruncF16Vop1, rdna3_5::kVTruncF16Vop3},
+           {1, rdna3_5::kVCeilF16Vop1, rdna3_5::kVCeilF16Vop3},
+           {2, rdna3_5::kVRndneF16Vop1, rdna3_5::kVRndneF16Vop3},
+           {3, rdna3_5::kVFloorF16Vop1, rdna3_5::kVFloorF16Vop3},
+           {4, rdna3_5::kVFrexpMantF16Vop1, rdna3_5::kVFrexpMantF16Vop3},
+           {5, rdna3_5::kVFrexpExpI16F16Vop1, rdna3_5::kVFrexpExpI16F16Vop3},
+           {13, rdna3_5::kVFractF16Vop1, rdna3_5::kVFractF16Vop3},
+       }},
+      {rocjitsu::IsaFamily::Cdna5,
+       &cdna5::execution_backend(),
+       {
+           {0, cdna5::kVTruncF16Vop1, cdna5::kVTruncF16Vop3},
+           {1, cdna5::kVCeilF16Vop1, cdna5::kVCeilF16Vop3},
+           {2, cdna5::kVRndneF16Vop1, cdna5::kVRndneF16Vop3},
+           {3, cdna5::kVFloorF16Vop1, cdna5::kVFloorF16Vop3},
+           {4, cdna5::kVFrexpMantF16Vop1, cdna5::kVFrexpMantF16Vop3},
+           {5, cdna5::kVFrexpExpI16F16Vop1, cdna5::kVFrexpExpI16F16Vop3},
+           {13, cdna5::kVFractF16Vop1, cdna5::kVFractF16Vop3},
+       }},
+  };
+  const uint16_t values[] = {0x3e00, 0xbe00, 0xb401, 0xc100, 0x8001,
+                             1,      0x7d23, 0xfc00, 0x7bff, 0xfbff};
+  enum class Form { Vop1, Vop3, Sdwa, Dpp, SuppressedDpp, Dpp8 };
+  struct Scenario {
+    Form form;
+    uint32_t mode;
+    unsigned omod;
+    bool clamp, high, abs, neg;
+  };
+  const Scenario scenarios[] = {
+      {Form::Vop1, 0, 0, false, false, false, false},
+      {Form::Vop1, 0xf0, 0, false, false, false, false},
+      {Form::Vop1, 0xf0, 0, false, true, false, false},
+      // FRACT(0xb401): nearest/upward -> 0x3a00, downward/zero -> 0x39ff.
+      {Form::Vop3, 0xf0, 0, false, false, false, false},
+      {Form::Vop3, 0xf4, 0, false, false, false, false},
+      {Form::Vop3, 0xf8, 0, false, false, false, false},
+      {Form::Vop3, 0xfc, 0, false, false, false, false},
+      {Form::Vop3, 0, 1, false, false, false, false},
+      {Form::Vop3, 4, 2, false, false, false, false},
+      {Form::Vop3, 12, 1, false, false, false, false},
+      {Form::Vop3, 0x800000, 2, false, false, false, false},
+      {Form::Vop3, 0x200, 1, false, false, false, false},
+      {Form::Vop3, 0x80, 1, false, false, false, false},
+      {Form::Vop3, 8, 3, false, false, false, false},
+      {Form::Vop3, 0, 0, true, false, false, false},
+      {Form::Vop3, 0x100, 0, true, false, false, false},
+      {Form::Vop3, 0xf0, 0, false, true, false, false},
+      {Form::Vop3, 0, 0, false, false, true, true},
+      {Form::Sdwa, 0, 1, false, true, false, false},
+      {Form::Dpp, 0xf0, 0, false, false, false, false},
+      {Form::Dpp, 0xf0, 0, false, true, false, false},
+      {Form::Dpp8, 0xf0, 0, false, true, false, false},
+      {Form::SuppressedDpp, 0xf0, 0, false, false, false, false},
+  };
+  const auto evaluate = [](int op, float x) {
+    switch (op) {
+    case 0:
+      return util::trunc_scalar(x);
+    case 1:
+      return util::ceil_scalar(x);
+    case 2:
+      return util::rndne_scalar(x);
+    case 3:
+      return util::floor_scalar(x);
+    default:
+      return frexp_f32(x, 3).mantissa;
+    }
+  };
+  for (const auto &family : families) {
+    ScopedIsaExecutionBackend backend(family.backend);
+    const bool cdna =
+        family.arch == rocjitsu::IsaFamily::Cdna1 || family.arch == rocjitsu::IsaFamily::Cdna2 ||
+        family.arch == rocjitsu::IsaFamily::Cdna3 || family.arch == rocjitsu::IsaFamily::Cdna4;
+    const bool gfx1250 = family.arch == rocjitsu::IsaFamily::Cdna5;
+    const bool true16 = cdna || gfx1250 || family.arch == rocjitsu::IsaFamily::Rdna3_5;
+    for (int lanes : {32, 64}) {
+      if ((cdna && lanes == 32) || (gfx1250 && lanes == 64)) {
+        continue;
+      }
+      for (auto semantics : {ArithmeticSemantics::Compatibility, ArithmeticSemantics::Loose}) {
+        ComputeUnitCore::Config config{};
+        config.arch = family.arch;
+        config.arithmetic = {semantics};
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 104;
+        config.vgprs_per_wf = 8;
+        config.lds_size_kb = 64;
+        GpuMemory memory("half_round_memory");
+        L2Cache cache("half_round_cache");
+        auto cu = ComputeUnitCore::create("half_round", config, &memory, &cache);
+        auto *wave = cu->dispatch_wf(0, 0, 104, 8, lanes);
+        ASSERT_NE(wave, nullptr);
+        auto decoder = Decoder::create(family.arch);
+        const auto base = wave->vgpr_alloc().base;
+        for (const auto &operation : family.operations) {
+          const int op = operation.model;
+          for (const auto &test : scenarios) {
+            const bool vop3 = test.form == Form::Vop3, sdwa = test.form == Form::Sdwa;
+            const bool dpp8 = test.form == Form::Dpp8;
+            const bool dpp = test.form == Form::Dpp || test.form == Form::SuppressedDpp || dpp8;
+            if ((dpp8 || (test.high && (test.form == Form::Vop1 || dpp))) && !gfx1250) {
+              continue;
+            }
+            if (sdwa && (gfx1250 || family.arch == rocjitsu::IsaFamily::Rdna3_5)) {
+              continue;
+            }
+            const bool high = test.high && (true16 || sdwa);
+            const unsigned omod = test.omod;
+            const bool clamp = test.clamp;
+            wave->set_mode_raw(test.mode);
+            wave->set_exec(dpp ? (lanes == 64 ? ~0ULL : 0xffffffffULL) : 0x80000003800003ffULL);
+            wave->set_vgpr_write_mask(dpp ? 0x80000003800003ffULL : ~0ULL);
+            std::array<uint32_t, 64> original{};
+            for (int lane = 0; lane < lanes; ++lane) {
+              original[lane] =
+                  uint32_t(values[lane % 10]) | (uint32_t(values[(lane + 3) % 10]) << 16);
+              cu->write_vgpr(base, lane, original[lane]);
+            }
+            std::array<uint32_t, 2> words =
+                vop3
+                    ? std::array<uint32_t, 2>{(cdna ? 0xd0000000U : 0xd4000000U) |
+                                                  (uint32_t(operation.vop3) << 16) |
+                                                  (high ? 9U << 11 : 0U) | (clamp ? 1U << 15 : 0U) |
+                                                  (test.abs ? 1U << 8 : 0U),
+                                              256U | (omod << 27) | (test.neg ? 1U << 29 : 0U)}
+                    : std::array<uint32_t, 2>{0x7e000000U | (uint32_t(operation.vop1) << 9) | 256U,
+                                              0};
+            if (sdwa) {
+              // llvm-mc: WORD_1 source/destination, preserve unused half, mul:2.
+              words = {0x7e000000U | (uint32_t(operation.vop1) << 9) | 249U, 0x00055500U};
+            } else if (dpp) {
+              // quad_perm:[1,0,3,2]; the second form suppresses every destination row.
+              words = {0x7e000000U | (uint32_t(operation.vop1) << 9) | 250U,
+                       test.form == Form::SuppressedDpp ? 0x0f00b100U : 0xff00b100U};
+            }
+            if (gfx1250 && !vop3) {
+              // e32 true16 puts the half selector in each VGPR index's bit7.
+              if (high) {
+                words[0] |= 0x80U << 17;
+                if (!dpp) {
+                  words[0] |= 0x80U;
+                } else {
+                  words[1] |= 0x80U;
+                }
+              }
+              if (dpp8) {
+                uint32_t selectors = 0;
+                for (int i = 0; i < 8; ++i) {
+                  selectors |= uint32_t(i ^ 1) << (3 * i);
+                }
+                words[0] = (words[0] & ~0x1ffU) | SRC_DPP8_FI_1;
+                words[1] = (high ? 0x80U : 0U) | (selectors << 8);
+              }
+            }
+            auto decoded = decoder->decode_window(words);
+            ASSERT_TRUE(decoded.succeeded());
+            ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+            for (int lane = 0; lane < lanes; ++lane) {
+              uint32_t expected = original[lane];
+              const bool written = test.form != Form::SuppressedDpp &&
+                                   (((wave->exec() & wave->vgpr_write_mask()) >> lane) & 1);
+              if (written) {
+                uint16_t input = uint16_t(original[dpp ? lane ^ 1 : lane] >> (high ? 16 : 0));
+                if (test.abs) {
+                  input &= 0x7fff;
+                }
+                if (test.neg) {
+                  input ^= 0x8000;
+                }
+                if ((op == 1 || op == 3 || op >= 4) && !(wave->fp_denorm_mode_f16_f64() & 1) &&
+                    (input & 0x7fff) < 0x400) {
+                  input &= 0x8000;
+                }
+                uint32_t result;
+                if (op == 5) {
+                  const float x = util::f16_to_f32(input);
+                  int exponent = 0;
+                  if (x != 0 && std::isfinite(x)) {
+                    std::frexp(x, &exponent);
+                  }
+                  result = uint16_t(exponent);
+                } else if (op == 13) {
+                  result = output_modifier::apply<fp_format::F16>(
+                      fract::evaluate<fp_format::F16>(
+                          uint32_t(input), fract::Policy::make(wave->fp_denorm_mode_f16_f64(),
+                                                               wave->fp_round_mode_f16_f64())),
+                      output_modifier_policy<fp_format::F16>(*wave, omod, clamp));
+                  if (input == 0xb401 && (test.mode & 0xf0) == 0xf0 && !omod && !clamp) {
+                    EXPECT_EQ(result, wave->fp_round_mode_f16_f64() < 2 ? 0x3a00U : 0x39ffU);
+                  }
+                } else if (op >= 6) {
+                  const float x = util::f16_to_f32(input);
+                  const uint32_t denorm = wave->fp_denorm_mode_f16_f64();
+                  const bool ovfl = wave->fp16_ovfl(), quiet = gfx1250 || wave->ieee_mode();
+                  float value =
+                      op == 6 ? transcendental::map_f16<transcendental::HalfOperation::RCP>(
+                                    x, denorm, ovfl, quiet)
+                      : op == 7 ? transcendental::map_f16<transcendental::HalfOperation::RSQ>(
+                                      x, denorm, ovfl, quiet)
+                      : op == 8 ? transcendental::map_f16<transcendental::HalfOperation::SQRT>(
+                                      x, denorm, ovfl, quiet)
+                      : op == 9  ? transcendental::detail::log_exp_f16_nearest<false>(x, denorm,
+                                                                                      ovfl, quiet)
+                      : op == 10 ? transcendental::detail::log_exp_f16_nearest<true>(x, denorm,
+                                                                                     ovfl, quiet)
+                      : op == 11 ? transcendental::map_f16<transcendental::HalfOperation::SIN>(
+                                       x, denorm, ovfl, quiet)
+                                 : transcendental::map_f16<transcendental::HalfOperation::COS>(
+                                       x, denorm, ovfl, quiet);
+                  result = output_modifier::apply<fp_format::F16>(
+                      uint32_t(util::f32_to_f16_mode(value, ovfl)),
+                      transcendental_output_modifier_policy<fp_format::F16>(*wave, omod, clamp));
+                } else {
+                  result = output_modifier::apply<fp_format::F16>(
+                      uint32_t(util::f32_to_f16_mode(evaluate(op, util::f16_to_f32(input)),
+                                                     wave->fp16_ovfl())),
+                      output_modifier_policy<fp_format::F16>(*wave, omod, clamp));
+                }
+                expected = high ? (result << 16) | (original[lane] & 0xffffU)
+                                : (cdna ? 0U : original[lane] & 0xffff0000U) | result;
+              }
+              const uint32_t actual = cu->read_vgpr(base, lane);
+              if (semantics == ArithmeticSemantics::Loose && op != 5 && written) {
+                const uint32_t keep = high ? 0xffffU : 0xffff0000U;
+                EXPECT_EQ(actual & keep, expected & keep);
+                const float got = util::f16_to_f32(uint16_t(actual >> (high ? 16 : 0)));
+                const float want = util::f16_to_f32(uint16_t(expected >> (high ? 16 : 0)));
+                if (std::isnan(want)) {
+                  EXPECT_TRUE(std::isnan(got));
+                } else if (std::isinf(want)) {
+                  EXPECT_EQ(got, want);
+                } else {
+                  EXPECT_LE(std::abs(double(got) - want), 0x1p-24 + 1.1e-3 * std::abs(want));
+                }
+              } else {
+                EXPECT_EQ(actual, expected) << family.arch << ',' << op << ',' << int(test.form)
+                                            << ',' << test.mode << ',' << lane;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+} // namespace
+} // namespace rocjitsu::amdgpu

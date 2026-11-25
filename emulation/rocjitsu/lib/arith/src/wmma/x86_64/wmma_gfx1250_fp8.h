@@ -6,58 +6,76 @@
 #include "common/x86_64/fp8.h"
 #include "wmma/gfx1250_fp8.h"
 #include "wmma/gfx1250_half.h"
+#include "wmma/x86_64/gfx1250_accumulator.h"
+#include "wmma/x86_64/gfx1250_bf8.h"
 #include "wmma/x86_64/gfx1250_reduction.h"
-#include <cstring>
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
+// Canonicalize the four packed E5M2 inputs before exposing them to F16C.
+// All three NaN encodings of a given sign widen to the same quiet NaN.
+inline Gfx1250PackedWords gfx1250_canonicalize_bf8(Gfx1250PackedWords words) {
+  using Bytes [[gnu::vector_size(sizeof(Gfx1250PackedWords))]] = uint8_t;
+  const auto bytes = bit_cast<Bytes>(words);
+  const auto canonical = (bytes & 0x80u) | 0x7eu;
+  return bit_cast<Gfx1250PackedWords>(((bytes & 0x7fu) > 0x7cu) ? canonical : bytes);
+}
+
+template <bool Bf8>
+inline void gfx1250_stage_byte_word(const uint32_t *source, float (*tile)[16], int lane,
+                                    bool nonfinite) {
+  Gfx1250PackedWords word;
+  std::memcpy(&word, source, sizeof(word));
+  if constexpr (Bf8) {
+    if (nonfinite) {
+      word = gfx1250_canonicalize_bf8(word);
+    }
+    for (int part = 0; part < 4; part += 2) {
+      Gfx1250PackedFloat even, odd;
+      gfx1250_widen_bf8_pair(word, even, odd);
+      std::memcpy(tile[part] + lane, &even, sizeof(even));
+      std::memcpy(tile[part + 1] + lane, &odd, sizeof(odd));
+      word >>= 16;
+    }
+  } else {
+    for (int part = 0; part < 4; ++part) {
+#if defined(__AVX512F__)
+      auto value = widen_fp8<false>(bit_cast<__m512i>(word));
+#else
+      auto value = widen_fp8<false>(bit_cast<__m256i>(word));
+#endif
+      std::memcpy(tile[part] + lane, &value, sizeof(value));
+      word >>= 8;
+    }
+  }
+}
 // Stage every source before publication, preserving whole-register operand overlap.
 template <int K, bool Bf8A, bool Bf8B, bool Packed>
 void wmma_gfx1250_fp8_kernel(uint64_t flags, uint64_t controls, uint32_t *const *d,
                              const uint32_t *const *a, const uint32_t *const *b,
                              const uint32_t *const *c) {
   constexpr auto form = Packed ? Wmma1250Form::F16 : Wmma1250Form::F32F16;
-  alignas(64) float rows[16][K], columns[K][16], result[16][16];
-#if defined(__AVX512F__)
-  // Four successive K elements occupy one word in each of 16 adjacent lanes.
-  // Decode B directly across columns, and copy A's four-element row slices.
+  alignas(64) float left[K][16], right[K][16], result[16][16];
+  constexpr int registers = K / 8;
+  constexpr int a_exponent = Bf8A ? 0x7c : 0x7f;
+  constexpr int b_exponent = Bf8B ? 0x7c : 0x7f;
+  const bool nonfinite = gfx1250_has_nonfinite<registers, true, a_exponent, b_exponent>(a, b);
+  // Four successive K elements occupy one word in each of 16 adjacent lanes, which are the
+  // rows of A and the columns of B: widen both directly into left[k][row], right[k][column].
   for (int k = 0; k < K; k += 4) {
     const int byte_index = gfx1250_fp8_index(0, k);
     const int reg = byte_index / 128;
     const int lane = byte_index / 4 % 32;
-    auto right = _mm512_loadu_si512(b[reg] + lane);
-    for (int part = 0; part < 4; ++part) {
-      _mm512_store_ps(columns[k + part], widen_fp8<Bf8B>(right));
-      right = _mm512_srli_epi32(right, 8);
-    }
-    for (int row = 0; row < 16; row += 4) {
-      const auto packed = _mm_loadu_si128(reinterpret_cast<const __m128i *>(a[reg] + lane + row));
-      alignas(64) float values[4][4];
-      _mm512_store_ps(values, widen_fp8<Bf8A>(_mm512_cvtepu8_epi32(packed)));
-      for (int part = 0; part < 4; ++part) {
-        std::memcpy(&rows[row + part][k], values[part], sizeof(values[part]));
-      }
+    constexpr int width = sizeof(Gfx1250PackedFloat) / sizeof(float);
+    for (int offset = 0; offset < 16; offset += width) {
+      gfx1250_stage_byte_word<Bf8A>(a[reg] + lane + offset, left + k, offset, nonfinite);
+      gfx1250_stage_byte_word<Bf8B>(b[reg] + lane + offset, right + k, offset, nonfinite);
     }
   }
-#else
-  alignas(64) float left[16 * K], right[16 * K];
-  for (int i = 0; i < 16 * K; i += 8) {
-    auto x = _mm_loadl_epi64(reinterpret_cast<const __m128i *>(a[i / 128] + i / 4 % 32));
-    auto y = _mm_loadl_epi64(reinterpret_cast<const __m128i *>(b[i / 128] + i / 4 % 32));
-    _mm256_store_ps(left + i, widen_fp8<Bf8A>(_mm256_cvtepu8_epi32(x)));
-    _mm256_store_ps(right + i, widen_fp8<Bf8B>(_mm256_cvtepu8_epi32(y)));
+  gfx1250_load_accumulators<form>(c, controls, result);
+  if (nonfinite) {
+    gfx1250_reduce_rows<K, false, true>(left, right, result);
+  } else {
+    gfx1250_reduce_interleaved<K, false>(left, right, result);
   }
-  for (int row = 0; row < 16; ++row) {
-    for (int k = 0; k < K; ++k) {
-      rows[row][k] = left[gfx1250_fp8_index(row, k)];
-      columns[k][row] = right[gfx1250_fp8_index(row, k)];
-    }
-  }
-#endif
-  for (int row = 0; row < 16; ++row) {
-    for (int col = 0; col < 16; ++col) {
-      result[row][col] = gfx1250_read_c<form>(c, row, col, controls);
-    }
-  }
-  gfx1250_reduce_rows<K, false>(rows, columns, result);
-  gfx1250_write_result<form>(flags, d, result, flags & RJ_ARITH_FP16_OVFL);
+  gfx1250_store_results<form>(flags, d, result, flags & RJ_ARITH_FP16_OVFL);
 }
 } // namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE

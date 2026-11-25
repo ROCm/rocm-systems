@@ -52,8 +52,9 @@ TEST(RdnaSwmmacFloat, Bf16TinyNegativeAccumulatorSubtractsFloorUnit) {
   // dropping C would give 0x0c000000 and 0x0c80.
   const auto input = [](uint32_t a, uint32_t b, uint32_t c) {
     Registers registers = uniform_input({0, b | (b << 16), 0, c, 0});
-    for (uint32_t lane = 0; lane < 16; ++lane)
+    for (uint32_t lane = 0; lane < 16; ++lane) {
       registers[0][lane] = a;
+    }
     return registers;
   };
   for (bool scalar : {false, true}) {

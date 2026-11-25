@@ -21,8 +21,9 @@ namespace {
 // Shares the bounds primitive with the rest of the code loader (file_io.h).
 template <typename T>
 [[nodiscard]] bool read_pod(std::span<const uint8_t> image, uint64_t offset, T *out) {
-  if (!detail::fits_in_bounds(offset, sizeof(T), image.size()))
+  if (!detail::fits_in_bounds(offset, sizeof(T), image.size())) {
     return false;
+  }
   std::memcpy(out, image.data() + offset, sizeof(T));
   return true;
 }
@@ -39,15 +40,18 @@ template <typename T>
 // range or the string is not terminated inside the table.
 [[nodiscard]] bool read_string(std::span<const uint8_t> image, uint64_t strtab_off,
                                uint64_t strtab_size, uint32_t name_off, std::string *out) {
-  if (name_off >= strtab_size)
+  if (name_off >= strtab_size) {
     return false;
-  if (!detail::fits_in_bounds(strtab_off, strtab_size, image.size()))
+  }
+  if (!detail::fits_in_bounds(strtab_off, strtab_size, image.size())) {
     return false;
+  }
   const char *base = reinterpret_cast<const char *>(image.data() + strtab_off);
   const size_t max_len = strtab_size - name_off;
   const size_t len = strnlen(base + name_off, max_len);
-  if (len == max_len)
+  if (len == max_len) {
     return false; // Not terminated inside the table.
+  }
   out->assign(base + name_off, len);
   return true;
 }
@@ -69,8 +73,9 @@ template <typename T>
       report(error_out, "malformed ELF: section header out of range");
       return false;
     }
-    if (shdr.sh_type != sym_type)
+    if (shdr.sh_type != sym_type) {
       continue;
+    }
 
     if (shdr.sh_entsize < sizeof(Elf64_Sym) || shdr.sh_entsize == 0) {
       report(error_out, "malformed ELF: symbol table entry size too small");
@@ -105,10 +110,12 @@ template <typename T>
         return false;
       }
       std::string name;
-      if (!read_string(image, strtab.sh_offset, strtab.sh_size, sym.st_name, &name))
+      if (!read_string(image, strtab.sh_offset, strtab.sh_size, sym.st_name, &name)) {
         continue; // Skip unreadable names rather than failing the whole table.
-      if (name != symbol_name)
+      }
+      if (name != symbol_name) {
         continue;
+      }
       // Dedup byte-identical definitions so the same symbol appearing in more
       // than one table of this type (or repeated within one) is treated as a
       // single definition, not a false duplicate. Genuinely conflicting
@@ -120,8 +127,9 @@ template <typename T>
           break;
         }
       }
-      if (!already_seen)
+      if (!already_seen) {
         out_matches->push_back(sym);
+      }
     }
   }
   return true;
@@ -172,10 +180,12 @@ std::optional<ResolvedProbeSymbol> resolve_probe_symbol(const AmdGpuCodeObject &
   std::vector<Elf64_Sym> matches;
   for (const uint32_t sym_type : {SHT_SYMTAB, SHT_DYNSYM}) {
     matches.clear();
-    if (!collect_matches(image, ehdr, sym_type, symbol_name, &matches, error_out))
+    if (!collect_matches(image, ehdr, sym_type, symbol_name, &matches, error_out)) {
       return std::nullopt;
-    if (!matches.empty())
+    }
+    if (!matches.empty()) {
       break;
+    }
   }
 
   if (matches.empty()) {

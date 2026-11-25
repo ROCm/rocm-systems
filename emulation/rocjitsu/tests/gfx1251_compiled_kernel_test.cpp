@@ -88,8 +88,9 @@ protected:
     ASSERT_FALSE(function_symbols.empty()) << "No sized .text function symbols found";
     std::vector<BasicBlock::CodeRange> function_ranges;
     function_ranges.reserve(function_symbols.size());
-    for (const TextFunctionSymbolRange &symbol : function_symbols)
+    for (const TextFunctionSymbolRange &symbol : function_symbols) {
       function_ranges.push_back({.start_offset = symbol.start_offset, .size = symbol.size});
+    }
     ASSERT_TRUE(std::ranges::any_of(function_ranges, [&](const BasicBlock::CodeRange &range) {
       return selected_kernel->entry_text_offset >= range.start_offset &&
              selected_kernel->entry_text_offset - range.start_offset < range.size;
@@ -210,11 +211,14 @@ TEST_F(Gfx1251CompiledKernelTest, ExecutesNaiveMatmulAndMatchesCpuGolden) {
     input_b[index] = static_cast<float>((index % 3) + 1);
   }
   std::vector<float> expected(kElementCount, 0.0f);
-  for (uint32_t row = 0; row < kDimension; ++row)
-    for (uint32_t column = 0; column < kDimension; ++column)
-      for (uint32_t inner = 0; inner < kDimension; ++inner)
+  for (uint32_t row = 0; row < kDimension; ++row) {
+    for (uint32_t column = 0; column < kDimension; ++column) {
+      for (uint32_t inner = 0; inner < kDimension; ++inner) {
         expected[row * kDimension + column] +=
             input_a[row * kDimension + inner] * input_b[inner * kDimension + column];
+      }
+    }
+  }
 
   const size_t matrix_bytes = kElementCount * sizeof(float);
   memory_->load_image(reinterpret_cast<const uint8_t *>(input_a.data()), matrix_bytes,

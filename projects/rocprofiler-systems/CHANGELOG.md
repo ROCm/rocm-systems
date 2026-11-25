@@ -8,6 +8,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- New options added for rocsys, `rocsys <subcommand> --traces` selects what is traced
+  with one list of names, for example `rocsys <subcommand> --traces hip mpi -- ./app`.
+  `rocsys <subcommand> --output-path` and `rocsys <subcommand> --log-level` set
+  `ROCPROFSYS_OUTPUT_PATH` and `ROCPROFSYS_LOG_LEVEL` for `profile`, `instrument`, `python`,
+  and `attach`.
 - Agent skills for choosing a profiling preset, discovering configuration options, and
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
@@ -27,6 +32,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
   `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed, and the default of
   that setting is now empty instead of `wall_clock`.
+- `rocsys` now requires a `--` separator between it's options and the application, even
+  when no profiling options are provided. For example, `rocsys profile ./app`is now
+  `rocsys profile -- ./app`.
 
 ### Removed
 

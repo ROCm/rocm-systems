@@ -114,9 +114,11 @@ struct ProbeArgValue {
 /// allocation before using the set for resource planning.
 [[nodiscard]] inline RegisterSet probe_argument_registers(std::span<const ProbeArgValue> args) {
   RegisterSet registers;
-  for (const ProbeArgValue &arg : args)
-    if (arg.source == ProbeArgSource::AnchorVgpr && arg.register_index < 256)
+  for (const ProbeArgValue &arg : args) {
+    if (arg.source == ProbeArgSource::AnchorVgpr && arg.register_index < 256) {
       registers.expand(RegisterRef{RegClass::VGPR, arg.register_index, 1});
+    }
+  }
   return registers;
 }
 
@@ -199,8 +201,9 @@ struct ProbeAbi {
 /// convention covers probes of any supported arity.
 [[nodiscard]] inline constexpr std::optional<ProbeAbi>
 derive_probe_abi(ProbeCallingConvention cc, uint8_t num_arg_dwords = 0) {
-  if (num_arg_dwords > kMaxProbeArgVgprs)
+  if (num_arg_dwords > kMaxProbeArgVgprs) {
     return std::nullopt;
+  }
   // No default case: a convention added to the enum should fail the build here
   // rather than silently derive to nullopt. The trailing return keeps a value
   // cast from outside the enumerators from running off the end.

@@ -870,11 +870,10 @@ static bool ncclPlannerMayInitializeSymmetric(struct ncclComm* comm) {
     if (tuningFunc < 0) continue;
     // A global forced selection wins over the per-call mask, but the tuning
     // context still records which implementations that override enabled.
-    uint64_t effAlgMask = comm->tuningContext.forced[tuningFunc] ? 0 : task->algMask;
+    rcclTuningMask effAlgMask = comm->tuningContext.forced[tuningFunc] ? rcclTuningMask() : task->algMask;
     bool symTuningEnabled = false;
     for (int i = NCCL_TUNING_SYM_KERNEL_ID_OFFSET; i < NCCL_TUNING_CE_METHOD_ID_OFFSET; i++) {
-      uint64_t bit = 1ULL << i;
-      if (comm->tuningContext.enabled[i][tuningFunc] && (effAlgMask == 0 || (effAlgMask & bit))) {
+      if (comm->tuningContext.enabled[i][tuningFunc] && (effAlgMask.none() || effAlgMask.test(i))) {
         symTuningEnabled = true;
         break;
       }

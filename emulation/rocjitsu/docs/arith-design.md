@@ -28,7 +28,8 @@ arithmetic may raise sticky exception flags.
 
 The library assumes the CPU's default floating-point environment: nearest-even
 rounding, denormal flushing disabled, and exceptions masked. Results are not
-guaranteed to be correct under a nondefault environment.
+guaranteed to be correct under a nondefault environment. The rest of rocjitsu makes
+the same assumption.
 
 The caller explicitly selects the CPU feature level through each entry point's
 `flags` argument, enabling internal SIMD paths such as AVX-512. Instruction calls
@@ -151,12 +152,20 @@ Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
 Each entry point selects the arithmetic and FP status policy matching rocjitsu's
 previous behavior. This can retain instruction-specific details beyond the
 other modes, such as rounding FP16 results before applying OMOD.
-FP32 MUL retains rocjitsu's inherited numerical and exception-classification
-models inside the library for Compatibility; explicit mode 3 uses its separately
-qualified reporting domain. Gfx12 binary arithmetic and selection likewise own
-their inherited Compatibility causes in the library. Their status storage must
-be valid when these policies report. Gfx1250 selection has a separate entry-point
-suffix because its inherited Compatibility policy does not report causes.
+FP32 MUL retains rocjitsu's inherited numerical model for Compatibility and reports
+one hardware-fitted exception classifier in every guest mode, shared with explicit
+mode 3 inside its separately qualified reporting domain; gfx1250 MUL keeps the
+inherited range-only classifier because the shared rule has no capture there. Gfx12
+binary arithmetic and selection likewise own their inherited Compatibility causes in
+the library. Their status storage must be valid when these policies report. Gfx1250
+selection has a separate entry-point suffix because its inherited Compatibility
+policy does not report causes.
+
+Overflow and underflow causes for scalar arithmetic and conversions, FP32 MUL and
+FP16 FMA share one rule fitted to gfx1201 captures: the significand is rounded with the
+guest rounding mode and an unbounded exponent, and the result overflows or is tiny by
+that rounding, not by its stored encoding. A product stored as the minimum normal still
+raises UNDERFLOW when the unbounded rounding stays below it.
 
 Gfx12 scalar FP Compatibility computes the inherited numerical result and FP
 status inside the library; the VM commits the destination and raises guest traps.

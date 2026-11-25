@@ -80,7 +80,7 @@ void mad(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d, const u
 // Evaluate gfx90a's two half roundings, with sources staged before any aliased writes.
 void separately_rounded_mad(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
                             const uint32_t *a, const uint32_t *b, const uint32_t *c) {
-  uint32_t x[32], y[32], z[32], product[32] = {}, result[32] = {};
+  alignas(64) uint32_t x[32], y[32], z[32], product[32] = {}, result[32] = {};
   for (int lane = 0; lane < 32; ++lane) {
     x[lane] = input_half(a[lane], mode);
     y[lane] = input_half(b[lane], mode >> 1);
@@ -96,16 +96,12 @@ void separately_rounded_mad(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
   rj_arith_v_mul_f16_w32(arithmetic, ~0U, 0, &pd, &px, &py, nullptr);
   rj_arith_v_add_f16_w32(arithmetic, ~0U, 0, &pr, &pp, &pz, nullptr);
   const int shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
-  for (int lane = 0; lane < 32; ++lane) {
-    // Raw-half OMOD/CLAMP retains the legacy NaN and signed-zero policy.
-    const uint16_t value =
-        rocjitsu::arith::selection_output<16>(uint16_t(result[lane]), mode, flags);
-    result[lane] = (d[lane] & ~(0xffffU << shift)) | (uint32_t(value) << shift);
+  for (uint32_t active = exec_mask; active; active &= active - 1) {
+    int lane = __builtin_ctz(active);
+    // Source registers have been staged. Compute the raw-half OMOD/CLAMP only for written lanes.
+    uint16_t value = rocjitsu::arith::selection_output<16>(uint16_t(result[lane]), mode, flags);
+    d[lane] = (d[lane] & ~(0xffffU << shift)) | (uint32_t(value) << shift);
   }
-  // Reuse the CPU-selected masked stores; partial EXEC does not select scalar arithmetic.
-  const uint32_t *out = result;
-  rj_arith_v_mov_b32_w32(flags & (RJ_ARITH_CPU_MASK | RJ_ARITH_CPU_FEATURES_MASK), exec_mask, 0, &d,
-                         &out);
 }
 
 // Dispatch both wave widths after one validation, before any partial-wave writes.

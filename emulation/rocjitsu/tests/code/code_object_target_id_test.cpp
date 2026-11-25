@@ -194,17 +194,20 @@ c_api_instruction_list_status(rj_status_t &output, uint32_t mach_flag, rj_code_t
   const auto image = make_minimal_amdgpu_elf(mach_flag, words);
   test::ScopedTempFile file;
   const testing::AssertionResult initialized = file.initialize("rj-code-object-target-cache-");
-  if (!initialized)
+  if (!initialized) {
     return initialized;
+  }
   const testing::AssertionResult written =
       file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
-  if (!written)
+  if (!written) {
     return written;
+  }
 
   rj_code_executable_t *exec = nullptr;
   const rj_status_t created = rj_code_executable_create(file.path().c_str(), &exec);
-  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr)
+  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr) {
     return testing::AssertionFailure() << "Failed to create executable: " << created;
+  }
   rj_code_object_t *obj = nullptr;
   const rj_status_t loaded = rj_code_executable_get_code_object(exec, target, 0, &obj);
   if (loaded != ROCJITSU_STATUS_SUCCESS || obj == nullptr) {
@@ -215,8 +218,9 @@ c_api_instruction_list_status(rj_status_t &output, uint32_t mach_flag, rj_code_t
 
   rj_code_inst_list_t *instructions = nullptr;
   const rj_status_t status = rj_code_inst_list_create(obj, target, &instructions);
-  if (instructions != nullptr)
+  if (instructions != nullptr) {
     rj_code_inst_list_destroy(instructions);
+  }
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);
   output = status;
@@ -234,17 +238,21 @@ struct CApiListStatuses {
                                                            rj_code_target_id_t decoder_target) {
   const auto image = make_minimal_amdgpu_elf(mach_flag);
   test::ScopedTempFile file;
-  if (testing::AssertionResult result = file.initialize("rj-code-object-target-mismatch-"); !result)
+  if (testing::AssertionResult result = file.initialize("rj-code-object-target-mismatch-");
+      !result) {
     return result;
+  }
   if (testing::AssertionResult result =
           file.write(std::string_view(reinterpret_cast<const char *>(image.data()), image.size()));
-      !result)
+      !result) {
     return result;
+  }
 
   rj_code_executable_t *exec = nullptr;
   const rj_status_t created = rj_code_executable_create(file.path().c_str(), &exec);
-  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr)
+  if (created != ROCJITSU_STATUS_SUCCESS || exec == nullptr) {
     return testing::AssertionFailure() << "Failed to create executable: " << created;
+  }
 
   rj_code_object_t *obj = nullptr;
   const rj_status_t loaded = rj_code_executable_get_code_object(exec, object_target, 0, &obj);
@@ -256,13 +264,15 @@ struct CApiListStatuses {
   rj_code_inst_list_t *instructions = nullptr;
   const rj_status_t instruction_status =
       rj_code_inst_list_create(obj, decoder_target, &instructions);
-  if (instructions != nullptr)
+  if (instructions != nullptr) {
     rj_code_inst_list_destroy(instructions);
+  }
 
   rj_code_basic_block_list_t *blocks = nullptr;
   const rj_status_t block_status = rj_code_basic_block_list_create(obj, decoder_target, &blocks);
-  if (blocks != nullptr)
+  if (blocks != nullptr) {
     rj_code_basic_block_list_destroy(blocks);
+  }
 
   rj_code_object_destroy(obj);
   rj_code_object_release(obj);

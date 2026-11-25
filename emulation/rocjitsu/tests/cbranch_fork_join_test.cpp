@@ -95,14 +95,16 @@ protected:
   }
 
   void TearDown() override {
-    if (wf && !wf->is_halted())
+    if (wf && !wf->is_halted()) {
       wf->halt();
+    }
   }
 
   void write_program(Program program) {
     program.insert(program.end(), 4, kSNop); // pad to instruction fetch window
-    for (size_t i = 0; i < program.size(); ++i)
+    for (size_t i = 0; i < program.size(); ++i) {
       memory.write32(kCodeBase + i * sizeof(uint32_t), program[i]);
+    }
   }
 
   /// Execute one instruction that falls through to the next one.
@@ -141,8 +143,9 @@ protected:
     return cu->read_vgpr(wf->vgpr_alloc().base + index, lane);
   }
   void fill_vgpr(uint32_t index, uint32_t value) {
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(wf->vgpr_alloc().base + index, lane, value);
+    }
   }
 
   /// Run until the PC reaches @p end_offset; returns the offset of each executed instruction.
@@ -151,8 +154,9 @@ protected:
     while (wf->pc != kCodeBase + end_offset && trace.size() < max_steps) {
       trace.push_back(wf->pc - kCodeBase);
       (void)cu->step();
-      if (wf->is_halted())
+      if (wf->is_halted()) {
         break;
+      }
     }
     EXPECT_FALSE(wf->is_halted());
     EXPECT_EQ(wf->pc, kCodeBase + end_offset);
@@ -259,20 +263,23 @@ TEST_P(CbranchForkJoinTest, ReusedSlotStartsWithEmptyForkStack) {
 }
 
 TEST_P(CbranchForkJoinTest, BranchStackEntriesStartAtTheWavesFirstSgpr) {
-  for (uint32_t n = 0; n <= 7; ++n)
+  for (uint32_t n = 0; n <= 7; ++n) {
     EXPECT_EQ(branch_stack_entry_physical_sgpr(*wf, n), wf->sgpr_alloc().base + 4 * n);
+  }
 }
 
 TEST_P(CbranchForkJoinTest, ForkAndJoinUseTheSecondWavesPhysicalStack) {
   Wavefront *first_wave = wf;
-  for (uint32_t index = 0; index < 32; ++index)
+  for (uint32_t index = 0; index < 32; ++index) {
     set_sgpr(index, 0x12340000u + index);
+  }
 
   wf = cu->dispatch_wf(1, kCodeBase, 104, 256);
   ASSERT_NE(wf, nullptr);
   ASSERT_NE(wf->sgpr_alloc().base, 0u);
-  for (uint32_t index = 0; index < 32; ++index)
+  for (uint32_t index = 0; index < 32; ++index) {
     set_sgpr(index, 0x56780000u + index);
+  }
   wf->set_cond_stack_ptr(3);
 
   const auto push = fork_stack_access(*wf, 0x15);
@@ -483,8 +490,9 @@ TEST_P(CbranchForkJoinTest, UniformIForkSkipsTheStackAndTheElseSide) {
 
   EXPECT_EQ(run_until(kEndOffset),
             (std::vector<uint64_t>{0x00, 0x04, kForkOffset, kThenOffset, kJoinOffset, 0x1C, 0x20}));
-  for (uint32_t lane = 0; lane < 64; ++lane)
+  for (uint32_t lane = 0; lane < 64; ++lane) {
     EXPECT_EQ(vgpr(0, lane), kThenValue) << "lane " << lane;
+  }
   EXPECT_EQ(sgpr64(0), kStackSentinel);
   EXPECT_EQ(wf->cond_stack_ptr(), 0u);
 }

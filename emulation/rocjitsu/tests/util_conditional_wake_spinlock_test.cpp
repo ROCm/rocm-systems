@@ -59,8 +59,9 @@ protected:
 template <typename Predicate> bool eventually(Predicate predicate) {
   const auto deadline = std::chrono::steady_clock::now() + 30s;
   while (!predicate()) {
-    if (std::chrono::steady_clock::now() > deadline)
+    if (std::chrono::steady_clock::now() > deadline) {
       return false;
+    }
     std::this_thread::sleep_for(1ms);
   }
   return true;
@@ -69,13 +70,15 @@ template <typename Predicate> bool eventually(Predicate predicate) {
 // A lost wakeup can leave threads blocked; detach them so the failure is
 // reported instead of hanging in join().
 void join_or_detach(std::vector<std::thread> &threads, bool completed) {
-  if (!completed)
+  if (!completed) {
     detached_waiters = true;
+  }
   for (auto &thread : threads) {
-    if (completed)
+    if (completed) {
       thread.join();
-    else
+    } else {
       thread.detach();
+    }
   }
 }
 
@@ -102,8 +105,9 @@ TEST_F(ConditionalWakeSpinlockTest, FailedTryLocksPreserveWaiterProgress) {
         ready->count_down();
         {
           std::lock_guard guard(lock);
-          if (!std::ranges::all_of(published, [](uint64_t value) { return value == counter; }))
+          if (!std::ranges::all_of(published, [](uint64_t value) { return value == counter; })) {
             inconsistent.store(true, std::memory_order_relaxed);
+          }
           published.fill(++counter);
         }
         finished.fetch_add(1);
@@ -113,14 +117,16 @@ TEST_F(ConditionalWakeSpinlockTest, FailedTryLocksPreserveWaiterProgress) {
     // Give contenders an opportunity to park before failed probes and the
     // owner's release. Every waiter must eventually receive ownership.
     std::this_thread::sleep_for(1ms);
-    for (unsigned probe = 0; probe < 256; ++probe)
+    for (unsigned probe = 0; probe < 256; ++probe) {
       EXPECT_FALSE(lock.try_lock());
+    }
     lock.unlock();
     const bool completed = eventually([] { return finished.load() == kWaiters; });
     EXPECT_TRUE(completed);
     join_or_detach(waiters, completed);
-    if (!completed)
+    if (!completed) {
       return;
+    }
     EXPECT_EQ(counter, (round + 1) * kWaiters);
   }
   EXPECT_FALSE(inconsistent.load(std::memory_order_relaxed));
@@ -140,8 +146,9 @@ TEST_F(ConditionalWakeSpinlockTest, ParkedWaiterAcquiresAfterFailedTryLocks) {
     lock.unlock();
   });
   std::this_thread::sleep_for(kParkDelay);
-  for (int attempt = 0; attempt < 16; ++attempt)
+  for (int attempt = 0; attempt < 16; ++attempt) {
     EXPECT_FALSE(lock.try_lock());
+  }
   lock.unlock();
   const bool completed = eventually([] { return acquired.load(); });
   EXPECT_TRUE(completed);
@@ -176,8 +183,9 @@ TEST_F(ConditionalWakeSpinlockTest, ParkedWaitersAcquireThroughNewcomerHandoffs)
   for (unsigned i = 0; i < kNewcomers; ++i) {
     newcomers.emplace_back([] {
       while (!stop_newcomers.load(std::memory_order_relaxed)) {
-        if (lock.try_lock())
+        if (lock.try_lock()) {
           lock.unlock();
+        }
         std::lock_guard guard(lock);
       }
       newcomers_done.fetch_add(1);
@@ -212,17 +220,20 @@ TEST_F(ConditionalWakeSpinlockTest, MutualExclusionAcrossParkingAndFailedTryLock
     threads.emplace_back([t] {
       for (unsigned i = 0; i < kIterations; ++i) {
         if ((i + t) % 3 == 0) {
-          if (!lock.try_lock())
+          if (!lock.try_lock()) {
             lock.lock();
+          }
         } else {
           lock.lock();
         }
-        if (inside.fetch_add(1, std::memory_order_relaxed) != 0)
+        if (inside.fetch_add(1, std::memory_order_relaxed) != 0) {
           overlap = true;
+        }
         ++counter;
         // Occasional long holds force the other threads to park.
-        if (i % 4096 == t)
+        if (i % 4096 == t) {
           std::this_thread::sleep_for(200us);
+        }
         inside.fetch_sub(1, std::memory_order_relaxed);
         lock.unlock();
       }
@@ -283,17 +294,20 @@ struct RecordingSyscalls {
         record.invalid = true;
       }
       if (timeout != nullptr) {
-        if (timeout->tv_sec != 0 || timeout->tv_nsec <= 0 || timeout->tv_nsec > 2'000'000)
+        if (timeout->tv_sec != 0 || timeout->tv_nsec <= 0 || timeout->tv_nsec > 2'000'000) {
           record.invalid = true;
-        if (index < record.timeouts.size())
+        }
+        if (index < record.timeouts.size()) {
           record.timeouts[index] = timeout->tv_nsec;
+        }
       }
       // Keep the waiter registered while its owner releases. This makes the
       // wake check deterministic without relying on scheduling delays.
       if (index + 1 == record.timeouts.size()) {
         record.blocked.store(true, std::memory_order_release);
-        while (!record.resume.load(std::memory_order_acquire))
+        while (!record.resume.load(std::memory_order_acquire)) {
           std::this_thread::yield();
+        }
       }
       constexpr std::array errors{EINTR, EAGAIN, ETIMEDOUT};
       record.errors.fetch_or(1u << (index % errors.size()));
@@ -307,8 +321,9 @@ struct RecordingSyscalls {
       const int bitset = va_arg(args, int);
       va_end(args);
       if (word != record.word.load() || count != 1 || timeout != nullptr ||
-          second_word != nullptr || bitset != 0)
+          second_word != nullptr || bitset != 0) {
         record.invalid = true;
+      }
       record.wakes.fetch_add(1);
       return 0;
     }
@@ -351,8 +366,9 @@ TEST_F(ConditionalWakeSpinlockTest, ParkingUsesProvidedHostWaitAndWake) {
   const bool parked = eventually([&record] { return record.blocked.load(); });
   EXPECT_TRUE(parked);
   EXPECT_FALSE(completed.load());
-  for (unsigned probe = 0; probe < 16; ++probe)
+  for (unsigned probe = 0; probe < 16; ++probe) {
     EXPECT_FALSE(lock.try_lock());
+  }
   published = 0x0123456789abcdef;
   lock.unlock();
   // Even when an expectation fails, release the gate and the original owner
@@ -361,8 +377,9 @@ TEST_F(ConditionalWakeSpinlockTest, ParkingUsesProvidedHostWaitAndWake) {
   const bool done = eventually([] { return completed.load(std::memory_order_acquire); });
   EXPECT_TRUE(done);
   join_or_detach(threads, done);
-  if (!done)
+  if (!done) {
     return;
+  }
   EXPECT_EQ(observed, published);
   EXPECT_EQ(record.waits.load(), 9u);
   EXPECT_EQ(record.wakes.load(), 1u);
@@ -439,26 +456,31 @@ TEST_F(ConditionalWakeSpinlockTest, SignalInterruptedParksKeepExclusionAndProgre
     threads.emplace_back([] {
       for (unsigned round = 0; round < kRounds; ++round) {
         std::lock_guard guard(lock);
-        if (inside.fetch_add(1, std::memory_order_relaxed) != 0)
+        if (inside.fetch_add(1, std::memory_order_relaxed) != 0) {
           overlap = true;
+        }
         // Periodic long holds make the other threads park.
-        if (round % 8 == 0)
+        if (round % 8 == 0) {
           std::this_thread::sleep_for(2ms);
+        }
         inside.fetch_sub(1, std::memory_order_relaxed);
       }
       finished.fetch_add(1);
       // Stay alive until signals stop so none targets an exited thread.
-      while (!release_waiters.load())
+      while (!release_waiters.load()) {
         std::this_thread::sleep_for(1ms);
+      }
     });
   }
   std::vector<pthread_t> handles;
-  for (auto &thread : threads)
+  for (auto &thread : threads) {
     handles.push_back(thread.native_handle());
+  }
   std::thread signaler([handles] {
     while (!stop_signals.load()) {
-      for (pthread_t handle : handles)
+      for (pthread_t handle : handles) {
         pthread_kill(handle, SIGUSR1);
+      }
       std::this_thread::sleep_for(100us);
     }
   });

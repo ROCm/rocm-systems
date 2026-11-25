@@ -53,8 +53,9 @@ public:
     resolution.callback_thread = std::this_thread::get_id();
     resolution.active_instructions = active_instructions_.load(std::memory_order_relaxed);
     std::vector<uint32_t> workgroups;
-    for (const auto *wf : wavefronts)
+    for (const auto *wf : wavefronts) {
       workgroups.push_back(wf->wg_id());
+    }
     std::ranges::sort(workgroups);
     workgroups.erase(std::ranges::unique(workgroups).begin(), workgroups.end());
     resolution.workgroup_ids = std::move(workgroups);
@@ -149,9 +150,11 @@ public:
 
   std::vector<Event> events(Hook hook) const {
     std::vector<Event> matching;
-    for (const Event &event : events())
-      if (event.hook == hook)
+    for (const Event &event : events()) {
+      if (event.hook == hook) {
         matching.push_back(event);
+      }
+    }
     return matching;
   }
 
@@ -160,8 +163,9 @@ private:
                             BarrierKind kind, BarrierRound round) {
     std::ranges::sort(members);
     std::vector<uint32_t> workgroups;
-    for (const auto *member : members)
+    for (const auto *member : members) {
       workgroups.push_back(member->wg_id());
+    }
     return {.hook = hook,
             .wave = nullptr,
             .members = std::move(members),
@@ -182,8 +186,9 @@ private:
 void PrintTo(const BarrierHookRecorder::Event &event, std::ostream *os) {
   static constexpr const char *kHooks[] = {"Signaled", "Resolved", "RoundCompleted", "WaitPassed"};
   *os << kHooks[static_cast<int>(event.hook)] << "{wave=" << event.wave << " members=[";
-  for (const auto *member : event.members)
+  for (const auto *member : event.members) {
     *os << member << ' ';
+  }
   *os << "] kind=" << static_cast<int>(event.kind)
       << " round={kind=" << static_cast<int>(event.round.kind)
       << " bit=" << static_cast<int>(event.round.completion_bit)
@@ -228,8 +233,9 @@ TEST(Gfx1250SimulationTest, VClsI32CountsLeadingSignBits) {
     wf->set_exec((uint64_t{1} << cases.size()) - 1);
 
     const uint32_t vgpr_base = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < cases.size(); ++lane)
+    for (uint32_t lane = 0; lane < cases.size(); ++lane) {
       sim.cu()->write_vgpr(vgpr_base + kSrc, lane, cases[lane].input);
+    }
 
     auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
@@ -239,8 +245,9 @@ TEST(Gfx1250SimulationTest, VClsI32CountsLeadingSignBits) {
       ASSERT_NE(inst, nullptr);
       ASSERT_EQ(std::string_view(inst->mnemonic()), expected_mnemonic);
 
-      for (uint32_t lane = 0; lane < cases.size(); ++lane)
+      for (uint32_t lane = 0; lane < cases.size(); ++lane) {
         sim.cu()->write_vgpr(vgpr_base + kDst, lane, 0xDEADBEEFu);
+      }
       EXPECT_TRUE(sim.cu()->execute_instruction(inst.get(), *wf).succeeded());
 
       for (uint32_t lane = 0; lane < cases.size(); ++lane) {
@@ -623,8 +630,9 @@ void expect_barrier_init_reads_implicit_m0(uint32_t init_encoding, uint32_t init
 
   wf0->set_m0(init_m0);
   EXPECT_TRUE(cu->execute_instruction(init.get(), *wf0).succeeded());
-  for (auto *wf : {wf0, wf1})
+  for (auto *wf : {wf0, wf1}) {
     EXPECT_TRUE(cu->execute_instruction(join.get(), *wf).succeeded());
+  }
 
   EXPECT_TRUE(cu->execute_instruction(signal.get(), *wf0).succeeded());
   EXPECT_TRUE(wf0->read_scc());
@@ -864,8 +872,9 @@ TEST(Gfx1250SimulationTest, AqlDescriptorAllocatesNamedBarriersForTwoWaveKernel)
   step_until_halted(*sim.engine, *sim.cu());
 
   ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
-  for (const auto &wf : sim.snapshot->snapshots())
+  for (const auto &wf : sim.snapshot->snapshots()) {
     EXPECT_EQ(wf.sgpr(4), 0x01000021u);
+  }
   const auto resolutions = barrier_span->resolutions();
   ASSERT_EQ(resolutions.size(), 1u);
   EXPECT_EQ(resolutions[0].kind, BarrierKind::Named);
@@ -1241,8 +1250,9 @@ TEST(Gfx1250SimulationTest, ClusterRoundReportsOneSignalPerWorkgroupAndEveryWait
 
   const auto waits = recorder->events(Hook::WaitPassed);
   ASSERT_EQ(waits.size(), 4u);
-  for (const auto &wait : waits)
+  for (const auto &wait : waits) {
     EXPECT_EQ(wait.round, round);
+  }
 }
 
 // Only a workgroup's first cluster signal in a round is counted (CDNA5 ISA
@@ -1307,8 +1317,9 @@ TEST(Gfx1250SimulationTest, ClusterRoundIgnoresAWorkgroupsSecondSignal) {
 
   const auto waits = recorder->events(Hook::WaitPassed);
   ASSERT_EQ(waits.size(), 4u);
-  for (const auto &wait : waits)
+  for (const auto &wait : waits) {
     EXPECT_EQ(wait.round, round);
+  }
 }
 
 // A workgroup that ends completes the cluster round its peer signalled
@@ -1390,8 +1401,9 @@ TEST(Gfx1250SimulationTest, ClusterRoundCompletedByAnExitingWorkgroupAdvancesThe
     generations[wait.wave].push_back(wait.round.generation);
   }
   ASSERT_EQ(generations.size(), 2u);
-  for (const auto &[wave, passed] : generations)
+  for (const auto &[wave, passed] : generations) {
     EXPECT_EQ(passed, (std::vector<uint64_t>{0, 1}));
+  }
 }
 
 TEST(Gfx1250SimulationTest, VgprMsbModeTracksModeRegisterLayout) {
@@ -1694,8 +1706,9 @@ TEST(Gfx1250SimulationTest, VMovDpp8ReadsSelectedHighVgprBank) {
   cdna5::VMovB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kHighValueBase + (lane ^ 1u)) << "lane " << lane;
+  }
 }
 
 TEST(Gfx1250SimulationTest, VMovDppPreservesMaskedHighDestinationLanes) {
@@ -1927,8 +1940,9 @@ TEST(Gfx1250SimulationTest, ModeBit27DoesNotIndexVmovDppOperands) {
   cdna5::VMovB32Vop1 inst(reinterpret_cast<const cdna5::MachineInst *>(&raw));
   inst.execute_impl(*wf);
 
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     EXPECT_EQ(cu.read_vgpr(vb + kDst, lane), kExpectedBase + (lane ^ 1u)) << "lane " << lane;
+  }
 }
 
 TEST(Gfx1250SimulationTest, PackedTrue16SourcesIgnoreModeBit27) {
@@ -2582,8 +2596,9 @@ TEST(Gfx1250SimulationTest, DsLoadTransposeIgnoresExecForAddressesAndMasks) {
     auto &cu = *sim.cu();
     wf->set_lds_base(cu.allocate_lds(512));
     wf->set_lds_size(512);
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu.write_vgpr(vgpr_base + kAddr, lane, lane * 8u);
+    }
 
     cdna5::VdsMachineInst raw{};
     raw.addr = kAddr;
@@ -2597,8 +2612,9 @@ TEST(Gfx1250SimulationTest, DsLoadTransposeIgnoresExecForAddressesAndMasks) {
     EXPECT_EQ(state->lane_mask, 0xFFFF'FFFFu);
     EXPECT_EQ(state->exec_mask, 0xFFFF'FFFFu);
     EXPECT_EQ(wf->exec(), architectural_exec);
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       EXPECT_EQ(state->per_lane_addr[lane], wf->lds_base() + kOffset + lane * 8u);
+    }
   }
 }
 
@@ -2683,8 +2699,9 @@ TEST(Gfx1250SimulationTest, VMovrelsReadsM0RelativeVgpr) {
   const auto *wf = dispatch_one_wave(sim, code, std::size(code), 16);
   ASSERT_NE(wf, nullptr);
 
-  for (uint32_t lane = 0; lane < wf->wf_size; ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size; ++lane) {
     EXPECT_EQ(wf->vgpr(1, lane), 99u) << "lane " << lane;
+  }
 }
 
 TEST(Gfx1250SimulationTest, VopdMulDx9ZeroOverridesNanProducts) {
@@ -2795,9 +2812,11 @@ TEST(Gfx1250ExecutionTest, UnsupportedVopd3SlotDoesNotCommitMixedWidthPair) {
     wf->set_exec(0xAAAA'AAAA);
     wf->set_vcc(0x12345678);
     wf->write_scc(1);
-    for (uint32_t lane = 0; lane < 32; ++lane)
-      for (uint32_t reg = 0; reg < 16; ++reg)
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      for (uint32_t reg = 0; reg < 16; ++reg) {
         sim.cu()->write_vgpr(base + reg, lane, 100u * reg + lane);
+      }
+    }
     ASSERT_NE(inst.execute, nullptr);
     wf->clear_instruction_execution_error();
     ASSERT_NO_THROW(inst.execute(inst, wf));
@@ -2807,9 +2826,11 @@ TEST(Gfx1250ExecutionTest, UnsupportedVopd3SlotDoesNotCommitMixedWidthPair) {
     EXPECT_EQ(wf->vcc(), 0x12345678u);
     EXPECT_EQ(wf->read_scc(), 1u);
     EXPECT_FALSE(wf->is_halted());
-    for (uint32_t lane = 0; lane < 32; ++lane)
-      for (uint32_t reg = 0; reg < 16; ++reg)
+    for (uint32_t lane = 0; lane < 32; ++lane) {
+      for (uint32_t reg = 0; reg < 16; ++reg) {
         EXPECT_EQ(sim.cu()->read_vgpr(base + reg, lane), 100u * reg + lane);
+      }
+    }
   }
 }
 

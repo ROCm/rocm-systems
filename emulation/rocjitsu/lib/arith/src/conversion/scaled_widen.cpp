@@ -6,6 +6,7 @@
 // Rocjitsu model without claiming newly established hardware bit-exactness.
 
 #include "conversion/scaled_widen.h"
+#include "common/exec_mask.h"
 #include "common/float_encoding.h"
 #include "common/validation.h"
 #include "conversion/scaled_widen_impl.h"
@@ -51,15 +52,18 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   int shift = Packed && Src != Source::Fp4 ? (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)
                                            : 8 * int((mode >> 16) & 3);
   [[maybe_unused]] const int destination_shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+  [[maybe_unused]] const bool use_simd = Dst == Destination::F16
+                                             ? (exec_mask & (exec_mask - 1)) != 0
+                                             : rocjitsu::arith::has_more_than_four_lanes(exec_mask);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (use_simd && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     scaled_widen_x86_64_v4(Lanes, exec_mask, Src, Dst, Packed, flags & RJ_ARITH_FP16_OVFL, shift,
                            destination_shift, d, a[0], b[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (use_simd && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     scaled_widen_x86_64_v3(Lanes, exec_mask, Src, Dst, Packed, flags & RJ_ARITH_FP16_OVFL, shift,
                            destination_shift, d, a[0], b[0]);
     return RJ_ARITH_SUCCESS;
@@ -69,10 +73,8 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   uint32_t result[words][Lanes];
   // Stage the entire result before stores so either input may overlap either
   // destination word, including when both destination pointers are identical.
-  for (int lane = 0; lane < Lanes; ++lane) {
-    if (!((exec_mask >> lane) & 1)) {
-      continue;
-    }
+  for (uint64_t active = exec_mask; active; active &= active - 1) {
+    int lane = __builtin_ctzll(active);
     uint32_t raw = a[0][lane] >> shift;
     uint32_t exponent = (b[0][lane] >> 23) & 255;
     // Exponent zero denotes 2^-127, not FP32 zero. Multiplication by the
@@ -103,10 +105,9 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
     }
   }
   for (int word = 0; word < words; ++word) {
-    for (int lane = 0; lane < Lanes; ++lane) {
-      if ((exec_mask >> lane) & 1) {
-        d[word][lane] = result[word][lane];
-      }
+    for (uint64_t active = exec_mask; active; active &= active - 1) {
+      int lane = __builtin_ctzll(active);
+      d[word][lane] = result[word][lane];
     }
   }
   return RJ_ARITH_SUCCESS;

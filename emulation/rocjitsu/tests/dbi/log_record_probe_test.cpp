@@ -82,20 +82,24 @@ void expect_declared_footprint(rocjitsu::IsaFamily arch) {
   const auto summary = build_probe_clobber_summary(callable, /*wave_size=*/64, &err);
   ASSERT_TRUE(summary.has_value()) << err;
   const RegisterSet &clobbers = summary->ordinary_clobbers;
-  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr)
+  for (uint16_t sgpr = 0; sgpr < REGISTER_SET_ALLOCATABLE_SGPRS; ++sgpr) {
     EXPECT_EQ(clobbers.contains(RegisterRef{RegClass::SGPR, sgpr, 1}),
               sgpr >= 4 && sgpr <= kLogRecordProbeLastSgpr)
         << "s" << sgpr;
+  }
   // The written VGPRs are checked at their bounds: no argument register, the
   // last one, and nothing above it. Unlike the SGPRs they are not contiguous,
   // since the body skips registers to keep its tuples even-aligned.
-  for (uint16_t vgpr = 0; vgpr < kLogRecordProbeArgDwords; ++vgpr)
+  for (uint16_t vgpr = 0; vgpr < kLogRecordProbeArgDwords; ++vgpr) {
     EXPECT_FALSE(clobbers.contains(RegisterRef{RegClass::VGPR, vgpr, 1})) << "argument v" << vgpr;
+  }
   EXPECT_TRUE(clobbers.contains(RegisterRef{RegClass::VGPR, kLogRecordProbeLastVgpr, 1}));
-  for (uint16_t vgpr = kLogRecordProbeLastVgpr + 1; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr)
+  for (uint16_t vgpr = kLogRecordProbeLastVgpr + 1; vgpr < REGISTER_SET_MAX_VGPRS; ++vgpr) {
     EXPECT_FALSE(clobbers.contains(RegisterRef{RegClass::VGPR, vgpr, 1})) << "v" << vgpr;
-  for (uint16_t acc = 0; acc < REGISTER_SET_MAX_ACC_VGPRS; ++acc)
+  }
+  for (uint16_t acc = 0; acc < REGISTER_SET_MAX_ACC_VGPRS; ++acc) {
     EXPECT_FALSE(clobbers.contains(RegisterRef{RegClass::ACC_VGPR, acc, 1})) << "acc" << acc;
+  }
   // The forced full mask is the caller's; the probe must not narrow it.
   EXPECT_FALSE(summary->touches_exec);
 }
