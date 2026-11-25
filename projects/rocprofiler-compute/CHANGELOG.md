@@ -12,7 +12,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Memory chart values in `--output-format db` and `csv` keep their full precision, like the other panels.
 
 * Changed the Memory Chart compute unit box to use the metric names and units of the other panels:
-  * *VGPRs*, *SGPRs*, *Wavefront Occupancy*, *Scratch Allocation* and *LDS Allocation*, and *AGPRs* on GPUs that report them.
+  * *VGPRs*, *SGPRs*, *Wavefront Occupancy*, *Scratch Allocation* and *LDS Allocation*.
   * *Scratch Allocation* is in bytes per work-item, and *LDS Allocation* in bytes.
   * Counts show their unit, for example `1.64e+04 instr`.
 
