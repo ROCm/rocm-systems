@@ -118,10 +118,11 @@ ceiling is one peak transfer per cycle, scaled by instance count and
 RDNA4 metrics
 =============
 
-``VALU Issue Rate`` and ``FP64 VALU Issue Rate`` count instruction issues per
-second. They include integer and floating-point issues and do not report FLOPs
-or a percentage of a FLOP peak. Wave Matrix Multiply-Accumulate (WMMA)
-instructions have their own metric, ``WMMA FLOPs (F16->F32 16x16x16)``.
+``VALU Issue Rate`` counts instruction issues per second, including integer and
+floating-point issues. ``FP64 VALU Issue Rate`` counts double-precision VALU
+issues. Neither reports FLOPs or a percentage of a FLOP peak. Wave Matrix
+Multiply-Accumulate (WMMA) instructions have their own metric,
+``WMMA FLOPs (F16->F32 16x16x16)``.
 
 Wavefronts and issue accounting
 -------------------------------
