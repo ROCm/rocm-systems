@@ -175,7 +175,12 @@ def _run_with_marker(
     kernel_name = _extract_kernel_name(instance)
     marker = f"{marker_prefix}.{kernel_name}"
     location = marker_ranges.resolve_user_caller_location()
-    marker_ranges.push_scope(marker, location, backend=_BACKEND_NAME)
+    marker_ranges.push_scope(
+        marker,
+        location,
+        backend=_BACKEND_NAME,
+        args=_format_triton_args(instance, call_args, call_kwargs),
+    )
     try:
         return call(*call_args, **call_kwargs)
     finally:

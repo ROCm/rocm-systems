@@ -53,7 +53,7 @@ def test_triton_backend_wraps_compiled_kernel_run(monkeypatch):
     monkeypatch.setattr(
         marker_ranges,
         "push_scope",
-        lambda marker, ctx, backend="": pushes.append((marker, backend)),
+        lambda marker, ctx, backend="", args="n/a": pushes.append((marker, backend)),
     )
     monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
     monkeypatch.setattr(triton_backend._CoreState, "jit_function", None)
@@ -79,7 +79,7 @@ def test_triton_backend_wraps_jitfunction_run(monkeypatch):
     monkeypatch.setattr(
         marker_ranges,
         "push_scope",
-        lambda marker, ctx, backend="": pushes.append(marker),
+        lambda marker, ctx, backend="", args="n/a": pushes.append(marker),
     )
     monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
     monkeypatch.setattr(triton_backend._CoreState, "compiled_kernel", None)
@@ -140,7 +140,7 @@ def test_triton_backend_patch_is_idempotent(monkeypatch):
     monkeypatch.setattr(
         marker_ranges,
         "push_scope",
-        lambda marker, ctx, backend="": pushes.append(marker),
+        lambda marker, ctx, backend="", args="n/a": pushes.append(marker),
     )
     monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
 
@@ -313,3 +313,29 @@ def test_format_triton_args_caps_at_32_items():
     assert blob.count("=") == 32
     assert "p31=" in blob
     assert "p32=" not in blob
+
+
+def test_triton_wrap_records_kernel_operand_on_marker(monkeypatch):
+    recorded = []
+    monkeypatch.setattr(
+        marker_ranges,
+        "push_scope",
+        lambda marker, ctx, backend="", args="n/a": recorded.append(args),
+    )
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
+    monkeypatch.setattr(triton_backend._CoreState, "compiled_kernel", None)
+
+    class FakeJIT:
+        def __init__(self):
+            self.params = [types.SimpleNamespace(name="x_ptr")]
+
+        def run(self, *a, **kw):
+            return "launched"
+
+    monkeypatch.setattr(triton_backend._CoreState, "jit_function", FakeJIT)
+    triton_backend.patch_triton_launcher()
+
+    tensor = types.SimpleNamespace(shape=(2, 4), dtype="float32")
+    assert FakeJIT().run(tensor) == "launched"
+    assert recorded
+    assert "x_ptr=float32[2x4]" in recorded[0]
