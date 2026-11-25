@@ -34,6 +34,8 @@ Check the GPU against
 The table lists product families, so match the `Marketing Name` that `rocminfo`
 prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
 tell the user.
+If the table marks the GPU as experimental, add `--experimental` to every
+`rocprof-compute profile` and `rocprof-compute analyze` command.
 
 Then follow "Install the analyze mode dependencies" in the
 [install guide](../../docs/install/core-install.rst), which installs
