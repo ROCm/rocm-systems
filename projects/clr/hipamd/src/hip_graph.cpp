@@ -11,6 +11,7 @@
 #include "hip_platform.hpp"
 #include "hip_event.hpp"
 #include "hip_mempool_impl.hpp"
+#include <algorithm>
 
 namespace hip {
 
@@ -2466,6 +2467,29 @@ hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDep
                                        size_t* pNumDependencies) {
   HIP_INIT_API(hipGraphNodeGetDependencies, node, pDependencies, pNumDependencies);
   HIP_RETURN(hipGraphNodeGetDependencies_common(node, pDependencies, pNumDependencies));
+}
+
+hipError_t hipGraphNodeGetDependencies_v2(hipGraphNode_t node,
+                                          hipGraphNode_t* pDependencies,
+                                          hipGraphEdgeData* edgeData,
+                                          size_t* pNumDependencies) {
+  hipError_t result;
+  HIP_INIT_API(hipGraphNodeGetDependencies_v2, node, pDependencies, edgeData, pNumDependencies);
+  // capture the edgeData array size before it gets overwritten
+  size_t edgeDataSize = edgeData && pNumDependencies? *pNumDependencies : 0;
+
+  if (edgeData && !pDependencies) {
+    // TODO g-h-c check this
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  result = hipGraphNodeGetDependencies_common(node, pDependencies, pNumDependencies);
+
+  if (!result) {
+    std::fill_n(edgeData, edgeDataSize, hipGraphEdgeData {});
+  }
+
+  HIP_RETURN(result);
 }
 
 hipError_t hipGraphNodeGetDependentNodes_common(hipGraphNode_t node,
