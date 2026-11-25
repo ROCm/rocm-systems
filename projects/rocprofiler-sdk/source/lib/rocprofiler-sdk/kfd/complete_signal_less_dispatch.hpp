@@ -25,6 +25,7 @@
 #include "lib/common/scope_destructor.hpp"
 #include "lib/rocprofiler-sdk/kfd/correlation_types.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -175,28 +176,44 @@ resolve_finalize(const std::optional<uint64_t>& start_ticks,
         std::swap(*start_ns_out, *end_ns_out);
     }
 
-    // Tick-to-system-domain conversion re-syncs periodically, so a just-completed
-    // dispatch's converted end can land a little after a `now` sampled right behind
-    // it, and its start a little before this dispatch's own enqueue (both observed in
-    // the low microseconds on gfx950). Mirror adjust_profiling_time: shift the whole
-    // interval so it ends no later than now, then so it starts no earlier than
-    // enqueue, preserving the measured duration. An end far past now is flagged stale
-    // but treated the same; the correlation key already proved this record is ours.
+    // Tick-to-system-domain conversion carries the uncertainty of the GPU/host clock
+    // calibration, so a just-completed dispatch's converted end can land a little
+    // after a `now` sampled right behind it, and its start a little before this
+    // dispatch's own enqueue (both observed in the low microseconds on gfx950).
+    // Mirror tracing::adjust_profiling_time: intersect the interval with
+    // [enqueue, now] when that leaves a positive duration. Intersection only moves an
+    // endpoint inward, so it may shorten the record slightly but can never push it
+    // across a neighboring dispatch on the same queue; shifting the whole interval
+    // (the previous repair) preserved the duration but created exactly those
+    // same-stream overlaps. An interval wholly outside the window (e.g. a fixed GPU
+    // timestamp epoch offset) has nothing to intersect and is still shifted whole. An
+    // end far past now is flagged stale but treated the same; the correlation key
+    // already proved this record is ours.
     if(*end_ns_out > now_ns + kKfdFutureSlackNs) _flag(finalize_reason::after_now);
-    if(*end_ns_out > now_ns)
+    if(*start_ns_out < enqueue_ts) _flag(finalize_reason::before_enqueue);
+    const uint64_t _clipped_start = std::max(*start_ns_out, enqueue_ts);
+    const uint64_t _clipped_end   = std::min(*end_ns_out, now_ns);
+    if(_clipped_start < _clipped_end)
     {
-        const uint64_t _shift = *end_ns_out - now_ns;
-        *end_ns_out           = now_ns;
-        *start_ns_out         = (*start_ns_out > _shift) ? *start_ns_out - _shift : 0;
+        *start_ns_out = _clipped_start;
+        *end_ns_out   = _clipped_end;
     }
-    if(*start_ns_out < enqueue_ts)
+    else
     {
-        _flag(finalize_reason::before_enqueue);
-        const uint64_t _shift = enqueue_ts - *start_ns_out;
-        // The shift-up addition is CHECKED, so nothing wraps.
-        if(_shift > UINT64_MAX - *end_ns_out) return _note(finalize_reason::bad_interval);
-        *start_ns_out += _shift;
-        *end_ns_out += _shift;
+        if(*end_ns_out > now_ns)
+        {
+            const uint64_t _shift = *end_ns_out - now_ns;
+            *end_ns_out           = now_ns;
+            *start_ns_out         = (*start_ns_out > _shift) ? *start_ns_out - _shift : 0;
+        }
+        if(*start_ns_out < enqueue_ts)
+        {
+            const uint64_t _shift = enqueue_ts - *start_ns_out;
+            // The shift-up addition is CHECKED, so nothing wraps.
+            if(_shift > UINT64_MAX - *end_ns_out) return _note(finalize_reason::bad_interval);
+            *start_ns_out += _shift;
+            *end_ns_out += _shift;
+        }
     }
 
     // The single unconditional postcondition that makes the contract

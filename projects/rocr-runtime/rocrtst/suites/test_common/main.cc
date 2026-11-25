@@ -441,6 +441,13 @@ TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
     RunCustomTestEpilog(&ts);
 }
 
+TEST(rocrtstFunc, TimeStamp_TranslationStability) {
+    TimeStamp ts;
+    RunCustomTestProlog(&ts);
+    ts.TimestampTranslationStabilityTest();
+    RunCustomTestEpilog(&ts);
+}
+
 TEST(rocrtstFunc, GpuCoreDump_DefaultPattern) {
     if (rocrtst::SkipOnWsl("GPU coredump-on-exception unavailable on WSL/DXG")) return;
     GpuCoreDumpTest gcd;

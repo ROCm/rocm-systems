@@ -36,6 +36,9 @@ class TimeStamp : public TestBase {
   void TimeStampTest (void);
 
   void BarrierPacketTimestampValidationTest(void);
+  // @Brief: Translation of GPU timestamps to system time must not change when the runtime
+  // refreshes its clock calibration while translating.
+  void TimestampTranslationStabilityTest(void);
 private:
   void FreeResources();  // Helper to clean up queue and signals
 

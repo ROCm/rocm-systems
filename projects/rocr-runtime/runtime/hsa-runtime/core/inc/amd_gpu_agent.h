@@ -62,6 +62,7 @@
 #include "core/inc/runtime.h"
 #include "core/inc/scratch_cache.h"
 #include "core/inc/signal.h"
+#include "core/util/clock_map.h"
 #include "core/util/lazy_ptr.h"
 #include "core/util/locks.h"
 #include "core/util/os.h"
@@ -459,11 +460,11 @@ class GpuAgent : public GpuAgentInt {
   __forceinline amdgpu_device_handle libDrmDev() const { return ldrm_dev_; }
   __forceinline HsaAMDGPUDeviceHandle libThunkDev() const { return libthunk_dev_; }
 
-  __forceinline void CheckClockTicks() {
-    // If we did not update t1 since agent initialization, force a SyncClock. Otherwise computing
-    // the SystemClockCounter to GPUClockCounter ratio in TranslateTime(tick) results to a division
-    // by 0.
-    if (t0_.GPUClockCounter == t1_.GPUClockCounter) SyncClocks();
+  // @brief Ensures the GPU to system clock ratio has been measured before profiling timestamps
+  // are translated.
+  void CheckClockTicks() {
+    std::lock_guard<std::mutex> lock(clock_lock_);
+    if (!clock_map_.HasBaseline()) SyncClocks();
   }
 
   /// @brief Override from AMD::GpuAgentInt.
@@ -643,7 +644,8 @@ class GpuAgent : public GpuAgentInt {
       hsa_status_t (*callback)(hsa_region_t region, void* data),
       void* data) const;
 
-  // @brief Update ::t1_ tick count.
+  // @brief Takes a correlated GPU/system clock sample and folds it into ::clock_map_. The caller
+  // must hold ::clock_lock_.
   void SyncClocks();
 
   // @brief Binds the second-level trap handler to this node.
@@ -736,8 +738,8 @@ class GpuAgent : public GpuAgentInt {
   // @brief Mutex to protect access to scratch pool.
   std::mutex scratch_lock_;
 
-  // @brief Mutex to protect access to ::t1_.
-  std::mutex t1_lock_;
+  // @brief Mutex to protect access to ::clock_map_ and ::gpu_clock_offset_.
+  std::mutex clock_lock_;
 
   // @brief Mutex to protect access to blit objects.
   std::mutex blit_lock_;
@@ -745,12 +747,9 @@ class GpuAgent : public GpuAgentInt {
   // @brief Mutex to protect sdma gang submissions.
   std::mutex sdma_gang_lock_;
 
-  // @brief GPU tick on initialization.
-  HsaClockCounters t0_;
-
-  HsaClockCounters t1_;
-
-  double historical_clock_ratio_;
+  // @brief Monotone map from GPU timestamp ticks to system time, built from correlated clock
+  // samples taken at agent creation and refreshed by ::SyncClocks.
+  core::ClockMap<> clock_map_;
 
   // @brief Offset (in GPU ticks) between AQL dispatch timestamp clock and
   // D3DKMTQueryClockCalibration GPU clock.  Non-zero on Windows where the two
