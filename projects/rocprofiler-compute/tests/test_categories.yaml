@@ -233,6 +233,7 @@ test_categories:
       - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
+      - test_profile_jax_trace
       - test_profile_ml_api_trace
       - test_torch_trace_coverage
       - test_profile_live_attach_detach
@@ -385,6 +386,7 @@ test_categories:
       - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
+      - test_profile_jax_trace
       - test_profile_ml_api_trace
       - test_torch_trace_coverage
       - test_profile_live_attach_detach
@@ -537,6 +539,7 @@ test_categories:
       - test-torch-trace-collector-before-install
       - test_profile_torch_trace
       - test_profile_triton_trace
+      - test_profile_jax_trace
       - test_profile_ml_api_trace
       - test_torch_trace_coverage
       - test_profile_live_attach_detach
