@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -38,6 +39,33 @@ std::vector<KernelDescriptorInfo> scan_via_text_section(const std::vector<uint8_
   EXPECT_FALSE(obj.text_sections().empty());
   const Section *text = obj.text_sections().front();
   return scan_kernel_descriptors({image.data(), image.size()}, text->sectionOffset(), text->size());
+}
+
+TEST(KernelDescriptorScan, HardwareRootsRespectPreloadFamilyAndExtent) {
+  KernelDescriptorInfo kernel = {
+      .descriptor_file_offset = 0, .kernel_name = "", .entry_text_offset = 32, .descriptor = {}};
+  const std::optional<std::vector<uint64_t>> ordinary =
+      kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna4, 64);
+  ASSERT_TRUE(ordinary);
+  EXPECT_EQ(*ordinary, (std::vector<uint64_t>{32}));
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna4, 32));
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Invalid, 512));
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Rv64i, 512));
+  RJ_AMDHSA_BITS_SET(kernel.descriptor.kernarg_preload, amdhsa::KERNARG_PRELOAD_SPEC_LENGTH, 3);
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    const std::optional<std::vector<uint64_t>> roots =
+        kernel_hardware_entry_candidates(kernel, arch, 512);
+    ASSERT_TRUE(roots);
+    EXPECT_EQ(*roots, (std::vector<uint64_t>{32, 288}));
+    EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, arch, 288));
+  }
+  const std::optional<std::vector<uint64_t>> cdna5 =
+      kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna5, 512);
+  ASSERT_TRUE(cdna5);
+  EXPECT_EQ(*cdna5, (std::vector<uint64_t>{32}));
+  kernel.entry_text_offset = std::numeric_limits<uint64_t>::max() - 1;
+  EXPECT_FALSE(kernel_hardware_entry_candidates(kernel, rocjitsu::IsaFamily::Cdna3,
+                                                std::numeric_limits<uint64_t>::max()));
 }
 
 void rewrite_descriptor_entry(std::vector<uint8_t> &image, uint64_t descriptor_vaddr,
@@ -176,12 +204,14 @@ TEST(KernelDescriptorScan, UnalignedSectionAndSymbolTablesAreReadAsBytes) {
   std::memcpy(sections.data(), image.data() + header.e_shoff, sections.size() * sizeof(Elf64_Shdr));
   size_t symbol_tables = 0;
   for (Elf64_Shdr &section : sections) {
-    if (section.sh_type != SHT_SYMTAB)
+    if (section.sh_type != SHT_SYMTAB) {
       continue;
+    }
     const std::vector<uint8_t> symbols(image.begin() + section.sh_offset,
                                        image.begin() + section.sh_offset + section.sh_size);
-    while (image.size() % 8 != 1)
+    while (image.size() % 8 != 1) {
       image.push_back(0);
+    }
     section.sh_offset = image.size();
     image.resize(image.size() + symbols.size());
     std::memcpy(image.data() + section.sh_offset, symbols.data(), symbols.size());
@@ -189,8 +219,9 @@ TEST(KernelDescriptorScan, UnalignedSectionAndSymbolTablesAreReadAsBytes) {
     ++symbol_tables;
   }
   ASSERT_EQ(symbol_tables, 1u);
-  while (image.size() % 8 != 1)
+  while (image.size() % 8 != 1) {
     image.push_back(0);
+  }
   header.e_shoff = image.size();
   const std::span<const std::byte> bytes = std::as_bytes(std::span(sections));
   image.resize(image.size() + bytes.size());

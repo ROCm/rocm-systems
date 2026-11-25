@@ -80,8 +80,9 @@ constexpr uint32_t kSetpc30Word = kSetpc30Encoding.value();
 
 std::vector<uint8_t> instruction_bytes(std::initializer_list<uint32_t> words) {
   std::vector<uint8_t> bytes(words.size() * sizeof(uint32_t));
-  if (!bytes.empty())
+  if (!bytes.empty()) {
     std::memcpy(bytes.data(), words.begin(), bytes.size());
+  }
   return bytes;
 }
 
@@ -123,8 +124,9 @@ void expect_pure_replacements(const AmdGpuCodeObject &source, const Instrumented
     uint32_t branch = 0;
     std::memcpy(&branch, text.data() + edit.offset, sizeof(branch));
     int64_t displacement = branch & 0xffffu;
-    if (displacement >= 0x8000)
+    if (displacement >= 0x8000) {
       displacement -= 0x10000;
+    }
     const uint64_t cave =
         static_cast<uint64_t>(static_cast<int64_t>(edit.offset) + 4 + displacement * 4);
     EXPECT_EQ(site.kind, InstrumentationKind::ReplaceWithInst);
@@ -201,12 +203,15 @@ void check_wide_entry_source_attribution(bool with_entry, bool with_replacement)
       Instrumentor instrumentor(source, source_case.arch);
       Instrumentor production(source, source_case.arch);
       std::vector<InstrumentationPoint> points;
-      if (with_replacement && order == 1)
+      if (with_replacement && order == 1) {
         points.push_back(replace);
-      if (with_entry)
+      }
+      if (with_entry) {
         points.push_back(entry);
-      if (with_replacement && order == 0)
+      }
+      if (with_replacement && order == 0) {
         points.push_back(replace);
+      }
       for (const InstrumentationPoint &point : points) {
         instrumentor.add_point(point);
         production.add_point(point);
@@ -729,12 +734,13 @@ TEST(InstrumentorReplacement, ComposesProbeAndReplacementAtTheSameSite) {
       const InstrumentedCodeObjectDebug result = instrumentor.patch_with_debug_summaries();
       ASSERT_TRUE(result.errors.empty()) << result.errors.front();
       test::expect_replacement_guest(result, 0, 4, instruction_bytes({replacement}), kArch, true);
-      if (mode == 0)
+      if (mode == 0) {
         direct_image = result.elf_bytes;
-      else
+      } else {
         // Equal bytes also check that pair coalescing preserves the full-EXEC
         // policy, not just the argument vector exposed by validate_points().
         EXPECT_EQ(result.elf_bytes, direct_image);
+      }
       EXPECT_FALSE(result.edit_error);
       EXPECT_TRUE(test::source_image_matches(source, pristine));
     }
@@ -748,8 +754,9 @@ std::vector<uint8_t> make_probe_cfg_extent_elf(bool external_target) {
       cdna4::kSMovB32Sop1, {.ssrc0 = scalar_positive_inline_u32(7), .sdst = 8})[0];
   constexpr uint32_t read = cdna4::build_sop1(cdna4::kSMovB32Sop1, {.ssrc0 = 8, .sdst = 9})[0];
   std::vector<uint32_t> words = {define, kNop0Word, kEndpgmWord};
-  if (!external_target)
+  if (!external_target) {
     words.insert(words.end(), {read, kEndpgmWord});
+  }
   std::vector<uint8_t> image =
       test::with_descriptor_metadata(test::make_gfx950_kernel_elf(words, 64), kArch);
   Elf64_Ehdr header = {};
@@ -759,28 +766,33 @@ std::vector<uint8_t> make_probe_cfg_extent_elf(bool external_target) {
   header.e_ident[EI_ABIVERSION] = ELFABIVERSION_AMDGPU_HSA_V5;
   std::memcpy(image.data(), &header, sizeof(header));
   const AmdGpuCodeObject original(image.data(), image.size());
-  if (!original.is_valid())
+  if (!original.is_valid()) {
     return {};
+  }
   const Section &text = *original.text_sections().front();
   const std::array<uint32_t, 2> foreign = {read, kEndpgmWord};
   const uint64_t target = external_target ? text.vaddr() - sizeof(foreign) : text.vaddr() + 12;
   const std::optional<uint32_t> branch =
       test::expected_replacement_branch(text.vaddr() + 8, target, kArch);
-  if (!branch)
+  if (!branch) {
     return {};
+  }
   std::memcpy(image.data() + text.sectionOffset() + 8, &*branch, sizeof(*branch));
-  if (!external_target)
+  if (!external_target) {
     return image;
+  }
   std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
-  if (!segments)
+  if (!segments) {
     return {};
+  }
   const std::vector<Elf64_Phdr>::iterator load =
       std::ranges::find_if(*segments, [&](const Elf64_Phdr &segment) {
         return segment.p_type == PT_LOAD && segment.p_offset == text.sectionOffset();
       });
-  if (load == segments->end() || load->p_offset < sizeof(foreign))
+  if (load == segments->end() || load->p_offset < sizeof(foreign)) {
     return {};
+  }
   load->p_offset -= sizeof(foreign);
   load->p_vaddr -= sizeof(foreign);
   load->p_paddr -= sizeof(foreign);
@@ -892,13 +904,16 @@ TEST(InstrumentorReplacement, ProbeAdmissionRequiresTheEffectiveGuestToStayInIts
     }
     const InstrumentationPoint before = {
         .anchor_offset = 4, .probe_obj = &probe, .probe_symbol = "probe", .probe_args = {}};
-    if (test_case.with_probe && test_case.composition == 2)
+    if (test_case.with_probe && test_case.composition == 2) {
       batch->add_point(before);
+    }
     batch->add_point(replace);
-    if (test_case.with_probe && test_case.composition == 1)
+    if (test_case.with_probe && test_case.composition == 1) {
       batch->add_point(before);
-    if (test_case.remove_branch)
+    }
+    if (test_case.remove_branch) {
       batch->add_point(replacement_point(8, {branch}, {kEndpgmWord}));
+    }
     const Instrumentor::ValidationResult validation = batch->validate_points();
     const InstrumentedCodeObjectDebug result = batch->patch_with_debug_summaries();
     if (test_case.external && test_case.with_probe && !test_case.remove_branch) {
@@ -919,10 +934,11 @@ TEST(InstrumentorReplacement, ProbeAdmissionRequiresTheEffectiveGuestToStayInIts
       ASSERT_EQ(result.patches.size(), result.sites.size());
       EXPECT_EQ(result.patches.front().is_probe_call, test_case.with_probe);
       EXPECT_EQ(result.sites.front().guest_size, 0u);
-      if (!test_case.with_probe)
+      if (!test_case.with_probe) {
         expect_pure_replacements(
             source, result,
             {{.offset = 4, .expected = instruction_bytes({kNop0Word}), .replacement = {}}});
+      }
       if (!test_case.external) {
         // This control has the same S8 use inside the analyzed CFG. It must
         // reach preservation planning rather than reject at an unrelated gate.
@@ -1724,37 +1740,46 @@ std::vector<uint8_t> make_rdna4_function_alignment_elf(const std::vector<uint32_
   std::memcpy(&header, image.data(), sizeof(header));
   header.e_flags = EF_AMDGPU_MACH_AMDGCN_GFX1201;
   std::memcpy(image.data(), &header, sizeof(header));
-  if (foreign_kind == 0)
+  if (foreign_kind == 0) {
     return image;
+  }
   std::optional<std::vector<Elf64_Shdr>> sections =
       read_elf_table<Elf64_Shdr>(image, header.e_shoff, header.e_shnum, header.e_shentsize);
   std::optional<std::vector<Elf64_Phdr>> segments =
       read_elf_table<Elf64_Phdr>(image, header.e_phoff, header.e_phnum, header.e_phentsize);
-  if (!sections || !segments)
+  if (!sections || !segments) {
     return {};
+  }
   const std::vector<Elf64_Shdr>::iterator foreign =
       std::ranges::find_if(*sections, [](const Elf64_Shdr &section) {
         return section.sh_type == SHT_PROGBITS && (section.sh_flags & SHF_WRITE) != 0;
       });
-  if (foreign == sections->end() || foreign->sh_size != 4 * sizeof(uint32_t))
+  if (foreign == sections->end() || foreign->sh_size != 4 * sizeof(uint32_t)) {
     return {};
+  }
   foreign->sh_flags |= SHF_EXECINSTR;
-  for (Elf64_Phdr &segment : *segments)
-    if (segment.p_type == PT_LOAD && segment.p_offset == foreign->sh_offset)
+  for (Elf64_Phdr &segment : *segments) {
+    if (segment.p_type == PT_LOAD && segment.p_offset == foreign->sh_offset) {
       segment.p_flags |= PF_X;
+    }
+  }
   // This loaded slot now contains code, not the fixture's function pointers.
-  for (Elf64_Shdr &section : *sections)
-    if (section.sh_type == SHT_RELA)
+  for (Elf64_Shdr &section : *sections) {
+    if (section.sh_type == SHT_RELA) {
       section.sh_size = 0;
+    }
+  }
   constexpr rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Rdna4;
   const uint32_t end = build_s_endpgm(arch).value();
   std::array<uint32_t, 4> foreign_words = {end, build_s_nop(0, arch).value(), end, end};
-  if (foreign_kind == 2)
+  if (foreign_kind == 2) {
     foreign_words[1] = 0; // Same section-local offset as the proven .text gap.
+  }
   if (foreign_kind == 3) {
     const AmdGpuCodeObject source(image.data(), image.size());
-    if (!source.is_valid() || source.text_sections().size() != 1)
+    if (!source.is_valid() || source.text_sections().size() != 1) {
       return {};
+    }
     const int64_t displacement =
         (static_cast<int64_t>(source.text_sections().front()->vaddr() + sizeof(uint32_t)) -
          static_cast<int64_t>(foreign->sh_addr + sizeof(uint32_t))) /
@@ -2247,8 +2272,9 @@ TEST(InstrumentorReplacement, RelocatableSymbolEndpointsKeepSectionRelativeCoord
       // Remove linked addresses with the program headers. Text growth must not
       // shift inherited linked data addresses without their LOAD alignment.
       for (Elf64_Shdr &section : sections) {
-        if ((section.sh_flags & SHF_ALLOC) != 0)
+        if ((section.sh_flags & SHF_ALLOC) != 0) {
           section.sh_addr = 0;
+        }
       }
       // An ET_REL symbol remains section-relative even when sh_addr is nonzero.
       sections[*original_text.sectionHeaderIndex()].sh_addr = 8;

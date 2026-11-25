@@ -18,16 +18,19 @@ inline bool valu_destinations_in_range(const Instruction &inst, const amdgpu::Wa
       if (index < amdgpu::ACC_VGPR_OFFSET && wf.gpr_idx_en() &&
           amdgpu::gpr_idx_role_enabled(wf.gpr_idx_mode(), dst.vgpr_msb_role())) {
         index += wf.gpr_idx_offset();
-        if (index >= amdgpu::ACC_VGPR_OFFSET)
+        if (index >= amdgpu::ACC_VGPR_OFFSET) {
           return false;
+        }
       }
-      if (!wf.unified_vgpr_range_is_allocated(index, reg->width))
+      if (!wf.unified_vgpr_range_is_allocated(index, reg->width)) {
         return false;
+      }
     } else if (!dst.is_fieldless()) {
       const auto scalar = dst.to_register_ref();
       if (scalar && scalar->cls == RegClass::SGPR &&
-          wf.exceeds_rounded_sgpr_allocation(scalar->index, scalar->width))
+          wf.exceeds_rounded_sgpr_allocation(scalar->index, scalar->width)) {
         return false;
+      }
     }
   }
   return true;

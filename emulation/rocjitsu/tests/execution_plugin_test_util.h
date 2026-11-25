@@ -145,8 +145,9 @@ public:
       : Instruction(mnemonic, nullptr) {
     size_ = sizeof(encoding_);
     raw_encoding_ = &encoding_;
-    if (memory_wait_producer)
+    if (memory_wait_producer) {
       flags_ |= MEMORY_WAIT_PRODUCER;
+    }
     // GCC 15.2 can warn about the vector downcast after inlining a scalar
     // call when the downcast is guarded only by the pipeline tag.
     const auto tag = state->tag();
@@ -209,8 +210,9 @@ prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wa
   }
   auto decoder = Decoder::create(cu.arch());
   std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
-  if (!load)
+  if (!load) {
     return nullptr;
+  }
   cu.track_memory_wait(*load, wave);
   load->set_data(std::move(state));
   return load;
@@ -229,8 +231,9 @@ protected:
     return amdgpu::VmAccessOutcome::Complete;
   }
 
-  amdgpu::MemoryAccessCompletion complete_access(Instruction &, amdgpu::Wavefront &,
-                                                 amdgpu::MemoryAccessDeferredCompletion) override {
+  amdgpu::MemoryAccessCompletion
+  complete_access(Instruction &, amdgpu::Wavefront &,
+                  const amdgpu::MemoryAccessCompletionFactory &) override {
     return amdgpu::MemoryAccessCompletion::Complete;
   }
 };
@@ -586,8 +589,9 @@ public:
   }
 
   void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override {
-    if (!wf || reg.cls != RegClass::SGPR)
+    if (!wf || reg.cls != RegClass::SGPR) {
       return;
+    }
     for (uint32_t offset = 0; offset < reg.width; ++offset) {
       HookEvent e{HookEvent::WRITE_SGPR};
       e.dispatch_id = wf->dispatch_id();
@@ -641,17 +645,21 @@ public:
 
 inline std::vector<HookEvent> vgpr_read_events(const OrderingPlugin &plugin) {
   std::vector<HookEvent> reads;
-  for (const HookEvent &e : plugin.events)
-    if (e.kind == HookEvent::READ_VGPR)
+  for (const HookEvent &e : plugin.events) {
+    if (e.kind == HookEvent::READ_VGPR) {
       reads.push_back(e);
+    }
+  }
   return reads;
 }
 
 inline std::vector<HookEvent> vgpr_write_events(const OrderingPlugin &plugin) {
   std::vector<HookEvent> writes;
-  for (const HookEvent &e : plugin.events)
-    if (e.kind == HookEvent::WRITE_VGPR)
+  for (const HookEvent &e : plugin.events) {
+    if (e.kind == HookEvent::WRITE_VGPR) {
       writes.push_back(e);
+    }
+  }
   return writes;
 }
 
@@ -750,8 +758,9 @@ struct PluginFixture {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
-      if (!links.empty())
+      if (!links.empty()) {
         links += ',';
+      }
       links += R"({"src":"xcd0.cp.req_)" + std::to_string(i) + R"(","dst":"xcd0.se0.cu)" +
                std::to_string(i) + R"(.cpl","latency":1,"weight":2})";
       links += R"(,{"src":"xcd0.se0.cu)" + std::to_string(i) + R"(.req","dst":"xcd0.l2.cpl_)" +
@@ -846,8 +855,9 @@ struct PluginFixture {
   }
 
   void shutdown() {
-    if (plugin_group_)
+    if (plugin_group_) {
       plugin_group_->onShutdown();
+    }
   }
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;

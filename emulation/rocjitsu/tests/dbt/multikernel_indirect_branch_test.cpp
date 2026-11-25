@@ -39,8 +39,9 @@ std::string kernel_path(const char *name) { return std::string(KERNEL_DIR) + "/"
 size_t count_text_mnemonic(const rocjitsu::AmdGpuCodeObject &co, rocjitsu::IsaFamily arch,
                            std::string_view mnemonic) {
   auto decoder = rocjitsu::Decoder::create(arch);
-  if (!decoder)
+  if (!decoder) {
     return 0;
+  }
 
   size_t count = 0;
   for (const auto *section : co.text_sections()) {
@@ -54,8 +55,9 @@ size_t count_text_mnemonic(const rocjitsu::AmdGpuCodeObject &co, rocjitsu::IsaFa
         ++word_offset;
         continue;
       }
-      if (inst->mnemonic() == mnemonic)
+      if (inst->mnemonic() == mnemonic) {
         ++count;
+      }
       word_offset += static_cast<size_t>(inst->size()) / sizeof(rj_code_binary_inst_t);
     }
   }
@@ -86,24 +88,29 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<rocjitsu::BasicBlock>>
   while (!stack.empty()) {
     const rocjitsu::BasicBlock *block = stack.back();
     stack.pop_back();
-    if (block == nullptr || !reachable.insert(block).second)
+    if (block == nullptr || !reachable.insert(block).second) {
       continue;
+    }
 
     for (const rocjitsu::BasicBlock *succ : block->successors()) {
-      if (succ == nullptr)
+      if (succ == nullptr) {
         continue;
+      }
       if (succ->start_offset() != entry.start_offset() &&
-          kernel_entries.contains(succ->start_offset()))
+          kernel_entries.contains(succ->start_offset())) {
         continue;
+      }
       stack.push_back(succ);
     }
     for (const rocjitsu::BasicBlock::CallEdge &call : block->call_edges()) {
       const rocjitsu::BasicBlock *callee = call.callee;
-      if (callee == nullptr)
+      if (callee == nullptr) {
         continue;
+      }
       if (callee->start_offset() != entry.start_offset() &&
-          kernel_entries.contains(callee->start_offset()))
+          kernel_entries.contains(callee->start_offset())) {
         continue;
+      }
       stack.push_back(callee);
     }
   }
@@ -111,8 +118,9 @@ reachable_kernel_blocks(const std::vector<std::unique_ptr<rocjitsu::BasicBlock>>
   std::vector<const rocjitsu::BasicBlock *> ordered;
   ordered.reserve(reachable.size());
   for (const auto &block : blocks) {
-    if (block && reachable.contains(block.get()))
+    if (block && reachable.contains(block.get())) {
       ordered.push_back(block.get());
+    }
   }
   return ordered;
 }
@@ -156,8 +164,9 @@ std::unordered_map<std::string, size_t>
 cfg_block_counts_by_kernel(const rocjitsu::AmdGpuCodeObject &co,
                            std::span<const char *const> kernel_names) {
   std::unordered_map<std::string, size_t> counts;
-  if (co.text_sections().empty())
+  if (co.text_sections().empty()) {
     return counts;
+  }
 
   const auto *text = co.text_sections()[0];
   rocjitsu::KernelDescriptorTranslator source_parser(rocjitsu::IsaFamily::Cdna4,
@@ -175,19 +184,22 @@ cfg_block_counts_by_kernel(const rocjitsu::AmdGpuCodeObject &co,
   }
 
   auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna4);
-  if (!decoder)
+  if (!decoder) {
     return counts;
+  }
 
   auto blocks =
       rocjitsu::build_valid_blocks(co, *decoder, rocjitsu::IsaFamily::Cdna4, kernel_entry_leaders);
 
   for (const char *name : kernel_names) {
     const auto *kernel = kernel_translation_by_name(source_kernels, co, name);
-    if (kernel == nullptr)
+    if (kernel == nullptr) {
       continue;
+    }
     const auto *entry = block_starting_at(blocks, kernel->entry_text_offset);
-    if (entry == nullptr)
+    if (entry == nullptr) {
       continue;
+    }
     const auto reachable = reachable_kernel_blocks(blocks, *entry, entries);
     counts.emplace(name, reachable.size());
   }
@@ -280,8 +292,9 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
 
   std::vector<uint64_t> kernel_entries;
   kernel_entries.reserve(source_kernels.size());
-  for (const auto &kernel : source_kernels)
+  for (const auto &kernel : source_kernels) {
     kernel_entries.push_back(kernel.entry_text_offset);
+  }
 
   auto decoder = rocjitsu::Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
@@ -294,16 +307,18 @@ TEST(BinaryTranslatorE2E, BuildsCfgForRealMultiKernelIndirectBranches) {
   std::vector<uint64_t> direct_scall_offsets;
   for (const auto &block : blocks) {
     const auto *term = block->terminator();
-    if (term == nullptr)
+    if (term == nullptr) {
       continue;
+    }
 
     const std::string_view mnemonic = term->mnemonic();
     if (mnemonic == "s_swappc_b64" && !block->static_indirect_call_fixups().empty()) {
       ++recovered_swappc_blocks;
       expect_recovered_target_call_edges(blocks, *block);
-      for (const auto &fixup : block->static_indirect_call_fixups())
+      for (const auto &fixup : block->static_indirect_call_fixups()) {
         EXPECT_FALSE(has_successor_start(*block, fixup.source_target_offset))
             << "swappc callees must be call edges, not ordinary CFG successors";
+      }
       EXPECT_TRUE(has_successor_start(*block, block->end_offset()))
           << "indirect calls must retain the return/fallthrough edge";
     } else if (mnemonic == "s_setpc_b64" && !block->static_indirect_call_fixups().empty()) {

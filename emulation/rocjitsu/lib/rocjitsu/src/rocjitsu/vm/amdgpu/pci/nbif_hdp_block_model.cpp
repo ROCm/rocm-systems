@@ -37,9 +37,10 @@ std::unique_ptr<NbifHdpBlockModel> NbifHdpBlockModel::create(const IpBlock &bloc
                                                              IpRegisterWindow registers) {
   for (const HdpRemapLayout &layout : kLayouts) {
     if (block.major == layout.major && block.minor == layout.minor &&
-        block.revision == layout.revision)
+        block.revision == layout.revision) {
       return std::unique_ptr<NbifHdpBlockModel>(
           new NbifHdpBlockModel(registers.absolute_remap(), layout.flush_dword));
+    }
   }
   util::Logger::warn(std::format("{}: no HDP remap for NBIF {}.{}.{}", registers.owner(),
                                  block.major, block.minor, block.revision));
@@ -56,11 +57,13 @@ bool NbifHdpBlockModel::reset() {
 }
 
 void NbifHdpBlockModel::observe_register_write(uint64_t byte_offset, PciMemoryAccess &) {
-  if (registers_.resolve(0, flush_dword_) != byte_offset)
+  if (registers_.resolve(0, flush_dword_) != byte_offset) {
     return;
+  }
   std::atomic_thread_fence(std::memory_order_seq_cst);
-  if (soc_ != nullptr)
+  if (soc_ != nullptr) {
     soc_->cache_coherence()->publish_local_backing_change();
+  }
   completed_flushes_.fetch_add(1, std::memory_order_release);
 }
 

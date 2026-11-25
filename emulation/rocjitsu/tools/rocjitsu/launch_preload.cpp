@@ -60,8 +60,9 @@ std::vector<std::string>::const_iterator find_env_entry(const std::vector<std::s
 #if defined(RJ_BUILT_WITH_ASAN) || defined(RJ_BUILT_WITH_TSAN)
 std::string canonical_existing_path(const std::filesystem::path &candidate) {
   std::error_code ec;
-  if (!std::filesystem::exists(candidate, ec) || ec)
+  if (!std::filesystem::exists(candidate, ec) || ec) {
     return {};
+  }
 
   std::filesystem::path canonical = std::filesystem::canonical(candidate, ec);
   return ec ? std::string{} : canonical.string();
@@ -75,30 +76,35 @@ std::string current_executable_path() {
 
 std::string find_loaded_sanitizer_runtime(void *init_symbol, std::string_view runtime_name) {
   Dl_info info{};
-  if (!dladdr(init_symbol, &info) || !info.dli_fname)
+  if (!dladdr(init_symbol, &info) || !info.dli_fname) {
     return {};
+  }
 
   const std::filesystem::path runtime_path(info.dli_fname);
-  if (runtime_path.filename().string().find(runtime_name) == std::string::npos)
+  if (runtime_path.filename().string().find(runtime_name) == std::string::npos) {
     return {};
+  }
 
   std::string runtime = canonical_existing_path(runtime_path);
-  if (runtime.empty() || runtime == current_executable_path())
+  if (runtime.empty() || runtime == current_executable_path()) {
     return {};
+  }
   return runtime;
 }
 #endif
 } // namespace
 
 LaunchEnvironment::LaunchEnvironment() {
-  for (char **entry = environ; entry && *entry; ++entry)
+  for (char **entry = environ; entry && *entry; ++entry) {
     entries_.emplace_back(*entry);
+  }
 }
 
 const char *LaunchEnvironment::get(const std::string &name) const {
   auto it = find_env_entry(entries_, name);
-  if (it == entries_.end())
+  if (it == entries_.end()) {
     return nullptr;
+  }
   return it->c_str() + name.size() + 1;
 }
 
@@ -125,8 +131,9 @@ char *const *LaunchEnvironment::envp() {
   if (envp_dirty_) {
     envp_.clear();
     envp_.reserve(entries_.size() + 1);
-    for (std::string &entry : entries_)
+    for (std::string &entry : entries_) {
       envp_.push_back(entry.data());
+    }
     envp_.push_back(nullptr);
     envp_dirty_ = false;
   }
@@ -151,10 +158,12 @@ std::string find_loaded_tsan_runtime() {
 
 void prepend_launch_preloads(LaunchEnvironment &environment, const std::string &interposer_path) {
   environment.prepend_path("LD_PRELOAD", interposer_path);
-  if (std::string asan_runtime = find_loaded_asan_runtime(); !asan_runtime.empty())
+  if (std::string asan_runtime = find_loaded_asan_runtime(); !asan_runtime.empty()) {
     environment.prepend_path("LD_PRELOAD", asan_runtime);
-  if (std::string tsan_runtime = find_loaded_tsan_runtime(); !tsan_runtime.empty())
+  }
+  if (std::string tsan_runtime = find_loaded_tsan_runtime(); !tsan_runtime.empty()) {
     environment.prepend_path("LD_PRELOAD", tsan_runtime);
+  }
 }
 
 void configure_dbt_guest_tool_environment(LaunchEnvironment &environment,

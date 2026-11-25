@@ -151,8 +151,9 @@ decltype(auto) host_call(Function resolved, Fallback fallback, Args... args) {
 
 /// @brief Close an optional host descriptor, including before pass-through is resolved.
 inline void host_close_fd(int fd) {
-  if (fd >= 0)
+  if (fd >= 0) {
     host_call(libc_passthrough().close, ::close, fd);
+  }
 }
 
 /// @brief Read a pinned proc stat file. Return 1 for an exited group, 0 for a live group, or

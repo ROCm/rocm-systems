@@ -117,6 +117,7 @@ from .amdsmi_interface import amdsmi_get_cpu_affinity_with_scope
 
 # # SW Version Information
 from .amdsmi_interface import amdsmi_get_gpu_driver_info
+from .amdsmi_interface import amdsmi_get_gpu_driver_info_v2
 
 # # ASIC and Bus Static Information
 from .amdsmi_interface import amdsmi_get_gpu_asic_info

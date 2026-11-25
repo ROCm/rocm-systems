@@ -1086,8 +1086,10 @@ rocprofsys_reset_preload_hidden(void)
 
 //======================================================================================//
 
-extern "C" void
-rocprofsys_finalize_hidden(void)
+namespace
+{
+void
+finalize_session(rocprofiler_sdk::client_registration registration)
 {
     // Prevent multiple finalization calls (e.g., from atexit handlers after reset_state)
     if(rocprofsys_finalization_done.exchange(true))
@@ -1124,7 +1126,7 @@ rocprofsys_finalize_hidden(void)
         get_control_session()->shutdown();
 
         LOG_DEBUG("Shutting down ROCm...");
-        rocprofiler_sdk::shutdown();
+        rocprofiler_sdk::shutdown(registration);
 
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
@@ -1279,7 +1281,7 @@ rocprofsys_finalize_hidden(void)
     }
 
     LOG_DEBUG("Shutting down ROCm...");
-    rocprofiler_sdk::shutdown();
+    rocprofiler_sdk::shutdown(registration);
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();
@@ -1535,6 +1537,19 @@ rocprofsys_finalize_hidden(void)
     // reset here. They are only reset during re-attach (in rocprofiler-sdk.cpp) when
     // explicitly preparing for a new session. Resetting them during normal exit
     // can cause crashes if cleanup code triggers reinitialization.
+}
+}  // namespace
+
+extern "C" void
+rocprofsys_finalize_hidden(void)
+{
+    finalize_session(rocprofiler_sdk::client_registration::release);
+}
+
+extern "C" void
+rocprofsys_finalize_attach_session_hidden(void)
+{
+    finalize_session(rocprofiler_sdk::client_registration::keep);
 }
 
 extern "C" void
