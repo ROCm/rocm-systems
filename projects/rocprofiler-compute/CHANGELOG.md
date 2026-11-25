@@ -11,12 +11,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Memory chart values in `--output-format db` and `csv` keep their full precision, like the other panels.
 
-* Changed the Memory Chart compute unit box to use the metric names and units of the other panels:
-  * *VGPRs*, *SGPRs*, *Wavefront Occupancy*, *Scratch Allocation* and *LDS Allocation*.
-  * *Scratch Allocation* is in bytes per work-item, and *LDS Allocation* in bytes.
-  * Counts show their unit, for example `1.64e+04 instr`.
-
-* Changed Memory Chart *Wavefront Occupancy* to match the System Speed of Light panel, so it is lower when CUs are idle.
+* The Memory Chart now uses the same metric names as the metric tables.
+  * Scratch Allocation is in bytes per work-item, and LDS Allocation is in bytes, as in the Wavefront panel.
+  * Counts show what they count, such as instr or req.
+  * Only percentages use the Util, Hit and Stall colors, and each shows a bar.
+  * Scratch Allocation and Wavefront Occupancy values can't be compared with earlier releases.
 
 ### Removed
 
