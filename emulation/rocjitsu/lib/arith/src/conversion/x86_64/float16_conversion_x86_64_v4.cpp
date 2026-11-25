@@ -125,23 +125,39 @@ namespace rocjitsu::arith {
 // Convert a Wave32 with validated controls; reads precede masked stores, including aliases.
 void float16_conversion_x86_64_v4(Float16Format format, Float16Conversion op, uint64_t flags,
                                   uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
-                                  const uint32_t *b, const uint32_t *c) {
+                                  const uint32_t *b, const uint32_t *c, bool gfx950) {
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
+  bool flush_in = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   const auto output = sdwa_output_policy(flags, uint32_t(rdna3_output_modifiers(flags, mode)));
+  using V = conversion_simd::Lanes<32>;
   for (int lane = 0; lane < 32; lane += 16) {
     auto av = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(a + lane));
     __m512i value;
     if (op == Float16Conversion::Widen) {
-      value = mode & RJ_ARITH_ALU_HIGH_A ? _mm512_and_si512(av, _mm512_set1_epi32(int(0xffff0000U)))
-                                         : _mm512_slli_epi32(av, 16);
       if (mode & RJ_ARITH_CVT_SDWA) {
-        using V = conversion_simd::Lanes<32>;
+        value = mode & RJ_ARITH_ALU_HIGH_A
+                    ? _mm512_and_si512(av, _mm512_set1_epi32(int(0xffff0000U)))
+                    : _mm512_slli_epi32(av, 16);
         value = sdwa_output_f32(V(value), output).bits;
+      } else if (gfx950) {
+        value = widen_bf16_gfx950(V(av), flags, mode).bits;
+      } else {
+        value = mode & RJ_ARITH_ALU_HIGH_A
+                    ? _mm512_and_si512(av, _mm512_set1_epi32(int(0xffff0000U)))
+                    : _mm512_slli_epi32(av, 16);
       }
     } else {
       auto bv = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(b + lane));
       if (op == Float16Conversion::Stochastic) {
-        value = narrow(format, source_sign(av, mode, 0), bv, true, saturate);
+        if (gfx950) {
+          const V src(source_sign(av, mode, 0));
+          value = (format == Float16Format::Bf16
+                       ? narrow_bf16_gfx950(src, V(bv), true, saturate, flush_in)
+                       : narrow_f16_sr_gfx950(src, V(bv), saturate))
+                      .bits;
+        } else {
+          value = narrow(format, source_sign(av, mode, 0), bv, true, saturate);
+        }
         auto old = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(d + lane));
         bool high = mode & RJ_ARITH_ALU_HIGH_D;
         auto keep = _mm512_set1_epi32(high ? 0xffff : int(0xffff0000U));
@@ -155,8 +171,18 @@ void float16_conversion_x86_64_v4(Float16Format format, Float16Conversion op, ui
           value =
               _mm512_or_si512(narrow(format, av, low_seed, true, saturate),
                               _mm512_slli_epi32(narrow(format, bv, high_seed, true, saturate), 16));
+        } else if (gfx950) {
+          const V src_a(source_sign(av, mode, 0));
+          const V src_b(source_sign(bv, mode, 1));
+          const V zero(uint32_t{0});
+          const V low = format == Float16Format::Bf16
+                            ? narrow_bf16_gfx950(src_a, zero, false, saturate, flush_in)
+                            : narrow_f16_pk_gfx950(src_a, flags);
+          const V high = format == Float16Format::Bf16
+                             ? narrow_bf16_gfx950(src_b, zero, false, saturate, flush_in)
+                             : narrow_f16_pk_gfx950(src_b, flags);
+          value = (low | (high << V(uint32_t{16}))).bits;
         } else {
-          using V = conversion_simd::Lanes<32>;
           auto zero = _mm512_setzero_si512();
           const V low(narrow(format, source_sign(av, mode, 0), zero, false, saturate));
           const V high(narrow(format, source_sign(bv, mode, 1), zero, false, saturate));

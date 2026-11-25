@@ -4128,8 +4128,8 @@ void VCvtF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   const unsigned byte = ((selector & 1) << 1) | ((selector & 2) >> 1);
   const uint64_t modifiers = (uint64_t(byte) << 16);
   const uint8_t source_bytes = uint8_t(1u << byte);
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32_gfx950,
-                                 rj_arith_v_cvt_f32_bf8_w64_gfx950, wf.cu().arithmetic_flags(),
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32_gfx1250,
+                                 rj_arith_v_cvt_f32_bf8_w64_gfx1250, wf.cu().arithmetic_flags(),
                                  modifiers, vdst, src0, source_bytes);
 }
 
@@ -4157,8 +4157,8 @@ RJ_NOINLINE void VCvtF32Bf8Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   const unsigned byte = ((selector & 1) << 1) | ((selector & 2) >> 1);
   const uint64_t modifiers = (uint64_t(byte) << 16);
   const uint8_t source_bytes = uint8_t(1u << byte);
-  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32_gfx950,
-                                 rj_arith_v_cvt_f32_bf8_w64_gfx950, wf.cu().arithmetic_flags(),
+  amdgpu::arith::execute_unary32(wf, rj_arith_v_cvt_f32_bf8_w32_gfx1250,
+                                 rj_arith_v_cvt_f32_bf8_w64_gfx1250, wf.cu().arithmetic_flags(),
                                  modifiers, vdst, src0, source_bytes);
   dpp_write_mask_scope_.restore();
 }
@@ -4168,7 +4168,7 @@ void VCvtPkF32Fp8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t modifiers = (selector & 1) ? RJ_ARITH_ALU_HIGH_A : 0u;
   const uint8_t source_bytes = (selector & 1) ? 0xC : 0x3;
   amdgpu::arith::execute_widen32_to_pair(
-      wf, rj_arith_v_cvt_pk_f32_fp8_w32_gfx950, rj_arith_v_cvt_pk_f32_fp8_w64_gfx950,
+      wf, rj_arith_v_cvt_pk_f32_fp8_w32_gfx1250, rj_arith_v_cvt_pk_f32_fp8_w64_gfx1250,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, source_bytes);
 }
 
@@ -4177,7 +4177,7 @@ void VCvtPkF32Bf8Vop1::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t modifiers = (selector & 1) ? RJ_ARITH_ALU_HIGH_A : 0u;
   const uint8_t source_bytes = (selector & 1) ? 0xC : 0x3;
   amdgpu::arith::execute_widen32_to_pair(
-      wf, rj_arith_v_cvt_pk_f32_bf8_w32_gfx950, rj_arith_v_cvt_pk_f32_bf8_w64_gfx950,
+      wf, rj_arith_v_cvt_pk_f32_bf8_w32_gfx1250, rj_arith_v_cvt_pk_f32_bf8_w64_gfx1250,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, source_bytes);
 }
 

@@ -160,8 +160,8 @@ inline uint64_t float32_flags(const Wavefront &wave, uint64_t flags, bool rdna3)
 // Source capture precedes writes to any overlapping destination.
 template <typename Inst>
 inline void execute_bf16_widen_sdwa(Inst &inst, Wavefront &wave, Unary32Function wave32,
-                                    Unary64Function wave64, const Operand &destination,
-                                    const Operand &source) {
+                                    Unary64Function wave64, uint64_t flags,
+                                    const Operand &destination, const Operand &source) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
   if (!exec_mask) {
     return;
@@ -173,12 +173,12 @@ inline void execute_bf16_widen_sdwa(Inst &inst, Wavefront &wave, Unary32Function
   }
   uint32_t result[64]{};
   uint32_t *d = result;
-  // Pure selection/widening needs no numerical SDWA stage or guest FP controls.
   const uint64_t modifiers = sdwa_float_modifiers(inst);
   const uint64_t mode = modifiers ? RJ_ARITH_CVT_SDWA | modifiers : 0;
-  const uint64_t flags = modifiers ? float32_flags(wave, wave.cu().arithmetic_flags(), true) &
-                                         ~RJ_ARITH_FP_FLUSH_INPUT_DENORMALS
-                                   : wave.cu().arithmetic_flags();
+  // Modified SDWA normalizes tiny BF16 inputs before scaling rather than flushing on input.
+  if (modifiers) {
+    flags &= ~RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  }
   int error = wave.wf_size() == 32 ? wave32(flags, uint32_t(exec_mask), mode, &d, &a.data)
                                    : wave64(flags, exec_mask, mode, &d, &a.data);
   if (error != RJ_ARITH_SUCCESS) {

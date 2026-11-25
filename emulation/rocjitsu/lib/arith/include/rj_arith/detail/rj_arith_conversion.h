@@ -1606,8 +1606,10 @@ int rj_arith_v_cvt_nearest_i32_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
 // unsigned E5M3 via CLAMP. ABS/NEG apply to floating sources, except in the raw
 // E5M3 path; OMOD is ignored. PK writes the selected half, SR the selected byte
 // using B as the stochastic seed. All other destination bits and inactive lanes
-// are preserved. FP16_OVFL saturates finite overflow. With CLAMP clear, gfx1250
-// converts +infinity to FP8 0x7f (NaN) or BF8 0x7c (infinity), even with FP16_OVFL.
+// are preserved. FP16_OVFL saturates finite overflow. gfx950 and CLAMP-clear
+// gfx1250 convert +infinity to FP8 0x7f (NaN) or BF8 0x7c (infinity), even with
+// FP16_OVFL, and encode input NaNs as 0xff / 0xfe; gfx950 additionally honors
+// RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS.
 int rj_arith_v_cvt_pk_fp8_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b);
@@ -1709,8 +1711,8 @@ int rj_arith_v_cvt_sr_bf8_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t m
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b);
 
-// gfx942 widens FNUZ; gfx950 (also used by gfx1250) widens OCP, preserving NaN signs.
-// These inherit Rocjitsu's format conversion model, without new hardware characterization.
+// gfx942 widens FNUZ and gfx950 widens OCP, both canonicalizing NaNs to 0xffc00000.
+// gfx1250 widens OCP preserving NaN signs, with single FP8 CLAMP selecting unsigned E5M3.
 // Single conversions select CVT_BYTE; packed conversions select a half with HIGH_A and write two
 // VGPRs.
 int rj_arith_v_cvt_f32_fp8_w32_gfx942(uint64_t flags, uint32_t exec_mask,
@@ -1763,12 +1765,33 @@ int rj_arith_v_cvt_pk_f32_bf8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                          const uint32_t *const *a);
 
 // gfx1250 single FP8 widening uses CLAMP as an unsigned E5M3 format selector.
+// Single BF8 and packed FP8/BF8 _gfx1250 wrappers preserve the inherited
+// OCP signed-NaN model in loose modes and reject strict modes 2 and 3 pending
+// gfx1250 hardware captures.
 int rj_arith_v_cvt_f32_fp8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a);
 int rj_arith_v_cvt_f32_fp8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_fp8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_fp8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_bf8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_bf8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
 
 // gfx1250 FP8/BF8 to FP16 conversions: each operand occupies one VGPR.
 // Single forms select a source byte with CVT_BYTE_0..3 and write low/HIGH_D half.
@@ -1882,6 +1905,43 @@ int rj_arith_v_cvt_sr_pk_f16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_
 int rj_arith_v_cvt_sr_pk_f16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, const uint32_t *const *c);
+
+// MI350X (gfx950) BF16/FP16 conversion entry points, calibrated for exact result semantics:
+// - v_cvt_f32_bf16_gfx950 honors HIGH_A, ABS_A, NEG_A, CDNA-gated OMOD, DX10-gated CLAMP,
+//   input/output denormal flushing, and unconditional sNaN quieting.
+// - v_cvt_{pk,sr}_bf16_f32_gfx950 honor FLUSH_INPUT_DENORMALS and quiet sNaNs while preserving
+//   upper payload bits; SR saturates +-infinity to +-max finite under FP16_OVFL.
+// - v_cvt_pk_f16_f32_gfx950 honors guest FP16 rounding, FLUSH_OUTPUT_DENORMALS, FP16_OVFL finite
+//   saturation, and quieted NaN payloads; v_cvt_sr_f16_f32_gfx950 quiets NaN payloads and
+//   saturates +-infinity under FP16_OVFL.
+int rj_arith_v_cvt_f32_bf16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_pk_bf16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_pk_bf16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_pk_f16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_f16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
 
 // gfx942/gfx950 conversions: a low-half destination zero-extends into its VGPR;
 // HIGH_D preserves the low half. Conversions to FP16 additionally accept CVT_SDWA

@@ -189,7 +189,8 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             and result_type == 'I32'
             and input_type == 'I8'
         ):
-            api = 'rj_arith_' + name.lower() + '_w64'
+            suffix = '_gfx950' if arch_name == 'cdna4' and M * K == 1024 else ''
+            api = f'rj_arith_{name.lower()}_w64{suffix}'
             L.append('  uint64_t controls = inst_.cbsz | (uint64_t(inst_.abid) << 3);')
             L.append(
                 f'  amdgpu::arith::exec_sparse_matrix<{M*K//512}, {M*K//256}, {M*N//64}, 1, 64>('
@@ -501,6 +502,12 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     if is_dense_i8_mfma or is_dense_iu8_wmma:
         lanes = 32 if is_dense_iu8_wmma else 64
         api = 'rj_arith_' + name.lower() + f'_w{lanes}'
+        if (
+            is_dense_i8_mfma
+            and arch == 'cdna4'
+            and (M, K, B) in {(32, 16, 1), (16, 32, 1)}
+        ):
+            api += '_gfx950'
         if is_dense_iu8_wmma:
             L.append(
                 '  uint64_t controls = (inst_.neg & 3) | ((inst_.opsel & 1u) ? RJ_ARITH_SWMMAC_INDEX_KEY_1 : 0);'
@@ -513,16 +520,20 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             )
             inputs, outputs = M * K * B // 256, M * M * B // 64
         if is_dense_i8_mfma:
-            L.append(
-                '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
-            )
-            L.append(
-                '    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid); });'
-            )
-            L.append(
-                '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
-            )
-            L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
+            if arch == 'cdna4' and B == 1:
+                L.append('  const uint64_t a_lanes = ~uint64_t{0};')
+                L.append('  const uint64_t b_lanes = ~uint64_t{0};')
+            else:
+                L.append(
+                    '  const uint64_t a_lanes = inst_.cbsz == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+                )
+                L.append(
+                    '    return amdgpu::permute_a_lane(lane, inst_.cbsz, inst_.abid); });'
+                )
+                L.append(
+                    '  const uint64_t b_lanes = inst_.blgp == 0 ? ~uint64_t{0} : amdgpu::mfma_permuted_lane_mask([&](uint32_t lane) {'
+                )
+                L.append('    return amdgpu::permute_b_lane(lane, inst_.blgp); });')
         L.append(
             f'  amdgpu::arith::exec_dense_fp_matrix<{inputs}, {outputs}, {lanes}>('
         )
