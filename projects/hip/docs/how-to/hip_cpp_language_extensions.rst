@@ -923,8 +923,8 @@ Arithmetic reduces:
 
 * On Nvidia platform: ``int`` or ``unsigned int``
 
-* On AMD platform: ``int`` or ``unsigned int``; if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then: ``unsigned long long``, ``long long``, ``half``/``float``/``double`` precision floating
-floating-point types are also supported.
+* On AMD platform: ``int`` or ``unsigned int``; if the user defines the macro ``HIP_ENABLE_EXTRA_WARP_SYNC_TYPES``, then: ``unsigned long long``, ``long long``, ``half``/``float``/``double`` precision
+  floating-point types are also supported.
 
 Returns the aggregated result of the arithmetic operation, where each of the participating threads
 (i.e. the ones mentioned on the mask) contribute ``var``.
