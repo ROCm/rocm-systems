@@ -136,11 +136,11 @@ For example, on an MI300 system:
    +-----------+-------------------------------+-------------+------------------------------------------+
    | Metric_ID | Metric                        | Unit        | Description                              |
    +-----------+-------------------------------+-------------+------------------------------------------+
-   | 6.1.0     | Accelerator Utilization       | Percent     | The percent of cycles in the kernel      |
-   |           |                               |             | where the accelerator was actively doing |
-   |           |                               |             | any work.                                |
+   | 6.1.0     | Accelerator Utilization       | Percent     | Percentage of cycles in the kernel where |
+   |           |                               |             | the accelerator was actively doing any   |
+   |           |                               |             | work.                                    |
    +-----------+-------------------------------+-------------+------------------------------------------+
-   | 6.1.1     | Scheduler-Pipe Utilization    | Percent     | The percent of total scheduler-pipe      |
+   | 6.1.1     | Scheduler-Pipe Utilization    | Percent     | Percentage of total scheduler-pipe       |
    |           |                               |             | cycles in the kernel where the           |
    |           |                               |             | scheduler-pipes were actively doing any  |
    |           |                               |             | work.                                    |

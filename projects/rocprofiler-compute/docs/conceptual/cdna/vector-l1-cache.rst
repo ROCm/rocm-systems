@@ -220,7 +220,7 @@ The address processor counts these instruction types as follows:
    * Global/Generic: global and flat memory operations, that are used for global
      and generic memory access.
 
-   * Spill/Stack: buffer instructions which are used on the AMD Instinct MI100 and
+   * Buffer: buffer instructions, which are used on the AMD Instinct MI100 and
      :ref:`MI2XX <mixxx-note>` GPUs for register spills/stack memory.
 
    These concepts are described in more detail in the :ref:`memory-spaces`,
