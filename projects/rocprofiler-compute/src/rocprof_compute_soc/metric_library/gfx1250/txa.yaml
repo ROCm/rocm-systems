@@ -89,7 +89,7 @@ txa.command_bus_stall_rate:
   description: Percentage of cycles the TXA-to-GL0 command bus is stalled.
 txa.command_bus_util:
   name: TXA Command Bus Utilization
-  formula: 100 * SUM(TX_VCA_VMEMCMD_CYCLES_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  formula: 100 * SUM(TX_VCA_VMEMCMD_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
     Percentage of cycles the TXA-to-GL0 command bus is carrying a memory command.
@@ -175,13 +175,13 @@ txa.req_bus_stall_rate:
     Percentage of cycles the TXA-to-GL0 request data bus is stalled.
 txa.req_bus_util:
   name: Shader-TXA Request Bus Utilization
-  formula: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  formula: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
     Percentage of cycles the Shader-to-TXA request bus is carrying a request.
 txa.req_bus_util_atomic_data:
   name: TXA Request Bus Utilization - Atomic Data
-  formula: 100 * SUM(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  formula: 100 * SUM(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
     Percentage of cycles the Shader-to-TXA request bus is carrying atomic write data.
@@ -233,7 +233,7 @@ txa.util:
   description: Percentage of cycles the TXA is processing memory requests.
 txa.vmw_req_bus_util:
   name: TXA-VMW Request Bus Utilization
-  formula: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  formula: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
     Percentage of cycles the TXA-to-GL0 request data bus is carrying data.
