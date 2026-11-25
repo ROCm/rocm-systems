@@ -230,7 +230,7 @@ def gpu_soc():
         )
     except FileNotFoundError:
         return "", ""
-    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)(?:-\w+)?\s*$", re.MULTILINE)
+    soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)(?:-\w+)*\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
     if not devices:
         return "", ""
