@@ -1,12 +1,36 @@
 System Speed-of-Light:
-  VALU Issue Rate:
-    plain: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
-    rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
-    unit: GInstructions/s
+  Theoretical LDS Bandwidth:
+    plain: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
+    rst: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
+    unit: GB/s
+  GL0 Cache Bandwidth:
+    plain: The number of bytes per second requested from the GL0 vector cache (TCP Cache). Each TCP_REQ cache-line request counts as 128 bytes, so this is an upper bound.
+    rst: The number of bytes per second requested from the GL0 vector cache (TCP Cache). Each TCP_REQ cache-line request counts as 128 bytes, so this is an upper bound.
+    unit: GB/s
+  Memory Read Bandwidth:
+    plain: The number of bytes per second the L2 cache (GL2C) reads over the EA for requests destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    rst: The number of bytes per second the L2 cache (GL2C) reads over the EA for requests destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    unit: GB/s
+  Memory Write Bandwidth:
+    plain: The number of bytes per second the L2 cache (GL2C) writes over the EA for requests destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are included.
+    rst: The number of bytes per second the L2 cache (GL2C) writes over the EA for requests destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are included.
+    unit: GB/s
+  WGP Utilization:
+    plain: Percentage of WGP clock cycles at least one wavefront is active.
+    rst: Percentage of WGP clock cycles at least one wavefront is active.
+    unit: Percent
+  VALU FLOPs:
+    plain: VALU instructions per second, excluding WMMA, at one FLOP per lane (32 in wave32). Every VALU instruction counts, including integer, move and convert, and an FMA counts once, so a pure FMA kernel reads low and a GEMM with address arithmetic can read about twice its true FLOP rate.
+    rst: VALU instructions per second, excluding WMMA, at one FLOP per lane (32 in wave32). Every VALU instruction counts, including integer, move and convert, and an FMA counts once, so a pure FMA kernel reads low and a GEMM with address arithmetic can read about twice its true FLOP rate.
+    unit: GFLOP/s
   WMMA FLOPs (F16->F32 16x16x16):
     plain: The total number of FP16 WMMA floating-point operations executed per second.
     rst: The total number of FP16 WMMA floating-point operations executed per second.
     unit: GFLOP/s
+  VALU Issue Rate:
+    plain: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
+    rst: Billions of VALU instruction issues per second. The counter includes floating-point and integer instructions and does not count FLOPs or active lanes.
+    unit: GInstructions/s
   FP64 VALU Issue Rate:
     plain: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes.
     rst: Billions of double-precision VALU instruction issues per second. This is an instruction rate, without accounting for FLOPs per instruction or active lanes.
@@ -15,33 +39,37 @@ System Speed-of-Light:
     plain: Average number of instructions per active WGP cycle.
     rst: Average number of instructions per active WGP cycle.
     unit: Instructions per Cycle
-  Wavefront Occupancy:
-    plain: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
-    rst: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
-    unit: Wavefronts
-  GL2 Cache Hit Rate:
-    plain: Percentage of GL2 cache requests that hit in the cache.
-    rst: Percentage of GL2 cache requests that hit in the cache.
+  LDS Utilization:
+    plain: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
+    rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
     unit: Percent
   LDS Bank Conflicts:
     plain: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     rst: Cycles LDS stalled on conflicting bank addresses, averaged per dispatch.
     unit: Conflicts
-  GL0 Hit Rate:
-    plain: Percentage of GL0 cache requests that hit in the cache.
-    rst: Percentage of GL0 cache requests that hit in the cache.
-    unit: Percent
-  sL1D Hit Rate:
-    plain: Percentage of Scalar Data Cache requests that hit in the cache.
-    rst: Percentage of Scalar Data Cache requests that hit in the cache.
+  GL2 Cache Hit Rate:
+    plain: Percentage of GL2 cache requests that hit in the cache.
+    rst: Percentage of GL2 cache requests that hit in the cache.
     unit: Percent
   sL1D Load Bandwidth:
     plain: The number of bytes per second loaded by scalar memory instructions. The number of bytes is the number of dwords each instruction loads multiplied by four; bounds-check reductions are ignored.
     rst: The number of bytes per second loaded by scalar memory instructions. The number of bytes is the number of dwords each instruction loads multiplied by four; bounds-check reductions are ignored.
     unit: GB/s
+  sL1D Hit Rate:
+    plain: Percentage of Scalar Data Cache requests that hit in the cache.
+    rst: Percentage of Scalar Data Cache requests that hit in the cache.
+    unit: Percent
   L1I Hit Rate:
     plain: Percentage of Instruction Cache requests that hit in the cache.
     rst: Percentage of Instruction Cache requests that hit in the cache.
+    unit: Percent
+  Wavefront Occupancy:
+    plain: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
+    rst: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
+    unit: Wavefronts
+  GL0 Hit Rate:
+    plain: Percentage of GL0 cache requests serviced from cache without accessing GL1. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
+    rst: Percentage of GL0 cache requests serviced from cache without accessing GL1. Higher hit rates indicate better data locality and lower memory access latency. Low hit rates may indicate working sets exceeding GL0 capacity or poor access patterns.
     unit: Percent
 Memory chart - Instruction Cache:
   L1I Requests:

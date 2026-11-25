@@ -319,7 +319,6 @@ gl0.gl1_wr_req:
 gl0.hit_rate:
   formula: 100 * SUM(TCP_REQ_sum - TCP_REQ_MISS_sum) / SUM(TCP_REQ_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_WAVES, TCP_REQ_MISS_sum, TCP_REQ_sum]
 gl0.miss_req:
   formula: SUM(TCP_REQ_MISS_sum) / SUM($denom)
@@ -378,7 +377,6 @@ gl1.gl2_wr_req:
 gl1.hit_rate:
   formula: 100 * SUM(GL1C_REQ_sum - GL1C_REQ_MISS_sum) / SUM(GL1C_REQ_sum)
   unit: Percent
-  peak: 100
   counters: [GL1C_REQ_MISS_sum, GL1C_REQ_sum, GRBM_GUI_ACTIVE, SQ_WAVES]
 gl1.lfifo_full_stall:
   formula: SUM(GL1C_STALL_LFIFO_FULL_sum) / SUM($denom)
@@ -437,7 +435,6 @@ gl2.fabric_wr_bw:
 gl2.hit_rate:
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  peak: 100
   counters: [GL2C_HIT_sum, GL2C_MISS_sum, GRBM_GUI_ACTIVE, SQ_WAVES]
 gl2.hits:
   formula: SUM(GL2C_HIT_sum) / SUM($denom)
@@ -491,7 +488,6 @@ l1i.gl1_rd_bw:
 l1i.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQC_ICACHE_HITS_sum, SQC_ICACHE_MISSES_sum, SQ_WAVES]
 l1i.req:
   formula: SUM(SQC_ICACHE_REQ_sum) / SUM($denom)
@@ -535,7 +531,6 @@ sl1d.gl1_rd_bw:
 sl1d.hit_rate_excl_dup:
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQC_DCACHE_HITS_sum, SQC_DCACHE_MISSES_sum, SQ_WAVES]
 sl1d.req:
   formula: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
@@ -565,20 +560,10 @@ wave.dispatched_wavefronts:
   formula: AVG(SQ_WAVES_sum)
   unit: Wavefronts
   counters: [GRBM_GUI_ACTIVE, SQ_WAVES, SQ_WAVES_sum]
-wave.issue_wait:
-  formula: 100 * SUM(SQ_WAIT_INST_ANY) / SUM(SQ_WAVE_CYCLES)
-  unit: Percent
-  peak: 100
-  counters: [GRBM_GUI_ACTIVE, SQ_WAIT_INST_ANY, SQ_WAVES, SQ_WAVE_CYCLES]
 wave.life:
   formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
   unit: Cycles
   counters: [GRBM_GUI_ACTIVE, SQ_WAVES, SQ_WAVES_sum, SQ_WAVE_CYCLES_sum]
-wave.occupancy:
-  formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr)
-  unit: Wavefronts
-  peak: $max_waves_per_cu * $cu_per_gpu
-  counters: [GRBM_GUI_ACTIVE, SQ_BUSY_CYCLES_avr, SQ_WAVES, SQ_WAVE_CYCLES_sum]
 wave.occupancy_pct:
   formula: 100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum * 2 * $max_waves_per_cu)
   unit: Percent
@@ -586,7 +571,6 @@ wave.occupancy_pct:
 wave.wait_for_any:
   formula: 100 * SUM(SQ_WAIT_ANY) / SUM(SQ_WAVE_CYCLES)
   unit: Percent
-  peak: 100
   counters: [GRBM_GUI_ACTIVE, SQ_WAIT_ANY, SQ_WAVES, SQ_WAVE_CYCLES]
 wave.wait_for_barrier:
   formula: 100 * SUM(SQ_WAIT_BARRIER) / SUM(SQ_WAVE_CYCLES)

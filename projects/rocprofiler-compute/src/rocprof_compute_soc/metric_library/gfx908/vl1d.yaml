@@ -77,7 +77,6 @@ vl1d.hit_rate:
   description: >-
     Percentage of cache line requests to the vL1D Cache RAM that hit in the vL1D cache.
     Calculated as 100 minus the percent of requests that were sent to the L2.
-  peak: 100
 vl1d.hit_ratio:
   name: UTCL1 Hit Ratio
   formula: 100 * SUM(TCP_UTCL1_TRANSLATION_HIT_sum) / SUM(TCP_UTCL1_REQUEST_sum)

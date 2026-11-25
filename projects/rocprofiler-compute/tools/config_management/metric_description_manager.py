@@ -50,7 +50,13 @@ DOCS_DIR = TOOLS_DIR.parent / "docs" / "data" / "metrics"
 # "Memory chart - <table title>", or "Memory chart" for the table titled like the view.
 # These maps name the other sections, by view title and table title; None leaves a
 # table, or a whole view, out of the docs.
+# The Speed of Light tables share one docs section, named after their view.
+SOL_DOCS_SECTIONS: Dict[str, Optional[str]] = {
+    title: "System Speed-of-Light"
+    for title in ("GPU Speed-of-Light", "Compute Throughput", "Memory Throughput")
+}
 CDNA_DOCS_SECTIONS: Dict[str, Optional[Dict[str, Optional[str]]]] = {
+    "System Speed-of-Light": SOL_DOCS_SECTIONS,
     "Wavefront": {
         "Wavefront Launch Stats": "Wavefront launch stats",
         "Wavefront Runtime Stats": "Wavefront runtime stats",
@@ -103,6 +109,7 @@ WGP_DOCS_SECTIONS: Dict[str, Optional[str]] = {
 # The sections of each config arch; an arch not listed has the CDNA sections.
 DOCS_SECTIONS: Dict[str, Dict[str, Optional[Dict[str, Optional[str]]]]] = {
     "gfx115x": {
+        "System Speed-of-Light": SOL_DOCS_SECTIONS,
         "Memory Chart": {
             "Graphics Core Efficiency Arbiter (GCEA) to System Memory": (
                 "Memory chart - GCEA to System Memory"
@@ -113,8 +120,12 @@ DOCS_SECTIONS: Dict[str, Dict[str, Optional[Dict[str, Optional[str]]]]] = {
             "Scalar Data Cache": "WGP Scalar Data Cache",
         },
     },
-    "gfx1201": {"Workgroup Processor (WGP)": WGP_DOCS_SECTIONS},
+    "gfx1201": {
+        "System Speed-of-Light": SOL_DOCS_SECTIONS,
+        "Workgroup Processor (WGP)": WGP_DOCS_SECTIONS,
+    },
     "gfx1250": {
+        "System Speed-of-Light": SOL_DOCS_SECTIONS,
         "Workgroup Manager (SPI)": {
             title: f"SPI {title}"
             for title in (

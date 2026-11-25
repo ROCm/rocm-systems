@@ -1,4 +1,36 @@
 System Speed-of-Light:
+  Theoretical LDS Bandwidth:
+    plain: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
+    rst: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS per unit time (see :ref:`LDS Bandwidth <lds-bandwidth>` example for more detail).
+    unit: GB/s
+  vL1D Cache Bandwidth:
+    plain: The number of bytes per second looked up in the vL1D cache by VMEM instructions. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
+    rst: The number of bytes looked up in the vL1D cache as a result of :ref:`VMEM <desc-vmem>` instructions per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
+    unit: GB/s
+  L2 Cache Bandwidth:
+    plain: The number of bytes per second looked up in the L2 cache. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
+    rst: The number of bytes per second looked up in the L2 cache. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
+    unit: GB/s
+  L2-Fabric Read Bandwidth:
+    plain: The number of bytes per second read by the L2 over the Infinity Fabric interface.
+    rst: The number of bytes read by the L2 over the :ref:`Infinity Fabric\u2122 interface <l2-fabric>` per unit time. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
+    unit: GB/s
+  L2-Fabric Write and Atomic Bandwidth:
+    plain: The number of bytes per second sent by the L2 over the Infinity Fabric interface by write and atomic operations. Infinity Fabric considers a request atomic only if it targets non-write-cacheable memory, for example, fine-grained or uncached memory allocations.
+    rst: The number of bytes sent by the L2 over the :ref:`Infinity Fabric interface <l2-fabric>` by write and atomic operations per unit time. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
+    unit: GB/s
+  Kernel Time:
+    plain: The total duration of the executed kernel.
+    rst: The total duration of the executed kernel.
+    unit: Nanoseconds
+  Kernel Time (Cycles):
+    plain: The total duration of the executed kernel in cycles.
+    rst: The total duration of the executed kernel in cycles.
+    unit: Cycles
+  CU Utilization:
+    plain: Percentage of total SIMD cycles in the kernel where any SIMD on a CU was actively doing any work, summed over all CUs. Low values (less than 100%) indicate that the accelerator was not fully saturated by the kernel, or a potential load-imbalance issue.
+    rst: The percent of :ref:`total SIMD cycles <total-simd-cycles>` in the kernel where any :ref:`SIMD <desc-valu>` on a CU was actively doing any work, summed over all CUs. Low values (less than 100%) indicate that the accelerator was not fully saturated by the kernel, or a potential load-imbalance issue.
+    unit: Percent
   VALU FLOPs:
     plain: 'The total floating-point operations executed per second on the VALU. Note: this does not include any floating-point operations from MFMA instructions.'
     rst: 'The total floating-point operations executed per second on the :ref:`VALU <desc-valu>`. This is also presented as a percent of the peak theoretical FLOPs achievable on the specific accelerator. Note: this does not include any floating-point operations from :ref:`MFMA <desc-mfma>` instructions.'
@@ -6,10 +38,6 @@ System Speed-of-Light:
   MFMA FLOPs (F8):
     plain: The total number of 8-bit floating point MFMA operations executed per second.
     rst: The total number of 8-bit floating point MFMA operations executed per second.
-    unit: GFLOP/s
-  MFMA FLOPs (MXF8):
-    plain: The total number of 8-bit microscaling floating point MFMA operations executed per second.
-    rst: The total number of 8-bit microscaling floating point MFMA operations executed per second.
     unit: GFLOP/s
   MFMA FLOPs (BF16):
     plain: 'The total number of 16-bit brain floating point MFMA operations executed per second. Note: this does not include any 16-bit brain floating point operations from VALU instructions.'
@@ -55,66 +83,34 @@ System Speed-of-Light:
     plain: Percentage of the kernel's duration the branch unit was busy executing instructions. Computed as the ratio of the total number of cycles spent by the scheduler issuing branch instructions over the total CU cycles.
     rst: Indicates what percent of the kernel's duration the :ref:`branch <desc-branch>` unit was busy executing instructions. Computed as the ratio of the total number of cycles spent by the :ref:`scheduler <desc-scheduler>` issuing branch instructions over the :ref:`total CU cycles <total-cu-cycles>`.
     unit: Percent
-  VALU Active Threads:
-    plain: Indicates the average level of divergence within a wavefront over the lifetime of the kernel. The number of work-items that were active in a wavefront during execution of each VALU instruction, time-averaged over all VALU instructions run on all wavefronts in the kernel.
-    rst: Indicates the average level of :ref:`divergence <desc-divergence>` within a wavefront over the lifetime of the kernel. The number of work-items that were active in a wavefront during execution of each :ref:`VALU <desc-valu>` instruction, time-averaged over all VALU instructions run on all wavefronts in the kernel.
-    unit: Work-items
   IPC:
     plain: The ratio of the total number of instructions executed on the CU over the total active CU cycles.
     rst: The ratio of the total number of instructions executed on the :doc:`CU <compute-unit>` over the :ref:`total active CU cycles <total-active-cu-cycles>`.
     unit: Instructions per Cycle
-  Wavefront Occupancy:
-    plain: 'The time-averaged number of wavefronts resident on the accelerator over the lifetime of the kernel. Note: this metric may be inaccurate for short-running kernels (less than 1ms).'
-    rst: 'The time-averaged number of wavefronts resident on the accelerator over the lifetime of the kernel. Note: this metric may be inaccurate for short-running kernels (less than 1ms).'
-    unit: Wavefronts
-  Theoretical LDS Bandwidth:
-    plain: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
-    rst: Indicates the maximum amount of bytes that could have been loaded from, stored to, or atomically updated in the LDS per unit time (see :ref:`LDS Bandwidth <lds-bandwidth>` example for more detail).
-    unit: GB/s
-  LDS Bank Conflicts per Access:
-    plain: The ratio of the number of cycles spent in the LDS scheduler due to bank conflicts (as determined by the conflict resolution hardware) to the base number of cycles that would be spent in the LDS scheduler in a completely uncontended case. This is the unnormalized form of the Bank Conflict Rate.
-    rst: The ratio of the number of cycles spent in the :doc:`LDS scheduler <local-data-share>` due to bank conflicts (as determined by the conflict resolution hardware) to the base number of cycles that would be spent in the LDS scheduler in a completely uncontended case. This is also presented in normalized form (i.e., the Bank Conflict Rate).
-    unit: Conflicts per Access
-  vL1D Cache Hit Rate:
-    plain: Percentage of cache line requests to the vL1D Cache RAM that hit in the vL1D cache. Calculated as 100 minus the percent of requests that were sent to the L2.
-    rst: The ratio of the number of vL1D cache line requests that hit in vL1D cache over the total number of cache line requests to the :ref:`vL1D cache RAM <desc-tc>`.
+  vL1D Utilization:
+    plain: Percentage of vL1D active cycles the vL1D Cache RAM was actively processing any request. This indicates how busy the vL1D Cache RAM was during the kernel execution.
+    rst: Percentage of vL1D active cycles the vL1D Cache RAM was actively processing any request. This indicates how busy the vL1D Cache RAM was during the kernel execution.
     unit: Percent
-  vL1D Cache Bandwidth:
-    plain: The number of bytes per second looked up in the vL1D cache by VMEM instructions. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
-    rst: The number of bytes looked up in the vL1D cache as a result of :ref:`VMEM <desc-vmem>` instructions per unit time. The number of bytes is calculated as the number of cache lines requested multiplied by the cache line size. This value does not consider partial requests, so e.g., if only a single value is requested in a cache line, the data movement will still be counted as a full cache line. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
-    unit: GB/s
+  LDS Utilization:
+    plain: Percentage of the total CU cycles the LDS was actively executing instructions (including, but not limited to, load, store, atomic and HIP's __shfl operations). Calculated as the ratio of the total number of cycles LDS was active over the total CU cycles.
+    rst: Percentage of the total CU cycles the LDS was actively executing instructions (including, but not limited to, load, store, atomic and HIP's __shfl operations). Calculated as the ratio of the total number of cycles LDS was active over the total CU cycles.
+    unit: Percent
   L2 Cache Hit Rate:
     plain: Percentage of incoming cache line requests to the L2 cache that hit in the L2 cache. A low rate (<50%) indicates that the workload exceeds the L2 cache capacity, leading to high memory traffic.
     rst: Percentage of incoming cache line requests to the L2 cache that hit in the L2 cache. A low rate (<50%) indicates that the workload exceeds the L2 cache capacity, leading to high memory traffic.
     unit: Percent
-  L2 Cache Bandwidth:
-    plain: The number of bytes per second looked up in the L2 cache. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
-    rst: The number of bytes per second looked up in the L2 cache. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
-    unit: GB/s
-  L2-Fabric Read Bandwidth:
-    plain: The number of bytes per second read by the L2 over the Infinity Fabric interface.
-    rst: The number of bytes read by the L2 over the :ref:`Infinity Fabric\u2122 interface <l2-fabric>` per unit time. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
-    unit: GB/s
-  L2-Fabric Write and Atomic Bandwidth:
-    plain: The number of bytes per second sent by the L2 over the Infinity Fabric interface by write and atomic operations. Infinity Fabric considers a request atomic only if it targets non-write-cacheable memory, for example, fine-grained or uncached memory allocations.
-    rst: The number of bytes sent by the L2 over the :ref:`Infinity Fabric interface <l2-fabric>` by write and atomic operations per unit time. This is also presented as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
-    unit: GB/s
-  L2-Fabric Read Latency:
-    plain: The time-averaged number of cycles read requests spent in Infinity Fabric before data was returned to the L2.
-    rst: The time-averaged number of cycles read requests spent in Infinity Fabric before data was returned to the L2.
-    unit: Cycles
-  L2-Fabric Write and Atomic Latency:
-    plain: The time-averaged number of cycles write requests spent in Infinity Fabric before a completion acknowledgement was returned to the L2.
-    rst: The time-averaged number of cycles write requests spent in Infinity Fabric before a completion acknowledgement was returned to the L2.
-    unit: Cycles
-  sL1D Hit Rate (Excluding Duplicate Misses):
-    plain: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
-    rst: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
+  L2 Utilization:
+    plain: Percentage of total L2 cycles an L2 channel was active, summed over all L2 channels on the accelerator.
+    rst: Percentage of total L2 cycles an L2 channel was active, summed over all L2 channels on the accelerator.
     unit: Percent
   sL1D Cache Bandwidth:
     plain: The number of bytes per second looked up in the sL1D cache.
     rst: The number of bytes per second looked up in the sL1D cache.
     unit: GB/s
+  sL1D Hit Rate (Excluding Duplicate Misses):
+    plain: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
+    rst: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
+    unit: Percent
   L1I Hit Rate (Excluding Duplicate Misses):
     plain: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
     rst: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
@@ -123,14 +119,54 @@ System Speed-of-Light:
     plain: The number of bytes per second looked up in the L1I cache.
     rst: The number of bytes per second looked up in the L1I cache.
     unit: GB/s
+  Address Processing Unit Busy:
+    plain: Percentage of the total CU cycles the address processor was busy.
+    rst: Percentage of the total CU cycles the address processor was busy.
+    unit: Percent
+  Data-Return Busy:
+    plain: Percentage of the total CU cycles the data-return unit was busy processing or waiting on data to return to the CU.
+    rst: Percentage of the total CU cycles the data-return unit was busy processing or waiting on data to return to the CU.
+    unit: Percent
+  L1I-L2 Bandwidth:
+    plain: The number of bytes per second transferred across L1I - L2 interface.
+    rst: The number of bytes per second transferred across L1I - L2 interface.
+    unit: GB/s
+  sL1D-L2 Bandwidth:
+    plain: The number of bytes per second read from, written to, or atomically updated across the sL1D<->L2 interface. Note that sL1D writes and atomics are typically unused on current CDNA accelerators, so in the majority of cases this can be interpreted as an sL1D->L2 read bandwidth.
+    rst: The number of bytes per second read from, written to, or atomically updated across the sL1D<->L2 interface. Note that sL1D writes and atomics are typically unused on current CDNA accelerators, so in the majority of cases this can be interpreted as an sL1D->L2 read bandwidth.
+    unit: GB/s
+  MFMA FLOPs (MXF8):
+    plain: The total number of 8-bit microscaling floating point MFMA operations executed per second.
+    rst: The total number of 8-bit microscaling floating point MFMA operations executed per second.
+    unit: GFLOP/s
+  VALU Active Threads:
+    plain: Indicates the average level of divergence within a wavefront over the lifetime of the kernel. The number of work-items that were active in a wavefront during execution of each VALU instruction, time-averaged over all VALU instructions run on all wavefronts in the kernel.
+    rst: Indicates the average level of :ref:`divergence <desc-divergence>` within a wavefront over the lifetime of the kernel. The number of work-items that were active in a wavefront during execution of each :ref:`VALU <desc-valu>` instruction, time-averaged over all VALU instructions run on all wavefronts in the kernel.
+    unit: Work-items
+  Wavefront Occupancy:
+    plain: 'The time-averaged number of wavefronts resident on the accelerator over the lifetime of the kernel. Note: this metric may be inaccurate for short-running kernels (less than 1ms).'
+    rst: 'The time-averaged number of wavefronts resident on the accelerator over the lifetime of the kernel. Note: this metric may be inaccurate for short-running kernels (less than 1ms).'
+    unit: Wavefronts
+  LDS Bank Conflicts per Access:
+    plain: The ratio of the number of cycles spent in the LDS scheduler due to bank conflicts (as determined by the conflict resolution hardware) to the base number of cycles that would be spent in the LDS scheduler in a completely uncontended case. This is the unnormalized form of the Bank Conflict Rate.
+    rst: The ratio of the number of cycles spent in the :doc:`LDS scheduler <local-data-share>` due to bank conflicts (as determined by the conflict resolution hardware) to the base number of cycles that would be spent in the LDS scheduler in a completely uncontended case. This is also presented in normalized form (i.e., the Bank Conflict Rate).
+    unit: Conflicts per Access
+  vL1D Cache Hit Rate:
+    plain: Percentage of cache line requests to the vL1D Cache RAM that hit in the vL1D cache. Calculated as 100 minus the percent of requests that were sent to the L2.
+    rst: The ratio of the number of vL1D cache line requests that hit in vL1D cache over the total number of cache line requests to the :ref:`vL1D cache RAM <desc-tc>`.
+    unit: Percent
+  L2-Fabric Read Latency:
+    plain: The time-averaged number of cycles read requests spent in Infinity Fabric before data was returned to the L2.
+    rst: The time-averaged number of cycles read requests spent in Infinity Fabric before data was returned to the L2.
+    unit: Cycles
+  L2-Fabric Write and Atomic Latency:
+    plain: The time-averaged number of cycles write requests spent in Infinity Fabric before a completion acknowledgement was returned to the L2.
+    rst: The time-averaged number of cycles write requests spent in Infinity Fabric before a completion acknowledgement was returned to the L2.
+    unit: Cycles
   L1I Fetch Latency:
     plain: The average number of cycles spent to fetch instructions to a CU.
     rst: The average number of cycles spent to fetch instructions to a :doc:`CU <compute-unit>`.
     unit: Cycles
-  CU Utilization:
-    plain: Percentage of total SIMD cycles in the kernel where any SIMD on a CU was actively doing any work, summed over all CUs. Low values (less than 100%) indicate that the accelerator was not fully saturated by the kernel, or a potential load-imbalance issue.
-    rst: The percent of :ref:`total SIMD cycles <total-simd-cycles>` in the kernel where any :ref:`SIMD <desc-valu>` on a CU was actively doing any work, summed over all CUs. Low values (less than 100%) indicate that the accelerator was not fully saturated by the kernel, or a potential load-imbalance issue.
-    unit: Percent
 Memory chart:
   Wavefront Occupancy:
     plain: Percentage of the maximum wavefronts per CU that are resident on active CUs, averaged over GPU-active cycles.

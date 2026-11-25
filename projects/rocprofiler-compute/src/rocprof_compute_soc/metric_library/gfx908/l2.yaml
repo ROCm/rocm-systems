@@ -107,7 +107,6 @@ l2.hit_rate:
     Percentage of incoming cache line requests to the L2 cache that hit in the L2 cache.
     A low rate (<50%) indicates that the workload exceeds the L2 cache capacity, leading
     to high memory traffic.
-  peak: 100
 l2.hits:
   name: L2 Hits
   formula: SUM(TCC_HIT_sum) / SUM($denom)

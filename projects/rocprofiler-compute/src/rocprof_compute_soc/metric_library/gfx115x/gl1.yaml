@@ -59,7 +59,6 @@ gl1.hit_rate:
     Percentage of L1 cache (GL1C) requests that hit in cache. GL1C is shared across
     multiple workgroup processors within a shader engine. Higher hit rates reduce
     traffic to the L2 cache and improve performance.
-  peak: 100
 gl1.lfifo_full_stall:
   name: GL1 LFIFO Full Stall
   formula: SUM(GL1C_STALL_LFIFO_FULL_sum) / SUM($denom)

@@ -1,7 +1,7 @@
 view: System Speed-of-Light
 alias: sol
 tables:
-- title: System Speed-of-Light
+- title: GPU Speed-of-Light
   header:
     metric: Metric
     value: Avg
@@ -9,17 +9,56 @@ tables:
     peak: Peak
     pct_of_peak: Percent of Peak
   metrics:
-  - metric: compute.valu_issue_rate
+  - metric: lds.theoretical_bw
+    pct_of_peak: false
+  - metric: gl0.bw
+    pct_of_peak: false
+  - metric: gl2.memory_rd_bw
+    pct_of_peak: false
+  - metric: gl2.memory_wr_bw
+    pct_of_peak: false
+  - metric: wgp.util
+    pct_of_peak: false
+- title: Compute Throughput
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: compute.valu_flops
     pct_of_peak: false
   - metric: compute.wmma_flops_f16_16x16x16
+  - metric: compute.valu_issue_rate
+    pct_of_peak: false
   - metric: compute.valu_issue_rate_fp64
     pct_of_peak: false
   - metric: compute.ipc
-  - metric: wave.occupancy
-  - metric: gl2.hit_rate
+- title: Memory Throughput
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+    peak: Peak
+    pct_of_peak: Percent of Peak
+  metrics:
+  - metric: gl0.bw
+    pct_of_peak: false
+  - metric: lds.theoretical_bw
+    pct_of_peak: false
+  - metric: lds.util
+    pct_of_peak: false
   - metric: lds.bank_conflicts
     pct_of_peak: false
-  - metric: gl0.hit_rate
-  - metric: sl1d.hits_per_req
+  - metric: gl2.hit_rate
+    pct_of_peak: false
+  - metric: gl2.memory_rd_bw
+    pct_of_peak: false
+  - metric: gl2.memory_wr_bw
+    pct_of_peak: false
   - metric: sl1d.load_bw
+  - metric: sl1d.hits_per_req
+    pct_of_peak: false
   - metric: l1i.hits_per_req
+    pct_of_peak: false

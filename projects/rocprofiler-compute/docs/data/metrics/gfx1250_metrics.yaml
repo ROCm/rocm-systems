@@ -1,112 +1,12 @@
 System Speed-of-Light:
-  VALU FLOPs (FP16):
-    plain: The total FP16 floating-point operations executed per second on the VALU.
-    rst: The total FP16 floating-point operations executed per second on the VALU.
-    unit: GFLOP/s
-  VALU FLOPs (FP32):
-    plain: The total FP32 floating-point operations executed per second on the VALU.
-    rst: The total FP32 floating-point operations executed per second on the VALU.
-    unit: GFLOP/s
-  VALU FLOPs (FP64):
-    plain: The total FP64 floating-point operations executed per second on the VALU.
-    rst: The total FP64 floating-point operations executed per second on the VALU.
-    unit: GFLOP/s
-  VALU IOPs:
-    plain: The total integer operations executed per second on the VALU.
-    rst: The total integer operations executed per second on the VALU.
-    unit: GIOP/s
-  VALU Trans FLOPs (FP16):
-    plain: The total FP16 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
-    rst: The total FP16 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
-    unit: GFLOP/s
-  VALU Trans FLOPs (FP32):
-    plain: The total FP32 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
-    rst: The total FP32 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
-    unit: GFLOP/s
-  VALU Trans FLOPs (FP64):
-    plain: The total FP64 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
-    rst: The total FP64 transcendental (square root, reciprocal, trig) floating-point operations executed per second on the VALU.
-    unit: GFLOP/s
-  WMMA FLOPs (FP64):
-    plain: The total number of FP64 WMMA floating-point operations executed per second.
-    rst: The total number of FP64 WMMA floating-point operations executed per second.
-    unit: GFLOP/s
-  WMMA FLOPs (FP32):
-    plain: The total number of FP32 WMMA floating-point operations executed per second.
-    rst: The total number of FP32 WMMA floating-point operations executed per second.
-    unit: GFLOP/s
-  WMMA FLOPs (FP16):
-    plain: The total number of FP16 WMMA floating-point operations executed per second.
-    rst: The total number of FP16 WMMA floating-point operations executed per second.
-    unit: GFLOP/s
-  WMMA FLOPs (BF16):
-    plain: The total number of BF16 WMMA floating-point operations executed per second.
-    rst: The total number of BF16 WMMA floating-point operations executed per second.
-    unit: GFLOP/s
-  WMMA FLOPs (FP8):
-    plain: The total number of FP8 WMMA floating-point operations executed per second.
-    rst: The total number of FP8 WMMA floating-point operations executed per second.
-    unit: GFLOP/s
-  WMMA FLOPs (MXFP8):
-    plain: The total number of MXFP8 WMMA floating-point operations executed per second.
-    rst: The total number of MXFP8 WMMA floating-point operations executed per second.
-    unit: GFLOP/s
-  WMMA FLOPs (FP6):
-    plain: The total number of FP6 WMMA floating-point operations executed per second.
-    rst: The total number of FP6 WMMA floating-point operations executed per second.
-    unit: GFLOP/s
-  WMMA FLOPs (FP4):
-    plain: The total number of FP4 WMMA floating-point operations executed per second.
-    rst: The total number of FP4 WMMA floating-point operations executed per second.
-    unit: GFLOP/s
-  WMMA IOPs (Int8):
-    plain: The total number of Int8 WMMA integer operations executed per second.
-    rst: The total number of Int8 WMMA integer operations executed per second.
-    unit: GIOP/s
-  WMMA IOPs (Int4):
-    plain: The total number of Int4 WMMA integer operations executed per second.
-    rst: The total number of Int4 WMMA integer operations executed per second.
-    unit: GIOP/s
-  Active WGPs:
-    plain: Average number of WGPs that had at least one active wavefront in a cycle.
-    rst: Average number of WGPs that had at least one active wavefront in a cycle.
-    unit: Count
-  IPC:
-    plain: Average number of instructions per active WGP cycle.
-    rst: Average number of instructions per active WGP cycle.
-    unit: Instructions per Cycle
-  Wavefront Occupancy:
-    plain: Average number of wavefronts in flight on GPU.
-    rst: Average number of wavefronts in flight on GPU.
-    unit: Wavefronts
-  LDS Load Bandwidth:
-    plain: The number of bytes per second read from the LDS into WGP registers.
-    rst: The number of bytes per second read from the LDS into WGP registers.
+  Theoretical LDS Bandwidth:
+    plain: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
+    rst: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
     unit: GB/s
-  LDS Store Bandwidth:
-    plain: The number of bytes per second written from WGP registers to the LDS.
-    rst: The number of bytes per second written from WGP registers to the LDS.
-    unit: GB/s
-  LDS Bank Conflicts per Access:
-    plain: Number of LDS bank conflicts per LDS access.
-    rst: Number of LDS bank conflicts per LDS access.
-    unit: Conflicts per Access
-  GL0 Hit Rate:
-    plain: Percentage of GL0 cache requests that hit in the cache.
-    rst: Percentage of GL0 cache requests that hit in the cache.
-    unit: Percent
   GL0 Cache Bandwidth:
     plain: The number of bytes per second loaded from, stored to, or atomically updated in the GL0 cache.
     rst: The number of bytes per second loaded from, stored to, or atomically updated in the GL0 cache.
     unit: GB/s
-  GL1A Utilization:
-    plain: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
-    rst: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
-    unit: Percent
-  GL2 Cache Hit Rate:
-    plain: Percentage of GL2 cache requests that hit in the cache.
-    rst: Percentage of GL2 cache requests that hit in the cache.
-    unit: Percent
   L2 Cache Bandwidth:
     plain: The number of bytes per second looked up in the L2 cache. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
     rst: The number of bytes per second looked up in the L2 cache. The number of bytes is the number of cache lines requested times the cache line size; a partial request counts as a full cache line.
@@ -119,22 +19,102 @@ System Speed-of-Light:
     plain: The number of bytes per second written to HBM (DRAM) through the EA.
     rst: The number of bytes per second written to HBM (DRAM) through the EA.
     unit: GB/s
-  GL2 to DRAM Read Latency:
-    plain: Average latency to read data from HBM to GL2.
-    rst: Average latency to read data from HBM to GL2.
+  GPU Active Cycles:
+    plain: Total GPU-active cycles during the measurement window.
+    rst: Total GPU-active cycles during the measurement window.
     unit: Cycles
-  GL2 to DRAM Write Latency:
-    plain: Average latency to write data from GL2 to HBM.
-    rst: Average latency to write data from GL2 to HBM.
-    unit: Cycles
-  sL1D Hit Rate (Excluding Duplicate Misses):
-    plain: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
-    rst: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
+  WGP Utilization:
+    plain: Percentage of WGP clock cycles at least one wavefront is active.
+    rst: Percentage of WGP clock cycles at least one wavefront is active.
+    unit: Percent
+  VALU FLOPs (FP16):
+    plain: The total FP16 floating-point operations executed per second on the VALU.
+    rst: The total FP16 floating-point operations executed per second on the VALU.
+    unit: GFLOP/s
+  VALU FLOPs (FP32):
+    plain: The total FP32 floating-point operations executed per second on the VALU.
+    rst: The total FP32 floating-point operations executed per second on the VALU.
+    unit: GFLOP/s
+  VALU FLOPs (FP64):
+    plain: The total FP64 floating-point operations executed per second on the VALU.
+    rst: The total FP64 floating-point operations executed per second on the VALU.
+    unit: GFLOP/s
+  WMMA FLOPs (FP8):
+    plain: The total number of FP8 WMMA floating-point operations executed per second.
+    rst: The total number of FP8 WMMA floating-point operations executed per second.
+    unit: GFLOP/s
+  WMMA FLOPs (MXFP8):
+    plain: The total number of MXFP8 WMMA floating-point operations executed per second.
+    rst: The total number of MXFP8 WMMA floating-point operations executed per second.
+    unit: GFLOP/s
+  WMMA FLOPs (BF16):
+    plain: The total number of BF16 WMMA floating-point operations executed per second.
+    rst: The total number of BF16 WMMA floating-point operations executed per second.
+    unit: GFLOP/s
+  WMMA FLOPs (FP16):
+    plain: The total number of FP16 WMMA floating-point operations executed per second.
+    rst: The total number of FP16 WMMA floating-point operations executed per second.
+    unit: GFLOP/s
+  WMMA FLOPs (FP32):
+    plain: The total number of FP32 WMMA floating-point operations executed per second.
+    rst: The total number of FP32 WMMA floating-point operations executed per second.
+    unit: GFLOP/s
+  WMMA FLOPs (FP64):
+    plain: The total number of FP64 WMMA floating-point operations executed per second.
+    rst: The total number of FP64 WMMA floating-point operations executed per second.
+    unit: GFLOP/s
+  WMMA FLOPs (FP6):
+    plain: The total number of FP6 WMMA floating-point operations executed per second.
+    rst: The total number of FP6 WMMA floating-point operations executed per second.
+    unit: GFLOP/s
+  WMMA FLOPs (FP4):
+    plain: The total number of FP4 WMMA floating-point operations executed per second.
+    rst: The total number of FP4 WMMA floating-point operations executed per second.
+    unit: GFLOP/s
+  WMMA FLOPs (F6F4):
+    plain: The total number of mixed FP6/FP4 WMMA floating-point operations executed per second.
+    rst: The total number of mixed FP6/FP4 WMMA floating-point operations executed per second.
+    unit: GFLOP/s
+  WMMA IOPs (Int8):
+    plain: The total number of Int8 WMMA integer operations executed per second.
+    rst: The total number of Int8 WMMA integer operations executed per second.
+    unit: GIOP/s
+  WMMA IOPs (Int4):
+    plain: The total number of Int4 WMMA integer operations executed per second.
+    rst: The total number of Int4 WMMA integer operations executed per second.
+    unit: GIOP/s
+  Pipeline Utilization - XDL:
+    plain: Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
+    rst: Percentage of WGP-busy cycles the XDL (WMMA) pipeline is busy.
+    unit: Percent
+  IPC:
+    plain: Average number of instructions per active WGP cycle.
+    rst: Average number of instructions per active WGP cycle.
+    unit: Instructions per Cycle
+  GL0 Utilization:
+    plain: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
+    rst: Percentage of GPU-active cycles (per WGP) the VMW cache controller is busy.
+    unit: Percent
+  LDS Utilization:
+    plain: Percentage of VMW-busy cycles the LDS controller is executing an LDS operation.
+    rst: Percentage of VMW-busy cycles the LDS controller is executing an LDS operation.
+    unit: Percent
+  GL2 Cache Hit Rate:
+    plain: Percentage of GL2 cache requests that hit in the cache.
+    rst: Percentage of GL2 cache requests that hit in the cache.
+    unit: Percent
+  GL2 Cache Utilization:
+    plain: Percentage of cycles the GL2 cache is busy.
+    rst: Percentage of cycles the GL2 cache is busy.
     unit: Percent
   sL1D Cache Bandwidth:
     plain: The number of bytes per second looked up in the sL1D cache.
     rst: The number of bytes per second looked up in the sL1D cache.
     unit: GB/s
+  sL1D Hit Rate (Excluding Duplicate Misses):
+    plain: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
+    rst: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
+    unit: Percent
   L1I Hit Rate (Excluding Duplicate Misses):
     plain: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
     rst: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
@@ -143,6 +123,74 @@ System Speed-of-Light:
     plain: The number of bytes per second looked up in the L1I cache.
     rst: The number of bytes per second looked up in the L1I cache.
     unit: GB/s
+  TXA Utilization:
+    plain: Percentage of cycles the TXA is processing memory requests.
+    rst: Percentage of cycles the TXA is processing memory requests.
+    unit: Percent
+  TXD Utilization:
+    plain: Percentage of VMW-busy cycles the TXD unit is busy returning data to shader VGPRs.
+    rst: Percentage of VMW-busy cycles the TXD unit is busy returning data to shader VGPRs.
+    unit: Percent
+  L1I-GL1 Read Bandwidth:
+    plain: The number of bytes per second the instruction cache (L1I) requests from the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
+    rst: The number of bytes per second the instruction cache (L1I) requests from the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
+    unit: GB/s
+  sL1D-GL1 Read Bandwidth:
+    plain: The number of bytes per second the scalar data cache (sL1D) reads from the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
+    rst: The number of bytes per second the scalar data cache (sL1D) reads from the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
+    unit: GB/s
+  VALU IOPs:
+    plain: Achieved integer VALU throughput.
+    rst: Achieved integer VALU throughput.
+    unit: GIOP/s
+  VALU Trans FLOPs (FP16):
+    plain: Achieved FP16 transcendental (square root, reciprocal, trig) VALU throughput.
+    rst: Achieved FP16 transcendental (square root, reciprocal, trig) VALU throughput.
+    unit: GFLOP/s
+  VALU Trans FLOPs (FP32):
+    plain: Achieved FP32 transcendental (square root, reciprocal, trig) VALU throughput.
+    rst: Achieved FP32 transcendental (square root, reciprocal, trig) VALU throughput.
+    unit: GFLOP/s
+  VALU Trans FLOPs (FP64):
+    plain: Achieved FP64 transcendental (square root, reciprocal, trig) VALU throughput.
+    rst: Achieved FP64 transcendental (square root, reciprocal, trig) VALU throughput.
+    unit: GFLOP/s
+  Active WGPs:
+    plain: Average number of WGPs that had at least one active wavefront in a cycle.
+    rst: Average number of WGPs that had at least one active wavefront in a cycle.
+    unit: Count
+  Wavefront Occupancy:
+    plain: Average number of wavefronts in flight on GPU.
+    rst: Average number of wavefronts in flight on GPU.
+    unit: Wavefronts
+  LDS Load Bandwidth:
+    plain: The number of bytes read from the LDS into WGP registers, divided by total duration.
+    rst: The number of bytes read from the LDS into WGP registers, divided by total duration.
+    unit: GB/s
+  LDS Store Bandwidth:
+    plain: The number of bytes written from WGP registers to the LDS, divided by total duration.
+    rst: The number of bytes written from WGP registers to the LDS, divided by total duration.
+    unit: GB/s
+  LDS Bank Conflicts per Access:
+    plain: Number of LDS bank conflicts per LDS access.
+    rst: Number of LDS bank conflicts per LDS access.
+    unit: Conflicts per Access
+  GL0 Hit Rate:
+    plain: Percentage of GL0 cache requests that hit in the cache.
+    rst: Percentage of GL0 cache requests that hit in the cache.
+    unit: Percent
+  GL1A Utilization:
+    plain: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
+    rst: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
+    unit: Percent
+  GL2 to DRAM Read Latency:
+    plain: Average latency to read data from HBM to GL2.
+    rst: Average latency to read data from HBM to GL2.
+    unit: Cycles
+  GL2 to DRAM Write Latency:
+    plain: Average latency to write data from GL2 to HBM.
+    rst: Average latency to write data from GL2 to HBM.
+    unit: Cycles
   Instruction Cache Fetch Latency:
     plain: Average latency to fetch instruction from GL1 to Instruction Cache.
     rst: Average latency to fetch instruction from GL1 to Instruction Cache.

@@ -1,24 +1,16 @@
 System Speed-of-Light:
-  VALU FLOPs:
-    plain: 'Floating-point operations per second on the VALU. Peak is based on FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses aggregate instruction counter.'
-    rst: 'Floating-point operations per second on the VALU. Peak is based on FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses aggregate instruction counter.'
-    unit: GFLOP/s
-  VALU FLOPs (F64):
-    plain: 64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
-    rst: 64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
-    unit: GFLOP/s
-  IPC:
-    plain: Average number of instructions per active WGP cycle.
-    rst: Average number of instructions per active WGP cycle.
-    unit: Instructions per Cycle
-  Wavefront Occupancy:
-    plain: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
-    rst: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
-    unit: Wavefronts
-  GL2 Cache Hit Rate:
-    plain: Percentage of GL2 cache requests that hit in the cache.
-    rst: Percentage of GL2 cache requests that hit in the cache.
-    unit: Percent
+  Theoretical LDS Bandwidth:
+    plain: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
+    rst: The maximum number of bytes per second the LDS could have moved, from its active cycles without bank conflicts. It ignores the execution mask.
+    unit: GB/s
+  GL0 Cache Bandwidth:
+    plain: The number of bytes per second requested from the GL0 vector cache (TCP Cache). This represents the rate at which the shader cores are requesting data from the cache hierarchy. High bandwidth indicates memory-intensive workloads.
+    rst: The number of bytes per second requested from the GL0 vector cache (TCP Cache). This represents the rate at which the shader cores are requesting data from the cache hierarchy. High bandwidth indicates memory-intensive workloads.
+    unit: GB/s
+  L2 Cache Bandwidth:
+    plain: The number of bytes per second read from the L2 cache. It shows L2 cache read traffic and helps identify memory subsystem bottlenecks.
+    rst: The number of bytes per second read from the L2 cache. It shows L2 cache read traffic and helps identify memory subsystem bottlenecks.
+    unit: GB/s
   GL2-Fabric Read Bandwidth:
     plain: The number of bytes per second the GL2 cache reads from the memory fabric or system memory. High values point to a memory bandwidth bottleneck. Its peak is the theoretical memory bandwidth at the maximum memory clock that amd-smi reports.
     rst: The number of bytes per second the GL2 cache reads from the memory fabric or system memory. High values point to a memory bandwidth bottleneck. Its peak is the theoretical memory bandwidth at the maximum memory clock that amd-smi reports.
@@ -27,10 +19,62 @@ System Speed-of-Light:
     plain: The number of bytes per second the GL2 cache writes to the memory fabric or system memory. High values indicate write-intensive workloads. Combined with read bandwidth, this shows total memory traffic leaving the GPU caches.
     rst: The number of bytes per second the GL2 cache writes to the memory fabric or system memory. High values indicate write-intensive workloads. Combined with read bandwidth, this shows total memory traffic leaving the GPU caches.
     unit: GB/s
+  VALU FLOPs:
+    plain: 'Floating-point operations per second on the VALU. Peak is based on FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses aggregate instruction counter.'
+    rst: 'Floating-point operations per second on the VALU. Peak is based on FP32 FMA single-issue (128 FLOPs/CU/cycle). VOPD dual-issue doubles throughput: FP32 to 256, FP16 packed to 512 FLOPs/CU/cycle. Uses aggregate instruction counter.'
+    unit: GFLOP/s
+  IPC:
+    plain: Average number of instructions per active WGP cycle.
+    rst: Average number of instructions per active WGP cycle.
+    unit: Instructions per Cycle
+  GL0 Busy (TCP):
+    plain: Percentage of cycles the GL0 vector cache (TCP) is actively processing requests. Each Workgroup Processor has its own GL0/TCP instance. Low utilization may indicate compute-bound workloads with minimal memory traffic or idle shader engines.
+    rst: Percentage of cycles the GL0 vector cache (TCP) is actively processing requests. Each Workgroup Processor has its own GL0/TCP instance. Low utilization may indicate compute-bound workloads with minimal memory traffic or idle shader engines.
+    unit: Percent
+  LDS Utilization:
+    plain: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
+    rst: Percentage of the LDS cycle budget across all CUs spent servicing indexed (non-direct, non-interpolation) accesses, measured over GPU-active cycles. Because two CUs share a workgroup processor's LDS, a saturated LDS reads well below 100% on this architecture.
+    unit: Percent
   LDS Bank Conflicts:
     plain: Number of Local Data Share bank conflicts during execution. Bank conflicts occur when multiple work-items in a wavefront access the same LDS bank simultaneously, causing serialized accesses. Reducing conflicts improves shared memory throughput.
     rst: Number of Local Data Share bank conflicts during execution. Bank conflicts occur when multiple work-items in a wavefront access the same LDS bank simultaneously, causing serialized accesses. Reducing conflicts improves shared memory throughput.
     unit: Conflicts
+  GL2 Cache Hit Rate:
+    plain: Percentage of GL2 cache requests that hit in the cache.
+    rst: Percentage of GL2 cache requests that hit in the cache.
+    unit: Percent
+  GL2 Cache Utilization:
+    plain: Percentage of cycles the GL2 cache is busy.
+    rst: Percentage of cycles the GL2 cache is busy.
+    unit: Percent
+  sL1D Hit Rate (Excluding Duplicate Misses):
+    plain: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
+    rst: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
+    unit: Percent
+  L1I Hit Rate (Excluding Duplicate Misses):
+    plain: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
+    rst: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
+    unit: Percent
+  TA Busy:
+    plain: Percentage of GPU active time the Texture Addresser was busy processing memory address calculations. High TA busy indicates active texture or buffer memory operations. This reflects the address generation workload for memory requests.
+    rst: Percentage of GPU active time the Texture Addresser was busy processing memory address calculations. High TA busy indicates active texture or buffer memory operations. This reflects the address generation workload for memory requests.
+    unit: Percent
+  L1I-GL1 Read Bandwidth:
+    plain: The number of bytes per second the instruction cache (L1I) requests from the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
+    rst: The number of bytes per second the instruction cache (L1I) requests from the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
+    unit: GB/s
+  sL1D-GL1 Read Bandwidth:
+    plain: The number of bytes per second the scalar data cache (sL1D) reads from the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
+    rst: The number of bytes per second the scalar data cache (sL1D) reads from the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
+    unit: GB/s
+  VALU FLOPs (F64):
+    plain: 64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
+    rst: 64-bit floating-point operations per second on the VALU. Peak is 4 FLOPs/CU/cycle (FP32 FMA rate / 32). Uses dedicated FP64 instruction counter (SQ_INSTS_VALU_DP_sum). FP64 is 1/32 rate of FP32 on RDNA.
+    unit: GFLOP/s
+  Wavefront Occupancy:
+    plain: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
+    rst: Average number of wavefronts resident on the GPU during kernel execution. Higher occupancy provides more opportunities to hide memory latency through wavefront switching. However, maximum occupancy is not always optimal. Excessive register or LDS usage per wavefront may limit occupancy.
+    unit: Wavefronts
   Wait for Any:
     plain: Percentage of wavefront execution time spent waiting for data dependencies to resolve, such as pending memory operations or prior instruction results. High values indicate latency-bound execution that could benefit from increased occupancy or reduced dependency chains.
     rst: Percentage of wavefront execution time spent waiting for data dependencies to resolve, such as pending memory operations or prior instruction results. High values indicate latency-bound execution that could benefit from increased occupancy or reduced dependency chains.
@@ -40,40 +84,16 @@ System Speed-of-Light:
     rst: Percentage of wavefront execution time spent waiting for instructions to become ready for issue. High values may indicate instruction cache misses, complex control flow, or pipeline stalls preventing instruction dispatch.
     unit: Percent
   GL0 Hit Rate:
-    plain: Percentage of GL0 cache requests that hit in the cache.
-    rst: Percentage of GL0 cache requests that hit in the cache.
+    plain: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache is the first-level cache for vector memory operations. High hit rates reduce traffic to the GL1 cache and improve memory access latency.
+    rst: Percentage of GL0 vector cache (TCP Cache) requests that hit in cache. The TCP cache is the first-level cache for vector memory operations. High hit rates reduce traffic to the GL1 cache and improve memory access latency.
     unit: Percent
-  GL0 Cache Bandwidth:
-    plain: The number of bytes per second requested from the GL0 vector cache (TCP Cache). This represents the rate at which the shader cores are requesting data from the cache hierarchy. High bandwidth indicates memory-intensive workloads.
-    rst: The number of bytes per second requested from the GL0 vector cache (TCP Cache). This represents the rate at which the shader cores are requesting data from the cache hierarchy. High bandwidth indicates memory-intensive workloads.
-    unit: GB/s
   GL1 Hit Rate:
     plain: Percentage of L1 cache (GL1C) requests that hit in cache. GL1C is shared across multiple workgroup processors within a shader engine. Higher hit rates reduce traffic to the L2 cache and improve performance.
     rst: Percentage of L1 cache (GL1C) requests that hit in cache. GL1C is shared across multiple workgroup processors within a shader engine. Higher hit rates reduce traffic to the L2 cache and improve performance.
     unit: Percent
   GL1-GL2 Read Bandwidth:
-    plain: The number of bytes per second L1 (GL1C) reads from L2 (GL2C). This represents cache miss traffic from L1 that must be serviced by L2. Lower values indicate better L1 cache efficiency.
-    rst: The number of bytes per second L1 (GL1C) reads from L2 (GL2C). This represents cache miss traffic from L1 that must be serviced by L2. Lower values indicate better L1 cache efficiency.
-    unit: GB/s
-  L2 Cache Bandwidth:
-    plain: The number of bytes per second read from the L2 cache. It shows L2 cache read traffic and helps identify memory subsystem bottlenecks.
-    rst: The number of bytes per second read from the L2 cache. It shows L2 cache read traffic and helps identify memory subsystem bottlenecks.
-    unit: GB/s
-  sL1D Hit Rate (Excluding Duplicate Misses):
-    plain: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
-    rst: Percentage of sL1D requests that hit on a previously loaded line in the cache. Calculated as the number of sL1D hits over the number of hits and misses, excluding duplicate misses.
-    unit: Percent
-  sL1D-GL1 Read Bandwidth:
-    plain: The number of bytes per second the scalar data cache (sL1D) reads from the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
-    rst: The number of bytes per second the scalar data cache (sL1D) reads from the GL1 cache. Scalar operations load uniform data shared across all threads in a wavefront, making efficient caching critical for performance.
-    unit: GB/s
-  L1I Hit Rate (Excluding Duplicate Misses):
-    plain: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
-    rst: Percentage of L1I requests that hit on a previously loaded line in the cache. Calculated as the number of L1I hits over the number of hits and misses, excluding duplicate misses.
-    unit: Percent
-  L1I-GL1 Read Bandwidth:
-    plain: The number of bytes per second the instruction cache (L1I) requests from the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
-    rst: The number of bytes per second the instruction cache (L1I) requests from the GL1 cache. High values may indicate instruction cache pressure from large kernels or frequent instruction cache misses.
+    plain: The number of bytes L1 (GL1C) reads from L2 (GL2C), divided by total duration. This represents cache miss traffic from L1 that must be serviced by L2. Lower values indicate better L1 cache efficiency.
+    rst: The number of bytes L1 (GL1C) reads from L2 (GL2C), divided by total duration. This represents cache miss traffic from L1 that must be serviced by L2. Lower values indicate better L1 cache efficiency.
     unit: GB/s
 Memory chart - Instruction Cache:
   L1I Requests:
