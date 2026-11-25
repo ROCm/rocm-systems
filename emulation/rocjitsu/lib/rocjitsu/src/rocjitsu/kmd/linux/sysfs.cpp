@@ -509,6 +509,7 @@ void Sysfs::write_gpu_node(const std::string &nodes_dir, uint32_t node_idx, cons
 void Sysfs::write_drm_tree(const std::vector<GpuInfo> &gpus) {
   drm_dir_ = make_tagged_dir("drm");
   if (drm_dir_.empty()) {
+    generation_failed_ = true;
     return;
   }
 

@@ -907,6 +907,8 @@ target_link_libraries(
         GTest::gmock
         GTest::gtest_main
 )
+# Allow the VM config tests to fail creation of the synthetic DRM directory.
+target_link_options(rocjitsu_tests PRIVATE "LINKER:--wrap=mkdtemp")
 target_include_directories(rocjitsu_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 rj_configure_target(rocjitsu_tests TEST)
 # GCC 14.3, GCC 15.2, and GCC 16.0.1 (20260322) emit a false-positive
