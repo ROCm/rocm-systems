@@ -115,7 +115,7 @@ endif()
 add_executable(rccl_tcp_bootstrap_test rccl_tcp_bootstrap_test.cpp)
 target_link_libraries(
     rccl_tcp_bootstrap_test
-    PRIVATE GTest::gtest_main Threads::Threads util
+    PRIVATE GTest::gtest_main Threads::Threads
 )
 rj_configure_target(rccl_tcp_bootstrap_test TEST)
 rj_add_gtest_tests(rccl_tcp_bootstrap_test)
@@ -4721,11 +4721,10 @@ if(RJ_ENABLE_HIP_TESTS)
                 ${AMDCXX} -x hip --offload-arch=${ARG_ARCH}
                 --rocm-path=${ROCM_PATH} -std=c++20 -O2
                 ${RJ_HIP_SANITIZER_FLAGS} -isystem ${GTEST_INC}
-                -I${CMAKE_CURRENT_SOURCE_DIR}
-                -I${PROJECT_SOURCE_DIR}/lib/util/include -o ${HIP_TEST_BIN}
-                ${HIP_TEST_SRC} ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest
-                -lpthread -Wl,-rpath,${GTEST_LIB_DIR}
-                -Wl,-rpath,${RJ_HSA_LIBRARY_DIR} ${RJ_HIP_SANITIZER_LINK_FLAGS}
+                -I${CMAKE_CURRENT_SOURCE_DIR} -o ${HIP_TEST_BIN} ${HIP_TEST_SRC}
+                ${HIP_EXTRA_LIBS} -L${GTEST_LIB_DIR} -lgtest -lpthread
+                -Wl,-rpath,${GTEST_LIB_DIR} -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+                ${RJ_HIP_SANITIZER_LINK_FLAGS}
             DEPENDS
                 ${HIP_TEST_SRC}
                 ${AMDCXX}
