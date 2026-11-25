@@ -529,9 +529,11 @@ class GpuAgent : public GpuAgentInt {
       case 9:
         switch (supported_isas()[0]->GetMinorVersion()) {
           case 4:
-            return (properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
+            return (properties_.uCodeEngineVersions.uCodeCompute >=
+                    GFX94X_MIN_CP_FW_VERSION_REQUIRED);
           case 5:
-            return (properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED);
+            return (properties_.uCodeEngineVersions.uCodeCompute >=
+                    GFX95X_MIN_CP_FW_VERSION_REQUIRED);
           default:
             break;
         }

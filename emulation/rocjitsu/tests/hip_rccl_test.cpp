@@ -238,11 +238,11 @@ protected:
         NCCL_ASSERT(ncclGetUniqueId(&id));
       }
       const std::string full_name = std::string(test_info->test_suite_name()) + "." + rendezvous;
-      util::StringDiagnostic diagnostic;
-      ASSERT_TRUE(
-          g_tcp_session->ExchangeCase(full_name, g_case_ordinal++, &id, diagnostic.emitter())
-              .succeeded())
-          << "TCP bootstrap failed for " << full_name << ": " << diagnostic.message();
+      try {
+        g_tcp_session->ExchangeCase(full_name, g_case_ordinal++, &id);
+      } catch (const std::exception &error) {
+        FAIL() << "TCP bootstrap failed for " << full_name << ": " << error.what();
+      }
     } else {
       const std::string id_path = g_shared_dir + "/nccl_id." + rendezvous;
       if (g_rank == 0) {
@@ -564,152 +564,119 @@ int main(int argc, char **argv) {
   bool saw_collective_timeout = false;
   bool saw_collective_marker = false;
 
-  util::StringDiagnostic diagnostic;
-  const auto parse_uint = [&](std::string_view value, uint64_t maximum,
-                              std::string_view option) -> util::FailureOr<uint64_t> {
+  const auto parse_uint = [](std::string_view value, uint64_t maximum,
+                             std::string_view option) -> uint64_t {
     uint64_t result = 0;
     const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
     if (value.empty() || error != std::errc{} || end != value.data() + value.size() ||
         result > maximum) {
-      return diagnostic.emitter().emit() << option << " requires an unsigned integer in range";
+      throw std::invalid_argument(std::string(option) + " requires an unsigned integer in range");
     }
     return result;
   };
 
-  const auto parse_args = [&]() -> util::Result {
+  try {
     for (int i = 1; i < argc; ++i) {
       const std::string_view arg(argv[i]);
       if (arg.starts_with("--rank=")) {
         if (saw_rank) {
-          return diagnostic.emitter().emit() << "duplicate --rank";
+          throw std::invalid_argument("duplicate --rank");
         }
-        {
-          const auto parsed = parse_uint(arg.substr(7), INT_MAX, "--rank");
-          if (parsed.failed())
-            return util::Result::failure();
-          g_rank = static_cast<int>(parsed.value());
-        }
+        g_rank = static_cast<int>(parse_uint(arg.substr(7), INT_MAX, "--rank"));
         saw_rank = true;
       } else if (arg.starts_with("--world-size=")) {
         if (saw_world_size) {
-          return diagnostic.emitter().emit() << "duplicate --world-size";
+          throw std::invalid_argument("duplicate --world-size");
         }
-        {
-          const auto parsed = parse_uint(arg.substr(13), INT_MAX, "--world-size");
-          if (parsed.failed())
-            return util::Result::failure();
-          g_world_size = static_cast<int>(parsed.value());
-        }
+        g_world_size = static_cast<int>(parse_uint(arg.substr(13), INT_MAX, "--world-size"));
         saw_world_size = true;
       } else if (arg.starts_with("--shared-dir=")) {
         if (saw_shared_dir) {
-          return diagnostic.emitter().emit() << "duplicate --shared-dir";
+          throw std::invalid_argument("duplicate --shared-dir");
         }
         g_shared_dir = arg.substr(13);
         saw_shared_dir = true;
       } else if (arg.starts_with("--seed=")) {
-        {
-          const auto parsed =
-              parse_uint(arg.substr(7), std::numeric_limits<uint32_t>::max(), "--seed");
-          if (parsed.failed())
-            return util::Result::failure();
-          g_base_seed = static_cast<uint32_t>(parsed.value());
-        }
+        g_base_seed = static_cast<uint32_t>(
+            parse_uint(arg.substr(7), std::numeric_limits<uint32_t>::max(), "--seed"));
       } else if (arg.starts_with("--expected-devices=")) {
-        {
-          const auto parsed = parse_uint(arg.substr(19), INT_MAX, "--expected-devices");
-          if (parsed.failed())
-            return util::Result::failure();
-          g_expected_devices = static_cast<int>(parsed.value());
-        }
+        g_expected_devices =
+            static_cast<int>(parse_uint(arg.substr(19), INT_MAX, "--expected-devices"));
       } else if (arg.starts_with("--payload-elements=")) {
         if (saw_payload_elements) {
-          return diagnostic.emitter().emit() << "duplicate --payload-elements";
+          throw std::invalid_argument("duplicate --payload-elements");
         }
-        {
-          const auto parsed = parse_uint(arg.substr(19), 1 << 20, "--payload-elements");
-          if (parsed.failed())
-            return util::Result::failure();
-          g_payload_elements = static_cast<int>(parsed.value());
-        }
+        g_payload_elements =
+            static_cast<int>(parse_uint(arg.substr(19), 1 << 20, "--payload-elements"));
         if (g_payload_elements == 0) {
-          return diagnostic.emitter().emit() << "--payload-elements must be positive";
+          throw std::invalid_argument("--payload-elements must be positive");
         }
         saw_payload_elements = true;
       } else if (arg.starts_with("--collective-timeout-ms=")) {
         if (saw_collective_timeout) {
-          return diagnostic.emitter().emit() << "duplicate --collective-timeout-ms";
+          throw std::invalid_argument("duplicate --collective-timeout-ms");
         }
         constexpr std::string_view option = "--collective-timeout-ms=";
-        {
-          const auto parsed = parse_uint(arg.substr(option.size()), 600000, option);
-          if (parsed.failed())
-            return util::Result::failure();
-          g_collective_timeout_ms = static_cast<int64_t>(parsed.value());
-        }
+        g_collective_timeout_ms =
+            static_cast<int64_t>(parse_uint(arg.substr(option.size()), 600000, option));
         if (g_collective_timeout_ms == 0) {
-          return diagnostic.emitter().emit() << "--collective-timeout-ms must be positive";
+          throw std::invalid_argument("--collective-timeout-ms must be positive");
         }
         saw_collective_timeout = true;
       } else if (arg.starts_with("--collective-timeout-marker=")) {
         if (saw_collective_marker) {
-          return diagnostic.emitter().emit() << "duplicate --collective-timeout-marker";
+          throw std::invalid_argument("duplicate --collective-timeout-marker");
         }
         constexpr std::string_view option = "--collective-timeout-marker=";
         g_collective_timeout_marker = arg.substr(option.size());
         if (g_collective_timeout_marker.empty()) {
-          return diagnostic.emitter().emit() << "--collective-timeout-marker needs a path";
+          throw std::invalid_argument("--collective-timeout-marker needs a path");
         }
         saw_collective_marker = true;
       } else if (arg.starts_with("--bootstrap-listen=")) {
         if (role) {
-          return diagnostic.emitter().emit() << "choose exactly one TCP bootstrap role";
+          throw std::invalid_argument("choose exactly one TCP bootstrap role");
         }
         role = tcp_bootstrap::Role::Listen;
         endpoint = arg.substr(19);
       } else if (arg.starts_with("--bootstrap-connect=")) {
         if (role) {
-          return diagnostic.emitter().emit() << "choose exactly one TCP bootstrap role";
+          throw std::invalid_argument("choose exactly one TCP bootstrap role");
         }
         role = tcp_bootstrap::Role::Connect;
         endpoint = arg.substr(20);
       } else if (arg.starts_with("--bootstrap-run-id=")) {
         if (saw_run_id) {
-          return diagnostic.emitter().emit() << "duplicate --bootstrap-run-id";
+          throw std::invalid_argument("duplicate --bootstrap-run-id");
         }
         run_id = arg.substr(19);
         saw_run_id = true;
       } else if (arg.starts_with("--bootstrap-timeout-ms=")) {
         if (saw_timeout) {
-          return diagnostic.emitter().emit() << "duplicate --bootstrap-timeout-ms";
+          throw std::invalid_argument("duplicate --bootstrap-timeout-ms");
         }
-        {
-          const auto parsed = parse_uint(arg.substr(23), 600000, "--bootstrap-timeout-ms");
-          if (parsed.failed())
-            return util::Result::failure();
-          timeout_ms = static_cast<int64_t>(parsed.value());
-        }
+        timeout_ms =
+            static_cast<int64_t>(parse_uint(arg.substr(23), 600000, "--bootstrap-timeout-ms"));
         saw_timeout = true;
       } else if (arg.starts_with("--bootstrap-")) {
-        return diagnostic.emitter().emit() << "unknown TCP bootstrap option";
+        throw std::invalid_argument("unknown TCP bootstrap option");
       }
     }
 
     if (g_world_size == 0) {
-      return diagnostic.emitter().emit() << "--world-size must be positive";
+      throw std::invalid_argument("--world-size must be positive");
     }
     if (saw_payload_elements && g_payload_elements % g_world_size != 0) {
-      return diagnostic.emitter().emit() << "--payload-elements must be divisible by --world-size";
+      throw std::invalid_argument("--payload-elements must be divisible by --world-size");
     }
     if (saw_collective_marker && !saw_collective_timeout) {
-      return diagnostic.emitter().emit() << "--collective-timeout-marker requires a deadline";
+      throw std::invalid_argument("--collective-timeout-marker requires a deadline");
     }
 
     if (role || saw_run_id || saw_timeout) {
       if (saw_shared_dir || !role || !saw_run_id || !saw_timeout || !saw_rank || !saw_world_size) {
-        return diagnostic.emitter().emit()
-               << "TCP bootstrap requires rank, world size, role, run ID, "
-                  "and timeout, without --shared-dir";
+        throw std::invalid_argument("TCP bootstrap requires rank, world size, role, run ID, "
+                                    "and timeout, without --shared-dir");
       }
       tcp_bootstrap::Config config{*role,
                                    endpoint,
@@ -719,17 +686,13 @@ int main(int argc, char **argv) {
                                    g_base_seed,
                                    sizeof(ncclUniqueId),
                                    std::chrono::milliseconds(timeout_ms)};
-      auto opened = tcp_bootstrap::Session::Open(std::move(config), diagnostic.emitter());
-      if (opened.failed())
-        return util::Result::failure();
-      g_tcp_session = std::make_unique<tcp_bootstrap::Session>(std::move(opened.value()));
+      g_tcp_session =
+          std::make_unique<tcp_bootstrap::Session>(tcp_bootstrap::Session::Open(std::move(config)));
     } else if (g_shared_dir.empty()) {
-      return diagnostic.emitter().emit() << "--shared-dir is required in file bootstrap mode";
+      throw std::invalid_argument("--shared-dir is required in file bootstrap mode");
     }
-    return util::Result::success();
-  };
-  if (parse_args().failed()) {
-    std::cerr << "RCCL bootstrap: " << diagnostic.message() << '\n'
+  } catch (const std::exception &error) {
+    std::cerr << "RCCL bootstrap: " << error.what() << '\n'
               << "Usage: " << argv[0]
               << " --rank=N --world-size=M [--seed=S] [--expected-devices=N]"
                  " [--payload-elements=N] [--collective-timeout-ms=N]"
