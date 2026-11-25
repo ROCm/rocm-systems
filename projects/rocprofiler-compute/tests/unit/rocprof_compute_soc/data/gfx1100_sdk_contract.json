@@ -1,0 +1,509 @@
+{
+  "source_sha": "e92aa6ee8c01f991c9da08ea386330a6374e0f4a",
+  "source_path": "projects/rocprofiler-sdk/source/share/rocprofiler-sdk/config.yaml",
+  "architecture": "gfx1100",
+  "definitions": {
+    "ALUStalledByLDS": {
+      "expression": "400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)"
+    },
+    "CU_NUM": {
+      "expression": "simd_count/simd_per_cu"
+    },
+    "SIMD_NUM": {
+      "expression": "simd_count"
+    },
+    "FETCH_SIZE": {
+      "expression": "(GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024"
+    },
+    "GDSInsts": {
+      "expression": "reduce(SQ_INSTS_GDS,sum)/reduce(SQ_WAVES,sum)"
+    },
+    "GL2C_EA_RDREQ_128B": {
+      "block": "GL2C",
+      "event": 102
+    },
+    "GL2C_EA_RDREQ_128B_sum": {
+      "expression": "reduce(GL2C_EA_RDREQ_128B,sum)"
+    },
+    "GL2C_EA_RDREQ_32B": {
+      "block": "GL2C",
+      "event": 99
+    },
+    "GL2C_EA_RDREQ_32B_sum": {
+      "expression": "reduce(GL2C_EA_RDREQ_32B,sum)"
+    },
+    "GL2C_EA_RDREQ_64B": {
+      "block": "GL2C",
+      "event": 100
+    },
+    "GL2C_EA_RDREQ_64B_sum": {
+      "expression": "reduce(GL2C_EA_RDREQ_64B,sum)"
+    },
+    "GL2C_EA_RDREQ_96B": {
+      "block": "GL2C",
+      "event": 101
+    },
+    "GL2C_EA_RDREQ_96B_sum": {
+      "expression": "reduce(GL2C_EA_RDREQ_96B,sum)"
+    },
+    "GL2C_EA_WRREQ_64B": {
+      "block": "GL2C",
+      "event": 85
+    },
+    "GL2C_EA_WRREQ_64B_sum": {
+      "expression": "reduce(GL2C_EA_WRREQ_64B,sum)"
+    },
+    "GL2C_HIT": {
+      "block": "GL2C",
+      "event": 42
+    },
+    "GL2C_HIT_sum": {
+      "expression": "reduce(GL2C_HIT,sum)"
+    },
+    "GL2C_MC_RDREQ": {
+      "block": "GL2C",
+      "event": 96
+    },
+    "GL2C_MC_RDREQ_sum": {
+      "expression": "reduce(GL2C_MC_RDREQ,sum)"
+    },
+    "GL2C_MC_WRREQ": {
+      "block": "GL2C",
+      "event": 83
+    },
+    "GL2C_MC_WRREQ_STALL": {
+      "block": "GL2C",
+      "event": 88
+    },
+    "GL2C_MC_WRREQ_sum": {
+      "expression": "reduce(GL2C_MC_WRREQ,sum)"
+    },
+    "GL2C_MISS": {
+      "block": "GL2C",
+      "event": 43
+    },
+    "GL2C_MISS_sum": {
+      "expression": "reduce(GL2C_MISS,sum)"
+    },
+    "GL2C_WRREQ_STALL_max": {
+      "expression": "reduce(GL2C_MC_WRREQ_STALL,max)"
+    },
+    "GPUBusy": {
+      "expression": "100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)"
+    },
+    "GPU_UTIL": {
+      "expression": "100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)"
+    },
+    "GRBM_COUNT": {
+      "block": "GRBM",
+      "event": 0
+    },
+    "GRBM_GUI_ACTIVE": {
+      "block": "GRBM",
+      "event": 2
+    },
+    "L2CacheHit": {
+      "expression": "100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))"
+    },
+    "LDSBankConflict": {
+      "expression": "100*reduce(SQC_LDS_BANK_CONFLICT,sum)/reduce(SQC_LDS_IDX_ACTIVE,sum)"
+    },
+    "LdsLatency": {
+      "expression": "reduce(accumulate(SQ_INST_LEVEL_LDS, HIGH_RES),sum)/reduce(SQ_INSTS_LDS,sum)"
+    },
+    "MAX_WAVE_SIZE": {
+      "expression": "wave_front_size"
+    },
+    "MeanOccupancyPerActiveCU": {
+      "expression": "reduce(SQ_WAVE_CYCLES,sum)/reduce(SQ_BUSY_CYCLES,sum)"
+    },
+    "MeanOccupancyPerCU": {
+      "expression": "reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM"
+    },
+    "OccupancyPercent": {
+      "expression": "100*reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM/32"
+    },
+    "MemUnitBusy": {
+      "expression": "100*reduce(TA_TA_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)"
+    },
+    "SALUInsts": {
+      "expression": "reduce(SQ_INSTS_SALU,sum)/reduce(SQ_WAVES,sum)"
+    },
+    "SE_NUM": {
+      "expression": "array_count/simd_arrays_per_engine"
+    },
+    "SFetchInsts": {
+      "expression": "reduce(SQ_INSTS_SMEM,sum)/reduce(SQ_WAVES,sum)"
+    },
+    "SQC_LDS_BANK_CONFLICT": {
+      "block": "SQ",
+      "event": 256
+    },
+    "SQC_LDS_IDX_ACTIVE": {
+      "block": "SQ",
+      "event": 261
+    },
+    "SQ_ACCUM_PREV": {
+      "block": "SQ",
+      "event": 1
+    },
+    "SQ_BUSY_CYCLES": {
+      "block": "SQ",
+      "event": 3
+    },
+    "SQ_INSTS_FLAT": {
+      "block": "SQ",
+      "event": 56
+    },
+    "SQ_INSTS_GDS": {
+      "block": "SQ",
+      "event": 54
+    },
+    "SQ_INSTS_LDS": {
+      "block": "SQ",
+      "event": 57
+    },
+    "SQ_INSTS_SALU": {
+      "block": "SQ",
+      "event": 58
+    },
+    "SQ_INSTS_SMEM": {
+      "block": "SQ",
+      "event": 59
+    },
+    "SQ_INSTS_TEX_LOAD": {
+      "block": "SQ",
+      "event": 66
+    },
+    "SQ_INSTS_TEX_STORE": {
+      "block": "SQ",
+      "event": 67
+    },
+    "SQ_INSTS_VALU": {
+      "block": "SQ",
+      "event": 62
+    },
+    "SQ_INSTS_WAVE32": {
+      "block": "SQ",
+      "event": 70
+    },
+    "SQ_INSTS_WAVE32_LDS": {
+      "block": "SQ",
+      "event": 72
+    },
+    "SQ_INSTS_WAVE32_VALU": {
+      "block": "SQ",
+      "event": 73
+    },
+    "SQ_INST_CYCLES_VMEM": {
+      "block": "SQ",
+      "event": 106
+    },
+    "SQ_INST_LEVEL_GDS": {
+      "block": "SQ",
+      "event": 87
+    },
+    "SQ_INST_LEVEL_LDS": {
+      "block": "SQ",
+      "event": 88
+    },
+    "SQ_WAIT_ANY": {
+      "block": "SQ",
+      "event": 35
+    },
+    "SQ_WAIT_INST_ANY": {
+      "block": "SQ",
+      "event": 26
+    },
+    "SQ_WAIT_INST_LDS": {
+      "block": "SQ",
+      "event": 29
+    },
+    "SQ_WAVE32_INSTS": {
+      "block": "SQ",
+      "event": 82
+    },
+    "SQ_WAVE64_INSTS": {
+      "block": "SQ",
+      "event": 83
+    },
+    "SQ_WAVES": {
+      "block": "SQ",
+      "event": 4
+    },
+    "SQ_WAVES_sum": {
+      "expression": "reduce(SQ_WAVES,sum)"
+    },
+    "SQ_WAVE_CYCLES": {
+      "block": "SQ",
+      "event": 24
+    },
+    "SQ_INST_CYCLES_VALU": {
+      "block": "SQ",
+      "event": 103
+    },
+    "TA_BUFFER_LOAD_WAVEFRONTS": {
+      "block": "TA",
+      "event": 45
+    },
+    "TA_BUFFER_LOAD_WAVEFRONTS_sum": {
+      "expression": "reduce(TA_BUFFER_LOAD_WAVEFRONTS,sum)"
+    },
+    "TA_BUFFER_STORE_WAVEFRONTS": {
+      "block": "TA",
+      "event": 46
+    },
+    "TA_BUFFER_STORE_WAVEFRONTS_sum": {
+      "expression": "reduce(TA_BUFFER_STORE_WAVEFRONTS,sum)"
+    },
+    "TA_BUSY_avr": {
+      "expression": "reduce(TA_TA_BUSY,avr)"
+    },
+    "TA_BUSY_max": {
+      "expression": "reduce(TA_TA_BUSY,max)"
+    },
+    "TA_BUSY_min": {
+      "expression": "reduce(TA_TA_BUSY,min)"
+    },
+    "TA_TA_BUSY": {
+      "block": "TA",
+      "event": 15
+    },
+    "VALUBusy": {
+      "expression": "100*reduce(SQ_INST_CYCLES_VALU,sum)/(SIMD_NUM/4)/reduce(GRBM_GUI_ACTIVE,max)"
+    },
+    "VALUInsts": {
+      "expression": "reduce(SQ_INSTS_VALU,sum)/reduce(SQ_WAVES,sum)"
+    },
+    "SIMD_UTILIZATION": {
+      "expression": "reduce(SQ_BUSY_CYCLES,sum)/reduce(GRBM_COUNT,max)/(SIMD_NUM/4)"
+    },
+    "ValuPipeIssueUtil": {
+      "expression": "100*reduce(SQ_INST_CYCLES_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*(SIMD_NUM/4))"
+    },
+    "WAVE_DEP_WAIT": {
+      "expression": "100*reduce(SQ_WAIT_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)"
+    },
+    "WAVE_ISSUE_WAIT": {
+      "expression": "100*reduce(SQ_WAIT_INST_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)"
+    },
+    "WRITE_SIZE": {
+      "expression": "((GL2C_MC_WRREQ_sum-GL2C_EA_WRREQ_64B_sum)*32+GL2C_EA_WRREQ_64B_sum*64)/1024"
+    },
+    "Wavefronts": {
+      "expression": "reduce(SQ_WAVES,sum)"
+    },
+    "WriteUnitStalled": {
+      "expression": "100*GL2C_WRREQ_STALL_max/reduce(GRBM_GUI_ACTIVE,max)"
+    }
+  },
+  "soc21_sha": "e8da3e5814e887580eb45ab5141a80104d58291c",
+  "soc21_path": "projects/aqlprofile/linux/soc21_enum.h",
+  "soc21_raw_selectors": {
+    "GL2C_EA_RDREQ_128B": {
+      "symbol": "GL2C_PERF_SEL_EA_RDREQ_128B",
+      "event": 102,
+      "line": 18429
+    },
+    "GL2C_EA_RDREQ_32B": {
+      "symbol": "GL2C_PERF_SEL_EA_RDREQ_32B",
+      "event": 99,
+      "line": 18426
+    },
+    "GL2C_EA_RDREQ_64B": {
+      "symbol": "GL2C_PERF_SEL_EA_RDREQ_64B",
+      "event": 100,
+      "line": 18427
+    },
+    "GL2C_EA_RDREQ_96B": {
+      "symbol": "GL2C_PERF_SEL_EA_RDREQ_96B",
+      "event": 101,
+      "line": 18428
+    },
+    "GL2C_EA_WRREQ_64B": {
+      "symbol": "GL2C_PERF_SEL_EA_WRREQ_64B",
+      "event": 85,
+      "line": 18412
+    },
+    "GL2C_HIT": {
+      "symbol": "GL2C_PERF_SEL_HIT",
+      "event": 42,
+      "line": 18369
+    },
+    "GL2C_MC_RDREQ": {
+      "symbol": "GL2C_PERF_SEL_MC_RDREQ",
+      "event": 96,
+      "line": 18423
+    },
+    "GL2C_MC_WRREQ": {
+      "symbol": "GL2C_PERF_SEL_MC_WRREQ",
+      "event": 83,
+      "line": 18410
+    },
+    "GL2C_MC_WRREQ_STALL": {
+      "symbol": "GL2C_PERF_SEL_MC_WRREQ_STALL",
+      "event": 88,
+      "line": 18415
+    },
+    "GL2C_MISS": {
+      "symbol": "GL2C_PERF_SEL_MISS",
+      "event": 43,
+      "line": 18370
+    },
+    "GRBM_COUNT": {
+      "symbol": "GRBM_PERF_SEL_COUNT",
+      "event": 0,
+      "line": 18596
+    },
+    "GRBM_GUI_ACTIVE": {
+      "symbol": "GRBM_PERF_SEL_GUI_ACTIVE",
+      "event": 2,
+      "line": 18598
+    },
+    "SQC_LDS_BANK_CONFLICT": {
+      "symbol": "SQC_PERF_SEL_LDS_BANK_CONFLICT",
+      "event": 256,
+      "line": 15752
+    },
+    "SQC_LDS_IDX_ACTIVE": {
+      "symbol": "SQC_PERF_SEL_LDS_IDX_ACTIVE",
+      "event": 261,
+      "line": 15757
+    },
+    "SQ_ACCUM_PREV": {
+      "symbol": "SQ_PERF_SEL_ACCUM_PREV",
+      "event": 1,
+      "line": 15563
+    },
+    "SQ_BUSY_CYCLES": {
+      "symbol": "SQ_PERF_SEL_BUSY_CYCLES",
+      "event": 3,
+      "line": 15565
+    },
+    "SQ_INSTS_FLAT": {
+      "symbol": "SQ_PERF_SEL_INSTS_FLAT",
+      "event": 56,
+      "line": 15618
+    },
+    "SQ_INSTS_GDS": {
+      "symbol": "SQ_PERF_SEL_INSTS_GDS",
+      "event": 54,
+      "line": 15616
+    },
+    "SQ_INSTS_LDS": {
+      "symbol": "SQ_PERF_SEL_INSTS_LDS",
+      "event": 57,
+      "line": 15619
+    },
+    "SQ_INSTS_SALU": {
+      "symbol": "SQ_PERF_SEL_INSTS_SALU",
+      "event": 58,
+      "line": 15620
+    },
+    "SQ_INSTS_SMEM": {
+      "symbol": "SQ_PERF_SEL_INSTS_SMEM",
+      "event": 59,
+      "line": 15621
+    },
+    "SQ_INSTS_TEX_LOAD": {
+      "symbol": "SQ_PERF_SEL_INSTS_TEX_LOAD",
+      "event": 66,
+      "line": 15628
+    },
+    "SQ_INSTS_TEX_STORE": {
+      "symbol": "SQ_PERF_SEL_INSTS_TEX_STORE",
+      "event": 67,
+      "line": 15629
+    },
+    "SQ_INSTS_VALU": {
+      "symbol": "SQ_PERF_SEL_INSTS_VALU",
+      "event": 62,
+      "line": 15624
+    },
+    "SQ_INSTS_WAVE32": {
+      "symbol": "SQ_PERF_SEL_INSTS_WAVE32",
+      "event": 70,
+      "line": 15632
+    },
+    "SQ_INSTS_WAVE32_LDS": {
+      "symbol": "SQ_PERF_SEL_INSTS_WAVE32_LDS",
+      "event": 72,
+      "line": 15634
+    },
+    "SQ_INSTS_WAVE32_VALU": {
+      "symbol": "SQ_PERF_SEL_INSTS_WAVE32_VALU",
+      "event": 73,
+      "line": 15635
+    },
+    "SQ_INST_CYCLES_VALU": {
+      "symbol": "SQ_PERF_SEL_INST_CYCLES_VALU",
+      "event": 103,
+      "line": 15665
+    },
+    "SQ_INST_CYCLES_VMEM": {
+      "symbol": "SQ_PERF_SEL_INST_CYCLES_VMEM",
+      "event": 106,
+      "line": 15668
+    },
+    "SQ_INST_LEVEL_GDS": {
+      "symbol": "SQ_PERF_SEL_INST_LEVEL_GDS",
+      "event": 87,
+      "line": 15649
+    },
+    "SQ_INST_LEVEL_LDS": {
+      "symbol": "SQ_PERF_SEL_INST_LEVEL_LDS",
+      "event": 88,
+      "line": 15650
+    },
+    "SQ_WAIT_ANY": {
+      "symbol": "SQ_PERF_SEL_WAIT_ANY",
+      "event": 35,
+      "line": 15597
+    },
+    "SQ_WAIT_INST_ANY": {
+      "symbol": "SQ_PERF_SEL_WAIT_INST_ANY",
+      "event": 26,
+      "line": 15588
+    },
+    "SQ_WAIT_INST_LDS": {
+      "symbol": "SQ_PERF_SEL_WAIT_INST_LDS",
+      "event": 29,
+      "line": 15591
+    },
+    "SQ_WAVE32_INSTS": {
+      "symbol": "SQ_PERF_SEL_WAVE32_INSTS",
+      "event": 82,
+      "line": 15644
+    },
+    "SQ_WAVE64_INSTS": {
+      "symbol": "SQ_PERF_SEL_WAVE64_INSTS",
+      "event": 83,
+      "line": 15645
+    },
+    "SQ_WAVES": {
+      "symbol": "SQ_PERF_SEL_WAVES",
+      "event": 4,
+      "line": 15566
+    },
+    "SQ_WAVE_CYCLES": {
+      "symbol": "SQ_PERF_SEL_WAVE_CYCLES",
+      "event": 24,
+      "line": 15586
+    },
+    "TA_BUFFER_LOAD_WAVEFRONTS": {
+      "symbol": "TA_PERF_SEL_buffer_load_wavefronts",
+      "event": 45,
+      "line": 17494
+    },
+    "TA_BUFFER_STORE_WAVEFRONTS": {
+      "symbol": "TA_PERF_SEL_buffer_store_wavefronts",
+      "event": 46,
+      "line": 17495
+    },
+    "TA_TA_BUSY": {
+      "symbol": "TA_PERF_SEL_ta_busy",
+      "event": 15,
+      "line": 17465
+    }
+  }
+}
