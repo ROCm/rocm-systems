@@ -198,7 +198,11 @@ The native `ds_add_f64` also records eight bytes on gfx942, gfx950 and gfx1250.
 The gfx1100 and gfx1201 instruction sets have no native FP64 LDS atomic add.
 Returning `ds_cmpst_rtn_b32` / `ds_cmpstore_rtn_b32` contributes one four-byte
 Atomic access on both compare outcomes and preserves the guest destination.
+If the comparison succeeds, the instruction writes the replacement value; if it
+fails, LDS remains unchanged. Either outcome can produce a conflict report with
+an unordered ordinary load of the same bytes from another wave.
 The probe captures the effective address and guest EXEC before the original RMW.
+The report alone therefore cannot tell whether a compare-store exchange succeeded.
 This observation contributes no ordering edge. Other atomic and barrier forms
 require their own qualification. Exact
 conditions are defined by [compiler qualification](../lib/rocjitsu/src/rocjitsu/code/patch/consan/lds_race.cpp)
