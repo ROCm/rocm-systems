@@ -206,7 +206,7 @@ const auto libdir            = path::get_internal_libdir();
 strvec_t   _dyn_api_rt_paths = { libdir, libdir + "/rocprofsys" };
 
 std::string
-get_absolute_filepath(std::string _name, const strvec_t& _paths,
+get_absolute_filepath(std::string name, const strvec_t& paths,
                       bool report_missing = true);
 
 std::string
@@ -3088,58 +3088,74 @@ absolute(std::string _path)
 
 //======================================================================================//
 //
-std::string
-get_absolute_filepath(std::string _name, const strvec_t& _search_paths,
-                      bool report_missing)
+// returns name (or just its file name) inside dir if that is a regular file,
+// or an empty string if it is not
+[[nodiscard]] std::string
+find_file_in_dir(const std::string& dir, const std::string& name)
 {
-    if(!_name.empty() && !path::is_regular_file(absolute(_name)))
+    for(const auto& candidate :
+        { absolute(fmt::format("{}/{}", dir, name)),
+          absolute(fmt::format("{}/{}", dir, path::filename(name))) })
     {
-        auto const _orig = _name;
-        for(auto itr : _search_paths)
+        if(path::is_regular_file(candidate))
         {
-            if(!path::is_directory(itr))
-            {
-                itr = path::parent_path(itr);
-            }
-
-            auto _exists = false;
-            ROCPROFSYS_ADD_LOG_ENTRY("searching", itr, "for", _name);
-            for(const auto& pitr :
-                { absolute(fmt::format("{}/{}", itr, _name)),
-                  absolute(fmt::format("{}/{}", itr, path::filename(_name))) })
-            {
-                _exists = path::is_regular_file(pitr);
-                if(_exists)
-                {
-                    _name = pitr;
-                    verbprintf(1, "Resolved '%s' to '%s'...\n", _orig.c_str(),
-                               _name.c_str());
-                    break;
-                }
-            }
-            if(_exists)
-            {
-                break;
-            }
-        }
-
-        if(report_missing && !path::is_regular_file(absolute(_name)))
-        {
-            auto const _search_paths_v =
-                fmt::format("{}", fmt::join(bin_search_paths, ", "));
-            verbprintf(
-                0, "Warning! File path to '%s' could not be determined... search: %s\n",
-                _name.c_str(), _search_paths_v.c_str());
+            return candidate;
         }
     }
-    else if(!_name.empty())
+    return {};
+}
+
+// returns the first regular file named `name` (or just its file name) found in the
+// search paths, or an empty string if there is none
+[[nodiscard]] std::string
+find_file_in_search_paths(const std::string& name, const strvec_t& search_paths)
+{
+    for(const auto& search_path : search_paths)
     {
-        auto const _orig = _name;
-        _name            = absolute(_name);
-        verbprintf(1, "Resolved '%s' to '%s'...\n", _orig.c_str(), _name.c_str());
+        const auto dir = path::is_directory(search_path) ? search_path
+                                                         : path::parent_path(search_path);
+
+        ROCPROFSYS_ADD_LOG_ENTRY("searching", dir, "for", name);
+        auto found = find_file_in_dir(dir, name);
+        if(!found.empty())
+        {
+            return found;
+        }
+    }
+    return {};
+}
+
+std::string
+get_absolute_filepath(std::string name, const strvec_t& search_paths, bool report_missing)
+{
+    if(name.empty())
+    {
+        return name;
     }
 
-    return _name;
+    auto const orig = name;
+    if(path::is_regular_file(absolute(name)))
+    {
+        name = absolute(name);
+        verbprintf(1, "Resolved '%s' to '%s'...\n", orig.c_str(), name.c_str());
+        return name;
+    }
+
+    auto const found = find_file_in_search_paths(name, search_paths);
+    if(!found.empty())
+    {
+        verbprintf(1, "Resolved '%s' to '%s'...\n", orig.c_str(), found.c_str());
+        return found;
+    }
+
+    if(report_missing)
+    {
+        auto const search_paths_v = fmt::format("{}", fmt::join(bin_search_paths, ", "));
+        verbprintf(0,
+                   "Warning! File path to '%s' could not be determined... search: %s\n",
+                   name.c_str(), search_paths_v.c_str());
+    }
+    return name;
 }
 
 //======================================================================================//
@@ -3257,13 +3273,13 @@ find_dyn_api_rt()
     }
     library_names.emplace_back(_dyn_api_rt_base + ".a");
 
-    auto const _dyn_api_rt_abs = resolve_library_path(library_names);
-    if(!_dyn_api_rt_abs.empty())
+    auto const dyn_api_rt_abs = resolve_library_path(library_names);
+    if(!dyn_api_rt_abs.empty())
     {
-        rocprofsys::set_env<string_t>("DYNINSTAPI_RT_LIB", _dyn_api_rt_abs, 1);
+        rocprofsys::set_env<string_t>("DYNINSTAPI_RT_LIB", dyn_api_rt_abs, 1);
         rocprofsys::set_env<string_t>("DYNINST_REWRITER_PATHS",
                                       fmt::format("{}:{}",
-                                                  path::parent_path(_dyn_api_rt_abs),
+                                                  path::parent_path(dyn_api_rt_abs),
                                                   fmt::join(lib_search_paths, ":")),
                                       1);
     }
