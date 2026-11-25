@@ -209,6 +209,7 @@ void hsakmt_topology_setup_is_dgpu_param(HsaNodeProperties *props);
 bool hsakmt_topology_is_svm_needed(HSA_ENGINE_ID EngineId);
 
 HSAuint32 hsakmt_PageSizeFromFlags(unsigned int pageSizeFlags);
+HSAuint64 MapDrmPerm(HsaMemoryMapFlags flags);
 
 void* hsakmt_allocate_exec_aligned_memory_gpu(HsaKFDContext *ctx,
 					   uint32_t size, uint32_t align,

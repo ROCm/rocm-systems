@@ -90,6 +90,13 @@ hsaKmtPcSamplingStart;
 hsaKmtPcSamplingStop;
 hsaKmtPcSamplingSupport;
 hsaKmtAisReadWriteFile;
+hsaKmtHandleImport;
+hsaKmtMemoryVaMap;
+hsaKmtMemoryVaUnmap;
+hsaKmtMemHandleFree;
+hsaKmtMemHandleFreePreserveMetadata;
+hsaKmtMemoryGetCpuAddr;
+hsaKmtMemoryCpuMap;
 local: *;
 };
 
