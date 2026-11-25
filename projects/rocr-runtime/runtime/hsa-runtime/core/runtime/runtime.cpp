@@ -1523,6 +1523,18 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
     os::IPCSocket conn = os::AcceptIPCConnection(ipc_sock_server_fd_);
     if (conn == os::INVALID_SOCKET_VALUE) continue;
     MAKE_SCOPE_GUARD([&]() { os::CloseIPCSocket(conn); });
+
+    // Authorize the peer before serving any exported buffer. The server socket
+    // lives in an abstract namespace that ignores filesystem permissions, so
+    // IPC sharing is restricted to processes of the same user; a connection
+    // from another user is dropped without disclosing a dma-buf descriptor.
+    if (!os::IsIPCSocketPeerSameUser(conn)) continue;
+
+    // Bound blocking reads so a peer cannot park the server thread (which also
+    // serializes exporter frees through ipc_sock_server_lock_) indefinitely by
+    // connecting and never sending or acknowledging.
+    os::SetIPCSocketRecvTimeout(conn, std::chrono::seconds(10));
+
     if (os::IPCSocketRead(conn, buf, sizeof(buf)) == -1) continue;
 
     uint64_t conn_handle = strtoull(buf, NULL, 10);

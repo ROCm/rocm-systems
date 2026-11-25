@@ -1098,7 +1098,9 @@ int IPCSendHandle(IPCSocket conn, intptr_t handle) {
 
   msg.msg_controllen = CMSG_SPACE(sizeof(int));
 
-  return (sendmsg(IPCSockToFd(conn), &msg, 0) < 0) ? -1 : 0;
+  // MSG_NOSIGNAL: a peer that disconnects mid-send must not raise SIGPIPE, whose
+  // default action would terminate the exporting process.
+  return (sendmsg(IPCSockToFd(conn), &msg, MSG_NOSIGNAL) < 0) ? -1 : 0;
 }
 
 intptr_t IPCRecvHandle(IPCSocket conn) {
@@ -1123,6 +1125,18 @@ intptr_t IPCRecvHandle(IPCSocket conn) {
   int fd;
   memcpy(&fd, CMSG_DATA(cmsg), sizeof(fd));
   return fd;
+}
+
+bool IsIPCSocketPeerSameUser(IPCSocket conn) {
+  // SO_PEERCRED reports the connecting peer's credentials as seen in this
+  // process' user namespace, so a peer with a different (or unmapped) uid is
+  // rejected. Fail closed if the credentials cannot be read.
+  struct ucred cred;
+  socklen_t cred_len = sizeof(cred);
+  if (getsockopt(IPCSockToFd(conn), SOL_SOCKET, SO_PEERCRED, &cred, &cred_len) != 0 ||
+      cred_len != sizeof(cred))
+    return false;
+  return cred.uid == geteuid();
 }
 
 void CloseIPCSocket(IPCSocket sock) {

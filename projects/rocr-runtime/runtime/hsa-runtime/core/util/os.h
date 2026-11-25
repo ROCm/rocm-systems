@@ -401,6 +401,19 @@ int IPCSendHandle(IPCSocket conn, intptr_t handle);
 /// @return The received handle/fd as intptr_t, or -1 on failure.
 intptr_t IPCRecvHandle(IPCSocket conn);
 
+/// @brief Check whether the peer on an accepted IPC connection belongs to the
+/// same OS user as the current process.
+///
+/// IPC GPU-buffer sharing is only supported between cooperating processes of a
+/// single user. The server socket lives in an abstract namespace, which ignores
+/// filesystem permissions, so without this check any process in the same network
+/// namespace could request an exported dma-buf descriptor. The server uses this
+/// to reject connections from other users.
+/// @param conn Accepted IPCSocket connection handle.
+/// @return true if the peer's effective uid matches this process' effective uid;
+///         false otherwise, including when the peer credentials are unavailable.
+bool IsIPCSocketPeerSameUser(IPCSocket conn);
+
 /// @brief Close any IPC socket (server or connection).
 /// @param sock IPCSocket handle to close.
 void CloseIPCSocket(IPCSocket sock);
