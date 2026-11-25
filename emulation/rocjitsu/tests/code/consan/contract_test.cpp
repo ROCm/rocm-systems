@@ -1003,9 +1003,16 @@ TEST_F(ConSanContract, UniformStoreProofUsesPreviouslyZeroBitsOfItsOwnSite) {
     facts.sites[0].uniform_store_proof = UniformStoreProof::BlockLocalBroadcast;
   }
   facts.options = mvp_options_digest();
-  facts.target = 1100;
-  EXPECT_TRUE(validate_manifest(facts).failed());
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    facts.target = target.id;
+    for (uint32_t wave : {32u, 64u}) {
+      facts.wave_size = wave;
+      EXPECT_EQ(validate_manifest(facts).succeeded(), supports_wave(target, wave))
+          << target.name << " wave" << wave;
+    }
+  }
   facts.target = 1250;
+  facts.wave_size = 32;
   SiteFacts &site = facts.sites[0];
   site.width = 8;
   EXPECT_TRUE(validate_manifest(facts).failed());

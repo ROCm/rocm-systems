@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: MIT
 
 set(_target_fixtures)
+set(_uniform_store_cases
+    uniform_store_read
+    uniform_store_write
+    uniform_store_varying
+)
 foreach(
     _gpu
     IN
@@ -68,13 +73,6 @@ foreach(
         if(_gpu STREQUAL "gfx1250")
             list(APPEND _barrier_cases 9 40 41)
         endif()
-        if(_gpu STREQUAL "gfx1250")
-            set(_uniform_store_cases_${_gpu}_${_wave_size}
-                uniform_store_read
-                uniform_store_write
-                uniform_store_varying
-            )
-        endif()
         foreach(
             _case
             IN
@@ -93,7 +91,7 @@ foreach(
                 dense-sites
                 ${_names}
                 ${_barrier_cases}
-                ${_uniform_store_cases_${_gpu}_${_wave_size}}
+                ${_uniform_store_cases}
         )
             set(_case_number ${_case})
             set(_layout_options)

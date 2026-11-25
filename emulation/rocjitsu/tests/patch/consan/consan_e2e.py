@@ -21,6 +21,7 @@ from consan_runtime_e2e import (
     build_root,
     identity,
     parse_target_arguments,
+    uniform_store_masks,
 )
 
 
@@ -101,9 +102,15 @@ class AnalysisDriver(Driver):
             writer, peer = sorted(
                 (pair['first'], pair['second']), key=lambda endpoint: endpoint['wave']
             )
+            writer_mask, peer_mask = uniform_store_masks(self.args.wave_size)
             for endpoint, site, mask, access in (
-                (writer, 0, 3, 'write'),
-                (peer, 1, 1, 'write' if case == 'uniform_store_write' else 'read'),
+                (writer, 0, writer_mask, 'write'),
+                (
+                    peer,
+                    1,
+                    peer_mask,
+                    'write' if case == 'uniform_store_write' else 'read',
+                ),
             ):
                 assert (
                     endpoint['workgroup_x'],
