@@ -108,7 +108,7 @@ FLOAT_COMPARISONS = {
 }
 
 
-# CDNA spells the floating always-true predicate TRU rather than T.
+# GFX9/GFX10 XML spells the floating always-true predicate TRU rather than T.
 for prefix in ('V_CMP', 'V_CMPX'):
     for bits in (16, 32, 64):
         FLOAT_COMPARISONS[f'{prefix}_TRU_F{bits}'] = (bits, True)
@@ -128,6 +128,7 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
     if (
         arch
         not in (
+            'rdna1',
             'rdna2',
             'rdna3',
             'rdna3_5',
@@ -141,15 +142,18 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
         or mnemonic not in FLOAT_COMPARISONS
     ):
         return None
-    # TRU aliases are CDNA-only; RDNA2 retains its legacy constant predicate
-    # handler, including strict semantics and CLAMP's signaling NaN status.
-    if '_TRU_' in mnemonic and not arch.startswith('cdna'):
-        return None
-    if arch == 'rdna2' and not is_vop3:
-        return None
     if len(src) != 2 or len(dst) > 1:
         return None
     bits, constant = FLOAT_COMPARISONS[mnemonic]
+    gfx10_native = arch in ('rdna1', 'rdna2') and bits in (32, 64)
+    # GFX10 also spells true TRU. Its not-yet-migrated FP16 alias keeps
+    # the legacy constant handler until its signaling policy is ported.
+    if '_TRU_' in mnemonic and not (arch.startswith('cdna') or gfx10_native):
+        return None
+    if arch == 'rdna1' and not gfx10_native:
+        return None
+    if arch == 'rdna2' and not is_vop3 and not gfx10_native:
+        return None
     # GFX12 removed the constant predicates; their rj-arith APIs describe RDNA3.
     if arch == 'rdna4' and constant:
         return None
@@ -203,16 +207,24 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
             f'      {src[0]}, {src[1]}, {skip_inputs}, {result_writer}, exec_mask);',
         ]
         return '\n'.join(lines)
-    if arch == 'cdna1':
-        # Constants still need operands for Compatibility's signaling CLAMP.
+    if arch == 'cdna1' or gfx10_native:
+        # Signaling constant predicates still need operands when reporting FP status.
         skip_inputs = str(constant).lower()
         if constant and is_vop3:
-            skip_inputs = (
-                '!(inst_.clamp && ((wf.cu().arithmetic_flags() & '
-                'RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY))'
+            semantics = '(wf.cu().arithmetic_flags() & RJ_ARITH_SEMANTICS_MASK)'
+            reports = f'{semantics} == RJ_ARITH_SEMANTICS_COMPATIBILITY'
+            if arch in ('rdna1', 'rdna2'):
+                reports += f' || {semantics} == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL'
+            skip_inputs = f'!(inst_.clamp && ({reports}))'
+        if arch == 'cdna1':
+            call = (
+                f'execute_float_compare_wave64<{bits}>(wf, {wave_api(api, 64)}_gfx908,'
             )
+        else:
+            api += '_gfx10'
+            call = f'execute_float_compare<{bits}>(wf, {wave_api(api, 32)}, {wave_api(api, 64)},'
         lines += [
-            f'  amdgpu::arith::execute_float_compare_wave64<{bits}>(wf, {wave_api(api, 64)}_gfx908,',
+            f'  amdgpu::arith::{call}',
             f'      wf.cu().arithmetic_flags(), {modifiers},',
             f'      {src[0]}, {src[1]}, {skip_inputs},',
             f'      {result_writer}, exec_mask);',

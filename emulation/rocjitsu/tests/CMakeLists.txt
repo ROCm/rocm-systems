@@ -709,6 +709,7 @@ add_executable(
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
     gfx908_compare_test.cpp
+    gfx10_compare_test.cpp
     vop3_conversion_modifiers_test.cpp
     cube_instruction_test.cpp
     older_graphics_test.cpp
