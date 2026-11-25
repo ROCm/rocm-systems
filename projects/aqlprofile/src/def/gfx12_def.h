@@ -32,7 +32,6 @@
 #endif
 
 #include "linux/soc24_enum.h"
-#include "linux/soc24_gfx1201_perf_sel.h"
 #include "util/soc15_common.h"
 #include "util/reg_offsets.h"
 #if GFX12_VARIANT == GFX12_VARIANT_1250

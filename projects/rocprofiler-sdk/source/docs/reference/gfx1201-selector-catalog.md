@@ -37,9 +37,16 @@ describes the experimental configuration contract.
 
 The author supplied 41 control results: 33 scoped model passes, 6 reference
 matches and 2 zero/unproven GL1C 32B classes. The
-[counter-specific validation summary](../../rocprofiler-compute/docs/reference/gfx1201-counter-definitions.md#runtime-validation-2026-11-25)
+[counter-specific validation summary](../../../../rocprofiler-compute/docs/reference/gfx1201-counter-definitions.md#runtime-validation-2026-11-25)
 records each model, measured mean and limit.
 
 These controls provide empirical support for the experimental configuration.
 The existing public chip-specific IP/RDL gaps remain documented. Results from
 different controls are independent entries, not one accounting window.
+
+## Active component location
+
+Develop has migrated AQLprofile into `projects/rocprofiler-sdk/source/lib/aqlprofile/`.
+The scoped header is included by that component's `def/gfx12_def.h`.
+The deprecated `projects/aqlprofile/` tree is unchanged by the final PR diff.
+This location update preserves all selector IDs and runtime validation results.
