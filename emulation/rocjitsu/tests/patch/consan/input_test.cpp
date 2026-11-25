@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -34,8 +35,11 @@ namespace {
 constexpr const TargetProfile &kTarget = kNativeLdsTargets[2];
 
 TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiveLane) {
-  const auto image =
-      test::read_fixture(test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap"));
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
   ASSERT_FALSE(image.empty());
   const auto &target = *target_profile(950);
   InputError error;
@@ -84,8 +88,11 @@ TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiv
 }
 
 TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndPrivateMappings) {
-  auto image =
-      test::read_fixture(test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap"));
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  std::vector<uint8_t> image = test::read_fixture(fixture);
   const auto &target = *target_profile(950);
   InputError error;
   const auto baseline = build_input_program(image, target, "lds_producer_consumer", error);
