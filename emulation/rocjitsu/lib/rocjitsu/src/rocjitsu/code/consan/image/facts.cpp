@@ -32,13 +32,13 @@ bool add_extent(uint64_t &total, uint64_t amount, uint64_t limit) {
 }
 } // namespace
 
-Digest selection_profile_digest(std::span<const EntryKey> selected_keys, ScopeKind scope) {
+Digest selection_profile_digest(std::span<const EntryKey> selected_keys, ScopeKind scope,
+                                const Digest &options) {
   util::Sha256 hash;
   hash.update("consan-image-selection-v2");
   std::array<uint8_t, 4> scope_bytes{};
   wire::write_u32(scope_bytes, 0, static_cast<uint32_t>(scope));
   hash.update(scope_bytes.data(), scope_bytes.size());
-  const Digest options = mvp_options_digest();
   hash.update(options.data(), options.size());
   std::array<uint8_t, 4> count{};
   wire::write_u32(count, 0, static_cast<uint32_t>(selected_keys.size()));
@@ -83,7 +83,8 @@ ImageFacts single_entry_image_facts(const Manifest &manifest, uint32_t original_
   const std::array<EntryKey, 1> keys = {manifest.entry.original_descriptor_offset};
   return ImageFacts{.original = manifest.original,
                     .prepared = manifest.prepared,
-                    .selection_profile = selection_profile_digest(keys, manifest.scope),
+                    .selection_profile =
+                        selection_profile_digest(keys, manifest.scope, manifest.options),
                     .target = manifest.target,
                     .wave_size = manifest.wave_size,
                     .code_object_abi = manifest.code_object_abi,
@@ -114,6 +115,7 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
   uint64_t encoded_bytes = kEnvelopeBytes + kImageFixedBytes;
   uint64_t total_sites = 0;
   std::vector<EntryKey> selected_keys;
+  const Digest *selected_options = nullptr;
   std::set<std::string> names;
   std::set<uint64_t> original_entries;
   std::set<uint64_t> prepared_entries;
@@ -233,6 +235,10 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
         prepared_observations.emplace_back(barrier.prepared_wait,
                                            barrier.completion_probe + barrier.probe_size);
       }
+      if (selected_options && *selected_options != manifest.options) {
+        return diagnostic.emit() << "selected entries must share one options profile";
+      }
+      selected_options = &manifest.options;
       selected_keys.push_back(entry.key);
     } else {
       return diagnostic.emit() << "unknown entry disposition";
@@ -251,8 +257,8 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
   if (!scope) {
     return diagnostic.emit() << "selected entries must share one qualified scope";
   }
-  if (selected_keys.empty() ||
-      image.selection_profile != selection_profile_digest(selected_keys, *scope)) {
+  if (!selected_options || image.selection_profile !=
+                               selection_profile_digest(selected_keys, *scope, *selected_options)) {
     return diagnostic.emit() << "image selection profile differs from entries";
   }
   return Result::success();

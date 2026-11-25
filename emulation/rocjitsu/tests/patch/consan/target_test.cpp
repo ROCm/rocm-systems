@@ -94,10 +94,60 @@ TEST(ConSanNativeWidthsStatic, AdmitGfx1250B64WithExactWidths) {
   EXPECT_EQ(artifact.value().manifest.sites[1].width, 4u);
 }
 
-TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
+TEST(ConSanNativeWidthsStatic, TransposeMappingsRequireTheDecodedFormAndLegalRegisterTuple) {
+  for (const test::TargetMode mode :
+       {test::TargetMode{"gfx950", 64}, test::TargetMode{"gfx1250", 32}}) {
+    const TargetProfile &target = *target_profile(mode.target);
+    const bool cdna4 = mode.wave_size == 64;
+    for (const auto &[bits, shape] : std::array{std::pair{4u, LdsRangeShape::Transpose4},
+                                                std::pair{6u, LdsRangeShape::Transpose6},
+                                                std::pair{8u, LdsRangeShape::Transpose8},
+                                                std::pair{16u, LdsRangeShape::Transpose16}}) {
+      SCOPED_TRACE(mode.target);
+      SCOPED_TRACE(bits);
+      const uint32_t width = bits == 6 ? 12 : bits == 16 && !cdna4 ? 16 : 8;
+      const auto original = test::read_fixture(
+          test::target_fixture_path(mode, "width-transpose-" + std::to_string(bits) + "-full"));
+      InputError error;
+      const auto input = build_input_program(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(input.succeeded()) << error.message;
+      ASSERT_EQ(input.value().accesses.size(), 2u);
+      const auto &access = input.value().accesses[1];
+      EXPECT_EQ(access.address_vgpr, 8);
+      EXPECT_EQ(access.immediate_bytes, 2048);
+      EXPECT_EQ(access.width, width);
+      EXPECT_EQ(access.kind, AccessKind::Read);
+      EXPECT_EQ(access.lds_ranges.shape, shape);
+      auto artifact = prepare(original, target, "lds_producer_consumer", error);
+      ASSERT_TRUE(artifact.succeeded()) << error.message;
+      ASSERT_TRUE(validate_prepared(original, artifact.value(), error).succeeded())
+          << error.message;
+      artifact.value().manifest.sites[1].lds_ranges.shape = LdsRangeShape::Single;
+      EXPECT_TRUE(validate_prepared(original, artifact.value(), error).failed());
+
+      auto changed = original;
+      const size_t vdst = input.value().text_file_offset + access.original_offset + 7;
+      ASSERT_EQ(changed.at(vdst), 8);
+      changed[vdst] = 255;
+      EXPECT_TRUE(build_input_program(changed, target, "lds_producer_consumer", error).failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+      changed[vdst] = 9;
+      auto odd = build_input_program(changed, target, "lds_producer_consumer", error);
+      EXPECT_EQ(odd.failed(), cdna4 && width == 8) << error.message;
+    }
+  }
+}
+
+TEST_P(ConSanTargetStatic, QualifySingleRangeFormsWithExactDataWidths) {
   const test::TargetMode mode = GetParam();
-  for (const auto &[name, width] : std::array<std::pair<const char *, uint32_t>, 5>{
-           {{"u16", 2}, {"i16", 2}, {"b64", 8}, {"b128", 16}, {"b128-alias", 16}}}) {
+  for (const auto &[name, width] :
+       std::array<std::pair<const char *, uint32_t>, 7>{{{"u16", 2},
+                                                         {"i16", 2},
+                                                         {"b64", 8},
+                                                         {"b96", 12},
+                                                         {"b96-alias-high", 12},
+                                                         {"b128", 16},
+                                                         {"b128-alias", 16}}}) {
     SCOPED_TRACE(name);
     const std::vector<uint8_t> original =
         test::read_fixture(test::target_fixture_path(mode, "width-" + std::string(name)));
@@ -112,15 +162,32 @@ TEST_P(ConSanTargetStatic, QualifyOnlyWholeRegisterSingleRangeForms) {
     }
     EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
   }
-  for (const char *name : {"excluded-b8", "excluded-b96", "excluded-partial"}) {
-    SCOPED_TRACE(name);
+  for (const char *name : {"u8", "i8-alias-high"}) {
     const std::vector<uint8_t> original =
         test::read_fixture(test::target_fixture_path(mode, "width-" + std::string(name)));
-    ASSERT_FALSE(original.empty());
     InputError error;
-    EXPECT_TRUE(
-        prepare(original, *target_profile(mode.target), "lds_producer_consumer", error).failed());
-    EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess) << error.message;
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(original, *target_profile(mode.target), "lds_producer_consumer", error);
+    ASSERT_TRUE(artifact.succeeded()) << name << ": " << error.message;
+    const std::vector<SiteFacts> &sites = artifact.value().manifest.sites;
+    ASSERT_EQ(sites.size(), 4u);
+    for (size_t index = 0; index < sites.size(); ++index) {
+      EXPECT_EQ(sites[index].width, index == 1 || index == 2 ? 1u : 4u);
+      EXPECT_EQ(sites[index].access, index < 2 ? AccessKind::Write : AccessKind::Read);
+    }
+  }
+  const std::vector<uint8_t> d16 =
+      test::read_fixture(test::target_fixture_path(mode, "width-d16-overlap"));
+  InputError error;
+  const FailureOr<PreparedArtifact> artifact =
+      prepare(d16, *target_profile(mode.target), "lds_producer_consumer", error);
+  ASSERT_TRUE(artifact.succeeded()) << error.message;
+  const std::array<unsigned, 9> widths{1, 2, 1, 1, 1, 1, 2, 2, 4};
+  const std::vector<SiteFacts> &sites = artifact.value().manifest.sites;
+  ASSERT_EQ(sites.size(), widths.size());
+  for (size_t index = 0; index < widths.size(); ++index) {
+    EXPECT_EQ(sites[index].width, widths[index]);
+    EXPECT_EQ(sites[index].access, index < 2 || index == 8 ? AccessKind::Write : AccessKind::Read);
   }
 }
 
