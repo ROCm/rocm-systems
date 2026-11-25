@@ -27,16 +27,21 @@ import validate_membw_tree_spec
 import validate_metric_library
 import validate_views
 from config_management import metric_lock
-from config_management.metric_description_manager import DOCS_DIR, sync_arch
+from config_management.metric_description_manager import DOCS_DIR, docs_file, sync_arch
 
 from rocprof_compute_soc.metric_library import loader
 
 
 def regenerate(lock_dir: Path, docs_dir: Path) -> None:
     """Write the metric lock and the metric description files from the shipped
-    metric library and views."""
+    metric library and views, and remove the description files of other archs."""
     metric_lock.write_lock(lock_dir, loader.default_metric_library_dir())
-    for arch in sorted(loader.METRIC_LIBRARY_PARENT_ARCH):
+    archs = sorted(loader.METRIC_LIBRARY_PARENT_ARCH)
+    expected = {docs_file(arch, docs_dir) for arch in archs}
+    for path in docs_dir.glob("*_metrics.yaml"):
+        if path not in expected:
+            path.unlink()
+    for arch in archs:
         sync_arch(arch, docs_dir)
 
 
