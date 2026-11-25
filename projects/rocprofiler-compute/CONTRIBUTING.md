@@ -334,17 +334,9 @@ implementation is `normalize_equation()` in
 [`src/utils/metrics/expression.py`](src/utils/metrics/expression.py), which
 [`tools/format_yaml.py`](tools/format_yaml.py) runs on the YAML files.
 
-**Scope.** The formatter checks these YAML files under `src/rocprof_compute_soc/`:
-
-- `analysis_configs/gfx*/*.yaml` (panel configs)
-- `metric_library/<arch>/*.yaml`, including `collectables.yaml`
-- `analysis_configs/collectables/<arch>_collectables.yaml` (panel collectables)
-
-It skips template files (`*_template.yaml`) and build artifacts. In the panel configs
-and metric library files, the equations are the values of these keys: `value`, `avg`,
-`min`, `max`, `std dev`, `expr`, `peak`, `formula` and `peak_empirical`. Table headers
-use the same keys for column titles, so the formatter skips them. In the panel
-collectables files, every top-level value is an equation.
+**Scope.** Equation formatting applies to the metric library,
+`src/rocprof_compute_soc/metric_library/<arch>/*.yaml`, including `collectables.yaml`.
+Only values under `formula`, `peak` and `peak_empirical` are equations.
 
 **Rules.**
 
@@ -369,18 +361,18 @@ the key of the equation and the parser message. The formatter leaves the equatio
 unchanged, so fix it by hand.
 
 **Enforcement.** The `yaml-format-fix` pre-commit hook runs
-`tools/format_yaml.py --fix` on staged config files and auto-corrects equations
+`tools/format_yaml.py --fix` on staged metric library files and auto-corrects equations
 in place. Re-stage the modified files and commit again.
 
 ```bash
 # Report equations that need formatting
-python tools/format_yaml.py --check src/rocprof_compute_soc/analysis_configs/gfx950/*.yaml
+python tools/format_yaml.py --check src/rocprof_compute_soc/metric_library/gfx950/*.yaml
 
 # Show proposed changes
 python tools/format_yaml.py --diff src/rocprof_compute_soc/metric_library/gfx950/*.yaml
 
 # Auto-fix in place
-python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/collectables/*.yaml
+python tools/format_yaml.py --fix src/rocprof_compute_soc/metric_library/gfx950/*.yaml
 ```
 
 `tests/unit/utils/metrics/test_expression.py` tests the canonical format, and
@@ -464,9 +456,7 @@ A metric whose counters do not fit one profiling pass is split into collectables
 
 ### Metric Library
 
-The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. Until production reads the library, a metric change goes into both the panel YAMLs and the metric library. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks, and its [description rules](./src/rocprof_compute_soc/metric_library/README.md#descriptions) before writing a metric description.
-
-`tools/test_metric_library_sync.py` checks that the metric library matches the panel YAMLs.
+The metric library in `src/rocprof_compute_soc/metric_library/` defines each metric once per architecture. See the [metric library README](./src/rocprof_compute_soc/metric_library/README.md) for its layout, inheritance and checks, and its [description rules](./src/rocprof_compute_soc/metric_library/README.md#descriptions) before writing a metric description.
 
 ## Memory Chart Layouts
 

@@ -19,7 +19,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Removed duplicate rows from the gfx1250 TXA block.
 
+* Removed the gfx908 `compute_thruput_flops` set, whose metrics MI100 has no counters for.
+
 ### Optimized
+
+* Some profiles take fewer passes on AMD Instinct MI100, MI200, MI300, and MI350 Series.
 
 ### Resolved issues
 
