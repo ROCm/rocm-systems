@@ -1,0 +1,76 @@
+view: Memory Chart
+alias: memchart
+tables:
+- title: Memory Chart
+  header:
+    metric: Metric
+    value: Value
+    unit: Unit
+  metrics:
+  - metric: wave.occupancy_pct
+    label: Wavefront Occupancy
+    round: 1
+  - metric: dispatch.vgprs
+    round: 0
+  - metric: dispatch.sgprs
+    round: 0
+  - metric: dispatch.lds_allocation
+    round: 0
+  - metric: dispatch.scratch_allocation_per_wave
+    round: 3
+  - metric: spi.workgroups_per_cu
+    round: 1
+  - metric: ta.global_rd_insts
+    round: 0
+  - metric: ta.global_wr_insts
+    round: 0
+  - metric: ta.global_atomic_insts
+    round: 0
+  - metric: ta.buffer_rd_insts
+    round: 0
+  - metric: ta.buffer_wr_insts
+    round: 0
+  - metric: ta.buffer_atomic_insts
+    round: 0
+  - metric: lds.insts
+    round: 0
+  - metric: lds.util
+    round: 0
+  - metric: lds.load
+    round: 0
+  - metric: lds.store
+    round: 0
+  - metric: lds.atomic
+    round: 0
+  - metric: vl1d.hit_rate
+    round: 0
+  - metric: vl1d.coalescing
+    round: 0
+  - metric: vl1d.l2_rd_bw
+  - metric: vl1d.l2_wr_bw
+  - metric: vl1d.l2_atomic_bw
+  - metric: sl1d.req
+    round: 0
+  - metric: sl1d.hits_per_req
+    label: sL1D Hit
+    round: 0
+  - metric: sl1d.l2_rd_bw
+  - metric: l1i.req
+    round: 0
+  - metric: l1i.hits_per_req
+    round: 0
+  - metric: l1i.l2_bw
+  - metric: l2.hit_rate
+    round: 0
+  - metric: fabric.rd_bw
+  - metric: fabric.wr_atomic_bw
+  - metric: fabric.hbm_rd_bw
+  - metric: fabric.hbm_wr_bw
+  - metric: fabric.hbm_atomic_bw
+  - metric: fabric.hbm_wr_atomic_bw
+  - metric: fabric.xgmi_rd_bw
+  - metric: fabric.xgmi_wr_bw
+  - metric: fabric.xgmi_atomic_bw
+  - metric: fabric.pcie_rd_bw
+  - metric: fabric.pcie_wr_bw
+  - metric: fabric.pcie_atomic_bw

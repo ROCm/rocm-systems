@@ -1,0 +1,149 @@
+view: GL0 Texture Addresser (TXA)
+alias: txa
+tables:
+- title: TXA Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txa.util
+    label: Utilization
+  - metric: txa.stall_rate
+- title: Shader-TXA Requests - LDS
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txa.lds_insts
+  - metric: txa.lds_load_insts
+  - metric: txa.lds_store_insts
+  - metric: txa.lds_atomics_insts
+- title: Shader-TXA Requests - VMEM
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txa.buffer_insts
+    label: Buffer Instructions
+  - metric: txa.buffer_load_insts
+    label: Buffer Load Instructions
+  - metric: txa.buffer_store_insts
+    label: Buffer Store Instructions
+  - metric: txa.buffer_atomics_insts
+    label: Buffer Atomics Instructions
+  - metric: txa.flat_insts
+    label: Flat Instructions
+  - metric: txa.flat_load_insts
+    label: Flat Load Instructions
+  - metric: txa.flat_store_insts
+    label: Flat Store Instructions
+  - metric: txa.flat_atomics_insts
+    label: Flat Atomics Instructions
+- title: Shader-TXA Requests - Async Load and Store
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txa.async_load_inst
+    label: Async Load Instruction
+  - metric: txa.async_store_inst
+    label: Async Store Instruction
+  - metric: txa.async_load_inst
+    label: Async Direct Load Instruction
+  - metric: txa.async_store_inst
+    label: Async Direct Store Instruction
+  - metric: txa.cluster_load_inst
+    label: Cluster Load Instruction
+  - metric: txa.async_cluster_load_inst
+    label: Async Cluster Load Instruction
+  - metric: txa.async_barrier_inst
+    label: Async Barrier Instruction
+- title: Shader-TXA Requests - TDM
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txa.tdm_insts
+  - metric: txa.tdm_async_load_req
+  - metric: txa.tdm_async_store_req
+  - metric: txa.tdm_async_cluster_load_req
+  - metric: txa.tdm_async_barrier_req
+- title: Shader-TXA Requests - Block Load and Store
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txa.block_load_inst
+    label: Block Load Instruction
+  - metric: txa.block_store_inst
+    label: Block Store Instruction
+- title: Shader-TXA Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txa.req_bus_util
+    label: Request Bus Utilization
+  - metric: txa.req_bus_util_atomic_data
+    label: Request Bus Utilization - Atomic Data
+- title: TXA-VMW Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txa.command_bus_util
+    label: Command Bus Util
+  - metric: txa.command_bus_stall_rate
+    label: Command Bus Stall Rate
+  - metric: txa.vmw_req_bus_util
+    label: Request Bus Util
+  - metric: txa.req_bus_stall_rate
+    label: Request Bus Stall Rate
+  - metric: txa.bus_util_lds_req
+    label: Bus Util - LDS Requests
+  - metric: txa.bus_util_buffer_req
+    label: Bus Util - Buffer Requests
+  - metric: txa.bus_util_flat_req
+    label: Bus Util - Flat Requests
+- title: LDS and GL0 Data Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: txa.lds_bw_load
+  - metric: txa.lds_bw_store
+  - metric: txa.lds_bw_atomics
+  - metric: txa.async_load_bw
+  - metric: txa.async_store_bw
+  - metric: txa.tdm_load_bw
+  - metric: txa.tdm_store_bw
+  - metric: txa.gl0_load_bw
+  - metric: txa.gl0_store_bw
+  - metric: txa.gl0_atomics_bw

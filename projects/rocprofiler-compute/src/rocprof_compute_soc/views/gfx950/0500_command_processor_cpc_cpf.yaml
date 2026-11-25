@@ -1,0 +1,34 @@
+view: Command Processor (CPC/CPF)
+alias: cpc
+tables:
+- title: Command processor fetcher (CPF)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.cpf_util
+  - metric: cp.cpf_stall
+  - metric: cp.cpf_l2_util
+  - metric: cp.cpf_l2_stall
+  - metric: cp.cpf_utcl1_stall
+- title: Command processor packet processor (CPC)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.cpc_sync_fifo_full_rate
+  - metric: cp.cpc_cane_stall_rate
+  - metric: cp.cpc_adc_util
+  - metric: cp.cpc_util
+  - metric: cp.cpc_stall_rate
+  - metric: cp.cpc_packet_decoding_util
+  - metric: cp.cpc_workgroup_manager_util
+  - metric: cp.cpc_l2_util
+  - metric: cp.cpc_utcl1_stall
+  - metric: cp.cpc_utcl2_util

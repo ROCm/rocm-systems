@@ -1,0 +1,61 @@
+view: Scalar L1 Data Cache
+alias: sl1d
+tables:
+- title: Scalar L1D Speed-of-Light
+  header:
+    metric: Metric
+    value: Avg
+    unit: Unit
+  metrics:
+  - metric: sl1d.bw_util
+    label: Bandwidth Utilization
+  - metric: sl1d.hit_rate_incl_dup
+  - metric: sl1d.l2_bw_util
+- title: Scalar L1D cache accesses
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: sl1d.req
+    label: Req
+  - metric: sl1d.hits
+    label: Hits
+  - metric: sl1d.misses_non_duplicated
+    label: Misses - Non Duplicated
+  - metric: sl1d.misses_duplicated
+    label: Misses- Duplicated
+  - metric: sl1d.hit_rate_incl_dup
+  - metric: sl1d.rd_req_total
+    label: Read Req (Total)
+  - metric: sl1d.atomic_req
+    label: Atomic Req
+  - metric: sl1d.rd_req_1_dword
+    label: Read Req (1 DWord)
+  - metric: sl1d.rd_req_2_dword
+    label: Read Req (2 DWord)
+  - metric: sl1d.rd_req_4_dword
+    label: Read Req (4 DWord)
+  - metric: sl1d.rd_req_8_dword
+    label: Read Req (8 DWord)
+  - metric: sl1d.rd_req_16_dword
+    label: Read Req (16 DWord)
+- title: Scalar L1D Cache - L2 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: sl1d.l2_bw
+  - metric: sl1d.l2_rd_req
+    label: Read Req
+  - metric: sl1d.l2_wr_req
+    label: Write Req
+  - metric: sl1d.l2_atomic_req
+    label: Atomic Req
+  - metric: sl1d.l2_stall_cycles
+    label: Stall Cycles

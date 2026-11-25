@@ -1,0 +1,63 @@
+view: GL1 Cache (L1)
+alias: gl1
+tables:
+- title: GL1 Cache Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.busy
+  - metric: gl1.starve
+- title: GL1 Cache Request Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.total_req
+    label: Total Requests
+  - metric: gl1.rd_req
+    label: Read Requests
+  - metric: gl1.wr_req
+    label: Write Requests
+  - metric: gl1.miss_req
+    label: Miss Requests
+- title: GL1 Cache Performance
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.hit_rate
+    label: Hit Rate
+- title: GL1-GL2 Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl2_rd_req
+    label: GL2 Read Requests
+  - metric: gl1.gl2_rd_128b_req
+  - metric: gl1.gl2_wr_req
+    label: GL2 Write Requests
+- title: GL1 Cache Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.gl2_stall
+  - metric: gl1.lfifo_full_stall
+    label: LFIFO Full Stall

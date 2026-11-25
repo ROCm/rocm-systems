@@ -28,15 +28,13 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Dict, Hashable, List, Optional, Sequence, Set, Tuple
 
-from format_yaml import normalize_equation
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 # Make src/ importable.
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from rocprof_compute_soc.metric_library import loader
-from utils.metrics.expression import build_eval_string
+from utils.metrics.expression import build_eval_string, normalize_equation
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import canonical_config_arch
+from utils.utils_common import canonical_config_arch, mapping_field_errors
 from utils.utils_counter_defs import counter_to_block
 
 # Categories named after panels, not hardware.
@@ -603,17 +601,10 @@ def _field_errors(
     """Report a missing required field and an unknown field of a mapping entry."""
     if not isinstance(entry, dict):
         return [f"[{source}] {item}: must be a mapping"]
-    errors = [
-        f"[{source}] {item}: '{field}' is required"
-        for field in required
-        if field not in entry
+    return [
+        f"[{source}] {item}: {error}"
+        for error in mapping_field_errors(entry, required, optional)
     ]
-    errors.extend(
-        f"[{source}] {item}: '{field}' is not a known field"
-        for field in entry
-        if field not in required and field not in optional
-    )
-    return errors
 
 
 def _text_errors(

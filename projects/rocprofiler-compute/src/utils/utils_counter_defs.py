@@ -8,7 +8,7 @@ Imported by both the main runtime code and lightweight tooling such as
 """
 
 import re
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import config
 from utils.logger import console_error
@@ -41,6 +41,12 @@ AMMOLITE_VAR_RE = re.compile(r"ammolite__([0-9A-Za-z_]+)")
 
 # Per-arch files of named formulas, written $name in metric formulas
 COLLECTABLES_DIR = config.analysis_configs_dir / "collectables"
+
+# A collectable whose formula matches is one value for all dispatches. A min or
+# max reads its partner named <name> + PER_DISPATCH_SUFFIX, which has a value per
+# dispatch.
+SUMMED_FORMULA_RE = re.compile(r"\bSUM\(")
+PER_DISPATCH_SUFFIX = "_per_dispatch"
 
 # per_kernel denom column, injected at pmc load with 1 per dispatch so
 # SUM($denom) == N and Avg is the mean per dispatch.
@@ -145,6 +151,32 @@ def extract_counters_and_variables(
         variables.update(new_vars)
 
     return hw, collectable_names
+
+
+def summed_collectables(collectables: Dict[str, str]) -> Set[str]:
+    """Return the collectables that are one value for all dispatches: those whose
+    formula, or a collectable it uses, sums over dispatches."""
+    summed = {
+        name
+        for name, formula in collectables.items()
+        if SUMMED_FORMULA_RE.search(formula)
+    }
+    return {
+        name
+        for name, formula in collectables.items()
+        if name in summed
+        or extract_counters_and_variables(
+            formula, collectables, include_supported_denom=False
+        )[1]
+        & summed
+    }
+
+
+def per_dispatch_partner(name: str, collectables: Dict[str, str]) -> Optional[str]:
+    """Return the collectable that holds name's value per dispatch, or None if
+    collectables has none."""
+    partner = name + PER_DISPATCH_SUFFIX
+    return partner if partner in collectables else None
 
 
 def counter_to_block(counter: str) -> str:

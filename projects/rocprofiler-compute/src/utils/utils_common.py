@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import argparse
+import copy
 import csv
 import errno
 import io
@@ -60,6 +61,47 @@ MEMORY_CHART_PANEL_ID: int = 300
 ROOFLINE_PANEL_ID: int = 400
 # --list-metrics value that lists every metric
 LIST_ALL_METRICS = "all"
+# The metric_table key that expands one row into a row per channel, e.g. per L2 channel
+PLACEHOLDER_RANGE_KEY = "placeholder_range"
+# Kinds of view tables, which are also the panel configs' data source keys
+METRIC_TABLE = "metric_table"
+RAW_CSV_TABLE = "raw_csv_table"
+# File name of a view: its panel id and a name, e.g. 0300_memory_chart.yaml
+VIEW_FILE_RE = re.compile(r"^(\d\d00)_[a-z0-9_]+\.yaml$")
+# The panel --list-stats shows.
+TOP_STATS_PANEL_ID = 0
+# The views every arch has, by panel id. They show the workload's CSV files,
+# not metrics.
+BUILT_IN_VIEWS: Dict[int, Dict[str, Any]] = {
+    TOP_STATS_PANEL_ID: {
+        "view": "Top Stats",
+        "alias": "topstats",
+        "tables": [
+            {
+                "render": RAW_CSV_TABLE,
+                "title": "Top Kernels",
+                "source": "pmc_kernel_top.csv",
+            },
+            {
+                "render": RAW_CSV_TABLE,
+                "title": "Dispatch List",
+                "source": "pmc_dispatch_info.csv",
+            },
+        ],
+    },
+    100: {
+        "view": "System Info",
+        "alias": "sysinfo",
+        "tables": [
+            {
+                "render": RAW_CSV_TABLE,
+                "title": "System Info",
+                "source": "sysinfo.csv",
+                "columnwise": True,
+            }
+        ],
+    },
+}
 # Narrowest the --list-metrics Description column gets on a narrow terminal
 DESCRIPTION_WIDTH_MIN = 40
 
@@ -632,7 +674,7 @@ def expand_placeholder_ranges(
                     continue
                 if "metric" not in data_config:
                     continue
-                if "placeholder_range" not in data_config["metric"]:
+                if PLACEHOLDER_RANGE_KEY not in data_config["metric"]:
                     continue
                 if sys_info is None:
                     data_config["metric"] = {}
@@ -640,7 +682,7 @@ def expand_placeholder_ranges(
 
                 # Resolved here (not in eval_metric) because the range may
                 # itself be a built-in var. Single placeholder only.
-                p_range = data_config["metric"].pop("placeholder_range")
+                p_range = data_config["metric"].pop(PLACEHOLDER_RANGE_KEY)
                 metric, metric_expr = data_config["metric"].popitem()
                 new_metrics: dict[str, Any] = {}
                 for p, r in p_range.items():
@@ -692,11 +734,19 @@ def format_table_id(config_id: int) -> str:
     return f"{config_id // 100}.{config_id % 100}"
 
 
+def format_row_id(config_id: int, index: int) -> str:
+    """Return the "block.table.index" id of a table config's row, e.g. 1802, 3 ->
+    "18.2.3"."""
+    return f"{format_table_id(config_id)}.{index}"
+
+
 def metric_ids_by_name(data_config: Dict[str, Any]) -> Dict[str, str]:
     """Map each metric name of a metric_table config to its "block.table.index" id."""
-    table_id = format_table_id(data_config["id"])
     metrics = data_config.get("metric") or {}
-    return {name: f"{table_id}.{index}" for index, name in enumerate(metrics)}
+    return {
+        name: format_row_id(data_config["id"], index)
+        for index, name in enumerate(metrics)
+    }
 
 
 def resolve_block_token(token: str, alias_map: Dict[str, str]) -> Optional[str]:
@@ -875,6 +925,85 @@ def config_template_path_for_arch(
         if match and arch.startswith(match.group(1)):
             return template_path
     return None
+
+
+def mapping_field_errors(
+    entry: Dict[str, Any], required: Tuple[str, ...], optional: Tuple[str, ...]
+) -> List[str]:
+    """Report each missing required field and each unknown field of a YAML mapping."""
+    errors = [f"'{field}' is required" for field in required if field not in entry]
+    errors.extend(
+        f"'{field}' is not a known field"
+        for field in entry
+        if field not in required and field not in optional
+    )
+    return errors
+
+
+def read_view_files(arch: str) -> Dict[Path, Any]:
+    """Return arch's view file documents by path, in file name order."""
+    arch_dir = config.analysis_views_dir / canonical_config_arch(arch)
+    return {path: load_yaml(path) for path in sorted(arch_dir.glob("*.yaml"))}
+
+
+def load_views(arch: str) -> "OrderedDict[int, Dict[str, Any]]":
+    """Return arch's views, built-in ones included, sorted by panel id."""
+    return views_from_files(read_view_files(arch))
+
+
+def views_from_files(documents: Dict[Path, Any]) -> "OrderedDict[int, Dict[str, Any]]":
+    """Return the built-in views and those of read_view_files(), sorted by panel id."""
+    views = copy.deepcopy(BUILT_IN_VIEWS)
+    views.update((view_panel_id(path.name), view) for path, view in documents.items())
+    return OrderedDict(sorted(views.items()))
+
+
+def view_panel_id(file_name: str) -> int:
+    """Return the panel id of a view file name, e.g. 300 for 0300_memory_chart.yaml."""
+    match = VIEW_FILE_RE.match(file_name)
+    if match is None:
+        raise ValueError(f"{file_name}: not a view file name")
+    return int(match.group(1))
+
+
+def panel_aliases(views: Dict[int, Dict[str, Any]]) -> Dict[str, str]:
+    """Return panel number -> -b alias, "" for none, of an arch's views."""
+    return {
+        str(panel_id // 100): view.get("alias") or ""
+        for panel_id, view in views.items()
+    }
+
+
+def iter_view_rows(
+    views: Dict[int, Dict[str, Any]],
+) -> Iterator[Tuple[str, Dict[str, Any]]]:
+    """Yield each metric table row of an arch's views with its numeric id."""
+    for panel_id, view in views.items():
+        for table_id, table in numbered_view_tables(panel_id, view):
+            if view_table_render(table) != METRIC_TABLE:
+                continue
+            for index, row in enumerate(table["metrics"]):
+                yield format_row_id(table_id, index), row
+
+
+def row_metric_ids(row: Dict[str, Any]) -> List[str]:
+    """Return the metric ids a row shows: its metric, or each column's."""
+    if "metric" in row:
+        return [row["metric"]]
+    return [metric_id for metric_id in row.get("columns", {}).values() if metric_id]
+
+
+def view_table_render(table: Dict[str, Any]) -> str:
+    """Return the kind of a view table: its render, a metric table by default."""
+    return table.get("render", METRIC_TABLE)
+
+
+def numbered_view_tables(
+    panel_id: int, view: Dict[str, Any]
+) -> Iterator[Tuple[int, Dict[str, Any]]]:
+    """Yield each table of a view with its table id: the panel id plus its position."""
+    for index, table in enumerate(view["tables"]):
+        yield panel_id + index + 1, table
 
 
 def get_arch_panel_id_to_alias(arch: str) -> Dict[str, str]:

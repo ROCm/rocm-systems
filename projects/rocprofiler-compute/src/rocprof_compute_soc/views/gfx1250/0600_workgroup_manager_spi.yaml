@@ -1,0 +1,61 @@
+view: Workgroup Manager (SPI)
+alias: spi
+tables:
+- title: Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.util
+- title: Wavefront Dispatch
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.dispatched_workgroups
+  - metric: spi.dispatched_wavefronts
+  - metric: spi.dispatched_clusters
+  - metric: spi.dispatched_group_groups
+  - metric: spi.wavefront_dispatch_rate
+  - metric: spi.thread_dispatch_rate
+  - metric: spi.per_se_wavefront_occupancy
+  - metric: spi.per_se_wavefront_life
+  - metric: spi.context_save_rate
+  - metric: spi.context_restore_rate
+  - metric: spi.wavefront_dispatch_fifo_full_rate
+- title: Resource Allocation
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.resource_no_allocation_rate
+  - metric: spi.resource_allocation_rate
+  - metric: spi.alloc_failure_lds_full
+  - metric: spi.alloc_failure_waveslots_full
+  - metric: spi.alloc_failure_vgpr_full
+  - metric: spi.alloc_failure_barrier_full
+  - metric: spi.alloc_failure_bulky_full
+  - metric: spi.alloc_failure_named_barriers_full
+  - metric: spi.alloc_failure_temp_space_full
+- title: CPC-SPI Interface
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: spi.per_queue_outstanding_dispatch_req_p0_q0_sum
+  - metric: spi.per_queue_outstanding_dispatch_req_p0_q1_sum
+  - metric: spi.per_queue_outstanding_dispatch_req_p1_q0_sum
+  - metric: spi.per_queue_outstanding_dispatch_req_p1_q1_sum
+  - metric: spi.cpc_pre_alloc_req_stall_rate

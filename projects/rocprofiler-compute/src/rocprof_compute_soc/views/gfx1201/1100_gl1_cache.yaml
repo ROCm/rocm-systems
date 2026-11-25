@@ -1,0 +1,13 @@
+view: GL1 Cache (L1)
+alias: gl1
+tables:
+- title: GL1 Cache Request Statistics
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl1.total_req
+    label: Total Requests

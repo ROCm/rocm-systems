@@ -1,0 +1,17 @@
+view: CPC (Command Processor - Compute)
+alias: cpc
+tables:
+- title: CPC Utilizations
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: cp.cpc_util
+  - metric: cp.cpc_micro_engine_busy_dispatching_workgroups
+  - metric: cp.cpc_adc_pipe0_busy_dispatching_workgroups
+  - metric: cp.cpc_adc_pipe1_busy_dispatching_workgroups
+  - metric: cp.cpc_adc_pipe2_busy_dispatching_workgroups
+  - metric: cp.cpc_adc_pipe3_busy_dispatching_workgroups

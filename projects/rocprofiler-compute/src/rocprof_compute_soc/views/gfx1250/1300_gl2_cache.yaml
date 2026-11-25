@@ -1,0 +1,133 @@
+view: GL2 Cache
+alias: gl2
+tables:
+- title: GL2A Processing
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.gl2a_util
+    label: Utilization
+  - metric: gl2.gl2a_gl2c0_req
+  - metric: gl2.gl2a_gl2c1_req
+  - metric: gl2.gl2a_gl2c2_req
+  - metric: gl2.gl2a_gl2c3_req
+  - metric: gl2.gl2a_gl2c0_req_stall_rate
+  - metric: gl2.gl2a_gl2c1_req_stall_rate
+  - metric: gl2.gl2a_gl2c2_req_stall_rate
+  - metric: gl2.gl2a_gl2c3_req_stall_rate
+  - metric: gl2.gl2c0_gl2a_return_stall_rate
+  - metric: gl2.gl2c1_gl2a_return_stall_rate
+  - metric: gl2.gl2c2_gl2a_return_stall_rate
+  - metric: gl2.gl2c3_gl2a_return_stall_rate
+- title: GL2C Utilization
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.util
+    label: GL2C Utilization
+- title: GL2C Cache Lookup
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.hit_rate
+  - metric: gl2.pipeline_stall
+  - metric: gl2.lat_fifo_full_stall
+  - metric: gl2.source_fifo_full_stall
+  - metric: gl2.tag_stall_set_full
+  - metric: gl2.tag_stall_writeback_fifo_full
+  - metric: gl2.tag_stall_cached_ea_fifo_full
+- title: GL2C-EA Stalls
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_req_stall_on_vc3
+  - metric: gl2.ea_req_stall_on_vc4
+  - metric: gl2.ea_req_stall_on_vc6
+  - metric: gl2.ea_req_stall_on_vc7
+  - metric: gl2.ea_data_stall_on_vc2
+  - metric: gl2.ea_data_stall_on_vc3
+  - metric: gl2.ea_data_stall_on_vc4
+  - metric: gl2.ea_data_stall_on_vc6
+  - metric: gl2.ea_data_stall_on_vc7
+- title: GL2C-EA Interface - Latencies
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_rd_lat
+  - metric: gl2.ea_wr_lat
+  - metric: gl2.ea_atomic_lat
+- title: GL2C-EA Interface - HBM Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_hbm_bw_rd
+  - metric: gl2.ea_hbm_bw_wr
+  - metric: gl2.ea_hbm_bw_atomic
+- title: GL2C-EA Interface - Host CPU Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_host_cpu_bw_rd
+  - metric: gl2.ea_host_cpu_bw_wr
+  - metric: gl2.ea_host_cpu_bw_atomic
+- title: GL2C-EA Interface - PCIe Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_pcie_bw_rd
+  - metric: gl2.ea_pcie_bw_wr
+  - metric: gl2.ea_pcie_bw_atomic
+- title: GL2C-EA Interface - Remote Node Bandwidth
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_remote_node_bw_rd
+  - metric: gl2.ea_remote_node_bw_wr
+  - metric: gl2.ea_remote_node_bw_atomic
+- title: GL2C-EA Interface - Remote Memory Bandwidth (Same Node)
+  header:
+    metric: Metric
+    avg: Avg
+    min: Min
+    max: Max
+    unit: Unit
+  metrics:
+  - metric: gl2.ea_remote_memory_bw_rd
+  - metric: gl2.ea_remote_memory_bw_wr
+  - metric: gl2.ea_remote_memory_bw_atomic

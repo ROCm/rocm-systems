@@ -330,7 +330,9 @@ ruff format .
 ### YAML Metric Equation Formatting
 
 Metric equations in YAML config files follow a canonical format. The canonical
-implementation is [`tools/format_yaml.py`](tools/format_yaml.py).
+implementation is `normalize_equation()` in
+[`src/utils/metrics/expression.py`](src/utils/metrics/expression.py), which
+[`tools/format_yaml.py`](tools/format_yaml.py) runs on the YAML files.
 
 **Scope.** The formatter checks these YAML files under `src/rocprof_compute_soc/`:
 
@@ -381,6 +383,7 @@ python tools/format_yaml.py --diff src/rocprof_compute_soc/metric_library/gfx950
 python tools/format_yaml.py --fix src/rocprof_compute_soc/analysis_configs/collectables/*.yaml
 ```
 
+`tests/unit/utils/metrics/test_expression.py` tests the canonical format, and
 `tools/test_format_yaml.py` tests the formatter.
 
 ## Documentation Changes
