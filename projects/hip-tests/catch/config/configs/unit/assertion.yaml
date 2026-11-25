@@ -11,6 +11,11 @@ assertion:
     tags: [deviceLib]
   Unit_Assert_Positive_Basic_KernelPass:
     level: [*level_0, *level_default]
+  Unit_Assert_Positive_FormatNotOnStack:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, nvidia]
+      reason: "AIRUNTIME-2744 - checks the Linux __assert_fail of the AMD headers; the test is compiled only for AMD Linux."
   Unit_Assert_Positive_Basic_KernelFail:
     <<: *level_default
     disabled:

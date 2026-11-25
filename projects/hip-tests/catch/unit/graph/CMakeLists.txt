@@ -114,6 +114,25 @@ if(HIP_PLATFORM MATCHES "amd" AND UNIX)
                hipGraphInstantiateNullStreamFence_exe)
 endif()
 
+if(HIP_PLATFORM MATCHES "amd")
+  # The classic graph scheduler is only used when the flag is set before HIP init.
+  add_test(NAME Unit_hipGraphAddChildGraphNode_ChildNodesRunOncePerLaunch_ClassicPath
+    COMMAND ${CMAKE_COMMAND} -E env
+      "DEBUG_HIP_GRAPH_CLASSIC_PATH=1"
+      $<TARGET_FILE:GraphsTest1>
+      "Unit_hipGraphAddChildGraphNode_ChildNodesRunOncePerLaunch")
+  add_test(NAME Unit_hipGraphAddChildGraphNode_DependentsWaitForChild_ClassicPath
+    COMMAND ${CMAKE_COMMAND} -E env
+      "DEBUG_HIP_GRAPH_CLASSIC_PATH=1"
+      $<TARGET_FILE:GraphsTest1>
+      "Unit_hipGraphAddChildGraphNode_DependentsWaitForChild")
+  add_test(NAME Unit_hipStreamBeginCaptureToGraph_ModifyChildpGraph_ClassicPath
+    COMMAND ${CMAKE_COMMAND} -E env
+      "DEBUG_HIP_GRAPH_CLASSIC_PATH=1"
+      $<TARGET_FILE:GraphsTest1>
+      "Unit_hipStreamBeginCaptureToGraph_ModifyChildpGraph")
+endif()
+
 # Collapse tests need scheduling flags set before HIP init.  They live in
 # their own binary built directly (bypassing hip_add_exe_to_target) so that
 # catch_discover_tests is NOT called — avoiding duplicate env-less entries

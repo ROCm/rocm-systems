@@ -172,3 +172,90 @@ HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Negative_Parameters) {
  * End doxygen group GraphTest.
  * @}
  */
+
+namespace {
+__global__ void ScaleAddKernel(int* out, const int* in, int add, size_t n) {
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < n; i += gridDim.x * blockDim.x) {
+    out[i] = in[i] * 2 + add;
+  }
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ *  - A chain kernel -> D2H copy -> H2D copy -> kernel -> D2H copy, with copies large enough to
+ *    take SDMA, replayed back to back. Each copy must see the previous kernel's writes and each
+ *    kernel the previous copy's, with no markers forced between the nodes.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphAddMemcpyNode1D.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.2
+ */
+HIP_TEST_CASE(Unit_hipGraphAddMemcpyNode1D_Positive_KernelCopyChainOrdering) {
+  constexpr size_t kCount = (8u << 20) / sizeof(int);
+  constexpr size_t kBytes = kCount * sizeof(int);
+  constexpr int kLaunches = 8;
+
+  LinearAllocGuard<int> dev_in(LinearAllocs::hipMalloc, kBytes);
+  LinearAllocGuard<int> dev_mid(LinearAllocs::hipMalloc, kBytes);
+  LinearAllocGuard<int> dev_out(LinearAllocs::hipMalloc, kBytes);
+  LinearAllocGuard<int> host_mid(LinearAllocs::hipHostMalloc, kBytes);
+  LinearAllocGuard<int> host_out(LinearAllocs::hipHostMalloc, kBytes);
+  for (size_t i = 0; i < kCount; i++) host_mid.host_ptr()[i] = -1;
+  std::vector<int> init(kCount);
+  for (size_t i = 0; i < kCount; i++) init[i] = static_cast<int>(i % 1000);
+  HIP_CHECK(hipMemcpy(dev_in.ptr(), init.data(), kBytes, hipMemcpyHostToDevice));
+
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t k1, d2h1, h2d, k2, d2h2;
+  int* in_ptr = dev_in.ptr();
+  int* mid_ptr = dev_mid.ptr();
+  int* out_ptr = dev_out.ptr();
+  size_t count = kCount;
+  int add1 = 1, add2 = 3;
+  void* args1[] = {&mid_ptr, &in_ptr, &add1, &count};
+  void* args2[] = {&out_ptr, &in_ptr, &add2, &count};
+  hipKernelNodeParams kp{};
+  kp.func = reinterpret_cast<void*>(ScaleAddKernel);
+  kp.gridDim = dim3(256);
+  kp.blockDim = dim3(256);
+  kp.kernelParams = args1;
+  HIP_CHECK(hipGraphAddKernelNode(&k1, graph, nullptr, 0, &kp));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&d2h1, graph, &k1, 1, host_mid.host_ptr(), mid_ptr, kBytes,
+                                    hipMemcpyDeviceToHost));
+  // Round trip through the host into dev_in, which the second kernel reads
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&h2d, graph, &d2h1, 1, in_ptr, host_mid.host_ptr(), kBytes,
+                                    hipMemcpyHostToDevice));
+  kp.kernelParams = args2;
+  HIP_CHECK(hipGraphAddKernelNode(&k2, graph, &h2d, 1, &kp));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&d2h2, graph, &k2, 1, host_out.host_ptr(), out_ptr, kBytes,
+                                    hipMemcpyDeviceToHost));
+
+  hipGraphExec_t exec;
+  HIP_CHECK(hipGraphInstantiate(&exec, graph, nullptr, nullptr, 0));
+  StreamGuard stream_guard(Streams::created);
+  for (int l = 0; l < kLaunches; l++) {
+    HIP_CHECK(hipGraphLaunch(exec, stream_guard.stream()));
+  }
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  // Each launch: mid = 2*in + 1, in = mid, out = 2*in + 3. Track the values on the host.
+  std::vector<long long> v(init.begin(), init.end());
+  for (int l = 0; l < kLaunches; l++) {
+    for (auto& x : v) x = static_cast<int>(x * 2 + 1);
+  }
+  for (size_t i = 0; i < kCount; i += 997) {
+    const int expected_mid = static_cast<int>(v[i]);
+    const int expected_out = static_cast<int>(static_cast<int>(v[i]) * 2 + 3);
+    INFO("index " << i);
+    REQUIRE(host_mid.host_ptr()[i] == expected_mid);
+    REQUIRE(host_out.host_ptr()[i] == expected_out);
+  }
+
+  HIP_CHECK(hipGraphExecDestroy(exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+}

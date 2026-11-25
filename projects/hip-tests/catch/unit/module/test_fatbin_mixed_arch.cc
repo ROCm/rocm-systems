@@ -44,6 +44,7 @@ for the multi-device loop is not possible.
 */
 
 #include <hip_test_common.hh>
+#include <hip_test_process.hh>
 #include <hip/hip_runtime.h>
 
 #include <set>
@@ -108,6 +109,28 @@ HIP_TEST_CASE(Unit_FatBin_NoCompatibleCodeObject_ReturnsInvalidImage) {
   // stacks surface the "no code object for this device" case with that code.
   HIP_CHECK_ERRORS(hipModuleLoad(&module, "fatbin_mismatch_module.code"),
                    hipErrorInvalidImage, hipErrorNoBinaryForGpu);
+}
+
+/*
+ * A kernel and a device variable compiled into the application for other GPUs only: querying
+ * them must report that the fat binary has no code object for the device
+ * (hipErrorInvalidImage, as hipModuleLoad does above), not a later lookup error, and launching
+ * must fail. Runs unit/module/hipFatBinMismatch_exe.cc, built for gfx900/gfx906 only.
+ */
+HIP_TEST_CASE(Unit_FatBin_NoCompatibleCodeObject_StaticKernel) {
+  hipDeviceProp_t prop;
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  const std::string arch(prop.gcnArchName);
+  if (arch.rfind("gfx900", 0) == 0 || arch.rfind("gfx906", 0) == 0) {
+    HIP_SKIP_TEST("Helper is built for gfx900/gfx906; current device matches it");
+    return;
+  }
+  hip::SpawnProc proc("hipFatBinMismatch_exe", true);
+  // Eager loading checks every kernel at registration and aborts on a missing code object
+  proc.setEnv("HIP_ENABLE_DEFERRED_LOADING", "1");
+  const int result = proc.run();
+  INFO("Output from process : " << proc.getOutput());
+  REQUIRE(result == 0);
 }
 
 /*

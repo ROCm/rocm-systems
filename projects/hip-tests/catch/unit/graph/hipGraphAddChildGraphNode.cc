@@ -61,6 +61,9 @@ Negative:
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
 
+#include <algorithm>
+#include <vector>
+
 #define TEST_LOOP_SIZE 50
 
 __global__ void dummy_kernel(float* data) {
@@ -1245,4 +1248,174 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_CmplxGrph_SchedLogic) {
   }
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(d_data));
+}
+
+static __global__ void count_launches(unsigned int* counter) { atomicAdd(counter, 1u); }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Child graph with a kernel node that counts its runs, inside a parent graph launched several
+ *    times. Each launch must run the child's kernel exactly once. Scheduling a child graph must
+ *    not list its nodes twice; ctest also runs this test with DEBUG_HIP_GRAPH_CLASSIC_PATH=1
+ *    (..._ClassicPath) to cover the classic scheduler.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphAddChildGraphNode.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_ChildNodesRunOncePerLaunch) {
+  constexpr unsigned int kLaunches = 3;
+  unsigned int* counter = nullptr;
+  HIP_CHECK(hipMalloc(&counter, sizeof(*counter)));
+  HIP_CHECK(hipMemset(counter, 0, sizeof(*counter)));
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipGraph_t child_graph;
+  HIP_CHECK(hipGraphCreate(&child_graph, 0));
+  void* kernel_args[] = {&counter};
+  hipKernelNodeParams params{};
+  params.func = reinterpret_cast<void*>(count_launches);
+  params.gridDim = dim3(1);
+  params.blockDim = dim3(1);
+  params.kernelParams = kernel_args;
+  hipGraphNode_t kernel_node;
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_node, child_graph, nullptr, 0, &params));
+
+  hipGraph_t graph;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  hipGraphNode_t child_node;
+  HIP_CHECK(hipGraphAddChildGraphNode(&child_node, graph, nullptr, 0, child_graph));
+  hipGraphExec_t graph_exec;
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  for (unsigned int i = 0; i < kLaunches; ++i) {
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+  }
+  HIP_CHECK(hipStreamSynchronize(stream));
+
+  unsigned int runs = 0;
+  HIP_CHECK(hipMemcpy(&runs, counter, sizeof(runs), hipMemcpyDeviceToHost));
+  REQUIRE(runs == kLaunches);
+
+  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipGraphDestroy(child_graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(counter));
+}
+
+// Waits `ticks` wall clock ticks, then stores `value`, so work that doesn't wait for it reads
+// the old value.
+static __global__ void delayed_store(int* out, int value, long long ticks) {
+  const long long start = wall_clock64();
+  while (wall_clock64() - start < ticks) {
+  }
+  __hip_atomic_store(out, value, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+}
+
+static __global__ void copy_value(const int* in, int* out) { *out = *in; }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Work that depends on a child graph node must wait for the child graph's work, also when it
+ *    runs on another stream, and the launch must not complete before a child graph node that
+ *    ends a branch. The child graph's kernel stores a value after a delay:
+ *    -# Child graph node with two dependent kernels (the second runs on another stream); both
+ *       must read the stored value.
+ *    -# Child graph node on the second branch of the root, with no dependents; the value must be
+ *       stored when the launch stream is synchronized. Its child graph starts with an empty
+ *       node, so the store runs on the child graph node's own stream rather than the launch
+ *       stream.
+ *  - ctest also runs this test with DEBUG_HIP_GRAPH_CLASSIC_PATH=1 (..._ClassicPath).
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphAddChildGraphNode.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.14
+ */
+HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_DependentsWaitForChild) {
+  constexpr int kValue = 42;
+  int clock_khz = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&clock_khz, hipDeviceAttributeWallClockRate, 0));
+  long long ticks = static_cast<long long>(clock_khz) * 20;  // 20 ms
+  // Host memory, read right after the launch stream is synchronized
+  int* data = nullptr;
+  HIP_CHECK(hipHostMalloc(&data, 3 * sizeof(int)));
+  int* value = data;
+  int* outs = data + 1;
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipGraph_t child_graph;
+  HIP_CHECK(hipGraphCreate(&child_graph, 0));
+  int stored = kValue;
+  void* store_args[] = {&value, &stored, &ticks};
+  hipKernelNodeParams store_params{};
+  store_params.func = reinterpret_cast<void*>(delayed_store);
+  store_params.gridDim = dim3(1);
+  store_params.blockDim = dim3(1);
+  store_params.kernelParams = store_args;
+  hipGraphNode_t store_node;
+  HIP_CHECK(hipGraphAddKernelNode(&store_node, child_graph, nullptr, 0, &store_params));
+  hipGraph_t leaf_child_graph;
+  HIP_CHECK(hipGraphCreate(&leaf_child_graph, 0));
+  hipGraphNode_t empty_node;
+  HIP_CHECK(hipGraphAddEmptyNode(&empty_node, leaf_child_graph, nullptr, 0));
+  HIP_CHECK(hipGraphAddKernelNode(&store_node, leaf_child_graph, nullptr, 0, &store_params));
+
+  auto run = [&](bool child_is_leaf) {
+    std::fill(data, data + 3, 0);
+    hipGraph_t graph;
+    HIP_CHECK(hipGraphCreate(&graph, 0));
+    hipGraphNode_t root;
+    HIP_CHECK(hipGraphAddEmptyNode(&root, graph, nullptr, 0));
+    hipGraphNode_t child_node;
+    if (child_is_leaf) {
+      // The first edge of the root keeps its stream, the child graph node gets another one
+      hipGraphNode_t first;
+      HIP_CHECK(hipGraphAddEmptyNode(&first, graph, &root, 1));
+      HIP_CHECK(hipGraphAddChildGraphNode(&child_node, graph, &root, 1, leaf_child_graph));
+    } else {
+      HIP_CHECK(hipGraphAddChildGraphNode(&child_node, graph, &root, 1, child_graph));
+      for (int i = 0; i < 2; ++i) {
+        int* out = outs + i;
+        void* copy_args[] = {&value, &out};
+        hipKernelNodeParams copy_params{};
+        copy_params.func = reinterpret_cast<void*>(copy_value);
+        copy_params.gridDim = dim3(1);
+        copy_params.blockDim = dim3(1);
+        copy_params.kernelParams = copy_args;
+        hipGraphNode_t copy_node;
+        HIP_CHECK(hipGraphAddKernelNode(&copy_node, graph, &child_node, 1, &copy_params));
+      }
+    }
+    hipGraphExec_t graph_exec;
+    HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+    HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+    const std::vector<int> host(data, data + 3);
+    HIP_CHECK(hipGraphExecDestroy(graph_exec));
+    HIP_CHECK(hipGraphDestroy(graph));
+    return host;
+  };
+
+  SECTION("Dependents on two streams") {
+    const auto host = run(false);
+    REQUIRE(host[1] == kValue);
+    REQUIRE(host[2] == kValue);
+  }
+  SECTION("Child graph node ends a branch") {
+    const auto host = run(true);
+    REQUIRE(host[0] == kValue);
+  }
+
+  HIP_CHECK(hipGraphDestroy(leaf_child_graph));
+  HIP_CHECK(hipGraphDestroy(child_graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipHostFree(data));
 }

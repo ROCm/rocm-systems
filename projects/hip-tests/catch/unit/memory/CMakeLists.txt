@@ -99,6 +99,7 @@ if(HIP_PLATFORM MATCHES "amd")
       hipArray.cc
       hipMemcpyDeviceToDeviceNoCU.cc
       hipGetProcAddressMemoryApis.cc
+      hipGetSymbolMissingFromCodeObject.cc
       # Will be enabled for NVIDIA after fix for SWDEV-551244
       hipMemPrefetchAsync_v2.cc
       hipMemAdvise_v2.cc)

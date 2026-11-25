@@ -224,6 +224,41 @@ HIP_TEST_CASE(Unit_fp8x2_ocp_compare_host_device) {
   HIP_CHECK(hipFree(d_numbers));
 }
 
+// Each half of an fp8x2 conversion saturates on its own value: a pair where only one half is out
+// of range must come back with that half clamped and the other half unchanged.
+HIP_TEST_CASE(Unit_fp8x2_ocp_saturates_each_half) {
+  FP8_OCP_SKIP_TEST
+  std::vector<float2> numbers = {float2(1.0f, 1000.0f), float2(1000.0f, 1.0f),
+                                 float2(-2.0f, -1.0e6f), float2(1.0e6f, 3.0f)};
+
+  float2* d_numbers;
+  HIP_CHECK(hipMalloc(&d_numbers, sizeof(float2) * numbers.size()));
+  std::vector<float2> result(numbers.size(), float2{0.0f, 0.0f});
+  std::vector<float2> cpu_result;
+
+  SECTION("e4m3_ocp") {
+    cpu_result = cpu_cvt_float2_fp8x2_float2<true>(numbers);
+    HIP_CHECK(hipMemcpy(d_numbers, numbers.data(), sizeof(float2) * numbers.size(),
+                        hipMemcpyHostToDevice));
+    cvt_float2_fp8x2_float2<true><<<1, numbers.size()>>>(d_numbers, numbers.size());
+  }
+
+  SECTION("e5m2_ocp") {
+    cpu_result = cpu_cvt_float2_fp8x2_float2<false>(numbers);
+    HIP_CHECK(hipMemcpy(d_numbers, numbers.data(), sizeof(float2) * numbers.size(),
+                        hipMemcpyHostToDevice));
+    cvt_float2_fp8x2_float2<false><<<1, numbers.size()>>>(d_numbers, numbers.size());
+  }
+
+  HIP_CHECK(hipMemcpy(result.data(), d_numbers, sizeof(float2) * numbers.size(),
+                      hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < result.size(); i++) {
+    INFO("input (" << numbers[i].x << ", " << numbers[i].y << ")");
+    CHECK(cpu_result[i] == result[i]);
+  }
+  HIP_CHECK(hipFree(d_numbers));
+}
+
 HIP_TEST_CASE(Unit_fp8x2_ocp_split_compare) {
   FP8_OCP_SKIP_TEST
   std::vector<float> numbers_input = {0.0f, 1.0f, 1.1f, 2.0f,  2.1f,  3.0f,  3.2f,

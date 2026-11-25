@@ -18,6 +18,9 @@ dynamicLoading:
   Unit_hipApiDynamicLoad:
     level: [*level_0, *level_default]
     tags: [module]
+  Unit_hipDispatchTable_ToolCallsHipDuringRegistration:
+    <<: *level_default
+    tags: [module]
   Unit_hipGetProcAddress_Positive:
     <<: *level_default
     tags: [module]
