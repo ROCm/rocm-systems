@@ -33,6 +33,7 @@ RCCL_PARAM(DdaLL128BcFanOut, "DDA_LL128_BC_FANOUT", 0);
 RCCL_PARAM(DdaDpxWarpsPerPeer, "DDA_DPX_WARPS_PER_PEER", 2);
 RCCL_PARAM(DdaDpxScaleInPct, "DDA_DPX_SCALE_IN_PCT", 25);
 RCCL_PARAM(DdaBcForceDpx, "DDA_BC_FORCE_DPX", 0);
+RCCL_PARAM(DdaBcForceTwoShot, "DDA_BC_FORCE_TWO_SHOT", 0);
 
 namespace {
 
@@ -288,8 +289,9 @@ uint32_t ncclBroadcastDdaFabricLL128Blocks(ncclComm* comm, size_t count, ncclDat
 ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                          int root, ncclComm* comm, cudaStream_t stream) {
   const size_t bytes = count * ncclTypeSize(datatype);
+  const bool forceTwoShot = rcclParamDdaBcForceTwoShot() > 0;
 
-  if (bytes < kDdaLL128BcTwoShotMin) {
+  if (!forceTwoShot && bytes < kDdaLL128BcTwoShotMin) {
     // One-shot path
     const bool isRoot = comm->rank == root;
     const dim3 grid = ddaLL128BcGrid(comm, isRoot, bytes);
@@ -320,8 +322,10 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
     }
   } else {
     // DPX (partition mode): use the warp-specialized hierarchical kernel.
-    if (ncclBroadcastDdaFabricLL128DpxEligible(comm, count, datatype) ||
-        (rcclParamDdaBcForceDpx() > 0 && comm->nRanks >= 4 && comm->nRanks % 2 == 0))
+    // RCCL_DDA_BC_FORCE_TWO_SHOT=1 bypasses DPX and forces SPX two-shot.
+    if (!forceTwoShot &&
+        (ncclBroadcastDdaFabricLL128DpxEligible(comm, count, datatype) ||
+         (rcclParamDdaBcForceDpx() > 0 && comm->nRanks >= 4 && comm->nRanks % 2 == 0)))
       return ncclBroadcastDdaFabricLL128DpxLaunch(sendbuff, recvbuff, count, datatype, root, comm, stream);
 
     // Two-shot path
