@@ -657,22 +657,20 @@ int RemoteDriver::open() {
     errno = EMFILE;
     return -1;
   }
-  {
-    const int started = pthread_create(
-        &disconnect_monitor_, nullptr,
-        +[](void *argument) -> void * {
-          auto *driver = static_cast<RemoteDriver *>(argument);
-          driver->watch_disconnect(driver->sock_);
-          return nullptr;
-        },
-        this);
-    if (started != 0) {
-      syscall(SYS_close, fd);
-      errno = started;
-      return -1;
-    }
-    disconnect_monitor_started_ = true;
+  const int started = pthread_create(
+      &disconnect_monitor_, nullptr,
+      +[](void *argument) -> void * {
+        auto *driver = static_cast<RemoteDriver *>(argument);
+        driver->watch_disconnect(driver->sock_);
+        return nullptr;
+      },
+      this);
+  if (started != 0) {
+    syscall(SYS_close, fd);
+    errno = started;
+    return -1;
   }
+  disconnect_monitor_started_ = true;
   return fd;
 }
 
@@ -1969,21 +1967,19 @@ void RemoteDriver::remember_host_svm_range_locked(uint64_t address, uint64_t len
     unbounded_host_svm_policy_ = true;
     return;
   }
-  {
-    uint64_t start = address;
-    uint64_t end = address + length;
-    auto first = std::lower_bound(
-        potential_host_svm_ranges_.begin(), potential_host_svm_ranges_.end(), start,
-        [](const auto &range, uint64_t value) { return range.second < value; });
-    auto last = first;
-    while (last != potential_host_svm_ranges_.end() && last->first <= end) {
-      start = std::min(start, last->first);
-      end = std::max(end, last->second);
-      ++last;
-    }
-    first = potential_host_svm_ranges_.erase(first, last);
-    potential_host_svm_ranges_.insert(first, {start, end});
+  uint64_t start = address;
+  uint64_t end = address + length;
+  auto first =
+      std::lower_bound(potential_host_svm_ranges_.begin(), potential_host_svm_ranges_.end(), start,
+                       [](const auto &range, uint64_t value) { return range.second < value; });
+  auto last = first;
+  while (last != potential_host_svm_ranges_.end() && last->first <= end) {
+    start = std::min(start, last->first);
+    end = std::max(end, last->second);
+    ++last;
   }
+  first = potential_host_svm_ranges_.erase(first, last);
+  potential_host_svm_ranges_.insert(first, {start, end});
 }
 
 bool RemoteDriver::may_have_host_svm_policy_locked(uint64_t address, uint64_t length) const {
