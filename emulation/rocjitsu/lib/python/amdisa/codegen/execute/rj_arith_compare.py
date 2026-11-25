@@ -24,7 +24,7 @@ def supports_integer_compare(arch, mnemonic):
         return False
     return arch in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5') or (
         arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
-        and INTEGER_COMPARISONS[mnemonic][0] in (32, 64)
+        and INTEGER_COMPARISONS[mnemonic][0] in (16, 32, 64)
     )
 
 

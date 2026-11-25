@@ -97,11 +97,7 @@ public:
       }
     } else {
       values_.fill(0);
-      for (uint32_t lane = 0; lane < wave.wf_size(); ++lane) {
-        if (exec_mask & (uint64_t{1} << lane)) {
-          values_[lane] = registers.read_lane(operand, lane);
-        }
-      }
+      registers.read_active_lanes(operand, exec_mask, values_.data());
     }
     data = values_.data();
   }

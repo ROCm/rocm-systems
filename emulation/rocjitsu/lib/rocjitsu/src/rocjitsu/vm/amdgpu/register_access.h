@@ -1403,6 +1403,20 @@ public:
     return op.read_lane(wf, lane);
   }
 
+  /// Read active wave lanes into nonaliasing scratch; leave inactive words untouched.
+  void read_active_lanes(const Operand &op, uint64_t lane_mask, uint32_t *out) const {
+    const Wavefront &wf = wavefront();
+    // Addressing stays fixed until the instruction commits. Packed-half and
+    // delegated sources without a direct base need no per-lane base lookup;
+    // their backend still owns each value read and its notifications.
+    const bool direct_base = op.simd_vgpr_base(wf).has_value();
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (lane_mask & (uint64_t{1} << lane)) {
+        out[lane] = direct_base ? read_lane(op, lane) : op.read_lane(wf, lane);
+      }
+    }
+  }
+
   /// @brief Read the lane selected by a scalar-lane instruction.
   /// @pre The decoder validated a VGPR or a target-supported direct LDS source.
   [[nodiscard]] uint32_t read_scalar_selected_lane(const Operand &op, uint32_t lane) const {
