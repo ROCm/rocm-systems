@@ -7,12 +7,14 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/analysis/instruction_boundaries.h"
+#include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/text_padding.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -143,8 +145,10 @@ Result decode_replacement(Decoder &decoder, std::span<const uint8_t> bytes, uint
 
 CheckedTextEdits::CheckedTextEdits(const AmdGpuCodeObject &source, Decoder &decoder,
                                    const InstructionBoundaries &boundaries,
-                                   const TextEditReferences &references)
-    : source_(source), decoder_(decoder), boundaries_(boundaries), references_(references) {}
+                                   const TextEditReferences &references,
+                                   rocjitsu::IsaFamily architecture)
+    : source_(source), architecture_(architecture), decoder_(decoder), boundaries_(boundaries),
+      references_(references) {}
 
 Result CheckedTextEdits::validate_source_extent(const AmdGpuCodeObject &source,
                                                 TextEditError &error) {
@@ -336,7 +340,19 @@ Result CheckedTextEdits::validate_source_edits(std::span<const CheckedTextEdit> 
 
   for (const CheckedTextEdit &edit : edits) {
     const InstructionBoundaries::Entry *instruction = boundaries_.find(edit.offset);
-    if (!instruction || instruction->size != edit.expected.size()) {
+    if (edit.kind == CheckedTextEditKind::Cdna5TerminalExit) {
+      const InstructionBoundaries::Entry *end = boundaries_.find(edit.offset + 4);
+      const std::array<uint32_t, 2> expected = {
+          cdna5::build_sopp(cdna5::kSSendmsgSopp, {.simm16 = 3})[0],
+          build_s_endpgm(rocjitsu::IsaFamily::Cdna5).value()};
+      if (architecture_ != rocjitsu::IsaFamily::Cdna5 || edit.expected.size() != 8 ||
+          !instruction || instruction->size != 4 || !end || end->size != 4 || end->clause_member ||
+          end->clause || std::memcmp(edit.expected.data(), expected.data(), 8) != 0)
+        return reject(error, TextEditErrorCode::InvalidInstruction,
+                      "edit does not cover a canonical CDNA5 terminal deallocation bundle",
+                      edit.offset);
+    } else if (edit.kind != CheckedTextEditKind::Instruction || !instruction ||
+               instruction->size != edit.expected.size()) {
       return reject(error, TextEditErrorCode::InvalidInstruction,
                     "edit does not cover one complete decoded source instruction", edit.offset);
     }

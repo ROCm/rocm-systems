@@ -7,6 +7,7 @@ add_executable(
     prepare_test.cpp
     row_layout_test.cpp
     callable_probe_test.cpp
+    application_instruction_test.cpp
 )
 target_link_libraries(
     consan_input_test

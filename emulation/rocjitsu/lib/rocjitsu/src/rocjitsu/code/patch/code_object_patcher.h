@@ -165,7 +165,7 @@ public:
 
   /// @brief Patch a planned descriptor and its matching numeric metadata together.
   /// @details The caller encodes architecture-specific allocation fields in the
-  /// descriptor. Missing metadata or insufficient integer widths reject before
+  /// descriptor. Missing metadata or insufficient note padding reject before
   /// either representation changes. Absent register counts retain their fields.
   [[nodiscard]] bool patch_kernel_resources(const KernelDescriptorInfo &kernel,
                                             const amdhsa::kernel_descriptor_t &descriptor,

@@ -23,7 +23,7 @@ constexpr uint64_t kNativeCodeRangeBytes = 24;
 constexpr uint64_t kNoProbesNeededProofBytes = 56;
 constexpr uint64_t kManifestFixedBytes = 64 + 248;
 constexpr uint64_t kSiteBytes = 68;
-constexpr uint64_t kBarrierBytes = 56;
+constexpr uint64_t kBarrierBytes = 60;
 constexpr uint64_t kBoundaryBytes = 36;
 
 bool add_extent(uint64_t &total, uint64_t amount, uint64_t limit) {
@@ -266,7 +266,10 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
         prepared_observations.emplace_back(site.probe_offset, site.probe_offset + site.probe_size);
       }
       for (const BarrierFacts &barrier : manifest.barriers) {
-        original_sites.emplace_back(barrier.original_drain, barrier.original_wait + 4);
+        original_sites.emplace_back(barrier.drain_proof == BarrierDrainProof::AdjacentZeroWait
+                                        ? barrier.original_drain
+                                        : barrier.original_signal,
+                                    barrier.original_wait + 4);
         if (barrier.prepared_signal != barrier.prepared_wait) {
           prepared_observations.emplace_back(barrier.prepared_signal, barrier.prepared_signal + 4);
         }

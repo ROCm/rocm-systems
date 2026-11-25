@@ -949,13 +949,33 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
       return std::nullopt;
     }
     if (pt.kind == InstrumentationKind::KernelExit &&
-        anchor.amdgpu_operation() != amdgpu::Operation::S_ENDPGM) {
-      fail("KernelExit must name s_endpgm");
+        anchor.amdgpu_operation() != amdgpu::Operation::S_ENDPGM &&
+        !(arch == rocjitsu::IsaFamily::Cdna5 && anchor.mnemonic() == "s_sendmsg" &&
+          anchor.size() == 4 && (anchor.raw_encoding()[0] & 0xffff) == 3)) {
+      fail("KernelExit must name s_endpgm or a terminal CDNA5 VGPR deallocation bundle");
       return std::nullopt;
     }
   }
 
-  const auto size = static_cast<uint32_t>(anchor.size());
+  uint32_t size = static_cast<uint32_t>(anchor.size());
+  if (pt.kind == InstrumentationKind::KernelExit &&
+      anchor.amdgpu_operation() != amdgpu::Operation::S_ENDPGM) {
+    // The allocation is needed by the callback. Replay the original release and
+    // endpgm together after it: a return branch between the pair is forbidden.
+    const util::FailureOr<uint32_t> endpgm = build_s_endpgm(arch);
+    uint32_t following = 0;
+    if (anchor_offset > text_bytes.size() || text_bytes.size() - anchor_offset < 8 ||
+        endpgm.failed()) {
+      fail("KernelExit deallocation bundle requires an adjacent canonical s_endpgm");
+      return std::nullopt;
+    }
+    std::memcpy(&following, text_bytes.data() + anchor_offset + 4, 4);
+    if (following != endpgm.value()) {
+      fail("KernelExit deallocation bundle requires an adjacent canonical s_endpgm");
+      return std::nullopt;
+    }
+    size = 8;
+  }
   ResolvedInstrumentationSite site;
   site.kind = pt.kind;
   site.anchor_offset = anchor_offset;
@@ -2114,6 +2134,10 @@ public:
         has_mfma_producer_ |= inst.is_mfma();
         has_cdna5_producer_ |=
             arch == rocjitsu::IsaFamily::Cdna5 && may_require_cdna5_valu_spacing(inst);
+        unknown_cdna5_producer_ |=
+            arch == rocjitsu::IsaFamily::Cdna5 && may_require_cdna5_valu_spacing(inst) &&
+            inst.amdgpu_operation() != amdgpu::Operation::V_WMMA_F32_16X16X32_F16 &&
+            !inst.is_transcendental();
         has_cdna5_packed_permute_ |=
             arch == rocjitsu::IsaFamily::Cdna5 && requires_cdna5_valu_follower(inst);
       }
@@ -2164,6 +2188,7 @@ public:
 
   [[nodiscard]] bool has_mfma_producer() const { return has_mfma_producer_; }
   [[nodiscard]] bool has_cdna5_producer() const { return has_cdna5_producer_; }
+  [[nodiscard]] bool unknown_cdna5_producer() const { return unknown_cdna5_producer_; }
   [[nodiscard]] bool has_cdna5_packed_permute() const { return has_cdna5_packed_permute_; }
 
   [[nodiscard]] bool may_be_unsafe(const Instruction &anchor, bool after,
@@ -2188,6 +2213,7 @@ private:
   bool missing_firmware_entry_ = false;
   bool has_mfma_producer_ = false;
   bool has_cdna5_producer_ = false;
+  bool unknown_cdna5_producer_ = false;
   bool has_cdna5_packed_permute_ = false;
 
   static uint8_t state_bit(CallableState state) { return 1u << static_cast<unsigned>(state); }
@@ -2805,7 +2831,7 @@ bool Instrumentor::prepare_mutation_analysis(
     append_words(text, bytes->trampoline_words);
   }
   const CheckedTextEdits transaction(obj_, *decoder_, source_facts_->boundaries,
-                                     source_facts_->references);
+                                     source_facts_->references, arch_);
   if (transaction.apply(edits, std::span(text).first(original_size), error).failed()) {
     return false;
   }
@@ -2839,6 +2865,13 @@ bool Instrumentor::prepare_mutation_analysis(
 
 Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   ResolvedPoints out;
+  if ((options_.cdna5_spacing != Cdna5CallableSpacing::Default &&
+       options_.cdna5_spacing != Cdna5CallableSpacing::ConservativeKnownProducers) ||
+      (options_.cdna5_spacing != Cdna5CallableSpacing::Default &&
+       arch_ != rocjitsu::IsaFamily::Cdna5)) {
+    out.errors.emplace_back("invalid CDNA5 callable spacing policy or target");
+    return out;
+  }
   const bool has_replacements = std::ranges::any_of(points_, [](const InstrumentationPoint &point) {
     return point.kind == InstrumentationKind::ReplaceWithInst;
   });
@@ -2892,7 +2925,7 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                               .probe_args = {}});
     }
     const CheckedTextEdits transaction(obj_, *decoder_, source_facts_->boundaries,
-                                       source_facts_->references);
+                                       source_facts_->references, arch_);
     if (transaction.validate_source_edits(source_edits, error).failed()) {
       out.errors.push_back(error.message);
       out.edit_error = std::move(error);
@@ -3519,8 +3552,20 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                                   "object containing MFMA or SMFMAC producers");
           continue;
         }
+        const bool cdna5_spacing =
+            options_.cdna5_spacing == Cdna5CallableSpacing::ConservativeKnownProducers;
+        if (cdna5_spacing && callable_state_analysis_->has_cdna5_packed_permute()) {
+          out.errors.emplace_back(
+              "CDNA5 callable spacing cannot preserve packed permute adjacency");
+          continue;
+        }
+        if (cdna5_spacing && callable_state_analysis_->unknown_cdna5_producer()) {
+          out.errors.emplace_back(
+              "CDNA5 callable spacing does not admit an unknown matrix producer");
+          continue;
+        }
         if (pt.kind == InstrumentationKind::AfterInst &&
-            callable_state_analysis_->has_cdna5_producer()) {
+            callable_state_analysis_->has_cdna5_producer() && !cdna5_spacing) {
           out.errors.emplace_back("AfterInst requires proven VALU spacing in a CDNA5 code object "
                                   "containing matrix or transcendental producers");
           continue;
@@ -3577,7 +3622,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
 InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
   InstrumentedCodeObjectDebug result;
   if (options_.register_growth || options_.kernarg_binding != DbiKernargBinding::None ||
-      options_.preservation != GuestStatePreservation::LiveRegisters) {
+      options_.preservation != GuestStatePreservation::LiveRegisters ||
+      options_.cdna5_spacing != Cdna5CallableSpacing::Default) {
     result.errors.emplace_back("explicit entry requests cannot be combined with legacy options");
     return result;
   }
@@ -3700,7 +3746,9 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
         result.errors.emplace_back("selected entry request has no instrumentation points");
         return result;
       }
-      Instrumentor validator(obj_, arch_);
+      Instrumentor validator(
+          obj_, arch_,
+          {.register_growth = std::nullopt, .cdna5_spacing = requests[index].cdna5_spacing});
       validator.planning_descriptor_offset_ = requests[index].descriptor_file_offset;
       for (InstrumentationPoint &point : entry_points[index]) {
         validator.add_point(std::move(point));
@@ -3738,7 +3786,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
     Instrumentor planner(obj_, arch_,
                          {.kernarg_binding = request.kernarg_binding,
                           .preservation = request.preservation,
-                          .register_growth = request.register_growth});
+                          .register_growth = request.register_growth,
+                          .cdna5_spacing = request.cdna5_spacing});
     planner.skip_patch_gates_ = skip_patch_gates_;
     planner.planning_descriptor_offset_ = request.descriptor_file_offset;
     planner.planning_cave_offset_ = cursor;
@@ -3789,7 +3838,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
             {.offset = site.site->anchor_offset,
              .expected = site.site->original_bytes,
              .replacement = {site.bytes.patched_anchor_bytes.begin(),
-                             site.bytes.patched_anchor_bytes.begin() + site.site->original_size}});
+                             site.bytes.patched_anchor_bytes.begin() + site.site->original_size},
+             .kind =
+                 site.site->kind == InstrumentationKind::KernelExit && site.site->original_size == 8
+                     ? CheckedTextEditKind::Cdna5TerminalExit
+                     : CheckedTextEditKind::Instruction});
       }
     }
     if (plan.prologue && plan.prologue->storage_base) {
@@ -3833,7 +3886,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
     }
     const TextEditReferences &references =
         source_facts_ ? source_facts_->references : *local_references;
-    const CheckedTextEdits transaction(obj_, *decoder_, source_boundaries, references);
+    const CheckedTextEdits transaction(obj_, *decoder_, source_boundaries, references, arch_);
     if (transaction.apply(edits, new_text, edit_error).failed()) {
       result.errors.push_back("anchor edit transaction: " + edit_error.message);
       result.edit_error = std::move(edit_error);
@@ -4503,6 +4556,8 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       plan.kernel_vgpr_count = vgpr_bounds.ordinary_bound;
       plan.probe_args = site.probe_args;
       plan.force_full_exec = probe.force_full_exec;
+      plan.cdna5_valu_spacing =
+          options_.cdna5_spacing == Cdna5CallableSpacing::ConservativeKnownProducers;
       // Set on every site of a kernel that has a prologue, not only the ones
       // passing the pointer on: the pair has to reach them all, so the envelope
       // has to stay off it everywhere.
@@ -4709,7 +4764,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                               .expected = applied_site.site->original_bytes,
                               .replacement = {applied_site.bytes.patched_anchor_bytes.begin(),
                                               applied_site.bytes.patched_anchor_bytes.begin() +
-                                                  applied_site.site->original_size}});
+                                                  applied_site.site->original_size},
+                              .kind = applied_site.site->kind == InstrumentationKind::KernelExit &&
+                                              applied_site.site->original_size == 8
+                                          ? CheckedTextEditKind::Cdna5TerminalExit
+                                          : CheckedTextEditKind::Instruction});
     }
   }
   // Entry-only callbacks patch the appended stub, leaving original text intact.
@@ -4748,7 +4807,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     const TextEditReferences &references =
         source_facts_ ? source_facts_->references : *local_references;
-    const CheckedTextEdits transaction(obj_, *decoder_, source_boundaries, references);
+    const CheckedTextEdits transaction(obj_, *decoder_, source_boundaries, references, arch_);
     if (transaction.apply(anchor_edits, new_text, edit_error).failed()) {
       result.errors.emplace_back("anchor edit transaction: " + edit_error.message);
       result.edit_error = std::move(edit_error);

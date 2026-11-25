@@ -72,7 +72,7 @@ namespace {
 constexpr std::array<uint8_t, 8> kFactsMagic = {'R', 'J', 'C', 'S', 'F', 'A', 'C', 'T'};
 constexpr size_t kEnvelopeBytes = 8 + 16 + 8 + 32;
 constexpr size_t kSiteWireBytes = 68;
-constexpr size_t kBarrierWireBytes = 56;
+constexpr size_t kBarrierWireBytes = 60;
 constexpr size_t kBoundaryWireBytes = 36;
 // Manifest prefix (144), entry fields including the name length (92), and site
 // and boundary counts (4 each). Barrier count and variable records are
@@ -277,10 +277,14 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
   uint64_t previous_barrier_end = 0;
   const bool split_barrier = uses_split_workgroup_barrier(target->arch);
   for (const BarrierFacts &barrier : manifest.barriers) {
-    if (barrier.original_drain < previous_barrier_end || barrier.identity != UINT32_MAX ||
-        !util::is_range_in_bounds(barrier.original_drain, split_barrier ? 12 : 8,
-                                  manifest.original_text_bytes) ||
-        barrier.original_drain % 4 != 0 || barrier.original_signal != barrier.original_drain + 4 ||
+    const bool adjacent = barrier.drain_proof == BarrierDrainProof::AdjacentZeroWait;
+    const uint64_t first = adjacent ? barrier.original_drain : barrier.original_signal;
+    if ((barrier.drain_proof != BarrierDrainProof::NoOutstandingLds && !adjacent) ||
+        (adjacent ? barrier.original_signal != barrier.original_drain + 4
+                  : barrier.original_drain != 0) ||
+        first < previous_barrier_end || barrier.identity != UINT32_MAX ||
+        !util::is_range_in_bounds(first, adjacent ? 8 : 4, manifest.original_text_bytes) ||
+        first % 4 != 0 || barrier.original_signal % 4 != 0 ||
         (split_barrier ? barrier.original_wait < barrier.original_signal + 4
                        : barrier.original_wait != barrier.original_signal) ||
         barrier.original_wait % 4 != 0 ||
@@ -298,7 +302,7 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
     }
     previous_barrier_end = barrier.original_wait + 4;
     for (const SiteFacts &site : manifest.sites) {
-      if (site.original_offset + site.original_size > barrier.original_drain &&
+      if (site.original_offset + site.original_size > first &&
           site.original_offset < barrier.original_wait + 4) {
         return diagnostic.emit() << "access overlaps original barrier group";
       }
@@ -440,6 +444,7 @@ FailureOr<std::vector<uint8_t>> encode_manifest(const Manifest &manifest,
     payload.u64(barrier.completion_probe);
     payload.u32(barrier.probe_size);
     payload.u32(barrier.identity);
+    payload.u32(static_cast<uint32_t>(barrier.drain_proof));
   }
   payload.u32(static_cast<uint32_t>(manifest.boundaries.size()));
   for (const BoundaryFacts &boundary : manifest.boundaries) {
@@ -511,12 +516,15 @@ FailureOr<Manifest> decode_manifest(std::span<const uint8_t> bytes,
   }
   for (uint32_t group = 0; group < groups; ++group) {
     BarrierFacts barrier;
+    uint32_t drain_proof = 0;
     if (!decoder.u64(barrier.original_drain) || !decoder.u64(barrier.original_signal) ||
         !decoder.u64(barrier.original_wait) || !decoder.u64(barrier.prepared_signal) ||
         !decoder.u64(barrier.prepared_wait) || !decoder.u64(barrier.completion_probe) ||
-        !decoder.u32(barrier.probe_size) || !decoder.u32(barrier.identity)) {
+        !decoder.u32(barrier.probe_size) || !decoder.u32(barrier.identity) ||
+        !decoder.u32(drain_proof)) {
       return diagnostic.emit() << "truncated barrier facts";
     }
+    barrier.drain_proof = static_cast<BarrierDrainProof>(drain_proof);
     manifest.barriers.push_back(barrier);
   }
   if (!decoder.u32(count) || count > limits.sites ||

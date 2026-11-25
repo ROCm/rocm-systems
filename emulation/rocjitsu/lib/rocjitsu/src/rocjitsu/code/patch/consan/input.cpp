@@ -109,6 +109,32 @@ Result validate_entry_abi(const kd::kernel_descriptor_t &descriptor, const Targe
   return Result::success();
 }
 
+bool deallocates_vgprs(const Instruction &instruction, rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna5 && instruction.mnemonic() == "s_sendmsg" &&
+         instruction.size() == 4 && (instruction.raw_encoding()[0] & 0xffff) == 3;
+}
+
+Result qualify_terminal_exit(const BasicBlock &block, InputProgram &program, InputError &error) {
+  std::vector<const Instruction *> instructions;
+  for (const Instruction &instruction : block.instructions())
+    instructions.push_back(&instruction);
+  for (size_t index = 0; index < instructions.size(); ++index) {
+    const Instruction &deallocation = *instructions[index];
+    if (!deallocates_vgprs(deallocation, program.target->arch))
+      continue;
+    if (index + 2 != instructions.size() || !block.successors().empty() ||
+        instructions[index + 1]->amdgpu_operation() != amdgpu::Operation::S_ENDPGM ||
+        instructions[index + 1]->size() != 4 ||
+        deallocation.src_loc() + 4 != instructions[index + 1]->src_loc())
+      return reject(error, InputErrorCode::UnsupportedFlow,
+                    "VGPR deallocation requires an adjacent terminal s_endpgm",
+                    deallocation.src_loc());
+    program.terminal_exits.push_back({.original_exit = instructions[index + 1]->src_loc(),
+                                      .deallocation = deallocation.src_loc()});
+  }
+  return Result::success();
+}
+
 Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                              InputProgram &program, RegisterSet &used, const InputLimits &limits,
                              InputError &error) {
@@ -140,8 +166,11 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
                     block->start_offset());
     }
     std::optional<uint64_t> latest;
-    if (!trace)
+    if (!trace) {
+      if (qualify_terminal_exit(*block, program, error).failed())
+        return Result::failure();
       latest = latest_access.find(block)->second;
+    }
     for (const Instruction &instruction : block->instructions()) {
       if (instruction_count++ >= limits.instructions) {
         return reject(error, InputErrorCode::ResourceLimit, "instruction analysis budget exceeded");
@@ -153,7 +182,8 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       }
       if (!trace) {
         const size_t previous_accesses = program.accesses.size();
-        if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
+        if (!deallocates_vgprs(instruction, program.target->arch) &&
+            classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
                                           program.accesses, error)
                 .failed())
           return Result::failure();

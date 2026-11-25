@@ -119,9 +119,9 @@ TEST(AmdhsaMetadata, ScratchGrowthUpdatesTheDescriptorAndNoteTogether) {
 }
 
 TEST(AmdhsaMetadata, ScratchWidthFailureLeavesBothRepresentationsUnchanged) {
-  const std::vector<uint8_t> image =
-      test::with_resource_metadata(test::make_gfx950_kernel_elf({0xbf800000u, 0xbf810000u}, 127),
-                                   {{"test_kernel", 0, 16, 4, 127}}, true);
+  const std::vector<uint8_t> image = test::with_resource_metadata_padding(
+      test::make_gfx950_kernel_elf({0xbf800000u, 0xbf810000u}, 127),
+      {{"test_kernel", 0, 16, 4, 127}}, 0);
   const std::vector<KernelDescriptorInfo> kernels = descriptors(image);
   ASSERT_EQ(kernels.size(), 1u);
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -136,9 +136,9 @@ TEST(AmdhsaMetadata, ScratchWidthFailureLeavesBothRepresentationsUnchanged) {
   EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
 }
 
-TEST(AmdhsaMetadata, WiderIntegerRejectsBeforeNoteOrDescriptorChanges) {
+TEST(AmdhsaMetadata, WiderIntegerWithoutPaddingRejectsBeforeNoteOrDescriptorChanges) {
   const std::vector<uint8_t> image =
-      test::with_resource_metadata(plain_kernel(), {{"test_kernel", 20, 16, 4}}, true);
+      test::with_resource_metadata_padding(plain_kernel(), {{"test_kernel", 20, 16, 4}}, 0);
   const std::vector<KernelDescriptorInfo> kernels = descriptors(image);
   ASSERT_EQ(kernels.size(), 1u);
   const AmdGpuCodeObject object(image.data(), image.size());
@@ -149,6 +149,94 @@ TEST(AmdhsaMetadata, WiderIntegerRejectsBeforeNoteOrDescriptorChanges) {
   EXPECT_FALSE(patcher.patch_kernel_resources(kernels.front(), descriptor, 128, 8, &error));
   EXPECT_NE(error.find("wider"), std::string::npos);
   EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
+}
+
+TEST(AmdhsaMetadata, IntegerGrowthUsesOnlyExistingNotePaddingAndRetainsOtherEntries) {
+  for (const uint32_t padding : {0u, 1u, 2u, 3u}) {
+    for (const uint32_t number : {128u, 256u, 65536u}) {
+      SCOPED_TRACE(padding);
+      SCOPED_TRACE(number);
+      const uint32_t growth = number == 128 ? 1 : number == 256 ? 2 : 4;
+      std::vector<uint8_t> image = test::with_resource_metadata_padding(
+          test::make_gfx950_two_kernel_elf({0xbf800000u, 0xbf810000u}, 4096),
+          {{"test_kernel0", 20, 16, 4}, {"test_kernel1", 20, 16, 4}}, padding);
+      const std::vector<KernelDescriptorInfo> kernels = descriptors(image);
+      ASSERT_EQ(kernels.size(), 2u);
+      const FailureOr<amdhsa::MetadataDocument> original_metadata =
+          amdhsa::MetadataDocument::parse(image);
+      ASSERT_TRUE(original_metadata.succeeded());
+      const size_t payload_offset = original_metadata.value().payload().data() - image.data();
+      const size_t payload_end = payload_offset + original_metadata.value().payload().size();
+      std::fill(image.begin() + payload_end, image.begin() + payload_end + padding, uint8_t{0xa5});
+      const amdhsa::MetadataValue &original_entry =
+          original_metadata.value().root().field("amdhsa.kernels")->array.front();
+      const amdhsa::MetadataValue &field = *original_entry.field(".kernarg_segment_size");
+      ASSERT_EQ(field.integer_bytes, 0u);
+      const AmdGpuCodeObject object(image.data(), image.size());
+      CodeObjectPatcher patcher(object);
+      amdhsa::kernel_descriptor_t descriptor = kernels.front().descriptor;
+      descriptor.kernarg_size = number;
+      std::string error;
+      const bool changed = patcher.patch_kernel_resources(kernels.front(), descriptor, std::nullopt,
+                                                          std::nullopt, &error);
+      ASSERT_EQ(changed, growth <= padding) << error;
+      if (!changed) {
+        EXPECT_NE(error.find("note padding permits"), std::string::npos);
+        EXPECT_TRUE(std::ranges::equal(patcher.image_bytes(), image));
+        continue;
+      }
+      EXPECT_EQ(patcher.image_bytes().size(), image.size());
+      const FailureOr<amdhsa::MetadataDocument> metadata =
+          amdhsa::MetadataDocument::parse(patcher.image_bytes());
+      ASSERT_TRUE(metadata.succeeded());
+      const amdhsa::MetadataValue &entries = *metadata.value().root().field("amdhsa.kernels");
+      EXPECT_EQ(entries.array.front().integer_field(".kernarg_segment_size"), number);
+      EXPECT_EQ(entries.array[1].integer_field(".kernarg_segment_size"), 20u);
+      EXPECT_EQ(entries.array[1].integer_field(".sgpr_count"), 16u);
+      EXPECT_EQ(entries.array[1].integer_field(".vgpr_count"), 4u);
+      EXPECT_TRUE(metadata.value().root().text_field_is("vendor.extra", "unchanged"));
+      const std::span<const uint8_t> before = original_metadata.value().payload();
+      const std::span<const uint8_t> after = metadata.value().payload();
+      EXPECT_EQ(after.size(), before.size() + growth);
+      EXPECT_TRUE(std::ranges::equal(
+          std::span(image).subspan(payload_end + growth, padding - growth),
+          patcher.image_bytes().subspan(payload_end + growth, padding - growth)));
+      EXPECT_TRUE(std::ranges::equal(before.first(field.offset), after.first(field.offset)));
+      EXPECT_TRUE(std::ranges::equal(before.subspan(field.offset + 1),
+                                     after.subspan(field.offset + 1 + growth)));
+      // ELF tables, other sections and descriptor addresses never move.
+      Elf64_Ehdr header = {};
+      std::memcpy(&header, image.data(), sizeof(header));
+      EXPECT_EQ(std::memcmp(image.data(), patcher.image_bytes().data(), sizeof(header)), 0);
+      EXPECT_EQ(std::memcmp(image.data() + header.e_shoff,
+                            patcher.image_bytes().data() + header.e_shoff,
+                            header.e_shnum * header.e_shentsize),
+                0);
+    }
+  }
+}
+
+TEST(AmdhsaMetadata, DescriptorOverlappingNoteFramingRejectsWithoutMutation) {
+  std::vector<uint8_t> image =
+      test::with_resource_metadata_padding(plain_kernel(), {{"test_kernel", 20, 16, 4}}, 1);
+  const std::vector<uint8_t> original = image;
+  const std::vector<KernelDescriptorInfo> kernels = descriptors(image);
+  ASSERT_EQ(kernels.size(), 1u);
+  const FailureOr<amdhsa::MetadataDocument> document = amdhsa::MetadataDocument::parse(image);
+  ASSERT_TRUE(document.succeeded());
+  const size_t payload = document.value().payload().data() - image.data();
+  ASSERT_GE(payload, sizeof(amdhsa::kernel_descriptor_t));
+  KernelDescriptorInfo forged = kernels.front();
+  // End at the payload start: payload-only overlap checks miss the note size word.
+  forged.descriptor_file_offset = payload - sizeof(amdhsa::kernel_descriptor_t);
+  amdhsa::kernel_descriptor_t descriptor = forged.descriptor;
+  descriptor.kernarg_size = 128;
+  std::string error;
+  EXPECT_TRUE(amdhsa::update_resource_metadata(image, forged, descriptor, std::nullopt,
+                                               std::nullopt, &error)
+                  .failed());
+  EXPECT_NE(error.find("framing or padding overlaps"), std::string::npos) << error;
+  EXPECT_EQ(image, original);
 }
 
 TEST(AmdhsaMetadata, MissingResourceFieldRejectsBeforeAnyWrites) {

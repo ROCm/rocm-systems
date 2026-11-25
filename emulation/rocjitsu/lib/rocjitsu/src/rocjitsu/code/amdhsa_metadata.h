@@ -52,11 +52,12 @@ private:
   MetadataValue root_;
 };
 
-/// @brief Update one kernel's numeric resources without resizing its note.
-/// @details Only the named kernel in supported v1.2 metadata is edited. Missing
-/// fields, ambiguous entries, descriptor overlap, or wider integer encodings
-/// fail before any writes. Kernarg and private-segment sizes come from the new
-/// descriptor. Absent register counts retain their original fields.
+/// @brief Update one kernel's numeric resources within its existing note extent.
+/// @details Only the named kernel in supported v1.2 metadata is edited. Integer
+/// encodings may grow into existing descriptor alignment padding; no ELF extent
+/// or load address moves. Missing fields, ambiguous entries, descriptor overlap,
+/// or insufficient padding fail before any writes. Kernarg and private-segment sizes come from the
+/// new descriptor. Absent register counts retain their original fields.
 [[nodiscard]] Result
 update_resource_metadata(std::span<uint8_t> image, const KernelDescriptorInfo &kernel,
                          const kernel_descriptor_t &descriptor, std::optional<uint32_t> sgprs,

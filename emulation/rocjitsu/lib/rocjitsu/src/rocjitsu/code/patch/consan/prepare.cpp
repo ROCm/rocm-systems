@@ -156,8 +156,14 @@ void add_program_points(Instrumentor &instrumentor, const InputProgram &program,
         std::move(args));
   }
   for (const uint64_t offset : program.exit_offsets) {
-    add(offset, InstrumentationKind::KernelExit, trace ? "rj_consan_trace_exit" : "rj_consan_exit",
-        context_args);
+    const std::vector<InputProgram::TerminalExit>::const_iterator terminal = std::ranges::find(
+        program.terminal_exits, offset, &InputProgram::TerminalExit::original_exit);
+    if (terminal != program.terminal_exits.end()) {
+      add(terminal->deallocation, InstrumentationKind::KernelExit, "rj_consan_exit", context_args);
+    } else {
+      add(offset, InstrumentationKind::KernelExit,
+          trace ? "rj_consan_trace_exit" : "rj_consan_exit", context_args);
+    }
   }
 }
 
@@ -210,6 +216,15 @@ Result append_program_facts(const InputProgram &program, const std::vector<Instr
                               .probe_size = mapping->instrumentation_size,
                               .first_slot = access.site * kAddressGroupsPerSite});
   }
+  for (const InputProgram::TerminalExit &terminal : program.terminal_exits) {
+    const std::vector<InstrumentedSite>::const_iterator mapping =
+        std::ranges::find_if(sites, [&](const InstrumentedSite &site) {
+          return site.kind == InstrumentationKind::KernelExit &&
+                 site.original_offset == terminal.deallocation;
+        });
+    if (mapping == sites.end() || mapping->guest_size != 8)
+      return reject(error, "callable DBI lowering omitted a terminal exit bundle");
+  }
   for (const BarrierFacts &barrier : program.barriers) {
     const std::vector<InstrumentedSite>::const_iterator mapping =
         std::ranges::find_if(sites, [&](const auto &site) {
@@ -252,7 +267,10 @@ FailureOr<PreparedArtifact> lower(const InputProgram &program, InputError &error
   const InstrumentationOptions options{
       .kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper,
       .preservation = GuestStatePreservation::DeclaredRegisters,
-      .register_growth = OriginalRegisterCounts{program.original_sgprs, program.original_vgprs}};
+      .register_growth = OriginalRegisterCounts{program.original_sgprs, program.original_vgprs},
+      .cdna5_spacing = program.target->arch == rocjitsu::IsaFamily::Cdna5
+                           ? Cdna5CallableSpacing::ConservativeKnownProducers
+                           : Cdna5CallableSpacing::Default};
   Instrumentor instrumentor(object, program.target->arch, options);
   add_program_points(instrumentor, program, probes, stride.value());
   InstrumentedCodeObject output = instrumentor.patch();
@@ -394,8 +412,11 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
     requests.push_back({.descriptor_file_offset = program.kernel.descriptor_file_offset,
                         .kernarg_binding = DbiKernargBinding::CallerSuppliedWrapper,
                         .preservation = GuestStatePreservation::DeclaredRegisters,
-                        .register_growth = OriginalRegisterCounts{
-                            .sgprs = program.original_sgprs, .vgprs = program.original_vgprs}});
+                        .register_growth = OriginalRegisterCounts{.sgprs = program.original_sgprs,
+                                                                  .vgprs = program.original_vgprs},
+                        .cdna5_spacing = program.target->arch == rocjitsu::IsaFamily::Cdna5
+                                             ? Cdna5CallableSpacing::ConservativeKnownProducers
+                                             : Cdna5CallableSpacing::Default});
   }
   const InstrumentationOptions options = {.kernarg_binding = DbiKernargBinding::None,
                                           .preservation = GuestStatePreservation::LiveRegisters,

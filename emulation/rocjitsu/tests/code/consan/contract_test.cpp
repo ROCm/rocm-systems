@@ -707,7 +707,7 @@ TEST_F(ConSanContract, RejectsBarrierFormMismatchesInTypedAndRehashedEncodedFact
         EXPECT_TRUE(encode_manifest(invalid, error_.emitter()).failed());
         EXPECT_EQ(error_.message(), "invalid fixed barrier qualification or mapping");
         bytes_ = encoded.value();
-        constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+        constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 3 * sizeof(uint32_t);
         const size_t offset = bytes_.size() - kBarrierBytes - sizeof(uint32_t);
         const std::array<uint64_t, 6> fields = {barrier.original_drain, barrier.original_signal,
                                                 barrier.original_wait,  barrier.prepared_signal,
@@ -763,7 +763,7 @@ TEST_F(ConSanContract, LegacyBarrierAliasDoesNotPermitOverlappingPreparedGroups)
         EXPECT_EQ(validate_manifest(changed, error_.emitter()).failed(), overlaps);
         EXPECT_EQ(encode_manifest(changed, error_.emitter()).failed(), overlaps);
         bytes_ = encoded.value();
-        constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+        constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 3 * sizeof(uint32_t);
         const size_t offset = bytes_.size() - kBarrierBytes - sizeof(uint32_t);
         ASSERT_TRUE(wire::write_u64(bytes_, offset + 24, wait));
         ASSERT_TRUE(wire::write_u64(bytes_, offset + 32, wait));
@@ -830,7 +830,7 @@ TEST_F(ConSanContract, RejectsOverlappingPreparedBarrierMappings) {
     // Mutate the last encoded barrier directly, so the encoder cannot hide
     // a missing decoder check. Keep framing and checksum valid.
     bytes_ = encoded.value();
-    constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 3 * sizeof(uint32_t);
     const size_t barrier = bytes_.size() - kBarrierBytes - sizeof(uint32_t);
     wire::write_u64(bytes_, barrier + 24, overlap.signal);
     wire::write_u64(bytes_, barrier + 32, overlap.wait);
@@ -880,7 +880,7 @@ TEST_F(ConSanContract, RejectsBarrierCallbacksOverlappingAccessEnvelopes) {
 
     // Independently exercise decoding with valid framing and checksum.
     bytes_ = encoded.value();
-    constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+    constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 3 * sizeof(uint32_t);
     const size_t barrier = bytes_.size() - kBarrierBytes - sizeof(uint32_t);
     ASSERT_TRUE(wire::write_u64(bytes_, barrier + 32, mapping.wait));
     ASSERT_TRUE(wire::write_u64(bytes_, barrier + 40, mapping.wait + 4));
@@ -975,7 +975,7 @@ TEST_F(ConSanContract, BarrierJournalCapacityIsInclusiveForTypedAndEncodedFacts)
   // Supply all seventeen well-formed records, not just an excessive count:
   // an extent or checksum error must not mask the decoder's capacity guard.
   bytes_ = encoded.value();
-  constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 2 * sizeof(uint32_t);
+  constexpr size_t kBarrierBytes = 6 * sizeof(uint64_t) + 3 * sizeof(uint32_t);
   const size_t count = bytes_.size() - kSyncCapacity * kBarrierBytes - 2 * sizeof(uint32_t);
   const size_t tail = bytes_.size() - sizeof(uint32_t);
   bytes_.insert(bytes_.end() - sizeof(uint32_t), kBarrierBytes, 0);

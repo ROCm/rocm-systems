@@ -71,6 +71,13 @@ struct InputProgram {
   uint32_t original_sgprs = 0;
   uint32_t original_vgprs = 0;
   std::vector<uint64_t> exit_offsets;
+  // KernelExit replays these two-instruction terminal bundles contiguously
+  // after the callback, while their VGPR allocation is still available.
+  struct TerminalExit {
+    uint64_t original_exit = 0;
+    uint64_t deallocation = 0;
+  };
+  std::vector<TerminalExit> terminal_exits;
   std::vector<NativeLdsAccess> accesses;
   std::vector<BarrierFacts> barriers;
   bool repeated = false;

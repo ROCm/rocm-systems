@@ -143,9 +143,10 @@ artifact directory contains:
 The preparation tool embeds probe bodies compiled at build time for each
 supported target/wave mode and lowers calls through the shared DBI framework.
 Register counts and kernarg size in the prepared descriptor and AMDHSA note
-are updated together by the shared code-object editor. Missing fields or integer
-encodings too narrow for the requested sizes reject preparation before artifact
-publication. ConSan keeps its own target, argument, and launch admission checks.
+are updated together by the shared code-object editor. Integer encodings may
+widen into the existing AMDGPU note alignment padding, without moving ELF
+sections or load addresses. Missing fields or insufficient padding reject
+preparation before artifact publication. ConSan keeps its own target, argument, and launch admission checks.
 
 The compiled probes use [`DeviceWaveState`](../lib/rocjitsu/src/rocjitsu/code/patch/consan/wave_state.h)
 for counters owned by each wave. State persists in runtime-owned memory across
@@ -570,18 +571,40 @@ instructions can overwrite it.
 Barrier qualification recognizes an original LDS drain followed by a
 full-workgroup barrier: `s_barrier` on gfx942/gfx950/gfx1100, or a matching
 signal/wait pair on gfx1201/gfx1250. It requires at least two waves per workgroup.
-Legacy barriers require an original `s_waitcnt` with a zero LGKM threshold
-immediately before `s_barrier`. Preparation rejects sequences with an intervening
-instruction, including a global store or `s_waitcnt_vscnt`, even if an earlier
-wait drained LDS.
-Split-barrier drains may use `s_wait_dscnt` or a combined load/DS or store/DS
-wait, provided the DS threshold is zero. The additional load/store threshold
-may be nonzero.
+Original CFG dataflow must prove no outstanding LDS at each barrier signal.
+An LDS access sets the pending state; an original zero LDS wait clears it.
+Predecessors join with OR, including loop backedges, so a drain on only one
+incoming path cannot qualify the join. A barrier before the first access needs
+no fabricated drain. Facts distinguish an adjacent zero wait from a
+`NoOutstandingLds` proof; the latter stores zero in the unused drain offset.
+Legacy waits need a zero LGKM threshold. Split-barrier drains may use
+`s_wait_dscnt` or a combined load/DS or store/DS wait with a zero DS threshold;
+the additional load/store threshold may be nonzero. Intervening instructions
+are allowed before the signal if they introduce no later LDS. Signal and wait
+still share one block without intervening memory or barrier operations. Probe
+envelope drains never participate in this proof.
 In acyclic flow, every path to an exit must pass through each barrier group.
 A barrier loop may instead use one basic block with a conditional self-backedge
 and a forward exit, with all barrier groups inside that block. A preheader may
 bypass the loop for zero iterations. These restrictions give every completed
 iteration the same static barrier order without assuming uniform trip counts.
+
+The gfx1250 application subset also admits the specific dense F16 WMMA,
+integer VOP3/VOPD address arithmetic, and ordinary buffer load/store forms used
+by the pinned prefill matmul. VOPD admission checks both slots. The only admitted
+mode write sets `MODE.REPLAY_MODE` to one; it leaves VGPR bank selection unchanged.
+The only hardware-status read selects stable cluster geometry, excluding mutable
+in-flight counters. LDS-transfer buffer forms remain unsupported.
+
+ConSan opts into shared CDNA5 callable spacing: eight full-mask `v_nop`
+instructions precede every envelope VGPR access, including backups and argument
+copies. This conservatively covers the supported WMMA/TRANS hazard table;
+unknown matrix families and packed-permute adjacency remain rejected. Copied
+probe bodies still cannot contain matrix/TRANS producers. Memory waits alone
+would not establish this register spacing. A terminal `MSG_DEALLOC_VGPRS` and
+immediately adjacent `s_endpgm` are replayed together after the exit callback,
+while the original register allocation remains available. Branches into the
+second instruction are rejected by checked editing.
 
 A static LDS instruction can execute many times. Within a wave, its site and
 dynamic access sequence identify one execution; all address groups from that

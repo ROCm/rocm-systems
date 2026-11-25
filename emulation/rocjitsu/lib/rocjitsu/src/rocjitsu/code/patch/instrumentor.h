@@ -228,6 +228,12 @@ enum class DbiKernargBinding { None, CallerSuppliedWrapper };
 /// @brief Whether growth preserves live values or every originally declared GPR.
 enum class GuestStatePreservation { LiveRegisters, DeclaredRegisters };
 
+/// @brief Opt-in spacing before callable envelopes on CDNA5.
+/// ConservativeKnownProducers admits dense F16 WMMA and decoded TRANS producers,
+/// with eight independent V_NOPs before any envelope VGPR access. Unknown matrix
+/// families and packed-permute adjacency remain excluded.
+enum class Cdna5CallableSpacing { Default, ConservativeKnownProducers };
+
 /// @brief Original SGPR/VGPR metadata counts needed to request register growth.
 struct OriginalRegisterCounts {
   uint32_t sgprs = 0;
@@ -272,6 +278,7 @@ struct EntryInstrumentationOptions {
   DbiKernargBinding kernarg_binding = DbiKernargBinding::None;
   GuestStatePreservation preservation = GuestStatePreservation::LiveRegisters;
   std::optional<OriginalRegisterCounts> register_growth;
+  Cdna5CallableSpacing cdna5_spacing = Cdna5CallableSpacing::Default;
 };
 
 struct InstrumentationOptions {
@@ -285,6 +292,7 @@ struct InstrumentationOptions {
   /// ReplaceWithInst is unsupported: ownership is proved on the original CFG.
   /// Every queued point must belong to exactly one requested entry scope.
   std::vector<EntryInstrumentationOptions> entries = {};
+  Cdna5CallableSpacing cdna5_spacing = Cdna5CallableSpacing::Default;
 };
 
 /// @brief Result of Instrumentor::patch_with_debug_summaries().

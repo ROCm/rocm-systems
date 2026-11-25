@@ -322,6 +322,114 @@ TEST_P(ConSanTargetStatic, RejectMismatchedMissingDrainAndNonconvergentGroups) {
   }
 }
 
+TEST_P(ConSanTargetStatic, OriginalLdsDrainProofFollowsCfgJoinsAndLoopBackedges) {
+  const test::TargetMode mode = GetParam();
+  const TargetProfile &target = *target_profile(mode.target);
+  for (const uint32_t fixture : {43u, 44u, 45u, 46u}) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, "native-" + std::to_string(fixture)));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<InputProgram> input =
+        build_input_program(original, target, "lds_producer_consumer", error);
+    if (fixture == 44 || fixture == 46) {
+      EXPECT_TRUE(input.failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedSynchronization) << error.message;
+      continue;
+    }
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    ASSERT_EQ(input.value().barriers.size(), 1u);
+    EXPECT_EQ(input.value().barriers.front().drain_proof, BarrierDrainProof::NoOutstandingLds);
+    EXPECT_EQ(input.value().barriers.front().original_drain, 0u);
+    EXPECT_EQ(input.value().repeated, fixture == 45);
+    const FailureOr<PreparedArtifact> artifact =
+        prepare(original, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
+    const FailureOr<std::vector<uint8_t>> encoded = encode_manifest(artifact.value().manifest);
+    ASSERT_TRUE(encoded.succeeded());
+    const FailureOr<Manifest> decoded = decode_manifest(encoded.value());
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value(), artifact.value().manifest);
+    Manifest invalid = artifact.value().manifest;
+    invalid.barriers.front().drain_proof = static_cast<BarrierDrainProof>(2);
+    EXPECT_TRUE(validate_manifest(invalid).failed());
+    invalid = artifact.value().manifest;
+    invalid.barriers.front().original_drain = 4;
+    EXPECT_TRUE(validate_manifest(invalid).failed());
+  }
+}
+
+TEST(ConSanTerminalExit, ReplaysAdjacentDeallocationAndEndpgmAfterCallback) {
+  const test::TargetMode mode = {.target = "gfx1250", .wave_size = 32};
+  const TargetProfile &target = *target_profile(mode.target);
+  const std::vector<uint8_t> original =
+      test::read_fixture(test::target_fixture_path(mode, "native-47"));
+  ASSERT_FALSE(original.empty());
+  InputError error;
+  const FailureOr<InputProgram> input =
+      build_input_program(original, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(input.succeeded()) << error.message;
+  ASSERT_EQ(input.value().terminal_exits.size(), 1u);
+  const InputProgram::TerminalExit &terminal = input.value().terminal_exits.front();
+  EXPECT_EQ(terminal.original_exit, terminal.deallocation + 4);
+  const FailureOr<PreparedArtifact> artifact =
+      prepare(original, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(artifact.succeeded()) << error.message;
+  EXPECT_TRUE(validate_prepared(original, artifact.value(), error).succeeded()) << error.message;
+  const AmdGpuCodeObject prepared(artifact.value().image.data(), artifact.value().image.size());
+  const Section &text = *prepared.text_sections().front();
+  const uint8_t *pair = original.data() + input.value().text_file_offset + terminal.deallocation;
+  size_t copies = 0;
+  for (size_t offset = 0; offset + 8 <= text.size(); offset += 4)
+    copies += std::memcmp(text.data() + offset, pair, 8) == 0;
+  EXPECT_EQ(copies, 1u);
+  const std::vector<uint8_t> invalid =
+      test::read_fixture(test::target_fixture_path(mode, "native-48"));
+  ASSERT_FALSE(invalid.empty());
+  EXPECT_TRUE(build_input_program(invalid, target, "lds_producer_consumer", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+}
+
+TEST(ConSanTraceMatrix, KnownProducerUsesSpacedBoundariesAndUnknownMatrixIsRejected) {
+  const test::TargetMode mode = {.target = "gfx1250", .wave_size = 32};
+  const TargetProfile &target = *target_profile(mode.target);
+  const std::array<std::string_view, 1> entries = {"lds_producer_consumer"};
+  for (const uint32_t fixture : {49u, 50u}) {
+    SCOPED_TRACE(fixture);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path(mode, "native-" + std::to_string(fixture)));
+    ASSERT_FALSE(original.empty());
+    InputError error;
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, entries, error, ScopeKind::ExecutionTrace);
+    if (fixture == 50) {
+      EXPECT_TRUE(artifact.failed());
+      EXPECT_NE(error.message.find("unknown matrix producer"), std::string::npos) << error.message;
+      continue;
+    }
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    ASSERT_EQ(artifact.value().facts.entries.size(), 1u);
+    const Manifest &manifest = *artifact.value().facts.entries.front().selected;
+    ASSERT_EQ(manifest.boundaries.size(), 2u);
+    EXPECT_TRUE(manifest.sites.empty());
+    const AmdGpuCodeObject prepared(artifact.value().image.data(), artifact.value().image.size());
+    const Section &text = *prepared.text_sections().front();
+    const uint32_t vector_nop = cdna5::build_vop1(cdna5::kVNopVop1)[0];
+    for (const BoundaryFacts &boundary : manifest.boundaries) {
+      size_t count = 0;
+      for (uint64_t offset = boundary.probe_offset;
+           offset < boundary.probe_offset + boundary.probe_size; offset += 4) {
+        uint32_t word = 0;
+        std::memcpy(&word, text.data() + offset, 4);
+        count += word == vector_nop;
+      }
+      EXPECT_EQ(count, 8u);
+    }
+  }
+}
+
 TEST_P(ConSanTargetStatic, OriginalDrainMustWaitForAllPriorLds) {
   const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);
@@ -847,12 +955,8 @@ TEST_P(ConSanTargetStatic, HipWorkloadsMustContainQualifiedNativeLdsSites) {
     InputError error;
     const FailureOr<InputProgram> input =
         build_input_program(original, *target_profile(mode.target), "lds_producer_consumer", error);
-    if (std::string_view(mode.target) == "gfx1250") {
-      EXPECT_TRUE(input.failed());
-      EXPECT_EQ(error.code, InputErrorCode::UnsupportedInstruction);
-      EXPECT_NE(error.message.find("global_prefetch_b8"), std::string::npos) << error.message;
-      continue;
-    }
+    // gfx1250 now qualifies its ordinary prefetch too, and must satisfy the
+    // same read/write inventory and final preservation checks as every target.
     ASSERT_TRUE(input.succeeded()) << error.message;
     EXPECT_EQ(input.value().wave_size, mode.wave_size);
     ASSERT_FALSE(input.value().accesses.empty());

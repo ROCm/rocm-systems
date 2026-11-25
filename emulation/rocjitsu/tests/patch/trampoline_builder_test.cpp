@@ -1480,6 +1480,46 @@ TEST(TrampolineBuilderEmit, SwappcUsesCcLinkPairAndTargetPair) {
 // rather than only the lanes active at the anchor. Emitting them after the
 // restore -- the obvious "just before the call" position -- would leave the
 // inactive lanes holding whatever the guest left there.
+TEST(TrampolineBuilderEmit, Cdna5SpacingPrecedesRegisterBackupsAndArguments) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
+  constexpr uint32_t kVectorNop = cdna5::build_vop1(cdna5::kVNopVop1)[0];
+  for (const bool arguments : {false, true}) {
+    SCOPED_TRACE(arguments);
+    TrampolinePlan plain = make_probe_plan(kArch);
+    plain.force_full_exec = true;
+    plain.register_saves = {{.cls = RegClass::VGPR, .source = 8, .destination = 40}};
+    if (arguments)
+      plain.probe_args = {probe_arg_vgpr(8), probe_arg_imm(123)};
+    TrampolinePlan spaced = plain;
+    spaced.cdna5_valu_spacing = true;
+    std::string error;
+    const ProbeAbi abi = arg_abi(static_cast<uint8_t>(plain.probe_args.size()));
+    ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plain, abi, make_sgpr_set({4}), {}, &error))
+        << error;
+    ASSERT_TRUE(TrampolineBuilder::plan_probe_call(spaced, abi, make_sgpr_set({4}), {}, &error))
+        << error;
+    EXPECT_EQ(spaced.planned_envelope_word_count, plain.planned_envelope_word_count + 8);
+    const std::optional<TrampolineBytes> emitted =
+        TrampolineBuilder::emit_probe_call(spaced, &error);
+    ASSERT_TRUE(emitted) << error;
+    const std::vector<uint32_t> &words = emitted->trampoline_words;
+    const uint32_t widen = build_s_mov_b64(scalar_operand_exec_lo(kArch).value(),
+                                           scalar_inline_neg_one(kArch).value(), kArch)
+                               .value();
+    const std::vector<uint32_t>::const_iterator first = std::ranges::find(words, widen);
+    ASSERT_NE(first, words.end());
+    ASSERT_GE(words.end() - first, 10);
+    for (size_t index = 1; index <= 8; ++index)
+      EXPECT_EQ(first[index], kVectorNop);
+    EXPECT_EQ(first[9], build_v_mov_b32_src(40, 256 + 8, kArch).value());
+  }
+  TrampolinePlan wrong_target = make_probe_plan(rocjitsu::IsaFamily::Cdna4);
+  wrong_target.cdna5_valu_spacing = true;
+  std::string error;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(wrong_target, arg_abi(0), {}, {}, &error));
+  EXPECT_NE(error.find("requires a CDNA5 target"), std::string::npos);
+}
+
 TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   TrampolinePlan plan = make_probe_plan();
   plan.probe_args = {probe_arg_imm(0xAAAA0000u), probe_arg_imm(0xBBBB1111u)};

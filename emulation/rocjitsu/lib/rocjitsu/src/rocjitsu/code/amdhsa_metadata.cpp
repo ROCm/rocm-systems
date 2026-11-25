@@ -6,8 +6,10 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "util/bit.h"
 
+#include <algorithm>
 #include <array>
 #include <cstring>
+#include <functional>
 #include <limits>
 #include <utility>
 
@@ -107,7 +109,9 @@ private:
   size_t nodes_ = 0;
 };
 
-std::optional<std::span<const uint8_t>> find_metadata_note(std::span<const uint8_t> image) {
+std::optional<std::span<const uint8_t>> find_metadata_note(std::span<const uint8_t> image,
+                                                           size_t *size_field = nullptr,
+                                                           size_t *capacity = nullptr) {
   Elf64_Ehdr header{};
   if (image.size() < sizeof(header)) {
     return std::nullopt;
@@ -147,6 +151,10 @@ std::optional<std::span<const uint8_t>> find_metadata_note(std::span<const uint8
           return std::nullopt;
         }
         result = bytes.subspan(offset + 12 + name_bytes, framing[1]);
+        if (size_field != nullptr)
+          *size_field = section.sh_offset + offset + sizeof(uint32_t);
+        if (capacity != nullptr)
+          *capacity = data_bytes;
       }
       offset += 12 + name_bytes + data_bytes;
     }
@@ -154,7 +162,7 @@ std::optional<std::span<const uint8_t>> find_metadata_note(std::span<const uint8
   return result;
 }
 
-Result fail(std::string *error, const char *message) {
+Result fail(std::string *error, std::string_view message) {
   if (error != nullptr) {
     *error = message;
   }
@@ -250,6 +258,13 @@ Result update_resource_metadata(std::span<uint8_t> image, const KernelDescriptor
       {".sgpr_count", sgprs},
       {".vgpr_count", vgprs},
   }};
+  struct IntegerEdit {
+    size_t offset = 0;
+    size_t old_bytes = 0;
+    std::vector<uint8_t> replacement;
+  };
+  std::vector<IntegerEdit> edits;
+  size_t growth = 0;
   for (const auto &[name, number] : updates) {
     if (!number) {
       continue;
@@ -258,26 +273,52 @@ Result update_resource_metadata(std::span<uint8_t> image, const KernelDescriptor
     if (value == nullptr || value->kind != MetadataValue::Kind::Integer) {
       return fail(error, "missing or non-integer AMDHSA resource field");
     }
-    if ((value->integer_bytes == 0 && *number > 127) ||
-        (value->integer_bytes != 0 && value->integer_bytes < 4 &&
-         *number >= (uint64_t{1} << (8 * value->integer_bytes)))) {
-      return fail(error, "resource growth needs a wider metadata integer encoding");
-    }
-  }
-  for (const auto &[name, number] : updates) {
-    if (!number) {
-      continue;
-    }
-    const MetadataValue &value = *entry->field(name);
-    if (value.integer_bytes == 0) {
-      image[payload_offset + value.offset] = static_cast<uint8_t>(*number);
+    unsigned width = value->integer_bytes;
+    if (width == 0 && *number > 127)
+      width = 1;
+    while (width != 0 && width < 8 && *number >= (uint64_t{1} << (8 * width)))
+      width *= 2;
+    IntegerEdit edit = {
+        .offset = value->offset, .old_bytes = value->integer_bytes + 1, .replacement = {}};
+    if (width == 0) {
+      edit.replacement.push_back(static_cast<uint8_t>(*number));
     } else {
-      for (unsigned index = 0; index < value.integer_bytes; ++index) {
-        image[payload_offset + value.offset + 1 + index] =
-            static_cast<uint8_t>(uint64_t{*number} >> (8 * (value.integer_bytes - index - 1)));
-      }
+      const uint8_t tag = width == 1 ? 0xcc : width == 2 ? 0xcd : width == 4 ? 0xce : 0xcf;
+      edit.replacement.push_back(tag);
+      for (unsigned index = 0; index < width; ++index)
+        edit.replacement.push_back(
+            static_cast<uint8_t>(uint64_t{*number} >> (8 * (width - index - 1))));
     }
+    growth += edit.replacement.size() - edit.old_bytes;
+    edits.push_back(std::move(edit));
   }
+  size_t size_field = 0;
+  size_t capacity = 0;
+  if (!find_metadata_note(image, &size_field, &capacity) || payload.size() > capacity ||
+      growth > capacity - payload.size() ||
+      growth > std::numeric_limits<uint32_t>::max() - payload.size())
+    return fail(
+        error, "resource growth needs a wider metadata integer encoding than note padding permits");
+  const uint64_t descriptor_end = kernel.descriptor_file_offset + sizeof(kernel.descriptor);
+  if ((payload_offset < descriptor_end &&
+       kernel.descriptor_file_offset < payload_offset + capacity) ||
+      (size_field < descriptor_end &&
+       kernel.descriptor_file_offset < size_field + sizeof(uint32_t)))
+    return fail(error, "AMDHSA metadata framing or padding overlaps the kernel descriptor");
+  // Rebuild into owning storage before publishing either bytes or note framing.
+  // Only alignment padding is consumed; ELF extents and every load address stay
+  // fixed. Existing wider integer encodings are retained rather than shrunk.
+  std::vector<uint8_t> rewritten(payload.begin(), payload.end());
+  std::ranges::sort(edits, std::greater{}, &IntegerEdit::offset);
+  for (const IntegerEdit &edit : edits) {
+    rewritten.erase(rewritten.begin() + edit.offset,
+                    rewritten.begin() + edit.offset + edit.old_bytes);
+    rewritten.insert(rewritten.begin() + edit.offset, edit.replacement.begin(),
+                     edit.replacement.end());
+  }
+  std::memcpy(image.data() + payload_offset, rewritten.data(), rewritten.size());
+  const uint32_t updated_size = static_cast<uint32_t>(rewritten.size());
+  std::memcpy(image.data() + size_field, &updated_size, sizeof(updated_size));
   return Result::success();
 }
 

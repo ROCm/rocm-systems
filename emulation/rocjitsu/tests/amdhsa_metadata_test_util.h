@@ -111,6 +111,24 @@ inline std::vector<uint8_t> with_resource_metadata(const std::vector<uint8_t> &i
   return with_metadata_note(image, resource_metadata_payload(kernels, narrow));
 }
 
+// Select note alignment slack independently of resource values. An extra vendor
+// field changes only payload length, leaving the known resources untouched.
+inline std::vector<uint8_t>
+with_resource_metadata_padding(const std::vector<uint8_t> &image,
+                               std::initializer_list<MetadataKernel> kernels, uint32_t padding) {
+  assert(padding < 4);
+  const std::vector<uint8_t> base = resource_metadata_payload(kernels, true);
+  for (uint32_t length = 0; length < 4; ++length) {
+    std::vector<uint8_t> payload = base;
+    payload.front() = 0x84;
+    append_metadata_text(payload, "test.padding");
+    append_metadata_text(payload, std::string(length, 'x'));
+    if ((4 - payload.size() % 4) % 4 == padding)
+      return with_metadata_note(image, payload);
+  }
+  return {};
+}
+
 // Synthetic simulation kernels need a real resource note when DBI grows their
 // scratch. Derive it from the same descriptor rather than duplicating sizes.
 inline std::vector<uint8_t> with_descriptor_metadata(const std::vector<uint8_t> &image,

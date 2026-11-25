@@ -20,11 +20,14 @@ class Decoder;
 class InstructionBoundaries;
 class Instrumentor;
 
+enum class CheckedTextEditKind { Instruction, Cdna5TerminalExit };
+
 // Private records translated from Instrumentor requests or resolved anchors.
 struct CheckedTextEdit {
   uint64_t offset = 0;
   std::vector<uint8_t> expected;
   std::vector<uint8_t> replacement;
+  CheckedTextEditKind kind = CheckedTextEditKind::Instruction;
 };
 
 // Immutable reference storage, independent of any decoder or private writer.
@@ -42,7 +45,8 @@ struct TextEditReferences {
 class CheckedTextEdits {
 private:
   CheckedTextEdits(const AmdGpuCodeObject &source, Decoder &decoder,
-                   const InstructionBoundaries &boundaries, const TextEditReferences &references);
+                   const InstructionBoundaries &boundaries, const TextEditReferences &references,
+                   rocjitsu::IsaFamily architecture);
   static Result validate_source_extent(const AmdGpuCodeObject &source, TextEditError &error);
   static FailureOr<TextEditReferences>
   collect_references(const AmdGpuCodeObject &source, rocjitsu::IsaFamily architecture,
@@ -54,6 +58,7 @@ private:
                TextEditError &error) const;
 
   const AmdGpuCodeObject &source_;
+  rocjitsu::IsaFamily architecture_;
   Decoder &decoder_;
   const InstructionBoundaries &boundaries_;
   const TextEditReferences &references_;

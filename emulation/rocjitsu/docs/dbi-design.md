@@ -114,7 +114,7 @@ current limits.
 
 - Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
-- `ReplaceWithInst` omits one complete 4/8/12-byte source instruction and executes an independently sized replacement sequence in its trampoline, including empty deletion. `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; callable sites follow the [admission contract](#key-design-constraint). Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
+- `ReplaceWithInst` omits one complete 4/8/12-byte source instruction and executes an independently sized replacement sequence in its trampoline, including empty deletion. `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; callable sites follow the [admission contract](#key-design-constraint). Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch; CDNA5 also admits an exact terminal `MSG_DEALLOC_VGPRS`/`s_endpgm` bundle, replayed contiguously after the callback. Other kinds are rejected.
 - Replacement and observation requests share a batch. A replacement can carry its callable probe directly or coalesce one same-site callable BeforeInst. Probe analysis reflects all replacements in the batch; pristine CFG/liveness cannot be reused for the changed guest program.
 - For observational points, `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed by callable points (see [Mask policy](#mask-policy)); points without a probe reject it because they have no call envelope whose mask could be widened.
@@ -289,7 +289,7 @@ the instruction; addressing and storage must be valid at the observation point.
 | Register addressing | The anchor must preserve VGPR bank selection. GPR indexing and VSKIP must be proven disabled where the ISA supports them; unproven state is rejected. |
 | Register usage | Before preservation planning, `AfterInst` requires enumerable physical VGPR accesses and liveness propagated across resolved guest calls and returns, including recognized computed jumps to kernel entries. Relative or GPR-indexed usage is rejected. |
 | Allocated storage | Every kernel that can reach the site must use static VGPR allocation. Admission also rejects `AfterInst` at or after an unproven `s_alloc_vgpr` or VGPR/scratch release. |
-| Register hazards | Callable `AfterInst` is conservatively rejected throughout code objects containing MFMA/SMFMAC, or CDNA5 matrix or transcendental producers, until the required register dependency spacing can be proven. |
+| Register hazards | Default callable `AfterInst` rejects code objects containing MFMA/SMFMAC or CDNA5 matrix/TRANS producers. The explicit `Cdna5CallableSpacing::ConservativeKnownProducers` policy admits dense `v_wmma_f32_16x16x32_f16` and decoded TRANS producers by emitting eight full-mask `v_nop`s before every envelope VGPR access, including backups and argument copies. Other matrix families remain rejected; direct producer `AfterInst` anchors retain their stricter gate. |
 | Instruction order | Callable `AfterInst` rejects CDNA5 code objects containing packed permutes that require an immediate safe VALU follower. Moving either the permute or its follower can break that adjacency. |
 
 Inherited GPR indexing, VSKIP, and storage availability also constrain callable
@@ -311,6 +311,19 @@ or dispatch that bypasses the call, a cycle, or a nested call prevents this
 leaf-helper proof. The separate closed-text MODE analysis can follow nested
 calls. For a helper that adjusts its caller's return PC, every caller must
 supply a continuation that the adjustment maps to a kernel entry.
+
+The CDNA5 spacing policy addresses guest producer dependencies on entry to
+an envelope. Copied probes remain free of matrix and TRANS producers, so they
+introduce no corresponding co-execution dependency on return. Ordinary register
+moves use hardware dependency resolution; scratch fills retain their explicit
+completion waits. ConSan resumes the original LDS or completing barrier anchor
+and preserves its later guest waits and arithmetic. It does not insert a callback
+at a WMMA instruction.
+
+The historical default `BeforeInst`/`KernelExit` path does not establish general
+CDNA5 matrix/TRANS spacing. Clients retaining that default must qualify their observation points
+independently. Both ConSan native-LDS and execution-trace lowering opt into the
+bounded policy on CDNA5; unknown matrix families remain compilation failures.
 
 Independent of placement, copied probes on CDNA1–4 must not enable VSKIP:
 the envelope uses vector instructions for restoration, even with `force_full_exec`.
