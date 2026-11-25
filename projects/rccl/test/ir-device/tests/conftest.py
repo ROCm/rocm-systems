@@ -557,6 +557,23 @@ def ir_artifacts():
 
 
 @pytest.fixture(scope="session")
+def ir_bitcode():
+    """Update librccl_device.bc alone and return its path.
+
+    For static checks of the bitcode; like ir_artifacts it needs no GPU or
+    GoogleTest, but it skips building the LTO IR.
+    """
+    reason = _missing_static_prerequisite()
+    if reason:
+        pytest.skip(f"IR bitcode checks skipped: {reason}")
+
+    logger.info("Updating librccl_device.bc at %s (arch=%s)...", BITCODE, ARCH)
+    bc_log = _build_bitcode()
+    logger.info("librccl_device.bc READY (log: %s)", bc_log)
+    return BITCODE
+
+
+@pytest.fixture(scope="session")
 def lto_ir_test_binary(ir_artifacts):
     """Compile IR_test.cpp against librccl_device.ltoir instead of the .bc.
 

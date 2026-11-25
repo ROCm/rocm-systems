@@ -19,12 +19,12 @@
 // [RCCL] HIP bodies follow load128/store128 in src/device/op128.h.
 NCCL_DEVICE_INLINE void ncclFlowLL128Load128(uint64_t const* src, uint64_t& lo, uint64_t& hi) {
 #if defined(__HIP_PLATFORM_AMD__)
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   union {
     v4u v;
     uint64_t u64[2];
   } u;
-  u.v = __builtin_amdgcn_global_load_b128((v4u_gptr)src, RCCL_SYSTEM_SYNCSCOPE);
+  u.v = RCCL_LOAD_B128_SYS(src);
   lo = u.u64[0];
   hi = u.u64[1];
 #else
@@ -38,14 +38,14 @@ NCCL_DEVICE_INLINE void ncclFlowLL128Load128(uint64_t const* src, uint64_t& lo, 
 
 NCCL_DEVICE_INLINE void ncclFlowLL128Store128(uint64_t* dst, uint64_t lo, uint64_t hi) {
 #if defined(__HIP_PLATFORM_AMD__)
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
+#if RCCL_HAVE_SYS_B128
   union {
     v4u v;
     uint64_t u64[2];
   } u;
   u.u64[0] = lo;
   u.u64[1] = hi;
-  __builtin_amdgcn_global_store_b128((v4u_gptr)dst, u.v, RCCL_SYSTEM_SYNCSCOPE);
+  RCCL_STORE_B128_SYS(dst, u.v);
 #else
   *((u64_gptr)dst) = lo;
   *((u64_gptr)dst + 1) = hi;
