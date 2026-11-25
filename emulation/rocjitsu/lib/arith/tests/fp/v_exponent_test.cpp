@@ -8,16 +8,17 @@
 #include "fp/ldexp_test.h"
 #include "fp/loose_unary_f64.h"
 #include "rj_arith/detail/rj_arith_fp.h"
+#include <array>
 
 #include "common/cpu.h"
 #include "common/semantics.h"
 #include <algorithm>
-#include <array>
 #include <random>
 
 #include <cmath>
 #include <gtest/gtest.h>
 #include <stdint.h>
+#include <type_traits>
 
 // Check integer exponent results, operand selection, and inactive-lane preservation.
 TEST(FpFrexpExpI16F16W32Gfx12, Arithmetic) {
@@ -339,6 +340,65 @@ const CapturedGfx11 ldexp_f64_lanes[] = {
     {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
 };
 
+TEST(FrexpExponent, SimdBoundaries) {
+  using namespace rocjitsu::arith::test;
+  for (int width : {32, 64}) {
+    const uint64_t normal = width == 64 ? 0x0010000000000000ULL : 0x00800000ULL;
+    const uint64_t infinity = width == 64 ? 0x7ff0000000000000ULL : 0x7f800000ULL;
+    const uint64_t sign = 1ULL << (width - 1);
+    const int top = width == 64 ? 51 : 22;
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (bool flush : {false, true}) {
+        for (int scenario = 0; scenario < 3; ++scenario) {
+          Registers<4, 32> input;
+          for (int lane = 0; lane < 32; ++lane) {
+            const int power = (lane / 3) * top / 10;
+            uint64_t bits = (1ULL << power) + uint64_t(lane % 3) - 1;
+            if (scenario == 1) {
+              bits = (lane & 1 ? normal : infinity) + uint64_t(lane % 3) - 1;
+            }
+            if (scenario == 2) {
+              bits = lane & 1 ? 0 : infinity + 1;
+            }
+            if (lane & 2) {
+              bits |= sign;
+            }
+            write_fp(input.v, lane, width, bits);
+          }
+          auto call =
+              width == 64 ? rj_arith_v_frexp_exp_i32_f64_w32 : rj_arith_v_frexp_exp_i32_f32_w32;
+          for (int aliasing_offset : {0, 1, 3}) {
+            SCOPED_TRACE(::testing::Message() << width << ':' << cpu << ':' << flush << ':'
+                                              << scenario << ':' << aliasing_offset);
+            auto actual = input;
+            uint32_t status = 0x100;
+            constexpr uint32_t exec_mask = 0x8000aaaa;
+            const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                                   (flush ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0);
+            ASSERT_EQ(call(flags, exec_mask, 0, actual.v + aliasing_offset, actual.v, &status),
+                      RJ_ARITH_SUCCESS);
+            EXPECT_EQ(status, 0x100U);
+            actual.expect_preserved(input, aliasing_offset, 1);
+            for (int lane = 0; lane < 32; ++lane) {
+              uint32_t expected = input.v[aliasing_offset][lane];
+              if (exec_mask >> lane & 1) {
+                const uint64_t bits = read_fp(input.v, lane, width);
+                const double x = fp_value(bits, width);
+                int exponent = 0;
+                if (std::isfinite(x) && x != 0 && (!flush || (bits & ~sign) >= normal)) {
+                  std::frexp(x, &exponent);
+                }
+                expected = uint32_t(exponent);
+              }
+              EXPECT_EQ(actual.v[aliasing_offset][lane], expected) << lane;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 } // namespace
 
 // Compatibility reproduces captured gfx1100 LDEXP lanes.
@@ -525,6 +585,86 @@ TEST(FpLdexpCdna, Qualification) {
       }
     }
   }
+}
+
+namespace {
+
+// Compare SIMD with the established scalar model over normal waves and raw
+// encodings, including signaling NaNs, boundary scales, aliases and sparse EXEC.
+template <int Lanes, bool Older, typename Call> void check_ldexp_cpu_agreement(Call call) {
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  const auto cpus = rocjitsu::arith::test::supported_cpu_levels();
+  std::minstd_rand random;
+  uint32_t a[Lanes], b[Lanes], expected[Lanes], actual[Lanes];
+  const uint32_t *bp = b;
+  for (int batch = 0; batch < 8; ++batch) {
+    for (int lane = 0; lane < Lanes; ++lane) {
+      const uint32_t first = uint32_t(random());
+      const uint32_t second = uint32_t(random());
+      // Keep high bits for normal inputs; raw waves cover the entire encoding.
+      a[lane] = batch < 4
+                    ? ((first & 0x40000000U) << 1) | ((first >> 7) & 0x007fffffU) | 0x3f000000U
+                    : (first << 1) | (second >> 30);
+      b[lane] = uint32_t(int(random() >> 20) % (batch < 4 ? 9 : 601) - (batch < 4 ? 4 : 300));
+    }
+    a[7] = 0x7f812345U;
+    a[8] = 0xff800000U;
+    a[9] = 0x80000000U;
+    a[10] = 0x00ffffffU;
+    b[10] = uint32_t(-1);
+    a[11] = 0x7f7fffffU;
+    b[11] = 1;
+    a[12] = 1;
+    b[12] = 24;
+    a[13] = 0x80000001U;
+    b[13] = 0x80000000U;
+    for (uint64_t denorm :
+         {uint64_t(0), RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+          RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
+      for (uint64_t rounding :
+           {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
+        for (uint64_t mode : {uint64_t(0), uint64_t(RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_CLAMP),
+                              uint64_t(RJ_ARITH_ALU_OMOD_2),
+                              uint64_t(RJ_ARITH_ALU_OMOD_HALF | RJ_ARITH_ALU_NEG_A)}) {
+          const uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | denorm | rounding |
+                                 (batch & 1 ? RJ_ARITH_FP_IEEE_MODE : 0) |
+                                 (Older && (batch & 2) ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+          for (Mask exec_mask : {Mask(-1), Mask(0x8000000180000001ULL)}) {
+            std::copy_n(a, Lanes, expected);
+            const uint32_t *source = expected;
+            uint32_t *dest = expected;
+            uint32_t status = 0x12345678U;
+            ASSERT_EQ(call(flags, exec_mask, mode, &dest, &source, &bp, &status), RJ_ARITH_SUCCESS);
+            for (uint64_t cpu : cpus) {
+              SCOPED_TRACE(::testing::Message() << Lanes << '/' << batch << '/' << cpu << '/'
+                                                << flags << '/' << mode << '/' << exec_mask);
+              std::copy_n(a, Lanes, actual);
+              source = actual;
+              dest = actual;
+              ASSERT_EQ(call(flags | cpu, exec_mask, mode, &dest, &source, &bp, &status),
+                        RJ_ARITH_SUCCESS);
+              EXPECT_EQ(status, 0x12345678U);
+              for (int lane = 0; lane < Lanes; ++lane) {
+                EXPECT_EQ(actual[lane], expected[lane]) << lane;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+} // namespace
+
+// Keep the three existing NaN/output-policy variants on the same SIMD arithmetic.
+TEST(FpLdexpF32, ScalarAndSimdAgree) {
+  check_ldexp_cpu_agreement<32, true>(rj_arith_v_ldexp_f32_w32);
+  check_ldexp_cpu_agreement<64, true>(rj_arith_v_ldexp_f32_w64);
+  check_ldexp_cpu_agreement<32, false>(rj_arith_v_ldexp_f32_w32_gfx12);
+  check_ldexp_cpu_agreement<64, false>(rj_arith_v_ldexp_f32_w64_gfx12);
+  check_ldexp_cpu_agreement<32, true>(rj_arith_v_ldexp_f32_w32_gfx942);
+  check_ldexp_cpu_agreement<64, true>(rj_arith_v_ldexp_f32_w64_gfx942);
 }
 
 // The existing scalar integer model remains the reference when normal lanes

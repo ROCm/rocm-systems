@@ -29,9 +29,10 @@
 namespace rocjitsu::arith::test {
 
 // Check unary math results and semantics/status support across CPU levels for the supplied entry
-// point. Loose-only entries pass accepts_exact = false so strict exact must be refused.
+// point. extra_modifiers lists controls exercised by separate focused tests.
 template <int Lanes, bool Half, bool Gfx12, typename Call>
-void check_unary(Call call, int op, bool iflag = false, bool accepts_exact = true) {
+void check_unary(Call call, int op, bool iflag = false, uint64_t extra_modifiers = 0,
+                 bool accepts_exact = true) {
   if constexpr (Half) {
     if (op <= 6) {
       // Exhaust all half encodings against the inherited scalar implementation.
@@ -96,7 +97,10 @@ void check_unary(Call call, int op, bool iflag = false, bool accepts_exact = tru
       // independent captured values below, including exponent extremes and
       // NaN payloads. Use high RNG bits, with deterministic guest-policy cases.
       std::minstd_rand engine;
-      auto word = [&] { return uint32_t(engine() >> 7) ^ (uint32_t(engine() >> 7) << 16); };
+      auto word = [&] {
+        const uint32_t low = uint32_t(engine() >> 7);
+        return low ^ (uint32_t(engine() >> 7) << 16);
+      };
       auto cpus = supported_cpu_levels();
       for (int scenario = 0;
            scenario < ((op == 4 || op == 6) ? 196 : ((op == 5 || iflag) ? 192 : 128)); ++scenario) {
@@ -321,7 +325,8 @@ void check_unary(Call call, int op, bool iflag = false, bool accepts_exact = tru
   }
   auto unchanged = random_input;
   uint64_t known = RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_HALF |
-                   RJ_ARITH_ALU_CLAMP | (Half ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D : 0);
+                   RJ_ARITH_ALU_CLAMP | (Half ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D : 0) |
+                   extra_modifiers;
   expect_alu_invalid_flags<true>(
       [&](auto f, auto m) {
         uint32_t status = 0x80000040U;
@@ -423,7 +428,7 @@ template <int Lanes, bool Half, typename Call> void check_cdna_integral_unary(Ca
     }
     return call(flags, exec_mask, mode, d, a, status);
   };
-  check_unary<Lanes, Half, false>(numeric, op);
+  check_unary<Lanes, Half, false>(numeric, op, /*iflag=*/false, RJ_ARITH_ALU_SDWA);
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics : semantics_modes()) {
       if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {

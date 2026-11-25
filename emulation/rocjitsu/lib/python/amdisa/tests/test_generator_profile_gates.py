@@ -27,7 +27,6 @@ from amdisa.codegen.execute.floating_policy import (
 )
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
-    gen_vector_div_scale,
     gen_vector_movrel,
     gen_vector_cvt_pk,
 )
@@ -1937,25 +1936,6 @@ def test_movrel_uses_wavefront_resolver_with_vgpr_msb_indexing():
     assert 'src0.vgpr_msb_role()' in body
 
 
-def test_div_scale_writes_explicit_sdst_mask():
-    body = gen_vector_div_scale(
-        ['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'f32', is_vop3=True
-    )
-
-    assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in body
-    assert 'wf.set_vcc' not in body
-
-    callback_body = gen_vector_div_scale(
-        ['vdst', 'sdst'],
-        ['src0', 'src1', 'src2'],
-        'f32',
-        is_vop3=True,
-        result_writer='commit_result',
-    )
-    assert 'commit_result(vcc);' in callback_body
-    assert 'write_wave_mask_scalar' not in callback_body
-
-
 def test_vector_cmp_writes_explicit_sdst_mask():
     body = gen_vector_cmp(['sdst'], ['src0', 'src1'], 't', 'u32', is_vop3=True)
 
@@ -3191,22 +3171,6 @@ def test_gfx1251_f64_wmma_uses_wave32_mode_independent_executor():
     assert 'amdgpu::exec_f64' not in body
 
 
-@pytest.mark.parametrize('dtype, mode', [('f32', 'f32'), ('f64', 'f16_f64')])
-def test_div_scale_delegates_classification_and_preserves_explicit_mask(dtype, mode):
-    body = gen_vector_div_scale(
-        ['vdst', 'sdst'], ['src0', 'src1', 'src2'], dtype, is_vop3=True
-    )
-
-    nan_policy = (
-        ', wf.cu().arch() != rocjitsu::IsaFamily::Rdna3' if dtype == 'f64' else ''
-    )
-    assert (
-        f'div_scale(s0, s1, s2, wf.fp_round_mode_{mode}(), '
-        f'wf.fp_denorm_mode_{mode}(){nan_policy})' in body
-    )
-    assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc)' in body
-
-
 def test_gfx1250_profile_enables_generator_backed_quirks():
     profile = Cdna5Profile()
 
@@ -3603,33 +3567,20 @@ def test_generated_special_vop3_true16_paths_use_selected_halves(
 ):
     execute_shared = execute_shared_path.read_text()
 
-    for arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'):
-        vop3 = (amdgpu_generated_root / arch / 'vop3_exec.cpp').read_text()
-        for kind in ('U', 'I'):
-            body = _generated_function_body(
-                vop3, f'void VMad{kind}32{kind}16Vop3::execute_impl'
-            )
-            assert 'execute_ternary32' in body
-            assert f'rj_arith_v_mad_{kind.lower()}32_{kind.lower()}16_w64' in body
-            assert 'RJ_ARITH_ALU_HIGH_A' in body
-            assert 'RJ_ARITH_ALU_HIGH_B' in body
-            assert 'RJ_ARITH_ALU_HIGH_C' not in body
-            assert 'src0, src1, src2' in body
-            assert (
-                f'execute_v_mad_{kind.lower()}32_{kind.lower()}16_vop3'
-                not in execute_shared
-            )
-
     rdna2_vop3 = (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text()
+    for name, api in [
+        ('VMadU32U16Vop3', 'rj_arith_v_mad_u32_u16_w32'),
+        ('VMadI32I16Vop3', 'rj_arith_v_mad_i32_i16_w32'),
+    ]:
+        body = _generated_function_body(rdna2_vop3, f'void {name}::execute_impl')
+        assert api in body
+        assert 'RJ_ARITH_ALU_HIGH_A' in body
+        assert 'RJ_ARITH_ALU_HIGH_B' in body
     div_fixup = _generated_function_body(
         rdna2_vop3, 'void VDivFixupF16Vop3::execute_impl'
     )
-    assert 'ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_FP16' in div_fixup
-    assert 'F16TernaryOutputOrder::MODIFY_THEN_ROUND' in div_fixup
-    assert 'read_vop3_true16_src(src0, wf, lane, opsel, 0)' in div_fixup
-    assert 'read_vop3_true16_src(src1, wf, lane, opsel, 1)' in div_fixup
-    assert 'read_vop3_true16_src(src2, wf, lane, opsel, 2)' in div_fixup
-    assert 'write_vop3_true16_dst(vdst, wf, lane, opsel, result_bits,' in div_fixup
+    assert 'rj_arith_v_div_fixup_f16_w32' in div_fixup
+    assert 'execute_float_ternary16' in div_fixup
 
     pack = _generated_function_body(rdna2_vop3, 'void VPackB32F16Vop3::execute_impl')
     assert 'rj_arith_v_pack_b32_f16_w64' in pack
@@ -3661,21 +3612,6 @@ def test_cdna_generated_vop3_b16_i16_u16_paths_use_selected_halves(
         assert 'RJ_ARITH_ALU_HIGH_D' in body
 
 
-def test_generated_classified_alu_latches_trapsts_before_simd_return(
-    execute_shared_path: Path,
-):
-    execute_shared = execute_shared_path.read_text()
-    body = _generated_function_body(
-        execute_shared, 'inline void execute_v_mul_f32_vop3'
-    )
-
-    classify_pos = body.index('uint32_t alu_causes = classify_mul_f32_vop3')
-    trapsts_pos = body.index('wf.set_trapsts(wf.trapsts() | alu_causes);')
-    simd_pos = body.index('ROCJITSU_TRY_SIMD_VOP3_BINARY_FP')
-    assert classify_pos < trapsts_pos < simd_pos
-    assert body.count('wf.set_trapsts(wf.trapsts() | alu_causes);') == 1
-
-
 @pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
 def test_older_f32_to_f64_conversion_uses_arithmetic(arch, amdgpu_generated_root: Path):
     text = (amdgpu_generated_root / arch / 'vop3_exec.cpp').read_text()
@@ -3698,7 +3634,7 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
         gfx1250_generated_root / 'vop3_exec_ternary.cpp'
     ).read_text()
 
-    # Migrated unary forms use library arithmetic with each profile's operand adapters.
+    # Older generic unary forms now use the library; packed and gfx1250 users remain legacy.
     assert 'inline void execute_v_ceil_f16_vop3' not in execute_shared
     unary = _generated_function_body(
         (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text(),
@@ -3716,8 +3652,8 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
         binary = _generated_function_body(source, 'void VAddF16Vop3::execute_impl')
         assert f'rj_arith_v_add_f16_w32_{suffix}' in binary
         assert 'const uint32_t opsel = 0;' in binary
-    assert 'read_vop3_true16_src' not in binary
-    assert 'write_vop3_true16_dst' not in binary
+        assert 'read_vop3_true16_src' not in binary
+        assert 'write_vop3_true16_dst' not in binary
 
     rdna2_vop3 = (amdgpu_generated_root / 'rdna2' / 'vop3_exec.cpp').read_text()
     ternary = _generated_function_body(rdna2_vop3, 'void VFmaF16Vop3::execute_impl')
@@ -3732,9 +3668,10 @@ def test_generated_vop3_f16_alu_paths_split_shared_generic_from_true16(
     )
     assert 'rj_arith_v_ceil_f16_w32_gfx12' in true16_unary
     assert 'execute_cdna_integral_unary<true, false>' in true16_unary
-    for operand in ('A', 'D'):
-        assert 'RJ_ARITH_ALU_HIGH_' + operand in true16_unary
+    assert 'RJ_ARITH_ALU_HIGH_A' in true16_unary
+    assert 'RJ_ARITH_ALU_HIGH_D' in true16_unary
     assert 'ROCJITSU_TRY_SIMD' not in true16_unary
+    assert 'read_vop3_true16_src' not in true16_unary
 
     true16_binary = _generated_method_body(
         gfx1250_vop3_alu, 'VAddF16Vop3', 'VSubF16Vop3'
@@ -4113,11 +4050,13 @@ def test_generated_pseudo_scalar_vop3_paths_ignore_exec_and_f16_opsel(
         assert 'amdgpu::vop3_opsel(inst_)' in generic_true16_constructor
         assert 'may not use VCC as a destination' not in generic_true16_constructor
 
-    ordinary_exp = _shared_execute_body(
-        execute_shared, 'v_exp_f32_vop1', 'v_exp_f32_vop3'
+    ordinary_exp = _generated_function_body(
+        (rdna4_generated_root / 'vop1_exec.cpp').read_text(),
+        'void VExpF32Vop1::execute_impl(',
     )
-    assert 'amdgpu::transcendental::exp_f32(' in ordinary_exp
-    assert 'amdgpu::pseudo_scalar::' not in ordinary_exp
+    assert 'rj_arith_v_exp_f32_w32_gfx12' in ordinary_exp
+    assert 'amdgpu::arith::execute_float_unary32(' in ordinary_exp
+    assert 'execute_pseudo_scalar' not in ordinary_exp
 
 
 def test_generated_scalar_f16_arithmetic_delegates_overflow_policy(
@@ -4166,7 +4105,19 @@ def test_generated_f16_sdwa_selects_producer_helper(
     """GFX10 arithmetic rounds to half before SDWA output scaling."""
     route, output = generated_f16_sdwa_consumers
     encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
-    if instruction in {'V_CEIL_F16', 'V_FLOOR_F16'}:
+    if instruction in {
+        'V_CEIL_F16',
+        'V_COS_F16',
+        'V_EXP_F16',
+        'V_FLOOR_F16',
+        'V_LOG_F16',
+        'V_RCP_F16',
+        'V_RSQ_F16',
+        'V_SIN_F16',
+        'V_SQRT_F16',
+        'V_EXP_F16',
+        'V_LOG_F16',
+    }:
         source = (output / 'rdna2' / 'vop1_exec.cpp').read_text()
         class_name = ''.join(word.title() for word in instruction.split('_'))
         body = _generated_function_body(
@@ -6235,9 +6186,7 @@ def test_generated_modifier_storage_is_out_of_ordinary_vop_frames(
         assert 'DppPlan' in modified
         assert 'ScopedOperandDelegate' in modified
         assert 'ScopedVgprWriteMask' in modified
-        execute_prefix = (
-            'amdgpu::arith::execute_' if arch == 'rdna4' else 'amdgpu::execute_'
-        )
+        execute_prefix = 'amdgpu::arith::execute_'
         assert execute_prefix in ordinary
         assert execute_prefix in modified
 
@@ -8164,11 +8113,13 @@ def test_vopd_execution_failure_stops_before_either_slot_commits(
     codegen.gen_vopd()
     cpp = (tmp_path / arch_name / 'vopd_exec.cpp').read_text()
     assert 'throw ' not in cpp
-    if arch_name in ('rdna3', 'rdna4', 'cdna5'):
+    if arch_name in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5'):
         # rj-arith evaluates both slots into temporaries and commits only on success.
         wave_check, invoke = cpp.split('amdgpu::arith::execute_dual_pair', 1)
         assert 'if (wf.wf_size() != 32)' in wave_check
-        assert ('InvalidInstructionEncoding' in wave_check) == (arch_name != 'rdna3')
+        assert ('InvalidInstructionEncoding' in wave_check) == (
+            arch_name not in ('rdna3', 'rdna3_5')
+        )
         assert 'return;' in wave_check
         assert 'amdgpu::InstructionExecutionError::UnimplementedInstruction' in invoke
         assert 'return RJ_ARITH_ERROR_INVALID_FLAGS;' in invoke

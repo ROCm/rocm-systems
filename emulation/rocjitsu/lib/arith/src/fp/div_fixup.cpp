@@ -101,7 +101,6 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
 #elif defined(RJ_ARITH_HAVE_X86_64_V4)
   cdna_vector = Cdna && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4);
 #endif
-  cdna_vector &= Width != 16 || !(flags & RJ_ARITH_FP_ROUND_MASK);
   if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && !cdna_vector) {
     return run_flushed<Width, Rdna3, Cdna>(flags, exec_mask, mode, d, a, b, c, excp_flag_user);
   }
@@ -146,10 +145,11 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
   // CDNA always quiets selected NaNs. In the shared backend IEEE selects only
   // this numeric policy; architecture-specific OMOD gating happens before run.
-  // FP16 SIMD final packing uses nearest rounding; directed modes use the scalar packer.
+  // RDNA directed-half packing remains scalar; the inherited CDNA half model
+  // always narrows to nearest, and its SIMD recovery already honors guest rounding.
   const uint64_t numeric_flags = flags | (Cdna ? RJ_ARITH_FP_IEEE_MODE : 0);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if ((Width != 16 || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
+  if ((Width != 16 || Cdna || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     // Read status operands before the numeric stores, which may alias sources.
     if (report && (!Rdna3 || Cdna)) {
@@ -165,7 +165,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if ((Width != 16 || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
+  if ((Width != 16 || Cdna || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     if (report && (!Rdna3 || Cdna)) {
       exceptions =

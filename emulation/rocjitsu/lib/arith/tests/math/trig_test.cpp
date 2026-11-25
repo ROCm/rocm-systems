@@ -13,6 +13,7 @@
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "common/wave.h"
+#include "math/older_half_unary_test.h"
 #include "math/trig_golden.h"
 #include "rj_arith/detail/rj_arith_math.h"
 #include <bit>
@@ -299,6 +300,31 @@ TEST(MathSinF32W32Gfx12, OutputDenormalSigns) {
         ASSERT_EQ(rj_arith_v_sin_f32_w32_gfx12(flags, 3, mode, r.v + 1, r.v, &status),
                   RJ_ARITH_SUCCESS);
         EXPECT_EQ(r.v[1][1], 0U);
+      }
+    }
+  }
+}
+
+// Selected half operands, aliases and qualification follow the inherited trig mapping.
+TEST(MathOlderHalfTrig, Arithmetic) {
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_sin_f16_w32_gfx908, 10);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_sin_f16_w64_gfx908, 10);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_cos_f16_w32_gfx908, 11);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_cos_f16_w64_gfx908, 11);
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (bool cosine : {false, true}) {
+      uint32_t data[32];
+      for (int lane = 0; lane < 32; ++lane) {
+        data[lane] = uint32_t(cosine ? 0x3251 : 0x2abc) | (lane & 1 ? 0x8000 : 0);
+      }
+      const uint32_t *a = data;
+      uint32_t *d = data;
+      uint32_t status = 0;
+      auto call = cosine ? rj_arith_v_cos_f16_w32_gfx908 : rj_arith_v_sin_f16_w32_gfx908;
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, UINT32_MAX, 0, &d, &a, &status),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(data[lane], 0x3531U | (!cosine && (lane & 1) ? 0x8000U : 0U));
       }
     }
   }

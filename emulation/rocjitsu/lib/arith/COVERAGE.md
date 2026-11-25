@@ -193,7 +193,7 @@ requests are rejected. Loose and allow-Loose remain supported.
 
 Gfx90a separately rounded MAD/MAC uses its own rj-arith model, described below;
 it is not folded into native FMA. Packed/mixed half arithmetic is also migrated.
-Graphics/division still have live legacy users.
+Graphics still has live legacy users; decoded division uses rj-arith.
 
 ## gfx908 FP16 MAD
 
@@ -363,3 +363,72 @@ are also SIMD. Directed AVX2 arithmetic uses its inherited integer fallback.
 Strict numeric and required FP-status semantics remain unsupported. All float
 values, per-element signs, CLAMP, scalar carriers, EXEC and overlap are supported.
 This is inherited behavior, not new empirical hardware qualification.
+## gfx12 dual MUL FP status
+
+Gfx12 dual MUL Compatibility classification is library-owned and retains the
+legacy FMA-style guest-policy model, including input-denormal causes beside
+NaNs. Other dual operations retain their existing Compatibility policy. This
+ownership change does not expand strict empirical qualification.
+
+## Older ordinary FP32 binary arithmetic
+
+ADD, SUB, SUBREV and MUL on gfx90a/gfx1010/gfx1030 use the existing numerical
+models and scalar/AVX2 backends; Compatibility also uses the existing AVX-512
+paths where eligible. Loose retains the AVX2 arithmetic path. Compatibility retains
+the inherited MUL exception classifier; its qualification is separate from explicit FP-status
+semantics. SDWA retains output scaling, clamp and destination-byte placement.
+DPP can suppress all stores while Compatibility MUL still accumulates its
+execution-participating causes. Gfx908 ADD/MUL and gfx1150 arithmetic have
+additional status policies and remain separate migrations.
+
+## Older native FP32 FMA
+
+Native FMA and FMAC on gfx908/gfx90a/gfx1010/gfx1030 use the existing FP32
+FMA implementation, as do gfx1010/gfx1030 FMAMK/FMAAK literal forms. These
+bindings preserve the inherited Compatibility model and provide Loose paths,
+using scalar, AVX2 and AVX-512-v4 arithmetic. Reusing the model does not establish
+new hardware qualification. Separately rounded MAC/MAD and gfx1150's additional
+FP-status policy remain separate migrations.
+
+## Older Legacy/DX9 arithmetic
+
+Legacy FP32 MUL on gfx908/gfx90a/gfx1010/gfx1030 and DX9 MUL on gfx1150
+share the inherited multiply model: guest denormal preparation, positive-zero
+products and unconditional NaN quieting. Both wave APIs support Loose, allow-Loose and Compatibility, with scalar,
+AVX2 and AVX-512 paths; strict exact modes are unsupported. gfx1150 DX9 FMA/FMAC reuse the existing
+DX9 FMA APIs, retaining forced denormal flushing and IEEE-dependent NaN quieting.
+Legal SDWA MUL forms retain their selected destination placement.
+
+## Older FP32 power-of-two scaling
+
+FP32 LDEXP on gfx908/gfx90a/gfx1010/gfx1030/gfx1150 reuses the gfx942 API's
+inherited always-quiet NaN, guest rounding and older output-modifier policy.
+Scalar, AVX2 and AVX-512 paths support arbitrary encodings; SIMD repairs only
+subnormal/boundary lanes. Compatibility and allow-Loose use the inherited model;
+explicit exact modes remain unqualified.
+The integer exponent does not receive floating-point source modifiers.
+## Older native math
+
+Gfx908/gfx90a/gfx1010/gfx1030/gfx1150 FP32 RCP, RCP_IFLAG, RSQ and SQRT use
+rj-arith's inherited scalar and SIMD models. FP32 EXP/LOG/SIN/COS also use
+these models on the same targets, as do CDNA1/2 EXP_LEGACY/LOG_LEGACY.
+Compatibility preserves their
+existing numeric and FP-status policy; explicit empirical semantics remain
+unqualified. The VM retains operand access, destination placement and trap delivery.
+
+The gfx942/gfx950 FP32 and FP16 native math APIs also own SDWA output controls
+in scalar, AVX2 and AVX-512 paths. FP32 SIN/RCP_IFLAG retain guest-mode output;
+other FP32 math uses nearest-output scaling. FP16 finalizes an already-scaled
+half without a second multiplication. These controls do not change ordinary
+encodings, and gfx1250 does not accept the SDWA selector. See
+[the API contract](include/rj_arith/detail/rj_arith_math.h) for details.
+
+The gfx942 integral/decomposition APIs (TRUNC/CEIL/FLOOR/RNDNE, FREXP_MANT
+and FRACT, FP16/FP32) also own inherited SDWA rounded-output scaling and clamp.
+They share the native-unary scalar/AVX2/v4 output passes. Ordinary arithmetic
+and its existing strict-mode/FP-status support are unchanged.
+
+Older FP64 native-math migration also routes TRIG_PREOP on gfx908/gfx90a,
+gfx1010/gfx1030 and gfx1150 through the inherited 1201-bit table and existing
+scalar/AVX2/AVX-512 implementations. Compatibility/Loose remain the supported
+semantics; strict empirical requests are not newly qualified.

@@ -1198,6 +1198,7 @@ std::vector<ArithmeticCase> vopd_mul_dx9_cases() {
            {{6, expected}, {7, expected}},
            mode,
            mode == 0xf0u ? expect_simd_path(amdgpu::SimdFastPath::VOPD) : expect_simd_fallback()});
+      cases.back().arith_dispatch = arch == rocjitsu::IsaFamily::Rdna3_5;
     };
     add("Preserve", 0x00000001u, 0x4b000000u, 0x00800000u, 0xf0u);
     add("PreserveNegative", 0x80000001u, 0x4b000000u, 0x80800000u, 0xf0u);

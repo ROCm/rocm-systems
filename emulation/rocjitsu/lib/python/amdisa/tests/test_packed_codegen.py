@@ -7,7 +7,6 @@ import pytest
 
 from amdisa.codegen.execute.packed import (
     gen_pk_binop,
-    gen_pk_binop_f32,
     gen_pk_binop_f64,
     gen_pk_ternary_f64,
     gen_pk_binop_u64,
@@ -59,36 +58,6 @@ def test_pk_bf16_binary_preserves_fp32_inline_constants():
         assert 'pk16_src_needs_narrowing' not in cpp
         assert 'raw0 = util::f32_to_bf16' not in cpp
         assert 'raw1 = util::f32_to_bf16' not in cpp
-
-
-def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
-    cpp = gen_pk_binop_f32(
-        ['vdst'],
-        ['src0', 'src1'],
-        'add',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-        use_cdna5_helpers=True,
-    )
-
-    assert 'const auto s0 = amdgpu::RegisterAccess(wf).read_lane_pair32(' in cpp
-    assert 'src0, lane, amdgpu::ScalarPairMode::Replicate32)' in cpp
-    assert 's0_hi_w' not in cpp
-    assert 's0.hi' in cpp
-    assert 'read_lane64' not in cpp
-
-
-def test_cdna_pk_f32_reads_all_register_pairs():
-    cpp = gen_pk_binop_f32(
-        ['vdst'],
-        ['src0', 'src1'],
-        'add',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert 'read_lane_pair32(src0, lane)' in cpp
-    assert 'const uint32_t s0_lo_w = s0_pair_w.lo' in cpp
-    assert 'const uint32_t s0_hi_w = s0_pair_w.hi' in cpp
-    assert 'encoding_value_ >= 256' not in cpp
 
 
 def test_pk_lshl_add_u64_routes_through_count_validating_adapter():
@@ -146,40 +115,6 @@ def test_pk_f64_ternary_rejects_unknown_operation():
 
     with pytest.raises(ValueError, match='unsupported packed F64 ternary operation'):
         gen_pk_ternary_f64(['vdst'], ['src0', 'src1', 'src2'], 'mad')
-
-
-def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
-    probe = vop3p_local_simd_probe_line('v_pk_add_f32_vop3p', ('opsel', 'opsel_hi'))
-
-    assert probe is not None
-    assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_BINARY_F32_SELECTORS' in probe
-    assert 'inst_.opsel, inst_.opsel_hi' in probe
-    assert (
-        vop3p_local_simd_probe_line('v_pk_add_f32_vop3p', ('op_sel', 'op_sel_hi'))
-        is None
-    )
-    assert (
-        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi')) is None
-    )
-
-
-def test_renamed_vop3p_packed_fma_f32_probe_passes_all_profile_selectors():
-    probe = vop3p_local_simd_probe_line(
-        'v_pk_fma_f32_vop3p',
-        ('opsel', 'opsel_hi'),
-        'inst_.pad_14',
-    )
-
-    assert probe is not None
-    assert 'ROCJITSU_TRY_SIMD_VOP3P_PK_TERNARY_F32_SELECTORS' in probe
-    assert 'inst_.opsel, inst_.opsel_hi, inst_.pad_14' in probe
-    assert (
-        vop3p_local_simd_probe_line(
-            'v_pk_fma_f32_vop3p',
-            ('op_sel', 'op_sel_hi'),
-        )
-        is None
-    )
 
 
 def test_renamed_packed_float_routes_use_exact_helpers():
