@@ -1310,10 +1310,17 @@ HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_ChildNodesRunOncePerLaunch) {
 // Waits `ticks` wall clock ticks, then stores `value`, so work that doesn't wait for it reads
 // the old value.
 static __global__ void delayed_store(int* out, int value, long long ticks) {
+#if HT_AMD
   const long long start = wall_clock64();
   while (wall_clock64() - start < ticks) {
   }
   __hip_atomic_store(out, value, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
+  const long long start = clock64();
+  while (clock64() - start < ticks) {
+  }
+  atomicExch(out, value);
+#endif
 }
 
 static __global__ void copy_value(const int* in, int* out) { *out = *in; }
@@ -1341,7 +1348,11 @@ static __global__ void copy_value(const int* in, int* out) { *out = *in; }
 HIP_TEST_CASE(Unit_hipGraphAddChildGraphNode_DependentsWaitForChild) {
   constexpr int kValue = 42;
   int clock_khz = 0;
+#if HT_AMD
   HIP_CHECK(hipDeviceGetAttribute(&clock_khz, hipDeviceAttributeWallClockRate, 0));
+#else
+  HIP_CHECK(hipDeviceGetAttribute(&clock_khz, hipDeviceAttributeClockRate, 0));
+#endif
   long long ticks = static_cast<long long>(clock_khz) * 20;  // 20 ms
   // Host memory, read right after the launch stream is synchronized
   int* data = nullptr;

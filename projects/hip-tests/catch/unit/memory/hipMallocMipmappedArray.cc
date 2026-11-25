@@ -443,6 +443,8 @@ static void MipmappedArrayLevelRoundTrip(const hipChannelFormatDesc& desc) {
 }
 
 HIP_TEST_CASE(Unit_hipMipmappedArrayLevel_CopyRoundTrip) {
+  CHECK_IMAGE_SUPPORT
+
   SECTION("half") {
     MipmappedArrayLevelRoundTrip<uint16_t>(
         hipCreateChannelDesc(16, 0, 0, 0, hipChannelFormatKindFloat));

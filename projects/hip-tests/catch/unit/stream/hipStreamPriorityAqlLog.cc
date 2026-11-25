@@ -287,13 +287,13 @@ HIP_TEST_CASE(Unit_hipStreamAqlBarrierBit_Scenarios) {
 
   SECTION("Captured hipExtAnyOrderLaunch kernel keeps its barrier bit clear") {
     const std::string log = runBarrierScenarioChild("graph_any_order");
-    REQUIRE(dispatchBarrierBitForWorkgroup(log, 22) == 0);
-    REQUIRE(dispatchBarrierBitForWorkgroup(log, 23) == 1);
+    REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 22) == 0);
+    REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 23) == 1);
   }
 
   SECTION("Graph exec update takes the launch flags of the new kernel node") {
     const std::string log = runBarrierScenarioChild("graph_any_order_update");
-    REQUIRE(dispatchBarrierBitForWorkgroup(log, 22) == 1);
+    REQUIRE(aqllog::DispatchBarrierBitForWorkgroup(log, 22) == 1);
   }
 
   SECTION("Event record and wait preserve stream ordering") {

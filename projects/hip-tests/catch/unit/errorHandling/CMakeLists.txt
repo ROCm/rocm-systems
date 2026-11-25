@@ -29,9 +29,11 @@ set_source_files_properties(hipPeekAtLastErrorEnv_Exe.cc PROPERTIES LANGUAGE ${G
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
       hipExtGetLastError.cc
-      hipOnError.cc
     hipDynamicLogging.cc
   )
+  if(UNIX AND BUILD_SHARED_LIBS)
+    list(APPEND AMD_SRC hipOnError.cc)
+  endif()
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
 hip_add_exe_to_target(NAME ErrorHandlingTest

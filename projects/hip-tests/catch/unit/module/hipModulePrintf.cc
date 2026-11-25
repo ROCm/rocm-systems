@@ -5,7 +5,9 @@
  */
 
 #include <hip_test_common.hh>
+#ifdef __linux__
 #include "../printf/printf_common.h"  // NOLINT
+#endif
 
 #include <string>
 
@@ -28,6 +30,7 @@
  * ------------------------
  * - HIP_VERSION >= 7.2
  */
+#ifdef __linux__
 HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Printf_DuplicateFormatString) {
   int pcieAtomic = 0;
   HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
@@ -58,6 +61,7 @@ HIP_TEST_CASE(Unit_hipModuleLaunchKernel_Printf_DuplicateFormatString) {
   HIP_CHECK(hipFree(count_d));
   HIP_CHECK(hipModuleUnload(module));
 }
+#endif  // __linux__
 
 /**
  * End doxygen group ModuleTest.

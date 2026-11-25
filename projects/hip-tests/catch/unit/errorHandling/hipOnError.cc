@@ -50,7 +50,7 @@ extern "C" void __hipOnError(const void* err_info) {
  * ------------------------
  *  - HIP_VERSION >= 7.2
  */
-TEST_CASE("Unit___hipOnError_CalledOnFailure") {
+HIP_TEST_CASE(Unit___hipOnError_CalledOnFailure) {
   HIP_CHECK(hipFree(nullptr));
   (void)hipGetLastError();
   g_calls = 0;
