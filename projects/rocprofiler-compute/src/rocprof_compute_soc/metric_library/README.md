@@ -140,11 +140,15 @@ A file missing from the child comes from its nearest ancestor.
 
 ## Checks
 
-`tools/validate_metric_library.py` runs as a pre-commit hook on changes here. It checks
-the fields, the ids and their files, names, units, sorted keys, that every formula
-parses, that a formula has one id on every arch, the roofline ceilings, and that each set
-fits in one pass. Its module docstring lists every check. The `check-yaml` hook rejects
-duplicate keys.
+`tools/validate_metric_library.py` runs on changes here, as part of the
+`metric-config-check` pre-commit hook. It checks the fields, the ids and their files,
+names, units, sorted keys, that every formula parses, that a formula has one id on every
+arch, the roofline ceilings, and that each set fits in one pass. Its module docstring
+lists every check. The `check-yaml` hook rejects duplicate keys.
+
+The same hook regenerates the metric lock and the metric description files; the
+[metric config management README](../../../tools/config_management/README.md) says how to
+review them.
 
 While production reads `analysis_configs/`,
 `tools/test_metric_library_sync.py` checks that

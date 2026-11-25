@@ -455,13 +455,10 @@ Customers read `docs/how-to/`, `CHANGELOG.md`, and the CLI help.
 
 ## Metrics Management
 
-If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof_compute_soc/analysis_configs/gfx<arch>/*.yaml` or metric descriptions in `tools/per_arch_metric_definitions/gfx<arch>_metrics_description.yaml` — follow the metric management workflow:
-
-1. Edit the relevant panel YAMLs.
-2. Validate them with `python tools/config_management/master_config_workflow_script.py --validate-only`.
-3. Refresh the hash DB with `python tools/config_management/hash_manager.py --compute-all src/rocprof_compute_soc/analysis_configs` and confirm CI tests pass.
-
-For full details, see the [metric config management README](./tools/config_management/README.md).
+If your PR changes a metric (`src/rocprof_compute_soc/metric_library/<arch>/*.yaml`) or
+what a panel shows (`src/rocprof_compute_soc/views/<arch>/*.yaml`), review and stage the
+files the `metric-config-check` pre-commit hook regenerates, as the
+[metric config management README](./tools/config_management/README.md) describes.
 
 A metric whose counters do not fit one profiling pass is split into collectables. The [metric library README](./src/rocprof_compute_soc/metric_library/README.md#collectables) explains how.
 
