@@ -8,7 +8,7 @@
  * defined but only used when SDMA_IS_OSS7 is set.
  *
  * SDMA_IS_OSS7 is detected at compile time from the HIP architecture
- * macro __gfx1250__ (MI400-series, OSS7.0 SDMA). gfx942 (MI300X, SDMA
+ * macros __gfx1250__ / __gfx1250_strict__ (MI400-series, OSS7.0 SDMA). gfx942 (MI300X, SDMA
  * 4.4.2) and gfx950 (MI350X, SDMA 4.4.5) are NOT OSS7: they share the
  * pre-OSS7 SDMA 4.4.x packet format, and the OSS7 packets (for example the
  * fused COPY_LINEAR_WAIT_SIGNAL_MI4) are not valid on them. Add new OSS7.0
@@ -18,7 +18,7 @@
 #pragma once
 
 /* ---- OSS7 detection: set by HIP compiler for each device arch ---- */
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #  define SDMA_IS_OSS7 1
 #else
 #  define SDMA_IS_OSS7 0

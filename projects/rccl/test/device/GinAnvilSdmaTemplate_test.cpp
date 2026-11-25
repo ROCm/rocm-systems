@@ -1893,7 +1893,7 @@ TEST_F(GinAnvilSdmaTemplateTest, ResetSignal_VaClearsWindowCell) {
 // one quiets the peer's queues and fences first, then still fuses, so the put
 // it carries is never waited on. The stub putSignal does not bump the cell, so
 // cells left at 0 show signalPeer did not run. useSdmaFusedSignal compiles to
-// false off gfx950, where these cases would pass without reaching the fused path.
+// false off gfx1250, where these cases would pass without reaching the fused path.
 static void checkFusedSignal(bool va, bool putValue, bool strong) {
   SCOPED_TRACE(::testing::Message() << "va=" << va << " putValue=" << putValue << " strong=" << strong);
   StrongSignalFixture f(0);
