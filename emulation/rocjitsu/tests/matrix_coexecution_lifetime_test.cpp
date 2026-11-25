@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/async_mma_policy.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/mma_admission.h"
 
@@ -47,9 +48,11 @@ AdmissionCache::Words write_window(amdgpu::GpuMemory &memory, amdgpu::Instructio
 }
 
 TEST(MmaAdmissionCacheTest, BoundsRetainedPlansAndRebuildsAfterEviction) {
-  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4))) {
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  }
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   decoder->enable_pool();
   AdmissionCache cache(2, 3);
   amdgpu::GpuMemory memory("bounded_plans");
@@ -71,8 +74,9 @@ TEST(MmaAdmissionCacheTest, BoundsRetainedPlansAndRebuildsAfterEviction) {
   const auto retained = write_window(memory, icache, last, false, 0xffff);
   const auto evictions = cache.stats.evictions;
   const auto decodes = cache.stats.decodes;
-  for (unsigned i = 0; i != 100; ++i)
+  for (unsigned i = 0; i != 100; ++i) {
     EXPECT_EQ(cache.inspect(*decoder, icache, memory, last, 0, 128, false, retained), last + 8);
+  }
   EXPECT_EQ(cache.stats.evictions, evictions);
   EXPECT_EQ(cache.stats.decodes, decodes);
 
@@ -84,9 +88,11 @@ TEST(MmaAdmissionCacheTest, BoundsRetainedPlansAndRebuildsAfterEviction) {
 }
 
 TEST(MmaAdmissionCacheTest, ReplacesChangedCodeWithoutGrowingTheCache) {
-  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4))) {
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  }
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   decoder->enable_pool();
   AdmissionCache cache(2, 1);
   amdgpu::GpuMemory memory("replaced_code");
@@ -104,15 +110,18 @@ TEST(MmaAdmissionCacheTest, ReplacesChangedCodeWithoutGrowingTheCache) {
   const auto first = write_window(memory, icache, pc, false, 0);
   EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
   const auto decodes = cache.stats.decodes;
-  for (unsigned i = 0; i != 100; ++i)
+  for (unsigned i = 0; i != 100; ++i) {
     EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), pc + 8);
+  }
   EXPECT_EQ(cache.stats.decodes, decodes);
 }
 
 TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialFetch) {
-  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4))) {
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  }
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   decoder->enable_pool();
   AdmissionCache cache;
   amdgpu::GpuMemory memory("changed_lookahead");
@@ -121,8 +130,9 @@ TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialF
   const auto a =
       cdna5::build_vop3p(cdna5::kVWmmaF3232x16x128F4Vop3p,
                          {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 320, .opsel_hi = 3});
-  for (unsigned i = 0; i != a.size(); ++i)
+  for (unsigned i = 0; i != a.size(); ++i) {
     memory.write32(pc + 4 * i, a[i]);
+  }
   memory.write32(pc + 8, 0xbf800000);  // s_nop
   memory.write32(pc + 12, 0xbf800000); // s_nop
   memory.write32(pc + 24, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0xffff})[0]);
@@ -137,8 +147,9 @@ TEST(MmaAdmissionCacheTest, RevalidatesAcceptedAndRejectedPlansBeyondTheInitialF
                                        .src1 = 288,
                                        .src2 = 352,
                                        .opsel_hi = 3});
-    for (unsigned i = 0; i != b.size(); ++i)
+    for (unsigned i = 0; i != b.size(); ++i) {
       memory.write32(pc + 16 + 4 * i, b[i]);
+    }
     icache.invalidate_all();
     const auto expected = dependent ? std::nullopt : std::optional(pc + 16);
     EXPECT_EQ(cache.inspect(*decoder, icache, memory, pc, 0, 128, false, first), expected);
@@ -180,7 +191,7 @@ private:
 class AdmissionTrackingDecoder final : public Decoder {
 public:
   explicit AdmissionTrackingDecoder(DecodeLifetimes &counts)
-      : counts_(counts), decoder_(Decoder::create(ROCJITSU_CODE_ARCH_CDNA5)) {}
+      : counts_(counts), decoder_(Decoder::create(rocjitsu::IsaFamily::Cdna5)) {}
   DecodeResult decode(const rj_code_binary_inst_t *words, const DecodeErrorEmitter &emit) override {
     auto result = decoder_->decode(words, emit);
     if (result.succeeded()) {
@@ -197,8 +208,10 @@ private:
 };
 
 TEST(MmaAdmissionCacheTest, ReleasesTemporaryDecodesBeforeReturningAndSurvivesThreadMigration) {
-  if (!rocjitsu::amdgpu::async_mma_policy::candidate("v_wmma_f32_32x16x128_f4"))
+  if (!rocjitsu::amdgpu::async_mma_policy::candidate(
+          mma_test::PolicyInstruction(amdgpu::Operation::V_WMMA_F32_32X16X128_F4))) {
     GTEST_SKIP() << "Migrated matrix handlers require issuer-owned error reporting.";
+  }
   for (bool pooled : {false, true}) {
     AdmissionCache cache;
     amdgpu::GpuMemory memory("decode_lifetimes");
@@ -207,8 +220,9 @@ TEST(MmaAdmissionCacheTest, ReleasesTemporaryDecodesBeforeReturningAndSurvivesTh
     DecodeLifetimes counts;
     std::thread build([&] {
       AdmissionTrackingDecoder decoder(counts);
-      if (pooled)
+      if (pooled) {
         decoder.enable_pool();
+      }
       for (bool dependent : {false, true}) {
         const auto first = write_window(memory, icache, pc, dependent, 0xffff);
         EXPECT_EQ(cache.inspect(decoder, icache, memory, pc, 0, 128, false, first),
@@ -224,8 +238,9 @@ TEST(MmaAdmissionCacheTest, ReleasesTemporaryDecodesBeforeReturningAndSurvivesTh
     // thread-local allocation hooks from the earlier scan have gone away.
     std::thread reuse([&] {
       AdmissionTrackingDecoder decoder(counts);
-      if (pooled)
+      if (pooled) {
         decoder.enable_pool();
+      }
       const auto first = write_window(memory, icache, pc, true, 0xffff);
       EXPECT_FALSE(cache.inspect(decoder, icache, memory, pc, 0, 128, false, first));
       EXPECT_EQ(counts.total, total);
@@ -243,22 +258,25 @@ TEST(MatrixCoexecutionTest, ForkChildRejectsInheritedPoolAndDestroysItWithoutJoi
   auto pool = std::make_unique<mc::SharedPool>(1);
   auto warm = pool->submit(increment, &calls);
   ASSERT_TRUE(warm);
-  ASSERT_FALSE(pool->finish(warm));
+  ASSERT_TRUE(pool->finish(warm).succeeded());
   ASSERT_EQ(calls, 1u);
   const pid_t child = fork();
   ASSERT_GE(child, 0);
   if (child == 0) {
     alarm(3);
-    if (pool->available() || pool->submit(increment, &calls))
+    if (pool->available() || pool->submit(increment, &calls)) {
       _exit(1);
+    }
     std::array<Instruction *, 2> pair{&increment, &increment};
     mma_test::execute_independent(*pool, pair, &calls);
-    if (calls != 3)
+    if (calls != 3) {
       _exit(2);
+    }
     pool.reset(); // Must not join or destroy inherited std::thread objects.
     mc::SharedPool fresh(1);
-    if (fresh.available() || fresh.submit(increment, &calls))
+    if (fresh.available() || fresh.submit(increment, &calls)) {
       _exit(3);
+    }
     mma_test::execute_independent(fresh, pair, &calls);
     _exit(calls == 5 ? 0 : 4);
   }
@@ -272,8 +290,39 @@ TEST(MatrixCoexecutionTest, ForkChildRejectsInheritedPoolAndDestroysItWithoutJoi
   EXPECT_EQ(WEXITSTATUS(status), 0);
   auto parent = pool->submit(increment, &calls);
   ASSERT_TRUE(parent);
-  EXPECT_FALSE(pool->finish(parent));
+  EXPECT_TRUE(pool->finish(parent).succeeded());
   EXPECT_EQ(calls, 2u);
+}
+
+TEST(MatrixCoexecutionTest, ForkChildDrainsQueueAndRetainsFirstFailureLocation) {
+  mc::SharedPool pool(2);
+  amdgpu::AsyncInstructionQueue queue(pool);
+  auto first = std::make_unique<Instruction>("first", [](Instruction &, void *) {});
+  auto second = std::make_unique<Instruction>("second", [](Instruction &, void *) {});
+  ASSERT_TRUE(queue.submit(first, nullptr, {}, 0x1234));
+  ASSERT_TRUE(queue.submit(second, nullptr, {}, 0x5678));
+  const pid_t child = fork();
+  if (child == 0) {
+    alarm(3);
+    queue.drain();
+    const auto failure = queue.take_error();
+    if (!queue.empty() || !failure || failure->pc != 0x1234 || failure->mnemonic != "first") {
+      _exit(1);
+    }
+    queue.drain();
+    _exit(queue.take_error() ? 2 : 0);
+  }
+  queue.drain();
+  ASSERT_GE(child, 0);
+  EXPECT_FALSE(queue.take_error());
+  int status = 0;
+  pid_t waited;
+  do {
+    waited = waitpid(child, &status, 0);
+  } while (waited < 0 && errno == EINTR);
+  ASSERT_EQ(waited, child);
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_EQ(WEXITSTATUS(status), 0);
 }
 
 TEST(MatrixCoexecutionTest, ForkChildRejectsInheritedOutstandingTicket) {
@@ -293,13 +342,14 @@ TEST(MatrixCoexecutionTest, ForkChildRejectsInheritedOutstandingTicket) {
   const pid_t child = fork();
   if (child == 0) {
     alarm(3);
-    if (!pool->ready(ticket) || !pool->finish(ticket))
+    if (!pool->ready(ticket) || pool->finish(ticket).succeeded()) {
       _exit(1);
+    }
     pool.reset();
     _exit(0);
   }
   context.release.release();
-  EXPECT_FALSE(pool->finish(ticket));
+  EXPECT_TRUE(pool->finish(ticket).succeeded());
   ASSERT_GE(child, 0);
   int status = 0;
   pid_t waited;

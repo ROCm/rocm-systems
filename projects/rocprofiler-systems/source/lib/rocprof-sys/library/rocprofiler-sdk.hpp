@@ -13,8 +13,15 @@ namespace rocprofsys::rocprofiler_sdk
 void
 setup();
 
+/// What shutdown() does with this tool's rocprofiler-sdk client registration.
+enum class client_registration
+{
+    release,  ///< The process is ending: ask the SDK to finalize the client.
+    keep,     ///< An attach session is ending: stay registered for the next attach.
+};
+
 void
-shutdown();
+shutdown(client_registration registration);
 
 void
 start();

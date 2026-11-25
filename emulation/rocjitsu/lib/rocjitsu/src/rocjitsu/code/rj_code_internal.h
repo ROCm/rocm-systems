@@ -21,8 +21,9 @@ struct rj_code_executable_t : rocjitsu::RefCounted {
 
 struct rj_code_object_t : rocjitsu::RefCounted {
   ~rj_code_object_t() {
-    if (parent_exec && parent_exec->release())
+    if (parent_exec && parent_exec->release()) {
       delete parent_exec;
+    }
   }
 
   rocjitsu::AmdGpuCodeObject *co = nullptr;
@@ -41,8 +42,9 @@ struct rj_code_basic_block_list_t : rocjitsu::RefCounted {
 
 struct rj_code_basic_block_t : rocjitsu::RefCounted {
   ~rj_code_basic_block_t() {
-    if (parent_list && parent_list->release())
+    if (parent_list && parent_list->release()) {
       delete parent_list;
+    }
   }
 
   rocjitsu::BasicBlock *block = nullptr;

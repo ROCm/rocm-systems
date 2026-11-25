@@ -30,6 +30,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 /*! \addtogroup HSA
@@ -57,6 +58,7 @@ class Memory;
 class Resource;
 class VirtualDevice;
 class PrintfDbg;
+class AbceEngineSet;
 
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
@@ -85,10 +87,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   uint32_t event_id_ = 0;          //!< amd_signal_t::event_id, which never changes
   bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
   bool timed_use_ = true;    //!< The current use captures timestamps
-  //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
-  //! which only the owning tracker updates. The other bits count uses, so a check that loaded the
-  //! previous use can't mark this one. Holders keep the signal from being reused, so the value
-  //! stays 0 until the next use.
+  //! Bit 0: a host check or wait on any thread saw the current use's value reach 0, unlike
+  //! use_retired_, which only the owning tracker updates. The other bits count uses, so a check
+  //! that loaded the previous use can't mark this one. Holders keep the signal from being reused,
+  //! so the value stays 0 until the next use.
   std::atomic<uint64_t> use_completion_{0};
   static constexpr uint64_t kUseCompleteBit = 1;
 
@@ -97,6 +99,13 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   void StartUse() {
     const uint64_t completion = use_completion_.load(std::memory_order_relaxed);
     use_completion_.store((completion | kUseCompleteBit) + 1, std::memory_order_release);
+  }
+
+  //! Marks the use whose use_completion_ was loaded as completion finished. Fails if a newer use
+  //! started since, which must not be marked.
+  void MarkUseComplete(uint64_t completion) {
+    use_completion_.compare_exchange_strong(completion, completion | kUseCompleteBit,
+                                            std::memory_order_release, std::memory_order_relaxed);
   }
 
   typedef union {
@@ -446,10 +455,9 @@ class Device : public NullDevice {
   //! Get the CPU agent with the least NUMA distance to this GPU
   const hsa_agent_t& getCpuAgent() const { return cpu_agent_info_->agent; }
 
-  //! Maps an HSA agent to a stable global index shared across all devices. GPU agents
-  //! occupy [0, numGpuAgents); CPU agents occupy [numGpuAgents, numGpuAgents + numCpuAgents).
-  //! Returns -1 if the agent is not one of the enumerated agents.
-  static int agentGlobalIndex(hsa_agent_t agent);
+  //! Returns the KFD topology node ID cached when the HSA agents were enumerated.
+  //! Returns UINT32_MAX if the agent was not enumerated.
+  static uint32_t agentDriverNodeId(hsa_agent_t agent);
 
   //! Get the CPU agent that is in a 'index' NUMA node
   const hsa_agent_t getCpuAgent(int index) const {
@@ -662,8 +670,8 @@ class Device : public NullDevice {
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events,
-                                   bool profiled) const override;
+                                   const std::vector<void*>& hw_events, bool profiled,
+                                   void* external_hw_event) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
@@ -675,8 +683,10 @@ class Device : public NullDevice {
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
 
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
-  //! return a new device pointer accessible by the GPU agent.
-  void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
+  //! return a new device pointer accessible by the GPU agent(s).
+  //! mapAllAgents locks the range to every GPU agent in one call instead of just this one.
+  void* hostLock(void* hostMem, size_t size, MemorySegment memSegment,
+                 bool mapAllAgents = false) const;
 
   [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
                                        const void* src) const override;
@@ -811,6 +821,11 @@ class Device : public NullDevice {
   void ReleaseSdmaEngine(VirtualGPU* vgpu) const {
     sdma_engine_allocator_.ReleaseEngine(vgpu);
   }
+  //! Lazily created device-owned ABCE engine set, or nullptr when disabled/unsupported.
+  AbceEngineSet* abceEngineSet() const { return abce_engine_set_.get(); }
+  //! As above, but brings the engine set up if this is the first caller, as the
+  //! first stream on the device is.
+  AbceEngineSet* getOrCreateAbceEngineSet();
   //! Returns the map of code objects to kernels
   const auto& KernelMap() const { return kernel_map_; }
   //! Adds a kernel to the kernel map
@@ -868,6 +883,7 @@ class Device : public NullDevice {
   static bool hostVmemSupported_;
   static std::vector<hsa_agent_t> gpu_agents_;
   static std::vector<AgentInfo> cpu_agents_;
+  static std::unordered_map<uint64_t, uint32_t> agent_driver_node_ids_;
   uint32_t preferred_numa_node_;
   std::vector<hsa_agent_t> p2p_agents_;   //!< List of P2P agents available for this device
   mutable std::mutex lock_allow_access_;  //!< To serialize allow_access calls
@@ -1004,6 +1020,11 @@ class Device : public NullDevice {
     void ReleaseEngine(VirtualGPU* vgpu);
   };
   mutable SdmaEngineAllocator sdma_engine_allocator_;
+
+  //! Device-owned ABCE engine set (host SDMA rings + shared orchestrator).
+  //! Null unless DEBUG_CLR_ENABLE_ABCE is set and the runtime supports it.
+  std::once_flag abce_engine_set_once_;
+  std::unique_ptr<AbceEngineSet> abce_engine_set_;
 
   //! Code object to kernel info map (used in the crash dump analysis)
   mutable std::map<uint64_t, Kernel&> kernel_map_;

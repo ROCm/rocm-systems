@@ -8,7 +8,8 @@ use std::ffi::{CStr, c_char, c_void};
 use super::output::write_value;
 use crate::ffi::*;
 use crate::isa::{isa_handle, isa_name, wavefront_handle};
-use crate::runtime::{boundary, lock};
+use crate::lifecycle::lock;
+use crate::status::boundary;
 
 /// # Safety
 /// The callback must be callable with the C ABI; `data` must remain valid for
@@ -35,15 +36,15 @@ pub unsafe extern "C" fn hsa_agent_iterate_isas(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(index) = runtime.gpu_index(agent) else {
-                return if runtime.is_cpu_agent(agent) {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
+                return if runtime.agents.is_cpu_agent(agent) {
                     SUCCESS
                 } else {
                     INVALID_AGENT
                 };
             };
-            let info = runtime.gpus[index].info();
-            (index, info, runtime.gpus[index].xnack_enabled)
+            let info = runtime.agents.gpus[index].info();
+            (index, info, runtime.agents.gpus[index].xnack_enabled)
         };
         for variant in 0..ISA_COUNT_PER_GPU {
             if isa_name(&info, xnack_enabled, variant).is_none() {
@@ -81,7 +82,7 @@ pub unsafe extern "C" fn hsa_isa_from_name(name: *const c_char, isa: *mut HsaIsa
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        for (index, gpu) in runtime.gpus.iter().enumerate() {
+        for (index, gpu) in runtime.agents.gpus.iter().enumerate() {
             for variant in 0..ISA_COUNT_PER_GPU {
                 let Some(candidate) = isa_name(&gpu.info(), gpu.xnack_enabled, variant) else {
                     continue;
@@ -122,12 +123,12 @@ pub unsafe extern "C" fn hsa_isa_get_info_alt(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some((index, variant)) = runtime.isa_parts(isa) else {
+            let Some((index, variant)) = runtime.agents.isa_parts(isa) else {
                 return INVALID_ISA;
             };
             (
-                runtime.gpus[index].info(),
-                runtime.gpus[index].xnack_enabled,
+                runtime.agents.gpus[index].info(),
+                runtime.agents.gpus[index].xnack_enabled,
                 variant,
             )
         };
@@ -204,7 +205,7 @@ pub unsafe extern "C" fn hsa_isa_get_info(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if runtime.isa_parts(isa).is_none() {
+        if runtime.agents.isa_parts(isa).is_none() {
             return INVALID_ISA;
         }
         // SAFETY: The caller supplied writable output storage.
@@ -241,7 +242,7 @@ pub unsafe extern "C" fn hsa_isa_get_exception_policies(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if runtime.isa_parts(isa).is_none() {
+        if runtime.agents.isa_parts(isa).is_none() {
             return INVALID_ISA;
         }
         // SAFETY: The caller supplied writable output storage.
@@ -274,7 +275,7 @@ pub unsafe extern "C" fn hsa_isa_get_round_method(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if runtime.isa_parts(isa).is_none() {
+        if runtime.agents.isa_parts(isa).is_none() {
             return INVALID_ISA;
         }
         // GFX1201 implements MAD with one rounding step for every supported
@@ -308,7 +309,7 @@ pub unsafe extern "C" fn hsa_isa_iterate_wavefronts(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if runtime.isa_parts(isa).is_none() {
+        if runtime.agents.isa_parts(isa).is_none() {
             return INVALID_ISA;
         }
         drop(guard);
@@ -342,13 +343,13 @@ pub unsafe extern "C" fn hsa_wavefront_get_info(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(isa) = runtime.wavefront_isa(wavefront) else {
+            let Some(isa) = runtime.agents.wavefront_isa(wavefront) else {
                 return INVALID_WAVEFRONT;
             };
-            let Some(index) = runtime.isa_index(isa) else {
+            let Some(index) = runtime.agents.isa_index(isa) else {
                 return INVALID_WAVEFRONT;
             };
-            runtime.gpus[index].info().wavefront_size
+            runtime.agents.gpus[index].info().wavefront_size
         };
         if attribute != 0 {
             return INVALID_ARGUMENT;
@@ -381,14 +382,14 @@ pub unsafe extern "C" fn hsa_isa_compatible(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        let Some((code_index, code_variant)) = runtime.isa_parts(code_object_isa) else {
+        let Some((code_index, code_variant)) = runtime.agents.isa_parts(code_object_isa) else {
             return INVALID_ISA;
         };
-        let Some((agent_index, agent_variant)) = runtime.isa_parts(agent_isa) else {
+        let Some((agent_index, agent_variant)) = runtime.agents.isa_parts(agent_isa) else {
             return INVALID_ISA;
         };
-        let code = &runtime.gpus[code_index];
-        let agent = &runtime.gpus[agent_index];
+        let code = &runtime.agents.gpus[code_index];
+        let agent = &runtime.agents.gpus[agent_index];
         let code_name = isa_name(&code.info(), code.xnack_enabled, code_variant);
         let agent_name = isa_name(&agent.info(), agent.xnack_enabled, agent_variant);
         let compatible = code_name == agent_name

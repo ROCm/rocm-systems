@@ -33,6 +33,7 @@ check_cxx_compiler_flag(
 )
 
 set(rj_arith_x86_64_v3_sources
+    common/x86_64/sdwa_output_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_fp8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_mixed_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/smfmac_float_x86_64_v3.cpp
@@ -44,12 +45,16 @@ set(rj_arith_x86_64_v3_sources
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_bf16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/float16_conversion_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/nibble_pack_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/pair_move_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/legacy_mul_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/bf16_math_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/tanh_loose_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/byte_conversion_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion32_x86_64_v3.cpp
@@ -104,6 +109,7 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_ternary_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_add_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/packed_u64_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_mad_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_minmax_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_mul_x86_64_v3.cpp
@@ -120,7 +126,10 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trans_f64_exact_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_exact_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/exp_exact_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/cdna_preop_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/unary_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v3.cpp
@@ -131,6 +140,8 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/screen_partition_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact8_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact16_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_integer_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v3.cpp
@@ -138,6 +149,9 @@ set(rj_arith_x86_64_v3_sources
 )
 
 set(rj_arith_x86_64_v4_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v4.cpp
+    common/x86_64/sdwa_output_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_fp8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_mixed_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/smfmac_float_x86_64_v4.cpp
@@ -149,6 +163,7 @@ set(rj_arith_x86_64_v4_sources
     wmma/x86_64/wmma_gfx1250_f32_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_half_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/mfma_f64_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/matrix_i8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/sparse_matrix_i8_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_bf16_x86_64_v4.cpp
@@ -156,7 +171,10 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/float16_conversion_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/nibble_pack_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/pair_move_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/legacy_mul_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/integer_dot_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/bf16_math_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/tanh_loose_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/byte_conversion_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/conversion/x86_64/conversion32_x86_64_v4.cpp
@@ -178,7 +196,9 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/half_dot_x86_64_v4.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fp64_directed_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/binary_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fp64_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/frexp_exp_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/selection_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fixup_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fmas_x86_64_v4.cpp
@@ -202,6 +222,7 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/byte_shift_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/carry_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_add_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/packed_u64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer_minmax_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer16_ternary_x86_64_v4.cpp
@@ -213,29 +234,37 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/mad64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/integer64_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/cndmask_x86_64_v4.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_round_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_unary_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/exp_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/round_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trans_f64_exact_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_exact_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/cdna_preop_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/ds_routing_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/move_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/packed_permute_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/permlane_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/screen_partition_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact8_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_exact16_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_integer_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_exact_x86_64_v4.cpp
 )
 
 set(rj_arith_x86_64_v4_bf16_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v4_bf16.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_fp8_x86_64_v4_bf16.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_x86_64_v4_bf16.cpp
 )
 
 set(rj_arith_avx512vnni_sources
+    ${CMAKE_CURRENT_SOURCE_DIR}/mfma/x86_64/gfx1250_integer_avx512vnni.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_avx512vnni.cpp
 )
 
@@ -263,3 +292,22 @@ endfunction()
 foreach(feature IN ITEMS X86_64_V3 X86_64_V4 X86_64_V4_BF16 AVX512VNNI)
     rj_arith_add_x86_64_backend(${feature})
 endforeach()
+
+# The sparse layouts revisit packed input words. Contiguous loads and shuffles avoid
+# the repeated gathers and scatters generated for these reductions on x86-64-v4.
+if(RJ_ARITH_COMPILER_X86_64_V4)
+    check_cxx_compiler_flag(
+        "-mno-gather -mno-scatter"
+        RJ_ARITH_COMPILER_NO_GATHER_SCATTER
+    )
+    if(RJ_ARITH_COMPILER_NO_GATHER_SCATTER)
+        set_property(
+            SOURCE
+                mfma/x86_64/smfmac_float_x86_64_v4.cpp
+                mfma/x86_64/sparse_matrix_i8_x86_64_v4.cpp
+                wmma/x86_64/swmmac_gfx1250_float_x86_64_v4.cpp
+            APPEND
+            PROPERTY COMPILE_OPTIONS "-mno-gather" "-mno-scatter"
+        )
+    endif()
+endif()

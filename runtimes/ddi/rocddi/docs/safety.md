@@ -122,6 +122,17 @@ caller-owned stream is involved. An in-flight token keeps shutdown from
 releasing the runtime while a prepared log write completes. Shutdown disables
 subsequent prepared log records before worker and queue cleanup.
 
+## Explicit owner retention
+
+`memory::storage::RetainOnDrop<T>` suppresses its owner's destructor on normal
+scope exit and unwind. Resources released by that destructor remain retained;
+`into_inner` explicitly returns the owner for normal destruction after cleanup
+proves release is safe. The guard supplies no release proof itself and does
+not pin inline storage or extend borrowed lifetimes. Externally reachable
+backing must already have suitable storage and ownership independent of the
+wrapper's address. `SessionRetirement` and the AMDF/HSA adapters use this
+mechanism with their distinct public handle-consumption and retry rules.
+
 ## Raw address contracts
 
 Safe Rust must not be able to authorize retained device access to temporary
@@ -182,7 +193,7 @@ An adapter that detaches its public runtime before native shutdown can move its
 session into `SessionRetirement`. Failed destruction keeps that owner for a
 later attempt; dropping an unfinished retirement retains its driver state
 until process exit. HSA retries this owner through `hsa_shut_down` while its
-public generation remains unavailable.
+public HSA session remains unavailable.
 
 The workspace-root shared image loads both public ABIs from one shared
 object. Sessions with `DriverContextLifetime::Process` share the primary KFD

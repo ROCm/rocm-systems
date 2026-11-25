@@ -81,13 +81,25 @@ if(AMDCXX AND EXISTS "${ROCM_PATH}/lib/llvm/bin/ld.lld")
     )
     list(APPEND _fixtures ${_fixture_dir}/renamed.hsaco)
     include(target_fixtures.cmake)
+    include(multi_entry.cmake)
     target_sources(consan_input_test PRIVATE target_test.cpp)
     add_custom_target(consan_original_fixtures DEPENDS ${_fixtures})
     add_dependencies(consan_input_test consan_original_fixtures)
-    add_dependencies(consan_input_test consan_target_fixtures)
+    add_dependencies(
+        consan_input_test
+        consan_target_fixtures
+        consan_multi_entry_fixture
+    )
     target_compile_definitions(
         consan_input_test
-        PRIVATE CONSAN_FIXTURE_DIR="${_fixture_dir}"
+        PRIVATE
+            CONSAN_FIXTURE_DIR="${_fixture_dir}"
+            CONSAN_MULTI_ENTRY_FIXTURE="${_fixture_dir}/multi-entry.hsaco"
+            CONSAN_MULTI_ENTRY_BARRIER_FIXTURE="${_fixture_dir}/multi-entry-barrier.hsaco"
+            CONSAN_MULTI_ENTRY_LOOP_FIXTURE="${_fixture_dir}/multi-entry-loop.hsaco"
+            CONSAN_MULTI_ENTRY_MIXED_FIXTURE="${_fixture_dir}/multi-entry-mixed.hsaco"
+            CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE="${_fixture_dir}/multi-entry-native-global.hsaco"
+            CONSAN_MULTI_ENTRY_UNREACHABLE_PC_FIXTURE="${_fixture_dir}/multi-entry-unreachable-pc.hsaco"
     )
 else()
     message(
@@ -144,6 +156,16 @@ target_link_libraries(
         flatbuffers
         GTest::gtest_main
 )
+if(RJ_BUILD_CONSAN_ANALYZER)
+    target_link_libraries(
+        consan_bootstrap_sim_test
+        PRIVATE rocjitsu_consan_analysis
+    )
+    target_compile_definitions(
+        consan_bootstrap_sim_test
+        PRIVATE CONSAN_ANALYZER_ENABLED=1
+    )
+endif()
 rj_configure_target(consan_bootstrap_sim_test PRIVATE_INCLUDES GENERATED WARNINGS SCHEMAS)
 if(TARGET consan_original_fixtures)
     add_dependencies(consan_bootstrap_sim_test consan_original_fixtures)
@@ -171,6 +193,24 @@ if(TARGET consan_original_fixtures)
         VERBATIM
     )
     add_custom_target(consan_artifact_fixture DEPENDS ${_artifact}/facts.bin)
+    set(_multi_artifact ${CMAKE_CURRENT_BINARY_DIR}/prepared/multi-entry)
+    add_custom_command(
+        OUTPUT ${_multi_artifact}/facts.bin
+        BYPRODUCTS ${_multi_artifact}/prepared.hsaco ${_multi_artifact}/ready
+        COMMAND
+            ${CMAKE_COMMAND} -E make_directory
+            ${CMAKE_CURRENT_BINARY_DIR}/prepared
+        COMMAND ${CMAKE_COMMAND} -E rm -rf ${_multi_artifact}
+        COMMAND
+            $<TARGET_FILE:rj_consan_prepare> ${_fixture_dir}/multi-entry.hsaco
+            gfx1250 ${_multi_artifact} --entry mk_a --entry mk_b
+        DEPENDS rj_consan_prepare ${_fixture_dir}/multi-entry.hsaco
+        VERBATIM
+    )
+    add_custom_target(
+        consan_multi_artifact_fixture
+        DEPENDS ${_multi_artifact}/facts.bin
+    )
     add_executable(
         consan_image_test
         ${PROJECT_SOURCE_DIR}/tests/code/consan/artifact_test.cpp
@@ -180,12 +220,20 @@ if(TARGET consan_original_fixtures)
         PRIVATE rocjitsu_consan_image GTest::gtest_main
     )
     rj_configure_target(consan_image_test PRIVATE_INCLUDES WARNINGS)
-    add_dependencies(consan_image_test consan_artifact_fixture)
+    add_dependencies(
+        consan_image_test
+        consan_artifact_fixture
+        consan_multi_entry_fixture
+    )
     target_compile_definitions(
         consan_image_test
         PRIVATE
             CONSAN_ORIGINAL_FIXTURE="${_fixture_dir}/race.hsaco"
             CONSAN_ARTIFACT_FIXTURE="${_artifact}"
+            CONSAN_MULTI_ENTRY_FIXTURE="${_fixture_dir}/multi-entry.hsaco"
+            CONSAN_MULTI_ENTRY_BARRIER_FIXTURE="${_fixture_dir}/multi-entry-barrier.hsaco"
+            CONSAN_MULTI_ENTRY_LOOP_FIXTURE="${_fixture_dir}/multi-entry-loop.hsaco"
+            CONSAN_MULTI_ENTRY_MIXED_FIXTURE="${_fixture_dir}/multi-entry-mixed.hsaco"
     )
     rj_add_gtest_tests(consan_image_test)
 endif()
@@ -209,6 +257,7 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
         consan_hsa_plugin_test
         hsa_consan_testable
         consan_artifact_fixture
+        consan_multi_artifact_fixture
     )
     target_compile_definitions(
         consan_hsa_plugin_test
@@ -216,6 +265,8 @@ if(RJ_BUILD_CONSAN_RUNTIME AND TARGET consan_original_fixtures)
             CONSAN_PLUGIN_FIXTURE="$<TARGET_FILE:hsa_consan_testable>"
             CONSAN_ORIGINAL_FIXTURE="${_fixture_dir}/race.hsaco"
             CONSAN_ARTIFACT_FIXTURE="${_artifact}"
+            CONSAN_MULTI_ORIGINAL_FIXTURE="${_fixture_dir}/multi-entry.hsaco"
+            CONSAN_MULTI_ARTIFACT_FIXTURE="${_multi_artifact}"
     )
     rj_add_gtest_tests(consan_hsa_plugin_test)
 endif()
@@ -243,6 +294,21 @@ if(
         PRIVATE ${ROCM_PATH}/lib/libhsa-runtime64.so ${CMAKE_DL_LIBS}
     )
     rj_configure_target(consan_hsa_runner WARNINGS)
+    add_executable(consan_multi_entry_runner consan_multi_entry_runner.cpp)
+    target_include_directories(
+        consan_multi_entry_runner
+        PRIVATE ${ROCJITSU_SRC_DIR} ${ROCJITSU_INCLUDE_DIR}
+    )
+    target_include_directories(
+        consan_multi_entry_runner
+        SYSTEM
+        PRIVATE ${ROCM_PATH}/include
+    )
+    target_link_libraries(
+        consan_multi_entry_runner
+        PRIVATE ${ROCM_PATH}/lib/libhsa-runtime64.so ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(consan_multi_entry_runner WARNINGS)
     add_test(
         NAME ConSanRuntimeIntegration.Guards
         COMMAND
@@ -344,9 +410,9 @@ if(TARGET consan_hsa_runner)
                 $<TARGET_FILE:${_plugin}> ${_statistics} ${_analysis_options}
                 --fixtures ${_fixture_dir} --source ${PROJECT_SOURCE_DIR} --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --case ${_case} --target ${gpu}
-                --wave-size ${wave_size} --threads ${threads}
-                ${_geometry_options} --fixture-kind ${kind} ${_entry_options}
-                ${_signal_options} ${_execution_options}
+                --wave-size ${wave_size} --threads ${threads} --fixture-kind
+                ${kind} ${_entry_options} ${_signal_options}
+                ${_execution_options} ${_geometry_options}
         )
         set_tests_properties(${_name} PROPERTIES TIMEOUT 120)
         if(environment STREQUAL "Sim")
@@ -415,7 +481,60 @@ if(TARGET consan_hsa_runner)
                 )
             endforeach()
             if(RJ_BUILD_CONSAN_ANALYZER)
-                set(_width_cases wide_u16 wide_i16 wide_b64 wide_b128)
+                if(_gpu STREQUAL "gfx950" OR _gpu STREQUAL "gfx1250")
+                    foreach(_bits IN ITEMS 4 6 8 16)
+                        foreach(
+                            _scenario
+                            IN
+                            ITEMS full partial empty overlap adjacent short
+                        )
+                            if(
+                                _scenario STREQUAL "short"
+                                AND NOT _gpu STREQUAL "gfx1250"
+                            )
+                                continue()
+                            endif()
+                            if(
+                                _gpu STREQUAL "gfx950"
+                                AND _scenario STREQUAL "partial"
+                                AND _environment STREQUAL "Physical"
+                            )
+                                continue() # The gfx950 ISA defines only full and empty EXEC.
+                            endif()
+                            set(_launch_size ${_wave_size})
+                            if(
+                                _scenario STREQUAL "overlap"
+                                OR _scenario STREQUAL "adjacent"
+                            )
+                                set(_launch_size ${_threads})
+                            elseif(_scenario STREQUAL "short")
+                                set(_launch_size 4)
+                            endif()
+                            consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                                transpose_${_bits}_${_scenario} ${_launch_size} production analysis
+                            )
+                        endforeach()
+                    endforeach()
+                endif()
+                foreach(_atomic IN LISTS _atomic_cases_${_gpu}_${_wave_size})
+                    string(REPLACE "-" "_" _case ${_atomic})
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        ${_case} ${_threads} production analysis
+                    )
+                endforeach()
+                set(_width_cases
+                    wide_u8
+                    wide_i8_alias_high
+                    wide_d16_u8
+                    wide_d16_i8_high
+                    wide_d16_u16
+                    wide_u16
+                    wide_i16
+                    wide_b64
+                    wide_b96
+                    wide_b96_alias_high
+                    wide_b128
+                )
                 if(_gpu STREQUAL "gfx1250")
                     list(
                         APPEND _width_cases
@@ -434,6 +553,32 @@ if(TARGET consan_hsa_runner)
                 foreach(_width_case IN LISTS _width_cases)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         ${_width_case} ${_width_threads} production analysis
+                    )
+                endforeach()
+                foreach(_peer IN ITEMS overlap adjacent)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        wide_d16_${_peer} ${_threads} production analysis
+                    )
+                endforeach()
+                foreach(_bits IN ITEMS 32 64)
+                    foreach(_spacing IN ITEMS normal stride64)
+                        set(_dual wide_dual_b${_bits}_${_spacing})
+                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                            ${_dual}_values_high ${_width_threads} production analysis
+                        )
+                        foreach(_peer IN ITEMS overlap gap)
+                            consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                                ${_dual}_${_peer} ${_threads} production analysis
+                            )
+                        endforeach()
+                    endforeach()
+                endforeach()
+                foreach(_peer IN ITEMS overlap adjacent disjoint)
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        wide_b8_${_peer} ${_threads} production analysis
+                    )
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        wide_b96_${_peer} ${_threads} production analysis
                     )
                 endforeach()
                 foreach(_groups IN ITEMS 1 4 16)
@@ -471,33 +616,48 @@ if(TARGET consan_hsa_runner)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
                         mixed_barrier ${_width_threads} production analysis
                     )
-                    foreach(_groups IN ITEMS 1 4 16)
-                        foreach(
-                            _scenario
-                            IN
-                            ITEMS grouped_barrier grouped_empty
-                        )
-                            consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
-                                ${_scenario} 65 production analysis ${_groups}
-                            )
-                        endforeach()
-                    endforeach()
-                    foreach(
-                        _barrier_case
-                        IN
-                        ITEMS
-                            barrier
-                            barrier_empty
-                            barrier_high
-                            barrier_separated
-                            barrier_multiple
-                            barrier_missing_second
-                    )
-                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
-                            ${_barrier_case} 65 production analysis
-                        )
-                    endforeach()
                 endif()
+                foreach(_groups IN ITEMS 1 4 16)
+                    foreach(_scenario IN ITEMS grouped_barrier grouped_empty)
+                        consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                            ${_scenario} ${_width_threads} production analysis ${_groups}
+                        )
+                    endforeach()
+                endforeach()
+                foreach(
+                    _barrier_case
+                    IN
+                    ITEMS
+                        barrier
+                        barrier_empty
+                        barrier_high
+                        barrier_separated
+                        barrier_multiple
+                        barrier_missing_second
+                )
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        ${_barrier_case} ${_width_threads} production analysis
+                    )
+                endforeach()
+                foreach(
+                    _loop_case
+                    IN
+                    ITEMS
+                        loop_zero
+                        loop_one
+                        loop_three
+                        loop_access_loss
+                        loop_sync_loss
+                        loop_no_b0
+                        loop_no_b0_full_journal
+                        loop_no_b0_sync_loss
+                        loop_no_b1
+                        loop_late
+                )
+                    consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} assembly
+                        ${_loop_case} ${_threads} production analysis
+                    )
+                endforeach()
                 foreach(_scenario IN LISTS _named_analysis_cases)
                     consan_add_target_e2e(${_environment} ${_gpu} ${_wave_size} named-assembly
                         ${_scenario} ${_threads} testable analysis
@@ -544,4 +704,47 @@ if(RJ_BUILD_CONSAN_ANALYZER)
             ${Python3_EXECUTABLE} -B
             ${PROJECT_SOURCE_DIR}/tests/code/consan/test_required.py
     )
+endif()
+
+if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
+    add_dependencies(consan_multi_entry_runner consan_multi_entry_fixture)
+    foreach(_profile IN ITEMS SelectedAB WrongProfile BarrierAB LoopAB)
+        set(_negative)
+        set(_multi_case_image ${_fixture_dir}/multi-entry.hsaco)
+        set(_multi_variant no-sync)
+        if(_profile STREQUAL "WrongProfile")
+            set(_negative --wrong-profile)
+        elseif(_profile STREQUAL "BarrierAB")
+            set(_multi_case_image ${_fixture_dir}/multi-entry-barrier.hsaco)
+            set(_multi_variant barrier)
+        elseif(_profile STREQUAL "LoopAB")
+            set(_multi_case_image ${_fixture_dir}/multi-entry-loop.hsaco)
+            set(_multi_variant loop)
+        endif()
+        set(_test ConSanMultiEntrySim.${_profile})
+        add_test(
+            NAME ${_test}
+            COMMAND
+                ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/consan_multi_entry_e2e.py --prepare
+                $<TARGET_FILE:rj_consan_prepare> --runner
+                $<TARGET_FILE:consan_multi_entry_runner> --inspect
+                $<TARGET_FILE:consan_capture_inspect> --analyze
+                $<TARGET_FILE:rj_consan_analyze> --plugin
+                $<TARGET_FILE:hsa_consan_testable> --launcher
+                $<TARGET_FILE:rocjitsu_bin> --fixture ${_multi_case_image}
+                --variant ${_multi_variant} --config
+                ${PROJECT_SOURCE_DIR}/configs/gfx1250_mi455x.json --root
+                ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --source ${PROJECT_SOURCE_DIR}
+                ${_negative}
+        )
+        rj_test_runtime_dir_env(_runtime ${_test})
+        set_tests_properties(
+            ${_test}
+            PROPERTIES
+                TIMEOUT 240
+                LABELS "consan;simulator;required-consan"
+                ENVIRONMENT "${_runtime}"
+        )
+    endforeach()
 endif()

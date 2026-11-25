@@ -6,6 +6,7 @@
 /// clocked driver that chooses which waves issue.
 
 #include "compute_unit_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
@@ -37,7 +38,7 @@ constexpr uint32_t kVgprs = 256;
 
 /// Initialize the two-slot CU in @p cu over @p memory.
 void make_cu(std::unique_ptr<ComputeUnitCore> &cu, GpuMemory &memory, L2Cache &l2,
-             rj_code_arch_t arch = ROCJITSU_CODE_ARCH_RDNA4) {
+             rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Rdna4) {
   l2.set_backing_memory(&memory);
   ComputeUnitCore::Config config{};
   config.arch = arch;
@@ -54,8 +55,9 @@ class RetryingFetchTranslator final : public AddressSpaceTranslator {
 public:
   VmTranslationResult translate(uint64_t address, std::size_t size,
                                 VmAccessKind access) const override {
-    if (access == VmAccessKind::Execute && fetch_unavailable)
+    if (access == VmAccessKind::Execute && fetch_unavailable) {
       return {.outcome = VmAccessOutcome::Unavailable, .translation = {}};
+    }
     return identity_.translate(address, size, access);
   }
 
@@ -70,10 +72,12 @@ protected:
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(make_cu(cu, memory, l2));
     const std::array words{kMovS5, kNop, kEndpgm};
-    for (size_t i = 0; i < words.size(); ++i)
+    for (size_t i = 0; i < words.size(); ++i) {
       memory.write32(kProgram + i * 4, words[i]);
-    for (size_t i = 0; i < 4; ++i)
+    }
+    for (size_t i = 0; i < 4; ++i) {
       memory.write32(kProgram + (words.size() + i) * 4, kEndpgm);
+    }
     // Each wave is its own workgroup; slots fill in order.
     for (uint32_t slot = 0; slot < kSlots; ++slot) {
       waves[slot] = cu->dispatch_wf(/*wg_id=*/slot, kProgram, kSgprs, kVgprs);
@@ -83,9 +87,11 @@ protected:
   }
 
   void TearDown() override {
-    for (auto *wave : waves)
-      if (wave && !wave->is_halted())
+    for (auto *wave : waves) {
+      if (wave && !wave->is_halted()) {
         wave->halt();
+      }
+    }
   }
 
   GpuMemory memory{"clocked_memory"};
@@ -110,8 +116,9 @@ TEST_F(ClockedIssueCycleTest, IssuesOnlySelectedSlots) {
 }
 
 TEST_F(ClockedIssueCycleTest, HaltedWaveDoesNotIssueAndLeavesItsSlot) {
-  for (int cycle = 0; cycle < 3; ++cycle)
+  for (int cycle = 0; cycle < 3; ++cycle) {
     (void)cu->run_issue_cycle(0b01);
+  }
   EXPECT_TRUE(waves[0]->is_halted());
   EXPECT_EQ(cu->run_issue_cycle(0b01), 0u);
   EXPECT_FALSE(waves[1]->is_halted());
@@ -165,9 +172,10 @@ TEST(ClockedIssueCycleVskipTest, SkippedInstructionDoesNotIssue) {
   L2Cache l2{"vskip_l2"};
   // VSKIP is a CDNA mode bit.
   std::unique_ptr<ComputeUnitCore> cu;
-  ASSERT_NO_FATAL_FAILURE(make_cu(cu, memory, l2, ROCJITSU_CODE_ARCH_CDNA3));
-  for (size_t i = 0; i < 4; ++i)
+  ASSERT_NO_FATAL_FAILURE(make_cu(cu, memory, l2, rocjitsu::IsaFamily::Cdna3));
+  for (size_t i = 0; i < 4; ++i) {
     memory.write32(kVectorProgram + i * 4, i == 0 ? kMoveVector : kNop);
+  }
   Wavefront *wave = cu->dispatch_wf(/*wg_id=*/0, kVectorProgram, kSgprs, kVgprs);
   ASSERT_NE(wave, nullptr);
   wave->set_mode_raw(wave->mode_raw() | Wavefront::VSKIP_BIT);

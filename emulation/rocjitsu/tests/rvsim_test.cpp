@@ -8,7 +8,10 @@
 
 #include <gtest/gtest.h>
 
+#include <bit>
 #include <cstdint>
+#include <iterator>
+#include <limits>
 #include <memory>
 
 namespace {
@@ -84,6 +87,136 @@ TEST_F(RvSimTest, ArithmeticAndMemory) {
   EXPECT_EQ(s.read_xreg(6), 0x10000);
   EXPECT_EQ(s.read_xreg(7), 50);
   EXPECT_EQ(hart_->memory().read32(0x10000), 50u);
+}
+
+TEST_F(RvSimTest, FloatToIntegerUsesStaticAndDynamicRounding) {
+  auto &state = hart_->state();
+  // f1 and f2 hold the same tie in the two source formats.
+  state.write_freg(1, rocjitsu::risc_v::nan_box(std::bit_cast<uint32_t>(2.5f)));
+  state.write_freg(2, std::bit_cast<uint64_t>(2.5));
+  struct Case {
+    unsigned rm;
+    unsigned frm;
+    int expected;
+  };
+  constexpr Case cases[] = {
+      {0, 3, 2}, // RNE
+      {1, 3, 2}, // RTZ
+      {2, 3, 2}, // RDN
+      {3, 3, 3}, // RUP
+      {4, 3, 3}, // RMM
+      {7, 0, 2}, // Dynamic RNE rounds the tie to even.
+      {7, 3, 3}, // Dynamic RUP
+      {7, 4, 3}, // Dynamic RMM uses all three frm bits and rounds the tie away from zero.
+  };
+  for (unsigned format : {0u, 1u}) {
+    for (unsigned dest = 0; dest < 4; ++dest) {
+      for (const Case &c : cases) {
+        SCOPED_TRACE(::testing::Message() << "format=" << format << " dest=" << dest
+                                          << " rm=" << c.rm << " frm=" << c.frm);
+        const uint32_t word =
+            0xc00002d3 | (format << 25) | (dest << 20) | ((format + 1) << 15) | (c.rm << 12);
+        hart_->memory().load_image(reinterpret_cast<const uint8_t *>(&word), sizeof(word), 0);
+        state.pc = 0;
+        state.write_csr(0x003, (c.frm << 5) | 8u); // DZ already accrued.
+        ASSERT_TRUE(hart_->advance(0));
+        EXPECT_EQ(state.read_xreg(5), c.expected);
+        EXPECT_EQ(state.read_csr(0x003), (c.frm << 5) | 9u);
+      }
+    }
+  }
+}
+
+TEST_F(RvSimTest, FloatToIntegerNearestModes) {
+  auto &state = hart_->state();
+  struct Case {
+    double input;
+    int64_t rne;
+    int64_t rmm;
+    unsigned flags;
+  };
+  constexpr Case cases[] = {
+      {0x1.fffffffffffffp-2, 0, 0, 1}, // Just below the first tie.
+      {0.5, 0, 1, 1},
+      {0x1.0000000000001p-1, 1, 1, 1}, // Just above the first tie.
+      {1.5, 2, 2, 1},
+      {-2.5, -2, -3, 1},
+      {0x1.0000000000001p52, 4503599627370497LL, 4503599627370497LL, 0},
+  };
+  for (unsigned rm : {0u, 4u}) {
+    const uint32_t word = 0xc22082d3 | (rm << 12); // fcvt.l.d x5, f1
+    hart_->memory().load_image(reinterpret_cast<const uint8_t *>(&word), sizeof(word), 0);
+    for (const Case &c : cases) {
+      SCOPED_TRACE(::testing::Message() << c.input << " rm=" << rm);
+      state.pc = 0;
+      state.write_freg(1, std::bit_cast<uint64_t>(c.input));
+      state.write_csr(0x001, 0);
+      ASSERT_TRUE(hart_->advance(0));
+      EXPECT_EQ(state.read_xreg(5), rm == 0 ? c.rne : c.rmm);
+      EXPECT_EQ(state.read_csr(0x001), c.flags);
+    }
+  }
+}
+
+TEST_F(RvSimTest, FloatToIntegerClipsAfterRoundingAndAccruesExceptions) {
+  auto &state = hart_->state();
+  struct Case {
+    double input;
+    unsigned dest; // W, WU, L, LU
+    unsigned mode;
+    int64_t expected;
+    unsigned flags;
+  };
+  constexpr unsigned nx = 1, nv = 16;
+  constexpr Case cases[] = {
+      {-2.5, 0, 0, -2, nx},
+      {-2.5, 0, 4, -3, nx},
+      {-2.1, 2, 2, -3, nx},
+      {-0.5, 1, 1, 0, nx},
+      {-0.5, 3, 2, 0, nv},
+      {-0.0, 3, 0, 0, 0},
+      {2147483647.25, 0, 0, INT32_MAX, nx},
+      {2147483647.5, 0, 0, INT32_MAX, nv},
+      {-2147483648.5, 0, 0, INT32_MIN, nx},
+      {-2147483648.5, 0, 4, INT32_MIN, nv},
+      {4294967295.0, 1, 0, -1, 0}, // WU sign-extends to XLEN.
+      {-0x1p63, 2, 0, INT64_MIN, 0},
+      {0x1p63, 2, 0, INT64_MAX, nv},
+      {0x1.fffffffffffffp63, 3, 0, -2048, 0},
+      {0x1p64, 3, 0, -1, nv},
+      {std::numeric_limits<double>::quiet_NaN(), 0, 0, INT32_MAX, nv},
+      {-std::numeric_limits<double>::infinity(), 2, 0, INT64_MIN, nv},
+      {std::numeric_limits<double>::infinity(), 3, 0, -1, nv},
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(::testing::Message() << c.input << " dest=" << c.dest << " rm=" << c.mode);
+    const uint32_t word = 0xc20082d3 | (c.dest << 20) | (c.mode << 12); // fcvt.*.d x5, f1
+    hart_->memory().load_image(reinterpret_cast<const uint8_t *>(&word), sizeof(word), 0);
+    state.pc = 0;
+    state.write_freg(1, std::bit_cast<uint64_t>(c.input));
+    state.write_csr(0x001, 8); // An earlier DZ survives either exception.
+    ASSERT_TRUE(hart_->advance(0));
+    EXPECT_EQ(state.read_xreg(5), c.expected);
+    EXPECT_EQ(state.read_csr(0x001), 8u | c.flags);
+  }
+}
+
+TEST_F(RvSimTest, FloatingPointCsrViewsPreserveSiblingFields) {
+  auto &state = hart_->state();
+  state.write_xreg(5, 0x161);
+  const uint32_t program[] = {
+      0x00329073, // csrw fcsr, x5
+      0x00202373, // csrr x6, frm
+      0x001023f3, // csrr x7, fflags
+      0x00215073, // csrwi frm, 2
+      0x00126073, // csrsi fflags, 4
+      0x00302473, // csrr x8, fcsr
+      0x00100073, // ebreak
+  };
+  load_and_run(program, std::size(program));
+  EXPECT_EQ(state.read_xreg(6), 3);
+  EXPECT_EQ(state.read_xreg(7), 1);
+  EXPECT_EQ(state.read_xreg(8), 0x45);
 }
 
 TEST_F(RvSimTest, BranchAndJump) {

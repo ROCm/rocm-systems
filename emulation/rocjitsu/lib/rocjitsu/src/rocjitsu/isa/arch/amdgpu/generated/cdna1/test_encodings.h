@@ -1206,6 +1206,37 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"ds_write_b128", {0xD9BE0000U, 0x00000000U}},
     {"ds_read_b96", {0xD9FC0000U, 0x00000000U}},
     {"ds_read_b128", {0xD9FE0000U, 0x00000000U}},
+    {"ds_add_src2_u32", {0xD9000000U, 0x00000000U}},
+    {"ds_sub_src2_u32", {0xD9020000U, 0x00000000U}},
+    {"ds_rsub_src2_u32", {0xD9040000U, 0x00000000U}},
+    {"ds_inc_src2_u32", {0xD9060000U, 0x00000000U}},
+    {"ds_dec_src2_u32", {0xD9080000U, 0x00000000U}},
+    {"ds_min_src2_i32", {0xD90A0000U, 0x00000000U}},
+    {"ds_max_src2_i32", {0xD90C0000U, 0x00000000U}},
+    {"ds_min_src2_u32", {0xD90E0000U, 0x00000000U}},
+    {"ds_max_src2_u32", {0xD9100000U, 0x00000000U}},
+    {"ds_and_src2_b32", {0xD9120000U, 0x00000000U}},
+    {"ds_or_src2_b32", {0xD9140000U, 0x00000000U}},
+    {"ds_xor_src2_b32", {0xD9160000U, 0x00000000U}},
+    {"ds_write_src2_b32", {0xD91A0000U, 0x00000000U}},
+    {"ds_min_src2_f32", {0xD9240000U, 0x00000000U}},
+    {"ds_max_src2_f32", {0xD9260000U, 0x00000000U}},
+    {"ds_add_src2_f32", {0xD92A0000U, 0x00000000U}},
+    {"ds_add_src2_u64", {0xD9800000U, 0x00000000U}},
+    {"ds_sub_src2_u64", {0xD9820000U, 0x00000000U}},
+    {"ds_rsub_src2_u64", {0xD9840000U, 0x00000000U}},
+    {"ds_inc_src2_u64", {0xD9860000U, 0x00000000U}},
+    {"ds_dec_src2_u64", {0xD9880000U, 0x00000000U}},
+    {"ds_min_src2_i64", {0xD98A0000U, 0x00000000U}},
+    {"ds_max_src2_i64", {0xD98C0000U, 0x00000000U}},
+    {"ds_min_src2_u64", {0xD98E0000U, 0x00000000U}},
+    {"ds_max_src2_u64", {0xD9900000U, 0x00000000U}},
+    {"ds_and_src2_b64", {0xD9920000U, 0x00000000U}},
+    {"ds_or_src2_b64", {0xD9940000U, 0x00000000U}},
+    {"ds_xor_src2_b64", {0xD9960000U, 0x00000000U}},
+    {"ds_write_src2_b64", {0xD99A0000U, 0x00000000U}},
+    {"ds_min_src2_f64", {0xD9A40000U, 0x00000000U}},
+    {"ds_max_src2_f64", {0xD9A60000U, 0x00000000U}},
     {"buffer_load_format_x", {0xE0000000U, 0x00000000U}},
     {"buffer_load_format_xy", {0xE0040000U, 0x00000000U}},
     {"buffer_load_format_xyz", {0xE0080000U, 0x00000000U}},
@@ -1435,7 +1466,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_dec_x2", {0xDDB00000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1414;
+inline constexpr size_t NUM_ENCODINGS = 1445;
 
 } // namespace rocjitsu::cdna1::test_data
 

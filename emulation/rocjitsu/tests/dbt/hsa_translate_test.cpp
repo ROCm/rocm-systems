@@ -6,6 +6,7 @@
 /// load via HSA, dispatch on the real GPU, and verify against CPU golden.
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/isa_family.h"
 RJ_DIAGNOSTIC_PUSH
 RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include <hsa/hsa.h>
@@ -23,6 +24,7 @@ RJ_DIAGNOSTIC_POP
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <random>
 #include <string>
 #include <vector>
@@ -88,13 +90,15 @@ hsa_amd_memory_pool_t find_pool(hsa_agent_t agent, hsa_amd_segment_t segment,
         auto *c = static_cast<Ctx *>(data);
         hsa_amd_segment_t seg;
         hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &seg);
-        if (seg != c->seg)
+        if (seg != c->seg) {
           return HSA_STATUS_SUCCESS;
+        }
         if (c->host_acc) {
           bool acc = false;
           hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL, &acc);
-          if (!acc)
+          if (!acc) {
             return HSA_STATUS_SUCCESS;
+          }
         }
         c->pool = pool;
         return HSA_STATUS_INFO_BREAK;
@@ -104,7 +108,7 @@ hsa_amd_memory_pool_t find_pool(hsa_agent_t agent, hsa_amd_segment_t segment,
 }
 
 struct HostTarget {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t mach;
   char isa_name[128];
 };
@@ -121,22 +125,22 @@ HostTarget select_host_target(hsa_agent_t gpu) {
   // same for all three, but preserve the exact ELF MACH value that HSA expects
   // for the host agent's code object loader.
   if (std::strstr(t.isa_name, "gfx940")) {
-    t.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    t.arch = rocjitsu::IsaFamily::Cdna3;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX940;
   } else if (std::strstr(t.isa_name, "gfx941")) {
-    t.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    t.arch = rocjitsu::IsaFamily::Cdna3;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX941;
   } else if (std::strstr(t.isa_name, "gfx942")) {
-    t.arch = ROCJITSU_CODE_ARCH_CDNA3;
+    t.arch = rocjitsu::IsaFamily::Cdna3;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX942;
   } else if (std::strstr(t.isa_name, "gfx1100")) {
-    t.arch = ROCJITSU_CODE_ARCH_RDNA3;
+    t.arch = rocjitsu::IsaFamily::Rdna3;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX1100;
   } else if (std::strstr(t.isa_name, "gfx1201")) {
-    t.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    t.arch = rocjitsu::IsaFamily::Rdna4;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX1201;
   } else if (std::strstr(t.isa_name, "gfx1200")) {
-    t.arch = ROCJITSU_CODE_ARCH_RDNA4;
+    t.arch = rocjitsu::IsaFamily::Rdna4;
     t.mach = EF_AMDGPU_MACH_AMDGCN_GFX1200;
   }
   return t;
@@ -162,7 +166,7 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
                                 "(gfx1200/1201) GPU, found: "
                              << target.isa_name;
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, target.arch, target.mach);
+  BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, target.arch, target.mach);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
   EXPECT_TRUE(result.ok()) << "Translation diagnostic: " << result.diagnostics.front().message;
@@ -290,8 +294,9 @@ TEST(HsaTranslateTest, TranslateAndDispatchVectorAdd) {
 
   int mismatches = 0;
   for (uint32_t i = 0; i < N; ++i) {
-    if (std::abs(C_result[i] - C_golden[i]) > 1e-5f)
+    if (std::abs(C_result[i] - C_golden[i]) > 1e-5f) {
       ++mismatches;
+    }
   }
   EXPECT_EQ(mismatches, 0) << mismatches << " element mismatches out of " << N;
 
@@ -326,22 +331,26 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
   // RDNA3 accepts the target selector for vector_add, but this MFMA test still
   // needs RDNA4-only MFMA->WMMA expansion rules. Skip instead of translating
   // unsupported MFMA instructions into NOPs and comparing invalid output.
-  if (target.arch != ROCJITSU_CODE_ARCH_RDNA4) {
+  if (target.arch != rocjitsu::IsaFamily::Rdna4) {
     hsa_shut_down();
     GTEST_SKIP() << "MFMA→WMMA semantic expansion is currently implemented only for RDNA4; found: "
                  << target.isa_name;
   }
 
-  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, target.arch, target.mach);
+  BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, target.arch, target.mach);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
 
   // Dump translated CO for offline inspection.
   {
-    auto *f = std::fopen("/tmp/translated_mfma16.co", "wb");
-    if (f) {
-      std::fwrite(result.elf_bytes.data(), 1, result.elf_bytes.size(), f);
-      std::fclose(f);
+    std::error_code error;
+    const auto temporary = std::filesystem::temp_directory_path(error);
+    if (!error) {
+      const auto output = temporary / "translated_mfma16.co";
+      if (auto *f = std::fopen(output.c_str(), "wb")) {
+        std::fwrite(result.elf_bytes.data(), 1, result.elf_bytes.size(), f);
+        std::fclose(f);
+      }
     }
   }
 
@@ -398,20 +407,24 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
     uint32_t sign = (fbits >> 16) & 0x8000;
     int32_t exp = static_cast<int32_t>((fbits >> 23) & 0xFF) - 127;
     uint32_t mant = fbits & 0x7FFFFF;
-    if ((fbits & 0x7FFFFFFF) == 0)
+    if ((fbits & 0x7FFFFFFF) == 0) {
       return static_cast<uint16_t>(sign);
-    if (exp > 15)
+    }
+    if (exp > 15) {
       return static_cast<uint16_t>(sign | 0x7BFF);
-    if (exp < -14)
+    }
+    if (exp < -14) {
       return static_cast<uint16_t>(sign);
+    }
     return static_cast<uint16_t>(sign | ((exp + 15) << 10) | (mant >> 13));
   };
   auto f16_to_f32 = [](uint16_t h) -> float {
     uint32_t sign = (h >> 15) & 1;
     uint32_t exp = (h >> 10) & 0x1F;
     uint32_t mant = h & 0x3FF;
-    if (exp == 0)
+    if (exp == 0) {
       return sign ? -0.0f : 0.0f;
+    }
     uint32_t f = (sign << 31) | ((exp + 112) << 23) | (mant << 13);
     float result;
     std::memcpy(&result, &f, 4);
@@ -454,10 +467,12 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
 
   for (int iter = 0; iter < kNumIterations; ++iter) {
     std::vector<uint16_t> A_host(M * K), B_host(K * N);
-    for (auto &v : A_host)
+    for (auto &v : A_host) {
       v = f32_to_f16(dist(rng));
-    for (auto &v : B_host)
+    }
+    for (auto &v : B_host) {
       v = f32_to_f16(dist(rng));
+    }
 
     hsa_memory_copy(A_dev, A_host.data(), ab_size);
     hsa_memory_copy(B_dev, B_host.data(), ab_size);
@@ -467,10 +482,13 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
     ASSERT_EQ(hsa_memory_copy(C_dev, c_zero_bytes.data(), c_size), HSA_STATUS_SUCCESS);
 
     std::vector<float> C_golden(M * N, 0.0f);
-    for (uint32_t i = 0; i < M; ++i)
-      for (uint32_t j = 0; j < N; ++j)
-        for (uint32_t k = 0; k < K; ++k)
+    for (uint32_t i = 0; i < M; ++i) {
+      for (uint32_t j = 0; j < N; ++j) {
+        for (uint32_t k = 0; k < K; ++k) {
           C_golden[i * N + j] += f16_to_f32(A_host[i * K + k]) * f16_to_f32(B_host[k * N + j]);
+        }
+      }
+    }
 
     // Dispatch.
     uint64_t write_idx = hsa_queue_add_write_index_relaxed(queue, 1);
@@ -507,8 +525,9 @@ TEST(HsaTranslateTest, TranslateAndDispatchMfma16x16) {
       float expected = C_golden[i];
       float got = C_result[i];
       float tol = std::max(0.01f * std::abs(expected), 0.001f);
-      if (std::abs(got - expected) > tol)
+      if (std::abs(got - expected) > tol) {
         ++mismatches;
+      }
     }
 
     if (mismatches > 0) {

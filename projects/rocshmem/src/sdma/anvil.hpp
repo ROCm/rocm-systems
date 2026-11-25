@@ -81,11 +81,17 @@ class SdmaQueue {
   // Status of the queue-creation attempt, so the caller can tell an exhausted queue budget
   // (NO_MEMORY) apart from other failures.
   HSAKMT_STATUS createStatus() const;
+  uint32_t engineId() const { return engineId_; }
+  // How the engine was chosen. RCCL's AnvilEngineChoice test checks it against the mask HSA
+  // reported; rocSHMEM's own tests do not create SDMA queues.
+  const EngineSelection& selection() const { return selection_; }
 
  private:
   bool valid_{false};
   HSAKMT_STATUS createStatus_{HSAKMT_STATUS_ERROR};
   int remoteDeviceId_{-1};
+  uint32_t engineId_{0};
+  EngineSelection selection_;
   uint64_t* cachedWptr_{nullptr};
   uint64_t* committedWptr_{nullptr};
   void* queueBuffer_{nullptr};
@@ -121,8 +127,18 @@ class AnvilLib {
   // and a fully abandoned create must bring it back to where it started.
   uint32_t queuesUsed() const { return queuesUsedTotal_; }
   SdmaQueue* getSdmaQueue(int srcDeviceId, int dstDeviceId, int channel_idx = 0);
+  // `vec` is the channel list the queue is stored in: the local-device map or the remote-peer map.
+  SdmaQueue* createSdmaQueue(std::vector<std::unique_ptr<SdmaQueue>>& vec, int srcDeviceId,
+                             int dstDeviceId, uint32_t engineId, const EngineSelection& selection,
+                             int* channelIdx = nullptr);
   SdmaQueue* createSdmaQueue(int srcDeviceId, int dstDeviceId, uint32_t engineId,
                              const EngineSelection& selection, int* channelIdx = nullptr);
+  // Queues for an off-host peer, keyed by peerKey so they never share a ring with a local peer.
+  bool connectRemotePeer(int srcDeviceId, uint64_t peerKey, int numChannels = 1);
+  SdmaQueue* getRemotePeerQueue(uint64_t peerKey, int channel_idx = 0);
+  void disconnectRemotePeer(uint64_t peerKey);
+  // This process's queues per engine, across both maps. Empty when the engine total is unknown.
+  std::vector<uint32_t> queuesPerEngine() const;
 
  private:
   /*
@@ -170,6 +186,8 @@ class AnvilLib {
   void querySdmaEngineCounts();
   // Pop `vec` back to `keep` entries, crediting each popped queue to the budget.
   void releaseQueues(std::vector<std::unique_ptr<SdmaQueue>>& vec, size_t keep);
+  // `peerKey` is set for a remote-peer connect and null for a local one.
+  void reportQueueBudget(uint32_t used, int numChannels, const uint64_t* peerKey = nullptr) const;
   int getOamId(int deviceId);
   int getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId);
   // Chooses an engine for the pair and records why, so the caller can hand the same record to
@@ -179,6 +197,7 @@ class AnvilLib {
   std::once_flag init_flag;
   std::vector<hsa_agent_t> gpuAgentsByHipDev_;
   std::unordered_map<int, std::vector<std::unique_ptr<SdmaQueue>>> sdma_channels_;
+  std::unordered_map<uint64_t, std::vector<std::unique_ptr<SdmaQueue>>> remote_peer_channels_;
 };
 
 extern AnvilLib& anvil;

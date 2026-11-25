@@ -6,6 +6,7 @@
 
 #include "rocjitsu/base/api.h"
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "simdojo/components/memory_interface.h"
 #include "util/bit.h"
 
@@ -21,21 +22,21 @@ namespace amdgpu {
 
 /// \NPI Review allocation and addressable granules for each new ISA.
 /// Physical workgroup allocations are rounded separately from the kernel descriptor encoding.
-constexpr uint32_t lds_allocation_granule(rj_code_arch_t arch) {
+constexpr uint32_t lds_allocation_granule(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Rdna1:
     return 512;
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
     return 1024;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return 1280;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     return 2048;
   default:
     // Legacy fallback for architectures without an AMDGPU ISA profile.
@@ -43,17 +44,18 @@ constexpr uint32_t lds_allocation_granule(rj_code_arch_t arch) {
   }
 }
 
-constexpr uint64_t lds_allocation_bytes(rj_code_arch_t arch, uint32_t requested) {
+constexpr uint64_t lds_allocation_bytes(rocjitsu::IsaFamily arch, uint32_t requested) {
   const uint64_t granule = lds_allocation_granule(arch);
   return (uint64_t{requested} + granule - 1) / granule * granule;
 }
 
 /// Size visible to DS and FLAT-LDS instructions, in bytes.
-constexpr uint64_t lds_workgroup_window_bytes(rj_code_arch_t arch, uint32_t requested) {
+constexpr uint64_t lds_workgroup_window_bytes(rocjitsu::IsaFamily arch, uint32_t requested) {
   // GFX11 and GFX12 place workgroups on 1 KiB boundaries but program LDS_SIZE in 512-byte units.
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+      arch == rocjitsu::IsaFamily::Rdna4) {
     return util::align_up(uint64_t{requested}, uint64_t{512});
+  }
   // RDNA2 ISA §3.6.6 restricts accesses to the allocated 256-DWORD blocks.
   // LDS_SIZE encoding and HWREG reporting units do not reduce this window.
   return lds_allocation_bytes(arch, requested);
@@ -89,23 +91,26 @@ public:
 
   /// @brief Read a single byte from LDS. OOB returns 0.
   uint8_t read8(uint32_t addr) const {
-    if (addr >= capacity_bytes_ || addr >= data_.size())
+    if (addr >= capacity_bytes_ || addr >= data_.size()) {
       return 0;
+    }
     return data_[addr];
   }
 
   /// @brief Write a single byte to LDS. OOB writes are dropped.
   void write8(uint32_t addr, uint8_t val) {
-    if (addr >= capacity_bytes_)
+    if (addr >= capacity_bytes_) {
       return;
+    }
     ensure_materialized(static_cast<size_t>(addr) + 1);
     data_[addr] = val;
   }
 
   /// @brief Read 16 bits (little-endian) from LDS. OOB returns 0.
   uint16_t read16(uint32_t addr) const {
-    if (!contains(addr, 2))
+    if (!contains(addr, 2)) {
       return 0;
+    }
     uint16_t val = 0;
     read_backing(addr, reinterpret_cast<uint8_t *>(&val), sizeof(val));
     return val;
@@ -113,15 +118,17 @@ public:
 
   /// @brief Write 16 bits (little-endian) to LDS. OOB writes are dropped.
   void write16(uint32_t addr, uint16_t val) {
-    if (!contains(addr, 2))
+    if (!contains(addr, 2)) {
       return;
+    }
     write_backing(addr, reinterpret_cast<const uint8_t *>(&val), sizeof(val));
   }
 
   /// @brief Read 32 bits (little-endian) from LDS. OOB returns 0.
   uint32_t read32(uint32_t addr) const {
-    if (!contains(addr, 4))
+    if (!contains(addr, 4)) {
       return 0;
+    }
     uint32_t val = 0;
     read_backing(addr, reinterpret_cast<uint8_t *>(&val), sizeof(val));
     return val;
@@ -129,15 +136,17 @@ public:
 
   /// @brief Write 32 bits (little-endian) to LDS. OOB writes are dropped.
   void write32(uint32_t addr, uint32_t val) {
-    if (!contains(addr, 4))
+    if (!contains(addr, 4)) {
       return;
+    }
     write_backing(addr, reinterpret_cast<const uint8_t *>(&val), sizeof(val));
   }
 
   /// @brief Read 64 bits (little-endian) from LDS. OOB returns 0.
   uint64_t read64(uint32_t addr) const {
-    if (!contains(addr, 8))
+    if (!contains(addr, 8)) {
       return 0;
+    }
     uint64_t val = 0;
     read_backing(addr, reinterpret_cast<uint8_t *>(&val), sizeof(val));
     return val;
@@ -145,15 +154,17 @@ public:
 
   /// @brief Write 64 bits (little-endian) to LDS. OOB writes are dropped.
   void write64(uint32_t addr, uint64_t val) {
-    if (!contains(addr, 8))
+    if (!contains(addr, 8)) {
       return;
+    }
     write_backing(addr, reinterpret_cast<const uint8_t *>(&val), sizeof(val));
   }
 
   /// @brief Bulk read of arbitrary size from LDS. OOB returns 0.
   void read(uint32_t addr, uint8_t *dst, uint32_t size) const {
-    if (size == 0)
+    if (size == 0) {
       return;
+    }
     if (!contains(addr, size)) {
       std::memset(dst, 0, size);
       return;
@@ -163,15 +174,17 @@ public:
 
   /// @brief Bulk write of arbitrary size to LDS. OOB writes are dropped.
   void write(uint32_t addr, const uint8_t *src, uint32_t size) {
-    if (size == 0 || !contains(addr, size))
+    if (size == 0 || !contains(addr, size)) {
       return;
+    }
     write_backing(addr, src, size);
   }
 
   /// @brief MemoryInterface read (truncates addr to 32-bit local address).
   void read(uint64_t addr, uint8_t *dst, uint32_t size) override {
-    if (size == 0)
+    if (size == 0) {
       return;
+    }
     auto a = static_cast<uint32_t>(addr);
     assert(contains(a, size));
     read_backing(a, dst, size);
@@ -179,8 +192,9 @@ public:
 
   /// @brief MemoryInterface write (truncates addr to 32-bit local address).
   void write(uint64_t addr, const uint8_t *src, uint32_t size) override {
-    if (size == 0)
+    if (size == 0) {
       return;
+    }
     auto a = static_cast<uint32_t>(addr);
     assert(contains(a, size));
     write_backing(a, src, size);
@@ -203,8 +217,9 @@ public:
                    uint32_t num_elems, uint8_t *dst, uint32_t base_offset = 0) {
     uint32_t stride = num_elems * elem_size;
     for (uint32_t lane = 0; lane < 64; ++lane) {
-      if (!(lane_mask & (1ULL << lane)))
+      if (!(lane_mask & (1ULL << lane))) {
         continue;
+      }
       uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
       for (uint32_t e = 0; e < num_elems; ++e) {
         uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
@@ -222,13 +237,15 @@ public:
                     uint32_t num_elems, const uint8_t *src, uint32_t base_offset = 0) {
     uint32_t stride = num_elems * elem_size;
     for (uint32_t lane = 0; lane < 64; ++lane) {
-      if (!(lane_mask & (1ULL << lane)))
+      if (!(lane_mask & (1ULL << lane))) {
         continue;
+      }
       uint64_t base = static_cast<uint64_t>(static_cast<uint32_t>(addrs[lane])) + base_offset;
       for (uint32_t e = 0; e < num_elems; ++e) {
         uint64_t ea = base + static_cast<uint64_t>(e) * elem_size;
-        if (ea + elem_size > capacity_bytes_)
+        if (ea + elem_size > capacity_bytes_) {
           continue;
+        }
         write_backing(static_cast<size_t>(ea), src + lane * stride + e * elem_size, elem_size);
       }
     }
@@ -236,23 +253,26 @@ public:
 
   /// @brief Zero all LDS contents.
   void clear() {
-    if (!data_.empty())
+    if (!data_.empty()) {
       std::memset(data_.data(), 0, data_.size());
+    }
   }
 
   /// @brief Materialize a reservation without clearing previously written bytes.
   void materialize_range(uint32_t offset, uint32_t len) {
     const size_t begin = offset;
     const size_t end = std::min(capacity_bytes_, begin + static_cast<size_t>(len));
-    if (begin < end)
+    if (begin < end) {
       ensure_materialized(end);
+    }
   }
 
   void zero_range(uint32_t offset, uint32_t len) {
     const size_t begin = offset;
     const size_t end = std::min(capacity_bytes_, begin + static_cast<size_t>(len));
-    if (begin >= end)
+    if (begin >= end) {
       return;
+    }
     ensure_materialized(end);
     std::memset(&data_[begin], 0, end - begin);
   }
@@ -287,8 +307,9 @@ private:
       copy_bytes(dst, data_.data() + begin, size);
       return;
     }
-    for (uint32_t i = 0; i < size; ++i)
+    for (uint32_t i = 0; i < size; ++i) {
       dst[i] = begin + i < data_.size() ? data_[begin + i] : 0;
+    }
   }
 
   void write_backing(size_t offset, const uint8_t *src, size_t size) {
@@ -298,8 +319,9 @@ private:
   }
 
   void ensure_materialized(size_t required) {
-    if (required > data_.size())
+    if (required > data_.size()) {
       grow_backing(required);
+    }
   }
 
   // Keep the resize out of line so GCC does not carry an old allocation's size into later stores.

@@ -407,6 +407,10 @@ struct DispatchEntry {
   bool enable_wg_id_y = false;
   bool enable_wg_id_z = false;
   bool enable_wg_info = false;
+  enum class OrderedAppend { Disabled, PerWave, PerWorkgroup };
+  OrderedAppend ordered_append = OrderedAppend::Disabled;
+  /// Number of distinct compute IDs in the ring's GDS_COMPUTE_MAX_WAVE_ID range.
+  uint32_t ordered_id_count = 4096;
   /// Enable the private-segment wave-offset SGPR at dispatch.
   bool enable_private_segment = false;
   uint8_t enable_vgpr_workitem_id = 0;
@@ -497,8 +501,9 @@ struct DispatchEntry {
   /// packet has completed", which for a fanned-out dispatch is a property of the
   /// whole grid: this XCD finishing its share says nothing about the others.
   [[nodiscard]] bool grid_fully_completed() const {
-    if (grid_completion)
+    if (grid_completion) {
       return grid_completion->grid_retired();
+    }
     return fully_completed();
   }
 
@@ -557,10 +562,12 @@ struct DispatchEntry {
     // A complete grid makes the highest active axis period a multiple of all
     // lower-axis periods, so one alignment check preserves the full rank.
     uint64_t period = cluster_size_x;
-    if (cluster_size_y > 1 || cluster_size_z > 1)
+    if (cluster_size_y > 1 || cluster_size_z > 1) {
       period = static_cast<uint64_t>(grid_wgs_x) * cluster_size_y;
-    if (cluster_size_z > 1)
+    }
+    if (cluster_size_z > 1) {
       period = static_cast<uint64_t>(grid_wgs_x) * grid_wgs_y * cluster_size_z;
+    }
     return period;
   }
 
@@ -668,10 +675,12 @@ inline constexpr uint32_t kPackedTidZShift = 20;
 [[nodiscard]] inline constexpr uint32_t pack_workitem_id(WorkitemCoord id,
                                                          uint32_t component_count) {
   uint32_t packed = id.x & kPackedTidMask;
-  if (component_count >= 1)
+  if (component_count >= 1) {
     packed |= (id.y & kPackedTidMask) << kPackedTidYShift;
-  if (component_count >= 2)
+  }
+  if (component_count >= 2) {
     packed |= (id.z & kPackedTidMask) << kPackedTidZShift;
+  }
   return packed;
 }
 
@@ -708,14 +717,16 @@ inline constexpr uint32_t kPackedTidZShift = 20;
   const uint32_t lanes = wave_size > 64 ? 64 : wave_size;
   for (uint32_t lane = 0; lane < lanes; ++lane) {
     const WorkitemCoord id = workitem_local_coord(entry, wf_index_in_wg, lane, wave_size);
-    if (id.z >= workgroup_size_z)
+    if (id.z >= workgroup_size_z) {
       continue;
+    }
     const uint64_t global_x = static_cast<uint64_t>(wg_x) * workgroup_size_x + id.x;
     const uint64_t global_y = static_cast<uint64_t>(wg_y) * workgroup_size_y + id.y;
     const uint64_t global_z = static_cast<uint64_t>(wg_z) * workgroup_size_z + id.z;
     if (global_x < entry.grid_size_x && global_y < entry.grid_size_y &&
-        global_z < entry.grid_size_z)
+        global_z < entry.grid_size_z) {
       mask |= 1ULL << lane;
+    }
   }
   return mask;
 }
@@ -832,12 +843,15 @@ struct ComputeQueueRecord : ComputeQueueConfig {
   /// of pushed entries. Callers already hold the CP's queue mutex.
   void push_entry(DispatchEntry entry) {
     ++activity_generation;
-    if (activity_generation == 0)
+    if (activity_generation == 0) {
       ++activity_generation;
-    if (accepted_entries < first_accepted_entry_kinds.size())
+    }
+    if (accepted_entries < first_accepted_entry_kinds.size()) {
       first_accepted_entry_kinds[accepted_entries] = entry.kind;
-    if (accepted_entries == 0)
+    }
+    if (accepted_entries == 0) {
       first_accepted_address_space = entry.address_space;
+    }
     entries.push_back(std::move(entry));
     ++accepted_entries;
   }

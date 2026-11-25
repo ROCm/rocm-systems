@@ -340,6 +340,7 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_kfd.cc"
     "${ROCM_SRC_DIR}/rocm_smi_kfd_data_manager.cc"
     "${ROCM_SRC_DIR}/rocm_smi_io_link.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_cpu_link.cc"
     "${ROCM_SRC_DIR}/rocm_smi_gpu_metrics.cc"
     "${ROCM_SRC_DIR}/rocm_smi_dyn_gpu_metrics.cc"
     "${ROCM_SRC_DIR}/rocm_smi.cc"
@@ -349,6 +350,7 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc"
     "${ROCM_SRC_DIR}/rocm_smi_npm.cc"
     "${ROCM_SRC_DIR}/rocm_smi_ampp.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_power_stabilization.cc"
     "${PROJECT_SOURCE_DIR}/src/amd_smi/amd_smi_test_overrides.cc" # Required for both rocm-smi & amd-smi paths
 )
 
@@ -371,6 +373,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_kfd.h"
     "${ROCM_INC_DIR}/rocm_smi_kfd_data_manager.h"
     "${ROCM_INC_DIR}/rocm_smi_io_link.h"
+    "${ROCM_INC_DIR}/rocm_smi_cpu_link.h"
     "${ROCM_INC_DIR}/rocm_smi_gpu_metrics.h"
     "${ROCM_INC_DIR}/rocm_smi_dyn_gpu_metrics.h"
     "${ROCM_INC_DIR}/rocm_smi.h"

@@ -20,6 +20,13 @@ _DRIVER_INFO = {
     "driver_name": "amdgpu",
     "driver_date": "2026/09/16 00:00",
     "driver_version": "6.19.14.31400000",
+    "driver_full_version": "6.19.14.31400000-2370381",
+    "driver_package": "amdgpu-dkms",
+}
+_NO_PACKAGE_DRIVER_INFO = {
+    **_DRIVER_INFO,
+    "driver_full_version": "6.19.14.31400000",
+    "driver_package": "N/A",
 }
 
 
@@ -52,7 +59,6 @@ def _default_interface() -> types.SimpleNamespace:
         amdsmi_get_lib_version=lambda: {"major": 27, "minor": 1, "release": 0},
         amdsmi_get_rocm_version=lambda: (True, "10.1.0"),
         amdsmi_get_processor_handles=lambda: ["gpu0"],
-        amdsmi_get_gpu_driver_info=lambda _gpu: _DRIVER_INFO,
     )
 
 
@@ -73,9 +79,14 @@ def _load_version_module(interface: types.SimpleNamespace) -> types.ModuleType:
         restore()
 
 
-def _run_version(gpu_version: bool = True, human_readable: bool = False) -> dict:
+def _run_version(
+    gpu_version: bool = True, human_readable: bool = False, driver_info: object = None
+) -> dict:
     return _run_version_with_interface(
-        _default_interface(), gpu_version=gpu_version, human_readable=human_readable
+        _default_interface(),
+        gpu_version=gpu_version,
+        human_readable=human_readable,
+        driver_info=driver_info,
     )
 
 
@@ -85,11 +96,21 @@ def _run_version_with_interface(
     human_readable: bool = False,
     driver_loaded: bool = True,
     all_drivers: bool = False,
+    driver_info: object = None,
 ) -> dict:
+    """`driver_info` is what the helper returns, or the exception it raises."""
+
+    def get_gpu_driver_info(_gpu: object) -> dict:
+        if isinstance(driver_info, Exception):
+            raise driver_info
+        return driver_info or _DRIVER_INFO
+
     module = _load_version_module(interface)
     commands = object.__new__(module.VersionCommands)
     commands.logger = _Logger(human_readable=human_readable)
-    commands.helpers = types.SimpleNamespace(is_driver_loaded=lambda _driver: driver_loaded)
+    commands.helpers = types.SimpleNamespace(
+        is_driver_loaded=lambda _driver: driver_loaded, get_gpu_driver_info=get_gpu_driver_info
+    )
     commands.group_check_printed = True
     args = types.SimpleNamespace(
         gpu_version=gpu_version, cpu_version=all_drivers, nic_version=all_drivers
@@ -104,21 +125,52 @@ class TestVersionDriverOutput(unittest.TestCase):
         if _VERSION_PATH is None or not _VERSION_PATH.is_file():
             raise unittest.SkipTest(f"amd-smi CLI version.py not found (looked in {_CLI_DIR})")
 
-    def test_json_reports_driver_version(self) -> None:
+    def test_json_reports_full_driver_version_and_package(self) -> None:
         output = _run_version()
-        self.assertEqual(output["amdgpu_version"], "6.19.14.31400000")
+        self.assertEqual(output["amdgpu_version"], "6.19.14.31400000-2370381")
+        self.assertEqual(output["amdgpu_package"], "amdgpu-dkms")
 
-    def test_human_readable_reports_driver_version(self) -> None:
+    def test_json_keeps_the_package_key_after_the_older_keys(self) -> None:
+        output = _run_version(driver_info=_NO_PACKAGE_DRIVER_INFO)
+        self.assertEqual(output["amdgpu_version"], "6.19.14.31400000")
+        self.assertEqual(output["amdgpu_package"], "N/A")
+        self.assertEqual(
+            list(output),
+            [
+                "tool",
+                "version",
+                "amdsmi_library_version",
+                "rocm_version",
+                "amdgpu_version",
+                "amd_hsmp_driver_version",
+                "nic_driver_version",
+                "amdgpu_package",
+            ],
+        )
+
+    def test_human_readable_reports_full_driver_version_and_package(self) -> None:
         stdout = io.StringIO()
         with redirect_stdout(stdout):
             _run_version(human_readable=True)
 
         line = stdout.getvalue()
-        self.assertIn("amdgpu version: 6.19.14.31400000", line)
+        self.assertIn(
+            "| amdgpu version: 6.19.14.31400000-2370381 | amdgpu package: amdgpu-dkms\n", line
+        )
+
+    def test_human_readable_hides_package_without_a_package(self) -> None:
+        stdout = io.StringIO()
+        with redirect_stdout(stdout):
+            _run_version(human_readable=True, driver_info=_NO_PACKAGE_DRIVER_INFO)
+
+        line = stdout.getvalue()
+        self.assertIn("| amdgpu version: 6.19.14.31400000\n", line)
+        self.assertNotIn("amdgpu package", line)
 
     def test_gpu_fields_are_na_when_gpu_version_is_disabled(self) -> None:
         output = _run_version(gpu_version=False)
         self.assertEqual(output["amdgpu_version"], "N/A")
+        self.assertEqual(output["amdgpu_package"], "N/A")
 
     def test_empty_gpu_list_reports_amdgpu_version_as_na(self) -> None:
         interface = _default_interface()
@@ -138,16 +190,10 @@ class TestVersionDriverOutput(unittest.TestCase):
         self.assertEqual(output["nic_driver_version"], "not loaded")
 
     def test_driver_info_failure_reports_amdgpu_version_as_na(self) -> None:
-        interface = _default_interface()
-
-        def raise_driver_info(_gpu: object) -> None:
-            raise _LibraryError("not supported")
-
-        interface.amdsmi_get_gpu_driver_info = raise_driver_info
-
-        output = _run_version_with_interface(interface)
+        output = _run_version(driver_info=_LibraryError("not supported"))
 
         self.assertEqual(output["amdgpu_version"], "N/A")
+        self.assertEqual(output["amdgpu_package"], "N/A")
 
 
 def _run_version_without_flags(loaded: set, hsmp_devices: list) -> dict:
@@ -160,6 +206,7 @@ def _run_version_without_flags(loaded: set, hsmp_devices: list) -> dict:
         is_amd_hsmp_initialized=lambda: False,
         get_devices_without_driver=lambda driver: hsmp_devices if driver == "hsmp_acpi" else [],
         get_ainic_handles=lambda: [],
+        get_gpu_driver_info=lambda _gpu: _DRIVER_INFO,
     )
     commands.group_check_printed = True
     args = types.SimpleNamespace(gpu_version=None, cpu_version=None, nic_version=None)

@@ -23,6 +23,7 @@ set(_MICRO_DDA_DEFS
   DDA_ALLTOALL_FABRIC_LL128_CC_PATH="${_MICRO_DDA_DIR}/alltoall/dda_alltoall_fabric_ll128.cu.cpp"
   DDA_ALLTOALL_IPC_CC_PATH="${_MICRO_DDA_DIR}/alltoall/dda_alltoall_ipc.cu.cpp"
   DDA_BROADCAST_FABRIC_LL_CC_PATH="${_MICRO_DDA_DIR}/broadcast/dda_broadcast_fabric_ll.cu.cpp"
+  DDA_BROADCAST_FABRIC_LL128_CC_PATH="${_MICRO_DDA_DIR}/broadcast/dda_broadcast_fabric_ll128.cu.cpp"
   DDA_IPC_GPU_BARRIER_CU_PATH="${_MICRO_DDA_DIR}/ipc/ipc_gpu_barrier.cu.cpp"
   DDA_IPC_INIT_CU_PATH="${_MICRO_DDA_DIR}/ipc/ipc_init.cu.cpp"
   DDA_IPC_MEM_HANDLER_CC_PATH="${_MICRO_DDA_DIR}/ipc/ipc_mem_handler.cc"
@@ -117,6 +118,12 @@ rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaAlltoallIpc alltoall/dda-alltoal
 rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaBroadcastFabricLl broadcast/dda-broadcast-fabric-ll-test.cc
   KERNELS
   SOURCES ${_MICRO_DDA_COLL_SOURCES})
+
+rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaBroadcastFabricLl128 broadcast/dda-broadcast-fabric-ll128-test.cc
+  KERNELS
+  SOURCES
+    ${_MICRO_DDA_COLL_SOURCES}
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc)
 
 rccl_add_dda_micro_binary(rccl-UnitTestsMicroDdaReduceScatterFabric reduce_scatter/dda-reduce-scatter-fabric-test.cc
   KERNELS

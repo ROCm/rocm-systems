@@ -21,14 +21,16 @@ namespace {
 class ScopedUnsetLdPreload {
 public:
   ScopedUnsetLdPreload() {
-    if (const char *value = std::getenv("LD_PRELOAD"))
+    if (const char *value = std::getenv("LD_PRELOAD")) {
       original_value_ = value;
+    }
     unset_result_ = unsetenv("LD_PRELOAD");
   }
 
   ~ScopedUnsetLdPreload() {
-    if (original_value_)
+    if (original_value_) {
       setenv("LD_PRELOAD", original_value_->c_str(), 1);
+    }
   }
 
   int unset_result() const { return unset_result_; }

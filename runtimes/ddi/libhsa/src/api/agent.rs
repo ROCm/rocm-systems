@@ -12,9 +12,11 @@ use super::system::{
 use std::ffi::c_void;
 
 use crate::ffi::*;
+use crate::image::descriptor as image_descriptor;
 use crate::isa::isa_handle;
-use crate::runtime::{boundary, lock, map_error};
-use crate::{image_gfx12, platform, runtime};
+use crate::lifecycle::lock;
+use crate::platform;
+use crate::status::{boundary, map_error};
 
 /// Maximum dimensions of a kernel cluster.
 pub(crate) const KERNEL_CLUSTER_MAX_DIM: HsaAmdDim3 = HsaAmdDim3 {
@@ -100,7 +102,7 @@ pub unsafe extern "C" fn hsa_iterate_agents(callback: AgentCallback, data: *mut 
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            (runtime.cpus.len(), runtime.gpus.len())
+            (runtime.agents.cpus.len(), runtime.agents.gpus.len())
         };
         for index in 0..cpu_count {
             // SAFETY: Traversal callbacks are synchronous and data remains live.
@@ -159,10 +161,10 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
-            let policy = &runtime.gpus[index].scratch;
+            let policy = &runtime.agents.gpus[index].scratch;
             let limit = if policy.asynchronous {
                 policy
                     .async_limit
@@ -207,17 +209,17 @@ pub unsafe extern "C" fn hsa_agent_get_info(
             let Some(runtime) = guard.as_ref() else {
                 return NOT_INITIALIZED;
             };
-            if let Some(index) = runtime.cpu_index(agent) {
+            if let Some(index) = runtime.agents.cpu_index(agent) {
                 (
                     None,
                     None,
-                    runtime.cpus[index].name.clone(),
-                    runtime.cpus[index].name.clone(),
-                    runtime.cpus[index].compute_units,
-                    runtime.cpus[index].maximum_clock_mhz,
+                    runtime.agents.cpus[index].name.clone(),
+                    runtime.agents.cpus[index].name.clone(),
+                    runtime.agents.cpus[index].compute_units,
+                    runtime.agents.cpus[index].maximum_clock_mhz,
                     None,
-                    host_alloc_dmabuf_supported(runtime.gpus.len()),
-                    runtime.agent_cache_sizes(agent),
+                    host_alloc_dmabuf_supported(runtime.agents.gpus.len()),
+                    runtime.agents.agent_cache_sizes(agent),
                     0,
                     [0; 2],
                     None,
@@ -225,17 +227,22 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                     false,
                     false,
                     64,
-                    Some(runtime.cpus[index].native_node),
+                    Some(runtime.agents.cpus[index].native_node),
                     HsaAgent { handle: 0 },
                 )
-            } else if let Some(index) = runtime.gpu_index(agent) {
-                let endpoint = &runtime.gpus[index].endpoint;
-                let host_xgmi_atomics = runtime.route_from_nearest_cpu(index).is_some_and(|link| {
-                    link.kind == rocddi::topology::MemoryLinkType::Xgmi
-                        && link.coherent_support
-                        && link.atomic_support_64bit
-                });
+            } else if let Some(index) = runtime.agents.gpu_index(agent) {
+                let endpoint = &runtime.agents.gpus[index].endpoint;
+                let host_xgmi_atomics =
+                    runtime
+                        .agents
+                        .route_from_nearest_cpu(index)
+                        .is_some_and(|link| {
+                            link.kind == rocddi::topology::MemoryLinkType::Xgmi
+                                && link.coherent_support
+                                && link.atomic_support_64bit
+                        });
                 let cacheline_size = runtime
+                    .agents
                     .topology
                     .caches_for_endpoint(endpoint)
                     .filter(|cache| cache.level == 2)
@@ -248,32 +255,32 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                         | AMD_AGENT_INFO_MEMORY_AVAIL
                         | AMD_AGENT_INFO_HAS_EXPERT_SCHED_MODE
                 ) {
-                    let Some(token) = runtime.inflight.enter() else {
+                    let Some(token) = runtime.control.inflight.enter() else {
                         return OUT_OF_RESOURCES;
                     };
-                    Some((runtime.gpus[index].device.clone(), token))
+                    Some((runtime.agents.gpus[index].device.clone(), token))
                 } else {
                     None
                 };
                 (
                     Some(index),
-                    Some(runtime.gpus[index].endpoint.clone()),
-                    runtime.gpus[index].name.clone(),
-                    runtime.gpus[index].product_name().into(),
+                    Some(runtime.agents.gpus[index].endpoint.clone()),
+                    runtime.agents.gpus[index].name.clone(),
+                    runtime.agents.gpus[index].product_name().into(),
                     0,
                     0,
                     native_device,
-                    host_alloc_dmabuf_supported(runtime.gpus.len()),
-                    runtime.agent_cache_sizes(agent),
-                    runtime.gpus[index].asic_family_id(),
-                    runtime.gpus[index].hdp_flush,
-                    Some(runtime.gpus[index].persisting_l2_cache_size.clone()),
-                    runtime.gpus[index].timestamp_frequency_hz(),
-                    runtime.gpus[index].pc_sampling_supported,
+                    host_alloc_dmabuf_supported(runtime.agents.gpus.len()),
+                    runtime.agents.agent_cache_sizes(agent),
+                    runtime.agents.gpus[index].asic_family_id(),
+                    runtime.agents.gpus[index].hdp_flush,
+                    Some(runtime.agents.gpus[index].persisting_l2_cache_size.clone()),
+                    runtime.agents.gpus[index].timestamp_frequency_hz(),
+                    runtime.agents.gpus[index].pc_sampling_supported,
                     host_xgmi_atomics,
                     cacheline_size,
                     None,
-                    runtime.nearest_cpu_agent(endpoint),
+                    runtime.agents.nearest_cpu_agent(endpoint),
                 )
             } else {
                 return INVALID_AGENT;
@@ -282,7 +289,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
         let clock_counters = if attribute == AMD_AGENT_INFO_CLOCK_COUNTERS {
             native_device
                 .as_ref()
-                .map(|(device, _)| runtime::clock_counters(device))
+                .map(|(device, _)| crate::clock::clock_counters(device))
         } else {
             None
         };
@@ -304,7 +311,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
         };
         let gpu = endpoint.as_ref().and_then(|endpoint| endpoint.gpu());
         let gpu_only = gpu.is_some();
-        let image_gpu = gpu.is_some_and(image_gfx12::supported_gpu);
+        let image_gpu = gpu.is_some_and(image_descriptor::supported_gpu);
         // SAFETY: The caller supplies the storage selected by the attribute.
         if let Some(status) = unsafe { write_image_2d_limit(attribute, image_gpu, value) } {
             return status;
@@ -602,7 +609,7 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 EXT_AGENT_INFO_IMAGE_1DB_MAX_ELEMENTS => write_value(
                     value,
                     if image_gpu {
-                        image_gfx12::BUFFER_MAX_ELEMENTS
+                        image_descriptor::BUFFER_MAX_ELEMENTS
                     } else {
                         0
                     },
@@ -629,11 +636,9 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 }
                 EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT => write_value(
                     value,
-                    if image_gpu {
-                        image_gfx12::ROW_ALIGNMENT
-                    } else {
-                        0
-                    },
+                    gpu.filter(|_| image_gpu)
+                        .and_then(image_descriptor::Generation::from_gpu)
+                        .map_or(0, image_descriptor::row_pitch_alignment),
                 ),
                 EXT_AGENT_INFO_IMAGE_SUPPORT => write_value(value, image_gpu),
                 _ => INVALID_ARGUMENT,
@@ -642,10 +647,12 @@ pub unsafe extern "C" fn hsa_agent_get_info(
     })
 }
 
-/// Writes the common 2D geometry limits using the public `size_t[2]` ABI.
+/// Writes the common 2D geometry limits using `ROCr`'s `uint32_t[2]` ABI.
+/// The header describes `size_t[2]`, but `ROCr` and existing consumers use two
+/// 32-bit values. Writing wider elements corrupts those callers' output storage.
 ///
 /// # Safety
-/// For a recognized attribute, `value` must address two writable `size_t` values.
+/// For a recognized attribute, `value` must address two writable `uint32_t` values.
 unsafe fn write_image_2d_limit(
     attribute: u32,
     image_gpu: bool,
@@ -657,7 +664,7 @@ unsafe fn write_image_2d_limit(
         | EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS
         | EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS => {
             if image_gpu {
-                [16_384_usize; 2]
+                [16_384_u32; 2]
             } else {
                 [0; 2]
             }
@@ -692,16 +699,16 @@ pub unsafe extern "C" fn hsa_amd_agent_set_attribute(
             if value.is_null() {
                 return INVALID_ARGUMENT;
             }
-            let Some(index) = runtime.gpu_index(agent) else {
+            let Some(index) = runtime.agents.gpu_index(agent) else {
                 return INVALID_AGENT;
             };
             if attribute != AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE {
                 return INVALID_ARGUMENT;
             }
-            let Some(token) = runtime.inflight.enter() else {
+            let Some(token) = runtime.control.inflight.enter() else {
                 return OUT_OF_RESOURCES;
             };
-            let gpu = &runtime.gpus[index];
+            let gpu = &runtime.agents.gpus[index];
             (
                 gpu.device.clone(),
                 gpu.info().persisting_l2_cache_size_max,
@@ -760,7 +767,7 @@ pub unsafe extern "C" fn hsa_agent_get_exception_policies(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
         // SAFETY: The caller supplied writable output storage.
@@ -796,13 +803,13 @@ pub unsafe extern "C" fn hsa_agent_extension_supported(
         }
         // ROCr clears the result before validating the agent handle.
         unsafe { result.write(false) };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
-        let gpu_index = runtime.gpu_index(agent);
+        let gpu_index = runtime.agents.gpu_index(agent);
         let supported_gpu = gpu_index.is_some_and(|index| match extension {
-            EXTENSION_IMAGES => image_gfx12::supported_gpu(&runtime.gpus[index].info()),
-            EXTENSION_AMD_PC_SAMPLING => runtime.gpus[index].pc_sampling_supported,
+            EXTENSION_IMAGES => image_descriptor::supported_gpu(&runtime.agents.gpus[index].info()),
+            EXTENSION_AMD_PC_SAMPLING => runtime.agents.gpus[index].pc_sampling_supported,
             _ => true,
         });
         let supported = legacy_agent_extension_supported(
@@ -845,13 +852,13 @@ pub unsafe extern "C" fn hsa_agent_major_extension_supported(
         }
         // ROCr clears the result before validating the agent handle.
         unsafe { result.write(false) };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
-        let gpu_index = runtime.gpu_index(agent);
+        let gpu_index = runtime.agents.gpu_index(agent);
         let supported_gpu = gpu_index.is_some_and(|index| match extension {
-            EXTENSION_IMAGES => image_gfx12::supported_gpu(&runtime.gpus[index].info()),
-            EXTENSION_AMD_PC_SAMPLING => runtime.gpus[index].pc_sampling_supported,
+            EXTENSION_IMAGES => image_descriptor::supported_gpu(&runtime.agents.gpus[index].info()),
+            EXTENSION_AMD_PC_SAMPLING => runtime.agents.gpus[index].pc_sampling_supported,
             _ => true,
         });
         let supported = major_agent_extension_supported(extension, supported_gpu, version_major);
@@ -876,6 +883,13 @@ mod tests {
 
     #[test]
     fn image_2d_limits_match_the_abi_and_supported_depth_extents() {
+        #[repr(C)]
+        struct GuardedLimits {
+            before: u64,
+            values: [u32; 2],
+            after: u64,
+        }
+
         for (attribute, geometry) in [
             (EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS, 1),
             (EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS, 4),
@@ -883,16 +897,30 @@ mod tests {
             (EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS, 7),
         ] {
             for supported in [false, true] {
-                let mut storage = [usize::MAX; 4];
-                // SAFETY: The middle two entries have the public output type.
+                let mut storage = GuardedLimits {
+                    before: u64::MAX,
+                    values: [u32::MAX; 2],
+                    after: u64::MAX,
+                };
+                let storage_ptr = &raw mut storage;
+                // SAFETY: The two entries have ROCr's output type. The trailing
+                // guard also contains an erroneous wider write within this object.
                 assert_eq!(
                     unsafe {
-                        write_image_2d_limit(attribute, supported, storage[1..].as_mut_ptr().cast())
+                        write_image_2d_limit(
+                            attribute,
+                            supported,
+                            storage_ptr
+                                .byte_add(std::mem::offset_of!(GuardedLimits, values))
+                                .cast(),
+                        )
                     },
                     Some(SUCCESS)
                 );
                 let expected = if supported { 16_384 } else { 0 };
-                assert_eq!(storage, [usize::MAX, expected, expected, usize::MAX]);
+                assert_eq!(storage.before, u64::MAX);
+                assert_eq!(storage.values, [expected; 2]);
+                assert_eq!(storage.after, u64::MAX);
                 if !supported || geometry < 6 {
                     continue;
                 }
@@ -901,17 +929,20 @@ mod tests {
                         channel_order: 18,
                         channel_type,
                     };
-                    assert_eq!(image_gfx12::access_capabilities(geometry, image_format), 3);
-                    let format = image_gfx12::format(image_format).unwrap();
+                    assert_eq!(
+                        image_descriptor::access_capabilities(geometry, image_format),
+                        3
+                    );
+                    let format = image_descriptor::format(image_format).unwrap();
                     let descriptor = HsaExtImageDescriptor {
                         geometry,
-                        width: storage[1],
-                        height: storage[2],
+                        width: storage.values[0] as usize,
+                        height: storage.values[1] as usize,
                         depth: 0,
                         array_size: usize::from(geometry == 7),
                         format: image_format,
                     };
-                    assert!(image_gfx12::layout(descriptor, format, 0, 0).is_ok());
+                    assert!(image_descriptor::layout(descriptor, format, 0, 0).is_ok());
                     for oversized in [
                         HsaExtImageDescriptor {
                             width: descriptor.width + 1,
@@ -923,7 +954,7 @@ mod tests {
                         },
                     ] {
                         assert!(matches!(
-                            image_gfx12::layout(oversized, format, 0, 0),
+                            image_descriptor::layout(oversized, format, 0, 0),
                             Err(IMAGE_SIZE_UNSUPPORTED)
                         ));
                     }

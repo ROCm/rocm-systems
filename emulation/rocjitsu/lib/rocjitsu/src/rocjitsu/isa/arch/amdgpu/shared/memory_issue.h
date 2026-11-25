@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <array>
 #include <cassert>
@@ -19,17 +20,17 @@ namespace rocjitsu::amdgpu {
 /// for every generic FLAT, even when all requesting lanes resolve to one space.
 /// CDNA1–4 use address-domain participation as an unverified model. CDNA3/4
 /// ISA section 10.2 describes joint VM and LGKM completion.
-[[nodiscard]] constexpr bool flat_issues_both_counter_domains(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+[[nodiscard]] constexpr bool flat_issues_both_counter_domains(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
 /// With the GFX10/GFX11 wait counters, each generic FLAT result needs both
 /// domains. Split-counter targets can establish completion per lane and space.
-[[nodiscard]] constexpr bool flat_requires_both_counters(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
+[[nodiscard]] constexpr bool flat_requires_both_counters(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5;
 }
 
 /// @brief Completion ordering associated with an AMDGPU memory issue.
@@ -128,19 +129,22 @@ struct MemoryIssueInfo {
   [[nodiscard]] MemoryIssueInfo for_flat_memory_domains(bool vmem, bool lds) const {
     MemoryIssueInfo result;
     result.exec_masked = exec_masked;
+    result.counts_with_empty_exec = counts_with_empty_exec;
     for (const auto obligation : counter_obligations()) {
       switch (obligation.wait_counter_type()) {
       case WaitCounterType::VMCNT:
       case WaitCounterType::VSCNT:
       case WaitCounterType::LOADCNT:
       case WaitCounterType::STORECNT:
-        if (!vmem)
+        if (!vmem) {
           continue;
+        }
         break;
       case WaitCounterType::LGKMCNT:
       case WaitCounterType::DSCNT:
-        if (!lds)
+        if (!lds) {
           continue;
+        }
         break;
       default:
         break;
@@ -153,6 +157,8 @@ struct MemoryIssueInfo {
   std::array<MemoryCounterObligation, MAX_COUNTER_OBLIGATIONS> counter_obligations_{};
   uint8_t num_counter_obligations_ = 0;
   bool exec_masked = true;
+  /// Count this instruction even when its EXEC-controlled data lanes are empty.
+  bool counts_with_empty_exec = false;
 };
 
 } // namespace rocjitsu::amdgpu

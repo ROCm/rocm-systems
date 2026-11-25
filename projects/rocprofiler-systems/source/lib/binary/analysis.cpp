@@ -14,11 +14,11 @@
 #include "analysis.hpp"
 #include "binary_info.hpp"
 #include "common/path.hpp"
+#include "common/spin_mutex.hpp"
 #include "core/binary/address_range.hpp"
 #include "core/binary/fwd.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
-#include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/utility.hpp"
 #include "dwarf_entry.hpp"
@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <dlfcn.h>
+#include <mutex>
 #include <regex>
 #include <set>
 #include <stdexcept>
@@ -210,7 +211,7 @@ std::optional<tim::unwind::processed_entry>
 lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
                     tim::unwind::cache* _cache_p)
 {
-    static auto _mutex     = locking::atomic_mutex{};
+    static auto s_mutex    = spin_mutex{};
     static auto _cache_v   = tim::unwind::cache{ true };
     static auto _context_v = []() {
         auto _v = unw_context_t{};
@@ -265,7 +266,7 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
         return std::optional<tim::unwind::processed_entry>{};
     }
 
-    auto _lk = locking::atomic_lock{ _mutex, std::defer_lock };
+    auto lock = std::unique_lock{ s_mutex, std::defer_lock };
 
     if(!_context_p)
     {
@@ -275,7 +276,7 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
     {
         _cache_p = &_cache_v;
         // prevent concurrent access to cache
-        _lk.lock();
+        lock.lock();
     }
 
     auto const _entry = tim::unwind::entry{ _addr };

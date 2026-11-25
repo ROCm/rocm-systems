@@ -1,5 +1,11 @@
 # hipFile Development Utilities
 
+## check-iwyu.sh
+
+Checks the include-what-you-use runs that `iwyu-wrapper.sh` recorded. Fails
+if IWYU didn't run or any run failed, and lists the files IWYU suggests
+changing without failing on them. Used by CI.
+
 ## check-profiler-abi.sh
 
 Compile-only guard that the hipFile dispatch-table ABI still satisfies the
@@ -24,6 +30,12 @@ Determines if important files changed. Used by CI.
 
 Formats applicable source in the repo using a specific version
 of `clang-format`. Run it from the root.
+
+## iwyu-wrapper.sh
+
+Runs include-what-you-use for CMake and records each run's command, output,
+and exit status for `check-iwyu.sh`, since CMake ignores IWYU's failures.
+Used by CI.
 
 ## llvm-coverage.sh
 

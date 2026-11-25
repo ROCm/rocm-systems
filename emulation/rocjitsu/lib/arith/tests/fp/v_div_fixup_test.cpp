@@ -4,6 +4,7 @@
 // Tests for division fixup, exceptional operands, and FP-status expectations.
 
 #include "fp/div_fixup_test.h"
+#include "fp/div_omod_gfx11_test.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
@@ -192,8 +193,8 @@ TEST(FpDivFixupGfx11, UnsupportedStatusBeforeOperandAccess) {
   }
 }
 
-// Active RDNA3 FP16 OMOD resolves Compatibility to loose; strict rejection is transactional,
-// including empty EXEC. IEEE clear keeps the selected sNaN under OMOD.
+// Active RDNA3 FP16 OMOD runs the shared model in Compatibility and strict exact; mode 3 rejection
+// is transactional, including empty EXEC. IEEE clear keeps the selected sNaN under OMOD.
 TEST(FpDivFixupF16, Rdna3OmodQualification) {
   using namespace rocjitsu::arith::test;
   for (uint64_t cpu : supported_cpu_levels()) {
@@ -207,8 +208,6 @@ TEST(FpDivFixupF16, Rdna3OmodQualification) {
       const uint64_t flags = cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
       const int expected = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
                                ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
-                           : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                               ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
                                : RJ_ARITH_SUCCESS;
       uint32_t status = 0x40;
       for (bool wide : {false, true}) {
@@ -290,6 +289,121 @@ TEST(FpDivFixupF16Gfx12, OmodOverflowRounding) {
   }
 }
 
+// Compare inherited CDNA policies across CPUs, with literal NaN/status witnesses.
+template <int Width, int Lanes, bool Older, typename Call> static void check_cdna_fixup(Call call) {
+  using namespace rocjitsu::arith::test;
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  const auto input = make_fp_inputs<Width, Lanes>();
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (int sample = 0; sample < 64; ++sample) {
+      constexpr uint64_t semantics[] = {RJ_ARITH_SEMANTICS_LOOSE,
+                                        RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+                                        RJ_ARITH_SEMANTICS_COMPATIBILITY};
+      uint64_t flags = semantics[sample % 3] | (uint64_t(sample & 3) << 24) |
+                       (sample & 4 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0) |
+                       (sample & 8 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0) |
+                       (sample & 16 ? RJ_ARITH_FP_IEEE_MODE : 0);
+      if (Older && (sample & 32)) {
+        flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;
+      }
+      uint64_t mode = uint64_t((sample >> 2) & 3) * RJ_ARITH_ALU_OMOD_2 |
+                      (sample & 32 ? RJ_ARITH_ALU_CLAMP : 0) |
+                      (sample & 16 ? RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_ABS_C : 0);
+      if constexpr (Width == 16) {
+        flags |= sample & 16 ? RJ_ARITH_FP16_OVFL : 0;
+        mode |= sample & 1 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_C | RJ_ARITH_ALU_HIGH_D : 0;
+      }
+      const Mask exec_mask = Mask(0xaaaaaaaaaaaaaaaaULL) | 1;
+      const int destination = sample & 1 ? 0 : 6;
+      auto expected = input, actual = input;
+      uint32_t expected_status = 0x40, status = 0x40;
+      ASSERT_EQ(call(flags, exec_mask, mode, expected.v + destination, expected.v, expected.v + 2,
+                     expected.v + 4, &expected_status),
+                0);
+      ASSERT_EQ(call(flags | cpu, exec_mask, mode, actual.v + destination, actual.v, actual.v + 2,
+                     actual.v + 4, &status),
+                0);
+      EXPECT_EQ(status, expected_status);
+      actual.expect_preserved(input, destination, Width == 64 ? 2 : 1);
+      for (int reg = 0; reg < (Width == 64 ? 2 : 1); ++reg) {
+        for (int lane = 0; lane < Lanes; ++lane) {
+          EXPECT_EQ(actual.v[destination + reg][lane], expected.v[destination + reg][lane]);
+        }
+      }
+    }
+    constexpr uint64_t one = Width == 16   ? 0x3c00ULL
+                             : Width == 32 ? 0x3f800000ULL
+                                           : 0x3ff0000000000000ULL;
+    constexpr uint64_t inf = Width == 16   ? 0x7c00ULL
+                             : Width == 32 ? 0x7f800000ULL
+                                           : 0x7ff0000000000000ULL;
+    constexpr uint64_t quiet = Width == 16   ? 0x200ULL
+                               : Width == 32 ? 0x400000ULL
+                                             : 0x8000000000000ULL;
+    Registers<8, Lanes> r;
+    write_fp(r.v, 0, Width, one);
+    write_fp(r.v + 2, 0, Width, one);
+    write_fp(r.v + 4, 0, Width, inf | 1);
+    uint32_t status = 0x40;
+    ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, Mask(1), 0, r.v + 6, r.v, r.v + 2,
+                   r.v + 4, &status),
+              0);
+    EXPECT_EQ(read_fp(r.v + 6, 0, Width), inf | quiet | 1);
+    EXPECT_EQ(status, 0x40U | (Width == 16 ? 0 : RJ_ARITH_EXCEPTION_INVALID));
+    // Legacy CDNA retains a denormal cause alongside sNaN, including under CLAMP.
+    // Input flushing removes only the denormal cause before classification.
+    write_fp(r.v + 2, 0, Width, 1);
+    for (bool flush : {false, true}) {
+      status = 0x40;
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                         (flush ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0),
+                     Mask(1), RJ_ARITH_ALU_CLAMP, r.v + 6, r.v, r.v + 2, r.v + 4, &status),
+                0);
+      EXPECT_EQ(read_fp(r.v + 6, 0, Width), 0U);
+      EXPECT_EQ(status, 0x40U | (Width == 16 ? 0
+                                             : RJ_ARITH_EXCEPTION_INVALID |
+                                                   (flush ? 0 : RJ_ARITH_EXCEPTION_INPUT_DENORM)));
+    }
+    write_fp(r.v + 2, 0, Width, 0);
+    write_fp(r.v + 4, 0, Width, one);
+    status = 0x40;
+    ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, Mask(1), RJ_ARITH_ALU_CLAMP, r.v + 6,
+                   r.v, r.v + 2, r.v + 4, &status),
+              0);
+    EXPECT_EQ(read_fp(r.v + 6, 0, Width), one);
+    EXPECT_EQ(status, 0x40U | (Width == 16 ? 0 : RJ_ARITH_EXCEPTION_FLOAT_DIV0));
+    // Directed overflow recovery chooses max-finite for positive RTZ/RTN.
+    for (unsigned rounding = 0; rounding < 4; ++rounding) {
+      write_fp(r.v, 0, Width, inf);
+      write_fp(r.v + 2, 0, Width, one);
+      write_fp(r.v + 4, 0, Width, one);
+      const auto flags = cpu | RJ_ARITH_SEMANTICS_LOOSE | (uint64_t(rounding) << 24);
+      ASSERT_EQ(call(flags, Mask(1), 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr), 0);
+      EXPECT_EQ(read_fp(r.v + 6, 0, Width), rounding < 2 ? inf : inf - 1);
+      if constexpr (Width == 16) {
+        // Directed rounding uses scalar packing, including its input-flush policy.
+        write_fp(r.v, 0, Width, one);
+        write_fp(r.v + 2, 0, Width, 1);
+        ASSERT_EQ(call(flags | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, Mask(1), 0, r.v + 6, r.v, r.v + 2,
+                       r.v + 4, nullptr),
+                  0);
+        EXPECT_EQ(read_fp(r.v + 6, 0, Width), inf);
+      }
+      if constexpr (Width != 16) {
+        // The exponent-gap recovery is below half the smallest subnormal.
+        write_fp(r.v, 0, Width, one);
+        write_fp(r.v + 2, 0, Width, inf - 1);
+        write_fp(r.v + 4, 0, Width, 1);
+        ASSERT_EQ(call(flags, Mask(1), 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr), 0);
+        EXPECT_EQ(read_fp(r.v + 6, 0, Width), rounding == 1 ? 1U : 0U);
+      }
+    }
+  }
+  EXPECT_EQ(call(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, Mask(0), 0, nullptr, nullptr, nullptr,
+                 nullptr, nullptr),
+            RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+}
+
 // gfx1100 IEEE=0 capture (hw1100-noieee) lanes at their MODE. FP16_OVFL saturates the
 // recovered overflow before OMOD; OMOD scales the flushed result and then flushes to signed
 // zero; IEEE clear keeps a selected sNaN under OMOD. The MODE 0x0c and 0x04 rows are separate
@@ -348,4 +462,159 @@ TEST(FpDivFixupF16Gfx11, CapturedOverflowOmodAndNan) {
       }
     }
   }
+}
+
+TEST(CdnaDivFixup, Arithmetic) {
+  check_cdna_fixup<16, 32, true>(rj_arith_v_div_fixup_f16_w32_gfx942);
+  check_cdna_fixup<16, 64, true>(rj_arith_v_div_fixup_f16_w64_gfx942);
+  check_cdna_fixup<32, 32, true>(rj_arith_v_div_fixup_f32_w32_gfx942);
+  check_cdna_fixup<32, 64, true>(rj_arith_v_div_fixup_f32_w64_gfx942);
+  check_cdna_fixup<64, 32, true>(rj_arith_v_div_fixup_f64_w32_gfx942);
+  check_cdna_fixup<64, 64, true>(rj_arith_v_div_fixup_f64_w64_gfx942);
+  check_cdna_fixup<16, 32, false>(rj_arith_v_div_fixup_f16_w32_gfx1250);
+  check_cdna_fixup<32, 32, false>(rj_arith_v_div_fixup_f32_w32_gfx1250);
+  check_cdna_fixup<64, 32, false>(rj_arith_v_div_fixup_f64_w32_gfx1250);
+}
+
+// Legacy names share the inherited CDNA numerical and API contract.
+TEST(CdnaDivFixup, LegacyHalf) {
+  check_cdna_fixup<16, 32, true>(rj_arith_v_div_fixup_legacy_f16_w32);
+  check_cdna_fixup<16, 64, true>(rj_arith_v_div_fixup_legacy_f16_w64);
+}
+
+// The inherited CDNA output order differs from RDNA's signed-underflow stage.
+TEST(CdnaDivFixup, HalfOutputOrder) {
+  using namespace rocjitsu::arith::test;
+  struct Case {
+    uint32_t p, c, omod, expected;
+    uint64_t flags;
+  };
+  const Case cases[] = {
+      {0x8400, 0xbc00, RJ_ARITH_ALU_OMOD_HALF, 0, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS},
+      {0x7bff, 0x3c00, RJ_ARITH_ALU_OMOD_2, 0x7c00,
+       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_ZERO},
+      {0x7c00, 0x3c00, 0, 0x7c00, RJ_ARITH_FP16_OVFL},
+      {0x7bff, 0x3c00, RJ_ARITH_ALU_OMOD_2, 0x7bff,
+       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP16_OVFL}};
+  for (auto cpu : supported_cpu_levels()) {
+    for (auto call : {rj_arith_v_div_fixup_f16_w32_gfx942, rj_arith_v_div_fixup_f16_w32_gfx1250,
+                      rj_arith_v_div_fixup_legacy_f16_w32}) {
+      for (auto test : cases) {
+        Registers<4, 32> r;
+        r.v[0][0] = test.p;
+        r.v[1][0] = 0x3c00;
+        r.v[2][0] = test.c;
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | test.flags, 1, test.omod, r.v + 3,
+                       r.v, r.v + 1, r.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[3][0] & 0xffffU, test.expected) << cpu << '/' << test.omod;
+      }
+    }
+  }
+}
+
+namespace {
+
+using rocjitsu::arith::test::DivOmodGfx11;
+
+// W7900 (gfx1100, ROCm 7.2) wave32 lanes captured on 2026-11-18 with the omod3 probe, the
+// hardware MODE word written per lane (F16 rounding in bits 3:2, F16 denormals in 7:6, DX10_CLAMP
+// bit 8, IEEE bit 9, FP16_OVFL bit 23). OMOD is active only with output denormals flushed and IEEE
+// clear. The result sign is B^C, not P's. FP16_OVFL saturates the fixed-up value before OMOD, and
+// an OMOD overflow follows the guest rounding; a denormal quotient becomes +0 before the scale,
+// the smallest normal halved keeps its sign; the selected sNaN passes through; CLAMP applies last.
+const DivOmodGfx11 omod_lanes_f16[] = {
+    {"mul2 overflow nearest", 0x100, 0x7bff, 0x3c00, 0x3c00, 0x7c00, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow round up", 0x104, 0x7bff, 0x3c00, 0x3c00, 0x7c00, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow round down", 0x108, 0x7bff, 0x3c00, 0x3c00, 0x7bff, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow toward zero", 0x10c, 0x7bff, 0x3c00, 0x3c00, 0x7bff, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow saturates with FP16_OVFL", 0x800100, 0x7bff, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow saturates with FP16_OVFL round up", 0x800104, 0x7bff, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 overflow takes the sign of B^C", 0x100, 0xfbff, 0x3c00, 0x3c00, 0x7c00,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 with input denormals allowed", 0x140, 0x7bff, 0x3c00, 0x3c00, 0x7c00,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 ignored with output denormals", 0x180, 0x7bff, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 ignored with IEEE", 0x300, 0x7bff, 0x3c00, 0x3c00, 0x7bff, RJ_ARITH_ALU_OMOD_2},
+    {"mul4 overflow nearest", 0x100, 0x7800, 0x3c00, 0x3c00, 0x7c00, RJ_ARITH_ALU_OMOD_4},
+    {"mul4 overflow toward zero", 0x10c, 0x7800, 0x3c00, 0x3c00, 0x7bff, RJ_ARITH_ALU_OMOD_4},
+    {"mul4 negative overflow nearest", 0x100, 0x7bff, 0xbc00, 0x3c00, 0xfc00, RJ_ARITH_ALU_OMOD_4},
+    {"mul4 negative ignored with output denormals", 0x180, 0x7bff, 0xbc00, 0x3c00, 0xfbff,
+     RJ_ARITH_ALU_OMOD_4},
+    {"div2 flushes the smallest normal", 0x100, 0x0400, 0x3c00, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_HALF},
+    {"div2 keeps the flushed sign of B^C", 0x100, 0x0400, 0xbc00, 0x3c00, 0x8000,
+     RJ_ARITH_ALU_OMOD_HALF},
+    {"mul2 of a negative normal", 0x100, 0x0401, 0xbc00, 0x3c00, 0x8801, RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of a denormal quotient is +0", 0x140, 0x0001, 0x3c00, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the largest denormal quotient is +0", 0x140, 0x03ff, 0x3c00, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the recovered overflow nearest", 0x100, 0x7c00, 0x3c00, 0x3c00, 0x7c00,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the recovered overflow with FP16_OVFL", 0x800100, 0x7c00, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of the recovered overflow toward zero", 0x10c, 0x7c00, 0x3c00, 0x3c00, 0x7bff,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 keeps the selected signaling NaN", 0x100, 0x3c00, 0x7c01, 0x3c00, 0x7c01,
+     RJ_ARITH_ALU_OMOD_2},
+    {"IEEE quiets the selected NaN and ignores mul2", 0x300, 0x3c00, 0x7c01, 0x3c00, 0x7e01,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 of a division by zero", 0x100, 0x3c00, 0x0000, 0x3c00, 0x7c00, RJ_ARITH_ALU_OMOD_2},
+    {"div2 of a zero numerator", 0x100, 0x3c00, 0x3c00, 0x0000, 0x0000, RJ_ARITH_ALU_OMOD_HALF},
+    {"mul2 of flushed denormal operands is NaN", 0x100, 0x0001, 0x0001, 0x0001, 0xfe00,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 with denormal operands kept", 0x140, 0x0400, 0x0001, 0x0001, 0x0800,
+     RJ_ARITH_ALU_OMOD_2},
+    {"mul2 clamp after overflow", 0x100, 0x7bff, 0x3c00, 0x3c00, 0x3c00,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp of a negative overflow", 0x100, 0x7bff, 0xbc00, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp of a NaN with DX10_CLAMP", 0x100, 0x3c00, 0x7c01, 0x3c00, 0x0000,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+    {"mul2 clamp keeps a NaN without DX10_CLAMP", 0x000, 0x3c00, 0x7c01, 0x3c00, 0x7c01,
+     RJ_ARITH_ALU_OMOD_2 | RJ_ARITH_ALU_CLAMP},
+};
+
+} // namespace
+
+// Active RDNA3 OMOD is accepted in strict exact and reproduces the W7900 lanes at every CPU level.
+TEST(FpDivFixupF16Gfx11, CapturedOutputModifiers) {
+  using rocjitsu::arith::test::check_div_fixup_f16_omod_gfx11;
+  check_div_fixup_f16_omod_gfx11<32>(rj_arith_v_div_fixup_f16_w32, omod_lanes_f16);
+  check_div_fixup_f16_omod_gfx11<64>(rj_arith_v_div_fixup_f16_w64, omod_lanes_f16);
+}
+
+// W7900 wave32 capture at MODE 0x10c (toward zero, flushed): lane 19 alone holds the largest finite
+// quotient, which mul:2 overflows to max-finite while every other lane doubles 1.0.
+template <int Lanes, typename Call> static void check_omod_overflow_lane(Call call) {
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+      Registers<4, Lanes> r;
+      for (int lane = 0; lane < Lanes; ++lane) {
+        r.v[0][lane] = lane % 32 == 19 ? 0x7bffU : 0x3c00U;
+        r.v[1][lane] = r.v[2][lane] = 0x3c00U;
+        r.v[3][lane] = 0xa5a5a5a5U;
+      }
+      ASSERT_EQ(call(cpu | semantics | RJ_ARITH_FP_ROUND_ZERO | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                         RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                     ~WaveMask<Lanes>(0), RJ_ARITH_ALU_OMOD_2, r.v + 3, r.v, r.v + 1, r.v + 2,
+                     nullptr),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < Lanes; ++lane) {
+        EXPECT_EQ(r.v[3][lane], lane % 32 == 19 ? 0xa5a57bffU : 0xa5a54000U)
+            << std::hex << cpu << '/' << semantics << " lane " << std::dec << lane;
+      }
+    }
+  }
+}
+
+TEST(FpDivFixupF16Gfx11, OmodOverflowLaneKeepsItsOperands) {
+  check_omod_overflow_lane<32>(rj_arith_v_div_fixup_f16_w32);
+  check_omod_overflow_lane<64>(rj_arith_v_div_fixup_f16_w64);
 }

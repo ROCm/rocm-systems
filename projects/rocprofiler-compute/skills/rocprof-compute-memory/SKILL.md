@@ -10,6 +10,39 @@ bandwidth, caches, or data movement directly.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
+## Before you start
+
+If `command -v rocprof-compute` finds the tool and
+`rocprof-compute analyze --debug-verify-deps` passes, skip this section.
+On ROCm 10.2, use `--verify-deps` instead of `--debug-verify-deps`.
+
+Otherwise, check that ROCm and a GPU are present:
+
+```bash
+rocminfo
+amd-smi list
+```
+
+If either command fails, ROCm is not installed or no GPU is visible. Stop and
+point the user to "Install the ROCm Core SDK" in the
+[install guide](../../docs/install/core-install.rst). Installing rocprof-compute
+alone does not help.
+
+Check the GPU against
+[compatible accelerators](../../docs/reference/compatible-accelerators.rst).
+The table lists product families, so match the `Marketing Name` that `rocminfo`
+prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
+tell the user.
+
+Then follow "Install the analyze mode dependencies" in the
+[install guide](../../docs/install/core-install.rst), which installs
+rocprof-compute in a virtual environment of its own. Use the nightly index so the
+version matches these skills. Activate that environment with
+`source <venv>/bin/activate` before you run rocprof-compute, and confirm with
+`rocprof-compute analyze --debug-verify-deps`. If the application is a Python
+script, note the full path of its Python before you activate, and run the
+script with that path.
+
 ## 1. Start with the Memory Chart
 
 ```bash

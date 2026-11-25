@@ -19,14 +19,16 @@ SNopSopp::SNopSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_NOP);
 }
 
 namespace detail {
 DecodeResult decodeSNopSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_nop", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SNopSopp>(opcode);
 }
 } // namespace detail
@@ -38,16 +40,19 @@ SSetkillSopp::SSetkillSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  if (inst_.simm16 & 1u)
+  if (inst_.simm16 & 1u) {
     flags_ |= PROGRAM_TERMINATOR;
+  }
+  set_amdgpu_operation(amdgpu::Operation::S_SETKILL);
 }
 
 namespace detail {
 DecodeResult decodeSSetkillSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_setkill", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSetkillSopp>(opcode);
 }
 } // namespace detail
@@ -60,14 +65,16 @@ SSethaltSopp::SSethaltSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SETHALT);
 }
 
 namespace detail {
 DecodeResult decodeSSethaltSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_sethalt", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSethaltSopp>(opcode);
 }
 } // namespace detail
@@ -80,14 +87,16 @@ SSleepSopp::SSleepSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SLEEP);
 }
 
 namespace detail {
 DecodeResult decodeSSleepSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_sleep", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSleepSopp>(opcode);
 }
 } // namespace detail
@@ -99,6 +108,7 @@ SSetInstPrefetchDistanceSopp::SSetInstPrefetchDistanceSopp(const MachineInst *in
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_SET_INST_PREFETCH_DISTANCE);
 }
 
 namespace detail {
@@ -107,8 +117,9 @@ DecodeResult decodeSSetInstPrefetchDistanceSopp(const MachineInst *opcode,
   Result validation =
       Sopp::validate_encoding("s_set_inst_prefetch_distance",
                               reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSetInstPrefetchDistanceSopp>(opcode);
 }
 } // namespace detail
@@ -120,14 +131,16 @@ SClauseSopp::SClauseSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_CLAUSE);
 }
 
 namespace detail {
 DecodeResult decodeSClauseSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_clause", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SClauseSopp>(opcode);
 }
 } // namespace detail
@@ -139,14 +152,16 @@ SDelayAluSopp::SDelayAluSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_DELAY_ALU);
 }
 
 namespace detail {
 DecodeResult decodeSDelayAluSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_delay_alu", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SDelayAluSopp>(opcode);
 }
 } // namespace detail
@@ -160,6 +175,7 @@ SWaitcntDepctrSopp::SWaitcntDepctrSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT_DEPCTR);
 }
 
 namespace detail {
@@ -167,8 +183,9 @@ DecodeResult decodeSWaitcntDepctrSopp(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_waitcnt_depctr", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWaitcntDepctrSopp>(opcode);
 }
 } // namespace detail
@@ -181,14 +198,16 @@ SWaitcntSopp::SWaitcntSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT);
 }
 
 namespace detail {
 DecodeResult decodeSWaitcntSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_waitcnt", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWaitcntSopp>(opcode);
 }
 } // namespace detail
@@ -199,14 +218,16 @@ SWaitIdleSopp::SWaitIdleSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_IDLE);
 }
 
 namespace detail {
 DecodeResult decodeSWaitIdleSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_wait_idle", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWaitIdleSopp>(opcode);
 }
 } // namespace detail
@@ -219,14 +240,16 @@ SWaitEventSopp::SWaitEventSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAIT_EVENT);
 }
 
 namespace detail {
 DecodeResult decodeSWaitEventSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_wait_event", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWaitEventSopp>(opcode);
 }
 } // namespace detail
@@ -240,14 +263,16 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= SOFTWARE_TRAP;
   flags_ |= WRITES_PC;
+  set_amdgpu_operation(amdgpu::Operation::S_TRAP);
 }
 
 namespace detail {
 DecodeResult decodeSTrapSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_trap", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<STrapSopp>(opcode);
 }
 } // namespace detail
@@ -259,14 +284,16 @@ SRoundModeSopp::SRoundModeSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_ROUND_MODE);
 }
 
 namespace detail {
 DecodeResult decodeSRoundModeSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_round_mode", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SRoundModeSopp>(opcode);
 }
 } // namespace detail
@@ -278,6 +305,7 @@ SDenormModeSopp::SDenormModeSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_DENORM_MODE);
 }
 
 namespace detail {
@@ -285,8 +313,9 @@ DecodeResult decodeSDenormModeSopp(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_denorm_mode", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SDenormModeSopp>(opcode);
 }
 } // namespace detail
@@ -296,14 +325,16 @@ SCodeEndSopp::SCodeEndSopp(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SCodeEndSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_CODE_END);
 }
 
 namespace detail {
 DecodeResult decodeSCodeEndSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_code_end", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCodeEndSopp>(opcode);
 }
 } // namespace detail
@@ -317,14 +348,16 @@ SBranchSopp::SBranchSopp(const MachineInst *inst)
   num_dst_ = 0;
   flags_ |= BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_BRANCH);
 }
 
 namespace detail {
 DecodeResult decodeSBranchSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_branch", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBranchSopp>(opcode);
 }
 } // namespace detail
@@ -346,6 +379,7 @@ SCbranchScc0Sopp::SCbranchScc0Sopp(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_SCC0);
 }
 
 namespace detail {
@@ -353,8 +387,9 @@ DecodeResult decodeSCbranchScc0Sopp(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_scc0", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchScc0Sopp>(opcode);
 }
 } // namespace detail
@@ -376,6 +411,7 @@ SCbranchScc1Sopp::SCbranchScc1Sopp(const MachineInst *inst)
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_SCC1);
 }
 
 namespace detail {
@@ -383,8 +419,9 @@ DecodeResult decodeSCbranchScc1Sopp(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_scc1", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchScc1Sopp>(opcode);
 }
 } // namespace detail
@@ -406,6 +443,7 @@ SCbranchVcczSopp::SCbranchVcczSopp(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_VCCZ);
 }
 
 namespace detail {
@@ -413,8 +451,9 @@ DecodeResult decodeSCbranchVcczSopp(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_vccz", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchVcczSopp>(opcode);
 }
 } // namespace detail
@@ -436,6 +475,7 @@ SCbranchVccnzSopp::SCbranchVccnzSopp(const MachineInst *inst)
   vcc.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_VCCNZ);
 }
 
 namespace detail {
@@ -443,8 +483,9 @@ DecodeResult decodeSCbranchVccnzSopp(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_vccnz", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchVccnzSopp>(opcode);
 }
 } // namespace detail
@@ -466,6 +507,7 @@ SCbranchExeczSopp::SCbranchExeczSopp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_EXECZ);
 }
 
 namespace detail {
@@ -473,8 +515,9 @@ DecodeResult decodeSCbranchExeczSopp(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_execz", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchExeczSopp>(opcode);
 }
 } // namespace detail
@@ -496,6 +539,7 @@ SCbranchExecnzSopp::SCbranchExecnzSopp(const MachineInst *inst)
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_EXECNZ);
 }
 
 namespace detail {
@@ -503,8 +547,9 @@ DecodeResult decodeSCbranchExecnzSopp(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_execnz", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchExecnzSopp>(opcode);
 }
 } // namespace detail
@@ -521,7 +566,9 @@ SCbranchCdbgsysSopp::SCbranchCdbgsysSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  flags_ |= WRITES_PC;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_CDBGSYS);
 }
 
 namespace detail {
@@ -529,11 +576,17 @@ DecodeResult decodeSCbranchCdbgsysSopp(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_cdbgsys", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchCdbgsysSopp>(opcode);
 }
 } // namespace detail
+
+std::optional<int64_t> SCbranchCdbgsysSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
 
 SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbguser", reinterpret_cast<const OpEncoding *>(inst),
@@ -542,7 +595,9 @@ SCbranchCdbguserSopp::SCbranchCdbguserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  flags_ |= WRITES_PC;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_CDBGUSER);
 }
 
 namespace detail {
@@ -550,11 +605,17 @@ DecodeResult decodeSCbranchCdbguserSopp(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_cdbguser", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchCdbguserSopp>(opcode);
 }
 } // namespace detail
+
+std::optional<int64_t> SCbranchCdbguserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
 
 SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_or_user", reinterpret_cast<const OpEncoding *>(inst),
@@ -563,7 +624,9 @@ SCbranchCdbgsysOrUserSopp::SCbranchCdbgsysOrUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  flags_ |= WRITES_PC;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_CDBGSYS_OR_USER);
 }
 
 namespace detail {
@@ -571,11 +634,17 @@ DecodeResult decodeSCbranchCdbgsysOrUserSopp(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_cdbgsys_or_user", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchCdbgsysOrUserSopp>(opcode);
 }
 } // namespace detail
+
+std::optional<int64_t> SCbranchCdbgsysOrUserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
 
 SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
     : Sopp("s_cbranch_cdbgsys_and_user", reinterpret_cast<const OpEncoding *>(inst),
@@ -584,7 +653,9 @@ SCbranchCdbgsysAndUserSopp::SCbranchCdbgsysAndUserSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
-  flags_ |= WRITES_PC;
+  flags_ |= COND_BRANCH;
+  flags_ |= IGNORES_EXEC;
+  set_amdgpu_operation(amdgpu::Operation::S_CBRANCH_CDBGSYS_AND_USER);
 }
 
 namespace detail {
@@ -592,11 +663,17 @@ DecodeResult decodeSCbranchCdbgsysAndUserSopp(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_cbranch_cdbgsys_and_user", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCbranchCdbgsysAndUserSopp>(opcode);
 }
 } // namespace detail
+
+std::optional<int64_t> SCbranchCdbgsysAndUserSopp::branch_offset_bytes() const {
+  // AMDGPU PC-relative branch immediates are signed instruction-count deltas.
+  return static_cast<int64_t>(static_cast<int16_t>(simm16.encoding_value_)) * 4;
+}
 
 SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
     : Sopp("s_endpgm", reinterpret_cast<const OpEncoding *>(inst),
@@ -604,14 +681,16 @@ SEndpgmSopp::SEndpgmSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= PROGRAM_TERMINATOR;
+  set_amdgpu_operation(amdgpu::Operation::S_ENDPGM);
 }
 
 namespace detail {
 DecodeResult decodeSEndpgmSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_endpgm", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SEndpgmSopp>(opcode);
 }
 } // namespace detail
@@ -622,6 +701,7 @@ SEndpgmSavedSopp::SEndpgmSavedSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= PROGRAM_TERMINATOR;
+  set_amdgpu_operation(amdgpu::Operation::S_ENDPGM_SAVED);
 }
 
 namespace detail {
@@ -629,8 +709,9 @@ DecodeResult decodeSEndpgmSavedSopp(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_endpgm_saved", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SEndpgmSavedSopp>(opcode);
 }
 } // namespace detail
@@ -641,6 +722,7 @@ SEndpgmOrderedPsDoneSopp::SEndpgmOrderedPsDoneSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= PROGRAM_TERMINATOR;
+  set_amdgpu_operation(amdgpu::Operation::S_ENDPGM_ORDERED_PS_DONE);
 }
 
 namespace detail {
@@ -648,8 +730,9 @@ DecodeResult decodeSEndpgmOrderedPsDoneSopp(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_endpgm_ordered_ps_done", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SEndpgmOrderedPsDoneSopp>(opcode);
 }
 } // namespace detail
@@ -659,14 +742,16 @@ SWakeupSopp::SWakeupSopp(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SWakeupSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_WAKEUP);
 }
 
 namespace detail {
 DecodeResult decodeSWakeupSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_wakeup", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWakeupSopp>(opcode);
 }
 } // namespace detail
@@ -678,14 +763,16 @@ SSetprioSopp::SSetprioSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_SETPRIO);
 }
 
 namespace detail {
 DecodeResult decodeSSetprioSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_setprio", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSetprioSopp>(opcode);
 }
 } // namespace detail
@@ -701,14 +788,16 @@ SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::S_SENDMSG);
 }
 
 namespace detail {
 DecodeResult decodeSSendmsgSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_sendmsg", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSendmsgSopp>(opcode);
 }
 } // namespace detail
@@ -725,6 +814,7 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   m0.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
   flags_ |= SUSPENDS_WAVE;
+  set_amdgpu_operation(amdgpu::Operation::S_SENDMSGHALT);
 }
 
 namespace detail {
@@ -732,8 +822,9 @@ DecodeResult decodeSSendmsghaltSopp(const MachineInst *opcode,
                                     const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_sendmsghalt", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSendmsghaltSopp>(opcode);
 }
 } // namespace detail
@@ -745,6 +836,7 @@ SIncperflevelSopp::SIncperflevelSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_INCPERFLEVEL);
 }
 
 namespace detail {
@@ -752,8 +844,9 @@ DecodeResult decodeSIncperflevelSopp(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_incperflevel", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SIncperflevelSopp>(opcode);
 }
 } // namespace detail
@@ -765,6 +858,7 @@ SDecperflevelSopp::SDecperflevelSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_DECPERFLEVEL);
 }
 
 namespace detail {
@@ -772,8 +866,9 @@ DecodeResult decodeSDecperflevelSopp(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_decperflevel", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SDecperflevelSopp>(opcode);
 }
 } // namespace detail
@@ -786,6 +881,7 @@ STtracedataSopp::STtracedataSopp(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_TTRACEDATA);
 }
 
 namespace detail {
@@ -793,8 +889,9 @@ DecodeResult decodeSTtracedataSopp(const MachineInst *opcode,
                                    const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_ttracedata", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<STtracedataSopp>(opcode);
 }
 } // namespace detail
@@ -806,6 +903,7 @@ STtracedataImmSopp::STtracedataImmSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_TTRACEDATA_IMM);
 }
 
 namespace detail {
@@ -813,8 +911,9 @@ DecodeResult decodeSTtracedataImmSopp(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_ttracedata_imm", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<STtracedataImmSopp>(opcode);
 }
 } // namespace detail
@@ -824,14 +923,16 @@ SIcacheInvSopp::SIcacheInvSopp(const MachineInst *inst)
            selected_exec_fn(InstructionExecutionId::SIcacheInvSopp)) {
   num_src_ = 0;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_ICACHE_INV);
 }
 
 namespace detail {
 DecodeResult decodeSIcacheInvSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_icache_inv", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SIcacheInvSopp>(opcode);
 }
 } // namespace detail
@@ -842,14 +943,16 @@ SBarrierSopp::SBarrierSopp(const MachineInst *inst)
   num_src_ = 0;
   num_dst_ = 0;
   flags_ |= BARRIER;
+  set_amdgpu_operation(amdgpu::Operation::S_BARRIER);
 }
 
 namespace detail {
 DecodeResult decodeSBarrierSopp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopp::validate_encoding(
       "s_barrier", reinterpret_cast<const Sopp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SBarrierSopp>(opcode);
 }
 } // namespace detail

@@ -11,7 +11,7 @@ conversion and graphics operations are not included in these percentages.
 | Instructions | Loose | Bit-exact | FP status |
 |---|---:|---:|---:|
 | Matrix (WMMA) | 100% | 100% | N/A |
-| FP arithmetic | 100% | 70% | 3% |
+| FP arithmetic | 100% | 92% | 3% |
 | Math (RCP, RSQ, SQRT, etc.) | 100% | 93% | 7% |
 | Dot products | 100% | 100% | 0% |
 
@@ -20,7 +20,7 @@ conversion and graphics operations are not included in these percentages.
 | Instructions | Loose | Bit-exact | FP status |
 |---|---:|---:|---:|
 | Matrix (WMMA, SWMMAC) | 100% | 100% | N/A |
-| FP arithmetic | 100% | 80% | 10% |
+| FP arithmetic | 100% | 94% | 10% |
 | Math (RCP, RSQ, SQRT, etc.) | 100% | 93% | 20% |
 | Dot products | 100% | 100% | 50% |
 
@@ -39,8 +39,8 @@ mode 3 succeeding on an API without that output is not FP-status coverage.
 
 | Architecture/family | Bit-exact mnemonics | FP-status mnemonics |
 |---|---:|---:|
-| RDNA3 FP | 43/62 | 2/59 |
-| RDNA4 FP | 59/78 | 11/75 |
+| RDNA3 FP | 57/62 | 2/59 |
+| RDNA4 FP | 73/78 | 11/75 |
 | RDNA3 DOT | 8/8 | 0/4 |
 | RDNA4 DOT | 12/12 | 2/4 |
 
@@ -48,6 +48,24 @@ The FP-status numerators are RDNA3 `DIV_FIXUP_F32/F64`; RDNA4 adds
 `DIV_FIXUP_F16`, `DIV_FMAS_F32/F64`, `FMA_F16`, `FMA_MIXLO/HI_F16`, `MUL_F32`,
 `PK_FMA_F16`, and `PK_FMAC_F16`. `DIV_SCALE_F32/F64` and `FMA_DX9_ZERO_F32`
 have no FP-status output and are excluded from these denominators.
+
+FP64 ADD/MUL/FMA, TRUNC/CEIL/RNDNE/FLOOR, FRACT, FREXP_MANT and FREXP_EXP, the FP16/FP32
+FRACT forms, the FP16/FP32/FP64 and normalized/packed/byte conversions, PACK_B32_F16 and
+VINTERP accept mode 2 on RDNA3 and RDNA4 since the gfx1100 and gfx1201 captures match their
+single numeric model; Compatibility resolves to mode 2 for them. The CDNA3 (`_gfx942`) FP64
+ADD/MUL/FMA/FMAC and TRUNC/CEIL/RNDNE/FLOOR/FRACT/FREXP_MANT, conversion (excluding SDWA F16
+prescaling), PACK_B32_F16 and unmodified CVT_PKACCUM_U8_F32 entry points likewise accept mode 2
+and resolve Compatibility to mode 2 against MI300X captures. The CDNA4 (`_gfx950`), gfx1250
+(`_gfx1250`) and RDNA2 (`_gfx10`) entry points of the shared conversion, PACK and FP64 kernels
+stay loose-only until their captures are reviewed per instruction.
+
+FP16 ADD/SUB/SUBREV/MUL, MULLIT and the RDNA4 V_S_EXP_F16/V_S_LOG_F16 carry their hardware
+rules (first-source NaN priority, FP16 rounding before OMOD, the RDNA3 signaling-NaN and OMOD
+gates, MULLIT's operand substitution before an exact multiply) on the exact path, so they
+accept mode 2 on RDNA3 and RDNA4 and Compatibility resolves to mode 2. Loose keeps its
+approximations and may differ from hardware on NaN selection and OMOD overflow. The gfx1250
+(`_gfx1250`) and RDNA2 (`_gfx10`) FP16 arithmetic entries and the gfx1250 MULLIT entry run the
+same rules in Compatibility but stay loose-only until their captures are reviewed.
 
 For DOT, integer instructions and FP8/BF8 DOT4 have no FP-status output and are
 excluded. RDNA4 FP32-output `DOT2_F32_F16/BF16` accepts mode 3 and leaves flags
@@ -57,14 +75,29 @@ not the ability to raise a flag on half of all DOT mnemonics.
 
 ## CDNA and gfx1250
 
+gfx1250 FP32 ADD/SUB/SUBREV use their `_gfx1250` entry points with no
+Compatibility FP causes. MUL retains inherited input-denormal/range reporting
+without adding gfx12 INVALID causes; OMOD retains its legacy cause suppression.
+Both explicit strict modes remain unqualified for these operations.
+
 ### Matrix instructions
 
-CDNA matrix support covers twenty gfx942 MFMA forms (FP16/BF16, XF32 and FP8/BF8),
-fourteen gfx950 half-input MFMA forms plus eight OCP FP8/BF8 forms, and five
-gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
+CDNA matrix support covers twenty dense and twelve sparse gfx942 MFMA/SMFMAC
+forms (FP16/BF16, dense XF32, and FNUZ FP8/BF8), fourteen dense and eight sparse
+gfx950 half-input forms plus eight dense and twelve sparse OCP FP8/BF8 forms,
+and five gfx1250 half-input WMMA forms plus sixteen FP8/BF8 K64/K128 forms.
 gfx942 FP8/BF8 uses FNUZ; gfx950 and gfx1250 use OCP.
-All have scalar, AVX2 and AVX-512-v4 implementations. Loose, allow-Loose and
-Compatibility are supported; strict bit-exact modes are not advertised.
+All have scalar, AVX2 and AVX-512-v4 approximate implementations. Loose and
+Compatibility retain those paths. The twenty dense gfx942 MFMA forms (with
+default CBSZ/ABID/BLGP and `FP16_OVFL` clear) and the twelve sparse gfx942
+`V_SMFMAC_F32_*` forms (with `FP16_OVFL` clear, across all CBSZ/ABID metadata
+selectors) support the integer empirical model contributed in #14809. Exact
+modes use that model; exact-allow-Loose falls back outside its qualified
+controls. All-negative-zero sums (+0), negative subnormal underflow to +0,
+subnormal C preservation, XF32 NaNs with payload only in bits 12:0 (truncating
+to infinity), BF16 2^128 product overflow, and subnormal BF16 product outputs
+and ties are all MI300X hardware-captured. This qualification does not extend
+to gfx950 or gfx1250, whose strict modes remain unsupported.
 Comparison and register-routing instructions also use rj-arith. Other families
 are migrating independently; an entry point's header documents its supported
 semantics and controls.
@@ -107,11 +140,171 @@ VCC/EXEC writes and trap delivery. Ordinary Compatibility comparisons remain
 numeric-only; explicit reporting qualification is unchanged. Gfx10 signaling
 policy remains in the partially migrated RDNA2 adapter until that migration.
 
+Gfx1150 floating relational predicates use scalar/AVX2/AVX-512 numeric and
+classification kernels on both waves. Compatibility preserves the inherited
+DX10_CLAMP-gated INVALID policy (CLAMP: any NaN; otherwise signaling NaNs).
+Explicit numeric modes leave FP status unused; strict status mode is unsupported.
+No new empirical hardware qualification is claimed for this inherited model.
+
 ## Scalar floating point
 
 gfx12 scalar arithmetic, comparisons, rounding and conversions use rj-arith in
 every semantics, including Compatibility. Compatibility retains the inherited
 scalar FP-status model; arithmetic and conversions still reject explicit mode 3
 where reporting is not qualified. Scalar comparisons and rounding support mode 3.
-The VM owns SGPR/SCC writes and trap delivery. gfx1150 retains its legacy scalar
-FP implementation pending migration; gfx1250 has its own documented library policy.
+The VM owns SGPR/SCC writes and trap delivery. gfx1150 and gfx1250 use the
+architecture-specific library policies documented below.
+
+## Older native FP16 FMA
+
+Gfx908/gfx90a native and legacy FMA and gfx908 fused MAC, plus gfx1010/gfx1030/
+gfx1150 FMA/FMAC and literal FMA, use the inherited gfx11 numeric model in
+Compatibility and the existing scalar/AVX2/AVX-512 paths. Source/destination
+half selection, partial EXEC, guest rounding/denormals, IEEE NaN quieting and
+round-before-OMOD remain profile-specific bindings. They do not gain new
+empirical qualification or FP-status reporting; active explicit strict decoded
+requests are rejected. Loose and allow-Loose remain supported.
+
+Gfx90a separately rounded MAD/MAC uses its own rj-arith model, described below;
+it is not folded into native FMA. Packed/mixed half arithmetic is also migrated.
+Graphics/division still have live legacy users.
+
+## gfx908 FP16 MAD
+
+Ordinary/legacy MAD and literal MADMK/MADAK reuse the existing CDNA3/4 rounded
+FP32-intermediate half-MAD model, including scalar/AVX2/AVX-512 dispatch,
+source/destination halves, output modifiers, FP16_OVFL, aliases and partial EXEC.
+This inherited approximation supports Compatibility/Loose/allow-Loose, not
+explicit bit-exact or FP-status semantics. Gfx90a's separately rounded half
+MAD/MAC remains a different model and is not enabled through these entry points.
+
+### gfx90a half MAD/MAC Compatibility
+
+MAD/MAD_LEGACY, MAC and literal MADMK/MADAK use the inherited two-half-rounding
+model in Compatibility, sharing existing scalar/AVX2/AVX-512 half MUL and ADD.
+Loose uses FP32-intermediate MAD. Guest rounding, forced intermediate flushing,
+IEEE NaN quieting, FP16_OVFL and final output modifiers are retained. This is
+software-model reuse, not new empirical qualification; strict modes reject and
+FP status is unchanged. The native half FMA migration is independent.
+
+## Older-profile integer dot products
+
+Rocjitsu routes the integer DOT2/DOT4/DOT8 forms present on gfx908, gfx90a,
+gfx1030 and gfx1150 through the existing scalar, AVX2 and AVX-512-v4 backends.
+This includes the old-destination DOTC forms where present, half selectors,
+signedness and saturation. Gfx1010 has no such integer-dot instructions.
+Floating-point DOT2 forms migrate as described below.
+
+## Older host-model floating dots
+
+gfx908, gfx90a and gfx1030 FP16-input FP32-output DOT2/DOT2C use the same
+pair-sum-then-accumulate model as gfx942, including packed source selectors,
+modifiers, destination overlap and partial EXEC. Compatibility and Loose use
+the existing scalar, AVX2 and AVX-512-v4 implementations; strict bit-exact modes
+remain unsupported. This transfers the inherited software model without new
+empirical qualification. gfx1150 uses the distinct model described below.
+The superseded HostF32 packed-dot and accumulating emitters have no remaining
+production users and are removed.
+
+## gfx1150 floating dots
+
+FP16/BF16 DOT2 with FP32 or true16 output and the FP16 DOT2ACC use the
+existing gfx11 arithmetic in both waves. Compatibility retains rocjitsu's
+integer-grid accumulation, NaN and packed narrowing policies; Loose uses
+the existing scalar, AVX2 and AVX-512 arithmetic. Packed-output Compatibility
+retains the inherited scalar grid model. Guest rounding/denormal controls
+remain ignored; FP16 overflow, inline replication, modifiers, selected
+C/D halves and DPP continue through the shared adapters. This inherits the
+existing software model, not a new gfx1150 hardware qualification. Explicit
+strict decoded modes 2 and 3 reject active VOP2, VOP3 and VOP3P requests
+without changing D; Compatibility/Loose/allow-Loose support the inherited model.
+This qualification boundary does not cover VOPD: its FP16/BF16 dual DOT2ACC
+forms retain their existing execution policy and can write both destinations
+in modes 2 and 3.
+
+The old true16-dot emitter loses its last production users and is deleted.
+Its semantic classes now route directly to the shared library binding, along
+with the migrated HostF32 packed and accumulating forms on CDNA1/2 and RDNA2.
+
+## gfx1251 packed U64
+
+The three packed U64 forms (ADD_NC, SUB_NC, LSHL_ADD) use scalar, AVX2 and
+AVX-512 paths for all semantics. ADD/SUB include independent half-element
+negation and mathematical U64 saturation. LSHL_ADD retains the inherited
+active count range0..4, checked before writes by Rocjitsu; no expanded hardware
+claim is made for other counts. Scalar carriers replicate the appropriate
+U64 data or U32 count. Existing decoder and simulator coverage is retained.
+## gfx1150 scalar floating point
+
+All 58 scalar FP forms used by Rocjitsu support Loose and Compatibility.
+Compatibility preserves the inherited software model, including guest rounding,
+IEEE-dependent NaNs and FP status. The 30 gfx1150-specific arithmetic, selection,
+rounding and conversion entry points do not advertise new empirical qualification;
+comparisons share the existing raw-bit predicates. Scalar operations have one
+SGPR value per operand, so there is no lane-vector SIMD backend to select.
+### gfx908 floating comparisons
+
+All FP16/FP32/FP64 relational CMP/CMPX forms, including F/TRU, use shared
+scalar, AVX2 and AVX-512 numeric predicates. Wave64-only gfx908 APIs preserve
+Compatibility's CLAMP-only INVALID classification, including quiet NaNs and
+constant predicates. Loose and numeric-only modes leave status untouched;
+mode 3 remains unsupported. This carries the existing emulator model without
+claiming new empirical qualification. Other older profiles migrate separately.
+### gfx90a floating comparisons
+
+FP16/FP32/FP64 relational CMP/CMPX, including F/TRU, use the existing shared
+comparison APIs and scalar, AVX2 and AVX-512 backends. Compatibility carries
+raw ordering, guest input flushing and the existing absence of FP-status
+reporting; CLAMP does not add a classifier on this target. Mode 3 remains
+unsupported. The VM owns explicit SGPR/VCC and EXEC commits, including both
+mask writes for CMPX. This migration does not newly qualify a numerical model.
+
+## Older-target FP16 arithmetic
+
+gfx908/gfx90a and gfx1150 ADD/SUB/SUBREV/MUL/LDEXP use the shared CDNA
+half-arithmetic backends. Compatibility retains destination-rounding tininess,
+unconditional signaling-NaN quieting and guest rounding/denormal/overflow
+controls. gfx908/gfx90a SDWA scales before rounding; ordinary forms round
+before OMOD. These targets introduce no FP-status reporting for these operations.
+
+gfx1010/gfx1030 ADD/SUB/SUBREV/MUL use explicit model variants; LDEXP reuses
+the gfx942 variant. gfx1010 retains encoded-result tininess and quiets input
+signaling NaNs; gfx1030 retains the gfx11 numeric model. Compatibility reports
+the inherited TRAPSTS causes for gfx1010 ADD and all four gfx1030 binary
+operations. Those calls require a valid status pointer; Loose leaves it unused.
+
+All these migrations include VOP2/VOP3, DPP/SDWA, selected halves, destination
+preservation and aliases where supported. Scalar, AVX2 and AVX-512 numeric
+paths are shared. Loose keeps its established arithmetic freedoms. Strict modes
+remain unsupported: model reuse adds no empirical qualification. Operand staging
+and destination-byte placement remain in the VM; retired VM classifiers and
+SDWA arithmetic adapters are removed, while helpers with remaining users stay.
+
+### Older-target half selection
+
+Gfx908/gfx90a MIN/MAX/MIN3/MAX3/MED3 reuse the existing CDNA selection model;
+gfx1010/gfx1030/gfx1150 reuse Radeon NaN priority and median zero ordering.
+Gfx1150 also routes MINMAX/MAXMIN. Compatibility, Loose and allow-Loose use
+scalar/AVX2/AVX-512 kernels with decoded half selection, aliases and EXEC.
+SDWA retains rounded-result scaling and byte placement. These migrations add
+no target empirical qualification or FP status; strict decoded requests reject.
+
+## Legacy selection SDWA output
+
+Unpacked legacy MIN/MAX FP16/FP32, unsuffixed and gfx942, accept `ALU_SDWA`
+for inherited scaling of the rounded result and subsequent clamp. Scalar, AVX2
+and AVX-512 preserve guest rounding, selected halves, aliases and EXEC. Numerical
+policy lives in the library; byte placement and observations remain in the VM.
+Ordinary selection and its FP-status/qualification behavior are unchanged.
+
+## BF16 SDWA widening
+
+BF16-to-FP32 widening accepts `CVT_SDWA` for inherited output scaling and
+clamp, including normalization of tiny inputs before scaling. Scalar, AVX2 and
+AVX-512 share this model. Compatibility, Loose and allow-Loose support it; strict
+empirical modes reject this unqualified encoding policy. Ordinary widening
+retains its existing qualification. The VM stages inputs and places output bytes.
+
+Unsuffixed packed RTZ conversion also accepts `CVT_SDWA`. It finalizes already-
+rounded halves and applies inherited clamp without multiplying again; scalar,
+AVX2 and AVX-512 share the finalizer. The gfx12 API keeps rejecting this selector.

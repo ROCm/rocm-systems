@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/dbt/binary_translator.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
@@ -81,8 +82,9 @@ public:
   DecodeResult decode(const rj_code_binary_inst_t *inst,
                       const DecodeErrorEmitter &emit_error) override {
     const uint32_t prefix_op = (inst[0] >> 16) & 0xffu;
-    if ((inst[0] >> 24) != 0xccu || (prefix_op != 0x35u && prefix_op != 0x3au))
+    if ((inst[0] >> 24) != 0xccu || (prefix_op != 0x35u && prefix_op != 0x3au)) {
       return decoder_->decode(inst, emit_error);
+    }
 
     std::array<rj_code_binary_inst_t, kLookaheadWords> canonical{};
     std::ranges::copy_n(inst, kLookaheadWords, canonical.begin());
@@ -98,28 +100,32 @@ private:
   std::unique_ptr<Decoder> decoder_;
 };
 
-EncodingTranslateFn select_encoding_translator(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4)
+EncodingTranslateFn select_encoding_translator(rocjitsu::IsaFamily guest,
+                                               rocjitsu::IsaFamily host) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna4) {
     return cdna4_to_rdna4::translate_encoding_cdna4_to_rdna4;
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3)
+  }
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Cdna3) {
     return cdna4_to_cdna3::translate_encoding_cdna4_to_cdna3;
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3)
+  }
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna3) {
     return cdna4_to_rdna3::translate_encoding_cdna4_to_rdna3;
+  }
   return nullptr;
 }
 
-LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t host) {
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA4) {
+LegalizationLookupFn select_legalization(rocjitsu::IsaFamily guest, rocjitsu::IsaFamily host) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna4) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_rdna4, enc_id, opcode);
     };
   }
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_CDNA3) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Cdna3) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_cdna3, enc_id, opcode);
     };
   }
-  if (guest == ROCJITSU_CODE_ARCH_CDNA4 && host == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (guest == rocjitsu::IsaFamily::Cdna4 && host == rocjitsu::IsaFamily::Rdna3) {
     return [](uint16_t enc_id, uint16_t opcode) -> const InstructionLegalization * {
       return lookup(kLegalization_cdna4_to_rdna3, enc_id, opcode);
     };
@@ -129,15 +135,17 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
 
 [[nodiscard]] std::vector<uint32_t> raw_words_for_inst(const Instruction &inst) {
   const uint32_t *raw = inst.raw_encoding();
-  if (!raw)
+  if (!raw) {
     return {};
+  }
   return {raw, raw + inst.size() / sizeof(uint32_t)};
 }
 
 [[nodiscard]] uint32_t text_word_at(std::span<const uint8_t> text, uint64_t offset) {
   uint32_t word = 0;
-  if (offset + sizeof(word) <= text.size())
+  if (offset + sizeof(word) <= text.size()) {
     std::memcpy(&word, text.data() + offset, sizeof(word));
+  }
   return word;
 }
 
@@ -151,16 +159,19 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
 /// same site differently and wrap a consumer this pass deliberately left dynamic, re-growing the
 /// body it had just kept flat. Treat the padding as part of the run.
 [[nodiscard]] bool builder_runs_into_consumer(std::span<const uint8_t> text, uint64_t recovery_end,
-                                              uint64_t call_offset, rj_code_arch_t arch) {
-  if (recovery_end > call_offset || (call_offset - recovery_end) % sizeof(uint32_t) != 0)
+                                              uint64_t call_offset, rocjitsu::IsaFamily arch) {
+  if (recovery_end > call_offset || (call_offset - recovery_end) % sizeof(uint32_t) != 0) {
     return false;
+  }
   util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, arch);
-  if (maybe_nop.failed())
+  if (maybe_nop.failed()) {
     return false;
+  }
   const uint32_t nop = maybe_nop.value();
   for (uint64_t offset = recovery_end; offset < call_offset; offset += sizeof(uint32_t)) {
-    if (text_word_at(text, offset) != nop)
+    if (text_word_at(text, offset) != nop) {
       return false;
+    }
   }
   return true;
 }
@@ -170,12 +181,14 @@ LegalizationLookupFn select_legalization(rj_code_arch_t guest, rj_code_arch_t ho
 /// @details An object-wide analysis cannot apply each kernel's own wave size, so kernels that
 /// disagree get 64: wave-mask operands keep the pair width they decode with.
 [[nodiscard]] uint8_t common_guest_wavefront_size(std::span<const KdTranslation> translations) {
-  if (translations.empty())
+  if (translations.empty()) {
     return 64;
+  }
   const uint8_t wave_size = translations.front().guest_wavefront_size;
   for (const KdTranslation &translation : translations) {
-    if (translation.guest_wavefront_size != wave_size)
+    if (translation.guest_wavefront_size != wave_size) {
       return 64;
+    }
   }
   return wave_size;
 }
@@ -200,8 +213,9 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   // helper or an adopted body rather than the scope entry. Seeding that block with the ABI's
   // kernarg fact would fabricate provenance for a pair the entry never established.
   if (!kd.source_has_kernarg_segment_ptr || blocks.empty() || entry == nullptr ||
-      std::ranges::find(blocks, entry) == blocks.end())
+      std::ranges::find(blocks, entry) == blocks.end()) {
     return offsets;
+  }
 
   // The only fact this function can produce is attached to an indirect transfer, so a scope with
   // none has nothing to say. Checking first avoids running the fixpoint -- an InstDefUse and two
@@ -211,12 +225,14 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   // it measured as the whole of a 22% translation-time regression. An indirect transfer ends its
   // block, so the terminator is the only place it can be.
   if (std::ranges::none_of(blocks, [](const BasicBlock *block) {
-        if (block == nullptr)
+        if (block == nullptr) {
           return false;
+        }
         const Instruction *term = block->terminator();
         return term != nullptr && (term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
-      }))
+      })) {
     return offsets;
+  }
 
   // Pair-low registers holding the kernarg segment pointer, and those holding a value loaded
   // through it. Tracked separately: only the first may be a load base, only the second may be a
@@ -230,11 +246,13 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   };
 
   const auto pair_operand = [](const Operand *operand, uint16_t &lo, uint16_t &width) {
-    if (operand == nullptr)
+    if (operand == nullptr) {
       return false;
+    }
     const auto ref = operand->to_register_ref();
-    if (!ref || ref->cls != RegClass::SGPR)
+    if (!ref || ref->cls != RegClass::SGPR) {
       return false;
+    }
     lo = ref->index;
     width = ref->width;
     return true;
@@ -244,8 +262,9 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   // instruction's full def set rather than a destination operand, so a wide load clears the pairs
   // above it and a def of one half clears the pair it belongs to.
   const auto kill_defs = [&](const Instruction &inst, PairState &state) {
-    if (state.pointer.empty() && state.loaded.empty())
+    if (state.pointer.empty() && state.loaded.empty()) {
       return;
+    }
     const InstDefUse def_use(inst, kd.guest_wavefront_size);
     // Only the pairs actually being tracked can be killed, and there are a handful at most.
     // Sweeping the whole SGPR file instead cost two RegisterSet::contains() calls per register per
@@ -280,11 +299,18 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       uint16_t base_lo = 0;
       uint16_t base_width = 0;
       const bool loads_through_kernarg =
-          inst.mnemonic().starts_with("s_load_b") && inst.num_src_operands() >= 1 &&
-          pair_operand(inst.src_operand(0), base_lo, base_width) && state.pointer.contains(base_lo);
+          (inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B32 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B64 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B96 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B128 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B256 ||
+           inst.amdgpu_operation() == amdgpu::Operation::S_LOAD_B512) &&
+          inst.num_src_operands() >= 1 && pair_operand(inst.src_operand(0), base_lo, base_width) &&
+          state.pointer.contains(base_lo);
       uint16_t copy_lo = 0;
       uint16_t copy_width = 0;
-      const bool copies_pointer = inst.mnemonic() == "s_mov_b64" && inst.num_src_operands() == 1 &&
+      const bool copies_pointer = inst.amdgpu_operation() == amdgpu::Operation::S_MOV_B64 &&
+                                  inst.num_src_operands() == 1 &&
                                   pair_operand(inst.src_operand(0), copy_lo, copy_width) &&
                                   copy_width == 2 && state.pointer.contains(copy_lo);
 
@@ -296,7 +322,7 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       kill_defs(inst, state);
 
       // A call clobbers everything the ABI does not preserve, direct or indirect alike.
-      if ((flags & INDIRECT_CALL) != 0 || inst.mnemonic().starts_with("s_call")) {
+      if ((flags & INDIRECT_CALL) != 0) {
         std::erase_if(state.pointer, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
         std::erase_if(state.loaded, [](uint16_t lo) { return !is_callee_saved_sgpr(lo); });
       }
@@ -304,11 +330,13 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       if (has_pair_dst && loads_through_kernarg && dst_width >= 2) {
         // Only an even-aligned pair wholly inside the loaded range is addressable as a 64-bit
         // transfer operand, so s_load_b96 s[80:82] yields (80,81) and b128 s[80:83] adds (82,83).
-        for (unsigned lo = dst_lo; lo + 1u < unsigned{dst_lo} + dst_width; lo += 2)
+        for (unsigned lo = dst_lo; lo + 1u < unsigned{dst_lo} + dst_width; lo += 2) {
           state.loaded.insert(static_cast<uint16_t>(lo));
+        }
       }
-      if (has_pair_dst && copies_pointer && dst_width == 2)
+      if (has_pair_dst && copies_pointer && dst_width == 2) {
         state.pointer.insert(dst_lo);
+      }
     }
     return state;
   };
@@ -340,13 +368,15 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
   for (size_t sweep = 0; sweep < sweep_cap; ++sweep) {
     bool changed = false;
     for (BasicBlock *block : blocks) {
-      if (block == nullptr || block == entry)
+      if (block == nullptr || block == entry) {
         continue;
+      }
       PairState in;
       bool seeded = false;
       for (const BasicBlock *predecessor : block->predecessors()) {
-        if (!in_scope.contains(predecessor) || !computed.contains(predecessor))
+        if (!in_scope.contains(predecessor) || !computed.contains(predecessor)) {
           continue;
+        }
         PairState exit =
             transfer(const_cast<BasicBlock *>(predecessor), entry_state[predecessor], false);
         if (!seeded) {
@@ -357,8 +387,9 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
         std::erase_if(in.pointer, [&](uint16_t lo) { return !exit.pointer.contains(lo); });
         std::erase_if(in.loaded, [&](uint16_t lo) { return !exit.loaded.contains(lo); });
       }
-      if (!seeded)
+      if (!seeded) {
         continue;
+      }
       const auto it = entry_state.find(block);
       if (it == entry_state.end() || !(it->second == in)) {
         entry_state[block] = std::move(in);
@@ -371,36 +402,42 @@ kernarg_supplied_indirect_targets(std::span<BasicBlock *const> blocks, const Bas
       break;
     }
   }
-  if (!converged)
+  if (!converged) {
     return offsets;
+  }
 
   for (BasicBlock *block : blocks) {
     const auto it = block == nullptr ? entry_state.end() : entry_state.find(block);
-    if (it != entry_state.end())
+    if (it != entry_state.end()) {
       transfer(block, it->second, true);
+    }
   }
   return offsets;
 }
 
 [[nodiscard]] std::unordered_set<uint64_t>
-generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch_t arch) {
+generated_branch_island_pool_offsets(std::span<const uint8_t> text, rocjitsu::IsaFamily arch) {
   std::unordered_set<uint64_t> offsets;
   auto decoder = Decoder::create(arch);
-  if (!decoder)
+  if (!decoder) {
     return offsets;
+  }
   const std::size_t lookahead_words = decoder->max_instruction_words();
-  if (lookahead_words == 0)
+  if (lookahead_words == 0) {
     return offsets;
+  }
   std::vector<uint32_t> slot_words(lookahead_words, 0);
 
   util::FailureOr<uint32_t> maybe_marker = build_s_nop(kBranchIslandPoolMarkerNopImmediate, arch);
-  if (maybe_marker.failed())
+  if (maybe_marker.failed()) {
     return offsets;
+  }
   const uint32_t marker = maybe_marker.value();
   util::FailureOr<uint32_t> maybe_skip =
       build_s_branch(static_cast<int16_t>(kDirectBranchIslandPoolSlots), arch);
-  if (maybe_skip.failed())
+  if (maybe_skip.failed()) {
     return offsets;
+  }
   const uint32_t skip_pool = maybe_skip.value();
   constexpr uint64_t kPoolBytes = (kGeneratedIslandPoolHeaderWords + kDirectBranchIslandPoolSlots) *
                                   static_cast<uint64_t>(sizeof(uint32_t));
@@ -424,23 +461,26 @@ generated_branch_island_pool_offsets(std::span<const uint8_t> text, rj_code_arch
       if (decoded.succeeded()) {
         const std::unique_ptr<Instruction> &slot_inst = decoded.value();
         if (slot_inst->size() == static_cast<int>(sizeof(uint32_t)) &&
-            slot_inst->mnemonic() == "s_branch" && slot_inst->branch_offset_bytes()) {
+            slot_inst->amdgpu_operation() == amdgpu::Operation::S_BRANCH &&
+            slot_inst->branch_offset_bytes()) {
           continue;
         }
       }
       has_canonical_slots = false;
       break;
     }
-    if (has_canonical_slots)
+    if (has_canonical_slots) {
       offsets.insert(offset);
+    }
   }
   return offsets;
 }
 
 [[nodiscard]] bool words_changed(std::span<const uint32_t> before,
                                  std::span<const uint32_t> after) {
-  if (before.size() != after.size())
+  if (before.size() != after.size()) {
     return true;
+  }
   return !std::ranges::equal(before, after);
 }
 
@@ -507,9 +547,9 @@ void append_diagnostics(std::vector<TranslationDiagnostic> &dst,
 /// The decoder check stays with the caller because it gates constructing the decoder that the
 /// rest of translation needs.
 [[nodiscard]] std::optional<TranslationDiagnostic>
-translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
-                    rj_code_arch_t host_arch, uint32_t target_mach,
-                    const BinaryTranslatorOptions &options) {
+translation_refusal(const CodeObjectPatcher &patcher, rocjitsu::IsaFamily guest_arch,
+                    rocjitsu::IsaFamily host_arch, uint32_t target_mach,
+                    const BinaryTranslatorOptions &options, rj_code_target_id_t guest_target) {
   const auto error = [](DiagnosticKind kind, std::string message) {
     return TranslationDiagnostic{.severity = DiagnosticSeverity::Error,
                                  .kind = kind,
@@ -539,20 +579,23 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
     }
     // Only the B0-to-A0 direction is implemented.
     if (options.input_revision == ProcessorRevision::Gfx1250A0 &&
-        options.output_revision == ProcessorRevision::Gfx1250B0)
+        options.output_revision == ProcessorRevision::Gfx1250B0) {
       return error(DiagnosticKind::Legalization, "gfx1250 A0-to-B0 translation is not supported");
+    }
   }
 
   const uint32_t target_machine = target_mach & EF_AMDGPU_MACH;
   const IsaTargetRegistry &registry = default_isa_target_registry();
+  const IsaTargetBinding *guest_binding = registry.find_target(guest_target);
+  const uint32_t guest_machine = guest_binding ? guest_binding->elf_machine : source_mach;
   const auto is_concrete_cdna5_target = [&](uint32_t machine) {
-    const IsaGpuTargetDescription *target = registry.find_gpu_target_by_elf_machine(machine);
+    const IsaTargetBinding *target = registry.find_target_by_elf_machine(machine);
     const IsaTargetDescriptor *descriptor =
         target != nullptr ? registry.find(target->public_id) : nullptr;
-    return descriptor != nullptr && descriptor->architecture_id == ROCJITSU_CODE_ARCH_CDNA5;
+    return descriptor != nullptr && descriptor->family == rocjitsu::IsaFamily::Cdna5;
   };
-  if (guest_arch == ROCJITSU_CODE_ARCH_CDNA5 && host_arch == ROCJITSU_CODE_ARCH_CDNA5 &&
-      source_mach != target_machine && is_concrete_cdna5_target(source_mach) &&
+  if (guest_arch == rocjitsu::IsaFamily::Cdna5 && host_arch == rocjitsu::IsaFamily::Cdna5 &&
+      guest_machine != target_machine && is_concrete_cdna5_target(guest_machine) &&
       is_concrete_cdna5_target(target_machine)) {
     // Same-architecture translation otherwise copies raw encodings. Different concrete CDNA5
     // targets may have different instruction legality, and no cross-target legalization contract
@@ -562,9 +605,10 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
 
   if (patcher.text_bytes().empty()) {
     const std::span<const uint8_t> image = patcher.image_bytes();
-    if (image.size() < sizeof(Elf64_Ehdr))
+    if (image.size() < sizeof(Elf64_Ehdr)) {
       return error(DiagnosticKind::ResourceLimit, "code object is too small to contain an ELF "
                                                   "header");
+    }
     Elf64_Ehdr header{};
     std::memcpy(&header, image.data(), sizeof(header));
     source_mach = header.e_flags & EF_AMDGPU_MACH;
@@ -611,15 +655,16 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
 /// the source .text entry offset keeps skip/failure diagnostics useful for
 /// debugging because the user can still identify which code-object entry failed.
 [[nodiscard]] std::string kernel_label(const KdTranslation &translation) {
-  if (!translation.kernel_name.empty())
+  if (!translation.kernel_name.empty()) {
     return translation.kernel_name;
+  }
 
   std::ostringstream os;
   os << ".text+0x" << std::hex << translation.entry_text_offset;
   return os.str();
 }
 
-[[nodiscard]] uint32_t max_descriptor_sgpr_allocation_for_long_branch(rj_code_arch_t arch) {
+[[nodiscard]] uint32_t max_descriptor_sgpr_allocation_for_long_branch(rocjitsu::IsaFamily arch) {
   // Long direct branches consume their scratch pair at the final
   // s_setpc_b64/s_swappc_b64 transfer, so DBT may only use a pair that can be
   // made descriptor-backed for the destination kernel.
@@ -628,23 +673,26 @@ translation_refusal(const CodeObjectPatcher &patcher, rj_code_arch_t guest_arch,
 
 /// @brief Find the next even SGPR pair that can be descriptor-backed for a branch thunk.
 [[nodiscard]] std::optional<uint16_t> next_long_branch_sgpr_pair(const TranslationContext &context,
-                                                                 rj_code_arch_t arch) {
+                                                                 rocjitsu::IsaFamily arch) {
   const uint32_t current = std::max(context.num_sgprs, context.required_sgpr_count);
   const uint32_t base = (current + 1u) & ~1u;
-  if (base > 126)
+  if (base > 126) {
     return std::nullopt;
+  }
 
   const uint32_t max_descriptor_sgprs = max_descriptor_sgpr_allocation_for_long_branch(arch);
-  if (max_descriptor_sgprs != 0 && base + 2 > max_descriptor_sgprs)
+  if (max_descriptor_sgprs != 0 && base + 2 > max_descriptor_sgprs) {
     return std::nullopt;
+  }
   return static_cast<uint16_t>(base);
 }
 
 [[nodiscard]] std::vector<uint64_t> kernel_entry_offsets(std::span<const KdTranslation> kernels) {
   std::vector<uint64_t> offsets;
   offsets.reserve(kernels.size());
-  for (const KdTranslation &kernel : kernels)
+  for (const KdTranslation &kernel : kernels) {
     offsets.push_back(kernel.entry_text_offset);
+  }
 
   std::ranges::sort(offsets);
   offsets.erase(std::ranges::unique(offsets).begin(), offsets.end());
@@ -657,8 +705,9 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
   offsets.reserve(kernels.size() * 2);
   for (const KdTranslation &kernel : kernels) {
     offsets.push_back(kernel.entry_text_offset);
-    if (kernel.has_kernarg_preload_firmware_skip)
+    if (kernel.has_kernarg_preload_firmware_skip) {
       offsets.push_back(kernel.kernarg_preload_firmware_entry_text_offset);
+    }
   }
 
   std::ranges::sort(offsets);
@@ -677,8 +726,9 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
     // KERNEL_CODE_ENTRY_BYTE_OFFSET + 256. That address is a real hardware entry,
     // not merely padding, so split a block there and seed reachability from it.
     if (kernel.has_kernarg_preload_firmware_skip &&
-        kernel.kernarg_preload_firmware_entry_text_offset < text.size())
+        kernel.kernarg_preload_firmware_entry_text_offset < text.size()) {
       offsets.push_back(kernel.kernarg_preload_firmware_entry_text_offset);
+    }
   }
 
   std::ranges::sort(offsets);
@@ -706,8 +756,9 @@ kernel_hardware_entry_offsets(std::span<const KdTranslation> kernels) {
 /// which entries DBT preserves.
 [[nodiscard]] std::optional<std::vector<uint64_t>>
 text_relocation_block_leaders(std::span<const uint8_t> image, const Section &text) {
-  if (!elf_image_contains(image, 0, sizeof(Elf64_Ehdr)))
+  if (!elf_image_contains(image, 0, sizeof(Elf64_Ehdr))) {
     return std::nullopt;
+  }
 
   Elf64_Ehdr ehdr{};
   std::memcpy(&ehdr, image.data(), sizeof(ehdr));
@@ -718,12 +769,14 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
   }
 
   std::vector<Elf64_Shdr> shdrs(ehdr.e_shnum);
-  if (!shdrs.empty())
+  if (!shdrs.empty()) {
     std::memcpy(shdrs.data(), image.data() + ehdr.e_shoff, shdrs.size() * sizeof(Elf64_Shdr));
+  }
 
   const auto text_index = text.sectionHeaderIndex();
-  if (!text_index || *text_index >= shdrs.size())
+  if (!text_index || *text_index >= shdrs.size()) {
     return std::nullopt;
+  }
   const Elf64_Shdr &text_header = shdrs[*text_index];
   if (text_header.sh_type == SHT_NOBITS || text_header.sh_name != text.sectionHeaderNameIdx() ||
       text_header.sh_flags != text.flags() || text_header.sh_addr != text.vaddr() ||
@@ -736,15 +789,18 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
   for (size_t relocation_section_index = 0; relocation_section_index < shdrs.size();
        ++relocation_section_index) {
     const Elf64_Shdr &relocs = shdrs[relocation_section_index];
-    if (relocs.sh_type != SHT_RELA)
+    if (relocs.sh_type != SHT_RELA) {
       continue;
+    }
     const RocrRelocationSectionMode section_mode =
         classify_rocr_relocation_section(ehdr, shdrs, relocs);
-    if (section_mode == RocrRelocationSectionMode::Malformed)
+    if (section_mode == RocrRelocationSectionMode::Malformed) {
       return std::nullopt;
+    }
     if (section_mode != RocrRelocationSectionMode::Dynamic && relocs.sh_info != SHN_UNDEF) {
-      if (relocs.sh_info >= shdrs.size())
+      if (relocs.sh_info >= shdrs.size()) {
         return std::nullopt;
+      }
       if ((shdrs[relocs.sh_info].sh_flags & SHF_ALLOC) == 0) {
         continue;
       }
@@ -764,20 +820,24 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
       const uint32_t symbol_index = elf_reloc_sym(relocation.r_info);
       const RocrNoneRelocationAction none_action =
           classify_rocr_none_relocation(section_mode, relocation.r_info);
-      if (none_action == RocrNoneRelocationAction::Rejected)
+      if (none_action == RocrNoneRelocationAction::Rejected) {
         return std::nullopt;
-      if (none_action == RocrNoneRelocationAction::Ignored)
+      }
+      if (none_action == RocrNoneRelocationAction::Ignored) {
         continue;
-      if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, relocation.r_offset))
+      }
+      if (!elf_relocation_place_is_allocated(ehdr, shdrs, relocs, relocation.r_offset)) {
         continue;
+      }
 
       const bool rocr_dynamic = section_mode == RocrRelocationSectionMode::Dynamic;
       const bool may_require_text_symbol_classification =
           symbol_index != 0 &&
           (!rocr_dynamic || rocr_dynamic_relocation_uses_symbol_value(relocation_type));
       if (may_require_text_symbol_classification) {
-        if (relocs.sh_link >= shdrs.size())
+        if (relocs.sh_link >= shdrs.size()) {
           return std::nullopt;
+        }
         const Elf64_Shdr &symtab = shdrs[relocs.sh_link];
         if ((symtab.sh_type != SHT_SYMTAB && symtab.sh_type != SHT_DYNSYM) ||
             symtab.sh_entsize != sizeof(Elf64_Sym) || symtab.sh_size % sizeof(Elf64_Sym) != 0 ||
@@ -785,8 +845,9 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
           return std::nullopt;
         }
         const size_t symbol_count = symtab.sh_size / sizeof(Elf64_Sym);
-        if (symbol_index >= symbol_count)
+        if (symbol_index >= symbol_count) {
           return std::nullopt;
+        }
 
         Elf64_Sym symbol{};
         std::memcpy(&symbol, image.data() + symtab.sh_offset + symbol_index * sizeof(Elf64_Sym),
@@ -798,14 +859,17 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
                 TextSymbolRelocationAction::RequiresExecutableEntry) {
           uint64_t offset = symbol.st_value;
           if (ehdr.e_type != ET_REL) {
-            if (symbol.st_value < text.vaddr())
+            if (symbol.st_value < text.vaddr()) {
               return std::nullopt;
+            }
             offset = symbol.st_value - text.vaddr();
           }
-          if (offset > text.size())
+          if (offset > text.size()) {
             return std::nullopt;
-          if (offset < text.size())
+          }
+          if (offset < text.size()) {
             leaders.push_back(offset);
+          }
         }
       }
 
@@ -814,11 +878,13 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
         continue;
       }
       const uint64_t target = static_cast<uint64_t>(relocation.r_addend);
-      if (target < text.vaddr())
+      if (target < text.vaddr()) {
         continue;
+      }
       const uint64_t offset = target - text.vaddr();
-      if (offset < text.size())
+      if (offset < text.size()) {
         leaders.push_back(offset);
+      }
     }
   }
 
@@ -833,8 +899,9 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
   std::unordered_set<uint64_t> decoded_block_starts;
   decoded_block_starts.reserve(blocks.size());
   for (const auto &block : blocks) {
-    if (block != nullptr)
+    if (block != nullptr) {
       decoded_block_starts.insert(block->start_offset());
+    }
   }
   return std::ranges::any_of(block_leaders, [&](uint64_t leader) {
     return leader >= text_size || !decoded_block_starts.contains(leader);
@@ -844,8 +911,9 @@ text_relocation_block_leaders(std::span<const uint8_t> image, const Section &tex
 [[nodiscard]] bool has_supported_executable_section_layout(const AmdGpuCodeObject &object) {
   const auto &text = object.text_sections();
   const auto &executable = object.allocated_executable_sections();
-  if (text.empty() && executable.empty())
+  if (text.empty() && executable.empty()) {
     return true;
+  }
   return text.size() == 1 && executable.size() == 1 && text.front() == executable.front();
 }
 
@@ -877,33 +945,39 @@ checkpoint_scope_descriptors(std::span<const KdTranslation> translations,
                              const KdTranslation &scope_translation) {
   std::vector<DescriptorVariantCheckpoint> checkpoint;
   for (size_t i = 0; i < translations.size(); ++i) {
-    if (same_kernel_scope_variant(translations[i], scope_translation))
+    if (same_kernel_scope_variant(translations[i], scope_translation)) {
       checkpoint.push_back({.index = i, .translation = translations[i]});
+    }
   }
   return checkpoint;
 }
 
 [[nodiscard]] size_t kernel_translation_scope_count(std::span<const KdTranslation> kernels) {
   std::unordered_set<uint64_t> keys;
-  for (const KdTranslation &kernel : kernels)
+  for (const KdTranslation &kernel : kernels) {
     keys.insert(kernel_scope_key(kernel));
+  }
   return keys.size();
 }
 
 [[nodiscard]] bool scope_uses_virtualizable_lds(const KernelTranslationScope &scope,
-                                                rj_code_arch_t guest_arch,
-                                                rj_code_arch_t host_arch) {
-  if (scope.translation == nullptr)
+                                                rocjitsu::IsaFamily guest_arch,
+                                                rocjitsu::IsaFamily host_arch) {
+  if (scope.translation == nullptr) {
     return false;
-  if (scope.translation->target_lds_size != 0)
+  }
+  if (scope.translation->target_lds_size != 0) {
     return true;
+  }
 
   for (BasicBlock *block : scope.blocks) {
-    if (block == nullptr)
+    if (block == nullptr) {
       continue;
+    }
     for (const Instruction &inst : block->instructions()) {
-      if (source_instruction_uses_virtualizable_lds(inst, guest_arch, host_arch))
+      if (source_instruction_uses_virtualizable_lds(inst, guest_arch, host_arch)) {
         return true;
+      }
     }
   }
   return false;
@@ -978,8 +1052,9 @@ scope_relocatable_pc_builders(std::span<BasicBlock *const> blocks) {
   std::unordered_set<uint64_t> block_starts;
   block_starts.reserve(blocks.size());
   for (BasicBlock *block : blocks) {
-    if (block == nullptr)
+    if (block == nullptr) {
       return std::nullopt;
+    }
     block_starts.insert(block->start_offset());
   }
 
@@ -995,13 +1070,15 @@ scope_relocatable_pc_builders(std::span<BasicBlock *const> blocks) {
   // [start_offset, end_offset) and validating its range against only that
   // block's instruction starts fails the proof closed for any cross-block range.
   for (BasicBlock *block : blocks) {
-    if (block->static_pc_address_builders().empty())
+    if (block->static_pc_address_builders().empty()) {
       continue;
+    }
 
     std::unordered_set<uint64_t> block_instruction_starts;
     block_instruction_starts.insert(block->end_offset());
-    for (const Instruction &inst : block->instructions())
+    for (const Instruction &inst : block->instructions()) {
       block_instruction_starts.insert(inst.src_loc());
+    }
 
     const auto in_owning_block = [&](uint64_t offset) {
       return offset >= block->start_offset() && offset <= block->end_offset() &&
@@ -1009,20 +1086,24 @@ scope_relocatable_pc_builders(std::span<BasicBlock *const> blocks) {
     };
 
     for (const PcAddressBuilder &builder : block->static_pc_address_builders()) {
-      if (!builder.resolved)
+      if (!builder.resolved) {
         return std::nullopt;
+      }
       // A non-contiguous range holds an unrelated instruction between builder
       // steps. patch_recovered_builder_fixups NOPs the whole range, so rewriting
       // it would erase that instruction. Fail the proof closed instead.
-      if (!builder.contiguous)
+      if (!builder.contiguous) {
         return std::nullopt;
-      if (builder.source_target_offset < 0)
+      }
+      if (builder.source_target_offset < 0) {
         return std::nullopt;
+      }
       const auto target = static_cast<uint64_t>(builder.source_target_offset);
       // patch_recovered_builder_fixups resolves the relocated target through
       // block placements, so only a block start has a defined new address.
-      if (!block_starts.contains(target))
+      if (!block_starts.contains(target)) {
         return std::nullopt;
+      }
       // The getpc and its whole recovery range must be instruction starts inside
       // the block that owns the getpc, so the NOP-and-rewrite stays contiguous.
       if (!in_owning_block(builder.source_getpc_offset) ||
@@ -1037,10 +1118,12 @@ scope_relocatable_pc_builders(std::span<BasicBlock *const> blocks) {
         // same block follows without consuming it into a delta. A getpc that is
         // the last instruction of its block is the shape whose add lives in a
         // successor, where an unmodeled write would leave the original delta.
-        if (target != builder.source_recovery_begin_offset)
+        if (target != builder.source_recovery_begin_offset) {
           return std::nullopt;
-        if (builder.source_recovery_end_offset >= block->end_offset())
+        }
+        if (builder.source_recovery_end_offset >= block->end_offset()) {
           return std::nullopt;
+        }
         continue;
       }
 
@@ -1065,15 +1148,18 @@ attach_relocation_table_call_edges(const BlockOffsetIndex &block_index,
                                    std::span<const RelocationTableDispatch> dispatches) {
   std::unordered_set<uint64_t> accepted_calls;
   for (const RelocationTableDispatch &dispatch : dispatches) {
-    if (dispatch.table_index >= tables.size())
+    if (dispatch.table_index >= tables.size()) {
       continue;
+    }
     BasicBlock *source = block_for_offset(block_index, dispatch.source_call_offset);
     if (source == nullptr || source->terminator() == nullptr ||
-        source->terminator()->src_loc() != dispatch.source_call_offset)
+        source->terminator()->src_loc() != dispatch.source_call_offset) {
       continue;
+    }
     BasicBlock *continuation = block_for_offset(block_index, source->end_offset());
-    if (continuation == nullptr || continuation->start_offset() != source->end_offset())
+    if (continuation == nullptr || continuation->start_offset() != source->end_offset()) {
       continue;
+    }
 
     std::vector<BasicBlock *> callees;
     callees.reserve(tables[dispatch.table_index].entries.size());
@@ -1086,8 +1172,9 @@ attach_relocation_table_call_edges(const BlockOffsetIndex &block_index,
       }
       callees.push_back(callee);
     }
-    if (!complete || callees.empty())
+    if (!complete || callees.empty()) {
       continue;
+    }
 
     for (BasicBlock *callee : callees) {
       source->add_call_edge({.kind = BasicBlock::CallEdgeKind::IndirectSwapPc,
@@ -1119,8 +1206,9 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
                           const std::unordered_set<uint64_t> *address_taken_entries = nullptr) {
   std::vector<KernelTranslationScope> scopes;
   const auto entries = kernel_entry_offsets(kernels);
-  if (entries.empty())
+  if (entries.empty()) {
     return scopes;
+  }
 
   const BlockPositionIndex block_positions = build_block_position_index(blocks);
   static const std::unordered_set<uint64_t> kNoAddressTakenEntries;
@@ -1139,32 +1227,37 @@ kernel_translation_scopes(const std::vector<std::unique_ptr<BasicBlock>> &blocks
   ordered_kernels.reserve(kernels.size());
   std::unordered_set<uint64_t> seen_scopes;
   for (KdTranslation &kernel : kernels) {
-    if (seen_scopes.insert(kernel_scope_key(kernel)).second)
+    if (seen_scopes.insert(kernel_scope_key(kernel)).second) {
       ordered_kernels.push_back(&kernel);
+    }
   }
 
   std::ranges::sort(ordered_kernels, [](const auto *lhs, const auto *rhs) {
-    if (lhs->entry_text_offset != rhs->entry_text_offset)
+    if (lhs->entry_text_offset != rhs->entry_text_offset) {
       return lhs->entry_text_offset < rhs->entry_text_offset;
+    }
     return lhs->needs_lds_overflow_buf < rhs->needs_lds_overflow_buf;
   });
 
   scopes.reserve(ordered_kernels.size());
   for (KdTranslation *kernel : ordered_kernels) {
     BasicBlock *entry = block_for_offset(block_index, kernel->entry_text_offset);
-    if (entry == nullptr)
+    if (entry == nullptr) {
       continue;
+    }
     std::unordered_set<uint64_t> own_entries{kernel->entry_text_offset};
     if (kernel->has_kernarg_preload_firmware_skip) {
       if (block_for_offset(block_index, kernel->kernarg_preload_firmware_entry_text_offset) ==
-          nullptr)
+          nullptr) {
         continue;
+      }
       own_entries.insert(kernel->kernarg_preload_firmware_entry_text_offset);
     }
     // ordered_kernels is sorted by entry offset, so "the first scope built" names the same scope on
     // every run and on a second pass over already-translated text.
-    if (scopes.empty())
+    if (scopes.empty()) {
       own_entries.insert(adopted_roots.begin(), adopted_roots.end());
+    }
 
     spec.own_entries = std::move(own_entries);
     scopes.push_back({kernel, entry,
@@ -1205,8 +1298,9 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
   const std::unordered_set<uint64_t> root_boundaries(adopted_roots.begin(), adopted_roots.end());
   for (const uint64_t root : adopted_roots) {
     BasicBlock *entry = block_for_offset(block_index, root);
-    if (entry == nullptr)
+    if (entry == nullptr) {
       continue;
+    }
 
     // Forward pass: collect the body's blocks and its candidate return terminators.
     std::vector<BasicBlock *> stack{entry};
@@ -1215,19 +1309,24 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     while (!stack.empty()) {
       BasicBlock *block = stack.back();
       stack.pop_back();
-      if (block == nullptr || !body.insert(block).second)
+      if (block == nullptr || !body.insert(block).second) {
         continue;
+      }
       const Instruction *term = block->terminator();
       if (term != nullptr && term->size() == sizeof(uint32_t)) {
-        const std::string_view mnemonic = term->mnemonic();
-        if (mnemonic == "s_setpc_b64" || mnemonic == "s_set_pc_i64")
+
+        const amdgpu::Operation operation = term->amdgpu_operation();
+        if (operation == amdgpu::Operation::S_SETPC_B64 ||
+            operation == amdgpu::Operation::S_SET_PC_I64) {
           candidates.emplace_back(
               block, static_cast<uint16_t>(text_word_at(text, term->src_loc()) & 0xffu));
+        }
       }
       for (BasicBlock *succ : block->successors()) {
         // A self-recursive root legitimately re-enters its own entry, so only OTHER roots stop it.
-        if (succ != nullptr && succ != entry && root_boundaries.contains(succ->start_offset()))
+        if (succ != nullptr && succ != entry && root_boundaries.contains(succ->start_offset())) {
           continue;
+        }
         stack.push_back(succ);
       }
     }
@@ -1253,19 +1352,23 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       while (!work.empty()) {
         const auto [block, before] = work.back();
         work.pop_back();
-        if (block == nullptr || !body.contains(block))
+        if (block == nullptr || !body.contains(block)) {
           return false;
-        if (!seen.insert({block, before}).second)
+        }
+        if (!seen.insert({block, before}).second) {
           continue;
+        }
         std::vector<const Instruction *> ordered;
         ordered.reserve(block->num_instructions());
-        for (const Instruction &inst : block->instructions())
+        for (const Instruction &inst : block->instructions()) {
           ordered.push_back(&inst);
+        }
         size_t cursor = ordered.size();
         if (before != nullptr) {
           const auto found = std::ranges::find(ordered, before);
-          if (found == ordered.end())
+          if (found == ordered.end()) {
             return false;
+          }
           cursor = static_cast<size_t>(found - ordered.begin());
         }
 
@@ -1273,40 +1376,49 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         while (cursor > 0) {
           --cursor;
           const Instruction &inst = *ordered[cursor];
-          const std::string_view lane_mnemonic = inst.mnemonic();
+
+          const amdgpu::Operation lane_operation = inst.amdgpu_operation();
           // The lane identity here is a low selector only. Anything that moves the VGPR bank makes
           // that selector name a different physical register, so the comparison below stops meaning
           // what it says and the proof has to give up.
-          if (lane_mnemonic == "s_set_vgpr_msb" || lane_mnemonic == "s_setreg_b32" ||
-              lane_mnemonic == "s_setreg_imm32_b32")
+          if (lane_operation == amdgpu::Operation::S_SET_VGPR_MSB ||
+              lane_operation == amdgpu::Operation::S_SETREG_B32 ||
+              lane_operation == amdgpu::Operation::S_SETREG_IMM32_B32) {
             return false;
+          }
           // A call only endangers the stash if the callee is allowed to write the lane's register.
           // The ABI keeps callee-saved VGPRs across a call, which is exactly what makes the
           // non-leaf save/call/restore shape legitimate, so those survive; a caller-saved register
           // may be overwritten inside the callee and fails closed.
           const bool is_call = (inst.flags() & INDIRECT_CALL) != 0 ||
-                               lane_mnemonic == "s_call_i64" || lane_mnemonic == "s_swap_pc_i64" ||
-                               lane_mnemonic == "s_swappc_b64";
-          if (is_call && !is_callee_saved_vgpr(vgpr))
+                               lane_operation == amdgpu::Operation::S_CALL_I64 ||
+                               lane_operation == amdgpu::Operation::S_SWAP_PC_I64 ||
+                               lane_operation == amdgpu::Operation::S_SWAPPC_B64;
+          if (is_call && !is_callee_saved_vgpr(vgpr)) {
             return false;
+          }
           const Operand *vdst = inst.dst_operand(0);
-          const bool writes_lane =
-              lane_mnemonic == "v_writelane_b32" && vdst != nullptr && vdst->encoding_value() >= 0;
+          const bool writes_lane = lane_operation == amdgpu::Operation::V_WRITELANE_B32 &&
+                                   vdst != nullptr && vdst->encoding_value() >= 0;
           if (writes_lane && static_cast<uint16_t>(vdst->encoding_value()) == vgpr) {
             const Operand *ssrc = inst.src_operand(0);
             const Operand *written_lane = inst.src_operand(1);
             if (ssrc == nullptr || written_lane == nullptr || ssrc->encoding_value() < 0 ||
-                written_lane->encoding_value() < 0)
+                written_lane->encoding_value() < 0) {
               return false;
+            }
             // A write to a different lane of the same VGPR leaves this lane alone.
-            if (static_cast<uint16_t>(written_lane->encoding_value()) != lane)
+            if (static_cast<uint16_t>(written_lane->encoding_value()) != lane) {
               continue;
-            if (static_cast<uint16_t>(ssrc->encoding_value()) != sgpr)
+            }
+            if (static_cast<uint16_t>(ssrc->encoding_value()) != sgpr) {
               return false;
+            }
             // Finding the save is not enough: it captured whatever the SGPR held at that point, so
             // the value is the caller's return PC only if the caller's value still reached here.
-            if (!caller_value_reaches(block, &inst, sgpr, /*allow_lane_restore=*/false))
+            if (!caller_value_reaches(block, &inst, sgpr, /*allow_lane_restore=*/false)) {
               return false;
+            }
             resolved = true;
             break;
           }
@@ -1314,12 +1426,14 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
           bool clobbers = false;
           for (int i = 0; i < inst.num_dst_operands(); ++i) {
             const Operand *dst = inst.dst_operand(i);
-            if (dst == nullptr || dst->encoding_value() < 0)
+            if (dst == nullptr || dst->encoding_value() < 0) {
               continue;
+            }
             const auto base = static_cast<uint16_t>(dst->encoding_value());
             const int halves = dst->size_bits() > 32 ? dst->size_bits() / 32 : 1;
-            if (vgpr >= base && vgpr < base + halves)
+            if (vgpr >= base && vgpr < base + halves) {
               clobbers = true;
+            }
           }
           // A destination operand is not the only way to write a VGPR. Ask the instruction for the
           // registers it writes without naming them, so a producer that touches this lane through a
@@ -1328,27 +1442,33 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
             RegisterSet implicit;
             inst.implicit_defs(implicit);
             if (implicit.contains(RegisterRef{RegClass::VGPR, vgpr, 1}) ||
-                implicit.contains(RegisterRef{RegClass::ACC_VGPR, vgpr, 1}))
+                implicit.contains(RegisterRef{RegClass::ACC_VGPR, vgpr, 1})) {
               clobbers = true;
+            }
           }
-          if (clobbers)
+          if (clobbers) {
             return false;
+          }
         }
-        if (resolved)
+        if (resolved) {
           continue;
+        }
         // Reaching the entry without meeting the save means the lane was never given the caller's
         // value on this path, which is the opposite of the SGPR search: there the entry is where
         // the caller's value comes from, here the save has to be inside the body.
-        if (block == entry)
+        if (block == entry) {
           return false;
+        }
         // Reconverging control flow -- a diamond, or a loop back edge -- reaches a block that is
         // already queued or done. That is ordinary, not a reason to give up on the whole query; the
         // dedup above absorbs it. Only a block with no predecessor inside the body is a path this
         // analysis cannot see, and that still fails closed.
-        if (block->predecessors().empty())
+        if (block->predecessors().empty()) {
           return false;
-        for (BasicBlock *pred : block->predecessors())
+        }
+        for (BasicBlock *pred : block->predecessors()) {
           work.emplace_back(pred, nullptr);
+        }
       }
       return true;
     };
@@ -1363,34 +1483,42 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       // has no callee-saved SGPRs that a translated body may rely on here, so any call between the
       // definition and the use invalidates the value. The call instruction's own destination list
       // does not mention it, which is why this is checked before the operand walk.
-      const std::string_view sgpr_mnemonic = inst.mnemonic();
-      if ((inst.flags() & INDIRECT_CALL) != 0 || sgpr_mnemonic == "s_call_i64" ||
-          sgpr_mnemonic == "s_swap_pc_i64" || sgpr_mnemonic == "s_swappc_b64")
+
+      const amdgpu::Operation sgpr_operation = inst.amdgpu_operation();
+      if ((inst.flags() & INDIRECT_CALL) != 0 || sgpr_operation == amdgpu::Operation::S_CALL_I64 ||
+          sgpr_operation == amdgpu::Operation::S_SWAP_PC_I64 ||
+          sgpr_operation == amdgpu::Operation::S_SWAPPC_B64) {
         return Effect::kRedefines;
+      }
       bool defines = false;
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
         const Operand *dst = inst.dst_operand(i);
-        if (dst == nullptr || dst->encoding_value() < 0)
+        if (dst == nullptr || dst->encoding_value() < 0) {
           continue;
+        }
         const auto base = static_cast<uint16_t>(dst->encoding_value());
         const int halves = dst->size_bits() > 32 ? dst->size_bits() / 32 : 1;
-        if (sgpr >= base && sgpr < base + halves)
+        if (sgpr >= base && sgpr < base + halves) {
           defines = true;
+        }
       }
       // Destination operands are not the only way to write an SGPR; ask the instruction for the
       // ones it writes without naming them.
       if (!defines) {
         RegisterSet implicit;
         inst.implicit_defs(implicit);
-        if (implicit.contains(RegisterRef{RegClass::SGPR, sgpr, 1}))
+        if (implicit.contains(RegisterRef{RegClass::SGPR, sgpr, 1})) {
           defines = true;
+        }
       }
-      if (!defines)
+      if (!defines) {
         return Effect::kNone;
+      }
       // The nested provenance query runs with this off: a lane restore is exactly what it is
       // trying to justify, so letting it count one would be circular.
-      if (!allow_lane_restore || inst.mnemonic() != "v_readlane_b32")
+      if (!allow_lane_restore || inst.amdgpu_operation() != amdgpu::Operation::V_READLANE_B32) {
         return Effect::kRedefines;
+      }
       // Only a read of the exact lane this body saved the same register into restores the caller's
       // value. Reading some other lane, or another register's lane, produces a value this analysis
       // cannot vouch for and must not be mistaken for a return address.
@@ -1402,8 +1530,9 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       }
       // Ask at this instruction, not of the body: the save has to reach this read on every path.
       if (!lane_holds_saved_sgpr(block, &inst, static_cast<uint16_t>(vsrc->encoding_value()),
-                                 static_cast<uint16_t>(lane->encoding_value()), sgpr))
+                                 static_cast<uint16_t>(lane->encoding_value()), sgpr)) {
         return Effect::kRedefines;
+      }
       return Effect::kRestores;
     };
 
@@ -1418,20 +1547,24 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       while (!work.empty()) {
         const auto [block, before] = work.back();
         work.pop_back();
-        if (block == nullptr || !body.contains(block))
+        if (block == nullptr || !body.contains(block)) {
           return false;
-        if (!seen.insert({block, before}).second)
+        }
+        if (!seen.insert({block, before}).second) {
           continue;
+        }
         // The instruction list is forward-only, so materialize it to scan upwards from `before`.
         std::vector<const Instruction *> ordered;
         ordered.reserve(block->num_instructions());
-        for (const Instruction &inst : block->instructions())
+        for (const Instruction &inst : block->instructions()) {
           ordered.push_back(&inst);
+        }
         size_t cursor = ordered.size();
         if (before != nullptr) {
           const auto found = std::ranges::find(ordered, before);
-          if (found == ordered.end())
+          if (found == ordered.end()) {
             return false;
+          }
           cursor = static_cast<size_t>(found - ordered.begin());
         }
 
@@ -1439,28 +1572,34 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
         while (cursor > 0) {
           --cursor;
           const Effect effect = effect_on(*ordered[cursor], sgpr, block, allow_lane_restore);
-          if (effect == Effect::kNone)
+          if (effect == Effect::kNone) {
             continue;
-          if (effect == Effect::kRedefines)
+          }
+          if (effect == Effect::kRedefines) {
             return false;
+          }
           resolved = true;
           break;
         }
-        if (resolved)
+        if (resolved) {
           continue;
+        }
         // No definition in this block. The function entry means the value is the caller's; any
         // other block defers to its predecessors, and a predecessor outside the body is a path
         // this analysis cannot see, so it fails closed above.
-        if (block == entry)
+        if (block == entry) {
           continue;
+        }
         // Reconverging control flow -- a diamond, or a loop back edge -- reaches a block that is
         // already queued or done. That is ordinary, not a reason to give up on the whole query; the
         // dedup above absorbs it. Only a block with no predecessor inside the body is a path this
         // analysis cannot see, and that still fails closed.
-        if (block->predecessors().empty())
+        if (block->predecessors().empty()) {
           return false;
-        for (BasicBlock *pred : block->predecessors())
+        }
+        for (BasicBlock *pred : block->predecessors()) {
           work.emplace_back(pred, nullptr);
+        }
       }
       return true;
     };
@@ -1469,8 +1608,9 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
       const Instruction *term = block->terminator();
       if (caller_value_reaches(block, term, ssrc0, /*allow_lane_restore=*/true) &&
           caller_value_reaches(block, term, static_cast<uint16_t>(ssrc0 + 1),
-                               /*allow_lane_restore=*/true))
+                               /*allow_lane_restore=*/true)) {
         returns.insert(term->src_loc());
+      }
     }
   }
   return returns;
@@ -1488,8 +1628,8 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     std::span<const TextOffsetRelocation> text_relocations,
     std::span<const PcRelativeDataRelocation> data_relocations,
     std::span<const PcRelativeTextRelocation> code_relocations,
-    std::span<const KdTranslation> translations, rj_code_arch_t host_arch, uint32_t target_mach,
-    bool require_every_text_symbol_mapped,
+    std::span<const KdTranslation> translations, rocjitsu::IsaFamily host_arch,
+    uint32_t target_mach, bool require_every_text_symbol_mapped,
     const std::unordered_map<uint64_t, uint64_t> &canonical_code_pointer_placement,
     std::vector<TranslationDiagnostic> &diagnostics) {
   auto record_builder_error = [&](std::string_view message) {
@@ -1505,10 +1645,12 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
 
   std::unordered_set<uint64_t> applied_descriptors;
   for (const KdTranslation &translation : translations) {
-    if (translation.sidecar_descriptor)
+    if (translation.sidecar_descriptor) {
       continue;
-    if (!applied_descriptors.insert(translation.descriptor_file_offset).second)
+    }
+    if (!applied_descriptors.insert(translation.descriptor_file_offset).second) {
       continue;
+    }
     if (!patcher.apply_kernel_descriptor_translation(translation, host_arch)) {
       append_error(
           diagnostics, DiagnosticKind::KernelDescriptor,
@@ -1534,8 +1676,9 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
   for (size_t i = 0; i < translations.size(); ++i) {
     const KdTranslation &translation = translations[i];
     if (!translation.sidecar_descriptor || !translation.needs_lds_overflow_buf ||
-        translation.skipped)
+        translation.skipped) {
       continue;
+    }
     sidecar_descriptors.push_back(translation);
     sidecar_indices.push_back(i);
   }
@@ -1548,8 +1691,9 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
                    "object unchanged");
       return std::nullopt;
     }
-    for (size_t i = 0; i < appended->size(); ++i)
+    for (size_t i = 0; i < appended->size(); ++i) {
       sidecar_descriptor_vaddrs[sidecar_indices[i]] = (*appended)[i].vaddr;
+    }
   }
 
   const auto patched_image = patcher.image_bytes();
@@ -1646,12 +1790,15 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     record.virtual_private_segment_size = translation.target_private_size;
     record.virtual_lds_base_sgpr = translation.virtual_lds_lowering.base_sgpr;
     record.flags |= kVirtualLdsFlagRuntimeStateBlock;
-    if (translation.workgroup_id_sgpr_x >= 0)
+    if (translation.workgroup_id_sgpr_x >= 0) {
       record.flags |= kVirtualLdsFlagWorkgroupIdX;
-    if (translation.workgroup_id_sgpr_y >= 0)
+    }
+    if (translation.workgroup_id_sgpr_y >= 0) {
       record.flags |= kVirtualLdsFlagWorkgroupIdY;
-    if (translation.workgroup_id_sgpr_z >= 0)
+    }
+    if (translation.workgroup_id_sgpr_z >= 0) {
       record.flags |= kVirtualLdsFlagWorkgroupIdZ;
+    }
     virtual_lds_metadata.push_back(std::move(record));
   }
 
@@ -1688,8 +1835,9 @@ adopted_root_return_offsets(const BlockOffsetIndex &block_index,
     }
   }
 
-  if (target_mach)
+  if (target_mach) {
     patcher.update_elf_flags(target_mach);
+  }
   return std::move(patcher).emit();
 }
 
@@ -1732,16 +1880,18 @@ struct KernelFailure {
 
 /// @brief Map a control-flow relocation failure onto the diagnostic kind that reports it.
 [[nodiscard]] DiagnosticKind relocation_diagnostic_kind(const TextRelocationResult &relocation) {
-  if (relocation.failure == TextLayoutFailureCategory::ResourceLimit)
+  if (relocation.failure == TextLayoutFailureCategory::ResourceLimit) {
     return DiagnosticKind::ResourceLimit;
+  }
   return DiagnosticKind::Legalization;
 }
 
 /// @brief Map a body-materialization failure onto the diagnostic kind that reports it.
 [[nodiscard]] DiagnosticKind
 materialization_diagnostic_kind(const KernelTextAppendResult &materialization) {
-  if (materialization.failure == TextLayoutFailureCategory::ResourceLimit)
+  if (materialization.failure == TextLayoutFailureCategory::ResourceLimit) {
     return DiagnosticKind::ResourceLimit;
+  }
   return DiagnosticKind::KernelDescriptor;
 }
 
@@ -1767,15 +1917,17 @@ struct PendingCodeRelocation {
     const std::unordered_set<uint64_t> &canonical_placement_variant_conflict,
     std::vector<PcRelativeTextRelocation> &code_relocations,
     std::vector<TranslationDiagnostic> &diagnostics) {
-  if (pending.empty())
+  if (pending.empty()) {
     return true;
+  }
 
   std::unordered_map<uint64_t, uint64_t> placement;
   std::unordered_set<uint64_t> conflicting;
   for (const TextOffsetRelocation &relocation : text_relocations) {
     auto [it, inserted] = placement.try_emplace(relocation.source_offset, relocation.target_offset);
-    if (!inserted && it->second != relocation.target_offset)
+    if (!inserted && it->second != relocation.target_offset) {
       conflicting.insert(relocation.source_offset);
+    }
   }
 
   for (const PendingCodeRelocation &entry : pending) {
@@ -1893,12 +2045,14 @@ struct ScopeTransaction {
       state.canonical_placement.erase(placed);
       state.canonical_placement_is_sidecar.erase(placed);
     }
-    for (const uint64_t conflicted : relocations.canonical_variant_conflicts_added)
+    for (const uint64_t conflicted : relocations.canonical_variant_conflicts_added) {
       state.canonical_placement_variant_conflict.erase(conflicted);
+    }
     state.canonical_host_outgrew_its_descriptor = relocations.canonical_host_outgrew_its_descriptor;
     for (const DescriptorVariantCheckpoint &saved : descriptors) {
-      if (saved.index >= state.descriptor_translations.size())
+      if (saved.index >= state.descriptor_translations.size()) {
         return false;
+      }
       state.descriptor_translations[saved.index] = saved.translation;
     }
     return true;
@@ -1916,16 +2070,18 @@ RewriteDischargeDecodeStatus RewriteDischargeInstructionDecoder::decode(
     std::span<const uint8_t> remaining_bytes, uint64_t source_offset,
     std::unique_ptr<Instruction> &instruction, const DecodeErrorEmitter &emit_error) {
   instruction.reset();
-  if (lookahead_words_.empty())
+  if (lookahead_words_.empty()) {
     return RewriteDischargeDecodeStatus::InvalidLookaheadBound;
+  }
 
   std::ranges::fill(lookahead_words_, 0u);
   const size_t remaining_words = remaining_bytes.size() / sizeof(uint32_t);
   const size_t copied_words = std::min(remaining_words, lookahead_words_.size());
   std::memcpy(lookahead_words_.data(), remaining_bytes.data(), copied_words * sizeof(uint32_t));
   DecodeResult decoded = decoder_.decode(lookahead_words_.data(), source_offset, emit_error);
-  if (decoded.failed())
+  if (decoded.failed()) {
     return RewriteDischargeDecodeStatus::InvalidEncoding;
+  }
   instruction = std::move(decoded).value();
   if (instruction == nullptr || instruction->size() <= 0 ||
       instruction->size() % static_cast<int>(sizeof(uint32_t)) != 0) {
@@ -1933,8 +2089,9 @@ RewriteDischargeDecodeStatus RewriteDischargeInstructionDecoder::decode(
   }
 
   const size_t decoded_words = static_cast<size_t>(instruction->size()) / sizeof(uint32_t);
-  if (decoded_words > lookahead_words_.size() || decoded_words > remaining_words)
+  if (decoded_words > lookahead_words_.size() || decoded_words > remaining_words) {
     return RewriteDischargeDecodeStatus::TruncatedInstruction;
+  }
   return RewriteDischargeDecodeStatus::Success;
 }
 
@@ -1982,19 +2139,22 @@ bool scope_roots_are_entry_state(std::span<BasicBlock *const> blocks,
   std::unordered_set<const BasicBlock *> in_scope(blocks.begin(), blocks.end());
   std::unordered_set<const BasicBlock *> call_targets;
   for (const BasicBlock *block : blocks) {
-    if (block == nullptr)
+    if (block == nullptr) {
       return false;
+    }
     for (const BasicBlock::CallEdge &edge : block->call_edges()) {
-      if (in_scope.contains(edge.callee))
+      if (in_scope.contains(edge.callee)) {
         call_targets.insert(edge.callee);
+      }
     }
   }
 
   for (const BasicBlock *block : blocks) {
     const bool has_in_scope_predecessor = std::ranges::any_of(
         block->predecessors(), [&](const BasicBlock *pred) { return in_scope.contains(pred); });
-    if (has_in_scope_predecessor)
+    if (has_in_scope_predecessor) {
       continue;
+    }
     // A block with no in-scope predecessor is an external entry (it has no
     // ordinary CFG edge from within the scope, even if it is reached by a call
     // edge or has predecessors outside the scope).
@@ -2002,13 +2162,15 @@ bool scope_roots_are_entry_state(std::span<BasicBlock *const> blocks,
     // A relocation-table-dispatched callee delivers unconstrained caller-supplied
     // SGPR arguments, so it is never a safe root regardless of its CallEdge; fail
     // closed for it even if it is also a getpc-recovered call target.
-    if (table_callee_offsets.contains(block->start_offset()))
+    if (table_callee_offsets.contains(block->start_offset())) {
       return false;
+    }
     // Otherwise accept a hardware kernel entry or a getpc-recovered in-scope call
     // target; any other root is an unconstrained external entry that may deliver a
     // stale code pointer.
-    if (hardware_entry_offsets.contains(block->start_offset()) || call_targets.contains(block))
+    if (hardware_entry_offsets.contains(block->start_offset()) || call_targets.contains(block)) {
       continue;
+    }
     return false;
   }
   return true;
@@ -2018,7 +2180,28 @@ bool scope_roots_are_entry_state(std::span<BasicBlock *const> blocks,
 
 BinaryTranslator::~BinaryTranslator() = default;
 
-BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
+BinaryTranslator::BinaryTranslator(rj_code_target_id_t guest_target,
+                                   rj_code_target_id_t host_target, BinaryTranslatorOptions options)
+    : BinaryTranslator(
+          [&] {
+            const IsaTargetDescriptor *descriptor =
+                default_isa_target_registry().find(guest_target);
+            return descriptor ? descriptor->family : IsaFamily::Invalid;
+          }(),
+          [&] {
+            const IsaTargetDescriptor *descriptor = default_isa_target_registry().find(host_target);
+            return descriptor ? descriptor->family : IsaFamily::Invalid;
+          }(),
+          [&] {
+            const IsaTargetBinding *binding =
+                default_isa_target_registry().find_target(host_target);
+            return binding ? binding->elf_machine : 0;
+          }(),
+          options) {
+  guest_target_ = guest_target;
+}
+
+BinaryTranslator::BinaryTranslator(rocjitsu::IsaFamily guest_arch, rocjitsu::IsaFamily host_arch,
                                    uint32_t target_mach, BinaryTranslatorOptions options)
     : guest_arch_(guest_arch), host_arch_(host_arch),
       target_mach_(target_mach ? target_mach : elf_mach_for_arch(host_arch)), options_(options),
@@ -2028,7 +2211,7 @@ BinaryTranslator::BinaryTranslator(rj_code_arch_t guest_arch, rj_code_arch_t hos
           guest_arch, host_arch, options.input_revision, options.output_revision)) {}
 
 bool BinaryTranslator::is_gfx1250_b0_to_a0() const {
-  return guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+  return guest_arch_ == rocjitsu::IsaFamily::Cdna5 && host_arch_ == rocjitsu::IsaFamily::Cdna5 &&
          (target_mach_ & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250 &&
          options_.input_revision == ProcessorRevision::Gfx1250B0 &&
          options_.output_revision == ProcessorRevision::Gfx1250A0;
@@ -2041,10 +2224,11 @@ BinaryTranslator::lookup_legalization(const Instruction &inst) const {
   // the B0-to-A0 profile use handwritten legalization; everything else follows
   // the raw same-ISA copy path.
   const InstructionLegalization *legalization = nullptr;
-  if (is_gfx1250_b0_to_a0())
+  if (is_gfx1250_b0_to_a0()) {
     legalization = gfx1250_b0_to_a0_legalization(inst);
-  else if (legalization_lookup_)
+  } else if (legalization_lookup_) {
     legalization = legalization_lookup_(inst.encoding_id(), inst.opcode());
+  }
   return legalization;
 }
 
@@ -2079,8 +2263,8 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
     return;
   }
 
-  const IsaGpuTargetDescription *host_target =
-      default_isa_target_registry().find_gpu_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
+  const IsaTargetBinding *host_target =
+      default_isa_target_registry().find_target_by_elf_machine(target_mach_ & EF_AMDGPU_MACH);
   auto decoder = host_target == nullptr
                      ? Decoder::create(host_arch_)
                      : Decoder::create(default_isa_target_registry(), host_target->public_id);
@@ -2114,8 +2298,9 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
   auto block_leaders = kernel_block_leaders(descriptor_translations, text_bytes);
 
   for (const RelocationFunctionTable &table : discover_relocation_function_tables(output)) {
-    for (const RelocationFunctionPointer &entry : table.entries)
+    for (const RelocationFunctionPointer &entry : table.entries) {
       block_leaders.push_back(entry.target_text_offset);
+    }
   }
 
   const auto relocation_leaders = text_relocation_block_leaders(image, *text);
@@ -2157,7 +2342,7 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
 
     uint32_t first_word = 0;
     std::memcpy(&first_word, text_bytes.data() + instruction_offset, sizeof(first_word));
-    if (host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && first_word == 0) {
+    if (host_arch_ == rocjitsu::IsaFamily::Cdna5 && first_word == 0) {
       ++instruction_word_index;
       instruction_offset += sizeof(uint32_t);
       continue;
@@ -2201,8 +2386,9 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
           instruction_offset, std::string(inst->mnemonic()));
       return;
     }
-    if (semantic_translator_->residual_rewrite_needs_basic_block(*inst))
+    if (semantic_translator_->residual_rewrite_needs_basic_block(*inst)) {
       needs_basic_block = true;
+    }
     if (semantic_translator_->instruction_local_residual_rewrite_applies(*inst)) {
       append_rewrite_discharge_error(streaming_diagnostics,
                                      "registered rewrite remains actionable in final output",
@@ -2252,8 +2438,9 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
   bool found_residual = false;
   for (const auto &block : blocks) {
     for (const Instruction &inst : block->instructions()) {
-      if (!semantic_translator_->residual_rewrite_applies(inst))
+      if (!semantic_translator_->residual_rewrite_applies(inst)) {
         continue;
+      }
       found_residual = true;
       append_rewrite_discharge_error(result.diagnostics,
                                      "registered rewrite remains actionable in final output",
@@ -2266,8 +2453,9 @@ void BinaryTranslator::verify_rewrite_discharge(TranslatedCodeObject &result) co
 
 TranslatedCodeObject BinaryTranslator::translate(const AmdGpuCodeObject &obj) {
   TranslatedCodeObject result = translate_impl(obj);
-  if (options_.verify_rewrite_discharge && result.ok())
+  if (options_.verify_rewrite_discharge && result.ok()) {
     verify_rewrite_discharge(result);
+  }
   return result;
 }
 
@@ -2281,8 +2469,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   auto leave_unchanged = [&]() {
     const auto *image = reinterpret_cast<const uint8_t *>(obj.image_data());
-    if (obj.image_size() != 0)
+    if (obj.image_size() != 0) {
       result.elf_bytes.assign(image, image + obj.image_size());
+    }
     return result;
   };
 
@@ -2306,15 +2495,21 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *object_target = registry.find(obj.target_id());
   rj_code_target_id_t effective_guest_target = ROCJITSU_CODE_TARGET_INVALID;
-  if (object_target != nullptr && object_target->architecture_id == guest_arch_) {
+  if (guest_target_ != ROCJITSU_CODE_TARGET_INVALID) {
+    if (obj.target_id() != ROCJITSU_CODE_TARGET_INVALID && obj.target_id() != guest_target_) {
+      append_error(result.diagnostics, DiagnosticKind::Legalization,
+                   "source code-object target does not match the selected guest target");
+      return leave_unchanged();
+    }
+    effective_guest_target = guest_target_;
+  } else if (object_target != nullptr && object_target->family == guest_arch_) {
     effective_guest_target = obj.target_id();
   } else if (const IsaTargetDescriptor *guest_descriptor = registry.find(guest_arch_)) {
-    if (const IsaGpuTargetDescription *default_target =
-            registry.find_default_gpu_target(*guest_descriptor))
+    if (const IsaTargetBinding *default_target = registry.find_default_target(*guest_descriptor)) {
       effective_guest_target = default_target->public_id;
+    }
   }
-  const IsaGpuTargetDescription *effective_guest_gpu_target =
-      registry.find_gpu_target(effective_guest_target);
+  const IsaTargetBinding *effective_guest_gpu_target = registry.find_target(effective_guest_target);
   const bool effective_setreg_vgpr_msb_fixup =
       effective_guest_gpu_target != nullptr &&
       effective_guest_gpu_target->capabilities.setreg_vgpr_msb_fixup;
@@ -2322,7 +2517,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // A same-target gfx1250 translation is direction-specific: A0 and B0 share
   // an ELF machine ID, so both revisions must be given. Do not apply this
   // revision contract to other concrete CDNA5 targets.
-  if (guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+  if (guest_arch_ == rocjitsu::IsaFamily::Cdna5 && host_arch_ == rocjitsu::IsaFamily::Cdna5 &&
       effective_guest_target == ROCJITSU_CODE_TARGET_GFX1250 &&
       (target_mach_ & EF_AMDGPU_MACH) == EF_AMDGPU_MACH_AMDGCN_GFX1250) {
     if (options_.input_revision == ProcessorRevision::Unspecified ||
@@ -2368,15 +2563,16 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   }
 
   auto text = patcher.text_bytes();
-  if (auto refusal =
-          translation_refusal(patcher, guest_arch_, host_arch_, target_mach_, options_)) {
+  if (auto refusal = translation_refusal(patcher, guest_arch_, host_arch_, target_mach_, options_,
+                                         effective_guest_target)) {
     result.diagnostics.push_back(std::move(*refusal));
     return leave_unchanged();
   }
 
   std::unordered_set<uint64_t> generated_island_pool_candidates;
-  if (guest_arch_ == host_arch_)
+  if (guest_arch_ == host_arch_) {
     generated_island_pool_candidates = generated_branch_island_pool_offsets(text, guest_arch_);
+  }
 
   // Per-kernel text relocation strategy:
   // 1. Translate descriptors first so their source entries and ABI state define
@@ -2407,32 +2603,37 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   const util::DiagnosticEmitter builder_error(record_builder_error);
   util::FailureOr<uint32_t> guest_pool_marker =
       build_s_nop(kBranchIslandPoolMarkerNopImmediate, guest_arch_, &builder_error);
-  if (guest_pool_marker.failed())
+  if (guest_pool_marker.failed()) {
     return leave_unchanged();
+  }
   util::FailureOr<uint32_t> guest_pool_skip = build_s_branch(
       static_cast<int16_t>(kDirectBranchIslandPoolSlots), guest_arch_, &builder_error);
-  if (guest_pool_skip.failed())
+  if (guest_pool_skip.failed()) {
     return leave_unchanged();
+  }
   util::FailureOr<uint32_t> guest_long_marker =
       build_s_nop(kLongDirectBranchMarkerNopImmediate, guest_arch_, &builder_error);
-  if (guest_long_marker.failed())
+  if (guest_long_marker.failed()) {
     return leave_unchanged();
+  }
   auto record_host_builder_error = [&](std::string_view message) {
     append_error(result.diagnostics, DiagnosticKind::Legalization,
                  "unsupported host_arch: " + std::string(message));
   };
   const util::DiagnosticEmitter host_builder_error(record_host_builder_error);
   util::FailureOr<uint32_t> host_endpgm = build_s_endpgm(host_arch_, &host_builder_error);
-  if (host_endpgm.failed())
+  if (host_endpgm.failed()) {
     return leave_unchanged();
+  }
   if (guest_arch_ != host_arch_ && (!encoding_translate_ || !legalization_lookup_)) {
     append_error(result.diagnostics, DiagnosticKind::Legalization,
                  "no instruction translator for this guest and host architecture pair");
     return leave_unchanged();
   }
 
-  if (is_gfx1250_b0_to_a0())
+  if (is_gfx1250_b0_to_a0()) {
     decoder = std::make_unique<Gfx1250B0ToA0CanonicalizingDecoder>(std::move(decoder));
+  }
 
   // Phase 1: descriptor translation gives DBT the source kernel roots and any
   // target descriptor/prologue bytes that must be materialized with the body.
@@ -2446,8 +2647,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       obj.text_sections().front()->sectionHeaderIndex());
   bool descriptors_supported = true;
   for (const auto &translation : descriptor_translations) {
-    if (translation.supported || !skip_failed_kernels)
+    if (translation.supported || !skip_failed_kernels) {
       append_diagnostics(result.diagnostics, translation.diagnostics);
+    }
     descriptors_supported &= translation.supported;
   }
   if (!descriptors_supported && !skip_failed_kernels) {
@@ -2459,7 +2661,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   if (descriptor_translations.empty()) {
     const bool descriptorless_gfx1250_b0_to_a0 =
-        guest_arch_ == ROCJITSU_CODE_ARCH_CDNA5 && host_arch_ == ROCJITSU_CODE_ARCH_CDNA5 &&
+        guest_arch_ == rocjitsu::IsaFamily::Cdna5 && host_arch_ == rocjitsu::IsaFamily::Cdna5 &&
         options_.input_revision == ProcessorRevision::Gfx1250B0 &&
         options_.output_revision == ProcessorRevision::Gfx1250A0;
     if (!descriptorless_gfx1250_b0_to_a0) {
@@ -2476,8 +2678,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   auto block_leaders = kernel_block_leaders(descriptor_translations, text);
   std::vector<uint64_t> required_external_entries;
   for (const RelocationFunctionTable &table : relocation_function_tables) {
-    for (const RelocationFunctionPointer &entry : table.entries)
+    for (const RelocationFunctionPointer &entry : table.entries) {
       required_external_entries.push_back(entry.target_text_offset);
+    }
   }
   const auto relocation_leaders =
       text_relocation_block_leaders(patcher.image_bytes(), *obj.text_sections().front());
@@ -2519,14 +2722,16 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // packaged-HSACO corpus -- enough on its own to exhaust the sanitizer job's budget.
   std::optional<bool> object_defines_no_device_function_cache;
   const auto object_defines_no_device_function = [&] {
-    if (!object_defines_no_device_function_cache)
+    if (!object_defines_no_device_function_cache) {
       object_defines_no_device_function_cache = object_defines_only_kernels(obj);
+    }
     return *object_defines_no_device_function_cache;
   };
   std::optional<std::vector<uint64_t>> externally_resolvable_cache;
   const auto externally_resolvable_text_function_offsets = [&]() -> const std::vector<uint64_t> & {
-    if (!externally_resolvable_cache)
+    if (!externally_resolvable_cache) {
       externally_resolvable_cache = discover_externally_resolvable_text_function_offsets(obj);
+    }
     return *externally_resolvable_cache;
   };
   const auto relative_text_addend_targets =
@@ -2626,10 +2831,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // instead would put two rewriters on one range, which patch_recovered_builder_fixups forbids.
   std::unordered_set<uint64_t> recovery_rewritten_getpc_offsets;
   for (const auto &block : blocks) {
-    if (block == nullptr)
+    if (block == nullptr) {
       continue;
-    for (const IndirectCallFixup &fixup : block->static_indirect_call_fixups())
+    }
+    for (const IndirectCallFixup &fixup : block->static_indirect_call_fixups()) {
       recovery_rewritten_getpc_offsets.insert(fixup.source_getpc_offset);
+    }
   }
 
   const bool code_addresses_fully_accounted = [&] {
@@ -2638,12 +2845,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     // getpc as covered because any one add was tracked would let a sibling add keep a stale code
     // literal while this predicate still reported everything accounted for.
     std::unordered_map<uint64_t, std::unordered_set<uint64_t>> lattice_targets_by_getpc;
-    for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders)
+    for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders) {
       lattice_targets_by_getpc[builder.source_getpc_offset].insert(builder.target_vaddr);
+    }
 
     for (const auto &block : blocks) {
-      if (block == nullptr)
+      if (block == nullptr) {
         continue;
+      }
       for (const PcAddressBuilder &builder : block->static_pc_address_builders()) {
         // A producer whose value this pass could not pin down, or whose arithmetic is not one
         // contiguous run, cannot be rewritten by anybody -- accept it only if the rewrite lattice
@@ -2677,10 +2886,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               builder.source_recovery_begin_offset == builder.source_recovery_end_offset &&
               static_cast<uint64_t>(builder.source_target_offset) ==
                   builder.source_recovery_begin_offset;
-          if (bare_getpc_value && lattice_saw_getpc)
+          if (bare_getpc_value && lattice_saw_getpc) {
             continue;
-          if (recovery_rewrites_builder)
+          }
+          if (recovery_rewrites_builder) {
             continue;
+          }
         } else if (lattice_saw_getpc && !builder.poisoned) {
           // This pass gave up -- it only follows producers that reach a setpc -- but the rewrite
           // lattice did track the getpc, and the lattice is what emits the relocation. Its coverage
@@ -2695,8 +2906,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         }
         // A known non-code target needs nothing: it cannot be a stale jump destination.
         if (builder.source_target_offset < 0 ||
-            static_cast<uint64_t>(builder.source_target_offset) >= text.size())
+            static_cast<uint64_t>(builder.source_target_offset) >= text.size()) {
           continue;
+        }
         // A code target whose exact value the lattice never produced cannot be rewritten.
         return false;
       }
@@ -2718,21 +2930,25 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // can fail closed for them (see scope_incomplete_roots_are_entry_state).
   std::unordered_set<uint64_t> relocation_table_callee_offsets;
   for (const RelocationTableDispatch &dispatch : relocation_table_dispatches) {
-    if (dispatch.table_index >= relocation_function_tables.size())
+    if (dispatch.table_index >= relocation_function_tables.size()) {
       continue;
-    if (!relocation_table_calls.contains(dispatch.source_call_offset))
+    }
+    if (!relocation_table_calls.contains(dispatch.source_call_offset)) {
       continue;
+    }
     for (const RelocationFunctionPointer &entry :
-         relocation_function_tables[dispatch.table_index].entries)
+         relocation_function_tables[dispatch.table_index].entries) {
       relocation_table_callee_offsets.insert(entry.target_text_offset);
+    }
   }
   // Bodies whose address a pointer can hold. Computed before the scopes because it decides which
   // callees a scope may clone, and derived only from input-fixed data -- relocation-table slots and
   // RELATIVE64 addends -- so the partition it produces is the same on every pass.
   std::unordered_set<uint64_t> address_taken_entries(relocation_table_callee_offsets.begin(),
                                                      relocation_table_callee_offsets.end());
-  for (const uint64_t target : relative_text_addend_targets)
+  for (const uint64_t target : relative_text_addend_targets) {
     address_taken_entries.insert(target);
+  }
 
   auto scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations, {},
                                           &address_taken_entries);
@@ -2740,8 +2956,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   if (can_emit_sidecar_descriptors) {
     std::vector<KdTranslation> sidecar_variants;
     for (const KernelTranslationScope &scope : scopes) {
-      if (scope.translation == nullptr)
+      if (scope.translation == nullptr) {
         continue;
+      }
       const uint32_t host_lds_bytes = arch_lds_bytes(host_arch_);
       const bool static_lds_exceeds_host =
           host_lds_bytes != 0 && scope.translation->target_lds_size > host_lds_bytes;
@@ -2802,21 +3019,24 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     // get a canonical copy, emitted once by the adopting scope, that every code address names.
     std::unordered_map<const BasicBlock *, unsigned> emitting_scopes;
     for (const KernelTranslationScope &scope : scopes) {
-      for (const BasicBlock *block : scope.blocks)
+      for (const BasicBlock *block : scope.blocks) {
         ++emitting_scopes[block];
+      }
     }
 
     const auto note_address_taken = [&](uint64_t text_offset) -> const BasicBlock * {
       const BasicBlock *entry = block_for_offset(block_index, text_offset);
-      if (entry != nullptr)
+      if (entry != nullptr) {
         address_taken_offsets.insert(text_offset);
+      }
       return entry;
     };
 
     const auto adopt = [&](uint64_t text_offset) {
       const BasicBlock *entry = note_address_taken(text_offset);
-      if (entry == nullptr)
+      if (entry == nullptr) {
         return;
+      }
       // block_for_offset() answers with the block CONTAINING the offset, so a target naming a
       // mid-function label -- or an offset inside an instruction -- would otherwise be adopted as
       // a root and seeded with the ABI's function-entry VGPR_MSB state it never actually has.
@@ -2824,27 +3044,31 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // guard so relocation slots, relative addends and getpc targets agree on what an entry is.
       // A rejected target stays noted as address-taken, so the code-address audit still fails
       // closed on it rather than silently dropping the reference.
-      if (entry->start_offset() != text_offset)
+      if (entry->start_offset() != text_offset) {
         return;
+      }
       // Only a body no scope reaches needs adopting. One that several scopes clone is left where it
       // is: lowering it through an unrelated scope would deny it the context its real caller
       // supplies -- DS2 mode inference and liveness are scope-relative -- so the ambiguity between
       // clones is settled by naming one of them canonical instead of by making a fresh copy.
-      if (emitting_scopes.contains(entry))
+      if (emitting_scopes.contains(entry)) {
         return;
+      }
       adopted_roots.push_back(text_offset);
     };
 
     for (const RelocationFunctionTable &table : relocation_function_tables) {
-      for (const RelocationFunctionPointer &slot : table.entries)
+      for (const RelocationFunctionPointer &slot : table.entries) {
         adopt(slot.target_text_offset);
+      }
     }
     // Every stored function pointer names a body that has to exist after translation, whether or
     // not its holder was recognized as a table. relocate_relative_text_addends() rewrites each of
     // these addends to its target's new placement and refuses the object when a target was never
     // emitted, so adopting them is what turns that refusal into a translation.
-    for (const uint64_t target : relative_text_addend_targets)
+    for (const uint64_t target : relative_text_addend_targets) {
       adopt(target);
+    }
     // Admitting an unrecovered transfer promises that every externally resolvable `.text` symbol
     // still names its body afterwards -- that promise is what lets an outside holder of a code
     // address keep it. replace_text() enforces it and refuses when such a symbol has no mapping,
@@ -2862,8 +3086,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     // which matters because every later analysis is proportional to blocks emitted.
     const bool object_has_indirect_transfer =
         std::ranges::any_of(blocks, [](const std::unique_ptr<BasicBlock> &block) {
-          if (block == nullptr)
+          if (block == nullptr) {
             return false;
+          }
           const Instruction *term = block->terminator();
           return term != nullptr && (term->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0;
         });
@@ -2888,12 +3113,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     // RegisterSet expansions per instruction, per predecessor edge, per sweep -- and running it for
     // every scope of every object measured as a 22% translation-time regression.
     object_admits_kernarg_supplied_transfer = [&] {
-      if (externally_resolvable_text_function_offsets().empty() || !object_has_indirect_transfer)
+      if (externally_resolvable_text_function_offsets().empty() || !object_has_indirect_transfer) {
         return false;
+      }
       if (std::ranges::none_of(descriptor_translations, [](const KdTranslation &translation) {
             return translation.source_has_kernarg_segment_ptr;
-          }))
+          })) {
         return false;
+      }
       return std::ranges::any_of(scopes, [&](const KernelTranslationScope &scope) {
         return scope.translation != nullptr &&
                !kernarg_supplied_indirect_targets(scope.blocks, scope.entry, *scope.translation)
@@ -2902,8 +3129,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     }();
     if ((object_produces_code_addresses && object_has_indirect_transfer) ||
         object_admits_kernarg_supplied_transfer) {
-      for (const uint64_t target : externally_resolvable_text_function_offsets())
+      for (const uint64_t target : externally_resolvable_text_function_offsets()) {
         adopt(target);
+      }
     }
 
     // Everything adopted so far is input-fixed: relocation-table slots and RELATIVE64 addends are
@@ -2931,9 +3159,11 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       scopes = kernel_translation_scopes(blocks, block_index, descriptor_translations,
                                          adopted_roots, &address_taken_entries);
       emitting_scopes.clear();
-      for (const KernelTranslationScope &scope : scopes)
-        for (const BasicBlock *block : scope.blocks)
+      for (const KernelTranslationScope &scope : scopes) {
+        for (const BasicBlock *block : scope.blocks) {
           ++emitting_scopes[block];
+        }
+      }
     }
 
     // A getpc that computes a code address makes that body address-taken just as surely as a
@@ -2953,8 +3183,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     // built with getpc, spilled to a VGPR lane, and later called through s_swap_pc_i64, so no
     // decoded edge names the body. Refusing those would refuse every device-linked object.
     for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders) {
-      if (builder.target_vaddr < text_vaddr || builder.target_vaddr - text_vaddr >= text.size())
+      if (builder.target_vaddr < text_vaddr || builder.target_vaddr - text_vaddr >= text.size()) {
         continue;
+      }
       const uint64_t target_text_offset = builder.target_vaddr - text_vaddr;
       // The addend path already intersects its targets with sized STT_FUNC symbols, because a
       // stored pointer is only known to name a function when a symbol says so. A recovered getpc
@@ -2994,8 +3225,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                                                             required_external_entries.end());
     for (const KernelTranslationScope &scope : scopes) {
       for (const BasicBlock *block : scope.blocks) {
-        if (block != nullptr)
+        if (block != nullptr) {
           uncovered_external_entries.erase(block->start_offset());
+        }
       }
     }
     if (!uncovered_external_entries.empty()) {
@@ -3022,8 +3254,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                          uint64_t offset, const InstructionLegalization *leg, bool copied_original,
                          bool semantic_lowering, bool changed, uint64_t target_offset,
                          std::vector<uint32_t> target_words) {
-    if (!trace_callback_)
+    if (!trace_callback_) {
       return;
+    }
     pending.push_back({.source_offset = offset,
                        .source_size = static_cast<uint32_t>(inst.size()),
                        .source_words = raw_words_for_inst(inst),
@@ -3036,8 +3269,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   };
 
   auto flush_traces = [&](std::vector<PendingTrace> &pending, uint64_t target_delta) {
-    if (!trace_callback_)
+    if (!trace_callback_) {
       return;
+    }
     for (PendingTrace &trace : pending) {
       trace_callback_({.source_offset = trace.source_offset,
                        .source_size = trace.source_size,
@@ -3070,8 +3304,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   auto continue_after_instruction_error = [&](const Instruction &inst, uint64_t offset,
                                               std::vector<uint8_t> &kernel_text,
                                               std::vector<PendingTrace> &pending_traces) {
-    if (!continue_after_failure)
+    if (!continue_after_failure) {
       return false;
+    }
     copy_original_instruction(inst, offset, kernel_text, pending_traces);
     return true;
   };
@@ -3100,8 +3335,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     }
 
     for (KdTranslation &translation : descriptor_translations) {
-      if (translation.entry_text_offset != source_entry)
+      if (translation.entry_text_offset != source_entry) {
         continue;
+      }
       // Normal hardware-LDS and virtual-LDS sidecar descriptors share the same
       // source entry, but a sidecar translation failure must not turn a normal
       // descriptor that can still launch on hardware LDS into a no-op. Skip
@@ -3113,8 +3349,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       const bool orphaned_by_sidecar_failure = skipped_uses_virtual_lds &&
                                                !translation.needs_lds_overflow_buf &&
                                                translation.static_lds_requires_sidecar;
-      if (!same_variant && !orphaned_by_sidecar_failure)
+      if (!same_variant && !orphaned_by_sidecar_failure) {
         continue;
+      }
       translation.target_entry_text_offset = skipped_text.target_entry;
       translation.target_body_entry_text_offset = skipped_text.target_body_entry;
       // A skipped descriptor must describe the target stub, not the failed
@@ -3201,8 +3438,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     KernelTranslationScope restored_scope = scope;
     restored_scope.translation = nullptr;
     for (KdTranslation &translation : descriptor_translations) {
-      if (!same_kernel_scope_variant(translation, *scope.translation))
+      if (!same_kernel_scope_variant(translation, *scope.translation)) {
         continue;
+      }
       restored_scope.translation = &translation;
       break;
     }
@@ -3217,18 +3455,21 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   auto reserve_long_branch_sgpr_pair = [&](TranslationContext &context) -> std::optional<uint16_t> {
     auto base = next_long_branch_sgpr_pair(context, host_arch_);
-    if (!base)
+    if (!base) {
       return std::nullopt;
+    }
     context.require_sgprs(static_cast<uint32_t>(*base) + 2);
     return base;
   };
 
   for (const KernelTranslationScope &scope : scopes) {
-    if (scope.blocks.empty())
+    if (scope.blocks.empty()) {
       continue;
+    }
     assert(scope.translation != nullptr && "kernel scope should have descriptor translation");
-    if (scope.translation->skipped)
+    if (scope.translation->skipped) {
       continue;
+    }
 
     ScopeTransaction transaction = ScopeTransaction::capture(rollback_state, *scope.translation);
     bool skip_scope = false;
@@ -3238,8 +3479,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           DiagnosticKind::KernelDescriptor,
           "kernel descriptor translation requires unsupported resource or ABI virtualization");
       for (const TranslationDiagnostic &diagnostic : scope.translation->diagnostics) {
-        if (diagnostic.severity != DiagnosticSeverity::Error)
+        if (diagnostic.severity != DiagnosticSeverity::Error) {
           continue;
+        }
         failure.kind = diagnostic.kind;
         failure.message = diagnostic.message;
         failure.guest_offset = diagnostic.guest_offset;
@@ -3247,8 +3489,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         failure.required_work = diagnostic.required_work;
         break;
       }
-      if (fail_or_skip_kernel(scope, std::move(failure), transaction))
+      if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
         continue;
+      }
       return leave_unchanged();
     }
 
@@ -3272,8 +3515,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         auto failure = make_kernel_failure(
             DiagnosticKind::ResourceLimit,
             "virtual LDS lowering cannot reserve a backing-buffer SGPR pair", layout.source_entry);
-        if (fail_or_skip_kernel(scope, std::move(failure), transaction))
+        if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
           continue;
+        }
         return leave_unchanged();
       }
       kernel_context.virtualize_lds = true;
@@ -3294,8 +3538,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
               DiagnosticKind::ResourceLimit,
               "virtual LDS backing-pointer spill offset overflows the 32-bit private segment",
               layout.source_entry);
-          if (fail_or_skip_kernel(scope, std::move(failure), transaction))
+          if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
             continue;
+          }
           return leave_unchanged();
         }
         kernel_context.virtual_lds_base_pointer_spilled = true;
@@ -3308,8 +3553,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
             DiagnosticKind::KernelDescriptor,
             "virtual LDS lowering cannot materialize backing-buffer pointer entry prologue",
             layout.source_entry);
-        if (fail_or_skip_kernel(scope, std::move(failure), transaction))
+        if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
           continue;
+        }
         return leave_unchanged();
       }
     }
@@ -3326,8 +3572,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           "kernel descriptor prologue does not fit in the 256-byte kernarg preload compatibility "
           "window",
           layout.source_entry);
-      if (fail_or_skip_kernel(scope, std::move(failure), transaction))
+      if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
         continue;
+      }
       return leave_unchanged();
     }
     const bool can_use_long_direct_branches =
@@ -3336,8 +3583,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     std::unordered_map<uint64_t, const Instruction *> source_instruction_by_offset;
     std::unordered_map<uint64_t, const BasicBlock *> source_block_by_end_offset;
     for (BasicBlock *block : scope.blocks) {
-      for (const Instruction &inst : block->instructions())
+      for (const Instruction &inst : block->instructions()) {
         source_instruction_by_offset.emplace(inst.src_loc(), &inst);
+      }
       source_block_by_end_offset.emplace(block->end_offset(), block);
     }
 
@@ -3348,8 +3596,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     std::vector<BasicBlock *> scope_adopted_entry_blocks;
     if (!adopted_root_offsets.empty()) {
       for (BasicBlock *block : scope.blocks) {
-        if (block != nullptr && adopted_root_offsets.contains(block->start_offset()))
+        if (block != nullptr && adopted_root_offsets.contains(block->start_offset())) {
           scope_adopted_entry_blocks.push_back(block);
+        }
       }
     }
 
@@ -3361,8 +3610,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     liveness_options.entry_block = scope.entry;
     liveness_options.additional_entry_blocks = scope_adopted_entry_blocks;
     liveness_options.text = text;
-    if (options_.debug_min_free_vgpr)
+    if (options_.debug_min_free_vgpr) {
       liveness_options.min_free_vgpr = *options_.debug_min_free_vgpr;
+    }
     std::vector<const Instruction *> live_before_instructions;
     bool scope_requires_liveness = false;
     if (semantic_translator_ && semantic_translator_->has_rules()) {
@@ -3372,8 +3622,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // registers. Collect live-before snapshots only for rules that can query them,
       // and skip the kernel dataflow entirely when no such rule is present.
       for (BasicBlock *block : scope.blocks) {
-        if (block == nullptr)
+        if (block == nullptr) {
           continue;
+        }
         for (const Instruction &inst : block->instructions()) {
           if (semantic_translator_->rewrite_requires_liveness(inst)) {
             scope_requires_liveness = true;
@@ -3386,8 +3637,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           live_before_instructions.data(), live_before_instructions.size());
     }
     // Model rules that query liveness without declaring that requirement.
-    if (force_unavailable_liveness_)
+    if (force_unavailable_liveness_) {
       scope_requires_liveness = false;
+    }
     LivenessAnalysis liveness = LivenessAnalysis::unavailable();
     std::vector<ScopedCfgEdge> scope_analysis_edges;
     if (scope_requires_liveness) {
@@ -3493,19 +3745,22 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
         }
         const bool reachable_skip_over_pool =
-            preceding_terminator != nullptr && preceding_terminator->mnemonic() == "s_branch" &&
+            preceding_terminator != nullptr &&
+            preceding_terminator->amdgpu_operation() == amdgpu::Operation::S_BRANCH &&
             source_instruction_by_offset.contains(pool_end) && preceding_branch_target >= 0 &&
             static_cast<uint64_t>(preceding_branch_target) == pool_end;
-        if (!reachable_header && !reachable_slot && !reachable_skip_over_pool)
+        if (!reachable_header && !reachable_slot && !reachable_skip_over_pool) {
           continue;
+        }
 
         generated_island_pool_offsets.insert(pool_offset);
         for (uint64_t word_index = 0; word_index < kGeneratedIslandPoolWords; ++word_index) {
           generated_island_pool_by_source_offset.emplace(
               pool_offset + word_index * sizeof(uint32_t), pool_offset);
         }
-        if (!reachable_header && !reachable_slot)
+        if (!reachable_header && !reachable_slot) {
           generated_island_pool_by_source_offset.emplace(pool_end, pool_offset);
+        }
       }
     }
     // A recognized pool comes from an already translated body. Reuse that
@@ -3576,8 +3831,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         });
     std::optional<std::vector<IndirectCallFixup>> whole_scope_builder_fixups;
     if (has_incomplete_consumer &&
-        scope_incomplete_roots_are_entry_state(scope, relocation_table_callee_offsets))
+        scope_incomplete_roots_are_entry_state(scope, relocation_table_callee_offsets)) {
       whole_scope_builder_fixups = scope_relocatable_pc_builders(scope.blocks);
+    }
     const bool no_stale_pc_values_in_scope = whole_scope_builder_fixups.has_value();
 
     std::vector<IndirectCallFixup> pending_builder_fixups;
@@ -3597,8 +3853,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     scope_block_by_end.reserve(scope.blocks.size());
     scope_block_starts.reserve(scope.blocks.size());
     for (BasicBlock *candidate : scope.blocks) {
-      if (candidate == nullptr)
+      if (candidate == nullptr) {
         continue;
+      }
       scope_block_by_start.emplace(candidate->start_offset(), candidate);
       scope_block_by_end.emplace(candidate->end_offset(), candidate);
       scope_block_starts.push_back(candidate->start_offset());
@@ -3606,8 +3863,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     std::ranges::sort(scope_block_starts);
 
     for (auto &[source_call_offset, consumer] : recovered_indirect_by_call) {
-      if (consumer.fixups.empty())
+      if (consumer.fixups.empty()) {
         continue;
+      }
 
       const IndirectCallFixup &first = consumer.fixups.front();
       bool single_effective_target = true;
@@ -3625,11 +3883,13 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           }
           return leave_unchanged();
         }
-        if (fixup.source_target_offset != first.source_target_offset)
+        if (fixup.source_target_offset != first.source_target_offset) {
           single_effective_target = false;
+        }
       }
-      if (skip_scope)
+      if (skip_scope) {
         break;
+      }
 
       // An incomplete fact means at least one predecessor left the PC pair
       // unconstrained. That path has no recovered builder or target to relocate,
@@ -3764,8 +4024,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                                       consumer.fixups.end());
       }
     }
-    if (skip_scope)
+    if (skip_scope) {
       continue;
+    }
 
     // Discharging the proof requires actually performing every rewrite it
     // assumes. Append it after the consumer-driven fixups so a builder that both
@@ -3780,15 +4041,17 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     std::unordered_map<uint64_t, const RecoveredConsumer *> marked_long_transfer_by_start;
     for (const auto &[source_call_offset, consumer] : recovered_indirect_by_call) {
       (void)source_call_offset;
-      if (consumer.preserve_marked_long_transfer)
+      if (consumer.preserve_marked_long_transfer) {
         marked_long_transfer_by_start.emplace(consumer.marked_window_begin, &consumer);
+      }
     }
 
     std::vector<uint8_t> kernel_text;
     std::vector<PendingTrace> pending_traces;
     uint64_t source_body_size = 0;
-    for (BasicBlock *block : scope.blocks)
+    for (BasicBlock *block : scope.blocks) {
       source_body_size += block->size();
+    }
     const uint64_t recovered_window_growth =
         recovered_indirect_by_call.size() * kMaxRecoveredIndirectTransferWords * sizeof(uint32_t);
     kernel_text.reserve(static_cast<size_t>(std::min<uint64_t>(
@@ -3845,8 +4108,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         uint64_t target_offset = kernel_text.size();
         const uint32_t inst_size = inst.size();
 
-        if (active_generated_island_pool && offset < active_generated_island_pool->source_end)
+        if (active_generated_island_pool && offset < active_generated_island_pool->source_end) {
           continue;
+        }
         active_generated_island_pool.reset();
 
         if (const auto pool_it = generated_island_pool_by_source_offset.find(offset);
@@ -3905,8 +4169,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                  .allow_window_growth = false,
                  .translated_words = {source_branch->raw_encoding()[0]}});
           }
-          if (skip_scope)
+          if (skip_scope) {
             break;
+          }
           for (uint64_t source_word = pool_offset; source_word < source_end;
                source_word += sizeof(uint32_t)) {
             target_offset_by_source_offset.emplace(source_word,
@@ -3934,8 +4199,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         if (active_marked_long_transfer && offset < active_marked_long_transfer->source_end) {
           // The patch layer regenerates the marked window, so its interior
           // source instructions have no stable one-to-one target offsets.
-          if (offset + inst_size >= active_marked_long_transfer->source_end)
+          if (offset + inst_size >= active_marked_long_transfer->source_end) {
             active_marked_long_transfer.reset();
+          }
           continue;
         }
         active_marked_long_transfer.reset();
@@ -4108,8 +4374,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           std::vector<uint32_t> target_words;
           if (!handle_encoding(inst, offset, kernel_text, branch_dst_opcode, text, true,
                                copied_original, changed, target_words)) {
-            if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces))
+            if (continue_after_instruction_error(inst, offset, kernel_text, pending_traces)) {
               continue;
+            }
             return leave_unchanged();
           }
           layout.branch_fixups.push_back(
@@ -4161,8 +4428,7 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         // all_reduce run emitted 104,831 identical lines, burying the
         // diagnostics that do name a specific instruction. The record is
         // per-translation, so each code object still reports its own gaps.
-        if (leg == nullptr && is_gfx1250_b0_to_a0() &&
-            gfx1250_b0_to_a0_is_deferred_family(inst.mnemonic()) &&
+        if (leg == nullptr && is_gfx1250_b0_to_a0() && gfx1250_b0_to_a0_is_deferred_family(inst) &&
             reported_deferred_families_.emplace(inst.mnemonic()).second) {
           append_warning(result.diagnostics, DiagnosticKind::Legalization,
                          "gfx1250 translation passes through '" + std::string(inst.mnemonic()) +
@@ -4207,8 +4473,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
           if (expansion.status == ExpandStatus::Success) {
             std::vector<uint32_t> target_words = std::move(expansion.words);
-            if (needs_profile_wmma_completion_wait(inst))
+            if (needs_profile_wmma_completion_wait(inst)) {
               append_profile_wmma_completion_wait_if_needed(inst, target_words);
+            }
             append_words(kernel_text, target_words);
             queue_trace(pending_traces, inst, offset, leg, false, true, true, target_offset,
                         std::move(target_words));
@@ -4369,8 +4636,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         queue_trace(pending_traces, inst, offset, leg, copied_original, false, changed,
                     target_offset, std::move(target_words));
       }
-      if (skip_scope)
+      if (skip_scope) {
         break;
+      }
       if (block->has_implicit_terminator()) {
         // Materialize the CFG boundary as part of the translated block. Like
         // any other target-side expansion, the terminator belongs in relocated
@@ -4423,12 +4691,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         next_branch_island_pool_offset = next_direct_branch_island_pool_offset(kernel_text.size());
       }
     }
-    if (skip_scope)
+    if (skip_scope) {
       continue;
+    }
     layout.body_end = kernel_text.size();
 
-    if (continue_after_failure && has_error_diagnostic(result.diagnostics))
+    if (continue_after_failure && has_error_diagnostic(result.diagnostics)) {
       continue;
+    }
 
     // A preserved marked window is itself a getpc-plus-delta sequence, so re-translating our own
     // output finds a textbook builder inside one. Whoever claims it -- a multi-target consumer's
@@ -4445,9 +4715,10 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     std::vector<std::pair<uint64_t, uint64_t>> preserved_marked_windows;
     for (const auto &entry : recovered_indirect_by_call) {
       const RecoveredConsumer &consumer = entry.second;
-      if (consumer.preserve_marked_long_transfer)
+      if (consumer.preserve_marked_long_transfer) {
         preserved_marked_windows.emplace_back(consumer.marked_window_begin,
                                               consumer.marked_window_end);
+      }
     }
     std::ranges::sort(preserved_marked_windows);
     const auto inside_preserved_marked_window = [&](uint64_t getpc_offset) {
@@ -4456,8 +4727,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       return it != preserved_marked_windows.begin() && getpc_offset < std::prev(it)->second;
     };
     for (IndirectCallFixup fixup : pending_builder_fixups) {
-      if (inside_preserved_marked_window(fixup.source_getpc_offset))
+      if (inside_preserved_marked_window(fixup.source_getpc_offset)) {
         continue;
+      }
       const auto getpc_it = target_offset_by_source_offset.find(fixup.source_getpc_offset);
       const auto begin_it = target_offset_by_source_offset.find(fixup.source_recovery_begin_offset);
       const auto end_it = target_offset_by_source_offset.find(fixup.source_recovery_end_offset);
@@ -4480,12 +4752,14 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       fixup.target_recovery_end_offset = end_it->second;
       layout.recovered_builder_fixups.push_back(fixup);
     }
-    if (skip_scope)
+    if (skip_scope) {
       continue;
+    }
 
     for (IndirectCallFixup fixup : pending_window_builder_fixups) {
-      if (inside_preserved_marked_window(fixup.source_getpc_offset))
+      if (inside_preserved_marked_window(fixup.source_getpc_offset)) {
         continue;
+      }
       const auto getpc_it = target_offset_by_source_offset.find(fixup.source_getpc_offset);
       const auto begin_it = target_offset_by_source_offset.find(fixup.source_recovery_begin_offset);
       const auto end_it = target_offset_by_source_offset.find(fixup.source_recovery_end_offset);
@@ -4508,8 +4782,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     // layout is fixed.
     const auto patch_control_flow = [&]() {
       TextRelocationResult patched = patch_direct_branch_fixups(kernel_text, layout, host_arch_);
-      if (!patched.ok)
+      if (!patched.ok) {
         return patched;
+      }
       return patch_recovered_indirect_fixups(kernel_text, layout, host_arch_);
     };
     TextRelocationResult patched_control_flow = patch_control_flow();
@@ -4535,8 +4810,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                                    : direct_words + recovered_words;
     }
     while (!patched_control_flow.ok) {
-      if (patched_control_flow.reason != TextLayoutFailureReason::BranchOutOfRange)
+      if (patched_control_flow.reason != TextLayoutFailureReason::BranchOutOfRange) {
         break;
+      }
 
       if (!patched_control_flow.required_windows.empty()) {
         uint64_t requested_growth_words = 0;
@@ -4613,8 +4889,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
           (void)source_offset;
           rebaser.rebase(target_offset);
         }
-        for (PendingTrace &trace : pending_traces)
+        for (PendingTrace &trace : pending_traces) {
           rebaser.rebase(trace.target_offset);
+        }
         remaining_growth_words -= requested_growth_words;
       } else if (!layout.long_branch_sgpr) {
         auto sgpr = reserve_long_branch_sgpr_pair(kernel_context);
@@ -4642,8 +4919,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       auto failure =
           make_kernel_failure(relocation_diagnostic_kind(patched_control_flow),
                               patched_control_flow.message, patched_control_flow.source_offset);
-      if (fail_or_skip_kernel(scope, std::move(failure), transaction))
+      if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
         continue;
+      }
       return leave_unchanged();
     }
 
@@ -4651,8 +4929,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         !patched.ok) {
       auto failure = make_kernel_failure(relocation_diagnostic_kind(patched), patched.message,
                                          patched.source_offset, "indirect branch");
-      if (fail_or_skip_kernel(scope, std::move(failure), transaction))
+      if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
         continue;
+      }
       return leave_unchanged();
     } else {
       // Say so here rather than let a later pass refuse the object with nothing naming the cause.
@@ -4672,8 +4951,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     if (!materialized.ok) {
       auto failure = make_kernel_failure(materialization_diagnostic_kind(materialized),
                                          materialized.message, materialized.source_offset);
-      if (fail_or_skip_kernel(scope, std::move(failure), transaction))
+      if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
         continue;
+      }
       return leave_unchanged();
     }
     const uint64_t target_delta = materialized.target_delta;
@@ -4683,8 +4963,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         scope.translation != nullptr && scope.translation->sidecar_descriptor;
     for (const uint64_t taken : address_taken_offsets) {
       const auto placed = target_offset_by_source_offset.find(taken);
-      if (placed == target_offset_by_source_offset.end())
+      if (placed == target_offset_by_source_offset.end()) {
         continue;
+      }
       if (canonical_placement.try_emplace(taken, placed->second + target_delta).second) {
         transaction.relocations.canonical_placements_added.push_back(taken);
         canonical_placement_is_sidecar[taken] = scope_is_sidecar;
@@ -4730,8 +5011,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
     std::unordered_set<uint64_t> patched_address_add_offsets;
     for (const RelocationTableDispatch &dispatch : relocation_table_dispatches) {
-      if (!target_offset_by_source_offset.contains(dispatch.source_call_offset))
+      if (!target_offset_by_source_offset.contains(dispatch.source_call_offset)) {
         continue;
+      }
       const auto getpc = target_offset_by_source_offset.find(dispatch.source_getpc_offset);
       const auto add = target_offset_by_source_offset.find(dispatch.source_address_add_offset);
       if (getpc == target_offset_by_source_offset.end() ||
@@ -4758,8 +5040,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     // A `.text` target is a code address and is handled below rather than here, because it moves
     // with the body that holds it and so cannot be named by a fixed virtual address.
     for (const PcRelativeAddressBuilder &builder : pc_relative_address_builders) {
-      if (patched_address_add_offsets.contains(builder.source_address_add_offset))
+      if (patched_address_add_offsets.contains(builder.source_address_add_offset)) {
         continue;
+      }
       const auto getpc = target_offset_by_source_offset.find(builder.source_getpc_offset);
       const auto add = target_offset_by_source_offset.find(builder.source_address_add_offset);
       // A builder outside this scope's emitted blocks belongs to another scope's copy and is
@@ -4785,10 +5068,12 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // it and it would otherwise be copied verbatim with a literal measuring the distance the body
       // used to be at. Record it and resolve after every scope has been placed: the target may be
       // emitted by a different scope, so this scope's placement map cannot answer for it yet.
-      if (!target_is_in_text)
+      if (!target_is_in_text) {
         continue;
-      if (owned_by_recovered_builder(builder.source_address_add_offset))
+      }
+      if (owned_by_recovered_builder(builder.source_address_add_offset)) {
         continue;
+      }
       const uint64_t source_target = builder.target_vaddr - text_vaddr;
       // An adopted body has one canonical copy; every code address names it, whatever scope the
       // builder lives in. Resolving that here rather than after the loop keeps the address stable
@@ -4826,13 +5111,16 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
            .source_target_text_offset = source_target});
     }
 
-    if (kernel_context.required_vgpr_count > kernel_context.num_vgprs)
+    if (kernel_context.required_vgpr_count > kernel_context.num_vgprs) {
       scope.translation->target_vgpr_count = kernel_context.required_vgpr_count;
-    if (kernel_context.required_sgpr_count > kernel_context.num_sgprs)
+    }
+    if (kernel_context.required_sgpr_count > kernel_context.num_sgprs) {
       scope.translation->target_sgpr_count = kernel_context.required_sgpr_count;
+    }
     if (kernel_context.required_private_segment_fixed_size >
-        kernel_context.private_segment_fixed_size)
+        kernel_context.private_segment_fixed_size) {
       scope.translation->target_private_size = kernel_context.required_private_segment_fixed_size;
+    }
 
     // Only this scope's descriptor is grown from the values above, but a canonical copy this scope
     // hosts is entered through a pointer any kernel can dereference. If lowering that copy needed
@@ -4877,8 +5165,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
       // scopes.
       bool recomputed_descriptor = false;
       for (KdTranslation &translation : descriptor_translations) {
-        if (!same_kernel_scope_variant(translation, *scope.translation))
+        if (!same_kernel_scope_variant(translation, *scope.translation)) {
           continue;
+        }
 
         auto updated = descriptor_translator.translate_descriptor(
             patcher.image_bytes(), translation.descriptor_file_offset,
@@ -4918,8 +5207,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
                                                "kernel descriptor translation requires unsupported "
                                                "resource or ABI virtualization");
             for (const TranslationDiagnostic &diagnostic : updated->diagnostics) {
-              if (diagnostic.severity != DiagnosticSeverity::Error)
+              if (diagnostic.severity != DiagnosticSeverity::Error) {
                 continue;
+              }
               failure.kind = diagnostic.kind;
               failure.message = diagnostic.message;
               failure.guest_offset = diagnostic.guest_offset;
@@ -4956,14 +5246,16 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
         translation = std::move(*updated);
         recomputed_descriptor = true;
       }
-      if (skip_scope)
+      if (skip_scope) {
         continue;
+      }
 
       if (!recomputed_descriptor) {
         auto failure = make_kernel_failure(DiagnosticKind::KernelDescriptor,
                                            "kernel descriptor translation could not be recomputed");
-        if (fail_or_skip_kernel(scope, std::move(failure), transaction))
+        if (fail_or_skip_kernel(scope, std::move(failure), transaction)) {
           continue;
+        }
         return leave_unchanged();
       }
     }
@@ -4971,8 +5263,9 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
     flush_traces(pending_traces, target_delta);
 
     for (KdTranslation &translation : descriptor_translations) {
-      if (!same_kernel_scope_variant(translation, *scope.translation))
+      if (!same_kernel_scope_variant(translation, *scope.translation)) {
         continue;
+      }
       translation.target_entry_text_offset = layout.target_entry;
       translation.target_body_entry_text_offset = layout.target_body_entry;
     }
@@ -4991,11 +5284,13 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
 
   if (!resolve_pending_code_relocations(pending_code_relocations, text_relocations,
                                         canonical_placement, canonical_placement_variant_conflict,
-                                        code_relocations, result.diagnostics))
+                                        code_relocations, result.diagnostics)) {
     return leave_unchanged();
+  }
 
-  if (continue_after_failure && has_error_diagnostic(result.diagnostics))
+  if (continue_after_failure && has_error_diagnostic(result.diagnostics)) {
     return leave_unchanged();
+  }
 
   // Phase 6 commits the completed translation plan without mixing ELF mutation
   // and sidecar metadata construction into the per-kernel lowering transaction.
@@ -5004,16 +5299,18 @@ TranslatedCodeObject BinaryTranslator::translate_impl(const AmdGpuCodeObject &ob
   // them exactly as before.
   std::unordered_map<uint64_t, uint64_t> canonical_code_pointer_placement;
   for (const auto &[source_offset, target_offset] : canonical_placement) {
-    if (!canonical_placement_variant_conflict.contains(source_offset))
+    if (!canonical_placement_variant_conflict.contains(source_offset)) {
       canonical_code_pointer_placement.emplace(source_offset, target_offset);
+    }
   }
 
   auto materialized = materialize_translated_code_object(
       std::move(patcher), std::move(translated_text), text.size(), text_relocations,
       data_relocations, code_relocations, descriptor_translations, host_arch_, target_mach_,
       relied_on_relocated_by_construction, canonical_code_pointer_placement, result.diagnostics);
-  if (!materialized)
+  if (!materialized) {
     return leave_unchanged();
+  }
   result.elf_bytes = std::move(*materialized);
   return result;
 }
@@ -5027,14 +5324,16 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   assert(raw && "handle_encoding called without raw encoding");
   copied_original = false;
   changed = false;
-  if (collect_target_words)
+  if (collect_target_words) {
     target_words.clear();
+  }
 
   if (!encoding_translate_) {
     copied_original = true;
     const size_t word_count = inst.size() / sizeof(uint32_t);
-    if (collect_target_words)
+    if (collect_target_words) {
       target_words.assign(raw, raw + word_count);
+    }
     append_words(text, std::span<const uint32_t>(raw, word_count));
     return true;
   }
@@ -5048,8 +5347,9 @@ bool BinaryTranslator::handle_encoding(const Instruction &inst, uint64_t offset,
   if (tr.word_count == 0) {
     copied_original = true;
     const size_t word_count = inst.size() / sizeof(uint32_t);
-    if (collect_target_words)
+    if (collect_target_words) {
       target_words.assign(raw, raw + word_count);
+    }
     append_words(text, std::span<const uint32_t>(raw, word_count));
     return true;
   }

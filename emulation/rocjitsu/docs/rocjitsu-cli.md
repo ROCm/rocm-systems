@@ -1,4 +1,4 @@
-# Rocjitsu CLI and Transport Layer Design
+# rocjitsu CLI and Transport Layer Design
 
 ## Overview
 
@@ -63,13 +63,13 @@ the others requires a separate queue/process recovery mechanism.
 ### The fork boundary
 
 A child created with `fork()` before the parent has started a GPU backend can
-initialize its own rocJITsu context. This supports Python forkserver workers.
+initialize its own rocjitsu context. This supports Python forkserver workers.
 The child handler replaces unused interposer bookkeeping and the host mapping
 lock, while preserving the invocation metadata used to find the configuration
 and daemon. It does not acquire or destroy inherited locks.
 
 **After the parent starts a backend, forked children must `exec` before using
-rocJITsu.** The child may inherit locks held by threads that no longer exist, so
+rocjitsu.** The child may inherit locks held by threads that no longer exist, so
 GPU endpoint opens fail with `ENODEV` until `exec` initializes a fresh context.
 This restriction applies to local and daemon clients, including after their GPU
 descriptors have been closed. Inheriting real GPU descriptors also prevents
@@ -174,7 +174,7 @@ destroys the topology root (VirtualMachine), which destroys the driver.
 | Local | `rocjitsu -- ./app` | SimulatedDriver (in-process) | Background thread |
 | Daemon (server) | `rocjitsu --daemon -- ./app` | SimulatedDriver (in-process) | Background thread |
 | Daemon (client) | LD_PRELOAD interposer | RemoteDriver (RPC stub) | In daemon process |
-| VFIO-user server | `rocjitsu --config ... --vfio-socket ...` (repeat per local GPU) | Guest AMDGPU driver through PCI/VFIO | rocJITsu process |
+| VFIO-user server | `rocjitsu --config ... --vfio-socket ...` (repeat per local GPU) | Guest AMDGPU driver through PCI/VFIO | rocjitsu process |
 
 ## RPC Protocol
 

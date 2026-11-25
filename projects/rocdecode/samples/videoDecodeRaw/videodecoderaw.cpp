@@ -226,9 +226,9 @@ int main(int argc, char **argv) {
         }
 
         RocVideoDecoder viddec(device_id, mem_type, rocdec_codec_id, b_force_zero_latency, p_crop_rect, b_extract_sei_messages, disp_delay);
-        // Query the decode capabilities directly instead of using RocVideoDecoder::CodecSupported(), which reports a
-        // failed query the same way as an unsupported codec. A codec the GPU's VCN doesn't support (e.g. AV1 on gfx90a)
-        // is skipped with exit code 77, the conventional skip code; a failed query is an error.
+        // Query the decode capabilities directly so the failure status can be reported. A codec the GPU's VCN doesn't
+        // support (e.g. AV1 on gfx90a) is skipped with exit code 77, the conventional skip code; a failed query is an
+        // error.
         RocdecDecodeCaps decode_caps = {};
         decode_caps.device_id = device_id;
         decode_caps.codec_type = rocdec_codec_id;

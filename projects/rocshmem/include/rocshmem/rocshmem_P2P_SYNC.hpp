@@ -40,8 +40,6 @@ namespace rocshmem {
  * @param[in] ivars Pointer to memory on the symmetric heap to wait for.
  * @param[in] cmp Operation for the comparison.
  * @param[in] val Value to compare the memory at \p ptr to.
- *
- * @return void
  */
 __device__ void rocshmem_float_wait_until(
     float *ivars, int cmp, float val);

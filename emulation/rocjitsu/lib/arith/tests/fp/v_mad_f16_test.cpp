@@ -3,6 +3,7 @@
 
 // Legacy half MAD's FP32 intermediate, output controls, wave masks and aliases.
 
+#include "common/contracts.h"
 #include "common/cpu.h"
 #include "common/registers.h"
 #include "common/semantics.h"
@@ -17,7 +18,7 @@
 namespace {
 
 // Both MAD spellings inherit the same approximation; selected goldens pin its rounding stages.
-template <int Lanes, typename Call> void check_mad(Call call) {
+template <int Lanes, bool Gfx90a = false, typename Call> void check_mad(Call call) {
   using namespace rocjitsu::arith::test;
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
   Registers<4, Lanes> input;
@@ -49,6 +50,54 @@ template <int Lanes, typename Call> void check_mad(Call call) {
       EXPECT_EQ(status, 0x80000000U);
     }
   }
+  expect_invalid_flags(
+      [&](uint64_t flags, uint64_t mode) {
+        return call(flags, Mask(0), mode, nullptr, nullptr, nullptr, nullptr, nullptr);
+      },
+      RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_ABS_C | RJ_ARITH_ALU_NEG_A |
+          RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C | RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B |
+          RJ_ARITH_ALU_HIGH_C | RJ_ARITH_ALU_HIGH_D | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP);
+  if constexpr (Gfx90a) {
+    // FP16_OVFL saturates the product before the separately rounded add.
+    for (auto cpu : cpus) {
+      for (bool overflow : {false, true}) {
+        auto actual = input;
+        actual.v[0][0] = actual.v[1][0] = 0x7bff;
+        actual.v[2][0] = 0;
+        const uint64_t flags =
+            cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | (overflow ? RJ_ARITH_FP16_OVFL : 0);
+        ASSERT_EQ(
+            call(flags, Mask(1), 0, actual.v + 3, actual.v, actual.v + 1, actual.v + 2, nullptr),
+            RJ_ARITH_SUCCESS);
+        EXPECT_EQ(uint16_t(actual.v[3][0]), overflow ? 0x7bff : 0x7c00);
+      }
+    }
+    // Selected inherited-model goldens distinguish two half roundings from FMA/FP32 MAD.
+    const uint16_t operands[][3] = {{0x5c01, 0x3bfe, 0xdc00},
+                                    {0x3c00, 0x3c00, 0x1000},
+                                    {0x0001, 0x3c00, 0x0000},
+                                    {0x7bff, 0x4000, 0x0000}};
+    const uint16_t goldens[][4] = {{0x0000, 0x3c00, 0x0000, 0x7c00},
+                                   {0x0000, 0x3c01, 0x0000, 0x7c00},
+                                   {0xb000, 0x3c00, 0x0000, 0x7bff},
+                                   {0xb000, 0x3c00, 0x0000, 0x7bff}};
+    for (int rounding = 0; rounding < 4; ++rounding) {
+      for (auto cpu : cpus) {
+        auto actual = input;
+        for (int lane = 0; lane < 4; ++lane) {
+          for (int operand = 0; operand < 3; ++operand) {
+            actual.v[operand][lane] = operands[lane][operand];
+          }
+        }
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | (uint64_t(rounding) << 24),
+                       Mask(15), 0, actual.v + 3, actual.v, actual.v + 1, actual.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        for (int lane = 0; lane < 4; ++lane) {
+          EXPECT_EQ(uint16_t(actual.v[3][lane]), goldens[rounding][lane]);
+        }
+      }
+    }
+  }
   // Independent numeric reference: decode halves, explicitly round the sum to FP32,
   // then use the test-only nearest-half encoder. This is an approximation contract.
   for (auto cpu : cpus) {
@@ -65,7 +114,8 @@ template <int Lanes, typename Call> void check_mad(Call call) {
                 /*atol=*/0x1p-14, /*rtol=*/0x1p-9);
     }
   }
-  for (auto fp : {uint64_t(0), RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+  for (auto fp : {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_IEEE_MODE,
+                  RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
                   RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_ZERO,
                   RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP16_OVFL,
                   RJ_ARITH_FP_DX10_CLAMP_OFF | RJ_ARITH_FP_IEEE_MODE}) {
@@ -95,8 +145,13 @@ template <int Lanes, typename Call> void check_mad(Call call) {
             EXPECT_EQ((actual.v[destination][lane] ^ input.v[destination][lane]) &
                           (shift ? 0xffffU : 0xffff0000U),
                       0U);
-            expect_fp(actual.v[destination][lane] >> shift, expected.v[destination][lane] >> shift,
-                      16, RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/0x1p-14, /*rtol=*/0x1p-9);
+            if constexpr (Gfx90a) {
+              EXPECT_EQ(actual.v[destination][lane], expected.v[destination][lane]);
+            } else {
+              expect_fp(actual.v[destination][lane] >> shift,
+                        expected.v[destination][lane] >> shift, 16, RJ_ARITH_SEMANTICS_LOOSE,
+                        /*atol=*/0x1p-14, /*rtol=*/0x1p-9);
+            }
           }
         }
       }
@@ -114,4 +169,14 @@ TEST(FpMadF16W32, Arithmetic) {
 TEST(FpMadF16W64, Arithmetic) {
   check_mad<64>(rj_arith_v_mad_f16_w64);
   check_mad<64>(rj_arith_v_mad_legacy_f16_w64);
+}
+
+TEST(FpMadF16W32Gfx90a, Arithmetic) {
+  check_mad<32, true>(rj_arith_v_mad_f16_w32_gfx90a);
+  check_mad<32, true>(rj_arith_v_mad_legacy_f16_w32_gfx90a);
+}
+
+TEST(FpMadF16W64Gfx90a, Arithmetic) {
+  check_mad<64, true>(rj_arith_v_mad_f16_w64_gfx90a);
+  check_mad<64, true>(rj_arith_v_mad_legacy_f16_w64_gfx90a);
 }

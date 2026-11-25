@@ -6,11 +6,11 @@
 use std::ffi::c_void;
 
 use crate::ffi::*;
-use crate::image_abi::{
+use crate::image::{
     IMAGE_LAYOUT_LINEAR, IMAGE_LAYOUT_OPAQUE, ImageRequest, create_image, create_imported_image,
     create_native_mip_image, destroy_image, image_mipmap_array_get_level,
 };
-use crate::runtime::boundary;
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -279,7 +279,7 @@ pub unsafe extern "C" fn hsa_ext_image_mipmap_array_get_level(
 ) -> Status {
     // SAFETY: The owner validates the C pointers and retains the image state
     // through this synchronous view creation call.
-    unsafe {
+    boundary(|| unsafe {
         image_mipmap_array_get_level(
             agent,
             mipmapped_array,
@@ -287,5 +287,5 @@ pub unsafe extern "C" fn hsa_ext_image_mipmap_array_get_level(
             image_descriptor,
             level_image_out,
         )
-    }
+    })
 }

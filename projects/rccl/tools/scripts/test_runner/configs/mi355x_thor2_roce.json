@@ -1549,6 +1549,24 @@
           "test_filter": "Recorder.RedOpRecordBinary"
         },
         {
+          "name": "Recorder.LogLevelNonNumeric",
+          "description": "Recorder rejects non-numeric log levels without throwing and keeps the default",
+          "test_filter": "Recorder.LogLevelNonNumeric",
+          "timeout": 60
+        },
+        {
+          "name": "Recorder.LogLevelNumeric",
+          "description": "Recorder accepts a numeric log level and writes named-call records",
+          "test_filter": "Recorder.LogLevelNumeric",
+          "timeout": 60
+        },
+        {
+          "name": "Recorder.LogLevelNumericSuffixRejected",
+          "description": "Recorder rejects numeric log levels with trailing characters and keeps the default",
+          "test_filter": "Recorder.LogLevelNumericSuffixRejected",
+          "timeout": 60
+        },
+        {
           "name": "ProxyTrace.nonEmptySingleton",
           "description": "Proxy trace non-empty singleton",
           "test_filter": "ProxyTraceTestFixture.nonEmptySingleton"
@@ -1809,7 +1827,7 @@
         {
           "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
           "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
-          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain*"
         }
       ]
     },
@@ -4067,6 +4085,14 @@
           "name": "DDA_IpcReduceScatterIndexData_8Ranks",
           "description": "DDA IPC ReduceScatter with rank- and index-dependent fp32/bf16 data: every rank must receive its own reduced slice",
           "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
+        },
+        {
+          "name": "DDA_IpcCommLifecycle_8Ranks",
+          "description": "DDA IPC must come up, with no HIP error pending, on communicators created after another one is destroyed; needs cuMem, which is cached per process",
+          "test_filter": "DdaIpcMPI_CommLifecycle.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
         }
       ]
     },

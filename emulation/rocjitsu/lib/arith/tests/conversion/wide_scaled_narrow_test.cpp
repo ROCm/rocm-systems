@@ -17,6 +17,7 @@
 #include <bit>
 #include <cmath>
 #include <gtest/gtest.h>
+#include <limits>
 #include <random>
 #include <stdint.h>
 
@@ -33,7 +34,7 @@ float decode(int source, uint32_t raw) {
 
 // Bind operand shapes once, then share contracts, arithmetic and aliases across
 // source formats and rounding modes without multiplying per-instruction fixtures.
-template <int Lanes, int Src, int Format, bool Stochastic, bool FullScale = false, typename Call>
+template <int Lanes, int Src, int Format, bool Stochastic, bool Gfx1250 = false, typename Call>
 void check(Call call) {
   constexpr bool Bf6 = Format == 1;
   constexpr int bits = Format == 2 ? 4 : Format >= 3 ? 8 : 6;
@@ -41,13 +42,13 @@ void check(Call call) {
   using Sources = const uint32_t *const *;
   auto invoke = [&](uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, Sources a,
                     Sources b, Sources c) {
-    if constexpr (Stochastic || (!FullScale && Src == 0)) {
+    if constexpr (Stochastic || (!Gfx1250 && Src == 0)) {
       return call(flags, exec_mask, mode, d, a, b, c);
     } else {
       return call(flags, exec_mask, mode, d, a, c);
     }
   };
-  constexpr int elements = FullScale ? (bits == 6 ? 16 : 8) : 32;
+  constexpr int elements = Gfx1250 ? (bits == 6 ? 16 : 8) : 32;
   constexpr int words = elements * bits / 32;
   Registers<56, Lanes> input;
   std::minstd_rand random;
@@ -64,7 +65,7 @@ void check(Call call) {
       input.v[32][lane] = seeds[lane % 4];
     }
   }
-  if constexpr (FullScale) {
+  if constexpr (Gfx1250) {
     const uint32_t scales[] = {0x3f800000U, 0, 0x80000000U, 0x7f800000U,
                                0x7fc12345U, 1, 0x7f7fffffU, 0xc0200000U};
     for (int lane = 0; lane < Lanes; ++lane) {
@@ -83,10 +84,14 @@ void check(Call call) {
   input.v[1][0] = Format == 2 ? fp4_cutoff : cutoff;
   input.v[2][0] = Src == 0 ? 0x7fc12345U : Src == 1 ? 0x7e017c00U : 0x7fc17f80U;
   input.v[3][0] = Src == 0 ? 0xff800000U : Src == 1 ? 0xfc007c00U : 0xff807f80U;
-  if constexpr (Src == 0 && !FullScale) {
+  if constexpr (Src == 0) {
     // Scaling by 2^-127 makes input-denormal handling observable after narrowing.
     input.v[0][1] = 0x00400000U;
-    input.v[32][1] = 0x80400000U;
+    if constexpr (Gfx1250) {
+      input.v[1][1] = 0;
+    } else {
+      input.v[32][1] = 0x80400000U;
+    }
   }
   if constexpr (Stochastic) {
     input.v[32][0] = ~0U;
@@ -116,7 +121,7 @@ void check(Call call) {
         if (!exact) {
           for (int lane = 0; lane < Lanes; ++lane) {
             int exponent = (input.v[48][lane] >> 23) & 255;
-            if (!((exec_mask >> lane) & 1) || (!FullScale && exponent == 255)) {
+            if (!((exec_mask >> lane) & 1) || (!Gfx1250 && exponent == 255)) {
               continue;
             }
             for (int word = 0; word < words; ++word) {
@@ -124,7 +129,7 @@ void check(Call call) {
             }
             uint32_t seed = Stochastic ? input.v[32][lane] : 0;
             for (int element = 0; element < elements; ++element) {
-              uint32_t raw = Src == 0 ? ((Stochastic || FullScale)
+              uint32_t raw = Src == 0 ? ((Stochastic || Gfx1250)
                                              ? input.v[element][lane]
                                              : input.v[(element % 2 ? 32 : 0) + element / 2][lane])
                                       : input.v[element / 2][lane] >> ((element % 2) * 16);
@@ -132,8 +137,8 @@ void check(Call call) {
                   (raw & 0x7f800000U) == 0) {
                 raw &= 0x80000000U;
               }
-              float value = FullScale
-                                ? decode(Src, raw) / std::bit_cast<float>(input.v[48][lane])
+              float value = exponent == 255
+                                ? std::numeric_limits<float>::quiet_NaN()
                                 : float(double(decode(Src, raw)) / std::ldexp(1.0, exponent - 127));
               uint32_t code;
               if constexpr (Format >= 3) {

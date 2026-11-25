@@ -6,6 +6,7 @@ As part of the efforts to enhance RCCL Replayer functionality, RCCL now provides
 * If the value of `RCCL_REPLAY_FILE` contains “.json” extension, the log will be exported as text in **JSON** format. Otherwise, the log will be a **binary** file by default, with ".bin" extension.
 * Each process will export its own log local to the directory and node of the executable. Names of each process' output will be in the format of `filename.PID.hostname.extension`. For example, run workload with `RCCL_REPLAY_FILE="replayer_log"` will produce logs named such as `replayer_log.1275.quanta-cyxtera-cx77-11.bin`.
 * Log level is controlled by `RCCL_LOG_LEVEL` environment. Currently, by default, log level is 1 and will record most essential RCCL APIs which perform actual operations or incur changes to the communicator. Otherwise, other informational RCCL calls such as `ncclGetAsyncError` or third party function calls like `mscclRunAlgo` will be recorded, too.
+  The value must parse completely as an integer in the range of `int`. Unset, empty, invalid, or out-of-range values use the default level of 1 without throwing; for example, `2abc` is invalid rather than being treated as `2`.
 
 ## What it does
 -   Every public RCCL API call is tracked and logged in order of execution
@@ -118,4 +119,3 @@ The `--sanitize` option normalizes logs for easier comparison by:
   * Use `--no-timestamp` (or `--nts`) to set all timestamps to 0.0 instead
 * Preserving relationships: same pointer values get the same sanitized identifier
 * Sanitized fields: communicators (`comm`), unique IDs (`uniqueID`), streams (`stream`), buffer addresses (`addr`/`base`/`ptr`/`acc`), handles (`handle`), thread IDs (`thread`), and process IDs (`pid`)
-

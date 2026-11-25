@@ -502,10 +502,7 @@ file(COPY ${CATCH_ADD_TESTS_SCRIPT}
          DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_SCRIPT_TARGETS ${CATCH_ADD_TESTS_SCRIPT})
 
-# copy python script and headers to catch test package
-file(COPY ./unit/compileAndCaptureOutput.py
-            DESTINATION  ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/unit )
-
+# copy headers to catch test package
 file(COPY ./include/hip_test_common.hh DESTINATION ${CATCH_INCLUDE_BINARY_DIR})
 file(COPY ./include/hip_test_context.hh DESTINATION ${CATCH_INCLUDE_BINARY_DIR})
 

@@ -9,10 +9,10 @@
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
 // Return the storage width of a validated format selector (0 through 4).
-inline int matrix_format_bits(int format) { return format < 2 ? 8 : format < 4 ? 6 : 4; }
+constexpr int matrix_format_bits(int format) { return format < 2 ? 8 : format < 4 ? 6 : 4; }
 
 // Widen all finite FP6/BF6/FP4 codes, including negative zero, without a lookup table.
-inline float matrix_decode_subbyte(uint32_t value, int format) {
+constexpr float matrix_decode_subbyte(uint32_t value, int format) {
   int fraction_bits = format == 2 ? 3 : format == 3 ? 2 : 1;
   int bits = matrix_format_bits(format);
   int bias = format == 3 ? 3 : 1;
@@ -22,9 +22,10 @@ inline float matrix_decode_subbyte(uint32_t value, int format) {
   uint32_t fraction = magnitude & ((1U << fraction_bits) - 1);
   if (!exponent) {
     float scale = format == 2 ? 0x1p-3f : format == 3 ? 0x1p-4f : 0x1p-1f;
-    return as_float(as_bits(float(fraction) * scale) | sign);
+    return bit_cast<float>(bit_cast<uint32_t>(float(fraction) * scale) | sign);
   }
-  return as_float(sign | ((exponent + 127 - bias) << 23) | (fraction << (23 - fraction_bits)));
+  return bit_cast<float>(sign | ((exponent + 127 - bias) << 23) |
+                         (fraction << (23 - fraction_bits)));
 }
 
 // Read one packed element, including six-bit values straddling consecutive VGPRs.
