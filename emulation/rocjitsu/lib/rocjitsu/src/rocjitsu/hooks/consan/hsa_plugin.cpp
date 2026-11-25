@@ -1316,12 +1316,12 @@ private:
         fail_locked(RuntimeStatus::InvalidFacts, "application native packet violates original ABI");
         return;
       }
-      // Trace rows currently use TTMP9 as the global workgroup X identity.
+      // Selected rows can use TTMP9 as the global workgroup X identity.
       // Format 3 supplies a cluster coordinate there for nonunit clusters.
       if (binding->disposition == EntryDisposition::Selected && is_extended &&
           (extended.cluster_size_x != 1 || extended.cluster_size_y != 1 ||
            extended.cluster_size_z != 1)) {
-        reject_packet_locked(packet, "application execution tracing requires unit cluster sizes");
+        reject_packet_locked(packet, "application instrumentation requires unit cluster sizes");
         return;
       }
       launch->module = std::move(owner);
@@ -1332,9 +1332,8 @@ private:
           release_unsubmitted_locked(*unsubmitted);
         };
         std::unique_ptr<Launch, decltype(release)> rollback(launch.get(), release);
-        if (!binding->facts || binding->facts->scope != ScopeKind::ExecutionTrace) {
-          reject_packet_locked(packet,
-                               "application selected dispatch requires execution-trace facts");
+        if (!binding->facts) {
+          reject_packet_locked(packet, "application selected dispatch requires qualified facts");
           return;
         }
         if (!prepare_selected_locked(launch, binding, packet,

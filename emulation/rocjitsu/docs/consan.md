@@ -282,6 +282,34 @@ variants use `NODELETE` to keep hook code mapped when ROCR closes the tool insid
 that call; Runtime resources are still released, but the DSO mapping remains for
 the process lifetime.
 
+#### LDS capture in applications
+
+The application adapter accepts qualified LDS artifacts as well as execution
+trace artifacts. The analysis scope describes the GPU observations; the
+execution mode separately records how the runtime completes and captures them.
+Application LDS captures therefore record system-visible completion without
+claiming application-signal forwarding, a single queue, nonoverlap, or disabled
+profiling. The original dispatch completion must still be null.
+
+LDS qualification and launch limits remain in force. Each selected dispatch
+requires complete one-dimensional workgroups, at most sixteen workgroups,
+supported kernargs, and enough runtime-owned report storage. Extended-format-3
+selected dispatches require unit cluster sizes. Rejected geometry or allocation
+failure does not submit a partially bound dispatch or publish a successful
+capture.
+
+The observer owns each completed report snapshot before report storage can be
+reused. Pending executions retain independent reports and copied arguments;
+the collector preserves submission order even when completion arrives out of
+order. LDS diagnosis remains local to each execution and workgroup. These host
+transport mechanisms do not add guest LDS synchronization.
+
+`ConSanMultiEntrySim.ApplicationLds` and `.ApplicationLdsBarrier` execute the
+original A/B/C/A fixture and its numerical oracle through this application
+adapter, then analyze a closed LDS capture again without its original and
+prepared input paths. They exercise simulated GPU probes and establish no
+physical-GPU coverage.
+
 #### Execution trace for application transport
 
 Use an explicit profile to instrument entry and terminal boundaries without

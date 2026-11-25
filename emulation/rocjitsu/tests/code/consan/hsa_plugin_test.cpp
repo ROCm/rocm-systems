@@ -1257,7 +1257,7 @@ INSTANTIATE_TEST_SUITE_P(InvalidOriginalArguments, ConSanTracePointerAdmission,
                          ::testing::Range(1u, 7u));
 #endif
 
-TEST_F(ConSanApplicationHsaPlugin, LdsSelectedDispatchCannotSilentlySucceedInApplicationProfile) {
+TEST_F(ConSanApplicationHsaPlugin, LdsExtendedDispatchCapturesWithoutApplicationSignalForwarding) {
   ASSERT_TRUE(bind());
   ASSERT_TRUE(create_queue_and_signal());
   hsa_amd_ext_kernel_dispatch_packet_t packet = extended_packet();
@@ -1265,7 +1265,102 @@ TEST_F(ConSanApplicationHsaPlugin, LdsSelectedDispatchCannotSilentlySucceedInApp
   packet.workgroup_size_y = 1;
   packet.cluster_count_x = 1;
   submit_application(packet);
+  ASSERT_EQ(application_packets_.size(), 1u);
+  ASSERT_EQ(application_reports_.size(), 1u);
+  const std::vector<uint8_t> report(application_reports_[0].begin(), application_reports_[0].end());
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(finish_(), 0);
+  const FailureOr<Capture> capture = decode_capture(read_capture());
+  ASSERT_TRUE(capture.succeeded());
+  EXPECT_EQ(capture.value().header.execution_conditions, kExecutionSystemFineGrain);
+  ASSERT_EQ(capture.value().executions.size(), 1u);
+  EXPECT_EQ(capture.value().executions[0].completion, kCompletionVisible);
+  EXPECT_EQ(capture.value().executions[0].report, report);
+  EXPECT_EQ(statistics_().submitted, 1u);
+  EXPECT_EQ(statistics_().copied, 1u);
+  EXPECT_EQ(statistics_().written, 1u);
+  EXPECT_EQ(statistics_().forwarded, 0u);
+  EXPECT_EQ(load_signal(signal_), 1);
+  EXPECT_TRUE(allocations_.empty());
+}
+
+TEST_F(ConSanApplicationHsaPlugin, LdsStandardDispatchCapturesWithoutApplicationSignalForwarding) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  const hsa_kernel_dispatch_packet_t packet = dispatch_packet({});
+  handler_(&packet, 1, 0, handler_context_, application_writer);
+  ASSERT_EQ(application_packets_.size(), 1u);
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(finish_(), 0);
+  const FailureOr<Capture> capture = decode_capture(read_capture());
+  ASSERT_TRUE(capture.succeeded());
+  ASSERT_EQ(capture.value().executions.size(), 1u);
+  EXPECT_EQ(capture.value().executions[0].completion, kCompletionVisible);
+  EXPECT_EQ(statistics_().forwarded, 0u);
+  EXPECT_EQ(load_signal(signal_), 1);
+}
+
+TEST_F(ConSanApplicationHsaPlugin, LdsPendingDispatchesKeepIndependentReportsAndArguments) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  auto_complete_ = false;
+  hsa_kernel_dispatch_packet_t packet = dispatch_packet({});
+  packet.header &= ~(1u << HSA_PACKET_HEADER_BARRIER);
+  handler_(&packet, 1, 0, handler_context_, application_writer);
+  ASSERT_EQ(application_reports_.size(), 1u);
+  const std::vector<uint8_t> first(application_reports_[0].begin(), application_reports_[0].end());
+  arguments_[0] = 23;
+  handler_(&packet, 1, 0, handler_context_, application_writer);
+  ASSERT_EQ(application_reports_.size(), 2u);
+  ASSERT_EQ(application_completions_.size(), 2u);
+  const std::vector<uint8_t> second(application_reports_[1].begin(), application_reports_[1].end());
+  EXPECT_NE(application_reports_[0].data(), application_reports_[1].data());
+  EXPECT_EQ(statistics_().submitted, 2u);
+  store_signal(application_completions_[1], 0);
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (statistics_().copied == 0 && std::chrono::steady_clock::now() < deadline)
+    std::this_thread::yield();
+  EXPECT_EQ(statistics_().copied, 1u);
+  EXPECT_EQ(statistics_().written, 0u);
+  store_signal(application_completions_[0], 0);
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(finish_(), 0);
+  const FailureOr<Capture> capture = decode_capture(read_capture());
+  ASSERT_TRUE(capture.succeeded());
+  ASSERT_EQ(capture.value().executions.size(), 2u);
+  const CapturedExecution &saved_first = capture.value().executions[0];
+  const CapturedExecution &saved_second = capture.value().executions[1];
+  EXPECT_EQ(saved_first.serial, 1u);
+  EXPECT_EQ(saved_second.serial, 2u);
+  EXPECT_EQ(saved_first.arguments[0], 7u);
+  EXPECT_EQ(saved_second.arguments[0], 23u);
+  EXPECT_EQ(saved_first.report, first);
+  EXPECT_EQ(saved_second.report, second);
+  EXPECT_EQ(statistics_().forwarded, 0u);
+  EXPECT_EQ(statistics_().written, 2u);
+}
+
+TEST_F(ConSanApplicationHsaPlugin, LdsPartialWorkgroupRejectsBeforeAllocationOrSubmission) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  const hsa_kernel_dispatch_packet_t packet = dispatch_packet({}, 65);
+  handler_(&packet, 1, 0, handler_context_, application_writer);
   EXPECT_TRUE(application_packets_.empty());
+  EXPECT_EQ(allocation_calls_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+TEST_F(ConSanApplicationHsaPlugin, LdsReportAllocationFailureDoesNotSubmitOrPublishCapture) {
+  ASSERT_TRUE(bind());
+  ASSERT_TRUE(create_queue_and_signal());
+  fail_allocation_ = 1;
+  const hsa_kernel_dispatch_packet_t packet = dispatch_packet({});
+  handler_(&packet, 1, 0, handler_context_, application_writer);
+  EXPECT_TRUE(application_packets_.empty());
+  EXPECT_EQ(statistics_().submitted, 0u);
   EXPECT_NE(finish_(), 0);
   EXPECT_FALSE(std::filesystem::exists(capture_));
 }
@@ -1867,7 +1962,8 @@ protected:
   }
 };
 
-TEST_P(ConSanApplicationSelectedLdsHsaPlugin, SelectedLdsCannotUseTheNativeApplicationProfile) {
+TEST_P(ConSanApplicationSelectedLdsHsaPlugin,
+       SelectedLdsCapturesWithApplicationCompletionEvidence) {
   ASSERT_EQ(facts_.scope, GetParam());
   ASSERT_EQ(image_facts_.entries.size(), 1u);
   ASSERT_TRUE(image_facts_.entries.front().selected.has_value());
@@ -1884,16 +1980,31 @@ TEST_P(ConSanApplicationSelectedLdsHsaPlugin, SelectedLdsCannotUseTheNativeAppli
   ASSERT_EQ(layout.value().wave_count, 4u);
   ASSERT_NE(handler_, nullptr);
   handler_(&packet, 1, 0, handler_context_, application_writer);
-  EXPECT_TRUE(application_packets_.empty());
+  ASSERT_EQ(application_packets_.size(), 1u);
+  ASSERT_EQ(application_reports_.size(), 1u);
+  const std::vector<uint8_t> report(application_reports_[0].begin(), application_reports_[0].end());
   EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(drain_(), 0);
+  EXPECT_EQ(finish_(), 0);
   const rj_consan_statistics statistics = statistics_();
-  EXPECT_EQ(statistics.submitted, 0u);
+  EXPECT_EQ(statistics.submitted, 1u);
   EXPECT_EQ(statistics.native_submitted, 0u);
   EXPECT_EQ(statistics.native_completed, 0u);
-  EXPECT_EQ(statistics.copied, 0u);
-  EXPECT_EQ(statistics.written, 0u);
-  EXPECT_NE(finish_(), 0);
-  EXPECT_FALSE(std::filesystem::exists(capture_));
+  EXPECT_EQ(statistics.copied, 1u);
+  EXPECT_EQ(statistics.written, 1u);
+  EXPECT_EQ(statistics.forwarded, 0u);
+  EXPECT_EQ(load_signal(signal_), 1);
+  const FailureOr<Capture> capture = decode_capture(read_capture());
+  ASSERT_TRUE(capture.succeeded());
+  EXPECT_EQ(capture.value().header.execution_conditions, kExecutionSystemFineGrain);
+  ASSERT_EQ(capture.value().executions.size(), 1u);
+  const CapturedExecution &execution = capture.value().executions[0];
+  EXPECT_EQ(execution.completion, kCompletionVisible);
+  EXPECT_EQ(execution.dimensions.grid, dimensions.grid);
+  EXPECT_EQ(execution.dimensions.workgroup, dimensions.workgroup);
+  EXPECT_EQ(execution.report, report);
+  ASSERT_TRUE(capture.value().header.image.entries.front().selected);
+  EXPECT_EQ(capture.value().header.image.entries.front().selected->scope, GetParam());
 }
 
 INSTANTIATE_TEST_SUITE_P(SelectedLdsScopes, ConSanApplicationSelectedLdsHsaPlugin,
