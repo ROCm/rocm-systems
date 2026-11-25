@@ -683,6 +683,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     0,                    // [7] Recv            -- not used
     0,                    // [8] AlltoAll        -- not used
   },
+  .arTreeMaxPerRankMultiNode = 4ULL*1024*1024,  // Tree/LL128 beats Ring/LL128 1.1-1.3x to 32 MiB per node (8 GPUs)
   .forceCeScratch = true,
   .bcRingLLMaxBytes = 0,
   .bcRingLL128MaxBytes = 0,

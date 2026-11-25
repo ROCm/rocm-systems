@@ -194,6 +194,10 @@ struct rcclArchThresholds {
   size_t rsRingSimpleCappedMaxPerRank;  // Ring Simple ReduceScatter above the LL128 band,
   int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
 
+  // Multi-node (nNodes > 1) AllReduce with 8 ranks per node runs Tree instead of Ring up to nRanks x this;
+  // rcclUpdateCollectiveProtocol then picks the Tree protocol. 0 = keep the cost model's choice.
+  size_t arTreeMaxPerRankMultiNode;
+
   // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter
   // whenever the receive fits ddaScratch, on top of the ceNonRegMin/Max window.
   // NCCL_CTA_POLICY_ZERO forces it on every arch (it is the one zero-CU path for

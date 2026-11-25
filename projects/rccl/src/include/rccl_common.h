@@ -157,10 +157,10 @@ ncclResult_t rcclOverrideProtocol(const char* ncclProtoStr[], float table[][NCCL
 ncclResult_t rcclOverrideAlgorithm(const char* ncclAlgoStr[], float table[][NCCL_NUM_PROTOCOLS],
                                    struct ncclTaskColl* info);
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);
-// Arch-table AllReduce Tree-over-Ring switch (rcclArchThresholds::arTreeMaxPerRank;
-// single-node comms of rankScaledMinRanks+ ranks, NCCL_ALGO / NCCL_PROTO unset, cost
-// table offering Tree LL and LL128). Call before rcclUpdateCollectiveProtocol, which
-// then picks the Tree protocol.
+// Arch-table AllReduce Tree-over-Ring switch (rcclArchThresholds::arTreeMaxPerRank on
+// single-node comms of rankScaledMinRanks+ ranks, arTreeMaxPerRankMultiNode on more nodes at
+// 8 ranks per node; NCCL_ALGO / NCCL_PROTO unset, cost table offering Tree LL, LL128 and Simple). Call before
+// rcclUpdateCollectiveProtocol, which then picks the Tree protocol.
 void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
                                    float table[][NCCL_NUM_PROTOCOLS]);
 // Arch-table channel cap for Ring Simple ReduceScatter
