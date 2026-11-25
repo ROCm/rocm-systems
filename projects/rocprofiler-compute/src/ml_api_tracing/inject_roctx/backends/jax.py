@@ -9,8 +9,10 @@ handles. Wraps those entry points with ROCTX ranges.
 
 import importlib.util
 import threading
+import types
+from functools import partial
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, List
 
 from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backend_contract import register
@@ -23,6 +25,7 @@ _jax_thread_local = threading.local()
 def patch_jax_entry_points() -> None:
     """Wrap JAX compiled-call and primitive-dispatch entry points."""
     _wrap_jit_compiled_call()
+    _wrap_mapped_factory("pmap", "jax.pmap")
     _wrap_primitive_bind_with_trace()
 
 
@@ -127,6 +130,69 @@ def _roctx_compiled_call(compiled: object, *args: Any, **kwargs: Any) -> object:
 _roctx_compiled_call._roctx_wrapped = True
 
 
+def _wrap_mapped_result(compiled: object, marker_prefix: str) -> object:
+    """Return a marked callable for a pmap or shard_map result."""
+    if getattr(compiled, "_roctx_wrapped", False):
+        return compiled
+    return _RoctxMappedCallable(compiled, marker_prefix)
+
+
+def _wrap_mapped_decorator_result(
+    decorator: Callable[..., Any], marker_prefix: str, user_fun: object
+) -> object:
+    """Apply a decorator-factory result to user_fun and mark the compiled callable."""
+    return _wrap_mapped_result(decorator(user_fun), marker_prefix)
+
+
+def _roctx_mapped_factory(
+    original: Callable[..., Any],
+    marker_prefix: str,
+    fun: object = None,
+    /,
+    *args: Any,
+    **kwargs: Any,
+) -> object:
+    """Call original and return a marked callable that forwards attributes."""
+    if fun is None:
+        decorator = original(*args, **kwargs)
+        wrapper = partial(_wrap_mapped_decorator_result, decorator, marker_prefix)
+        wrapper._roctx_wrapped = True
+        return wrapper
+    return _wrap_mapped_result(original(fun, *args, **kwargs), marker_prefix)
+
+
+def _wrap_mapped_factory(attr: str, marker_prefix: str) -> None:
+    """Replace jax.<attr> with a marked factory that forwards compiled attributes."""
+    original = getattr(_CoreState, attr, None)
+    if original is None:
+        console_warning(
+            "ml api trace",
+            f"jax.{attr} is not available; skipping {attr} instrumentation.",
+        )
+        return
+    if getattr(original, "_roctx_wrapped", False):
+        return
+    try:
+        import jax
+
+        current = getattr(jax, attr, None)
+        if getattr(current, "_roctx_wrapped", False):
+            return
+        wrapper = partial(_roctx_mapped_factory, original, marker_prefix)
+        wrapper._roctx_wrapped = True
+        setattr(jax, attr, wrapper)
+    except Exception as exc:
+        console_warning(
+            "ml api trace",
+            f"Could not patch jax.{attr}: {exc}",
+        )
+        return
+    console_log(
+        "ml api trace",
+        f"Wrapped jax.{attr} compiled calls with ROCTX markers",
+    )
+
+
 def _wrap_jit_compiled_call() -> None:
     """Replace PjitFunction.__call__ with _roctx_compiled_call."""
     jit = _CoreState.jit
@@ -205,6 +271,43 @@ class _JaxState:
 
 
 _CoreState = _JaxState()
+
+
+class _RoctxMappedCallable:
+    """pmap or shard_map result that opens a ROCTX range, then forwards attrs."""
+
+    __slots__ = ("_compiled", "_marker_prefix", "_roctx_wrapped", "__weakref__")
+
+    def __init__(self, compiled: object, marker_prefix: str) -> None:
+        object.__setattr__(self, "_compiled", compiled)
+        object.__setattr__(self, "_marker_prefix", marker_prefix)
+        object.__setattr__(self, "_roctx_wrapped", True)
+
+    def __call__(self, *args: Any, **kwargs: Any) -> object:
+        compiled = object.__getattribute__(self, "_compiled")
+        marker_prefix = object.__getattribute__(self, "_marker_prefix")
+        marker = f"{marker_prefix}.{_compiled_function_name(compiled)}"
+        return _run_with_jax_range(marker, compiled, *args, **kwargs)
+
+    def __get__(self, obj: object, objtype: object = None) -> object:
+        if obj is None:
+            return self
+        return types.MethodType(self, obj)
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._compiled, name)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if name in ("_compiled", "_marker_prefix", "_roctx_wrapped"):
+            object.__setattr__(self, name, value)
+            return
+        setattr(self._compiled, name, value)
+
+    def __dir__(self) -> List[str]:
+        names = set(dir(type(self)))
+        compiled = object.__getattribute__(self, "_compiled")
+        names.update(dir(compiled))
+        return sorted(names)
 
 
 class JaxBackend:

@@ -62,10 +62,20 @@ def install_fake_jax(monkeypatch, jax_package_init=FAKE_JAX_PACKAGE_INIT):
         name = getattr(fun, "__name__", "<unknown>")
         return compiled_type(name, body=fun)
 
+    def fake_pmap(fun, *args, **kwargs):
+        name = getattr(fun, "__name__", "<unknown>")
+
+        def mapped(*mapped_args, **mapped_kwargs):
+            return fun(*mapped_args, **mapped_kwargs)
+
+        mapped.__name__ = name
+        mapped.lower = lambda *a, **k: "lowered"
+        return mapped
+
     jax_mod = types.ModuleType("jax")
     jax_mod.__file__ = jax_package_init
     jax_mod.jit = fake_jit
-    jax_mod.pmap = None
+    jax_mod.pmap = fake_pmap
     jax_mod.shard_map = None
     extend = types.ModuleType("jax.extend")
     extend_core = types.ModuleType("jax.extend.core")
@@ -260,3 +270,54 @@ def test_jax_primitive_skips_when_range_open(monkeypatch):
     )
     compiled()
     assert [item["marker"] for item in pushes] == ["jax.jit.train_step"]
+
+
+def test_jax_pmap_call_emits_pmap_marker(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    def pmap_square(value):
+        return value
+
+    mapped = jax_mod.pmap(pmap_square)
+    assert mapped(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.pmap.pmap_square"]
+    assert pushes[0]["backend"] == "jax"
+
+
+def test_jax_pmap_method_binds_self(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    class Worker:
+        @jax_mod.pmap
+        def step(self, value):
+            return value
+
+    assert Worker().step(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.pmap.step"]
+    assert pushes[0]["backend"] == "jax"
+
+
+def test_jax_pmap_forwards_lower(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+
+    def pmap_square(value):
+        return value
+
+    assert jax_mod.pmap(pmap_square).lower() == "lowered"
+
+
+def test_jax_pmap_wrap_is_idempotent(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    wrapped_once = jax_mod.pmap
+    jax_backend.patch_jax_entry_points()
+    assert jax_mod.pmap is wrapped_once
+
+    pushes = record_scopes(monkeypatch)
+
+    def pmap_square(value):
+        return value
+
+    assert jax_mod.pmap(pmap_square)(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.pmap.pmap_square"]
