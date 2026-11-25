@@ -5601,6 +5601,13 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(HsaKFDContext *ctx,
 		/* Prefetch memory on APUs with dummy-reads */
 		fmm_check_user_memory(address, size);
 		ret = HSAKMT_STATUS_SUCCESS;
+	} else if (hsakmt_enable_drm && object && aperture &&
+		   object->handles[0].drm &&
+		   is_supported_on_drm(object->alloc_flags)) {
+		/* DRM mode: objects with a DRM BO handle must be mapped via
+		 * bo_va_op_raw2 so the mapping lands in the DRM render VM,
+		 * which the kernel validates during userq create. */
+		ret = _fmm_map_to_gpu(ctx, aperture, address, size, object, NULL, 0);
 	} else if ((ctx->hsakmt_is_svm_api_supported && !object) ||
 		   (object && (object->userptr || object->is_svm_paged))) {
 		ret = _fmm_map_to_gpu_userptr(ctx, address, size, gpuvm_address, object, NULL, 0);
@@ -6733,7 +6740,9 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu_nodes(HsaKFDContext *ctx,
 	}
 
 	if ((ctx->hsakmt_is_svm_api_supported && !object) ||
-	    object->userptr || object->is_svm_paged) {
+	    (object && (object->userptr || object->is_svm_paged) &&
+	     !(hsakmt_enable_drm && object->handles[0].drm &&
+	       is_supported_on_drm(object->alloc_flags)))) {
 		retcode = _fmm_map_to_gpu_userptr(ctx, address, size, gpuvm_address,
 				object, nodes_to_map, num_of_nodes * sizeof(uint32_t));
 		if (object)
