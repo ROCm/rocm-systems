@@ -78,6 +78,18 @@ allocation is successful, the function returns a value of
 :cpp:enumerator:`hipSuccess`, with :cpp:type:`hipMemGenericAllocationHandle_t`
 representing a valid physical memory allocation.
 
+The ``location.type`` member of :cpp:struct:`hipMemAllocationProp` selects the
+memory that backs the allocation and determines how ``location.id`` is
+interpreted:
+
+* ``hipMemLocationTypeDevice``: memory on the GPU with the device ID given in
+  ``location.id``.
+* ``hipMemLocationTypeHost``: host memory. ``location.id`` is ignored.
+* ``hipMemLocationTypeHostNuma``: host memory on the NUMA node given in
+  ``location.id``.
+* ``hipMemLocationTypeHostNumaCurrent``: host memory on the NUMA node closest to
+  the CPU of the calling thread. ``location.id`` is ignored.
+
 The allocated memory must be aligned with the appropriate granularity. The
 granularity value can be queried with :cpp:func:`hipMemGetAllocationGranularity`,
 and its value depends on the target device hardware and the type of memory
@@ -93,7 +105,8 @@ an out-of-memory error.
     // The pinned allocation type cannot be migrated from its current location
     // while the application is actively using it.
     prop.type = hipMemAllocationTypePinned;
-    // Set the location type to device, currently there are no other valid option.
+    // Back the allocation with device memory. Host memory location types are
+    // also supported.
     prop.location.type = hipMemLocationTypeDevice;
     // Set the device id, where the memory will be allocated.
     prop.location.id = currentDev;
