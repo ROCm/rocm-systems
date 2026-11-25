@@ -84,11 +84,6 @@ def assert_routes_to(body, api, suffix):
         ), f'{expected} not routed; body routes {sorted(set(re.findall(r"rj_arith_\w+", body)))}'
 
 
-def test_other_architectures_keep_existing_path():
-    for arch in ('rdna1', 'rdna2', 'rdna3_5', 'cdna1', 'cdna2'):
-        assert gen_float_unary32(context(arch, 'V_CEIL_F32', ['dst'], ['src'])) is None
-
-
 @pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
 def test_generated_float_methods_use_policy_and_no_legacy_fast_path(arch):
     root = (
@@ -3863,3 +3858,117 @@ def test_remaining_integral_f64_keeps_legacy_nan_and_architecture_policy(arch):
     # Older-target native math remains independent; CDNA3/4/5 already use rj-arith.
     if arch not in ('cdna3', 'cdna4', 'cdna5'):
         assert gen_float_unary64(context(arch, 'V_SQRT_F64', ['dst'], ['src'])) is None
+
+
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5']
+)
+def test_inherited_exponents_preserve_integer_output_and_qualification(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_unary32,
+        gen_float_unary64,
+    )
+
+    for bits, generate in [(32, gen_float_unary32), (64, gen_float_unary64)]:
+        for vop3 in (False, True):
+            body = generate(
+                context(
+                    arch, f'V_FREXP_EXP_I32_F{bits}', ['dst'], ['src'], is_vop3=vop3
+                )
+            )
+            assert f'rj_arith_v_frexp_exp_i32_f{bits}_w32' in body
+            assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+            assert 'UnsupportedOperandValue' in body
+            assert 'inst_.omod' not in body and 'inst_.clamp' not in body
+            assert ('execute_exponent_sdwa' in body) == (bits == 32 and not vop3)
+            if bits == 64:
+                assert '/*integer_result=*/true' in body
+
+
+@pytest.mark.parametrize('arch', ['cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5'])
+def test_remaining_integral_f32_uses_legacy_nan_policy(arch):
+    for op in ('TRUNC', 'CEIL', 'RNDNE', 'FLOOR'):
+        for vop3 in (False, True):
+            body = gen_float_unary32(
+                context(arch, f'V_{op}_F32', ['dst'], ['src'], is_vop3=vop3)
+            )
+            suffix = 'gfx12' if arch == 'cdna5' else 'gfx908'
+            assert f'rj_arith_v_{op.lower()}_f32_w32_{suffix}' in body
+            assert '/*guest_rounding=*/true' in body
+            assert ('execute_float_round_sdwa' in body) != vop3
+            assert ('inst_.omod' in body) == vop3
+
+
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5']
+)
+def test_inherited_mantissas_use_legacy_nan_and_guest_output_policy(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_unary32,
+        gen_float_unary64,
+    )
+
+    for bits, generate in [(32, gen_float_unary32), (64, gen_float_unary64)]:
+        # CDNA FP32 production dispatch selects gen_cdna_integral_unary first.
+        if bits == 32 and arch in ('cdna3', 'cdna4', 'cdna5'):
+            continue
+        for vop3 in (False, True):
+            body = generate(
+                context(arch, f'V_FREXP_MANT_F{bits}', ['dst'], ['src'], is_vop3=vop3)
+            )
+            suffix = (
+                '_gfx12'
+                if arch == 'cdna5'
+                else (
+                    CONVERSION_SUFFIX[arch]
+                    if bits == 64 and arch in ('cdna3', 'cdna4')
+                    else '_gfx908'
+                )
+            )
+            assert f'rj_arith_v_frexp_mant_f{bits}_w32{suffix}' in body
+            assert ('execute_float_unary_sdwa' in body) == (bits == 32 and not vop3)
+            if arch == 'cdna5':
+                assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+            if vop3:
+                assert 'inst_.omod' in body and 'inst_.clamp' in body
+
+
+def test_older_radeon_native_math_keeps_existing_path():
+    for arch in ('rdna1', 'rdna2', 'rdna3_5'):
+        assert gen_float_unary32(context(arch, 'V_RCP_F32', ['dst'], ['src'])) is None
+
+
+@pytest.mark.parametrize(
+    'arch', ['cdna1', 'cdna2', 'cdna3', 'cdna4', 'cdna5', 'rdna1', 'rdna2', 'rdna3_5']
+)
+def test_inherited_fract_preserves_guest_rounding_and_legacy_output_policy(arch):
+    from amdisa.codegen.execute.rj_arith_float import (
+        gen_float_unary32,
+        gen_float_unary64,
+    )
+
+    for bits, generate in [(32, gen_float_unary32), (64, gen_float_unary64)]:
+        # CDNA FP32 production dispatch selects gen_cdna_integral_unary first.
+        if bits == 32 and arch in ('cdna3', 'cdna4', 'cdna5'):
+            continue
+        for vop3 in (False, True):
+            body = generate(
+                context(arch, f'V_FRACT_F{bits}', ['dst'], ['src'], is_vop3=vop3)
+            )
+            suffix = (
+                '_gfx12'
+                if arch == 'cdna5'
+                else (
+                    CONVERSION_SUFFIX[arch]
+                    if bits == 64 and arch in ('cdna3', 'cdna4')
+                    else '_gfx908'
+                )
+            )
+            assert f'rj_arith_v_fract_f{bits}_w32{suffix}' in body
+            assert ('execute_float_unary_sdwa' in body) == (bits == 32 and not vop3)
+            if bits == 32:
+                assert '/*guest_rounding=*/true' in body
+            if arch == 'cdna5':
+                assert 'RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS' in body
+            if vop3:
+                assert 'inst_.omod' in body and 'inst_.clamp' in body

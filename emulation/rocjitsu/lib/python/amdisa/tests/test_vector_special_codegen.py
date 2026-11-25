@@ -158,15 +158,16 @@ def test_arch_local_execute_bodies_are_not_shared():
 
 
 @pytest.mark.parametrize('dtype', ['f16', 'f32', 'f64'])
-def test_fract_simd_probes_use_the_shared_raw_operation(dtype):
-    fmt = f'amdgpu::fp_format::{dtype.upper()}'
-    operation = f'amdgpu::fract::Operation<{fmt}>{{amdgpu::fract::Policy::make('
+def test_fract_simd_probes_use_the_remaining_legacy_model(dtype):
     vop1 = simd_probe_line(f'v_fract_{dtype}_vop1')
-    assert operation in vop1 and 'floor' not in vop1
-    # VOP3 FRACT deliberately has no SIMD path in any format.
     assert simd_probe_line(f'v_fract_{dtype}_vop3') is None
     if dtype == 'f16':
+        operation = 'amdgpu::fract::Operation<amdgpu::fp_format::F16>{amdgpu::fract::Policy::make('
+        assert operation in vop1 and 'floor' not in vop1
         assert simd_probe_line('v_fract_f16_vop3', true16_vop3=True) is None
+    else:
+        # FP32/FP64 use rj-arith's native kernels rather than these legacy probes.
+        assert vop1 is None
 
 
 def test_ldexp_simd_probes_use_the_shared_raw_operation():

@@ -11,6 +11,8 @@
 #include "fp/fp64_impl.h"
 #include "fp/fp64_round.h"
 #include "fp/minmax_impl.h"
+#include "math/fract.h"
+#include "math/frexp_mant.h"
 #include "math/unary_f64_exact.h"
 #include "math/x86_64/trans_f64_exact.h"
 #include "rj_arith/detail/rj_arith_fp.h"
@@ -152,9 +154,9 @@ int fp64(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   // AVX2 has no per-instruction directed FP64 ADD/MUL/FMA. Use the inherited integer
   // model for directed modes; nearest rounding retains the existing SIMD path.
-  constexpr bool directed_arithmetic =
-      Op == rocjitsu::arith::Fp64::Fma || Op == rocjitsu::arith::Fp64::Add ||
-      Op == rocjitsu::arith::Fp64::Mul || Op == rocjitsu::arith::Fp64::Fract;
+  constexpr bool directed_arithmetic = Op == rocjitsu::arith::Fp64::Fma ||
+                                       Op == rocjitsu::arith::Fp64::Add ||
+                                       Op == rocjitsu::arith::Fp64::Mul;
   if ((!directed_arithmetic || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::fp64_x86_64_v3(Op, flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan,
@@ -2296,4 +2298,76 @@ int rj_arith_v_floor_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t
   }
   return fp64_wave64<rocjitsu::arith::Fp64::Floor, true, false, false, false, true>(
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
+}
+
+int rj_arith_v_fract_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return fp64<rocjitsu::arith::Fp64::Fract, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(mode), d, a, nullptr, nullptr);
+}
+
+int rj_arith_v_fract_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::Fract, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(mode), d, a, nullptr, nullptr);
+}
+
+int rj_arith_v_frexp_mant_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return fp64<rocjitsu::arith::Fp64::FrexpMant, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(mode), d, a, nullptr, nullptr);
+}
+
+int rj_arith_v_frexp_mant_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         [[maybe_unused]] uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+      (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  return fp64_wave64<rocjitsu::arith::Fp64::FrexpMant, true, false, false, false, true>(
+      flags, exec_mask, uint32_t(mode), d, a, nullptr, nullptr);
 }

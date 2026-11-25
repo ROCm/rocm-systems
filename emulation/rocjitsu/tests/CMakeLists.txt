@@ -715,6 +715,10 @@ add_executable(
     older_graphics_test.cpp
     division_test.cpp
     integral_rounding_f64_test.cpp
+    fract_test.cpp
+    frexp_exponent_test.cpp
+    frexp_mantissa_test.cpp
+    integral_rounding_f32_test.cpp
     division_macro_test.cpp
     valu_floating_policy_test.cpp
     gfx11_dot2_test.cpp
