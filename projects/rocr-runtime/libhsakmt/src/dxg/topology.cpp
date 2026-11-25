@@ -966,7 +966,8 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.LuidLowPart = device->GetLuid().LowPart;
   props.LuidHighPart = device->GetLuid().HighPart;
 
-  props.EngineId.ui32.uCode = device->GetMecFwVersion();
+  props.EngineId.ui32.uCode = device->GetMecFwVersion() & 0x3ff;
+  props.uCodeEngineVersions.uCodeCompute = device->GetMecFwVersion() & 0xffff;
   if (const char* envvar = getenv("HSA_OVERRIDE_GFX_VERSION"); envvar) {
     char dummy = '\0';
     uint32_t major = 0, minor = 0, step = 0;
