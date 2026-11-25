@@ -16,19 +16,7 @@
 
 namespace rocjitsu {
 
-namespace {
-
-/// @brief How an instruction affects the EXEC mask.
-enum class ExecWrite : uint8_t {
-  None,      ///< Does not write EXEC; state unchanged.
-  AllOnes,   ///< Writes the whole EXEC mask to all-ones -> Full.
-  Preserve,  ///< Sets a subset of EXEC to all-ones (e.g. only exec_lo on
-             ///< Wave64); keeps an already-Full mask Full and leaves Unknown
-             ///< as Unknown, but cannot establish Full on its own.
-  Narrowing, ///< Writes EXEC some other way -> Unknown.
-};
-
-[[nodiscard]] bool writes_execution_mask(const Instruction &inst) {
+bool writes_execution_mask(const Instruction &inst) {
   // Two complementary signals: the WRITES_EXEC flag covers instructions whose
   // semantics always write EXEC (s_*_saveexec, s_wrexec, v_cmpx), while an EXEC
   // destination operand covers the generic move case (`s_mov_b64 exec, ...`),
@@ -49,6 +37,18 @@ enum class ExecWrite : uint8_t {
   }
   return false;
 }
+
+namespace {
+
+/// @brief How an instruction affects the EXEC mask.
+enum class ExecWrite : uint8_t {
+  None,      ///< Does not write EXEC; state unchanged.
+  AllOnes,   ///< Writes the whole EXEC mask to all-ones -> Full.
+  Preserve,  ///< Sets a subset of EXEC to all-ones (e.g. only exec_lo on
+             ///< Wave64); keeps an already-Full mask Full and leaves Unknown
+             ///< as Unknown, but cannot establish Full on its own.
+  Narrowing, ///< Writes EXEC some other way -> Unknown.
+};
 
 /// @brief All-ones mask for an EXEC register of @p wave_size lanes.
 [[nodiscard]] uint64_t full_exec_mask(uint32_t wave_size) {

@@ -291,6 +291,35 @@ CONSAN_KERNEL:
   DS_LOAD v3, v1
   consan_wait_all
   GLOBAL_STORE v5, v3, s[6:7]
+#elif defined(CONSAN_UNIFORM_STORE)
+  v_cmp_gt_u32 MASK_VCC, 2, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  v_mov_b32 v1, 0
+#if defined(CONSAN_VARYING_VALUE)
+  VECTOR_ADD v2, 7, v0
+#else
+  v_mov_b32 v2, 7
+#endif
+  DS_STORE v1, v2
+  // The two writer lanes publish their own data without reading the racy LDS word.
+  v_lshlrev_b32 v5, 2, v0
+#if defined(CONSAN_VARYING_VALUE)
+  v_mov_b32 v6, v2
+#else
+  VECTOR_ADD v6, v2, v0
+#endif
+  GLOBAL_STORE v5, v6, s[6:7]
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+#if defined(CONSAN_PEER_WRITE)
+  DS_STORE v1, v2
+#else
+  DS_LOAD v3, v1
+  consan_wait_lds
+  // The peer may read before or after the write. Keep final guest state defined.
+  v_mov_b32 v3, 0
+#endif
 #elif CONSAN_CASE == 4 || CONSAN_CASE == 5
 #if CONSAN_CASE == 4
   v_cmp_gt_u32 MASK_VCC, 2, v0

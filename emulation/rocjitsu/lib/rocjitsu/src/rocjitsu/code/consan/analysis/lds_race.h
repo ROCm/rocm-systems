@@ -78,6 +78,9 @@ struct LdsRaceExecutionResult {
   uint64_t cross_wave_lane_pairs = 0;
   // Each write observation with multiple lanes sharing its address contributes
   // one group; lane pairs count the unordered lane combinations within it.
+  // Suppressed groups are excluded from the finding totals below.
+  uint64_t suppressed_collision_groups = 0;
+  uint64_t suppressed_collision_lane_pairs = 0;
   uint64_t collision_groups = 0;
   uint64_t collision_lane_pairs = 0;
   bool coverage_complete = true;
@@ -101,6 +104,7 @@ public:
   EntryDisposition disposition = EntryDisposition::Native;
   uint32_t observed_sites = 0;
   std::vector<SiteFacts> flat_sites{};
+  std::vector<SiteFacts> uniform_store_sites{};
   std::vector<FlatExclusion> flat_exclusions{};
   bool operator==(const LdsRaceImageEntry &) const = default;
 };
@@ -124,7 +128,12 @@ struct LdsRaceResult {
   uint64_t ordered_pairs = 0;
   uint64_t cross_wave_pairs = 0;
   uint64_t ordering_unresolved_pairs = 0;
+  // Suppressed groups are excluded from the finding totals below.
+  uint64_t suppressed_collision_groups = 0;
+  uint64_t suppressed_collision_lane_pairs = 0;
   uint64_t collision_groups = 0;
+  uint64_t collision_lane_pairs = 0;
+  bool suppress_uniform_store_collisions = false;
   bool coverage_complete = false;
   std::vector<LdsRaceExecutionResult> executions;
   bool operator==(const LdsRaceResult &) const = default;
@@ -134,9 +143,9 @@ struct LdsRaceResult {
 /// @details The coordinator validates static facts, conditions and example budget.
 /// Malformed local evidence produces gaps rather than discarding other findings.
 /// See docs/consan.md#analysis-and-admission.
-[[nodiscard]] LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
-                                                                const CapturedExecution &execution,
-                                                                uint32_t examples);
+[[nodiscard]] LdsRaceExecutionResult
+analyze_lds_race_execution(const Manifest &facts, const CapturedExecution &execution,
+                           uint32_t examples, bool suppress_uniform_store_collisions = false);
 
 /// @brief Render the concrete LDS result as deterministic JSON.
 [[nodiscard]] std::string render_lds_race_analysis(const LdsRaceResult &result);

@@ -174,6 +174,50 @@ struct ApertureWords {
   }
 };
 
+// A word in this set holds one value across the current EXEC lanes. The
+// original-entry whitelist excludes VGPR bank and indexing mode changes, so
+// encoded VGPR indices have their kernel-entry meaning throughout the scope.
+class BlockUniformWords {
+public:
+  UniformStoreProof store_proof(const Instruction &store) const {
+    if (store.amdgpu_operation() != amdgpu::Operation::DS_STORE_B32)
+      return UniformStoreProof::None;
+    // The native classifier checked both allocated VGPR operands. The DS
+    // immediate displacement is common to every lane.
+    const std::optional<RegisterRef> address = store.src_operand(0)->decoded_vgpr();
+    const std::optional<RegisterRef> data = store.src_operand(1)->decoded_vgpr();
+    return address && data && words_.contains(*address) && words_.contains(*data)
+               ? UniformStoreProof::BlockLocalBroadcast
+               : UniformStoreProof::None;
+  }
+
+  void transfer(const Instruction &inst, const InstDefUse &effects) {
+    if (writes_execution_mask(inst)) {
+      // Saving the old mask into an ordinary SGPR and intersecting EXEC
+      // only removes lanes. Other mask writes may expose stale VGPR lanes.
+      const std::optional<RegisterRef> saved =
+          inst.num_dst_operands() ? inst.dst_operand(0)->to_register_ref() : std::nullopt;
+      if (inst.amdgpu_operation() != amdgpu::Operation::S_AND_SAVEEXEC_B32 || !saved ||
+          saved->cls != RegClass::SGPR)
+        words_ = {};
+    }
+    words_ -= effects.defs;
+    if (effects.conditional_vgpr_def)
+      words_.erase(*effects.conditional_vgpr_def);
+    // The qualified four-byte VOP1 has no DPP, SDWA or literal extension.
+    if (inst.amdgpu_operation() != amdgpu::Operation::V_MOV_B32 || inst.size() != 4)
+      return;
+    const Operand &source = *inst.src_operand(0);
+    const std::optional<RegisterRef> reg = source.to_register_ref();
+    const std::optional<RegisterRef> dst = inst.dst_operand(0)->decoded_vgpr();
+    if (dst && (source.const_value() || (reg && reg->cls == RegClass::SGPR)))
+      words_.expand(*dst);
+  }
+
+private:
+  RegisterSet words_;
+};
+
 struct FlatPointers {
   ApertureWords shared, non_group, selected;
   void transfer(const Instruction &inst, const InstDefUse &effects, ExecState exec) {
@@ -245,6 +289,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
   const std::array<const BasicBlock *, 1> entries{*root};
   const ExecMaskAnalysis exec(scope, program.wave_size, call.edges, entries);
   std::unordered_map<const BasicBlock *, FlatPointers> outgoing;
+  const bool prove_uniform = program.target->id == 1250 && program.wave_size == 32;
   size_t instruction_count = 0;
   for (const BasicBlock *block : ordered.value()) {
     if (block->has_implicit_terminator() ||
@@ -255,6 +300,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       return reject(error, InputErrorCode::UnsupportedFlow, "original control flow is not closed",
                     block->start_offset());
     }
+    BlockUniformWords uniform; // No definitions flow across a branch, call, or backedge.
     FlatPointers aperture;
     if (block->start_offset() == program.kernel.entry_text_offset &&
         block->predecessors().empty()) {
@@ -318,6 +364,11 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         latest = &instruction;
       }
       const InstDefUse effects(instruction, program.wave_size);
+      if (prove_uniform) {
+        if (program.accesses.size() != previous_accesses)
+          program.accesses.back().uniform_store_proof = uniform.store_proof(instruction);
+        uniform.transfer(instruction, effects);
+      }
       aperture.transfer(instruction, effects, exec.before(instruction));
       used |= effects.uses;
       used |= effects.defs;

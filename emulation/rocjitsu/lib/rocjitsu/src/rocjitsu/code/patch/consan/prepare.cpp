@@ -186,7 +186,8 @@ Result append_program_facts(const InputProgram &program, const std::vector<Instr
                               .prepared_guest_size = mapping->guest_size,
                               .probe_offset = mapping->instrumentation_offset,
                               .probe_size = mapping->instrumentation_size,
-                              .first_slot = access.site * kAddressGroupsPerSite});
+                              .first_slot = access.site * kAddressGroupsPerSite,
+                              .uniform_store_proof = access.uniform_store_proof});
   }
   for (const BarrierFacts &barrier : program.barriers) {
     const std::vector<InstrumentedSite>::const_iterator mapping =
