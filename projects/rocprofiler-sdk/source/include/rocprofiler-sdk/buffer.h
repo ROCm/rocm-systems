@@ -99,12 +99,6 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
 /**
  * @brief Flush buffer.
  *
- * Delivers the records already written to the buffer, invoking the buffer callback once per
- * non-empty internal buffer and returning once they have all been delivered. A record whose
- * producer has not finished writing it when the flush reaches that internal buffer is left for a
- * later flush, so a caller that requires a particular record must ensure whatever produces it has
- * finished before flushing.
- *
  * @param [in] buffer_id
  * @return ::rocprofiler_status_t
  */

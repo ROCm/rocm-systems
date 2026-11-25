@@ -241,8 +241,6 @@ rocprofiler_synchronize_context(const rocprofiler_context_id_t                  
         timeout_ns    = options->timeout_ns;
     }
 
-    // flags is a bitset, so every test below masks. Comparing it outright silently inverts both
-    // flags the moment a caller combines them.
     const auto _nohang  = (context_flags & ROCPROFILER_SYNCHRONIZE_CONTEXT_NOHANG) != 0;
     const auto _noflush = (context_flags & ROCPROFILER_SYNCHRONIZE_CONTEXT_NOFLUSH) != 0;
 

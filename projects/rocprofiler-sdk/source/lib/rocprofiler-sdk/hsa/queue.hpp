@@ -178,10 +178,9 @@ public:
 
     // Block for in-flight async completion handlers to finish, bounded by @p timeout_ns or, at
     // the default of 0, by the built-in ~5s slice. Returns the kernels still active on expiry,
-    // so ZERO means drained -- never use the result as a truth value, since a non-zero count
-    // converts to `true` and reads as the opposite. HSA's signal wait does not wake spuriously,
-    // so a non-zero return is a real timeout. Teardown callers warn and proceed; callers needing
-    // a guaranteed drain loop until it returns zero (e.g. @replay_drain_or_fatal).
+    // HSA's signal wait does not wake spuriously, so a non-zero return is a real timeout. Teardown
+    // callers warn and proceed; callers needing a guaranteed drain loop until it returns zero (e.g.
+    // @replay_drain_or_fatal).
     uint64_t sync(const uint64_t timeout_ns = 0) const;
 
     void register_callback(ClientID id, queue_callbacks_t callbacks);

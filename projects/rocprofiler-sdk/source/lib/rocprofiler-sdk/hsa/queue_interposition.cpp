@@ -1793,9 +1793,7 @@ process_doorbell_impl(const queue_state_ptr_t& state,
     auto* state_ptr            = state.get();
     auto  deferred_completions = pending_completion_vector_t{};
 
-    // gate_lock serializes doorbell processing; producers never take it. write_interceptor below
-    // runs the tool's dispatch-enqueue callbacks with it held, so nothing reachable from them may
-    // acquire a queue gate -- a drain that fences every gate self-deadlocks here.
+    // gate_lock serializes doorbell processing; producers never take it, so no deadlock.
     std::unique_lock<std::mutex> lock{state_ptr->gate_lock};
 
     const uint64_t scan_pos = state_ptr->next_scan_pos;

@@ -327,8 +327,8 @@ struct active_signals
 
     void create();   // create hsa signal
     void destroy();  // destroy hsa signal
-    // Wait for outstanding signal completion callbacks. False if the wait expired with
-    // callbacks still undelivered.
+    // Wait for outstanding signal completion callbacks. Returns number of in-flight records if
+    // timeout is hit
     uint64_t sync(const uint64_t timeout_ns);
     void     fetch_add(int v);    // increment hsa signal value
     void     fetch_sub(int v);    // decrement hsa signal value

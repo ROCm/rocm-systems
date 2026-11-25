@@ -441,8 +441,6 @@ TEST(counters_queue_hooks, stop_context_completes_when_queue_drain_times_out)
     fq_raw->async_started();
     ASSERT_EQ(fq_raw->active_async_packets(), 1);
 
-    // Non-zero, not "false": queue_controller_sync() returns the count still outstanding, so the
-    // drained answer is zero and a truth test would read this backwards.
     EXPECT_NE(hsa::queue_controller_sync(), 0u)
         << "a queue with an outstanding async packet must report an incomplete drain";
 
