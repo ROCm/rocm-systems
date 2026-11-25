@@ -662,9 +662,16 @@ hsa_status_t DrmDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
   return HSA_STATUS_ERROR;
 }
 
-hsa_status_t DrmDriver::SetXnackMode(uint32_t node_id, bool enable) const {
-  // Enable-only latch: XNACK- is the default, so there is nothing to issue when
-  // the requested mode is XNACK-.
+hsa_status_t DrmDriver::BindXnackMode(uint32_t node_id) const {
+  // Decide the XNACK mode from the user's flag, mirroring KfdDriver::BindXnackMode()
+  // so the DRM path owns its decision rather than depending on the KFD path having
+  // set Runtime::XnackEnabled(). The kernel VM op is an enable-only latch: XNACK- is
+  // the GPUVM default and there is no per-VM query or disable op, so STALLING_FAULT
+  // is issued only when the user requested a non-disabled mode. An unset preference
+  // (XNACK_UNCHANGED) leaves the default XNACK-.
+  const HSAint32 mode = core::Runtime::runtime_singleton_->flag().xnack();
+  const bool enable = (mode != Flag::XNACK_REQUEST::XNACK_UNCHANGED) &&
+                      (mode != Flag::XNACK_DISABLE);
   if (!enable) return HSA_STATUS_SUCCESS;
 
   core::Agent* agent = core::Runtime::runtime_singleton_->agent_by_nodeid(node_id);
@@ -680,7 +687,7 @@ hsa_status_t DrmDriver::SetXnackMode(uint32_t node_id, bool enable) const {
   // VM in default XNACK-. Surface it once and continue rather than failing agent
   // init -- XNACK selection is a best-effort, kernel-dependent feature.
   const int err = errno;
-  debug_print("DrmDriver::SetXnackMode: DRM_IOCTL_AMDGPU_VM STALLING_FAULT on node %u "
+  debug_print("DrmDriver::BindXnackMode: DRM_IOCTL_AMDGPU_VM STALLING_FAULT on node %u "
               "failed (errno %d); GPUVM stays in default XNACK- mode\n",
               node_id, err);
   return HSA_STATUS_ERROR;

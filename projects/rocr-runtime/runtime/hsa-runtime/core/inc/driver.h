@@ -453,12 +453,14 @@ public:
 
   /// @brief Select the XNACK (recoverable GPU page-fault) mode for a node's GPUVM.
   ///
-  /// On the DRM/UKI path, @p enable == true issues AMDGPU_VM_OP_STALLING_FAULT on
-  /// the node's render VM to switch it into XNACK+ mode; the kernel op is an
-  /// enable-only latch, so @p enable == false is a no-op (default XNACK-). Must be
-  /// called before any queue is created on the node. The default (KFD path) is a
-  /// no-op: the KFD driver selects XNACK globally during BindXnackMode().
-  virtual hsa_status_t SetXnackMode(uint32_t /*node_id*/, bool /*enable*/) const {
+  /// Mirrors KfdDriver::BindXnackMode(): the override reads the user's XNACK flag
+  /// and decides the mode itself. On the DRM/UKI path, when XNACK is requested it
+  /// issues AMDGPU_VM_OP_STALLING_FAULT on the node's render VM to switch it into
+  /// XNACK+; the kernel op is an enable-only latch (XNACK- is the default and needs
+  /// nothing), so an unset/disabled preference is a no-op. Must be called before any
+  /// queue is created on the node. The default (KFD path) is a no-op -- KfdDriver
+  /// selects XNACK globally in its own (static, platform-wide) BindXnackMode().
+  virtual hsa_status_t BindXnackMode(uint32_t /*node_id*/) const {
     return HSA_STATUS_SUCCESS;
   }
 
