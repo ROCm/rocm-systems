@@ -26,6 +26,7 @@ def patch_jax_entry_points() -> None:
     """Wrap JAX compiled-call and primitive-dispatch entry points."""
     _wrap_jit_compiled_call()
     _wrap_mapped_factory("pmap", "jax.pmap")
+    _wrap_mapped_factory("shard_map", "jax.shard_map")
     _wrap_primitive_bind_with_trace()
 
 

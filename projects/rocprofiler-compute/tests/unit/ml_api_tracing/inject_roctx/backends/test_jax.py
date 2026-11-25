@@ -72,11 +72,22 @@ def install_fake_jax(monkeypatch, jax_package_init=FAKE_JAX_PACKAGE_INIT):
         mapped.lower = lambda *a, **k: "lowered"
         return mapped
 
+    def fake_shard_map(fun=None, /, **kwargs):
+        if fun is None:
+            return lambda user_fun: fake_shard_map(user_fun, **kwargs)
+        name = getattr(fun, "__name__", "<unknown>")
+
+        def mapped(*mapped_args, **mapped_kwargs):
+            return fun(*mapped_args, **mapped_kwargs)
+
+        mapped.__name__ = name
+        return mapped
+
     jax_mod = types.ModuleType("jax")
     jax_mod.__file__ = jax_package_init
     jax_mod.jit = fake_jit
     jax_mod.pmap = fake_pmap
-    jax_mod.shard_map = None
+    jax_mod.shard_map = fake_shard_map
     extend = types.ModuleType("jax.extend")
     extend_core = types.ModuleType("jax.extend.core")
     extend_core.Primitive = primitive_type
@@ -321,3 +332,28 @@ def test_jax_pmap_wrap_is_idempotent(monkeypatch):
 
     assert jax_mod.pmap(pmap_square)(1) == 1
     assert [item["marker"] for item in pushes] == ["jax.pmap.pmap_square"]
+
+
+def test_jax_shard_map_call_emits_shard_map_marker(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    def shard_map_square(value):
+        return value
+
+    assert jax_mod.shard_map(shard_map_square)(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.shard_map.shard_map_square"]
+    assert pushes[0]["backend"] == "jax"
+
+
+def test_jax_shard_map_decorator_factory_emits_shard_map_marker(monkeypatch):
+    jax_mod, _compiled_type, _primitive_type = install_jax_backend(monkeypatch)
+    pushes = record_scopes(monkeypatch)
+
+    def shard_map_cube(value):
+        return value
+
+    mapped = jax_mod.shard_map(mesh=None)(shard_map_cube)
+    assert mapped(1) == 1
+    assert [item["marker"] for item in pushes] == ["jax.shard_map.shard_map_cube"]
+    assert pushes[0]["backend"] == "jax"
