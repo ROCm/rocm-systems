@@ -547,6 +547,23 @@ private:
   rocjitsu::VfioDeviceHost &host_;
 };
 
+TEST(VfioQuiesceWake, SignalsOnlyWhileAHostIsWaitingForPermits) {
+  rocjitsu::VfioQuiesceWake wake;
+  ASSERT_GE(wake.fd(), 0);
+  pollfd fd{.fd = wake.fd(), .events = POLLIN, .revents = 0};
+  wake.notify_if_waiting();
+  EXPECT_EQ(::poll(&fd, 1, 0), 0);
+  wake.set_waiting(true);
+  wake.notify_if_waiting();
+  ASSERT_EQ(::poll(&fd, 1, 0), 1);
+  uint64_t completions = 0;
+  ASSERT_EQ(::read(wake.fd(), &completions, sizeof(completions)), sizeof(completions));
+  EXPECT_EQ(completions, 1u);
+  wake.set_waiting(false);
+  wake.notify_if_waiting();
+  EXPECT_EQ(::poll(&fd, 1, 0), 0);
+}
+
 TEST(VfioDeviceHost, ServesAClientAndReportsItsBusShape) {
   ServedDevice served;
   ASSERT_TRUE(served.start());
@@ -1190,7 +1207,15 @@ TEST(VfioTargetGrants, RejectsPeerSnapshotWithChangedCanonicalBacking) {
 
   auto admitted = pair.grants().admit_peer(peer.snapshot);
   ASSERT_EQ(admitted.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  // Join both servers so neither can consume a stray wake after the MAP.
+  pair.stop_serving();
+  std::array wakes{pollfd{pair.requester_host().quiesce_wake()->fd(), POLLIN, 0},
+                   pollfd{pair.owner_host().quiesce_wake()->fd(), POLLIN, 0}};
+  ASSERT_GE(wakes[0].fd, 0);
+  ASSERT_GE(wakes[1].fd, 0);
+  ASSERT_EQ(::poll(wakes.data(), wakes.size(), 0), 0);
   admitted.permit.reset();
+  EXPECT_EQ(::poll(wakes.data(), wakes.size(), 0), 0);
 
   auto wrong_id = peer.snapshot;
   ++wrong_id.backing_id;
