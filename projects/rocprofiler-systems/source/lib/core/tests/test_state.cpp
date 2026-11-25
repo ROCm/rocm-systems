@@ -172,7 +172,7 @@ TEST_F(ThreadStateTest, nesting_beyond_reserved_depth_unwinds_in_lifo_order)
             observed_on_unwind.push_back(thread_state::pop());
         }
 
-        std::reverse(expected_on_unwind.begin(), expected_on_unwind.end());
+        std::ranges::reverse(expected_on_unwind);
         EXPECT_EQ(observed_on_unwind, expected_on_unwind);
     });
     worker.join();
