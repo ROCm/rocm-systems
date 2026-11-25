@@ -16,7 +16,7 @@ vl1d.l2_bw_by_size:
   formula: SUM(128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes transferred across the vL1D-L2 interface as a result of VMEM
-    instructions, divided by total duration. Each read request counts as 128 bytes and
-    each write or atomic request as 64 bytes, so, for example, a request for a single
-    value still counts as a full request.
+    The number of bytes per second transferred across the vL1D-L2 interface as a result
+    of VMEM instructions. Each read request counts as 128 bytes and each write or atomic
+    request as 64 bytes, so, for example, a request for a single value still counts as a
+    full request.

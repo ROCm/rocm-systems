@@ -24,8 +24,7 @@ gl1.gl1a_util:
   name: GL1A Utilization
   formula: 100 * SUM(GL1A_BUSY_sum) / SUM(GL1A_CYCLE_sum)
   unit: Percent
-  description: >-
-    Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
+  description: Percentage of cycles the GL1 Arbiter busy servicing GL0 miss requests.
   peak: 100
 gl1.gl1c_buffer_full_stall:
   name: GL1C Buffer Full Stall
@@ -37,7 +36,9 @@ gl1.gl1c_glarb_rd_bw:
   name: GL1C-GLARB Read Bandwidth
   formula: SUM(GL1C_GL2_REQ_READ_32B_sum * 32 + GL1C_GL2_REQ_READ_64B_sum * 64 + GL1C_GL2_REQ_READ_128B_sum * 128 + GL1C_GL2_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL1 to Graphic Level Arbiter read bandwidth.
+  description: >-
+    The number of bytes per second of read requests from the GL1 cache to the Graphics
+    Level Arbiter.
 gl1.gl1c_glarb_rd_lat:
   name: GL1C-GLARB Read Latency
   formula: SUM(GL1C_GL2_REQ_READ_LEVEL_sum) / SUM(GL1C_GL2_REQ_READ_sum)
@@ -47,20 +48,17 @@ gl1.gl1c_glarb_rd_req_256b:
   name: GL1C-GLARB Read Requests - 256B
   formula: SUM(GL1C_GL2_REQ_READ_256B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 256-byte GL1 to Graphics Level Arbiter read requests.
+  description: Number of 256-byte GL1 to Graphics Level Arbiter read requests.
 gl1.gl1c_glarb_rd_req_32b:
   name: GL1C-GLARB Read Requests - 32B
   formula: SUM(GL1C_GL2_REQ_READ_32B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 32-byte GL1 to Graphics Level Arbiter read requests.
+  description: Number of 32-byte GL1 to Graphics Level Arbiter read requests.
 gl1.gl1c_glarb_rd_req_64b:
   name: GL1C-GLARB Read Requests - 64B
   formula: SUM(GL1C_GL2_REQ_READ_64B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 64-byte GL1 to Graphics Level Arbiter read requests.
+  description: Number of 64-byte GL1 to Graphics Level Arbiter read requests.
 gl1.gl1c_glarb_wr_acks:
   name: GL1C-GLARB Write ACKs
   formula: SUM(GL1C_GL2_RET_ACK_sum) / SUM($denom)
@@ -71,7 +69,10 @@ gl1.gl1c_glarb_wr_bw:
   name: GL1C-GLARB Write Bandwidth
   formula: 32 * SUM(GL1C_GL2_REQ_WRITE_32B_DATA_BEATS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL1 to Graphic Level Arbiter write bandwidth.
+  description: >-
+    The number of bytes per second of write requests from the GL1 cache to the Graphics
+    Level Arbiter. The number of bytes is the number of 32-byte write data beats
+    multiplied by 32.
 gl1.gl1c_glarb_wr_lat:
   name: GL1C-GLARB Write Latency
   formula: SUM(GL1C_GL2_REQ_WRITE_LEVEL_sum) / SUM(GL1C_GL2_REQ_WRITE_sum)
@@ -81,38 +82,32 @@ gl1.gl1c_glarb_wr_req_128b:
   name: GL1C-GLARB Write Requests - 128B
   formula: SUM(GL1C_GL2_REQ_WRITE_128B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 128-byte GL1 to Graphics Level Arbiter write requests.
+  description: Number of 128-byte GL1 to Graphics Level Arbiter write requests.
 gl1.gl1c_glarb_wr_req_256b:
   name: GL1C-GLARB Write Requests - 256B
   formula: SUM(GL1C_GL2_REQ_WRITE_256B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 256-byte GL1 to Graphics Level Arbiter write requests.
+  description: Number of 256-byte GL1 to Graphics Level Arbiter write requests.
 gl1.gl1c_glarb_wr_req_32b:
   name: GL1C-GLARB Write Requests - 32B
   formula: SUM(GL1C_GL2_REQ_WRITE_32B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 32-byte GL1 to Graphics Level Arbiter write requests.
+  description: Number of 32-byte GL1 to Graphics Level Arbiter write requests.
 gl1.gl1c_glarb_wr_req_64b:
   name: GL1C-GLARB Write Requests - 64B
   formula: SUM(GL1C_GL2_REQ_WRITE_64B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 64-byte GL1 to Graphics Level Arbiter write requests.
+  description: Number of 64-byte GL1 to Graphics Level Arbiter write requests.
 gl1.gl1c_multicast_req_128b:
   name: GL1C Multicast Request - 128B
   formula: SUM(GL1C_REQ_MULTICAST_128B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 128-byte multicast requests processed by GL1 Cache.
+  description: Number of 128-byte multicast requests processed by GL1 Cache.
 gl1.gl1c_multicast_req_256b:
   name: GL1C Multicast Request - 256B
   formula: SUM(GL1C_REQ_MULTICAST_256B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 256-byte multicast requests processed by GL1 Cache.
+  description: Number of 256-byte multicast requests processed by GL1 Cache.
 gl1.gl1c_multicast_to_unicast_downgrade_rate:
   name: GL1C Multicast-to-Unicast Downgrade Rate
   formula: 100 * SUM(GL1C_REQ_MULTICAST_DOWNGRADE_sum) / SUM(GL1C_BUSY_sum)
@@ -123,26 +118,22 @@ gl1.gl1c_multicast_tracker_0_timeout_rate:
   name: GL1C Multicast Tracker 0 Timeout Rate
   formula: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT0_sum) / SUM(GL1C_BUSY_sum)
   unit: Percent
-  description: >-
-    Percentage of GL1 Cache busy cycles multicast tracker 0 timed out.
+  description: Percentage of GL1 Cache busy cycles multicast tracker 0 timed out.
 gl1.gl1c_multicast_tracker_1_timeout_rate:
   name: GL1C Multicast Tracker 1 Timeout Rate
   formula: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT1_sum) / SUM(GL1C_BUSY_sum)
   unit: Percent
-  description: >-
-    Percentage of GL1 Cache busy cycles multicast tracker 1 timed out.
+  description: Percentage of GL1 Cache busy cycles multicast tracker 1 timed out.
 gl1.gl1c_multicast_tracker_2_timeout_rate:
   name: GL1C Multicast Tracker 2 Timeout Rate
   formula: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT2_sum) / SUM(GL1C_BUSY_sum)
   unit: Percent
-  description: >-
-    Percentage of GL1 Cache busy cycles multicast tracker 2 timed out.
+  description: Percentage of GL1 Cache busy cycles multicast tracker 2 timed out.
 gl1.gl1c_multicast_tracker_3_timeout_rate:
   name: GL1C Multicast Tracker 3 Timeout Rate
   formula: 100 * SUM(GL1C_REQ_MULTICAST_TIMEOUT3_sum) / SUM(GL1C_BUSY_sum)
   unit: Percent
-  description: >-
-    Percentage of GL1 Cache busy cycles multicast tracker 3 timed out.
+  description: Percentage of GL1 Cache busy cycles multicast tracker 3 timed out.
 gl1.gl1c_multicast_tracker_depletion_stall:
   name: GL1C Multicast Tracker Depletion Stall
   formula: 100 * SUM(GL1C_MULTICAST_TRACKER_DEPLETS_sum) / SUM(GL1C_BUSY_sum)
@@ -163,17 +154,17 @@ gl1.gl1c_req_bw_multicast:
   name: GL1C Request Bandwidth - Multicast
   formula: SUM(GL1C_REQ_MULTICAST_128B_sum * 128 + GL1C_REQ_MULTICAST_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL1 Cache multicast bandwidth.
+  description: The number of bytes per second of multicast requests to the GL1 cache.
 gl1.gl1c_req_bw_rd:
   name: GL1C Request Bandwidth - Read
   formula: SUM(GL1C_REQ_READ_32B_sum * 32 + GL1C_REQ_READ_64B_sum * 64 + GL1C_REQ_READ_128B_sum * 128 + GL1C_REQ_READ_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL1 read bandwidth.
+  description: The number of bytes per second of read requests to the GL1 cache.
 gl1.gl1c_req_bw_wr:
   name: GL1C Request Bandwidth - Write
   formula: SUM(GL1C_REQ_WRITE_32B_sum * 32 + GL1C_REQ_WRITE_64B_sum * 64 + GL1C_REQ_WRITE_128B_sum * 128 + GL1C_REQ_WRITE_256B_sum * 256) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL1 write bandwidth.
+  description: The number of bytes per second of write requests to the GL1 cache.
 gl1.gl1c_return_arbitration_lat:
   name: GL1C Return Arbitration Latency
   formula: SUM(GL1C_ARB_RET_LEVEL_sum) / SUM(GL1C_REQ_sum)
@@ -183,8 +174,7 @@ gl1.gl2_rd_128b_req:
   name: GL2 Read 128B Requests
   formula: SUM(GL1C_GL2_REQ_READ_128B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of 128-byte GL1 to Graphics Level Arbiter read requests.
+  description: Number of 128-byte GL1 to Graphics Level Arbiter read requests.
 gl1.gl2_rd_req:
   name: GL1-GL2 Read Requests
   formula: SUM(GL1C_GL2_REQ_READ_sum) / SUM($denom)

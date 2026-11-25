@@ -2,24 +2,30 @@ l1i.bw:
   name: L1I Bandwidth
   formula: 64 * SUM(SQC_ICACHE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total Instruction Cache data bandwidth.
+  description: The number of bytes per second looked up in the L1I cache.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 l1i.gl1_rd_bw:
   name: L1I-GL1 Read Bandwidth
   formula: 128 * SUM(SQC_TC_INST_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Instruction Cache miss fill bandwidth from GL1.
+  description: >-
+    The number of bytes per second the instruction cache (L1I) requests from the GL1
+    cache. High values may indicate instruction cache pressure from large kernels or
+    frequent instruction cache misses.
 l1i.hit_rate_excl_dup:
   name: L1I Hit Rate (Excluding Duplicate Misses)
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_HITS_sum + SQC_ICACHE_MISSES_sum)
   unit: Percent
-  description: Instruction Cache hit rate.
+  description: >-
+    Percentage of L1I requests that hit on a previously loaded line in the cache.
+    Calculated as the number of L1I hits over the number of hits and misses, excluding
+    duplicate misses.
   peak: 100
 l1i.hits_per_req:
   name: L1I Hit Rate
   formula: 100 * SUM(SQC_ICACHE_HITS_sum) / SUM(SQC_ICACHE_REQ_sum)
   unit: Percent
-  description: Instruction Cache hit rate.
+  description: Percentage of Instruction Cache requests that hit in the cache.
 l1i.icache_gl1_req_lat:
   name: ICache-GL1 Request Latency
   formula: SUM(SQC_ICACHE_TC_INFLIGHT_LEVEL_ACCUM) / SUM(SQC_TC_INST_REQ_sum)
@@ -34,8 +40,7 @@ l1i.icache_req_stall_rate:
   name: ICache Request Stall Rate
   formula: 100 * SUM(SQC_ICACHE_INPUT_VALID_READYB_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Percent
-  description: >-
-    Percentage of shader-busy cycles the instruction fetch unit is stalled.
+  description: Percentage of shader-busy cycles the instruction fetch unit is stalled.
 l1i.icache_util:
   name: ICache Utilization
   formula: 100 * SUM(SQC_ICACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)

@@ -4,8 +4,8 @@ gl2.atomic_req:
   unit: (Count + $normUnit)
   description: >-
     Number of atomic memory operations processed by the GL2 cache. Atomics provide
-    thread-safe memory access but may serialize at contended addresses. High counts
-    may impact performance.
+    thread-safe memory access but may serialize at contended addresses. High counts may
+    impact performance.
 gl2.ea_rd_req_dram:
   name: EA Read Requests (DRAM)
   formula: SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM($denom)
@@ -24,82 +24,75 @@ gl2.hit_rate:
   name: GL2 Cache Hit Rate
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  description: >-
-    Percentage of L2 lookups that hit.
+  description: Percentage of GL2 cache requests that hit in the cache.
   peak: 100
 gl2.hits:
   name: GL2 Cache Hits
   formula: SUM(GL2C_HIT_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of GL2 cache requests that were serviced from cache. High hit counts
-    relative to total requests indicate effective caching. Low hit counts suggest
-    memory-bound workloads or poor data locality.
+    Number of GL2 cache requests that were serviced from cache. High hit counts relative
+    to total requests indicate effective caching. Low hit counts suggest memory-bound
+    workloads or poor data locality.
 gl2.memory_ai:
   name: Memory Arithmetic Intensity
+  # FLOPs: VALU FLOPs without the WMMA instructions SQ_INSTS_VALU counts, plus 8192 per WMMA instruction.
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum))
   unit: FLOPs/Byte
   description: >-
-    Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot
-    marks the point at the VRAM level. The requests include those the Infinity Cache
-    serves, and the counters cannot separate them, so this intensity can be lower
-    than the true VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the
-    WMMA instructions already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192
-    per instruction.
+    Arithmetic intensity relative to the bytes of GL2C requests over the EA destined for
+    VRAM. These include requests the Infinity Cache serves, which the counters cannot
+    separate, so this can be lower than the true VRAM intensity.
 gl2.memory_bw:
   name: Memory Bandwidth
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Bandwidth of GL2C/EA read and write requests leaving L2 toward memory, compared
-    with the measured VRAM bandwidth (VRAMBw column of roofline.csv). Counts 32-byte
-    granules from GL2C_EA_RDREQ_DRAM_32B (PERF_SEL 0xa7) and GL2C_EA_WRREQ_DRAM_32B
-    (PERF_SEL 0xa8). The unsized EA_RDREQ_DRAM and EA_WRREQ_DRAM counters (0xa5 and
-    0xa6) mix 32-byte through 128-byte requests, so a fixed 256 bytes per request
-    would overstate them. It includes requests the Infinity Cache serves. The
-    counters cannot separate them, so this can be higher than true VRAM traffic and
-    can exceed the measured VRAM peak.
+    The number of bytes per second the L2 cache (GL2C) reads from and writes to memory
+    over the EA. The counters count 32-byte granules. They include requests the Infinity
+    Cache serves and cannot separate them, so this can be higher than true VRAM traffic
+    and can exceed the measured VRAM peak.
   peak_empirical: $VRAMBw_empirical_peak
 gl2.memory_rd_bw:
   name: Memory Read Bandwidth
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Bytes L2 read over EA for requests destined for VRAM, in 32-byte units. Infinity
-    Cache hits are included, so this can exceed the VRAM bandwidth peak.
+    The number of bytes per second the L2 cache (GL2C) reads over the EA for requests
+    destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are
+    included, so this can exceed the VRAM bandwidth peak.
 gl2.memory_wr_bw:
   name: Memory Write Bandwidth
   formula: 32 * SUM(GL2C_EA_WRREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Bytes L2 wrote over EA for requests destined for VRAM, in 32-byte units.
-    Infinity Cache hits are included.
+    The number of bytes per second the L2 cache (GL2C) writes over the EA for requests
+    destined for VRAM. The counter counts 32-byte granules. Infinity Cache hits are
+    included.
 gl2.misses:
   name: GL2 Cache Misses
   formula: SUM(GL2C_MISS_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
     Number of GL2 cache requests that missed and required fetching through GCEA
-    (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory
-    traffic. Consider improving data locality or reducing working set size.
+    (Graphics Core Efficiency Arbiter). High miss counts indicate heavy memory traffic.
+    Consider improving data locality or reducing working set size.
 gl2.rd_req:
   name: GL2 Read Requests
   formula: SUM(GL2C_READ_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of read requests to the GL2 cache. High read counts indicate
-    memory-intensive load operations. Compare with hit rate to assess GL2 cache
-    effectiveness for reads.
+    Number of read requests to the GL2 cache. High read counts indicate memory-intensive
+    load operations. Compare with hit rate to assess GL2 cache effectiveness for reads.
 gl2.total_req:
   name: GL2 Total Requests
   formula: SUM(GL2C_REQ_sum) / SUM($denom)
   unit: (Count + $normUnit)
-  description: >-
-    L2 requests, normalized by the chosen unit.
+  description: Total number of GL2 cache requests.
 gl2.wr_req:
   name: GL2 Write Requests
   formula: SUM(GL2C_WRITE_sum) / SUM($denom)
   unit: (Count + $normUnit)
   description: >-
-    Number of write requests to the GL2 cache. Write traffic includes stores and
-    cache writebacks from GL1. High write counts indicate write-intensive workloads.
+    Number of write requests to the GL2 cache. Write traffic includes stores and cache
+    writebacks from GL1. High write counts indicate write-intensive workloads.

@@ -133,6 +133,7 @@ def test_main_reports_errors(tree, monkeypatch, capsys):
         ("name: VALU Utilization", 'name: "VALU \\u2192 Utilization"', "plain ASCII"),
         ('description: ""', "description: VALU \\u2122 busy", "plain ASCII"),
         ('description: ""', "description: 5", "'description' must be a string"),
+        ('description: ""', f"description: {'x' * 301}", "use at most 300"),
     ],
 )
 def test_metric_errors(tree, old, new, message):

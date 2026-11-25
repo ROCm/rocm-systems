@@ -13,7 +13,7 @@ fabric.hbm_bw:
   formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64 + TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The total number of bytes read from and written to High-Bandwidth Memory (HBM) per
-    second. Its peak is the single-direction (read-only) bandwidth, so write-heavy or
-    mixed kernels fall below it.
+    The number of bytes per second read from and written to High-Bandwidth Memory (HBM).
+    Its peak is the single-direction (read-only) bandwidth, so write-heavy or mixed
+    kernels fall below it.
   peak_empirical: $HBMBw_empirical_peak
