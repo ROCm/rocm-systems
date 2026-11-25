@@ -332,7 +332,10 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   const auto link_info =
       core::Runtime::runtime_singleton_->GetLinkInfo(nearest_cpu->node_id(), node_id());
 
-  if (link_info.num_hop >= 1 && !properties_.Integrated) {
+  // With HSA_DEVICE_MEM_NO_HOST_ACCESS the CPU cannot access device memory, so treat the
+  // device as small-BAR.
+  if (link_info.num_hop >= 1 && !properties_.Integrated &&
+      !core::Runtime::runtime_singleton_->flag().device_mem_no_host_access()) {
     large_bar_enabled_ = true;
   }
 
