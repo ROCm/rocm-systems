@@ -8,7 +8,7 @@ from tests.integration import common as integration_common
 
 # sample/memcopy.cpp copies 268435456 doubles in each of 1000 measured dispatches.
 # Each direction transfers 2 GiB per dispatch; the warmup is excluded by -d.
-MEMCOPY_BYTES_PER_DIRECTION = 268_435_456 * 8 * 1000
+MEMCOPY_GB_PER_DIRECTION = 268_435_456 * 8 * 1000 / 1e9
 
 
 def get_hbm_data_transfer(analysis_workload_dir, data):
@@ -34,12 +34,15 @@ def get_hbm_bandwidth_peak(analysis_workload_dir, data):
 
 
 def get_memcopy_fabric_metrics(soc, read_metric_id, write_metric_id):
-    """Validate directional fabric traffic using the existing roofline counters."""
+    """Validate directional fabric traffic using the existing roofline counters.
+
+    The fabric bandwidth rows are in GB/s, so their traffic is in GB.
+    """
     return [
         {
             "name": name,
             "profile_metric_id": [metric_id],
-            "expected_values": [MEMCOPY_BYTES_PER_DIRECTION],
+            "expected_values": [MEMCOPY_GB_PER_DIRECTION],
             "tolerance": 0.10,
             "get_actual_data": {
                 "soc": soc,
@@ -51,8 +54,8 @@ def get_memcopy_fabric_metrics(soc, read_metric_id, write_metric_id):
             },
         }
         for name, metric_id in [
-            ("L2-Fabric Read Data Transfer (bytes)", read_metric_id),
-            ("L2-Fabric Write and Atomic Data Transfer (bytes)", write_metric_id),
+            ("L2-Fabric Read Data Transfer (GB)", read_metric_id),
+            ("L2-Fabric Write and Atomic Data Transfer (GB)", write_metric_id),
         ]
     ]
 
