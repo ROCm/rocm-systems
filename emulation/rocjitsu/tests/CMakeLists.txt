@@ -1587,6 +1587,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             GTest::gtest_main
     )
     rj_configure_target(queue_registration_allocation_failure_test PRIVATE_INCLUDES WARNINGS)
+    rj_add_test_path(queue_registration_allocation_failure_test RJ_KFD_MMAP_TEST_CONFIG
+                     "${CMAKE_SOURCE_DIR}/configs/gfx950_mi350x.json"
+    )
     rj_add_gtest_tests(queue_registration_allocation_failure_test)
 
     # Native dispatch must extract both the relative tables and their factories
