@@ -139,22 +139,6 @@ template <class Simd>
   }
 }
 
-/// Expand the low native<uint32_t>::size() bits into 0/1 uint32_t lanes. This
-/// is the numeric form needed by carry-in arithmetic; selection paths should
-/// use simd_mask_from_bits directly. AVX-512 materializes the lanes with a
-/// k-mask zero-masked broadcast; narrower targets use vector bit tests.
-[[gnu::always_inline]] inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t bits) {
-  using U = native<uint32_t>;
-  static_assert(U::size() <= 32);
-#if RJ_HOST_HAS_AVX512F
-  static_assert(U::size() == 16);
-  return std::bit_cast<U>(_mm512_maskz_set1_epi32(static_cast<__mmask16>(bits), 1));
-#else
-  const U lane_bits([](auto i) { return uint32_t{1} << i; });
-  const U lane_indices([](auto i) { return static_cast<uint32_t>(i); });
-  return (U(static_cast<uint32_t>(bits)) & lane_bits) >> lane_indices;
-#endif
-}
 #else
 // Fallback definitions so `if constexpr (has_stdx_simd)` discarded
 // branches compile out even in non-template callers (e.g. gtest TEST
@@ -170,7 +154,6 @@ template <class T> native<T> load(const uint32_t *) { return {}; }
 template <class T> native<T> broadcast(uint32_t) { return {}; }
 template <class Mask> uint64_t simd_mask_to_bits(const Mask &) { return 0; }
 template <class Simd> bool simd_mask_from_bits(uint64_t) { return false; }
-inline native<uint32_t> simd_u32_lanes_from_bits(uint64_t) { return {}; }
 inline native<float> native_fma(native<float>, native<float>, native<float>) { return {}; }
 template <class T> void masked_store(uint32_t *, native<T>, uint64_t) {}
 template <class T> void blit_to_buffer(uint32_t (&)[native<T>::size()], native<T>) {}
@@ -1011,37 +994,9 @@ inline native<float> round_to_nearest_even_simd(native<float> value) {
   return lower;
 }
 
-/// Round a normalized value scaled by 32767 or 65535 to the nearest integer,
-/// with ties to even. Clamp inputs to [minimum, 1] and convert NaNs to zero.
-/// An FP32 product can round onto an integer midpoint. The FMA residual
-/// distinguishes these false ties so the conversion rounds only once.
-inline native<float> round_normalized_simd(native<float> f, float scale, float minimum) {
-  using F = native<float>;
-  stdx::where(f < F(minimum), f) = F(minimum);
-  stdx::where(f > F(1.0f), f) = F(1.0f);
-  stdx::where(stdx::isnan(f), f) = F(0.0f);
-  const F product = f * F(scale);
-  const F residual = stdx::fma(f, F(scale), -product);
-  const F lower = stdx::floor(product);
-  const auto midpoint = product == lower + F(0.5f);
-  F rounded = rndne_simd(product);
-  stdx::where(midpoint && (residual < F(0.0f)), rounded) = lower;
-  stdx::where(midpoint && (residual > F(0.0f)), rounded) = lower + F(1.0f);
-  return rounded;
-}
-
-/// Convert to signed normalized integers in [-32767, 32767]; NaNs become zero.
-inline native<int32_t> cvt_pknorm_i16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<int32_t>>(round_normalized_simd(f, 32767.0f, -1.0f));
-}
-/// Convert to unsigned normalized integers in [0, 65535]; NaNs become zero.
-inline native<uint32_t> cvt_pknorm_u16_f32_simd(native<float> f) {
-  return stdx::static_simd_cast<native<uint32_t>>(round_normalized_simd(f, 65535.0f, 0.0f));
-}
-
 /// Vector port of the f32 `std::frexp` mantissa over raw float bits. Returns the
-/// significand m with |m| in [0.5, 1) such that input = m * 2^e (e via
-/// frexp_exp_f32_simd). Normal lanes force the exponent field to 126 and keep
+/// significand m with |m| in [0.5, 1) such that input = m * 2^e.
+/// Normal lanes force the exponent field to 126 and keep
 /// the mantissa; ±0 / Inf / NaN pass through unchanged (matching glibc frexp,
 /// which the scalar body calls unguarded); denormals are renormalized via the
 /// highest-set-bit index p = floor(log2(M)) (M < 2^24, so the int->float cast is
@@ -1066,27 +1021,6 @@ inline native<float> frexp_mant_f32_simd(native<uint32_t> v) {
   // payload; qNaN inputs are unchanged by the idempotent OR.
   stdx::where((E == 255u) && (M != 0u), out) = v | U(0x00400000u);
   return std::bit_cast<native<float>>(out);
-}
-
-/// Vector port of the f32 `std::frexp` exponent over raw float bits, returned as
-/// the raw bits of the int32 result. Normal lanes give E - 126; denormals give
-/// p - 148 (p = floor(log2(M))); ±0 / Inf / NaN give 0 (the scalar body only
-/// calls frexp on finite non-zero inputs, leaving exp = 0 otherwise). Negative
-/// results carry the correct two's-complement bits. Bit-identical to the scalar
-/// v_frexp_exp_i32_f32 body.
-inline native<uint32_t> frexp_exp_f32_simd(native<uint32_t> v) {
-  using U = native<uint32_t>;
-  U E = (v >> 23) & U(0xFFu);
-  U M = v & U(0x7FFFFFu);
-  U normal = E - U(126u);
-  const native<float> mf = stdx::static_simd_cast<native<float>>(M);
-  const U p = (std::bit_cast<U>(mf) >> 23) - U(127u);
-  U dn = p - U(148u);
-  U out = normal;
-  stdx::where(E == 0u, out) = U(0u);             // ±0 (M==0); overwritten if denormal
-  stdx::where((E == 0u) && (M != 0u), out) = dn; // denormal exponent
-  stdx::where(E == 255u, out) = U(0u);           // Inf / NaN -> 0
-  return out;
 }
 
 /// 64-bit-lane port of the f64 `std::frexp` mantissa over native<double>. Same

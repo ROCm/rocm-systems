@@ -1885,12 +1885,16 @@ public:
     DrmFileReservation(DrmFileReservation &&other) noexcept
         : context_(std::exchange(other.context_, nullptr)), file_(std::move(other.file_)) {}
     DrmFileReservation &operator=(DrmFileReservation &&) = delete;
-    ~DrmFileReservation() {
+    ~DrmFileReservation() { reset(); }
+
+    void reset() {
       if (!context_) {
         return;
       }
       const int saved_errno = errno;
-      context_->release_drm_file_reservation(file_);
+      InterposerContext *context = std::exchange(context_, nullptr);
+      context->release_drm_file_reservation(file_);
+      file_.reset();
       errno = saved_errno;
     }
 
@@ -2395,7 +2399,9 @@ public:
   /// @details Waiters use a per-file generation futex. Producers update the
   /// points under fd_mutex_, increment the generation with release ordering, and
   /// wake all sleepers; waiters recheck state under the same mutex after waking.
-  int wait_syncobj_timeline(const DrmFileToken &file, drm_syncobj_timeline_wait *wait) {
+  int wait_syncobj_timeline(DrmFileReservation &reservation, drm_syncobj_timeline_wait *wait,
+                            bool binary = false) {
+    const DrmFileToken &file = reservation.file();
     if (!wait) {
       return -EINVAL;
     }
@@ -2414,8 +2420,10 @@ public:
     if (int rc = snapshot_user_array(request.handles, request.count_handles, handles); rc != 0) {
       return rc;
     }
-    if (int rc = snapshot_user_array(request.points, request.count_handles, points); rc != 0) {
-      return rc;
+    if (!binary) {
+      if (int rc = snapshot_user_array(request.points, request.count_handles, points); rc != 0) {
+        return rc;
+      }
     }
     if (!file) {
       return -EBADF;
@@ -2423,6 +2431,9 @@ public:
     std::vector<std::shared_ptr<SyncobjEntry>> entries;
     std::vector<std::shared_ptr<SyncobjFence>> fences;
     try {
+      if (binary) {
+        points.resize(request.count_handles, 0);
+      }
       fences.resize(request.count_handles);
       entries.reserve(request.count_handles);
     } catch (const std::bad_alloc &) {
@@ -2430,92 +2441,123 @@ public:
     } catch (const std::length_error &) {
       return -ENOMEM;
     }
-    std::unique_lock lock(fd_mutex_);
-    for (uint32_t i = 0; i < request.count_handles; ++i) {
-      auto it = file->syncobj_entries.find(handles[i]);
-      if (it == file->syncobj_entries.end()) {
-        return -ENOENT;
+    std::unique_lock lock(fd_mutex_, std::defer_lock);
+    // Native exit bypasses C++ destructors with -fno-exceptions. Keep cleanup
+    // registered through the wait and its normal resource release.
+    struct WaitCleanup {
+      std::unique_lock<std::mutex> *lock;
+      std::vector<uint32_t> *handles;
+      std::vector<uint64_t> *points;
+      std::vector<std::shared_ptr<SyncobjEntry>> *entries;
+      std::vector<std::shared_ptr<SyncobjFence>> *fences;
+      DrmFileReservation *reservation;
+    } cleanup{&lock, &handles, &points, &entries, &fences, &reservation};
+    const auto release_wait = +[](void *argument) {
+      auto &state = *static_cast<WaitCleanup *>(argument);
+      const int saved_errno = errno;
+      if (state.lock->owns_lock()) {
+        state.lock->unlock();
       }
-      entries.push_back(it->second);
-    }
-    const bool wait_all = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) != 0;
-    const bool wait_for_submit = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT) != 0;
-    const bool wait_available = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE) != 0;
-    // The kernel validates fence availability once when the wait begins. A later
-    // unrelated wakeup must not turn a valid pending wait into EINVAL.
-    if (!wait_for_submit && !wait_available) {
-      for (uint32_t i = 0; i < request.count_handles; ++i) {
-        fences[i] = syncobj_fence_locked(*entries[i], points[i]);
-        const bool submitted = fences[i] != nullptr;
-        if (!submitted) {
-          return -EINVAL;
-        }
-      }
-    }
-    const auto evaluate = [&]() -> std::pair<int, uint32_t> {
-      bool all_ready = true;
-      bool any_ready = false;
-      uint32_t first_ready = 0;
-      for (uint32_t i = 0; i < request.count_handles; ++i) {
-        if (!fences[i]) {
-          fences[i] = syncobj_fence_locked(*entries[i], points[i]);
-        }
-        const bool submitted = fences[i] != nullptr;
-        if (submitted && !wait_available && fences[i]->is_failed()) {
-          return {-EIO, 0};
-        }
-        const bool ready = submitted && (wait_available || fences[i]->is_signaled());
-        all_ready = all_ready && ready;
-        if (!wait_all && ready && !any_ready) {
-          first_ready = i;
-          any_ready = true;
-        }
-      }
-      return {(wait_all ? all_ready : any_ready) ? 1 : 0, first_ready};
+      std::vector<uint32_t>{}.swap(*state.handles);
+      std::vector<uint64_t>{}.swap(*state.points);
+      std::vector<std::shared_ptr<SyncobjEntry>>{}.swap(*state.entries);
+      std::vector<std::shared_ptr<SyncobjFence>>{}.swap(*state.fences);
+      state.reservation->reset();
+      errno = saved_errno;
     };
-
-    while (true) {
-      auto &generation_word =
-          file->imported_sync_fence ? imported_syncobj_generation_ : file->syncobj_generation;
-      const uint32_t generation = generation_word.load(std::memory_order_acquire);
-      auto [state, first_ready] = evaluate();
-      if (state < 0) {
-        return state;
-      }
-      if (state > 0) {
-        wait->first_signaled = wait_all ? std::numeric_limits<uint32_t>::max() : first_ready;
-        return 0;
-      }
-
-      timespec now{};
-      if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
-        return -errno;
-      }
-      const int64_t now_ns = static_cast<int64_t>(now.tv_sec) * 1'000'000'000LL + now.tv_nsec;
-      if (request.timeout_nsec <= now_ns) {
-        return -ETIME;
-      }
-      lock.unlock();
-      const timespec deadline{static_cast<time_t>(request.timeout_nsec / 1'000'000'000LL),
-                              static_cast<long>(request.timeout_nsec % 1'000'000'000LL)};
-      // This user-space model cannot recover which signal interrupted futex(2),
-      // so it cannot apply the kernel ioctl layer's SA_RESTART decision. Surface
-      // EINTR consistently and let callers retry; the focused regression pins
-      // that documented difference from the in-kernel DRM implementation.
-      const long rc = futex_wait_until(generation_word, generation, &deadline);
-      const int wait_errno = errno;
+    int result;
+    pthread_cleanup_push(release_wait, &cleanup);
+    result = [&]() -> int {
       lock.lock();
-      if (rc == 0 || wait_errno == EAGAIN) {
-        continue;
+      for (uint32_t i = 0; i < request.count_handles; ++i) {
+        auto it = file->syncobj_entries.find(handles[i]);
+        if (it == file->syncobj_entries.end()) {
+          return -ENOENT;
+        }
+        entries.push_back(it->second);
       }
-      if (wait_errno == ETIMEDOUT) {
-        return -ETIME;
+      const bool wait_all = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_ALL) != 0;
+      const bool wait_for_submit = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT) != 0;
+      const bool wait_available = (request.flags & DRM_SYNCOBJ_WAIT_FLAGS_WAIT_AVAILABLE) != 0;
+      // The kernel validates fence availability once when the wait begins. A later
+      // unrelated wakeup must not turn a valid pending wait into EINVAL.
+      if (!wait_for_submit && !wait_available) {
+        for (uint32_t i = 0; i < request.count_handles; ++i) {
+          fences[i] = syncobj_fence_locked(*entries[i], points[i]);
+          const bool submitted = fences[i] != nullptr;
+          if (!submitted) {
+            return -EINVAL;
+          }
+        }
       }
-      if (wait_errno == EINTR) {
-        return -EINTR;
+      const auto evaluate = [&]() -> std::pair<int, uint32_t> {
+        bool all_ready = true;
+        bool any_ready = false;
+        uint32_t first_ready = 0;
+        for (uint32_t i = 0; i < request.count_handles; ++i) {
+          if (!fences[i]) {
+            fences[i] = syncobj_fence_locked(*entries[i], points[i]);
+          }
+          const bool submitted = fences[i] != nullptr;
+          if (submitted && !wait_available && fences[i]->is_failed()) {
+            return {-EIO, 0};
+          }
+          const bool ready = submitted && (wait_available || fences[i]->is_signaled());
+          all_ready = all_ready && ready;
+          if (!wait_all && ready && !any_ready) {
+            first_ready = i;
+            any_ready = true;
+          }
+        }
+        return {(wait_all ? all_ready : any_ready) ? 1 : 0, first_ready};
+      };
+
+      while (true) {
+        auto &generation_word =
+            file->imported_sync_fence ? imported_syncobj_generation_ : file->syncobj_generation;
+        const uint32_t generation = generation_word.load(std::memory_order_acquire);
+        auto [state, first_ready] = evaluate();
+        if (state < 0) {
+          return state;
+        }
+        if (state > 0) {
+          wait->first_signaled = wait_all ? std::numeric_limits<uint32_t>::max() : first_ready;
+          return 0;
+        }
+
+        timespec now{};
+        if (clock_gettime(CLOCK_MONOTONIC, &now) != 0) {
+          return -errno;
+        }
+        const int64_t now_ns = static_cast<int64_t>(now.tv_sec) * 1'000'000'000LL + now.tv_nsec;
+        if (request.timeout_nsec <= now_ns) {
+          return -ETIME;
+        }
+        lock.unlock();
+        const timespec deadline{static_cast<time_t>(request.timeout_nsec / 1'000'000'000LL),
+                                static_cast<long>(request.timeout_nsec % 1'000'000'000LL)};
+        // This user-space model cannot recover which signal interrupted futex(2),
+        // so it cannot apply the kernel ioctl layer's SA_RESTART decision. Surface
+        // EINTR consistently and let callers retry; the focused regression pins
+        // that documented difference from the in-kernel DRM implementation.
+        const long rc = futex_wait_until(generation_word, generation, &deadline);
+        const int wait_errno = errno;
+        lock.lock();
+        if (rc == 0 || wait_errno == EAGAIN) {
+          continue;
+        }
+        if (wait_errno == ETIMEDOUT) {
+          return -ETIME;
+        }
+        if (wait_errno == EINTR) {
+          return -EINTR;
+        }
+        return -wait_errno;
       }
-      return -wait_errno;
-    }
+    }();
+    release_wait(&cleanup);
+    pthread_cleanup_pop(0);
+    return result;
   }
 
   /// @brief Publish a completed binary or timeline fence under fd_mutex_.
@@ -5582,21 +5624,13 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
       if ((wait->flags & ~kSupportedFlags) != 0) {
         return kfd_ioctl_ret(-EINVAL);
       }
-      std::vector<uint64_t> points;
-      try {
-        points.resize(wait->count_handles, 0);
-      } catch (const std::bad_alloc &) {
-        return kfd_ioctl_ret(-ENOMEM);
-      } catch (const std::length_error &) {
-        return kfd_ioctl_ret(-ENOMEM);
-      }
       drm_syncobj_timeline_wait timeline{};
       timeline.handles = wait->handles;
-      timeline.points = reinterpret_cast<uint64_t>(points.data());
       timeline.count_handles = wait->count_handles;
       timeline.timeout_nsec = wait->timeout_nsec;
       timeline.flags = wait->flags;
-      int result = InterposerContext::ctx.wait_syncobj_timeline(drm_file, &timeline);
+      int result = InterposerContext::ctx.wait_syncobj_timeline(drm_file_reservation, &timeline,
+                                                                /*binary=*/true);
       wait->first_signaled = timeline.first_signaled;
       return kfd_ioctl_ret(result);
     }
@@ -5763,7 +5797,7 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrSyncobjTimelineWait && arg) {
       return kfd_ioctl_ret(InterposerContext::ctx.wait_syncobj_timeline(
-          drm_file, static_cast<drm_syncobj_timeline_wait *>(arg)));
+          drm_file_reservation, static_cast<drm_syncobj_timeline_wait *>(arg)));
     }
     if (type == kDrmIoctlType && nr == kDrmIoctlNrAmdgpuInfo && arg) {
       // Service the AMDGPU_INFO queries that real libdrm_amdgpu issues during

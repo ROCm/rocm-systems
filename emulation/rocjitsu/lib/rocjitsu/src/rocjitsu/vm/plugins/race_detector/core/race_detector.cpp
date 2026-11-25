@@ -11,23 +11,24 @@
 #include <limits>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace rocjitsu::plugins::race_detector {
 
+util::Result RaceDetector::validate_wave_count(size_t waves, util::DiagnosticEmitter diagnostic) {
+  if (waves > kMaxWaves)
+    return diagnostic.emit() << "race detector supports at most " << kMaxWaves
+                             << " waves in a workgroup, got " << waves;
+  return util::Result::success();
+}
+
 RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
                            std::function<void(RaceViolation)> raceHandler,
                            CounterCapacities counterCapacities, size_t ldsSizeBytes)
     : ldsSizeBytes_(ldsSizeBytes), workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
-  // Barrier rounds keep a bit per wave. A workgroup has at most 1024
-  // work-items (CDNA5 ISA 2.2), so at most 32 waves of 32 lanes.
-  if (nWaves > kMaxWaves) {
-    throw std::length_error("race detector supports at most " + std::to_string(kMaxWaves) +
-                            " waves in a workgroup, got " + std::to_string(nWaves));
-  }
+  assert(nWaves >= 0 && validate_wave_count(static_cast<size_t>(nWaves)).succeeded());
   waveRaceStates.reserve(nWaves);
   for (int i = 0; i < nWaves; ++i) {
     waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this, counterCapacities);

@@ -1403,6 +1403,20 @@ public:
     return op.read_lane(wf, lane);
   }
 
+  /// Read active wave lanes into nonaliasing scratch; leave inactive words untouched.
+  void read_active_lanes(const Operand &op, uint64_t lane_mask, uint32_t *out) const {
+    const Wavefront &wf = wavefront();
+    // Addressing stays fixed until the instruction commits. Packed-half and
+    // delegated sources without a direct base need no per-lane base lookup;
+    // their backend still owns each value read and its notifications.
+    const bool direct_base = op.simd_vgpr_base(wf).has_value();
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (lane_mask & (uint64_t{1} << lane)) {
+        out[lane] = direct_base ? read_lane(op, lane) : op.read_lane(wf, lane);
+      }
+    }
+  }
+
   /// @brief Read the lane selected by a scalar-lane instruction.
   /// @pre The decoder validated a VGPR or a target-supported direct LDS source.
   [[nodiscard]] uint32_t read_scalar_selected_lane(const Operand &op, uint32_t lane) const {
@@ -2041,19 +2055,30 @@ public:
   }
 
   /// @brief Acquire observed storage for an undelegated VGPR operand.
-  /// reg_count is the number of consecutive physical source registers consumed.
-  /// @returns No view for uniform or delegated operands; their operand semantics
-  /// must be materialized through the logical read APIs instead.
+  /// reg_count is the number of consecutive logical source words consumed.
+  /// @returns No view for uniform/delegated operands or wordwise mappings that
+  /// cannot be represented by contiguous storage. Materialize those operands
+  /// through the logical per-word read APIs instead.
   [[nodiscard]] std::optional<VgprReadRegion>
   read_operand_region(const Operand &op, uint64_t lane_mask, uint32_t reg_count = 1) const {
     if (op.delegate()) {
       return std::nullopt;
     }
+    if (reg_count > 1 && cu_->arch() == rocjitsu::IsaFamily::Cdna2) {
+      const auto first = op.decoded_vgpr();
+      // CDNA2 resolves missing words to V0, including words past the ordinary/AccVGPR split.
+      // Indexed tuples need per-word resolution too, even if their first word fits.
+      if (wavefront().gpr_idx_en() ||
+          (first && !wavefront().unified_vgpr_range_is_allocated(first->index, reg_count))) {
+        return std::nullopt;
+      }
+    }
     auto base = op.simd_vgpr_base(wavefront());
     if (!base) {
       return std::nullopt;
     }
-    if (!cu_->valid_operand_vgpr_range(wavefront(), *base, reg_count) && uses_vgpr0_fallback()) {
+    // Only gfx10 needs this extra allocation check before acquiring its fallback view.
+    if (uses_vgpr0_fallback() && !cu_->valid_operand_vgpr_range(wavefront(), *base, reg_count)) {
       return std::nullopt; // A partial tuple can require noncontiguous source registers.
     }
     if (auto mapped = remapped_valu_source(op, *base, reg_count)) {

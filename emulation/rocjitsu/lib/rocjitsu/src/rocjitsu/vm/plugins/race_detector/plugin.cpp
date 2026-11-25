@@ -43,7 +43,6 @@
 #include <optional>
 #include <span>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -574,8 +573,9 @@ namespace {
 
 // Load events do not retain a reliable source memory space: FLAT lanes can
 // resolve differently, and scalar and direct-to-LDS loads can read scratch.
-std::string_view event_description(const EventRegistry &events, EventId event,
-                                   RaceViolation::Space space) {
+util::FailureOr<std::string_view> event_description(const EventRegistry &events, EventId event,
+                                                    RaceViolation::Space space,
+                                                    util::DiagnosticEmitter diagnostic) {
   // A barrier arrive is an atomic update that is kept as a read only.
   if (space == RaceViolation::Space::LDS && events.barrierArrive(event)) {
     return events.type(event) == MemoryEventType::LDS_TO_VGPR
@@ -611,19 +611,21 @@ std::string_view event_description(const EventRegistry &events, EventId event,
   case LDS_OPERAND_READ:
     return "read from LDS";
   }
-  throw std::logic_error("race event has an unknown memory operation");
+  return diagnostic.emit() << "race event has an unknown memory operation";
 }
 
 } // namespace
 
-std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &events,
-                                  uint64_t access_pc, rocjitsu::IsaFamily arch) {
+util::FailureOr<std::string> formatRaceDescription(const RaceViolation &v,
+                                                   const EventRegistry &events, uint64_t access_pc,
+                                                   rocjitsu::IsaFamily arch,
+                                                   util::DiagnosticEmitter diagnostic) {
   if (!v.sourceInstruction && !events.contains(v.conflictingEvent)) {
-    throw std::out_of_range("race violation references an unavailable conflicting event");
+    return diagnostic.emit() << "race violation references an unavailable conflicting event";
   }
   const util::FailureOr<amdgpu::WaitcntModel> model = amdgpu::waitcnt_model(arch);
   if (model.failed()) {
-    throw std::invalid_argument("race report has an unsupported architecture");
+    return diagnostic.emit() << "race report has an unsupported architecture";
   }
   const EventId event = v.conflictingEvent;
   const bool conflicting_read =
@@ -666,11 +668,20 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
     oss << "  Completion for wave " << v.wave << " is not guaranteed; pending counters: expcnt.\n";
     return oss.str();
   }
+  std::string_view description;
+  if (v.conflictsWithSrc2Read) {
+    description = "read of LDS source operand";
+  } else if (v.conflictsWithBarrierArrive) {
+    description = "arrival at an LDS barrier cell";
+  } else {
+    const util::FailureOr<std::string_view> event_text =
+        event_description(events, event, v.space, diagnostic);
+    if (event_text.failed())
+      return util::Result::failure();
+    description = event_text.value();
+  }
   const int owner = events.waveId(event).value;
-  oss << "  Conflict: "
-      << (v.conflictsWithSrc2Read        ? "read of LDS source operand"
-          : v.conflictsWithBarrierArrive ? "arrival at an LDS barrier cell"
-                                         : event_description(events, event, v.space));
+  oss << "  Conflict: " << description;
   oss << " at PC 0x" << std::hex << events.instruction(event).pc() << std::dec << ", wave " << owner
       << ".\n";
   const bool flat_lds = v.space == RaceViolation::Space::LDS && events.usesFlatLds(event);
@@ -701,7 +712,7 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   } else if (status == EventStatus::WAVE_COMPLETE) {
     oss << "  Wait requirements satisfied for this operation in wave " << owner << ".\n";
   } else {
-    throw std::logic_error("race violation references a retired memory event");
+    return diagnostic.emit() << "race violation references a retired memory event";
   }
   if (owner != v.wave) {
     oss << "  The detector observed no synchronization between waves " << owner << " and " << v.wave
@@ -710,32 +721,44 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   return oss.str();
 }
 
-RaceDetectorPlugin::RaceDetectorPlugin(const char *config_json) : ExecutionPlugin("race") {
+RaceDetectorPlugin::RaceDetectorPlugin() : ExecutionPlugin("race") {}
+
+util::Result RaceDetectorPlugin::initialize(const char *config_json,
+                                            util::DiagnosticEmitter diagnostic) {
+  initialization_failed_ = false;
   if (!config_json || !*config_json) {
-    return;
+    return util::Result::success();
   }
   flexbuffers::Builder builder;
   flatbuffers::Parser parser;
   if (!parser.ParseFlexBuffer(config_json, nullptr, &builder)) {
-    throw std::invalid_argument("Race plugin configuration is not valid JSON");
+    initialization_failed_ = true;
+    return diagnostic.emit() << "Race plugin configuration is not valid JSON";
   }
   const flexbuffers::Reference root = flexbuffers::GetRoot(builder.GetBuffer());
   if (!root.IsMap()) {
-    throw std::invalid_argument("Race plugin configuration must be an object");
+    initialization_failed_ = true;
+    return diagnostic.emit() << "Race plugin configuration must be an object";
   }
   const flexbuffers::Reference context = root.AsMap()["trace_context"];
   if (context.IsNull()) {
-    return;
+    return util::Result::success();
   }
   if (!context.IsIntOrUint() || (context.IsInt() && context.AsInt64() < 2) ||
       context.AsUInt64() < 2 || context.AsUInt64() > kTraceHistorySize) {
-    throw std::invalid_argument(std::format(
-        "Race plugin 'trace_context' must be an integer between 2 and {}", kTraceHistorySize));
+    initialization_failed_ = true;
+    return diagnostic.emit() << "Race plugin 'trace_context' must be an integer between 2 and "
+                             << kTraceHistorySize;
   }
   trace_context_ = static_cast<size_t>(context.AsUInt64());
+  return util::Result::success();
 }
 
-RaceDetectorPlugin::~RaceDetectorPlugin() { sink().write(getSummary()); }
+RaceDetectorPlugin::~RaceDetectorPlugin() {
+  if (!initialization_failed_) {
+    sink().write(getSummary());
+  }
+}
 
 std::string RaceDetectorPlugin::getSummary() const {
   std::lock_guard<std::mutex> lock(report_mutex_);
@@ -773,6 +796,16 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
                                                      uint32_t physical_vgpr_count,
                                                      uint32_t physical_sgpr_count,
                                                      std::span<amdgpu::Wavefront *> wavefronts) {
+  util::StringDiagnostic diagnostic;
+  if (RaceDetector::validate_wave_count(wavefronts.size(), diagnostic.emitter()).failed()) {
+    for (amdgpu::Wavefront *wavefront : wavefronts)
+      report_plugin_failure(*wavefront, "race detector workgroup exceeds wave capacity");
+    std::lock_guard<std::mutex> lock(report_mutex_);
+    sink().write(diagnostic.message());
+    return;
+  }
+  if (wavefronts.empty())
+    return;
   uint32_t num_waves = static_cast<uint32_t>(wavefronts.size());
   WorkgroupKey key{dispatch_id, wg_id};
 
@@ -805,11 +838,19 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     }
     const MarkedInstruction &conflict = maybe_conflict.value();
 
+    util::StringDiagnostic diagnostic;
+    const util::FailureOr<std::string> description =
+        formatRaceDescription(v, detector->events(), pc, wf->cu().arch(), diagnostic.emitter());
+    if (description.failed()) {
+      report_plugin_failure(*wf, "race detector could not describe the conflicting event");
+      std::lock_guard<std::mutex> lock(report_mutex_);
+      sink().write(diagnostic.message());
+      return;
+    }
     std::ostringstream oss;
-    oss << formatRaceDescription(v, detector->events(), pc, wf->cu().arch());
+    oss << description.value();
 
     MarkedInstruction access_mark{*current, v.wave, v.lane};
-    util::StringDiagnostic diagnostic;
     util::FailureOr<std::string> trace = formatTrace(
         ws->trace,
         [wf, &diagnostic](const InstructionSnapshot &instruction) {

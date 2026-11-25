@@ -61,6 +61,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   version it was built against.
 - Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
   reported several orders of magnitude too small.
+- Fixed a race in the process and thread state machines where concurrent `set()` calls
+  could lower the state (for example from `Finalized` back to `Active`). The transition is
+  now an atomic compare-and-swap. `push()` also no longer changes the state when recording
+  the previous state in the history throws (for example `std::bad_alloc`).
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 

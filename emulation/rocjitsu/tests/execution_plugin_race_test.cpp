@@ -4076,6 +4076,23 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   }
 }
 
+TEST(RaceDetectorPluginTest, OversizedWorkgroupReportsFailureBeforeRetainingDetector) {
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(1));
+  fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  auto plugin = std::make_unique<RaceDetectorPlugin>();
+  RaceDetectorPlugin *race = plugin.get();
+  ASSERT_TRUE(fixture.plugin_group_->add(std::move(plugin)));
+  amdgpu::Wavefront *wavefront = fixture.cu()->dispatch_wf(0, 0, 104, 256);
+  ASSERT_NE(wavefront, nullptr);
+  std::vector<amdgpu::Wavefront *> waves(RaceDetector::kMaxWaves + 1, wavefront);
+  fixture.plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
+  EXPECT_TRUE(wavefront->instruction_execution_failed());
+  EXPECT_STREQ(wavefront->instruction_execution_error_detail(),
+               "race detector workgroup exceeds wave capacity");
+  EXPECT_EQ(race->retainedWorkgroupCount(), 0u);
+}
+
 TEST(RaceDetectorPluginTest, CompletedWorkgroupReleasesOnlyItsDetector) {
   PluginFixture f;
   ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/3));
@@ -10418,7 +10435,7 @@ TEST(RaceDetectorPluginTest, OrderedCountTracksRestoredExecAndIndependentGdsCoun
         ASSERT_NE(source, sources.end());
         const RaceViolation violation{RaceViolation::Space::VGPR, 1, 0, 1, true, Dim3d(0), *source};
         const auto report =
-            formatRaceDescription(violation, events, wave->pc + 8, wave->cu().arch());
+            formatRaceDescription(violation, events, wave->pc + 8, wave->cu().arch()).value();
         EXPECT_NE(report.find("write-after-read (WAR)"), std::string::npos) << report;
         EXPECT_NE(report.find("Conflict: VGPR source read by DS_ORDERED_COUNT"), std::string::npos)
             << report;
@@ -13965,7 +13982,9 @@ TEST(RaceDetectorPluginOutputTest, ConfiguredContextAndNopCompactionReachRealRep
     PluginSinkConfig sinks;
     StringSink &sink = sinks.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
-    ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>(config)));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    ASSERT_TRUE(plugin->initialize(config).succeeded());
+    ASSERT_TRUE(f.plugin_group_->add(std::move(plugin)));
     f.soc->set_plugin_group(f.plugin_group_);
     f.plugin_group_->onInit();
     const auto load = cdna4::build_ds(cdna4::kDsReadB32Ds, {.addr = 0, .vdst = 8});
