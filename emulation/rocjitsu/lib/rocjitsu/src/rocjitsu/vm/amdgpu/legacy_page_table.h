@@ -98,11 +98,13 @@ public:
   [[nodiscard]] uint64_t generation() const { return generation_.load(std::memory_order_seq_cst); }
 
   [[nodiscard]] bool try_acquire(uint64_t expected_generation) const {
-    if (generation_.load(std::memory_order_seq_cst) != expected_generation)
+    if (generation_.load(std::memory_order_seq_cst) != expected_generation) {
       return false;
+    }
     reader_count().fetch_add(1, std::memory_order_seq_cst);
-    if (generation_.load(std::memory_order_seq_cst) == expected_generation)
+    if (generation_.load(std::memory_order_seq_cst) == expected_generation) {
       return true;
+    }
     release();
     return false;
   }
@@ -110,8 +112,9 @@ public:
   void release() const {
     auto &active = reader_count();
     if (active.fetch_sub(1, std::memory_order_seq_cst) == 1 &&
-        draining_.load(std::memory_order_seq_cst))
+        draining_.load(std::memory_order_seq_cst)) {
       active.notify_all();
+    }
   }
 
   /// @brief Exclude new cached readers and drain the previous generation.

@@ -64,6 +64,9 @@ parser.add_argument('--results_directory',    type=str, default='',
                     help='The path to a directory to store results - optional')
 parser.add_argument('--use_ffmpeg_demuxer',   type=int, default=1,
                     help='Indicator to use FFMPEG demuxer - optional (default:1). If set to 0, built-in bitstream reader is used.')
+# 3 (not mapped / decode only) is excluded: no frame is returned, so there is nothing to compare against the reference MD5.
+parser.add_argument('--mem_type',   type=int, default=None, choices=[0, 1, 2],
+                    help='Output surface memory type passed to the sample as -m - optional (default: the sample\'s own default, 0) [0: device internal, 1: device copied, 2: host copied]')
 
 args = parser.parse_args()
 
@@ -73,6 +76,7 @@ filesDir = args.files_directory
 videoDecodeEXE = args.videodecode_exe
 resultsDir = args.results_directory
 useFFDemuxer = args.use_ffmpeg_demuxer
+memType = args.mem_type
 
 if useFFDemuxer == 1:
     bsReaderOption = ''
@@ -99,6 +103,8 @@ run_rocDecode_app = os.path.abspath(rocDecode_exe)
 os.makedirs(resultsPath, exist_ok=True)
 if(os.path.isfile(run_rocDecode_app)):
     print("STATUS: rocDecode path - "+run_rocDecode_app+"\n")
+    if memType is not None:
+        print("STATUS: output surface memory type - "+str(memType)+"\n")
 else:
     print("\nERROR: rocDecode Executable Not Found - "+run_rocDecode_app)
     print("Build the sample first, or pass --videodecode_exe to point at it.\n")
@@ -141,6 +147,8 @@ for i in range(streamListSize):
     if bsReaderOption:
         cmd.append(bsReaderOption)
     cmd += ['-md5_check', md5FilePath, '-d', str(gpuDeviceID)]
+    if memType is not None:
+        cmd += ['-m', str(memType)]
     logFilePath = resultsPath + '/rocDecode_output.log'
     run_and_log(cmd, logFilePath)
     print("======================================================================================\n")

@@ -20,6 +20,12 @@ namespace testing {
 class ScopedProcessorRegistration;
 }  // namespace testing
 
+// "/sys/devices/system" root used by get_cpu_sockets_from_numa_node().
+const char* SysDevicesSystemRoot();
+
+// Test-only hook to point SysDevicesSystemRoot() at a mock sysfs tree.
+void SetSysDevicesSystemRootForTesting(const char* path);
+
 // Singleton: Only one system in an application
 class AMDSmiSystem {
  public:

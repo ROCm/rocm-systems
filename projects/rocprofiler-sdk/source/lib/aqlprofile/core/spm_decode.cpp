@@ -124,7 +124,7 @@ aqlprofile_spm_decode_stream_v1(aqlprofile_spm_buffer_desc_t        desc_bin,
             index &= SPM_COUNTER_MAP_INDEX_MASK;
             uint32_t sa_count  = is_sa ? desc->num_sa : 1;
             uint32_t wgp_count = is_wgp ? desc->num_wgp : 1;
-#if defined(DEBUG_TRACE)
+#if AQLPROFILE_DEBUG_LEVEL > 0
             if(is_wgp && wgp_count == 0)
             {
                 std::fprintf(stderr,

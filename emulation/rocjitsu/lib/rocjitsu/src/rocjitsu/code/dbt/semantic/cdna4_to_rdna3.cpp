@@ -28,9 +28,10 @@ ExpandResult expand_waitcnt_gfx9_to_gfx11(const Instruction &inst, uint32_t, uin
                                           std::span<const uint8_t>, const LivenessAnalysis &,
                                           TranslationContext &, const LaneLayout *,
                                           const LaneLayout *) {
-  if (inst.encoding_id() != cdna4::encoding::kSopp)
+  if (inst.encoding_id() != cdna4::encoding::kSopp) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " matched the waitcnt expansion rule with an unexpected encoding");
+  }
 
   return ExpandResult::success({rdna3::build_sopp(rdna3::kSWaitcnt)[0]});
 }

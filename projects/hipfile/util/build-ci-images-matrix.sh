@@ -9,7 +9,7 @@
 #   - a Dockerfile change rebuilds the whole catalog;
 #   - otherwise only nightly rows may need building (other versions reuse their
 #     latest-rocm<ver> images from hipfile-image-update.yml), and a nightly row
-#     is built only when its base or nvidia image isn't already published.
+#     is built only when its image isn't already published.
 #
 # Two ways to use it:
 #   Sourced (CI):  source build-ci-images-matrix.sh
@@ -59,7 +59,7 @@ _image_published() {
 # Emit the matrix of images to (re)build on stdout. Progress notes go to stderr
 # so stdout carries only the JSON result.
 # Args: changed_dockerfile ("1" or other) full_ci_images_matrix (JSON)
-#       ci_images (JSON map: "<sp>-<rv>" -> {ci_image, ci_image_nvidia, ...})
+#       ci_images (JSON map: "<sp>-<rv>" -> {ci_image, ci_image_cache})
 compute_build_set() {
   local changed_dockerfile="$1" full_ci_images_matrix="$2" ci_images="$3"
 
@@ -68,15 +68,14 @@ compute_build_set() {
     return
   fi
 
-  local nightly_matrix to_build="" key img img_nvidia
+  local nightly_matrix to_build="" key img
   nightly_matrix=$(filter_nightly_rows "${full_ci_images_matrix}")
 
-  # A nightly row is (re)built when its base OR nvidia image is missing.
+  # A nightly row is (re)built when its image is missing.
   for key in $(printf '%s' "${nightly_matrix}" \
       | jq -r '.include[] | "\(.supported_platforms)-\(.rocm_versions)"'); do
     img=$(printf '%s' "${ci_images}" | jq -r --arg k "${key}" '.[$k].ci_image')
-    img_nvidia=$(printf '%s' "${ci_images}" | jq -r --arg k "${key}" '.[$k].ci_image_nvidia')
-    if ! _image_published "${img}" || ! _image_published "${img_nvidia}"; then
+    if ! _image_published "${img}"; then
       echo "Nightly image not yet published, will build: ${key}" >&2
       to_build="${to_build}${key} "
     fi
@@ -117,8 +116,8 @@ _run_tests() {
   }
 
   local CI_IMAGES_FIX='{
-    "ubuntu-nightly":{"ci_image":"reg/ubuntu:nightly","ci_image_nvidia":"reg/ubuntu:nightly-nvidia"},
-    "rocky-nightly":{"ci_image":"reg/rocky:nightly","ci_image_nvidia":"reg/rocky:nightly-nvidia"}
+    "ubuntu-nightly":{"ci_image":"reg/ubuntu:nightly"},
+    "rocky-nightly":{"ci_image":"reg/rocky:nightly"}
   }'
   local FULL='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"7.2.2"},{"supported_platforms":"ubuntu","rocm_versions":"nightly"}]}'
   local TWO_NIGHTLY='{"include":[{"supported_platforms":"ubuntu","rocm_versions":"nightly"},{"supported_platforms":"rocky","rocm_versions":"nightly"}]}'
@@ -154,35 +153,28 @@ _run_tests() {
 
   echo
   echo "Test 6: compute_build_set with Dockerfile change -> full catalog"
-  _PUBLISHED="reg/ubuntu:nightly reg/ubuntu:nightly-nvidia"
+  _PUBLISHED="reg/ubuntu:nightly"
   _assert_eq "  output" \
     "$(compute_build_set "1" "${FULL}" "${CI_IMAGES_FIX}")" \
     "${FULL}" || failures=$((failures+1))
 
   echo
-  echo "Test 7: compute_build_set, nightly fully published -> empty (skip)"
-  _PUBLISHED="reg/ubuntu:nightly reg/ubuntu:nightly-nvidia"
+  echo "Test 7: compute_build_set, nightly published -> empty (skip)"
+  _PUBLISHED="reg/ubuntu:nightly"
   _assert_eq "  output" \
     "$(compute_build_set "0" "${FULL}" "${CI_IMAGES_FIX}")" \
     '{"include":[]}' || failures=$((failures+1))
 
   echo
-  echo "Test 8: compute_build_set, nightly base missing -> build it"
-  _PUBLISHED="reg/ubuntu:nightly-nvidia"
+  echo "Test 8: compute_build_set, nightly missing -> build it"
+  _PUBLISHED=""
   _assert_eq "  output" \
     "$(compute_build_set "0" "${FULL}" "${CI_IMAGES_FIX}")" \
     '{"include":[{"supported_platforms":"ubuntu","rocm_versions":"nightly"}]}' || failures=$((failures+1))
 
   echo
-  echo "Test 9: compute_build_set, nightly nvidia missing -> build it"
-  _PUBLISHED="reg/ubuntu:nightly"
-  _assert_eq "  output" \
-    "$(compute_build_set "0" "${FULL}" "${CI_IMAGES_FIX}")" \
-    '{"include":[{"supported_platforms":"ubuntu","rocm_versions":"nightly"}]}' || failures=$((failures+1))
-
-  echo
-  echo "Test 10: compute_build_set, two nightly rows, only the unpublished one is built"
-  _PUBLISHED="reg/rocky:nightly reg/rocky:nightly-nvidia"
+  echo "Test 9: compute_build_set, two nightly rows, only the unpublished one is built"
+  _PUBLISHED="reg/rocky:nightly"
   _assert_eq "  output" \
     "$(compute_build_set "0" "${TWO_NIGHTLY}" "${CI_IMAGES_FIX}")" \
     '{"include":[{"supported_platforms":"ubuntu","rocm_versions":"nightly"}]}' || failures=$((failures+1))

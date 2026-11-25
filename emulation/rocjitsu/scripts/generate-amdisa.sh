@@ -109,9 +109,12 @@ log "Running amdisa generator"
 "$python" -m amdisa \
   "${isa_entries[@]}" \
   --isa-additions "cdna1:$isa_xml/amdgpu_isa_cdna1_legacy_math.xml" \
+  --isa-additions "cdna1:$isa_xml/amdgpu_isa_cdna1_ds_src2.xml" \
   --isa-additions "cdna2:$isa_xml/amdgpu_isa_cdna2_legacy_math.xml" \
   --isa-additions "cdna3:$isa_xml/amdgpu_isa_cdna3_legacy_math.xml" \
   --isa-additions "cdna4:$isa_xml/amdgpu_isa_cdna4_legacy_math.xml" \
+  --isa-additions "rdna2:$isa_xml/amdgpu_isa_rdna2_atc_probe.xml" \
+  --isa-additions "rdna4:$isa_xml/amdgpu_isa_rdna4_barrier_state.xml" \
   --isa-additions "cdna5:$cdna5_delta" \
   --isa-variants "cdna5:$cdna5_variants" \
   --isa-output "$isa_out" \
@@ -130,13 +133,35 @@ if [[ -n "$generated_files" ]]; then
   mapfile -t format_files <<<"$generated_files"
 fi
 if ((${#format_files[@]} > 0)); then
+  # Keep generated output braced even while the project style allows unbraced
+  # statements. Reuse the repository's clang-format revision and file filters.
+  format_config="$(mktemp)"
+  trap 'rm -f -- "$format_config"' EXIT
+  "$python" - "$repo/.pre-commit-config.yaml" "$format_config" <<'PY'
+from pathlib import Path
+import sys
+
+import yaml
+
+source, destination = map(Path, sys.argv[1:])
+config = yaml.safe_load(source.read_text())
+hook = next(
+    hook
+    for repository in config['repos']
+    for hook in repository['hooks']
+    if hook['id'] == 'clang-format'
+)
+hook['entry'] = 'clang-format -i'
+hook['args'] = ['--style={BasedOnStyle: InheritParentConfig, InsertBraces: true}']
+destination.write_text(yaml.safe_dump(config, sort_keys=False))
+PY
   (
     cd "$repo"
     # pre-commit exits nonzero when clang-format rewrites files. Run it again
     # to distinguish that expected first result from a persistent hook failure.
-    if ! "$pre_commit" run clang-format --files "${format_files[@]}"; then
+    if ! "$pre_commit" run --config "$format_config" clang-format --files "${format_files[@]}"; then
       log "Verifying files updated by clang-format"
-      "$pre_commit" run clang-format --files "${format_files[@]}"
+      "$pre_commit" run --config "$format_config" clang-format --files "${format_files[@]}"
     fi
   )
 else

@@ -129,21 +129,25 @@ constexpr hsa_executable_symbol_t kFakeKernelSymbol{500};
 constexpr uint32_t kResolvedHostGpuId = 8716;
 
 const char *isa_name(hsa_isa_t isa) {
-  if (isa.handle == kGuestIsa.handle)
+  if (isa.handle == kGuestIsa.handle) {
     return "amdgcn-amd-amdhsa--gfx950";
-  if (isa.handle == kHostIsa.handle)
+  }
+  if (isa.handle == kHostIsa.handle) {
     return "amdgcn-amd-amdhsa--gfx1201";
+  }
   return "";
 }
 
 hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, void *),
                                          void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   ++g_fake_iterate_agents_calls;
-  if (g_fail_agent_iteration)
+  if (g_fail_agent_iteration) {
     return HSA_STATUS_ERROR;
+  }
 
   {
     std::unique_lock lock(g_agent_mutex);
@@ -155,35 +159,41 @@ hsa_status_t HSA_API fake_iterate_agents(hsa_status_t (*callback)(hsa_agent_t, v
   }
 
   hsa_status_t status = callback(kGuestAgent, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   return callback(kHostAgent, data);
 }
 
 hsa_status_t HSA_API fake_iterate_agents_host_first(hsa_status_t (*callback)(hsa_agent_t, void *),
                                                     void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   ++g_fake_iterate_agents_calls;
   hsa_status_t status = callback(kHostAgent, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   return callback(kGuestAgent, data);
 }
 
 hsa_status_t HSA_API fake_iterate_agents_with_cpu(hsa_status_t (*callback)(hsa_agent_t, void *),
                                                   void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   ++g_fake_iterate_agents_calls;
   hsa_status_t status = callback(kCpuAgent, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   status = callback(kGuestAgent, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   return callback(kHostAgent, data);
 }
 
@@ -192,8 +202,9 @@ hsa_status_t HSA_API fake_iterate_agents_with_cpu(hsa_status_t (*callback)(hsa_a
 // collision: one agent satisfies both predicates and no distinct guest remains.
 hsa_status_t HSA_API fake_iterate_agents_host_only(hsa_status_t (*callback)(hsa_agent_t, void *),
                                                    void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   ++g_fake_iterate_agents_calls;
   return callback(kHostAgent, data);
@@ -206,8 +217,9 @@ hsa_status_t HSA_API fake_shut_down() {
 
 hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t attribute,
                                          void *value) {
-  if (value == nullptr)
+  if (value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   if (attribute == HSA_AGENT_INFO_DEVICE) {
     *static_cast<hsa_device_type_t *>(value) =
@@ -219,11 +231,12 @@ hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t att
     return HSA_STATUS_SUCCESS;
   }
   if (attribute == static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID)) {
-    if (agent.handle == kCpuAgent.handle)
+    if (agent.handle == kCpuAgent.handle) {
       *static_cast<uint32_t *>(value) = kCpuNodeId;
-    else
+    } else {
       *static_cast<uint32_t *>(value) =
           agent.handle == kGuestAgent.handle ? kGuestNodeId : kHostNodeId;
+    }
     return HSA_STATUS_SUCCESS;
   }
   return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -232,13 +245,16 @@ hsa_status_t HSA_API fake_agent_get_info(hsa_agent_t agent, hsa_agent_info_t att
 hsa_status_t HSA_API fake_agent_iterate_isas(hsa_agent_t agent,
                                              hsa_status_t (*callback)(hsa_isa_t, void *),
                                              void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
-  if (agent.handle == kGuestAgent.handle)
+  if (agent.handle == kGuestAgent.handle) {
     return callback(kGuestIsa, data);
-  if (agent.handle == kHostAgent.handle)
+  }
+  if (agent.handle == kHostAgent.handle) {
     return callback(kHostIsa, data);
+  }
   return HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
@@ -248,24 +264,29 @@ hsa_status_t HSA_API fake_agent_iterate_isas(hsa_agent_t agent,
 // constraint can tell the two roles apart.
 hsa_status_t HSA_API fake_agent_iterate_isas_overlapping(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_isa_t, void *), void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (agent.handle != kGuestAgent.handle && agent.handle != kHostAgent.handle)
+  }
+  if (agent.handle != kGuestAgent.handle && agent.handle != kHostAgent.handle) {
     return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
 
   hsa_status_t status = callback(kGuestIsa, data);
-  if (status != HSA_STATUS_SUCCESS)
+  if (status != HSA_STATUS_SUCCESS) {
     return status;
+  }
   return callback(kHostIsa, data);
 }
 
 hsa_status_t HSA_API fake_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attribute, void *value) {
-  if (value == nullptr)
+  if (value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   const char *name = isa_name(isa);
-  if (name[0] == '\0')
+  if (name[0] == '\0') {
     return HSA_STATUS_ERROR_INVALID_ISA;
+  }
 
   if (attribute == HSA_ISA_INFO_NAME_LENGTH) {
     *static_cast<uint32_t *>(value) = static_cast<uint32_t>(std::strlen(name));
@@ -281,8 +302,9 @@ hsa_status_t HSA_API fake_isa_get_info_alt(hsa_isa_t isa, hsa_isa_info_t attribu
 hsa_status_t HSA_API fake_queue_create(hsa_agent_t agent, uint32_t size, hsa_queue_type32_t type,
                                        void (*)(hsa_status_t, hsa_queue_t *, void *), void *,
                                        uint32_t, uint32_t, hsa_queue_t **queue) {
-  if (queue == nullptr || size == 0 || size > g_fake_queue_packets.size())
+  if (queue == nullptr || size == 0 || size > g_fake_queue_packets.size()) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   g_last_queue_create_agent = agent;
   g_fake_queue_packets = {};
@@ -321,8 +343,9 @@ hsa_status_t HSA_API fake_amd_queue_intercept_register(hsa_queue_t *queue,
 
 void fake_intercept_packet_writer(const void *pkts, uint64_t pkt_count) {
   g_last_intercept_written_packets.clear();
-  if (pkts == nullptr || pkt_count == 0)
+  if (pkts == nullptr || pkt_count == 0) {
     return;
+  }
 
   const auto *packets = static_cast<const hsa_kernel_dispatch_packet_t *>(pkts);
   g_last_intercept_written_packets.assign(packets, packets + pkt_count);
@@ -352,8 +375,9 @@ void set_fake_signal_value(hsa_signal_t signal, hsa_signal_value_t value) {
 
 hsa_status_t HSA_API fake_signal_create(hsa_signal_value_t initial_value, uint32_t,
                                         const hsa_agent_t *, hsa_signal_t *signal) {
-  if (signal == nullptr)
+  if (signal == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   *signal = hsa_signal_t{g_next_fake_signal_handle++};
   g_fake_created_signals.push_back(*signal);
   set_fake_signal_value(*signal, initial_value);
@@ -367,24 +391,27 @@ hsa_status_t HSA_API fake_signal_destroy(hsa_signal_t signal) {
 
 hsa_signal_value_t HSA_API fake_signal_load_scacquire(hsa_signal_t signal) {
   for (const FakeSignalValue &entry : g_fake_signal_values) {
-    if (entry.handle == signal.handle)
+    if (entry.handle == signal.handle) {
       return entry.value;
+    }
   }
   return 1;
 }
 
 hsa_status_t HSA_API
 fake_code_object_reader_create_from_file(hsa_file_t, hsa_code_object_reader_t *code_object_reader) {
-  if (code_object_reader == nullptr)
+  if (code_object_reader == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   code_object_reader->handle = 1;
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API fake_code_object_reader_create_from_memory(
     const void *, size_t, hsa_code_object_reader_t *code_object_reader) {
-  if (code_object_reader == nullptr)
+  if (code_object_reader == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   code_object_reader->handle = g_next_memory_reader_handle++;
   return HSA_STATUS_SUCCESS;
 }
@@ -399,18 +426,21 @@ hsa_status_t HSA_API fake_executable_load_agent_code_object(
   ++g_fake_load_agent_calls;
   g_last_load_agent = agent;
   g_last_load_reader = reader;
-  if (loaded_code_object != nullptr)
+  if (loaded_code_object != nullptr) {
     loaded_code_object->handle = 77;
+  }
   return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t HSA_API fake_executable_get_symbol_by_name(hsa_executable_t, const char *symbol_name,
                                                         const hsa_agent_t *,
                                                         hsa_executable_symbol_t *symbol) {
-  if (symbol_name == nullptr || symbol == nullptr)
+  if (symbol_name == nullptr || symbol == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (symbol_name != g_fake_symbol_name)
+  }
+  if (symbol_name != g_fake_symbol_name) {
     return HSA_STATUS_ERROR_INVALID_SYMBOL_NAME;
+  }
   *symbol = kFakeKernelSymbol;
   return HSA_STATUS_SUCCESS;
 }
@@ -419,16 +449,18 @@ hsa_status_t HSA_API fake_executable_iterate_agent_symbols(
     hsa_executable_t executable, hsa_agent_t agent,
     hsa_status_t (*callback)(hsa_executable_t, hsa_agent_t, hsa_executable_symbol_t, void *),
     void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
   return callback(executable, agent, kFakeKernelSymbol, data);
 }
 
 hsa_status_t HSA_API fake_executable_symbol_get_info(hsa_executable_symbol_t symbol,
                                                      hsa_executable_symbol_info_t attribute,
                                                      void *value) {
-  if (symbol.handle != kFakeKernelSymbol.handle || value == nullptr)
+  if (symbol.handle != kFakeKernelSymbol.handle || value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_NAME_LENGTH) {
     const uint32_t name_length = static_cast<uint32_t>(g_fake_symbol_name.size());
@@ -482,8 +514,9 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
                                                       const hsa_signal_t *) {
   g_last_batch_src_agents.clear();
   g_last_batch_dst_agents.clear();
-  if (copy_ops == nullptr && num_copy_ops != 0)
+  if (copy_ops == nullptr && num_copy_ops != 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   for (uint32_t op_idx = 0; op_idx < num_copy_ops; ++op_idx) {
     const hsa_amd_memory_copy_op_t &op = copy_ops[op_idx];
@@ -498,8 +531,9 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
         g_last_batch_dst_agents.push_back(op.dst_agent.handle);
         continue;
       }
-      if (op.dst_agent_list == nullptr)
+      if (op.dst_agent_list == nullptr) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
       for (uint16_t entry_idx = 0; entry_idx < op.num_entries; ++entry_idx) {
         g_last_batch_src_agents.push_back(op.src_agent.handle);
         g_last_batch_dst_agents.push_back(op.dst_agent_list[entry_idx].handle);
@@ -507,8 +541,9 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
       continue;
     case HSA_AMD_MEMORY_COPY_OP_LINEAR_BROADCAST:
     case HSA_AMD_MEMORY_COPY_OP_RECT:
-      if (op.num_entries == 0 || op.dst_agent_list == nullptr)
+      if (op.num_entries == 0 || op.dst_agent_list == nullptr) {
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      }
       for (uint16_t entry_idx = 0; entry_idx < op.num_entries; ++entry_idx) {
         g_last_batch_src_agents.push_back(op.src_agent.handle);
         g_last_batch_dst_agents.push_back(op.dst_agent_list[entry_idx].handle);
@@ -523,10 +558,12 @@ hsa_status_t HSA_API fake_amd_memory_async_batch_copy(const hsa_amd_memory_copy_
 hsa_status_t HSA_API fake_amd_memory_lock(void *, size_t, hsa_agent_t *agents, int num_agent,
                                           void **) {
   g_last_memory_lock_agents.clear();
-  if (agents == nullptr && num_agent != 0)
+  if (agents == nullptr && num_agent != 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  for (int i = 0; i < num_agent; ++i)
+  }
+  for (int i = 0; i < num_agent; ++i) {
     g_last_memory_lock_agents.push_back(agents[i].handle);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -535,10 +572,12 @@ hsa_status_t HSA_API fake_amd_memory_lock_to_pool(void *, size_t, hsa_agent_t *a
                                                   uint32_t, void **) {
   g_last_memory_lock_to_pool_pool = pool;
   g_last_memory_lock_to_pool_agents.clear();
-  if (agents == nullptr && num_agent != 0)
+  if (agents == nullptr && num_agent != 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  for (int i = 0; i < num_agent; ++i)
+  }
+  for (int i = 0; i < num_agent; ++i) {
     g_last_memory_lock_to_pool_agents.push_back(agents[i].handle);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -546,10 +585,12 @@ hsa_status_t HSA_API fake_amd_vmem_set_access(void *, size_t,
                                               const hsa_amd_memory_access_desc_t *desc,
                                               size_t desc_cnt) {
   g_last_vmem_access_agents.clear();
-  if (desc == nullptr && desc_cnt != 0)
+  if (desc == nullptr && desc_cnt != 0) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  for (size_t i = 0; i < desc_cnt; ++i)
+  }
+  for (size_t i = 0; i < desc_cnt; ++i) {
     g_last_vmem_access_agents.push_back(desc[i].agent_handle.handle);
+  }
   return HSA_STATUS_SUCCESS;
 }
 
@@ -571,8 +612,9 @@ hsa_status_t HSA_API fake_amd_pointer_info(const void *, hsa_amd_pointer_info_t 
 
 hsa_status_t HSA_API fake_amd_agent_iterate_memory_pools(
     hsa_agent_t agent, hsa_status_t (*callback)(hsa_amd_memory_pool_t, void *), void *data) {
-  if (callback == nullptr)
+  if (callback == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   if (agent.handle == kGuestAgent.handle) {
     if (g_fail_guest_pool_iteration_once) {
@@ -590,20 +632,23 @@ hsa_status_t HSA_API fake_amd_agent_iterate_memory_pools(
   }
   if (agent.handle == kHostAgent.handle) {
     hsa_status_t status = callback(kHostPool, data);
-    if (status != HSA_STATUS_SUCCESS)
+    if (status != HSA_STATUS_SUCCESS) {
       return status;
+    }
     return callback(kHostKernargPool, data);
   }
-  if (agent.handle == kCpuAgent.handle)
+  if (agent.handle == kCpuAgent.handle) {
     return callback(kCpuFineGrainedPool, data);
+  }
   return HSA_STATUS_ERROR_INVALID_AGENT;
 }
 
 hsa_status_t HSA_API fake_amd_memory_pool_get_info(hsa_amd_memory_pool_t pool,
                                                    hsa_amd_memory_pool_info_t attribute,
                                                    void *value) {
-  if (value == nullptr)
+  if (value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
 
   if (attribute == HSA_AMD_MEMORY_POOL_INFO_SEGMENT) {
     *static_cast<uint32_t *>(value) = 0;
@@ -632,10 +677,12 @@ hsa_status_t HSA_API fake_amd_agent_memory_pool_get_info(hsa_agent_t agent,
   g_last_agent_memory_pool_agent = agent;
   g_last_agent_memory_pool = memory_pool;
 
-  if (value == nullptr)
+  if (value == nullptr) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  if (memory_pool.handle == 0)
+  }
+  if (memory_pool.handle == 0) {
     return HSA_STATUS_SUCCESS;
+  }
   if (attribute == HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS) {
     *static_cast<uint32_t *>(value) = 0;
     return HSA_STATUS_SUCCESS;
@@ -706,8 +753,9 @@ struct FakeApiTable {
 [[nodiscard]] testing::AssertionResult create_host_node(const std::filesystem::path &host_node) {
   std::error_code error;
   std::filesystem::create_directories(host_node, error);
-  if (error)
+  if (error) {
     return testing::AssertionFailure() << "Failed to create host node: " << error.message();
+  }
   return testing::AssertionSuccess();
 }
 
@@ -715,37 +763,43 @@ struct FakeApiTable {
   std::ofstream gpu_id(host_node / "gpu_id");
   gpu_id << kResolvedHostGpuId << '\n';
   gpu_id.close();
-  if (!gpu_id)
+  if (!gpu_id) {
     return testing::AssertionFailure() << "Failed to write host node gpu_id";
+  }
   return testing::AssertionSuccess();
 }
 
 [[nodiscard]] testing::AssertionResult
 write_runtime_config_path(const std::string &runtime_dir, bool create_host_topology_node = true) {
-  if (setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1) == -1)
+  if (setenv("ROCJITSU_RUNTIME_DIR", runtime_dir.c_str(), 1) == -1) {
     return testing::AssertionFailure()
            << "Failed to set ROCJITSU_RUNTIME_DIR: " << std::strerror(errno);
+  }
 
   const std::filesystem::path topology_root =
       std::filesystem::path(runtime_dir) / "topology" / "nodes";
   std::error_code error;
   std::filesystem::create_directories(topology_root, error);
-  if (error)
+  if (error) {
     return testing::AssertionFailure() << "Failed to create topology root: " << error.message();
+  }
   if (create_host_topology_node) {
     const std::filesystem::path host_node = topology_root / std::to_string(kHostNodeId);
-    if (testing::AssertionResult result = create_host_node(host_node); !result)
+    if (testing::AssertionResult result = create_host_node(host_node); !result) {
       return result;
-    if (testing::AssertionResult result = write_host_gpu_id(host_node); !result)
+    }
+    if (testing::AssertionResult result = write_host_gpu_id(host_node); !result) {
       return result;
+    }
   }
   rj_hsa_dbt_set_topology_nodes_root_for_test(topology_root.c_str());
 
   std::ofstream config_path(rocjitsu::rpc_default_config_file_path());
   config_path << RJ_HOOK_UNIT_CONFIG_PATH << '\n' << kResolvedHostGpuId << '\n';
   config_path.close();
-  if (!config_path)
+  if (!config_path) {
     return testing::AssertionFailure() << "Failed to write runtime config path";
+  }
   return testing::AssertionSuccess();
 }
 
@@ -754,13 +808,15 @@ public:
   [[nodiscard]] testing::AssertionResult initialize(FakeApiTable &api,
                                                     bool create_host_topology_node = true) {
     if (testing::AssertionResult result = runtime_dir_.initialize("rocjitsu-hsa-hooks-unit-");
-        !result)
+        !result) {
       return result;
+    }
     OnUnload();
     if (testing::AssertionResult result =
             write_runtime_config_path(runtime_dir_.path(), create_host_topology_node);
-        !result)
+        !result) {
       return result;
+    }
     installed_ = OnLoad(&api.table, 0, 0, nullptr);
     return testing::AssertionSuccess();
   }
@@ -864,8 +920,9 @@ void reset_queue_fakes() {
 }
 
 void write_bytes(std::vector<uint8_t> &image, size_t offset, const void *src, size_t size) {
-  if (image.size() < offset + size)
+  if (image.size() < offset + size) {
     image.resize(offset + size);
+  }
   std::memcpy(image.data() + offset, src, size);
 }
 
@@ -875,8 +932,9 @@ void write_struct(std::vector<uint8_t> &image, size_t offset, const T &value) {
 }
 
 size_t align_up(size_t value, size_t alignment) {
-  if (alignment <= 1)
+  if (alignment <= 1) {
     return value;
+  }
   const size_t remainder = value % alignment;
   return remainder == 0 ? value : value + alignment - remainder;
 }
@@ -1059,8 +1117,9 @@ VirtualLdsRegistrationForTest register_virtual_lds_kernel_for_test(
                 request_loaded_code_object ? &loaded : nullptr),
             HSA_STATUS_SUCCESS);
 
-  if (!resolve_symbol_by_name)
+  if (!resolve_symbol_by_name) {
     return {};
+  }
 
   hsa_executable_symbol_t symbol{};
   EXPECT_EQ(api.core.hsa_executable_get_symbol_by_name_fn(

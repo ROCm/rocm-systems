@@ -86,7 +86,9 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamGetCaptureInfo_v2.cc
     hipStreamUpdateCaptureDependencies.cc
     hipGraphAddNodeBeginCapture.cc
+    hipStreamCaptureAPIRestrictions.cc
     hipGraphExternalSemaphoresNodes.cc
+    hipGraphInstantiateNullStreamFence.cc
   )
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
 endif()
@@ -94,6 +96,23 @@ endif()
 hip_add_exe_to_target(NAME GraphsTest1
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+
+if(HIP_PLATFORM MATCHES "amd" AND UNIX)
+  add_executable(hipGraphInstantiateNullStreamFence_exe EXCLUDE_FROM_ALL
+                 hipGraphInstantiateNullStreamFence_exe.cc)
+  set_source_files_properties(hipGraphInstantiateNullStreamFence_exe.cc
+                              PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+  target_link_libraries(hipGraphInstantiateNullStreamFence_exe
+                        ${GPGPU_LINKER_LIBRARIES})
+  add_dependencies(GraphsTest1 hipGraphInstantiateNullStreamFence_exe)
+  # STANDALONE_TESTS creates a per-file target that also runs this helper.
+  if(TARGET hipGraphInstantiateNullStreamFence)
+    add_dependencies(hipGraphInstantiateNullStreamFence
+                     hipGraphInstantiateNullStreamFence_exe)
+  endif()
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
+               hipGraphInstantiateNullStreamFence_exe)
+endif()
 
 # Collapse tests need scheduling flags set before HIP init.  They live in
 # their own binary built directly (bypassing hip_add_exe_to_target) so that
@@ -165,6 +184,33 @@ foreach(fast_launch 0 1)
       "DEBUG_HIP_GRAPH_DOT_PRINT=2"
       $<TARGET_FILE:GraphsFastLaunchTest>
       "Unit_hipGraph_FastLaunch_UncapturedEdgeCollapse")
+endforeach()
+
+set_source_files_properties(hipGraphChildMultiStreamSync.cc PROPERTIES LANGUAGE ${GPGPU_LANGUAGE})
+add_executable(GraphsChildMultiStreamTest EXCLUDE_FROM_ALL
+  hipGraphChildMultiStreamSync.cc
+  $<TARGET_OBJECTS:Main_Object>
+  $<TARGET_OBJECTS:KERNELS>)
+set_target_properties(GraphsChildMultiStreamTest PROPERTIES LINKER_LANGUAGE ${GPGPU_LANGUAGE})
+target_link_libraries(GraphsChildMultiStreamTest Catch2::Catch2 ${GPGPU_LINKER_LIBRARIES})
+if(UNIX)
+  target_link_libraries(GraphsChildMultiStreamTest stdc++fs -ldl pthread rt)
+endif()
+add_dependencies(build_tests GraphsChildMultiStreamTest)
+add_dependencies(GraphsChildMultiStreamTest hip_tests_config)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS GraphsChildMultiStreamTest)
+
+foreach(_child_ms_case
+    Unit_hipGraphChildMultiStream_ParentChildBoundarySync
+    Unit_hipGraphChildMultiStream_SiblingChildren
+    Unit_hipGraphChildMultiStream_NestedChild)
+  add_test(NAME ${_child_ms_case}
+    COMMAND ${CMAKE_COMMAND} -E env
+      "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=1"
+      "DEBUG_HIP_FORCE_GRAPH_QUEUES=4"
+      "DEBUG_HIP_GRAPH_DOT_PRINT=2"
+      $<TARGET_FILE:GraphsChildMultiStreamTest>
+      "${_child_ms_case}")
 endforeach()
 
 set(TEST_SRC

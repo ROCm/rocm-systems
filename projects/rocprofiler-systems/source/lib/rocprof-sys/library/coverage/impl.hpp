@@ -98,12 +98,6 @@ code_coverage::operator()(Category _c) const
     return 0.0;
 }
 
-code_coverage::int_set_t
-code_coverage::get_uncovered_addresses() const
-{
-    return get_uncovered(covered.addresses, possible.addresses);
-}
-
 code_coverage::str_set_t
 code_coverage::get_uncovered_modules() const
 {

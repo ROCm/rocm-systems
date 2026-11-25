@@ -2,6 +2,12 @@
 // SPDX-License-Identifier: MIT
 
 // Decoded CDNA integer migration: aliases, saturation, masks and aliased scalar results.
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
@@ -11,9 +17,19 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -70,6 +86,194 @@ std::array<uint32_t, 2> build_carry(int arch, bool wide) {
       {.vdst = destination, .sdst = 0, .src0 = 256, .src1 = 257, .src2 = source});
 }
 
+// Older profiles share arithmetic but retain their own opcodes and wave rules.
+TEST(CdnaIntegerArith, OlderProfilesMasksAliasesAndSelectors) {
+  struct Family {
+    rocjitsu::IsaFamily arch;
+    const IsaExecutionBackend *backend;
+    std::array<uint16_t, 4> opcodes;
+    uint16_t sdwa_and;
+  };
+  const Family families[] = {
+      {rocjitsu::IsaFamily::Cdna1,
+       &cdna1::execution_backend(),
+       {cdna1::kVAddI32Vop3, cdna1::kVFfbhI32Vop3, cdna1::kVAlignbitB32Vop3,
+        cdna1::kVMbcntHiU32B32Vop3},
+       cdna1::kVAndB32Vop2},
+      {rocjitsu::IsaFamily::Cdna2,
+       &cdna2::execution_backend(),
+       {cdna2::kVAddI32Vop3, cdna2::kVFfbhI32Vop3, cdna2::kVAlignbitB32Vop3,
+        cdna2::kVMbcntHiU32B32Vop3},
+       cdna2::kVAndB32Vop2},
+      {rocjitsu::IsaFamily::Rdna1,
+       &rdna1::execution_backend(),
+       {rdna1::kVAddNcI32Vop3, rdna1::kVFfbhI32Vop3, rdna1::kVAlignbitB32Vop3,
+        rdna1::kVMbcntHiU32B32Vop3},
+       rdna1::kVAndB32Vop2},
+      {rocjitsu::IsaFamily::Rdna2,
+       &rdna2::execution_backend(),
+       {rdna2::kVAddNcI32Vop3, rdna2::kVFfbhI32Vop3, rdna2::kVAlignbitB32Vop3,
+        rdna2::kVMbcntHiU32B32Vop3},
+       rdna2::kVAndB32Vop2},
+      {rocjitsu::IsaFamily::Rdna3_5,
+       &rdna3_5::execution_backend(),
+       {rdna3_5::kVAddNcI32Vop3, rdna3_5::kVClsI32Vop3, rdna3_5::kVAlignbitB32Vop3,
+        rdna3_5::kVMbcntHiU32B32Vop3},
+       0},
+  };
+  for (int family = 0; family < 5; ++family) {
+    const auto &target = families[family];
+    SCOPED_TRACE(family);
+    ScopedIsaExecutionBackend backend(target.backend);
+    for (auto semantics : {ArithmeticSemantics::Loose, ArithmeticSemantics::Compatibility}) {
+      for (unsigned lanes : {32u, 64u}) {
+        if (family < 2 && lanes == 32) {
+          continue;
+        }
+        ComputeUnitCore::Config config{};
+        config.arch = target.arch;
+        config.arithmetic = {semantics};
+        config.num_wf_slots = 1;
+        config.sgprs_per_wf = 104;
+        config.vgprs_per_wf = 16;
+        config.lds_size_kb = 64;
+        GpuMemory memory("older_integer_memory");
+        L2Cache l2("older_integer_l2");
+        auto cu = ComputeUnitCore::create("older_integer", config, &memory, &l2);
+        auto *wave = cu->dispatch_wf(0, 0, 104, 16, lanes);
+        ASSERT_NE(wave, nullptr);
+        auto decoder = Decoder::create(target.arch);
+        const uint32_t base = wave->vgpr_alloc().base;
+        wave->set_exec(0x8000000380000005ULL);
+        struct Case {
+          uint32_t a, b, c, expected;
+        };
+        const Case cases[] = {
+            {0x7fffffffU, 2, 0, 0x7fffffffU}, // CLAMP saturates the signed sum.
+            {0xffffffffU, 0, 0, 0xffffffffU}, // No differing sign bit.
+            {0x12345678U, 0x9abcdef0U, 0x08040001U, 0x89abcdefU},
+            {0xffffffffU, 3, 0, 3},
+        };
+        for (int operation = 0; operation < 4; ++operation) {
+          SCOPED_TRACE(operation);
+          const auto &test = cases[operation];
+          for (unsigned lane = 0; lane < lanes; ++lane) {
+            cu->write_vgpr(base, lane, test.a);
+            cu->write_vgpr(base + 1, lane, test.b);
+            cu->write_vgpr(base + 2, lane, test.c);
+          }
+          const auto opcode = target.opcodes[operation];
+          // gfx9/gfx10 select count byte 2; gfx1150 selects the upper half.
+          const uint8_t opsel = operation == 2 ? (family < 4 ? 2 : 4) : 0;
+          std::array<uint32_t, 2> words;
+          if (family == 0) {
+            words = cdna1::build_vop3(
+                opcode,
+                {.vdst = 0, .op_sel = opsel, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
+          } else if (family == 1) {
+            words = cdna2::build_vop3(
+                opcode,
+                {.vdst = 0, .op_sel = opsel, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
+          } else if (family == 2) {
+            words = rdna1::build_vop3(
+                opcode,
+                {.vdst = 0, .op_sel = opsel, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
+          } else if (family == 3) {
+            words = rdna2::build_vop3(
+                opcode,
+                {.vdst = 0, .op_sel = opsel, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
+          } else {
+            words = rdna3_5::build_vop3(
+                opcode,
+                {.vdst = 0, .op_sel = opsel, .clamp = 1, .src0 = 256, .src1 = 257, .src2 = 258});
+          }
+          auto decoded = decoder->decode_window(words);
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+          for (unsigned lane = 0; lane < lanes; ++lane) {
+            const uint32_t expected = test.expected + (operation == 3 && lane > 32 ? lane - 32 : 0);
+            EXPECT_EQ(cu->read_vgpr(base, lane), (wave->exec() >> lane) & 1 ? expected : test.a);
+          }
+        }
+        if (family == 2 || family == 3) {
+          // gfx10 ignores selector bit 2; each low pair selects one count byte.
+          for (bool bytes : {false, true}) {
+            for (uint8_t selector = 0; selector < 8; ++selector) {
+              SCOPED_TRACE(::testing::Message()
+                           << "lanes=" << lanes << " selector=" << +selector << " bytes=" << bytes);
+              const uint16_t opcode =
+                  family == 2 ? (bytes ? rdna1::kVAlignbyteB32Vop3 : rdna1::kVAlignbitB32Vop3)
+                              : (bytes ? rdna2::kVAlignbyteB32Vop3 : rdna2::kVAlignbitB32Vop3);
+              const auto words =
+                  family == 2
+                      ? rdna1::build_vop3(
+                            opcode,
+                            {.vdst = 0, .op_sel = selector, .src0 = 256, .src1 = 257, .src2 = 258})
+                      : rdna2::build_vop3(
+                            opcode,
+                            {.vdst = 0, .op_sel = selector, .src0 = 256, .src1 = 257, .src2 = 258});
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                cu->write_vgpr(base, lane, 0x12345678U);
+                cu->write_vgpr(base + 1, lane, 0x9abcdef0U);
+                cu->write_vgpr(base + 2, lane, 0x04030201U);
+              }
+              auto decoded = decoder->decode_window(words);
+              ASSERT_TRUE(decoded.succeeded());
+              ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+              // Byte selection precedes the instruction's modulo-32 shift count.
+              const unsigned selected = (0x04030201U >> (8 * (selector & 3))) & 0xff;
+              const unsigned count = (selected & (bytes ? 3u : 31u)) * (bytes ? 8 : 1);
+              const uint32_t expected = uint32_t(0x123456789abcdef0ULL >> count);
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                EXPECT_EQ(cu->read_vgpr(base, lane),
+                          (wave->exec() >> lane) & 1 ? expected : 0x12345678U);
+              }
+            }
+          }
+        }
+        if (family != 4) {
+          // gfx9 and gfx10 share this SDWA layout; WORD_1/PAD must follow arithmetic.
+          cdna1::Vop2VopSdwaMachineInst raw{};
+          raw.op = target.sdwa_and;
+          raw.src0 = SRC_SDWA;
+          raw.vsrc0 = raw.vdst = 0;
+          raw.vsrc1 = 1;
+          raw.src0_sel = raw.src1_sel = sdwa::DWORD;
+          raw.dst_sel = sdwa::WORD_1;
+          raw.dst_unused = sdwa::UNUSED_PAD;
+          for (unsigned lane = 0; lane < lanes; ++lane) {
+            cu->write_vgpr(base, lane, 0x12345678U);
+            cu->write_vgpr(base + 1, lane, 0xff00ff00U);
+          }
+          auto decoded = decoder->decode_window(std::bit_cast<std::array<uint32_t, 2>>(raw));
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+          for (unsigned lane = 0; lane < lanes; ++lane) {
+            EXPECT_EQ(cu->read_vgpr(base, lane),
+                      (wave->exec() >> lane) & 1 ? 0x56000000U : 0x12345678U);
+          }
+          // An aliased byte write must retain the other destination bytes.
+          raw.src0_sel = sdwa::BYTE_1;
+          raw.src1_sel = sdwa::BYTE_2;
+          raw.dst_sel = sdwa::BYTE_2;
+          raw.dst_unused = sdwa::UNUSED_PRESERVE;
+          for (unsigned lane = 0; lane < lanes; ++lane) {
+            cu->write_vgpr(base, lane, 0x1234f678U);
+            cu->write_vgpr(base + 1, lane, 0xffff0000U);
+          }
+          decoded = decoder->decode_window(std::bit_cast<std::array<uint32_t, 2>>(raw));
+          ASSERT_TRUE(decoded.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+          for (unsigned lane = 0; lane < lanes; ++lane) {
+            EXPECT_EQ(cu->read_vgpr(base, lane),
+                      (wave->exec() >> lane) & 1 ? 0x12f6f678U : 0x1234f678U);
+          }
+        }
+      }
+    }
+  }
+}
+
 TEST(CdnaIntegerArith, DecodedMasksAliasesAndCarry) {
   struct Case {
     std::array<uint16_t, 3> opcode;
@@ -113,9 +317,9 @@ TEST(CdnaIntegerArith, DecodedMasksAliasesAndCarry) {
                                         : arch == 1 ? &cdna4::execution_backend()
                                                     : &cdna5::execution_backend());
       ComputeUnitCore::Config config{};
-      config.arch = arch == 0   ? ROCJITSU_CODE_ARCH_CDNA3
-                    : arch == 1 ? ROCJITSU_CODE_ARCH_CDNA4
-                                : ROCJITSU_CODE_ARCH_CDNA5;
+      config.arch = arch == 0   ? rocjitsu::IsaFamily::Cdna3
+                    : arch == 1 ? rocjitsu::IsaFamily::Cdna4
+                                : rocjitsu::IsaFamily::Cdna5;
       config.arithmetic = {semantics};
       config.num_wf_slots = 1;
       config.sgprs_per_wf = 104;

@@ -3890,6 +3890,39 @@ inline static hipError_t hipDeviceGetLuid(char* luid, unsigned int* deviceNodeMa
 }
 #endif
 
+inline static hipError_t hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type,
+                                                         hipDevice_t dev) {
+#if CUDA_VERSION >= CUDA_11040
+  if (pi == NULL) {
+    return hipErrorInvalidValue;
+  }
+  int ccMajor = 0;
+  CUresult devStatus =
+      cuDeviceGetAttribute(&ccMajor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, dev);
+  if (devStatus != CUDA_SUCCESS) {
+    return hipCUResultTohipError(devStatus);
+  }
+  switch (type) {
+    case hipExecAffinityTypeCUCount:
+      return hipCUResultTohipError(
+          cuDeviceGetExecAffinitySupport(pi, CU_EXEC_AFFINITY_TYPE_SM_COUNT, dev));
+    case hipExtExecAffinityTypeGranularityCU:
+    case hipExtExecAffinityTypeGranularityWGP:
+      // CU-masking granularity is AMD-only; no NVIDIA device reports it.
+      *pi = 0;
+      return hipSuccess;
+    default:
+      return hipErrorInvalidValue;
+  }
+#else
+  // cuDeviceGetExecAffinitySupport and CUexecAffinityType were introduced in CUDA 11.4.
+  (void)pi;
+  (void)type;
+  (void)dev;
+  return hipErrorNotSupported;
+#endif
+}
+
 inline static hipError_t hipDeviceGetP2PAttribute(int* value, hipDeviceP2PAttr attr, int srcDevice,
                                                   int dstDevice) {
   return hipCUDAErrorTohipError(cudaDeviceGetP2PAttribute(value, attr, srcDevice, dstDevice));
@@ -4784,6 +4817,13 @@ inline static hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayD
                                                  hipArray_t array) {
   return hipCUResultTohipError(cuArray3DGetDescriptor(pArrayDescriptor, (CUarray)array));
 }
+
+#if CUDA_VERSION >= CUDA_11020
+inline static hipError_t hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray,
+                                          unsigned int planeIdx) {
+  return hipCUResultTohipError(cuArrayGetPlane((CUarray*)pPlaneArray, (CUarray)hArray, planeIdx));
+}
+#endif
 
 inline static hipError_t hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode) {
   return hipCUDAErrorTohipError(cudaStreamBeginCapture(stream, mode));

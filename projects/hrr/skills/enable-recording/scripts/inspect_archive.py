@@ -94,9 +94,9 @@ COMPRESSED_BUNDLE_MAGIC = b"CCOB"
 # where the record keeps the hash after the event header and `uint64 ret`.
 # The id is per archive format version (hrr_api_args.h): v8 put two runtime
 # APIs ahead of it, v9 one more, v10 left it where it was, v11 and v12 one more
-# each, v13 none, v14 three more, and v15 four more. A v7 archive may hold
-# either numbering, so that and any other version leaves the fat binaries
-# unscanned.
+# each, v13 none, v14 three more, v15 four more, v16 and v17 one more each.
+# A v7 archive may hold either numbering, so that and any other version
+# leaves the fat binaries unscanned.
 # tools/tests/test_skill_api_ids.py fails when HRR_VERSION moves past this table.
 REGISTER_FAT_BINARY = {
     8: 549,
@@ -107,6 +107,8 @@ REGISTER_FAT_BINARY = {
     13: 552,
     14: 555,
     15: 559,
+    16: 560,
+    17: 561,
 }
 FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
 HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")

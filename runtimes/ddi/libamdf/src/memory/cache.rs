@@ -26,7 +26,7 @@ pub(super) struct Site {
 }
 
 pub(super) fn host_transitions(
-    instance: &Instance,
+    instance: &AmdfSession,
     cacheability: amdf_host_cacheability_t,
 ) -> Result<
     (
@@ -205,7 +205,7 @@ unsafe fn profile_site(
             let capability = capabilities.get(index).ok_or(INTERNAL)?;
             let device = unsafe { object(access.device.cast::<Device>())? };
             let family =
-                crate::instance::family(device.native.endpoint(), value.queue_family_ordinal)?;
+                crate::session::family(device.native.endpoint(), value.queue_family_ordinal)?;
             Ok(device_site(
                 std::ptr::null_mut(),
                 profile.memory_class,
@@ -435,7 +435,7 @@ unsafe fn site(pointer: *const amdf_memory_site_t) -> Result<Site, u64> {
                 .get(device.access_ordinal as usize)
                 .ok_or(INTERNAL)?;
             let family = unsafe {
-                crate::instance::family(
+                crate::session::family(
                     (*access.device).native.endpoint(),
                     device.queue_family_ordinal,
                 )?

@@ -1,0 +1,47 @@
+Subject: [PATCH] drm/amdgpu: Wait for VM clears before enabling CPU updates
+
+The initial root page-table clear is submitted through SDMA and recorded
+as a BOOKKEEP fence. amdgpu_bo_sync_wait only examines READ and lower
+reservation usages. It therefore misses that clear when make_compute
+switches to CPU updates. A delayed SDMA clear can erase the CWSR mapping
+that KFD has just written, causing gfx1201 trap instruction-fetch faults.
+
+Wait for all root reservation usages at this transition. Keep the wait
+interruptible and retain its long result until checking for an error.
+Limit the new wait to the first transition from SDMA to CPU updates,
+under the root reservation. Retries and racing acquires can already carry
+an unsignaled KFD eviction fence after CPU updates were enabled. Preserve
+the existing implicit wait on every CPU-mapping path. Broadening the
+shared implicit-sync helper would affect unrelated paths.
+
+Target: amdgpu DKMS 6.19.14-2364437.24.04, amd/amdgpu/amdgpu_vm.c
+Base SHA256: dc2cfcf5c11b86dc16247dce712fe826c7de672cd27f8d3759cb7ca0a1a9d1e5
+---
+--- a/amd/amdgpu/amdgpu_vm.c
++++ b/amd/amdgpu/amdgpu_vm.c
+@@ -2720,7 +2720,24 @@
+ 		  "CPU update of VM recommended only for large BAR system\n");
+ 
+ 	if (vm->use_cpu_for_update) {
+-		/* Sync with last SDMA update/clear before switching to CPU */
++		/* Initial SDMA clears use BOOKKEEP fences, which implicit
++		 * synchronization excludes. Once CPU updates are enabled,
++		 * retries can carry KFD eviction fences and must not wait
++		 * for all BOOKKEEP users again.
++		 */
++		if (vm->update_funcs != &amdgpu_vm_cpu_funcs) {
++			long wait_ret;
++
++			wait_ret = dma_resv_wait_timeout(
++				amdkcl_ttm_resvp(&vm->root.bo->tbo),
++				DMA_RESV_USAGE_BOOKKEEP, true, MAX_SCHEDULE_TIMEOUT);
++			if (wait_ret < 0) {
++				r = wait_ret;
++				goto unreserve_bo;
++			}
++		}
++
++		/* Keep implicit synchronization for existing CPU VMs too. */
+ 		r = amdgpu_bo_sync_wait(vm->root.bo,
+ 					AMDGPU_FENCE_OWNER_UNDEFINED, true);
+ 		if (r)

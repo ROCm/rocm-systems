@@ -26,11 +26,13 @@ namespace rocjitsu::amdgpu {
 [[nodiscard]] inline uint32_t read_scalar_f16_carrier(const Operand &source, const Wavefront &wf,
                                                       bool inline_high_half = false) {
   const Operand *effective = &source;
-  while (effective->delegate())
+  while (effective->delegate()) {
     effective = effective->delegate();
+  }
   if (effective->reads_value() && effective->has_register_selector()) {
-    if (auto value = resolve_inline_float16_statically(effective->encoding_value()))
+    if (auto value = resolve_inline_float16_statically(effective->encoding_value())) {
       return uint32_t{*value} << (inline_high_half ? 16 : 0);
+    }
   }
   return RegisterAccess(wf).read_scalar(source);
 }

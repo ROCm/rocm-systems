@@ -1,0 +1,327 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#ifndef CONSAN_TARGET
+#define CONSAN_TARGET "amdgcn-amd-amdhsa--gfx1250"
+#endif
+#define CONSAN_METADATA_TARGET CONSAN_TARGET
+#define CONSAN_KERNEL lds_producer_consumer
+#ifndef CONSAN_WAVE_SIZE
+#define CONSAN_WAVE_SIZE 32
+#endif
+#ifndef CONSAN_LEGACY
+#define CONSAN_LEGACY 0
+#endif
+#ifndef CONSAN_GFX12
+#define CONSAN_GFX12 1
+#endif
+#if CONSAN_LEGACY
+#define LOAD32 s_load_dword
+#define LOAD64 s_load_dwordx2
+#define DS_STORE_B8 ds_write_b8
+#define DS_STORE_B16 ds_write_b16
+#define DS_STORE_B32 ds_write_b32
+#define DS_STORE_B64 ds_write_b64
+#define DS_STORE_B96 ds_write_b96
+#define DS_STORE_B128 ds_write_b128
+#define DS_LOAD_U8 ds_read_u8
+#define DS_LOAD_I8 ds_read_i8
+#define DS_LOAD_B32 ds_read_b32
+#define DS_LOAD_U16 ds_read_u16
+#define DS_LOAD_I16 ds_read_i16
+#define DS_READ_D16_OP(type) ds_read_##type
+#define DS_WRITE_D16_OP(type) ds_write_##type
+#define DS_LOAD_B96 ds_read_b96
+#define DS_LOAD_B64 ds_read_b64
+#define DS_LOAD_B128 ds_read_b128
+#define GLOBAL_STORE global_store_dword
+#define VECTOR_ADD v_add_u32
+#else
+#define LOAD32 s_load_b32
+#define LOAD64 s_load_b64
+#define DS_STORE_B8 ds_store_b8
+#define DS_STORE_B16 ds_store_b16
+#define DS_STORE_B32 ds_store_b32
+#define DS_STORE_B64 ds_store_b64
+#define DS_STORE_B96 ds_store_b96
+#define DS_STORE_B128 ds_store_b128
+#define DS_LOAD_U8 ds_load_u8
+#define DS_LOAD_I8 ds_load_i8
+#define DS_LOAD_B32 ds_load_b32
+#define DS_LOAD_U16 ds_load_u16
+#define DS_LOAD_I16 ds_load_i16
+#define DS_READ_D16_OP(type) ds_load_##type
+#define DS_WRITE_D16_OP(type) ds_store_##type
+#define DS_LOAD_B96 ds_load_b96
+#define DS_LOAD_B64 ds_load_b64
+#define DS_LOAD_B128 ds_load_b128
+#define GLOBAL_STORE global_store_b32
+#define VECTOR_ADD v_add_nc_u32
+#endif
+#if CONSAN_WAVE_SIZE == 64
+#define MASK_EXEC exec
+#define MASK_VCC vcc
+#define MASK_SAVE s[8:9]
+#define MASK_PEER_SAVE s[10:11]
+#define MASK_MOVE s_mov_b64
+#define MASK_AND_SAVE s_and_saveexec_b64
+#define WAVE_SHIFT 6
+#else
+#define MASK_EXEC exec_lo
+#define MASK_VCC vcc_lo
+#define MASK_SAVE s8
+#define MASK_PEER_SAVE s10
+#define MASK_MOVE s_mov_b32
+#define MASK_AND_SAVE s_and_saveexec_b32
+#define WAVE_SHIFT 5
+#endif
+#if defined(CONSAN_DUAL_WRITE) || defined(CONSAN_TRANSPOSE_BITS)
+#define GROUP_BYTES 4096
+#else
+#define GROUP_BYTES 1024
+#endif
+#define CONSAN_MAX_WORKGROUP 1024
+#ifndef CONSAN_WIDTH
+#define CONSAN_WIDTH 16
+#endif
+#ifndef CONSAN_SIGNED
+#define CONSAN_SIGNED 0
+#endif
+#ifndef CONSAN_HIGH
+#define CONSAN_HIGH 0
+#endif
+#ifndef CONSAN_ALIAS
+#define CONSAN_ALIAS 0
+#endif
+#ifndef CONSAN_B96_PEER_OFFSET
+#define CONSAN_B96_PEER_OFFSET 0
+#endif
+#ifndef CONSAN_COLLISION
+#define CONSAN_COLLISION 0
+#endif
+
+.amdgcn_target CONSAN_TARGET
+.macro consan_wait_all
+#if CONSAN_GFX12
+  s_wait_kmcnt 0
+  s_wait_dscnt 0
+  s_wait_loadcnt 0
+#else
+  s_waitcnt lgkmcnt(0)
+#endif
+.endm
+.macro consan_wait_stores
+#if CONSAN_GFX12
+  s_wait_storecnt 0
+#elif CONSAN_LEGACY
+  s_waitcnt vmcnt(0)
+#else
+  s_waitcnt_vscnt null, 0
+#endif
+.endm
+.text
+.globl CONSAN_KERNEL
+.type CONSAN_KERNEL,@function
+.p2align 8
+CONSAN_KERNEL:
+#ifdef CONSAN_ATOMIC
+#include "native_atomic.inc"
+#elif defined(CONSAN_TRANSPOSE_BITS)
+#include "native_transpose.inc"
+#else
+  LOAD32 s4, s[0:1], 0
+  LOAD64 s[6:7], s[0:1], 8
+  consan_wait_all
+  v_lshrrev_b32 v6, WAVE_SHIFT, v0
+#ifdef CONSAN_DUAL_WRITE
+#if CONSAN_COLLISION
+  v_lshlrev_b32 v1, 3, v0
+  VECTOR_ADD v1, 8, v1
+#elif CONSAN_DUAL_PEER
+  v_mov_b32 v1, 8
+#else
+  v_lshlrev_b32 v1, 5, v6
+  VECTOR_ADD v1, 8, v1
+#endif
+#elif defined(CONSAN_B8_PEER_STRIDE)
+#if CONSAN_B8_PEER_STRIDE == 0
+  v_mov_b32 v1, 0
+#elif CONSAN_B8_PEER_STRIDE == 1
+  v_mov_b32 v1, v6
+#else
+  v_lshlrev_b32 v1, 1, v6
+#endif
+#elif defined(CONSAN_D16_PEER_OFFSET)
+  v_mov_b32 v1, 0
+#elif CONSAN_WIDTH == 8 || CONSAN_WIDTH == 17
+  // Three waves occupy the last three dwords of the allocation.
+  v_lshlrev_b32 v1, 2, v6
+  VECTOR_ADD v1, (GROUP_BYTES-12), v1
+#else
+  v_lshlrev_b32 v1, 4, v6
+#endif
+#if CONSAN_WIDTH == 96
+  VECTOR_ADD v1, 4, v1
+#endif
+  v_lshlrev_b32 v7, 4, v6
+  VECTOR_ADD v2, s4, v6
+#if CONSAN_WIDTH == 8
+  VECTOR_ADD v2, 0x80, v2
+#elif CONSAN_WIDTH == 16
+  VECTOR_ADD v2, 0x8000, v2
+#endif
+  v_mov_b32 v3, 0x89abcdef
+  v_mov_b32 v4, 0x13579bdf
+  v_mov_b32 v5, 0xfedcba98
+  v_mov_b32 v8, 0xdeadbeef
+  v_mov_b32 v9, 0x01234567
+  v_mov_b32 v10, 0x76543210
+  v_mov_b32 v11, 0xa5a5a5a5
+  v_and_b32 v12, (CONSAN_WAVE_SIZE-1), v0
+#if CONSAN_COLLISION
+  v_cmp_gt_u32 MASK_VCC, 2, v12
+#else
+  v_cmp_eq_u32 MASK_VCC, ((CONSAN_WAVE_SIZE-1)*CONSAN_HIGH), v12
+#endif
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+#ifdef CONSAN_DUAL_WRITE
+#include "native_dual.inc"
+#elif defined(CONSAN_B8_PEER_STRIDE)
+  DS_STORE_B8 v1, v2 offset:1020
+  v_and_b32 v8, 0xff, v2
+#elif CONSAN_WIDTH == 8
+  DS_STORE_B32 v1, v9
+  consan_wait_all
+  DS_STORE_B8 v1, v2 offset:3
+  consan_wait_all
+#if CONSAN_SIGNED
+#define DS_LOAD_BYTE DS_LOAD_I8
+#else
+#define DS_LOAD_BYTE DS_LOAD_U8
+#endif
+#if CONSAN_ALIAS
+  v_mov_b32 v8, v1
+  DS_LOAD_BYTE v8, v8 offset:3
+#else
+  DS_LOAD_BYTE v8, v1 offset:3
+#endif
+  DS_LOAD_B32 v9, v1
+#elif CONSAN_WIDTH == 96
+#if CONSAN_B96_PEER_OFFSET
+  // Only wave zero writes the 12-byte range. The next wave writes one dword.
+  v_cmp_eq_u32 MASK_VCC, 0, v6
+  MASK_AND_SAVE MASK_PEER_SAVE, MASK_VCC
+  DS_STORE_B96 v1, v[2:4] offset:12
+  MASK_MOVE MASK_EXEC, MASK_PEER_SAVE
+  v_cmp_eq_u32 MASK_VCC, 1, v6
+  MASK_AND_SAVE MASK_PEER_SAVE, MASK_VCC
+  DS_STORE_B32 v1, v2 offset:CONSAN_B96_PEER_OFFSET
+  MASK_MOVE MASK_EXEC, MASK_PEER_SAVE
+  v_mov_b32 v8, v2
+  v_mov_b32 v9, v3
+  v_mov_b32 v10, v4
+#else
+  DS_STORE_B96 v1, v[2:4] offset:12
+  consan_wait_all
+#if CONSAN_ALIAS
+  v_mov_b32 v8, v1
+  DS_LOAD_B96 v[8:10], v8 offset:12
+#else
+  DS_LOAD_B96 v[8:10], v1 offset:12
+#endif
+#endif
+#elif CONSAN_WIDTH == 17
+#define DS_READ_D16(type) DS_READ_D16_OP(type)
+#define DS_WRITE_D16(type) DS_WRITE_D16_OP(type)
+#include "native_d16.inc"
+#elif CONSAN_WIDTH == 16
+  DS_STORE_B16 v1, v2 offset:2
+  consan_wait_all
+#if CONSAN_SIGNED
+  DS_LOAD_I16 v8, v1 offset:2
+#else
+  DS_LOAD_U16 v8, v1 offset:2
+#endif
+#elif CONSAN_WIDTH == 64
+  DS_STORE_B64 v1, v[2:3] offset:8
+  consan_wait_all
+  DS_LOAD_B64 v[8:9], v1 offset:8
+#elif CONSAN_WIDTH == 128
+  DS_STORE_B128 v1, v[2:5] offset:16
+  consan_wait_all
+#if CONSAN_ALIAS
+  v_mov_b32 v8, v1
+  DS_LOAD_B128 v[8:11], v8 offset:16
+#else
+  DS_LOAD_B128 v[8:11], v1 offset:16
+#endif
+#endif
+  consan_wait_all
+  GLOBAL_STORE v7, v8, s[6:7]
+  VECTOR_ADD v7, 4, v7
+  GLOBAL_STORE v7, v9, s[6:7]
+  VECTOR_ADD v7, 4, v7
+  GLOBAL_STORE v7, v10, s[6:7]
+  VECTOR_ADD v7, 4, v7
+  GLOBAL_STORE v7, v11, s[6:7]
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  consan_wait_stores
+  s_endpgm
+#endif
+.Lkernel_end:
+.size CONSAN_KERNEL, .Lkernel_end-CONSAN_KERNEL
+
+.rodata
+.p2align 6
+.amdhsa_kernel CONSAN_KERNEL
+  .amdhsa_group_segment_fixed_size GROUP_BYTES
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 16
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  // Keep the kernarg pointer at s[0:1] and pad user inputs so the original
+  // workgroup-X input occupies s15.
+  .amdhsa_user_sgpr_count 15
+  .amdhsa_system_sgpr_workgroup_id_x 1
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 16
+  .amdhsa_next_free_sgpr 16
+#if CONSAN_LEGACY
+  .amdhsa_accum_offset 16
+#endif
+#if !CONSAN_LEGACY
+#if CONSAN_WAVE_SIZE == 32
+  .amdhsa_wavefront_size32 1
+#else
+  .amdhsa_wavefront_size32 0
+#endif
+#endif
+  .amdhsa_reserve_vcc 1
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+---
+amdhsa.version: [1, 2]
+amdhsa.target: CONSAN_METADATA_TARGET
+amdhsa.kernels:
+  - .name: CONSAN_KERNEL
+    .symbol: CONSAN_KERNEL.kd
+    .kernarg_segment_size: 16
+    .kernarg_segment_align: 8
+    .group_segment_fixed_size: GROUP_BYTES
+    .private_segment_fixed_size: 0
+    .sgpr_count: 16
+    .vgpr_count: 16
+    .wavefront_size: CONSAN_WAVE_SIZE
+    .max_flat_workgroup_size: CONSAN_MAX_WORKGROUP
+    .args:
+      - .name: input
+        .size: 4
+        .offset: 0
+        .value_kind: by_value
+      - .name: output
+        .size: 8
+        .offset: 8
+        .value_kind: global_buffer
+        .address_space: global
+...
+.end_amdgpu_metadata

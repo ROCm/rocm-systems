@@ -94,25 +94,31 @@ public:
   /// @brief Snapshots taken on a specific CU, in halt order.
   std::vector<const WavefrontSnapshot *> for_cu(const amdgpu::ComputeUnitCore *cu) const {
     std::vector<const WavefrontSnapshot *> out;
-    for (const auto &s : snapshots_)
-      if (cu && s.cu_id == cu->id())
+    for (const auto &s : snapshots_) {
+      if (cu && s.cu_id == cu->id()) {
         out.push_back(&s);
+      }
+    }
     return out;
   }
 
   /// @brief First snapshot matching a wavefront slot id, or nullptr.
   const WavefrontSnapshot *by_wf_id(uint32_t wf_id) const {
-    for (const auto &s : snapshots_)
-      if (s.wf_id == wf_id)
+    for (const auto &s : snapshots_) {
+      if (s.wf_id == wf_id) {
         return &s;
+      }
+    }
     return nullptr;
   }
 
   /// @brief First snapshot matching a workgroup id, or nullptr.
   const WavefrontSnapshot *by_wg_id(uint32_t wg_id) const {
-    for (const auto &s : snapshots_)
-      if (s.wg_id == wg_id)
+    for (const auto &s : snapshots_) {
+      if (s.wg_id == wg_id) {
         return &s;
+      }
+    }
     return nullptr;
   }
 
@@ -148,21 +154,25 @@ public:
     const uint32_t sbase = wf.sgpr_alloc().base;
     const uint32_t sgpr_block = wf.cu().sgprs_per_wf();
     s.sgprs.reserve(sgpr_block);
-    for (uint32_t i = 0; i < sgpr_block; ++i)
+    for (uint32_t i = 0; i < sgpr_block; ++i) {
       s.sgprs.push_back(regs.read_sgpr(sbase + i));
+    }
 
     // TTMPs live in their own file, so capture them separately.
-    for (uint32_t i = 0; i < s.ttmps.size(); ++i)
+    for (uint32_t i = 0; i < s.ttmps.size(); ++i) {
       s.ttmps[i] = wf.ttmp(i);
+    }
 
     // Capture the full physical VGPR block (normal + AccVGPR bank) so tests can
     // inspect accumulator registers as well as ordinary VGPRs.
     s.vgpr_block = wf.cu().vgpr_allocation_block_size();
     const uint32_t vbase = wf.vgpr_alloc().base;
     s.vgprs.reserve(static_cast<size_t>(s.vgpr_block) * s.wf_size);
-    for (uint32_t r = 0; r < s.vgpr_block; ++r)
-      for (uint32_t lane = 0; lane < s.wf_size; ++lane)
+    for (uint32_t r = 0; r < s.vgpr_block; ++r) {
+      for (uint32_t lane = 0; lane < s.wf_size; ++lane) {
         s.vgprs.push_back(regs.read_vgpr(vbase + r, lane));
+      }
+    }
 
     // Serialize the append: concurrent halts from different partition threads
     // would otherwise race the vector.
@@ -211,8 +221,9 @@ public:
   }
   uint32_t for_cu(const amdgpu::ComputeUnitCore *cu) const {
     std::lock_guard<std::mutex> lk(mutex_);
-    if (!cu)
+    if (!cu) {
       return 0u;
+    }
     auto it = counts_.find(cu->id());
     return it == counts_.end() ? 0u : it->second;
   }

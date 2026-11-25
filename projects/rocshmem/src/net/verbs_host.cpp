@@ -22,9 +22,10 @@
 
 #include "net/verbs_host.hpp"
 
-#include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#include "log.hpp"
 
 namespace rocshmem {
 namespace net {
@@ -48,23 +49,23 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
                      AllgatherFn allgather, DmabufFn dmabuf,
                      const char *dev_name) {
   if (!ibv_.load()) {
-    fprintf(stderr, "[rocSHMEM] host-verbs: libibverbs load failed\n");
+    LOG_ERROR("host-verbs: libibverbs load failed");
     return false;
   }
   if (!ctrl_.open(&ibv_, dev_name, 1)) {
-    fprintf(stderr, "[rocSHMEM] host-verbs: device bring-up failed\n");
+    LOG_ERROR("host-verbs: device bring-up failed");
     return false;
   }
   lm_ = LaneMap(num_host_ctx, num_pes);
   if (!ctrl_.create_queues(lm_, kCqDepth, kSqDepth)) {
-    fprintf(stderr, "[rocSHMEM] host-verbs: queue creation failed\n");
+    LOG_ERROR("host-verbs: queue creation failed");
     return false;
   }
 
   // Heap MR (dma-buf for device memory).
   if (!mr_.register_heap(&ibv_, const_cast<ibv_pd *>(ctrl_.dev().pd), heap_base,
                          heap_size, heap_device, dmabuf)) {
-    fprintf(stderr, "[rocSHMEM] host-verbs: heap registration failed\n");
+    LOG_ERROR("host-verbs: heap registration failed");
     return false;
   }
 
@@ -72,7 +73,7 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
   // so the calling thread can read the fetched value back).
   size_t scratch_bytes = static_cast<size_t>(num_host_ctx) * kAmoSlot;
   if (posix_memalign(&amo_scratch_, 64, scratch_bytes) != 0) {
-    fprintf(stderr, "[rocSHMEM] host-verbs: amo scratch alloc failed\n");
+    LOG_ERROR("host-verbs: amo scratch alloc failed");
     return false;
   }
   memset(amo_scratch_, 0, scratch_bytes);
@@ -90,7 +91,7 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
 
   // Exchange heap {base,rkey} and connect the RC mesh.
   if (!mr_.exchange_heap(num_pes, my_pe, allgather)) {
-    fprintf(stderr, "[rocSHMEM] host-verbs: heap key exchange failed\n");
+    LOG_ERROR("host-verbs: heap key exchange failed");
     return false;
   }
   std::vector<DestInfo> local, global;
@@ -98,7 +99,7 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
   global = allgather_array<DestInfo>(local, num_pes, my_pe, lm_.num_lanes(),
                                      allgather);
   if (!ctrl_.connect(my_pe, global)) {
-    fprintf(stderr, "[rocSHMEM] host-verbs: RC connect failed\n");
+    LOG_ERROR("host-verbs: RC connect failed");
     return false;
   }
 
@@ -116,9 +117,8 @@ bool VerbsHost::init(HdpPolicy *hdp, void *heap_base, size_t heap_size,
   }
 
   initialized_ = true;
-  fprintf(stderr,
-          "[rocSHMEM] host-verbs: initialized (%d host contexts, %d PEs)\n",
-          num_host_ctx, num_pes);
+  LOG_INFO("host-verbs: initialized (%d host contexts, %d PEs)",
+           num_host_ctx, num_pes);
   return true;
 }
 

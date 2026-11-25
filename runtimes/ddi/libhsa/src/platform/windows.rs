@@ -74,7 +74,7 @@ pub(crate) unsafe fn ais_file_io(
     _operation_status: *mut i32,
     _operation: AisOperation,
 ) -> Status {
-    let guard = match crate::runtime::lock() {
+    let guard = match crate::lifecycle::lock() {
         Ok(guard) => guard,
         Err(status) => return status,
     };

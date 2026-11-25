@@ -328,12 +328,12 @@ unsafe extern "C" fn profiler_cleanup(
     work: unsafe extern "C" fn(*mut c_void) -> i32,
     data: *mut c_void,
 ) -> u32 {
-    let Ok(_lease) = crate::runtime::enter_delegated_tool_cleanup(generation) else {
+    let Ok(token) = crate::lifecycle::enter_delegated_tool_cleanup(generation) else {
         return 9; // ROCP_REG_ATTACHMENT_NOT_AVAILABLE
     };
     // SAFETY: The v2 callback is synchronous and must not unwind or retain the
     // supplied native-call lease beyond this call.
-    if unsafe { work(data) } == 0 { 0 } else { 6 }
+    crate::admission::ApiLeaseScope::run(token, || if unsafe { work(data) } == 0 { 0 } else { 6 })
 }
 
 /// Executes a versioned foreign update without exposing its mutable table to
@@ -349,32 +349,34 @@ unsafe extern "C" fn profiler_update(
     if PROFILER_QUIESCING.load(Ordering::Acquire) {
         return INACTIVE;
     }
-    let Some(token) = crate::runtime::process_admission().enter() else {
+    let Some(token) = crate::admission::process_admission().enter() else {
         return INACTIVE;
     };
     let generation = token.generation();
-    let _lease = crate::runtime::ApiLeaseScope::enter(token);
-    // Registrar serializes its calls and rejects recursive updates. The
-    // independent mutex also protects the retained seed across generations.
-    let Ok(mut profiler) = PROFILER.lock() else {
-        return INVALID_ARGUMENT;
-    };
-    let staging = profiler.as_ref().map_or_else(ApiTables::new, |tables| {
-        ApiTables::from_functions(&tables.functions())
-    });
-    // Pin before invoking foreign code: even a failed updater may retain the
-    // root or children. No subsequent runtime mutation reaches this table.
-    let staging = Box::leak(staging);
-    let mut root = (&raw mut staging.root).cast::<c_void>();
-    // SAFETY: The registrar's versioned contract permits synchronous writes
-    // to this private table and requires all such writes to finish on return.
-    if unsafe { updater(data, &raw mut root, 1, generation) } != 0 || !generated::valid(staging) {
-        return 6; // ROCP_REG_ROCPROFILER_ERROR
-    }
-    let snapshot = ApiTables::from_functions(&staging.functions());
-    generated::publish_profiler(&snapshot);
-    *profiler = Some(snapshot);
-    0
+    crate::admission::ApiLeaseScope::run(token, || {
+        // Registrar serializes its calls and rejects recursive updates. The
+        // independent mutex also protects the retained seed across generations.
+        let Ok(mut profiler) = PROFILER.lock() else {
+            return INVALID_ARGUMENT;
+        };
+        let staging = profiler.as_ref().map_or_else(ApiTables::new, |tables| {
+            ApiTables::from_functions(&tables.functions())
+        });
+        // Pin before invoking foreign code: even a failed updater may retain the
+        // root or children. No subsequent runtime mutation reaches this table.
+        let staging = Box::leak(staging);
+        let mut root = (&raw mut staging.root).cast::<c_void>();
+        // SAFETY: The registrar's versioned contract permits synchronous writes
+        // to this private table and requires all such writes to finish on return.
+        if unsafe { updater(data, &raw mut root, 1, generation) } != 0 || !generated::valid(staging)
+        {
+            return 6; // ROCP_REG_ROCPROFILER_ERROR
+        }
+        let snapshot = ApiTables::from_functions(&staging.functions());
+        generated::publish_profiler(&snapshot);
+        *profiler = Some(snapshot);
+        0
+    })
 }
 
 /// ABI version value for HSA register.
@@ -656,8 +658,8 @@ pub(crate) fn retire_profiler() -> crate::ffi::Status {
     else {
         return crate::ffi::SUCCESS;
     };
-    // The lifecycle owner supplies a synchronous native cleanup lease only
-    // around this call, after prepare and native stop have succeeded.
+    // The lifecycle owner supplies a synchronous native cleanup lease through
+    // retirement and legacy unload, after prepare and native stop succeed.
     if let (Some(library), Some(identifier)) = (&state.registration, state.profiler_id) {
         let symbol = library.symbol(c"rocprofiler_register_quiesce_library_api_table_v2");
         if symbol.is_null() {

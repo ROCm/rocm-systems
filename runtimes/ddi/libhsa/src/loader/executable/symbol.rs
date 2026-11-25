@@ -7,7 +7,7 @@ use super::*;
 
 /// Binds an external variable address into an executable.
 pub(crate) fn define_external_variable(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     executable: HsaExecutable,
     agent: HsaAgent,
     name: &str,
@@ -55,7 +55,7 @@ pub(crate) fn define_external_variable(
 
 /// Collects executable symbol handles matching the requested agent.
 pub(crate) fn executable_symbol_handles(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     executable: HsaExecutable,
     agent: Option<HsaAgent>,
 ) -> Result<Vec<u64>, Status> {

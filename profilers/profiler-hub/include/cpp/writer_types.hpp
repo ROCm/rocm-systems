@@ -207,7 +207,7 @@ struct pmc_info_unique_id_t
         const bool are_names_same = name == other.name;
         if(agent_id.has_value() && other.agent_id.has_value())
         {
-            return are_names_same && (agent_id.value() == other.agent_id.value());
+            return are_names_same && (*agent_id == *other.agent_id);
         }
         return are_names_same;
     }

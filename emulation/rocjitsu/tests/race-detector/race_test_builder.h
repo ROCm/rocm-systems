@@ -9,6 +9,7 @@
 #pragma once
 
 #include "race_test_instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/core/race_detector.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
@@ -30,7 +31,7 @@ class RaceTestBuilder {
 public:
   RaceTestBuilder(
       int numWaves, int vgprs, int sgprs, int waveSize = 64, Dim3d wgId = Dim3d(0),
-      CounterCapacities counterCapacities = counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4))
+      CounterCapacities counterCapacities = counterCapacitiesForArch(rocjitsu::IsaFamily::Cdna4))
       : waveSize_(waveSize), defaultExec_(waveSize == 64 ? ~0ULL : (1ULL << waveSize) - 1) {
     detector_ = std::make_unique<RaceDetector>(
         numWaves, vgprs, sgprs, wgId, [this](RaceViolation v) { violations_.push_back(v); },
@@ -38,6 +39,8 @@ public:
     for (int w = 0; w < numWaves; ++w) {
       waves_.push_back(&detector_->getWaveRaceState(w));
     }
+    ended_.assign(numWaves, false);
+    tensorTransfers_.assign(numWaves, EventId{});
   }
 
   // -- Memory events --
@@ -66,14 +69,14 @@ public:
         memoryOrder);
   }
 
-  /// Register a generic FLAT load whose active lanes resolve uniformly to
-  /// global memory. The caller supplies architecture-specific counter
-  /// obligations because their domains and ordering vary by target.
-  void flatGlobalLoad(int wave, int vgprBase, int numRegs,
-                      std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                      uint64_t exec = 0) {
-    if (!exec)
+  /// Register a global load with caller-supplied counter obligations.
+  void
+  globalLoadWithObligations(int wave, int vgprBase, int numRegs,
+                            std::span<const amdgpu::MemoryCounterObligation> counterObligations,
+                            uint64_t exec = 0) {
+    if (!exec) {
       exec = defaultExec_;
+    }
     const MemoryOrderClass memoryOrder = memoryOrderForObligations(counterObligations);
     std::vector<uint32_t> registers(numRegs);
     for (int i = 0; i < numRegs; ++i) {
@@ -96,10 +99,12 @@ public:
         waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT).succeeded());
     ldsAddrs.resize(waveSize_, 0);
     // Validate each active lane's write against outstanding reads, as the plugin does.
-    for (int lane = 0; lane < waveSize_; ++lane)
-      if (exec & (1ULL << lane))
+    for (int lane = 0; lane < waveSize_; ++lane) {
+      if (exec & (1ULL << lane)) {
         detector_->validateWrite(static_cast<int>(ldsAddrs[lane]), WaveId{wave}, lane, bytesPerLane,
                                  memoryOrder);
+      }
+    }
     waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::GLOBAL_TO_LDS,
                                    /*registers=*/{}, exec, waveSize_, ldsAddrs, bytesPerLane,
                                    /*byteMask=*/0xF,
@@ -206,15 +211,17 @@ public:
     for (const auto &range : ranges) {
       const auto bytes = static_cast<int>(
           detector_->ldsBytesInRange(range.address, range.bytes, /*elementBytes=*/1));
-      if (bytes == 0)
+      if (bytes == 0) {
         continue;
+      }
       const int addr = static_cast<int>(range.address);
-      if (type == MemoryEventType::GLOBAL_TO_LDS)
+      if (type == MemoryEventType::GLOBAL_TO_LDS) {
         detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes,
                                  MemoryOrderClass::UNORDERED);
-      else
+      } else {
         detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes,
                                 MemoryOrderClass::UNORDERED);
+      }
     }
     const std::array obligations{amdgpu::MemoryCounterObligation{counter, order}};
     waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type, ranges, obligations, order);
@@ -269,18 +276,36 @@ public:
         CounterObligations{waitCounterType, memoryOrder, additionalWaitCounterType}, memoryOrder);
   }
 
-  /// Register a CDNA1-4 generic FLAT load whose active lanes resolve uniformly
-  /// to LDS. Its unordered VMCNT and LGKMCNT obligations are independent of
-  /// that resolved memory route.
-  void flatLdsLoad(int wave, int lane, int addr, int bytes, int vgprDst) {
+  /// Inject an unordered LDS read with independent VMCNT and LGKMCNT obligations.
+  void unorderedLdsRead(int wave, int lane, int addr, int bytes, int vgprDst) {
     ldsRead(wave, lane, addr, bytes, vgprDst, /*byteMask=*/0xF, amdgpu::WaitCounterType::VMCNT,
             MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::LGKMCNT);
   }
 
-  /// Register a CDNA1-4 generic FLAT store whose active lane resolves to LDS.
-  void flatLdsStore(int wave, int lane, int addr, int bytes) {
+  /// Inject an unordered LDS write with independent VMCNT and LGKMCNT obligations.
+  void unorderedLdsWrite(int wave, int lane, int addr, int bytes) {
     ldsWrite(wave, lane, addr, bytes, MemoryOrderClass::UNORDERED, amdgpu::WaitCounterType::VMCNT,
              amdgpu::WaitCounterType::LGKMCNT);
+  }
+
+  /// Register a routed FLAT read of LDS. Its LDS access completes with
+  /// lgkmcnt, before the destination VGPR's writeback completes with vmcnt.
+  void flatLdsRead(int wave, int lane, int addr, int bytes, int vgprDst) {
+    constexpr MemoryOrderClass memoryOrder = MemoryOrderClass::UNORDERED;
+    ASSERT_TRUE(
+        waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::VMCNT).succeeded());
+    ASSERT_TRUE(
+        waves_[wave]->prepareForCounterIncrement(amdgpu::WaitCounterType::LGKMCNT).succeeded());
+    detector_->validateRead(addr, WaveId{wave}, lane, bytes, MemoryOrderClass::LDS);
+    std::vector<uint32_t> ldsAddrs(waveSize_, 0);
+    ldsAddrs[lane] = addr;
+    waves_[wave]->registerLdsEvent(testInstruction(pc_++), MemoryEventType::LDS_TO_VGPR,
+                                   {static_cast<uint32_t>(vgprDst)}, uint64_t{1} << lane, waveSize_,
+                                   ldsAddrs, bytes, /*byteMask=*/0xF,
+                                   CounterObligations{amdgpu::WaitCounterType::VMCNT, memoryOrder,
+                                                      amdgpu::WaitCounterType::LGKMCNT},
+                                   memoryOrder, /*ldsLaneMask=*/~uint64_t{0}, /*elementBytes=*/0,
+                                   LdsAccess{.uses_flat_lds = true});
   }
 
   // -- Sync --
@@ -305,11 +330,131 @@ public:
     waves_[wave]->dispatch(wait);
   }
 
-  /// Barrier: flush all waves' barrier-pending events (simulates s_barrier).
+  void waitDscnt(int wave, int dscnt) {
+    PendingWaitCount wait;
+    wait.add(amdgpu::WaitCounterType::DSCNT, dscnt);
+    waves_[wave]->dispatch(wait);
+  }
+
+  /// A single-instruction workgroup barrier (s_barrier): every live wave
+  /// signals, the round completes, and every live wave passes its wait, as the
+  /// simulator reports it.
   void barrier() {
-    for (auto *w : waves_) {
-      w->flushBarrierPendingEvents();
+    const BarrierRoundId round = workgroupRound(nextWorkgroupGeneration_++);
+    const std::vector<int> members = liveWaves();
+    for (int wave : members) {
+      signal(wave, round);
     }
+    completeRound(round, members);
+    for (int wave : members) {
+      waitPassed(wave, round);
+    }
+  }
+
+  // -- Split barriers (s_barrier_signal / s_barrier_wait) --
+
+  /// The simulator's completion bits for the workgroup and named barriers.
+  static constexpr uint8_t kWorkgroupBarrier = 1;
+  static constexpr uint8_t kNamedBarrier = 0;
+
+  static BarrierRoundId workgroupRound(uint64_t generation) {
+    return {.barrier = kWorkgroupBarrier, .namedId = 0, .generation = generation};
+  }
+
+  static BarrierRoundId namedRound(uint32_t namedId, uint64_t generation) {
+    return {.barrier = kNamedBarrier, .namedId = namedId, .generation = generation};
+  }
+
+  void signal(int wave, BarrierRoundId round) { detector_->barrierSignaled(WaveId{wave}, round); }
+
+  /// Complete `round`, arming the wait of each wave in `armed`: the waves
+  /// whose completion bit the round sets. A wave whose bit an earlier round
+  /// left set is not armed, and acquires that round when it waits. Workgroup
+  /// rounds also order the events of waves that ended before the round
+  /// completed.
+  void completeRound(BarrierRoundId round, const std::vector<int> &armed) {
+    std::vector<WaveId> ids;
+    for (int wave : armed) {
+      ids.push_back(WaveId{wave});
+    }
+    detector_->barrierRoundCompleted(round, ids, round.barrier == kWorkgroupBarrier);
+  }
+
+  void waitPassed(int wave, BarrierRoundId round) {
+    detector_->barrierWaitPassed(WaveId{wave}, round);
+  }
+
+  /// End a wave: apply s_endpgm's implicit wait for every counter, as the
+  /// plugin does when a wave halts, then report the end.
+  void endWave(int wave) {
+    PendingWaitCount wait;
+    for (auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::LGKMCNT,
+                         amdgpu::WaitCounterType::EXPCNT, amdgpu::WaitCounterType::VSCNT,
+                         amdgpu::WaitCounterType::LOADCNT, amdgpu::WaitCounterType::STORECNT,
+                         amdgpu::WaitCounterType::DSCNT, amdgpu::WaitCounterType::KMCNT,
+                         amdgpu::WaitCounterType::TENSORCNT, amdgpu::WaitCounterType::ASYNCCNT,
+                         amdgpu::WaitCounterType::SAMPLECNT}) {
+      wait.add(counter, 0);
+    }
+    waves_[wave]->dispatch(wait);
+    detector_->waveEnded(WaveId{wave});
+    ended_[wave] = true;
+  }
+
+  size_t openBarrierRounds() const { return detector_->openBarrierRounds(); }
+
+  // -- LDS barrier cells (ds_atomic_*barrier_arrive, tensor DMA arrival) --
+
+  /// Arrive at the barrier cell at `cell`, as the plugin does: the DS arrive
+  /// instructions validate and register an aligned 64-bit atomic on the cell,
+  /// on DSCNT in the LDS class or on ASYNCCNT in the async-load class; a tensor
+  /// transfer's arrival is validated and attaches the cell to the wave's
+  /// latest tensor transfer, if it has issued one since its last tensor
+  /// arrival. `completes` says whether the arrival changes the cell's phase.
+  void cellArrive(int wave, int cell, BarrierCellArrival kind, bool completes) {
+    const bool tensor = kind == BarrierCellArrival::Tensor;
+    const bool ds = kind == BarrierCellArrival::Ds;
+    const MemoryOrderClass order = tensor ? MemoryOrderClass::UNORDERED
+                                   : ds   ? MemoryOrderClass::LDS
+                                          : MemoryOrderClass::ASYNC_LOAD;
+    const auto counter = ds ? amdgpu::WaitCounterType::DSCNT : amdgpu::WaitCounterType::ASYNCCNT;
+    const int lane = tensor ? -1 : 0;
+    if (!tensor) {
+      ASSERT_TRUE(waves_[wave]->prepareForCounterIncrement(counter).succeeded());
+    }
+    // An arrival updates the cell atomically: it is checked as a read, against
+    // writes of the cell, and never against reads of it.
+    detector_->validateRead(cell, WaveId{wave}, lane, kBarrierCellBytes, order, kBarrierCellBytes);
+    if (tensor) {
+      if (const EventId transfer = std::exchange(tensorTransfers_[wave], {}); transfer.isValid()) {
+        detector_->attachBarrierArrive(transfer, static_cast<uint32_t>(cell));
+      }
+    } else {
+      IntervalSet intervals;
+      intervals.append(cell, cell + kBarrierCellBytes);
+      intervals.finalize();
+      const std::array obligations{amdgpu::MemoryCounterObligation{counter, order}};
+      waves_[wave]->registerEventWithIntervals(
+          testInstruction(pc_++), ds ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS,
+          /*registers=*/{}, /*execMask=*/1, /*byteMask=*/0xF, std::move(intervals), obligations,
+          order, /*lastRegisterByteMask=*/0,
+          LdsAccess{.read_modify_write = true,
+                    .aligned_atomic_bytes = kBarrierCellBytes,
+                    .barrier_arrive = true});
+    }
+    detector_->barrierCellArrived(WaveId{wave}, static_cast<uint32_t>(cell), kind, completes);
+  }
+
+  /// A DS load of `bytes` bytes at `addr` on DSCNT, such as a poll of a barrier
+  /// cell: validated and registered like any LDS read, then offered to the
+  /// detector as a read of whichever barrier cells it overlaps.
+  void cellRead(int wave, int addr, int vgprDst, int bytes = kBarrierCellBytes) {
+    ldsRead(wave, /*lane=*/0, addr, bytes, vgprDst, /*byteMask=*/0xF,
+            amdgpu::WaitCounterType::DSCNT);
+    IntervalSet intervals;
+    intervals.append(addr, addr + bytes);
+    intervals.finalize();
+    detector_->acquireBarrierCells(WaveId{wave}, intervals);
   }
 
   // -- Trigger race checks --
@@ -360,6 +505,13 @@ public:
     detector_->validateRead(addr, WaveId{wave}, lane, bytes, memoryOrder);
   }
 
+  /// A synchronous instruction reads `bytes` of LDS at `addr` as an operand.
+  /// The read completes at once; other waves still need a barrier to order it.
+  void ldsOperandRead(int wave, int lane, int addr, int bytes) {
+    waves_[wave]->recordLdsOperandRead(testInstruction(pc_++), static_cast<uint32_t>(addr),
+                                       static_cast<uint32_t>(bytes), static_cast<uint32_t>(lane));
+  }
+
   void checkLdsWrite(int wave, int lane, int addr, int bytes,
                      MemoryOrderClass memoryOrder = MemoryOrderClass::LDS) {
     detector_->validateWrite(addr, WaveId{wave}, lane, bytes, memoryOrder);
@@ -391,8 +543,9 @@ public:
 
   bool hasTtmpRace(int reg) const {
     for (const auto &v : violations_) {
-      if (v.space == RaceViolation::Space::TTMP && v.index == reg)
+      if (v.space == RaceViolation::Space::TTMP && v.index == reg) {
         return true;
+      }
     }
     return false;
   }
@@ -411,7 +564,26 @@ public:
   const EventRegistry &events() const { return detector_->events(); }
   const RaceDetector &detector() const { return *detector_; }
 
+  /// LDS events still checked against other waves' accesses.
+  size_t ldsWriteEventCount() const { return detector_->liveLdsWriteEvents(); }
+  size_t ldsReadEventCount() const { return detector_->liveLdsReadEvents(); }
+
+  /// Completed LDS events of `wave` that a barrier has not yet retired.
+  size_t barrierPendingEventCount(int wave) const {
+    return waves_[wave]->getBarrierPendingEvents().size();
+  }
+
 private:
+  std::vector<int> liveWaves() const {
+    std::vector<int> live;
+    for (int wave = 0; wave < static_cast<int>(waves_.size()); ++wave) {
+      if (!ended_[wave]) {
+        live.push_back(wave);
+      }
+    }
+    return live;
+  }
+
   /// A transfer has no lanes; its violations report lane -1. Validates and
   /// registers the same bytes as the plugin's tensor DMA hook.
   void tensorTransfer(int wave, MemoryEventType type, std::span<const LdsByteRange> ranges) {
@@ -422,18 +594,20 @@ private:
     for (const auto &range : ranges) {
       const auto bytes = static_cast<int>(
           detector_->ldsBytesInRange(range.address, range.bytes, /*elementBytes=*/1));
-      if (bytes == 0)
+      if (bytes == 0) {
         continue;
+      }
       const int addr = static_cast<int>(range.address);
-      if (type == MemoryEventType::GLOBAL_TO_LDS)
+      if (type == MemoryEventType::GLOBAL_TO_LDS) {
         detector_->validateWrite(addr, WaveId{wave}, /*lane=*/-1, bytes, ldsAccessOrder);
-      else
+      } else {
         detector_->validateRead(addr, WaveId{wave}, /*lane=*/-1, bytes, ldsAccessOrder);
+      }
     }
     const std::array obligations{
         amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::TENSORCNT, memoryOrder}};
-    waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type, ranges, obligations,
-                                        memoryOrder);
+    tensorTransfers_[wave] = waves_[wave]->registerLdsRangeEvent(testInstruction(pc_++), type,
+                                                                 ranges, obligations, memoryOrder);
   }
 
   std::unique_ptr<RaceDetector> detector_;
@@ -442,6 +616,10 @@ private:
   int waveSize_;
   uint64_t defaultExec_;
   int pc_ = 0; // Auto-incrementing fake PC for event registration.
+  std::vector<bool> ended_;
+  /// Each wave's latest tensor transfer that no tensor arrival has taken.
+  std::vector<EventId> tensorTransfers_;
+  uint64_t nextWorkgroupGeneration_ = 0;
 };
 
 } // namespace rocjitsu::plugins::race_detector

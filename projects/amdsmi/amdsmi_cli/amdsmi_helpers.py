@@ -16,6 +16,7 @@ import glob
 import errno
 import pwd
 import stat
+import warnings
 from typing import List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 from enum import Enum
@@ -421,15 +422,44 @@ class AMDSMIHelpers:
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
 
-    def get_gpu_cuid_info(self, device_handle, include_primary=False):
-        """CUID presentation metadata; unavailable metadata does not imply a legacy UUID."""
+    def get_gpu_driver_info(self, device_handle) -> dict:
+        """Driver info with the full version and the driver package.
+
+        An older library or amdsmi package only has amdsmi_get_gpu_driver_info(); its module
+        version then stands in for the full version and no package is reported.
+        """
+        get_driver_info_v2 = getattr(amdsmi_interface, "amdsmi_get_gpu_driver_info_v2", None)
+        if get_driver_info_v2 is None:
+            logging.debug("The amdsmi package has no amdsmi_get_gpu_driver_info_v2()")
+        else:
+            try:
+                return get_driver_info_v2(device_handle)
+            except amdsmi_exception.AmdSmiLibraryException as error:
+                if (
+                    error.get_error_code()
+                    != amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                ):
+                    raise
+                logging.debug("amdsmi_get_gpu_driver_info_v2() is not supported, trying v1")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", DeprecationWarning)
+            info = amdsmi_interface.amdsmi_get_gpu_driver_info(device_handle)
+        return {
+            **info,
+            "driver_kernel_version": "N/A",
+            "amdgpu_driver_version": "N/A",
+            "driver_build_version": "N/A",
+            "driver_full_version": info["driver_version"],
+            "driver_package": "N/A",
+        }
+
+    def get_gpu_cuid_info(self, device_handle):
+        """CUID presentation metadata."""
         result = {
-            "derived_cuid": "N/A",
-            "primary_cuid": "N/A" if include_primary else "N/A (not requested)",
+            "cuid": "N/A",
             "component_type": "UNKNOWN",
-            "auxiliary": "unknown",
             "source": "UNKNOWN",
-            "identifier_kind": "unknown",
+            "temporary": "unknown",
             "cuid_metadata_status": "unknown",
         }
         try:
@@ -443,8 +473,8 @@ class AMDSMIHelpers:
             ):
                 result.update(
                     component_type="N/A",
-                    auxiliary="N/A",
                     source="N/A",
+                    temporary="N/A",
                     cuid_metadata_status="not_supported",
                 )
             else:
@@ -455,29 +485,25 @@ class AMDSMIHelpers:
             except (amdsmi_exception.AmdSmiLibraryException, AttributeError):
                 return result
             if cuid and cuid != "N/A":
-                result.update(derived_cuid=cuid, identifier_kind="cuid")
+                result["cuid"] = cuid
             return result
 
         cuid = info.get("derived")
         if not cuid or cuid == "N/A":
             result["cuid_metadata_status"] = "invalid_value"
             return result
-        result.update(derived_cuid=cuid, identifier_kind="cuid", cuid_metadata_status="available")
+        result.update(cuid=cuid, cuid_metadata_status="available")
         result["component_type"] = info.get("component_type", "UNKNOWN")
         source = info.get("source")
         if source in ("DRIVER", "LIBRARY", "UNKNOWN"):
             result["source"] = source
         else:
             result["cuid_metadata_status"] = "partial"
-        auxiliary = info.get("auxiliary")
-        if isinstance(auxiliary, bool):
-            result["auxiliary"] = auxiliary
+        temporary = info.get("auxiliary")
+        if isinstance(temporary, bool):
+            result["temporary"] = temporary
         else:
             result["cuid_metadata_status"] = "partial"
-        if include_primary:
-            result["primary_cuid"] = info.get("primary") or (
-                "N/A (requires root)" if os.geteuid() != 0 else "N/A"
-            )
         return result
 
     def get_gpu_choices(self):
@@ -620,6 +646,17 @@ class AMDSMIHelpers:
         except UnicodeEncodeError:
             return False
 
+    # Shared int64 range, reused by parse_ampp_field_value and
+    # parse_power_stabilization_token so the two sets of literals can't drift.
+    _INT64_MIN = -(2**63)
+    _INT64_MAX_EXCLUSIVE = 2**63
+
+    @classmethod
+    def _fits_int64(cls, value: int) -> bool:
+        """Range check for anything that lands in an int64 ctypes field
+        (Power Stabilization's int64_t value / AMPP field values)."""
+        return cls._INT64_MIN <= value < cls._INT64_MAX_EXCLUSIVE
+
     @staticmethod
     def parse_ampp_field_value(value) -> Optional[int]:
         """Parse and range-check a candidate AMPP field value the same way
@@ -632,9 +669,96 @@ class AMDSMIHelpers:
             parsed = int(value)
         except (TypeError, ValueError, OverflowError):
             return None
-        if not -(2**63) <= parsed < 2**63:
+        if not AMDSMIHelpers._fits_int64(parsed):
             return None
         return parsed
+
+    @staticmethod
+    def _sanitize_for_error_message(raw_value, max_len=64) -> str:
+        """Strip non-printable characters and cap the length of file-controlled
+        text before embedding it in a raised error message, so a malicious
+        `@<path>` replay file can't forge terminal output (e.g. ANSI escapes)
+        via a parse-failure message."""
+        sanitized = re.sub(r"[^\x20-\x7e]", "?", str(raw_value))
+        if len(sanitized) > max_len:
+            sanitized = sanitized[:max_len] + "..."
+        return sanitized
+
+    @staticmethod
+    def parse_power_stabilization_token(
+        token: str, ignore_read_only: bool
+    ) -> Optional[Tuple["amdsmi_interface.AmdSmiPowerStabilizationParamId", int]]:
+        """Parse a single 'KEY=VALUE' Power Stabilization token into
+        (AmdSmiPowerStabilizationParamId, value).
+
+        Shared between --power-stabilization-configure's direct KEY=VALUE
+        argv parsing (amdsmi_parser.py) and its @<file> JSON restore path
+        (set_value.py) so the two entry points can't drift apart.
+
+        Returns None for "host_control=..." when ignore_read_only is True
+        (HOST_CONTROL isn't a settable param_id at all, so it's silently
+        skipped when replaying a full `static --json` dump). Raises
+        ValueError with a user-facing message for any other malformed
+        token, unknown key, or unparsable value.
+        """
+        param_ids = amdsmi_interface.AmdSmiPowerStabilizationParamId
+        allowed_keys = {name.lower(): member for name, member in param_ids.__members__.items()}
+
+        if "=" not in token:
+            raise ValueError(
+                f"Invalid KEY=VALUE pair '{AMDSMIHelpers._sanitize_for_error_message(token)}'"
+            )
+        key, _, raw_value = token.partition("=")
+        key = key.strip().lower()
+        raw_value = raw_value.strip()
+        safe_key = AMDSMIHelpers._sanitize_for_error_message(key)
+        safe_value = AMDSMIHelpers._sanitize_for_error_message(raw_value)
+
+        if key == "host_control":
+            if ignore_read_only:
+                return None
+            raise ValueError("HOST_CONTROL is read-only and cannot be set")
+
+        if key not in allowed_keys:
+            raise ValueError(
+                f"Invalid Power Stabilization key '{safe_key}'. Valid keys are: "
+                + ", ".join(sorted(allowed_keys))
+            )
+
+        param_id = allowed_keys[key]
+        if param_id == param_ids.INSERTION_PRIORITY and not raw_value.lstrip("-").isdigit():
+            try:
+                value = int(amdsmi_interface.AmdSmiHawkInsertionPriority[raw_value.upper()])
+            except KeyError:
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for insertion_priority. Valid values are: "
+                    + ", ".join(amdsmi_interface.AmdSmiHawkInsertionPriority.__members__)
+                ) from None
+        elif param_id in (param_ids.ENABLE, param_ids.RAMP_ENABLE):
+            bool_map = {"on": 1, "true": 1, "1": 1, "off": 0, "false": 0, "0": 0}
+            value = bool_map.get(raw_value.lower())
+            if value is None:
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for {key}. Valid values are: "
+                    "on, off, true, false, 1, 0"
+                )
+        else:
+            try:
+                value = int(raw_value)
+            except ValueError:
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for {key}: must be an integer"
+                ) from None
+            # ctypes silently truncates an out-of-int64-range value when it's
+            # passed as the int64_t parameter; reject it here instead of
+            # letting the CLI report "success" for a value that was never
+            # actually written.
+            if not AMDSMIHelpers._fits_int64(value):
+                raise ValueError(
+                    f"Invalid value '{safe_value}' for {key}: must fit in a signed 64-bit integer"
+                )
+
+        return (param_id, value)
 
     @staticmethod
     def is_UUID(uuid_question: str) -> bool:
@@ -1370,6 +1494,38 @@ class AMDSMIHelpers:
         except:
             return False
 
+    def device_has_ualink(self, device_handle):
+        """Check if device has ualink sysfs directory.
+
+        Args:
+            device_handle: GPU device handle
+
+        Returns:
+            bool: True if /sys/class/drm/<card>/device/ualink/ exists
+        """
+        try:
+            bdf_str = amdsmi_interface.amdsmi_get_gpu_device_bdf(device_handle)
+            drm_path = "/sys/class/drm"
+
+            for card in os.listdir(drm_path):
+                if not card.startswith("card"):
+                    continue
+                uevent_path = os.path.join(drm_path, card, "device", "uevent")
+                if not os.path.exists(uevent_path):
+                    continue
+
+                with open(uevent_path) as f:
+                    for line in f:
+                        if (
+                            line.startswith("PCI_SLOT_NAME=")
+                            and line.split("=")[1].strip() == bdf_str
+                        ):
+                            ualink_path = os.path.join(drm_path, card, "device", "ualink")
+                            return os.path.isdir(ualink_path)
+            return False
+        except Exception:
+            return False
+
     def get_perf_levels(self):
         perf_levels_str = [clock.name for clock in amdsmi_interface.AmdSmiDevPerfLevel]
         perf_levels_int = list(set(clock.value for clock in amdsmi_interface.AmdSmiDevPerfLevel))
@@ -2081,7 +2237,7 @@ class AMDSMIHelpers:
 
     def get_pci_device_ids(self) -> Set[str]:
         pci_devices_path = "/sys/bus/pci/devices"
-        pci_devices: set[str] = set()
+        pci_devices: Set[str] = set()
         for device in os.listdir(pci_devices_path):
             device_path = os.path.join(pci_devices_path, device, "device")
             try:
@@ -3466,6 +3622,23 @@ class AMDSMIHelpers:
     # (amdsmi_interface.py's own string contract stays unchanged).
     NPM_BALANCING_MODE_TO_CLI = {"PB": "POWER_BALANCING", "FB": "FREQUENCY_BALANCING"}
     NPM_BALANCING_MODE_FROM_CLI = {"POWER_BALANCING": "PB", "FREQUENCY_BALANCING": "FB"}
+
+    def is_npm_enabled(self, node_handle) -> bool:
+        """Check whether NPM (Node Power Management) is enabled on a node.
+
+        No node handle counts as disabled for callers deciding between per-GPU
+        and node-wide behavior. A driver read failure (AmdSmiException) or a
+        malformed return missing "status" (KeyError) is NOT treated as
+        "disabled": that would fail open, silently letting a per-GPU write
+        through on a node where NPM might actually be enabled. Instead such
+        errors propagate to the caller, matching the established precedent in
+        validate_and_set_node_balancing_mode, which lets the same kind of
+        error propagate rather than masking it.
+        """
+        if node_handle is None:
+            return False
+        info = amdsmi_interface.amdsmi_get_npm_info(node_handle)
+        return info["status"] == amdsmi_interface.amdsmi_wrapper.AMDSMI_NPM_STATUS_ENABLED
 
     def validate_and_set_node_balancing_mode(self, node_handle, requested_mode, logger):
         """Validate and set the NPM balancing mode for a node.

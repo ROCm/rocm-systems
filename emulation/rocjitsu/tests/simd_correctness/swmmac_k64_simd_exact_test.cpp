@@ -6,6 +6,7 @@
 /// F16/BF16 SWMMAC instructions.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "../decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -76,7 +77,7 @@ constexpr std::array SWMMAC_CASES{
 };
 
 struct SwmmacFixture : ExactFixture {
-  SwmmacFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA5, WF_SIZE) {}
+  SwmmacFixture() : ExactFixture(rocjitsu::IsaFamily::Cdna5, WF_SIZE) {}
 };
 
 struct Observation {
@@ -89,10 +90,12 @@ struct Observation {
 void restore(SwmmacFixture &fx, uint32_t off, const std::vector<uint32_t> &words) {
   ASSERT_EQ(words.size() % WF_SIZE, 0u);
   const uint32_t regs = static_cast<uint32_t>(words.size() / WF_SIZE);
-  for (uint32_t reg = 0; reg < regs; ++reg)
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t reg = 0; reg < regs; ++reg) {
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(fx.vbase + off + reg, lane,
                         words[static_cast<size_t>(reg) * WF_SIZE + lane]);
+    }
+  }
 }
 
 void seed_legal_indices(SwmmacFixture &fx, uint32_t phase, uint32_t off = INDEX_OFF) {
@@ -107,9 +110,11 @@ void seed_legal_indices(SwmmacFixture &fx, uint32_t phase, uint32_t off = INDEX_
 }
 
 void seed_pattern(SwmmacFixture &fx, uint32_t off, uint32_t regs, uint32_t salt) {
-  for (uint32_t reg = 0; reg < regs; ++reg)
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t reg = 0; reg < regs; ++reg) {
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(fx.vbase + off + reg, lane, 0xA5000000u ^ (salt << 16) ^ (reg << 8) ^ lane);
+    }
+  }
 }
 
 void write_packed16(SwmmacFixture &fx, uint32_t base, const amdgpu::InputLoc &loc, uint16_t value) {
@@ -130,8 +135,9 @@ void write_packed8(SwmmacFixture &fx, uint32_t base, const amdgpu::InputLoc &loc
 
 void clear_state(SwmmacFixture &fx) {
   restore(fx, 0, std::vector<uint32_t>(static_cast<size_t>(STATE_REGS) * WF_SIZE, 0));
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     fx.cu->write_vgpr(fx.vbase + INDEX_OFF, lane, 0x44444444u);
+  }
   seed_pattern(fx, ACC_OFF - 1, 1, 0x51);
   seed_pattern(fx, ACC_OFF + F32_ACC_REGS, 1, 0x52);
 }
@@ -144,8 +150,9 @@ Observation execute_from_state(SwmmacFixture &fx, Instruction &instruction,
   Observation result;
   result.succeeded = fx.cu->execute_instruction(&instruction, *fx.wf).succeeded();
   result.output = fx.snapshot(ACC_OFF, test.output_regs);
-  if (test.output_regs < F32_ACC_REGS)
+  if (test.output_regs < F32_ACC_REGS) {
     result.tail = fx.snapshot(ACC_OFF + test.output_regs, F32_ACC_REGS - test.output_regs);
+  }
   result.canaries = fx.snapshot(ACC_OFF - 1, 1);
   const auto after = fx.snapshot(ACC_OFF + F32_ACC_REGS, 1);
   result.canaries.insert(result.canaries.end(), after.begin(), after.end());
@@ -154,8 +161,9 @@ Observation execute_from_state(SwmmacFixture &fx, Instruction &instruction,
 
 void expect_unchanged_tail(const SwmmacCase &test, const Observation &result,
                            const std::vector<uint32_t> &initial) {
-  if (test.output_regs == F32_ACC_REGS)
+  if (test.output_regs == F32_ACC_REGS) {
     return;
+  }
   const auto first = initial.begin() + static_cast<size_t>(ACC_OFF + test.output_regs) * WF_SIZE;
   const auto last = initial.begin() + static_cast<size_t>(ACC_OFF + F32_ACC_REGS) * WF_SIZE;
   const std::vector<uint32_t> expected(first, last);
@@ -204,9 +212,10 @@ void run_exact_case(const SwmmacCase &test, Mode mode, uint32_t seed, uint32_t m
   }
   if (dst_alias != DstAlias::A && dst_alias != DstAlias::B) {
     fx.seed(ACC_OFF, test.accumulator_regs, test.accumulator_fmt, Mode::RandomInt, seed + 3);
-    if (test.accumulator_regs < F32_ACC_REGS)
+    if (test.accumulator_regs < F32_ACC_REGS) {
       seed_pattern(fx, ACC_OFF + test.accumulator_regs, F32_ACC_REGS - test.accumulator_regs,
                    seed + 5);
+    }
   }
   seed_legal_indices(fx, metadata_phase, index_off);
   seed_pattern(fx, ACC_OFF - 1, 1, seed + 6);
@@ -219,7 +228,7 @@ void run_exact_case(const SwmmacCase &test, Mode mode, uint32_t seed, uint32_t m
                     .src0 = static_cast<uint16_t>(256 + a_off),
                     .src1 = static_cast<uint16_t>(256 + b_off),
                     .src2 = static_cast<uint16_t>(256 + index_off)});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
@@ -244,9 +253,10 @@ std::unique_ptr<Instruction> decode_case(const SwmmacCase &test) {
   const auto words = cdna5::build_vop3p(
       test.opcode,
       {.vdst = ACC_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = 256 + INDEX_OFF});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
-  if (!decoder)
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
+  if (!decoder) {
     return nullptr;
+  }
   return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
 }
 
@@ -264,8 +274,9 @@ void expect_scalar_and_default(SwmmacFixture &fx, Instruction &instruction, cons
   expect_unchanged_tail(test, scalar, initial);
   expect_unchanged_canaries(test, scalar, initial);
 
-  if (!check_default)
+  if (!check_default) {
     return;
+  }
   fx.wf->set_mode_raw(fp16_ovfl ? amdgpu::Wavefront::FP16_OVFL_BIT : 0u);
   const auto default_path = execute_from_state(fx, instruction, initial, test, false);
   ASSERT_TRUE(default_path.succeeded) << test.label << ": default execution failed";
@@ -336,8 +347,9 @@ void seed_bf16f32_contract_state(SwmmacFixture &fx, std::vector<uint32_t> &expec
       written[index] |= static_cast<uint8_t>(1u << d_loc.sub_element);
     }
   }
-  for (uint8_t mask : written)
+  for (uint8_t mask : written) {
     ASSERT_EQ(mask, 0x3u);
+  }
   seed_pattern(fx, ACC_OFF - 1, 1, 0x31);
   seed_pattern(fx, ACC_OFF + F32_ACC_REGS, 1, 0x32);
 }
@@ -359,7 +371,7 @@ TEST(SwmmacK64SimdExact, IndexKeyUsesShiftedMetadataWord) {
                                                                 .src0 = 256 + A_OFF,
                                                                 .src1 = 256 + B_OFF,
                                                                 .src2 = 256 + INDEX_OFF});
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
@@ -378,8 +390,9 @@ TEST(SwmmacK64SimdExact, AllDecodedFormsMatchScalarForLegalMetadata) {
                    << test.label << " mode=" << static_cast<int>(MODES[mode_index]));
       run_exact_case(test, MODES[mode_index], 100 + 17 * case_index + mode_index,
                      case_index + mode_index);
-      if (testing::Test::HasFatalFailure())
+      if (testing::Test::HasFatalFailure()) {
         return;
+      }
     }
     ++case_index;
   }
@@ -417,21 +430,24 @@ TEST(SwmmacK64SimdExact, Bf16ResultRoundsHalfwayToEven) {
   fx.seed(B_OFF, INPUT_B_REGS, Fmt::BF16, Mode::Zeros, 0);
   fx.seed(ACC_OFF, PACKED_ACC_REGS, Fmt::BF16, Mode::Zeros, 0);
   seed_pattern(fx, ACC_OFF + PACKED_ACC_REGS, F32_ACC_REGS - PACKED_ACC_REGS, 0x41);
-  for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     fx.cu->write_vgpr(fx.vbase + INDEX_OFF, lane, 0x44444444u);
+  }
 
   // 0x3f01 * 0x3f40 is exactly F32 0x3ec18000: halfway between BF16 0x3ec1
   // and 0x3ec2. The retained LSB is odd, so RNE must produce 0x3ec2.
-  for (uint32_t row = 0; row < 16; ++row)
+  for (uint32_t row = 0; row < 16; ++row) {
     write_packed16(fx, A_OFF, amdgpu::swmmac_a_input_loc<16, 64>(WF_SIZE, row, 0, 16), 0x3F01u);
-  for (uint32_t col = 0; col < 16; ++col)
+  }
+  for (uint32_t col = 0; col < 16; ++col) {
     write_packed16(fx, B_OFF, amdgpu::swmmac_b_input_loc<16, 64>(WF_SIZE, col, 0, 16), 0x3F40u);
+  }
 
   const auto &test = SWMMAC_CASES[3];
   const auto words = cdna5::build_vop3p(
       test.opcode,
       {.vdst = ACC_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = 256 + INDEX_OFF});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
@@ -500,10 +516,11 @@ TEST(SwmmacK64SimdExact, SparseGatherMatchesIndependentPhysicalLayoutOracle) {
     ASSERT_NE(instruction, nullptr);
     const auto initial = fx.snapshot(0, STATE_REGS);
     std::vector<uint32_t> expected(static_cast<size_t>(test.output_regs) * WF_SIZE, 0);
-    if (test.output_kind == OutputKind::F32)
+    if (test.output_kind == OutputKind::F32) {
       expected[5 * WF_SIZE + 7] = 0x40C00000u;
-    else
+    } else {
       expected[2 * WF_SIZE + 7] = 0x40C00000u;
+    }
     expect_scalar_and_default(fx, *instruction, test, initial, expected, false);
   }
 }

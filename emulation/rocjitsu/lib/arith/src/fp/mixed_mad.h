@@ -19,4 +19,11 @@ void mixed_mad_x86_64_v3(MixedFma destination, uint64_t flags, uint32_t exec_mas
 void mixed_mad_x86_64_v4(MixedFma destination, uint64_t flags, uint32_t exec_mask, uint32_t mode,
                          uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
+// Narrow an already-rounded FP32 Wave32, preserving inactive/unselected data.
+// Require the named ISA; controls have been validated by the caller.
+void mixed_narrow_x86_64_v3(MixedFma destination, uint64_t flags, uint32_t exec_mask, uint32_t *d,
+                            const uint32_t *source);
+void mixed_narrow_x86_64_v4(MixedFma destination, uint64_t flags, uint32_t exec_mask, uint32_t *d,
+                            const uint32_t *source);
+
 } // namespace rocjitsu::arith

@@ -6,6 +6,7 @@ import argparse
 import errno
 import logging
 import os
+import re
 import sys
 import time
 import collections
@@ -87,8 +88,10 @@ class AMDSMISubParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(
                 command, value, outputformat, hint=hint
             )
-        elif ": expected" in message:
-            # e.g. "argument --gpu: expected one argument"
+        elif re.search(r": expected (one|at least one|\d+) arguments?$", message):
+            # e.g. "argument --gpu: expected one argument", or
+            # "argument --node-balancing-mode: expected 2 arguments" for a
+            # fixed-nargs action.
             arg = (
                 message[len("argument ") :].split(":")[0]
                 if message.startswith("argument ")
@@ -1347,6 +1350,64 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         return _ValidatePtlFormat
 
+    def _validate_power_stabilization_configure(self):
+        """Validate and normalize --power-stabilization-configure.
+
+        Accepts either:
+          - a single '@<path>' argument pointing to a JSON file shaped like
+            the `static --power-stabilization --json` output (a top-level
+            `gpu_data` list with one entry per GPU) -- the path is only
+            syntax-checked here; set_value.py resolves the per-GPU entry
+            and parses its tokens once the target GPU is known, or
+          - one or more space- and/or comma-separated KEY=VALUE tokens
+            (lowercase keys matching amdsmi_power_stabilization_param_id_t).
+
+        Normalizes to a power_stabilization_configure_args(tokens, file_path)
+        namedtuple: `tokens` is an ordered list of
+        (AmdSmiPowerStabilizationParamId, value) tuples for the direct
+        KEY=VALUE form, or None for the '@<path>' form (and vice versa for
+        `file_path`).
+        """
+        power_stabilization_configure_args = collections.namedtuple(
+            "power_stabilization_configure_args", ["tokens", "file_path"]
+        )
+
+        class _PowerStabilizationConfigureAction(argparse.Action):
+            def __call__(self, parser, args, values, option_string=None):
+                # `@<path>` form: resolved once per GPU in set_value.py, since
+                # the file is a multi-GPU `gpu_data` dump and which entry
+                # applies isn't known until the GPU being processed is.
+                if len(values) == 1 and values[0].startswith("@"):
+                    if not values[0][1:]:
+                        raise argparse.ArgumentError(self, "File path cannot be empty after '@'.")
+                    setattr(
+                        args, self.dest, power_stabilization_configure_args(None, values[0][1:])
+                    )
+                    return
+
+                tokens = []
+                for value in values:
+                    tokens.extend(part for part in value.split(",") if part.strip() != "")
+
+                parsed = []
+                for token in tokens:
+                    try:
+                        result = AMDSMIHelpers.parse_power_stabilization_token(
+                            token, ignore_read_only=False
+                        )
+                    except ValueError as e:
+                        raise argparse.ArgumentError(self, f"{e} for {option_string}")
+                    parsed.append(result)
+
+                if not parsed:
+                    raise argparse.ArgumentError(
+                        self, f"{option_string} requires at least one KEY=VALUE pair"
+                    )
+
+                setattr(args, self.dest, power_stabilization_configure_args(parsed, None))
+
+        return _PowerStabilizationConfigureAction
+
     def _ampp_configure_options(self):
         """Custom action for --ampp-configure PROFILE_NAME KEY=VALUE [KEY=VALUE ...]"""
         output_format = self.helpers.get_output_format()
@@ -1530,7 +1591,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     ):
         # Device arguments help text
         gpu_help = (
-            f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
+            f"Select a GPU ID, BDF, UUID or CUID from the possible choices:\n{self.gpu_choices_str}"
         )
         vf_help = "Gets general information about the specified VF (timeslice, fb info, …).\
                     \nAvailable only on virtualization OSs"
@@ -1653,7 +1714,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_command_modifiers(version_parser)
 
         # help info
-        gpu_version_help = "Display the current amdgpu driver version"
+        gpu_version_help = "Display the current amdgpu driver version and package"
         cpu_version_help = "Display the current amd_hsmp or hsmp_acpi driver version"
         nic_version_help = "Display the current nic driver version"
 
@@ -1692,7 +1753,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         list_help = "List GPU information"
         list_optionals_title = "List Arguments"
         list_subcommand_help = f"{self.description}\n\nLists all detected devices on the system.\
-                            \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.\
+                            \nLists the BDF, UUID, KFD_ID, NODE_ID, Partition ID and CUID for each GPU and/or CPUs.\
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
         enumeration_help = "Enumeration mapping to other features.\
@@ -1725,7 +1786,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         bus_help = "All bus information"
         vbios_help = "All video bios/IFWI information (if available)"
         limit_help = "All limit metric values (i.e. power and thermal limits)"
-        driver_help = "Displays driver version"
+        driver_help = "Displays driver version and package"
         vram_help = "All vram information"
         cache_help = "All cache information"
         board_help = "All board information"
@@ -1733,16 +1794,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         xgmi_plpd_help = "The available XGMI per-link power down policy"
         process_isolation_help = "The process isolation status"
         cuid_help = (
-            "Component Unified ID: the derived CUID, its component type, whether it is a\n"
-            "temporary (auxiliary) identifier, and which layer answered.\n"
-            "Not part of the default `amd-smi static` output; ask for it.\n"
-            "The primary CUID is not shown by default either: its payload embeds the raw\n"
-            "serial number. Add --cuid-primary, as root, to include it."
-        )
-        cuid_primary_help = (
-            "Include the primary CUID in the CUID output, implying --cuid. Requires\n"
-            "privilege, and prints a value that embeds the device serial number. Do not\n"
-            "paste it into a bug report."
+            "Component Unified ID: the CUID, its component type, which layer answered,\n"
+            "and whether it is temporary.\n"
+            "Not part of the default `amd-smi static` output; ask for it."
         )
         profile_help = "Display current and available power profiles"
         clk_options = self.helpers.get_clock_types()[0]
@@ -1828,9 +1882,6 @@ class AMDSMIParser(argparse.ArgumentParser):
                 "-Y", "--cuid", action="store_true", required=False, help=cuid_help
             )
             static_parser.add_argument(
-                "-y", "--cuid-primary", action="store_true", required=False, help=cuid_primary_help
-            )
-            static_parser.add_argument(
                 "-C",
                 "--clock",
                 action="store",
@@ -1879,6 +1930,19 @@ class AMDSMIParser(argparse.ArgumentParser):
             if self.helpers.is_linux():
                 static_parser.add_argument(
                     "-u", "--numa", action="store_true", required=False, help=numa_help
+                )
+
+            # Power Stabilization is bare-metal Linux only (no NPM/guest-VF routing)
+            if self.helpers.is_linux() and self.helpers.is_baremetal():
+                power_stabilization_help = (
+                    "Power Stabilization status (HAWK dummy-compute insertion and Ramp Management)"
+                )
+                static_parser.add_argument(
+                    "-S",
+                    "--power-stabilization",
+                    action="store_true",
+                    required=False,
+                    help=power_stabilization_help,
                 )
 
             # Options to only display on a Hypervisor TODO: Add hypervisor driver check
@@ -3033,6 +3097,34 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metavar="WATTS",
             )
 
+            if self.helpers.is_linux() and self.helpers.is_baremetal():
+                set_power_stabilization_help = (
+                    "Configure Power Stabilization (HAWK dummy-compute insertion"
+                    " and Ramp Management)."
+                    "\n\tAccepts one or more space/comma-separated KEY=VALUE pairs"
+                    " (enable, power_floor, delay, insertion_priority, ramp_enable,"
+                    " ramp_max_ramp_up_rate, ramp_max_ramp_down_rate,"
+                    " ramp_min_time_at_power_floor, ramp_stop_delay), or a single"
+                    " @<path> argument pointing to a JSON file matching the"
+                    " `static --power-stabilization --json` output."
+                    "\n\tenable/ramp_enable accept on/off/true/false/1/0;"
+                    " insertion_priority accepts a name (OPPORTUNISTIC, GUARANTEED,"
+                    " DYNAMIC) or its integer value; the rest, including"
+                    " ramp_max_ramp_up_rate/ramp_max_ramp_down_rate, are integers."
+                    "\n\tExample: enable=on power_floor=70 insertion_priority=GUARANTEED"
+                    " ramp_max_ramp_up_rate=5"
+                    "\n\tEach key is applied in order; processing stops at the first failure."
+                )
+                set_value_exclusive_group.add_argument(
+                    "-s",
+                    "--power-stabilization-configure",
+                    action=self._validate_power_stabilization_configure(),
+                    nargs="+",
+                    required=False,
+                    help=set_power_stabilization_help,
+                    metavar="KEY=VALUE [KEY=VALUE ...] | @PATH",
+                )
+
         if self.helpers.is_amd_hsmp_initialized():
             if self.helpers.is_baremetal():
                 # Optional CPU Args
@@ -3632,9 +3724,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             "Lists the CUID of every component on the node: the platform, CPU\n"
             "packages, GPUs, NPUs and NICs. Every CUID is temporary."
         )
-        node_cuid_primary_help = (
-            "Include each component's primary CUID, implying --cuid. Requires root."
-        )
 
         node_parser = subparsers.add_parser(
             "node", help=node_help, description=node_subcommand_help
@@ -3664,9 +3753,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         )
         node_parser.add_argument(
             "-Y", "--cuid", action="store_true", required=False, help=node_cuid_help
-        )
-        node_parser.add_argument(
-            "-y", "--cuid-primary", action="store_true", required=False, help=node_cuid_primary_help
         )
 
         # Add Universal Arguments

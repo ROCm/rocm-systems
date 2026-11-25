@@ -34,10 +34,10 @@ kernel:
     <<: *level_default
     tags: [launch, P1]
   Unit_kernel_chkConstantViaKernel:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [memory, P0]
   Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [memory, P0]
   Unit_kernel_MemoryOperationsViaKernels:
     <<: *level_default
@@ -123,5 +123,5 @@ kernel:
     <<: *level_default
     tags: [launch]
   Unit_kernel_BlockDim3D_Validation_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [launch]

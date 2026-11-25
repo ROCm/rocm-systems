@@ -1,9 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "native_d16_oracle.h"
 #include "rocjitsu/code/consan/target.h"
 #include "rocjitsu/hooks/consan/api.h"
 #include "rocjitsu/hooks/consan/testing.h"
+#include "transpose_oracle.h"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
@@ -35,10 +37,12 @@ Agents agents(std::string_view target) {
       [](hsa_agent_t agent, void *data) {
         auto &result = *static_cast<Agents *>(data);
         hsa_device_type_t type{};
-        if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS)
+        if (hsa_agent_get_info(agent, HSA_AGENT_INFO_DEVICE, &type) != HSA_STATUS_SUCCESS) {
           return HSA_STATUS_SUCCESS;
-        if (type == HSA_DEVICE_TYPE_CPU)
+        }
+        if (type == HSA_DEVICE_TYPE_CPU) {
           result.cpu = agent;
+        }
         if (type == HSA_DEVICE_TYPE_GPU) {
           hsa_isa_t isa{};
           uint32_t bytes = 0;
@@ -52,8 +56,9 @@ Agents agents(std::string_view target) {
               if (identity.starts_with(prefix)) {
                 identity.remove_prefix(prefix.size());
                 identity = identity.substr(0, identity.find(':'));
-                if (identity == result.target)
+                if (identity == result.target) {
                   result.gpu = agent;
+                }
               }
             }
           }
@@ -95,68 +100,128 @@ hsa_amd_memory_pool_t fine_pool(hsa_agent_t cpu) {
 
 int run(int argc, char **argv) {
   if (argc < 5) {
-    std::cerr << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES defined|observe [--baseline] "
-                 "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
-                 "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
-                 "[--separate-barrier] [--amd-signals]\n";
+    std::cerr
+        << "Usage: consan_hsa_runner ORIGINAL ENTRY LAUNCHES MODE "
+           "[--baseline] "
+           "[--bad-geometry] [--profiling] [--reuse-signal] [--target GPU] [--wave-size N] "
+           "[--threads N] [--test-statistics] [--batch-barrier-and|--batch-barrier-or] "
+           "[--separate-barrier] [--high-lane] [--workgroups N] [--amd-signals]\n"
+           "MODE: grouped, grouped_sync, defined, synchronized, mixed, wide_u8, wide_i8, "
+           "wide_b8_peer, wide_d16_u8, wide_d16_i8, wide_d16_u16, wide_d16_peer, wide_u16, "
+           "wide_i16, "
+           "wide_b64, wide_b96, wide_b128, atomic_u32_count, atomic_u64_count, atomic_f32_count, "
+           "atomic_f64_count, atomic_cas_count, transpose_BITS_SCENARIO, observe\n";
     return 3;
   }
   uint32_t launches = 0;
   const std::from_chars_result parsed =
       std::from_chars(argv[3], argv[3] + std::strlen(argv[3]), launches);
-  if (parsed.ec != std::errc{} || *parsed.ptr != '\0' || launches == 0 || launches > 16)
+  if (parsed.ec != std::errc{} || *parsed.ptr != '\0' || launches == 0 || launches > 16) {
     return 3;
-  const bool defined = std::string_view(argv[4]) == "defined";
-  if (!defined && std::string_view(argv[4]) != "observe")
+  }
+  const std::string_view mode(argv[4]);
+  uint32_t transpose_bits = 0;
+  std::string_view transpose_scenario;
+  if (mode.starts_with("transpose_")) {
+    const std::string_view suffix = mode.substr(10);
+    const char *end = suffix.data() + suffix.size();
+    const auto parsed_bits = std::from_chars(suffix.data(), end, transpose_bits);
+    if (parsed_bits.ec != std::errc{} || parsed_bits.ptr == end || *parsed_bits.ptr != '_' ||
+        (transpose_bits != 4 && transpose_bits != 6 && transpose_bits != 8 &&
+         transpose_bits != 16)) {
+      return 3;
+    }
+    transpose_scenario = {parsed_bits.ptr + 1, end};
+    if (transpose_scenario != "full" && transpose_scenario != "empty" &&
+        transpose_scenario != "partial" && transpose_scenario != "overlap" &&
+        transpose_scenario != "adjacent" && transpose_scenario != "short") {
+      return 3;
+    }
+  }
+  const bool atomic_cas = mode == "atomic_cas_count";
+  const bool atomic_wide = mode == "atomic_u64_count" || mode == "atomic_f64_count";
+  const bool defined =
+      mode == "defined" || mode == "atomic_u32_count" || mode == "atomic_f32_count";
+  const bool grouped = mode == "grouped" || mode == "grouped_sync";
+  const bool group_barrier = mode == "grouped_sync";
+  const bool mixed = mode == "mixed";
+  const bool synchronized = mode == "synchronized" || mixed;
+  const bool d16 = mode == "wide_d16_u8" || mode == "wide_d16_i8" || mode == "wide_d16_u16" ||
+                   mode == "wide_d16_peer";
+  const uint32_t wide_width = mode == "wide_u8" || mode == "wide_i8" || mode == "wide_b8_peer" ? 1
+                              : mode == "wide_u16" || mode == "wide_i16"                       ? 2
+                              : mode == "wide_b64"                                             ? 8
+                              : mode == "wide_b96"                                             ? 12
+                              : mode == "wide_b128"                                            ? 16
+                                                                                               : 0;
+  if (!atomic_wide && !atomic_cas && !defined && !synchronized && !grouped && wide_width == 0 &&
+      !d16 && !transpose_bits && mode != "observe") {
     return 3;
+  }
   std::string_view target = "gfx1100";
-  uint32_t threads = 64, wave_size = 32;
+  uint32_t threads = 64, wave_size = 32, workgroups = 1;
   bool baseline = false, bad_geometry = false, profiling = false, reuse_signal = false;
-  bool test_statistics = false, separate_barrier = false, amd_signals = false;
+  bool test_statistics = false, separate_barrier = false, high_lane = false, amd_signals = false;
   uint16_t barrier_type = 0;
   for (int index = 5; index < argc; ++index) {
     const std::string_view option(argv[index]);
-    if (option == "--baseline")
+    if (option == "--high-lane") {
+      high_lane = true;
+    } else if (option == "--baseline") {
       baseline = true;
-    else if (option == "--bad-geometry")
+    } else if (option == "--bad-geometry") {
       bad_geometry = true;
-    else if (option == "--profiling")
+    } else if (option == "--profiling") {
       profiling = true;
-    else if (option == "--reuse-signal")
+    } else if (option == "--reuse-signal") {
       reuse_signal = true;
-    else if (option == "--test-statistics")
+    } else if (option == "--test-statistics") {
       test_statistics = true;
-    else if (option == "--amd-signals")
+    } else if (option == "--amd-signals") {
       amd_signals = true;
-    else if (option == "--batch-barrier-and" || option == "--batch-barrier-or")
+    } else if (option == "--batch-barrier-and" || option == "--batch-barrier-or") {
       barrier_type = option == "--batch-barrier-and" ? HSA_PACKET_TYPE_BARRIER_AND
                                                      : HSA_PACKET_TYPE_BARRIER_OR;
-    else if (option == "--separate-barrier")
+    } else if (option == "--separate-barrier") {
       separate_barrier = true;
-    else if (option == "--target" && index + 1 < argc)
+    } else if (option == "--target" && index + 1 < argc) {
       target = argv[++index];
-    else if ((option == "--threads" || option == "--wave-size") && index + 1 < argc) {
+    } else if ((option == "--threads" || option == "--wave-size" || option == "--workgroups") &&
+               index + 1 < argc) {
       const char *value = argv[++index];
-      uint32_t &number = option == "--threads" ? threads : wave_size;
+      uint32_t &number = option == "--threads"     ? threads
+                         : option == "--wave-size" ? wave_size
+                                                   : workgroups;
       const std::from_chars_result conversion =
           std::from_chars(value, value + std::strlen(value), number);
-      if (conversion.ec != std::errc{} || *conversion.ptr != '\0')
+      if (conversion.ec != std::errc{} || *conversion.ptr != '\0') {
         return 3;
-    } else
+      }
+    } else {
       return 3;
+    }
   }
   const rocjitsu::consan::TargetProfile *profile = rocjitsu::consan::target_profile(target);
   if (profile == nullptr || !rocjitsu::consan::supports_wave(*profile, wave_size) || threads == 0 ||
-      threads > 1024)
+      threads > 1024 || workgroups == 0 || workgroups > 32) {
     return 3;
+  }
   const uint32_t wave_count = (threads + wave_size - 1) / wave_size;
-  const size_t output_bytes = std::max(wave_count, 2u) * sizeof(uint32_t);
-  if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type))
+  const uint32_t output_words =
+      transpose_bits ? 4u * threads * workgroups
+                     : std::max(((wide_width || d16 || atomic_cas) ? 4u : (atomic_wide ? 2u : 1u)) *
+                                    wave_count * workgroups,
+                                2u);
+  const size_t output_bytes = output_words * sizeof(uint32_t);
+  if (baseline && (bad_geometry || profiling || reuse_signal || test_statistics || barrier_type)) {
     return 3;
-  if (separate_barrier && (!barrier_type || !bad_geometry))
+  }
+  if (separate_barrier && (!barrier_type || !bad_geometry)) {
     return 3;
-  if (hsa_init() != HSA_STATUS_SUCCESS)
+  }
+  if (hsa_init() != HSA_STATUS_SUCCESS) {
     return 77;
+  }
   const Agents hardware = agents(target);
   void *plugin = nullptr;
   rj_consan_finish_fn finish = nullptr;
@@ -164,14 +229,16 @@ int run(int argc, char **argv) {
   rj_consan_statistics_fn statistics = nullptr;
   if (!baseline) {
     const char *path = std::getenv("RJ_CONSAN_PLUGIN_PATH");
-    if (path)
+    if (path) {
       plugin = ::dlopen(path, RTLD_NOW | RTLD_NOLOAD);
+    }
     if (plugin) {
       finish = reinterpret_cast<rj_consan_finish_fn>(::dlsym(plugin, "rj_consan_finish"));
       drain = reinterpret_cast<rj_consan_drain_fn>(::dlsym(plugin, "rj_consan_drain"));
-      if (test_statistics)
+      if (test_statistics) {
         statistics =
             reinterpret_cast<rj_consan_statistics_fn>(::dlsym(plugin, "rj_consan_get_statistics"));
+      }
     }
     if (!finish || !drain || drain() != 0) {
       std::cerr << "required ConSan plugin was not active before original load\n";
@@ -183,11 +250,13 @@ int run(int argc, char **argv) {
     }
   }
   if (!hardware.cpu.handle || !hardware.gpu.handle) {
-    if (finish)
+    if (finish) {
       (void)finish();
+    }
     (void)hsa_shut_down();
-    if (plugin)
+    if (plugin) {
       ::dlclose(plugin);
+    }
     return 77;
   }
 
@@ -200,11 +269,14 @@ int run(int argc, char **argv) {
   void *arguments = nullptr, *output = nullptr;
   int result = 0;
   uint32_t completed = 0;
+  size_t output_allocation_bytes = 0;
+  int64_t dispatch_wall_ns = 0, drain_wall_ns = 0;
   int profiling_status = 0;
-  std::vector<uint32_t> last_output(std::max(wave_count, 2u));
+  std::vector<uint32_t> last_output(output_words);
   const auto require = [&](hsa_status_t status, const char *operation) {
-    if (status == HSA_STATUS_SUCCESS)
+    if (status == HSA_STATUS_SUCCESS) {
       return true;
+    }
     std::cerr << operation << " failed with HSA status " << uint32_t(status) << '\n';
     return false;
   };
@@ -217,10 +289,12 @@ int run(int argc, char **argv) {
       !require(
           hsa_executable_load_agent_code_object(executable, hardware.gpu, reader, nullptr, nullptr),
           "original load through plugin") ||
-      !require(hsa_executable_freeze(executable, nullptr), "freeze/binding"))
+      !require(hsa_executable_freeze(executable, nullptr), "freeze/binding")) {
     result = 20;
-  if (descriptor >= 0 && ::close(descriptor) != 0 && result == 0)
+  }
+  if (descriptor >= 0 && ::close(descriptor) != 0 && result == 0) {
     result = 20;
+  }
   uint64_t kernel = 0;
   uint32_t kernarg_bytes = 0, group_bytes = 0;
   hsa_executable_symbol_t symbol{};
@@ -237,8 +311,9 @@ int run(int argc, char **argv) {
        !require(hsa_executable_symbol_get_info(
                     symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE, &group_bytes),
                 "LDS extent") ||
-       kernarg_bytes != 16 || kernel == 0))
+       kernarg_bytes != 16 || kernel == 0)) {
     result = 20;
+  }
   const hsa_amd_memory_pool_t pool = fine_pool(hardware.cpu);
   if (result == 0 &&
       (!pool.handle ||
@@ -250,20 +325,34 @@ int run(int argc, char **argv) {
        !require(hsa_amd_agents_allow_access(1, &hardware.gpu, nullptr, output), "output access") ||
        !require(hsa_queue_create(hardware.gpu, 128, HSA_QUEUE_TYPE_SINGLE, nullptr, nullptr, 0, 0,
                                  &queue),
-                "controlled queue")))
+                "controlled queue"))) {
     result = 20;
+  }
+  if (result == 0) {
+    hsa_amd_pointer_info_t output_info = {};
+    output_info.size = sizeof(output_info);
+    if (!require(hsa_amd_pointer_info(output, &output_info, nullptr, nullptr, nullptr),
+                 "output allocation info") ||
+        output_info.type != HSA_EXT_POINTER_TYPE_HSA) {
+      result = 20;
+    } else {
+      output_allocation_bytes = output_info.sizeInBytes;
+    }
+  }
   if (result == 0 && profiling) {
     profiling_status = hsa_amd_profiling_set_profiler_enabled(queue, 1);
-    if (profiling_status == HSA_STATUS_SUCCESS)
+    if (profiling_status == HSA_STATUS_SUCCESS) {
       result = 21;
+    }
   }
   if (const char *maps = std::getenv("CONSAN_PROCESS_MAPS")) {
     std::ifstream source("/proc/self/maps");
     std::ofstream destination(maps);
     destination << source.rdbuf();
     destination.close();
-    if (destination.fail() && result == 0)
+    if (destination.fail() && result == 0) {
       result = 22;
+    }
   }
   const auto create_completion = [amd_signals](hsa_signal_t *completion) {
     return amd_signals ? hsa_amd_signal_create(1, 0, nullptr, 0, completion)
@@ -275,11 +364,13 @@ int run(int argc, char **argv) {
         result = 21;
         break;
       }
-    } else
+    } else {
       hsa_signal_store_screlease(signal, 1);
+    }
     const uint32_t input = 7 + 16 * index;
     std::memset(arguments, 0, 16);
     std::memcpy(arguments, &input, 4);
+    std::memcpy(static_cast<uint8_t *>(arguments) + 4, &wave_count, 4);
     std::memcpy(static_cast<uint8_t *>(arguments) + 8, &output, 8);
     std::memset(output, 0, output_bytes);
     if (barrier_type && !require(create_completion(&barrier_signal), "barrier completion")) {
@@ -294,7 +385,7 @@ int run(int argc, char **argv) {
     packet->setup = 1;
     packet->workgroup_size_x = static_cast<uint16_t>(threads);
     packet->workgroup_size_y = packet->workgroup_size_z = 1;
-    packet->grid_size_x = bad_geometry ? 2 * threads : threads;
+    packet->grid_size_x = threads * workgroups + uint32_t{bad_geometry};
     packet->grid_size_y = packet->grid_size_z = 1;
     packet->group_segment_size = group_bytes;
     packet->kernel_object = kernel;
@@ -316,6 +407,9 @@ int run(int argc, char **argv) {
               : barrier_type | (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
                     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     }
+    // Host wall time includes simulator/driver work and completion forwarding;
+    // it is not a profiling timestamp from the GPU.
+    const auto dispatch_started = std::chrono::steady_clock::now();
     // Keep the second header invalid for the separate-callback control.
     __atomic_store_n(reinterpret_cast<uint16_t *>(packet), header, __ATOMIC_RELEASE);
     hsa_signal_store_screlease(queue->doorbell_signal,
@@ -336,9 +430,10 @@ int run(int argc, char **argv) {
     if (barrier_type) {
       const std::chrono::steady_clock::time_point deadline =
           std::chrono::steady_clock::now() + std::chrono::seconds(5);
-      while (barrier_completion == 1 && std::chrono::steady_clock::now() < deadline)
+      while (barrier_completion == 1 && std::chrono::steady_clock::now() < deadline) {
         barrier_completion = hsa_signal_wait_scacquire(barrier_signal, HSA_SIGNAL_CONDITION_LT, 1,
                                                        1000000, HSA_WAIT_STATE_BLOCKED);
+      }
       if (barrier_completion != -1) {
         std::cerr << "batch barrier did not report failure; retaining live HSA resources\n";
         ::_exit(24);
@@ -347,9 +442,10 @@ int run(int argc, char **argv) {
     hsa_signal_value_t value = 1;
     const std::chrono::steady_clock::time_point deadline =
         std::chrono::steady_clock::now() + std::chrono::seconds(20);
-    while (value == 1 && std::chrono::steady_clock::now() < deadline)
+    while (value == 1 && std::chrono::steady_clock::now() < deadline) {
       value = hsa_signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, 1, 1000000,
                                         HSA_WAIT_STATE_BLOCKED);
+    }
     if (value == 1) {
       std::cerr << "dispatch timed out without completion proof; retaining live GPU allocations\n";
       ::_exit(24);
@@ -358,58 +454,177 @@ int run(int argc, char **argv) {
       result = 21;
       break;
     }
+    dispatch_wall_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                            std::chrono::steady_clock::now() - dispatch_started)
+                            .count();
     ++completed;
     std::memcpy(last_output.data(), output, output_bytes);
     std::cout << "launch=" << index + 1 << " input=" << input << " output=" << last_output[0] << ','
               << last_output[1] << '\n';
     if (defined) {
-      for (uint32_t wave = 0; wave < wave_count; ++wave)
-        if (last_output[wave] != input + wave)
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        const uint32_t expected = mode == "atomic_f32_count"
+                                      ? 0x40200000u
+                                      : input + wave + (mode == "atomic_u32_count" ? 2u : 0u);
+        if (last_output[wave] != expected) {
           result = 23;
+        }
+      }
     }
-    if (drain && drain() != 0)
-      result = 22;
-    if (!reuse_signal) {
-      if (!require(hsa_signal_destroy(signal), "completed signal destroy") && result == 0)
+    if (atomic_cas) {
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        const std::array<uint32_t, 4> expected = {input, wave == 0 ? 0x2468u : input,
+                                                  1008 + 8 * wave, 0};
+        if (!std::equal(expected.begin(), expected.end(), last_output.begin() + 4 * wave))
+          result = 23;
+      }
+    }
+    if (atomic_wide) {
+      const uint32_t expected_high = mode == "atomic_f64_count" ? 0x40040000u : 4u;
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        if (last_output[2 * wave] != 0 || last_output[2 * wave + 1] != expected_high) {
+          result = 23;
+        }
+      }
+    }
+    if (synchronized) {
+      // This checks output preservation, not that a wait actually blocked: an
+      // eager producer can also yield input without a barrier. The simulator's
+      // Gfx1250PublicationBarrierBlocksAnEarlyConsumer test supplies that control.
+      for (size_t word = 0; word < last_output.size(); ++word) {
+        if (last_output[word] != (word == 0 ? input + uint32_t{mixed} : 0)) {
+          result = 23;
+        }
+      }
+    }
+    if (transpose_bits) {
+      // Partial EXEC on gfx950 is an undefined input used only for the simulator diagnosis.
+      if (target != "gfx950" || transpose_scenario != "partial") {
+        for (uint32_t thread = 0; thread < threads * workgroups; ++thread) {
+          const auto expected = rocjitsu::consan::test::transpose_output(
+              thread % wave_size, transpose_bits, target == "gfx950", transpose_scenario);
+          if (!std::equal(expected.begin(), expected.end(), last_output.begin() + 4 * thread)) {
+            result = 23;
+          }
+        }
+      }
+    } else if (wide_width || d16) {
+      for (uint32_t wave = 0; wave < wave_count; ++wave) {
+        std::array<uint32_t, 4> expected{input + wave, 0x01234567u, 0x76543210u, 0xa5a5a5a5u};
+        if (mode == "wide_d16_peer") {
+          expected = {input + wave, 0x89abcdefu, 0x13579bdfu, 0xfedcba98u};
+        } else if (d16) {
+          expected = rocjitsu::consan::test::d16_output(target, wave, mode == "wide_d16_u16",
+                                                        mode == "wide_d16_i8");
+        } else if (wide_width == 1) {
+          const uint32_t byte = (0x80u + input + wave) & 0xffu;
+          expected[0] = mode == "wide_i8" && (byte & 0x80) ? (0xffffff00u | byte) : byte;
+          if (mode != "wide_b8_peer") {
+            expected[1] = (byte << 24) | 0x00234567u;
+          }
+        } else if (mode == "wide_i16") {
+          expected[0] += 0xffff8000u;
+        } else if (wide_width == 2) {
+          expected[0] += 0x8000u;
+        } else {
+          expected[1] = 0x89abcdefu;
+        }
+        if (wide_width >= 12) {
+          expected[2] = 0x13579bdfu;
+        }
+        if (wide_width == 16) {
+          expected[3] = 0xfedcba98u;
+        }
+        if (high_lane && wave * wave_size + wave_size - 1 >= threads) {
+          expected.fill(0);
+        }
+        for (uint32_t word = 0; word < 4; ++word) {
+          if (last_output[4 * wave + word] != expected[word]) {
+            result = 23;
+          }
+        }
+      }
+    } else if (grouped) {
+      for (uint32_t group = 0; group < workgroups; ++group) {
+        for (uint32_t wave = 0; wave < wave_count; ++wave) {
+          if (last_output[group * wave_count + wave] !=
+              input + 16 * group + (group_barrier ? 0 : wave)) {
+            result = 23;
+          }
+        }
+      }
+    }
+    if (drain) {
+      const auto drain_started = std::chrono::steady_clock::now();
+      if (drain() != 0) {
         result = 22;
+      }
+      drain_wall_ns += std::chrono::duration_cast<std::chrono::nanoseconds>(
+                           std::chrono::steady_clock::now() - drain_started)
+                           .count();
+    }
+    if (!reuse_signal) {
+      if (!require(hsa_signal_destroy(signal), "completed signal destroy") && result == 0) {
+        result = 22;
+      }
       signal = {};
     }
   }
   // This explicit finish is before signal/queue/executable teardown and HSA
   // shutdown, so GPU and capture last users are still inside HSA's lifetime.
+  const auto finish_started = std::chrono::steady_clock::now();
   const int finish_status = finish ? finish() : 0;
-  if (finish_status != 0 && result == 0)
+  const int64_t finish_wall_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now() - finish_started)
+                                     .count();
+  if (finish_status != 0 && result == 0) {
     result = 22;
+  }
   const rj_consan_statistics stats = statistics ? statistics() : rj_consan_statistics{};
-  if (signal.handle && !require(hsa_signal_destroy(signal), "signal cleanup") && result == 0)
+  if (signal.handle && !require(hsa_signal_destroy(signal), "signal cleanup") && result == 0) {
     result = 22;
+  }
   if (barrier_signal.handle &&
-      !require(hsa_signal_destroy(barrier_signal), "barrier signal cleanup") && result == 0)
+      !require(hsa_signal_destroy(barrier_signal), "barrier signal cleanup") && result == 0) {
     result = 22;
-  if (queue && !require(hsa_queue_destroy(queue), "queue cleanup") && result == 0)
+  }
+  if (queue && !require(hsa_queue_destroy(queue), "queue cleanup") && result == 0) {
     result = 22;
+  }
   if (reader.handle && !require(hsa_code_object_reader_destroy(reader), "reader cleanup") &&
-      result == 0)
+      result == 0) {
     result = 22;
+  }
   if (executable.handle && !require(hsa_executable_destroy(executable), "executable cleanup") &&
-      result == 0)
+      result == 0) {
     result = 22;
-  if (arguments && !require(hsa_amd_memory_pool_free(arguments), "argument cleanup") && result == 0)
+  }
+  if (arguments && !require(hsa_amd_memory_pool_free(arguments), "argument cleanup") &&
+      result == 0) {
     result = 22;
-  if (output && !require(hsa_amd_memory_pool_free(output), "output cleanup") && result == 0)
+  }
+  if (output && !require(hsa_amd_memory_pool_free(output), "output cleanup") && result == 0) {
     result = 22;
-  if (!require(hsa_shut_down(), "HSA shutdown") && result == 0)
+  }
+  if (!require(hsa_shut_down(), "HSA shutdown") && result == 0) {
     result = 22;
-  if (plugin)
+  }
+  if (plugin) {
     ::dlclose(plugin);
+  }
   std::cout << "{\"app_status\":" << result << ",\"finish_status\":" << finish_status
-            << ",\"completed\":" << completed;
-  if (barrier_type)
+            << ",\"completed\":" << completed
+            << ",\"output_allocation_bytes\":" << output_allocation_bytes
+            << ",\"dispatch_wall_ns\":" << dispatch_wall_ns
+            << ",\"drain_wall_ns\":" << drain_wall_ns << ",\"finish_wall_ns\":" << finish_wall_ns;
+  if (barrier_type) {
     std::cout << ",\"barrier_completion\":" << barrier_completion;
-  if (statistics)
+  }
+  if (statistics) {
     std::cout << ",\"submitted\":" << stats.submitted << ",\"forwarded\":" << stats.forwarded
               << ",\"copied\":" << stats.copied << ",\"written\":" << stats.written
               << ",\"reused\":" << stats.reused;
+  }
   std::cout << ",\"profiling_status\":" << profiling_status << "}\n";
   return result;
 }

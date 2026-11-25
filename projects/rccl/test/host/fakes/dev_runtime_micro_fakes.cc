@@ -314,7 +314,9 @@ ncclResult_t ncclGinConnectOnce(struct ncclComm* comm) { return g_devrGinConnect
 // installs its own so the capture-mode restore can be observed.
 static ncclResult_t DefaultGinDevCommSetup(struct ncclComm*, struct ncclDevCommRequirements const*,
                                            struct ncclDevResourceRequirements*, struct ncclGinBarrierReq const*, int,
-                                           struct ncclDevComm*, uint32_t, struct ncclDevCommCompat const*) {
+                                           struct ncclDevComm* devComm, uint32_t, struct ncclDevCommCompat const*) {
+  devComm->ginContextCount = 1;
+  devComm->ginHandles[0] = reinterpret_cast<void*>(0xACE);
   return ncclSuccess;
 }
 std::function<ncclResult_t(struct ncclComm*, struct ncclDevCommRequirements const*,
@@ -331,8 +333,16 @@ ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequir
   return g_devrGinDevCommSetup(comm, reqs, resReqs, barrierReqs, nBarrierReqs, devComm, deviceCodeVersion,
                                devCompat);
 }
-ncclResult_t ncclGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
-void ncclGinDevCommClearFields(struct ncclDevComm*) {}
+
+static ncclResult_t DefaultGinDevCommFree(struct ncclComm*, struct ncclDevComm const*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*, struct ncclDevComm const*)> g_devrGinDevCommFree = DefaultGinDevCommFree;
+ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const* devComm) {
+  return g_devrGinDevCommFree(comm, devComm);
+}
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm) {
+  devComm->ginContextCount = 0;
+  for (auto& handle : devComm->ginHandles) handle = nullptr;
+}
 #ifdef ENABLE_ROCSHMEM_GIN
 // Only referenced from ncclDevrCommCreateInternal's SDMA signal-binding block,
 // which is itself behind ENABLE_ROCSHMEM_GIN. Copied from develop's
@@ -547,6 +557,7 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapRecv                           = DefaultBootstrapRecv;
   g_devrGinConnectOnce                          = DefaultGinConnectOnce;
   g_devrGinDevCommSetup                         = DefaultGinDevCommSetup;
+  g_devrGinDevCommFree                          = DefaultGinDevCommFree;
   ResetMgmtTaskEnqFakes();
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;

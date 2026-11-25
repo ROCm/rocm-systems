@@ -16,6 +16,8 @@ set(_MICRO_PLUGIN_DEFS
   CSV_TUNER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/tuner/csv_tuner.cc"
   # Source tuner/ dir, so a test can check the generator embedded the CSVs verbatim.
   RCCL_TUNER_CSV_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../../tuner"
+  ENV_V1_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/env/env_v1.cc"
+  ENV_V2_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/env/env_v2.cc"
   # plugin/gin.cc is the first gin.cc in SRC_FILES, so hipify keeps the name.
   GIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/gin.cc"
   NET_V6_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/net/net_v6.cc"
@@ -37,7 +39,9 @@ set(_MICRO_PLUGIN_DEFS
   PROFILER_V7_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v7.cc"
   PROFILER_V8_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/profiler/profiler_v8.cc"
   # src/CMakeLists.txt lists plugin/rma.cc before rma/rma.cc, so it keeps its own name.
-  RMA_PLUGIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma.cc")
+  RMA_PLUGIN_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma.cc"
+  RMA_V14_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma/rma_v14.cc"
+  RMA_V15_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/plugin/rma/rma_v15.cc")
 
 # One src/plugin/ test file per binary; see rccl_add_unit_micro_binary().
 macro(rccl_add_plugin_micro_binary _name _test)
@@ -78,7 +82,15 @@ rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginRmaPluginInit rma-plugin-i
   SOURCES
     fakes/env_fakes.cc
     fakes/nccl_fakes.cc
-    fakes/plugin_stubs.cc)
+    fakes/transport_stubs.cc)            # rcclUseAinic, for the internal backend choice
+
+rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginEnvV1 env/env-v1-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc)
+
+rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginEnvV2 env/env-v2-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc)
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginNetV6 net/net-v6-test.cc
   SOURCES
@@ -147,6 +159,14 @@ rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginProfilerV8 profiler/profil
   SOURCES
     fakes/nccl_fakes.cc
     plugin/profiler/fake_lib_dlsym.cc)
+
+rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginRmaV14 rma/rma-v14-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc)
+
+rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginRmaV15 rma/rma-v15-test.cc
+  SOURCES
+    fakes/nccl_fakes.cc)
 
 rccl_add_plugin_micro_binary(rccl-UnitTestsMicroPluginTunerCsvTuner tuner/csv-tuner-test.cc
   SOURCES

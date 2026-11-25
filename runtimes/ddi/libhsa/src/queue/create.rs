@@ -38,8 +38,8 @@ pub(crate) unsafe fn create_hardware_queue(
         event: Arc<QueueEventOwner>,
         host_page_size: usize,
         stop: Arc<AtomicBool>,
-        health: Arc<crate::runtime::GenerationHealth>,
-        _token: crate::runtime::InFlightToken,
+        health: Arc<crate::session::SessionHealth>,
+        _token: crate::admission::InFlightToken,
     }
 
     let cooperative = queue_type == QUEUE_TYPE_COOPERATIVE;
@@ -77,27 +77,30 @@ pub(crate) unsafe fn create_hardware_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.stop_workers.load(Ordering::Acquire) {
+        if runtime.control.stop_workers.load(Ordering::Acquire) {
             return INVALID_RUNTIME_STATE;
         }
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
-        let info = runtime.gpus[index].info();
+        let info = runtime.agents.gpus[index].info();
         if control_memory == QueueRingMemory::HostVisibleLocal
-            && !runtime.route_from_nearest_cpu(index).is_some_and(|link| {
-                link.kind == rocddi::topology::MemoryLinkType::Xgmi
-                    && link.coherent_support
-                    && link.atomic_support_32bit
-                    && link.atomic_support_64bit
-            })
+            && !runtime
+                .agents
+                .route_from_nearest_cpu(index)
+                .is_some_and(|link| {
+                    link.kind == rocddi::topology::MemoryLinkType::Xgmi
+                        && link.coherent_support
+                        && link.atomic_support_32bit
+                        && link.atomic_support_64bit
+                })
         {
             return INVALID_QUEUE_CREATION;
         }
-        if cu_mask.is_some() || runtime.gpus[index].global_cu_mask.is_some() {
+        if cu_mask.is_some() || runtime.agents.gpus[index].global_cu_mask.is_some() {
             cu_mask = match constrain_cu_mask(
                 &info,
-                runtime.gpus[index].global_cu_mask.as_deref(),
+                runtime.agents.gpus[index].global_cu_mask.as_deref(),
                 cu_mask.as_deref(),
             ) {
                 Ok((mask, _)) => Some(mask),
@@ -124,7 +127,7 @@ pub(crate) unsafe fn create_hardware_queue(
             return INVALID_QUEUE_CREATION;
         }
         if cooperative {
-            if !runtime.gpus[index]
+            if !runtime.agents.gpus[index]
                 .info()
                 .queues
                 .aql
@@ -193,20 +196,20 @@ pub(crate) unsafe fn create_hardware_queue(
         if runtime.queue_state.queues.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        let tracker = runtime.inflight.clone();
+        let tracker = runtime.control.inflight.clone();
         let Some(token) = tracker.enter() else {
             return OUT_OF_RESOURCES;
         };
         Prepared {
             generation,
             id,
-            device: runtime.gpus[index].device.clone(),
-            gpu: runtime.gpus[index].info(),
-            scratch_policy: runtime.gpus[index].scratch.clone(),
+            device: runtime.agents.gpus[index].device.clone(),
+            gpu: runtime.agents.gpus[index].info(),
+            scratch_policy: runtime.agents.gpus[index].scratch.clone(),
             event,
-            host_page_size: runtime.host_page_size,
-            stop: runtime.stop_workers.clone(),
-            health: runtime.health.clone(),
+            host_page_size: runtime.agents.host_page_size,
+            stop: runtime.control.stop_workers.clone(),
+            health: runtime.control.health.clone(),
             _token: token,
         }
     };
@@ -405,7 +408,7 @@ pub(crate) unsafe fn create_hardware_queue(
         },
     );
     runtime.queue_state.released_counted_queues.remove(&public);
-    let observer_failed = runtime.system_event_failed.clone();
+    let observer_failed = runtime.events.failure_flag();
     let event_worker = thread::Builder::new()
         .name("rocddi-queue-events".into())
         .spawn(move || {
@@ -469,14 +472,14 @@ pub(crate) unsafe fn create_hardware_queue(
 /// unpublished queue whose cleanup cannot be proven complete.
 struct UnpublishedQueueGuard<'a> {
     /// Generation health retained until queue publication or rollback.
-    health: &'a crate::runtime::GenerationHealth,
+    health: &'a crate::session::SessionHealth,
     /// Whether dropping this guard must retire an unpublished queue.
     armed: bool,
 }
 
 impl<'a> UnpublishedQueueGuard<'a> {
     /// Arms rollback for an unpublished queue and retains its health record.
-    fn new(health: &'a crate::runtime::GenerationHealth) -> Self {
+    fn new(health: &'a crate::session::SessionHealth) -> Self {
         Self {
             health,
             armed: true,
@@ -568,10 +571,10 @@ pub(crate) unsafe fn create_sdma_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.stop_workers.load(Ordering::Acquire) {
+        if runtime.control.stop_workers.load(Ordering::Acquire) {
             return INVALID_RUNTIME_STATE;
         }
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
         let id = match runtime.queue_state.allocate_id() {
@@ -581,16 +584,16 @@ pub(crate) unsafe fn create_sdma_queue(
         if runtime.queue_state.sdma_queues.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        let tracker = runtime.inflight.clone();
+        let tracker = runtime.control.inflight.clone();
         let Some(token) = tracker.enter() else {
             return OUT_OF_RESOURCES;
         };
         (
             generation,
             id,
-            runtime.gpus[index].device.clone(),
-            runtime.health.clone(),
-            runtime.stop_workers.clone(),
+            runtime.agents.gpus[index].device.clone(),
+            runtime.control.health.clone(),
+            runtime.control.stop_workers.clone(),
             token,
         )
     };

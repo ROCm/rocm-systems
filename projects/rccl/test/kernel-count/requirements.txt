@@ -2,4 +2,4 @@
 # The guards themselves only use the Python standard library; pytest is the
 # only external dependency (test framework + JUnit XML for the test_runner
 # harness).
-pytest
+pytest==9.2.0

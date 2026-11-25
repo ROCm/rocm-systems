@@ -13,6 +13,7 @@
 
 #include "fail_loud.h"
 #include "nccl_fakes.h"
+#include "rccl_common.h"
 #include "rma/rma.h"
 
 // init.cc owns NCCL_PARAM(P2pDisable). enqueue.cc's addP2pToPlan calls it via
@@ -39,6 +40,10 @@ ncclResult_t scheduleRmaTasksToPlan(struct ncclComm*, struct ncclKernelPlan*) {
 }
 #endif
 const char* ncclGetErrorString(ncclResult_t) { FailLoudUnfaked("enqueue_test_deps", "ncclGetErrorString"); }
+
+// paths.cc owns RCCL_PARAM(SaturateP2pNChannels). This binary does not compile
+// paths.cc, and rcclP2pPolicyChannels consults the accessor.
+int64_t rcclParamSaturateP2pNChannels() { return g_loadParam("RCCL_SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET); }
 
 void ResetEnqueueTestDeps() {
   ResetAllocatorFakes();

@@ -35,6 +35,7 @@ hipDeviceGetLuid
 hipDeviceGetPCIBusId
 hipDeviceGetSharedMemConfig
 hipDeviceGetP2PAttribute
+hipDeviceGetExecAffinitySupport
 hipExternalMemoryGetMappedMipmappedArray
 hipDevicePrimaryCtxGetState
 hipDevicePrimaryCtxRelease
@@ -114,6 +115,7 @@ hipArrayDestroy
 hipArrayGetInfo
 hipArrayGetDescriptor
 hipArray3DGetDescriptor
+hipArrayGetPlane
 hipMallocArray
 hipMemAdvise
 hipMemAllocPitch

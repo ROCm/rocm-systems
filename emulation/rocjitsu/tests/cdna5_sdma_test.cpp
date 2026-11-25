@@ -40,8 +40,9 @@ template <typename Predicate>
 bool wait_until(Predicate predicate, std::chrono::milliseconds timeout = std::chrono::seconds(1)) {
   const std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::now() + timeout;
   while (!predicate()) {
-    if (std::chrono::steady_clock::now() >= deadline)
+    if (std::chrono::steady_clock::now() >= deadline) {
       return false;
+    }
     std::this_thread::sleep_for(std::chrono::microseconds(50));
   }
   return true;
@@ -57,8 +58,9 @@ class TransientAqlAddressSpace final : public amdgpu::AddressSpaceTranslator,
 public:
   amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
                                         amdgpu::VmAccessKind) const override {
-    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address) {
       return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {
         .outcome = amdgpu::VmAccessOutcome::Complete,
         .translation = {.domain = amdgpu::VmMemoryDomain::System,
@@ -73,29 +75,33 @@ public:
     std::function<void()> callback;
     {
       std::lock_guard lock(mutex_);
-      if (address == tracked_read_address_)
+      if (address == tracked_read_address_) {
         ++tracked_read_attempts_;
+      }
       if (next_read_outcome_ && address == next_read_outcome_->address) {
         const amdgpu::VmAccessOutcome outcome = next_read_outcome_->outcome;
         next_read_outcome_.reset();
         return outcome;
       }
-      if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+      if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
         return amdgpu::VmAccessOutcome::Faulted;
+      }
       std::ranges::copy_n(bytes_.begin() + static_cast<ptrdiff_t>(address), bytes.size(),
                           bytes.begin());
       callback = take_hook(read_hook_, address);
     }
-    if (callback)
+    if (callback) {
       callback();
+    }
     return amdgpu::VmAccessOutcome::Complete;
   }
 
   amdgpu::VmAccessOutcome write(amdgpu::VmMemoryDomain, uint64_t address,
                                 std::span<const std::byte> bytes) override {
     std::lock_guard lock(mutex_);
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return amdgpu::VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<ptrdiff_t>(address));
     return amdgpu::VmAccessOutcome::Complete;
   }
@@ -119,8 +125,9 @@ public:
       std::memcpy(&value, bytes_.data() + address, width);
       callback = take_hook(atomic_load_hook_, address);
     }
-    if (callback)
+    if (callback) {
       callback();
+    }
     return {.outcome = amdgpu::VmAccessOutcome::Complete, .value = value};
   }
 
@@ -130,8 +137,9 @@ public:
     amdgpu::VmAccessOutcome outcome = amdgpu::VmAccessOutcome::Complete;
     {
       std::lock_guard lock(mutex_);
-      if (address == tracked_atomic_store_address_)
+      if (address == tracked_atomic_store_address_) {
         ++tracked_atomic_store_attempts_;
+      }
       if (fail_atomic_store_at_ && address == *fail_atomic_store_at_) {
         fail_atomic_store_at_.reset();
         callback = take_hook(atomic_store_hook_, address);
@@ -145,8 +153,9 @@ public:
         callback = take_hook(atomic_store_hook_, address);
       }
     }
-    if (callback)
+    if (callback) {
       callback();
+    }
     return outcome;
   }
 
@@ -222,8 +231,9 @@ private:
   };
 
   static std::function<void()> take_hook(std::optional<AccessHook> &hook, uint64_t address) {
-    if (!hook || hook->address != address)
+    if (!hook || hook->address != address) {
       return {};
+    }
     std::function<void()> callback = std::move(hook->callback);
     hook.reset();
     return callback;
@@ -276,8 +286,9 @@ public:
   }
 
   ~TransientAqlQueueForTest() {
-    if (registration_id_ != 0)
+    if (registration_id_ != 0) {
       sim_.cp()->unregister_queue(kQueueId, kProcessId);
+    }
     (void)sim_.soc->gpu_vm().unregister_address_space(address_space_);
   }
 
@@ -462,9 +473,10 @@ public:
   }
 
   ~HostSdmaQueueForTest() {
-    if (queue_handle_)
+    if (queue_handle_) {
       (void)sim_.soc->queue_registry().unregister_queue(queue_handle_,
                                                         amdgpu::QueueCloseMode::ForceCancel);
+    }
     (void)legacy_vm_.unregister_address_space(address_space_);
   }
 
@@ -486,8 +498,9 @@ public:
         ADD_FAILURE() << "timed out waiting for the host SDMA queue to retire or terminate";
         return;
       }
-      if (terminal_)
+      if (terminal_) {
         last_submission_status_ = amdgpu::QueueSubmissionStatus::Faulted;
+      }
     }
   }
 
@@ -543,8 +556,9 @@ public:
                      .page_table_generation = process_.page_table_generation(),
                      .request_mutex = {},
                      .access_admission = std::move(admission)});
-    if (!address_space_)
+    if (!address_space_) {
       throw std::runtime_error("cannot register the translated SDMA test address space");
+    }
     process_.map_pages(kRingVa, ring_.data(), ring_.size() * sizeof(ring_[0]));
     process_.map_pages(kQueueStateVa, queue_state_.data(),
                        queue_state_.size() * sizeof(queue_state_[0]));
@@ -599,9 +613,10 @@ public:
   }
 
   ~TranslatedSdmaQueueForTest() {
-    if (queue_handle_)
+    if (queue_handle_) {
       (void)sim_.soc->queue_registry().unregister_queue(queue_handle_,
                                                         amdgpu::QueueCloseMode::ForceCancel);
+    }
     (void)legacy_vm_.unregister_address_space(address_space_);
   }
 
@@ -624,8 +639,9 @@ public:
     std::lock_guard lock(process_.alloc_mutex_);
     auto &allocation = process_.allocations_.at(1);
     if (granted) {
-      if (allocation.mapped_device_ids.insert(1250).second)
+      if (allocation.mapped_device_ids.insert(1250).second) {
         allocation.admission_generations[1250] = process_.next_gpu_admission_generation_locked();
+      }
     } else {
       allocation.mapped_device_ids.erase(1250);
       allocation.admission_generations.erase(1250);
@@ -703,8 +719,9 @@ public:
         ADD_FAILURE() << "timed out waiting for the translated SDMA queue to retire or terminate";
         return;
       }
-      if (terminal_)
+      if (terminal_) {
         last_submission_status_ = amdgpu::QueueSubmissionStatus::Faulted;
+      }
     }
   }
 
@@ -1291,8 +1308,9 @@ TEST(Gfx1250SdmaTest, StaleAddressSpaceCannotExecuteThroughLegacyBacking) {
   std::array<uint64_t, 1> doorbells{write_idx};
   std::array<uint8_t, 32> source{};
   std::array<uint8_t, 32> destination{};
-  for (size_t index = 0; index < source.size(); ++index)
+  for (size_t index = 0; index < source.size(); ++index) {
     source[index] = static_cast<uint8_t>(index + 1);
+  }
 
   ring[0] = kSdmaOpCopy | (kSdmaSubopCopyLinear << 8);
   ring[1] = static_cast<uint32_t>(source.size() - 1);
@@ -1659,8 +1677,9 @@ TEST(Gfx1250SdmaTest, WrappingWriteHaltsInsteadOfLandingInLowMemory) {
   packet[0] = kSdmaOpWrite;
   write_sdma_qword_va(packet, 1, 2, kNearTop);
   packet[3] = kDwords - 1;
-  for (uint32_t i = 0; i < kDwords; ++i)
+  for (uint32_t i = 0; i < kDwords; ++i) {
     packet[4 + i] = 0xA5A5A5A5u;
+  }
   packet[4 + kDwords] = kSdmaOpFence;
   write_sdma_qword_va(packet, 5 + kDwords, 6 + kDwords, queue.signal_va());
   packet[7 + kDwords] = 0xDEADBEEFu;
@@ -1728,8 +1747,9 @@ TEST(Gfx1250SdmaTest, ConstFillSupersedesOverlappingScalarL1Line) {
   // Mimic later acquire/release maintenance. The clean K$ snapshot must not
   // resurrect stale data over the SDMA fill.
   cu->flush_l1(kProcessId);
-  if (auto *l2 = sim.xcd()->l2_cache())
+  if (auto *l2 = sim.xcd()->l2_cache()) {
     l2->flush_all();
+  }
 
   // Backing must reflect the SDMA fill, not the stale scalar line.
   uint32_t filled_word{};
@@ -1767,8 +1787,9 @@ TEST(Gfx1250SdmaTest, TimestampSupersedesOverlappingDirtyL2Line) {
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Accepted);
 
   // Force any still-resident dirty line out, mimicking a later flush.
-  if (auto *xl2 = sim.xcd()->l2_cache())
+  if (auto *xl2 = sim.xcd()->l2_cache()) {
     xl2->flush_all();
+  }
 
   // The timestamp value is nondeterministic, but it must not be the stale word
   // and must be a plausible nonzero nanosecond count.
@@ -1816,12 +1837,13 @@ TEST(Gfx1250SdmaTest, GcrWritebackPublishesInvalidateDropsNoopKeeps) {
 
     auto *packet = queue.ring();
     packet[0] = kSdmaOpGcr;
-    if (kind == GcrKind::WritebackOnly)
+    if (kind == GcrKind::WritebackOnly) {
       packet[kControlDw] = kGl2WbBit;
-    else if (kind == GcrKind::InvalidateOnly)
+    } else if (kind == GcrKind::InvalidateOnly) {
       packet[kControlDw] = kGl2InvBit;
-    else
+    } else {
       packet[kControlDw] = 0; // no GL2 bits: no-op.
+    }
 
     queue.submit(6); // gfx1250 GCR is 6 dwords.
     EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Accepted);
@@ -1889,6 +1911,7 @@ TEST(Gfx1250SdmaTest, CopyWaitSignalResolvesTranslatedAddresses) {
   EXPECT_EQ(queue.signal_value(), 4);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 // An endpoint that does not resolve YET is worth retrying, and
 // ConstFillUnmappedTailDoesNotAdvance pins that. An endpoint that does not
 // exist is not: the violation has already been reported to the process, and
@@ -1948,9 +1971,10 @@ TEST(Gfx1250SdmaTest, UnpublishableReadPointerHaltsInsteadOfReplayingPackets) {
   std::memset(queue.dst(), 0, kCopyBytes);
   queue.submit(7);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
-  for (uint32_t i = 0; i < kCopyBytes; ++i)
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
     ASSERT_EQ(queue.dst()[i], 0u) << "packet replayed after an unpublishable read pointer, byte "
                                   << i;
+  }
 
   ASSERT_EQ(mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
   munmap(raw, KfdProcess::kPageSize);
@@ -1993,13 +2017,16 @@ TEST(Gfx1250SdmaTest, UnwritableReadPointerHaltsInsteadOfReplayingPackets) {
   std::memset(queue.dst(), 0, kCopyBytes);
   queue.submit(7);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
-  for (uint32_t i = 0; i < kCopyBytes; ++i)
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
     ASSERT_EQ(queue.dst()[i], 0u) << "packet replayed after an unpublishable read pointer, byte "
                                   << i;
+  }
 
   mprotect(raw, KfdProcess::kPageSize, PROT_READ | PROT_WRITE);
   munmap(raw, KfdProcess::kPageSize);
 }
+
+#endif
 
 /// @brief A poll on a faulted address must halt rather than spin forever.
 /// @details A poll that cannot read its address is normally right to retry --
@@ -2048,6 +2075,7 @@ TEST(Gfx1250SdmaTest, PollOnFaultedAddressHaltsInsteadOfSpinning) {
   munmap(raw, KfdProcess::kPageSize);
 }
 
+#if !defined(RJ_DISABLE_HOST_FAULT_RECOVERY)
 TEST(Gfx1250SdmaTest, FaultedCopyHaltsTheQueueBeforeLaterPackets) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
@@ -2078,8 +2106,9 @@ TEST(Gfx1250SdmaTest, FaultedCopyHaltsTheQueueBeforeLaterPackets) {
   queue.submit(11);
   EXPECT_EQ(queue.last_submission_status(), amdgpu::QueueSubmissionStatus::Faulted);
 
-  for (uint32_t i = 0; i < kCopyBytes; ++i)
+  for (uint32_t i = 0; i < kCopyBytes; ++i) {
     ASSERT_EQ(queue.dst()[i], kSentinel) << "destination byte " << i;
+  }
   EXPECT_EQ(queue.signal_value(), 5)
       << "a packet behind a faulted copy must not run and publish completion";
 
@@ -2173,6 +2202,8 @@ TEST(Gfx1250SdmaTest, CopyFromFaultedAddressRetiresPacketInsteadOfWedgingQueue) 
 
   munmap(raw, KfdProcess::kPageSize);
 }
+
+#endif
 
 TEST(Gfx1250SdmaTest, CompactCopyWaitPacketCopies) {
   Gfx1250Sim sim;

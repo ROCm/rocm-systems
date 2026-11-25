@@ -63,9 +63,15 @@ another session or the backend's process owner retains the native context.
 removed its public handle. `destroy` and `try_destroy` retain the older
 `Result` interface. See the [safety guide](docs/safety.md) for ownership rules.
 
+The private `HsaSession` and `AmdfSession` frontend owners each compose their
+own native `Session`. They share its implementation and related native
+services while retaining independent public ownership and lifecycle policy.
+`memory::storage::RetainOnDrop` supplies explicit retention for both frontends
+and `SessionRetirement`; it releases no owner until the caller authorizes it.
+
 HSA begins core retirement after its tool preparation, callbacks, and unload
 have finished. It then releases frontend resources and GPU owners before
-attempting core closure. Its HSA initialization reference count and generation
+attempting core closure. Its HSA initialization reference count and session generation identity
 remain frontend policy; native retirement outcomes determine whether another
 generation may start. Configuration and native activation constraints remain
 per driver, so activating one backend does not freeze another backend's

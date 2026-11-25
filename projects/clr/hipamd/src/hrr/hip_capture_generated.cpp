@@ -8087,6 +8087,34 @@ static hipError_t capture_hipGraphExecGetId(hipGraphExec_t graphExec, unsigned i
 }
 
 // Generated shim
+static hipError_t capture_hipDeviceGetExecAffinitySupport(int* pi, hipExecAffinityType type, hipDevice_t dev) {
+  hipError_t r = g_real_table.hipDeviceGetExecAffinitySupport_fn(pi, type, dev);
+  if (r == hipSuccess) {
+    hrr_args_hipDeviceGetExecAffinitySupport a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.pi = reinterpret_cast<uint64_t>(pi);
+    a.type = static_cast<decltype(a.type)>(type);
+    a.dev = static_cast<uint64_t>(static_cast<int>(dev));
+    hrr_cap::writer::write_event_raw(HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipArrayGetPlane(hipArray_t* pPlaneArray, hipArray_t hArray, unsigned int planeIdx) {
+  hipError_t r = g_real_table.hipArrayGetPlane_fn(pPlaneArray, hArray, planeIdx);
+  if (r == hipSuccess) {
+    hrr_args_hipArrayGetPlane a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.hArray = reinterpret_cast<uint64_t>(hArray);
+    a.planeIdx = static_cast<decltype(a.planeIdx)>(planeIdx);
+    if (pPlaneArray) a.pPlaneArray = reinterpret_cast<uint64_t>(*pPlaneArray);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPARRAYGETPLANE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
 static hipError_t capture___hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem, hipStream_t* stream) {
   hipError_t r = g_real_compiler_table.__hipPopCallConfiguration_fn(gridDim, blockDim, sharedMem, stream);
   if (r == hipSuccess) {
@@ -8835,6 +8863,8 @@ void hip_capture_build_table() {
   g_cap_table.hipGraphNodeGetToolsId_fn = capture_hipGraphNodeGetToolsId;
   g_cap_table.hipGraphGetId_fn = capture_hipGraphGetId;
   g_cap_table.hipGraphExecGetId_fn = capture_hipGraphExecGetId;
+  g_cap_table.hipDeviceGetExecAffinitySupport_fn = capture_hipDeviceGetExecAffinitySupport;
+  g_cap_table.hipArrayGetPlane_fn = capture_hipArrayGetPlane;
 }
 
 void hip_capture_build_compiler_table() {

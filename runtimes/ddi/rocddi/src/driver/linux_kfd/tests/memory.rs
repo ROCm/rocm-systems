@@ -36,6 +36,8 @@ enum Reply {
     MapDevices(&'static [u32], u32, u32, Option<i32>),
     UnmapDevices(&'static [u32], u32, u32, Option<i32>),
     Free(Option<i32>),
+    Svm(u64, u64, &'static [(u32, u32)], Option<i32>),
+    Userptr(u64, u64, u64, Option<i32>),
 }
 
 enum FixtureMemoryKind {
@@ -66,6 +68,7 @@ struct Fixture {
 
 fn node() -> sysfs::KfdNode {
     sysfs::KfdNode {
+        debug: sysfs::KfdDebugProperties::default(),
         host_atomics: false,
         node: 1,
         gpu_id: 42,
@@ -168,11 +171,11 @@ impl Fixture {
         let observed_native_waits = native_waits.clone();
         let scratch_base = Arc::new(AtomicU64::new(0));
         let observed_scratch_base = scratch_base.clone();
-        let kfd = shared(sys::Kfd::with_hook(
+        let kfd = shared(connection::Kfd::with_hook(
             File::open("/dev/null").unwrap(),
             Arc::new(move |call| {
                 match call {
-                    sys::Call::Wait(args, event) if event.event_id == 19 => {
+                    connection::Call::Wait(args, event) if event.event_id == 19 => {
                         let state = hardware_signal.load(Ordering::Acquire);
                         if state == 0 {
                             args.result = uapi::WAIT_TIMEOUT;
@@ -184,7 +187,7 @@ impl Fixture {
                         }
                         return Ok(());
                     }
-                    sys::Call::Wait(args, event) if event.event_id == 20 => {
+                    connection::Call::Wait(args, event) if event.event_id == 20 => {
                         let errno = injected_memory_error.load(Ordering::Acquire);
                         if errno != 0 {
                             return Err(io::Error::from_raw_os_error(
@@ -201,14 +204,14 @@ impl Fixture {
                         }
                         return Ok(());
                     }
-                    sys::Call::WaitExceptions(args, events) => {
+                    connection::Call::WaitExceptions(args, events) => {
                         assert_eq!(args.count, 2);
                         assert_eq!([events[0].event_id, events[1].event_id], [19, 20]);
                         observed_native_waits.fetch_add(1, Ordering::Relaxed);
                         args.result = uapi::WAIT_TIMEOUT;
                         return Ok(());
                     }
-                    sys::Call::ResetEvent(args) if args.event_id == 19 => {
+                    connection::Call::ResetEvent(args) if args.event_id == 19 => {
                         let errno = injected_reset_error.swap(0, Ordering::AcqRel);
                         if errno != 0 {
                             return Err(io::Error::from_raw_os_error(
@@ -218,11 +221,11 @@ impl Fixture {
                         hardware_signal.store(0, Ordering::Release);
                         return Ok(());
                     }
-                    sys::Call::ResetEvent(args) if args.event_id == 20 => {
+                    connection::Call::ResetEvent(args) if args.event_id == 20 => {
                         loss_signal.store(false, Ordering::Release);
                         return Ok(());
                     }
-                    sys::Call::DestroyEvent(_) => return Ok(()),
+                    connection::Call::DestroyEvent(_) => return Ok(()),
                     _ => {}
                 }
                 let reply = pending
@@ -231,14 +234,42 @@ impl Fixture {
                     .pop_front()
                     .expect("unexpected native call");
                 let errno = match (call, reply) {
-                    (sys::Call::SetScratchBackingVa(args), Reply::SetScratch(errno)) => {
+                    (
+                        connection::Call::Allocate(args),
+                        Reply::Userptr(address, size, handle, errno),
+                    ) => {
+                        assert_eq!(args.mmap_offset, address);
+                        assert_eq!(args.size, size);
+                        assert_eq!(
+                            args.flags,
+                            uapi::USERPTR | uapi::COHERENT | uapi::NO_SUBSTITUTE | uapi::WRITABLE
+                        );
+                        assert_eq!(args.gpu_id, 42);
+                        args.handle = handle;
+                        errno
+                    }
+                    (
+                        connection::Call::Svm(args, attributes),
+                        Reply::Svm(start, size, expected, errno),
+                    ) => {
+                        assert_eq!(args.start_address, start);
+                        assert_eq!(args.size, size);
+                        assert_eq!(args.operation, uapi::SVM_OP_SET_ATTR);
+                        let actual: Vec<_> = attributes
+                            .iter()
+                            .map(|attribute| (attribute.attribute_type, attribute.value))
+                            .collect();
+                        assert_eq!(actual, expected);
+                        errno
+                    }
+                    (connection::Call::SetScratchBackingVa(args), Reply::SetScratch(errno)) => {
                         assert_eq!(args.gpu_id, 42);
                         assert_eq!(args.pad, 0);
                         assert_ne!(args.va_address, 0);
                         observed_scratch_base.store(args.va_address << 16, Ordering::Relaxed);
                         errno
                     }
-                    (sys::Call::Allocate(args), Reply::Allocate(handle, errno)) => {
+                    (connection::Call::Allocate(args), Reply::Allocate(handle, errno)) => {
                         assert_eq!(args.va % 65536, 0);
                         let page = os_memory::page_size().unwrap() as u64;
                         let expected_size = if expected_flags & uapi::USERPTR != 0 && !owned_userptr
@@ -263,7 +294,7 @@ impl Fixture {
                         errno
                     }
                     (
-                        sys::Call::DmaBufInfo(args, metadata),
+                        connection::Call::DmaBufInfo(args, metadata),
                         Reply::DmaBufInfo(size, gpu_id, flags, expected_metadata, errno),
                     ) => {
                         assert!(i32::try_from(args.descriptor).is_ok());
@@ -286,20 +317,23 @@ impl Fixture {
                         args.metadata_size = u32::try_from(expected_metadata.len()).unwrap();
                         errno
                     }
-                    (sys::Call::ImportDmaBuf(args), Reply::ImportDmaBuf(handle, gpu_id, errno)) => {
+                    (
+                        connection::Call::ImportDmaBuf(args),
+                        Reply::ImportDmaBuf(handle, gpu_id, errno),
+                    ) => {
                         assert_eq!(args.va % 65536, 0);
                         assert_eq!(args.gpu_id, gpu_id);
                         assert!(i32::try_from(args.descriptor).is_ok());
                         args.handle = handle;
                         errno
                     }
-                    (sys::Call::ExportDmaBuf(args), Reply::ExportDmaBuf(fd, errno)) => {
+                    (connection::Call::ExportDmaBuf(args), Reply::ExportDmaBuf(fd, errno)) => {
                         assert_eq!(args.handle, 17);
                         args.descriptor = u32::try_from(fd).unwrap();
                         errno
                     }
                     (
-                        sys::Call::IpcImportHandle(args),
+                        connection::Call::IpcImportHandle(args),
                         Reply::IpcImport(handle, offset, flags, errno),
                     ) => {
                         assert_eq!(args.va_addr % 4096, 0);
@@ -310,20 +344,23 @@ impl Fixture {
                         args.flags = flags;
                         errno
                     }
-                    (sys::Call::IpcExportHandle(args), Reply::IpcExport(handle, errno)) => {
+                    (connection::Call::IpcExportHandle(args), Reply::IpcExport(handle, errno)) => {
                         assert_eq!(args.handle, 17);
                         assert_eq!(args.gpu_id, 42);
                         assert_eq!(args.flags, expected_flags);
                         args.share_handle = handle;
                         errno
                     }
-                    (sys::Call::Ais(args), Reply::Ais(expected, output, errno)) => {
+                    (connection::Call::Ais(args), Reply::Ais(expected, output, errno)) => {
                         assert_eq!(args.requested_input(), expected);
                         args.set_completed_output(output);
                         errno
                     }
-                    (sys::Call::Map(args, devices), Reply::Map(before, after, errno))
-                    | (sys::Call::Unmap(args, devices), Reply::Unmap(before, after, errno)) => {
+                    (connection::Call::Map(args, devices), Reply::Map(before, after, errno))
+                    | (
+                        connection::Call::Unmap(args, devices),
+                        Reply::Unmap(before, after, errno),
+                    ) => {
                         assert_eq!(*devices, expected_devices.as_slice());
                         assert_eq!(args.handle, 17);
                         assert_eq!(args.success, before);
@@ -331,11 +368,11 @@ impl Fixture {
                         errno
                     }
                     (
-                        sys::Call::Map(args, devices),
+                        connection::Call::Map(args, devices),
                         Reply::MapDevices(expected, before, after, errno),
                     )
                     | (
-                        sys::Call::Unmap(args, devices),
+                        connection::Call::Unmap(args, devices),
                         Reply::UnmapDevices(expected, before, after, errno),
                     ) => {
                         assert_eq!(devices, &expected);
@@ -344,12 +381,12 @@ impl Fixture {
                         args.success = after;
                         errno
                     }
-                    (sys::Call::XnackMode(args), Reply::Xnack(enabled, errno)) => {
+                    (connection::Call::XnackMode(args), Reply::Xnack(enabled, errno)) => {
                         assert_eq!(args.xnack_enabled, -1);
                         args.xnack_enabled = enabled;
                         errno
                     }
-                    (sys::Call::Free(args), Reply::Free(errno)) => {
+                    (connection::Call::Free(args), Reply::Free(errno)) => {
                         assert_eq!(args.handle, 17);
                         errno
                     }
@@ -367,6 +404,7 @@ impl Fixture {
                 memory_destroy_uncertain: AtomicBool::new(false),
                 observed: Mutex::new(ObservedEvents::new().unwrap()),
                 host_aliases: Mutex::new(Vec::new()),
+                svm_registrations: Mutex::new(registered_svm::Registry::default()),
                 lost: AtomicBool::new(false),
             })
             .unwrap(),
@@ -835,6 +873,7 @@ fn secondary_extended_registration_reaches_drm_only_for_gfx1201() {
     let make_device = |gfx_target| super::super::DeviceState {
         vm: fixture.vm.clone(),
         native: sysfs::KfdNode {
+            debug: sysfs::KfdDebugProperties::default(),
             host_atomics: false,
             queues: sysfs::KfdQueueProperties {
                 gfx_target,
@@ -2710,18 +2749,18 @@ fn terminal_hardware_loss_survives_a_second_event_poll_error() {
 fn failed_memory_event_creation_reclaims_every_returned_event_id() {
     let destroyed = Arc::new(Mutex::new(Vec::new()));
     let observed = destroyed.clone();
-    let kfd = shared(sys::Kfd::with_hook(
+    let kfd = shared(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(move |call| match call {
-            sys::Call::CreateEvent(args) if args.event_type == uapi::HW_EXCEPTION => {
+            connection::Call::CreateEvent(args) if args.event_type == uapi::HW_EXCEPTION => {
                 args.event_id = 19;
                 Ok(())
             }
-            sys::Call::CreateEvent(args) if args.event_type == uapi::MEMORY_EXCEPTION => {
+            connection::Call::CreateEvent(args) if args.event_type == uapi::MEMORY_EXCEPTION => {
                 args.event_id = 20;
                 Err(io::Error::from_raw_os_error(errno::EIO))
             }
-            sys::Call::DestroyEvent(args) => {
+            connection::Call::DestroyEvent(args) => {
                 observed.lock().unwrap().push(args.event_id);
                 Ok(())
             }
@@ -2775,16 +2814,16 @@ fn warmed_native_address_and_allocation_limits_allocate_no_heap_storage() {
     fixture.exhausted();
 }
 
-fn initialization_endpoint(acquisitions: Arc<AtomicUsize>, busy: bool) -> Shared<sys::Kfd> {
-    shared(sys::Kfd::with_hook(
+fn initialization_endpoint(acquisitions: Arc<AtomicUsize>, busy: bool) -> Shared<connection::Kfd> {
+    shared(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(move |call| {
             match call {
-                sys::Call::Version(args) => {
+                connection::Call::Version(args) => {
                     args.major = 1;
                     args.minor = 23;
                 }
-                sys::Call::Apertures(args, entries) => {
+                connection::Call::Apertures(args, entries) => {
                     args.count = 2;
                     for (entry, gpu_id) in entries.iter_mut().zip([42, 43]) {
                         entry.gpu_id = gpu_id;
@@ -2792,27 +2831,27 @@ fn initialization_endpoint(acquisitions: Arc<AtomicUsize>, busy: bool) -> Shared
                         entry.gpuvm_limit = isize::MAX as u64;
                     }
                 }
-                sys::Call::CreateEvent(args) => {
+                connection::Call::CreateEvent(args) => {
                     args.event_id = match args.event_type {
                         uapi::HW_EXCEPTION => 19,
                         uapi::MEMORY_EXCEPTION => 20,
                         _ => panic!("unexpected exception event type"),
                     };
                 }
-                sys::Call::Wait(args, _) => args.result = uapi::WAIT_TIMEOUT,
-                sys::Call::AcquireVm(args) => {
+                connection::Call::Wait(args, _) => args.result = uapi::WAIT_TIMEOUT,
+                connection::Call::AcquireVm(args) => {
                     assert!(matches!(args.gpu_id, 42 | 43));
                     acquisitions.fetch_add(1, Ordering::Relaxed);
                     if busy {
                         return Err(io::Error::from_raw_os_error(errno::EBUSY));
                     }
                 }
-                sys::Call::RuntimeEnable(args) => {
+                connection::Call::RuntimeEnable(args) => {
                     assert!(matches!(args.mode_mask, 0 | 1));
                     assert_eq!(args.r_debug, 0);
                     assert_eq!(args.capabilities_mask, 0);
                 }
-                sys::Call::DestroyEvent(_) => {}
+                connection::Call::DestroyEvent(_) => {}
                 _ => panic!("unexpected initialization ioctl"),
             }
             Ok(())
@@ -2946,6 +2985,7 @@ fn runtime_reenable_reuses_exact_vm_and_allows_late_distinct_device_activation()
         })
         .unwrap();
     let second = sysfs::KfdNode {
+        debug: sysfs::KfdDebugProperties::default(),
         host_atomics: false,
         node: 2,
         gpu_id: 43,
@@ -2977,10 +3017,10 @@ fn runtime_reenable_reuses_exact_vm_and_allows_late_distinct_device_activation()
 fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() {
     let destroys = Arc::new(AtomicUsize::new(0));
     let observed = destroys.clone();
-    let kfd = shared(sys::Kfd::with_hook(
+    let kfd = shared(connection::Kfd::with_hook(
         File::open("/dev/null").unwrap(),
         Arc::new(move |call| {
-            if let sys::Call::DestroyEvent(_) = call {
+            if let connection::Call::DestroyEvent(_) = call {
                 let attempt = observed.fetch_add(1, Ordering::Relaxed);
                 if attempt == 0 {
                     Err(io::Error::from_raw_os_error(errno::EIO))
@@ -3001,6 +3041,7 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
         memory_destroy_uncertain: AtomicBool::new(false),
         observed: Mutex::new(ObservedEvents::new().unwrap()),
         host_aliases: Mutex::new(Vec::new()),
+        svm_registrations: Mutex::new(registered_svm::Registry::default()),
         lost: AtomicBool::new(false),
     }));
     assert_eq!(
@@ -3022,4 +3063,369 @@ fn instance_shutdown_quarantines_ambiguous_event_destroy_without_replaying_id() 
     );
     assert!(bindings.bindings.get_mut().unwrap().loss.is_some());
     assert_eq!(destroys.load(Ordering::Relaxed), 2);
+}
+
+const SVM_FINE_GRANT: &[(u32, u32)] = &[
+    (
+        uapi::SVM_ATTR_SET_FLAGS,
+        uapi::SVM_FLAG_HOST_ACCESS | uapi::SVM_FLAG_COHERENT,
+    ),
+    (
+        uapi::SVM_ATTR_CLEAR_FLAGS,
+        uapi::SVM_FLAG_EXT_COHERENT | uapi::SVM_FLAG_GPU_READ_ONLY | uapi::SVM_FLAG_GPU_EXECUTE,
+    ),
+    (uapi::SVM_ATTR_ACCESS_IN_PLACE, 42),
+];
+const SVM_REVOKE: &[(u32, u32)] = &[(uapi::SVM_ATTR_NO_ACCESS, 42)];
+
+fn svm_registration(
+    fixture: &Fixture,
+    address: usize,
+    size: u64,
+    backing: Option<crate::memory::host::HostBackingLease>,
+) -> Result<Owned<KfdRegisteredHost>, Error> {
+    KfdRegisteredHost::create(
+        fixture.vm.clone(),
+        std::iter::empty(),
+        AllocationDesc {
+            size,
+            alignment: 4096,
+        },
+        address,
+        HostMappingPolicy::Fine,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        backing,
+    )
+}
+
+#[test]
+fn svm_host_registration_reuses_advised_address_without_userptr_bo() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x12000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(
+            0x12000,
+            0x2000,
+            &[(uapi::SVM_ATTR_SET_FLAGS, uapi::SVM_FLAG_GPU_READ_MOSTLY)],
+            None,
+        ),
+        Reply::Svm(0x12000, 0x2000, SVM_REVOKE, None),
+        Reply::Svm(0x12000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x12000, 0x2000, SVM_REVOKE, None),
+    ]);
+    let mut first = svm_registration(&fixture, 0x12345, 4096, None).unwrap();
+    let info = first.cached_info();
+    assert_eq!(info.device_address, 0x12345);
+    assert_eq!(info.host_address, Some(0x12345));
+    assert_eq!(info.size, 4096);
+    assert_eq!(info.native_size, 8192);
+    fixture
+        .vm
+        .kfd()
+        .svm_attributes(
+            0x12000,
+            0x2000,
+            uapi::SVM_OP_SET_ATTR,
+            &mut [uapi::SvmAttribute {
+                attribute_type: uapi::SVM_ATTR_SET_FLAGS,
+                value: uapi::SVM_FLAG_GPU_READ_MOSTLY,
+            }],
+        )
+        .unwrap();
+    first.free().unwrap();
+    first.free().unwrap();
+    let mut second = svm_registration(&fixture, 0x12345, 4096, None).unwrap();
+    second.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_unregister_preserves_shared_page_cover_and_gpu_grants() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x4000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x11000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x13000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x11000, 0x2000, SVM_REVOKE, None),
+    ]);
+    let mut outer = svm_registration(&fixture, 0x10000, 0x4000, None).unwrap();
+    let mut inner = svm_registration(&fixture, 0x11010, 0x1000, None).unwrap();
+    outer.free().unwrap();
+    assert_eq!(inner.device_address(&fixture.vm).unwrap(), 0x11010);
+    inner.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_unregister_retry_accounts_for_new_registration() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x3000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x3000, SVM_REVOKE, Some(errno::EIO)),
+        Reply::Svm(0x11000, 0x1000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x12000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x11000, 0x1000, SVM_REVOKE, None),
+    ]);
+    let mut first = svm_registration(&fixture, 0x10000, 0x3000, None).unwrap();
+    assert!(first.free().is_err());
+    assert!(first.device_address(&fixture.vm).is_err());
+    let mut newer = svm_registration(&fixture, 0x11000, 0x1000, None).unwrap();
+    first.free().unwrap();
+    assert_eq!(newer.device_address(&fixture.vm).unwrap(), 0x11000);
+    newer.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_registration_rejects_conflicting_page_policy_before_native_changes() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x1000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+    ]);
+    let mut first = svm_registration(&fixture, 0x10000, 16, None).unwrap();
+    let result = KfdRegisteredHost::create(
+        fixture.vm.clone(),
+        std::iter::empty(),
+        AllocationDesc {
+            size: 16,
+            alignment: 4096,
+        },
+        0x10100,
+        HostMappingPolicy::Coarse,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        None,
+    );
+    assert_eq!(result.err().unwrap().kind(), ErrorKind::Unsupported);
+    first.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_access_replacement_retains_both_device_sets_until_retry() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x1000, SVM_FINE_GRANT, None),
+        Reply::Svm(
+            0x10000,
+            0x1000,
+            &[(uapi::SVM_ATTR_ACCESS_IN_PLACE, 43)],
+            None,
+        ),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, Some(errno::EIO)),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x10000, 0x1000, &[(uapi::SVM_ATTR_NO_ACCESS, 43)], None),
+    ]);
+    let peer = fixture.peer(43, 0x10000, isize::MAX as u64);
+    let mut allocation = svm_registration(&fixture, 0x10000, 0x1000, None).unwrap();
+    assert!(allocation.set_access(&[&peer]).is_err());
+    assert!(allocation.device_address(&fixture.vm).is_err());
+    assert!(allocation.device_address(&peer).is_err());
+    assert_eq!(
+        allocation.set_access(&[&fixture.vm]).unwrap_err().kind(),
+        ErrorKind::Busy
+    );
+    allocation.set_access(&[&peer]).unwrap();
+    assert!(allocation.device_address(&fixture.vm).is_err());
+    assert_eq!(allocation.device_address(&peer).unwrap(), 0x10000);
+    allocation.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_failed_grant_runs_revoke_before_returning_backing() {
+    let fixture = Fixture::new([
+        Reply::Svm(0x10000, 0x1000, SVM_FINE_GRANT, Some(errno::EIO)),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+    ]);
+    assert!(svm_registration(&fixture, 0x10000, 0x1000, None).is_err());
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_release_failure_retains_owned_page_lease_until_retry() {
+    let mut backing = HostAllocation::allocate(4096, 4096).unwrap();
+    let address = backing.info().host_address;
+    let fixture = Fixture::new([
+        Reply::Svm(address as u64, 4096, SVM_FINE_GRANT, None),
+        Reply::Svm(address as u64, 4096, SVM_REVOKE, Some(errno::EIO)),
+        Reply::Svm(address as u64, 4096, SVM_REVOKE, None),
+    ]);
+    let mut registration = svm_registration(
+        &fixture,
+        address,
+        4096,
+        Some(backing.registration_lease().unwrap()),
+    )
+    .unwrap();
+    assert!(registration.free().is_err());
+    assert_eq!(backing.free().unwrap_err().kind(), ErrorKind::Busy);
+    registration.free().unwrap();
+    backing.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+#[allow(unsafe_code)]
+fn svm_host_process_registration_routes_to_svm_and_does_not_retry_userptr() {
+    let fixture = Fixture::new([
+        Reply::Userptr(0x12000, 0x2000, 0, Some(libc::EADDRINUSE)),
+        Reply::Svm(0x12000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x12000, 0x2000, SVM_REVOKE, None),
+        Reply::Userptr(0x12000, 0x2000, 0, Some(libc::EADDRINUSE)),
+        Reply::Svm(0x12000, 0x2000, SVM_FINE_GRANT, Some(errno::EIO)),
+        Reply::Svm(0x12000, 0x2000, SVM_REVOKE, None),
+    ]);
+    let driver = super::super::LinuxKfdDriver::with_context_lifetime(
+        crate::session::DriverContextLifetime::Process,
+        crate::os::ProcessIdentity::capture().unwrap(),
+    );
+    let device = super::super::DeviceState {
+        vm: fixture.vm.clone(),
+        native: node(),
+        asic_family_id: 0,
+        gpu_counter_frequency_hz: 0,
+    };
+    let request = || crate::memory::HostRegistration {
+        address: 0x12345,
+        policy: HostMappingPolicy::Fine,
+        size: 4096,
+        alignment: 4096,
+        permissions: DeviceAccess::READ | DeviceAccess::WRITE,
+        backing: None,
+    };
+    // SAFETY: The scripted native backend never dereferences the synthetic pages.
+    let mut registration = unsafe { driver.register_host(&device, &[], request()) }.unwrap();
+    assert_eq!(registration.cached_info().device_address, 0x12345);
+    registration.free().unwrap();
+    // SAFETY: The script models a partial native grant followed by revocation.
+    assert!(unsafe { driver.register_host(&device, &[], request()) }.is_err());
+    fixture.exhausted();
+}
+
+#[test]
+fn svm_host_unregister_preserves_overlap_only_for_the_registered_gpu() {
+    let fixture = Fixture::new([
+        Reply::Svm(
+            0x10000,
+            0x4000,
+            &[
+                (
+                    uapi::SVM_ATTR_SET_FLAGS,
+                    uapi::SVM_FLAG_HOST_ACCESS | uapi::SVM_FLAG_COHERENT,
+                ),
+                (
+                    uapi::SVM_ATTR_CLEAR_FLAGS,
+                    uapi::SVM_FLAG_EXT_COHERENT
+                        | uapi::SVM_FLAG_GPU_READ_ONLY
+                        | uapi::SVM_FLAG_GPU_EXECUTE,
+                ),
+                (uapi::SVM_ATTR_ACCESS_IN_PLACE, 42),
+                (uapi::SVM_ATTR_ACCESS_IN_PLACE, 43),
+            ],
+            None,
+        ),
+        Reply::Svm(0x11000, 0x2000, SVM_FINE_GRANT, None),
+        Reply::Svm(0x10000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x13000, 0x1000, SVM_REVOKE, None),
+        Reply::Svm(0x10000, 0x4000, &[(uapi::SVM_ATTR_NO_ACCESS, 43)], None),
+        Reply::Svm(0x11000, 0x2000, SVM_REVOKE, None),
+    ]);
+    let peer = fixture.peer(43, 0x10000, isize::MAX as u64);
+    let mut outer = KfdRegisteredHost::create(
+        fixture.vm.clone(),
+        std::iter::once(peer),
+        AllocationDesc {
+            size: 0x4000,
+            alignment: 4096,
+        },
+        0x10000,
+        HostMappingPolicy::Fine,
+        DeviceAccess::READ | DeviceAccess::WRITE,
+        None,
+    )
+    .unwrap();
+    let mut inner = svm_registration(&fixture, 0x11000, 0x2000, None).unwrap();
+    outer.free().unwrap();
+    assert_eq!(inner.device_address(&fixture.vm).unwrap(), 0x11000);
+    inner.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+#[allow(unsafe_code)]
+fn svm_host_fallback_keeps_the_original_owned_backing_lease() {
+    let mut backing = HostAllocation::allocate(4096, 4096).unwrap();
+    let address = backing.info().host_address;
+    let fixture = Fixture::new([
+        Reply::Userptr(address as u64, 4096, 0, Some(libc::EADDRINUSE)),
+        Reply::Svm(address as u64, 4096, SVM_FINE_GRANT, None),
+        Reply::Svm(address as u64, 4096, SVM_REVOKE, None),
+    ]);
+    let driver = super::super::LinuxKfdDriver::with_context_lifetime(
+        crate::session::DriverContextLifetime::Process,
+        crate::os::ProcessIdentity::capture().unwrap(),
+    );
+    let device = super::super::DeviceState {
+        vm: fixture.vm.clone(),
+        native: node(),
+        asic_family_id: 0,
+        gpu_counter_frequency_hz: 0,
+    };
+    // SAFETY: The owned lease retains the live pages throughout both mechanisms.
+    let mut registration = unsafe {
+        driver.register_host(
+            &device,
+            &[],
+            crate::memory::HostRegistration {
+                address,
+                policy: HostMappingPolicy::Fine,
+                size: 4096,
+                alignment: 4096,
+                permissions: DeviceAccess::READ | DeviceAccess::WRITE,
+                backing: Some(backing.registration_lease().unwrap()),
+            },
+        )
+    }
+    .unwrap();
+    assert_eq!(backing.free().unwrap_err().kind(), ErrorKind::Busy);
+    registration.free().unwrap();
+    backing.free().unwrap();
+    fixture.exhausted();
+}
+
+#[test]
+#[allow(unsafe_code)]
+fn svm_host_fallback_rejects_errors_with_uncertain_or_returned_native_objects() {
+    for (handle, errno) in [(0, errno::EFAULT), (17, libc::EADDRINUSE)] {
+        let mut replies = vec![Reply::Userptr(0x12000, 0x2000, handle, Some(errno))];
+        if handle != 0 {
+            replies.push(Reply::Free(None));
+        }
+        let fixture = Fixture::new(replies);
+        let driver = super::super::LinuxKfdDriver::with_context_lifetime(
+            crate::session::DriverContextLifetime::Process,
+            crate::os::ProcessIdentity::capture().unwrap(),
+        );
+        let device = super::super::DeviceState {
+            vm: fixture.vm.clone(),
+            native: node(),
+            asic_family_id: 0,
+            gpu_counter_frequency_hz: 0,
+        };
+        // SAFETY: The script models output ambiguity without native page access.
+        let result = unsafe {
+            driver.register_host(
+                &device,
+                &[],
+                crate::memory::HostRegistration {
+                    address: 0x12345,
+                    policy: HostMappingPolicy::Fine,
+                    size: 4096,
+                    alignment: 4096,
+                    permissions: DeviceAccess::READ | DeviceAccess::WRITE,
+                    backing: None,
+                },
+            )
+        };
+        assert!(result.is_err());
+        fixture.exhausted();
+    }
 }

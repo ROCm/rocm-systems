@@ -38,7 +38,6 @@ members = [
     "ddi/rocddi",
     "ddi/libamdf",
     "ddi/libhsa",
-    "loader/rocelf",
     "image/rocaddr3",
     "loader/rocloader",
 ]

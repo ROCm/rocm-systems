@@ -31,32 +31,35 @@ void execute_compare_with_exceptions(Wavefront &wave, const Operand &lhs, const 
       wave, active, lhs, rhs, false, selections,
       [&](const uint32_t *const *a, const uint32_t *const *b) {
         if constexpr (util::has_stdx_simd) {
-          if (active && !util::force_scalar()) {
+          if (active && !wave.cu().force_scalar()) {
             detail::record_simd_fast_path(SimdFastPath::VOPC_COMPARE_STATUS);
             using Lane = typename Fmt::Lane;
             constexpr auto width = util::native_width_v<Lane>;
             const uint64_t full = util::mask<uint64_t>(width);
             for (unsigned base = 0; base < wave.wf_size(); base += width) {
               const uint64_t lanes = (active >> base) & full;
-              if (!lanes)
+              if (!lanes) {
                 continue;
+              }
               const auto read = [&](const uint32_t *const *words, unsigned index) {
-                if constexpr (Fmt::kWidth == 64)
+                if constexpr (Fmt::kWidth == 64) {
                   return util::load64<Lane>(words[0] + base, words[1] + base);
-                else {
+                } else {
                   auto bits = util::load<Lane>(words[0] + base);
-                  if constexpr (Fmt::kWidth == 16)
+                  if constexpr (Fmt::kWidth == 16) {
                     bits >>= (opsel & (1u << index)) ? 16 : 0;
+                  }
                   return bits;
                 }
               };
               const auto x = read(a, 0);
               const auto y = read(b, 1);
               const auto compare_bits = [&](auto predicate) -> uint64_t {
-                if constexpr (Fmt::kWidth == 64)
+                if constexpr (Fmt::kWidth == 64) {
                   return cmp_bits64<Lane>(x, y, predicate);
-                else
+                } else {
                   return util::simd_mask_to_bits(predicate(x, y));
+                }
               };
               if (signal_invalid && !invalid) {
                 const auto raises = [&](auto value) {
@@ -74,18 +77,21 @@ void execute_compare_with_exceptions(Wavefront &wave, const Operand &lhs, const 
                 result |= (predicate & lanes) << base;
               }
             }
-            if constexpr (constant)
+            if constexpr (constant) {
               result = std::is_same_v<Rel, comparison::T> ? active : 0;
+            }
             return RJ_ARITH_SUCCESS;
           }
         }
         for (uint64_t lanes = active; lanes; lanes &= lanes - 1) {
           const unsigned lane = std::countr_zero(lanes);
           const auto read = [&](const uint32_t *const *src, unsigned index) -> typename Fmt::Lane {
-            if constexpr (Fmt::kWidth == 64)
+            if constexpr (Fmt::kWidth == 64) {
               return static_cast<uint64_t>(src[1][lane]) << 32 | src[0][lane];
-            if constexpr (Fmt::kWidth == 16)
+            }
+            if constexpr (Fmt::kWidth == 16) {
               return (src[0][lane] >> (((opsel >> index) & 1u) * 16)) & 0xffffu;
+            }
             return src[0][lane];
           };
           const auto x = read(a, 0), y = read(b, 1);
@@ -93,13 +99,15 @@ void execute_compare_with_exceptions(Wavefront &wave, const Operand &lhs, const 
             return comparison::is_nan<Fmt>(value) && (signaling || !(value & Fmt::kQuiet));
           };
           invalid |= raises_invalid(x) || raises_invalid(y);
-          if (comparison::evaluate<Fmt, Rel>(x, y, absolute, negate, policy))
+          if (comparison::evaluate<Fmt, Rel>(x, y, absolute, negate, policy)) {
             result |= uint64_t{1} << lane;
+          }
         }
         return RJ_ARITH_SUCCESS;
       });
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   commit(result);
   if (signal_invalid && invalid && !wave.instruction_execution_failed()) {
     wave.set_trapsts(wave.trapsts() | RJ_ARITH_EXCEPTION_INVALID);

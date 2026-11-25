@@ -2,25 +2,27 @@
 // SPDX-License-Identifier: MIT
 
 /// @file gfx1250_b0_to_a0_diagnostics.h
-/// @brief Internal C-view adapter for gfx1250 B0-to-A0 diagnostics.
+/// @brief Internal diagnostic adapter for gfx1250 B0-to-A0 translation.
 
 #pragma once
 
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_library.h"
 #include "rocjitsu/code/dbt/translation_diagnostic.h"
-#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
 
 #include <vector>
 
 namespace rocjitsu {
 
-/// @brief Map completed translation diagnostics to the fixed-profile C API status.
+/// @brief Distinguish rejected input from an internal translation failure.
 inline rj_status_t
 gfx1250_b0_to_a0_translation_status(const std::vector<TranslationDiagnostic> &diagnostics,
                                     bool has_output, bool dispatchable) {
-  if (has_diagnostic_kind(diagnostics, DiagnosticKind::InternalError))
+  if (has_diagnostic_kind(diagnostics, DiagnosticKind::InternalError)) {
     return ROCJITSU_STATUS_ERROR;
-  if (!has_output || !dispatchable)
+  }
+  if (!has_output || !dispatchable) {
     return ROCJITSU_STATUS_INVALID_CODE_OBJECT;
+  }
   return ROCJITSU_STATUS_SUCCESS;
 }
 
@@ -31,7 +33,7 @@ gfx1250_b0_to_a0_translation_status(const std::vector<TranslationDiagnostic> &di
 /// The version script names it explicitly, so the exported surface stays
 /// deliberate rather than incidental.
 RJ_API_EXPORT void
-emit_gfx1250_b0_to_a0_diagnostics(rj_gfx1250_b0_to_a0_diagnostic_callback_t callback,
+emit_gfx1250_b0_to_a0_diagnostics(rocjitsu::Gfx1250B0ToA0DiagnosticCallback callback,
                                   void *user_data,
                                   const std::vector<TranslationDiagnostic> &diagnostics) noexcept;
 

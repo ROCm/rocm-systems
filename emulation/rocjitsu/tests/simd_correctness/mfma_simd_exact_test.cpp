@@ -12,6 +12,7 @@
 /// (SIMD) and non-fused (scalar) accumulation cannot legitimately differ.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 
 namespace {
 
@@ -29,7 +30,7 @@ using MfmaFloatSpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, 
 using MfmaIntSpecFn = void (*)(amdgpu::ComputeUnitCore &, uint32_t, uint32_t, uint32_t, uint32_t,
                                uint32_t);
 struct MfmaFixture : ExactFixture {
-  MfmaFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA4, WF) {}
+  MfmaFixture() : ExactFixture(rocjitsu::IsaFamily::Cdna4, WF) {}
 };
 
 // Drive one (kernel, fmt) case across all trial modes and both accumulator
@@ -48,8 +49,9 @@ void run_case(const char *label, Fmt fmt, Fmt acc_fmt,
     };
     for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, CONST_ONE}) {
       expect_bit_exact(label, mode, fx, reseed, [&] { kernel(fx, const_acc); }, DST, DST_REGS);
-      if (testing::Test::HasFatalFailure())
+      if (testing::Test::HasFatalFailure()) {
         return;
+      }
     }
   }
 }
@@ -88,10 +90,11 @@ void expect_fixture_bit_exact(const char *label, const std::function<void(MfmaFi
 
   std::vector<uint32_t> scalar = scalar_fixture.snapshot(dst, dst_regs);
   std::vector<uint32_t> simd = simd_fixture.snapshot(dst, dst_regs);
-  for (size_t word = 0; word < scalar.size(); ++word)
+  for (size_t word = 0; word < scalar.size(); ++word) {
     ASSERT_EQ(scalar[word], simd[word])
         << label << ": SIMD diverges from scalar at word " << word << " (scalar=0x" << std::hex
         << scalar[word] << " simd=0x" << simd[word] << ")";
+  }
 }
 
 } // namespace
@@ -192,8 +195,9 @@ TEST(MfmaSimdExact, F32Spec_AllShapes) {
 TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
   SKIP_IF_NO_SIMD();
   constexpr uint32_t W = static_cast<uint32_t>(util::native<float>::size());
-  if (W <= 1 || 32 % W != 0)
+  if (W <= 1 || 32 % W != 0) {
     GTEST_SKIP() << "test requires a supported native SIMD width";
+  }
   constexpr uint32_t source_b = 0;
   constexpr uint32_t destination_and_source_a = 64;
   constexpr uint32_t accumulator = 128;
@@ -203,8 +207,9 @@ TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
     auto seed = [=](MfmaFixture &fx) {
       fx.seed(source_b, 1, Fmt::F32, Mode::RandomInt, 11);
       fx.seed(accumulator, 32, Fmt::F32, Mode::RandomInt, 22);
-      if (materialize_overlap)
+      if (materialize_overlap) {
         fx.seed(destination_and_source_a, 1, Fmt::F32, Mode::RandomInt, 33);
+      }
     };
     auto kernel = [](MfmaFixture &fx) {
       amdgpu::exec_f32_mfma_f32_spec<32, 32, 1, 2>(
@@ -218,8 +223,9 @@ TEST(MfmaSimdExact, F32SpecDestructiveSourceOverlap) {
 TEST(MfmaSimdExact, F16SpecDestructiveAccumulatorOverlap) {
   SKIP_IF_NO_SIMD();
   constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-  if (!amdgpu::mma_f32_native_width_supported(32, width))
+  if (!amdgpu::mma_f32_native_width_supported(32, width)) {
     GTEST_SKIP() << "f16 MFMA shape is not divisible by the native SIMD width";
+  }
   constexpr uint32_t source_a = 0;
   constexpr uint32_t source_b = 16;
   constexpr uint32_t accumulator = 48;
@@ -231,8 +237,9 @@ TEST(MfmaSimdExact, F16SpecDestructiveAccumulatorOverlap) {
       fx.seed(source_a, 2, Fmt::F16, Mode::RandomInt, 44);
       fx.seed(source_b, 2, Fmt::F16, Mode::RandomInt, 55);
       fx.seed(accumulator, 16, Fmt::F32, Mode::RandomInt, 66);
-      if (materialize_overlap)
+      if (materialize_overlap) {
         fx.seed(destination, 16, Fmt::F32, Mode::RandomInt, 77);
+      }
     };
     auto kernel = [](MfmaFixture &fx) {
       amdgpu::exec_f32_mfma_f16_spec<32, 32, 4, 2>(
@@ -246,8 +253,9 @@ TEST(MfmaSimdExact, F16SpecDestructiveAccumulatorOverlap) {
 TEST(MfmaSimdExact, Bf16SpecDestructiveAccumulatorOverlap) {
   SKIP_IF_NO_SIMD();
   constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-  if (!amdgpu::mma_f32_native_width_supported(32, width))
+  if (!amdgpu::mma_f32_native_width_supported(32, width)) {
     GTEST_SKIP() << "bf16 MFMA shape is not divisible by the native SIMD width";
+  }
   constexpr uint32_t source_a = 0;
   constexpr uint32_t source_b = 16;
   constexpr uint32_t accumulator = 48;
@@ -259,8 +267,9 @@ TEST(MfmaSimdExact, Bf16SpecDestructiveAccumulatorOverlap) {
       fx.seed(source_a, 2, Fmt::BF16, Mode::RandomInt, 122);
       fx.seed(source_b, 2, Fmt::BF16, Mode::RandomInt, 133);
       fx.seed(accumulator, 16, Fmt::F32, Mode::RandomInt, 144);
-      if (materialize_overlap)
+      if (materialize_overlap) {
         fx.seed(destination, 16, Fmt::F32, Mode::RandomInt, 155);
+      }
     };
     auto kernel = [](MfmaFixture &fx) {
       amdgpu::exec_f32_mfma_bf16_spec<32, 32, 4, 2>(
@@ -278,21 +287,24 @@ TEST(MfmaSimdExact, I32_i8_AllShapes) {
     uint32_t m, n, k, b;
   } shapes[] = {{16, 16, 64, 1}, {32, 32, 32, 1}, {32, 32, 16, 1}, {16, 16, 32, 1},
                 {32, 32, 4, 2},  {16, 16, 4, 4},  {4, 4, 4, 16}};
-  for (auto s : shapes)
+  for (auto s : shapes) {
     run_i8("i32_i8", s.m, s.n, s.k, s.b);
+  }
 }
 
 // --- f64 MFMA ---
 TEST(MfmaSimdExact, F64_AllShapes) {
   SKIP_IF_NO_SIMD();
-  if (util::native<double>::size() <= 1)
+  if (util::native<double>::size() <= 1) {
     GTEST_SKIP() << "no native f64 SIMD";
+  }
   const struct {
     uint32_t m, n, k, b;
   } shapes[] = {{16, 16, 4, 1}, {4, 4, 4, 4}};
-  for (auto s : shapes)
+  for (auto s : shapes) {
     run_case("f64", Fmt::F64, Fmt::F64, [=](MfmaFixture &fx, uint32_t const_acc) {
       amdgpu::exec_f64(*fx.cu, s.m, s.n, s.k, s.b, fx.vbase + DST, fx.vbase + S0, fx.vbase + S1,
                        fx.vbase + ACC, const_acc);
     });
+  }
 }

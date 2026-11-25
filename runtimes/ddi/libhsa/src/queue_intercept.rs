@@ -22,10 +22,13 @@ use rocddi::device::Device;
 use rocddi::device::gpu::queue::{AqlControlRegion, QueueRingMemory, complete_host_stores};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 
+use crate::admission::InFlightTracker;
 use crate::callback_arg::CallbackArg;
+use crate::events::CallbackScope;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, InFlightTracker, initialized_mut, lock, map_error};
+use crate::lifecycle::{initialized_mut, lock};
 use crate::signal::AmdSignal;
+use crate::status::map_error;
 
 /// Packet size in bytes.
 const PACKET_BYTES: usize = 64;
@@ -181,10 +184,9 @@ unsafe extern "C" fn packet_writer(packets: *const c_void, count: u64) {
                 failed: frame.failed,
             };
             let previous = slot.replace(&raw mut nested);
-            let _scope = CallbackScope::enter();
             // SAFETY: Tool registration supplies the callback and data. The
             // packet span is borrowed only through this synchronous call.
-            unsafe {
+            CallbackScope::run(|| unsafe {
                 (interceptor.callback)(
                     packets,
                     count as u64,
@@ -192,7 +194,7 @@ unsafe extern "C" fn packet_writer(packets: *const c_void, count: u64) {
                     interceptor.data.as_ptr(),
                     packet_writer,
                 );
-            }
+            });
             slot.set(previous);
         } else {
             // SAFETY: The frame owns the output queue exclusively while the
@@ -432,29 +434,30 @@ impl InterceptQueue {
         // Forwarding may ring the lower queue through an HSA signal store.
         // Keep that nested work in the admitted generation even if final
         // shutdown commits while this drain is running.
-        let Some(_lease_scope) = crate::runtime::enter_runtime_service() else {
+        let Some(token) = crate::admission::enter_runtime_service() else {
             return;
         };
-        if !self.active.load(Ordering::Acquire) {
-            return;
-        }
-        let result = self.drain_locked();
-        if let Err(status) = result {
-            if self.active.swap(false, Ordering::AcqRel) {
-                if let Some(callback) = self.callback {
-                    let _scope = CallbackScope::enter();
-                    // SAFETY: The queue and callback argument remain owned through
-                    // worker join, including this final callback.
-                    unsafe {
-                        callback(
-                            status,
-                            self.public as *mut HsaQueue,
-                            self.callback_data.as_ptr(),
-                        )
-                    };
+        crate::admission::ApiLeaseScope::run(token, || {
+            if !self.active.load(Ordering::Acquire) {
+                return;
+            }
+            let result = self.drain_locked();
+            if let Err(status) = result {
+                if self.active.swap(false, Ordering::AcqRel) {
+                    if let Some(callback) = self.callback {
+                        // SAFETY: The queue and callback argument remain owned through
+                        // worker join, including this final callback.
+                        CallbackScope::run(|| unsafe {
+                            callback(
+                                status,
+                                self.public as *mut HsaQueue,
+                                self.callback_data.as_ptr(),
+                            )
+                        });
+                    }
                 }
             }
-        }
+        });
     }
 
     /// Drains locked.
@@ -512,10 +515,9 @@ impl InterceptQueue {
                 };
                 let previous = REWRITE_FRAME.with(|slot| slot.replace(&raw mut frame));
                 let interceptor = snapshot[snapshot.len() - 1];
-                let _scope = CallbackScope::enter();
                 // SAFETY: The packet and callback snapshot remain live for
                 // this synchronous tool invocation and its writer chain.
-                unsafe {
+                CallbackScope::run(|| unsafe {
                     (interceptor.callback)(
                         (&raw const packet).cast(),
                         1,
@@ -523,7 +525,7 @@ impl InterceptQueue {
                         interceptor.data.as_ptr(),
                         packet_writer,
                     );
-                }
+                });
                 REWRITE_FRAME.with(|slot| slot.set(previous));
             }
             if failed {
@@ -627,9 +629,8 @@ impl InterceptQueue {
         // queue remains live until this worker stops.
         let marker = unsafe { &*((&raw const packet).cast::<InterceptMarker>()) };
         if let Some(callback) = marker.callback {
-            let _scope = CallbackScope::enter();
             // SAFETY: The marker callback is a synchronous tool function.
-            unsafe { callback(marker, self.lower as *mut HsaQueue, write) };
+            CallbackScope::run(|| unsafe { callback(marker, self.lower as *mut HsaQueue, write) });
         }
     }
 }

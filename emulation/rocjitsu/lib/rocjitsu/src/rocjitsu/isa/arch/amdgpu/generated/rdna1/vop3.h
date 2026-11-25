@@ -501,6 +501,33 @@ public:
   Operand m0;
 };
 
+class VMovrelsB32Vop3 : public Vop3 {
+public:
+  VMovrelsB32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand m0;
+};
+
+class VMovrelsdB32Vop3 : public Vop3 {
+public:
+  VMovrelsdB32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand m0;
+};
+
+class VMovrelsd2B32Vop3 : public Vop3 {
+public:
+  VMovrelsd2B32Vop3(const MachineInst *inst);
+  void execute_impl(amdgpu::Wavefront &wf);
+  Operand vdst;
+  Operand src0;
+  Operand m0;
+};
+
 class VCvtF16U16Vop3 : public Vop3 {
 public:
   VCvtF16U16Vop3(const MachineInst *inst);
@@ -1718,8 +1745,9 @@ public:
     append_interp_operand(out, index, src0, &src1);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 & 0x100u)
+    if (inst_.src0 & 0x100u) {
       out += " high";
+    }
     Vop3::build_modifiers(out);
   }
   VInterpP1llF16Vop3(const MachineInst *inst);
@@ -1727,6 +1755,7 @@ public:
   Operand vdst;
   Operand src1;
   Operand src0;
+  Operand lds_m0;
 };
 
 class VInterpP1lvF16Vop3 : public Vop3 {
@@ -1735,8 +1764,9 @@ public:
     append_interp_operand(out, index, src0, &src1);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 & 0x100u)
+    if (inst_.src0 & 0x100u) {
       out += " high";
+    }
     Vop3::build_modifiers(out);
   }
   VInterpP1lvF16Vop3(const MachineInst *inst);
@@ -1745,6 +1775,7 @@ public:
   Operand src1;
   Operand src0;
   Operand src2;
+  Operand lds_m0;
 };
 
 class VPermB32Vop3 : public Vop3 {
@@ -1903,10 +1934,12 @@ public:
     append_interp_operand(out, index, src0, &src1);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 & 0x100u)
+    if (inst_.src0 & 0x100u) {
       out += " high";
-    if (inst_.op_sel & 8u)
+    }
+    if (inst_.op_sel & 8u) {
       out += " op_sel:[0,0,0,1]";
+    }
     Vop3::build_modifiers(out);
   }
   VInterpP2F16Vop3(const MachineInst *inst);
@@ -1916,6 +1949,7 @@ public:
   Operand src1;
   Operand src0;
   Operand src2;
+  Operand lds_m0;
 };
 
 class VMadI16Vop3 : public Vop3 {

@@ -5,6 +5,7 @@
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -21,7 +22,7 @@ namespace {
 
 using namespace rocjitsu;
 
-class ReadlaneSelectorTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class ReadlaneSelectorTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override {
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -35,13 +36,15 @@ protected:
     decoder = Decoder::create(GetParam());
     wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(wf->vgpr_alloc().base, lane, 0xa5000000u + lane);
+    }
   }
 
   void TearDown() override {
-    if (wf)
+    if (wf) {
       wf->halt();
+    }
   }
 
   amdgpu::GpuMemory mem{"readlane_mem"};
@@ -52,24 +55,25 @@ protected:
 
   bool gfx9() const {
     const auto arch = GetParam();
-    return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-           arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+           arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
   }
 };
 
 INSTANTIATE_TEST_SUITE_P(AllArchitectures, ReadlaneSelectorTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                           ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                           ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA1,
-                                           ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                                           ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                           rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna1,
+                                           rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                           rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5));
 
 TEST_P(ReadlaneSelectorTest, ReadlaneMasksInline64AndLiteralIndices) {
   wf->set_exec(0); // READLANE ignores EXEC, even for inactive source lanes.
   for (uint32_t selector : {192u, 255u}) {
-    if (selector == 255 && GetParam() != ROCJITSU_CODE_ARCH_RDNA3 &&
-        GetParam() != ROCJITSU_CODE_ARCH_RDNA4)
+    if (selector == 255 && GetParam() != rocjitsu::IsaFamily::Rdna3 &&
+        GetParam() != rocjitsu::IsaFamily::Rdna4) {
       continue; // Literal lane indices are only qualified on these two targets.
+    }
     // v_readlane_b32 s4, v0, 64 / literal 95, followed by s_endpgm.
     std::array<uint32_t, 4> words{gfx9() ? 0xd2890004u : 0xd7600004u, 256u | (selector << 9), 95,
                                   0xbfb00000};
@@ -82,7 +86,7 @@ TEST_P(ReadlaneSelectorTest, ReadlaneMasksInline64AndLiteralIndices) {
     EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 4),
               0xa5000000u + ((selector == 255 ? 95u : 64u) & (wf->wf_size() - 1)));
   }
-  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA2) {
+  if (GetParam() == rocjitsu::IsaFamily::Rdna2) {
     // An ordinary source VGPR beyond the 16-register allocation reads v0.
     // v_readlane_b32 s4,v40,5
     constexpr std::array<uint32_t, 2> words{0xd7600004, 0x02010b28};
@@ -94,7 +98,7 @@ TEST_P(ReadlaneSelectorTest, ReadlaneMasksInline64AndLiteralIndices) {
 }
 
 class Mi200ReadlaneTest : public ReadlaneSelectorTest {};
-INSTANTIATE_TEST_SUITE_P(Gfx90a, Mi200ReadlaneTest, ::testing::Values(ROCJITSU_CODE_ARCH_CDNA2));
+INSTANTIATE_TEST_SUITE_P(Gfx90a, Mi200ReadlaneTest, ::testing::Values(rocjitsu::IsaFamily::Cdna2));
 
 TEST_P(Mi200ReadlaneTest, OutOfRangeSourceUsesV0) {
   wf->set_exec(0);
@@ -119,7 +123,7 @@ TEST_P(ReadlaneSelectorTest, ReadlaneWritesBothVccWordsWithEmptyExec) {
     ASSERT_NE(inst, nullptr);
     EXPECT_EQ(
         inst->disassemble(),
-        GetParam() == ROCJITSU_CODE_ARCH_CDNA5
+        GetParam() == rocjitsu::IsaFamily::Cdna5
             ? (dst == 106 ? "v_readlane_b32 VCC_LO, v0, s4" : "v_readlane_b32 VCC_HI, v0, s4")
             : (dst == 106 ? "v_readlane_b32 vcc_lo, v0, s4" : "v_readlane_b32 vcc_hi, v0, s4"));
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
@@ -168,9 +172,10 @@ TEST_P(ReadlaneSelectorTest, WritelaneUsesVccSourceAndLaneIndexWithEmptyExec) {
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, lane),
                 lane == 5 ? (src == 106 ? 0xcafebabeu : 0xdeadbeefu) : 0xa5000000u + lane);
+    }
     EXPECT_EQ(wf->vcc(), initial);
     // v_writelane_b32 v0, 42, vcc_lo/hi. Each encoding uses one scalar source.
     const uint64_t index = wf->wf_size() + 5u;
@@ -179,8 +184,9 @@ TEST_P(ReadlaneSelectorTest, WritelaneUsesVccSourceAndLaneIndexWithEmptyExec) {
     inst.reset(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr);
     ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, lane), lane == 5 ? 42u : 0xa5000000u + lane);
+    }
     EXPECT_EQ(wf->vcc(), src == 106 ? index : index << 32);
     EXPECT_EQ(wf->exec(), 0u);
   }
@@ -188,7 +194,7 @@ TEST_P(ReadlaneSelectorTest, WritelaneUsesVccSourceAndLaneIndexWithEmptyExec) {
 
 TEST_P(ReadlaneSelectorTest, LaneReadsRejectUnqualifiedScalarDestinations) {
   const bool rdna12 =
-      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+      GetParam() == rocjitsu::IsaFamily::Rdna1 || GetParam() == rocjitsu::IsaFamily::Rdna2;
   const uint32_t m0 = gfx9() || rdna12 ? 124u : 125u;
   // LLVM assembles EXEC destinations, but their write behavior is not qualified.
   // Keep them explicitly unsupported alongside the architectural M0 exclusion.
@@ -205,7 +211,7 @@ TEST_P(ReadlaneSelectorTest, LaneReadsRejectUnqualifiedScalarDestinations) {
 }
 
 TEST(CdnaReadlaneTest, RestoresBothVccHalvesFromInactiveSpillLanes) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     SCOPED_TRACE(arch);
     amdgpu::GpuMemory mem("readlane_mem");
     amdgpu::L2Cache l2("readlane_l2");

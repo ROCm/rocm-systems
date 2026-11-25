@@ -5,6 +5,7 @@
 /// @brief Decoded scalar-vs-AVX-512 checks for gfx1250 K=128 FP8/BF8 SWMMAC.
 
 #include "mma_exact_test_support.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "../decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -68,7 +69,7 @@ constexpr std::array CASES{
 };
 
 struct SwmmacFixture : ExactFixture {
-  SwmmacFixture() : ExactFixture(ROCJITSU_CODE_ARCH_CDNA5, WF_SIZE) {}
+  SwmmacFixture() : ExactFixture(rocjitsu::IsaFamily::Cdna5, WF_SIZE) {}
 };
 
 struct Observation {
@@ -78,9 +79,11 @@ struct Observation {
 
 void restore(SwmmacFixture &fx, const std::vector<uint32_t> &words) {
   ASSERT_EQ(words.size(), static_cast<size_t>(STATE_REGS) * WF_SIZE);
-  for (uint32_t reg = 0; reg < STATE_REGS; ++reg)
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t reg = 0; reg < STATE_REGS; ++reg) {
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(fx.vbase + reg, lane, words[static_cast<size_t>(reg) * WF_SIZE + lane]);
+    }
+  }
 }
 
 void clear_state(SwmmacFixture &fx) {
@@ -90,26 +93,32 @@ void clear_state(SwmmacFixture &fx) {
 void seed_indices(SwmmacFixture &fx, uint32_t off, uint32_t phase) {
   // A 32-entry index set occupies two VGPRs per lane. Exercise every legal
   // ordered 2:4 pair in each half, including the upper register.
-  for (uint32_t reg = 0; reg < INDEX_REGS; ++reg)
+  for (uint32_t reg = 0; reg < INDEX_REGS; ++reg) {
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       uint32_t word = 0;
-      for (uint32_t group = 0; group < 8; ++group)
+      for (uint32_t group = 0; group < 8; ++group) {
         word |= LEGAL_PAIRS[(phase + lane + reg * 3 + group) % LEGAL_PAIRS.size()] << (4 * group);
+      }
       fx.cu->write_vgpr(fx.vbase + off + reg, lane, word);
     }
+  }
 }
 
 void seed_constant_indices(SwmmacFixture &fx) {
-  for (uint32_t reg = 0; reg < INDEX_REGS; ++reg)
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t reg = 0; reg < INDEX_REGS; ++reg) {
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(fx.vbase + INDEX_OFF + reg, lane, 0x44444444u);
+    }
+  }
 }
 
 void seed_constant_operand(SwmmacFixture &fx, uint32_t off, uint32_t regs, uint8_t value) {
   const uint32_t word = static_cast<uint32_t>(value) * 0x01010101u;
-  for (uint32_t reg = 0; reg < regs; ++reg)
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+  for (uint32_t reg = 0; reg < regs; ++reg) {
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       fx.cu->write_vgpr(fx.vbase + off + reg, lane, word);
+    }
+  }
 }
 
 void write_byte(SwmmacFixture &fx, uint32_t off, uint32_t reg, uint32_t lane, uint32_t byte,
@@ -128,9 +137,10 @@ std::unique_ptr<Instruction> decode_case(const SwmmacCase &test, uint32_t a_off 
                                        .src0 = static_cast<uint16_t>(256 + a_off),
                                        .src1 = static_cast<uint16_t>(256 + b_off),
                                        .src2 = static_cast<uint16_t>(256 + index_off)});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
-  if (!decoder)
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
+  if (!decoder) {
     return nullptr;
+  }
   return std::unique_ptr<Instruction>(decode_valid(*decoder, words.data()));
 }
 
@@ -146,7 +156,7 @@ void expect_equal_and_bounded(const SwmmacCase &test, const std::vector<uint32_t
                               const Observation &scalar, const Observation &simd) {
   ASSERT_TRUE(scalar.succeeded) << test.name << ": forced-scalar execution failed";
   ASSERT_TRUE(simd.succeeded) << test.name << ": default execution failed";
-  for (uint32_t reg = 0; reg < STATE_REGS; ++reg)
+  for (uint32_t reg = 0; reg < STATE_REGS; ++reg) {
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const size_t i = static_cast<size_t>(reg) * WF_SIZE + lane;
       ASSERT_EQ(simd.state[i], scalar.state[i])
@@ -158,6 +168,7 @@ void expect_equal_and_bounded(const SwmmacCase &test, const std::vector<uint32_t
             << test.name << ": SIMD changed source or canary reg=" << reg << " lane=" << lane;
       }
     }
+  }
 }
 
 void expect_output(const SwmmacCase &test, const Observation &observation,
@@ -243,8 +254,9 @@ void expect_uniform_result_with_overflow_modes(const SwmmacCase &test, uint8_t a
                                          fp16_ovfl ? set_word : clear_word);
     expect_output(test, scalar, expected);
     expect_output(test, simd, expected);
-    if (testing::Test::HasFatalFailure())
+    if (testing::Test::HasFatalFailure()) {
       return;
+    }
   }
 }
 
@@ -258,21 +270,24 @@ TEST(SwmmacK128SimdExact, AllEightDecodedFormsMatchForcedScalar) {
     const auto &test = CASES[case_index];
     for (size_t mode_index = 0; mode_index < MODES.size(); ++mode_index) {
       const Mode mode = MODES[mode_index];
-      if (mode == Mode::Inf && (!fmt_has_inf(test.a_fmt) || !fmt_has_inf(test.b_fmt)))
+      if (mode == Mode::Inf && (!fmt_has_inf(test.a_fmt) || !fmt_has_inf(test.b_fmt))) {
         continue;
+      }
       SCOPED_TRACE(::testing::Message() << test.name << " mode=" << static_cast<int>(mode));
       run_case(test, mode, 101 + 17 * case_index + mode_index, case_index + mode_index);
-      if (testing::Test::HasFatalFailure())
+      if (testing::Test::HasFatalFailure()) {
         return;
+      }
     }
   }
 }
 
 TEST(SwmmacK128SimdExact, InfinityInEitherOperandHonorsFp16Ovfl) {
-  for (const auto &test : CASES)
+  for (const auto &test : CASES) {
     for (bool infinity_in_a : {true, false}) {
-      if ((infinity_in_a ? test.a_fmt : test.b_fmt) != Fmt::BF8)
+      if ((infinity_in_a ? test.a_fmt : test.b_fmt) != Fmt::BF8) {
         continue;
+      }
       for (bool negative : {false, true}) {
         SCOPED_TRACE(::testing::Message()
                      << test.name << " infinity source=" << (infinity_in_a ? "A" : "B")
@@ -287,16 +302,19 @@ TEST(SwmmacK128SimdExact, InfinityInEitherOperandHonorsFp16Ovfl) {
         const uint32_t set_word =
             test.f32_result ? clear_word : (negative ? 0xFBFFFBFFu : 0x7BFF7BFFu);
         expect_uniform_result_with_overflow_modes(test, a, b, clear_word, set_word);
-        if (testing::Test::HasFatalFailure())
+        if (testing::Test::HasFatalFailure()) {
           return;
+        }
       }
     }
+  }
 }
 
 TEST(SwmmacK128SimdExact, AllF16FormsHonorFp16OvflForFiniteOverflow) {
   for (const auto &test : CASES) {
-    if (test.f32_result)
+    if (test.f32_result) {
       continue;
+    }
     for (bool negative : {false, true}) {
       SCOPED_TRACE(::testing::Message() << test.name << " negative=" << negative);
       // Both formats represent 256 exactly. The 64 selected products sum to
@@ -306,8 +324,9 @@ TEST(SwmmacK128SimdExact, AllF16FormsHonorFp16OvflForFiniteOverflow) {
       const uint8_t b = test.b_fmt == Fmt::FP8 ? 0x78u : 0x5Cu;
       expect_uniform_result_with_overflow_modes(test, a, b, negative ? 0xFC00FC00u : 0x7C007C00u,
                                                 negative ? 0xFBFFFBFFu : 0x7BFF7BFFu);
-      if (testing::Test::HasFatalFailure())
+      if (testing::Test::HasFatalFailure()) {
         return;
+      }
     }
   }
 }
@@ -315,16 +334,18 @@ TEST(SwmmacK128SimdExact, AllF16FormsHonorFp16OvflForFiniteOverflow) {
 TEST(SwmmacK128SimdExact, DestinationAliasesA_BAndBothMetadataWords) {
 
   constexpr std::array ALIASES{DstAlias::A, DstAlias::B, DstAlias::Index};
-  for (size_t case_index = 0; case_index < CASES.size(); ++case_index)
+  for (size_t case_index = 0; case_index < CASES.size(); ++case_index) {
     for (size_t alias_index = 0; alias_index < ALIASES.size(); ++alias_index) {
       const auto &test = CASES[case_index];
       SCOPED_TRACE(::testing::Message()
                    << test.name << " alias=" << static_cast<int>(ALIASES[alias_index]));
       run_case(test, Mode::RandomInt, 701 + 17 * case_index + alias_index, case_index + alias_index,
                ALIASES[alias_index]);
-      if (testing::Test::HasFatalFailure())
+      if (testing::Test::HasFatalFailure()) {
         return;
+      }
     }
+  }
 }
 
 TEST(SwmmacK128SimdExact, TiedCIsReadFromD) {
@@ -337,9 +358,11 @@ TEST(SwmmacK128SimdExact, TiedCIsReadFromD) {
     clear_state(fx);
     seed_constant_indices(fx);
     const uint32_t c_word = test.f32_result ? 0x3F800000u : 0x3C003C00u;
-    for (uint32_t reg = 0; reg < test.dst_regs(); ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < test.dst_regs(); ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         fx.cu->write_vgpr(fx.vbase + D_OFF + reg, lane, c_word);
+      }
+    }
     auto instruction = decode_case(test);
     ASSERT_NE(instruction, nullptr);
     const auto initial = fx.snapshot(0, STATE_REGS);
@@ -365,12 +388,16 @@ TEST(SwmmacK128SimdExact, IgnoresPartialExecAndUpdatesFullWave) {
 
     const uint32_t a_word = static_cast<uint32_t>(one(test.a_fmt)) * 0x01010101u;
     const uint32_t b_word = static_cast<uint32_t>(one(test.b_fmt)) * 0x01010101u;
-    for (uint32_t reg = 0; reg < A_REGS; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < A_REGS; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         fx.cu->write_vgpr(fx.vbase + A_OFF + reg, lane, a_word);
-    for (uint32_t reg = 0; reg < B_REGS; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+      }
+    }
+    for (uint32_t reg = 0; reg < B_REGS; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         fx.cu->write_vgpr(fx.vbase + B_OFF + reg, lane, b_word);
+      }
+    }
 
     auto instruction = decode_case(test);
     ASSERT_NE(instruction, nullptr);
@@ -423,10 +450,11 @@ TEST(SwmmacK128SimdExact, UpperMetadataAndPhysicalGatherMatchIndependentOracle) 
     std::vector<uint32_t> expected(static_cast<size_t>(test.dst_regs()) * WF_SIZE, 0);
     // gfx1250 wave32: F32 row5/col7 is D reg5/lane7; packed F16 is
     // D reg2/lane7/high half. These coordinates are intentionally literal.
-    if (test.f32_result)
+    if (test.f32_result) {
       expected[5 * WF_SIZE + 7] = 0x40C00000u;
-    else
+    } else {
       expected[2 * WF_SIZE + 7] = 0x46000000u;
+    }
     expect_output(test, scalar, expected);
     expect_output(test, simd, expected);
   }
@@ -435,7 +463,7 @@ TEST(SwmmacK128SimdExact, UpperMetadataAndPhysicalGatherMatchIndependentOracle) 
 TEST(SwmmacK128SimdExact, NaNSourcePriorityIsBitExact) {
 
   enum class Source { A, B, C };
-  for (const auto &test : CASES)
+  for (const auto &test : CASES) {
     for (Source source : {Source::A, Source::B, Source::C}) {
       SCOPED_TRACE(::testing::Message() << test.name << " NaN source=" << static_cast<int>(source));
       SwmmacFixture fx;
@@ -454,12 +482,13 @@ TEST(SwmmacK128SimdExact, NaNSourcePriorityIsBitExact) {
       fx.cu->write_vgpr(fx.vbase + D_OFF, 0, test.f32_result ? 0x7FC12345u : 0x00007E05u);
 
       float selected = 0.0f;
-      if (source == Source::A)
+      if (source == Source::A) {
         selected = decode_eight_bit(test.a_fmt, a);
-      else if (source == Source::B)
+      } else if (source == Source::B) {
         selected = decode_eight_bit(test.b_fmt, b);
-      else
+      } else {
         selected = test.f32_result ? std::bit_cast<float>(0x7FC12345u) : util::f16_to_f32(0x7E05u);
+      }
       selected = std::bit_cast<float>(std::bit_cast<uint32_t>(selected) | 0x00400000u);
       const uint32_t expected = result_bits(test, selected);
 
@@ -473,6 +502,7 @@ TEST(SwmmacK128SimdExact, NaNSourcePriorityIsBitExact) {
       EXPECT_EQ(first_output(test, scalar), expected) << test.name << ": scalar NaN payload";
       EXPECT_EQ(first_output(test, simd), expected) << test.name << ": SIMD NaN payload";
     }
+  }
 }
 
 TEST(SwmmacK128SimdExact, PackedF16RoundsHalfwayToEven) {

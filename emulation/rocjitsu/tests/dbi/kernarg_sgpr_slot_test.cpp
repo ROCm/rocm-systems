@@ -23,6 +23,7 @@
 /// reimplemented in the test would drift along with whichever side it copied.
 
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -105,7 +106,7 @@ TEST_P(KernargSgprSlot, CommandProcessorWritesThePointerWhereTheHelperNamesIt) {
   ASSERT_NO_FATAL_FAILURE(sim.initialize("cdna3", /*wave_size=*/64));
   sim.set_kernarg(std::vector<uint8_t>(8, 0), properties, c.user_sgpr_count);
 
-  util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3);
+  util::FailureOr<uint32_t> maybe_s_endpgm_2 = build_s_endpgm(rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_s_endpgm_2.succeeded());
   const std::vector<uint32_t> code{maybe_s_endpgm_2.value()};
   const std::optional<uint64_t> pair =
@@ -125,7 +126,7 @@ TEST(KernargSgprSlotNeighbours, ThePointerIsNotAlsoInTheAdjacentPairs) {
   desc.kernel_code_properties = properties;
   ASSERT_EQ(kernarg_segment_ptr_slot(desc), kSlot);
 
-  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(ROCJITSU_CODE_ARCH_CDNA3);
+  util::FailureOr<uint32_t> maybe_s_endpgm_1 = build_s_endpgm(rocjitsu::IsaFamily::Cdna3);
   ASSERT_TRUE(maybe_s_endpgm_1.succeeded());
   const std::vector<uint32_t> code{maybe_s_endpgm_1.value()};
   for (uint32_t slot : {kSlot - 2, kSlot + 2}) {

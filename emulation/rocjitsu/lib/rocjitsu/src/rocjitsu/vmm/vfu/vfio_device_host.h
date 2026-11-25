@@ -205,9 +205,7 @@ public:
   ///   drains before it waits. It is not immediate, and there is no wake-up: a
   ///   caller needing promptness needs a different mechanism.
   /// - **@p work must not throw.** It runs on the serving thread, so an escaping
-  ///   exception would terminate the process; this catches and reports instead,
-  ///   which keeps a faulty request from taking the device down but does NOT
-  ///   make throwing a supported way to report failure.
+  ///   exception terminates the process.
   /// - **It may never run.** If serving stops first the request is discarded.
   /// - **State referenced by @p work must stay alive until the request has
   ///   finished or the serving thread has stopped.** The request is one-shot
@@ -262,7 +260,7 @@ private:
                                                              bool to_guest) const;
   [[nodiscard]] bool
   finish_session_reset(simdojo::ResetKind kind,
-                       std::shared_ptr<simdojo::PciTransportSession> closing_session) noexcept;
+                       std::shared_ptr<simdojo::PciTransportSession> closing_session);
   [[nodiscard]] bool target_quiesce_drained() const noexcept;
   void end_target_quiesce() noexcept;
 

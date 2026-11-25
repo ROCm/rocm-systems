@@ -223,12 +223,6 @@ experiment::description()
     return "Records an experiment for causal profiling";
 }
 
-const std::atomic<experiment*>&
-experiment::get_current_experiment()
-{
-    return current_experiment;
-}
-
 bool
 experiment::start()
 {
@@ -436,16 +430,6 @@ experiment::get_delay()
         return 0;
     }
     return current_experiment_value.sample_delay;
-}
-
-double
-experiment::get_delay_scaling()
-{
-    if(!current_experiment.load())
-    {
-        return 0;
-    }
-    return current_experiment_value.delay_scaling;
 }
 
 std::uint32_t

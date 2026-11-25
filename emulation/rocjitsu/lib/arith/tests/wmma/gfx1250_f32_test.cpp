@@ -15,7 +15,7 @@
 
 namespace {
 using namespace rocjitsu::arith::test;
-TEST(WmmaGfx1250F32, Arithmetic) {
+void check_arithmetic(bool inject_nonfinite) {
   // One register bank permits D to overlap any input, or occupy independent storage.
   std::array<std::array<uint32_t, 32>, 20> input;
   std::minstd_rand random;
@@ -24,9 +24,11 @@ TEST(WmmaGfx1250F32, Arithmetic) {
       word = random_f32_bits(random);
     }
   }
-  for (int base : {0, 2, 4}) {
-    input[base][0] = kF32QuietNaNBits;
-    input[base][1] = kF32PositiveInfinityBits;
+  if (inject_nonfinite) {
+    for (int base : {0, 2, 4}) {
+      input[base][0] = kF32QuietNaNBits;
+      input[base][1] = kF32PositiveInfinityBits;
+    }
   }
   const auto levels = supported_cpu_levels();
   for (uint64_t controls :
@@ -87,4 +89,6 @@ TEST(WmmaGfx1250F32, Arithmetic) {
                                                 nullptr, nullptr, nullptr),
             RJ_ARITH_ERROR_INVALID_FLAGS);
 }
+TEST(WmmaGfx1250F32, Arithmetic) { check_arithmetic(true); }
+TEST(WmmaGfx1250F32, FiniteArithmetic) { check_arithmetic(false); }
 } // namespace
