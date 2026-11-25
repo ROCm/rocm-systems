@@ -11,12 +11,11 @@ import struct
 import sys
 
 from consan_runtime_e2e import (
-    CASES,
     Driver,
     HardwareUnavailable,
-    add_target_arguments,
     build_root,
     identity,
+    parse_target_arguments,
 )
 
 
@@ -88,6 +87,8 @@ class AnalysisDriver(Driver):
             if case == 'wide_collision'
             else (1 if case == 'collision' else 0)
         )
+        if case.startswith('atomic_') and case.endswith(('_read', '_write')):
+            pairs = 1
         transpose = case.startswith('transpose_')
         transpose_overlap = transpose and case.endswith('_overlap')
         rejected = int(
@@ -206,6 +207,38 @@ class AnalysisDriver(Driver):
             )
             assert analyzed['cross_wave_pairs'] == per_launch_pairs
             assert analyzed['collision_groups'] == collisions
+            if case.startswith('atomic_'):
+                assert (
+                    analyzed['ordered_pairs']
+                    == analyzed['ordering_unresolved_pairs']
+                    == 0
+                )
+                assert (
+                    analyzed['completed_barrier_waves']
+                    == analyzed['required_barrier_waves']
+                    == 0
+                )
+                if pairs:
+                    (finding,) = analyzed['cross_wave_examples']
+                    assert (
+                        finding['ordering'] == 'unordered'
+                        and finding['lane_pairs'] == 1
+                    )
+                    endpoints = sorted(
+                        (finding['first'], finding['second']), key=lambda e: e['wave']
+                    )
+                    _, form, peer = case.split('_')
+                    width = 8 if form in ('u64', 'f64') else 4
+                    for wave, (endpoint, role) in enumerate(
+                        zip(endpoints, ('atomic', peer))
+                    ):
+                        assert endpoint['site'] == endpoint['wave'] == wave
+                        assert endpoint['access'] == role
+                        assert endpoint['mask'] == 1 << (self.args.wave_size - 1)
+                        assert (
+                            endpoint['offset'] == 1024 - 2 * width + (width - 4) * wave
+                        )
+                        assert endpoint['width'] == (4 if wave else width)
             if case == 'wide_d16_overlap':
                 endpoints = set()
                 for finding in analyzed['cross_wave_examples']:
@@ -512,10 +545,8 @@ def main():
         parser.add_argument(
             f'--{name}', type=lambda value: Path(value).resolve(), required=True
         )
-    parser.add_argument('--case', choices=CASES, required=True)
     parser.add_argument('--utf8-entry', action='store_true')
-    add_target_arguments(parser)
-    driver = AnalysisDriver(parser.parse_args())
+    driver = AnalysisDriver(parse_target_arguments(parser))
     status = 1
     try:
         driver.execute()

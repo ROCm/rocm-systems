@@ -34,13 +34,25 @@ void write_json_string(std::ostream &out, std::string_view value) {
   out << '"';
 }
 
+std::string_view access_name(AccessKind access) {
+  switch (access) {
+  case AccessKind::Read:
+    return "read";
+  case AccessKind::Write:
+    return "write";
+  case AccessKind::Atomic:
+    return "atomic";
+  }
+  return "unknown";
+}
+
 void write_participant(std::ostream &out, const LdsRaceParticipant &value) {
   out << "{\"workgroup_x\":" << value.workgroup << ",\"wave\":" << value.wave
       << ",\"site\":" << value.site << ",\"range_id\":" << value.range_id
       << ",\"phase\":" << value.phase << ",\"sequence\":" << value.sequence
       << ",\"mask\":" << value.mask << ",\"offset\":" << value.offset
       << ",\"width\":" << value.width << ",\"original_offset\":" << value.original_offset
-      << ",\"access\":\"" << (value.access == AccessKind::Write ? "write" : "read") << '"';
+      << ",\"access\":\"" << access_name(value.access) << '"';
   if (value.transpose_exec)
     out << ",\"mask_role\":\"transpose_source_lanes\",\"anchor_exec\":" << *value.transpose_exec;
   out << '}';

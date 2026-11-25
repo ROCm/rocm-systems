@@ -124,7 +124,9 @@
 .type CONSAN_KERNEL,@function
 .p2align 8
 CONSAN_KERNEL:
-#ifdef CONSAN_TRANSPOSE_BITS
+#ifdef CONSAN_ATOMIC
+#include "native_atomic.inc"
+#elif defined(CONSAN_TRANSPOSE_BITS)
 #include "native_transpose.inc"
 #else
   LOAD32 s4, s[0:1], 0

@@ -57,6 +57,11 @@ CASES = (
         for bits in (4, 6, 8, 16)
         for scenario in ('full', 'empty', 'partial', 'overlap', 'adjacent', 'short')
     ),
+    *(
+        f'atomic_{form}_{peer}'
+        for form in ('u32', 'u64', 'f32', 'f64', 'cas')
+        for peer in ('count', 'read', 'write', 'atomic', 'adjacent')
+    ),
     'wide_u8',
     'wide_i8_alias_high',
     'wide_d16_u8',
@@ -233,7 +238,7 @@ class Driver:
         )
         if args.fixture_kind == 'named-assembly':
             fixture = fixture_directory / f'{fixture_name}.hsaco'
-        elif fixture_name.startswith('transpose_'):
+        elif fixture_name.startswith(('transpose_', 'atomic_')):
             fixture = fixture_directory / (
                 'width-' + fixture_name.replace('_', '-') + '.hsaco'
             )
@@ -334,6 +339,8 @@ class Driver:
         wide = fixture_name.startswith('wide_')
         if fixture_name.startswith('transpose_'):
             mode = fixture_name
+        if fixture_name.startswith('atomic_'):
+            mode = fixture_name if fixture_name.endswith('_count') else 'defined'
         if wide:
             mode = (
                 'wide_b128'
@@ -370,7 +377,7 @@ class Driver:
         if (
             synchronized
             or wide
-            or fixture_name.startswith('transpose_')
+            or fixture_name.startswith(('transpose_', 'atomic_'))
             or fixture_name == 'mixed_barrier'
             or (grouped and args.case not in ('grouped_oversized', 'grouped_edge'))
             or (
@@ -683,7 +690,56 @@ class Driver:
                 else:
                     assert record['flags'] == 4 and record['anchor_exec'] == anchor
 
+    def assert_atomic_observations(self, decoded, fixture):
+        _, form, scenario = fixture.split('_')
+        width = 8 if form in ('u64', 'f64') else 4
+        high = 1 << (self.args.wave_size - 1)
+        if scenario == 'count':
+            kinds = [2, 3, 1]
+            expected_rows = [
+                [
+                    (0, address, high),
+                    (1, address, high if form == 'cas' else high | (high >> 1)),
+                    (2, address, high),
+                ]
+                for address in (1024 - 3 * width, 1024 - width)
+            ]
+        else:
+            kinds = [3, {'read': 1, 'write': 2, 'atomic': 3, 'adjacent': 2}[scenario]]
+            start = 1024 - 2 * width
+            peer = start if scenario == 'atomic' else start + width - 4
+            expected_rows = [
+                [(0, start, high)],
+                [(1, peer + 4 if scenario == 'adjacent' else peer, high)],
+            ]
+        widths = [width] * len(kinds)
+        if scenario not in ('count', 'atomic'):
+            widths[1] = 4
+        assert [(site['access'], site['width']) for site in decoded['sites']] == list(
+            zip(kinds, widths)
+        )
+        (execution,) = decoded['executions']
+        assert len(execution['rows']) == len(expected_rows)
+        for wave, (row, expected) in enumerate(zip(execution['rows'], expected_rows)):
+            assert row['wave'] == wave and row['serial'] == execution['serial'] == 1
+            assert row['status'] == ROW_ENTERED | ROW_EXITED and row['loss'] == 0
+            assert row['final_phase'] == 0 and not row['completions']
+            assert row['final_sequence'] == len(row['records']) == len(expected)
+            for sequence, (record, (site, address, mask)) in enumerate(
+                zip(row['records'], expected), 1
+            ):
+                assert record['site'] == site and record['sequence'] == sequence
+                assert record['commit'] == 0x43534143 and record['flags'] == 1
+                assert (record['width'], record['offset'], record['mask']) == (
+                    widths[site],
+                    address,
+                    mask,
+                )
+
     def assert_observations(self, decoded, fixture):
+        if fixture.startswith('atomic_'):
+            self.assert_atomic_observations(decoded, fixture)
+            return
         if fixture.startswith('transpose_'):
             self.assert_transpose_observations(decoded, fixture)
             return
@@ -1110,7 +1166,8 @@ class Driver:
             )
 
 
-def add_target_arguments(parser):
+def parse_target_arguments(parser, argv=None):
+    parser.add_argument('--case', choices=CASES, required=True)
     parser.add_argument('--test-statistics', action='store_true')
     parser.add_argument('--amd-signals', action='store_true')
     parser.add_argument(
@@ -1119,7 +1176,11 @@ def add_target_arguments(parser):
         choices=('gfx942', 'gfx950', 'gfx1100', 'gfx1201', 'gfx1250'),
     )
     parser.add_argument('--wave-size', type=int, choices=(32, 64), default=32)
-    parser.add_argument('--threads', type=int, default=64)
+    parser.add_argument(
+        '--threads',
+        type=int,
+        help='threads per workgroup (default: two waves for atomic cases, otherwise 64)',
+    )
     parser.add_argument('--workgroups', type=int, default=1)
     parser.add_argument(
         '--fixture-kind',
@@ -1129,6 +1190,16 @@ def add_target_arguments(parser):
     parser.add_argument('--launcher', type=lambda value: Path(value).resolve())
     parser.add_argument('--config', type=lambda value: Path(value).resolve())
     parser.add_argument('--require-agent', action='store_true')
+    args = parser.parse_args(argv)
+    atomic = args.case.startswith('atomic_')
+    if args.threads is None:
+        args.threads = 2 * args.wave_size if atomic else 64
+    if atomic and (args.threads != 2 * args.wave_size or args.workgroups != 1):
+        parser.error(
+            f'{args.case} requires one workgroup of two full waves '
+            f'(--workgroups 1 --threads {2 * args.wave_size})'
+        )
+    return args
 
 
 class HardwareUnavailable(Exception):
@@ -1149,9 +1220,7 @@ def main():
         parser.add_argument(
             f'--{name}', type=lambda value: Path(value).resolve(), required=True
         )
-    parser.add_argument('--case', choices=CASES, required=True)
-    add_target_arguments(parser)
-    driver = Driver(parser.parse_args())
+    driver = Driver(parse_target_arguments(parser))
     status = 1
     try:
         driver.execute()

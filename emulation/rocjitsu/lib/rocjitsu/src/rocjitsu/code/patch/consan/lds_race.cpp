@@ -108,6 +108,22 @@ struct NativeLdsForm {
 };
 
 NativeLdsForm native_lds_form(const Instruction &instruction) {
+  if (instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic) {
+    if (instruction.amdgpu_memory_addressing() != amdgpu::MemoryAddressing::Lds)
+      return {};
+    switch (instruction.amdgpu_operation()) {
+    case amdgpu::Operation::DS_CMPST_RTN_B32:
+    case amdgpu::Operation::DS_CMPSTORE_RTN_B32:
+    case amdgpu::Operation::DS_ADD_U32:
+    case amdgpu::Operation::DS_ADD_F32:
+      return {.width = 4};
+    case amdgpu::Operation::DS_ADD_U64:
+    case amdgpu::Operation::DS_ADD_F64:
+      return {.width = 8};
+    default:
+      return {};
+    }
+  }
   switch (instruction.amdgpu_operation()) {
   case amdgpu::Operation::DS_LOAD_B32:
   case amdgpu::Operation::DS_STORE_B32:
@@ -291,13 +307,13 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
       (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER)) {
     return Result::success(); // The complete original group/CFG is qualified below.
   }
-  if ((instruction.flags() & BARRIER) != 0 ||
-      instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic ||
+  const bool atomic = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic;
+  const NativeLdsForm form = native_lds_form(instruction);
+  if ((instruction.flags() & BARRIER) != 0 || (atomic && form.width == 0) ||
       name.starts_with("s_barrier") || name.starts_with("s_sendmsg")) {
     return reject_instruction(error, InputErrorCode::UnsupportedSynchronization,
                               "unmodeled synchronization: " + std::string(name), offset);
   }
-  const NativeLdsForm form = native_lds_form(instruction);
   const uint32_t width = form.width;
   if ((addressing == amdgpu::MemoryAddressing::Lds || addressing == amdgpu::MemoryAddressing::Gds ||
        addressing == amdgpu::MemoryAddressing::DirectLds) &&
@@ -338,6 +354,12 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     const uint32_t value_words = read && dual ? 2 * words_per_range : words_per_range;
     const std::optional<RegisterRef> value_reg =
         allocated_vgpr_tuple(value, value_words, allocated_vgprs);
+    const bool compare_store = operation == amdgpu::Operation::DS_CMPST_RTN_B32 ||
+                               operation == amdgpu::Operation::DS_CMPSTORE_RTN_B32;
+    if (compare_store && (!allocated_vgpr_tuple(instruction.src_operand(2), 1, allocated_vgprs) ||
+                          !allocated_vgpr_tuple(instruction.dst_operand(0), 1, allocated_vgprs)))
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "LDS compare-store operands exceed allocation", offset);
     if (!address_reg || !value_reg ||
         (dual_store &&
          !allocated_vgpr_tuple(instruction.src_operand(2), words_per_range, allocated_vgprs))) {
@@ -361,7 +383,9 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     }
     accesses.push_back({.site = static_cast<uint32_t>(accesses.size()),
                         .original_offset = offset,
-                        .kind = read ? AccessKind::Read : AccessKind::Write,
+                        .kind = atomic ? AccessKind::Atomic
+                                : read ? AccessKind::Read
+                                       : AccessKind::Write,
                         .address_vgpr = address_reg->index,
                         .immediate_bytes = immediate,
                         .width = width,

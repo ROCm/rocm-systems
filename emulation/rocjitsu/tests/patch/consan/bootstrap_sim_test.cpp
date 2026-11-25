@@ -585,7 +585,12 @@ TEST_F(ConSanBootstrapSim,
 }
 
 class ConSanTargetSim : public ConSanBootstrapSim,
-                        public ::testing::WithParamInterface<test::TargetMode> {};
+                        public ::testing::WithParamInterface<test::TargetMode> {
+protected:
+  void check_atomic_add(const std::string &form, uint32_t width,
+                        const std::vector<uint32_t> &expected_words);
+  void check_atomic_peers(const std::string &form, uint32_t width);
+};
 
 TEST_P(ConSanTargetSim, PublicationBarrierBlocksAnEarlyConsumer) {
   const test::TargetMode target = GetParam();
@@ -1148,6 +1153,189 @@ TEST_P(ConSanTargetSim, NativeWidthsPreserveEveryWordAndAllGuestState) {
 
 // The capture counts probes. Count the original memory operations independently,
 // including a second execution if instrumentation accidentally duplicates one.
+class AtomicIssueTrace final : public ExecutionPlugin {
+public:
+  using Masks = std::array<std::vector<uint64_t>, 2>;
+
+  AtomicIssueTrace(std::string_view mnemonic, Masks &masks)
+      : ExecutionPlugin("atomic_issue_trace"), mnemonic_(mnemonic), masks_(masks) {}
+  bool requires_serial_hot_hooks() const override { return true; }
+  void onAmdgpuBeforeExecuteInstruction(uint64_t, const Instruction &instruction,
+                                        amdgpu::Wavefront &wave) override {
+    if (instruction.mnemonic() == mnemonic_ && wave.exec())
+      masks_.at(wave.wave_in_group()).push_back(wave.exec());
+  }
+
+private:
+  std::string_view mnemonic_;
+  Masks &masks_;
+};
+
+#ifdef CONSAN_ANALYZER_ENABLED
+void expect_atomic_analysis(const RunResult &run, uint32_t threads, size_t observations,
+                            unsigned cross_wave_pairs) {
+  const CapturedExecution execution = {.serial = 41,
+                                       .dimensions = {{threads, 1, 1}, {threads, 1, 1}},
+                                       .group_bytes = run.manifest.entry.prepared_group_bytes,
+                                       .arguments = {},
+                                       .report = run.report};
+  const LdsRaceExecutionResult analysis = analyze_lds_race_execution(run.manifest, execution, 8);
+  EXPECT_TRUE(analysis.coverage_complete);
+  EXPECT_EQ(analysis.valid_observations, observations);
+  EXPECT_EQ(analysis.rejected_records, 0u);
+  EXPECT_EQ(analysis.cross_wave_pairs, cross_wave_pairs);
+  EXPECT_EQ(analysis.collision_groups, 0u);
+  EXPECT_EQ(analysis.ordered_pairs, 0u);
+  EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
+}
+#endif
+
+void ConSanTargetSim::check_atomic_add(const std::string &form, uint32_t width,
+                                       const std::vector<uint32_t> &expected_words) {
+  SCOPED_TRACE(form);
+  const std::string fixture = "width-atomic-" + form + "-count";
+  const std::string mnemonic = "ds_add_" + form;
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  const uint64_t high = uint64_t{1} << (target.wave_size - 1);
+  const uint64_t atomic_mask = high | (high >> 1);
+  RunResult before, after;
+  AtomicIssueTrace::Masks before_masks, after_masks;
+  ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, width / 4,
+                              false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, before_masks)));
+  ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true,
+                              width / 4, false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, after_masks)));
+  expect_guest_state(before, after);
+  EXPECT_EQ(before.full_output, expected_words);
+  EXPECT_EQ(after_masks, before_masks);
+  EXPECT_EQ(after.manifest.scope, ScopeKind::NativeLdsNoSynchronization);
+  ASSERT_EQ(after.manifest.sites.size(), 3u);
+  const std::array roles{AccessKind::Write, AccessKind::Atomic, AccessKind::Read};
+  const auto records = published_accesses(after);
+  ASSERT_EQ(records.size(), 6u);
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    EXPECT_EQ(before_masks[wave], (std::vector<uint64_t>{atomic_mask}));
+    for (uint32_t site = 0; site < roles.size(); ++site) {
+      EXPECT_EQ(after.manifest.sites[site].access, roles[site]);
+      EXPECT_EQ(after.manifest.sites[site].width, width);
+      const auto &record = records[3 * wave + site];
+      EXPECT_EQ(record.wave, wave);
+      EXPECT_EQ(record.site, site);
+      EXPECT_EQ(record.offset, 1024 - 3 * width + 2 * width * wave);
+      EXPECT_EQ(record.mask, site == 1 ? atomic_mask : high);
+    }
+  }
+#ifdef CONSAN_ANALYZER_ENABLED
+  expect_atomic_analysis(after, threads, records.size(), 0);
+#endif
+}
+
+void ConSanTargetSim::check_atomic_peers(const std::string &form, uint32_t width) {
+  SCOPED_TRACE(form);
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  const uint64_t high = uint64_t{1} << (target.wave_size - 1);
+  const uint32_t atomic_offset = 1024 - 2 * width;
+  const uint32_t overlap_offset = atomic_offset + width - 4;
+  for (const auto &[peer, role, offset, pairs] :
+       {std::tuple{"read", AccessKind::Read, overlap_offset, 1u},
+        std::tuple{"write", AccessKind::Write, overlap_offset, 1u},
+        std::tuple{"atomic", AccessKind::Atomic, atomic_offset, 0u},
+        std::tuple{"adjacent", AccessKind::Write, atomic_offset + width, 0u}}) {
+    SCOPED_TRACE(peer);
+    const std::string fixture = "width-atomic-" + form + "-" + peer;
+    RunResult before, after;
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true));
+    ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true));
+    // The peer discards its racing load before publishing the output.
+    expect_guest_state(before, after);
+    EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 8}));
+    ASSERT_EQ(after.manifest.sites.size(), 2u);
+    EXPECT_EQ(after.manifest.sites[0].access, AccessKind::Atomic);
+    EXPECT_EQ(after.manifest.sites[1].access, role);
+    const auto records = published_accesses(after);
+    ASSERT_EQ(records.size(), 2u);
+    for (uint32_t wave = 0; wave < 2; ++wave) {
+      EXPECT_EQ(after.manifest.sites[wave].width,
+                wave == 0 || role == AccessKind::Atomic ? width : 4u);
+      EXPECT_EQ(records[wave].wave, wave);
+      EXPECT_EQ(records[wave].site, wave);
+      EXPECT_EQ(records[wave].mask, high);
+      EXPECT_EQ(records[wave].offset, wave == 0 ? atomic_offset : offset);
+    }
+#ifdef CONSAN_ANALYZER_ENABLED
+    expect_atomic_analysis(after, threads, records.size(), pairs);
+#endif
+  }
+}
+
+TEST_P(ConSanTargetSim, AtomicU32AddsOnceAndConflictsWithOverlappingOrdinaryPeers) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("u32", 4, {9, 10}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("u32", 4));
+}
+
+TEST_P(ConSanTargetSim, AtomicU64PropagatesCarryAndConflictsWithTheUpperDword) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("u64", 8, {0, 4, 0, 4}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("u64", 8));
+}
+
+TEST_P(ConSanTargetSim, AtomicF32PerformsFloatingPointAddition) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("f32", 4, {0x40200000u, 0x40200000u}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("f32", 4));
+}
+
+class ConSanAtomicF64Sim : public ConSanTargetSim {};
+
+TEST_P(ConSanAtomicF64Sim, AtomicF64PerformsFloatingPointAddition) {
+  ASSERT_NO_FATAL_FAILURE(check_atomic_add("f64", 8, {0, 0x40040000u, 0, 0x40040000u}));
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("f64", 8));
+}
+
+TEST_P(ConSanTargetSim, AtomicCompareStorePreservesOldValueAndUsesThePreGuestAddress) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  const uint64_t high = uint64_t{1} << (target.wave_size - 1);
+  const std::string_view gpu = target.target;
+  const std::string_view mnemonic =
+      gpu == "gfx942" || gpu == "gfx950" ? "ds_cmpst_rtn_b32" : "ds_cmpstore_rtn_b32";
+  RunResult before, after;
+  AtomicIssueTrace::Masks before_masks, after_masks;
+  ASSERT_NO_FATAL_FAILURE(run("width-atomic-cas-count", Bootstrap::None, before, target, threads,
+                              true, 4, false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, before_masks)));
+  ASSERT_NO_FATAL_FAILURE(run("width-atomic-cas-count", Bootstrap::Instrumented, after, target,
+                              threads, true, 4, false, 1,
+                              std::make_unique<AtomicIssueTrace>(mnemonic, after_masks)));
+  expect_guest_state(before, after);
+  // Both waves see the old value 7. Only wave zero matches the comparison.
+  // The neighboring inactive lane retains the original address in the aliased VGPR.
+  EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 0x2468, 1008, 0, 7, 7, 1016, 0}));
+  EXPECT_EQ(after_masks, before_masks);
+  EXPECT_EQ(after.manifest.scope, ScopeKind::NativeLdsNoSynchronization);
+  const auto records = published_accesses(after);
+  ASSERT_EQ(records.size(), 6u);
+  const std::array roles{AccessKind::Write, AccessKind::Atomic, AccessKind::Read};
+  ASSERT_EQ(after.manifest.sites.size(), roles.size());
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    EXPECT_EQ(before_masks[wave], (std::vector<uint64_t>{high}));
+    for (uint32_t site = 0; site < roles.size(); ++site) {
+      EXPECT_EQ(after.manifest.sites[site].access, roles[site]);
+      EXPECT_EQ(after.manifest.sites[site].width, 4u);
+      const auto &record = records[3 * wave + site];
+      EXPECT_EQ(record.wave, wave);
+      EXPECT_EQ(record.site, site);
+      EXPECT_EQ(record.offset, 1012 + 8 * wave);
+      EXPECT_EQ(record.mask, high);
+    }
+  }
+#ifdef CONSAN_ANALYZER_ENABLED
+  expect_atomic_analysis(after, threads, records.size(), 0);
+#endif
+  ASSERT_NO_FATAL_FAILURE(check_atomic_peers("cas", 4));
+}
+
 class NativeWidthIssueCounter final : public ExecutionPlugin {
 public:
   explicit NativeWidthIssueCounter(std::vector<std::array<unsigned, 2>> &counts)
@@ -1641,6 +1829,11 @@ const auto target_name = [](const auto &info) {
   return std::string(info.param.target) + "Wave" + std::to_string(info.param.wave_size);
 };
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanTargetSim, ::testing::ValuesIn(test::kTargetModes),
+                         target_name);
+INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanAtomicF64Sim,
+                         ::testing::Values(test::TargetMode{"gfx942", 64},
+                                           test::TargetMode{"gfx950", 64},
+                                           test::TargetMode{"gfx1250", 32}),
                          target_name);
 INSTANTIATE_TEST_SUITE_P(ConSanTargets, ConSanHipSim,
                          ::testing::ValuesIn(std::span(test::kTargetModes).first(6)), target_name);

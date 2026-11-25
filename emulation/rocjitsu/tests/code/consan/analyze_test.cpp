@@ -542,6 +542,115 @@ TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot
   }
 }
 
+TEST_F(ConSanAnalysis, AtomicOverlapUsesOrdinaryPeersAndRetainsTheSavedAccessRole) {
+  struct PeerRange {
+    uint32_t offset, width;
+    bool overlaps;
+  };
+  // The atomic covers [4, 8). Exercise the equal-range bucket and both sides
+  // of the range sweep, including an adjacent ordinary access.
+  for (const AccessKind ordinary : {AccessKind::Read, AccessKind::Write})
+    for (const PeerRange peer : {PeerRange{4, 4, true}, {0, 8, true}, {6, 2, true}, {8, 4, false}})
+      for (const uint32_t atomic_site : {0u, 1u}) {
+        SCOPED_TRACE(::testing::Message()
+                     << "atomic site " << atomic_site << " peer " << uint32_t(ordinary)
+                     << " offset " << peer.offset << " width " << peer.width);
+        Manifest &manifest = test::manifest(capture_.header);
+        manifest.sites[atomic_site].access = AccessKind::Atomic;
+        manifest.sites[atomic_site].width = 4;
+        const uint32_t ordinary_site = 1 - atomic_site;
+        manifest.sites[ordinary_site].access = ordinary;
+        manifest.sites[ordinary_site].width = peer.width;
+        workgroups(1, 950, 64);
+        access(atomic_site, atomic_site, 1, 4, uint64_t{3} << 62);
+        access(ordinary_site, ordinary_site, 1, peer.offset);
+        const FailureOr<LdsRaceResult> result = analyze();
+        ASSERT_TRUE(result.succeeded()) << error_.message();
+        EXPECT_TRUE(result.value().coverage_complete);
+        const LdsRaceExecutionResult &execution = result.value().executions.front();
+        EXPECT_EQ(execution.valid_observations, 2u);
+        EXPECT_EQ(execution.cross_wave_pairs, peer.overlaps ? 1u : 0u);
+        EXPECT_EQ(execution.cross_wave_lane_pairs, peer.overlaps ? 2u : 0u);
+        EXPECT_EQ(execution.collision_groups, 0u);
+        if (peer.overlaps) {
+          ASSERT_EQ(execution.cross_wave_examples.size(), 1u);
+          const LdsRaceFinding &finding = execution.cross_wave_examples.front();
+          const LdsRaceParticipant &atomic =
+              finding.first.site == atomic_site ? finding.first : finding.second;
+          EXPECT_EQ(atomic.access, AccessKind::Atomic);
+          EXPECT_EQ(atomic.offset, 4u);
+          EXPECT_EQ(atomic.mask, uint64_t{3} << 62);
+          EXPECT_NE(render_analysis(result.value()).find("\"access\":\"atomic\""),
+                    std::string::npos);
+        }
+      }
+}
+
+TEST_F(ConSanAnalysis, AtomicPeersAndSameWaveOrdinaryAccessDoNotFormCandidates) {
+  Manifest &manifest = test::manifest(capture_.header);
+  for (auto &site : manifest.sites)
+    site.access = AccessKind::Atomic;
+  workgroups(1, 950, 64);
+  access(0, 0, 1, 4, 3);
+  access(1, 1, 1, 4, 3);
+  auto result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_TRUE(result.value().coverage_complete);
+  EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
+  EXPECT_EQ(result.value().cross_wave_pairs, 0u);
+  EXPECT_EQ(result.value().collision_groups, 0u);
+
+  manifest.sites[1].access = AccessKind::Write;
+  workgroups(1, 950, 64);
+  access(0, 0, 1, 4, 3);
+  access(0, 1, 2, 4);
+  result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_TRUE(result.value().coverage_complete);
+  EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
+  EXPECT_EQ(result.value().cross_wave_pairs, 0u);
+  EXPECT_EQ(result.value().collision_groups, 0u);
+}
+
+TEST_F(ConSanAnalysis, QwordAtomicRequiresEightValidBytesAndOverlapsTheHighDword) {
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.sites.front().access = AccessKind::Atomic;
+  manifest.sites.front().width = 8;
+  // [120,128) is the last aligned qword inside this 128-byte LDS extent.
+  for (const uint32_t offset : {120u, 116u, 128u}) {
+    workgroups(1, 950, 64);
+    access(0, 0, 1, offset, 3);
+    access(1, 1, 1, 124);
+    const auto result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    const auto &execution = result.value().executions.front();
+    const bool valid = offset == 120;
+    EXPECT_EQ(execution.coverage_complete, valid);
+    EXPECT_EQ(execution.valid_observations, valid ? 2u : 1u);
+    EXPECT_EQ(execution.rejected_records, valid ? 0u : 1u);
+    EXPECT_EQ(execution.cross_wave_pairs, valid ? 1u : 0u);
+    EXPECT_EQ(execution.collision_groups, 0u);
+  }
+}
+
+TEST_F(ConSanAnalysis, OrdinaryLdsProfileReplaysByteAccessesAndRejectsAtomicFacts) {
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.options = {
+      0x0c, 0x9d, 0x4a, 0x7a, 0x78, 0x6b, 0xd8, 0x4a, 0xe6, 0x60, 0xc3,
+      0xff, 0xa2, 0xcf, 0xe2, 0xf3, 0x2b, 0xb4, 0x29, 0xc7, 0x23, 0x4b,
+      0x13, 0x17, 0x87, 0x26, 0x0f, 0x4d, 0xfa, 0x19, 0xe6, 0x15,
+  };
+  manifest.sites[0].width = 1;
+  workgroups(1, 950, 64);
+  access(0, 0, 1);
+  access(1, 1, 1);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_EQ(result.value().cross_wave_pairs, 1u);
+  manifest.sites[1].access = AccessKind::Atomic;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+}
+
 TEST_F(ConSanAnalysis, ThreeDwordAccessRequiresNativeAlignmentAndCoversOnlyTwelveBytes) {
   test::manifest(capture_.header).sites[0].width = 12;
   for (uint32_t start : {12u, 16u}) {
@@ -970,6 +1079,24 @@ TEST_F(ConSanAnalysis, MultiWorkgroupReusedStorageNeverJoinsDifferentDispatches)
   EXPECT_EQ(result.value().executions[0].valid_observations, 1u);
   EXPECT_EQ(result.value().executions[1].valid_observations, 1u);
   EXPECT_TRUE(result.value().coverage_complete);
+}
+
+TEST_F(ConSanAnalysis, AtomicOrdinaryOverlapRequiresACompleteBarrierWitnessToBeOrdered) {
+  test::manifest(capture_.header).sites[0].access = AccessKind::Atomic;
+  access(0, 0, 1);
+  access(1, 1, 1);
+  barrier();
+  for (const bool complete : {true, false}) {
+    if (!complete)
+      wire::write_u32(capture_.executions[0].report, completion(1) + wire::kSyncCommit, 0);
+    const auto result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    const auto &execution = result.value().executions.front();
+    EXPECT_EQ(execution.ordered_pairs, complete ? 1u : 0u);
+    EXPECT_EQ(execution.ordering_unresolved_pairs, complete ? 0u : 1u);
+    EXPECT_EQ(execution.cross_wave_pairs, 0u);
+    EXPECT_EQ(execution.coverage_complete, complete);
+  }
 }
 
 TEST_F(ConSanAnalysis, FixedBarrierCertificateOrdersRetainedPairAndSurvivesUnrelatedLocalGap) {
