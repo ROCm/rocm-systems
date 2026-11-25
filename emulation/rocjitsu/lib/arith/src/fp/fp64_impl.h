@@ -48,7 +48,8 @@ inline double fp64_flush_denorm(double value) {
 }
 
 // FP64 ADD/MUL/FMA return the first NaN source in operand order, quieted unless quiet_snan is
-// clear. An invalid FMA product (0 * infinity) gives the default NaN even when the addend is a NaN.
+// clear. Invalid operations (+Inf + -Inf, 0 * +-Inf) return the architectural default NaN
+// (0xfff8000000000000) even when the FMA addend is a NaN or host arithmetic produces +qNaN.
 // Host arithmetic may commute its operands, so its NaN choice is replaced; other results are kept.
 template <bool Fma>
 inline double fp64_nan_priority(double value, double x, double y, double z = 0,
@@ -70,6 +71,9 @@ inline double fp64_nan_priority(double value, double x, double y, double z = 0,
     if ((zb & 0x7fffffffffffffffULL) > infinity) {
       return as_double(zb | quiet);
     }
+  }
+  if ((double_bits(value) & 0x7fffffffffffffffULL) > infinity) {
+    return as_double(0xfff8000000000000ULL);
   }
   return value;
 }
@@ -107,6 +111,23 @@ inline double fp64_input(const uint32_t *const *v, int lane, uint32_t mode) {
     bits ^= 0x8000000000000000ULL;
   }
   return as_double(bits);
+}
+
+// Preserve the legacy CDNA native-math stages: scale in the default host mode,
+// then flush a subnormal OMOD result and canonicalize either signed zero.
+inline double fp64_native_math_output(double value, uint32_t mode) {
+  const unsigned omod = (mode >> 6) & 3;
+  if (omod) {
+    const double scales[] = {1, 2, 4, 0.5};
+    value *= scales[omod];
+    if ((double_bits(value) & 0x7ff0000000000000ULL) == 0) {
+      value = 0;
+    }
+  }
+  if (mode & RJ_ARITH_ALU_CLAMP) {
+    value = !(value > 0) ? 0 : value > 1 ? 1 : value;
+  }
+  return value;
 }
 
 // Apply FP64 output modifiers by encoding arithmetic, including guest overflow rounding.

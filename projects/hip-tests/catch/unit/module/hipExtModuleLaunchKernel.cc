@@ -764,7 +764,7 @@ HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_Functional) {
   }
 }
 
-TEST_CASE("Unit_hipExtModuleLaunchKernel_AnyOrder") {
+HIP_TEST_CASE(Unit_hipExtModuleLaunchKernel_AnyOrder) {
   int device = -1;
   hipDeviceProp_t props{};
   HIP_CHECK(hipGetDevice(&device));

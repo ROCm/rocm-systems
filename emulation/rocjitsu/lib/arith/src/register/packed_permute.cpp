@@ -4,7 +4,9 @@
 // Packed B4/B6/B8 table permutations, including elements crossing word boundaries.
 
 #include "register/packed_permute.h"
+#include "common/exec_mask.h"
 #include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_register.h"
 
@@ -22,20 +24,26 @@ int permute(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  const bool use_wide = rocjitsu::arith::has_more_than_four_lanes(exec_mask);
+  // The AVX2 byte shuffle also handles sparse masks efficiently.
+  [[maybe_unused]] const auto level = Bits == 8 || use_wide
+                                          ? rocjitsu::arith::wave_cpu_level(flags, use_wide)
+                                          : RJ_ARITH_CPU_BASELINE;
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     rocjitsu::arith::packed_permute_x86_64_v4(Bits, Lanes, exec_mask, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     rocjitsu::arith::packed_permute_x86_64_v3(Bits, Lanes, exec_mask, d, a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif
   constexpr int Words = Bits / 2, LowWords = Bits == 4 ? 1 : 2;
-  for (int lane = 0; lane < Lanes; ++lane) {
+  for (uint64_t active = exec_mask; active; active &= active - 1) {
+    int lane = __builtin_ctzll(active);
     uint32_t table[Words + 1] = {}, result[Words] = {};
     for (int word = 0; word < Words; ++word) {
       table[word] = word < LowWords ? b[word][lane] : a[word - LowWords][lane];
@@ -51,10 +59,8 @@ int permute(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
         result[output / 32 + 1] |= value >> (32 - output % 32);
       }
     }
-    if ((exec_mask >> lane) & 1) {
-      for (int word = 0; word < Words; ++word) {
-        d[word][lane] = result[word];
-      }
+    for (int word = 0; word < Words; ++word) {
+      d[word][lane] = result[word];
     }
   }
   return RJ_ARITH_SUCCESS;

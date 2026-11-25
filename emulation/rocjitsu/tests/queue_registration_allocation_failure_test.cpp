@@ -49,13 +49,15 @@ void *operator new(std::size_t size) {
   }
   for (;;) {
     if (void *memory = std::malloc(size == 0 ? 1 : size)) {
-      if (trace_allocations)
+      if (trace_allocations) {
         last_allocation = memory;
+      }
       return memory;
     }
     const std::new_handler handler = std::get_new_handler();
-    if (!handler)
+    if (!handler) {
       throw std::bad_alloc();
+    }
     handler();
   }
 }
@@ -159,8 +161,9 @@ TEST_P(QueueRegistrationDeathTest, BindingAllocationFailureCannotReachRecovering
 }
 
 TEST_P(QueueRegistrationDeathTest, ForeignCallbackAllocationExceptionStillPropagates) {
-  if (GetParam() != QueueType::Sdma)
+  if (GetParam() != QueueType::Sdma) {
     GTEST_SKIP() << "only SDMA resolves foreign factories during binding creation";
+  }
   for (bool progress : {false, true}) {
     SdmaCallbackFactory callbacks =
         progress ? SdmaCallbackFactory{}

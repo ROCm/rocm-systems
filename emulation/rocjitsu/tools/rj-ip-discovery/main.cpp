@@ -34,16 +34,18 @@ int main(int argc, char **argv) {
       std::make_shared<BoolFlag>(FlagInfo{"--help", {"-h"}, "Show help", ValueMode::Switch});
   auto report = [](std::string_view message) { std::cerr << message << '\n'; };
   util::DiagnosticEmitter diagnostic(report);
-  if (command.add_flag(help, diagnostic).failed())
+  if (command.add_flag(help, diagnostic).failed()) {
     return EXIT_FAILURE;
+  }
   std::vector<std::string_view> arguments(argv + 1, argv + argc);
   if (arguments.size() == 2 && !arguments[0].empty() && arguments[0].front() != '-') {
     // Legacy two-operand form permits flag-like output filenames after the generation.
     arguments.insert(arguments.begin(), "--");
   }
   auto parsed = parse(command, arguments, diagnostic);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return EXIT_FAILURE;
+  }
   const auto &inputs = parsed.value().positional;
   if (inputs.size() != 2) {
     std::cerr << format_help(command) << "\nRequired arguments: <generation> <output-path>\n"

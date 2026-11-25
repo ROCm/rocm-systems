@@ -41,25 +41,31 @@ public:
   void set_sgpr_alias_end(uint16_t end) { sgpr_alias_end_ = end; }
   RegisterRef canonical(RegisterRef reg) const {
     if (sgpr_alias_end_) {
-      if (reg.cls == RegClass::VCC)
+      if (reg.cls == RegClass::VCC) {
         return {RegClass::SGPR, static_cast<uint16_t>(cdna3::vcc_base(sgpr_alias_end_) + reg.index),
                 reg.width};
-      if (reg.cls == RegClass::FLAT_SCRATCH)
+      }
+      if (reg.cls == RegClass::FLAT_SCRATCH) {
         return {RegClass::SGPR,
                 static_cast<uint16_t>(cdna3::flat_scratch_base(sgpr_alias_end_) + reg.index),
                 reg.width};
+      }
     }
     return reg;
   }
   static size_t index(RegisterRef reg) {
-    if (reg.cls == RegClass::VGPR && reg.index < REGISTER_SET_MAX_VGPRS)
+    if (reg.cls == RegClass::VGPR && reg.index < REGISTER_SET_MAX_VGPRS) {
       return reg.index;
-    if (reg.cls == RegClass::SGPR && reg.index < kSgprEncodingSlots)
+    }
+    if (reg.cls == RegClass::SGPR && reg.index < kSgprEncodingSlots) {
       return REGISTER_SET_MAX_VGPRS + reg.index;
-    if (reg.cls == RegClass::TTMP && reg.index < REGISTER_SET_MAX_TTMPS)
+    }
+    if (reg.cls == RegClass::TTMP && reg.index < REGISTER_SET_MAX_TTMPS) {
       return kTtmpBase + reg.index;
-    if (is_special_reg_class(reg.cls))
+    }
+    if (is_special_reg_class(reg.cls)) {
       return kSpecialBase + static_cast<size_t>(reg.cls);
+    }
     return kRegisters;
   }
   static constexpr uint8_t kResult = 1;
@@ -69,11 +75,14 @@ public:
   }
   bool pending_vgpr(uint16_t index, uint8_t width) const {
     assert(index + width <= REGISTER_SET_MAX_VGPRS);
-    if (width == 1)
+    if (width == 1) {
       return bytes_[index] != 0;
-    for (unsigned i = 0; i < width; ++i)
-      if (bytes_[index + i])
+    }
+    for (unsigned i = 0; i < width; ++i) {
+      if (bytes_[index + i]) {
         return true;
+      }
+    }
     return false;
   }
 
@@ -82,8 +91,9 @@ public:
     for (unsigned r = 0; r < reg.width; ++r) {
       auto element = reg;
       element.index += r;
-      if (test(index(element), write))
+      if (test(index(element), write)) {
         return true;
+      }
     }
     return false;
   }
@@ -116,14 +126,16 @@ public:
   void clear(RegisterRef reg) {
     reg = canonical(reg);
     if (reg.cls == RegClass::VGPR && reg.index + reg.width <= REGISTER_SET_MAX_VGPRS) {
-      for (unsigned r = 0; r < reg.width; ++r)
+      for (unsigned r = 0; r < reg.width; ++r) {
         bytes_[reg.index + r] = 0;
+      }
     } else {
       for (unsigned r = 0; r < reg.width; ++r) {
         auto element = reg;
         element.index += r;
-        if (const auto i = index(element); i < kRegisters)
+        if (const auto i = index(element); i < kRegisters) {
           bytes_[i] = 0;
+        }
       }
     }
   }
@@ -260,10 +272,12 @@ public:
   }
   [[gnu::always_inline]] void access(RegisterRef reg, uint64_t lanes, uint8_t bytes, bool write,
                                      WriteOrder ordered_write_order = kUnordered) {
-    if (!lanes || !bytes)
+    if (!lanes || !bytes) {
       return;
-    if (!pending_.pending(reg, write))
+    }
+    if (!pending_.pending(reg, write)) {
       return;
+    }
     access_pending(pending_.canonical(reg), lanes, bytes, write, ordered_write_order);
   }
 
@@ -328,6 +342,8 @@ private:
   // not make their shared register byte independently clearable.
   bool may_overlap_ = false;
   MemoryWaitShadow &pending_;
+  // Reuse classification storage for consecutive pending-result and counter-capacity checks.
+  std::vector<waitcheck_detail::ClassifiedEvent> classification_scratch_;
   std::vector<Event> events_;
   struct SupersededEvent {
     Event event;

@@ -69,6 +69,10 @@ public:
   bool read_modify_write = false;
   // A nonzero width proves all atomic elements have this width and natural alignment.
   uint8_t aligned_atomic_bytes = 0;
+  /// The access is an arrival at an LDS barrier cell (CDNA5 ISA 11.2.2). It
+  /// updates the cell atomically, so it conflicts only with non-atomic writes
+  /// of the cell, never with reads of it.
+  bool barrier_arrive = false;
 
   MemoryOrderClass order(MemoryOrderClass wholeEventOrder) const {
     return uses_flat_lds ? MemoryOrderClass::LDS : wholeEventOrder;
@@ -96,13 +100,15 @@ public:
 /// different completion classes is not ordered as a whole.
 inline MemoryOrderClass
 memoryOrderForObligations(std::span<const amdgpu::MemoryCounterObligation> obligations) {
-  if (obligations.empty())
+  if (obligations.empty()) {
     return MemoryOrderClass::UNORDERED;
+  }
 
   const MemoryOrderClass order = obligations.front().completion_class();
   for (const auto obligation : obligations) {
-    if (obligation.completion_class() != order)
+    if (obligation.completion_class() != order) {
       return MemoryOrderClass::UNORDERED;
+    }
   }
   return order;
 }
@@ -197,8 +203,9 @@ public:
       amdgpu::WaitCounterType wait_counter_type, MemoryOrderClass memory_order,
       std::optional<amdgpu::WaitCounterType> additional_wait_counter_type = std::nullopt)
       : obligations_{amdgpu::MemoryCounterObligation{wait_counter_type, memory_order}, {}} {
-    if (additional_wait_counter_type)
+    if (additional_wait_counter_type) {
       obligations_[count_++] = {*additional_wait_counter_type, memory_order};
+    }
   }
 
   /// @brief The default counter and order for an event type.

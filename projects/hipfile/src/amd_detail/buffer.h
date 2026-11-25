@@ -119,26 +119,26 @@ public:
     virtual ~BufferMap();
 
     /// @brief Creates and registers a buffer
-    /// @attention A unique_lock on HipFileMutex must be held
+    /// @attention A unique_lock on DriverState::state_mutex must be held
     /// @param buf Buffer pointer
     /// @param length Buffer length
     /// @param flags Buffer flags (unused)
     virtual void registerBuffer(const void *buf, size_t length, int flags);
 
     /// @brief Deregisters and destroys a buffer
-    /// @attention A unique_lock on HipFileMutex must be held
+    /// @attention A unique_lock on DriverState::state_mutex must be held
     /// @param buf Buffer pointer
     virtual void deregisterBuffer(const void *buf);
 
     /// @brief Look up a registered buffer using the buffer pointer
-    /// @attention A shared_lock on HipFileMutex must be held
+    /// @attention A shared_lock on DriverState::state_mutex must be held
     /// @param buf Buffer pointer
     /// @return A registered buffer
     virtual std::shared_ptr<IBuffer> getRegisteredBuffer(const void *buf);
 
     /// @brief Look up a registered buffer. Returns a temporary unregistered
     ///        buffer if no registered buffer is found.
-    /// @attention A shared_lock on HipFileMutex must be held
+    /// @attention A shared_lock on DriverState::state_mutex must be held
     /// @param buf Buffer pointer
     /// @return A registered or temporary unregistered buffer
     virtual std::shared_ptr<IBuffer> getBuffer(const void *buf);
@@ -146,7 +146,7 @@ public:
     virtual void clear();
 
 private:
-    /// Buffer lookup table. Protected by hipfile.cpp's StateMutex
+    /// Buffer lookup table. Protected by DriverState::state_mutex
     std::unordered_map<const void *, std::shared_ptr<IBuffer>> from_ptr;
 };
 

@@ -44,6 +44,7 @@ class ExecuteContext:
     supports_dpp8: bool = False
     supports_sdwa: bool = False
     result_writer: str | None = None
+    uses_vop3_half_selectors: bool = False
 
     @property
     def cls(self) -> str:
@@ -78,29 +79,19 @@ DISPATCH: dict[str, Callable[[ExecuteContext], str]] = {}
 def _register_handlers() -> None:
     """Populate DISPATCH with handlers from the extracted modules."""
     from amdisa.codegen.execute.vector_cmp import (
-        gen_vector_cmp_class,
         gen_vector_cmpx,
     )
     from amdisa.codegen.execute.vector_special import (
         gen_vector_movrel,
         gen_vector_swaprel,
         gen_vector_sat_pack,
-        gen_vector_mullit,
         gen_vector_perm_pk16,
-        gen_vector_qsad,
         gen_vector_trig_preop,
-        gen_vector_mad_64_32,
-        gen_vector_mad_32_16,
         gen_vector_div_fixup,
         gen_vector_div_scale,
         gen_vector_div_fmas,
         gen_vector_dot2c_bf16,
         gen_vector_bitop3,
-        gen_vector_permlane_swap,
-        gen_vector_permlane,
-        gen_vector_permlane64,
-        gen_vector_permlane_family,
-        gen_vector_permlane_idx_gen,
         gen_vector_cvt_pk,
         gen_cvt_fp8,
     )
@@ -113,7 +104,6 @@ def _register_handlers() -> None:
         gen_pk_binop_u64,
         gen_pk_binop_f64,
         gen_pk_lshl_add_u64,
-        gen_pk_mov_b32,
     )
     from amdisa.codegen.execute.matrix import (
         gen_accvgpr_read,
@@ -126,11 +116,7 @@ def _register_handlers() -> None:
     # pseudo_scalar_unary retains its VALU expression/encoding contract but
     # uses ExecModel.SCALAR because the ISA says V_S_* ignores EXEC.
 
-    # Vector compare — vector_cmp, vector_add_co handled by SemaAST pipeline
-    # (_SEMA_CLASSES). vector_cmp_class is NOT: the SemaAST lowering mangles the
-    # operand (a bit_cast<float>(static_cast<uint32_t>(...)) value round-trip)
-    # and always classifies in f32, so the dedicated per-type generator here
-    # (correct f16/f32/f64 qnan masks, full 64-bit f64 read) owns it instead.
+    # Relational CMPX keeps the legacy fallback; CLASS is handled by rj-arith.
     DISPATCH['vector_cmpx'] = lambda c: gen_vector_cmpx(
         c.src_ops,
         c.op,
@@ -141,27 +127,6 @@ def _register_handlers() -> None:
         c.has_abs,
         c.result_writer,
     )
-    DISPATCH['vector_cmp_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        False,
-        False,
-        c.is_vop3,
-        c.has_abs,
-        c.result_writer,
-    )
-    DISPATCH['vector_cmpx_class'] = lambda c: gen_vector_cmp_class(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        True,
-        c.cmpx_writes_vcc,
-        c.is_vop3,
-        c.has_abs,
-        c.result_writer,
-    )
-
     # Vector special
     DISPATCH['vector_movrel'] = lambda c: gen_vector_movrel(
         c.dst_ops,
@@ -172,8 +137,9 @@ def _register_handlers() -> None:
         c.supports_dpp8,
         c.supports_sdwa,
         c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
-        is_vop3=c.is_vop3,
+        # Older profiles preserve the legacy bit-copy treatment of modifiers.
+        is_vop3=c.is_vop3
+        and c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
         stage_after_destination=c.arch_name == 'rdna3_5',
         # Preserve legacy CDNA bit-move modifiers; RDNA treats signs as FP32.
         apply_dpp_source_modifiers=c.arch_name in ('rdna3', 'rdna4'),
@@ -182,7 +148,6 @@ def _register_handlers() -> None:
         c.dst_ops,
         c.src_ops,
         c.profile.uses_vgpr_msb_indexing,
-        use_rj_arith=c.arch_name in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5'),
     )
     DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
         c.dst_ops,
@@ -190,32 +155,11 @@ def _register_handlers() -> None:
         c.op,
         true16_dst=c.is_vop3 and c.profile.uses_true16_vop3_opsel,
     )
-    DISPATCH['vector_mullit'] = lambda c: gen_vector_mullit(
-        c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
-    )
     DISPATCH['vector_perm_pk16'] = lambda c: gen_vector_perm_pk16(
         c.dst_ops, c.src_ops, c.op, c.profile.uses_vgpr_msb_indexing
     )
-    DISPATCH['vector_qsad'] = lambda c: gen_vector_qsad(
-        c.dst_ops,
-        c.src_ops,
-        c.op,
-        c.profile.uses_vgpr_msb_indexing,
-        c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
-        c.arch_name == 'rdna3_5',
-    )
     DISPATCH['vector_trig_preop'] = lambda c: gen_vector_trig_preop(
         c.dst_ops, c.src_ops, c.is_vop3, c.has_abs
-    )
-    DISPATCH['vector_mad_64_32'] = lambda c: gen_vector_mad_64_32(
-        c.dst_ops,
-        c.src_ops,
-        c.dtype,
-        c.result_writer,
-        c.is_vop3 and c.inst.name in c.profile.integer_clamp_dtypes,
-    )
-    DISPATCH['vector_mad_32_16'] = lambda c: gen_vector_mad_32_16(
-        c.dst_ops, c.src_ops, c.dtype, c.is_vop3
     )
     DISPATCH['vector_div_fixup'] = lambda c: gen_vector_div_fixup(
         c.dst_ops, c.src_ops, c.dtype, c.is_vop3, c.has_abs
@@ -250,27 +194,6 @@ def _register_handlers() -> None:
             else None
         ),
     )
-    DISPATCH['vector_permlane16'] = lambda c: gen_vector_permlane(
-        c.dst_ops, c.src_ops, c.op, cross=False, op_sel_expr=c.opsel_exprs[0]
-    )
-    DISPATCH['vector_permlanex16'] = lambda c: gen_vector_permlane(
-        c.dst_ops, c.src_ops, c.op, cross=True, op_sel_expr=c.opsel_exprs[0]
-    )
-    DISPATCH['vector_permlane16_swap'] = lambda c: gen_vector_permlane_swap(
-        c.dst_ops, c.src_ops, stride=16
-    )
-    DISPATCH['vector_permlane32_swap'] = lambda c: gen_vector_permlane_swap(
-        c.dst_ops, c.src_ops, stride=32
-    )
-    DISPATCH['vector_permlane64'] = lambda c: gen_vector_permlane64(
-        c.dst_ops, c.src_ops
-    )
-    DISPATCH['vector_permlane_family'] = lambda c: gen_vector_permlane_family(
-        c.dst_ops, c.src_ops, c.op
-    )
-    DISPATCH['vector_permlane_idx_gen'] = lambda c: gen_vector_permlane_idx_gen(
-        c.dst_ops, c.src_ops
-    )
     DISPATCH['vector_cvt_pk'] = lambda c: gen_vector_cvt_pk(
         c.dst_ops,
         c.src_ops,
@@ -303,7 +226,6 @@ def _register_handlers() -> None:
         c.op,
         c.dtype,
         opsel_exprs=c.opsel_exprs,
-        multiply_clamp=c.profile.packed_mul_lo_u16_clamp,
     )
     DISPATCH['pk_ternary'] = lambda c: gen_pk_ternary(
         c.dst_ops,
@@ -312,7 +234,6 @@ def _register_handlers() -> None:
         c.dtype,
         op_sel_hi_2_expr=c.op_sel_hi_2_expr,
         opsel_exprs=c.opsel_exprs,
-        integer_clamp=c.inst.name in c.profile.integer_clamp_dtypes,
     )
     DISPATCH['pk_binop_f32'] = lambda c: gen_pk_binop_f32(
         c.dst_ops,
@@ -335,12 +256,6 @@ def _register_handlers() -> None:
         c.dst_ops, c.src_ops, c.op
     )
     DISPATCH['pk_lshl_add_u64'] = lambda c: gen_pk_lshl_add_u64(c.dst_ops, c.src_ops)
-    DISPATCH['pk_mov_b32'] = lambda c: gen_pk_mov_b32(
-        c.dst_ops,
-        c.src_ops,
-        opsel_exprs=c.opsel_exprs,
-    )
-    # MIX arithmetic is emitted by rj_arith_float.gen_mixed_fma.
     # DOT: every semantic class routes here, so the generator keeps no
     # dot2_/dot4_/dot8_ fallback. test_dot_dispatch_covers_every_semantic_class
     # fails if a new class arrives without an entry.

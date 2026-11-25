@@ -67,8 +67,9 @@ public:
                                    std::span<std::byte>(reinterpret_cast<std::byte *>(dst), size))
                     : VmAccessOutcome::Faulted;
     }
-    if (memory_ == nullptr)
+    if (memory_ == nullptr) {
       return VmAccessOutcome::Unavailable;
+    }
     memory_->read_block(addr, std::span<uint8_t>(dst, size));
     return VmAccessOutcome::Complete;
   }
@@ -81,8 +82,9 @@ public:
                                               reinterpret_cast<const std::byte *>(src), size))
                     : VmAccessOutcome::Faulted;
     }
-    if (memory_ == nullptr)
+    if (memory_ == nullptr) {
       return VmAccessOutcome::Unavailable;
+    }
     memory_->write_block(addr, std::span<const uint8_t>(src, size));
     return VmAccessOutcome::Complete;
   }
@@ -94,8 +96,9 @@ public:
           gpu_vm_ != nullptr ? gpu_vm_->snapshot_vmid(vmid) : std::nullopt;
       return access ? access->atomic_modify(addr, size, mutation) : VmAccessOutcome::Faulted;
     }
-    if (memory_ == nullptr)
+    if (memory_ == nullptr) {
       return VmAccessOutcome::Unavailable;
+    }
     const bool modified = memory_->atomic_modify(addr, size, [&](uint8_t *target) {
       mutation(std::span<std::byte>(reinterpret_cast<std::byte *>(target), size));
     });
@@ -146,17 +149,18 @@ private:
       auto &hdr = msg->header();
       auto *data = reinterpret_cast<uint8_t *>(msg->payload());
       VmAccessOutcome outcome = VmAccessOutcome::Malformed;
-      if (hdr.op == simdojo::MessageOp::READ)
+      if (hdr.op == simdojo::MessageOp::READ) {
         outcome = read(hdr.addr, data, hdr.size_bytes, hdr.vmid);
-      else if (hdr.op == simdojo::MessageOp::WRITE)
+      } else if (hdr.op == simdojo::MessageOp::WRITE) {
         outcome = write(hdr.addr, data, hdr.size_bytes, hdr.vmid);
-      else if (hdr.op == simdojo::MessageOp::ATOMIC) {
+      } else if (hdr.op == simdojo::MessageOp::ATOMIC) {
         auto *mutation = reinterpret_cast<simdojo::MemoryAtomicMutation *>(msg->payload());
         outcome = mutation != nullptr ? atomic_modify(hdr.addr, hdr.size_bytes, *mutation, hdr.vmid)
                                       : VmAccessOutcome::Malformed;
       }
-      if (hdr.completion_status != nullptr)
+      if (hdr.completion_status != nullptr) {
         *hdr.completion_status = message_status(outcome);
+      }
       hdr.op = simdojo::MessageOp::RESPONSE;
     });
   }

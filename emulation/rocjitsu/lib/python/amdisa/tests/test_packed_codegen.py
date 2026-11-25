@@ -1,3 +1,5 @@
+import pytest
+
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
@@ -27,76 +29,6 @@ def test_pk_fma_f16_has_no_legacy_ternary_fallback():
             op_sel_hi_2_expr='hi_c',
             opsel_exprs=('lo', 'hi'),
         )
-
-
-def test_pk_add_minmax_saturates_add_before_selecting_third_operand():
-    signed = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'add_max_sat',
-        'i16',
-        op_sel_hi_2_expr='inst_.pad_14',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-    )
-    unsigned = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'add_min_sat',
-        'u16',
-        op_sel_hi_2_expr='inst_.pad_14',
-        opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
-    )
-
-    assert 'std::clamp(static_cast<int32_t>(a_lo) + b_lo, -32768, 32767)' in signed
-    assert 'std::max(sum_lo, c_lo)' in signed
-    assert 'if (inst_.clamp)' in signed
-    assert 'std::max<int16_t>(static_cast<int16_t>(rlo), 0)' in signed
-    assert 'std::min(static_cast<uint32_t>(a_lo) + b_lo, 65535u)' in unsigned
-    assert 'std::min(sum_lo, c_lo)' in unsigned
-
-
-def test_pk_mad_integer_clamp_saturates_both_selected_halves():
-    signed = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'mad',
-        'i16',
-        op_sel_hi_2_expr='inst_.op_sel_hi_2',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-        integer_clamp=True,
-    )
-    unsigned = gen_pk_ternary(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'mad',
-        'u16',
-        op_sel_hi_2_expr='inst_.op_sel_hi_2',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-        integer_clamp=True,
-    )
-
-    assert signed.count('vop3_integer_mad<int16_t, 16>') == 2
-    assert signed.count('inst_.clamp') == 2
-    assert unsigned.count('vop3_integer_mad<uint16_t, 16>') == 2
-    assert unsigned.count('inst_.clamp') == 2
-
-
-def test_pk_f16_binop_narrows_inline_float_constants():
-    cpp = gen_pk_binop(
-        ['vdst'],
-        ['src0', 'src1'],
-        'add',
-        'f16',
-        opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-    )
-
-    assert 'if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))' in cpp
-    assert 'raw0 = util::f32_to_f16(std::bit_cast<float>(raw0));' in cpp
-    assert 'if (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()))' in cpp
-    assert 'raw1 = util::f32_to_f16(std::bit_cast<float>(raw1));' in cpp
-    # Keyed on the selector field, never on the operand: an IsaOperand keeps a
-    # 255-literal's value in encoding_value_.
-    assert 'encoding_value_' not in cpp
 
 
 def test_pk_bf16_ternary_preserves_fp32_inline_constants():
@@ -129,20 +61,6 @@ def test_pk_bf16_binary_preserves_fp32_inline_constants():
         assert 'raw1 = util::f32_to_bf16' not in cpp
 
 
-def test_pk_integer_binop_leaves_inline_constants_alone():
-    for dtype in ('i16', 'u16'):
-        cpp = gen_pk_binop(
-            ['vdst'],
-            ['src0', 'src1'],
-            'add',
-            dtype,
-            opsel_exprs=('inst_.op_sel', 'inst_.op_sel_hi'),
-        )
-
-        assert '240u' not in cpp
-        assert 'bit_cast' not in cpp
-
-
 def test_gfx1250_pk_f32_uses_literal_aware_pair_helper():
     cpp = gen_pk_binop_f32(
         ['vdst'],
@@ -173,59 +91,22 @@ def test_cdna_pk_f32_reads_all_register_pairs():
     assert 'encoding_value_ >= 256' not in cpp
 
 
-def test_pk_lshl_add_u64_operates_on_two_independent_64_bit_elements():
+def test_pk_lshl_add_u64_routes_through_count_validating_adapter():
     cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
-
-    assert 'const auto values = read_pk_u64_pair(src0, wf, lane);' in cpp
-    assert 'const auto shifts = read_pk_u32_pair(src1, wf, lane);' in cpp
-    assert 'const auto addends = read_pk_u64_pair(src2, wf, lane);' in cpp
-    assert (
-        'amdgpu::lshl_masked(values.lo, static_cast<uint64_t>(shifts.lo)) + addends.lo'
-        in cpp
-    )
-    assert (
-        'amdgpu::lshl_masked(values.hi, static_cast<uint64_t>(shifts.hi)) + addends.hi'
-        in cpp
-    )
-    assert 'lshl_masked(values.lo, shifts.lo)' not in cpp
-    assert 'lshl_masked(values.hi, shifts.hi)' not in cpp
-    assert 'results[lane] = {result_lo, result_hi};' in cpp
-    assert 'write_pk_u64_pair(vdst, wf, lane, results[lane]);' in cpp
+    assert 'execute_packed_u64<true>' in cpp
+    assert 'rj_arith_v_pk_lshl_add_u64_w32, 0, vdst, src0, src1, &src2' in cpp
     assert 'inst_.neg' not in cpp
     assert 'inst_.clamp' not in cpp
 
 
-def test_pk_lshl_add_u64_rejects_unproven_counts_before_any_write():
-    cpp = gen_pk_lshl_add_u64(['vdst'], ['src0', 'src1', 'src2'])
-
-    reject = 'if (shifts.lo > 4u || shifts.hi > 4u)'
-    report = 'wf.report_instruction_execution_error('
-    write = 'write_pk_u64_pair(vdst, wf, lane, results[lane]);'
-    assert reject in cpp
-    assert report in cpp
-    assert write in cpp
-    assert cpp.index(reject) < cpp.index(report) < cpp.index(write)
-
-
-def test_pk_u64_add_sub_generate_per_element_negation_and_integer_clamp():
-    add = gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'add')
-    sub = gen_pk_binop_u64(['vdst'], ['src0', 'src1'], 'sub')
-
-    for cpp in (add, sub):
-        assert 'const auto lhs = read_pk_u64_pair(src0, wf, lane);' in cpp
-        assert 'const auto rhs = read_pk_u64_pair(src1, wf, lane);' in cpp
-        assert 'using Wide = util::int128_t;' in cpp
-        assert 'if (negate_lhs) lhs_wide = -lhs_wide;' in cpp
-        assert 'if (negate_rhs) rhs_wide = -rhs_wide;' in cpp
-        assert 'if (result < Wide{}) return 0;' in cpp
-        assert 'if (result > kMax) return std::numeric_limits<uint64_t>::max();' in cpp
-        assert '(inst_.neg & 1u) != 0' in cpp
-        assert '(inst_.neg_hi & 2u) != 0' in cpp
-        assert 'write_pk_u64_pair(vdst, wf, lane, {result_lo, result_hi});' in cpp
-        assert cpp.index('if (negate_lhs)') < cpp.index('const Wide result')
-        assert cpp.index('const Wide result') < cpp.index('if (inst_.clamp)')
-    assert 'const Wide result = lhs_wide + rhs_wide;' in add
-    assert 'const Wide result = lhs_wide - rhs_wide;' in sub
+def test_pk_u64_add_sub_forward_per_element_modifiers():
+    for op in ('add', 'sub'):
+        cpp = gen_pk_binop_u64(['vdst'], ['src0', 'src1'], op)
+        assert 'execute_packed_u64<false>' in cpp
+        assert f'rj_arith_v_pk_{op}_nc_u64_w32, modifiers, vdst, src0, src1' in cpp
+        assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in cpp
+        assert 'inst_.clamp ? RJ_ARITH_PK_CLAMP : 0' in cpp
+        assert 'int128' not in cpp
 
 
 def test_pk_u64_binop_rejects_unknown_operation():
@@ -300,8 +181,7 @@ def test_renamed_vop3p_packed_f32_probe_passes_profile_selectors():
         is None
     )
     assert (
-        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi'))
-        == '  ROCJITSU_TRY_SIMD_PACKED_FLOAT(ADD, false);'
+        vop3p_local_simd_probe_line('v_pk_add_f16_vop3p', ('opsel', 'opsel_hi')) is None
     )
 
 
@@ -326,8 +206,6 @@ def test_renamed_vop3p_packed_fma_f32_probe_passes_all_profile_selectors():
 
 def test_renamed_packed_float_routes_use_exact_helpers():
     for spelling, operation, bf16 in (
-        ('v_pk_min_f16_vop3p', 'MIN', False),
-        ('v_pk_max_f16_vop3p', 'MAX', False),
         ('v_pk_add_bf16_vop3p', 'ADD', True),
         ('v_pk_fma_bf16_vop3p', 'FMA', True),
     ):
@@ -381,3 +259,8 @@ def test_dot_dispatch_covers_every_semantic_class():
     assert found, 'no DOT semantic classes found; the ISA specs did not load'
     routes = ('dot2', 'dot4', 'dot8')
     assert found == {cls for cls in DISPATCH if cls.startswith(routes)}
+
+
+def test_pk_f16_binary_has_no_legacy_fallback():
+    with pytest.raises(ValueError, match='does not support f16'):
+        gen_pk_binop(['vdst'], ['src0', 'src1'], 'add', 'f16')

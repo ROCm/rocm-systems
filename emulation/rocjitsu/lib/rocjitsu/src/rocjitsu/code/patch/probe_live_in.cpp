@@ -44,8 +44,9 @@ const char *class_prefix(RegClass cls) {
 std::string format_register_set(const RegisterSet &regs) {
   std::string out;
   regs.for_each([&](RegisterRef ref) {
-    if (!out.empty())
+    if (!out.empty()) {
       out += ", ";
+    }
     out += class_prefix(ref.cls);
     out += std::to_string(ref.index);
   });
@@ -128,16 +129,21 @@ std::optional<RegisterSet> analyze_probe_live_ins(const AmdGpuCodeObject &probe_
   const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(probe_obj.image_data()),
                                        probe_obj.image_size());
   for (const KernelDescriptorInfo &kd :
-       scan_kernel_descriptors(image, text->sectionOffset(), text->size(), text_index))
+       scan_kernel_descriptors(image, text->sectionOffset(), text->size(), text_index)) {
     spec.kernel_entries.insert(kd.entry_text_offset);
+  }
   spec.own_entries.insert(entry_text_offset);
 
   const std::vector<BasicBlock *> scope =
       reachable_kernel_blocks(blocks, block_index, block_positions, *entry, spec);
 
+  // Callable admission proves VSKIP clear at the call site and rejects bodies
+  // that can enable it. Analyze the body under that ABI entry precondition.
+  const BasicBlock *const vskip_clear_entries[] = {entry};
   LivenessAnalysisOptions options;
   options.arch = arch;
   options.entry_block = entry;
+  options.vskip_clear_entry_blocks = vskip_clear_entries;
   options.text =
       std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
   // Otherwise no EXEC-masked def is ever a kill and every VGPR the probe reads

@@ -21,16 +21,18 @@ namespace rocjitsu {
 /// call sites while rejection-specific tests inspect DecodeResult directly.
 inline Instruction *decode_valid(Decoder &decoder, const rj_code_binary_inst_t *inst) {
   DecodeResult result = decoder.decode(inst);
-  if (result.failed())
+  if (result.failed()) {
     return nullptr;
+  }
   return result.value().release();
 }
 
 inline Instruction *decode_valid(Decoder &decoder, const rj_code_binary_inst_t *inst,
                                  uint64_t src_loc) {
   DecodeResult result = decoder.decode(inst, src_loc);
-  if (result.failed())
+  if (result.failed()) {
     return nullptr;
+  }
   return result.value().release();
 }
 

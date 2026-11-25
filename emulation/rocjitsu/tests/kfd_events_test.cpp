@@ -53,8 +53,9 @@ protected:
   bool registered(uint32_t id, size_t count = 1) {
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
     while (std::chrono::steady_clock::now() < deadline) {
-      if (events.waiter_count(id) == count)
+      if (events.waiter_count(id) == count) {
         return true;
+      }
       std::this_thread::yield();
     }
     return false;
@@ -80,13 +81,14 @@ protected:
       args.num_events = data.size();
       args.wait_for_all = all;
       args.timeout = poll ? 0 : 5000;
-      if (poll)
+      if (poll) {
         rc = events.wait_events(&args);
-      else
+      } else {
         thread = std::thread([this] {
           rc = this->events.wait_events(&args);
           done.store(true);
         });
+      }
     }
 
     ~Wait() {
@@ -97,16 +99,18 @@ protected:
     }
 
     void complete() {
-      if (thread.joinable())
+      if (thread.joinable()) {
         thread.join();
+      }
       EXPECT_EQ(rc, 0);
       EXPECT_EQ(args.wait_result, KFD_IOC_WAIT_RESULT_COMPLETE);
     }
 
     bool finished() {
       const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
-      while (!done.load() && std::chrono::steady_clock::now() < deadline)
+      while (!done.load() && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::yield();
+      }
       return done.load();
     }
   };
@@ -136,8 +140,9 @@ TEST_P(KfdEventOrderingTest, AutoResetSignalReachesWaiter) {
       signal(id, source);
     }
   };
-  if (signal_first)
+  if (signal_first) {
     deliver();
+  }
   Wait wait(events, {id}, age);
   if (!signal_first) {
     ASSERT_TRUE(registered(id));
@@ -165,13 +170,14 @@ TEST_F(KfdEventsTest, NamedInterruptUsesTheGpuMailboxRule) {
   slots.fill(UINT64_MAX);
   events.adopt_page(slots.data(), sizeof(slots));
   const std::array ids{create(), create()};
-  for (bool mailbox_updated : {false, true})
-    for (uint32_t context : {0u, ids[0], UINT32_MAX})
+  for (bool mailbox_updated : {false, true}) {
+    for (uint32_t context : {0u, ids[0], UINT32_MAX}) {
       for (uint32_t marked : {0u, 1u, 2u, 3u}) {
         SCOPED_TRACE(::testing::Message() << mailbox_updated << ':' << context << ':' << marked);
-        for (size_t index = 0; index < ids.size(); ++index)
+        for (size_t index = 0; index < ids.size(); ++index) {
           std::atomic_ref<uint64_t>(slots[ids[index]])
               .store(marked & (1u << index) ? ids[index] : UINT64_MAX, std::memory_order_release);
+        }
         events.signal_interrupt(context, mailbox_updated);
         const bool named = context == ids[0] && (!mailbox_updated || (marked & 1u));
         for (size_t index = 0; index < ids.size(); ++index) {
@@ -185,6 +191,8 @@ TEST_F(KfdEventsTest, NamedInterruptUsesTheGpuMailboxRule) {
                     !expected && (marked & (1u << index)) ? uint64_t{ids[index]} : UINT64_MAX);
         }
       }
+    }
+  }
 }
 
 TEST_F(KfdEventsTest, InvalidInterruptConsumesOnlyMarkedMailboxes) {

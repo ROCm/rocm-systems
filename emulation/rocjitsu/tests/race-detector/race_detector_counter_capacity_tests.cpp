@@ -61,8 +61,9 @@ void issueUnorderedVmcntLoads(RaceTestBuilder &builder, int count, int firstVgpr
 }
 
 void issueOrderedVmemStores(RaceTestBuilder &builder, int count) {
-  for (int index = 0; index < count; ++index)
+  for (int index = 0; index < count; ++index) {
     builder.globalStore(kWave);
+  }
 }
 
 void expectVgprReady(RaceTestBuilder &builder, int vgpr) {
@@ -279,8 +280,9 @@ TEST(RaceDetector, CounterCapacity_InterleavedLgkmcntSoakRetiresOnlyProvableLdsP
       3, 0, 4, 1, 2, 5, 0, 3, 1, 4, 2, 0, 5, 1, 3,
   };
   for (int ordered = 0; ordered < kLgkmcntCapacity; ++ordered) {
-    for (int unordered = 0; unordered < unorderedBursts[ordered]; ++unordered)
+    for (int unordered = 0; unordered < unorderedBursts[ordered]; ++unordered) {
       builder.scalarStore(kWave);
+    }
     builder.ldsRead(kWave, kLane, /*addr=*/ordered * kDwordBytes,
                     /*bytes=*/kDwordBytes, /*vgprDst=*/ordered);
   }
@@ -424,8 +426,9 @@ RaceTestBuilder makeGfx1250Test(int numWaves = 1) {
 
 void issueCounterOps(RaceTestBuilder &builder, int count, amdgpu::WaitCounterType counter,
                      MemoryOrderClass order) {
-  for (int index = 0; index < count; ++index)
+  for (int index = 0; index < count; ++index) {
     builder.counterOp(kWave, counter, order);
+  }
 }
 
 EventStatus statusOf(const RaceTestBuilder &builder, int event) {
@@ -466,8 +469,9 @@ TEST_P(Gfx1250SplitCounterCapacityTest, OverflowRetiresOldestPrefix) {
     auto builder = makeGfx1250Test();
     issue(builder, capacity() + overflow);
 
-    for (int event = 0; event < overflow; ++event)
+    for (int event = 0; event < overflow; ++event) {
       EXPECT_EQ(statusOf(builder, event), EventStatus::WAVE_COMPLETE) << "event " << event;
+    }
     EXPECT_EQ(statusOf(builder, overflow), EventStatus::ACTIVE);
   }
 }
@@ -538,8 +542,9 @@ TEST(RaceDetector, CounterCapacity_SplitReturnsEachCountersOwnCapacity) {
   EXPECT_EQ(capacities.split(amdgpu::WaitCounterType::TENSORCNT), 8);
   for (const auto counter : {amdgpu::WaitCounterType::VMCNT, amdgpu::WaitCounterType::LGKMCNT,
                              amdgpu::WaitCounterType::VSCNT, amdgpu::WaitCounterType::EXPCNT,
-                             amdgpu::WaitCounterType::SAMPLECNT})
+                             amdgpu::WaitCounterType::SAMPLECNT}) {
     EXPECT_EQ(capacities.split(counter), 0) << static_cast<int>(counter);
+  }
 }
 
 // Pre-GFX12 targets keep their combined capacities; their split counter names
@@ -556,8 +561,9 @@ TEST(RaceDetector, CounterCapacity_LegacyArchCapacitiesHaveNoSplitCounters) {
     for (const auto counter :
          {amdgpu::WaitCounterType::LOADCNT, amdgpu::WaitCounterType::STORECNT,
           amdgpu::WaitCounterType::DSCNT, amdgpu::WaitCounterType::KMCNT,
-          amdgpu::WaitCounterType::ASYNCCNT, amdgpu::WaitCounterType::TENSORCNT})
+          amdgpu::WaitCounterType::ASYNCCNT, amdgpu::WaitCounterType::TENSORCNT}) {
       EXPECT_EQ(capacities.split(counter), 0);
+    }
   }
 }
 
@@ -567,8 +573,9 @@ TEST(RaceDetector, CounterCapacity_Rdna4ModelsItsSplitCounters) {
   EXPECT_EQ(capacities.vmcnt, 0);
   EXPECT_EQ(capacities.lgkmcnt, 0);
   for (const auto counter : {WaitCounterType::LOADCNT, WaitCounterType::STORECNT,
-                             WaitCounterType::DSCNT, WaitCounterType::SAMPLECNT})
+                             WaitCounterType::DSCNT, WaitCounterType::SAMPLECNT}) {
     EXPECT_EQ(capacities.split(counter), 63);
+  }
   EXPECT_EQ(capacities.split(WaitCounterType::KMCNT), 31);
   EXPECT_EQ(capacities.split(WaitCounterType::BVHCNT), 7);
   EXPECT_EQ(capacities.split(WaitCounterType::EXPCNT), 7);
@@ -584,8 +591,9 @@ TEST(RaceDetector, Gfx1250CounterCapacity_TwoTokenEventsFillKmcnt) {
   const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::KMCNT);
   const int events = capacity / kTokens;
   auto builder = makeGfx1250Test();
-  for (int index = 0; index <= events; ++index)
+  for (int index = 0; index <= events; ++index) {
     builder.counterOp(kWave, amdgpu::WaitCounterType::KMCNT, MemoryOrderClass::VMEM, kTokens);
+  }
 
   EXPECT_EQ(statusOf(builder, 0), EventStatus::WAVE_COMPLETE);
   EXPECT_EQ(statusOf(builder, 1), EventStatus::ACTIVE);
@@ -596,8 +604,9 @@ TEST(RaceDetector, Gfx1250CounterCapacity_TwoTokenEventsFillKmcnt) {
 TEST(RaceDetector, Gfx1250CounterCapacity_FullKmcntDoesNotCompleteScalarLoads) {
   const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::KMCNT);
   auto builder = makeGfx1250Test();
-  for (int sgpr = 0; sgpr <= capacity; ++sgpr)
+  for (int sgpr = 0; sgpr <= capacity; ++sgpr) {
     builder.scalarLoad(kWave, sgpr, /*numRegs=*/1, amdgpu::WaitCounterType::KMCNT);
+  }
 
   builder.checkSgprRead(kWave, /*reg=*/0);
   EXPECT_TRUE(builder.hasSgprRace(0));
@@ -608,8 +617,9 @@ TEST(RaceDetector, Gfx1250CounterCapacity_FullKmcntDoesNotCompleteWideScalarLoad
   const int capacity = gfx1250Capacity(amdgpu::WaitCounterType::KMCNT);
   auto builder = makeGfx1250Test();
   const int wideLoads = capacity / 2 + 1;
-  for (int load = 0; load < wideLoads; ++load)
+  for (int load = 0; load < wideLoads; ++load) {
     builder.scalarLoad(kWave, /*sgprBase=*/2 * load, /*numRegs=*/2, amdgpu::WaitCounterType::KMCNT);
+  }
 
   builder.checkSgprRead(kWave, /*reg=*/0, /*width=*/2);
   EXPECT_TRUE(builder.hasSgprRace(0));
@@ -725,9 +735,10 @@ TEST(RaceDetector, Gfx1250CounterCapacity_CapacityCompletedDsWriteIsReleasedAtBa
   auto builder = makeGfx1250Test(/*numWaves=*/2);
   builder.ldsWrite(/*wave=*/0, kLane, /*addr=*/0, kDwordBytes, MemoryOrderClass::LDS,
                    amdgpu::WaitCounterType::DSCNT);
-  for (int index = 0; index < capacity; ++index)
+  for (int index = 0; index < capacity; ++index) {
     builder.ldsWrite(/*wave=*/0, kLane, /*addr=*/64, kDwordBytes, MemoryOrderClass::LDS,
                      amdgpu::WaitCounterType::DSCNT);
+  }
   builder.barrier();
 
   builder.checkLdsRead(/*wave=*/1, kLane, /*addr=*/0, kDwordBytes);
@@ -739,9 +750,10 @@ TEST(RaceDetector, Gfx1250CounterCapacity_DsWriteBelowCapacityIsNotReleasedAtBar
   auto builder = makeGfx1250Test(/*numWaves=*/2);
   builder.ldsWrite(/*wave=*/0, kLane, /*addr=*/0, kDwordBytes, MemoryOrderClass::LDS,
                    amdgpu::WaitCounterType::DSCNT);
-  for (int index = 0; index < capacity - 1; ++index)
+  for (int index = 0; index < capacity - 1; ++index) {
     builder.ldsWrite(/*wave=*/0, kLane, /*addr=*/64, kDwordBytes, MemoryOrderClass::LDS,
                      amdgpu::WaitCounterType::DSCNT);
+  }
   builder.barrier();
 
   builder.checkLdsRead(/*wave=*/1, kLane, /*addr=*/0, kDwordBytes);
