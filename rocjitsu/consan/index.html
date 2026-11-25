@@ -2184,8 +2184,8 @@ original code-object files nor live HSA state.</p>
 <h2 id="available-analysis">Available analysis<a class="headerlink" href="#available-analysis" title="Permanent link">&para;</a></h2>
 <p><code>LdsRaceDetection</code> is the only implemented analysis. It checks ordinary native
 LDS reads/writes at naturally aligned addresses, using the same observations
-for two checks. All supported targets admit ordinary single-range b16, b32,
-b64, and b128: gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or wave64, and
+for two checks. All supported targets admit ordinary single-range b8, b16, b32,
+b64, b96, and b128: gfx942/gfx950 wave64, gfx1100/gfx1201 wave32 or wave64, and
 gfx1250 wave32.</p>
 <table>
 <thead>
@@ -2218,17 +2218,83 @@ and static site mapping. Unselected native siblings remain in the whole image;
 this does not provide arbitrary native queue or HIP application integration.
 The multi-entry simulator fixture qualifies gfx1250 wave32; single-entry coverage
 on other modes does not establish their multi-entry execution qualification.</p>
-<p>The forms are <code>ds_store_b16</code>, <code>ds_load_u16</code>, <code>ds_load_i16</code>, and
-<code>ds_store_b32/b64/b128</code> or <code>ds_load_b32/b64/b128</code> on gfx1100/gfx1201/gfx1250.
+<p>The subword forms are byte/halfword stores and whole-register signed or
+unsigned byte/halfword loads. D16 loads place a zero- or sign-extended byte
+(<code>ds_load_u8_d16</code>, <code>ds_load_i8_d16</code>) or a halfword (<code>ds_load_u16_d16</code>) in
+the low half of a VGPR. Their <code>_hi</code> variants select the high half. In active
+lanes the unselected half is preserved on gfx1100/gfx1201 and cleared on the
+SRAM-ECC gfx942/gfx950/gfx1250 profiles. Inactive lanes keep the entire VGPR.
+<code>ds_store_b8_d16_hi</code> and <code>ds_store_b16_d16_hi</code> store bits 23:16 or 31:16
+of the source VGPR, respectively. The LDS range is one byte for byte forms
+and two bytes for halfword forms.</p>
+<p>The wider forms are
+<code>ds_store_b32/b64/b96/b128</code> or <code>ds_load_b32/b64/b96/b128</code> on gfx1100/gfx1201/gfx1250.
 gfx942/gfx950 use the corresponding <code>ds_write_*</code> and <code>ds_read_*</code> names.
-The b16 loads write a whole 32-bit result with unsigned or signed extension. Access probes
-capture addresses before an aliased load can overwrite them, record actual byte
-widths and byte immediates, and preserve every guest result word. b8/b96,
-partial-register subword loads, dual-range, transpose, FLAT, and atomic forms
-remain unsupported. The existing minimum fixed LDS extent remains four bytes.</p>
+Access probes capture addresses before an aliased load can overwrite them, record actual byte
+widths and byte immediates, and preserve every guest result word. For b96 the
+range spans three dwords. Its effective start must be 16-byte aligned so the
+range is independent of the launch alignment mode. FLAT and atomic
+forms remain unsupported. The minimum fixed LDS extent remains four bytes.</p>
+<p>Two-address native LDS loads and stores support 32- and 64-bit elements.
+One guest instruction produces one occurrence and shares the four sampled
+address groups across both elements. Each group records the pre-instruction
+base and lane mask. Saved site facts retain both encoded offsets in operand
+order. Replay adds each offset times the element size to the recorded base,
+with an additional factor of 64 for stride-64 forms. For example, a b32
+operation with offsets 3 and 5 covers bytes [base + 12, base + 16) and
+[base + 20, base + 24). With equal offsets, gfx942/gfx950 coalesce the access
+and a store uses DATA0.</p>
+<p>The following matrix transpose reads gather LDS data from physical source lanes
+and distribute the result across destination lanes. Each source lane contributes
+one contiguous range starting at its pre-instruction address VGPR plus the byte
+immediate. Only the returned elements undergo the matrix permutation. The
+before-instruction probe also covers an address VGPR aliased by the destination.</p>
+<table>
+<thead>
+<tr>
+<th>Element bits</th>
+<th>gfx950, wave64</th>
+<th>gfx1250, wave32</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>4</td>
+<td><code>ds_read_b64_tr_b4</code> (8 bytes)</td>
+<td><code>ds_load_tr4_b64</code> (8 bytes)</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>ds_read_b96_tr_b6</code> (12 bytes)</td>
+<td><code>ds_load_tr6_b96</code> (12 bytes)</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>ds_read_b64_tr_b8</code> (8 bytes)</td>
+<td><code>ds_load_tr8_b64</code> (8 bytes)</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>ds_read_b64_tr_b16</code> (8 bytes)</td>
+<td><code>ds_load_tr16_b128</code> (16 bytes)</td>
+</tr>
+</tbody>
+</table>
+<p>On gfx950, a defined active transpose requires full EXEC and the B64
+destination starts at an even VGPR. The simulator issues no requests at
+empty EXEC. Replay rejects a nonempty partial EXEC and reports
+<code>partial_exec_lds_transpose</code>. The capture profile conservatively requires a
+16-byte-aligned effective start for packed B96. <a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna4-instruction-set-architecture.pdf">CDNA4 ISA, section 11.4</a></p>
+<p>On gfx1250, all 32 physical source lanes request data even at partial or empty
+EXEC and in a short final wave. Each transpose record preserves the guest
+EXEC separately from the source lanes which actually requested the recorded
+range. Finding examples expose <code>mask_role</code> as <code>transpose_source_lanes</code> and
+<code>anchor_exec</code> as the original mask. Physical source lanes may exceed the
+number of logical workitems in the last wave. These reads share the four
+address-group retention limit with ordinary operations. <a href="https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/instruction-set-architectures/amd-instinct-cdna5-instruction-set-architecture.pdf">CDNA5 ISA, section 11.2.4</a></p>
 <p>Access widths are measured in bytes. <code>NativeLdsAccess::width</code> and
 <code>SiteFacts::width</code> default to zero, meaning unspecified and invalid. Producers
-must explicitly supply 2, 4, 8, or 16; zero never implies b32 or a zero-length
+must explicitly supply 1, 2, 4, 8, 12, or 16; zero never implies b32 or a zero-length
 access. Manifest admission rejects zero, and a committed observation must match
 its site's width. An all-zero uncommitted report slot still represents vacant
 storage, not an access.</p>
