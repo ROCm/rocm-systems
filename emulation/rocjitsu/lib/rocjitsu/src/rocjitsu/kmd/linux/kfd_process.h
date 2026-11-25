@@ -14,6 +14,7 @@
 #include "rocjitsu/kmd/linux/events.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/vm/amdgpu/gpu_backing_range.h"
 #include "rocjitsu/vm/amdgpu/gpu_handles.h"
 #include "rocjitsu/vm/amdgpu/legacy_page_table.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
@@ -155,6 +156,11 @@ public:
     [[nodiscard]] explicit operator bool() const { return owner_ != nullptr; }
     [[nodiscard]] std::byte *data() const { return owner_ ? owner_->data() + offset_ : nullptr; }
     [[nodiscard]] std::span<std::byte> bytes() const { return {data(), size_}; }
+    [[nodiscard]] amdgpu::GpuBackingRange retain_backing_range() const noexcept {
+      return {owner_gpu_id(),
+              simdojo::RetainedBackingRange::mapped(std::shared_ptr<std::byte>(owner_, data()),
+                                                    backing_id(), file_offset(), size())};
+    }
     [[nodiscard]] uint64_t file_offset() const { return offset_; }
     [[nodiscard]] size_t size() const { return size_; }
     [[nodiscard]] uint32_t owner_gpu_id() const { return owner_ ? owner_->gpu_id() : 0; }

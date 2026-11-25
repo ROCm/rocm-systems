@@ -49,7 +49,6 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 
 class FabricEndpoint;
-class FabricBacking;
 class VirtualMachine;
 
 namespace amdgpu {
@@ -902,10 +901,9 @@ private:
     std::shared_ptr<LivePeerEffectLease> lease;
   };
 
-  [[nodiscard]] std::optional<LivePeerAliasSelection>
-  try_select_live_peer_aliases(const KfdProcess::GpuAliasRecord &requester,
-                               const FabricBacking &backing, amdgpu::MemoryIngressPermit driver_pin,
-                               bool allow_cacheable_aliases, bool &busy);
+  [[nodiscard]] std::optional<LivePeerAliasSelection> try_select_live_peer_aliases(
+      const KfdProcess::GpuAliasRecord &requester, const simdojo::RetainedBackingRange &backing,
+      amdgpu::MemoryIngressPermit driver_pin, bool allow_cacheable_aliases, bool &busy);
 
   std::shared_ptr<CuIngressAccess> cu_ingress_access_ = std::make_shared<CuIngressAccess>();
   std::shared_ptr<GpuAliasIngressGate> alias_ingress_gate_ =

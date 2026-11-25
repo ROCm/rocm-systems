@@ -16,8 +16,8 @@
 #include "rocjitsu/vm/amdgpu/memory_side_cache.h"
 #include "rocjitsu/vm/amdgpu/prepared_canonical_writeback.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
-#include "rocjitsu/vm/fabric_backing.h"
 #include "rocjitsu/vm/soc.h"
+#include "simdojo/components/retained_backing_range.h"
 #include "simdojo/sim/exec_mode.h"
 #include "util/diagnostic.h"
 
@@ -234,7 +234,7 @@ public:
   }
 };
 
-class PreparedBackingOwner final : public FabricBacking::Owner {
+class PreparedBackingOwner final : public simdojo::BackingRangeAccess {
 public:
   static constexpr uint64_t kBaseOffset = 0x2000;
   static constexpr uint64_t kBackingId = 57;
@@ -278,7 +278,7 @@ class PreparedCanonicalWritebackTestAccess {
 public:
   static PreparedCanonicalWriteback make(
       uint64_t address, size_t extent, uint32_t vmid, uint64_t cache_identity, uint64_t generation,
-      FabricBacking backing,
+      simdojo::RetainedBackingRange backing,
       std::shared_ptr<VmTransferEffectGate> gate = std::make_shared<VmTransferEffectGate>(),
       std::function<void()> release = [] {}, std::span<std::byte> direct_bytes = {}) {
     std::vector<PreparedCanonicalWriteback::Entry> entries;
@@ -2019,7 +2019,7 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedSingleL2RunCommitsBeforeLeaseEpochs)
         EXPECT_EQ(line_size, L2Cache::LINE_SIZE);
         return PreparedCanonicalWritebackTestAccess::make(
             kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
-            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()));
+            simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, dirty.size()));
       });
   ASSERT_EQ(leases.size(), 1u);
   EXPECT_EQ(resolver_calls, 1u);
@@ -2066,7 +2066,7 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedCompleteGrantWithWrongIdentityIsTerm
           ++resolver_calls;
           return PreparedCanonicalWritebackTestAccess::make(
               address, line_size, kVmid, kIdentity + 1, kGeneration,
-              rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, line_size));
+              simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, line_size));
         });
   });
   EXPECT_EQ(resolver_calls, 1u);
@@ -2181,7 +2181,7 @@ TEST(DeviceCacheCoherenceTest, CheckedGroupPreparedFailurePreservesDirtyState) {
     const auto resolve = [&](uint32_t, uint32_t, uint64_t address, size_t size) {
       return PreparedCanonicalWritebackTestAccess::make(
           address, size, kVmid, 101, failure == 0 ? 24 : 23,
-          rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size), gate);
+          simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, size), gate);
     };
     EXPECT_TRUE(DeviceCacheCoherence::acquire_cache_maintenance_group(
                     domains, DeviceCacheOperation::WritebackInvalidate, resolve, emit_error)
@@ -2192,7 +2192,7 @@ TEST(DeviceCacheCoherenceTest, CheckedGroupPreparedFailurePreservesDirtyState) {
   const auto unavailable = [&](uint32_t, uint32_t, uint64_t address, size_t size) {
     return PreparedCanonicalWritebackTestAccess::make(
         address, size, kVmid, 101, 23,
-        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size), nullptr);
+        simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, size), nullptr);
   };
   const std::string terminal_diagnostic(diagnostic.message());
   auto retry = DeviceCacheCoherence::acquire_cache_maintenance_group(
@@ -2211,7 +2211,8 @@ TEST(DeviceCacheCoherenceTest, CheckedGroupPreparedFailurePreservesDirtyState) {
     L2CacheTestAccess::replace_prepared_dirty_line_bytes(l2, kAddress, changed, kVmid);
     return PreparedCanonicalWritebackTestAccess::make(
         address, size, kVmid, 101, 23,
-        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size), changing_gate);
+        simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, size),
+        changing_gate);
   };
   auto changed = DeviceCacheCoherence::acquire_cache_maintenance_group(
       domains, DeviceCacheOperation::WritebackInvalidate, changed_snapshot, emit_error);
@@ -2248,7 +2249,7 @@ TEST(DeviceCacheCoherenceTest, CheckedGroupPreparedFailurePreservesDirtyState) {
   const auto resolve = [&](uint32_t, uint32_t, uint64_t address, size_t size) {
     return PreparedCanonicalWritebackTestAccess::make(
         address, size, kVmid, 101, 23,
-        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size), gate);
+        simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, size), gate);
   };
   auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
       domains, DeviceCacheOperation::WritebackInvalidate, resolve, emit_error);
@@ -2298,7 +2299,7 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRevokedGateRetainsDirtyL2Run) {
         [&](uint32_t, uint32_t, uint64_t, size_t) {
           return PreparedCanonicalWritebackTestAccess::make(
               kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
-              rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()),
+              simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, dirty.size()),
               gate);
         });
   });
@@ -2336,7 +2337,7 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedFailedBackingRetainsDirtyL2Run) {
   const auto resolve = [&](uint32_t, uint32_t, uint64_t, size_t) {
     return PreparedCanonicalWritebackTestAccess::make(
         kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
-        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()));
+        simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, dirty.size()));
   };
   expect_terminal_maintenance_failure([&] {
     [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_cache_maintenance_group(
@@ -2388,7 +2389,7 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedDirectViewCommitsTwoDisjointL2Runs) 
         EXPECT_EQ(line_size, L2Cache::LINE_SIZE);
         return PreparedCanonicalWritebackTestAccess::make(
             kAddress, dirty.size(), kVmid, 101, 23,
-            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()),
+            simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, dirty.size()),
             std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
             std::span<std::byte>(owner->bytes_).first(dirty.size()));
       });
@@ -2440,8 +2441,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedFallibleOwnerRejectsTwoRunsBeforeAny
               ++resolver_calls;
               return PreparedCanonicalWritebackTestAccess::make(
                   kAddress, dirty.size(), kVmid, 101, 23,
-                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
-                                          dirty.size()));
+                  simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset,
+                                                dirty.size()));
             });
       },
       util::Exception);
@@ -2502,8 +2503,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedTwoLinesAcrossDomainsRetainEveryPerm
         const size_t backing_offset = first ? 0 : L2Cache::LINE_SIZE;
         return PreparedCanonicalWritebackTestAccess::make(
             address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
-            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset + backing_offset,
-                                    line_size),
+            simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset + backing_offset,
+                                          line_size),
             std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(),
             [&] {
               ++permit_releases;
@@ -2568,7 +2569,7 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedSameLineMemorySidePrecedesL2Overlay)
         EXPECT_EQ(line_size, L2Cache::LINE_SIZE);
         return PreparedCanonicalWritebackTestAccess::make(
             kAddress, line_size, kVmid, 101, 23,
-            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, line_size),
+            simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, line_size),
             std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
             std::span<std::byte>(owner->bytes_).first(line_size));
       });
@@ -2630,7 +2631,7 @@ void check_group_prepared_rejects_distinct_va_canonical_overlap(bool separate_do
             EXPECT_EQ(vmid, kVmid);
             return PreparedCanonicalWritebackTestAccess::make(
                 address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
-                rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, line_size),
+                simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, line_size),
                 std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
                 std::span<std::byte>(owner->bytes_).first(line_size));
           });
@@ -3197,7 +3198,7 @@ TEST(DeviceCacheCoherenceTest, ScopedWritebackPreservesOtherDirtyMemorySideDomai
         const size_t offset = selected ? 0 : L2Cache::LINE_SIZE;
         return PreparedCanonicalWritebackTestAccess::make(
             address, size, kVmid, selected ? 101 : 102, selected ? 23 : 24,
-            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset + offset, size),
+            simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset + offset, size),
             std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [&] { ++permit_releases; });
       });
   ASSERT_EQ(leases.size(), 2u);
@@ -3260,7 +3261,7 @@ TEST(DeviceCacheCoherenceTest, ScopedRefusesUnresolvedOrphanDirtyWitnessBeforeWr
               EXPECT_EQ(address, kSelectedAddress);
               return PreparedCanonicalWritebackTestAccess::make(
                   address, size, kVmid, 101, 23,
-                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+                  simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, size),
                   std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
                   std::span<std::byte>(owner->bytes_).first(size));
             });
@@ -3314,7 +3315,7 @@ TEST(DeviceCacheCoherenceTest, ScopedRejectsOverlappingUnselectedDirtyAlias) {
               const bool selected = address == kSelectedAddress;
               return PreparedCanonicalWritebackTestAccess::make(
                   address, size, kVmid, selected ? 101 : 102, selected ? 23 : 24,
-                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+                  simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, size),
                   std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
                   std::span<std::byte>(owner->bytes_).first(size));
             });
@@ -3494,7 +3495,8 @@ TEST(DeviceCacheCoherenceTest, ScopedWitnessChecksSelectedBackingAndScopeConflic
                   [&](uint32_t, uint32_t, uint64_t address, size_t size) {
                     return PreparedCanonicalWritebackTestAccess::make(
                         address, size, kVmid, 101, 23,
-                        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+                        simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset,
+                                                      size),
                         std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
                         std::span<std::byte>(owner->bytes_).first(size));
                   },
@@ -3523,7 +3525,7 @@ TEST(DeviceCacheCoherenceTest, ScopedWitnessChecksSelectedBackingAndScopeConflic
             [&](uint32_t, uint32_t, uint64_t address, size_t size) {
               return PreparedCanonicalWritebackTestAccess::make(
                   address, size, kVmid, 101, 23,
-                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+                  simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, size),
                   std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
                   std::span<std::byte>(owner->bytes_).first(size));
             },
@@ -3539,7 +3541,7 @@ TEST(DeviceCacheCoherenceTest, ScopedWitnessChecksSelectedBackingAndScopeConflic
       [&](uint32_t, uint32_t, uint64_t address, size_t size) {
         return PreparedCanonicalWritebackTestAccess::make(
             address, size, kVmid, 101, 23,
-            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, size),
+            simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, size),
             std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
             std::span<std::byte>(owner->bytes_).first(size));
       },
@@ -3601,8 +3603,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRevokedSecondGateRetainsDirtyBatch) 
     const size_t backing_offset = first ? 0 : L2Cache::LINE_SIZE;
     return PreparedCanonicalWritebackTestAccess::make(
         address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
-        rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset + backing_offset,
-                                line_size),
+        simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset + backing_offset,
+                                      line_size),
         first ? first_gate : second_gate, [] {},
         std::span<std::byte>(owner->bytes_).subspan(backing_offset, line_size));
   };
@@ -3632,8 +3634,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRevokedSecondGateRetainsDirtyBatch) 
           const size_t backing_offset = first ? 0 : L2Cache::LINE_SIZE;
           return PreparedCanonicalWritebackTestAccess::make(
               address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
-              rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset + backing_offset,
-                                      line_size),
+              simdojo::RetainedBackingRange(
+                  owner, PreparedBackingOwner::kBaseOffset + backing_offset, line_size),
               std::make_shared<VmTransferEffectGate>(), [] {},
               std::span<std::byte>(owner->bytes_).subspan(backing_offset, line_size));
         });
@@ -3686,8 +3688,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsMixedVmidZeroWriterBeforeAnyW
               ++resolver_calls;
               return PreparedCanonicalWritebackTestAccess::make(
                   kAddress, dirty.size(), kVmid, 101, 23,
-                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
-                                          dirty.size()));
+                  simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset,
+                                                dirty.size()));
             });
       },
       CacheMaintenanceUnavailable);
@@ -3736,8 +3738,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsReboundDirtyTagDuringResolver
                                                             kNewIdentity, kGeneration);
               return PreparedCanonicalWritebackTestAccess::make(
                   kAddress, old_dirty.size(), kVmid, kOldIdentity, kGeneration,
-                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
-                                          old_dirty.size()));
+                  simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset,
+                                                old_dirty.size()));
             });
       },
       util::Exception);
@@ -3753,8 +3755,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsReboundDirtyTagDuringResolver
         [&](uint32_t, uint32_t, uint64_t, size_t) {
           return PreparedCanonicalWritebackTestAccess::make(
               kAddress, old_dirty.size(), kVmid, kNewIdentity, kGeneration,
-              rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
-                                      old_dirty.size()));
+              simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset,
+                                            old_dirty.size()));
         });
   }
   EXPECT_EQ(owner->write_attempts, 1u);
@@ -3814,8 +3816,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsOtherLineByteChangeDuringBatc
               const size_t backing_offset = first ? 0 : L2Cache::LINE_SIZE;
               return PreparedCanonicalWritebackTestAccess::make(
                   address, line_size, kVmid, first ? 101 : 102, first ? 23 : 24,
-                  rocjitsu::FabricBacking(
-                      owner, 1, PreparedBackingOwner::kBaseOffset + backing_offset, line_size),
+                  simdojo::RetainedBackingRange(
+                      owner, PreparedBackingOwner::kBaseOffset + backing_offset, line_size),
                   std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [] {},
                   std::span<std::byte>(owner->bytes_).subspan(backing_offset, line_size));
             });
@@ -3878,7 +3880,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedVmRebindDuringResolverRevokesTwoRunB
               }
               return PreparedCanonicalWritebackTestAccess::make(
                   kAddress, line_size, kVmid, old_access->cache_identity(), 23,
-                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, line_size),
+                  simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset,
+                                                line_size),
                   old_access->retain_effect_gate(), [] {},
                   std::span<std::byte>(owner->bytes_).first(line_size));
             });
@@ -3933,8 +3936,8 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedRejectsEpochChangeDuringResolver) {
                                                                                      kVmid, 8));
               return PreparedCanonicalWritebackTestAccess::make(
                   kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
-                  rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset,
-                                          dirty.size()));
+                  simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset,
+                                                dirty.size()));
             });
       },
       util::Exception);
@@ -3975,7 +3978,7 @@ TEST(DeviceCacheCoherenceTest, GroupPreparedPermitOutlivesAllDomainLeases) {
       [&](uint32_t, uint32_t, uint64_t, size_t) {
         return PreparedCanonicalWritebackTestAccess::make(
             kAddress, dirty.size(), kVmid, 101, 23,
-            rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()),
+            simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, dirty.size()),
             std::make_shared<rocjitsu::amdgpu::VmTransferEffectGate>(), [&] {
               ++permit_releases;
               cache_locks_released_on_permit =
@@ -8227,7 +8230,7 @@ TEST(L2CacheTest, PreparedCanonicalPrewritePublishesOnlyCommittedDirtySiblings) 
 
   auto owner = std::make_shared<PreparedBackingOwner>();
   owner->fail_on_attempt = 2;
-  rocjitsu::FabricBacking backing(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size());
+  simdojo::RetainedBackingRange backing(owner, PreparedBackingOwner::kBaseOffset, dirty.size());
   const auto prepared = PreparedCanonicalWritebackTestAccess::make(kAddress, dirty.size(), kVmid,
                                                                    kIdentity, kGeneration, backing);
   ASSERT_TRUE(prepared);
@@ -8264,7 +8267,7 @@ TEST(L2CacheTest, MovedFromPreparedCanonicalWritebackCannotAuthorizeEmptyRange) 
   auto owner = std::make_shared<PreparedBackingOwner>();
   PreparedCanonicalWriteback prepared = PreparedCanonicalWritebackTestAccess::make(
       kAddress, L2Cache::LINE_SIZE, kVmid, 101, 23,
-      rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, L2Cache::LINE_SIZE));
+      simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, L2Cache::LINE_SIZE));
   ASSERT_TRUE(prepared);
   PreparedCanonicalWriteback retained = std::move(prepared);
   EXPECT_EQ(prepared.outcome(), VmAccessOutcome::Unavailable);
@@ -8297,7 +8300,7 @@ TEST(L2CacheTest, PreparedCanonicalPrewriteRefusedGateAndReusedVmidRetainDirtyBy
   auto old_gate = std::make_shared<VmTransferEffectGate>();
   const auto old_prepared = PreparedCanonicalWritebackTestAccess::make(
       kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
-      rocjitsu::FabricBacking(old_owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()),
+      simdojo::RetainedBackingRange(old_owner, PreparedBackingOwner::kBaseOffset, dirty.size()),
       old_gate);
   ASSERT_TRUE(old_prepared);
   old_gate->revoke();
@@ -8309,7 +8312,7 @@ TEST(L2CacheTest, PreparedCanonicalPrewriteRefusedGateAndReusedVmidRetainDirtyBy
   auto new_owner = std::make_shared<PreparedBackingOwner>();
   const auto new_prepared = PreparedCanonicalWritebackTestAccess::make(
       kAddress, dirty.size(), kVmid, kIdentity + 1, kGeneration,
-      rocjitsu::FabricBacking(new_owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()));
+      simdojo::RetainedBackingRange(new_owner, PreparedBackingOwner::kBaseOffset, dirty.size()));
   ASSERT_TRUE(new_prepared);
   EXPECT_EQ(l2.flush_range_before_external_write(kAddress + 32, 4, kVmid, new_prepared),
             VmAccessOutcome::Unavailable);
@@ -8336,7 +8339,7 @@ TEST(MemorySideCacheTest, PreparedCanonicalPrewriteRequiresWholeLineAndRetries) 
   auto owner = std::make_shared<PreparedBackingOwner>();
   const auto partial = PreparedCanonicalWritebackTestAccess::make(
       kAddress, dirty.size() / 2, kVmid, kIdentity, kGeneration,
-      rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size() / 2));
+      simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, dirty.size() / 2));
   ASSERT_TRUE(partial);
   EXPECT_EQ(cache.flush_range(kAddress + 32, 4, kVmid, partial), VmAccessOutcome::Unavailable);
   EXPECT_EQ(owner->write_attempts, 0u);
@@ -8344,7 +8347,7 @@ TEST(MemorySideCacheTest, PreparedCanonicalPrewriteRequiresWholeLineAndRetries) 
 
   const auto complete = PreparedCanonicalWritebackTestAccess::make(
       kAddress, dirty.size(), kVmid, kIdentity, kGeneration,
-      rocjitsu::FabricBacking(owner, 1, PreparedBackingOwner::kBaseOffset, dirty.size()));
+      simdojo::RetainedBackingRange(owner, PreparedBackingOwner::kBaseOffset, dirty.size()));
   ASSERT_TRUE(complete);
   MemorySideCacheTestAccess::set_byte_valid(cache, kAddress, kVmid, 16, false);
   EXPECT_EQ(cache.flush_range(kAddress + 32, 4, kVmid, complete), VmAccessOutcome::Unavailable);

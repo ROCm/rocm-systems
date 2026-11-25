@@ -7,7 +7,7 @@
 #pragma once
 
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
-#include "rocjitsu/vm/fabric_backing.h"
+#include "simdojo/components/retained_backing_range.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -33,7 +33,7 @@ class DeviceCacheCoherence;
 /// KFD entries also carry direct byte views held alive by their backing lease;
 /// a batch may copy multiple runs only through those views after acquiring all
 /// VM gates. write() remains the bounded, single-effect fallback for a generic
-/// FabricBacking owner whose virtual write can fail.
+/// simdojo::RetainedBackingRange owner whose virtual write can fail.
 class PreparedCanonicalWriteback {
 public:
   PreparedCanonicalWriteback(const PreparedCanonicalWriteback &) = delete;
@@ -83,7 +83,8 @@ public:
     }
 
     const uint64_t backing_offset = entry->backing_offset_ + (address - entry->address_);
-    const FabricBacking view = entry->backing_.subview(backing_offset, bytes.size());
+    const simdojo::RetainedBackingRange view =
+        entry->backing_.subview(backing_offset, bytes.size());
     if (!view) {
       return VmAccessOutcome::Unavailable;
     }
@@ -104,7 +105,7 @@ private:
   struct ResolvedLine {
     uint64_t backing_id;
     uint64_t backing_offset;
-    FabricBacking backing;
+    simdojo::RetainedBackingRange backing;
     std::span<std::byte> direct_bytes;
   };
 
@@ -112,7 +113,8 @@ private:
   public:
     Entry(uint64_t address, size_t extent, uint32_t vmid, VmCacheNamespace cache_namespace,
           uint64_t cache_identity, uint64_t admission_generation, uint64_t backing_id,
-          uint64_t backing_offset, FabricBacking backing, std::span<std::byte> direct_bytes = {})
+          uint64_t backing_offset, simdojo::RetainedBackingRange backing,
+          std::span<std::byte> direct_bytes = {})
         : address_(address), extent_(extent), vmid_(vmid), cache_namespace_(cache_namespace),
           cache_identity_(cache_identity), admission_generation_(admission_generation),
           backing_id_(backing_id), backing_offset_(backing_offset), backing_(std::move(backing)),
@@ -148,9 +150,9 @@ private:
     uint64_t admission_generation_;
     uint64_t backing_id_;
     uint64_t backing_offset_;
-    FabricBacking backing_;
+    simdojo::RetainedBackingRange backing_;
     // KFD's retained GpuBackingLease owns these bytes through backing_. A
-    // generic FabricBacking owner leaves this empty and remains fallible.
+    // generic simdojo::RetainedBackingRange owner leaves this empty and remains fallible.
     std::span<std::byte> direct_bytes_;
   };
 
@@ -199,7 +201,7 @@ private:
     }
     const size_t relative = static_cast<size_t>(address - entry->address_);
     const uint64_t offset = entry->backing_offset_ + relative;
-    FabricBacking backing = entry->backing_.subview(offset, size);
+    simdojo::RetainedBackingRange backing = entry->backing_.subview(offset, size);
     if (!backing) {
       return std::nullopt;
     }
