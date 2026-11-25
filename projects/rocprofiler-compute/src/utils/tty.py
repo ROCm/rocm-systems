@@ -644,8 +644,7 @@ def show_all(
                 )
 
                 if is_mem_chart and len(runs) == 1:
-                    # The chart reads the evaluated table and rounds each value
-                    # once, for display; process_table_data formats tables only.
+                    # The chart rounds each value when it draws it.
                     # Metric tables are indexed by Metric_ID.
                     table_df = first_run.dfs[table_config["id"]]
                     if (
