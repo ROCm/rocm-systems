@@ -21,7 +21,7 @@ initramfs, AMDGPU package, ROCm runtime, or rocBLAS payload. Those inputs must
 come from one mutually compatible public release or nightly. Record their
 versions and SHA-256 digests when publishing a result.
 For the external QEMU, libvfio-user, driver, kernel, and ROCm inputs, use the
-[pod guest payload recipe](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/tests/guest/README.md).
+[pod guest payload recipe](https://github.com/ROCm/rocjitsu-test-corpus/blob/99320c65ea55b4a1e916523ea7784fd26445d9a1/corpus/system-cts/guest/README.md).
 The recipe records inputs used by the same-host peer/RCCL gates and
 distinguishes the zero-patch final driver module from earlier diagnostic patch
 runs.

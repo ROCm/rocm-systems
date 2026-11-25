@@ -6,18 +6,64 @@ The launcher can also expose multiple local gfx1250 GPUs from a matching
 configuration, including `configs/gfx1250_mi455x_kmd_4gpu.json`. QEMU owns the
 guest, while rocjitsu supplies the emulated PCI devices and GPU models.
 
-The repository provides the VFIO-user server and
-`scripts/run-vfio-guest.py`. It does not build or distribute a guest kernel,
-initramfs, AMDGPU package, ROCm runtime, or rocBLAS payload. Those inputs must
-come from one mutually compatible public release or nightly. Record their
-versions and SHA-256 digests when publishing a result.
-The [pod guest payload recipe](../tests/guest/README.md) pins the external
-QEMU, libvfio-user, driver, kernel, and ROCm inputs used by the same-host
-peer/RCCL gates. It also distinguishes the zero-patch final driver module
-from earlier diagnostic patch runs.
+This repository provides the VFIO-user server and `scripts/run-vfio-guest.py`.
+The Release CI job uses the pinned rocjitsu-test-corpus actions to build or
+restore patched QEMU, the guest kernel and its stock AMDGPU modules. It packs
+the HIP probe, current RCCL rank binary and pinned guest runtime libraries into
+separate initramfs images. The corpus also publishes qualified guest bundles as
+workflow artifacts. For local runs, follow the
+[guest build recipe](https://github.com/ROCm/rocjitsu-test-corpus/blob/99320c65ea55b4a1e916523ea7784fd26445d9a1/corpus/system-cts/guest/README.md).
 The [four-node VFIO pod controller](../scripts/run-rccl-pod-vfio.py) uses
 `configs/gfx1250_mi455x_kmd_4node_2gpu_if.json` to launch the mixed local
 peer and inter-node NET workload described by that recipe.
+
+## Run the system CTS
+
+The core suite covers the PCI device model, BAR planning and DMA interval
+bookkeeping. The socket client, transport lifecycle tests, guest probes and
+scale-up and scale-out workloads live in rocjitsu-test-corpus. From the
+rocjitsu source directory, fetch the corpus revision used by Release CI into
+a new directory, then configure and run the transport checks.
+
+```sh
+CORPUS=$(mktemp -d)
+git -C "$CORPUS" init -q
+git -C "$CORPUS" fetch --depth=1 https://github.com/ROCm/rocjitsu-test-corpus.git \
+  99320c65ea55b4a1e916523ea7784fd26445d9a1
+git -C "$CORPUS" checkout -q --detach FETCH_HEAD
+
+cmake -S . -B build-vfio -G Ninja -DCMAKE_BUILD_TYPE=Release \
+  -DROCJITSU_ENABLE_VFIO=ON \
+  -DROCJITSU_SYSTEM_CTS_DIR="$CORPUS/corpus/system-cts"
+cmake --build build-vfio
+ctest --test-dir build-vfio/tests/system-cts -LE workload --no-tests=error --output-on-failure
+```
+
+The [system CTS guide](https://github.com/ROCm/rocjitsu-test-corpus/blob/99320c65ea55b4a1e916523ea7784fd26445d9a1/corpus/system-cts/README.md) describes the full corpus command,
+guest artifact manifest, numerical checks and directed route evidence.
+
+### Measuring VFIO host overhead
+
+Run the same GART transfer on both revisions with a Release build. It exercises
+page-table walks, BAR grant admission, and committed peer reads and writes.
+On the corpus-enabled build, count the host notifications with:
+
+```sh
+strace -f -qq -yy -e trace=write -o /tmp/vfio-writes.log \
+  build-vfio/tests/system-cts/vfio_system_cts \
+  --gtest_filter=VfioTargetGrants.Gfx12GartPeerReadWriteUsesFabricWithStockPageTableWalks \
+  --gtest_repeat=3
+rg -c 'anon_inode:\[eventfd\]' /tmp/vfio-writes.log
+```
+
+An idle server needs no quiesce wake on peer completion. A server draining
+a grant must wake when the final permit leaves. Check both conditions with
+`VfioQuiesceWake.SignalsOnlyWhileAHostIsWaitingForPermits` and the held-effect
+reset, UNMAP, and detach cases. Compare CPU time and wall time separately
+for transport-only, guest boot, and guest payload phases. Record the QEMU
+accelerator, payload sizes, active ranks, directed bytes, CPU affinity, and
+logging flags with each comparison. Eventfd write counts and simulated link
+ticks measure different things.
 
 ## Standard peer BAR transport
 

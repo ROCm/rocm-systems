@@ -67,7 +67,9 @@ def run(args: argparse.Namespace) -> dict:
                 "--fabric-effect-trace",
                 "--",
                 sys.executable,
-                "scripts/run-rccl-pod-emulated-node.py",
+                str(
+                    Path(__file__).resolve().with_name("run-rccl-pod-emulated-node.py")
+                ),
                 "--node",
                 str(node),
                 "--run-id",
@@ -197,7 +199,7 @@ def run(args: argparse.Namespace) -> dict:
         config,
         rank_binary,
         Path(__file__).resolve(),
-        Path("scripts/run-rccl-pod-emulated-node.py").resolve(),
+        Path(__file__).resolve().with_name("run-rccl-pod-emulated-node.py"),
     ]
     artifact_paths += [
         path for node in range(4) for path in (output / f"node{node}").glob("*.log")

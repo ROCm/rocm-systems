@@ -58,7 +58,7 @@ reachability; they do not grant peer memory access. Legacy replicated-GPU
 configs retain their XGMI links, hive ID, and XGMI SDMA count for
 compatibility. An explicit manifest suppresses that XGMI discovery metadata
 even when its local ScaleUp or Infinity Fabric routes execute through the
-VM-owned `FabricEndpoint`. Those routes model local effects behind the stock
+VM-owned `PeerMemoryFabric`. Those routes model local effects behind the stock
 driver's UC PCIe peer BAR mappings; they do not establish native XGMI
 discovery or cacheable peer access. Converting a legacy config to a manifest
 therefore changes what ROCr discovers. Legacy single-GPU drivers also keep the

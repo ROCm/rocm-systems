@@ -47,7 +47,7 @@ SimulationEngine                           (simdojo - owns topology)
 └── Topology
     └── VirtualMachine                     (CompositeComponent - topology root)
         ├── SimulatedKfd driver_            (owned member, not a child component)
-        ├── FabricEndpoint ("fabric")        (VM-owned local peer transport)
+        ├── PeerMemoryFabric ("fabric")        (VM-owned local peer transport)
         └── gpu[0..G] ("gpu0"..)           (CompositeComponent, one per GPU)
             ├── SoC ("soc")                 (owned, but its children were adopted
             │                                by the gpuN wrapper above, so it is
@@ -71,7 +71,7 @@ and it owns the simulated KFD alongside its SoCs. The simulation infrastructure
 represents the hardware being modeled.
 
 For unambiguous local ScaleUp or Infinity Fabric routes, the VM owns a
-`FabricEndpoint` child that carries admitted peer effects through Simdojo
+`PeerMemoryFabric` child that carries admitted peer effects through Simdojo
 endpoints. Both link classes currently use unit-latency functional transport;
 this does not model hardware-specific Infinity Fabric timing. Executing those
 routes does not grant native XGMI discovery: explicit manifests still suppress
