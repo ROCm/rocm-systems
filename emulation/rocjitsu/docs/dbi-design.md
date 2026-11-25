@@ -350,10 +350,10 @@ spacing that the envelope's load drain does not establish. Live-after preservati
 alone does not establish readiness. The builder neither validates these
 obligations nor inserts anchor-specific hazard spacing.
 
-The emitted call-target displacement includes the relocated instruction's four
-or eight bytes only when `emit_original` is true. With the original omitted,
-both placements emit the envelope at the trampoline start and call the same
-probe body, with identical bytes and attribution offsets. `original_byte_offset`
+For callable `AfterInst`, the call-target displacement accounts for the full
+`original_size` of the instruction emitted before the call envelope. With the
+original omitted, both placements emit the envelope at the trampoline start and
+call the same probe body, with identical bytes and attribution offsets. `original_byte_offset`
 then names the replacement body when present, or the return branch/end of the
 trampoline for empty deletion.
 `TrampolineBytes` reports the call envelope's offset and size separately from the

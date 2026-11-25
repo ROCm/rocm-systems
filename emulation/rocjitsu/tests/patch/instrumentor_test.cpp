@@ -6004,8 +6004,7 @@ TEST_F(Cdna4ProbeSpill, SgprAndM0RestoresShareOneNop) {
 
 // GFX9-style s_nop padding is omitted on RDNA4; the resume s_wait_alu covers
 // the restored SGPR before the anchor's VALU read. Separate emitted-envelope
-// tests pin the internal SALU guards and the final restore drain. RDNA4 global
-// loads are 12 bytes and cannot be anchors, hence the VALU read.
+// tests pin the internal SALU guards and the final restore drain.
 TEST_F(Rdna4ProbeSpill, SgprRestoreAddsNoNop) {
   util::FailureOr<uint32_t> maybe_clobber = build_s_mov_b32(/*s8=*/8, /*inline 0=*/128, arch());
   ASSERT_TRUE(maybe_clobber.succeeded());
