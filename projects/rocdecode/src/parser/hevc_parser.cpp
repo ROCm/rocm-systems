@@ -1108,6 +1108,7 @@ ParserResult HevcVideoParser::ParseShortTermRefPicSet(HevcSeqParamSet *sps_ptr, 
         int delta_rps = (1 - 2 * rps->delta_rps_sign) * (rps->abs_delta_rps_minus1 + 1);  // (7-60)
 
         HevcShortTermRps *ref_rps = &rps_ref[ref_rps_idx];
+        CHECK_ALLOWED_RANGE("ref_rps->num_of_delta_pocs", ref_rps->num_of_delta_pocs, 0, HEVC_MAX_DPB_FRAMES - 1);
         for (j = 0; j <= ref_rps->num_of_delta_pocs; j++) {
             rps->used_by_curr_pic_flag[j] = Parser::GetBit(nalu, offset);
             if (!rps->used_by_curr_pic_flag[j]) {
@@ -1160,6 +1161,8 @@ ParserResult HevcVideoParser::ParseShortTermRefPicSet(HevcSeqParamSet *sps_ptr, 
             }
         }
         rps->num_positive_pics = i;
+        CHECK_ALLOWED_RANGE("num_negative_pics (inter-predicted)", rps->num_negative_pics, 0, sps_ptr->sps_max_dec_pic_buffering_minus1[sps_ptr->sps_max_sub_layers_minus1]);
+        CHECK_ALLOWED_RANGE("num_positive_pics (inter-predicted)", rps->num_positive_pics, 0, sps_ptr->sps_max_dec_pic_buffering_minus1[sps_ptr->sps_max_sub_layers_minus1] - rps->num_negative_pics);
         rps->num_of_delta_pocs = rps->num_negative_pics + rps->num_positive_pics;
     } else {
         rps->num_negative_pics = Parser::ExpGolomb::ReadUe(nalu, offset);
