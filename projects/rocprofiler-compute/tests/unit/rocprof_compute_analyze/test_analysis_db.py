@@ -145,10 +145,7 @@ def make_pc_sampling_database_analyzer(
     sys_info_row=None,
 ):
     """Build a database analyzer configured for sampling-only workloads."""
-    analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"),
-        {},
-    )
+    analyzer = db_analysis(SimpleNamespace(output_name=None, output_format="database"))
     analyzer._runs = {
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([
@@ -197,10 +194,7 @@ def make_counter_backed_database_analyzer(
     tool_data_records,
 ):
     """Build a counter-backed analyzer with optional sampling records."""
-    analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"),
-        {},
-    )
+    analyzer = db_analysis(SimpleNamespace(output_name=None, output_format="database"))
     analyzer._runs = {
         workload_path: schema.Workload(
             sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
@@ -877,7 +871,7 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
         }
     }
 
-    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer = db_analysis(MagicMock(verbose=0))
     analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
     analyzer._runs = {
         workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
@@ -916,7 +910,7 @@ def test_calc_pmc_df_data_reads_compressed_results(tmp_path):
     """The reader consumes compressed rocpd result artifacts."""
     common.write_result_csv(tmp_path, LONG_FORM_PMC_PERF)
 
-    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer = db_analysis(MagicMock(verbose=0))
     analyzer._runs = {str(tmp_path): MagicMock()}
     analyzer._profiling_config = {}
 
@@ -928,7 +922,7 @@ def test_calc_pmc_df_data_reads_compressed_results(tmp_path):
 
 def test_calc_pmc_df_data_skips_workload_without_results(tmp_path):
     """A workload with no counter artifacts, such as a PC-sampling-only run."""
-    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer = db_analysis(MagicMock(verbose=0))
     analyzer._runs = {str(tmp_path): MagicMock()}
     analyzer._profiling_config = {}
 
@@ -961,7 +955,7 @@ def test_calc_metrics_data_exports_qualified_per_channel_names():
         }
     }
 
-    analyzer = db_analysis(MagicMock(), {})
+    analyzer = db_analysis(MagicMock())
     analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
     analyzer._runs = {
         workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
@@ -1318,7 +1312,7 @@ def test_add_pc_sampling_data_no_tool_data_is_noop(db_session):
     """A workload without tool data inserts no rows."""
     workload = orm.Workload(name="w", sub_name="s")
     db_session.add(workload)
-    analyzer = db_analysis(MagicMock(), {})
+    analyzer = db_analysis(MagicMock())
     analyzer._pc_sampling_tool_data_per_workload = {"/fake/workload": []}
 
     code_object_stores = analyzer.add_pc_sampling_data(
@@ -1348,7 +1342,7 @@ def test_add_pc_sampling_data_populates_and_attributes_kernels(db_session):
     for kernel in kernel_objs.values():
         db_session.add(kernel)
 
-    analyzer = db_analysis(MagicMock(), {})
+    analyzer = db_analysis(MagicMock())
     analyzer._pc_sampling_tool_data_per_workload = {
         workload_path: [make_pc_sampling_tool_data()]
     }
@@ -1468,7 +1462,7 @@ def test_add_pc_sampling_data_separates_shared_code_object_ids_across_pids(
     second_tool_data["metadata"]["pid"] = 99
     second_tool_data["code_objects"][0]["load_base"] = 0x3000
 
-    analyzer = db_analysis(MagicMock(), {})
+    analyzer = db_analysis(MagicMock())
     analyzer._pc_sampling_tool_data_per_workload = {
         workload_path: [first_tool_data, second_tool_data]
     }
@@ -1518,10 +1512,7 @@ def test_run_analysis_scopes_pc_sampling_uuids_by_process(db_session):
     workload = schema.Workload(
         sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]),
     )
-    analyzer = db_analysis(
-        SimpleNamespace(output_name=None, output_format="database"),
-        {},
-    )
+    analyzer = db_analysis(SimpleNamespace(output_name=None, output_format="database"))
     analyzer._runs = {workload_path: workload}
     analyzer._roofline_ceilings_per_workload = {}
     analyzer._profiling_config = {"filter_blocks": ["pc_sampling"]}
@@ -2530,7 +2521,7 @@ def test_add_code_object_isa_adds_unsampled_lines(db_session):
         for kernel in kernel_objs.values():
             db_session.add(kernel)
 
-        analyzer = db_analysis(MagicMock(), {})
+        analyzer = db_analysis(MagicMock())
         analyzer._pc_sampling_tool_data_per_workload = {
             workload_path: [make_pc_sampling_tool_data()]
         }
@@ -2644,7 +2635,7 @@ def test_add_code_object_isa_scopes_unsampled_code_objects_by_process(db_session
         }
         db_session.add_all(kernel_objs.values())
 
-        analyzer = db_analysis(MagicMock(), {})
+        analyzer = db_analysis(MagicMock())
         analyzer._pc_sampling_tool_data_per_workload = {
             workload_path: [first_tool_data, second_tool_data]
         }
@@ -2723,7 +2714,7 @@ def test_add_code_object_isa_skips_code_object_without_load_base(db_session):
         db_session.add(helper)
         kernel_objs = {"helper": helper}
 
-        analyzer = db_analysis(MagicMock(), {})
+        analyzer = db_analysis(MagicMock())
         analyzer._pc_sampling_tool_data_per_workload = {workload_path: [tool_data]}
         kernel_symbols = {}
         source_frames = make_source_frame_collector(workload)
@@ -2814,7 +2805,7 @@ def test_add_code_object_isa_scopes_duplicate_offsets_by_process(db_session):
         for kernel in kernel_objs.values():
             db_session.add(kernel)
 
-        analyzer = db_analysis(MagicMock(), {})
+        analyzer = db_analysis(MagicMock())
         analyzer._pc_sampling_tool_data_per_workload = {
             workload_path: [first_tool_data, second_tool_data]
         }
@@ -2927,7 +2918,7 @@ def test_add_code_object_isa_requires_process_local_dispatch(db_session):
         }
         db_session.add_all(kernel_objs.values())
 
-        analyzer = db_analysis(MagicMock(), {})
+        analyzer = db_analysis(MagicMock())
         analyzer._pc_sampling_tool_data_per_workload = {
             workload_path: [first_tool_data, second_tool_data]
         }
@@ -2966,7 +2957,7 @@ def test_add_pc_sampling_data_drops_lines_without_kernel(db_session):
     kernel_objs = {"vecCopy": orm.Kernel(kernel_name="vecCopy", workload=workload)}
     db_session.add(kernel_objs["vecCopy"])
 
-    analyzer = db_analysis(MagicMock(), {})
+    analyzer = db_analysis(MagicMock())
     analyzer._pc_sampling_tool_data_per_workload = {
         workload_path: [make_pc_sampling_tool_data()]
     }

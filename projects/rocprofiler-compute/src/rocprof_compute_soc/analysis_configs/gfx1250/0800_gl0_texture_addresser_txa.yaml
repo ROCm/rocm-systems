@@ -134,16 +134,6 @@ Panel Config:
           min: MIN(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
           max: MAX(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
           unit: (Count + $normUnit)
-        Async Direct Load Instruction:
-          avg: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
-          min: MIN(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
-          max: MAX(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
-        Async Direct Store Instruction:
-          avg: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
-          min: MIN(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
-          max: MAX(TX_VCA_ASYNC_STORE_WAVEFRONT_sum / $denom)
-          unit: (Count + $normUnit)
         Cluster Load Instruction:
           avg: SUM(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum) / SUM($denom)
           min: MIN(TX_VCA_CLUSTER_LOAD_WAVEFRONT_sum / $denom)
@@ -390,12 +380,6 @@ Panel Config:
 
     Async Store Instruction: >-
       Number of async store instructions processed by TXA.
-
-    Async Direct Load Instruction: >-
-      Number of async direct load instructions processed by TXA.
-
-    Async Direct Store Instruction: >-
-      Number of async direct store instructions processed by TXA.
 
     Cluster Load Instruction: >-
       Number of cluster load instructions processed by TXA.

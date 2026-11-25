@@ -98,7 +98,12 @@ from utils.utils_analysis import (
     impute_counters_iteration_multiplex,
     pass_tables_on_rows,
 )
-from utils.utils_common import get_uuid, get_version, normalize_filter_to_str_list
+from utils.utils_common import (
+    get_uuid,
+    get_version,
+    normalize_filter_to_str_list,
+    panel_id_of,
+)
 from utils.utils_counter_defs import (
     Collectables,
     extract_counters_and_variables,
@@ -1392,7 +1397,7 @@ class db_analysis(OmniAnalyze_Base):
             # per table.
             metric_tables = [
                 (
-                    table_names_map[table_id // 100 * 100],
+                    table_names_map[panel_id_of(table_id)],
                     table_names_map[table_id],
                     descriptions_map[table_id],
                     [c for c in metric_df.columns if c not in non_expression_columns],

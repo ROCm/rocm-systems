@@ -41,12 +41,17 @@ def default_metric_library_dir() -> Path:
     return Path(__file__).resolve().parent
 
 
+def has_metric_library(arch: str) -> bool:
+    """Return whether rocprof-compute ships a metric library, and so analysis views,
+    for arch."""
+    return canonical_config_arch(arch) in METRIC_LIBRARY_PARENT_ARCH
+
+
 def arch_chain(arch: str) -> List[str]:
     """Return the chain of archs for arch, base first."""
-    config_arch = canonical_config_arch(arch)
-    if config_arch not in METRIC_LIBRARY_PARENT_ARCH:
+    if not has_metric_library(arch):
         raise ValueError(f"No metric library is defined for arch {arch}")
-    chain = [config_arch]
+    chain = [canonical_config_arch(arch)]
     while METRIC_LIBRARY_PARENT_ARCH[chain[-1]] is not None:
         parent = METRIC_LIBRARY_PARENT_ARCH[chain[-1]]
         if parent in chain:

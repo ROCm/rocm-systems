@@ -60,10 +60,6 @@ tables:
     label: Async Load Instruction
   - metric: txa.async_store_inst
     label: Async Store Instruction
-  - metric: txa.async_load_inst
-    label: Async Direct Load Instruction
-  - metric: txa.async_store_inst
-    label: Async Direct Store Instruction
   - metric: txa.cluster_load_inst
     label: Cluster Load Instruction
   - metric: txa.async_cluster_load_inst

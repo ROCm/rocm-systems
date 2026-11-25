@@ -171,7 +171,7 @@ gl1.gl1c_return_arbitration_lat:
   unit: Cycles
   description: ''
 gl1.gl2_rd_128b_req:
-  name: GL2 Read 128B Requests
+  name: GL1-GL2 Read Requests (128B)
   formula: SUM(GL1C_GL2_REQ_READ_128B_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: Number of 128-byte GL1 to Graphics Level Arbiter read requests.

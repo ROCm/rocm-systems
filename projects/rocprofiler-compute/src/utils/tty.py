@@ -35,6 +35,8 @@ from utils.utils_common import (
     ROOFLINE_PANEL_ID,
     convert_filter_blocks_to_panel_ids,
     format_table_id,
+    is_gfx115x,
+    panel_id_of,
     selects_roofline,
     strip_ansi,
 )
@@ -44,6 +46,9 @@ _GUIDANCE_PANEL_MIN_WIDTH = 100
 KERNEL_NAME_WRAP_WIDTH = 40
 
 PC_SAMPLING_TABLE_ID = "21.1"
+
+# Columns that scale_bw_columns() scales
+BANDWIDTH_VALUE_COLUMNS = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
 
 PC_SAMPLING_STALL_REASON_REFERENCE = (
     "Stall reason definitions: https://rocm.docs.amd.com/projects/"
@@ -59,13 +64,13 @@ def wrap_kernel_name(name: str) -> str:
 def scale_bw_columns(
     df: pd.DataFrame, value_columns: list[str], decimal: int = 2
 ) -> pd.DataFrame:
-    """Scale Bytes/s rows to human-readable units; recalculate Percent of Peak."""
+    """Scale GB/s rows to human-readable units; recalculate Percent of Peak."""
     if "Unit" not in df.columns:
         return df
 
     df_copy = df.copy()
 
-    bw_rows = df_copy["Unit"].str.lower().str.contains("bytes/s", na=False)
+    bw_rows = df_copy["Unit"].str.lower().eq("gb/s")
     if not bw_rows.any():
         return df_copy
 
@@ -297,13 +302,18 @@ def process_table_data(
     table_config: dict[str, Any],
     table_type: str,
     comparable_columns: list[str],
+    scale_bandwidth: bool = False,
 ) -> pd.DataFrame:
+    """Return a table's values of every run, rounded; with scale_bandwidth, a single
+    run's GB/s rows are shown in readable units (scale_bw_columns())."""
     # take the 1st run as baseline
     base_run, base_data = next(iter(runs.items()))
     base_df = base_data.dfs[table_config["id"]]
 
     if args.time_unit and has_time_data(base_df):
         base_df = convert_time_columns(base_df, args.time_unit)
+    if scale_bandwidth:
+        base_df = scale_bw_columns(base_df, BANDWIDTH_VALUE_COLUMNS, args.decimal)
 
     result_df = pd.DataFrame(index=base_df.index)
 
@@ -420,18 +430,19 @@ def format_table_output(
     # fash for now.
     transpose = table_type != "raw_csv_table" and table_config.get("columnwise", False)
 
-    # For a single run, format Bytes/s metrics with human-readable units.
-    # For multiple runs (baseline comparison), keep Bytes for accurate comparison
-    is_single_run = len(runs) == 1
-
-    if is_single_run and "Unit" in df.columns:
-        # Identify value columns to format
-        value_cols = ["Value", "Avg", "Min", "Max", "Peak", "Peak (Empirical)"]
-        df = scale_bw_columns(df, value_cols, args.decimal)
-
     content += get_table_string(df, transpose=transpose, decimal=args.decimal) + "\n"
 
     return content
+
+
+def _scales_bandwidth(gpu_arch: Optional[str], table_id: int) -> bool:
+    """Return whether a table's GB/s rows are shown in readable units: every table
+    on gfx115x and gfx1201, and the memory chart tables on every arch."""
+    return (
+        is_gfx115x(gpu_arch)
+        or gpu_arch == "gfx1201"
+        or panel_id_of(table_id) == MEMORY_CHART_PANEL_ID
+    )
 
 
 def _max_line_width(rendered: str) -> int:
@@ -633,17 +644,6 @@ def show_all(
                         else:
                             run_data.dfs[table_config["id"]].index = initial_index
 
-                processed_df = process_table_data(
-                    args,
-                    runs,
-                    table_config,
-                    table_type,
-                    comparable_columns,
-                )
-
-                if processed_df.empty:
-                    continue
-
                 # For the memory chart panel, collect all tables and merge
                 # into a single chart; skip individual table output.
                 # Gate to architectures with a chart layout; others fall back to
@@ -653,6 +653,22 @@ def show_all(
                     and not args.debug_table_view
                     and Layouts.for_arch(gpu_arch) is not None
                 )
+
+                # A single run shows bandwidth in readable units; a comparison of
+                # runs keeps GB/s, and the memory chart takes the raw values.
+                processed_df = process_table_data(
+                    args,
+                    runs,
+                    table_config,
+                    table_type,
+                    comparable_columns,
+                    scale_bandwidth=len(runs) == 1
+                    and not is_mem_chart
+                    and _scales_bandwidth(gpu_arch, table_config["id"]),
+                )
+
+                if processed_df.empty:
+                    continue
 
                 if is_mem_chart and len(runs) == 1:
                     # Metric tables are indexed by Metric_ID

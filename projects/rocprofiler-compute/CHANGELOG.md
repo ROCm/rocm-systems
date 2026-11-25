@@ -9,7 +9,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Analyze, `--list-metrics`, and the CSV and DB exports show corrected metric names, units, peaks, and descriptions, and leave out rows that have no value. Some table and metric IDs change, so a numeric metric ID can select a different row.
+
+* `--block` rejects the alias of a block that the architecture doesn't have.
+
 ### Removed
+
+* Removed the PC Sampling block on gfx908, which doesn't support PC sampling.
+
+* Removed duplicate rows from the gfx1250 TXA block.
 
 ### Optimized
 
@@ -20,6 +28,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed MI200 profiling collecting the L2-Fabric write counters twice under two names, which took one extra profiling pass.
 
 * Fixed gfx1201 Wavefront Occupancy, Memory Chart occupancy and Wavefront Life reading far above the real wave count.
+
+* Fixed the gfx1250 roofline missing its L0 and L2 points.
 
 ### Upcoming changes
 

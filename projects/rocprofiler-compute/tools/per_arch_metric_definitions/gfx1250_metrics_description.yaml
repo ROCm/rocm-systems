@@ -1169,14 +1169,6 @@ Shader-TXA Requests - Async Load and Store:
     plain: Number of async store instructions processed by TXA.
     rst: Number of async store instructions processed by TXA.
     unit: Count per Normalization Unit
-  Async Direct Load Instruction:
-    plain: Number of async direct load instructions processed by TXA.
-    rst: Number of async direct load instructions processed by TXA.
-    unit: Count per Normalization Unit
-  Async Direct Store Instruction:
-    plain: Number of async direct store instructions processed by TXA.
-    rst: Number of async direct store instructions processed by TXA.
-    unit: Count per Normalization Unit
   Cluster Load Instruction:
     plain: Number of cluster load instructions processed by TXA.
     rst: Number of cluster load instructions processed by TXA.
