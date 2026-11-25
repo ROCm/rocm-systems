@@ -691,3 +691,29 @@ TEST(regex_compatibility, thread_safety)
     EXPECT_EQ(success_count.load(), 400) << "All regex operations should succeed";
     EXPECT_EQ(failure_count.load(), 0) << "No regex operations should fail";
 }
+
+// regex_match() -> Parser::parse_atom() -> parse_class() is reached by any bracket
+// expression; the "\S" escape inside the brackets exercises parse_class's handling.
+TEST(regex_compatibility, bracket_class_non_whitespace_escape)
+{
+    struct Case
+    {
+        const char* text;
+        const char* pat;
+        bool        expected;
+    };
+    const Case cases[] = {
+        {"x", "[\\S]", true},
+        {" ", "[\\S]", false},
+        {"x", "[^\\S]", false},
+        {" ", "[^\\S]", true},
+        {"x", "[\\S]+", true},
+    };
+    for(const auto& c : cases)
+    {
+        EXPECT_EQ(R::regex_match(c.text, c.pat), c.expected) << c.text << " vs " << c.pat;
+        auto s = TryStdMatch(c.text, c.pat);
+        ASSERT_TRUE(s.has_value());
+        EXPECT_EQ(R::regex_match(c.text, c.pat), *s) << c.text << " vs " << c.pat;
+    }
+}
