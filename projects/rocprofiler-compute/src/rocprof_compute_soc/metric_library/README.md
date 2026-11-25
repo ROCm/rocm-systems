@@ -81,6 +81,9 @@ A description says what the metric counts. It follows the
 8. **Spelling and grammar.** Correct English spelling and grammar.
 9. **Characters.** Plain ASCII (`->` for an arrow, no trademark mark), ending with a
    period.
+10. **Length.** At most 300 characters, and as short as the description can be while
+    staying clear. A longer description means the wording or the metric needs rework.
+    `tools/validate_metric_library.py` checks the length.
 
 ## Sets
 

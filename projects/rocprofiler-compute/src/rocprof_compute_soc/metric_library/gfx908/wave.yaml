@@ -3,13 +3,10 @@ wave.active_cycles:
   formula: 4 * SUM(SQ_ACTIVE_INST_ANY) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    The average number of cycles a wavefront in the kernel dispatch was actively
-    executing instructions. This measurement is made on a per-wavefront basis, and may
-    include cycles that another wavefront spent actively executing (on another execution
-    unit, for example) or was stalled. As such, it is most useful to get a sense of how
-    wavefronts were spending their time, rather than identification of a precise
-    limiter. The sum of this metric, Issue Wait Cycles and Active Wait Cycles should be
-    equal to the total Wave Cycles metric.
+    The number of cycles wavefronts in the kernel dispatch were actively executing
+    instructions, counted per wavefront, so it can include cycles another wavefront was
+    executing or stalled. It shows how wavefronts spend their time rather than a precise
+    limiter.
 wave.cycles:
   name: Wavefront Cycles
   formula: 4 * SUM(SQ_WAVE_CYCLES) / SUM($denom)
@@ -29,14 +26,10 @@ wave.issue_wait_cycles:
   formula: 4 * SUM(SQ_WAIT_INST_ANY) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    The number of cycles a wavefront in the kernel dispatch was unable to issue an
-    instruction for any reason (for example, execution pipe back-pressure, arbitration
-    loss, etc.). This counter is incremented at every cycle by all wavefronts on a CU
-    unable to issue an instruction. As such, it is most useful to get a sense of how
-    wavefronts were spending their time, rather than identification of a precise limiter
-    because another wavefront could be actively executing while a wavefront is issue
-    stalled. The sum of this metric, Dependency Wait Cycles and Active Cycles should be
-    equal to the total Wave Cycles metric.
+    The number of cycles wavefronts in the kernel dispatch could not issue an
+    instruction for any reason, for example execution pipe back-pressure or arbitration
+    loss, counted per wavefront. It shows how wavefronts spend their time rather than a
+    precise limiter.
 wave.occupancy:
   name: Wavefront Occupancy
   formula: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD)

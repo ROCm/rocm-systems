@@ -115,16 +115,14 @@ compute.total_insts:
   description: Total instructions issued.
 compute.valu_flops:
   name: VALU FLOPs
+  # SQ_WMMA_VALU_INSTS counts per vec32, the unit of SQ_INSTS_VALU for gfx120x compute.
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum)) / SUM(End_Timestamp - Start_Timestamp)
   unit: GFLOP/s
   description: >-
-    VALU issues per second, excluding WMMA, at one FLOP per lane. gfx120x compute is
-    wave32 by default, so that is 32 per instruction. SQ_INSTS_VALU counts every VALU
-    issue, including integer, move, and convert, and an FMA counts as one issue while
-    the FP32 roof counts it as two FLOPs. A pure FMA kernel therefore reads low. A tiled
-    FP32 GEMM also issues address arithmetic, so this metric can read about twice the
-    true FLOP count. SQ_WMMA_VALU_INSTS is per vec32, the same unit as SQ_INSTS_VALU for
-    gfx120x compute.
+    VALU instructions per second, excluding WMMA, at one FLOP per lane (32 in wave32).
+    Every VALU instruction counts, including integer, move and convert, and an FMA
+    counts once, so a pure FMA kernel reads low and a GEMM with address arithmetic can
+    read about twice its true FLOP rate.
   peak_empirical: $FP32Flops_empirical_peak
 compute.valu_flops_f64:
   name: VALU FLOPs (F64)

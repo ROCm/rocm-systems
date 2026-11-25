@@ -7,7 +7,8 @@
 For every arch in METRIC_LIBRARY_PARENT_ARCH, check that:
 
 - the arch has a directory, and each of its files loads;
-- each metric has the required fields and plain ASCII text;
+- each metric has the required fields, plain ASCII text and a description of at most
+  DESCRIPTION_MAX_LENGTH characters;
 - each id is named after hardware and lives in the file of its category;
 - units use one spelling, and an id has one name and one unit on every arch;
 - no two metrics on an arch share a formula or a name;
@@ -57,6 +58,7 @@ UNIT_ALIASES = {
 METRIC_LIBRARY_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
+DESCRIPTION_MAX_LENGTH = 300
 # Metric fields with an expression.
 EXPRESSION_FIELDS = ("formula", *METRIC_OPTIONAL_FIELDS)
 COLLECTABLE_FIELDS = ("formula",)
@@ -287,7 +289,8 @@ def _metric_errors(entry: object, source: str, metric_id: str) -> List[str]:
 
 
 def _string_errors(entry: Dict[str, Any], source: str, metric_id: str) -> List[str]:
-    """Report non-string units and descriptions, non-ASCII text and unit aliases."""
+    """Report non-string units and descriptions, non-ASCII text, long descriptions and
+    unit aliases."""
     errors = [
         f"[{source}] {metric_id}: '{field}' must be a string"
         for field in ("unit", "description")
@@ -299,6 +302,12 @@ def _string_errors(entry: Dict[str, Any], source: str, metric_id: str) -> List[s
         if isinstance(entry[field], str)
         and (not entry[field].isascii() or "\\u" in entry[field])
     )
+    description = entry["description"]
+    if isinstance(description, str) and len(description) > DESCRIPTION_MAX_LENGTH:
+        errors.append(
+            f"[{source}] {metric_id}: 'description' has {len(description)} characters; "
+            f"use at most {DESCRIPTION_MAX_LENGTH}"
+        )
     if isinstance(entry["unit"], str) and entry["unit"] in UNIT_ALIASES:
         errors.append(
             f"[{source}] {metric_id}: 'unit' {entry['unit']!r} is an alias; "

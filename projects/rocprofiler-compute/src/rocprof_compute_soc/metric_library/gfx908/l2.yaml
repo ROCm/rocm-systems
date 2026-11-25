@@ -10,11 +10,9 @@ l2.bw:
   formula: 64 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes per second looked up in the L2 cache. The number of bytes is
-    calculated as the number of cache lines requested multiplied by the cache line size.
-    This value does not consider partial requests, so, for example, if only a single
-    value is requested in a cache line, the data movement will still be counted as a
-    full cache line.
+    The number of bytes per second looked up in the L2 cache. The number of bytes is the
+    number of cache lines requested times the cache line size; a partial request counts
+    as a full cache line.
   peak: $max_sclk / 1000 * 64 * TO_INT($total_l2_chan)
 l2.cc_req:
   name: L2 CC Requests
@@ -137,10 +135,8 @@ l2.peak_bw:
   unit: Percent
   description: >-
     Percentage of the peak theoretical L2 cache bandwidth used by the bytes looked up in
-    the L2 cache. The number of bytes is calculated as the number of cache lines
-    requested multiplied by the cache line size. This value does not consider partial
-    requests, so, for example, if only a single value is requested in a cache line, the
-    data movement will still be counted as a full cache line.
+    the L2 cache. The number of bytes is the number of cache lines requested times the
+    cache line size; a partial request counts as a full cache line.
 l2.probe_req:
   name: L2 Probe Requests
   formula: SUM(TCC_PROBE_sum) / SUM($denom)
@@ -173,10 +169,9 @@ l2.streaming_req:
   formula: SUM(TCC_STREAMING_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    The total number of incoming requests to the L2 that are marked as streaming. The
-    exact meaning of this may differ depending on the targeted accelerator, however on
-    an MI2XX this corresponds to non-temporal load or stores. The L2 cache attempts to
-    evict streaming requests before normal requests when the L2 is at capacity.
+    The total number of incoming L2 requests marked as streaming; on MI2XX these are
+    non-temporal loads and stores. When the L2 is full, it evicts streaming requests
+    before normal ones.
 l2.uc_req:
   name: L2 UC Requests
   formula: SUM(TCC_UC_REQ_sum) / SUM($denom)

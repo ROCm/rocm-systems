@@ -36,14 +36,13 @@ gl2.hits:
     workloads or poor data locality.
 gl2.memory_ai:
   name: Memory Arithmetic Intensity
+  # FLOPs: VALU FLOPs without the WMMA instructions SQ_INSTS_VALU counts, plus 8192 per WMMA instruction.
   formula: SUM($wave_size * (SQ_INSTS_VALU_sum - SQ_WMMA_VALU_INSTS_sum) + 8192 * SQ_WMMA_VALU_INSTS_sum) / (32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum))
   unit: FLOPs/Byte
   description: >-
-    Arithmetic intensity relative to GL2C/EA requests destined for VRAM. The plot marks
-    the point at the VRAM level. The requests include those the Infinity Cache serves,
-    and the counters cannot separate them, so this intensity can be lower than the true
-    VRAM intensity. The FLOP numerator is the VALU FLOPs excluding the WMMA instructions
-    already counted in SQ_INSTS_VALU, plus the WMMA FLOPs at 8192 per instruction.
+    Arithmetic intensity relative to the bytes of GL2C requests over the EA destined for
+    VRAM. These include requests the Infinity Cache serves, which the counters cannot
+    separate, so this can be lower than the true VRAM intensity.
 gl2.memory_bw:
   name: Memory Bandwidth
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_32B_sum + GL2C_EA_WRREQ_DRAM_32B_sum) / SUM(End_Timestamp - Start_Timestamp)

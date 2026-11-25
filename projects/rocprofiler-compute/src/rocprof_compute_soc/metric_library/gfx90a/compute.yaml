@@ -182,11 +182,10 @@ compute.inst_mix_valu:
   formula: SUM(SQ_INSTS_VALU - SQ_INSTS_MFMA) / SUM($denom)
   unit: (Instructions + $normUnit)
   description: >-
-    The total number of vector arithmetic logic unit (VALU) operations issued. These are
-    the workhorses of the compute unit, and are used to execute a wide range of
-    instruction types including floating point operations, non-uniform address
-    calculations, transcendental operations, integer operations, shifts, conditional
-    evaluation, etc.
+    The total number of vector arithmetic logic unit (VALU) operations issued, excluding
+    MFMA. VALU instructions do most of the compute unit's work: floating-point, integer,
+    transcendental, shift and conditional operations and non-uniform address
+    calculations.
 compute.inst_mix_vmem:
   name: VMEM Instructions
   formula: SUM(SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / SUM($denom)
@@ -354,7 +353,5 @@ compute.vmem_util:
   unit: Percent
   description: >-
     Percentage of the kernel's duration the VMEM unit was busy executing instructions,
-    including both global/generic and spill/scratch operations. Does not include VALU
-    operations. Computed as the ratio of the total number of cycles spent by the
-    scheduler issuing VMEM instructions over the total CU cycles.
+    including global, generic, spill and scratch operations, but not VALU operations.
   peak: 100

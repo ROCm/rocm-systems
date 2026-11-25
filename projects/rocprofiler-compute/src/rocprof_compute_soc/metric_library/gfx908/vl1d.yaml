@@ -18,11 +18,9 @@ vl1d.bw_util:
   unit: Percent
   description: >-
     Percentage of the peak theoretical vL1D cache bandwidth used by the bytes looked up
-    in the vL1D cache as a result of VMEM instructions. The number of bytes is
-    calculated as the number of cache lines requested multiplied by the cache line size.
-    This value does not consider partial requests, so, for example, if only a single
-    value is requested in a cache line, the data movement will still be counted as a
-    full cache line.
+    in the vL1D cache by VMEM instructions. The number of bytes is the number of cache
+    lines requested times the cache line size; a partial request counts as a full cache
+    line.
 vl1d.cache_accesses:
   name: vL1D Cache Accesses
   formula: SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM($denom)
@@ -33,11 +31,9 @@ vl1d.cache_bw:
   formula: 64 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes per second looked up in the vL1D cache as a result of VMEM
-    instructions. The number of bytes is calculated as the number of cache lines
-    requested multiplied by the cache line size. This value does not consider partial
-    requests, so, for example, if only a single value is requested in a cache line, the
-    data movement will still be counted as a full cache line.
+    The number of bytes per second looked up in the vL1D cache by VMEM instructions. The
+    number of bytes is the number of cache lines requested times the cache line size; a
+    partial request counts as a full cache line.
   peak: $max_sclk / 1000 * 64 * $cu_per_gpu
 vl1d.cache_hits:
   name: vL1D Cache Hits
@@ -120,11 +116,9 @@ vl1d.l2_bw:
   formula: 64 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    The number of bytes per second transferred across the vL1D-L2 interface as a result
-    of VMEM instructions. The number of bytes is calculated as the number of cache lines
-    requested multiplied by the cache line size. This value does not consider partial
-    requests, so, for example, if only a single value is requested in a cache line, the
-    data movement will still be counted as a full cache line.
+    The number of bytes per second transferred across the vL1D-L2 interface by VMEM
+    instructions. The number of bytes is the number of cache lines requested times the
+    cache line size; a partial request counts as a full cache line.
 vl1d.l2_rd_bw:
   name: vL1D-L2 Read Bandwidth
   formula: 128 * SUM(TCP_TCC_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)

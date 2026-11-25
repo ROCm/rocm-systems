@@ -105,11 +105,10 @@ spi.scratch_stall_rate:
   formula: 100 * SUM(SPI_RA_TMP_STALL_CSN) / SUM($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)
   unit: Percent
   description: >-
-    Percentage of total shader-engine cycles in the kernel where a workgroup could not
-    be scheduled to a CU due to lack of private (a.k.a., scratch) memory slots. While
-    this can reach up to 100%, note that the actual occupancy limitations on a kernel
-    using private memory are typically quite small (for example, less than 1% of the
-    total number of wavefronts that can be scheduled to an accelerator).
+    Percentage of shader-engine cycles in the kernel where a workgroup could not be
+    scheduled to a CU for lack of private (scratch) memory slots. It can reach 100%, but
+    the occupancy this costs is usually small, for example under 1% of the wavefronts an
+    accelerator can schedule.
 spi.sgpr_writes:
   name: SGPR Writes
   formula: SUM(SPI_SWC_CSC_WR) / SUM(SPI_CSN_WAVE)
