@@ -51,6 +51,9 @@ void wide_scaled_widen_x86_64_v4(int lanes, uint64_t exec_mask, ScaledDestinatio
   constexpr int input_words = elements * bits / 32;
   int words = destination == ScaledDestination::F32 ? elements : elements / 2;
   for (int lane = 0; lane < lanes; lane += 16) {
+    if (uint16_t(exec_mask >> lane) == 0) {
+      continue;
+    }
     __m512i source[input_words], result[elements];
     for (int word = 0; word < input_words; ++word) {
       source[word] = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(a[word] + lane));

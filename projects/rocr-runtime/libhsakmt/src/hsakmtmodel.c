@@ -221,7 +221,7 @@ void model_init_env_vars(void)
 		}
 		model_reported_minor = model_functions->version_minor;
 		if (model_reported_minor < expected_version_minor) {
-			fprintf(stderr, "[MODEL] WARN: Model version %u.%u < expected %u.%u — "
+			fprintf(stderr, "[MODEL] WARN: Model version %u.%u < expected %u.%u - "
 				"DRM simulation unavailable, using v1.0 compatibility fallbacks\n",
 				model_functions->version_major, model_reported_minor,
 				expected_version_major, expected_version_minor);

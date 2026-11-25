@@ -29,6 +29,18 @@ struct KernelDescriptorInfo {
   rocjitsu::amdhsa::kernel_descriptor_t descriptor{}; ///< Raw descriptor bytes.
 };
 
+/// @brief Legacy CDNA preload firmware enters 256 bytes beyond the ordinary entry.
+inline constexpr uint64_t kKernargPreloadSkipBytes = 256;
+[[nodiscard]] bool uses_kernarg_preload_firmware_skip(rocjitsu::IsaFamily arch);
+
+/// @brief Derive hardware-entry candidates for one descriptor inside the text extent.
+/// @details A missing/out-of-range candidate fails. The caller must verify every
+/// candidate is a decoded instruction/block boundary before using it as a root.
+/// CDNA3/4 preload adds a firmware entry; CDNA5 does not.
+[[nodiscard]] std::optional<std::vector<uint64_t>>
+kernel_hardware_entry_candidates(const KernelDescriptorInfo &kernel, rocjitsu::IsaFamily arch,
+                                 uint64_t text_size);
+
 /// @brief Locate every ".kd" descriptor whose entry lands in a selected executable section.
 ///
 /// @details text_offset and text_size identify the selected section's file range;

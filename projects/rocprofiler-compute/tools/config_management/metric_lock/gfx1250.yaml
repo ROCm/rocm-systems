@@ -875,7 +875,7 @@ gl0.utcl1_req_stall:
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VMW_UTCL0_STALL_UTCL1_REQ_OUT_OF_CREDITS_sum, TX_VMW_VMW_BUSY_sum]
 gl0.util:
-  formula: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  formula: 100 * SUM(TX_VMW_VMW_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VMW_VMW_BUSY_sum]
 gl0.wr_sectors:
@@ -1596,7 +1596,7 @@ spi.thread_dispatch_rate:
   unit: Threads per Cycle
   counters: [GRBM_GUI_ACTIVE_sum, SPI_ALL_WAVE_ITEMS_sum, SPI_BUSY_sum, SQ_WAVES]
 spi.util:
-  formula: 100 * SUM(SPI_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $se_per_gpu)
+  formula: 100 * SUM(SPI_BUSY_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu)
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SPI_BUSY_sum, SQ_WAVES]
 spi.wavefront_dispatch_fifo_full_rate:
@@ -1680,7 +1680,7 @@ txa.command_bus_stall_rate:
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VMW_GATE_EN1_sum, TX_VMW_VMW_VCA_REQ_STALL_sum]
 txa.command_bus_util:
-  formula: 100 * SUM(TX_VCA_VMEMCMD_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  formula: 100 * SUM(TX_VCA_VMEMCMD_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VCA_VMEMCMD_CYCLES_sum]
 txa.flat_atomics_insts:
@@ -1746,11 +1746,11 @@ txa.req_bus_stall_rate:
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VMW_DATA_FIFO_STALL_sum, TX_VMW_GATE_EN1_sum]
 txa.req_bus_util:
-  formula: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  formula: 100 * SUM(TX_VCA_IN_ADDR_CYCLES_sum + TX_VCA_IN_DATA_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VCA_IN_ADDR_CYCLES_sum, TX_VCA_IN_DATA_CYCLES_sum]
 txa.req_bus_util_atomic_data:
-  formula: 100 * SUM(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  formula: 100 * SUM(TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VCA_ATOMIC_WRITE_DATA_INPUT_CYCLES_sum]
 txa.stall_rate:
@@ -1786,11 +1786,11 @@ txa.tdm_store_bw:
   unit: GB/s
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VCA_TDM_STORE_BANDWIDTH_BYTES_sum]
 txa.util:
-  formula: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM(GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  formula: 100 * SUM(TX_VCA_VCA_BUSY_sum) / SUM(2 * $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VCA_VCA_BUSY_sum]
 txa.vmw_req_bus_util:
-  formula: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM(2 * GRBM_GUI_ACTIVE_sum * $cu_per_gpu)
+  formula: 100 * SUM(TX_VCA_VMEMREQ_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   counters: [GRBM_GUI_ACTIVE_sum, SQ_WAVES, TX_VCA_VMEMREQ_CYCLES_sum]
 txd.cache_return_stalled_by_txd:

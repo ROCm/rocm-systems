@@ -462,7 +462,7 @@ void MPITransport::alltoall(void *dst, void *src, int size, int win_id,
   NET_CHECK(mpilib_ftable_.Type_size(mpi_type, &type_size));
 
   if (dst == src) {
-    LOG_ERROR_EXIT("IN_PLACE option not supported for alltoall in the RO rocSHMEM conduit");
+    LOG_ERROR_EXIT("IN_PLACE option not supported for alltoall in the RO rocSHMEM backend");
   }
 
   std::vector<MPI_Request> pe_req(pe_size);
@@ -510,7 +510,7 @@ void MPITransport::fcollect(void *dst, void *src, int size, int win_id,
   NET_CHECK(mpilib_ftable_.Type_size(mpi_type, &type_size));
 
   if (dst == src) {
-    LOG_ERROR_EXIT("IN_PLACE option not supported for fcollect in the RO rocSHMEM conduit");
+    LOG_ERROR_EXIT("IN_PLACE option not supported for fcollect in the RO rocSHMEM backend");
   }
 
   std::vector<MPI_Request> pe_req(pe_size);

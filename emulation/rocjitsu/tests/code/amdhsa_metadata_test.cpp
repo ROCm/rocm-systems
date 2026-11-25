@@ -18,8 +18,9 @@ namespace {
 
 std::vector<KernelDescriptorInfo> descriptors(const std::vector<uint8_t> &image) {
   const AmdGpuCodeObject object(image.data(), image.size());
-  if (!object.is_valid() || object.text_sections().size() != 1)
+  if (!object.is_valid() || object.text_sections().size() != 1) {
     return {};
+  }
   const Section &text = *object.text_sections().front();
   return scan_kernel_descriptors(image, text.sectionOffset(), text.size());
 }

@@ -26,47 +26,21 @@ namespace denorm = rocjitsu::amdgpu::input_denormal;
 constexpr denorm::Policy kKeep{false};
 constexpr denorm::Policy kFlush{true};
 
-TEST(ConversionTest, PackU8RoundsInModeAndKeepsOtherBytes) {
-  const conversion::PackU8 nearest{0, 0, kKeep, conversion::mode_rounding(0)};
-  const conversion::PackU8 down{0, 0, kKeep, conversion::mode_rounding(2)};
-  const conversion::PackU8 up{0, 0, kKeep, conversion::mode_rounding(1)};
-  EXPECT_EQ(nearest(0x3fc00000u, 0u, 0u), 2u); // 1.5
-  EXPECT_EQ(nearest(0x40200000u, 0u, 0u), 2u); // 2.5 ties to even
-  EXPECT_EQ(down(0x3fc00000u, 0u, 0u), 1u);
-  EXPECT_EQ(up(0x3f000000u, 0u, 0u), 1u);                        // 0.5
-  EXPECT_EQ(up(0xbf000000u, 0u, 0u), 0u);                        // -0.5 rounds to -0
-  EXPECT_EQ(nearest(0x437f8000u, 2u, 0x11223344u), 0x11ff3344u); // 255.5 saturates
-  EXPECT_EQ(nearest(0x7fc00000u, 3u, 0x11223344u), 0x00223344u); // NaN gives zero
-  const conversion::PackU8 negated{0, 1, kKeep, conversion::mode_rounding(0)};
-  EXPECT_EQ(negated(0xc0400000u, 1u, 0u), 0x300u); // -(-3)
-}
-
-TEST(ConversionTest, PackB32F16ModifiesFlushesAndQuietsEachHalf) {
-  const conversion::PackB32F16 keep{0, 0, kKeep, true};
-  EXPECT_EQ(keep(0x12347c01u, 0x5678fc00u), 0xfc007e01u); // upper source bits are ignored
-  EXPECT_EQ(keep(0x03ffu, 0x8001u), 0x800103ffu);
-  const conversion::PackB32F16 flush{0, 0, kFlush, true};
-  EXPECT_EQ(flush(0x03ffu, 0x8001u), 0x80000000u);
-  const conversion::PackB32F16 modified{1, 2, kKeep, true};
-  EXPECT_EQ(modified(0xbc00u, 0x3c00u), 0xbc003c00u);
-  // Targets that keep signaling NaNs copy their payload unchanged.
-  const conversion::PackB32F16 raw{0, 0, kKeep, false};
-  EXPECT_EQ(raw(0x7c01u, 0u), 0x7c01u);
-}
-
 TEST(ConversionTest, Fp8DecodeIsExactAndCanonicalizesNan) {
   // Every non-NaN byte decodes to a value that encodes back to the same byte.
   for (uint32_t byte = 0; byte < 0x100u; ++byte) {
     const uint32_t fp8 = conversion::decode_fp8<conversion::Fp8>(byte);
     const uint32_t bf8 = conversion::decode_fp8<conversion::Bf8>(byte);
-    if ((byte & 0x7fu) == 0x7fu)
+    if ((byte & 0x7fu) == 0x7fu) {
       EXPECT_EQ(fp8, 0xffc00000u) << byte;
-    else
+    } else {
       EXPECT_EQ(conversion::encode_fp8<conversion::Fp8>(fp8, false), byte) << byte;
-    if ((byte & 0x7fu) > 0x7cu)
+    }
+    if ((byte & 0x7fu) > 0x7cu) {
       EXPECT_EQ(bf8, 0xffc00000u) << byte;
-    else
+    } else {
       EXPECT_EQ(conversion::encode_fp8<conversion::Bf8>(bf8, false), byte) << byte;
+    }
   }
   EXPECT_EQ(conversion::decode_fp8<conversion::Fp8>(0x7eu), 0x43e00000u); // 448
   EXPECT_EQ(conversion::decode_fp8<conversion::Fp8>(0x01u), 0x3b000000u); // 2^-9
@@ -207,7 +181,8 @@ int host_round_mode(Rounding direction) {
   }
 }
 
-/// Run host IEEE conversions in one rounding mode, restoring nearest-even afterwards.
+/// Run a host IEEE reference conversion in one rounding mode, restoring nearest-even
+/// afterwards, so the conversions under test run in the default host environment.
 class HostRounding {
 public:
   explicit HostRounding(Rounding direction) { std::fesetround(host_round_mode(direction)); }
@@ -216,9 +191,19 @@ public:
   HostRounding &operator=(const HostRounding &) = delete;
 };
 
-uint32_t host_f64_to_f32(uint64_t bits) {
+// Volatile results keep each conversion inside its rounding scope.
+uint32_t host_f64_to_f32(uint64_t bits, Rounding direction) {
+  HostRounding host(direction);
   volatile double value = std::bit_cast<double>(bits);
-  return std::bit_cast<uint32_t>(static_cast<float>(value));
+  volatile float result = static_cast<float>(value);
+  return std::bit_cast<uint32_t>(float(result));
+}
+
+template <typename Integer> uint32_t host_integer_to_f32(Integer integer, Rounding direction) {
+  HostRounding host(direction);
+  volatile Integer value = integer;
+  volatile float result = static_cast<float>(value);
+  return std::bit_cast<uint32_t>(float(result));
 }
 
 // Without flushing or saturation the rules are those of IEEE 754 conversion.
@@ -226,13 +211,13 @@ TEST(FloatRoundingTest, NarrowF64ToF32MatchesIeeeInEveryMode) {
   std::mt19937_64 random(1);
   for (const Rounding direction : kDirections) {
     const FloatRounding policy{direction, false, false};
-    HostRounding host(direction);
     for (int i = 0; i < 200000; ++i) {
       uint64_t bits = random();
       // Most samples land near the F32 range, including its subnormals.
-      if (i % 4 != 0)
+      if (i % 4 != 0) {
         bits = (bits & 0x800fffffffffffffull) | (uint64_t{random() % 320 + 1023 - 170} << 52);
-      ASSERT_EQ(f64_to_f32(bits, policy), uint64_t{host_f64_to_f32(bits)})
+      }
+      ASSERT_EQ(f64_to_f32(bits, policy), uint64_t{host_f64_to_f32(bits, direction)})
           << std::hex << bits << " direction " << static_cast<int>(direction);
     }
   }
@@ -288,17 +273,14 @@ TEST(FloatRoundingTest, IntegerToF32MatchesIeeeInEveryMode) {
   std::mt19937_64 random(2);
   for (const Rounding direction : kDirections) {
     const FloatRounding policy{direction, false, false};
-    HostRounding host(direction);
     for (int i = 0; i < 200000; ++i) {
       const auto value = static_cast<uint32_t>(random() >> (random() % 40));
-      volatile uint32_t unsigned_value = value;
-      volatile int32_t signed_value = static_cast<int32_t>(value);
+      const auto signed_value = static_cast<int32_t>(value);
       const uint32_t magnitude = signed_value < 0 ? 0u - value : value;
       ASSERT_EQ(integer_to_f32(magnitude, signed_value < 0, policy),
-                std::bit_cast<uint32_t>(static_cast<float>(signed_value)))
-          << static_cast<int32_t>(value);
-      ASSERT_EQ(integer_to_f32(value, false, policy),
-                std::bit_cast<uint32_t>(static_cast<float>(unsigned_value)))
+                host_integer_to_f32(signed_value, direction))
+          << signed_value;
+      ASSERT_EQ(integer_to_f32(value, false, policy), host_integer_to_f32(value, direction))
           << value;
     }
   }
@@ -308,8 +290,9 @@ TEST(FloatRoundingTest, WidenF32ToF64IsExact) {
   std::mt19937_64 random(3);
   for (int i = 0; i < 200000; ++i) {
     auto bits = static_cast<uint32_t>(random());
-    if (i % 2 == 0)
+    if (i % 2 == 0) {
       bits &= 0x807fffffu; // zero or subnormal
+    }
     volatile float value = std::bit_cast<float>(bits);
     ASSERT_EQ(f32_to_f64(uint64_t{bits}), std::bit_cast<uint64_t>(static_cast<double>(value)))
         << std::hex << bits;
@@ -350,33 +333,6 @@ TEST(FloatRoundingTest, OverflowFollowsModeUnlessSaturated) {
   EXPECT_EQ(integer_to_f16(65535u, true, saturate), 0xfbffu);
   // Saturation applies to finite values only.
   EXPECT_EQ(f32_to_f16(0xff800000u, saturate), 0xfc00u);
-}
-
-// A prescale multiplies the exact value before its single rounding.
-TEST(FloatRoundingTest, PrescaleAppliesBeforeRounding) {
-  FloatRounding halve;
-  halve.prescale = -1;
-  // 131008 overflows F16, but 65504 is its largest finite value.
-  EXPECT_EQ(f32_to_f16(0x47ffe000u, FloatRounding{}), 0x7c00u);
-  EXPECT_EQ(f32_to_f16(0x47ffe000u, halve), 0x7bffu);
-  // Halving the smallest normal gives a subnormal, not a flushed or rounded value.
-  EXPECT_EQ(f32_to_f16(0x38800000u, halve), 0x0200u);
-  FloatRounding quadruple;
-  quadruple.prescale = 2;
-  EXPECT_EQ(integer_to_f16(2u, false, quadruple), 0x4800u);
-  EXPECT_EQ(integer_to_f16(32767u, true, quadruple), 0xfc00u);
-}
-
-// Pins the SDWA ordering that simd_glue.h's sdwa_conversion_to_f16 documents as
-// a known hardware mismatch: scaling the exact value first rounds 65535 div:2 to
-// 32768, while gfx1030 rounds to infinity first and halves that. Measured on
-// gfx1030 (RX 6800 XT) for SDWA v_cvt_f16_{u16,i16,f32} at mul:2/mul:4/div:2,
-// which match VOP3 on every lane; left for the SDWA F16 migration follow-up.
-TEST(FloatRoundingTest, PrescaleBeforeRoundingDisagreesWithGfx1030Sdwa) {
-  FloatRounding halve;
-  halve.prescale = -1;
-  EXPECT_EQ(integer_to_f16(65535u, false, FloatRounding{}), 0x7c00u);
-  EXPECT_EQ(integer_to_f16(65535u, false, halve), 0x7800u);
 }
 
 TEST(FloatRoundingTest, NarrowQuietsNanAndKeepsLeadingPayload) {

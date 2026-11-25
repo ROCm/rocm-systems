@@ -89,18 +89,18 @@ Clocked mode always uses a width of one.
 ### `async_helper_threads`
 
 Shared MMA helpers across the VM's CUs. Omission or -1 selects from the target
-table; zero disables helpers. Explicit values range from 0 to 128. The gfx950
-and gfx1250 single-GPU tables enable helpers within the shared thread budget;
-other shipped targets and multi-GPU defaults keep H=0. See
+table. Zero disables helpers. Explicit values range from 0 to 128. All current
+matrix handlers execute synchronously and all shipped presets use zero helpers. See
 [asynchronous MMA execution](../../async-instructions.md).
 
 ### Execution budget and preferred allocations
 
 `cpu_thread_budget` is a ceiling for engines, retained dispatch workers and shared MMA helpers:
 E + sum(D - 1) + H. Its default is process affinity and the target allocation
-table. Desktop/older CDNA presets stop at 24 engine/dispatch threads; gfx950
-adds eight helpers, while gfx1250 uses up to 40 engine/dispatch threads and
-eight helpers. A positive budget overrides affinity. The selector picks the largest fitting
+table. The single-GPU gfx942 and gfx950 presets use up to 48 execution threads,
+and gfx1250 uses up to 64. See the
+[preferred allocations](../../configuration.md#thread-accounting-and-preferred-allocations)
+for per-target granules. A positive budget overrides affinity. The selector picks the largest fitting
 entry in `thread_allocations`; it leaves unused budget between granules.
 Explicit E/D/H knobs take priority and may exceed the automatic budget. A config
 without a table uses serial defaults for unspecified knobs.

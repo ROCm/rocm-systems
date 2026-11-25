@@ -36,8 +36,9 @@ DecodeResult decodeDsParamLoadVdsdir(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vdsdir::validate_encoding(
       "ds_param_load", reinterpret_cast<const Vdsdir::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsParamLoadVdsdir>(opcode);
 }
 } // namespace detail
@@ -67,8 +68,9 @@ DecodeResult decodeDsDirectLoadVdsdir(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Vdsdir::validate_encoding(
       "ds_direct_load", reinterpret_cast<const Vdsdir::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<DsDirectLoadVdsdir>(opcode);
 }
 } // namespace detail

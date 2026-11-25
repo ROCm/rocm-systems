@@ -40,47 +40,56 @@ std::vector<util::LibraryHandle> &open_handles() {
 }
 
 bool map_has_key(const flexbuffers::Reference &root, std::string_view key) {
-  if (!root.IsMap())
+  if (!root.IsMap()) {
     return false;
+  }
   auto keys = root.AsMap().Keys();
-  for (size_t i = 0; i < keys.size(); ++i)
-    if (std::string_view(keys[i].AsKey()) == key)
+  for (size_t i = 0; i < keys.size(); ++i) {
+    if (std::string_view(keys[i].AsKey()) == key) {
       return true;
+    }
+  }
   return false;
 }
 
 util::FailureOr<bool> parse_require_all_plugins(const flexbuffers::Reference &root,
                                                 util::DiagnosticEmitter emit_error) {
-  if (!map_has_key(root, "require_all_plugins"))
+  if (!map_has_key(root, "require_all_plugins")) {
     return false;
+  }
 
   auto value = root.AsMap()["require_all_plugins"];
-  if (!value.IsBool())
+  if (!value.IsBool()) {
     return emit_error.emit() << "top-level 'require_all_plugins' must be a boolean";
+  }
   return value.AsBool();
 }
 
 util::FailureOr<size_t> configured_plugin_count(const flexbuffers::Reference &root,
                                                 bool require_all_plugins,
                                                 util::DiagnosticEmitter emit_error) {
-  if (!root.IsMap())
+  if (!root.IsMap()) {
     return 0;
-  if (!map_has_key(root, "plugins"))
+  }
+  if (!map_has_key(root, "plugins")) {
     return 0;
+  }
 
   auto plugins = root.AsMap()["plugins"];
   if (!plugins.IsMap()) {
-    if (require_all_plugins)
+    if (require_all_plugins) {
       return emit_error.emit()
              << "top-level 'plugins' must be an object when 'require_all_plugins' is true";
+    }
     return 0;
   }
   return plugins.AsMap().size();
 }
 
 std::string resolve_plugin_path(const std::string &soname, const std::string &plugin_dir) {
-  if (!plugin_dir.empty())
+  if (!plugin_dir.empty()) {
     return plugin_dir + "/" + soname;
+  }
 
 #if defined(__linux__)
   Dl_info info{};
@@ -99,8 +108,9 @@ std::string resolve_plugin_path(const std::string &soname, const std::string &pl
       };
       std::error_code error;
       for (const auto &candidate : candidates) {
-        if (std::filesystem::is_regular_file(candidate, error) && !error)
+        if (std::filesystem::is_regular_file(candidate, error) && !error) {
           return candidate.lexically_normal().string();
+        }
         error.clear();
       }
     }
@@ -144,9 +154,10 @@ bool load_one(const std::string &name, const flexbuffers::Reference &user_cfg,
     util::close_library(handle);
     return false;
   }
-  if (meta->name && name != meta->name)
+  if (meta->name && name != meta->name) {
     util::Logger::warn("plugin '", name, "': metadata name '", meta->name,
                        "' differs from library name");
+  }
 
   std::string resolved;
   if (!resolve_config(name, meta->config_schema, user_cfg, resolved)) {
@@ -222,12 +233,14 @@ PluginSinkConfig parse_sink_config(const flexbuffers::Reference &root) {
       if (!dir.empty()) {
         config.set_file_directory(dir);
         configured = true;
-      } else
+      } else {
         util::Logger::warn("sink type 'file' requested but no 'dir' set");
+      }
     }
   }
-  if (!configured)
+  if (!configured) {
     config.emplace<StderrSink>();
+  }
   return config;
 }
 
@@ -236,16 +249,19 @@ PluginSinkConfig parse_sink_config(const flexbuffers::Reference &root) {
 int PluginLoader::load_from_config(const std::string &config_json, ExecutionPluginGroup &group,
                                    const std::string &plugin_dir) {
   flexbuffers::Builder root_fbb;
-  if (!flexbuffer_from_json(config_json, root_fbb))
+  if (!flexbuffer_from_json(config_json, root_fbb)) {
     return 0;
+  }
 
   auto root = flexbuffers::GetRoot(root_fbb.GetBuffer());
-  if (!root.IsMap())
+  if (!root.IsMap()) {
     return 0;
+  }
 
   auto plugins = root.AsMap()["plugins"];
-  if (!plugins.IsMap())
+  if (!plugins.IsMap()) {
     return 0;
+  }
 
   auto pmap = plugins.AsMap();
   auto keys = pmap.Keys();
@@ -253,8 +269,9 @@ int PluginLoader::load_from_config(const std::string &config_json, ExecutionPlug
   int added = 0;
   for (size_t i = 0; i < keys.size(); ++i) {
     std::string name = keys[i].AsKey();
-    if (load_one(name, vals[i], group, plugin_dir))
+    if (load_one(name, vals[i], group, plugin_dir)) {
       ++added;
+    }
   }
   return added;
 }
@@ -273,14 +290,16 @@ PluginLoader::configure_plugin_group(const std::string &config_json, const std::
     while ((offset = config_json.find_first_not_of(" \t\r\n", offset)) != std::string::npos) {
       if (config_json.compare(offset, 2, "//") == 0) {
         offset = config_json.find_first_of("\r\n", offset + 2);
-        if (offset == std::string::npos)
+        if (offset == std::string::npos) {
           break;
+        }
       } else if (config_json.compare(offset, 2, "/*") == 0) {
         const size_t end = config_json.find("*/", offset + 2);
-        if (end == std::string::npos)
+        if (end == std::string::npos) {
           return emit_error.emit() << "invalid plugin configuration JSON: unterminated comment at "
                                       "offset "
                                    << offset;
+        }
         offset = end + 2;
       } else {
         return emit_error.emit()
@@ -289,24 +308,29 @@ PluginLoader::configure_plugin_group(const std::string &config_json, const std::
     }
   }
   // Empty input intentionally configures an empty group.
-  if (!parsed && !config_json.empty())
+  if (!parsed && !config_json.empty()) {
     return emit_error.emit() << "invalid plugin configuration JSON: " << parser.error_;
+  }
   auto root = parsed ? flexbuffers::GetRoot(root_fbb.GetBuffer()) : flexbuffers::Reference();
 
-  if (parsed && !root.IsMap())
+  if (parsed && !root.IsMap()) {
     return emit_error.emit() << "plugin configuration must be an object";
+  }
 
-  if (map_has_key(root, "profiled"))
+  if (map_has_key(root, "profiled")) {
     util::Logger::warn("hook profiling was removed; ignoring top-level 'profiled' config");
+  }
 
   const util::FailureOr<bool> require_all = parse_require_all_plugins(root, emit_error);
-  if (require_all.failed())
+  if (require_all.failed()) {
     return util::Result::failure();
+  }
   const bool require_all_plugins = require_all.value();
   const util::FailureOr<size_t> requested =
       configured_plugin_count(root, require_all_plugins, emit_error);
-  if (requested.failed())
+  if (requested.failed()) {
     return util::Result::failure();
+  }
   const size_t requested_plugins = requested.value();
   auto group = std::make_shared<ExecutionPluginGroup>(parse_sink_config(root));
   group->defer_file_sinks();

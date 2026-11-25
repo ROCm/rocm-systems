@@ -374,11 +374,11 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_UnregisteredGinWindow_EverythingCleared) {
     return t;
   });
   ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
-  uint32_t blocked =
+  ncclSymkKernelMask blocked =
       ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true,
                    /*ginWindowsUnregistered=*/true);
   EXPECT_EQ(blocked, 0u);
-  uint32_t kept =
+  ncclSymkKernelMask kept =
       ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true,
                    /*ginWindowsUnregistered=*/false);
   EXPECT_TRUE(KernelBitSet(kept, ncclSymkKernelId_AllGather_RailRing_LsaST));

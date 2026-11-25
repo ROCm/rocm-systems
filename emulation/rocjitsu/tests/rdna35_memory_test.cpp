@@ -57,8 +57,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wf_)
+    if (wf_) {
       wf_->halt();
+    }
   }
 
   void issue(uint32_t word0, uint32_t word1, VmAccessOutcome expected = VmAccessOutcome::Complete) {
@@ -168,8 +169,9 @@ TEST_P(ReturningDsAtomicRouteTest, DirectRouteQualifiesReturningAtomicBeforeWrit
   const auto address = wf_->lds_base() + 8;
   const bool cdna4 = GetParam() == rocjitsu::IsaFamily::Cdna4;
   const uint32_t ordinary_vgprs = cdna4 ? 16 : 32;
-  if (cdna4)
+  if (cdna4) {
     wf_->set_accum_offset(ordinary_vgprs);
+  }
   for (uint32_t dst : {ordinary_vgprs - 1, ordinary_vgprs}) {
     SCOPED_TRACE(dst);
     wf_->lds().write32(address, 41);
@@ -332,8 +334,9 @@ private:
   mutable std::shared_ptr<const PrtRanges> ranges_;
   IdentityAddressSpaceTranslator identity;
   VmTranslationResult translate(uint64_t address, size_t size, VmAccessKind kind) const override {
-    if (address >= 0x50000)
+    if (address >= 0x50000) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     auto result = identity.translate(address, size, kind);
     result.translation.contiguous_bytes =
         std::min<uint64_t>(result.translation.contiguous_bytes, 0x50000 - address);
@@ -380,8 +383,9 @@ TEST_P(Gfx11MemoryTest, DebuggerProbesOnlyResidentBufferTfeElements) {
         translator->publish_hole(sparse, sparse && tfe && resident == 1);
         const uint32_t address = limit - 4 * resident;
         write_scalar(0, address);
-        for (unsigned reg = 0; reg < 3; ++reg)
+        for (unsigned reg = 0; reg < 3; ++reg) {
           write_vector(reg, sentinel);
+        }
         wf_->pc = tfe ? kernel : kernel + 8;
         watches.clear();
         faults = 0;
@@ -679,11 +683,13 @@ TEST_F(Rdna35MemoryTest, OrderedCountScoreboardTracksOnlyTheReturnedLane) {
     wf_->set_exec(exec);
     const unsigned result_lane = exec ? 1 : 0;
     EXPECT_EQ(MemoryWaitScoreboard::result_lanes(*decoded.value(), *wf_), 1ull << result_lane);
-    for (unsigned lane = 0; lane < 4; ++lane)
+    for (unsigned lane = 0; lane < 4; ++lane) {
       write_vector(8, 0xdeadbeef, lane);
+    }
     issue(words[0], words[1]);
-    for (unsigned lane = 0; lane < 4; ++lane)
+    for (unsigned lane = 0; lane < 4; ++lane) {
       EXPECT_EQ(read_vector(8, lane), lane == result_lane ? 0u : 0xdeadbeefu);
+    }
   }
 }
 
@@ -723,8 +729,9 @@ TEST_F(Rdna35MemoryTest, DebuggerTreatsAtcProbesAsNonfaultingHints) {
     IdentityAddressSpaceTranslator identity;
     VmTranslationResult translate(uint64_t address, size_t size,
                                   VmAccessKind access) const override {
-      if (address >= 0x50000 || (address >= 0x40000 && access == VmAccessKind::Write))
+      if (address >= 0x50000 || (address >= 0x40000 && access == VmAccessKind::Write)) {
         return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+      }
       return identity.translate(address, size, access);
     }
   };

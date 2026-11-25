@@ -20,6 +20,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -78,13 +79,13 @@ struct ScalarGuard {
 TEST(OlderConversion64, Arithmetic) {
   ScalarGuard guard;
   struct Family {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     const IsaExecutionBackend *backend;
     std::array<std::array<uint16_t, 2>, 6> opcodes;
   };
   // Order: I32/U32/F32 to F64, then F64 to F32/I32/U32.
   const Family families[] = {
-      {ROCJITSU_CODE_ARCH_CDNA1,
+      {rocjitsu::IsaFamily::Cdna1,
        &cdna1::execution_backend(),
        {{
            {cdna1::kVCvtF64I32Vop1, cdna1::kVCvtF64I32Vop3},
@@ -94,7 +95,7 @@ TEST(OlderConversion64, Arithmetic) {
            {cdna1::kVCvtI32F64Vop1, cdna1::kVCvtI32F64Vop3},
            {cdna1::kVCvtU32F64Vop1, cdna1::kVCvtU32F64Vop3},
        }}},
-      {ROCJITSU_CODE_ARCH_CDNA2,
+      {rocjitsu::IsaFamily::Cdna2,
        &cdna2::execution_backend(),
        {{
            {cdna2::kVCvtF64I32Vop1, cdna2::kVCvtF64I32Vop3},
@@ -104,7 +105,7 @@ TEST(OlderConversion64, Arithmetic) {
            {cdna2::kVCvtI32F64Vop1, cdna2::kVCvtI32F64Vop3},
            {cdna2::kVCvtU32F64Vop1, cdna2::kVCvtU32F64Vop3},
        }}},
-      {ROCJITSU_CODE_ARCH_RDNA1,
+      {rocjitsu::IsaFamily::Rdna1,
        &rdna1::execution_backend(),
        {{
            {rdna1::kVCvtF64I32Vop1, rdna1::kVCvtF64I32Vop3},
@@ -114,7 +115,7 @@ TEST(OlderConversion64, Arithmetic) {
            {rdna1::kVCvtI32F64Vop1, rdna1::kVCvtI32F64Vop3},
            {rdna1::kVCvtU32F64Vop1, rdna1::kVCvtU32F64Vop3},
        }}},
-      {ROCJITSU_CODE_ARCH_RDNA2,
+      {rocjitsu::IsaFamily::Rdna2,
        &rdna2::execution_backend(),
        {{
            {rdna2::kVCvtF64I32Vop1, rdna2::kVCvtF64I32Vop3},
@@ -124,7 +125,7 @@ TEST(OlderConversion64, Arithmetic) {
            {rdna2::kVCvtI32F64Vop1, rdna2::kVCvtI32F64Vop3},
            {rdna2::kVCvtU32F64Vop1, rdna2::kVCvtU32F64Vop3},
        }}},
-      {ROCJITSU_CODE_ARCH_RDNA3_5,
+      {rocjitsu::IsaFamily::Rdna3_5,
        &rdna3_5::execution_backend(),
        {{
            {rdna3_5::kVCvtF64I32Vop1, rdna3_5::kVCvtF64I32Vop3},
@@ -177,7 +178,7 @@ TEST(OlderConversion64, Arithmetic) {
   for (const auto &family : families) {
     ScopedIsaExecutionBackend backend(family.backend);
     const bool cdna =
-        family.arch == ROCJITSU_CODE_ARCH_CDNA1 || family.arch == ROCJITSU_CODE_ARCH_CDNA2;
+        family.arch == rocjitsu::IsaFamily::Cdna1 || family.arch == rocjitsu::IsaFamily::Cdna2;
     for (int lanes : {32, 64}) {
       if (cdna && lanes != 64) {
         continue;

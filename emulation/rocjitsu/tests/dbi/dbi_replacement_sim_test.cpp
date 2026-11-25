@@ -81,8 +81,9 @@ std::optional<uint32_t> double_v0(rocjitsu::IsaFamily arch) {
 
 std::vector<uint8_t> instruction_bytes(std::span<const uint32_t> words) {
   std::vector<uint8_t> bytes(words.size_bytes());
-  if (!bytes.empty())
+  if (!bytes.empty()) {
     std::memcpy(bytes.data(), words.data(), bytes.size());
+  }
   return bytes;
 }
 
@@ -177,8 +178,9 @@ protected:
       ASSERT_TRUE(set_exec.succeeded());
       words.push_back(set_exec.value());
     }
-    if (definition != ObservationDefinition::Absent)
+    if (definition != ObservationDefinition::Absent) {
       words.push_back(test::make_mov_vgpr_inline(1, kReplacementInput));
+    }
     program.observer_offset = words.size() * sizeof(uint32_t);
     words.push_back(nop.value());
     words.push_back(end.value());
@@ -231,8 +233,9 @@ protected:
     test::DbiSim simulator;
     ASSERT_NO_FATAL_FAILURE(simulator.initialize(target.sim_arch, target.wave_size));
     simulator.set_entry_offset(entry_offset);
-    if (target.wave_size == 32)
+    if (target.wave_size == 32) {
       simulator.set_wave32_dispatch();
+    }
     const uint32_t output_count = output_dwords == 0 ? target.wave_size : output_dwords;
     const std::vector<uint32_t> unwritten(output_count, kUnwritten);
     simulator.write_memory(kOutputAddress, {reinterpret_cast<const uint8_t *>(unwritten.data()),
@@ -258,8 +261,9 @@ protected:
       ASSERT_TRUE(load.succeeded());
       const std::span<uint32_t>::iterator restore =
           std::ranges::search(words, load.value()).begin();
-      if (restore == words.end())
+      if (restore == words.end()) {
         continue;
+      }
       if (verify_store) {
         const util::FailureOr<std::vector<uint32_t>> store =
             build_scratch_store_dword(1, offset, GetParam().arch);
@@ -411,8 +415,9 @@ TEST_P(DbiReplacementSim, LaterProbeArgumentsSurviveDeletingTheirOnlyGuestRead) 
     std::vector<uint32_t> words = setup_;
     const uint64_t early_offset = words.size() * sizeof(uint32_t);
     words.push_back(nop.value());
-    if (redefined)
+    if (redefined) {
       words.push_back(test::make_mov_vgpr_inline(1, kOriginalInput));
+    }
     const uint64_t observer_offset = words.size() * sizeof(uint32_t);
     words.push_back(copy_v3_v1_);
     // Keep the address argument live in the guest to isolate the value argument.
@@ -629,8 +634,9 @@ TEST_P(DbiVskipReplacementSim, SuppressedGuestDefinitionsPreserveTheEarlierProbe
     ASSERT_TRUE(logger.is_valid());
     ASSERT_TRUE(clobber.is_valid());
     std::vector<uint32_t> words = setup_;
-    if (test_case.scalar_destination)
+    if (test_case.scalar_destination) {
       words.push_back(set_s4.value());
+    }
     const uint64_t early_offset = words.size() * sizeof(uint32_t);
     words.push_back(nop.value());
     words.push_back(set_exec.value());
@@ -658,8 +664,9 @@ TEST_P(DbiVskipReplacementSim, SuppressedGuestDefinitionsPreserveTheEarlierProbe
     words.push_back(test_case.scalar_destination ? 0x7e080502u // v_readfirstlane_b32 s4, v2
                                                  : test::make_mov_vgpr_inline(1, kOriginalInput));
     words.push_back(0xbf108080u); // Both callbacks execute with VSKIP clear.
-    if (test_case.scalar_destination)
+    if (test_case.scalar_destination) {
       words.push_back(copy_s4.value());
+    }
     const uint64_t observer_offset = words.size() * sizeof(uint32_t);
     words.push_back(nop.value());
     words.push_back(end.value());
@@ -669,8 +676,9 @@ TEST_P(DbiVskipReplacementSim, SuppressedGuestDefinitionsPreserveTheEarlierProbe
     const AmdGpuCodeObject source(image.data(), image.size());
     ASSERT_TRUE(source.is_valid());
     Instrumentor instrumentor(source, arch);
-    if (test_case.earlier_probe)
+    if (test_case.earlier_probe) {
       instrumentor.add_point(probe_at(early_offset, clobber));
+    }
     InstrumentationPoint observer = replacement(observer_offset, nop.value(), {});
     observer.probe_obj = &logger;
     observer.probe_symbol = "replacement_probe";
@@ -783,8 +791,9 @@ TEST_P(DbiVskipReplacementSim, LocalClearDoesNotProveCallableStateAcrossAnOpaque
   for (bool enable_vskip : {false, true}) {
     SCOPED_TRACE(enable_vskip);
     std::vector<uint32_t> words = setup_;
-    if (enable_vskip)
+    if (enable_vskip) {
       words.push_back(0xbf108081u);
+    }
     words.insert(words.end(), {transfer.value(), 0xbf108080u});
     // The unresolved transfer can enter at this callback, bypassing the local
     // clear. Its decoded block alone therefore cannot prove the incoming state.
