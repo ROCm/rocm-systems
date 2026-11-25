@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS, USER_REGION_BACKEND
 
 _MAX_ARGS_LEN = 512
+_MAX_TENSOR_ARGUMENT_ITEMS = 32
 _STACKED_MARKER_WIRE = re.compile(r":#\d+@")
 
 
@@ -82,6 +83,29 @@ def render_dtype_shape(obj: object) -> Optional[str]:
         return f"{dt}[{dims}]"
     except Exception:
         return None
+
+
+def format_wrap_args(args: Tuple[object, ...], kwargs: Dict[str, object]) -> str:
+    """Render tensor args and kwargs as a marker args blob.
+
+    Skip objects without readable shape and dtype. Return n/a when none remain.
+    """
+    items: List[str] = []
+    for value in args:
+        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
+            break
+        rendered = render_dtype_shape(value)
+        if rendered is None:
+            continue
+        items.append(rendered)
+    for name, value in kwargs.items():
+        if len(items) >= _MAX_TENSOR_ARGUMENT_ITEMS:
+            break
+        rendered = render_dtype_shape(value)
+        if rendered is None:
+            continue
+        items.append(f"{name}={rendered}")
+    return format_args_blob(items)
 
 
 def decode_marker_name(name: str) -> str:
