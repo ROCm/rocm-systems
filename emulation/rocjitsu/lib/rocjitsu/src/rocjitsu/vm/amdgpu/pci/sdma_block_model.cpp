@@ -104,13 +104,16 @@ bool SdmaBlockModel::reset() {
 
 void SdmaBlockModel::teardown_queues() {
   if (soc_ != nullptr) {
-    for (std::optional<Queue> &queue : register_queues_)
-      if (queue && queue->queue_handle)
+    for (std::optional<Queue> &queue : register_queues_) {
+      if (queue && queue->queue_handle) {
         (void)soc_->queue_registry().unregister_queue(queue->queue_handle,
                                                       amdgpu::QueueCloseMode::ForceCancel);
+      }
+    }
   }
-  for (std::optional<Queue> &queue : register_queues_)
+  for (std::optional<Queue> &queue : register_queues_) {
     queue.reset();
+  }
 }
 
 SdmaBlockModel::Queue SdmaBlockModel::configured_queue(uint32_t engine) const {
@@ -141,8 +144,9 @@ SdmaBlockModel::Queue SdmaBlockModel::configured_queue(uint32_t engine) const {
 
 amdgpu::QueueSubmissionStatus SdmaBlockModel::process_queue(Queue &queue, uint64_t write_pointer) {
   if (!queue.active || queue.faulted || queue.ring_base == 0 || queue.ring_bytes == 0 ||
-      !queue.address_space || soc_ == nullptr || queue_binding_factory_ == nullptr)
+      !queue.address_space || soc_ == nullptr || queue_binding_factory_ == nullptr) {
     return amdgpu::QueueSubmissionStatus::Faulted;
+  }
 
   if (!queue.queue_handle) {
     queue.queue_handle = soc_->queue_registry().register_queue({
@@ -159,8 +163,9 @@ amdgpu::QueueSubmissionStatus SdmaBlockModel::process_queue(Queue &queue, uint64
         .type = amdgpu::QueueType::Sdma,
         .packet_format = amdgpu::QueuePacketFormat::Sdma,
     });
-    if (!queue.queue_handle)
+    if (!queue.queue_handle) {
       return amdgpu::QueueSubmissionStatus::Faulted;
+    }
   }
 
   const amdgpu::QueueSubmissionResult result =
@@ -175,11 +180,13 @@ amdgpu::QueueSubmissionStatus SdmaBlockModel::process_queue(Queue &queue, uint64
 
 void SdmaBlockModel::update_queue_progress(uint32_t engine, uint64_t consumer_cursor,
                                            bool terminal) {
-  if (engine >= register_queues_.size() || !register_queues_[engine])
+  if (engine >= register_queues_.size() || !register_queues_[engine]) {
     return;
+  }
   Queue &queue = *register_queues_[engine];
-  if (!queue.queue_handle)
+  if (!queue.queue_handle) {
     return;
+  }
   queue.read_pointer = std::max(queue.read_pointer, consumer_cursor);
   const uint32_t offset = queue.register_offset;
   (void)registers_.write(kSdmaSegment, kQueueReadPointerLow + offset,
@@ -198,12 +205,14 @@ DoorbellDisposition SdmaBlockModel::observe_doorbell_write(uint64_t byte_offset,
                                                            std::size_t width,
                                                            PciMemoryAccess &memory) {
   (void)memory;
-  if (width != sizeof(uint32_t) && width != sizeof(uint64_t))
+  if (width != sizeof(uint32_t) && width != sizeof(uint64_t)) {
     return DoorbellDisposition::Ignored;
+  }
   for (uint32_t engine = 0; engine < register_queues_.size(); ++engine) {
     Queue configured = configured_queue(engine);
-    if (configured.doorbell_offset != byte_offset)
+    if (configured.doorbell_offset != byte_offset) {
       continue;
+    }
 
     std::optional<Queue> &runtime = register_queues_[engine];
     bool replace = !runtime;

@@ -32,14 +32,16 @@ public:
 
   uint32_t byte_size() const {
     uint32_t bits = 0;
-    for (uint32_t width : widths)
+    for (uint32_t width : widths) {
       bits += width;
+    }
     return bits / 8;
   }
   uint32_t component_count() const {
     uint32_t count = 0;
-    for (uint32_t width : widths)
+    for (uint32_t width : widths) {
       count += width != 0;
+    }
     return count;
   }
 };

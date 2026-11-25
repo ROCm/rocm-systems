@@ -143,6 +143,13 @@ BLACKLIST_GFX12=\
 "KFDMemoryTest.BigSysBufferStressTest:"\
 "KFDGWSTest.*"
 
+BLACKLIST_GFX13=\
+"KFDQMTest.CreateAqlCpQueue:"\
+"KFDPerfCountersTest.*:"\
+"KFDMemoryTest.FlatScratchAccess:"\
+"KFDMemoryTest.BigSysBufferStressTest:"\
+"KFDGWSTest.*"
+
 # KFDQMTest.CpuWriteCoherence fails. 0 dwordsAvailable (KFD-338)
 # KFDMemoryTest.MemoryRegister fails on SDMA queue creation (KFD-337)
 FILTER[kaveri]=\
@@ -397,6 +404,10 @@ FILTER[gfx1251]=\
 "KFDExceptionTest.AddressFault:"\
 "KFDQMTest.GpuMemCopyTest:"\
 "KFDDBGTest.HitTrapOnWaveStartEndEvent"
+
+FILTER[gfx1310]=\
+"$BLACKLIST_ALL_ASICS:"\
+"$BLACKLIST_GFX13"
 
 FILTER[RHEL9]=\
 "$BLACKLIST_ALL_ASICS:"\

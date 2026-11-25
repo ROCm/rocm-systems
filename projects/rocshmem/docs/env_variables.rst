@@ -105,11 +105,11 @@ control the behavior of rocSHMEM.
 
     * - ``ROCSHMEM_DISABLE_MIXED_IPC``
 
-        Defines whether to force using the network conduit even when IPC is
+        Defines whether to force using the network backend even when IPC is
         available.
       - ``0``
       - * ``0``: Use IPC when available.
-        * ``1``: Force network conduit.
+        * ``1``: Force network backend.
 
     * - ``ROCSHMEM_DISABLE_IPC``
 
@@ -117,7 +117,7 @@ control the behavior of rocSHMEM.
         in new configurations.
       - ``0``
       - * ``0``: Use IPC when available.
-        * ``1``: Force network conduit.
+        * ``1``: Force network backend.
 
     * - ``ROCSHMEM_HOST_TRANSPORT``
 
@@ -332,7 +332,7 @@ control the behavior of rocSHMEM.
         reverse-offload (RO) backend.
       - ``0``
       - * ``0``: Use IPC when available.
-        * ``1``: Force network conduit.
+        * ``1``: Force network backend.
 
     * - ``ROCSHMEM_RO_PROGRESS_DELAY``
 

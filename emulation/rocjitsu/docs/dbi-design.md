@@ -250,6 +250,36 @@ emitted bytes afresh; pristine facts cannot be attached to a different source.
 
 ### Key design constraint
 
+Explicit `InstrumentationOptions::entries` requests plan each selected descriptor's
+reachable code, register preservation, bootstrap and resource changes separately,
+then commit one combined original-text edit transaction. Every selected or native
+entry must have a closed, disjoint scope. Explicit-entry requests support
+observations; combining them with `ReplaceWithInst` is rejected because a
+replacement could invalidate ownership proved from the original CFG. Replacement
+requests without explicit entries retain their existing support.
+Kernarg-preloaded siblings are rejected:
+their additional firmware entry is outside this bounded ownership model. Validation
+records retain caller insertion order, including a `KernelEntry` callback and an
+ordinary point sharing the same source offset.
+
+Explicit-entry requests require `.text` to be the sole allocated executable
+section, including unmaterialized executable ranges. Otherwise native code
+outside the decoded CFG could enter a selected scope without its dispatch
+bootstrap or resource allocation.
+
+Descriptor ownership also requires a complete symbol inventory: weak `.kd`
+definitions and distinct names aliasing one descriptor are rejected before
+planning. Identical name/location records in `.symtab` and `.dynsym` remain
+valid. Program-path terminators, including ROCr's non-returning `s_trap 2`, end
+the ownership scope. Other unknown PC-writing branch targets are rejected for
+native siblings even when only a `KernelEntry` callback is requested.
+
+For explicit requests, look up `InstrumentedCodeObject::entries` by
+`InstrumentedEntry::original_descriptor_offset` and read that entry's `resources`,
+including `kernarg_bytes` for its wrapper size. Entries are sorted by original
+descriptor offset, independently of request order. The top-level `resources`
+field is zero on this path, including a single selected entry.
+
 Callable `AfterInst` requires an ordinary relocatable anchor and a supported
 post-anchor state. Pre-anchor liveness alone cannot justify a callback after
 the instruction; addressing and storage must be valid at the observation point.
@@ -258,15 +288,29 @@ the instruction; addressing and storage must be valid at the observation point.
 |---|---|
 | Register addressing | The anchor must preserve VGPR bank selection. GPR indexing and VSKIP must be proven disabled where the ISA supports them; unproven state is rejected. |
 | Register usage | Before preservation planning, `AfterInst` requires enumerable physical VGPR accesses and liveness propagated across resolved guest calls and returns, including recognized computed jumps to kernel entries. Relative or GPR-indexed usage is rejected. |
-| Allocated storage | Required VGPRs and scratch must remain available. Unproven `s_alloc_vgpr` or VGPR/scratch-deallocation effects, including those inherited from incoming paths, are rejected. No allocation-recovery proof is implemented yet. |
+| Allocated storage | Every kernel that can reach the site must use static VGPR allocation. Admission also rejects `AfterInst` at or after an unproven `s_alloc_vgpr` or VGPR/scratch release. |
 | Register hazards | Callable `AfterInst` is conservatively rejected throughout code objects containing MFMA/SMFMAC, or CDNA5 matrix or transcendental producers, until the required register dependency spacing can be proven. |
 | Instruction order | Callable `AfterInst` rejects CDNA5 code objects containing packed permutes that require an immediate safe VALU follower. Moving either the permute or its follower can break that adjacency. |
 
 Inherited GPR indexing, VSKIP, and storage availability also constrain callable
 `BeforeInst` and `KernelExit` observations on targets that support those states.
-Descriptors describe the initial allocation, not storage after guest allocation
-changes. `KernelEntry` uses dispatch-entry state: guest backedges to the original
-entry do not execute its descriptor stub again.
+On RDNA4 and CDNA5, a dynamic wave can start with fewer VGPRs than its
+descriptor declares. Growing that count cannot guarantee registers for either
+the probe body or its save and restore instructions. Callable `BeforeInst`,
+`AfterInst`, and `KernelExit` sites must therefore be unreachable from dynamic
+dispatches. An unresolved successor in a dynamic kernel excludes those sites
+throughout the code object. `KernelEntry` checks its own dispatch descriptor
+for static allocation because guest backedges bypass the entry stub.
+
+The callable-state analysis follows resolved branches in a leaf helper when
+every path leaves the state under analysis unchanged and returns through the
+original ordinary SGPR pair. A numeric pair in the allocated special-register
+tail can alias VCC or FLAT_SCRATCH. For such a pair, only nops may precede
+the return or the recognized PC adjustment back to a kernel entry. A branch
+or dispatch that bypasses the call, a cycle, or a nested call prevents this
+leaf-helper proof. The separate closed-text MODE analysis can follow nested
+calls. For a helper that adjusts its caller's return PC, every caller must
+supply a continuation that the adjustment maps to a kernel entry.
 
 Independent of placement, copied probes on CDNA1–4 must not enable VSKIP:
 the envelope uses vector instructions for restoration, even with `force_full_exec`.

@@ -154,8 +154,9 @@ TEST(GlobalMemoryBuilders, RefusesAnOddScalarBase) {
 // the 7-bit field wraps 128 to s0 on every target.
 TEST(GlobalMemoryBuilders, RefusesAScalarBasePastTheOrdinarySgprs) {
   for (const rocjitsu::IsaFamily arch :
-       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4})
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4}) {
     EXPECT_TRUE(build_global_store_dword(1, 0, 128, 0, arch).failed()) << "arch " << arch;
+  }
   util::StringDiagnostic diagnostic;
   EXPECT_TRUE(
       build_global_store_dword(1, 0, 124, 0, rocjitsu::IsaFamily::Rdna4, diagnostic.emitter())
@@ -240,9 +241,9 @@ void make_copy_kernel(rocjitsu::IsaFamily arch, bool with_store, std::vector<uin
       build_global_store_dword(1, 0, 2, kDestinationDelta, arch);
   ASSERT_TRUE(maybe_store.succeeded());
   const std::vector<uint32_t> &store = maybe_store.value();
-  if (with_store)
+  if (with_store) {
     code.insert(code.end(), store.begin(), store.end());
-  else {
+  } else {
     util::FailureOr<uint32_t> maybe_s_nop_4 = build_s_nop(0, arch);
     ASSERT_TRUE(maybe_s_nop_4.succeeded());
     code.insert(code.end(), store.size(), maybe_s_nop_4.value());
@@ -257,19 +258,22 @@ void make_copy_kernel(rocjitsu::IsaFamily arch, bool with_store, std::vector<uin
 std::optional<uint32_t> run_copy(const SimArch &target, bool with_store) {
   DbiSim sim;
   sim.initialize(target.name, target.wave_size);
-  if (testing::Test::HasFatalFailure())
+  if (testing::Test::HasFatalFailure()) {
     return std::nullopt;
+  }
   std::array<uint8_t, sizeof(kSeed)> seed{};
   std::memcpy(seed.data(), &kSeed, sizeof(kSeed));
   sim.write_memory(kSource, seed);
   std::vector<uint32_t> code;
   make_copy_kernel(target.arch, with_store, code);
-  if (testing::Test::HasFatalFailure())
+  if (testing::Test::HasFatalFailure()) {
     return std::nullopt;
+  }
   const std::optional<std::vector<uint8_t>> bytes = sim.run_and_read_memory(
       code, /*private_bytes=*/0, kSource + kDestinationDelta, sizeof(uint32_t));
-  if (!bytes)
+  if (!bytes) {
     return std::nullopt;
+  }
   uint32_t value = 0;
   std::memcpy(&value, bytes->data(), sizeof(value));
   return value;

@@ -11,6 +11,10 @@
 
 namespace rocjitsu::arith {
 
+// Evaluate an unmodified full wave using the empirical FP32 sine model.
+void sin_exact_x86_64_v3(uint32_t *d, const uint32_t *a, unsigned denorm, bool quiet_snan);
+void sin_exact_x86_64_v4(uint32_t *d, const uint32_t *a, unsigned denorm, bool quiet_snan);
+
 // Evaluate FP32 sine/cosine. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 void trig_x86_64_v3(bool cosine, uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a);

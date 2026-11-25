@@ -118,8 +118,9 @@ std::vector<uint8_t> make_host_elf_with_fatbin(const std::vector<uint8_t> &fatbi
   ehdr.e_shstrndx = 2;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  if (!fatbin.empty())
+  if (!fatbin.empty()) {
     std::memcpy(image.data() + kFatbinOffset, fatbin.data(), fatbin.size());
+  }
   std::memcpy(image.data() + names_offset, names.data(), names.size());
 
   std::array<Elf64_Shdr, 3> shdrs{};

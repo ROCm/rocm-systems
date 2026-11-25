@@ -48,7 +48,7 @@ struct DestInfo {
 };
 
 /**
- * @brief The opened HCA/port context a conduit posts through.
+ * @brief The opened HCA/port context a backend posts through.
  */
 struct IbDevice {
   struct ibv_context *ctx{nullptr};
@@ -62,7 +62,7 @@ struct IbDevice {
 };
 
 /**
- * @brief Plain-ibv (non-DevX) RC control plane for a host-side conduit.
+ * @brief Plain-ibv (non-DevX) RC control plane for a host-side backend.
  *
  * Opens an HCA/port, chooses a RoCEv2 GID, and creates one CQ per context plus
  * one RC QP per lane (lane = ctx*num_pes + pe), then drives each QP through the

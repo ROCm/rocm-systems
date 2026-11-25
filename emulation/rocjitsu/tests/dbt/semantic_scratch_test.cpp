@@ -75,8 +75,9 @@ std::vector<BasicBlock *>
 scratch_test_scope(const std::vector<std::unique_ptr<BasicBlock>> &blocks) {
   std::vector<BasicBlock *> scope;
   scope.reserve(blocks.size());
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     scope.push_back(block.get());
+  }
   return scope;
 }
 
@@ -387,8 +388,9 @@ TEST(SemanticScratchAllocator, RejectsSpillVictimInDynamicStackKernel) {
 TEST(SemanticScratchAllocator, AllowsFreeWindowInDynamicStackKernel) {
   auto blocks = build_scratch_test_blocks();
   std::vector<BasicBlock *> scope;
-  for (const auto &block : blocks)
+  for (const auto &block : blocks) {
     scope.push_back(block.get());
+  }
   const Instruction &inst = *blocks.front()->instructions().begin();
   const ExecMaskAnalysis exec(KernelBlockScope(scope), /*wave_size=*/64);
   LivenessAnalysis liveness(scope, 64, std::make_unique<ExecMaskAnalysis>(exec));

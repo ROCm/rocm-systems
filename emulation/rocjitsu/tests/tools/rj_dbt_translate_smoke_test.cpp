@@ -315,16 +315,19 @@ bool contains(std::string_view haystack, std::string_view needle) {
 std::optional<long long> summary_counter(std::string_view text, std::string_view name) {
   const std::string key = " " + std::string(name) + "=";
   const size_t at = text.find(key);
-  if (at == std::string_view::npos)
+  if (at == std::string_view::npos) {
     return std::nullopt;
+  }
   const size_t first = at + key.size();
   const size_t last = text.find_first_not_of("0123456789", first);
-  if (last == first)
+  if (last == first) {
     return std::nullopt;
+  }
   long long value = 0;
   const auto digits = text.substr(first, last - first);
-  for (const char digit : digits)
+  for (const char digit : digits) {
     value = value * 10 + (digit - '0');
+  }
   return value;
 }
 
@@ -446,8 +449,9 @@ TEST(RjDbtTranslateIdempotence, ReportsSyntheticMismatchThroughCli) {
   };
   std::vector<char *> argv;
   argv.reserve(arguments.size());
-  for (std::string &argument : arguments)
+  for (std::string &argument : arguments) {
     argv.push_back(argument.data());
+  }
 
   testing::internal::CaptureStdout();
   testing::internal::CaptureStderr();
@@ -480,8 +484,9 @@ TEST(RjDbtTranslateRewriteDischarge, ReportsSyntheticResidualThroughCli) {
   };
   std::vector<char *> argv;
   argv.reserve(arguments.size());
-  for (std::string &argument : arguments)
+  for (std::string &argument : arguments) {
     argv.push_back(argument.data());
+  }
 
   testing::internal::CaptureStdout();
   testing::internal::CaptureStderr();
@@ -704,20 +709,23 @@ TEST(RjDbtTranslate, SharedParserPreservesHexBoundsOmissionAndLastValue) {
     std::vector<std::string> arguments{"rj_dbt_translate",        "--input-target=gfx1251",
                                        "--output-target=gfx1251", "--output-mode=code-object",
                                        "--output-mode=disasm",    "--code-object-index=0X2a"};
-    if (explicit_vgpr)
+    if (explicit_vgpr) {
       arguments.push_back("--debug-conservative-liveness=0xffff");
+    }
     arguments.insert(arguments.end(), {"--", explicit_vgpr ? "explicit.co" : "omitted.co"});
     std::vector<char *> argv;
-    for (auto &argument : arguments)
+    for (auto &argument : arguments) {
       argv.push_back(argument.data());
+    }
     auto check = [](const rocjitsu::tools::TranslateOptions &options)
         -> rocjitsu::tools::ToolResult<rocjitsu::tools::TranslateOutput> {
       EXPECT_EQ(options.code_object_index, 42u);
       EXPECT_EQ(options.disassembly, rocjitsu::tools::DisassemblyMode::Translated);
-      if (options.input_path == "explicit.co")
+      if (options.input_path == "explicit.co") {
         EXPECT_EQ(options.debug_min_free_vgpr, UINT16_MAX);
-      else
+      } else {
         EXPECT_FALSE(options.debug_min_free_vgpr);
+      }
       return {};
     };
     EXPECT_EQ(rocjitsu::tools::detail::run_dbt_translate_cli(static_cast<int>(argv.size()),
@@ -735,8 +743,9 @@ TEST(RjDbtTranslate, AcceptsGfx1251WithoutGfx1250Revisions) {
   };
   std::vector<char *> argv;
   argv.reserve(arguments.size());
-  for (std::string &argument : arguments)
+  for (std::string &argument : arguments) {
     argv.push_back(argument.data());
+  }
 
   testing::internal::CaptureStdout();
   testing::internal::CaptureStderr();
@@ -1078,8 +1087,9 @@ TEST(RjDbtTranslate, RejectsRewriteDischargeWithListCodeObjects) {
   };
   std::vector<char *> argv;
   argv.reserve(arguments.size());
-  for (std::string &argument : arguments)
+  for (std::string &argument : arguments) {
     argv.push_back(argument.data());
+  }
 
   testing::internal::CaptureStdout();
   testing::internal::CaptureStderr();
