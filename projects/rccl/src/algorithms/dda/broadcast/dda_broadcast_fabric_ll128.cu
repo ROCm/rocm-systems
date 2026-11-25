@@ -163,7 +163,7 @@ static inline DpxLaunchGeom ddaBroadcastFabricLL128DpxGeom(ncclComm* comm, size_
 bool ncclBroadcastDdaFabricLL128DpxEligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   if (!ncclBroadcastDdaFabricLL128Eligible(comm, count, datatype))
     return false;
-  if (comm->ddaFabricScaleInSize != 2)
+  if (!comm->hasMloPart)
     return false;
   if (comm->nRanks < 4 || comm->nRanks % 2 != 0)
     return false;
@@ -205,7 +205,7 @@ static ncclResult_t ncclBroadcastDdaFabricLL128DpxLaunch(
        "chunkSlices=%zu grid=%ux%u block=%u bankSize=%zu scaleInSize=%d "
        "warpsPerPeer=%d suWarps=%d siWarps=%d peersPerBlock=%d",
        nRanks, root, bytes, slices, cs, grid.x, grid.y, block.x, bank,
-       comm->ddaFabricScaleInSize, wpp, ws.suWarps, ws.siWarps, ws.peersPerBlock);
+       comm->hasMloPart ? 2 : 1, wpp, ws.suWarps, ws.siWarps, ws.peersPerBlock);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
