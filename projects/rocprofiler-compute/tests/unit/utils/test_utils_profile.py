@@ -1256,3 +1256,50 @@ def test_require_container_rocm_errors_when_version_is_missing(tmp_path, monkeyp
 
     with pytest.raises(SystemExit):
         utils_profile.require_container_rocm_at_least_host(42, "10.3.0")
+
+
+def test_get_target_rocm_version_does_not_fall_back_from_mapped_install(
+    tmp_path, monkeypatch
+):
+    """A mapped install without .info must not borrow /opt/rocm metadata."""
+    target_root = make_container_target(tmp_path, monkeypatch)
+    write_target_maps([
+        "7f20-7f30 r-xp 00000000 08:01 3 "
+        "/opt/rocm-old/lib/librocprofiler-sdk-attach.so.1"
+    ])
+    (target_root / "opt/rocm-old/lib").mkdir(parents=True)
+    other_info = target_root / "opt/rocm/.info"
+    other_info.mkdir(parents=True)
+    (other_info / "version").write_text("10.3.0\n", encoding="utf-8")
+
+    assert utils_profile.get_target_rocm_version(42) is None
+
+
+def test_require_container_rocm_errors_on_invalid_version(tmp_path, monkeypatch):
+    target_root = make_container_target(tmp_path, monkeypatch)
+    write_target_maps([
+        "7f20-7f30 r-xp 00000000 08:01 3 "
+        "/opt/rocm-container/lib/librocprofiler-sdk-attach.so.1"
+    ])
+    info_dir = target_root / "opt/rocm-container/.info"
+    info_dir.mkdir(parents=True)
+    (info_dir / "version").write_text("not-a-version\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        utils_profile.require_container_rocm_at_least_host(42, "10.3.0")
+
+
+def test_get_rocm_version_near_path(tmp_path):
+    rocm_root = tmp_path / "rocm"
+    library = rocm_root / "lib" / "librocprofiler-sdk-rocattach.so"
+    library.parent.mkdir(parents=True)
+    library.touch()
+    info_dir = rocm_root / ".info"
+    info_dir.mkdir()
+    (info_dir / "version").write_text("10.2.0\n", encoding="utf-8")
+    other_tree = tmp_path / "other" / "lib" / "lib.so"
+    other_tree.parent.mkdir(parents=True)
+    other_tree.touch()
+
+    assert utils_profile.get_rocm_version_near_path(str(library)) == "10.2.0"
+    assert utils_profile.get_rocm_version_near_path(str(other_tree)) is None

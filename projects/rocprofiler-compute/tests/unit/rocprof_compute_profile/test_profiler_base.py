@@ -398,6 +398,9 @@ def test_attach_library_resolution_with_fallback():
     )
     new_lib = output_dir / "librocprofiler-sdk-rocattach.so"
     old_lib = output_dir / "librocprofv3-attach.so"
+    info_dir = output_dir / ".info"
+    info_dir.mkdir(exist_ok=True)
+    (info_dir / "version").write_text("10.3.0\n", encoding="utf-8")
 
     # Case 1: new library present -> selected, fallback lookup never happens.
     new_lib.write_text("")
@@ -437,6 +440,9 @@ def test_attach_tool_library_comes_from_target_rocm(tmp_path, monkeypatch):
     target_tool = "/opt/rocm-9.9.9/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     attach_library = tmp_path / "librocprofiler-sdk-rocattach.so"
     attach_library.touch()
+    info_dir = tmp_path / ".info"
+    info_dir.mkdir()
+    (info_dir / "version").write_text("10.3.0\n", encoding="utf-8")
     args = _make_sanitize_args(
         ["/bin/true"],
         rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
@@ -464,6 +470,11 @@ def test_attach_tool_library_comes_from_target_rocm(tmp_path, monkeypatch):
 
 def test_attach_errors_when_target_rocm_has_no_tool_library(tmp_path, monkeypatch):
     """Stop before attaching when the ROCm of the target has no tool library."""
+    attach_library = tmp_path / "librocprofiler-sdk-rocattach.so"
+    attach_library.touch()
+    info_dir = tmp_path / ".info"
+    info_dir.mkdir()
+    (info_dir / "version").write_text("10.3.0\n", encoding="utf-8")
     args = _make_sanitize_args(
         ["/bin/true"],
         rocprofiler_sdk_tool_path="/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
@@ -473,6 +484,10 @@ def test_attach_errors_when_target_rocm_has_no_tool_library(tmp_path, monkeypatc
     )
     args.remaining = "-- /bin/true"
     profiler = rocprofiler_sdk_profiler(args, profiler_mode="rocprofiler-sdk", soc=None)
+    monkeypatch.setattr(
+        "rocprof_compute_profile.profiler_rocprofiler_sdk.resolve_rocm_library_path",
+        lambda _path: str(attach_library),
+    )
     monkeypatch.setattr(
         "rocprof_compute_profile.profiler_rocprofiler_sdk.find_attach_tool_library",
         lambda _pid: None,

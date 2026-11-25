@@ -150,8 +150,32 @@ def is_process_in_container(pid: int) -> bool:
         return False
 
 
+def get_rocm_version_near_path(path_text: str) -> Optional[str]:
+    """Return the ROCm version from .info next to path_text, or None."""
+    current = Path(path_text)
+    try:
+        current = current.resolve()
+    except OSError:
+        return None
+    if current.is_file():
+        current = current.parent
+    for base in (current, *current.parents):
+        try:
+            version = read_rocm_version_at(base)
+        except (OSError, UnicodeError):
+            return None
+        if version is not None:
+            return version
+    return None
+
+
 def get_target_rocm_version(pid: int) -> Optional[str]:
-    """Return the ROCm version of process pid, as seen through its mount root."""
+    """Return the ROCm version of process pid, as seen through its mount root.
+
+    Prefer the install that maps the attach or register library. When that
+    install is known, do not fall back to a different /opt/rocm tree. When no
+    mapped install is found, read /opt/rocm under the target root.
+    """
     maps_lines = _read_process_maps(pid)
     library_dir = _find_mapped_library_directory(
         maps_lines, "librocprofiler-sdk-attach.so"
@@ -161,15 +185,14 @@ def get_target_rocm_version(pid: int) -> Optional[str]:
             maps_lines, "librocprofiler-register.so"
         )
     target_root = PROCFS_ROOT / str(pid) / "root"
-    candidates: List[Path] = []
-    if library_dir is not None:
-        candidates.append(Path(library_dir).parent)
-    candidates.append(Path("/opt/rocm"))
-    for candidate in candidates:
-        version = read_rocm_version_at(target_root / candidate.relative_to("/"))
-        if version is not None:
-            return version
-    return None
+    try:
+        if library_dir is not None:
+            return read_rocm_version_at(
+                target_root / Path(library_dir).parent.relative_to("/")
+            )
+        return read_rocm_version_at(target_root / "opt" / "rocm")
+    except (OSError, UnicodeError):
+        return None
 
 
 def require_container_rocm_at_least_host(pid: int, host_rocm_version: str) -> None:
@@ -180,7 +203,12 @@ def require_container_rocm_at_least_host(pid: int, host_rocm_version: str) -> No
     """
     if not is_process_in_container(pid):
         return
-    target_version = get_target_rocm_version(pid)
+    try:
+        target_version = get_target_rocm_version(pid)
+    except (OSError, UnicodeError) as error:
+        console_error(
+            f"Cannot read the ROCm version of container process {pid}: {error}"
+        )
     if target_version is None:
         console_error(
             f"Cannot read the ROCm version of container process {pid}. "
@@ -188,7 +216,14 @@ def require_container_rocm_at_least_host(pid: int, host_rocm_version: str) -> No
             "only when the container ROCm is at least as new as the host "
             f"ROCm ({host_rocm_version})."
         )
-    if not rocm_version_at_least(target_version, host_rocm_version):
+    try:
+        compatible = rocm_version_at_least(target_version, host_rocm_version)
+    except ValueError:
+        console_error(
+            f"Cannot compare ROCm versions for container process {pid}: "
+            f"target={target_version!r}, host={host_rocm_version!r}."
+        )
+    if not compatible:
         console_error(
             f"Container process {pid} has ROCm {target_version}, which is "
             f"older than the host ROCm {host_rocm_version}. Use a container "

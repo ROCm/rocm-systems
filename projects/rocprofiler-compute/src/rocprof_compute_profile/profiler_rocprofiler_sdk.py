@@ -10,13 +10,13 @@ from typing import Dict, List, Optional, Union
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
-from utils.specs import get_rocm_ver
 from utils.utils_common import (
     PROFILE_OUTPUT_FORMAT,
     resolve_rocm_library_path,
 )
 from utils.utils_profile import (
     find_attach_tool_library,
+    get_rocm_version_near_path,
     pc_sampling_unit,
     require_container_rocm_at_least_host,
 )
@@ -94,27 +94,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         if args.attach_pid:
             # In attach mode, tools are provided using ROCPROF_ATTACH_TOOL_LIBRARY
             # instead of LD_PRELOAD.
-            # Build attach tool list (only our tools, not user's LD_PRELOAD)
-            if self._soc is not None:
-                host_rocm_version = self._soc._mspec.rocm_version
-            else:
-                host_rocm_version = get_rocm_ver()
-            require_container_rocm_at_least_host(args.attach_pid, host_rocm_version)
-            sdk_attach_tool = find_attach_tool_library(args.attach_pid)
-            if sdk_attach_tool is None:
-                console_error(
-                    "Cannot find librocprofiler-sdk-tool.so in the ROCm "
-                    f"installation of process {args.attach_pid}."
-                )
-            attach_tools = [sdk_attach_tool]
-            if native_tool_path:
-                attach_tools.append(native_tool_path)
-            options.update({
-                "ROCPROF_ATTACH_TOOL_LIBRARY": ":".join(attach_tools),
-            })
-            options.pop("LD_PRELOAD", None)
-
-            # Try new live attach library first, fall back to old library
+            # Resolve the host attach library first so the container check uses
+            # that install's ROCm version, not an unrelated ROCM_PATH value.
             rocprofiler_attach_library_path = resolve_rocm_library_path(
                 str(
                     Path(args.rocprofiler_sdk_tool_path).parent.parent
@@ -138,6 +119,28 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
                     "No live attach library found at "
                     f"{rocprofiler_attach_library_path}."
                 )
+            host_rocm_version = get_rocm_version_near_path(
+                rocprofiler_attach_library_path
+            )
+            if host_rocm_version is None:
+                console_error(
+                    "Cannot read the ROCm version next to the host attach "
+                    f"library {rocprofiler_attach_library_path}."
+                )
+            require_container_rocm_at_least_host(args.attach_pid, host_rocm_version)
+            sdk_attach_tool = find_attach_tool_library(args.attach_pid)
+            if sdk_attach_tool is None:
+                console_error(
+                    "Cannot find librocprofiler-sdk-tool.so in the ROCm "
+                    f"installation of process {args.attach_pid}."
+                )
+            attach_tools = [sdk_attach_tool]
+            if native_tool_path:
+                attach_tools.append(native_tool_path)
+            options.update({
+                "ROCPROF_ATTACH_TOOL_LIBRARY": ":".join(attach_tools),
+            })
+            options.pop("LD_PRELOAD", None)
             options.update({
                 "ROCPROF_ATTACH_LIBRARY": rocprofiler_attach_library_path,
                 "ROCPROF_ATTACH_PID": args.attach_pid,
