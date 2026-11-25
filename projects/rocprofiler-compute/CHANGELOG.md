@@ -7,6 +7,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added JAX to experimental ML API tracing.
+  * Profile with `--experimental --trace-ml-api jax`.
+  * Analyze with `--list-operators jax` / `--operator jax:PATTERN`.
+
 ### Changed
 
 ### Removed
