@@ -2773,7 +2773,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint32_t*)value) = static_cast<uint32_t>(properties_.FamilyID);
       break;
     case HSA_AMD_AGENT_INFO_UCODE_VERSION:
-      *((uint32_t*)value) = static_cast<uint32_t>(properties_.EngineId.ui32.uCode);
+      *((uint32_t*)value) = static_cast<uint32_t>(properties_.uCodeEngineVersions.uCodeCompute);
       break;
     case HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION:
       *((uint32_t*)value) = static_cast<uint32_t>(properties_.uCodeEngineVersions.uCodeSDMA);
@@ -3538,7 +3538,7 @@ bool GpuAgent::current_coherency_type(hsa_amd_coherency_type_t type) {
 }
 
 uint16_t GpuAgent::GetMicrocodeVersion() const {
-  return (properties_.EngineId.ui32.uCode);
+  return (properties_.uCodeEngineVersions.uCodeCompute);
 }
 
 uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
@@ -3677,12 +3677,12 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   // Check for microcode cache invalidation support.
   // This is deprecated in later microcode builds.
   if (supported_isas()[0]->GetMajorVersion() == 7) {
-    if (properties_.EngineId.ui32.uCode < 420) {
+    if (properties_.uCodeEngineVersions.uCodeCompute < 420) {
       // Microcode is handling code cache invalidation.
       return;
     }
   } else if (supported_isas()[0]->GetMajorVersion() == 8 && supported_isas()[0]->GetMinorVersion() == 0) {
-    if (properties_.EngineId.ui32.uCode < 685) {
+    if (properties_.uCodeEngineVersions.uCodeCompute < 685) {
       // Microcode is handling code cache invalidation.
       return;
     }

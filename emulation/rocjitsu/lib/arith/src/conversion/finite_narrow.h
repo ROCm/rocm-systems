@@ -8,10 +8,12 @@
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 // Narrow FP32 bits to a finite-only format, adapted from util/data_types.h.
-// NaNs become positive zero; infinities saturate. Magnitudes below half the
-// smallest nonzero value flush to signed zero, including stochastic rounding.
-template <int ExponentBits, int FractionBits, bool Stochastic>
-inline uint32_t narrow_finite(uint32_t raw, uint32_t seed) {
+// On gfx950, NaNs and infinities saturate to signed max finite, and stochastic
+// rounding uses fixed-width source-significand precision without a tiny cutoff.
+// Inherited non-gfx950 forms map NaN to +0 and flush magnitudes below half the
+// smallest nonzero value to signed zero.
+template <int ExponentBits, int FractionBits, bool Stochastic, bool Gfx950 = false>
+inline uint32_t narrow_finite(uint32_t raw, uint32_t seed, uint32_t sig_mask = 0xffffffffU) {
   constexpr int bias = (1 << (ExponentBits - 1)) - 1;
   constexpr uint32_t sign_bit = 1U << (ExponentBits + FractionBits);
   constexpr uint32_t max_code = sign_bit - 1;
@@ -21,10 +23,21 @@ inline uint32_t narrow_finite(uint32_t raw, uint32_t seed) {
   uint32_t magnitude = raw & 0x7fffffffU;
   uint32_t sign = (raw >> (31 - ExponentBits - FractionBits)) & sign_bit;
   if (magnitude > 0x7f800000U) {
-    return 0;
+    return Gfx950 ? (sign | max_code) : 0;
   }
   if (magnitude > max_value) {
     return sign | max_code;
+  }
+  if constexpr (Gfx950 && Stochastic) {
+    int exponent = int(magnitude >> 23) - 127 + bias;
+    unsigned alignment = exponent < 1 ? unsigned(1 - exponent) : 0;
+    uint32_t significand = (raw & 0x7fffffU) | 0x800000U;
+    uint32_t aligned = alignment < 25 ? ((significand >> alignment) & sig_mask) : 0;
+    uint32_t result = (aligned + (seed >> (9 + FractionBits))) >> (23 - FractionBits);
+    if (exponent > 0) {
+      result += uint32_t(exponent - 1) << FractionBits;
+    }
+    return sign | (result < max_code ? result : max_code);
   }
   if (magnitude < cutoff) {
     return sign;

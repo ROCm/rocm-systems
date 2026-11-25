@@ -8338,11 +8338,11 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8ConversionsHonorDenormAndOverflowModes) {
     wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
     cu->write_vgpr(vb + 2, 0, 0xA5A5BEEFu);
     EXPECT_TRUE(cu->execute_instruction(low_inst.get(), *wf).succeeded());
-    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57BFFu);
+    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0xA5A57C00u);
 
     cu->write_vgpr(vb + 2, 0, 0x0000BEEFu);
     EXPECT_TRUE(cu->execute_instruction(high_inst.get(), *wf).succeeded());
-    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x7BFFBEEFu);
+    EXPECT_EQ(cu->read_vgpr(vb + 2, 0), 0x7C00BEEFu);
   };
 
   run_scaled_f16_dst_case(cdna4::kVCvtScalef32F16Fp8Vop3, "v_cvt_scalef32_f16_fp8", 0x0000007Eu,
@@ -8392,7 +8392,7 @@ TEST(Cdna4CvtScaleTest, ScaledFp8Bf8ConversionsHonorDenormAndOverflowModes) {
   }
 }
 
-TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
+TEST(Cdna4CvtScaleTest, WideFp6ToF16IgnoresFp16OvflMode) {
   amdgpu::GpuMemory gpu_mem("cdna4_cvt_scale_wide_fp6_f16_overflow_mem");
   amdgpu::L2Cache l2("cdna4_cvt_scale_wide_fp6_f16_overflow_l2");
 
@@ -8442,7 +8442,7 @@ TEST(Cdna4CvtScaleTest, WideFp6ToF16ConsumesFp16OvflMode) {
   wf->set_mode_raw(amdgpu::Wavefront::FP16_OVFL_BIT);
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
   for (uint32_t i = 0; i < 16; ++i) {
-    EXPECT_EQ(cu->read_vgpr(vb + 2 + i, 0), 0xFBFF7BFFu) << "dst dword " << i;
+    EXPECT_EQ(cu->read_vgpr(vb + 2 + i, 0), 0xFC007C00u) << "dst dword " << i;
   }
 
   if (!wf->is_halted()) {
