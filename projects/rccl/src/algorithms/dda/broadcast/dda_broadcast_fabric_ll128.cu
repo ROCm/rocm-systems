@@ -10,6 +10,7 @@
 
 #include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128_twoshot.h"
 #include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128.h"
+#include "algorithms/dda/broadcast/broadcast_dda_fabric_ll128_dpx_twoshot.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h" // dda::common::kDdaMaxNranks
 #include "checks.h"
 #include "comm.h"
@@ -29,6 +30,9 @@ constexpr size_t kDdaLL128BcTwoShotMin = 256ULL * 1024;
 
 RCCL_PARAM(DdaLL128BcThreads, "DDA_LL128_BC_THREADS", kDdaLL128BcDefaultThreads);
 RCCL_PARAM(DdaLL128BcFanOut, "DDA_LL128_BC_FANOUT", 0);
+RCCL_PARAM(DdaDpxWarpsPerPeer, "DDA_DPX_WARPS_PER_PEER", 2);
+RCCL_PARAM(DdaDpxScaleInPct, "DDA_DPX_SCALE_IN_PCT", 25);
+RCCL_PARAM(DdaBcForceDpx, "DDA_BC_FORCE_DPX", 0);
 
 namespace {
 
@@ -46,6 +50,11 @@ using dda::common::kDdaMaxNranks;
 using dda::common::ddaLL128BcSlotSlices;
 using dda::common::kDdaLL128DataBytesPerSliceL;
 using dda::common::kDdaLL128WireWordsPerSliceW;
+// DPX helpers
+using dda::common::ddaLL128BcDpxChunkSlices;
+using dda::common::ddaLL128BcDpxSlotSlices;
+using dda::common::DpxWsGeom;
+using dda::common::ddaDpxWsGeom;
 
 // Host mirror of kDdaLL128ArchLineElems / kDdaLL128ArchWarp.
 struct DdaLL128BcArch {
@@ -117,7 +126,106 @@ static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128Geom(ncclComm* comm, 
   return std::make_pair(dim3((unsigned)nPeers, bpp), dim3(threads));
 }
 
+
+struct DpxLaunchGeom {
+  dim3 grid;
+  dim3 block;
+  DpxWsGeom ws;
+};
+
+static inline DpxLaunchGeom ddaBroadcastFabricLL128DpxGeom(ncclComm* comm, size_t totalBytes) {
+  const int archThreadsRaw = rcclDdaFabricBcLL128Threads(comm);
+  const unsigned archThreads = archThreadsRaw > 0 ? (unsigned)archThreadsRaw : 0;
+  const bool envSet = (getenv("RCCL_DDA_LL128_BC_THREADS") != nullptr);
+  const unsigned threads = envSet ? ddaLL128BcThreads()
+                         : (archThreads > 0 ? archThreads : kDdaLL128BcDefaultThreads);
+  const int nwarps   = (int)(threads / (unsigned)kDdaLL128Warp);
+  const int nNonRoot = comm->nRanks - 2;
+  const int budget   = (int)ncclBroadcastDdaBlockBudget(comm);
+
+  int wpp = (int)rcclParamDdaDpxWarpsPerPeer();
+  if (wpp < 1) wpp = 1;
+  if (wpp >= nwarps) wpp = nwarps - 1;
+  int pct = (int)rcclParamDdaDpxScaleInPct();
+  if (pct < 1) pct = 1;
+  if (pct > 99) pct = 99;
+
+  const int nSameParityPeers = (nNonRoot + 1) / 2;
+
+  DpxWsGeom ws = ddaDpxWsGeom(nwarps, wpp, pct, nSameParityPeers, budget);
+  dim3 grid((unsigned)ws.gridWidth, (unsigned)ws.bpp);
+  dim3 block(threads);
+  return {grid, block, ws};
+}
+
 } // namespace
+
+bool ncclBroadcastDdaFabricLL128DpxEligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
+  if (!ncclBroadcastDdaFabricLL128Eligible(comm, count, datatype))
+    return false;
+  if (comm->ddaFabricScaleInSize != 2)
+    return false;
+  if (comm->nRanks < 4 || comm->nRanks % 2 != 0)
+    return false;
+
+  const size_t bytes  = count * ncclTypeSize(datatype);
+  if (bytes < kDdaLL128BcTwoShotMin)
+    return false;
+  const size_t bank   = ddaBankSize(comm->ddaScratchBytes);
+  const size_t slices = ddaLL128Slices(bytes);
+  if (ddaLL128BcDpxSlotSlices(bank, comm->nRanks, slices) == 0)
+    return false;
+
+  return true;
+}
+
+static ncclResult_t ncclBroadcastDdaFabricLL128DpxLaunch(
+    const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
+    int root, ncclComm* comm, cudaStream_t stream) {
+  const size_t bytes  = count * ncclTypeSize(datatype);
+  const size_t slices = ddaLL128Slices(bytes);
+  const size_t cs     = ddaLL128BcDpxChunkSlices(slices, comm->nRanks);
+  const size_t bank   = ddaBankSize(comm->ddaScratchBytes);
+
+  auto geom = ddaBroadcastFabricLL128DpxGeom(comm, bytes);
+  const auto& grid = geom.grid;
+  const auto& block = geom.block;
+  const auto& ws = geom.ws;
+
+  int8_t** peers     = reinterpret_cast<int8_t**>(comm->ddaPeerPtrsDev);
+  uint32_t* epochDev = comm->ddaLLEpochDev;
+  const int epochLen = comm->ddaLLEpochLen;
+  const int nRanks   = comm->nRanks;
+
+  int wpp = (int)rcclParamDdaDpxWarpsPerPeer();
+  if (wpp < 1) wpp = 1;
+
+  INFO(NCCL_COLL,
+       "DDA fabric Broadcast LL128 DPX WS two-shot: nRanks=%d root=%d bytes=%zu slices=%zu "
+       "chunkSlices=%zu grid=%ux%u block=%u bankSize=%zu scaleInSize=%d "
+       "warpsPerPeer=%d suWarps=%d siWarps=%d peersPerBlock=%d",
+       nRanks, root, bytes, slices, cs, grid.x, grid.y, block.x, bank,
+       comm->ddaFabricScaleInSize, wpp, ws.suWarps, ws.siWarps, ws.peersPerBlock);
+
+  const dda::common::DdaKernelParams params{comm->abortFlagDev};
+  const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
+
+  hipExtLaunchKernelGGL(
+    (dda::common::ddaBroadcastFabricLL128DpxTwoShot<0>),
+    grid, block, 0, stream,
+    /*startEvent=*/nullptr, stopEvent, /*flags=*/0,
+    peers,
+    static_cast<int8_t*>(recvbuff),
+    static_cast<const int8_t*>(sendbuff),
+    bytes,
+    comm->rank, nRanks, root,
+    epochDev, epochLen,
+    slices, cs, bank, params,
+    wpp, ws.suWarps, ws.siWarps, ws.peersPerBlock);
+
+  CUDACHECK(cudaGetLastError());
+  return ncclSuccess;
+}
 
 bool ncclBroadcastDdaFabricLL128Eligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
   if (comm == nullptr || comm->bootstrap == nullptr)
@@ -211,6 +319,11 @@ ncclResult_t ncclBroadcastDdaFabricLL128(const void* sendbuff, void* recvbuff, s
                             comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
     }
   } else {
+    // DPX (partition mode): use the warp-specialized hierarchical kernel.
+    if (ncclBroadcastDdaFabricLL128DpxEligible(comm, count, datatype) ||
+        (rcclParamDdaBcForceDpx() > 0 && comm->nRanks >= 4 && comm->nRanks % 2 == 0))
+      return ncclBroadcastDdaFabricLL128DpxLaunch(sendbuff, recvbuff, count, datatype, root, comm, stream);
+
     // Two-shot path
     if (!rcclDdaDatatypeSupported(comm, datatype))
       return ncclInvalidArgument;

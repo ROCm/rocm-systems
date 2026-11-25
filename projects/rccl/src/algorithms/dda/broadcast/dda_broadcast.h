@@ -17,6 +17,7 @@ struct ncclComm;
 // Rank-uniform inputs only: no buffers (sendbuff is unused on non-roots), no root.
 bool ncclBroadcastDdaFabricLLEligible(ncclComm* comm, size_t count, ncclDataType_t datatype);
 bool ncclBroadcastDdaFabricLL128Eligible(ncclComm* comm, size_t count, ncclDataType_t datatype);
+bool ncclBroadcastDdaFabricLL128DpxEligible(ncclComm* comm, size_t count, ncclDataType_t datatype);
 
 // Upper bound for the DDA Broadcast block-size env overrides.
 constexpr unsigned kDdaBcMaxThreads = 512;
