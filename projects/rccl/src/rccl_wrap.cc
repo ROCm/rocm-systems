@@ -1099,8 +1099,7 @@ inline size_t rcclSymMaxR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
   return funcThresholdFromTable(caps, func);
 }
 
-// AllReduce R2 symk cap: eager calls on a table with arSymMaxR2PerRankElems, on comms of at least
-// arSymMaxR2MinRanks ranks, run symk to nRanks x that many elements when it is above symMaxR2[AllReduce].
+// AllReduce R2 symk cap, per rcclArchThresholds::arSymMaxR2PerRankElems.
 inline size_t rcclArSymMaxR2CapTab(const rcclArchThresholds* table, bool graphMode, int nRanks,
                                    ncclDataType_t datatype) {
   const size_t cap = rcclSymMaxR2CapTab(table, ncclFuncAllReduce, graphMode);
@@ -1108,7 +1107,9 @@ inline size_t rcclArSymMaxR2CapTab(const rcclArchThresholds* table, bool graphMo
       nRanks < table->arSymMaxR2MinRanks) {
     return cap;
   }
-  return std::max(cap, (size_t)nRanks * table->arSymMaxR2PerRankElems * ncclTypeSize(datatype));
+  size_t perRankCap = (size_t)nRanks * table->arSymMaxR2PerRankElems * ncclTypeSize(datatype);
+  if (table->arSymMaxR2MaxBytes != 0) perRankCap = std::min(perRankCap, table->arSymMaxR2MaxBytes);
+  return std::max(cap, perRankCap);
 }
 
 // R2 symmetric-kernel lower-bound per collective.  Below this size DDA is
@@ -1379,6 +1380,9 @@ bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes) {
 }
 size_t rcclArSymMaxR2Cap(const ncclComm* comm, bool graphMode, ncclDataType_t datatype) {
   return rcclArSymMaxR2CapTab(extAlgoArchTable(comm), graphMode, comm != nullptr ? comm->nRanks : 0, datatype);
+}
+size_t rcclCeArRegMaxBytes(const ncclComm* comm) {
+  return rcclCeRegMaxTab(extAlgoArchTable(comm), ncclFuncAllReduce);
 }
 
 // Elements per CE-registered reduce launch: ncclCeAllReduce's chunk for the staging size ncclCeInit resolves.

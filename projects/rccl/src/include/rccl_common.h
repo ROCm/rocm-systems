@@ -406,10 +406,10 @@ size_t rcclDdaLLOneShotThreshold(const ncclComm* comm);
 size_t rcclDdaArRegCaptureMaxBytes(const ncclComm* comm);
 // Whether an eager registered AllReduce of `bytes` has a shard the DDA LL128 two-shot takes over from CE-registered.
 bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes);
-// Largest registered AllReduce the symmetric kernel takes: symMaxR2 / symMaxR2Graph, raised in eager mode to
-// nRanks x arSymMaxR2PerRankElems elements of datatype on comms of at least arSymMaxR2MinRanks ranks.
-// RCCL_SYM_K_MAX_BYTES wins when set.
+// Largest registered AllReduce the symmetric kernel takes, per rcclArchThresholds::arSymMaxR2PerRankElems.
 size_t rcclArSymMaxR2Cap(const ncclComm* comm, bool graphMode, ncclDataType_t datatype);
+// Largest registered AllReduce CE-registered takes: ceRegMax[AllReduce], or RCCL_CE_AR_REG_MAX_MSG_BYTES when set.
+size_t rcclCeArRegMaxBytes(const ncclComm* comm);
 // Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the init cap,
 // lowered on large comms per rcclArchThresholds::ddaVmmBlockBudget.
 int rcclDdaFabricVmmBlocks(const ncclComm* comm);

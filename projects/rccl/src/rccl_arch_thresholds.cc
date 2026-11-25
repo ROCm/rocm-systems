@@ -194,9 +194,11 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .symTdmMaxR2Graph = {0, 0, 4096ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   .symTdmCrossTrayMaxR2 = {0, 0, 512ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   // symk beats Ring from symMinR2 to 256K elements per rank from 16 ranks: fp32 to 16M on 16 and 32M on 32,
-  // bf16 to 8M on 16 and 16M on 32. On 8 ranks Ring beats it 1.1x at 8M (SPX).
+  // bf16 to 8M on 16 and 16M on 32. On 8 ranks Ring beats it 1.1x at 8M (SPX). Capped at 32M, the largest size
+  // measured, on 64+ ranks.
   .arSymMaxR2PerRankElems = 256ULL*1024,
   .arSymMaxR2MinRanks = 16,
+  .arSymMaxR2MaxBytes = 32ULL*1024*1024,
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).
@@ -464,8 +466,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .agHierSymMinR2 = 16ULL*1024*1024,
   .agHierSymMaxR2 = kThreshUnlimited,
   // symk beats Ring from symMinR2 to 128K elements per rank: fp32 to 8M on 16 ranks, 16M on 32 and 32M on 64;
-  // bf16 to 8M on 32 and 16M on 64 (DPX).
+  // bf16 to 8M on 32 and 16M on 64 (DPX). Capped at 32M, the largest size measured, past 64 ranks.
   .arSymMaxR2PerRankElems = 128ULL*1024,
+  .arSymMaxR2MaxBytes = 32ULL*1024*1024,
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).
