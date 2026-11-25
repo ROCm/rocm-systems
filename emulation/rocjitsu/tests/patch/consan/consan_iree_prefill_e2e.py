@@ -18,6 +18,10 @@ import tempfile
 import time
 import traceback
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / 'tools'))
+from consan_application_contract import validate_preparation_report
+from consan_prefill_report import write_report
+
 SUITE_REVISION = '08a7187a92d6496e50c7f2f7fb0251711990ed09'
 IREE_VERSION = '3.13.0rc20261006'
 INPUTS = {
@@ -29,6 +33,7 @@ INPUTS = {
 SCATTER = 'prefill_bs1$async_dispatch_8_scatter_Dx32x4x32xf16_dispatch_tensor_store'
 ELEMENTWISE = 'prefill_bs1$async_dispatch_9_elementwise_D_i64'
 LDS_MATMUL = 'prefill_bs1$async_dispatch_3_matmul_Dx128x256_f16xf16xf32'
+LDS_FIRST_MATMUL = 'prefill_bs1$async_dispatch_2_matmul_Dx256x256_f16xf16xf32'
 SELECTED = (SCATTER, ELEMENTWISE)
 SEQUENCE = (SCATTER, ELEMENTWISE, SCATTER) * 3
 CASES = ('trace', 'lds')
@@ -207,6 +212,161 @@ def validate_lds(analysis, exit_code=None):
     return selected
 
 
+def validate_all_images(index, analysis):
+    require(
+        index.get('schema_version') == 2
+        and index['scope'] == 'provided_application_images'
+        and len(index['images']) == 2,
+        'all-image inventory differs from the model and helper inputs',
+    )
+    reports = [image['preparation'] for image in index['images']]
+    require(
+        sorted(report['requested'] for report in reports) == [13, 55],
+        'all-image preparation did not attempt every model and helper entry',
+    )
+    require(
+        all(
+            report['requested'] == len(report['entries']) and report['requested'] > 0
+            for report in reports
+        ),
+        'all-image preparation omitted entry outcomes',
+    )
+    for report in reports:
+        validate_preparation_report(report)
+    require(
+        sum(report['instrumented'] for report in reports) == 1
+        and sum(report['no_probes_needed'] for report in reports) == 60
+        and sum(report['blocked'] for report in reports) == 7,
+        'all-image preparation classification differs',
+    )
+    models = [
+        report
+        for report in reports
+        if any(entry['entry'] == LDS_MATMUL for entry in report['entries'])
+    ]
+    require(
+        len(models) == 1 and models[0]['requested'] == 55,
+        'all-image preparation did not attempt all model entries',
+    )
+    require(
+        all(
+            entry['reason_code'] != 'none' and bool(entry['reason'])
+            for report in reports
+            for entry in report['entries']
+            if entry['disposition'] == 'blocked'
+        ),
+        'skipped entry has no owning qualification reason',
+    )
+    require(
+        analysis['scope'] == 'provided_application_images'
+        and analysis['whole_application_coverage'] == 'not_established'
+        and analysis['lds_analysis'] == 'performed'
+        and analysis['lds_observations_present'],
+        'all-image result lacks scoped LDS analysis evidence',
+    )
+    require(
+        {report['original_sha256'] for report in reports}
+        == {image['original_sha256'] for image in analysis['images']},
+        'all-image analysis dropped a provided image',
+    )
+    model = next(
+        image
+        for image in analysis['images']
+        if image['original_sha256'] == models[0]['original_sha256']
+    )
+    require(model['analysis'] is not None, 'all-image model has no selected capture')
+    selected = {
+        entry['entry']
+        for entry in models[0]['entries']
+        if entry['disposition'] == 'instrumented'
+    }
+    require(
+        selected == {LDS_FIRST_MATMUL}, 'ordered all-image retained selection differs'
+    )
+    incompatible = next(
+        entry for entry in models[0]['entries'] if entry['entry'] == LDS_MATMUL
+    )
+    require(
+        incompatible['disposition'] == 'blocked'
+        and incompatible['reason_code'] == 'unsupported_control_transfer_range',
+        'combined branch capacity must retain its owning native-skip reason',
+    )
+    executions = model['analysis']['executions']
+    require(
+        len(executions) == 4
+        and all(row['entry'] == LDS_FIRST_MATMUL for row in executions),
+        'all-image retained matmul execution count differs',
+    )
+    require(
+        all(
+            row['workgroup_count'] == 4
+            and row['waves_per_workgroup'] == 4
+            and row['valid_observations'] == 9216
+            and row['lost_occurrences'] == 1152
+            and row['address_group_exhaustion'] == 1152
+            and row['synchronization_loss'] == 0
+            and row['integrity_events'] == 0
+            and row['rejected_records'] == 0
+            and not row['coverage_complete']
+            for row in executions
+        ),
+        'all-image LDS matmul observation/loss evidence differs',
+    )
+    require(
+        not analysis['coverage_complete'], 'bounded loss cannot claim complete coverage'
+    )
+
+
+def collect_capture_summaries(
+    commands, inspector, trace_capture=None, lds_capture=None, index=None, root=None
+):
+    def inspect(stage, path):
+        return json.loads(commands.run(stage, [inspector, '--summary', path]))
+
+    summaries = {}
+    if trace_capture is not None:
+        summaries['trace'] = inspect('inspect-trace', trace_capture)
+    if lds_capture is not None:
+        summaries['pinned_lds'] = inspect('inspect-lds', lds_capture)
+    if index is not None:
+        require(root is not None, 'all-image summaries require an owning root')
+        summaries['all_images'] = [
+            inspect(
+                'inspect-all-' + image['preparation']['original_sha256'],
+                root / image['capture'],
+            )
+            for image in index['images']
+            if image['capture'] is not None
+        ]
+    return summaries
+
+
+def validate_capture_summaries(summaries):
+    if 'trace' in summaries:
+        selected = [
+            entry for entry in summaries['trace']['entries'] if entry['selected']
+        ]
+        require(
+            len(selected) == 2
+            and all(
+                entry['trace_boundary_sites'] == 2 and entry['lds_access_sites'] == 0
+                for entry in selected
+            ),
+            'static trace probe-site evidence differs',
+        )
+    lds_summaries = summaries.get('all_images', [])
+    if 'pinned_lds' in summaries:
+        lds_summaries = [summaries['pinned_lds'], *lds_summaries]
+    for summary in lds_summaries:
+        selected = [entry for entry in summary['entries'] if entry['selected']]
+        require(
+            len(selected) == 1
+            and selected[0]['lds_access_sites'] == 72
+            and selected[0]['barrier_completion_sites'] == 5,
+            'static LDS probe-site evidence differs',
+        )
+
+
 class Commands:
     def __init__(self, directory, source, environment, timeout):
         self.directory = directory
@@ -273,6 +433,7 @@ def offline_replay(
     *,
     allowed_exits=(0,),
     expected_exit=None,
+    arguments=(),
 ):
     # Test-owned copies only: no upstream checkout or shared inputs are renamed.
     hidden = [(path, path.with_name(path.name + '.hidden')) for path in paths]
@@ -287,7 +448,9 @@ def offline_replay(
             not any(path.exists() for path in paths),
             'replay input paths are still available',
         )
-        after = commands.run(stage, [analyzer, capture], allowed_exits=allowed_exits)
+        after = commands.run(
+            stage, [analyzer, capture, *arguments], allowed_exits=allowed_exits
+        )
         if expected_exit is not None:
             require(
                 commands.records[-1]['exit'] == expected_exit,
@@ -315,6 +478,7 @@ def validate_environment(args):
         'launcher': args.build / 'tools/rocjitsu/rocjitsu',
         'prepare': args.build / 'tools/rj_consan_prepare',
         'analyze': args.build / 'tools/rj_consan_analyze',
+        'inspect': args.build / 'tests/consan_capture_inspect',
         'plugin': args.build
         / 'lib/rocjitsu/src/rocjitsu/hooks/consan/libhsa_consan.so',
     }
@@ -521,6 +685,92 @@ def selection_profile(preparation):
     return profiles[0]
 
 
+def run_all_images(args, commands, tools, inputs):
+    application_artifacts = commands.directory / 'all-images'
+    coordinator = args.source / 'tools/consan_prepare_application.py'
+    aggregate_analyzer = args.source / 'tools/consan_analyze_application.py'
+    commands.run(
+        'prepare-all-images',
+        [
+            sys.executable,
+            coordinator,
+            '--prepare',
+            tools['prepare'],
+            '--target',
+            'gfx1250',
+            '--images-dir',
+            inputs / 'images',
+            '--output',
+            application_artifacts,
+            '--timeout',
+            max(1, math.ceil(commands.deadline - time.monotonic())),
+        ],
+    )
+    index_path = application_artifacts / 'application.json'
+    application_index = json.loads(index_path.read_text())
+    bindings = json.loads(
+        (application_artifacts / 'launch-environment.json').read_text()
+    )
+    output, oracle = application(
+        args,
+        commands,
+        tools,
+        inputs,
+        'all-images-instrumented',
+        {'HSA_TOOLS_LIB': str(tools['plugin'])} | bindings,
+        with_plugin=True,
+    )
+    require(
+        (args.fixture / 'baseline/logits.npy').read_bytes()
+        == (output / 'logits.npy').read_bytes(),
+        'all-image instrumented complete logits differ from original baseline',
+    )
+    before = commands.run(
+        'analyze-all-images',
+        [
+            aggregate_analyzer,
+            index_path,
+            '--analyzer',
+            tools['analyze'],
+            '--fail-on-findings',
+            '--require-complete',
+        ],
+        allowed_exits=(1,),
+    )
+    analysis = json.loads(before)
+    validate_all_images(application_index, analysis)
+    summaries = collect_capture_summaries(
+        commands, tools['inspect'], index=application_index, root=application_artifacts
+    )
+    validate_capture_summaries(summaries)
+    offline_replay(
+        commands,
+        aggregate_analyzer,
+        index_path,
+        (
+            inputs,
+            commands.directory / 'artifact',
+            application_artifacts / 'images',
+            application_artifacts / 'application.bin',
+        ),
+        before,
+        stage='fresh-all-image-analysis-without-inputs',
+        allowed_exits=(1,),
+        expected_exit=1,
+        arguments=(
+            '--analyzer',
+            tools['analyze'],
+            '--fail-on-findings',
+            '--require-complete',
+        ),
+    )
+    return {
+        'all_images_instrumented': oracle,
+        'all_images_analysis': analysis,
+        'capture_summaries': summaries,
+    }
+
+
 def run_case(args, tools, fixture, case):
     directory = args.fixture / case
     timeout = min(args.timeout, case_timeout(args.fixture, fixture, case))
@@ -574,9 +824,12 @@ def run_case(args, tools, fixture, case):
             f'{case} complete logits differ from original baseline',
         )
         allowed_exits = (0,) if trace else (0, 1)
+        analysis_arguments = (
+            ('--require-complete',) if trace else ('--fail-on-findings',)
+        )
         before = commands.run(
             'analyze' if trace else 'analyze-lds',
-            [tools['analyze'], capture],
+            [tools['analyze'], capture, *analysis_arguments],
             allowed_exits=allowed_exits,
         )
         analyzer_exit = commands.records[-1]['exit']
@@ -590,6 +843,17 @@ def run_case(args, tools, fixture, case):
             validate_trace(analysis)
         else:
             validate_lds(analysis, analyzer_exit)
+        summaries = collect_capture_summaries(
+            commands,
+            tools['inspect'],
+            **({'trace_capture': capture} if trace else {'lds_capture': capture}),
+        )
+        validate_capture_summaries(summaries)
+        preparation_reports = {
+            'trace' if trace else 'pinned_lds': json.loads(
+                (artifact / 'preparation.json').read_text()
+            )
+        }
         offline_replay(
             commands,
             tools['analyze'],
@@ -603,9 +867,16 @@ def run_case(args, tools, fixture, case):
             ),
             allowed_exits=allowed_exits,
             expected_exit=analyzer_exit,
+            arguments=analysis_arguments,
         )
+        if not trace:
+            all_images = run_all_images(args, commands, tools, inputs)
+            summaries.update(all_images.pop('capture_summaries', {}))
+            result.update(all_images)
         result.update(
             passed=True,
+            capture_summaries=summaries,
+            preparation_reports=preparation_reports,
             baseline=fixture['baseline'],
             fresh_replay_identical=True,
             **(
@@ -665,11 +936,42 @@ def combine_case_results(args, fixture, results=None):
                 key: value
                 for key, value in results[case].items()
                 if key
-                in ('instrumented', 'analysis', 'lds_instrumented', 'lds_analysis')
+                in (
+                    'instrumented',
+                    'analysis',
+                    'lds_instrumented',
+                    'lds_analysis',
+                    'all_images_instrumented',
+                    'all_images_analysis',
+                )
             }
         )
         result['stage_seconds'].update(results[case].get('stage_seconds', {}))
+    for field in ('capture_summaries', 'preparation_reports'):
+        combined = {}
+        for case in CASES:
+            for scope, evidence in results[case].get(field, {}).items():
+                require(scope not in combined, 'duplicate case evidence scope')
+                combined[scope] = evidence
+        result[field] = combined
     (args.fixture / 'result.json').write_text(json.dumps(result, indent=2) + '\n')
+    if passed:
+        report_json, report_text = write_report(args.fixture / 'result.json')
+        print(report_text.read_text(), end='', flush=True)
+        result.update(
+            coverage_report_json=str(report_json), coverage_report_text=str(report_text)
+        )
+        print(
+            json.dumps(
+                {
+                    'passed': True,
+                    'artifact_directory': str(args.fixture),
+                    'coverage_report_json': str(report_json),
+                    'coverage_report_text': str(report_text),
+                }
+            ),
+            flush=True,
+        )
     return result
 
 
@@ -689,7 +991,17 @@ def run_cases(args, tools, fixture):
     result = combine_case_results(args, fixture, results)
     require(result['passed'], f'prefill case failed; see {args.fixture}')
     print(
-        json.dumps({'passed': True, 'artifact_directory': str(args.fixture)}),
+        json.dumps(
+            {
+                'passed': True,
+                'artifact_directory': str(args.fixture),
+                **{
+                    key: result[key]
+                    for key in ('coverage_report_json', 'coverage_report_text')
+                    if key in result
+                },
+            }
+        ),
         flush=True,
     )
     return result

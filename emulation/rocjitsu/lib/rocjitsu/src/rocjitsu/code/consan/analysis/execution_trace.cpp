@@ -39,6 +39,8 @@ analyze_execution_trace_capture(const Capture &capture, util::DiagnosticEmitter 
   result.run_identity = capture.header.run_identity;
   result.original = capture.header.image.original;
   result.selection_profile = capture.header.image.selection_profile;
+  result.target = capture.header.image.target;
+  result.wave_size = capture.header.image.wave_size;
   result.transport_complete = !capture.executions.empty();
   for (const ImageEntryFacts &entry : capture.header.image.entries) {
     if (!util::is_valid_utf8(entry.binding.name))
@@ -119,7 +121,8 @@ std::string render_execution_trace(const ExecutionTraceResult &result) {
       << hex_bytes(result.run_identity) << "\",\"original_sha256\":\""
       << hex_bytes(result.original.sha256) << "\",\"original_bytes\":" << result.original.bytes
       << ",\"selection_profile\":\"" << hex_bytes(result.selection_profile)
-      << "\",\"transport_complete\":" << result.transport_complete
+      << "\",\"target\":" << result.target << ",\"wave_size\":" << result.wave_size
+      << ",\"transport_complete\":" << result.transport_complete
       << ",\"expected_rows\":" << result.expected_rows
       << ",\"completed_rows\":" << result.completed_rows
       << ",\"entry_events\":" << result.entry_events << ",\"exit_events\":" << result.exit_events

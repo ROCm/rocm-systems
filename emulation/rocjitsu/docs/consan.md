@@ -135,51 +135,84 @@ log-groups-OFF build. Per-entry qualification details use the compile-time
 written regardless of logging configuration. Intentionally unrequested entries
 do not count as skipped and do not generate degradation warnings.
 
+#### All supplied application images
+
+Use the application coordinator when a workload contains multiple code images:
+
+```sh
+python3 tools/consan_prepare_application.py \
+  --prepare build/tools/rj_consan_prepare --target gfx1250 \
+  --images-dir extracted-hsaco --output new-application-directory
+```
+
+It attempts all entries of every distinct `*.hsaco` in the supplied directory,
+including helper kernels, and deduplicates identical image bytes. Additional
+image paths can be supplied as positional arguments. This inventories the
+provided images; it does not extract embedded code objects or discover images
+that a future process might generate. Explicit `--entry` selection remains
+available on the single-image compiler CLI. `--require-all` accepts proven `no_probes_needed` entries and makes any blocked
+entry fail preparation before a launch catalog is published.
+
+`launch-environment.json` contains `RJ_CONSAN_APPLICATION_PROFILE=1` and
+`RJ_CONSAN_APPLICATION_CATALOG=<absolute application.bin path>`. Add these two
+variables to the application's environment alongside `HSA_TOOLS_LIB`. Catalog
+configuration excludes the legacy artifact, selection-profile, native-images,
+and capture-path variables. Installation validates bounded, checksummed catalog
+records, exact original images, selected artifacts, profiles, and targets before
+installing hooks. An invalid catalog is an error, never a native fallback.
+An image absent from the catalog can run as its exact original after bounded
+native metadata admission. The runtime warns once for that image identity; it
+never treats an unlisted image as selected or supplies invented analysis facts.
+Unsupported native metadata and exhausted retention budgets remain admission
+errors. Images carrying the reserved `.rocjitsu.kernarg` prepared-wrapper section
+are rejected as native inputs: their probes require a selected wrapper/context,
+even when their identity is absent from the catalog. The immutable index describes `provided_application_images`, so aggregate
+results explicitly leave `whole_application_coverage` as `not_established`.
+Persisting owning coverage reasons for late images requires a runtime ledger.
+The adapter currently binds one code image per HSA executable. Distinct images
+and repeated loads are supported through separate executables.
+
+Each selected image has one capture shared by repeated loads of that same
+image. Different images retain independent entry-key namespaces and execution
+serials, and all captures share one application run identity. The collector
+retains each snapshot's owning image through executable destruction and writes
+it into that image's capture. Native-only images use their exact original bytes
+and do not claim selected capture coverage. Selected images that were never
+loaded or executed do not fabricate executions.
+
 An image can contain multiple qualified LDS scopes: each entry retains its own
 no-synchronization, workgroup-barrier, or barrier-loop facts. Its selection
 identity includes the per-entry scopes. Analysis renders an explicit
 `native_lds_single_range_mixed_scopes` scope for these images. Mixing execution-trace and LDS
 entries in one selected image remains invalid.
 
-#### Application image catalogs
+The owning `application.json` embeds every schema 2 preparation report, absence proofs, and blocking
+reasons, plus relative capture paths. After the application finishes, run:
 
-The C++ `ApplicationCatalog` interface describes exact selected and native
-images. `encode_application_catalog()` produces the bounded binary catalog;
-`decode_application_catalog()` and `load_application_catalog()` validate its
-producer contract, checksum, paths, identities, targets and extent budgets.
-`rj_consan_prepare --producer-contract` prints the producer token, and
-`rj_consan_prepare --validate-application-catalog FILE` validates a saved catalog.
-A selected record names its artifact directory, selection profile and capture
-path; the directory must also own its exact `original.hsaco`. A native record
-names the exact original HSACO and supplies no selected profile or capture.
+```sh
+python3 tools/consan_analyze_application.py \
+  new-application-directory/application.json --analyzer build/tools/rj_consan_analyze
+```
 
-Enable `RJ_CONSAN_APPLICATION_PROFILE=1` and set
-`RJ_CONSAN_APPLICATION_CATALOG` to the absolute catalog path alongside
-`HSA_TOOLS_LIB`. Catalog configuration excludes the legacy artifact,
-selection-profile, native-images and capture-path variables. Installation
-validates original bytes and selected artifacts before installing hooks. An
-invalid catalog is an error, never a native fallback.
-
-An image absent from the catalog can run as its exact original after bounded
-native metadata admission. The runtime warns once for that image identity;
-it never treats the image as selected or invents analysis facts. Unsupported
-native metadata and exhausted retention budgets remain admission errors.
-Images carrying the reserved `.rocjitsu.kernarg` prepared-wrapper section are
-rejected as native inputs: their probes require a selected wrapper/context,
-even when their identity is absent from the catalog. Catalog admission
-establishes only the configured image scope; persistent owning reasons for
-late images require a runtime ledger.
-
-Each selected image has one capture shared by repeated loads of that same
-image. Different images retain independent entry-key namespaces and execution
-serials, and all captures share one application run identity. The collector
-retains each snapshot's owning image through executable destruction and writes
-it into that image's capture. Native-only images retain their original bytes
-and create no selected capture. Configured images that were never loaded do
-not create captures; a loaded but unexecuted image creates no executions.
-The adapter binds one code image per HSA executable. Distinct images and
-repeated loads use separate executables; load transactions and finalization
-retain both active and queued callers until their ownership is settled.
+The analyzer verifies each capture against its owning report and joins images
+only when their run identities agree. Missing captures, selected entries that
+were not executed, blocked or unrequested entries, and incomplete observation evidence remain
+explicit coverage gaps. The aggregate `lds_analysis` says `performed` when
+nonempty LDS executions were analyzed; execution-trace-only captures never
+claim LDS analysis. The separate `lds_observations_present` flag records whether
+those executions supplied any valid LDS memory observations. A legitimately
+completed kernel whose memory operations were all masked off can therefore
+report complete execution coverage and performed analysis with no observed LDS
+accesses. A pinned test that must exercise a memory-observation path should
+assert this flag as well as the analysis outcome. A successfully written report
+returns exit 0, including reports with findings or coverage gaps. For CI,
+`--fail-on-findings` returns 1 when race or collision findings are present, and
+`--require-complete` returns 1 when provided-image coverage is incomplete. Both
+options can be combined; either unmet condition returns 1 after writing the same
+report. Invalid input or a failed child analyzer returns 2. These policy options
+do not change preparation, capture, analysis, or the recorded coverage. Replay needs only
+`application.json` and its capture files; it does not reread original images,
+prepared images, or the runtime catalog.
 
 The compiler inventories the exact original image, qualifies each selected entry,
 and plans its probes, bootstrap and resources. One transactional rewrite produces
@@ -429,10 +462,12 @@ successful End/close/publication.
 `rj_consan_analyze` dispatches trace captures to a separate transport analyzer.
 Its JSON says `scope: execution_trace` and `lds_analysis: not_performed`, with
 expected/completed rows, validated entry/exit event counts, per-execution gaps and
-native-uncovered entries. It emits no LDS verdict or race counters. Trace exit
-codes are 0 for complete observed transport, 1 for transport gaps, 2 for invalid
-input, and 3 for output failure; `--examples` remains an LDS-only option and does
-not change trace diagnostics. An empty execution list cannot certify transport.
+native-uncovered entries. It emits no LDS verdict or race counters. A successfully
+written trace report returns exit 0, including reports with transport gaps.
+`--require-complete` returns 1 for incomplete observed transport;
+`--fail-on-findings` does not turn transport gaps into LDS findings. Invalid input
+returns 2 and output failure returns 3. `--examples` remains an LDS-only option and
+does not change trace diagnostics. An empty execution list cannot certify transport.
 
 Registered `ConSanExecutionTraceSim.Groups1`, `.Groups16` and `.Groups512` controls
 execute the original whole A/B/C/A fixture with original CPU output oracles and
@@ -714,12 +749,14 @@ independently of barrier position. Capacity loss is reported separately from
 malformed-evidence integrity issues.
 
 The analyzer keeps ordered, confirmed unordered, and unresolved pairs separate.
-Only confirmed conflicts contribute to the findings exit status; incomplete
-coverage alone does not. `coverage_complete` describes the captured selected
+Only confirmed conflicts trigger `--fail-on-findings`; incomplete coverage alone
+does not. `coverage_complete` describes the captured selected
 executions. `provided_entry_coverage_complete` additionally requires an observed
 execution for every selected entry and a valid LDS no-probes certificate for
 every native entry in the supplied image. An unrequested or blocked native entry
-leaves this wider coverage incomplete. Zero findings with missing evidence does
+leaves this wider coverage incomplete. For LDS captures, `--require-complete`
+checks `provided_entry_coverage_complete`, including these owning-entry gaps.
+Zero findings with missing evidence does
 not establish that unobserved accesses were safe.
 
 ## How to use
@@ -846,8 +883,11 @@ capture files are not overwritten.
 "$consan_analyze" "$RJ_CONSAN_CAPTURE_PATH" --examples 1
 ```
 
-The analyzer writes JSON to stdout. For this race example, exit 1 means a
-conflict was found; exit 0 means no findings were observed. The result includes:
+The analyzer writes JSON to stdout and returns exit 0 when the report is written
+successfully, including this race example. To make observed conflicts fail a CI
+step, add `--fail-on-findings`; this example then returns 1 with the same JSON.
+To also require complete provided-entry coverage, add `--require-complete`.
+The result includes:
 
 ```json
 {
@@ -878,8 +918,8 @@ The closed capture can be analyzed again without images or application state.
 For LDS captures, `lds_analysis` is `performed` only when at least one selected
 execution was analyzed; an empty execution list reports `not_performed` and
 incomplete coverage. An executed dispatch with no committed LDS observations
-still counts as analysis performed. Neither status changes the findings exit
-code.
+still counts as analysis performed. Neither status alone triggers
+`--fail-on-findings`; an empty execution list does trigger `--require-complete`.
 
 A native `no_probes_needed` entry carries a versioned LDS certificate in its
 owning image facts. The original image SHA256 and entry key bind its identity;
@@ -892,7 +932,11 @@ not an independent security attestation of an arbitrary binary. It does not
 create an execution or an LDS verdict. An image containing only such entries
 remains native-only and publishes no capture.
 
-Other normal nonzero analyzer statuses indicate input/output failures. See the
+The default exit status reports whether diagnosis produced its output; findings
+and coverage remain separate result fields. Existing scripts that used exit 1
+as a findings gate must now pass `--fail-on-findings`. Scripts that also require
+complete coverage must pass `--require-complete`. Input/analysis errors return 2,
+and the native analyzer returns 3 on output failure. See the
 [analyzer CLI](../tools/rj_consan_analyze.cpp) and
 [analysis results](../lib/rocjitsu/src/rocjitsu/code/consan/analysis/lds_race.h)
 for option, status, and result details.
@@ -969,6 +1013,52 @@ keep `coverage_complete` false; a partial capture cannot claim complete coverage
 checks establish analysis of the selected observations, with no full-model
 race-free or physical-GPU coverage claim.
 
+The LDS test also runs an all-image subcase through the coordinator without an
+entry selection. It attempts all 55 model kernels and all 13 helper-image entries,
+classifies 1 entry as instrumented, 60 as `no_probes_needed`, and 7 as
+blocked, and executes the resulting
+selected/native catalog against the same VMFB and numerical baseline. The
+aggregate requires performed LDS analysis and observed memory evidence. Ordered
+composition retains the earlier `dispatch_2_matmul_Dx256x256` entry, with four
+executions retaining 9,216 observations and reporting 1,152 address-group losses
+each; the later separately tested matmul cannot fit the combined branch range
+and remains native with that explicit reason. All actual coverage gaps remain
+visible rather than being called full-model coverage. A fresh index analyzer
+must reproduce the result after original images, prepared images, and the runtime
+catalog are hidden. The index and capture files own this replay.
+
+After both independent tests succeed, their combined result writes `coverage-report.json` and
+`coverage-report.txt` beside `result.json`, and prints the text report. The
+report keeps the trace control, pinned LDS control, and automatic all-image
+execution separate. Each case saves its own capture summaries and preparation
+reports; aggregation merges those scopes without replacing the sibling evidence.
+A failed case remains independently visible and cannot produce a success report.
+Entry inventory, requested preparation, excluded entries,
+instrumented entries, and captured dispatches are different counts. Native
+entry dispatch counts remain unknown because these captures only record selected
+executions; a native entry in the inventory is not evidence that it ran.
+
+Preparation exclusions retain each entry's first reason. They describe a
+best-effort native outcome rather than a count of compiler process failures.
+The report also separates static LDS access and barrier probe sites from dynamic
+observations, and records race/collision findings alongside loss and coverage.
+`lost_occurrences` already includes address-group loss, so those counters are
+not added as independent losses. No observed findings with incomplete coverage
+does not establish race freedom. LDS entry/exit callbacks are not counted from
+the access-site facts, which do not carry those boundary mappings.
+
+A saved `result.json` can be summarized without recompiling or executing the
+application, including results that predate the compact static-site metadata:
+
+```bash
+python emulation/rocjitsu/tests/patch/consan/consan_prefill_report.py \
+  --result /path/to/toy-llama-run/result.json --output /path/to/report
+```
+
+Unavailable preparation or static-site counts in older results are reported as
+unknown, rather than zero. This command formats saved analyzer output; it does
+not run the analyzer again or create new LDS observations.
+
 The test uses the checkout's own build and pinned ROCm SDK, Python 3.12, and a
 separate environment with IREE compiler/runtime `3.13.0rc20261006`, NumPy, and
 pytest. The exact wheel pins and hashes are in the
@@ -1002,6 +1092,8 @@ then `--case trace --fixture /new/private/fixture` and
 budget arguments. Setup publishes `fixture.json` only after compilation and the
 baseline pass. Trace and LDS keep separate `commands.json`, captures, prepared
 artifacts, replay results, and failure diagnostics under `trace/` and `lds/`.
+The automatic all-image artifacts and capture index stay under `lds/all-images/`;
+their replay shares the LDS case's budget and does not run as part of trace.
 Neither case silently treats missing or failed setup as a passing test.
 
 ## Extending ConSan

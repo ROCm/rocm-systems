@@ -32,6 +32,8 @@ struct ExecutionTraceResult {
   std::array<uint8_t, 16> run_identity{};
   ImageIdentity original;
   Digest selection_profile{};
+  uint32_t target = 0;
+  uint32_t wave_size = 0;
   std::vector<ExecutionTraceEntry> entries;
   std::vector<ExecutionTraceExecution> executions;
   uint64_t expected_rows = 0;

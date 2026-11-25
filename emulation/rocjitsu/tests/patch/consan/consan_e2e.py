@@ -117,7 +117,7 @@ class AnalysisDriver(Driver):
         # The dynamic loader's own trace records the analyzer's actual modules
         # without linking a runtime or adding a live-registry input to the tool.
         environment = self.environment | {'LD_DEBUG': 'files'}
-        analysis_command = [self.args.analyze, capture]
+        analysis_command = [self.args.analyze, capture, '--fail-on-findings']
         if case.startswith('grouped_'):
             analysis_command += ['--examples', 64]
         first = self.run('analyze', analysis_command, status, environment)
@@ -483,7 +483,7 @@ class AnalysisDriver(Driver):
         hidden = json.loads(
             self.run(
                 'analyze-no-examples',
-                [self.args.analyze, capture, '--examples', 0],
+                [self.args.analyze, capture, '--examples', 0, '--fail-on-findings'],
                 status,
             )
         )
@@ -492,8 +492,8 @@ class AnalysisDriver(Driver):
             result == hidden
         ), 'example limit changed full semantic counts or coverage'
         self.run(
-            'analysis-reject-removed-option',
-            [self.args.analyze, capture, '--require-complete'],
+            'analysis-reject-unknown-option',
+            [self.args.analyze, capture, '--unknown-analysis-option'],
             2,
         )
         if case == 'disjoint':

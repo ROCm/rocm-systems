@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
+#include <initializer_list>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -287,11 +288,19 @@ TEST_F(ConSanExecutionTraceAnalysis, FreshCliSeparatesTransportGapsAndInvalidCon
   const std::filesystem::path directory = temporary.data();
   const std::filesystem::path capture_path = directory / "capture.bin";
   const std::filesystem::path output_path = directory / "analysis.json";
-  const auto execute = [&](int expected_status) {
+  std::string rendered;
+  const auto execute = [&](int expected_status, std::initializer_list<const char *> options = {}) {
     std::ofstream file(capture_path, std::ios::binary);
     file.write(reinterpret_cast<const char *>(encoded_.data()), encoded_.size());
     file.close();
     ASSERT_TRUE(file);
+    std::vector<std::string> command = {CONSAN_ANALYZER_FIXTURE, "capture.bin", "--examples", "0"};
+    for (const char *option : options)
+      command.emplace_back(option);
+    std::vector<char *> arguments;
+    for (std::string &argument : command)
+      arguments.push_back(argument.data());
+    arguments.push_back(nullptr);
     const pid_t child = ::fork();
     ASSERT_GE(child, 0);
     if (child == 0) {
@@ -299,31 +308,53 @@ TEST_F(ConSanExecutionTraceAnalysis, FreshCliSeparatesTransportGapsAndInvalidCon
       if (output < 0 || ::dup2(output, STDOUT_FILENO) < 0 || ::chdir(directory.c_str()) != 0)
         std::_Exit(90);
       ::close(output);
-      ::execl(CONSAN_ANALYZER_FIXTURE, CONSAN_ANALYZER_FIXTURE, "capture.bin", "--examples", "0",
-              nullptr);
+      ::execv(arguments.front(), arguments.data());
       std::_Exit(91);
     }
     int status = 0;
     ASSERT_EQ(::waitpid(child, &status, 0), child);
     ASSERT_TRUE(WIFEXITED(status));
     EXPECT_EQ(WEXITSTATUS(status), expected_status);
+    std::ifstream output(output_path);
+    rendered.assign(std::istreambuf_iterator<char>(output), std::istreambuf_iterator<char>());
+  };
+  const auto check_policies = [&](bool complete) {
+    execute(0);
+    const std::string baseline = rendered;
+    EXPECT_NE(baseline.find(std::string("\"transport_complete\":") + (complete ? "true" : "false")),
+              std::string::npos);
+    EXPECT_EQ(baseline.find("verdict"), std::string::npos);
+    execute(0, {"--fail-on-findings"});
+    EXPECT_EQ(rendered, baseline);
+    execute(complete ? 0 : 1, {"--require-complete"});
+    EXPECT_EQ(rendered, baseline);
+    execute(complete ? 0 : 1, {"--fail-on-findings", "--require-complete"});
+    EXPECT_EQ(rendered, baseline);
   };
   ASSERT_TRUE(roundtrip(make_capture()).succeeded());
-  execute(0);
-  std::ifstream output(output_path);
-  const std::string rendered{std::istreambuf_iterator<char>(output),
-                             std::istreambuf_iterator<char>()};
-  EXPECT_NE(rendered.find("\"transport_complete\":true"), std::string::npos);
-  EXPECT_EQ(rendered.find("verdict"), std::string::npos);
+  check_policies(true);
   Capture gap = make_capture();
   wire::write_u32(gap.executions[0].report, kReportHeaderBytes + wire::kTraceRowExits, 0);
   ASSERT_TRUE(roundtrip(gap).succeeded());
-  execute(1);
+  check_policies(false);
+  Capture empty = make_capture();
+  empty.executions.clear();
+  ASSERT_TRUE(roundtrip(empty).succeeded());
+  check_policies(false);
   encoded_.pop_back();
   execute(2);
+  EXPECT_TRUE(rendered.empty());
+  execute(2, {"--fail-on-findings", "--require-complete"});
+  EXPECT_TRUE(rendered.empty());
   ASSERT_TRUE(roundtrip(make_capture()).succeeded());
   encoded_.back() ^= 1;
   execute(2);
+  EXPECT_TRUE(rendered.empty());
+  execute(2, {"--require-complete"});
+  EXPECT_TRUE(rendered.empty());
+  ASSERT_TRUE(roundtrip(make_capture()).succeeded());
+  execute(2, {"--unknown-option"});
+  EXPECT_TRUE(rendered.empty());
   std::filesystem::remove_all(directory);
 }
 #endif
