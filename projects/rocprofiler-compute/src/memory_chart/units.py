@@ -55,10 +55,10 @@ def display_unit(unit: Optional[str]) -> Optional[DisplayUnit]:
     if unit in _DISPLAY_UNITS:
         return _DISPLAY_UNITS[unit]
     match = _COUNT_UNIT.match(unit) if unit else None
-    if match is None:
+    # A count unit without a label has no rule, so the unit tests name it
+    if match is None or match.group(1) not in _COUNT_SHORT:
         return None
-    counted = match.group(1)
-    return DisplayUnit("count", " " + _COUNT_SHORT.get(counted, counted.lower()))
+    return DisplayUnit("count", " " + _COUNT_SHORT[match.group(1)])
 
 
 def panel_units(panel_config: dict[str, Any]) -> dict[str, str]:

@@ -37,7 +37,8 @@ def test_missing_value_shows_na(unit, value):
     ("unit", "has_rule"),
     [
         ("Percent", True),
-        ("(Wavefronts + $normUnit)", True),
+        ("(Requests + $normUnit)", True),
+        ("(Wavefronts + $normUnit)", False),
         ("Furlongs", False),
         (None, False),
     ],
