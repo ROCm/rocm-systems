@@ -496,10 +496,14 @@ TEST_F(ConSanInputFixture, BarrierAndExcludedAccessCannotBecomeNoSyncFacts) {
   EXPECT_TRUE(inspect(load("barrier")).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedSynchronization);
   EXPECT_TRUE(error_.text_offset.has_value());
-  const std::vector<uint8_t> excluded =
-      test::read_fixture(test::target_fixture_path({"gfx1100", 32}, "width-excluded-b8"));
-  ASSERT_FALSE(excluded.empty());
-  EXPECT_TRUE(inspect(excluded).failed());
+  const FailureOr<InputProgram> ordinary = inspect(image_);
+  ASSERT_TRUE(ordinary.succeeded());
+  ASSERT_FALSE(ordinary.value().accesses.empty());
+  const size_t offset = text_offset_ + ordinary.value().accesses.front().original_offset;
+  const std::array<uint32_t, 2> gds = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.gds = 1});
+  ASSERT_LE(offset + sizeof(gds), image_.size());
+  std::memcpy(image_.data() + offset, gds.data(), sizeof(gds));
+  EXPECT_TRUE(inspect(image_).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedAccess);
   EXPECT_TRUE(error_.text_offset.has_value());
 }

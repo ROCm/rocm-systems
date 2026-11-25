@@ -63,7 +63,7 @@ protected:
               {wire::kRecordAnalysis, uint32_t(facts.analysis)},
               {wire::kRecordKind, uint32_t(facts.record)},
               {wire::kRecordSite, site},
-              {wire::kRecordRange, facts.range_id},
+              {wire::kRecordRange, 0},
               {wire::kRecordSequence, sequence},
               {wire::kRecordLdsOffset, offset},
               {wire::kRecordWidth, facts.width},
@@ -78,6 +78,24 @@ protected:
     wire::write_u64(report, base + wire::kRecordGuestMask, mask);
     const uint32_t final = *wire::read_u32(report, row(wave) + wire::kRowFinalSequence);
     wire::write_u32(report, row(wave) + wire::kRowFinalSequence, std::max(final, sequence));
+  }
+
+  void set_transpose_site(uint32_t target) {
+    Manifest &facts = test::manifest(capture_.header);
+    facts.target = target;
+    facts.wave_size = target == 950 ? 64 : 32;
+    facts.sites[1].width = 8;
+    facts.sites[1].lds_ranges.shape = LdsRangeShape::Transpose8;
+    capture_.executions.clear();
+  }
+
+  void transpose_access(uint64_t mask, uint64_t anchor_exec, uint32_t group = 0,
+                        uint32_t offset = 0) {
+    access(0, 1, 1, offset, mask, group);
+    std::vector<uint8_t> &report = capture_.executions.front().report;
+    wire::write_u32(report, record(0, 1, group) + wire::kRecordFlags,
+                    wire::kExactTransposeRequestMask);
+    wire::write_u64(report, record(0, 1, group) + wire::kRecordAnchorExec, anchor_exec);
   }
 
   FailureOr<std::vector<uint8_t>> encode() {
@@ -524,9 +542,195 @@ TEST_F(ConSanAnalysis, UnequalStartMixedWidthRangesOverlapAndAdjacentRangesDoNot
   }
 }
 
+TEST_F(ConSanAnalysis, ThreeDwordAccessRequiresNativeAlignmentAndCoversOnlyTwelveBytes) {
+  test::manifest(capture_.header).sites[0].width = 12;
+  for (uint32_t start : {12u, 16u}) {
+    for (uint32_t peer : {24u, 28u, 32u}) {
+      SCOPED_TRACE(::testing::Message() << start << ", " << peer);
+      capture_.executions.clear();
+      append_execution();
+      access(0, 0, 1, start);
+      access(1, 1, 1, peer);
+      const FailureOr<LdsRaceResult> result = analyze();
+      ASSERT_TRUE(result.succeeded()) << error_.message();
+      EXPECT_EQ(result.value().coverage_complete, start == 16);
+      EXPECT_EQ(result.value().executions[0].valid_observations, start == 16 ? 2u : 1u);
+      EXPECT_EQ(result.value().cross_wave_pairs, start == 16 && peer == 24 ? 1u : 0u);
+    }
+  }
+}
+
+TEST_F(ConSanAnalysis, TransposeFactsRequireTheTargetReadWidthAndNoEncodedDualOffsets) {
+  for (uint32_t target : {950u, 1250u}) {
+    set_transpose_site(target);
+    Manifest &facts = test::manifest(capture_.header);
+    SiteFacts &site = facts.sites[1];
+    for (const auto &[shape, width] : std::array<std::pair<LdsRangeShape, uint32_t>, 4>{
+             {{LdsRangeShape::Transpose4, 8},
+              {LdsRangeShape::Transpose6, 12},
+              {LdsRangeShape::Transpose8, 8},
+              {LdsRangeShape::Transpose16, target == 950 ? 8u : 16u}}}) {
+      site.lds_ranges = {.shape = shape};
+      site.width = width;
+      const auto bytes = encode_manifest(facts);
+      ASSERT_TRUE(bytes.succeeded());
+      const auto decoded = decode_manifest(bytes.value());
+      ASSERT_TRUE(decoded.succeeded());
+      EXPECT_EQ(decoded.value().sites[1], site);
+      site.width = 4;
+      EXPECT_TRUE(validate_manifest(facts).failed());
+    }
+    site.width = target == 950 ? 8 : 16;
+    site.lds_ranges.offset0 = 1;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+    site.lds_ranges.offset0 = 0;
+    site.lds_ranges.offset1 = 1;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+    site.lds_ranges.offset1 = 0;
+    site.access = AccessKind::Write;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+    site.access = AccessKind::Read;
+    facts.target = target == 950 ? 942 : 1201;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+  }
+}
+
+TEST_F(ConSanAnalysis, PhysicalTransposeLanesAndGuestExecRemainDistinctInAShortWave) {
+  set_transpose_site(1250);
+  append_execution({{4, 1, 1}, {4, 1, 1}});
+  transpose_access(UINT32_MAX, 0);
+  const auto complete = analyze();
+  ASSERT_TRUE(complete.succeeded()) << error_.message();
+  EXPECT_TRUE(complete.value().coverage_complete);
+  EXPECT_EQ(complete.value().executions[0].valid_observations, 1u);
+  EXPECT_NE(render_analysis(complete.value()).find("transpose_no_sync"), std::string::npos);
+  auto &report = capture_.executions[0].report;
+  for (const auto &[field, value] :
+       std::array<std::pair<uint32_t, uint64_t>, 5>{{{wire::kRecordGuestMask, 15},
+                                                     {wire::kRecordGuestMask, uint64_t{1} << 32},
+                                                     {wire::kRecordAnchorExec, uint64_t{1} << 32},
+                                                     {wire::kRecordFlags, wire::kExactGuestMask},
+                                                     {wire::kRecordAnchorExec + 8, 1}}}) {
+    SCOPED_TRACE(::testing::Message() << field << ", " << value);
+    const auto saved = report;
+    wire::write_u64(report, record(0, 1) + field, value);
+    const auto malformed = analyze();
+    ASSERT_TRUE(malformed.succeeded()) << error_.message();
+    EXPECT_FALSE(malformed.value().coverage_complete);
+    EXPECT_EQ(malformed.value().executions[0].rejected_records, 1u);
+    EXPECT_EQ(malformed.value().executions[0].valid_observations, 0u);
+    report = saved;
+  }
+  access(0, 0, 1, 0, 16);
+  const auto ordinary = analyze();
+  ASSERT_TRUE(ordinary.succeeded());
+  EXPECT_FALSE(ordinary.value().coverage_complete);
+  EXPECT_EQ(ordinary.value().executions[0].rejected_records, 1u);
+}
+
+TEST_F(ConSanAnalysis, DisagreeingTransposeExecAcrossSourceGroupsCannotProduceAWitness) {
+  set_transpose_site(1250);
+  append_execution();
+  access(1, 0, 1);
+  transpose_access(1, 0);
+  transpose_access(UINT32_MAX - 1, 1, 1, 8);
+  const auto malformed = analyze();
+  ASSERT_TRUE(malformed.succeeded()) << error_.message();
+  EXPECT_EQ(malformed.value().executions[0].rejected_records, 2u);
+  EXPECT_EQ(malformed.value().executions[0].valid_observations, 1u);
+  EXPECT_EQ(malformed.value().cross_wave_pairs, 0u);
+}
+
+TEST_F(ConSanAnalysis, Cdna4TransposeRequiresFullExecAndOrdinarySlotsKeepReservedWordsZero) {
+  set_transpose_site(950);
+  append_execution();
+  transpose_access(UINT64_MAX, UINT64_MAX);
+  const auto complete = analyze();
+  ASSERT_TRUE(complete.succeeded());
+  EXPECT_TRUE(complete.value().coverage_complete);
+  auto &report = capture_.executions[0].report;
+  for (const uint64_t bad : std::array<uint64_t, 2>{0, 1}) {
+    wire::write_u64(report, record(0, 1) + wire::kRecordAnchorExec, bad);
+    const auto malformed = analyze();
+    ASSERT_TRUE(malformed.succeeded());
+    EXPECT_EQ(malformed.value().executions[0].rejected_records, 1u);
+    EXPECT_EQ(malformed.value().executions[0].valid_observations, 0u);
+  }
+  test::manifest(capture_.header).sites[1].lds_ranges = {};
+  access(0, 1, 1, 0, 1);
+  const auto reserved = analyze();
+  ASSERT_TRUE(reserved.succeeded());
+  EXPECT_EQ(reserved.value().executions[0].rejected_records, 1u);
+}
+
+TEST_F(ConSanAnalysis, DualBaseGroupsRetainTheSharedStoreOccurrenceAndBothOrdinals) {
+  test::manifest(capture_.header).sites[0].lds_ranges = {LdsRangeShape::Dual, 3, 5};
+  access(0, 0, 1, 0, 1);
+  access(0, 0, 1, 8, 2, 1);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const LdsRaceExecutionResult &execution = result.value().executions.front();
+  EXPECT_TRUE(execution.coverage_complete);
+  EXPECT_EQ(execution.valid_observations, 4u);
+  EXPECT_EQ(execution.collision_groups, 1u);
+  EXPECT_EQ(execution.collision_lane_pairs, 1u);
+  ASSERT_EQ(execution.collision_examples.size(), 1u);
+  const LdsRaceFinding &finding = execution.collision_examples.front();
+  EXPECT_EQ(finding.first.offset, 20u);
+  EXPECT_EQ(finding.second.offset, 20u);
+  EXPECT_EQ(finding.first.range_id, 1u);
+  EXPECT_EQ(finding.second.range_id, 0u);
+  EXPECT_EQ(finding.first.mask, 1u);
+  EXPECT_EQ(finding.second.mask, 2u);
+}
+
+TEST_F(ConSanAnalysis, InvalidSecondRangeRetainsTheFirstValidConflict) {
+  test::manifest(capture_.header).sites[0].lds_ranges = {LdsRangeShape::DualStride64, 0, 255};
+  access(0, 0, 1, 16);
+  access(1, 1, 1, 16);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  const LdsRaceExecutionResult &execution = result.value().executions.front();
+  EXPECT_FALSE(execution.coverage_complete);
+  EXPECT_EQ(execution.rejected_records, 1u);
+  EXPECT_EQ(execution.valid_observations, 2u);
+  EXPECT_EQ(execution.cross_wave_pairs, 1u);
+}
+
+TEST_F(ConSanAnalysis, CoincidentOffsetsFollowTargetRequestSemantics) {
+  Manifest &manifest = test::manifest(capture_.header);
+  for (uint32_t target : {950u, 1100u}) {
+    manifest.target = target;
+    manifest.wave_size = 64;
+    manifest.sites[0].lds_ranges = {LdsRangeShape::Dual, 3, 3};
+    capture_.executions.clear();
+    append_execution({{128, 1, 1}, {128, 1, 1}});
+    access(0, 0, 1, 0);
+    access(1, 1, 1, 12);
+    const FailureOr<LdsRaceResult> result = analyze();
+    ASSERT_TRUE(result.succeeded()) << error_.message();
+    EXPECT_EQ(result.value().cross_wave_pairs, target == 950 ? 1u : 2u);
+    EXPECT_EQ(result.value().collision_groups, 0u);
+  }
+}
+
+TEST_F(ConSanAnalysis, EarlierThreeDwordProfileCannotAdvertiseByteSites) {
+  // The selection identity emitted before whole-register byte loads were admitted.
+  Manifest &manifest = test::manifest(capture_.header);
+  manifest.options = {
+      0x0f, 0xd8, 0x00, 0xf0, 0xff, 0xf8, 0x77, 0xb0, 0xf0, 0x51, 0x04,
+      0x56, 0xfe, 0x42, 0x8d, 0x4c, 0xab, 0x4e, 0xe3, 0x50, 0x3b, 0xb6,
+      0x11, 0xe3, 0x11, 0xda, 0xd5, 0x94, 0x33, 0x0b, 0xd5, 0xf5,
+  };
+  manifest.sites[0].width = 12;
+  EXPECT_TRUE(validate_manifest(manifest).succeeded());
+  manifest.sites[0].width = 1;
+  EXPECT_TRUE(validate_manifest(manifest).failed());
+}
+
 TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
   test::manifest(capture_.header).target = 1250;
-  for (const uint32_t width : {2u, 8u, 16u}) {
+  for (const uint32_t width : {2u, 8u, 12u, 16u}) {
     test::manifest(capture_.header).sites[0].width = width;
     for (const uint32_t offset : {1u, 128u - width + 1, UINT32_MAX - 7}) {
       capture_.executions.clear();
@@ -542,7 +746,7 @@ TEST_F(ConSanAnalysis, DecoderControlWideBoundsCannotWrapOrSilentlyBecomeB32) {
       EXPECT_FALSE(result.value().coverage_complete);
     }
   }
-  for (const uint32_t width : {0u, 1u, 3u, 12u, 32u}) {
+  for (const uint32_t width : {0u, 3u, 5u, 10u, 32u}) {
     test::manifest(capture_.header).sites[0].width = width;
     EXPECT_TRUE(validate_manifest(test::manifest(capture_.header)).failed());
   }
@@ -2114,6 +2318,31 @@ TEST_F(ConSanAnalysis, LargeTruncatedLoopCountsKeepDistinctLatePhasesAggregated)
     EXPECT_EQ(execution.unresolved_examples.size(), examples);
     EXPECT_FALSE(execution.coverage_complete);
   }
+}
+
+TEST_F(ConSanAnalysis, SecondSelectedEntryContributesDualAndTransposeMetadata) {
+  capture_.header = test::multi_entry_header();
+  capture_.executions.clear();
+  Manifest &second = *capture_.header.image.entries[1].selected;
+  test::manifest(capture_.header).target = 1250;
+  second.target = 1250;
+  second.sites[1].width = 8;
+  second.sites[1].lds_ranges.shape = LdsRangeShape::Transpose8;
+  second.sites[0].lds_ranges = {LdsRangeShape::Dual, 3, 5};
+  CapturedExecution execution = test::execution(second, 1);
+  for (uint32_t wave = 0; wave < 2; ++wave) {
+    wire::write_u32(execution.report, row(wave) + wire::kRowStatus,
+                    wire::kRowEntered | wire::kRowExited);
+  }
+  capture_.executions.push_back(std::move(execution));
+  access(0, 0, 1);
+  const FailureOr<LdsRaceResult> result = analyze();
+  ASSERT_TRUE(result.succeeded()) << error_.message();
+  EXPECT_TRUE(result.value().has_dual_ranges);
+  EXPECT_TRUE(result.value().has_transpose);
+  ASSERT_EQ(result.value().executions.size(), 1u);
+  EXPECT_EQ(result.value().executions.front().entry_key, second.entry.original_descriptor_offset);
+  EXPECT_EQ(result.value().executions.front().valid_observations, 2u);
 }
 
 TEST_F(ConSanAnalysis, SameImageEntriesUseTheirOwnFactsAndRepeatAttribution) {
