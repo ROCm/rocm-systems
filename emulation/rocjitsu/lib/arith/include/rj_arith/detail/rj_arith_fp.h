@@ -1384,6 +1384,9 @@ int rj_arith_v_fma_mixhi_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 // canonicalization/output flushing. This evidence is specific to gfx1201.
 // Mode 3 returns UNSUPPORTED_FP_STATUS. Modes 0–2 leave FP status unchanged. Binary F64 and
 // packed forms reject DPP; the other forms route A with DPP8/DPP16.
+// Unpacked legacy v_min/v_max F16/F32, unsuffixed or gfx942, accept ALU_SDWA:
+// scale the rounded selection with inherited guest controls, then clamp. Byte
+// placement is separate, and SDWA cannot be combined with DPP.
 int rj_arith_v_min_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                            uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                            uint32_t *trapsts);

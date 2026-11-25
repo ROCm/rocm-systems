@@ -237,13 +237,6 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         'uint32_t',
         '[](auto a, auto b) { return util::stdx::min(a & 0xFFFFu, b & 0xFFFFu); }',
     ),
-    # Legacy selection shares the raw-bit operation with scalar execution.
-    'v_max_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'legacy_max')),
-    'v_min_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'legacy_min')),
-    # IEEE-2019 *_NUM forms use the same selection rules as the scalar path.
-    # float_minmax.simd_probe routes the other IEEE-2019 forms, VOP3 included.
-    'v_max_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'max_num')),
-    'v_min_num_f16_vop2': ('uint32_t', float_minmax.simd_functor('f16', 'min_num')),
     # v_cvt_pkrtz_f16_f32 (both spellings): two F32 sources rounded toward
     # zero into packed halves by the shared/conversion.h stages.
     'v_cvt_pkrtz_f16_f32_vop2': ('uint32_t', conversion.STAGES),
@@ -1509,7 +1502,7 @@ def _simd_probe_line(
             f'{str(true16_vop3).lower()}, amdgpu::fp_mode::Arithmetic::{operation}, '
             f'amdgpu::NegatedSource::{negated_source});'
         )
-    minmax_probe = float_minmax.simd_probe(template_name, true16_vop3)
+    minmax_probe = float_minmax.simd_probe(template_name)
     if minmax_probe is not None:
         return minmax_probe
     ldexp_probe = float_ldexp.simd_probe(template_name, true16_vop3)

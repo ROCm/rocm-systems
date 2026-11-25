@@ -4233,6 +4233,27 @@ def test_generated_f16_sdwa_rounds_before_omod(
         assert 'execute_half_unary_sdwa' in body
         assert 'rj_arith_v_fract_f16_w32_gfx908' in body
         return
+    if instruction in {'V_MIN_F16', 'V_MAX_F16'}:
+        # Both generation modes keep migrated arithmetic out of shared executors.
+        if route == 'shared':
+            shared = (output / 'shared' / 'execute_shared.h').read_text()
+            assert f'execute_{instruction.lower()}_{encoding}' not in shared
+        source = (output / 'rdna2/vop2_exec.cpp').read_text()
+        class_name = ''.join(word.title() for word in instruction.split('_'))
+        body = _generated_function_body(
+            source, f'void {class_name}Vop2::execute_modifier_impl('
+        )
+        assert 'execute_sdwa_float_binary16' in body
+        helper = (
+            Path(__file__).resolve().parents[3]
+            / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h'
+        ).read_text()
+        store = _generated_function_body(
+            helper, 'inline void execute_sdwa_float_binary16('
+        )
+        assert 'sdwa::write_lane<sdwa::ResultFormat::NONE>' in store
+        assert 'RJ_ARITH_ALU_SDWA | sdwa_float_modifiers(inst)' in store
+        return
     if instruction in ('V_ADD_F16', 'V_LDEXP_F16'):
         arch = 'rdna1' if route == 'shared' else 'rdna2'
         source = (output / arch / f'{encoding}_exec.cpp').read_text()

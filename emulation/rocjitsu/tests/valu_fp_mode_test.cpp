@@ -1878,16 +1878,13 @@ std::vector<ArithmeticCase> minimum_maximum_cases() {
            {{0, 1u}, {1, 0u}, {2, 1u}}, {{6, 0u}}, 0x00u),
       make("Maximum3F16KeepsNegativeNan", RDNA4, {0xd6300006u, 0x040a0300u, 0u},
            {{0, 0xfd2du}, {1, 0x21c8u}, {2, 0xb723u}, {6, 0u}}, {{6, 0xff2du}}, 0xf0u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           SimdPathExpectation{}),
       make("Minimum3F16FlushesInput", RDNA4, {0xd62f0006u, 0x040a0300u, 0u},
-           {{0, 0x83ffu}, {1, 0u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0x00u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           {{0, 0x83ffu}, {1, 0u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0x00u, SimdPathExpectation{}),
       make("MaximumMinimumF16QuietsSrc2", RDNA4, {0xd66f0006u, 0x040a0300u, 0u},
-           {{0, 0u}, {1, 0u}, {2, 0x7c01u}, {6, 0u}}, {{6, 0x7e01u}}, 0xf0u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           {{0, 0u}, {1, 0u}, {2, 0x7c01u}, {6, 0u}}, {{6, 0x7e01u}}, 0xf0u, SimdPathExpectation{}),
       make("MinimumMaximumF16FlushesSrc2", RDNA4, {0xd66e0006u, 0x040a0300u, 0u},
-           {{0, 0u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           {{0, 0u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u, SimdPathExpectation{}),
   };
 }
 
@@ -1929,19 +1926,18 @@ std::vector<ArithmeticCase> min_max_num_cases() {
             {{0, 0x80000000u}, {1, 0x80000000u}, {2, 1u}}, {{6, 0u}}, 0x00u),
       rdna4("Min3NumF16OrdersSignedZero", {0xd62b0006u, 0x040a0300u, 0u},
             {{0, 0u}, {1, 0x8000u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0xf0u,
-            expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+            SimdPathExpectation{}),
       rdna4("Med3NumF32NanSelectsMin3", MED3_NUM_F32, {{0, 0x7fc00000u}, {1, 1u}, {2, 0u}},
             {{6, 0u}}, 0xf0u),
       rdna4("Med3NumF32NegativeZeroMedian", MED3_NUM_F32,
             {{0, 0x80000000u}, {1, 0u}, {2, 0x80000000u}}, {{6, 0x80000000u}}, 0xf0u),
       rdna4("Med3NumF16FlushesInput", {0xd6320006u, 0x040a0300u, 0u},
-            {{0, 1u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u,
-            expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+            {{0, 1u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u, SimdPathExpectation{}),
       rdna4("MinMaxNumF32IgnoresInnerNanPair", MINMAX_NUM_F32,
             {{0, 0x7f800001u}, {1, 0x7fc00000u}, {2, 0x3f800000u}}, {{6, 0x3f800000u}}, 0xf0u),
       rdna4("MaxMinNumF16OrdersSignedZero", {0xd66b0006u, 0x040a0300u, 0u},
             {{0, 0x8000u}, {1, 0u}, {2, 0x3c00u}, {6, 0u}}, {{6, 0u}}, 0xf0u,
-            expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+            SimdPathExpectation{}),
       // v_dual_max_num_f32 v6, v0, v1 :: v_dual_mov_b32 v7, v2
       // Expected from V_MAX_NUM_F32 rules; VOPD was not captured on hardware.
       rdna4("DualMaxNumF32OrdersSignedZero", {0xca900300u, 0x06060102u, 0u},
@@ -2051,10 +2047,8 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
       {"MinimumF64", vop3(rdna4::kVMinimumF64Vop3, 64), 64, true, {}},
       {"MaximumF64", vop3(rdna4::kVMaximumF64Vop3, 64), 64, false, {}},
       // Ternary forms use separate SIMD helpers from the binary forms.
-      {"Min3NumF16", vop3(rdna4::kVMin3NumF16Vop3, 16), 16, true,
-       expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)},
-      {"Max3NumF16", vop3(rdna4::kVMax3NumF16Vop3, 16), 16, false,
-       expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)},
+      {"Min3NumF16", vop3(rdna4::kVMin3NumF16Vop3, 16), 16, true, SimdPathExpectation{}},
+      {"Max3NumF16", vop3(rdna4::kVMax3NumF16Vop3, 16), 16, false, SimdPathExpectation{}},
       {"Min3NumF32", vop3(rdna4::kVMin3NumF32Vop3, 32), 32, true, {}},
       {"Max3NumF32", vop3(rdna4::kVMax3NumF32Vop3, 32), 32, false, {}},
   }};
@@ -2107,16 +2101,12 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
           }
           expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(result)}};
         }
-        cases.push_back(
-            {std::string(form.name) + "AllSources" + (negative ? "Negative" : "Positive") + "Mode" +
-                 std::to_string(mode.mode),
-             rocjitsu::IsaFamily::Rdna4, vop3(form.op, form.width), std::move(sources),
-             std::move(expected), mode.mode,
-             form.width == 16
-                 ? expect_simd_path(form.sources == 2
-                                        ? amdgpu::SimdFastPath::VOP3_BINARY_FP16
-                                        : amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)
-                 : SimdPathExpectation{}});
+        cases.push_back({std::string(form.name) + "AllSources" +
+                             (negative ? "Negative" : "Positive") + "Mode" +
+                             std::to_string(mode.mode),
+                         rocjitsu::IsaFamily::Rdna4, vop3(form.op, form.width), std::move(sources),
+                         std::move(expected), mode.mode,
+                         form.width == 16 ? SimdPathExpectation{} : SimdPathExpectation{}});
       }
     }
   }
@@ -2275,18 +2265,13 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
                    {2, high | uint32_t(sample.value)}};
         expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(sample.expected)}};
       }
-      cases.push_back(
-          {std::string(form.name) + sample.name,
-           rocjitsu::IsaFamily::Rdna4,
-           {words[0], words[1], 0u},
-           std::move(sources),
-           std::move(expected),
-           sample.mode,
-           form.width == 16
-               ? expect_simd_path(form.sources == 2
-                                      ? amdgpu::SimdFastPath::VOP3_BINARY_FP16
-                                      : amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)
-               : SimdPathExpectation{}});
+      cases.push_back({std::string(form.name) + sample.name,
+                       rocjitsu::IsaFamily::Rdna4,
+                       {words[0], words[1], 0u},
+                       std::move(sources),
+                       std::move(expected),
+                       sample.mode,
+                       form.width == 16 ? SimdPathExpectation{} : SimdPathExpectation{}});
     }
   }
   // Emulator regression expectations, not additional hardware captures.
@@ -2315,7 +2300,7 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
                    {{0, 0x40007e00u}, {1, 0x7c013800u}, {2, 0x3c007e00u}},
                    {{6, 0xbc00beefu}},
                    0xf0u,
-                   expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)});
+                   SimdPathExpectation{}});
   return cases;
 }
 
