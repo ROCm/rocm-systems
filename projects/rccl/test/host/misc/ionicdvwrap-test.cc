@@ -52,6 +52,18 @@ const WrapCase kCases[] = {
        };
      },
      [] { return wrap_ionicdv_pd_set_udma_mask(kPd, 0x5); }},
+    {"pd_set_sqcmb",
+     [] {
+       ionicdvSymbols.ionicdv_internal_pd_set_sqcmb = [](ibv_pd* pd, bool enable, bool expdb, bool require) {
+         EXPECT_EQ(pd, kPd);
+         EXPECT_TRUE(enable);
+         EXPECT_FALSE(expdb);
+         EXPECT_TRUE(require);
+         ++g_calls;
+         return g_ret;
+       };
+     },
+     [] { return wrap_ionicdv_pd_set_sqcmb(kPd, true, false, true); }},
     {"qp_set_puec_plane_route",
      [] {
        ionicdvSymbols.ionicdv_internal_qp_set_puec_plane_route = [](ibv_qp* qp, uint8_t plane, ionic_dv_puec_route* r) {

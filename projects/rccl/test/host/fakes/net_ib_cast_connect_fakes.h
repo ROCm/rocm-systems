@@ -7,7 +7,7 @@
 // Seams for the src/transport/net_ib_cast/connect.cc symbols, for binaries that
 // do not compile connect.cc. Every hook fails loud by default except
 // IbCastByOrderRequested, which answers false (BY_ID, the default scheme).
-// IbCastReportMatchingScheme only counts its calls.
+// IbCastReportMatchingScheme and IbCastSetUseSqCmb only count their calls.
 
 #ifndef RCCL_TEST_HOST_NET_IB_CAST_CONNECT_FAKES_H_
 #define RCCL_TEST_HOST_NET_IB_CAST_CONNECT_FAKES_H_
@@ -47,6 +47,7 @@ extern std::function<ncclResult_t(struct ibv_context*, uint8_t, struct ibv_port_
     g_ibCastGidInfoQuery;
 extern std::function<void(void*, int)> g_ibCastSetTrafficClass;
 extern int g_ibCastReportMatchingSchemeCalls;
+extern int g_ibCastSetUseSqCmbCalls;
 // The P2P QP policy net.cc applies to an IB-cast connect handle. Defaults to fail-loud.
 extern std::function<ncclResult_t(void* /*handle*/, int /*isP2p*/)> g_rcclCastNetP2pPolicy;
 
