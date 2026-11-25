@@ -1445,6 +1445,17 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
+  //! Tracks host function callbacks that are armed but have not run yet
+  void IncrementPendingHostCallbacks() {
+    pending_host_callbacks_.fetch_add(1, std::memory_order_relaxed);
+  }
+  void DecrementPendingHostCallbacks() {
+    pending_host_callbacks_.fetch_sub(1, std::memory_order_release);
+  }
+  bool HasPendingHostCallbacks() const {
+    return pending_host_callbacks_.load(std::memory_order_acquire) != 0;
+  }
+
  private:
   //! Disable default copy constructor
   VirtualDevice& operator=(const VirtualDevice&);
@@ -1461,6 +1472,7 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   std::recursive_mutex execution_;  //!< Lock to serialise access to all device objects
   uint index_;              //!< The virtual device unique index
   mutable std::atomic<uint64_t> queued_async_handlers_ = 0;  //!< Outstanding HSA async handlers
+  std::atomic<uint32_t> pending_host_callbacks_ = 0;  //!< Armed hipLaunchHostFunc-style callbacks
 
   //! Creates buffer object from image
   amd::Memory* createBufferFromImage(

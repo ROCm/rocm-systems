@@ -3488,12 +3488,15 @@ class GraphHostNode : public GraphNode {
   static void Callback(cl_event event, cl_int command_exec_status, void* user_data) {
     hipHostNodeParams* NodeParams = reinterpret_cast<hipHostNodeParams*>(user_data);
     NodeParams->fn(NodeParams->userData);
+    as_amd(event)->command().queue()->vdev()->DecrementPendingHostCallbacks();
   }
 
   hipError_t EnqueueCommands(hip::Stream* stream) override {
     if (!commands_.empty()) {
       if (!commands_[0]->setCallback(CL_COMPLETE, GraphHostNode::Callback, &NodeParams_)) {
         ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "[hipGraph] Failed during setCallback");
+      } else {
+        stream->vdev()->IncrementPendingHostCallbacks();
       }
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_CODE,
               "EnqueueCommands: NodeParams_.fn=%p, NodeParams_.userData=%p", NodeParams_.fn,
