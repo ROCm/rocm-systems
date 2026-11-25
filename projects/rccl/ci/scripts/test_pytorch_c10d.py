@@ -47,12 +47,8 @@ log = logging.getLogger(__name__)
 
 PYTORCH_REPO = "https://github.com/pytorch/pytorch.git"
 
-# Since 2026-11-20 the legacy ProcessGroupNCCL is built only internally
-# (pytorch#205374, #205548). In OSS wheels ProcessGroupNCCL is an alias of
-# ProcessGroupNCCL2, and test_c10d_nccl.py keeps only five default-backend
-# tests. These are the OSS tests that still reach RCCL through the default
-# backend (AICOMRCCL-4001). Paths are under test/distributed; "file::Class"
-# runs one class of a file.
+# OSS c10d tests that still reach RCCL via the default nccl backend
+# (AICOMRCCL-4001); "file::Class" runs one class.
 SMOKE_TARGETS = (
     "test_c10d_nccl.py",
     "test_c10d_ops_nccl.py",
@@ -89,10 +85,8 @@ SMOKE_TESTS = [
     "test_reduce_op_premul_sum",
 ]
 
-# Fewest tests that must run (pass or fail) in each file in the all scope, so
-# a file upstream empties, renames or stops importing fails the job. Set a
-# little under the counts that ran on torch 20261123 (MI300X): 5, 30 (the two
-# float8 tests are skipped upstream), 18, 10, 15.
+# Fewest tests that must run (pass or fail) per file, so a file upstream
+# empties or breaks fails the all scope.
 ALL_MIN_RAN = {
     "test_c10d_nccl.py": 5,
     "test_c10d_ops_nccl.py": 28,
@@ -140,13 +134,15 @@ def ran(case: dict) -> bool:
     return case["outcome"] in ("passed", "failed")
 
 
-def missing_smoke_tests(smoke_tests: list[str], cases: list[dict]) -> list[str]:
-    """Smoke tests with no testcase of exactly that name that ran.
+def distinct_tests(cases: list[dict]) -> list[dict]:
+    """One testcase per test: pytest writes two for a test whose call fails
+    and whose teardown then errors."""
+    return list({(c.get("file", ""), c["classname"], c["name"]): c for c in cases}.values())
 
-    A count of collected tests is not enough: -k matches substrings, so extra
-    matches can hide a missing name, and a test that was skipped ("Previous
-    test failed", or a skip decided at collection) gives no coverage.
-    """
+
+def missing_smoke_tests(smoke_tests: list[str], cases: list[dict]) -> list[str]:
+    """Smoke tests with no testcase of exactly that name that ran; a skipped
+    test gives no coverage."""
     ran_names = {c["name"] for c in cases if ran(c)}
     return [t for t in smoke_tests if t not in ran_names]
 
@@ -162,9 +158,8 @@ def judge(test_scope: str, cases: list[dict], known_set: set[str],
           returncode: int) -> dict:
     """Turn the JUnit testcases of one run into a verdict."""
     errors: list[str] = []
-    # A test whose call fails and whose teardown then errors appears twice.
-    failed = list({(c["classname"], c["name"]): c
-                   for c in cases if c["outcome"] == "failed"}.values())
+    cases = distinct_tests(cases)
+    failed = [c for c in cases if c["outcome"] == "failed"]
     known_failed = [case_key(c) for c in failed if is_known(c, known_set)]
     unexpected_failed = [case_key(c) for c in failed if not is_known(c, known_set)]
 
@@ -188,8 +183,7 @@ def judge(test_scope: str, cases: list[dict], known_set: set[str],
         errors.append("pytest exited 1 but the JUnit XML records no failure")
 
     passed = [c for c in cases if c["outcome"] == "passed"]
-    now_passing = sorted(k for k in known_set
-                         if any(k in (c["name"], case_key(c)) for c in passed))
+    now_passing = sorted(k for k in known_set if any(is_known(c, {k}) for c in passed))
     return {
         "exit_code": 1 if errors else 0,
         "errors": errors,
@@ -318,10 +312,8 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
     if test_scope == "smoke":
         targets = SMOKE_TARGETS
         k_expr = " or ".join(SMOKE_TESTS)
-        # In MultiProcContinuousTest classes (test_c10d_ops_nccl.py) the main
-        # process waits DISTRIBUTED_TESTS_DEFAULT_TIMEOUT for its workers. If
-        # pytest-timeout fires first, the workers keep running the test and
-        # the next test receives its result, so keep this order.
+        # --timeout must exceed MultiProcContinuousTest's wait for its workers, or
+        # a hung test's result is reported under the next test.
         env["DISTRIBUTED_TESTS_DEFAULT_TIMEOUT"] = "120"
         timeout = "300"
         log.info("Running smoke tests (%d tests)", len(SMOKE_TESTS))
@@ -421,7 +413,7 @@ def run_tests(pytorch_src: Path, results_log: Path, test_scope: str = "smoke") -
     summary_line = ", ".join(parts) or "no tests ran"
 
     smoke = test_scope == "smoke"
-    scope_files = [target_file(t) for t in (SMOKE_TARGETS if smoke else ALL_TARGETS)]
+    scope_files = [target_file(t) for t in targets]
     summary = {
         "exit_code": verdict["exit_code"],
         "test_scope": test_scope,

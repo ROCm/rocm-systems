@@ -121,6 +121,18 @@ class AllVerdict(unittest.TestCase):
         v = tp.judge("all", cases, known, 1)
         self.assertEqual(v["exit_code"], 0, v["errors"])
 
+    def test_a_test_recorded_twice_counts_once(self):
+        # A call failure and its teardown error are two testcases; the second
+        # must not stand in for a test that did not run.
+        floor = tp.ALL_MIN_RAN["test_c10d_ops_nccl.py"]
+        cases = [c for c in all_cases() if ".test_c10d_ops_nccl." not in c["classname"]]
+        cases += [case(f"test_{i}") for i in range(floor - 2)]
+        cases += [case("test_flaky", "failed"), case("test_flaky", "failed")]
+        v = tp.judge("all", cases, {"test_flaky"}, 1)
+        self.assertEqual(v["exit_code"], 1)
+        self.assertTrue(any(e.startswith("test_c10d_ops_nccl.py:") for e in v["errors"]))
+        self.assertEqual(v["ran_per_file"]["test_c10d_ops_nccl.py"], floor - 1)
+
     def test_pytest_errors_fail_the_run(self):
         self.assertEqual(tp.judge("all", all_cases(), set(), 3)["exit_code"], 1)
         # Exit 1 with nothing recorded as failed: something went wrong outside a test.
@@ -160,12 +172,18 @@ class KnownFailures(unittest.TestCase):
 
 
 class JunitCases(unittest.TestCase):
-    # Shapes pytest writes with -o junit_family=xunit1, including the testcase
-    # for a file that fails to import under --continue-on-collection-errors.
+    # Shapes pytest writes with -o junit_family=xunit1: a pass, a call failure
+    # and its teardown error, a skip, and a file that fails to import.
     XML = """<?xml version="1.0"?>
-<testsuites><testsuite tests="3" failures="0" errors="1">
+<testsuites><testsuite tests="5" failures="1" errors="2" skipped="1">
   <testcase classname="test.distributed.test_c10d_ops_nccl.ProcessGroupNCCLOpTest"
             name="test_allreduce_ops" file="test/distributed/test_c10d_ops_nccl.py" time="2.0"/>
+  <testcase classname="test.distributed.test_c10d_ops_nccl.ProcessGroupNCCLOpTest"
+            name="test_broadcast_ops" file="test/distributed/test_c10d_ops_nccl.py" time="1.0">
+    <failure message="AssertionError: Tensor-likes are not equal!">...</failure></testcase>
+  <testcase classname="test.distributed.test_c10d_ops_nccl.ProcessGroupNCCLOpTest"
+            name="test_broadcast_ops" file="test/distributed/test_c10d_ops_nccl.py" time="1.0">
+    <error message="failed on teardown with &quot;TimeoutError&quot;">...</error></testcase>
   <testcase classname="test.distributed.test_c10d_ops_nccl.ProcessGroupNCCLOpTest"
             name="test_barrier" file="test/distributed/test_c10d_ops_nccl.py" time="0">
     <skipped message="Previous test failed, skipping"/></testcase>
@@ -182,9 +200,17 @@ class JunitCases(unittest.TestCase):
 
     def test_cases_carry_classname_file_outcome_and_message(self):
         r = self.parse()
-        self.assertEqual([c["outcome"] for c in r["cases"]], ["passed", "skipped", "failed"])
+        self.assertEqual([c["outcome"] for c in r["cases"]],
+                         ["passed", "failed", "failed", "skipped", "failed"])
         self.assertEqual(r["cases"][0]["file"], "test/distributed/test_c10d_ops_nccl.py")
-        self.assertEqual(r["cases"][1]["message"], "Previous test failed, skipping")
+        self.assertEqual(r["cases"][1]["message"], "AssertionError: Tensor-likes are not equal!")
+        self.assertEqual(r["cases"][3]["message"], "Previous test failed, skipping")
+
+    def test_a_call_failure_and_its_teardown_error_are_one_test(self):
+        v = tp.judge("all", self.parse()["cases"], set(), 1)
+        self.assertEqual(v["ran_per_file"]["test_c10d_ops_nccl.py"], 2)
+        failed = v["unexpected_failed"]
+        self.assertEqual(failed.count("ProcessGroupNCCLOpTest.test_broadcast_ops"), 1)
 
     def test_a_file_that_fails_to_import_fails_the_run(self):
         v = tp.judge("all", self.parse()["cases"], set(), 1)
