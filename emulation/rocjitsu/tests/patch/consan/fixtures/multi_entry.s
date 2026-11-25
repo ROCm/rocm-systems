@@ -30,6 +30,9 @@
 #ifndef MK_NATIVE_VGPRS
 #define MK_NATIVE_VGPRS 16
 #endif
+#ifndef MK_A_KERNARG_ALIGNMENT
+#define MK_A_KERNARG_ALIGNMENT 8
+#endif
 .amdgcn_target "amdgcn-amd-amdhsa--gfx1250"
 
 .macro wait_all
@@ -224,7 +227,7 @@ amdhsa.kernels:
   - .name: mk_a
     .symbol: mk_a.kd
     .kernarg_segment_size: 16
-    .kernarg_segment_align: 8
+    .kernarg_segment_align: MK_A_KERNARG_ALIGNMENT
     .group_segment_fixed_size: 8
     .private_segment_fixed_size: 0
     .sgpr_count: 16

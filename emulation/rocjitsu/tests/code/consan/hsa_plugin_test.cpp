@@ -60,10 +60,9 @@ protected:
     const char *root = std::getenv("CONSAN_TEST_ARTIFACT_ROOT");
     const std::filesystem::path parent = root ? root : std::filesystem::temp_directory_path();
     std::filesystem::create_directories(parent);
-    std::string pattern =
-        (parent / (std::string("fake-hsa-") +
-                   ::testing::UnitTest::GetInstance()->current_test_info()->name() + "-XXXXXX"))
-            .string();
+    std::string test_name = ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    std::ranges::replace(test_name, '/', '-');
+    std::string pattern = (parent / ("fake-hsa-" + test_name + "-XXXXXX")).string();
     std::vector<char> temporary(pattern.begin(), pattern.end());
     temporary.push_back(0);
     char *created = ::mkdtemp(temporary.data());
@@ -723,6 +722,99 @@ TEST_F(ConSanLegacyNativeShapeHsaPlugin, RetainsTheOriginalRequiredShapeAndNativ
   EXPECT_EQ(statistics_().native_completed, 1u);
   EXPECT_EQ(finish_(), 0);
 }
+#endif
+
+#if defined(CONSAN_ALIGNMENT_ORIGINAL_FIXTURE) &&                                                  \
+    defined(CONSAN_SELECTED_ALIGNMENT_ARTIFACT_FIXTURE) &&                                         \
+    defined(CONSAN_NATIVE_ALIGNMENT_ARTIFACT_FIXTURE)
+class ConSanKernargAlignmentHsaPlugin : public ConSanHsaPlugin,
+                                        public ::testing::WithParamInterface<bool> {
+protected:
+  const char *original_fixture() const override { return CONSAN_ALIGNMENT_ORIGINAL_FIXTURE; }
+  const char *artifact_fixture() const override {
+    return GetParam() ? CONSAN_SELECTED_ALIGNMENT_ARTIFACT_FIXTURE
+                      : CONSAN_NATIVE_ALIGNMENT_ARTIFACT_FIXTURE;
+  }
+
+  void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(ConSanHsaPlugin::SetUp());
+    const ImageEntryFacts &entry = image_facts_.entries.front();
+    ASSERT_EQ(entry.binding.name, "mk_a");
+    ASSERT_EQ(entry.selected.has_value(), GetParam());
+    ASSERT_EQ(entry.binding.kernarg_alignment, 32u);
+    ASSERT_EQ(entry.binding.original_kernarg_bytes, 16u);
+    ASSERT_EQ(argument_extent_, arguments_.size());
+    hsa_amd_pointer_info_t info = {};
+    info.size = sizeof(info);
+    ASSERT_EQ(pointer_info(arguments_.data() + 16, &info, nullptr, nullptr, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(info.hostBaseAddress, arguments_.data());
+    ASSERT_EQ(info.sizeInBytes, 32u);
+    ASSERT_LE(size_t{16} + entry.binding.original_kernarg_bytes, info.sizeInBytes);
+    ASSERT_TRUE(bind());
+    uint32_t alignment = 0;
+    ASSERT_EQ(core_.hsa_executable_symbol_get_info_fn(
+                  {10}, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT, &alignment),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(alignment, 16u);
+    ASSERT_TRUE(create_queue_and_signal());
+  }
+
+  hsa_kernel_dispatch_packet_t alignment_packet(const void *arguments) {
+    hsa_kernel_dispatch_packet_t packet = dispatch_packet(signal_, 64, arguments, 64);
+    packet.group_segment_size = image_facts_.entries.front().binding.original_group_bytes;
+    packet.private_segment_size = image_facts_.entries.front().binding.original_private_bytes;
+    packet.header |= (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                     (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    return packet;
+  }
+};
+
+TEST_P(ConSanKernargAlignmentHsaPlugin, RejectsHsaAlignedArgumentsBelowMetadataAlignment) {
+  const uint8_t *arguments = arguments_.data() + 16;
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(arguments) % 16, 0u);
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(arguments) % 32, 16u);
+  const hsa_kernel_dispatch_packet_t packet = alignment_packet(arguments);
+  handler_(&packet, 1, 0, handler_context_, packet_writer);
+  EXPECT_EQ(published_packets_, 0u);
+  EXPECT_EQ(statistics_().submitted, 0u);
+  EXPECT_EQ(statistics_().native_submitted, 0u);
+  EXPECT_EQ(load_signal(signal_), -1);
+  EXPECT_NE(finish_(), 0);
+  EXPECT_FALSE(std::filesystem::exists(capture_));
+}
+
+TEST_P(ConSanKernargAlignmentHsaPlugin, AcceptsArgumentsMeetingMetadataAndHsaAlignment) {
+  ASSERT_EQ(reinterpret_cast<uintptr_t>(arguments_.data()) % 32, 0u);
+  const hsa_kernel_dispatch_packet_t packet = alignment_packet(arguments_.data());
+  handler_(&packet, 1, 0, handler_context_, packet_writer);
+  ASSERT_EQ(published_packets_, 1u);
+  if (GetParam())
+    EXPECT_NE(published_.completion_signal.handle, signal_.handle);
+  else
+    EXPECT_EQ(std::memcmp(&published_, &packet, sizeof(packet)), 0);
+  ASSERT_EQ(drain_(), 0);
+  EXPECT_EQ(load_signal(signal_), 0);
+  ASSERT_EQ(finish_(), 0);
+  const uint64_t selected = GetParam() ? 1 : 0;
+  const uint64_t native = GetParam() ? 0 : 1;
+  const rj_consan_statistics statistics = statistics_();
+  EXPECT_EQ(statistics.submitted, selected);
+  EXPECT_EQ(statistics.forwarded, selected);
+  EXPECT_EQ(statistics.copied, selected);
+  EXPECT_EQ(statistics.written, selected);
+  EXPECT_EQ(statistics.native_submitted, native);
+  EXPECT_EQ(statistics.native_completed, native);
+  const FailureOr<Capture> captured = decode_capture(read_capture());
+  ASSERT_TRUE(captured.succeeded());
+  EXPECT_EQ(captured.value().executions.size(), selected);
+}
+
+INSTANTIATE_TEST_SUITE_P(SelectedAndNative, ConSanKernargAlignmentHsaPlugin,
+                         ::testing::Values(true, false),
+                         [](const ::testing::TestParamInfo<bool> &info) {
+                           return info.param ? "Selected" : "Native";
+                         });
 #endif
 
 #if defined(CONSAN_MULTI_ORIGINAL_FIXTURE) && defined(CONSAN_MULTI_ARTIFACT_FIXTURE)

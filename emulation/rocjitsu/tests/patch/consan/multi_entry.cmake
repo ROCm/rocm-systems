@@ -23,12 +23,18 @@ add_custom_command(
 )
 add_custom_target(consan_multi_entry_fixture DEPENDS ${_multi_image})
 
-# Keep the original ABI/oracle while exercising per-entry Q barrier facts and
-# repeated-site AfterInst maps in one whole image.
+# Share kernel bodies across synchronization and per-entry ABI fixtures.
 foreach(
     _variant
     IN
-    ITEMS barrier loop mixed native-global unreachable-pc native-wide-vgprs
+    ITEMS
+        barrier
+        loop
+        mixed
+        native-global
+        unreachable-pc
+        native-wide-vgprs
+        alignment
 )
     set(_variant_object ${_fixture_dir}/multi-entry-${_variant}.o)
     set(_variant_image ${_fixture_dir}/multi-entry-${_variant}.hsaco)
@@ -43,6 +49,8 @@ foreach(
         set(_variant_defines -DMK_NATIVE_GLOBAL=1 -DMK_UNREACHABLE_PC_READ=1)
     elseif(_variant STREQUAL "native-wide-vgprs")
         set(_variant_defines -DMK_NATIVE_VGPRS=384)
+    elseif(_variant STREQUAL "alignment")
+        set(_variant_defines -DMK_EXTENDED_ABI=1 -DMK_A_KERNARG_ALIGNMENT=32)
     endif()
     add_custom_command(
         OUTPUT ${_variant_object}
