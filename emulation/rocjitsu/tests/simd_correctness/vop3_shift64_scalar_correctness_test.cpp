@@ -86,12 +86,14 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_shift64", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
-    if (wf == nullptr)
+    if (wf == nullptr) {
       ADD_FAILURE() << "dispatch_wf returned nullptr";
+    }
   }
 
   void write32(uint32_t reg, uint32_t v) { cu->write_vgpr(reg, 0, v); }
@@ -171,34 +173,37 @@ const uint64_t kVals64[] = {
 TEST(Vop3Shift64Scalar, LshlrevB64) {
   Fixture fx;
   ASSERT_NE(fx.cu, nullptr);
-  for (uint64_t v : kVals64)
+  for (uint64_t v : kVals64) {
     for (uint32_t c : kCounts64) {
       uint64_t got = fx.run_revshift(OP_LSHLREV_B64, "v_lshlrev_b64", c, v);
       uint64_t want = v << (c & 63u);
       EXPECT_EQ(got, want) << "v_lshlrev_b64 v=0x" << std::hex << v << " count=" << std::dec << c;
     }
+  }
 }
 
 TEST(Vop3Shift64Scalar, LshrrevB64) {
   Fixture fx;
   ASSERT_NE(fx.cu, nullptr);
-  for (uint64_t v : kVals64)
+  for (uint64_t v : kVals64) {
     for (uint32_t c : kCounts64) {
       uint64_t got = fx.run_revshift(OP_LSHRREV_B64, "v_lshrrev_b64", c, v);
       uint64_t want = v >> (c & 63u);
       EXPECT_EQ(got, want) << "v_lshrrev_b64 v=0x" << std::hex << v << " count=" << std::dec << c;
     }
+  }
 }
 
 TEST(Vop3Shift64Scalar, AshrrevI64) {
   Fixture fx;
   ASSERT_NE(fx.cu, nullptr);
-  for (uint64_t v : kVals64)
+  for (uint64_t v : kVals64) {
     for (uint32_t c : kCounts64) {
       uint64_t got = fx.run_revshift(OP_ASHRREV_I64, "v_ashrrev_i64", c, v);
       uint64_t want = static_cast<uint64_t>(static_cast<int64_t>(v) >> (c & 63u));
       EXPECT_EQ(got, want) << "v_ashrrev_i64 v=0x" << std::hex << v << " count=" << std::dec << c;
     }
+  }
 }
 
 TEST(Vop3Shift64Scalar, LshlAddU64) {
@@ -213,25 +218,27 @@ TEST(Vop3Shift64Scalar, LshlAddU64) {
       {0, 0}, {1, 1}, {2, 2}, {3, 3},  {4, 4},  {5, 0},  {6, 0},
       {7, 0}, {8, 0}, {9, 1}, {12, 4}, {13, 0}, {65, 1}, {UINT32_MAX, 0},
   };
-  for (uint64_t v : kVals64)
+  for (uint64_t v : kVals64) {
     for (auto [count, shift] : kCases) {
       uint64_t got = fx.run_lshl_add_u64(v, count, addend);
       uint64_t want = (v << shift) + addend;
       EXPECT_EQ(got, want) << "v_lshl_add_u64 v=0x" << std::hex << v << " count=" << std::dec
                            << count;
     }
+  }
 }
 
 TEST(Vop3Shift64Scalar, LshlAddU32) {
   Fixture fx;
   ASSERT_NE(fx.cu, nullptr);
   const uint32_t addend = 0x0BADF00Du;
-  for (uint32_t v : {0x00000001u, 0x80000001u, 0xFFFFFFFFu, 0x0000FFFFu, 0xDEADBEEFu})
+  for (uint32_t v : {0x00000001u, 0x80000001u, 0xFFFFFFFFu, 0x0000FFFFu, 0xDEADBEEFu}) {
     for (uint32_t c : kCounts32) {
       uint32_t got = fx.run_lshl_add_u32(v, c, addend);
       uint32_t want = (v << (c & 31u)) + addend;
       EXPECT_EQ(got, want) << "v_lshl_add_u32 v=0x" << std::hex << v << " count=" << std::dec << c;
     }
+  }
 }
 
 } // namespace

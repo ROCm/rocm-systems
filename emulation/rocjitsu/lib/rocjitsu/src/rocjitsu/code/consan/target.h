@@ -72,21 +72,29 @@ static_assert(std::ranges::none_of(kNativeLdsTargets, [](const TargetProfile &ta
 }));
 
 inline constexpr const TargetProfile *target_profile(uint32_t id) {
-  for (const TargetProfile &target : kNativeLdsTargets)
-    if (target.id == id)
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    if (target.id == id) {
       return &target;
+    }
+  }
   return nullptr;
 }
 
 inline constexpr const TargetProfile *target_profile(std::string_view name) {
-  for (const TargetProfile &target : kNativeLdsTargets)
-    if (target.name == name)
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    if (target.name == name) {
       return &target;
+    }
+  }
   return nullptr;
 }
 
 inline constexpr bool supports_wave(const TargetProfile &target, uint32_t wave_size) {
   return wave_size == target.default_wave_size || (target.wave64 && wave_size == 64);
+}
+
+inline constexpr bool uses_split_workgroup_barrier(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
 }
 
 } // namespace rocjitsu::consan

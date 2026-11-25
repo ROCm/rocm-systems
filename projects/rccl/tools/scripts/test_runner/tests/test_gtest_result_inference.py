@@ -594,7 +594,7 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
         self.assertEqual(stamped[0]["run_identity"], "id-1")
         self.assertNotIn("run_identity", original[0])
 
-    def test_suppressed_disabled_leaves_are_not_executed(self):
+    def test_suppressed_disabled_leaves_are_reported_as_disabled(self):
         payload = {
             "testsuites": [{
                 "name": "MemManagerRealMem",
@@ -611,12 +611,13 @@ class TestUniqueAndDuplicateCases(unittest.TestCase):
         details = collect_gtest_case_details(payload)
         self.assertEqual(
             [(d["full_name"], d["status"]) for d in details],
-            [("MemManagerRealMem.Track_Something", "PASSED")],
+            [("MemManagerRealMem.Track_Something", "PASSED"),
+             ("MemManagerRealMem.DISABLED_Track_RealHipMalloc_Scratch", "DISABLED")],
         )
         counts = _counts_from_details(details)
         self.assertEqual(counts, {
-            "cases": 1, "passed": 1, "failed": 0, "skipped": 0, "timeout": 0,
-            "disabled": 0,
+            "cases": 2, "passed": 1, "failed": 0, "skipped": 0, "timeout": 0,
+            "disabled": 1,
         })
 
     def test_missing_report_counts_as_one_executed_and_unique_case(self):

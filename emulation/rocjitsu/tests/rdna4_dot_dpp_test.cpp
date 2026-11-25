@@ -155,8 +155,9 @@ TEST(Rdna4DotDppTest, FloatingDot4UsesEachOperandFormat) {
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     for (const auto &dot : kDots) {
-      if (dot.opcode == rdna4::kVDot2F32F16Vop3p || dot.opcode == rdna4::kVDot2F32Bf16Vop3p)
+      if (dot.opcode == rdna4::kVDot2F32F16Vop3p || dot.opcode == rdna4::kVDot2F32Bf16Vop3p) {
         continue;
+      }
       for (unsigned form = 0; form != 3; ++form) {
         SCOPED_TRACE(std::format("{} form={} scalar={}", dot.mnemonic, form, force_scalar));
         const uint32_t words[] = {0xcc004010u | (dot.opcode << 16),

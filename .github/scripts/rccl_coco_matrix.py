@@ -61,6 +61,14 @@ SCHEDULED_RUNNERS = {
     "crusoe": "crusoe-linux-slurm-scale-runner",
 }
 
+# Clusters whose runner workspace is not mounted on the compute nodes.
+SCHEDULED_SHARED_SCRATCH = {
+    "ruby": "",
+    "oci": "",
+    "tw": "/share_nfs/coco/ci-scratch",
+    "crusoe": "/shared_nfs/coco/ci-scratch",
+}
+
 
 def pr_clusters() -> None:
     set_github_output({"matrix": json.dumps({"include": PR_CLUSTERS})})
@@ -71,6 +79,7 @@ def scheduled_runs(mode: str) -> None:
         {
             "job": job,
             "runner": SCHEDULED_RUNNERS[cluster],
+            "shared_scratch": SCHEDULED_SHARED_SCRATCH[cluster],
             "timeout": timeout,
             "group": f"rccl-coco-{entry_mode}-{cluster}-{kind}",
         }

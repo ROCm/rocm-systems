@@ -79,8 +79,9 @@ public:
     // nothing rather than divide by zero. Failing closed keeps the invalid shard
     // identifiable through rank()/stride(); rewriting it to the unsharded shard
     // would instead hand a caller the entire range on the strength of a bug.
-    if (stride_ == 0 || rank_ >= total_chunks)
+    if (stride_ == 0 || rank_ >= total_chunks) {
       return 0;
+    }
     // Quotient/remainder rather than the usual (n + stride - 1) / stride: with a
     // maximal grid that addition wraps in 32 bits and silently reports zero
     // chunks, dropping almost the entire grid.

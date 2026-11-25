@@ -24,10 +24,12 @@ void issue(LdsRaceExecutionResult &result, uint32_t wave, uint32_t site, const c
            uint32_t workgroup = UINT32_MAX, bool integrity = true) {
   result.coverage_complete = false;
   result.ordering_uncertain = true;
-  if (integrity)
+  if (integrity) {
     ++result.integrity_events;
-  if (result.issues.size() < kMaxIntegrityIssueExamples)
+  }
+  if (result.issues.size() < kMaxIntegrityIssueExamples) {
     result.issues.push_back({wave, site, reason, workgroup});
+  }
 }
 
 struct Observation {
@@ -112,12 +114,15 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   result.address_group_exhaustion += repeated ? address_loss : loss;
   result.dropped_representatives += repeated ? loss - address_loss : 0;
   result.counter_exhausted_waves += exhausted;
-  if (!valid_final || !valid_loss)
+  if (!valid_final || !valid_loss) {
     issue(result, wave, UINT32_MAX, "invalid_final_barrier_phase_or_loss", workgroup);
-  if (sync_loss)
+  }
+  if (sync_loss) {
     issue(result, wave, UINT32_MAX, "synchronization_journal_exhausted", workgroup, false);
-  if (exhausted)
+  }
+  if (exhausted) {
     issue(result, wave, UINT32_MAX, "counter_exhausted", workgroup, false);
+  }
   if (!facts.barriers.empty()) {
     uint32_t previous_sequence = 0;
     for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
@@ -152,8 +157,9 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
     }
   }
   result.lost_occurrences += loss;
-  if (loss != 0)
+  if (loss != 0) {
     issue(result, wave, UINT32_MAX, "range_reservation_exhausted", workgroup, false);
+  }
   using Operation = std::pair<uint32_t, uint32_t>;
   std::map<Operation, SiteGroup> groups;
   for (const SiteFacts &site : facts.sites) {
@@ -197,8 +203,9 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
         issue(result, wave, site.id, "unaligned_lds_alignment_mode_unavailable", workgroup);
         continue;
       }
-      if (vacant && !repeated)
+      if (vacant && !repeated) {
         issue(result, wave, site.id, "record_after_vacant_reservation", workgroup);
+      }
       SiteGroup &group = groups[{site.id, repeated ? sequence : 0}];
       if (repeated && (std::countr_zero(mask) % kAddressGroupsPerSite) != address_group) {
         ++result.rejected_records;
@@ -206,8 +213,9 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
         continue;
       }
       if ((group.sequence != 0 && group.sequence != sequence) || (group.mask & mask) != 0 ||
-          !group.offsets.insert(offset).second)
+          !group.offsets.insert(offset).second) {
         group.ambiguous = true;
+      }
       group.sequence = sequence;
       group.mask |= mask;
       const uint32_t phase = *wire::read_u32(record, wire::kRecordPhase);
@@ -232,8 +240,9 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       const bool phase_consistent =
           phase <= final_phase && (static_phase_valid || (saturated_phase && exhausted));
       const bool phase_valid = phase_consistent && !saturated_phase;
-      if (!phase_consistent)
+      if (!phase_consistent) {
         issue(result, wave, site.id, "access_phase_contradicts_qualified_program", workgroup);
+      }
       group.records.push_back({{wave, site.id, sequence, mask, offset, width, site.original_offset,
                                 site.access, phase, workgroup},
                                phase_valid});
@@ -241,22 +250,25 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   }
   std::map<uint32_t, std::vector<Operation>> occurrences;
   for (const auto &[site, group] : groups) {
-    if (!group.records.empty())
+    if (!group.records.empty()) {
       occurrences[group.sequence].push_back(site);
+    }
   }
   for (const auto &[sequence, sites] : occurrences) {
     (void)sequence;
     if (sites.size() > 1) {
-      for (const Operation &site : sites)
+      for (const Operation &site : sites) {
         groups[site].ambiguous = true;
+      }
     }
   }
   // Acyclic profiles retain increasing original instruction order. Repeated
   // operations are instead grouped by (site, dynamic sequence).
   std::map<Operation, SiteGroup>::iterator previous = groups.end();
   for (std::map<Operation, SiteGroup>::iterator it = groups.begin(); it != groups.end(); ++it) {
-    if (it->second.records.empty())
+    if (it->second.records.empty()) {
       continue;
+    }
     if (!repeated && previous != groups.end() && previous->second.sequence >= it->second.sequence) {
       previous->second.ambiguous = true;
       it->second.ambiguous = true;
@@ -267,16 +279,18 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
   // Every wholly unrepresented instruction needs a loss event, but a partially
   // retained instruction can also lose a group: final=1, retained=1, loss=1.
   // Thus missing occurrences are bounded by loss, not necessarily equal to it.
-  if (occurrences.size() > final || final - occurrences.size() > (repeated ? loss : 0))
+  if (occurrences.size() > final || final - occurrences.size() > (repeated ? loss : 0)) {
     issue(result, wave, UINT32_MAX, "missing_observed_occurrence", workgroup);
+  }
   for (const auto &[site, group] : groups) {
     if (group.ambiguous || std::ranges::any_of(group.records, [&](const Observation &record) {
           return record.participant.phase != group.records.front().participant.phase;
         })) {
       result.rejected_records += group.records.size();
       issue(result, wave, site.first, "ambiguous_instruction_group_ownership", workgroup);
-    } else
+    } else {
       observations.insert(observations.end(), group.records.begin(), group.records.end());
+    }
   }
   // Validate every retained endpoint, including disjoint and Read/Read accesses.
   // A boundary contradiction is an integrity issue even without a candidate pair.
@@ -301,8 +315,9 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       }
     }
   }
-  if (!facts.barriers.empty() && evidence.journal_complete && consistent)
+  if (!facts.barriers.empty() && evidence.journal_complete && consistent) {
     ++result.completed_barrier_waves;
+  }
 }
 
 struct Bucket {
@@ -340,8 +355,9 @@ Position position(const Observation &observation, ScopeKind scope,
                   std::span<const WaveEvidence> evidence, uint32_t complete_witnesses,
                   bool complete_exit) {
   Position result;
-  if (!observation.phase_valid)
+  if (!observation.phase_valid) {
     return result;
+  }
   // Qualification rules out synchronization throughout this scope. Once the
   // endpoint is valid, no other wave's exit or journal is needed to prove that
   // it is unordered with another valid endpoint in the same workgroup.
@@ -351,8 +367,9 @@ Position position(const Observation &observation, ScopeKind scope,
   }
   const LdsRaceParticipant &access = observation.participant;
   for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
-    if ((complete_witnesses & (1u << slot)) == 0)
+    if ((complete_witnesses & (1u << slot)) == 0) {
       continue;
+    }
     const Completion &completion = *evidence[access.wave].journal[slot];
     // read_wave already validated this endpoint against every retained boundary.
     const bool before = access.phase < completion.phase;
@@ -374,8 +391,9 @@ Position position(const Observation &observation, ScopeKind scope,
   // Only closed intervals need distinct phase keys. Truncated observations can
   // have arbitrarily many phases; splitting their identical proof states would
   // turn aggregate counting back into quadratic candidate enumeration.
-  if (result.interval_complete)
+  if (result.interval_complete) {
     result.phase = access.phase;
+  }
   return result;
 }
 
@@ -384,8 +402,9 @@ LdsRaceOrdering ordering(const Position &first, const Position &second) {
   // A shared bit proves first -> barrier -> second; the other intersection
   // proves the reverse. With B0 in bit 0, first.before=0b1 and second.after=0b1
   // intersect at B0, establishing an ordering even if unrelated evidence is lost.
-  if ((first.before & second.after) || (second.before & first.after))
+  if ((first.before & second.after) || (second.before & first.after)) {
     return LdsRaceOrdering::Ordered;
+  }
   // With B0 as the only witness, two accesses before it both have before=0b1,
   // after=0b0, so neither intersection orders them. Unordered requires both
   // endpoints in the same closed interval (same phase); missing or contradictory
@@ -396,10 +415,12 @@ LdsRaceOrdering ordering(const Position &first, const Position &second) {
 }
 
 std::vector<LdsRaceFinding> &examples_for(LdsRaceExecutionResult &result, LdsRaceOrdering order) {
-  if (order == LdsRaceOrdering::Ordered)
+  if (order == LdsRaceOrdering::Ordered) {
     return result.ordered_examples;
-  if (order == LdsRaceOrdering::Unresolved)
+  }
+  if (order == LdsRaceOrdering::Unresolved) {
     return result.unresolved_examples;
+  }
   return result.cross_wave_examples;
 }
 
@@ -407,8 +428,9 @@ void compare(const std::vector<const Observation *> &first,
              const std::vector<const Observation *> &second, uint32_t examples, ScopeKind scope,
              std::span<const WaveEvidence> evidence, uint32_t complete_witnesses,
              bool complete_exit, LdsRaceExecutionResult &result) {
-  if (first.empty() || second.empty())
+  if (first.empty() || second.empty()) {
     return;
+  }
   // The caller has selected conflicting ranges and distinct waves. Equal
   // Positions then have identical ordering against another group, so products
   // of group sizes and lane totals count pairs exactly (e.g. 3 * 2 = 6 pairs).
@@ -431,7 +453,7 @@ void compare(const std::vector<const Observation *> &first,
     group.lanes += second[index]->lanes();
     group.indices.push_back(index);
   }
-  for (const auto &[left, left_group] : first_groups)
+  for (const auto &[left, left_group] : first_groups) {
     for (const auto &[right, right_group] : second_groups) {
       const uint64_t pairs = left_group.count * right_group.count;
       switch (ordering(left, right)) {
@@ -449,12 +471,14 @@ void compare(const std::vector<const Observation *> &first,
         break;
       }
     }
+  }
   // Merge group indices so bounded examples preserve the canonical pair order.
   for (const Observation *left : first) {
     if (result.ordered_examples.size() >= examples &&
         result.cross_wave_examples.size() >= examples &&
-        result.unresolved_examples.size() >= examples)
+        result.unresolved_examples.size() >= examples) {
       break;
+    }
     const Position left_position =
         position(*left, scope, evidence, complete_witnesses, complete_exit);
     std::map<Position, size_t> cursors;
@@ -469,8 +493,9 @@ void compare(const std::vector<const Observation *> &first,
           selected = right_position;
         }
       }
-      if (next == second.size())
+      if (next == second.size()) {
         break;
+      }
       const LdsRaceOrdering order = ordering(left_position, selected);
       examples_for(result, order)
           .push_back({LdsRaceFindingKind::CrossWave, left->participant, second[next]->participant,
@@ -507,10 +532,12 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
   }
   std::vector<Observation> observations;
   std::vector<WaveEvidence> completions(layout.value().wave_count);
-  if (!facts.barriers.empty())
+  if (!facts.barriers.empty()) {
     result.required_barrier_waves = layout.value().wave_count;
-  for (uint32_t wave = 0; wave < layout.value().wave_count; ++wave)
+  }
+  for (uint32_t wave = 0; wave < layout.value().wave_count; ++wave) {
     read_wave(facts, execution, layout.value(), wave, result, observations, completions);
+  }
   result.workgroup_count = layout.value().workgroup_count;
   result.waves_per_workgroup = layout.value().waves_per_workgroup;
   result.valid_observations = observations.size();
@@ -525,9 +552,10 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
       const uint64_t pairs = uint64_t{observation.lanes()} * (observation.lanes() - 1) / 2;
       ++result.collision_groups;
       result.collision_lane_pairs += pairs;
-      if (result.collision_examples.size() < examples)
+      if (result.collision_examples.size() < examples) {
         result.collision_examples.push_back(
             {LdsRaceFindingKind::InstructionCollision, participant, {}, pairs});
+      }
     }
   }
   // LDS identities and certificates are local to each workgroup.
@@ -545,17 +573,19 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
         matching_phases && std::ranges::all_of(domain_completions, &WaveEvidence::journal_complete);
     // Qualified loops may have different wave-local trip counts. This opens
     // the final interval without contradicting otherwise valid row evidence.
-    if (!matching_phases)
+    if (!matching_phases) {
       issue(result, UINT32_MAX, UINT32_MAX, "mismatched_workgroup_final_phases", workgroup,
             facts.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop);
+    }
     uint32_t complete_witnesses = 0;
     for (uint32_t slot = 0; slot < kSyncCapacity; ++slot) {
       const std::optional<Completion> &first = domain_completions.front().journal[slot];
       if (first && std::ranges::all_of(domain_completions, [&](const WaveEvidence &wave) {
             const std::optional<Completion> &other = wave.journal[slot];
             return other && other->group == first->group && other->occurrence == first->occurrence;
-          }))
+          })) {
         complete_witnesses |= 1u << slot;
+      }
     }
     // Sweep checked half-open byte ranges. Grouping identical ranges retains
     // aggregate counting for dense no-barrier cases and never enumerates Read/Read
@@ -567,11 +597,12 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
     std::vector<ActiveRange> active;
     for (const auto &[range, bucket] : ranges) {
       std::erase_if(active, [&](const ActiveRange &prior) { return prior.end <= range.first; });
-      for (const ActiveRange &prior : active)
-        for (const auto &[prior_wave, prior_accesses] : prior.bucket->waves)
+      for (const ActiveRange &prior : active) {
+        for (const auto &[prior_wave, prior_accesses] : prior.bucket->waves) {
           for (const auto &[wave, accesses] : bucket.waves) {
-            if (prior_wave == wave)
+            if (prior_wave == wave) {
               continue;
+            }
             compare(prior_accesses.writes, accesses.writes, examples, facts.scope,
                     domain_completions, complete_witnesses, complete_exit, result);
             compare(prior_accesses.writes, accesses.reads, examples, facts.scope,
@@ -579,6 +610,8 @@ LdsRaceExecutionResult analyze_lds_race_execution(const Manifest &facts,
             compare(prior_accesses.reads, accesses.writes, examples, facts.scope,
                     domain_completions, complete_witnesses, complete_exit, result);
           }
+        }
+      }
       std::vector<const Observation *> prior_reads, prior_writes;
       for (const auto &[wave, accesses] : bucket.waves) {
         (void)wave;

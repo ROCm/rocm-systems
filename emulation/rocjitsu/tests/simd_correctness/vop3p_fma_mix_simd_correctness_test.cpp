@@ -252,8 +252,9 @@ template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_fma_mix", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(cfg.arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF, WF_SIZE);
   }
@@ -279,8 +280,9 @@ template <uint32_t WF_SIZE, int ArchTag> struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -321,8 +323,9 @@ void check_combo(uint32_t opcode, const ModCombo &mc, uint64_t exec, uint32_t ds
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture<WF_SIZE, ArchTag> fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -356,8 +359,9 @@ void check_combo(uint32_t opcode, const ModCombo &mc, uint64_t exec, uint32_t ds
         uint32_t raw0 = widen0 ? kSrcA_f16[i0] : kSrcA[i0];
         uint32_t raw1 = widen1 ? kSrcB_f16[i1] : kSrcB[i1];
         uint32_t raw2 = widen2 ? kSrcC_f16[i2] : kSrcC[i2];
-        if (input_lane_is_nan(raw0, raw1, raw2, widen0, widen1, widen2, mc.op_sel))
+        if (input_lane_is_nan(raw0, raw1, raw2, widen0, widen1, widen2, mc.op_sel)) {
           continue;
+        }
         EXPECT_EQ(scalar_out[lane], simd_out[lane])
             << label << " rot=" << rot << " lane=" << lane << ": SIMD path diverged from scalar";
       } else {
@@ -373,8 +377,9 @@ void check_combo(uint32_t opcode, const ModCombo &mc, uint64_t exec, uint32_t ds
 template <uint32_t WF_SIZE, int ArchTag>
 void check_op(uint32_t opcode, uint64_t exec, uint32_t dst_seed, const char *label) {
   ForceScalarGuard gate_guard;
-  for (const auto &mc : kModCombos)
+  for (const auto &mc : kModCombos) {
     check_combo<WF_SIZE, ArchTag>(opcode, mc, exec, dst_seed, label);
+  }
 }
 
 constexpr uint32_t kVop3pOpFmaMixF32 = 32;
@@ -485,7 +490,7 @@ void check_decoded_mix_modes(uint32_t denorm = 3) {
   ASSERT_FALSE(::testing::Test::HasFatalFailure());
   ForceScalarGuard guard;
   util::set_force_scalar_for_testing(false);
-  for (uint32_t round = 0; round < 4; ++round)
+  for (uint32_t round = 0; round < 4; ++round) {
     for (bool alias : {false, true}) {
       uint32_t words[2];
       const auto encode = ArchTag == 0 ? vop3p_encode_rdna3 : vop3p_encode_cdna4;
@@ -504,15 +509,18 @@ void check_decoded_mix_modes(uint32_t denorm = 3) {
       ASSERT_TRUE(fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded());
       std::array<uint32_t, 32> expected;
       const uint32_t base = fixture.wf->vgpr_alloc().base + kDstVgpr;
-      for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t lane = 0; lane < 32; ++lane) {
         expected[lane] = fixture.cu->read_vgpr(base, lane);
+      }
       seed();
       util::set_force_scalar_for_testing(false);
       ASSERT_TRUE(fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded());
-      for (uint32_t lane = 0; lane < 32; ++lane)
+      for (uint32_t lane = 0; lane < 32; ++lane) {
         EXPECT_EQ(fixture.cu->read_vgpr(base, lane), expected[lane])
             << "round=" << round << " alias=" << alias << " lane=" << lane;
+      }
     }
+  }
 }
 
 TEST(Vop3pFmaMixSimdCorrectness, HalfResultsHonorEveryRoundingMode) {
@@ -523,8 +531,9 @@ TEST(Vop3pFmaMixSimdCorrectness, HalfResultsHonorEveryRoundingMode) {
 }
 
 TEST(Vop3pFmaMixSimdCorrectness, F32ResultsHonorGuestModes) {
-  for (uint32_t denorm = 0; denorm < 4; ++denorm)
+  for (uint32_t denorm = 0; denorm < 4; ++denorm) {
     check_decoded_mix_modes<false, 0, true>(denorm);
+  }
 }
 
 // Compare decoded scalar/SIMD dispatch with directed modes, modifiers and overlap.
@@ -552,16 +561,18 @@ TEST(Vop3pFmaMixSimdCorrectness, DirectedModesPreserveModifiersAndWave64Aliases)
             util::set_force_scalar_for_testing(true);
             ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
             std::array<uint32_t, Size> expected{};
-            for (uint32_t lane = 0; lane < Size; ++lane)
+            for (uint32_t lane = 0; lane < Size; ++lane) {
               expected[lane] = fx.cu->read_vgpr(fx.wf->vgpr_alloc().base + destination, lane);
+            }
             seed();
             util::set_force_scalar_for_testing(false);
             ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
-            for (uint32_t lane = 0; lane < Size; ++lane)
+            for (uint32_t lane = 0; lane < Size; ++lane) {
               EXPECT_EQ(fx.cu->read_vgpr(fx.wf->vgpr_alloc().base + destination, lane),
                         expected[lane])
                   << "round=" << round << " high=" << high << " destination=" << destination
                   << " lane=" << lane;
+            }
           }
         }
       }

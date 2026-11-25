@@ -20,8 +20,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   bool tracks_explicit_source(uint8_t index) const override {
     const auto operands = amdgpu::ShaderExportOperands::decode(inst_);
-    if (index < operands.sources.size())
+    if (index < operands.sources.size()) {
       return operands.channel_enabled(index);
+    }
     return src_operands_[index] != &m0 || operands.row_from_m0;
   }
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {

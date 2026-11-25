@@ -8,8 +8,9 @@
 #include <dlfcn.h>
 
 int main(int argc, char **argv) {
-  if (argc != 3)
+  if (argc != 3) {
     return 2;
+  }
   // Load without core objects or librocjitsu.so so unresolved simulator
   // helpers cannot be supplied accidentally by the host process.
   void *module = ::dlopen(argv[1], RTLD_NOW | RTLD_LOCAL);

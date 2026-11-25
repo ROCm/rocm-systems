@@ -91,20 +91,26 @@ TEST(P2pBatchEligibility, AppliesThresholdToExplicitEnable)
     EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/0, threshold, threshold, threshold));
 }
 
-TEST(P2pBatchEligibility, CutoffOnlyOnGfx950At16Nodes)
+TEST(P2pBatchEligibility, ArchDefaultCutoffOnGfx942AndGfx950At16Nodes)
 {
     constexpr ssize_t perPeer = 128 * 1024;
+    constexpr ssize_t aboveGfx942Cutoff = (ssize_t(1) << 20) + 1;
 
-    auto eligible = [](const char* arch, int nNodes) {
-        const ssize_t cutoff = rcclP2pBatchCutoff(arch, nNodes, perPeer, perPeer, /*threshold=*/-1);
-        return rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer, cutoff);
+    auto eligible = [](const char* arch, int nNodes, ssize_t bytes) {
+        const ssize_t cutoff = rcclP2pBatchCutoff(arch, nNodes, bytes, bytes, /*threshold=*/-1);
+        return rcclP2pBatchEligible(/*enabled=*/1, bytes, bytes, cutoff);
     };
 
-    EXPECT_TRUE(eligible("gfx942", 4));
-    EXPECT_TRUE(eligible("gfx942", 16));
-    EXPECT_TRUE(eligible("gfx950", 15));
-    EXPECT_FALSE(eligible("gfx950", 16));
-    EXPECT_TRUE(eligible("gfx1250", 16));
+    EXPECT_TRUE(eligible("gfx942", 4, perPeer));
+    EXPECT_TRUE(eligible("gfx942", 16, perPeer));
+    EXPECT_TRUE(eligible("gfx942", 4, ssize_t(1) << 20));
+    EXPECT_FALSE(eligible("gfx942", 4, aboveGfx942Cutoff));
+    EXPECT_FALSE(eligible("gfx942", 16, aboveGfx942Cutoff));
+    EXPECT_TRUE(eligible("gfx950", 15, perPeer));
+    EXPECT_TRUE(eligible("gfx950", 15, aboveGfx942Cutoff));
+    EXPECT_FALSE(eligible("gfx950", 16, perPeer));
+    EXPECT_TRUE(eligible("gfx1250", 16, perPeer));
+    EXPECT_TRUE(eligible("gfx1250", 16, aboveGfx942Cutoff));
 
     const ssize_t unequal = rcclP2pBatchCutoff("gfx942", 4, perPeer, perPeer / 2, /*threshold=*/-1);
     EXPECT_FALSE(rcclP2pBatchEligible(/*enabled=*/1, perPeer, perPeer / 2, unequal));

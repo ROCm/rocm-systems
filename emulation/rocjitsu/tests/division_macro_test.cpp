@@ -144,9 +144,12 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      // Policies are immutable while waves are active. FMAS needs numeric exactness;
-      // FIXUP additionally reports FP status, so give each its own CU.
-      config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
+      // Policies are immutable while waves are active. Use strict numeric semantics
+      // for the captured RDNA4 model; CDNA5 inherits the legacy model through
+      // Compatibility without claiming hardware-validated empirical semantics.
+      config.arithmetic = {arch == rocjitsu::IsaFamily::Cdna5
+                               ? amdgpu::ArithmeticSemantics::Compatibility
+                               : amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
       std::unique_ptr<amdgpu::ComputeUnitCore> fmas_cu;
       ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(fmas_cu, "division_fmas",
                                                                       config, &memory, &cache));
@@ -154,7 +157,9 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
       ASSERT_NE(fmas_wf, nullptr);
       fmas_wf->set_exec(1);
       const uint32_t fmas_base = fmas_wf->vgpr_alloc().base;
-      config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpirical};
+      config.arithmetic = {arch == rocjitsu::IsaFamily::Cdna5
+                               ? amdgpu::ArithmeticSemantics::Compatibility
+                               : amdgpu::ArithmeticSemantics::BitExactEmpirical};
       std::unique_ptr<amdgpu::ComputeUnitCore> cu;
       ASSERT_NO_FATAL_FAILURE(
           rocjitsu::test::initialize_compute_unit(cu, "division", config, &memory, &cache));
@@ -172,8 +177,9 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             wide ? std::bit_cast<uint64_t>(0x1p-947) : std::bit_cast<uint32_t>(0x1p-86f);
         const auto write = [&](uint32_t reg, uint64_t bits) {
           cu->write_vgpr(base + reg, 0, static_cast<uint32_t>(bits));
-          if (wide)
+          if (wide) {
             cu->write_vgpr(base + reg + 1, 0, static_cast<uint32_t>(bits >> 32));
+          }
         };
         const auto result = [&]() -> uint64_t {
           return cu->read_vgpr(base, 0) | (wide ? uint64_t{cu->read_vgpr(base + 1, 0)} << 32 : 0);
@@ -199,13 +205,15 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             for (uint32_t operand = 1; operand <= 3; ++operand) {
               const uint64_t bits = operand == 3 ? midpoint : 0;
               fmas_cu->write_vgpr(fmas_base + operand * stride, 0, static_cast<uint32_t>(bits));
-              if (wide)
+              if (wide) {
                 fmas_cu->write_vgpr(fmas_base + operand * stride + 1, 0,
                                     static_cast<uint32_t>(bits >> 32));
+              }
             }
             fmas_wf->set_vcc_mask(1);
             fmas_cu->write_vgpr(fmas_base, 1, 0x12345678u);
             fmas->execute(*fmas, fmas_wf);
+            ASSERT_FALSE(fmas_wf->instruction_execution_failed());
             const uint64_t fmas_result =
                 fmas_cu->read_vgpr(fmas_base, 0) |
                 (wide ? uint64_t{fmas_cu->read_vgpr(fmas_base + 1, 0)} << 32 : 0);
@@ -221,6 +229,7 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             wf->set_trapsts(1u << 5); // An unrelated sticky cause must survive.
             wf->clear_pending_alu_causes();
             fixup->execute(*fixup, wf);
+            ASSERT_FALSE(wf->instruction_execution_failed());
             const uint32_t causes = (denorm & 1u) ? 1u << 1 : 1u << 2;
             EXPECT_EQ(result(), (denorm & 1u) ? one : inf);
             EXPECT_EQ(wf->pending_alu_causes(), causes);
@@ -347,8 +356,9 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
         for (const FixupCase &test : fixup_cases) {
           for (uint32_t rounding = 0; rounding < 4; ++rounding) {
             for (bool use_modifiers : {false, true}) {
-              if (use_modifiers && !(test.abs | test.neg))
+              if (use_modifiers && !(test.abs | test.neg)) {
                 continue;
+              }
               SCOPED_TRACE(::testing::Message()
                            << "wide=" << wide << " scalar=" << scalar << " abs=" << test.abs
                            << " neg=" << test.neg << " use_modifiers=" << use_modifiers

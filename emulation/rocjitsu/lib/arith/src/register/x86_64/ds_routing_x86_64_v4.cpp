@@ -46,18 +46,35 @@ namespace rocjitsu::arith {
 void ds_bpermute_x86_64_v4(int lanes, int group, uint64_t exec_mask, uint32_t *d,
                            const uint32_t *addr, const uint32_t *data, uint16_t offset,
                            bool fetch_inactive) {
-  uint32_t result[64];
+  __m512i result[4];
   for (int lane = 0; lane < lanes; lane += 16) {
-    auto address =
-        _mm512_add_epi32(_mm512_loadu_si512(reinterpret_cast<const __m512i *>(addr + lane)),
-                         _mm512_set1_epi32(offset));
-    auto source = _mm512_or_si512(
-        _mm512_and_si512(_mm512_srli_epi32(address, 2), _mm512_set1_epi32(group - 1)),
-        _mm512_set1_epi32(lane & ~(group - 1)));
-    _mm512_storeu_si512(reinterpret_cast<__m512i *>(result + lane),
-                        gather(data, source, exec_mask, fetch_inactive));
+    auto address = _mm512_add_epi32(_mm512_loadu_si512(addr + lane), _mm512_set1_epi32(offset));
+    auto source = _mm512_and_si512(_mm512_srli_epi32(address, 2), _mm512_set1_epi32(group - 1));
+    int base = lane & ~(group - 1);
+    auto first = _mm512_loadu_si512(data + base);
+    auto value = _mm512_permutex2var_epi32(first, source, _mm512_loadu_si512(data + base + 16));
+    if (group == 64) {
+      auto high = _mm512_permutex2var_epi32(_mm512_loadu_si512(data + 32), source,
+                                            _mm512_loadu_si512(data + 48));
+      value =
+          _mm512_mask_mov_epi32(value, _mm512_test_epi32_mask(source, _mm512_set1_epi32(32)), high);
+    }
+    if (!fetch_inactive) {
+      auto bits = _mm512_set1_epi32(int(uint32_t(exec_mask >> base)));
+      if (group == 64) {
+        bits = _mm512_mask_set1_epi32(bits, _mm512_test_epi32_mask(source, _mm512_set1_epi32(32)),
+                                      int(exec_mask >> 32));
+      }
+      auto active = _mm512_test_epi32_mask(
+          _mm512_srlv_epi32(bits, _mm512_and_si512(source, _mm512_set1_epi32(31))),
+          _mm512_set1_epi32(1));
+      value = _mm512_maskz_mov_epi32(active, value);
+    }
+    result[lane / 16] = value;
   }
-  store(lanes, exec_mask, d, result);
+  for (int lane = 0; lane < lanes; lane += 16) {
+    _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), result[lane / 16]);
+  }
 }
 
 // Evaluate ds swizzle for the caller-selected operation. Preserve destination lanes outside

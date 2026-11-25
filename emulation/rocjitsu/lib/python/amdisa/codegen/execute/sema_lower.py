@@ -29,7 +29,6 @@ from amdisa.codegen.execute import (
     input_policy,
     vop3_modifiers,
 )
-from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name, uses_shared_fp8_widening
 from amdisa.sema_derive import CONVERSION_CALL, FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
 from amdisa.sema_ast import (
@@ -267,7 +266,9 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
                 wrapped.append(f'  {vcc_write}')
             return '\n'.join(wrapped)
         wrapped.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        wrapped.append('    if (!(exec & (1ULL << lane))) continue;')
+        wrapped.extend(
+            ('    if (!(exec & (1ULL << lane))) {', '      continue;', '    }')
+        )
         for line in body_lines:
             wrapped.append('  ' + line)
         wrapped.append('  }')
@@ -447,16 +448,17 @@ def _lower_assign(node: SemaNode, ctx: LoweringContext) -> list[str]:
             rhs = _lower_expr(rhs_node, ctx)
             ind = _indent(ctx)
             lines = [
-                f'{ind}if ({rhs})',
+                f'{ind}if ({rhs}) {{',
                 f'{ind}  {ctx.vcc_var} |= (1ULL << {idx});',
             ]
             if ctx.clear_false_lane_mask_writes:
                 lines.extend(
                     [
-                        f'{ind}else',
+                        f'{ind}}} else {{',
                         f'{ind}  {ctx.vcc_var} &= ~(1ULL << {idx});',
                     ]
                 )
+            lines.append(f'{ind}}}')
             return lines
         if arr.kind == SemaNodeKind.ID and arr.id_name in ('MEM', 'LDS'):
             idx = _lower_expr(lhs_node.children[1], ctx)
@@ -496,23 +498,13 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
     lines: list[str] = []
     inner_ctx = _nested_context(ctx)
 
-    if len(children) == 2:
-        cond = _lower_expr(children[0], ctx)
-        body_lines = _lower_stmt(children[1], inner_ctx)
-        if len(body_lines) == 1:
-            lines.append(f'{_indent(ctx)}if ({cond})')
-            lines.append(body_lines[0])
-        else:
-            lines.append(f'{_indent(ctx)}if ({cond}) {{')
-            lines.extend(body_lines)
-            lines.append(f'{_indent(ctx)}}}')
-    elif len(children) == 3:
+    if len(children) in (2, 3):
         cond = _lower_expr(children[0], ctx)
         lines.append(f'{_indent(ctx)}if ({cond}) {{')
         lines.extend(_lower_stmt(children[1], inner_ctx))
-        lines.append(f'{_indent(ctx)}}} else {{')
-        lines.extend(_lower_stmt(children[2], inner_ctx))
-        lines.append(f'{_indent(ctx)}}}')
+        if len(children) == 3:
+            lines.append(f'{_indent(ctx)}}} else {{')
+            lines.extend(_lower_stmt(children[2], inner_ctx))
     else:
         # Multi-branch: treat as if/elif chain (pairs of cond, body)
         for i in range(0, len(children) - 1, 2):
@@ -523,8 +515,7 @@ def _lower_if(node: SemaNode, ctx: LoweringContext) -> list[str]:
         if len(children) % 2 == 1:
             lines.append(f'{_indent(ctx)}}} else {{')
             lines.extend(_lower_stmt(children[-1], inner_ctx))
-        lines.append(f'{_indent(ctx)}}}')
-
+    lines.append(f'{_indent(ctx)}}}')
     return lines
 
 
@@ -1139,6 +1130,49 @@ def _rhs_is_float_expr(node: SemaNode) -> int:
     return 0
 
 
+def _rounds_on_host(node: SemaNode, ctx: LoweringContext) -> bool:
+    """Whether lowering node evaluates float arithmetic inline on the host.
+
+    Such arithmetic rounds under the host rounding mode, so it needs the guest
+    rounding installed around it. Arithmetic lowered to fp_mode helpers installs
+    the guest rounding itself, and raw-bit helpers do not round on the host.
+    """
+    host_ops = (
+        SemaNodeKind.DIV,
+        SemaNodeKind.POW,
+        SemaNodeKind.FPOW,
+        SemaNodeKind.SQRT,
+        SemaNodeKind.SIN,
+        SemaNodeKind.COS,
+        SemaNodeKind.LOG2,
+    )
+    for n in node.walk():
+        if not n.ty or n.ty.base != 'F':
+            continue
+        helper = (
+            ctx.mode_arithmetic
+            and ctx.exec_model == ExecModel.VECTOR
+            and n.ty.size in (16, 32, 64)
+        )
+        if n.kind in (SemaNodeKind.ADD, SemaNodeKind.SUB, SemaNodeKind.MUL) or (
+            n.kind == SemaNodeKind.CALL and n.call_name == 'mul_legacy'
+        ):
+            if not helper:
+                return True
+        elif n.kind == SemaNodeKind.FMA:
+            if not helper and n.ty != SemaType.F32:
+                return True
+        elif n.kind == SemaNodeKind.LDEXP:
+            if not _is_vector_ldexp(n, ctx):
+                return True
+        elif n.kind == SemaNodeKind.FRACT:
+            if not _is_vector_fract(n, ctx):
+                return True
+        elif n.kind in host_ops:
+            return True
+    return False
+
+
 def _contains_mode_arithmetic(node: SemaNode) -> bool:
     return (
         (
@@ -1343,7 +1377,6 @@ def _lower_arrayderef(node: SemaNode, ctx: LoweringContext) -> str:
 
 
 _INLINE_UNARY_OPS: dict[str, str] = {
-    'screen_partition_4se': 'amdgpu::screen_partition_4se({0})',
     'rcp': 'amdgpu::transcendental::rcp_f32({0})',
     'rcp_iflag': 'amdgpu::transcendental::rcp_f32({0})',
     'rsq': 'amdgpu::transcendental::rsq_f32({0})',
@@ -1453,10 +1486,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'prng_advance': 'util::prng_advance({0})',
     'frexp_exp_f32': 'static_cast<uint32_t>(amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).exponent)',
-    # Signed 16-bit exponent in the low half.
-    'frexp_exp_f16': '[&]() -> uint32_t {{ float s = {0}; int exp = 0;'
-    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint16_t>(exp); }}()',
     'frexp_exp_f64': '[&]() {{ double s = {0};'
     ' int exp = 0;'
     ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
@@ -1514,17 +1543,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (s >= 32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MAX));'
     ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s))); }}()',
-    # These arguments are decoded floats, including source modifiers. Conversion
-    # rounds once with ties to even, independently of MODE.FP_ROUND. F16 sources
-    # are widened with MODE.FP_DENORM input flushing (unpacked NORM only).
-    'cvt_norm_i16_f16': '[&]() -> uint32_t {{ float s = {0};'
-    ' if (std::isnan(s)) return 0u;'
-    ' double scaled = util::rndne_scalar(std::clamp(static_cast<double>(s) * 32767.0, -32767.0, 32767.0));'
-    ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(scaled))); }}()',
-    'cvt_norm_u16_f16': '[&]() -> uint32_t {{ float s = {0};'
-    ' if (std::isnan(s)) return 0u;'
-    ' double scaled = util::rndne_scalar(std::clamp(static_cast<double>(s) * 65535.0, 0.0, 65535.0));'
-    ' return static_cast<uint32_t>(static_cast<uint16_t>(scaled)); }}()',
     'cvt_off_f32_i4': '[&]() -> float {{ int32_t nibble = static_cast<int32_t>({0} & 0xfu);'
     ' if (nibble & 0x8) nibble -= 16;'
     ' return static_cast<float>(nibble) * 0.0625f; }}()',
@@ -1918,7 +1936,6 @@ _INLINE_TERNARY_OPS: dict[str, str] = {
     ' if (w == 0) return 0u; uint32_t mask = (uint32_t{{1}} << w) - 1u;'
     ' uint32_t extracted = static_cast<uint32_t>(static_cast<int32_t>(src) >> off) & mask;'
     ' uint32_t signbit = uint32_t{{1}} << (w - 1u); return (extracted ^ signbit) - signbit; }}()',
-    **{op: cube_expression(op, '{0}', '{1}', '{2}') for op in CUBE_OPERATIONS},
 }
 
 
@@ -1932,7 +1949,7 @@ def _takes_flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> bool:
         return True
     if ctx.exec_model != ExecModel.VECTOR:
         return False
-    if callee in ('cvt_f32_f16_valu', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'):
+    if callee == 'cvt_f32_f16_valu':
         return True
     return callee in F16_FLUSHED_SOURCE_CALLS and node.ty == SemaType.F16
 
@@ -2661,8 +2678,6 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
         raise ValueError('F16 output modifiers must be handled by _destination_result')
     if len(node.children) < 2:
         return '0'
-    if any(_contains_call(node.children[1], op) for op in CUBE_OPERATIONS):
-        return cube_omod(_lower_expr(node.children[1], ctx))
     is_f64 = node.ty and node.ty.size == 64
     mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
     fp_type = 'double' if is_f64 else 'float'
@@ -2717,6 +2732,10 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}, {omod_round}); }}()'
         )
     if node.ty == SemaType.F32:
+        # Raw-bit scaling rounds by its explicit mode; only inline host
+        # arithmetic in the operand needs the guest rounding installed.
+        if not _rounds_on_host(node.children[1], ctx):
+            environment = ''
         return (
             f'[&]() {{ {environment}float v = {rhs};'
             f' return amdgpu::fp_mode::apply_omod_f32(v, {omod_expr}, {omod_round}); }}()'
@@ -2740,25 +2759,26 @@ def _lower_apply_clamp(node: SemaNode, ctx: LoweringContext) -> str:
         return '0'
     rhs = _lower_expr(node.children[1], ctx)
     is_f64 = node.ty and node.ty.size == 64
-    mode_arithmetic = ctx.mode_arithmetic and _contains_mode_arithmetic(node)
     fp_type = 'double' if is_f64 else 'float'
-    mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
-    environment = (
-        f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '
-        if mode_arithmetic
-        else ''
-    )
     if node.ty == SemaType.F32 and any(
         child.kind in (SemaNodeKind.ADD, SemaNodeKind.MUL, SemaNodeKind.FMA)
         for child in node.children[1].walk()
     ):
-        # The arithmetic helper scopes MODE itself; scope only CLAMP here, after
-        # the operand reads, so register-access callbacks keep the caller's FP state.
+        # The arithmetic helper scopes MODE itself, and CLAMP compares raw bits.
         return (
             f'[&]() {{ float v = {rhs};'
-            f' if (inst_.clamp) {{ {environment}'
-            ' v = amdgpu::clamp_floating_result(v, wf); } return v; }()'
+            ' if (inst_.clamp) v = amdgpu::clamp_floating_result(v, wf); return v; }()'
         )
+    # CLAMP compares raw bits; only inline host arithmetic in the operand needs the
+    # guest rounding installed.
+    mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
+    environment = (
+        f'amdgpu::fp_mode::detail::ScopedFenv environment(wf.fp_round_mode_{mode}()); '
+        if ctx.mode_arithmetic
+        and _contains_mode_arithmetic(node)
+        and _rounds_on_host(node.children[1], ctx)
+        else ''
+    )
     return (
         f'[&]() {{ {environment}{fp_type} v = {rhs};'
         ' if (inst_.clamp) v = amdgpu::clamp_floating_result(v, wf);'

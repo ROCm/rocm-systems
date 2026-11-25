@@ -38,7 +38,21 @@ INTEGER32_ARCHITECTURES = INTEGER_ARCHITECTURES + (
     'rdna3_5',
 )
 # Routing and conversions migrate independently of integer arithmetic.
-ROUTING_ARCHITECTURES = INTEGER_ARCHITECTURES
+ROUTING_ARCHITECTURES = (
+    'cdna1',
+    'cdna2',
+    'cdna3',
+    'cdna4',
+    'cdna5',
+    'rdna1',
+    'rdna2',
+    'rdna3',
+    'rdna3_5',
+    'rdna4',
+)
+WORD_ROUTING_NAMES = {'V_MOV_B32', 'V_CNDMASK_B32'}
+HALF_CONDITIONAL_ARCHITECTURES = (*INTEGER_ARCHITECTURES, 'rdna3_5')
+SCREEN_PARTITION_ARCHITECTURES = ('cdna1', 'cdna2', 'cdna3', 'cdna4')
 
 
 # These integer APIs use one 32-bit VGPR for each result and source.
@@ -148,6 +162,25 @@ UNMODIFIED_MULTIPLIES = {
 }
 
 
+# Halfword and packed operations migrate independently of word arithmetic.
+HALF_INTEGER_ARCHITECTURES = INTEGER_ARCHITECTURES + (
+    'cdna1',
+    'cdna2',
+    'rdna1',
+    'rdna2',
+    'rdna3_5',
+)
+
+# Carry and multiword operations migrate separately from word operations.
+CARRY_WIDE_ARCHITECTURES = INTEGER_ARCHITECTURES + (
+    'cdna1',
+    'cdna2',
+    'rdna1',
+    'rdna2',
+    'rdna3_5',
+)
+
+
 def gen_vector32(ctx: ExecuteContext) -> str | None:
     arch = ctx.arch_name
     mnemonic = (
@@ -162,16 +195,31 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         return None
     if mnemonic == 'V_PRNG_B32' and arch not in ('cdna4', 'cdna5'):
         return None
-    if arch not in INTEGER32_ARCHITECTURES or mnemonic not in VECTOR32_NAMES:
+    older_saturation = (
+        arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'rdna3_5')
+        and mnemonic == 'V_SAT_PK_U8_I16'
+    )
+    if mnemonic in WIDEN16_NAMES:
+        architectures = HALF_INTEGER_ARCHITECTURES
+    elif mnemonic == 'V_SCREEN_PARTITION_4SE_B32':
+        architectures = SCREEN_PARTITION_ARCHITECTURES
+    elif mnemonic == 'V_CNDMASK_B16':
+        architectures = HALF_CONDITIONAL_ARCHITECTURES
+    elif mnemonic in WORD_ROUTING_NAMES:
+        architectures = ROUTING_ARCHITECTURES
+    else:
+        architectures = INTEGER32_ARCHITECTURES
+    if (
+        arch not in architectures and not older_saturation
+    ) or mnemonic not in VECTOR32_NAMES:
         return None
     if (
-        mnemonic in CONDITIONAL_NAMES | {'V_MOV_B32'}
-        and arch not in ROUTING_ARCHITECTURES
+        mnemonic in SATURATE_NAMES
+        and arch not in INTEGER_ARCHITECTURES
+        and not older_saturation
     ):
         return None
-    if mnemonic in WIDEN16_NAMES | SATURATE_NAMES and arch not in ROUTING_ARCHITECTURES:
-        return None
-    if mnemonic in WIDEN16_NAMES and arch not in ('rdna3', 'rdna4', 'cdna5'):
+    if mnemonic in WIDEN16_NAMES and arch not in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5'):
         return None
     if mnemonic in ACCUMULATOR_MOVES:
         if arch not in ('cdna3', 'cdna4') or len(dst) != 1 or len(src) != 1:
@@ -180,7 +228,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
     if mnemonic == 'V_MOV_B32' and not is_vop3 and len(dst) == len(src) == 1:
         return f'  amdgpu::arith::execute_move32(*this, wf, {dst[0]}, {src[0]});'
     if mnemonic == 'V_SCREEN_PARTITION_4SE_B32':
-        if arch not in ('cdna3', 'cdna4') or len(dst) != 1 or len(src) != 1:
+        if len(dst) != 1 or len(src) != 1:
             return None
         # These CDNA targets only execute Wave64. Decoder operands retain DPP/SDWA routing.
         return (
@@ -200,7 +248,7 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         return None
     api = 'rj_arith_' + mnemonic.lower()
     if mnemonic in SATURATE_NAMES:
-        if arch in ('cdna3', 'cdna4'):
+        if arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'cdna3', 'cdna4'):
             api += '_gfx942'
             sdwa = (
                 ''
@@ -212,9 +260,10 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
                     '  }\n'
                 )
             )
+            # Legacy GFX10 publishes a whole word and ignores OPSEL in both encodings.
             modifiers = (
                 '(amdgpu::vop3_opsel(inst_) & 8) ? RJ_ARITH_ALU_HIGH_D : 0u'
-                if is_vop3
+                if is_vop3 and arch not in ('rdna1', 'rdna2')
                 else '0u'
             )
             return sdwa + (
@@ -263,7 +312,11 @@ def gen_vector32(ctx: ExecuteContext) -> str | None:
         if is_vop3 and mnemonic not in UNMODIFIED_MULTIPLIES and mnemonic != 'V_MOV_B32'
         else '0u'
     )
-    if mnemonic == 'V_MOV_B32' and is_vop3 and arch in ('rdna3', 'rdna4', 'cdna5'):
+    if (
+        mnemonic == 'V_MOV_B32'
+        and is_vop3
+        and arch in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'cdna5')
+    ):
         modifiers = '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u)'
     extra = ''
     if mnemonic in ('V_ALIGNBIT_B32', 'V_ALIGNBYTE_B32') and arch in (
@@ -342,11 +395,11 @@ CARRY32_NAMES = {
 
 def gen_carry32(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
-    if arch.startswith('cdna'):
+    if arch.startswith('cdna') or arch in ('rdna1', 'rdna2'):
         mnemonic = CDNA_INTEGER_ALIASES.get(mnemonic, mnemonic)
     dst, src = ctx.dst_ops, ctx.src_ops
     is_vop3, result_writer = ctx.is_vop3, ctx.result_writer
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in CARRY32_NAMES:
+    if arch not in CARRY_WIDE_ARCHITECTURES or mnemonic not in CARRY32_NAMES:
         return None
     with_carry = '_CI_' in mnemonic
     if len(dst) != (2 if is_vop3 else 1) or len(src) != (
@@ -369,9 +422,12 @@ def gen_carry32(ctx: ExecuteContext) -> str | None:
         carry = f'wf.exec() ? {carry} : 0u'
     modifiers = 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' if is_vop3 else '0u'
     api = 'rj_arith_' + mnemonic.lower()
-    carry_policy = ', false' if arch.startswith('cdna') else ''
+    # Pre-gfx11 Radeon preserves carry across DPP destination-only masks.
+    carry_policy = (
+        ', false' if arch.startswith('cdna') or arch in ('rdna1', 'rdna2') else ''
+    )
     sdwa = ''
-    if arch in ('cdna3', 'cdna4') and not is_vop3:
+    if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2') and not is_vop3:
         sdwa = (
             '  if (inst_.src0 == amdgpu::SRC_SDWA) {\n'
             f'    amdgpu::arith::execute_sdwa_carry32<{str(with_carry).lower()}>(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},\n'
@@ -419,7 +475,7 @@ def gen_wide_integer(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
     dst, src = ctx.dst_ops, ctx.src_ops
     is_vop3, result_writer = ctx.is_vop3, ctx.result_writer
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in WIDE_INTEGER_NAMES:
+    if arch not in CARRY_WIDE_ARCHITECTURES or mnemonic not in WIDE_INTEGER_NAMES:
         return None
     api = 'rj_arith_' + mnemonic.lower()
     modifiers = 'inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u' if is_vop3 else '0u'
@@ -520,36 +576,50 @@ def gen_integer16(ctx: ExecuteContext) -> str | None:
     )
     dst = ctx.dst_ops
     src = ctx.src_ops
-    reverse = ctx.inst.name == 'V_SUBREV_U16' and arch in ('cdna3', 'cdna4')
+    reverse = ctx.inst.name == 'V_SUBREV_U16' and arch in (
+        'cdna1',
+        'cdna2',
+        'cdna3',
+        'cdna4',
+    )
     if reverse:
         src = list(reversed(src))
     is_vop3 = ctx.is_vop3
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in INTEGER16_NAMES:
+    if arch not in HALF_INTEGER_ARCHITECTURES or mnemonic not in INTEGER16_NAMES:
         return None
-    if mnemonic == 'V_MOV_B16' and arch not in ('rdna3', 'rdna4', 'cdna5'):
+    if mnemonic == 'V_MOV_B16' and arch not in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5'):
         return None
     count = 1 if mnemonic in UNARY16 else 2 if mnemonic in BINARY16 else 3
     if len(dst) != 1 or len(src) != count:
         return None
-    # Legacy MAD wraps even when the encoding's CLAMP bit is set.
+    # Preserve CDNA2's saturating legacy MAD; other legacy forms wrap.
     clamp = (
         '0u'
         if ctx.inst.name.startswith('V_MAD_LEGACY_')
+        and not ctx.profile.legacy_integer_mad_clamp
         else '(inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u)'
     )
     lines = []
     sign_modifiers = (
         '((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) | ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |'
-        if mnemonic == 'V_MOV_B16' and is_vop3
+        # gfx1150's inherited MOV ignores encoded sign modifiers.
+        if mnemonic == 'V_MOV_B16' and is_vop3 and arch != 'rdna3_5'
         else ''
     )
     full_sources = mnemonic in BYTE_SHIFT_NAMES
+    rdna2_native = is_vop3 and arch == 'rdna2' and ctx.uses_vop3_half_selectors
+    # Share the decoder's instruction-level policy: native gfx1030 binaries
+    # and ternaries select halves, while promoted VOP1/2 forms do not.
     if full_sources:
         lines += [
             '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
             '  const uint64_t modifiers = (opsel & 8) ? RJ_ARITH_ALU_HIGH_D : 0u;',
         ]
-    elif is_vop3:
+    elif is_vop3 and (
+        ctx.profile.uses_true16_vop3_opsel
+        or mnemonic in ('V_MAD_U16', 'V_MAD_I16')
+        or rdna2_native
+    ):
         lines += [
             '  const uint32_t opsel = amdgpu::vop3_opsel(inst_);',
             f'  const uint64_t modifiers = {sign_modifiers} {clamp} |',
@@ -561,6 +631,8 @@ def gen_integer16(ctx: ExecuteContext) -> str | None:
             lines.append(
                 f'      ((opsel & {1 << source_index}) ? RJ_ARITH_ALU_HIGH_{selector} : 0u){suffix}'
             )
+    elif is_vop3:
+        lines.append(f'  const uint64_t modifiers = {clamp};')
     elif (
         mnemonic == 'V_MUL_LO_U16'
         and ctx.enc_name in ctx.profile.mul_lo_u16_clamp_encodings
@@ -578,11 +650,21 @@ def gen_integer16(ctx: ExecuteContext) -> str | None:
     ):
         api += '_gfx942'
     inputs = ', '.join([src[0]] + ['&' + operand for operand in src[1:]])
-    # gfx942/gfx950 zero the upper half only when writing the low half.
-    shape = f'{count}, true' if arch in ('cdna3', 'cdna4') else str(count)
+    # Older word-valued half arithmetic clears the unused high half. Ordinary
+    # true16 MAD preserves it; CDNA legacy MAD and other CDNA half results clear it.
+    zero_high = arch in ('cdna3', 'cdna4') or (
+        arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2')
+        and not rdna2_native
+        and (not is_vop3 or ctx.inst.name not in ('V_MAD_U16', 'V_MAD_I16'))
+    )
+    shape = f'{count}, true' if zero_high else str(count)
     if full_sources:
         shape = f'{count}, {str(arch in ("cdna3", "cdna4")).lower()}, true'
-    if arch in ('cdna3', 'cdna4') and not is_vop3 and count <= 2:
+    if (
+        arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4', 'rdna1', 'rdna2')
+        and not is_vop3
+        and count <= 2
+    ):
         lines += [
             f'  if (amdgpu::arith::try_execute_sdwa_integer32(*this, wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
             f'      wf.cu().arithmetic_flags(), modifiers, {dst[0]}, {", ".join(src)})) return;',
@@ -611,7 +693,7 @@ def gen_widening_integer(ctx: ExecuteContext) -> str | None:
     dst = ctx.dst_ops
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in WIDENING_INTEGER_NAMES:
+    if arch not in HALF_INTEGER_ARCHITECTURES or mnemonic not in WIDENING_INTEGER_NAMES:
         return None
     mad = mnemonic in WIDENING_MAD_NAMES
     if not is_vop3 or len(dst) != 1 or len(src) != (3 if mad else 2):
@@ -674,7 +756,7 @@ def gen_packed_integer(ctx: ExecuteContext) -> str | None:
     hi_c_expr = ctx.op_sel_hi_2_expr
     if mnemonic in CDNA5_PACKED_TERNARY and arch != 'cdna5':
         return None
-    if arch not in INTEGER_ARCHITECTURES or mnemonic not in PACKED_INTEGER_NAMES:
+    if arch not in HALF_INTEGER_ARCHITECTURES or mnemonic not in PACKED_INTEGER_NAMES:
         return None
     count = 3 if mnemonic in PACKED_INTEGER_TERNARY else 2
     if enc_name != 'ENC_VOP3P' or len(dst) != 1 or len(src) != count:

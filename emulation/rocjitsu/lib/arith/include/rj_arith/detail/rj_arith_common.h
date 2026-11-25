@@ -223,8 +223,9 @@ constexpr uint32_t RJ_ARITH_ALU_HIGH_D = 1U << 12;
 // exact value before rounding. Source selection and destination byte placement
 // remain separate from this arithmetic control.
 constexpr uint32_t RJ_ARITH_CVT_SDWA = 1U << 16;
-// CDNA FP16 binary SDWA scaling order in Compatibility. Only the gfx942
-// binary arithmetic entry points accept this encoding selector.
+// Select inherited SDWA output processing where the entry point documents support.
+// Depending on the instruction, this scales a rounded result or finalizes an already-scaled
+// result before CLAMP. Source and destination byte placement remain separate; excludes DPP.
 constexpr uint32_t RJ_ARITH_ALU_SDWA = 1U << 16;
 
 // Mixed FMA source formats: unset means FP32; set means FP16 in the half
@@ -242,6 +243,9 @@ constexpr uint32_t RJ_ARITH_MIX_BF16_C = 1U << 15;
 // Returns CPU capability flags for features usable on this machine, accounting
 // for CPU and operating-system support. All non-CPU flag bits are zero.
 uint64_t rj_arith_init_cpu_flags(void);
+
+// Limit detected CPU flags to the highest compiled level at or below max_level.
+uint64_t rj_arith_limit_cpu_flags(uint64_t detected_flags, uint64_t max_level);
 
 // Returns a static CPU-level name, ignoring bits outside RJ_ARITH_CPU_MASK.
 // Unknown levels return "unknown". The returned string must not be modified.
