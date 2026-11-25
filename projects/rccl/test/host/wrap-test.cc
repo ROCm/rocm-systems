@@ -9138,7 +9138,7 @@ TEST(WrapMicrotestIsolated, ArSymMaxR2Cap_Gfx1250ScalesWithRanks) {
 
 // gfx1250 DPX and SPX, registered eager sum AllReduce: symk from symMinR2 (8M) to the rank- and type-scaled cap
 // (DPX on every comm, SPX from 16 ranks), Ring above it, and never CE-registered or the DDA LL128 re-route. Comms
-// whose cap is below symMinR2 take Ring from 8M. DPX capture keeps Ring; SPX capture re-routes to DDA (tested
+// whose cap is below symMinR2 (2-8 ranks) take Ring from 8M. DPX capture keeps Ring; SPX capture re-routes to DDA (tested
 // with the re-route). Each size is a whole number of elements per rank.
 TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250RegisteredSymkThenRing) {
   RUN_ISOLATED_TEST(
@@ -9183,10 +9183,12 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250RegisteredSymkThenRing) {
             EXPECT_EQ(NCCL_ALGO_RING, ar.Select(2 * c.cap, false, true, ncclSum, ncclBfloat16).algo)
                 << t.name << " " << c.nRanks << " ranks, bf16 above the cap";
           }
-          ar.SetRanks(8);
-          const std::string at = std::string(t.name) + " 8 ranks, ";
-          ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, (at + "cap below symMinR2").c_str());
-          ar.ExpectUnchanged(256 * kMiB, false, NCCL_ALGO_RING, (at + "old CE-registered ceiling").c_str());
+          for (int nRanks : {2, 4, 8}) {
+            ar.SetRanks(nRanks);
+            const std::string at = std::string(t.name) + " " + std::to_string(nRanks) + " ranks, ";
+            ar.ExpectUnchanged(8 * kMiB, false, NCCL_ALGO_RING, (at + "cap below symMinR2").c_str());
+            ar.ExpectUnchanged(256 * kMiB, false, NCCL_ALGO_RING, (at + "old CE-registered ceiling").c_str());
+          }
         }
         ar.SetRanks(16);
         ar.comm_->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
@@ -9228,18 +9230,21 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_Gfx1250CeRegisteredWindowEndsAt4M) {
       });
 }
 
-// gfx1250 DPX and SPX close the AllGather CE-registered window at every size.
-TEST(WrapMicrotestIsolated, AllGatherCeRegisteredWindow_Gfx1250Closed) {
+// gfx1250 SPX keeps the AllGather CE-registered window to 32M, for types DDA cannot run; DPX closes it.
+TEST(WrapMicrotestIsolated, AllGatherCeRegisteredWindow_Gfx1250SpxTo32MDpxClosed) {
   RUN_ISOLATED_TEST(
-      "Wrap_AllGatherCeRegisteredWindow_Gfx1250Closed",
+      "Wrap_AllGatherCeRegisteredWindow_Gfx1250SpxTo32MDpxClosed",
       []() {
         ncclComm* comm = MakeCommWithArch("gfx1250");
         for (rcclTuningPartition partition : {RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}) {
+          const bool spx = partition == RCCL_TUNING_PARTITION_SPX;
           comm->archThresholds = real_arch_thresholds::rcclGetArchThresholds("gfx1250", partition);
           ASSERT_NE(nullptr, comm->archThresholds);
-          for (size_t bytes : {2 * kMiB, 128 * kMiB, 1024 * kMiB, 8192 * kMiB}) {
-            EXPECT_FALSE(rcclAllGatherCeRegisteredWindow(comm, bytes, ncclSymSendRegRecvReg, false))
-                << (int)partition << " " << bytes;
+          for (const std::pair<size_t, bool> c : {std::make_pair(2 * kMiB, spx), {32 * kMiB, spx},
+                                                  {32 * kMiB + 1, false}, {128 * kMiB, false},
+                                                  {8192 * kMiB, false}}) {
+            EXPECT_EQ(c.second, rcclAllGatherCeRegisteredWindow(comm, c.first, ncclSymSendRegRecvReg, false))
+                << (spx ? "SPX " : "DPX ") << c.first;
           }
         }
         DeleteCommWithArch(comm);

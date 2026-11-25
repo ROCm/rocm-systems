@@ -3571,7 +3571,7 @@ TEST(RcclAlltoAllDecision, UnsupportedArch_DirectFallback)
 // The function is a pure CE-capability gate: recv registered AND totalBytes
 // within ceRegMax[AG].  symMaxR2 arbitration is a selector-level concern
 // (symEligible) and is intentionally absent here, matching AllReduce and
-// AlltoAll.  gfx1250 table: ceRegMax[AG] = 8 GiB.
+// AlltoAll.  gfx1250 tables: ceRegMax[AG] = 32 MiB (SPX), 0 (DPX).
 // ---------------------------------------------------------------------------
 namespace
 {

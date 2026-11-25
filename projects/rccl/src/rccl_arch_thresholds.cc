@@ -138,7 +138,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ceRegMax = {
     0,                             // [0] Broadcast      -- not used
     0,                             // [1] Reduce          -- not used
-    0,                             // [2] AllGather       -- 0 = disabled: Ring beats CE 1.4-1.8x from 256M (SPX)
+    32ULL*1024*1024,               // [2] AllGather       -- types DDA cannot run: CE beats Ring up to 7x to 32M, Ring
+                                   //                        beats CE from 64M; DDA / TDM / symk run the others first (SPX)
     0,                             // [3] ReduceScatter   -- not used
     4ULL*1024*1024,                // [4] AllReduce       -- non-sum ops below symMinR2; symk or Ring beats CE 1.4-2x from 8M (SPX)
     0,                             // [5] SendRecv        -- not used
