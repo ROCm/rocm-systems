@@ -111,6 +111,9 @@ static std::tuple<const amd::Isa*, const char*> findIsa(uint32_t gfxipMajor, uin
       palDeviceIter->gfxipMajor_, palDeviceIter->gfxipMinor_, palDeviceIter->gfxipStepping_,
       sramecc ? amd::Isa::Feature::Enabled : amd::Isa::Feature::Disabled,
       xnack ? amd::Isa::Feature::Enabled : amd::Isa::Feature::Disabled);
+  if (isa == nullptr) {
+    return std::make_tuple(nullptr, nullptr);
+  }
   return std::make_tuple(
       isa, (palDeviceIter->gfxipMajor_ > 8) ? isa->targetId() : palDeviceIter->palName_);
 }
@@ -426,6 +429,10 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.maxConstantBufferSize_ = info_.maxMemAllocSize_;
   info_.maxConstantArgs_ = MaxConstArguments;
 
+  // PAL image limits, zero for offline devices. HIP caps them at the ROCr limits.
+  const Pal::Extent3d& palImageDims = palProp.imageProperties.maxDimensions;
+  const bool usePalImageLimits = amd::IS_HIP && (palImageDims.width != 0);
+
   // Image support fields
   if (settings().imageSupport_) {
     info_.imageSupport_ = true;
@@ -434,11 +441,17 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     info_.maxWriteImageArgs_ = MaxWriteImage;
     info_.image2DMaxWidth_ = maxTextureSize;
     info_.image2DMaxHeight_ = maxTextureSize;
-    info_.image3DMaxWidth_ = std::min(2 * Ki, maxTextureSize);
-    info_.image3DMaxHeight_ = std::min(2 * Ki, maxTextureSize);
-    info_.image3DMaxDepth_ = std::min(2 * Ki, maxTextureSize);
+    if (usePalImageLimits) {
+      info_.image3DMaxWidth_ = std::min<size_t>(palImageDims.width, maxTextureSize);
+      info_.image3DMaxHeight_ = std::min<size_t>(palImageDims.height, maxTextureSize);
+      info_.image3DMaxDepth_ = std::min<size_t>(palImageDims.depth, MaxImage3DDepth);
+    } else {
+      info_.image3DMaxWidth_ = std::min(2 * Ki, maxTextureSize);
+      info_.image3DMaxHeight_ = std::min(2 * Ki, maxTextureSize);
+      info_.image3DMaxDepth_ = std::min(2 * Ki, maxTextureSize);
+    }
 
-    info_.imagePitchAlignment_ = 256;        // PAL uses LINEAR_ALIGNED
+    info_.imagePitchAlignment_ = (palProp.gfxTriple >= Pal::IpLevel(12, 0)) ? 128 : 256;
     info_.imageBaseAddressAlignment_ = 256;  // XXX: 256 byte base address alignment for now
 
     info_.bufferFromImageSupport_ = true;
@@ -509,9 +522,16 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
   info_.imageMaxBufferSize_ =
       std::min<size_t>(MaxImageBufferSize, info_.maxMemAllocSize_ / kPixelRgbaSize);
   info_.image1DMaxWidth_ = maxTextureSize;
-  info_.imageMaxArraySize_ = MaxImageArraySize;
-  info_.image2DAMaxWidth_[0] = MaxImageArraySize;
-  info_.image2DAMaxWidth_[1] = MaxImageArraySize;
+  if (usePalImageLimits) {
+    info_.imageMaxArraySize_ =
+        std::min<size_t>(palProp.imageProperties.maxArraySlices, MaxImageArraySizeHip);
+    info_.image2DAMaxWidth_[0] = info_.image2DMaxWidth_;
+    info_.image2DAMaxWidth_[1] = info_.image2DMaxHeight_;
+  } else {
+    info_.imageMaxArraySize_ = MaxImageArraySize;
+    info_.image2DAMaxWidth_[0] = MaxImageArraySize;
+    info_.image2DAMaxWidth_[1] = MaxImageArraySize;
+  }
   info_.image1DAMaxWidth_ = maxTextureSize;
   info_.preferredInteropUserSync_ = true;
   info_.printfBufferSize_ = PrintfDbg::WorkitemDebugSize * info().maxWorkGroupSize_;
@@ -648,10 +668,19 @@ void NullDevice::fillDeviceInfo(const Pal::DeviceProperties& palProp,
     }
   }
 #if PAL_CLIENT_INTERFACE_MAJOR_VERSION >= 989
-  info_.hasExpertSchedMode_ = palProp.gfxTriple >= Pal::IpLevel(12, 0);
+  const bool isGfx12Plus = palProp.gfxTriple >= Pal::IpLevel(12, 0);
 #else
-  info_.hasExpertSchedMode_ = palProp.gfxLevel >= Pal::GfxIpLevel::GfxIp12;
+  const bool isGfx12Plus = palProp.gfxLevel >= Pal::GfxIpLevel::GfxIp12;
 #endif
+  info_.hasExpertSchedMode_ = isGfx12Plus;
+
+  // gfx12+ packs workgroup IDs Y and Z into 16-bit halves of an architected SGPR,
+  // so a kernel can't address more than 2^16 work-groups in those dimensions.
+  if (isGfx12Plus) {
+    constexpr uint32_t kMaxWorkGroupCountYZ = std::numeric_limits<uint16_t>::max() + 1;
+    info_.maxWorkGroupCount_[1] = kMaxWorkGroupCountYZ;
+    info_.maxWorkGroupCount_[2] = kMaxWorkGroupCountYZ;
+  }
 }
 
 Device::XferBuffers::~XferBuffers() {
@@ -2344,7 +2373,7 @@ void Device::destroyScratchBuffers() {
 
 void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
                            const uint* addressMode, uint32_t mipFilter, float minLod,
-                           float maxLod) const {
+                           float maxLod, uint32_t maxAnisotropy) const {
   Pal::SamplerInfo samplerInfo = {};
   assert(addressMode != nullptr);
   samplerInfo.borderColorType = Pal::BorderColorType::TransparentBlack;
@@ -2353,15 +2382,24 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
 
   samplerInfo.flags.unnormalizedCoords = !(state & amd::Sampler::StateNormalizedCoordsMask);
   samplerInfo.maxLod = 4096.0f;
+  samplerInfo.maxAnisotropy = maxAnisotropy;
 
   state &= ~amd::Sampler::StateNormalizedCoordsMask;
 
+  const bool aniso = (maxAnisotropy >= 2);
+
   // Program texture filter mode
   if (state == amd::Sampler::StateFilterLinear) {
-    samplerInfo.filter.magnification = Pal::XyFilterLinear;
-    samplerInfo.filter.minification = Pal::XyFilterLinear;
+    samplerInfo.filter.magnification =
+        aniso ? Pal::XyFilterAnisotropicLinear : Pal::XyFilterLinear;
+    samplerInfo.filter.minification =
+        aniso ? Pal::XyFilterAnisotropicLinear : Pal::XyFilterLinear;
     samplerInfo.filter.zFilter = Pal::ZFilterLinear;
+  } else if (aniso) {
+    samplerInfo.filter.magnification = Pal::XyFilterAnisotropicPoint;
+    samplerInfo.filter.minification = Pal::XyFilterAnisotropicPoint;
   }
+
 
   if (mipFilter == CL_FILTER_NEAREST) {
     samplerInfo.filter.mipFilter = Pal::MipFilterPoint;
@@ -2423,6 +2461,37 @@ bool Device::deviceAllowAccess(void* ptr) const {
   std::lock_guard<std::mutex> lock(lockAllowAccess_);
   // Empty function for now.
   return true;
+}
+
+// ================================================================================================
+void Device::CheckExecutionState() const {
+  // The error is sticky, so once one is latched there is nothing left to ask.
+  if (amd::Device::IsGPUInError()) {
+    return;
+  }
+
+  Pal::PageFaultStatus pageFault = {};
+  const Pal::Result result = iDev()->CheckExecutionState(&pageFault);
+
+  // ErrorUnavailable means the query isn't supported for this client and
+  // ErrorInvalidValue that PAL couldn't read the reset state, neither of which
+  // says the device is bad.
+  if (!Util::IsErrorResult(result) || (result == Pal::Result::ErrorUnavailable) ||
+      (result == Pal::Result::ErrorInvalidValue)) {
+    return;
+  }
+
+  if (result == Pal::Result::ErrorGpuPageFaultDetected) {
+    LogPrintfError("GPU page fault detected! %s at address 0x%llx",
+                   pageFault.flags.readFault ? "read" : "write",
+                   static_cast<unsigned long long>(pageFault.faultAddress));
+  } else {
+    LogPrintfError("PAL reports the device unusable! result:%d", result);
+  }
+  // A trap faults instead of being caught when the KMD trap handler is missing, so
+  // it can't be told apart from a bad access here. Both keep reporting the error
+  // the failed submit in VirtualGPU::Queue::isDone() already reported.
+  gpu_error_.store(CL_INVALID_OPERATION, std::memory_order_relaxed);
 }
 
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
@@ -2805,7 +2874,7 @@ bool Sampler::create(const amd::Sampler& owner) {
     return false;
   }
   dev_.fillHwSampler(owner.state(), hwState_, HsaSamplerObjectSize, owner.addessMode(),
-                     owner.mipFilter(), owner.minLod(), owner.maxLod());
+                     owner.mipFilter(), owner.minLod(), owner.maxLod(), owner.maxAnisotropy());
   return true;
 }
 

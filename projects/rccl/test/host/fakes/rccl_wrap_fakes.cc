@@ -21,6 +21,7 @@ ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAllReduce, rcclSelectAllReduce);
 ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAllGather, rcclSelectAllGather);
 ASSERT_HOOK_MATCHES_PROD(g_rcclSelectReduceScatter, rcclSelectReduceScatter);
 ASSERT_HOOK_MATCHES_PROD(g_rcclSelectAlltoAll, rcclSelectAlltoAll);
+ASSERT_HOOK_MATCHES_PROD(g_rcclSelectBroadcast, rcclSelectBroadcast);
 ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEnabled, rcclDdaEnabled);
 ASSERT_HOOK_MATCHES_PROD(g_rcclDdaEntryThreshold, rcclDdaEntryThreshold);
 ASSERT_HOOK_MATCHES_PROD(g_rcclGetAlgoName, rcclGetAlgoName);
@@ -28,6 +29,7 @@ ASSERT_HOOK_MATCHES_PROD(g_rcclUseAllGatherDirect, rcclUseAllGatherDirect);
 ASSERT_HOOK_MATCHES_PROD(g_rcclUseReduceScatterDirect, rcclUseReduceScatterDirect);
 ASSERT_HOOK_MATCHES_PROD(g_rcclNetRegSegmentCount, rcclNetRegSegmentCount);
 ASSERT_HOOK_MATCHES_PROD(g_rcclNetGraphRegSegmentCount, rcclNetGraphRegSegmentCount);
+ASSERT_HOOK_MATCHES_PROD(g_rcclCeArNonRegCap, rcclCeArNonRegCap);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 // ===========================================================================
@@ -140,11 +142,22 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm*, bool ceCapturing) {
 // definitions are dropped by --gc-sections when the option is off.
 bool g_rcclWarpSpeedSupported = false;
 int g_rcclWarpSpeedSupportedCalls = 0;
-bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*) {
-  ++g_rcclWarpSpeedSupportedCalls;
+struct ncclTaskColl* g_rcclWarpSpeedSupportedLastCollHead = nullptr;
+int g_rcclWarpSpeedSupportedLastNCollTasks = 0;
+static bool DefaultWarpSpeedSupportedPrefix(struct ncclComm*, struct ncclKernelPlan*,
+                                            struct ncclTaskColl*, int) {
   return g_rcclWarpSpeedSupported;
 }
-
+std::function<bool(struct ncclComm*, struct ncclKernelPlan*,
+                   struct ncclTaskColl*, int)> g_rcclWarpSpeedSupportedPrefix =
+    DefaultWarpSpeedSupportedPrefix;
+bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                            struct ncclTaskColl* collHead, int nCollTasks) {
+  ++g_rcclWarpSpeedSupportedCalls;
+  g_rcclWarpSpeedSupportedLastCollHead = collHead;
+  g_rcclWarpSpeedSupportedLastNCollTasks = nCollTasks;
+  return g_rcclWarpSpeedSupportedPrefix(comm, plan, collHead, nCollTasks);
+}
 // Identity by default, so an ENABLE_WARP_SPEED=ON build computes the same
 // channel count as an OFF one and the existing topoGetAlgoInfo expectations hold.
 static int DefaultWarpSpeedAdjustChannels(struct ncclComm*, struct ncclTaskColl*, int nc) {
@@ -196,6 +209,9 @@ int64_t g_rcclParamCeReduceScatter = 0;            // rccl_wrap.cc:70 RCCL_PARAM
 int64_t rcclParamCeReduceScatter() { return g_rcclParamCeReduceScatter; }
 int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:73 RCCL_PARAM default
 int64_t rcclParamCeArStagingBytes() { return g_rcclParamCeArStagingBytes; }
+static size_t DefaultCeArNonRegCap(const ncclComm*) { FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap"); }
+std::function<size_t(const ncclComm*)> g_rcclCeArNonRegCap = DefaultCeArNonRegCap;
+size_t rcclCeArNonRegCap(const ncclComm* comm) { return g_rcclCeArNonRegCap(comm); }
 
 static ncclResult_t DefaultSelectAllReduce(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
                                            hipStream_t, bool, bool, struct rcclCollDecision*) {
@@ -223,6 +239,17 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
                                  struct rcclCollDecision* decision) {
   return g_rcclSelectAllGather(comm, sendbuff, recvbuff, sendcount, datatype, stream, query, graphCapturingHint,
                                decision);
+}
+
+static ncclResult_t DefaultSelectBroadcast(struct ncclComm*, size_t, ncclDataType_t, int, bool,
+                                           struct rcclCollDecision*) {
+  FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectBroadcast");
+}
+std::function<ncclResult_t(struct ncclComm*, size_t, ncclDataType_t, int, bool, struct rcclCollDecision*)>
+    g_rcclSelectBroadcast = DefaultSelectBroadcast;
+ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int root, bool query,
+                                 struct rcclCollDecision* decision) {
+  return g_rcclSelectBroadcast(comm, count, datatype, root, query, decision);
 }
 
 static ncclResult_t DefaultSelectReduceScatter(struct ncclComm*, const void*, void*, size_t, ncclDataType_t,
@@ -346,6 +373,7 @@ void ResetRcclWrapFakes() {
   g_rcclParamCeAllReduce = -1;
   g_rcclParamCeReduceScatter = 0;
   g_rcclParamCeArStagingBytes = -1;
+  g_rcclCeArNonRegCap = DefaultCeArNonRegCap;
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclUpdateCollectiveAlgorithmCalls = 0;
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
@@ -367,6 +395,9 @@ void ResetRcclWrapFakes() {
   g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
   g_rcclWarpSpeedSupported = false;
   g_rcclWarpSpeedSupportedCalls = 0;
+  g_rcclWarpSpeedSupportedLastCollHead = nullptr;
+  g_rcclWarpSpeedSupportedLastNCollTasks = 0;
+  g_rcclWarpSpeedSupportedPrefix = DefaultWarpSpeedSupportedPrefix;
   g_rcclWarpSpeedAdjustChannels = DefaultWarpSpeedAdjustChannels;
   g_rcclSetWarpSpeedAutoResult = ncclSuccess;
   g_rcclSetWarpSpeedAutoCalls = 0;
@@ -382,6 +413,7 @@ void ResetRcclWrapFakes() {
   g_rcclSelectAllGather = DefaultSelectAllGather;
   g_rcclSelectReduceScatter = DefaultSelectReduceScatter;
   g_rcclSelectAlltoAll = DefaultSelectAlltoAll;
+  g_rcclSelectBroadcast = DefaultSelectBroadcast;
   g_rcclDdaEnabled = DefaultDdaEnabled;
   g_rcclDdaEntryThreshold = DefaultDdaEntryThreshold;
   g_rcclGetAlgoName = DefaultGetAlgoName;
@@ -445,11 +477,7 @@ size_t rcclCeAr2ShotMax(const ncclComm*) {
 size_t rcclCeAr2ShotMin(const ncclComm*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclCeAr2ShotMin");
 }
-// taskAppend and ncclCeInit call this instead of rcclCeAr2ShotMax. No host
-// microtest reaches either site; the stub exists so those binaries link.
-size_t rcclCeArNonRegCap(const ncclComm*) {
-  FailLoudUnfaked("rccl_wrap_fakes", "rcclCeArNonRegCap");
-}
+// rcclCeArNonRegCap, which taskAppend and ncclCeInit call instead of rcclCeAr2ShotMax, is a seam above.
 bool rcclNcclAlgoEnvIsSet() {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclNcclAlgoEnvIsSet");
 }

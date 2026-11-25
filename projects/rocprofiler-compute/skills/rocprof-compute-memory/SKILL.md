@@ -10,12 +10,47 @@ bandwidth, caches, or data movement directly.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
+## Before you start
+
+If `command -v rocprof-compute` finds the tool and
+`rocprof-compute analyze --debug-verify-deps` passes, skip this section.
+On ROCm 10.2, use `--verify-deps` instead of `--debug-verify-deps`.
+
+Otherwise, check that ROCm and a GPU are present:
+
+```bash
+rocminfo
+amd-smi list
+```
+
+If either command fails, ROCm is not installed or no GPU is visible. Stop and
+point the user to "Install the ROCm Core SDK" in the
+[install guide](../../docs/install/core-install.rst). Installing rocprof-compute
+alone does not help.
+
+Check the GPU against
+[compatible accelerators](../../docs/reference/compatible-accelerators.rst).
+The table lists product families, so match the `Marketing Name` that `rocminfo`
+prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
+tell the user.
+
+Then follow "Install the analyze mode dependencies" in the
+[install guide](../../docs/install/core-install.rst), which installs
+rocprof-compute in a virtual environment of its own. Use the nightly index so the
+version matches these skills. Activate that environment with
+`source <venv>/bin/activate` before you run rocprof-compute, and confirm with
+`rocprof-compute analyze --debug-verify-deps`. If the application is a Python
+script, note the full path of its Python before you activate, and run the
+script with that path.
+
 ## 1. Start with the Memory Chart
 
 ```bash
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> --list-stats
-rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b memchart
+rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> --memory-chart
 ```
+
+On ROCm 10.2 and earlier, use `-b memchart` instead of `--memory-chart`.
 
 The Memory Chart shows the whole hierarchy at once: requests issued, what each
 cache level served, and what reached HBM. Read it before opening any single
@@ -26,7 +61,7 @@ Always analyze one kernel at a time with `-k`.
 If there is no workload yet, collect only the memory blocks:
 
 ```bash
-rocprof-compute profile --name <workload_name> -b memchart vl1d l2 lds -- <application> <args>
+rocprof-compute profile --name <workload_name> --memory-chart -b vl1d l2 lds -- <application> <args>
 ```
 
 The cache aliases differ by architecture; for example, some GPUs name their
@@ -37,18 +72,20 @@ caches `gl0` and `gl2`.
 Never run a full profile. It replays the application once per counter pass and
 also runs the roofline benchmarks.
 
-- List what this GPU can collect with `rocprof-compute --list-blocks <gfx_arch>`
-  and `rocprof-compute --list-metrics <gfx_arch>`. Pass `-b` only the block
-  aliases, block ids, or metric ids (for example `2.1.0`) the question needs.
-  Aliases differ by architecture.
+- List what this GPU can collect with `rocprof-compute --list-metrics`, and a
+  block's metrics with `rocprof-compute --list-metrics <alias>`. On ROCm 10.2
+  and earlier, use `--list-blocks <gfx_arch>` and `--list-metrics <gfx_arch>`.
+  Pass `-b` only the block aliases, block ids, or metric ids (for example
+  `2.1.0`) the question needs. Aliases differ by architecture.
 - `--set <set_name>` collects a predefined topic in one pass.
   `rocprof-compute profile --list-sets` lists the sets.
 - Add `-k <kernel_name>` when the user names the kernels that matter.
-- Add `--no-roof` unless the question is about roofline. A `-b` list without
-  block 4 (`roof`) already skips it.
-- `--iteration-multiplexing kernel` spreads counters over repeated dispatches of
-  each kernel, so it only helps when every profiled kernel is dispatched many
-  times. Pair it with `-k`. See Iteration multiplexing in
+- Unless the question is about roofline, select blocks with `-b` and leave out
+  block 4 (`roof`), so the roofline benchmark is skipped.
+- `--iteration-multiplexing` spreads counters over repeated dispatches of each
+  kernel with the same launch parameters, so it only helps when each profiled
+  kernel runs many times with the same launch parameters. Pair it with `-k`.
+  See Iteration multiplexing in
   [profile mode](../../docs/how-to/profile/mode.rst).
 - Tell the user which analysis panels the narrower profile leaves empty.
 
@@ -75,8 +112,7 @@ rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id> -b 
 ```
 
 Aliases are stable; numeric block ids are architecture-specific. List what this
-workload actually has with `--list-available-metrics`, and the aliases for an
-architecture with `rocprof-compute --list-blocks <arch>`.
+workload actually has with `--list-metrics`.
 
 ## 3. Interpret
 
@@ -118,7 +154,7 @@ It is experimental and currently shipped for gfx950 only; see
 only the memory chart (block 3) and block 30, so profile only those two blocks:
 
 ```bash
-rocprof-compute profile --experimental --membw-analysis -b 3 30 \
+rocprof-compute profile --experimental --membw-analysis --memory-chart -b 30 \
     --name <name> -- <application>
 
 rocprof-compute analyze --path ./workloads/<name>/<gpu_model> -k <kernel_id>

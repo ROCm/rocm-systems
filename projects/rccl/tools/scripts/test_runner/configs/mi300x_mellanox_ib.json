@@ -340,6 +340,11 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
+        },
+        {
+          "name": "GdrFlush_ScratchpadWriteRoundTrip",
+          "description": "The chained flush must write the host sentinel into the RO=0 scratchpad and read it back. Dropping the write leaves the scratchpad zero.",
+          "test_filter": "GdrFlushTest.ScratchpadWrite_RoundTripsSentinel"
         }
       ]
     },
@@ -397,7 +402,13 @@
         }
       ]
     },
-    "net_transport_eth_multinode": {
+    "net_ib_gdr_flush_cast": {
+      "extends": "net_ib_gdr_flush",
+      "env_variables": {
+        "NCCL_NET": "ib-cast",
+        "NCCL_GDR_FLUSH_DISABLE": "0"
+      }
+    },    "net_transport_eth_multinode": {
       "extends": "default",
       "is_gtest": true,
       "binary": "rccl-UnitTestsMPI",
@@ -1084,6 +1095,11 @@
           "test_filter": "P2pMaxNchannels*"
         },
         {
+          "name": "P2pCeChannelCap",
+          "description": "Copy Engine P2P channel, connection, step-size, and shared-stream policies",
+          "test_filter": "P2pCeChannelCapTests.*"
+        },
+        {
           "name": "RcclAlltoAllDecision",
           "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
           "test_filter": "RcclAlltoAllDecision.*"
@@ -1102,6 +1118,11 @@
           "name": "SkipPresetTopoMatching",
           "description": "SkipPreset arch topology matching and threshold lookup tests",
           "test_filter": "SkipPresetTopoMatching.*"
+        },
+        {
+          "name": "SocketCrypt",
+          "description": "Socket encryption over loopback sockets: ncclSetEncryption API contract, plaintext wire capture, no-TLS-support failure. The TLS cases skip unless the build uses -DTLS_BACKEND=OPENSSL3",
+          "test_filter": "SocketCrypt.*"
         }
       ]
     },
@@ -1357,8 +1378,10 @@
         {"name": "ReduceScatter.ManagedMem", "description": "ReduceScatter managed memory", "test_filter": "ReduceScatter.ManagedMem"},
         {"name": "ReduceScatter.ManagedMemGraph", "description": "ReduceScatter managed memory graph", "test_filter": "ReduceScatter.ManagedMemGraph"},
         {"name": "Register.ProcessIsolatedRegisterTests", "description": "Process isolated buffer registration tests", "test_filter": "Register.ProcessIsolatedRegisterTests"},
+        {"name": "Register.P2pIpcSegmentReuse", "description": "Verify a reused P2P IPC registration stays in bounds when the registered buffer spans multiple cuMem segments", "test_filter": "Register.P2pIpcSegmentReuse"},
         {"name": "SendRecv.SinglePairs", "description": "SendRecv single pairs", "test_filter": "SendRecv.SinglePairs"},
         {"name": "SendRecv.UserBufferRegister", "description": "SendRecv user buffer register", "test_filter": "SendRecv.UserBufferRegister"},
+        {"name": "SendRecv.SingleRankGroupedSendRecvToSelf", "description": "1-rank grouped send/recv to self, default env and forced 256 P2P channels per peer", "test_filter": "SendRecv.SingleRankGroupedSendRecvToSelf"},
         {"name": "GroupCall.Identical", "description": "GroupCall identical", "test_filter": "GroupCall.Identical"},
         {"name": "GroupCall.Different", "description": "GroupCall different", "test_filter": "GroupCall.Different"},
         {"name": "GroupCall.Multistream", "description": "GroupCall multistream", "test_filter": "GroupCall.Multistream"},
@@ -1377,6 +1400,9 @@
         {"name": "Recorder.VerifyMultithread", "description": "Recorder multithreaded verification", "test_filter": "Recorder.VerifyMultithread"},
         {"name": "Recorder.RedOpRecordJson", "description": "Recorder RedOp record JSON output", "test_filter": "Recorder.RedOpRecordJson"},
         {"name": "Recorder.RedOpRecordBinary", "description": "Recorder RedOp record binary output", "test_filter": "Recorder.RedOpRecordBinary"},
+        {"name": "Recorder.LogLevelNonNumeric", "description": "Recorder rejects non-numeric log levels without throwing and keeps the default", "test_filter": "Recorder.LogLevelNonNumeric", "timeout": 60},
+        {"name": "Recorder.LogLevelNumeric", "description": "Recorder accepts a numeric log level and writes named-call records", "test_filter": "Recorder.LogLevelNumeric", "timeout": 60},
+        {"name": "Recorder.LogLevelNumericSuffixRejected", "description": "Recorder rejects numeric log levels with trailing characters and keeps the default", "test_filter": "Recorder.LogLevelNumericSuffixRejected", "timeout": 60},
         {"name": "IbvSymbolsEnv.DefaultLoadsLibrary", "description": "NCCL_IBVERBS_LIB unset loads default libibverbs", "test_filter": "IbvSymbolsEnv.DefaultLoadsLibrary"},
         {"name": "IbvSymbolsEnv.EnvOverrideValidSoname", "description": "NCCL_IBVERBS_LIB override to a valid soname is honored", "test_filter": "IbvSymbolsEnv.EnvOverrideValidSoname"},
         {"name": "IbvSymbolsEnv.BogusPathFallsBackToDefault", "description": "NCCL_IBVERBS_LIB bogus path falls back to default libibverbs", "test_filter": "IbvSymbolsEnv.BogusPathFallsBackToDefault"},
@@ -1708,7 +1734,28 @@
         {
           "name": "ImplicitLaunchOrder_MultiCommunicatorChain",
           "description": "Test NCCL_LAUNCH_ORDER_IMPLICIT serialization across multiple communicators",
-          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain"
+          "test_filter": "ImplicitLaunchOrderMPITest.MultiCommunicatorChain*"
+        }
+      ]
+    },
+    "net_ll128_post_send_fence": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 8,
+      "num_nodes": 1,
+      "num_gpus": 8,
+      "timeout": 300,
+      "description": "LL128 Ring AllReduce with every ring hop on NET/IB with GPU Direct RDMA. NCCL_P2P_DISABLE and NCCL_SHM_DISABLE are cached per process, so they are set before launch.",
+      "env_variables": {
+        "NCCL_P2P_DISABLE": "1",
+        "NCCL_SHM_DISABLE": "1"
+      },
+      "tests": [
+        {
+          "name": "NetLl128_RingAllReduceEveryHopOnNet",
+          "description": "Regression test for the LL128 post-send fence: without the full fence the NIC could send stale 128-byte lines and the receiver hung",
+          "test_filter": "NetLl128MPITest.RingAllReduceCompletesWithEveryHopOnNet"
         }
       ]
     },
@@ -2287,7 +2334,7 @@
         "NCCL_DEBUG_SUBSYS": "REG,INIT,TUNING",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_LEGACY_CUDA_REGISTER": "1",
-        "NCCL_LAUNCH_ORDER_IMPLICIT": "1",
+        "RCCL_DDA_ENABLE": "0",
         "RCCL_DIRECT_ALLGATHER_THRESHOLD": "2147483648",
         "RCCL_MPI_LOG_ALL_RANKS": "1"
       },
@@ -3798,6 +3845,14 @@
           "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
         },
         {
+          "name": "DDA_IpcCommLifecycle_8Ranks",
+          "description": "DDA IPC must come up, with no HIP error pending, on communicators created after another one is destroyed; needs cuMem, which is cached per process",
+          "test_filter": "DdaIpcMPI_CommLifecycle.*",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1"
+          }
+        },
+        {
           "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
           "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
           "test_filter": "HostApiTest.DenseAllToAllPutSignal",
@@ -3970,6 +4025,71 @@
       ]
     },
 
+    "bootstrap_tls_mpi_2rank": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 1,
+      "num_gpus": 2,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "BootstrapTls_2Rank",
+          "description": "Communicator lifecycle with a socket encryption key set, 2 ranks and default bootstrap settings. With 2 ranks every bootstrap ring AllGather step is one-way, so the write-only clients exposed the TLS session-ticket reset. Without -DTLS_BACKEND=OPENSSL3 only the no-TLS-support check runs",
+          "test_filter": "BootstrapTlsMPITest.*"
+        }
+      ]
+    },
+    "bootstrap_tls_mpi_bidir": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_BOOTSTRAP_BIDIR_ALLGATHER": "1",
+        "NCCL_BOOTSTRAP_BIDIR_THRESHOLD": "0"
+      },
+      "tests": [
+        {
+          "name": "BootstrapTls_Bidir",
+          "description": "Communicator lifecycle with a socket encryption key set, bidirectional bootstrap ring AllGather (needs at least 3 ranks). Without -DTLS_BACKEND=OPENSSL3 only the no-TLS-support check runs",
+          "test_filter": "BootstrapTlsMPITest.*"
+        },
+        {
+          "name": "BootstrapStrayPeer_Bidir",
+          "description": "A connection that fails the socket handshake does not end the bootstrap root",
+          "test_filter": "BootstrapStrayPeerMPITest.*"
+        }
+      ]
+    },
+    "bootstrap_tls_mpi_unidir": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_BOOTSTRAP_BIDIR_ALLGATHER": "0"
+      },
+      "tests": [
+        {
+          "name": "BootstrapTls_Unidir",
+          "description": "Same with the unidirectional bootstrap ring AllGather, whose write-only clients exposed the TLS session-ticket reset",
+          "test_filter": "BootstrapTlsMPITest.*"
+        },
+        {
+          "name": "BootstrapStrayPeer_Unidir",
+          "description": "A connection that fails the socket handshake does not end the bootstrap root",
+          "test_filter": "BootstrapStrayPeerMPITest.*"
+        }
+      ]
+    },
     "grow_mpi_tests_netbidir": {
       "extends": "default",
       "is_gtest": true,
@@ -4396,6 +4516,23 @@
     "net_ib_stress_inline_cast": {
       "extends": "net_ib_stress_inline",
       "env_variables": { "NCCL_NET": "ib-cast" }
+    },
+    "rccl_ep_python_dispatch": {
+      "extends": "default",
+      "is_pytest": true,
+      "setup_venv": true,
+      "test_dir": "test/rccl_ep",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": "auto",
+      "timeout": 600,
+      "tests": [
+        {
+          "name": "RcclEp_Python_Dispatch_ScaleDtype",
+          "description": "ElasticBuffer.dispatch fp8 scale cast to contiguous float32 (single-process, stubbed lib)",
+          "test_filter": "ALL"
+        }
+      ]
     },
     "nccl4py_build_smoke": {
       "extends": "default",
@@ -5472,6 +5609,12 @@
       "enabled": true
     },
     {
+      "name": "GDR Flush - Whitebox ncclIbIflush (Single-Node, 2-Rank) (IB-CAST)",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
+      "config": "net_ib_gdr_flush_cast",
+      "enabled": true
+    },
+    {
       "name": "GDR Flush - cuMem AllGather (Multi-Node)",
       "description": "Cross-node AllGather over cuMem/DMA-BUF GDR exercising the base recv+flush path with the RO=0 scratchpad write+read fence",
       "config": "gdr_flush_cumem_multinode",
@@ -5982,6 +6125,24 @@
       "enabled": true
     },
     {
+      "name": "Bootstrap TLS - Default Settings (2-rank, single-node)",
+      "description": "BootstrapTlsMPITest.* on 2 ranks with default bootstrap settings, where the ring AllGather is one-way",
+      "config": "bootstrap_tls_mpi_2rank",
+      "enabled": true
+    },
+    {
+      "name": "Bootstrap TLS - Bidirectional Ring (4-rank, single-node)",
+      "description": "BootstrapTlsMPITest.* and BootstrapStrayPeerMPITest.* with the bidirectional bootstrap ring AllGather",
+      "config": "bootstrap_tls_mpi_bidir",
+      "enabled": true
+    },
+    {
+      "name": "Bootstrap TLS - Unidirectional Ring (4-rank, single-node)",
+      "description": "BootstrapTlsMPITest.* and BootstrapStrayPeerMPITest.* with the unidirectional bootstrap ring AllGather",
+      "config": "bootstrap_tls_mpi_unidir",
+      "enabled": true
+    },
+    {
       "name": "Grow MPI Tests (8-rank, single-node)",
       "description": "ncclCommGrow scenarios requiring 3-8 ranks on one node: coordinator-only uniqueId (NCCL convention), elastic grow/shrink cycles, double/triple grow with magic chain verification, multi-rank jump (4 ranks at once), and coordinator-at-last-rank bootstrap path",
       "config": "grow_mpi_tests_8rank",
@@ -6099,6 +6260,12 @@
       "name": "NET IB - Stress Inline CTS (ib-cast)",
       "description": "InfiniBand inline CTS stress via ib-cast plugin (NCCL_NET=ib-cast)",
       "config": "net_ib_stress_inline_cast",
+      "enabled": true
+    },
+    {
+      "name": "RCCL EP Python Dispatch Scale Dtype",
+      "description": "Single-process pytest of ElasticBuffer.dispatch fp8 scale dtype handling with a stubbed library",
+      "config": "rccl_ep_python_dispatch",
       "enabled": true
     },
     {

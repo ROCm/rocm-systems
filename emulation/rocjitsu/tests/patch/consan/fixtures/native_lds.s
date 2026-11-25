@@ -77,6 +77,22 @@
   s_waitcnt lgkmcnt(0)
 #endif
 .endm
+.macro consan_wait_lds
+#if CONSAN_GFX12
+  s_wait_dscnt 0
+#else
+  s_waitcnt lgkmcnt(0)
+#endif
+.endm
+.macro consan_barrier
+  consan_wait_lds
+#if CONSAN_GFX12
+  s_barrier_signal -1
+  s_barrier_wait -1
+#else
+  s_barrier
+#endif
+.endm
 .macro consan_wait_stores
 #if CONSAN_GFX12
   s_wait_storecnt 0
@@ -103,6 +119,103 @@ CONSAN_KERNEL:
   v_mov_b32 v2, s4
   v_mov_b32 v5, 0
 
+#if (CONSAN_CASE >= 25 && CONSAN_CASE <= 35) || CONSAN_CASE == 38 || (CONSAN_CASE >= 40 && CONSAN_CASE <= 42)
+#if CONSAN_CASE == 25
+  s_mov_b32 s10, 0
+#elif CONSAN_CASE == 26
+  s_mov_b32 s10, 1
+#elif CONSAN_CASE == 28
+  s_mov_b32 s10, 6
+#elif CONSAN_CASE == 29 || CONSAN_CASE == 35
+  s_mov_b32 s10, 20
+#elif CONSAN_CASE == 34
+  s_mov_b32 s10, 16
+#elif CONSAN_CASE == 32
+  s_mov_b32 s10, 10
+#else
+  s_mov_b32 s10, 3
+#endif
+#if CONSAN_CASE == 40 || CONSAN_CASE == 41
+  // Whole waves choose different trip counts before entering the same loop.
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  s_cbranch_vccz .Lshort_trip
+  s_mov_b32 s10, 3
+  s_branch .Ltrip_ready
+.Lshort_trip:
+#if CONSAN_CASE == 40
+  s_mov_b32 s10, 2
+#else
+  s_mov_b32 s10, 0
+#endif
+.Ltrip_ready:
+#endif
+#if CONSAN_CASE == 32
+  // Delay the only cross-wave pair until cycle 10.
+  // Nine decrements select W0 lane 0 / W1 lane 0 only after the sixteen retained
+  // barrier completions, isolating missing sync evidence from access-bank loss.
+  v_mov_b32 v6, (2*CONSAN_WAVE_SIZE*9)
+#elif CONSAN_CASE == 42
+  // Rotate through three high lanes while selecting independent banks 0..2.
+  v_mov_b32 v6, (CONSAN_WAVE_SIZE-4)
+#else
+  v_mov_b32 v6, 0
+#endif
+  // RDNA4 requires a wait when SALU rewrites selectors previously read by VALU.
+  // Keep both rotating selectors in VGPRs within the existing allocation.
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  GLOBAL_STORE v5, v2, s[6:7]
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  s_cmp_eq_u32 s10, 0
+  s_cbranch_scc1 .Lloop_done
+#if CONSAN_CASE == 33
+  v_and_b32 v4, (CONSAN_WAVE_SIZE-1), v0
+  v_lshlrev_b32 v1, 2, v4
+#endif
+.Lloop:
+#if CONSAN_CASE == 33
+  v_cmp_gt_u32 MASK_VCC, 5, v0
+#else
+  v_cmp_eq_u32 MASK_VCC, v6, v0
+#endif
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_STORE v1, v2
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+#if CONSAN_CASE != 30 && CONSAN_CASE != 34 && CONSAN_CASE != 35
+  consan_barrier
+#endif
+  VECTOR_ADD v7, CONSAN_WAVE_SIZE, v6
+#if CONSAN_CASE == 33
+  // All waves read their own first five lanes after the full-workgroup barrier.
+  v_cmp_gt_u32 MASK_VCC, 5, v4
+#else
+  v_cmp_eq_u32 MASK_VCC, v7, v0
+#endif
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_LOAD v3, v1
+  consan_wait_all
+  GLOBAL_STORE v5, v3, s[6:7]
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+#if CONSAN_CASE != 31
+  consan_barrier
+#endif
+#if CONSAN_CASE == 38
+  // A non-power-of-two group count exercises integer-only occurrence division.
+  consan_barrier
+#endif
+#if CONSAN_CASE == 32
+  VECTOR_ADD v6, -(2*CONSAN_WAVE_SIZE), v6
+#else
+  VECTOR_ADD v6, 1, v6
+#endif
+  s_sub_u32 s10, s10, 1
+  s_cmp_eq_u32 s10, 0
+  s_cbranch_scc0 .Lloop
+.Lloop_done:
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_STORE v1, v2 offset:4
+#else
 #if CONSAN_CASE == 10 || CONSAN_CASE == 11 || CONSAN_CASE == 12
   // Distinct addresses exercise grouping, bounded reservation and empty EXEC.
   v_lshlrev_b32 v1, 2, v0
@@ -148,6 +261,36 @@ CONSAN_KERNEL:
   GLOBAL_STORE v5, v3, s[6:7]
 #endif
   .endr
+#elif CONSAN_CASE == 36 || CONSAN_CASE == 37
+  // Initialize the shared word before racing a delayed producer against the
+  // consumer. The first barrier makes the old value deterministic in both
+  // variants; case 37 omits only the publication barrier.
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  v_mov_b32 v2, 0
+  DS_STORE v1, v2
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  consan_barrier
+  v_mov_b32 v2, s4
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  s_cbranch_execz .Lpublication
+  // Outlast the completion callback even when the relocated publication wait
+  // is removed. Forward-only delay keeps this inside the acyclic T02 profile.
+  .rept 512
+  s_nop 0
+  .endr
+  DS_STORE v1, v2
+.Lpublication:
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+#if CONSAN_CASE == 36
+  consan_barrier
+#endif
+  v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_LOAD v3, v1
+  consan_wait_all
+  GLOBAL_STORE v5, v3, s[6:7]
 #elif CONSAN_CASE == 4 || CONSAN_CASE == 5
 #if CONSAN_CASE == 4
   v_cmp_gt_u32 MASK_VCC, 2, v0
@@ -158,7 +301,7 @@ CONSAN_KERNEL:
   DS_STORE v1, v2
   GLOBAL_STORE v5, v2, s[6:7]
 #else
-#if CONSAN_CASE == 14
+#if CONSAN_CASE == 14 || CONSAN_CASE == 20
   v_cmp_eq_u32 MASK_VCC, (CONSAN_WAVE_SIZE-1), v0
 #else
   v_cmp_eq_u32 MASK_VCC, 0, v0
@@ -174,18 +317,92 @@ CONSAN_KERNEL:
   DS_STORE v1, v2
 #endif
   MASK_MOVE MASK_EXEC, MASK_SAVE
-#if CONSAN_CASE == 7
+#if (CONSAN_CASE >= 15 && CONSAN_CASE <= 24) || CONSAN_CASE == 39
+#if CONSAN_CASE == 19
+  s_cmp_eq_u32 s4, 7
+  s_cbranch_scc1 .Lskip_barrier
+#endif
+#if CONSAN_CASE == 16
+  // Scalar barriers still execute when the guest EXEC is empty.
+  MASK_MOVE MASK_EXEC, 0
+#endif
+#if CONSAN_CASE == 21 && !CONSAN_GFX12
+  // Legacy barriers combine signal and wait; arithmetic precedes their drain.
+  VECTOR_ADD v2, 0, v2
+  s_cmp_eq_u32 s4, 7
+#endif
+#if CONSAN_CASE != 18
+  consan_wait_lds
+#endif
+#if CONSAN_GFX12
+#if CONSAN_CASE == 23
+  s_barrier_signal m0
+#else
+  s_barrier_signal -1
+#endif
+#if CONSAN_CASE == 21
+  VECTOR_ADD v2, 0, v2
+  s_cmp_eq_u32 s4, 7
+#elif CONSAN_CASE == 22
+  DS_LOAD v3, v1
+#endif
+#if CONSAN_CASE == 17
+  s_barrier_wait 0
+#else
+  s_barrier_wait -1
+#endif
+#else
+#if CONSAN_CASE == 22
+  DS_LOAD v3, v1
+#endif
+#if CONSAN_CASE == 17 || CONSAN_CASE == 23
+  // The assembler only accepts the operand-free spelling. Preserve a
+  // noncanonical immediate in raw code so qualification must reject it.
+#if CONSAN_LEGACY
+  .long 0xbf8a0001
+#else
+  .long 0xbfbd0001
+#endif
+#else
   s_barrier
 #endif
-#if CONSAN_CASE == 14
+#endif
+#if CONSAN_CASE == 24 || CONSAN_CASE == 39
+  // B0 publishes the first store. B1 protects the consumer's load before
+  // wave 0 reuses the word; case 39 omits only that second barrier group.
+  v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_LOAD v3, v1
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+#if CONSAN_CASE == 24
+  consan_barrier
+#endif
+#endif
+.Lskip_barrier:
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+#elif CONSAN_CASE == 7
+  s_barrier
+#endif
+#if CONSAN_CASE == 24 || CONSAN_CASE == 39
+  v_cmp_eq_u32 MASK_VCC, 0, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+  DS_STORE v1, v2
+  MASK_MOVE MASK_EXEC, MASK_SAVE
+  // Publish the earlier consumer load without adding another LDS access.
+  v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
+  MASK_AND_SAVE MASK_SAVE, MASK_VCC
+#else
+#if CONSAN_CASE == 14 || CONSAN_CASE == 20
   v_cmp_eq_u32 MASK_VCC, (2*CONSAN_WAVE_SIZE-1), v0
 #else
   v_cmp_eq_u32 MASK_VCC, CONSAN_WAVE_SIZE, v0
 #endif
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
   DS_LOAD v3, v1
+#endif
   consan_wait_all
   GLOBAL_STORE v5, v3, s[6:7]
+#endif
 #endif
   MASK_MOVE MASK_EXEC, MASK_SAVE
   consan_wait_all
@@ -201,10 +418,16 @@ CONSAN_KERNEL:
   .amdhsa_private_segment_fixed_size 0
   .amdhsa_kernarg_size 16
   .amdhsa_user_sgpr_kernarg_segment_ptr 1
-  // gfx1100 wave32 requires at least 16 user+system SGPR inputs. The
-  // kernarg pointer stays at s[0:1]; padding moves workgroup X to s15.
+  // gfx1100 wave32 requires at least 16 user+system SGPR inputs. Without
+  // workgroup X, user padding alone must retain that 16-register input range.
+#if defined(CONSAN_NO_WORKGROUP_ID) && CONSAN_NO_WORKGROUP_ID
+  .amdhsa_user_sgpr_count 16
+  .amdhsa_system_sgpr_workgroup_id_x 0
+#else
+  // The kernarg pointer stays at s[0:1]; padding moves workgroup X to s15.
   .amdhsa_user_sgpr_count 15
   .amdhsa_system_sgpr_workgroup_id_x 1
+#endif
   .amdhsa_system_vgpr_workitem_id 0
   .amdhsa_next_free_vgpr 8
   .amdhsa_next_free_sgpr 16

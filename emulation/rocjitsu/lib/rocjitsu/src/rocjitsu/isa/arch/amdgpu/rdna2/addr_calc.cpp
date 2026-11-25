@@ -24,33 +24,52 @@ constexpr bool has_saddr(uint32_t selector) { return selector != 0x7D && selecto
 namespace {
 
 std::optional<uint32_t> read_smem_offset(uint32_t soffset, amdgpu::Wavefront &wf) {
-  if (soffset == OPR_SMEM_OFFSET_NULL || soffset == 0x7F)
+  if (soffset == OPR_SMEM_OFFSET_NULL || soffset == 0x7F) {
     return 0;
-  if (soffset == OPR_SMEM_OFFSET_M0)
+  }
+  if (soffset == OPR_SMEM_OFFSET_M0) {
     return wf.m0();
+  }
   return amdgpu::try_read_scalar_selector(wf, soffset);
 }
 
 } // namespace
 
+bool nullify_unallocated_memory_return(Instruction &inst, const amdgpu::Wavefront &wf,
+                                       amdgpu::MemPipelineTag pipeline) {
+  if (amdgpu::RegisterAccess(wf).vgpr_results_fit_allocation(inst)) {
+    return false;
+  }
+  std::unique_ptr<amdgpu::VectorMemState> state =
+      inst.acquire_data<amdgpu::VectorMemState>(pipeline);
+  state->wf_size = wf.wf_size();
+  inst.set_data(std::move(state));
+  return true;
+}
+
 std::optional<uint64_t> smem_calculate_address(const SmemMachineInst &inst, amdgpu::Wavefront &wf,
                                                amdgpu::ScalarMemState *state) {
   const uint32_t sbase_sel = inst.sbase * 2;
   auto base = amdgpu::try_read_scalar_selector64(wf, sbase_sel);
-  if (!base)
+  if (!base) {
     return std::nullopt;
-  int64_t off = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 11) >> 11);
-  auto soffset = read_smem_offset(inst.soffset, wf);
-  if (!soffset)
+  }
+  const int64_t inst_offset = static_cast<int32_t>(inst.offset << 11) >> 11;
+  const auto soffset = read_smem_offset(inst.soffset, wf);
+  if (!soffset) {
     return std::nullopt;
-  off += *soffset;
-  // Only the non-buffer addressing section defines a negative sum as undefined.
-  if (!amdgpu::addr_calc::smem_is_buffer_load_op(inst.op) && off < 0)
-    wf.report_undefined_behavior("negative combined scalar-memory offset");
-  if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op))
-    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base, off, state,
+  }
+  if (amdgpu::addr_calc::smem_is_buffer_load_op(inst.op)) {
+    return amdgpu::addr_calc::scalar_buffer_address(wf, sbase_sel, *base & ~uint64_t{3},
+                                                    inst_offset + *soffset, state,
                                                     /*align_mask=*/3, /*size_align_mask=*/0);
-  return (*base + off) & ~0x3ULL;
+  }
+  // RDNA2 ignores the low two bits of each non-buffer address component before addition.
+  const int64_t offset = (inst_offset & ~int64_t{3}) + (*soffset & ~uint32_t{3});
+  if (inst_offset + *soffset < 0) {
+    wf.report_undefined_behavior("negative combined scalar-memory offset");
+  }
+  return (*base & ~uint64_t{3}) + offset;
 }
 
 void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf,
@@ -65,7 +84,8 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
   d.lane_mask = exec;
   d.exec_mask = exec;
   d.wf_size = wf.wf_size();
-  int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.offset << 20) >> 20);
+  const int64_t offset =
+      inst.seg == 0 ? int32_t(inst.offset & 0x7ffu) : static_cast<int32_t>(inst.offset << 20) >> 20;
   amdgpu::RegisterAccess regs(cu);
   uint64_t saddr_val = 0;
   if (has_saddr(inst.saddr)) {
@@ -80,15 +100,20 @@ void flat_calculate_addresses(const FlatMachineInst &inst, amdgpu::Wavefront &wf
   uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
   auto vaddr_region = regs.read_vgpr_region(vbase, has_saddr(inst.saddr) ? 1 : 2, exec);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     uint64_t vaddr;
     if (has_saddr(inst.saddr)) {
       vaddr = vaddr_region.lane(0, lane);
     } else {
       vaddr = vaddr_region.lane64(0, lane);
     }
-    d.per_lane_addr[lane] = saddr_val + vaddr + offset;
+    uint64_t address = saddr_val + vaddr + offset;
+    if (inst.seg == 0) {
+      address = amdgpu::addr_calc::capture_flat_private_address(wf, d, address, lane);
+    }
+    d.per_lane_addr[lane] = address;
   }
 }
 

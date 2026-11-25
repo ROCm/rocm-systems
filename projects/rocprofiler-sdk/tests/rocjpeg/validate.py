@@ -179,7 +179,7 @@ def test_rocjpeg_traces(input_data):
 
     rocjpeg_bf_traces = sdk_data["buffer_records"]["rocjpeg_api_traces"]
     rocjpeg_api_bf_ops = get_operation(buffer_records, "ROCJPEG_API")
-    assert len(rocjpeg_api_bf_ops[1]) == 9
+    assert len(rocjpeg_api_bf_ops[1]) == 14
 
     rocjpeg_cb_traces = sdk_data["callback_records"]["rocjpeg_api_traces"]
     rocjpeg_api_cb_ops = get_operation(callback_records, "ROCJPEG_API")
@@ -188,7 +188,8 @@ def test_rocjpeg_traces(input_data):
     if len(rocjpeg_bf_traces) <= 2:
         return pytest.skip("rocdecode tracing unavailable")
     assert (
-        rocjpeg_api_bf_ops[1] == rocjpeg_api_cb_ops[1] and len(rocjpeg_api_cb_ops[1]) == 9
+        rocjpeg_api_bf_ops[1] == rocjpeg_api_cb_ops[1]
+        and len(rocjpeg_api_cb_ops[1]) == 14
     )
 
     # check that buffer and callback records agree

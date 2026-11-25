@@ -118,8 +118,9 @@ TEST(Gfx1250SimulationTest, MultiWaveDispatchHonorsPackedTidComponentCount) {
 // Collect the EXEC mask each wavefront had at halt (captured before it freed).
 std::vector<uint64_t> collect_active_exec_masks(Gfx1250Sim &sim) {
   std::vector<uint64_t> exec_masks;
-  for (const auto &wf : sim.snapshot->snapshots())
+  for (const auto &wf : sim.snapshot->snapshots()) {
     exec_masks.push_back(wf.exec);
+  }
   std::ranges::sort(exec_masks);
   return exec_masks;
 }
@@ -144,8 +145,9 @@ TEST(Gfx1250SimulationTest, PartialWorkgroupMasksTailWaveExec) {
 // workgroups, so it cannot observe the rounding; wavefront wg_ids can.
 uint32_t count_dispatched_workgroups(Gfx1250Sim &sim) {
   std::set<uint32_t> wg_ids;
-  for (const auto &wf : sim.snapshot->snapshots())
+  for (const auto &wf : sim.snapshot->snapshots()) {
     wg_ids.insert(wf.wg_id);
+  }
   return static_cast<uint32_t>(wg_ids.size());
 }
 
@@ -301,8 +303,9 @@ TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload)
   constexpr uint64_t kKernargAddr = 0x400000;
   const uint32_t code[] = {S_ENDPGM_GFX12};
   std::array<uint32_t, 30> args{};
-  for (uint32_t i = 0; i < args.size(); ++i)
+  for (uint32_t i = 0; i < args.size(); ++i) {
     args[i] = 0x1000u + i;
+  }
 
   uint32_t kernel_code_properties = 0;
   RJ_AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR,
@@ -323,8 +326,9 @@ TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload)
   ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
   const auto &wf = sim.snapshot->snapshots().front();
   EXPECT_EQ(wf.sgpr64(0), kKernargAddr);
-  for (uint32_t i = 0; i < args.size(); ++i)
+  for (uint32_t i = 0; i < args.size(); ++i) {
     EXPECT_EQ(wf.sgpr(i + 2), args[i]);
+  }
 }
 
 TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
@@ -436,7 +440,7 @@ TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
   EXPECT_EQ(sim.snapshot->snapshots().front().vcc, kExpected);
 }
 
-TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
+TEST(Gfx1250SimulationTest, SLoadB32WritesSgprAndDiscardsUnprivilegedTtmpAndNullDestinations) {
   using namespace rocjitsu::amdhsa;
 
   constexpr uint64_t kKernelAddr = 0x10000;
@@ -487,7 +491,7 @@ TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
   ASSERT_EQ(sim.snapshot->snapshots().size(), 1u);
   const auto &wf = sim.snapshot->snapshots().front();
   EXPECT_EQ(wf.sgpr(4), kSgprValue);
-  EXPECT_EQ(wf.ttmp(0), kTtmpValue);
+  EXPECT_EQ(wf.ttmp(0), 0u); // User-mode stores to trap temporaries are discarded.
   EXPECT_EQ(wf.sgpr(amdgpu::kModernNullSelector), 0u);
 }
 
@@ -532,8 +536,9 @@ TEST(Gfx1250SimulationTest, Ttmp8EncodesWaveIdWithinWorkgroup) {
 
   ASSERT_EQ(sim.snapshot->snapshots().size(), 2u);
   std::vector<uint32_t> ttmp8_values;
-  for (const auto &wf : sim.snapshot->snapshots())
+  for (const auto &wf : sim.snapshot->snapshots()) {
     ttmp8_values.push_back(wf.ttmp(8));
+  }
   std::ranges::sort(ttmp8_values);
   EXPECT_EQ(ttmp8_values, (std::vector<uint32_t>{0, 1u << 25}));
 }
@@ -583,16 +588,18 @@ TEST(Gfx1250SimulationTest, GlobalStoreWritesVisibleMemory) {
   Gfx1250Sim sim;
   ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code));
-  for (uint32_t lane = 0; lane < 32; ++lane)
+  for (uint32_t lane = 0; lane < 32; ++lane) {
     sim.memory->write32(output_addr + lane * sizeof(uint32_t), 0);
+  }
 
   test::AqlQueue queue(sim.memory, sim.cp());
   queue.dispatch(kernel_object, 32, 32);
   sim.engine->run();
   sim.soc->flush_all();
 
-  for (uint32_t lane = 0; lane < 32; ++lane)
+  for (uint32_t lane = 0; lane < 32; ++lane) {
     EXPECT_EQ(sim.memory->read32(output_addr + lane * sizeof(uint32_t)), 1u) << "lane " << lane;
+  }
 }
 
 /// @brief A GLOBAL saddr access sign-extends its VGPR offset on gfx1250.
@@ -767,16 +774,18 @@ TEST(WriterPreferredAccessGateTest, WaitingWriterBlocksLateSharedEntrant) {
 
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
   while (!amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate) &&
-         std::chrono::steady_clock::now() < deadline)
+         std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
+  }
 
   const bool writer_waiting = amdgpu::WriterPreferredAccessGateTestAccess::has_waiting_writer(gate);
   EXPECT_TRUE(writer_waiting);
   if (writer_waiting) {
     const bool late_reader_acquired = gate.try_lock_shared();
     EXPECT_FALSE(late_reader_acquired);
-    if (late_reader_acquired)
+    if (late_reader_acquired) {
       gate.unlock_shared();
+    }
   }
 
   active_reader.unlock();
@@ -812,8 +821,9 @@ TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousRead
   }
 
   start.arrive_and_wait();
-  while (readers_started.load(std::memory_order_acquire) < reader_count)
+  while (readers_started.load(std::memory_order_acquire) < reader_count) {
     std::this_thread::yield();
+  }
 
   std::atomic<bool> flush_completed = false;
   std::thread flusher([&] {
@@ -823,13 +833,15 @@ TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousRead
 
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
   while (!flush_completed.load(std::memory_order_acquire) &&
-         std::chrono::steady_clock::now() < deadline)
+         std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
+  }
   const bool completed_while_readers_active = flush_completed.load(std::memory_order_acquire);
 
   stop_readers.store(true, std::memory_order_release);
-  for (auto &reader : readers)
+  for (auto &reader : readers) {
     reader.join();
+  }
   flusher.join();
 
   EXPECT_TRUE(completed_while_readers_active);

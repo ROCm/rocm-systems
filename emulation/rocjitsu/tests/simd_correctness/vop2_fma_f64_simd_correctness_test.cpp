@@ -5,7 +5,9 @@
 /// @brief CDNA4 V_FMAC_F64 decode, split-register, partial-EXEC, and MODE-aware
 /// SIMD regressions.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -55,13 +57,16 @@ public:
 
   Vop2FmaF64Fixture() {
     amdgpu::ComputeUnitCore::Config config{};
-    config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    config.arch = rocjitsu::IsaFamily::Cdna4;
     config.num_wf_slots = 1;
     config.sgprs_per_wf = kSgprsPerWave;
     config.vgprs_per_wf = kVgprsPerWave;
     config.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("vop2_fma_f64_simd_cu", config, &gpu_memory, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    rocjitsu::test::initialize_compute_unit(cu, "vop2_fma_f64_simd_cu", config, &gpu_memory, &l2);
+    if (!cu) {
+      return;
+    }
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, kSgprsPerWave, kVgprsPerWave);
   }
 
@@ -89,6 +94,9 @@ RunResult run_fmac(bool force_scalar, uint64_t exec, uint32_t mode, bool literal
                    const RawInputs *raw_inputs = nullptr) {
   util::set_force_scalar_for_testing(force_scalar);
   Vop2FmaF64Fixture fixture;
+  if (::testing::Test::HasFatalFailure()) {
+    return {};
+  }
   EXPECT_NE(fixture.cu, nullptr);
   EXPECT_NE(fixture.wf, nullptr);
   fixture.wf->set_exec(exec);
@@ -119,14 +127,16 @@ RunResult run_fmac(bool force_scalar, uint64_t exec, uint32_t mode, bool literal
   std::unique_ptr<Instruction> instruction(decode_valid(*fixture.decoder, words));
   EXPECT_NE(instruction, nullptr);
   EXPECT_TRUE(fixture.cu->execute_instruction(instruction.get(), *fixture.wf).succeeded());
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
     result.output[lane] = fixture.read64(4, lane);
+  }
   return result;
 }
 
 TEST(Vop2FmaF64SimdCorrectness, InlineLiteralUsesEncodedHighWord) {
-  if constexpr (!util::has_stdx_simd)
+  if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
+  }
   ForceScalarGuard guard;
   const RunResult scalar = run_fmac(true, ~uint64_t{0}, /*mode=*/3u << 6, true);
   const RunResult simd = run_fmac(false, ~uint64_t{0}, /*mode=*/3u << 6, true);
@@ -135,8 +145,9 @@ TEST(Vop2FmaF64SimdCorrectness, InlineLiteralUsesEncodedHighWord) {
 }
 
 TEST(Vop2FmaF64SimdCorrectness, PartialExecPreservesBothInactiveVgprWords) {
-  if constexpr (!util::has_stdx_simd)
+  if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
+  }
   ForceScalarGuard guard;
   constexpr uint64_t kExec = 0xa5a5f0f012348001ULL;
   const RunResult scalar = run_fmac(true, kExec, /*mode=*/3u << 6);
@@ -150,8 +161,9 @@ TEST(Vop2FmaF64SimdCorrectness, PartialExecPreservesBothInactiveVgprWords) {
 }
 
 TEST(Vop2FmaF64SimdCorrectness, AllRoundAndDenormModesMatchScalar) {
-  if constexpr (!util::has_stdx_simd)
+  if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
+  }
   ForceScalarGuard guard;
   for (uint32_t round = 0; round < 4; ++round) {
     for (uint32_t denorm = 0; denorm < 4; ++denorm) {
@@ -164,8 +176,9 @@ TEST(Vop2FmaF64SimdCorrectness, AllRoundAndDenormModesMatchScalar) {
 }
 
 TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExactly) {
-  if constexpr (!util::has_stdx_simd)
+  if constexpr (!util::has_stdx_simd) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
+  }
   ForceScalarGuard guard;
 
   constexpr uint64_t kPositiveZero = 0x0000'0000'0000'0000ULL;
@@ -198,8 +211,9 @@ TEST(Vop2FmaF64SimdCorrectness, SpecialValuesAndDenormBoundariesMatchScalarExact
       {kMinNormal, kOne, kMinNormal | (uint64_t{1} << 63)},
   }};
   RawInputs inputs{};
-  for (uint32_t lane = 0; lane < kWaveSize; ++lane)
+  for (uint32_t lane = 0; lane < kWaveSize; ++lane) {
     inputs[lane] = cases[lane % cases.size()];
+  }
 
   for (uint32_t round = 0; round < 4; ++round) {
     for (uint32_t denorm = 0; denorm < 4; ++denorm) {

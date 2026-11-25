@@ -4,10 +4,10 @@
 // Division operand rescaling and its per-lane scaling-condition output.
 // Owns public entry points and their validation/dispatch policy.
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/div_scale_impl.h"
 #include "fp/float_output.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 
@@ -15,7 +15,7 @@ namespace {
 
 // Rescale division operands and produce scaling conditions for the selected lanes. Reject
 // invalid controls before changing outputs.
-template <int Width, bool Rdna3 = false>
+template <int Width, bool Rdna3 = false, bool Cdna = false>
 int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d, uint32_t *condition,
         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   const uint32_t known = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C |
@@ -28,7 +28,8 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d, u
     }
   }
 
-  // The borrowed RDNA3 model covers unscaled results, not active OMOD.
+  // W7900 (gfx1100) captures match this model with active OMOD as well: the scaled value is
+  // rounded first, then OMOD overflows per the guest rounding and flushes denormals to zero.
   if (int error = rocjitsu::arith::validate(flags, mode & ~known,
                                             RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
@@ -36,25 +37,21 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d, u
                                                 (Rdna3 ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0))) {
     return error;
   }
-  if (Rdna3 && (mode & RJ_ARITH_ALU_OMOD_MASK) &&
-      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
-  }
   if (!exec_mask) {
     *condition = 0;
     return RJ_ARITH_SUCCESS;
   }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    *condition =
-        rocjitsu::arith::div_scale_x86_64_v4<Width>(exec_mask, mode, d, a, b, c, !Rdna3, flags);
+    *condition = rocjitsu::arith::div_scale_x86_64_v4<Width>(exec_mask, mode, d, a, b, c, !Rdna3,
+                                                             flags, !Cdna);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    *condition =
-        rocjitsu::arith::div_scale_x86_64_v3<Width>(exec_mask, mode, d, a, b, c, !Rdna3, flags);
+    *condition = rocjitsu::arith::div_scale_x86_64_v3<Width>(exec_mask, mode, d, a, b, c, !Rdna3,
+                                                             flags, !Cdna);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -69,7 +66,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d, u
       cv |= T(c[1][lane]) << 32;
     }
     rocjitsu::arith::DivisionScaleResult<Width> scaled =
-        rocjitsu::arith::division_scale<Width>(av, bv, cv, mode, !Rdna3, flags);
+        rocjitsu::arith::division_scale<Width>(av, bv, cv, mode, !Rdna3, flags, !Cdna);
     result[lane] = scaled.value;
     output_mask |= uint32_t(scaled.post_scale) << lane;
   }
@@ -86,13 +83,13 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d, u
 
 // Rescale division operands and produce scaling conditions for Wave64. Reject invalid controls
 // before changing outputs.
-template <int Width, bool Rdna3 = false>
+template <int Width, bool Rdna3 = false, bool Cdna = false>
 int run_wave64(uint64_t flags, uint64_t exec_mask, uint32_t mode, uint32_t *const *d,
                uint64_t *condition, const uint32_t *const *a, const uint32_t *const *b,
                const uint32_t *const *c) {
   uint32_t half_condition = 0;
-  if (int error =
-          run<Width, Rdna3>(flags, 0, mode, nullptr, &half_condition, nullptr, nullptr, nullptr)) {
+  if (int error = run<Width, Rdna3, Cdna>(flags, 0, mode, nullptr, &half_condition, nullptr,
+                                          nullptr, nullptr)) {
     return error;
   }
   uint64_t result_condition = 0;
@@ -106,8 +103,8 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint32_t mode, uint32_t *cons
         bv[reg] = b[reg] + half * 32;
         cv[reg] = c[reg] + half * 32;
       }
-      if (int error = run<Width, Rdna3>(flags, uint32_t(exec_mask >> (half * 32)), mode, dest,
-                                        &half_condition, av, bv, cv)) {
+      if (int error = run<Width, Rdna3, Cdna>(flags, uint32_t(exec_mask >> (half * 32)), mode, dest,
+                                              &half_condition, av, bv, cv)) {
         return error;
       }
       result_condition |= uint64_t(half_condition) << (half * 32);
@@ -118,6 +115,33 @@ int run_wave64(uint64_t flags, uint64_t exec_mask, uint32_t mode, uint32_t *cons
   // Erase the pointer alignment before the byte copy (also for UBSan).
   __builtin_memcpy(static_cast<void *>(condition), &result_condition, sizeof(result_condition));
   return RJ_ARITH_SUCCESS;
+}
+
+// CDNA keeps ordinary underflow and the quiet-NaN model, ignoring encoded OMOD and CLAMP.
+// Strict empirical modes are not established for these architectures.
+template <int Width, int Lanes, typename Mask>
+int run_cdna(uint64_t flags, Mask exec_mask, uint64_t mode, uint32_t *const *d, Mask *condition,
+             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  using namespace rocjitsu::arith;
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  constexpr uint64_t controls = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C |
+                                RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;
+  constexpr uint64_t fp = RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE |
+                          RJ_ARITH_FP_DX10_CLAMP_OFF;
+  if (int error = validate(flags, mode & ~controls, fp)) {
+    return error;
+  }
+  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+  }
+  mode &= ~(RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP);
+  flags &= ~RJ_ARITH_FP_DX10_CLAMP_OFF;
+  if constexpr (Lanes == 32) {
+    return run<Width, false, true>(flags, exec_mask, uint32_t(mode), d, condition, a, b, c);
+  } else {
+    return run_wave64<Width, false, true>(flags, exec_mask, uint32_t(mode), d, condition, a, b, c);
+  }
 }
 
 } // namespace
@@ -196,10 +220,7 @@ int rj_arith_v_div_scale_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, uint32_t *condition, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -215,10 +236,7 @@ int rj_arith_v_div_scale_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, uint64_t *condition, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -234,10 +252,7 @@ int rj_arith_v_div_scale_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  uint32_t *const *d, uint32_t *condition, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -253,10 +268,7 @@ int rj_arith_v_div_scale_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  uint32_t *const *d, uint64_t *condition, const uint32_t *const *a,
                                  const uint32_t *const *b, const uint32_t *const *c) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, (!(instruction_flags & RJ_ARITH_ALU_OMOD_MASK) || (flags & RJ_ARITH_FP_IEEE_MODE) ||
-              !(flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS))
-                 ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                 : RJ_ARITH_SEMANTICS_LOOSE);
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -264,4 +276,36 @@ int rj_arith_v_div_scale_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return run_wave64<32, true>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+// Rescale CDNA operands and return active condition bits; preserve inactive VGPR lanes.
+int rj_arith_v_div_scale_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint32_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_cdna<32, 32>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+// Rescale CDNA operands and return active condition bits; preserve inactive VGPR lanes.
+int rj_arith_v_div_scale_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint64_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_cdna<32, 64>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+// Rescale CDNA operands and return active condition bits; preserve inactive VGPR lanes.
+int rj_arith_v_div_scale_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint32_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_cdna<64, 32>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
+}
+
+// Rescale CDNA operands and return active condition bits; preserve inactive VGPR lanes.
+int rj_arith_v_div_scale_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        uint64_t *condition, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c) {
+  return run_cdna<64, 64>(flags, exec_mask, instruction_flags, d, condition, a, b, c);
 }

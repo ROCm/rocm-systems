@@ -317,7 +317,7 @@ static void initHipCtx(hipCtx_t* pcontext, int deviceId = 0) {
 #define HIP_TEST_DRIVER_INIT()
 #endif
 
-#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__) || defined(__gfx1251__)
 // Wrap __cluster_dims__ so a test's host code is NOT compiled away when the
 // offload-arch string mixes archs that support clusters with ones that don't
 // (e.g. gfx950). The attribute is only emitted for targets with cluster support.

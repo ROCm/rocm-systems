@@ -1605,6 +1605,16 @@ class VSubrevNcU32Vop3 : public Vop3 {
 public:
   VSubrevNcU32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  bool tracks_explicit_source(uint8_t i) const override {
+    return src_operand(i) != &src1 || src1.decoded_vgpr() ||
+           (!has_encoded_dpp() && !has_encoded_dpp8());
+  }
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3202,6 +3212,9 @@ class VCvtScalePk8F16Fp4Vop3 : public Vop3 {
 public:
   VCvtScalePk8F16Fp4Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f4_f6(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3211,6 +3224,9 @@ class VCvtScalePk8Bf16Fp4Vop3 : public Vop3 {
 public:
   VCvtScalePk8Bf16Fp4Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f4_f6(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3220,6 +3236,9 @@ class VCvtScalePk8F32Fp4Vop3 : public Vop3 {
 public:
   VCvtScalePk8F32Fp4Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f4_f6(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3229,6 +3248,9 @@ class VCvtScalePk8F16Fp8Vop3 : public Vop3 {
 public:
   VCvtScalePk8F16Fp8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f8(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3238,6 +3260,9 @@ class VCvtScalePk8Bf16Fp8Vop3 : public Vop3 {
 public:
   VCvtScalePk8Bf16Fp8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f8(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3247,6 +3272,9 @@ class VCvtScalePk8F32Fp8Vop3 : public Vop3 {
 public:
   VCvtScalePk8F32Fp8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f8(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3256,6 +3284,9 @@ class VCvtScalePk8F16Bf8Vop3 : public Vop3 {
 public:
   VCvtScalePk8F16Bf8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f8(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3265,6 +3296,9 @@ class VCvtScalePk8Bf16Bf8Vop3 : public Vop3 {
 public:
   VCvtScalePk8Bf16Bf8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f8(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3274,6 +3308,9 @@ class VCvtScalePk8F32Bf8Vop3 : public Vop3 {
 public:
   VCvtScalePk8F32Bf8Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f8(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3424,6 +3461,9 @@ class VCvtScalePk16F16Fp6Vop3 : public Vop3 {
 public:
   VCvtScalePk16F16Fp6Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f4_f6(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3433,6 +3473,9 @@ class VCvtScalePk16Bf16Fp6Vop3 : public Vop3 {
 public:
   VCvtScalePk16Bf16Fp6Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f4_f6(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3442,6 +3485,9 @@ class VCvtScalePk16F32Fp6Vop3 : public Vop3 {
 public:
   VCvtScalePk16F32Fp6Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f4_f6(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3451,6 +3497,9 @@ class VCvtScalePk16F16Bf6Vop3 : public Vop3 {
 public:
   VCvtScalePk16F16Bf6Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f4_f6(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3460,6 +3509,9 @@ class VCvtScalePk16Bf16Bf6Vop3 : public Vop3 {
 public:
   VCvtScalePk16Bf16Bf6Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f4_f6(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3469,6 +3521,9 @@ class VCvtScalePk16F32Bf6Vop3 : public Vop3 {
 public:
   VCvtScalePk16F32Bf6Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.cvt_scale = amdgpu::CvtScaleSelection::f4_f6(inst_.opsel);
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -6305,8 +6360,6 @@ public:
     Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
     modifiers.src2_is_wave_mask = true;
   }
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -6325,8 +6378,6 @@ public:
     Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
     modifiers.src2_is_wave_mask = true;
   }
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -6341,12 +6392,17 @@ class VSubrevCoCiU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  bool tracks_explicit_source(uint8_t i) const override {
+    return src_operand(i) != &src1 || src1.decoded_vgpr() ||
+           (!has_encoded_dpp() && !has_encoded_dpp8());
+  }
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &src1;
+    }
     modifiers.src2_is_wave_mask = true;
   }
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -6420,8 +6476,6 @@ class VAddCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VAddCoU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -6435,8 +6489,6 @@ class VSubCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubCoU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -6450,8 +6502,16 @@ class VSubrevCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubrevCoU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
-  void implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const override;
+  bool tracks_explicit_source(uint8_t i) const override {
+    return src_operand(i) != &src1 || src1.decoded_vgpr() ||
+           (!has_encoded_dpp() && !has_encoded_dpp8());
+  }
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &src1;
+    }
+  }
   Operand vdst;
   Operand sdst;
   Operand src0;

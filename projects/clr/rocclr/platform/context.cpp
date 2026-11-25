@@ -56,9 +56,9 @@ Context::~Context() {
   // Loop through all devices
   for (const auto& it : devices_) {
     // Dissociate OCL context with any external device.
-    // D3D10/D3D11 interop requires amd::Context* (this); GL uses the API context handle.
-    if (info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr)) {
-      uint d3dFlags = info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr);
+    // D3D interop requires amd::Context* (this); GL uses the API context handle.
+    if (info_.flags_ & kD3DDeviceFlags) {
+      uint d3dFlags = info_.flags_ & kD3DDeviceFlags;
       it->unbindExternalDevice(d3dFlags, info_.hDev_, this, VALIDATE_ONLY);
     }
     if (info_.flags_ & GLDeviceKhr) {
@@ -252,21 +252,20 @@ int Context::create(const intptr_t* properties) {
   }
 
   // Check if OCL context can be associated with any external device
-  if (info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr | GLDeviceKhr | D3D9DeviceKhr |
-                      D3D9DeviceEXKhr | D3D9DeviceVAKhr)) {
+  if (info_.flags_ & (kD3DDeviceFlags | GLDeviceKhr)) {
     // Loop through all devices
     for (const auto& it : devices_) {
-      // D3D10/D3D11 interop requires amd::Context* (this) as the context pointer so that
-      // extension objects can be cached per-ID3D11Device inside the OpenCL context.
-      // GL and D3D9 interop use the API-level context handle stored in info_.hCtx_.
-      if (info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr)) {
-        uint d3dFlags = info_.flags_ & (D3D10DeviceKhr | D3D11DeviceKhr);
+      // D3D interop requires amd::Context* (this) as the context pointer so that
+      // extension objects can be cached per graphics device inside the OpenCL context.
+      // GL interop uses the API-level context handle stored in info_.hCtx_.
+      if (info_.flags_ & kD3DDeviceFlags) {
+        uint d3dFlags = info_.flags_ & kD3DDeviceFlags;
         if (!it->bindExternalDevice(d3dFlags, info_.hDev_, this, VALIDATE_ONLY)) {
           result = CL_INVALID_VALUE;
         }
       }
-      if (info_.flags_ & (GLDeviceKhr | D3D9DeviceKhr | D3D9DeviceEXKhr | D3D9DeviceVAKhr)) {
-        uint glFlags = info_.flags_ & (GLDeviceKhr | D3D9DeviceKhr | D3D9DeviceEXKhr | D3D9DeviceVAKhr);
+      if (info_.flags_ & GLDeviceKhr) {
+        uint glFlags = info_.flags_ & GLDeviceKhr;
         if (!it->bindExternalDevice(glFlags, info_.hDev_, info_.hCtx_, VALIDATE_ONLY)) {
           result = CL_INVALID_VALUE;
         }

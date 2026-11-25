@@ -318,7 +318,7 @@ atomics:
   Unit_atomicExch_system_Positive_Host_And_GPU:
     <<: *level_default
     disabled:
-      targets: [nvidia_linux]
+      targets: [nvidia_linux, amd_wsl]
       reason: "AIRUNTIME-2744 - SWDEV-435667: fails randomly in stress test (observed 01/12/23). Needs re-triage on nvidia_linux."
     tags: [deviceLib, system]
   Unit_atomicExch_system_Positive_Host_And_Peer_GPUs:

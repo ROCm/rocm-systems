@@ -1,172 +1,154 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX2 loose dense FP16/BF16 WMMA kernels for gfx11/gfx12 and both wave sizes.
-// Reuses decoded factors across eight-column FMA accumulation, applying operand
-// modifiers and stage-specific narrowing for packed results before final stores.
+// AVX2 loose FP16/BF16 WMMA. Four rows share each decoded B vector;
+// packed outputs narrow after each gfx11 DOT2 or gfx12 DOT4.
 
-#include "common/float_formats.h"
+#include "common/compiler.h"
 #include "common/simd.h"
 #include "common/x86_64/half_x86_64_v3.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/layout.h"
 
 #include <immintrin.h>
 #include <stdint.h>
 
+namespace rocjitsu::arith {
 namespace {
 
-// Narrow eight FP32 lanes into low halfwords: BF16 truncates, FP16 rounds
-// to nearest-even and optionally saturates finite overflow. Preserve subnormals.
-template <bool Bf16> __m256i packed_narrow(__m256 value, bool saturate) {
+template <bool Bf16> __m256 widen(__m256i words, int shift) {
   if constexpr (Bf16) {
-    return _mm256_srli_epi32(_mm256_castps_si256(value), 16);
+    return _mm256_castsi256_ps(shift ? _mm256_and_si256(words, _mm256_set1_epi32(0xffff0000U))
+                                     : _mm256_slli_epi32(words, 16));
   } else {
-    return rocjitsu::arith::half_narrow(value, saturate);
+    return half_input(words, shift, 0);
   }
 }
 
-// Widen eight low-halfword FP16/BF16 encodings into FP32 lanes.
-template <bool Bf16> __m256 packed_widen(__m256i value) {
+template <bool Bf16, bool Saturate> __m256i narrow(__m256 x) {
   if constexpr (Bf16) {
-    return _mm256_castsi256_ps(_mm256_slli_epi32(value, 16));
+    return _mm256_srli_epi32(_mm256_castps_si256(x), 16);
   } else {
-    return rocjitsu::arith::half_input(value, 0, 0);
+    return half_narrow(x, Saturate);
   }
 }
 
-// Compute loose FP16/BF16 A*B+C in the selected gfx layout and wave size.
-// Modifiers must be validated; Modified=false requires zero instruction_flags. Packed
-// results use staged narrowing and preserve gfx11's unselected D half.
-template <bool Bf16, bool Modified, int Lanes, bool Rdna3, bool Packed = false>
-void wmma(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-          const uint32_t *const *b, const uint32_t *const *c, bool saturate = false) {
-  const uint32_t a_sign = ((instruction_flags & RJ_ARITH_WMMA_NEG_LO_A) ? 0x8000U : 0) |
-                          ((instruction_flags & RJ_ARITH_WMMA_NEG_HI_A) ? 0x80000000U : 0);
-  // Decode B once for all output rows. Each input word holds two consecutive
-  // K elements; columns occupy consecutive lanes within each half-wave.
-  constexpr int Groups = Rdna3 ? Lanes / 16 : 1;
-  constexpr int KPerLane = 256 / Lanes;
-  alignas(32) float right[Groups][16][16];
-  for (int group = 0; group < Groups; ++group) {
-    for (int k = 0; k < 16; ++k) {
-      for (int col = 0; col < 16; col += 8) {
-        __m256i words = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(
-            b[Rdna3 ? k / 2 : (k % KPerLane) / 2] + 16 * (Rdna3 ? group : k / KPerLane) + col));
-        if constexpr (Modified) {
-          __m256i signs =
-              _mm256_set1_epi32(((instruction_flags & RJ_ARITH_WMMA_NEG_LO_B) ? 0x8000 : 0) |
-                                ((instruction_flags & RJ_ARITH_WMMA_NEG_HI_B) ? INT32_MIN : 0));
-          words = _mm256_xor_si256(words, signs);
-        }
-        if constexpr (Bf16) {
-          // BF16 widens exactly by placing its bits in FP32's high half.
-          words = k % 2 ? _mm256_and_si256(words, _mm256_set1_epi32(0xffff0000U))
-                        : _mm256_slli_epi32(words, 16);
-          _mm256_store_ps(right[group][k] + col, _mm256_castsi256_ps(words));
-        } else {
-          words = k % 2 ? _mm256_srli_epi32(words, 16)
-                        : _mm256_and_si256(words, _mm256_set1_epi32(0xffff));
-          __m128i halves =
-              _mm_packus_epi32(_mm256_castsi256_si128(words), _mm256_extracti128_si256(words, 1));
-          _mm256_store_ps(right[group][k] + col, _mm256_cvtph_ps(halves));
-        }
-      }
-    }
+template <bool Bf16, bool Saturate> __m256 round_stage(__m256 x) {
+  if constexpr (Bf16) {
+    return _mm256_and_ps(x, _mm256_castsi256_ps(_mm256_set1_epi32(0xffff0000U)));
+  } else if constexpr (Saturate) {
+    return widen<false>(narrow<false, true>(x), 0);
+  } else {
+    return _mm256_cvtph_ps(_mm256_cvtps_ph(x, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
+}
 
-  uint32_t result[256 / Lanes][Lanes];
-  for (int row = 0; row < 16; ++row) {
-    // GFX11 interleaves rows across replicated groups. GFX12 blocks rows,
-    // with Wave64's upper half holding the second four-row block.
-    int group = Rdna3 ? row % Groups : 0;
-    int reg = Rdna3 ? row / Groups : row % KPerLane;
-    int lane = Rdna3 ? 16 * group : 16 * (row / 8) + (Lanes == 64 ? 32 * ((row / 4) % 2) : 0);
-    int source_reg = Packed && !Rdna3 ? reg / 2 : reg;
-    // Read eight C values at a column offset, widening the selected half if packed.
-    auto read_acc = [&](int offset) {
+// Decode a K pair from each packed word in one pass. Keep both tiles in
+// accumulation order, including the gfx12 Wave32 packed-output permutation.
+template <bool Bf16, int Lanes, bool Rdna3, bool Packed>
+void decode(float (&tile)[16][16], const uint32_t *const *operand, __m256i signs) {
+  for (int step = 0; step < 16; step += 2) {
+    int k = Packed && !Rdna3 && Lanes == 32 ? wmma_gfx12_w32_k(step) : step;
+    auto src = wmma_half_input<Lanes, Rdna3>(k);
+    for (int col = 0; col < 16; col += 8) {
       auto words =
-          _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c[source_reg] + lane + offset));
-      if constexpr (Packed) {
-        int shift = Rdna3 ? (instruction_flags & RJ_ARITH_WMMA_HIGH_C_D ? 16 : 0) : 16 * (reg % 2);
-        words = _mm256_and_si256(_mm256_srl_epi32(words, _mm_cvtsi32_si128(shift)),
-                                 _mm256_set1_epi32(0xffff));
-        return packed_widen<Bf16>(words);
-      } else {
-        return _mm256_castsi256_ps(words);
-      }
-    };
-    __m256 low = read_acc(0), high = read_acc(8);
-    if constexpr (Modified) {
-      __m256 keep = _mm256_castsi256_ps(
-          _mm256_set1_epi32((instruction_flags & RJ_ARITH_WMMA_ABS_C) ? INT32_MAX : -1));
-      __m256 sign = _mm256_castsi256_ps(
-          _mm256_set1_epi32((instruction_flags & RJ_ARITH_WMMA_NEG_C) ? INT32_MIN : 0));
-      low = _mm256_xor_ps(_mm256_and_ps(low, keep), sign);
-      high = _mm256_xor_ps(_mm256_and_ps(high, keep), sign);
+          _mm256_loadu_si256(reinterpret_cast<const __m256i *>(operand[src.reg] + src.lane + col));
+      words = _mm256_xor_si256(words, signs);
+      _mm256_store_ps(tile[step] + col, widen<Bf16>(words, 0));
+      _mm256_store_ps(tile[step + 1] + col, widen<Bf16>(words, 16));
     }
+  }
+}
+
+template <bool Bf16, int Lanes, bool Rdna3, bool Packed, bool Saturate>
+void compute(uint32_t mods, uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+             const uint32_t *const *c) {
+  constexpr int Rows = 4;
+  constexpr int Registers = 256 / Lanes;
+  alignas(32) float left[16][16], right[16][16];
+  auto signs = [&](uint32_t lo, uint32_t hi) {
+    return _mm256_set1_epi32((mods & lo ? 0x8000 : 0) | (mods & hi ? INT32_MIN : 0));
+  };
+  decode<Bf16, Lanes, Rdna3, Packed>(left, a,
+                                     signs(RJ_ARITH_WMMA_NEG_LO_A, RJ_ARITH_WMMA_NEG_HI_A));
+  decode<Bf16, Lanes, Rdna3, Packed>(right, b,
+                                     signs(RJ_ARITH_WMMA_NEG_LO_B, RJ_ARITH_WMMA_NEG_HI_B));
+  auto keep = _mm256_castsi256_ps(_mm256_set1_epi32(mods & RJ_ARITH_WMMA_ABS_C ? INT32_MAX : -1));
+  auto sign = _mm256_castsi256_ps(_mm256_set1_epi32(mods & RJ_ARITH_WMMA_NEG_C ? INT32_MIN : 0));
+  bool high_half = mods & RJ_ARITH_WMMA_HIGH_C_D;
+  alignas(32) uint32_t result[Registers][Lanes];
+  for (int base = 0; base < 16; base += Rows) {
+    __m256 low[Rows], high[Rows];
+    for (int r = 0; r < Rows; ++r) {
+      auto out = wmma_half_output<Lanes, Rdna3>(base + r);
+      auto read = [&](int col) {
+        int src = Packed && !Rdna3 ? out.reg / 2 : out.reg;
+        auto bits = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c[src] + out.lane + col));
+        auto value = _mm256_castsi256_ps(bits);
+        if constexpr (Packed) {
+          value = widen<Bf16>(bits, 16 * (Rdna3 ? int(high_half) : out.reg % 2));
+        }
+        return _mm256_xor_ps(_mm256_and_ps(value, keep), sign);
+      };
+      low[r] = read(0);
+      high[r] = read(8);
+    }
+    RJ_ARITH_UNROLL(4)
     for (int step = 0; step < 16; ++step) {
-      int k = Packed && !Rdna3 && Lanes == 32 ? rocjitsu::arith::wmma_gfx12_w32_k(step) : step;
-      uint32_t word =
-          a[Rdna3 ? k / 2 : (k % KPerLane) / 2][row + 16 * (Rdna3 ? group : k / KPerLane)];
-      if constexpr (Modified) {
-        word ^= a_sign;
-      }
-      uint16_t bits = uint16_t(word >> (16 * (k % 2)));
-      __m256 left = _mm256_set1_ps(Bf16 ? rocjitsu::arith::bf16_to_float(bits) : _cvtsh_ss(bits));
-      low = _mm256_fmadd_ps(left, _mm256_load_ps(right[group][k]), low);
-      high = _mm256_fmadd_ps(left, _mm256_load_ps(right[group][k] + 8), high);
-      // gfx11 narrows every DOT2; gfx12 every DOT4, so the order matters.
-      if constexpr (Packed) {
-        if ((step + 1) % (Rdna3 ? 2 : 4) == 0) {
-          low = packed_widen<Bf16>(packed_narrow<Bf16>(low, saturate));
-          high = packed_widen<Bf16>(packed_narrow<Bf16>(high, saturate));
+      auto b_low = _mm256_load_ps(right[step]);
+      auto b_high = _mm256_load_ps(right[step] + 8);
+      RJ_ARITH_UNROLL(4)
+      for (int r = 0; r < Rows; ++r) {
+        auto x = _mm256_set1_ps(left[step][base + r]);
+        low[r] = _mm256_fmadd_ps(x, b_low, low[r]);
+        high[r] = _mm256_fmadd_ps(x, b_high, high[r]);
+        if constexpr (Packed) {
+          if (step < 15 && (step + 1) % (Rdna3 ? 2 : 4) == 0) {
+            low[r] = round_stage<Bf16, Saturate>(low[r]);
+            high[r] = round_stage<Bf16, Saturate>(high[r]);
+          }
         }
       }
     }
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[reg] + lane),
-                        Packed ? packed_narrow<Bf16>(low, saturate) : _mm256_castps_si256(low));
-    _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[reg] + lane + 8),
-                        Packed ? packed_narrow<Bf16>(high, saturate) : _mm256_castps_si256(high));
+    for (int r = 0; r < Rows; ++r) {
+      auto out = wmma_half_output<Lanes, Rdna3>(base + r);
+      auto store = [&](int col, __m256 x) {
+        auto bits = _mm256_castps_si256(x);
+        if constexpr (Packed) {
+          bits = narrow<Bf16, Saturate>(x);
+        }
+        _mm256_store_si256(reinterpret_cast<__m256i *>(result[out.reg] + out.lane + col), bits);
+      };
+      store(0, low[r]);
+      store(8, high[r]);
+    }
   }
-
-  // Stage all outputs before any stores, since D may overlap A, B or C.
-  constexpr int DestinationRegs = 256 / Lanes / (Packed && !Rdna3 ? 2 : 1);
+  // All input reads precede the first D store. Write repeated D registers in order.
+  constexpr int DestinationRegs = Registers / (Packed && !Rdna3 ? 2 : 1);
   for (int reg = 0; reg < DestinationRegs; ++reg) {
     for (int lane = 0; lane < Lanes; lane += 8) {
-      int source_reg = Packed && !Rdna3 ? reg * 2 : reg;
-      auto value = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result[source_reg] + lane));
-      // gfx11 replaces one half of each D word; gfx12 combines two output rows.
+      int src = Packed && !Rdna3 ? reg * 2 : reg;
+      auto value = _mm256_load_si256(reinterpret_cast<const __m256i *>(result[src] + lane));
       if constexpr (Packed && Rdna3) {
-        int shift = instruction_flags & RJ_ARITH_WMMA_HIGH_C_D ? 16 : 0;
         auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d[reg] + lane));
-        value =
-            _mm256_or_si256(_mm256_sll_epi32(value, _mm_cvtsi32_si128(shift)),
-                            _mm256_and_si256(old, _mm256_set1_epi32(shift ? 0xffff : 0xffff0000U)));
+        value = high_half ? _mm256_blend_epi16(old, _mm256_slli_epi32(value, 16), 0xaa)
+                          : _mm256_blend_epi16(old, value, 0x55);
       } else if constexpr (Packed) {
-        auto high =
-            _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result[source_reg + 1] + lane));
-        value = _mm256_or_si256(value, _mm256_slli_epi32(high, 16));
+        auto upper = _mm256_load_si256(reinterpret_cast<const __m256i *>(result[src + 1] + lane));
+        value = _mm256_or_si256(value, _mm256_slli_epi32(upper, 16));
       }
       _mm256_storeu_si256(reinterpret_cast<__m256i *>(d[reg] + lane), value);
     }
   }
 }
-
 } // namespace
-
-namespace rocjitsu::arith {
 
 // Compute loose FP16/BF16 A*B+C with FP32 output and validated instruction flags.
 // D may overlap inputs; Lanes and Rdna3 select the physical register layout.
 template <bool Bf16, int Lanes, bool Rdna3>
 void wmma_f32_x86_64_v3(uint32_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
                         const uint32_t *const *b, const uint32_t *const *c) {
-  if (instruction_flags) {
-    wmma<Bf16, true, Lanes, Rdna3>(instruction_flags, d, a, b, c);
-  } else {
-    wmma<Bf16, false, Lanes, Rdna3>(0, d, a, b, c);
-  }
+  compute<Bf16, Lanes, Rdna3, false, false>(instruction_flags, d, a, b, c);
 }
 
 template void wmma_f32_x86_64_v3<false, 32, false>(uint32_t, uint32_t *const *,
@@ -201,7 +183,13 @@ template <bool Bf16, int Lanes, bool Rdna3>
 void wmma_packed_x86_64_v3(uint32_t instruction_flags, bool saturate, uint32_t *const *d,
                            const uint32_t *const *a, const uint32_t *const *b,
                            const uint32_t *const *c) {
-  wmma<Bf16, true, Lanes, Rdna3, true>(instruction_flags, d, a, b, c, saturate);
+  if constexpr (!Bf16) {
+    if (saturate) {
+      compute<Bf16, Lanes, Rdna3, true, true>(instruction_flags, d, a, b, c);
+      return;
+    }
+  }
+  compute<Bf16, Lanes, Rdna3, true, false>(instruction_flags, d, a, b, c);
 }
 
 template void wmma_packed_x86_64_v3<false, 32, false>(uint32_t, bool, uint32_t *const *,

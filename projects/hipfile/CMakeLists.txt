@@ -4,8 +4,10 @@
 
 # Top-level CMake file for hipFile
 
-# CMake version according to latest ROCm platform requirements
-cmake_minimum_required(VERSION 3.21)
+# TheRock requires 3.25. 3.25.0 and 3.25.1 pass FetchContent_Declare()'s
+# SYSTEM on to ExternalProject_Add() as part of the previous option's
+# value, which breaks the download.
+cmake_minimum_required(VERSION 3.25.2)
 
 # Set the default CMake build type
 #
@@ -55,6 +57,16 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/HipFileDeprecatedAISOptions.cmake")
 
 set(HIPFILE_CXX_STANDARD "20" CACHE STRING "C++ standard to build with")
 set_property(CACHE HIPFILE_CXX_STANDARD PROPERTY STRINGS "20" "23" "26")
+
+# The cxx_std_26 compile feature, which the hipfile_add_* helpers ask for,
+# only works from CMake 3.30 on, with both GCC and Clang. Older versions
+# fail with an error about the feature that doesn't mention
+# HIPFILE_CXX_STANDARD, so check here and say what's needed.
+if(HIPFILE_CXX_STANDARD STREQUAL "26" AND CMAKE_VERSION VERSION_LESS 3.30)
+    message(FATAL_ERROR
+        "HIPFILE_CXX_STANDARD=26 needs CMake 3.30 or later, but this is "
+        "CMake ${CMAKE_VERSION}")
+endif()
 
 # Set the list of build types for ccmake/CMake GUI
 #

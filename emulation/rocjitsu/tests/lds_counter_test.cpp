@@ -1,9 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -23,21 +25,21 @@ namespace {
 
 using namespace rocjitsu;
 
-class LdsCounterTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class LdsCounterTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   bool gfx9() const {
     const auto arch = GetParam();
-    return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-           arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+           arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
   }
 };
 
 INSTANTIATE_TEST_SUITE_P(AllArchitectures, LdsCounterTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                           ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                           ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA1,
-                                           ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                                           ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                           rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna1,
+                                           rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                           rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5));
 
 TEST_P(LdsCounterTest, AppendAndConsumeBroadcastOldCounterToSparseActiveLanes) {
   for (auto arch : {GetParam()}) {
@@ -49,16 +51,22 @@ TEST_P(LdsCounterTest, AppendAndConsumeBroadcastOldCounterToSparseActiveLanes) {
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("lds_counter", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "lds_counter", cfg, &mem, &l2));
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
+    wf->set_lds_size(1024);
     wf->set_exec(0x25);
+    wf->set_lds_size(1024);
     wf->set_m0(0);
+    wf->set_lds_size(512);
     for (uint16_t op : {uint16_t{61}, uint16_t{62}}) {
       wf->lds().write32(0, 99);
-      for (uint32_t lane = 0; lane < 6; ++lane)
+      for (uint32_t lane = 0; lane < 6; ++lane) {
         cu->write_vgpr(wf->vgpr_alloc().base + 6, lane, 0xdeadbeef);
+      }
       // LLVM encoding: GFX9 uses op 189/190; RDNA and CDNA5 use 61/62.
       const std::array<uint32_t, 2> words{
           0xd8000000u | ((op + (gfx9() ? 128u : 0u)) << (gfx9() ? 17 : 18)), 6u << 24};
@@ -69,9 +77,10 @@ TEST_P(LdsCounterTest, AppendAndConsumeBroadcastOldCounterToSparseActiveLanes) {
       amdgpu::LocalMemPipeline pipeline;
       pipeline.issue(inst.release(), *wf);
       EXPECT_EQ(wf->lds().read32(0), op == 61 ? 96u : 102u);
-      for (uint32_t lane = 0; lane < 6; ++lane)
+      for (uint32_t lane = 0; lane < 6; ++lane) {
         EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 6, lane),
                   (0x25 & (1u << lane)) ? 99u : 0xdeadbeefu);
+      }
     }
     wf->halt();
   }

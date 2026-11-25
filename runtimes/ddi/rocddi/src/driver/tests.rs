@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 const ID: [u8; 16] = [0x42; 16];
 
 struct FakeDriver {
+    admission: crate::session::SessionAdmission,
     instance: DriverInstanceId,
     allocation_drops: Arc<AtomicUsize>,
     fail_activation: bool,
@@ -45,8 +46,15 @@ fn failure(kind: crate::ErrorKind, detail: &'static str) -> Error {
 }
 
 impl FakeDriver {
+    #[allow(
+        clippy::expect_used,
+        reason = "test fixture requires a process witness"
+    )]
     fn new() -> Self {
         Self {
+            admission: crate::session::SessionAdmission::new(
+                crate::os::ProcessIdentity::capture().expect("test process identity"),
+            ),
             instance: new_driver_instance(),
             allocation_drops: Arc::new(AtomicUsize::new(0)),
             fail_activation: false,
@@ -93,6 +101,10 @@ impl CachedInfo for FakeAllocation {
 
 impl Driver for FakeDriver {
     type DeviceState = FakeDevice;
+
+    fn admission(&self) -> &crate::session::SessionAdmission {
+        &self.admission
+    }
 
     fn driver_instance(&self) -> DriverInstanceId {
         self.instance

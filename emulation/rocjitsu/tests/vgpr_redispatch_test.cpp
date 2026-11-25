@@ -4,7 +4,9 @@
 /// @file vgpr_redispatch_test.cpp
 /// @brief Integration coverage for VGPR storage recycling through compute units.
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -21,7 +23,7 @@ using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 
 struct RedispatchCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t wave_size;
   uint32_t vgprs_per_wf;
   const char *name;
@@ -41,7 +43,9 @@ TEST_P(VgprRedispatchTest, RecycledAllocationStartsZero) {
   config.vgprs_per_wf = test_case.vgprs_per_wf;
   config.lds_size_kb = 64;
 
-  auto compute_unit = ComputeUnitCore::create("vgpr_redispatch_cu", config, &gpu_memory, &l2);
+  std::unique_ptr<ComputeUnitCore> compute_unit;
+  ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(
+      compute_unit, "vgpr_redispatch_cu", config, &gpu_memory, &l2));
   compute_unit->set_plugin_group(std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{}));
   ASSERT_EQ(compute_unit->wf_size(), test_case.wave_size);
 
@@ -54,8 +58,9 @@ TEST_P(VgprRedispatchTest, RecycledAllocationStartsZero) {
   compute_unit->write_sgpr(first_sgpr_base, 0x12345678u);
   compute_unit->write_sgpr(first_sgpr_base + 31, 0x9abcdef0u);
   for (uint32_t reg = 0; reg < block_size; ++reg) {
-    for (uint32_t lane = 0; lane < test_case.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < test_case.wave_size; ++lane) {
       compute_unit->write_vgpr(first_base + reg, lane, 1u + reg * test_case.wave_size + lane);
+    }
   }
 
   first->halt();
@@ -89,7 +94,9 @@ TEST_P(VgprRedispatchTest, BlockOwnershipTracksDispatchAndRetirement) {
   config.vgprs_per_wf = test_case.vgprs_per_wf;
   config.lds_size_kb = 64;
 
-  auto compute_unit = ComputeUnitCore::create("vgpr_owner_cu", config, &gpu_memory, &l2);
+  std::unique_ptr<ComputeUnitCore> compute_unit;
+  ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(compute_unit, "vgpr_owner_cu",
+                                                                  config, &gpu_memory, &l2));
   const uint32_t block_size = compute_unit->vgpr_allocation_block_size();
   ASSERT_GT(block_size, 0u);
 
@@ -125,10 +132,10 @@ TEST_P(VgprRedispatchTest, BlockOwnershipTracksDispatchAndRetirement) {
 
 INSTANTIATE_TEST_SUITE_P(
     Configurations, VgprRedispatchTest,
-    ::testing::Values(RedispatchCase{ROCJITSU_CODE_ARCH_RDNA4, 32, 256, "Wave32"},
-                      RedispatchCase{ROCJITSU_CODE_ARCH_RDNA4, 32, 17, "OddBlock"},
-                      RedispatchCase{ROCJITSU_CODE_ARCH_CDNA4, 64, 256, "Wave64"},
-                      RedispatchCase{ROCJITSU_CODE_ARCH_CDNA5, 32, 1024, "Gfx1250"}),
+    ::testing::Values(RedispatchCase{rocjitsu::IsaFamily::Rdna4, 32, 256, "Wave32"},
+                      RedispatchCase{rocjitsu::IsaFamily::Rdna4, 32, 17, "OddBlock"},
+                      RedispatchCase{rocjitsu::IsaFamily::Cdna4, 64, 256, "Wave64"},
+                      RedispatchCase{rocjitsu::IsaFamily::Cdna5, 32, 1024, "Gfx1250"}),
     [](const ::testing::TestParamInfo<RedispatchCase> &info) { return info.param.name; });
 
 } // namespace

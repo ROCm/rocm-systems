@@ -8,15 +8,12 @@
 Using the rocsys command (experimental)
 ***************************************
 
-The ``rocprof-sys-*`` executables are the original ROCm Systems Profiler tools.
-The other pages in this documentation show those commands.
-
 The ``rocsys`` command is a new unified command-line entry point for profiling.
 Running ``rocsys -- ./app`` or ``rocsys profile -- ./app`` produces a full trace
 profile, and ``rocsys rewrite`` runs ``rocprof-sys-instrument`` in binary-rewrite
-mode (``-o``). A ``rocsys`` subcommand selects the tool, and any arguments after the subcommand are
-forwarded to the selected tool. ``rocsys --help`` reports that the command is
-experimental and that commands and workflows are subject to change.
+mode (``-o``). A ``rocsys`` subcommand selects the tool. ``rocsys`` reads its own
+options, described in :ref:`rocsys-options`, and forwards every other argument after the
+subcommand, unchanged and in order, to the selected tool.
 
 Usage
 =====
@@ -30,23 +27,103 @@ Usage
    rocsys --version
    rocsys <subcommand> --help
 
-``profile`` is the default. ``rocsys -- ./app`` and ``rocsys profile -- ./app``
-both produce a full trace profile, the same way ``rocprof-sys-run`` launches the
-application. With no other flags, that records a rocpd trace of the default
-ROCm domains and GPU telemetry.
-It does not rewrite the binary, and it does not enable call-stack sampling or
-an aggregated function profile. You can change the data that is collected by using
-``--preset`` or domain flags, as described in :doc:`using-preset-profiles`. Output
-paths follow ``rocprof-sys-run``; see :doc:`understanding-rocprof-sys-output`.
+``profile`` is the default subcommand if none is specified.
+``rocsys -- ./app``, ``rocsys --preset=balanced -- ./app``, and
+``rocsys profile -- ./app`` produce a full trace profile. With no other flags,
+a profile records a rocpd trace of the default ROCm domains and default GPU
+telemetry. You can change the data that is collected by using ``--preset`` or
+domain flags, as described in :doc:`using-preset-profiles`.
+
+The application and its arguments always follow ``--``. ``rocsys`` reports an error
+for a command without ``--``, such as ``rocsys python ./script.py`` or
+``rocsys rewrite -o app.inst ./app``, because it cannot tell the application from a
+tool option's value. A command that runs no application still ends with ``--``, as in
+``rocsys --preset=balanced --export-config --``. ``avail`` and ``attach`` run no
+application and take no ``--``.
 
 ``rocsys`` with no arguments prints the top-level help. ``rocsys --version``
-prints the version. Pass ``--help`` after ``profile`` to read the
-``rocprof-sys-run`` options, including presets:
+prints the version. Print the top-level help, or run a profile with a preset:
 
 .. code-block:: shell
 
-   rocsys profile --help
-   rocsys profile --preset=balanced -- ./app
+   rocsys --help
+   rocsys --preset=balanced -- ./app
+
+.. _rocsys-options:
+
+rocsys options
+==============
+
+``rocsys`` has three options of its own. They apply to ``profile``, ``instrument``,
+``python``, and ``attach``, and can appear anywhere between the subcommand and ``--``.
+``rewrite``, ``avail``, and ``causal`` pass them to their tool unchanged, like any other
+option: ``rocsys causal --log-level debug -- ./app`` uses the ``--log-level`` of
+``rocprof-sys-causal``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 76
+
+   * - Option
+     - Effect
+   * - ``--traces <names>``
+     - Selects what is traced: the ROCm APIs ``hip-api`` (or ``hip``), ``hsa-api``
+       (or ``hsa``), ``roctx``, ``kernel-dispatch``, ``memory-copy``,
+       ``memory-allocation``, and ``rocshmem``, and the runtimes ``mpi``, ``openmp``,
+       ``rccl``, ``ucx``, and ``openshmem``.
+   * - ``--output-path <dir>``
+     - Directory for the output files.
+   * - ``--log-level <level>``
+     - How much the tool logs: ``trace``, ``debug``, ``info``, ``warn`` (or
+       ``warning``), ``error`` (or ``err``), ``critical``, or ``off``.
+
+.. code-block:: shell
+
+   rocsys --traces hip mpi -- ./app
+   rocsys --traces hip,mpi -- ./app
+   rocsys --traces hip --traces mpi -- ./app
+   rocsys instrument --traces kernel-dispatch -- ./app
+   rocsys --output-path out --log-level debug -- ./app
+
+Names are separated by spaces or commas, and ``--traces`` can be repeated. With ``=``,
+separate names with commas only: ``--traces=hip,mpi``. An unknown name is an error.
+``--traces`` is the whole selection: a name you leave out is not traced, so
+``rocsys --traces hip -- ./app`` also turns MPI tracing off. Without ``--traces``, the
+tool's own defaults apply.
+
+.. _rocsys-precedence:
+
+Setting precedence
+==================
+
+``rocsys`` uses the order below, and the highest source in this list wins:
+
+#. A tool option forwarded by ``rocsys``, such as ``--rocm`` or ``-o``, or a preset
+   named with ``--preset``. Where both set the same thing, ``--rocm`` overrides the
+   preset, but the preset overrides ``--gpu`` and ``--cpu``, and overrides ``-o`` when
+   the preset sets an output path.
+#. A ``rocsys`` option: ``--traces``, ``--output-path``, or ``--log-level``.
+#. An environment variable.
+#. A configuration file (:ref:`creating-a-configuration-file`).
+#. The tool's built-in default.
+
+.. note::
+
+   This order might change in a future release. Don't rely on a preset to override
+   ``--traces``, ``--output-path``, or ``--log-level``.
+
+``rocsys`` writes only an option you type, and that write replaces the environment
+variable of the same name. The tool then applies the preset and its own command line, so
+``rocsys --traces hip --rocm=hsa -- ./app`` keeps the domains from ``--rocm``.
+With no ``rocsys`` option for a setting, the shell value is left unchanged.
+For ``rewrite``, pass ``--traces`` when the rewritten binary runs, as in
+``rocsys --traces hip -- ./app.inst``.
+
+``rocsys --help`` lists these options after the subcommands. ``rocsys <subcommand> --help``,
+``-h``, or ``-?`` names the tool whose own ``--help`` lists every other option, and also
+lists these options for ``profile``, ``instrument``, ``python``, and ``attach``. A help topic
+such as ``rocsys profile --help=tracing`` is passed to the tool. A ``--help`` after ``--``
+belongs to the application.
 
 Subcommands
 ===========
@@ -61,25 +138,25 @@ Subcommands
      - Description
      - See also
    * - ``profile``
-     - The default. Produces a full trace profile, using the same run mode as ``rocprof-sys-run``. With no other flags, that is a rocpd trace of the default ROCm domains and GPU telemetry. Also launches a binary already produced by ``rewrite``.
+     - The default subcommand. Produces a full trace profile, using ``rocprof-sys-run``. Also launches an instrumented binary produced by ``rewrite``.
      - :doc:`using-preset-profiles`, :doc:`understanding-rocprof-sys-output`
    * - ``avail``
-     - Queries the settings, domains, hardware counters, and components available on this system through ``rocprof-sys-avail``. An application argument is optional.
+     - Queries the settings, domains, hardware counters, and components available on the current system through ``rocprof-sys-avail``.
      - :doc:`general-tips-using-rocprof-sys`
    * - ``attach``
-     - Attaches to an already running process through ``rocprof-sys-attach``. Pass ``-p`` or ``--pid``. This verb does not take an application after ``--``.
+     - Attaches to an already running process through ``rocprof-sys-attach``. Pass ``-p`` or ``--pid``. This verb takes no application and no ``--``.
      - :doc:`attaching-to-running-process`
    * - ``causal``
      - Estimates how much faster the application would run if a selected function or line were sped up, through ``rocprof-sys-causal``.
      - :doc:`performing-causal-profiling`
    * - ``instrument``
-     - Instruments the application in memory and then runs it, through ``rocprof-sys-instrument``. Does not write a new binary.
+     - Instruments the application in memory and then runs it, through ``rocprof-sys-instrument``.
      - :doc:`instrumenting-rewriting-binary-application`
    * - ``rewrite``
-     - Writes an instrumented binary through ``rocprof-sys-instrument`` and exits. ``rocsys`` inserts ``-o`` when you do not pass an output path. The rewritten binary is not executed.
+     - Writes an instrumented binary through ``rocprof-sys-instrument`` and exits. The rewritten binary is not executed.
      - :doc:`instrumenting-rewriting-binary-application`
    * - ``python``
-     - Profiles a Python script through the ``rocprof-sys-python`` helper. Its flags are the Python-script options, such as ``-b``, ``-I``, and ``-E``, not ``--preset``.
+     - Profiles a Python application through ``rocprof-sys-python``. Its flags are the Python-script options, such as ``-b``, ``-I``, and ``-E``, not ``--preset``.
      - :doc:`profiling-python-scripts`
 
 Examples
@@ -100,46 +177,15 @@ Examples
 
 ``instrument`` performs runtime instrumentation and does not write a new binary.
 ``rewrite`` writes a new binary and exits. Profile that binary with
-``rocsys profile -- ./app.inst``.
-
-``python`` forwards to the ``rocprof-sys-python`` helper. Its flags are the
-ones on :doc:`profiling-python-scripts`, such as ``-b``, ``-I``, and ``-E``.
+``rocsys -- ./app.inst``.
 
 Default output for rewrite
 ==========================
 
 ``rocsys rewrite -- ./app`` runs ``rocprof-sys-instrument -o -- ./app``. When
-``-o`` has no filename, the rewritten file is written in the current directory.
-"Already in the current directory" means the resolved path is the current
-directory plus the file's basename. A relative path such as ``./subdir/app``
-is handled like a target outside the current directory.
-
-.. list-table::
-   :header-rows: 1
-   :widths: 55 45
-
-   * - Target
-     - Default output
-   * - ``./app``, already in the current directory and not a library
-     - ``./app.inst``
-   * - A name with no extension, such as ``./libfoo``
-     - ``./libfoo.inst``
-   * - A local non-library whose name contains a dot, such as ``./my.app``
-     - ``./my.app.inst``
-   * - A library already in the current directory, such as ``./libfoo.so``
-     - ``./instrumented/libfoo.so``
-   * - A target outside the current directory, such as ``/usr/bin/app`` or ``./subdir/app``
-     - ``./app``
-   * - A library outside the current directory, such as ``/usr/lib/libfoo.so`` or ``./libs/libfoo.so``
-     - ``./libfoo.so``
-
-A target is treated as a library only when its basename contains a dot and either
-starts with ``lib``, contains ``.so``, or ends with ``.a``.
-The ``instrumented/`` directory is used only for a library whose resolved path
-is the current directory plus its basename.
-
-The default name is written in the current directory and can overwrite a file
-that is already there. Rewriting ``/usr/bin/app`` writes ``./app``.
+``-o`` has no filename, the output name and location follow the rules in
+:doc:`instrumenting-rewriting-binary-application`. The default name is written in
+the current directory and can overwrite a file that already exists.
 Pass ``-o``, ``--output``, ``-o=``, or ``--output=`` to choose the path yourself:
 
 .. code-block:: shell
@@ -151,20 +197,18 @@ Call-stack sampling
 ===================
 
 There is no ``sample`` subcommand. ``rocsys sample -- ./app`` reports an unknown
-subcommand.
-
-Call-stack sampling without instrumentation is ``rocprof-sys-sample``.
-See :doc:`sampling-call-stack`.
+subcommand error.
 
 To turn call-stack sampling on during a profile run, pass ``--sample``
 (``-S``) or ``--cpu``. ``--sample`` accepts a timer, ``cputime`` or
-``realtime``. ``--cpu=50`` sets the sampling frequency in Hz:
+``realtime``. ``--cpu`` sets the sampling frequency in Hz and defaults to
+100 Hz. The same flags apply when ``profile`` is implicit:
 
 .. code-block:: shell
 
-   rocsys profile --sample -- ./my_app
-   rocsys profile --sample realtime -- ./my_app
-   rocsys profile --cpu=50 -- ./my_app
+   rocsys --sample -- ./my_app
+   rocsys --sample realtime -- ./my_app
+   rocsys --cpu=50 -- ./my_app
 
 That keeps the run-tool collection and adds sampling. It does not switch to
-``rocprof-sys-sample``.
+``rocprof-sys-sample``. See :doc:`sampling-call-stack`.

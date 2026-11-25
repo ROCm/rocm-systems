@@ -1,0 +1,396 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// IWYU pragma: private, include "rj_arith/rj_arith.h"
+
+#ifndef RJ_ARITH_REGISTER_H_
+#define RJ_ARITH_REGISTER_H_
+
+#include "rj_arith_common.h"
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Bit-preserving Wave32/Wave64 moves, shared by RDNA3 and RDNA4. One VGPR per operand.
+// Supports loose and exact semantics, EXEC masking, and DPP8/DPP16 source routing.
+// ABS_A clears and NEG_A toggles bit 31, in that order, after DPP routing.
+// Other low instruction flags, including OMOD and CLAMP, are unsupported.
+// No FP interpretation or exceptions; inactive destinations remain unchanged.
+int rj_arith_v_mov_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a);
+
+int rj_arith_v_mov_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a);
+
+// Wave32/Wave64 raw half moves. HIGH_A/D select source/destination halves; the other
+// destination half is preserved. ABS_A clears and NEG_A toggles the selected
+// sign bit (in that order), with no FP conversion or NaN canonicalization.
+// OMOD and CLAMP are accepted but ignored, matching hardware. DPP8/DPP16 route
+// A before half/sign selection. Both semantics are exact; whole VGPRs may alias.
+// Inactive destinations are preserved; zero EXEC permits null pointers.
+int rj_arith_v_mov_b16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a);
+
+int rj_arith_v_mov_b16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a);
+
+// Exchange selected halves in active lanes. HIGH_A/D are the only valid flags.
+// Both operands are read/write; unselected halves and inactive lanes survive.
+// Supports exchanging two halves of the same VGPR. All supported semantics are exact.
+// Zero EXEC permits null pointers. Shared RDNA3/RDNA4 Wave32/Wave64 operations.
+int rj_arith_v_swap_b16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, uint32_t *const *a);
+
+int rj_arith_v_swap_b16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, uint32_t *const *a);
+
+// Exchange two read/write VGPRs in active lanes. Both operands use their
+// original values; whole-register aliasing is allowed. Inactive lanes are
+// unchanged. No instruction flags are supported. All supported semantics are exact.
+// Zero EXEC permits null pointers. Shared by RDNA3 and RDNA4.
+int rj_arith_v_swap_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, uint32_t *const *a);
+
+int rj_arith_v_swap_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                            uint32_t *const *d, uint32_t *const *a);
+
+// Wave32 PERMLANE64 is a no-op: no EXEC input and no operand access; null
+// pointers are allowed. Wave64 copies A[lane ^ 32] into active D lanes, reading
+// inactive source lanes too. D may alias A; inactive destinations are unchanged.
+// No instruction flags are supported. All supported semantics are exact. Shared by
+// RDNA3 and RDNA4; neither operation interprets bits as floating-point values.
+int rj_arith_v_permlane64_b32_w32(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+                                  const uint32_t *const *a);
+
+int rj_arith_v_permlane64_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a);
+
+// Register-only DS permutations; no LDS storage or global-state updates.
+// ADDR and DATA each use one VGPR. Add the 16-bit byte offset to ADDR, then
+// select address bits [6:2] within each 32-lane group. Wave32 is shared;
+// RDNA3 Wave64 operates independently in each half. RDNA4 Wave64 instead uses
+// bits [7:2] to route across all 64 lanes. BPERMUTE gathers DATA from the selected
+// source; PERMUTE scatters DATA to the selected destination. EXEC applies to
+// both reads and writes: inactive sources contribute zero, unfilled active
+// destinations receive zero, and inactive destinations are preserved.
+// For PERMUTE collisions rj-arith chooses the highest active source lane, following
+// the ISA pseudocode; hardware prose does not guarantee a particular winner.
+// All inputs are read before output stores; whole-register aliases are allowed.
+// Both semantics are exact within this collision rule. No instruction flags
+// are supported; errors preserve D. Zero EXEC permits null VGPR pointers.
+int rj_arith_ds_permute_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *addr,
+                                const uint32_t *const *data, uint16_t offset);
+
+int rj_arith_ds_permute_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *addr,
+                                const uint32_t *const *data, uint16_t offset);
+
+int rj_arith_ds_permute_b32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *addr, const uint32_t *const *data,
+                                      uint16_t offset);
+
+int rj_arith_ds_bpermute_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *addr,
+                                 const uint32_t *const *data, uint16_t offset);
+
+int rj_arith_ds_bpermute_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                 uint32_t *const *d, const uint32_t *const *addr,
+                                 const uint32_t *const *data, uint16_t offset);
+
+int rj_arith_ds_bpermute_b32_w64_gfx12(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *addr, const uint32_t *const *data,
+                                       uint16_t offset);
+
+// RDNA4 FI backward permutation: same byte addressing as BPERMUTE, but reads
+// inactive source lanes too. EXEC only controls destination writes. Wave64
+// routes across all 64 lanes. The other DS permutation contracts apply.
+int rj_arith_ds_bpermute_fi_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *addr,
+                                    const uint32_t *const *data, uint16_t offset);
+
+int rj_arith_ds_bpermute_fi_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *addr,
+                                    const uint32_t *const *data, uint16_t offset);
+
+// DS_SWIZZLE routes raw bits within each 32-lane row without LDS storage.
+// offset selects bit-mask (<0x8000), quad (<0xc000), masked rotate (<0xe000),
+// or FFT routing. Rotations wrap within the row. Shared RDNA3/RDNA4 ISA
+// pseudocode semantics; selected rotate/FFT cases also match gfx1100/gfx1201 observations.
+// Inactive sources supply zero; inactive destinations are preserved. All source
+// values precede output writes, permitting aliases. Both semantics are exact;
+// no instruction flags are supported. Zero EXEC permits null VGPR pointers.
+int rj_arith_ds_swizzle_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a, uint16_t offset);
+
+int rj_arith_ds_swizzle_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a, uint16_t offset);
+
+// PERMLANE flags are a bit field. FI permits reading inactive source lanes.
+// Otherwise BOUND_CTRL selects zero for an inactive source; without it the
+// destination is preserved. Neither flag enables inactive destination lanes.
+constexpr uint32_t RJ_ARITH_PERMLANE_FI = 1U << 0;
+constexpr uint32_t RJ_ARITH_PERMLANE_BOUND_CTRL = 1U << 1;
+
+// Wave32 lane permutations support both semantics and preserve all host FP state.
+// Guest FP flags have no effect. Each source index is its low four bits; the
+// ordinary forms select within each group of 16 lanes, and X forms select from
+// the other group. Whole-register aliasing, including d == a or b, is supported.
+
+// Indices are successive nibbles of lo (lanes 0..7) and hi (8..15), repeated.
+int rj_arith_v_permlane16_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t lo,
+                                  uint32_t hi);
+
+// Indices are successive nibbles of lo (lanes 0..7) and hi (8..15), repeated.
+int rj_arith_v_permlanex16_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t lo,
+                                   uint32_t hi);
+
+// Indices come from each destination lane of b.
+int rj_arith_v_permlane16_var_b32_w32(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b);
+
+// Indices come from each destination lane of b.
+int rj_arith_v_permlanex16_var_b32_w32(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b);
+
+// Wave64 variants use the same selectors and inactive-source rules. X forms
+// exchange rows 0/1 and 2/3 independently; no source crosses a 32-lane half.
+int rj_arith_v_permlane16_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t lo,
+                                  uint32_t hi);
+
+int rj_arith_v_permlane16_var_b32_w64(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b);
+
+int rj_arith_v_permlanex16_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t lo,
+                                   uint32_t hi);
+
+int rj_arith_v_permlanex16_var_b32_w64(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b);
+
+// Wave32/Wave64 relative VGPR moves shared by RDNA3/RDNA4. d/a are full register-file
+// views starting at VGPR0, bounded by d_count/a_count. d_base/a_base are encoded
+// register indices. RELS adds M0 to source; RELD to destination; RELSD to both.
+// RELSD_2 uses M0[9:0] for source and M0[25:16] for destination. Per ISA section
+// 3.3.2.2, offsets above 255 or resolved indices outside the allocation are out
+// of range: sources redirect to VGPR0, and destination writes are discarded.
+// A source allocation of zero returns zero. Zero counts permit null arrays.
+// No indexing wraps; addition uses widened arithmetic. Whole VGPRs may alias.
+// Both semantics are exact; DPP routes the selected source with MOV_B32 flags.
+// Invalid flags leave all outputs unchanged.
+int rj_arith_v_movrels_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a, uint32_t d_count,
+                               uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+int rj_arith_v_movrels_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a, uint32_t d_count,
+                               uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+int rj_arith_v_movreld_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a, uint32_t d_count,
+                               uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+int rj_arith_v_movreld_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a, uint32_t d_count,
+                               uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+int rj_arith_v_movrelsd_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a, uint32_t d_count,
+                                uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+int rj_arith_v_movrelsd_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                uint32_t *const *d, const uint32_t *const *a, uint32_t d_count,
+                                uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+int rj_arith_v_movrelsd_2_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t d_count,
+                                  uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+int rj_arith_v_movrelsd_2_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t d_count,
+                                  uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+// Relative VGPR swaps shared by RDNA3/RDNA4. d/a are mutable full register-file
+// views starting at VGPR0, bounded by d_count/a_count. M0[9:0] offsets a_base;
+// M0[25:16] offsets d_base. Other M0 bits are ignored. If either offset exceeds
+// 255 or either resolved index is outside its allocation, neither operand is
+// written. Zero counts permit NULL arrays. Index arithmetic does not wrap.
+// Active lanes exchange raw words; inactive lanes are preserved. Whole VGPRs
+// may alias. Both semantics are exact; instruction_flags must be zero.
+// Invalid flags leave all outputs unchanged, including when EXEC is zero.
+int rj_arith_v_swaprel_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, uint32_t *const *a, uint32_t d_count,
+                               uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+int rj_arith_v_swaprel_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, uint32_t *const *a, uint32_t d_count,
+                               uint32_t a_count, uint32_t d_base, uint32_t a_base, uint32_t m0);
+
+// Scalar lane transfers shared by RDNA3/RDNA4; one VGPR input/output.
+// READFIRSTLANE reads the first active lane, or lane 0 for zero EXEC.
+// READLANE/WRITELANE ignore EXEC; lane indices wrap modulo 32 or 64.
+// WRITELANE preserves every other lane. All copy raw bits, support both
+// semantics, require zero instruction_flags, and preserve host FP state.
+// Scalar destinations may overlap source lane storage; values are read first.
+int rj_arith_v_readfirstlane_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a);
+
+int rj_arith_v_readlane_b32_w32(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                const uint32_t *const *a, uint32_t lane);
+
+int rj_arith_v_writelane_b32_w32(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+                                 uint32_t a, uint32_t lane);
+
+int rj_arith_v_readfirstlane_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *d, const uint32_t *const *a);
+
+int rj_arith_v_readlane_b32_w64(uint64_t flags, uint64_t instruction_flags, uint32_t *d,
+                                const uint32_t *const *a, uint32_t lane);
+
+int rj_arith_v_writelane_b32_w64(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+                                 uint32_t a, uint32_t lane);
+
+// Select B where the corresponding condition bit is set, A otherwise. Each
+// operand uses one VGPR. ABS_A/B clear source sign bits, then NEG_A/B toggle
+// them; all other payload bits, including signaling NaNs, are preserved.
+// The B16 form also supports HIGH_A/B/D: selected source halves are written to
+// the selected destination half, preserving the other half. CLAMP is accepted
+// and ignored; OMOD is unsupported.
+// DPP8/DPP16 permutes A before source modifiers and half selection; B and
+// the condition mask remain in their original lanes.
+// Both semantics are bit-exact; all host FP state is preserved.
+int rj_arith_v_cndmask_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t condition);
+int rj_arith_v_cndmask_b16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint32_t condition);
+
+int rj_arith_v_cndmask_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint64_t condition);
+
+int rj_arith_v_cndmask_b16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                               uint32_t *const *d, const uint32_t *const *a,
+                               const uint32_t *const *b, uint64_t condition);
+
+// Pair moves consume two VGPRs per operand and produce two VGPRs. Whole-register
+// overlap is supported; inactive lanes are preserved. MOV_B64 takes no instruction
+// flags. PK_MOV_B32 selects A/B words using PK_LO_A_HIGH and PK_LO_B_HIGH.
+int rj_arith_v_mov_b64_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a);
+int rj_arith_v_pk_mov_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                              const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_mov_b64_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a);
+int rj_arith_v_pk_mov_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                              const uint32_t *const *a, const uint32_t *const *b);
+
+// Generate byte offsets within power-of-two groups using A[lane][5:0].
+// A/D each use one VGPR of 32/64 words; group_width may exceed the wave size.
+// Controls are reserved (zero); aliases are supported.
+// All semantics share exact integer arithmetic; inactive destinations remain unchanged.
+int rj_arith_v_permlane_idx_gen_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t controls,
+                                        uint32_t *const *d, const uint32_t *const *a,
+                                        uint32_t group_width);
+int rj_arith_v_permlane_idx_gen_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t controls,
+                                        uint32_t *const *d, const uint32_t *const *a,
+                                        uint32_t group_width);
+
+// Exchange A's lower row with D's adjacent upper row in each pair. Row width
+// is 16 or 32 lanes; 32-row swaps are a no-op for Wave32. Both operands are
+// one read/write VGPR, may alias, and retain lanes outside their row and EXEC.
+// Source participation ignores EXEC; instruction_flags must be zero.
+int rj_arith_v_permlane16_swap_b32_w32(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       uint32_t *const *a);
+int rj_arith_v_permlane16_swap_b32_w64(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       uint32_t *const *a);
+int rj_arith_v_permlane32_swap_b32_w32(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       uint32_t *const *a);
+int rj_arith_v_permlane32_swap_b32_w64(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       uint32_t *const *a);
+// Route one source VGPR within power-of-two lane groups, including inactive
+// sources; D is one VGPR and may alias A. Only EXEC-selected destinations change.
+// BCAST wraps within the group; UP/DOWN retain their lane across group boundaries.
+// XOR may read an earlier group but retains its lane beyond the upper boundary.
+// Invalid/oversized widths use the wave size.
+// instruction_flags must be zero. These instructions do not produce FP status.
+int rj_arith_v_permlane_bcast_b32_w32(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t selector,
+                                      uint32_t group_width);
+int rj_arith_v_permlane_bcast_b32_w64(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t selector,
+                                      uint32_t group_width);
+int rj_arith_v_permlane_up_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t selector,
+                                   uint32_t group_width);
+int rj_arith_v_permlane_up_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a, uint32_t selector,
+                                   uint32_t group_width);
+int rj_arith_v_permlane_down_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t selector, uint32_t group_width);
+int rj_arith_v_permlane_down_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t selector, uint32_t group_width);
+int rj_arith_v_permlane_xor_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t selector,
+                                    uint32_t group_width);
+int rj_arith_v_permlane_xor_b32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a, uint32_t selector,
+                                    uint32_t group_width);
+// Select sixteen B4/B6/B8 elements from the packed table B followed by A,
+// using sixteen U4 selectors in C's two VGPRs. D consumes 2/3/4 VGPRs; A
+// consumes 1/1/2 and B consumes 1/2/2 respectively. Words and elements are
+// least-significant first. Operands may alias; inactive D lanes are preserved.
+// instruction_flags must be zero. These operations do not produce FP status.
+int rj_arith_v_perm_pk16_b4_u4_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c);
+int rj_arith_v_perm_pk16_b4_u4_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c);
+int rj_arith_v_perm_pk16_b6_u4_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c);
+int rj_arith_v_perm_pk16_b6_u4_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c);
+int rj_arith_v_perm_pk16_b8_u4_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c);
+int rj_arith_v_perm_pk16_b8_u4_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c);
+
+// gfx942/gfx950 Wave64 screen-partition coverage: one VGPR source and destination.
+// Low eight source bits select a rectangle; high bits are ignored. Controls must be zero.
+// Loose, allow-Loose, and Compatibility use the inherited CDNA2 table; strict modes are
+// unsupported. EXEC masks writes, and source/destination storage may overlap.
+int rj_arith_v_screen_partition_4se_b32_w64(uint64_t flags, uint64_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a);
+
+#ifdef __cplusplus
+} // extern "C"
+#endif
+
+#endif

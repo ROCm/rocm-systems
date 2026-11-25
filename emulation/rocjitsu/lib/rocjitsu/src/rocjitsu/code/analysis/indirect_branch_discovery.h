@@ -7,6 +7,7 @@
 #pragma once
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <cstdint>
 #include <span>
@@ -59,12 +60,15 @@ struct IndirectCallFixup {
   /// translation's relocation lattice reads as a code address naming no body at all.
   uint16_t source_builder_sreg = 0;
   bool source_is_call = false; ///< Whether the consumer is a call-like swappc.
-  /// @brief True when the recovered fact for this consumer was incomplete: at least
-  /// one predecessor path left the PC pair at an unconstrained value. The concrete
+  /// @brief True when recovery cannot represent every target of this consumer,
+  /// including unconstrained paths or targets outside the analyzed text. The concrete
   /// targets are still valid for relocation and liveness, but the consumer must NOT
   /// be replaced with a direct transfer window — an unconstrained path would be
   /// redirected to a concrete target it never dynamically reaches.
   bool source_incomplete = false;
+  /// The CFG can use a known PC even when its arithmetic spans other instructions.
+  /// In that case the complete interval cannot be replaced during relocation.
+  bool source_recovery_contiguous = true;
   /// @brief True when the recovery range contains an `s_wait_xcnt` the replacement
   /// must reproduce. The canonical builder overwrites the whole range and writes
   /// the same SGPR pair the drain was ordering, so dropping the wait would let the
@@ -199,8 +203,8 @@ struct PcAddressBuilder {
 /// @param target Concrete GPU target whose target-specific instruction semantics
 ///        apply. Invalid selects the architecture's default concrete target.
 [[nodiscard]] std::vector<IndirectCallFixup> discover_indirect_branch_edges(
-    std::span<const Instruction *const> insts, std::span<const uint8_t> text, rj_code_arch_t arch,
-    std::span<const uint64_t> extra_leaders = {},
+    std::span<const Instruction *const> insts, std::span<const uint8_t> text,
+    rocjitsu::IsaFamily arch, std::span<const uint64_t> extra_leaders = {},
     ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
     std::vector<PcAddressBuilder> *pc_builders = nullptr,
     std::span<const uint64_t> extra_split_points = {},

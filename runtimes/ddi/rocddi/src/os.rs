@@ -18,8 +18,19 @@ pub(crate) mod linux;
 
 #[cfg(target_os = "linux")]
 use linux as platform;
+#[cfg(windows)]
+pub(crate) mod windows;
+#[cfg(windows)]
+use windows as platform;
 
-#[cfg(target_os = "linux")]
 pub(crate) use platform::{
-    HostAllocation, HostReservation, host_clock, host_page_size, native_error,
+    HostAllocation, HostReservation, file, host_clock, host_memory_capabilities, host_page_size,
+    module, native_error,
 };
+
+pub(crate) use platform::process_identity::{ProcessIdentity, note_runtime_image};
+
+// Exercise the placeholder ownership state machine on GPU-free Linux CI too.
+#[cfg(all(test, not(windows)))]
+#[path = "os/windows/memory/regions.rs"]
+mod placeholder_contract;

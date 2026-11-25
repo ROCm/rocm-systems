@@ -12,6 +12,7 @@
 #include "aql_queue.h"
 #include "config_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/kernel_descriptor_abi.h"
@@ -32,6 +33,7 @@
 
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
@@ -60,11 +62,14 @@ namespace rocjitsu::test {
 
 class ComputeUnitTestAccess {
 public:
+  static void tick_memory_pipelines(amdgpu::ComputeUnitCore &cu) { cu.tick_pipelines(); }
+
   static amdgpu::Wavefront *sgpr_owner(const amdgpu::ComputeUnitCore &cu, uint32_t reg_idx) {
     return cu.sgpr_owner(reg_idx);
   }
 
-  static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu, Instruction *inst,
+  static amdgpu::VmAccessOutcome route_memory_inst(amdgpu::ComputeUnitCore &cu,
+                                                   std::unique_ptr<Instruction> inst,
                                                    amdgpu::Wavefront &wf) {
     return cu.route_memory_inst(inst, wf);
   }
@@ -121,10 +126,12 @@ inline constexpr uint64_t kPartialExecMask = 0xA5A5'F0F0'1234'8001ULL;
 
 class TestMemoryInstruction : public Instruction {
 public:
+  /// `mnemonic` must have static storage duration; a `flat_` prefix makes the
+  /// instruction a generic FLAT access to plugins.
   TestMemoryInstruction(std::unique_ptr<DynamicInstState> state,
                         std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
-                        bool exec_masked = true)
-      : Instruction("test_mem", nullptr) {
+                        bool exec_masked = true, std::string_view mnemonic = "test_mem")
+      : Instruction(mnemonic, nullptr) {
     size_ = sizeof(encoding_);
     raw_encoding_ = &encoding_;
     set_memory_issue_info(counter_obligations, exec_masked);
@@ -138,32 +145,43 @@ public:
       : Instruction(mnemonic, nullptr) {
     size_ = sizeof(encoding_);
     raw_encoding_ = &encoding_;
-    if (memory_wait_producer)
+    if (memory_wait_producer) {
       flags_ |= MEMORY_WAIT_PRODUCER;
-    if (state->tag() == amdgpu::SCALAR_MEM) {
-      const auto &memory = *static_cast<const amdgpu::ScalarMemState *>(state.get());
+    }
+    // GCC 15.2 can warn about the vector downcast after inlining a scalar
+    // call when the downcast is guarded only by the pipeline tag.
+    const auto tag = state->tag();
+    if (const auto *scalar = dynamic_cast<const amdgpu::ScalarMemState *>(state.get());
+        tag == amdgpu::SCALAR_MEM && scalar) {
       if (additional_wait_counter_type) {
         set_memory_issue_info(
-            {{memory.wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED},
+            {{scalar->wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED},
              {*additional_wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED}},
             false);
       } else {
         set_memory_issue_info(
-            {{memory.wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED}}, false);
+            {{scalar->wait_counter_type, amdgpu::MemoryCompletionClass::UNORDERED}}, false);
       }
-    } else if (state->tag() == amdgpu::GLOBAL_MEM || state->tag() == amdgpu::LOCAL_MEM) {
-      const auto &memory = *static_cast<const amdgpu::VectorMemState *>(state.get());
-      const auto completion_class = state->tag() == amdgpu::LOCAL_MEM
-                                        ? amdgpu::MemoryCompletionClass::LDS
-                                        : amdgpu::MemoryCompletionClass::VMEM;
+    } else if (const auto *vector = dynamic_cast<const amdgpu::VectorMemState *>(state.get());
+               (tag == amdgpu::GLOBAL_MEM || tag == amdgpu::LOCAL_MEM) && vector) {
+      const auto completion_class = tag == amdgpu::LOCAL_MEM ? amdgpu::MemoryCompletionClass::LDS
+                                                             : amdgpu::MemoryCompletionClass::VMEM;
       if (additional_wait_counter_type) {
-        set_memory_issue_info({{memory.wait_counter_type, completion_class},
+        set_memory_issue_info({{vector->wait_counter_type, completion_class},
                                {*additional_wait_counter_type, completion_class}});
       } else {
-        set_memory_issue_info({{memory.wait_counter_type, completion_class}});
+        set_memory_issue_info({{vector->wait_counter_type, completion_class}});
       }
     }
     set_data(std::move(state));
+  }
+
+  TestMemoryInstruction(std::unique_ptr<DynamicInstState> state, std::string_view mnemonic,
+                        amdgpu::Operation operation, amdgpu::MemoryAddressing addressing,
+                        amdgpu::MemoryKind kind)
+      : TestMemoryInstruction(std::move(state), mnemonic) {
+    set_amdgpu_operation(operation);
+    set_amdgpu_memory(addressing, kind);
   }
 
 private:
@@ -183,7 +201,7 @@ prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wa
   }
   const auto dst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base);
   std::array<uint32_t, 3> words{};
-  if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+  if (cu.arch() == rocjitsu::IsaFamily::Cdna5) {
     words = cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = dst, .vaddr = 0});
   } else {
     const auto encoded = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
@@ -192,8 +210,9 @@ prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wa
   }
   auto decoder = Decoder::create(cu.arch());
   std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
-  if (!load)
+  if (!load) {
     return nullptr;
+  }
   cu.track_memory_wait(*load, wave);
   load->set_data(std::move(state));
   return load;
@@ -212,8 +231,9 @@ protected:
     return amdgpu::VmAccessOutcome::Complete;
   }
 
-  amdgpu::MemoryAccessCompletion complete_access(Instruction &, amdgpu::Wavefront &,
-                                                 amdgpu::MemoryAccessDeferredCompletion) override {
+  amdgpu::MemoryAccessCompletion
+  complete_access(Instruction &, amdgpu::Wavefront &,
+                  const amdgpu::MemoryAccessCompletionFactory &) override {
     return amdgpu::MemoryAccessCompletion::Complete;
   }
 };
@@ -235,6 +255,9 @@ struct HookEvent {
     READ_SGPR,
     WRITE_SGPR,
     BARRIER_RESOLVED,
+    BARRIER_SIGNALED,
+    BARRIER_ROUND_COMPLETED,
+    BARRIER_WAIT_PASSED,
     INIT,
     SHUTDOWN,
     KIND_COUNT,
@@ -264,6 +287,8 @@ struct HookEvent {
   uint32_t cluster_size_x = 0;
   uint32_t cluster_size_y = 0;
   uint32_t cluster_size_z = 0;
+  BarrierKind barrier_kind = BarrierKind::Workgroup;
+  BarrierRound barrier_round;
 };
 
 /// @brief One routed access, copied out of the callback's borrowed spans.
@@ -293,6 +318,7 @@ struct CapturedAccess {
   uint64_t architectural_exec_lane_mask = 0;
   uint64_t valid_lane_mask = 0;
   uint64_t request_lane_mask = 0;
+  std::optional<uint64_t> ordered_count_result_lane_mask;
   uint64_t inactive_lane_mask = 0;
   uint64_t unknown_lane_mask = 0;
   uint64_t scratch_lane_mask = 0;
@@ -304,9 +330,15 @@ struct CapturedAccess {
   bool non_temporal = false;
   std::vector<uint64_t> element_lane_masks;
   std::vector<uint64_t> addresses;
+  std::vector<std::vector<uint64_t>> image_footprints;
+  std::vector<uint64_t> image_footprint_masks;
   std::vector<uint64_t> pre_routing_addresses;
   std::vector<uint64_t> execution_addresses;
   std::vector<uint64_t> secondary_addresses;
+  std::vector<uint32_t> lds_source_addresses;
+  std::optional<amdgpu::LdsAllocationRange> lds_allocation;
+  uint64_t ds_suppressed_lanes = 0;
+  uint64_t ds2_suppressed_lanes = 0;
   std::vector<amdgpu::WaitCounterType> issued_counters;
 };
 
@@ -374,6 +406,7 @@ public:
     captured.architectural_exec_lane_mask = access.architectural_exec_lane_mask;
     captured.valid_lane_mask = access.valid_lane_mask;
     captured.request_lane_mask = access.request_lane_mask;
+    captured.ordered_count_result_lane_mask = access.ordered_count_result_lane_mask;
     captured.inactive_lane_mask = access.inactive_lane_mask();
     captured.unknown_lane_mask = access.unknown_lane_mask();
     captured.scratch_lane_mask = access.scratch_lane_mask;
@@ -386,10 +419,20 @@ public:
     captured.element_lane_masks.assign(access.element_lane_masks.begin(),
                                        access.element_lane_masks.end());
     captured.addresses.assign(access.addresses.begin(), access.addresses.end());
+    for (const auto &footprint : access.image_sample_footprints) {
+      captured.image_footprints.emplace_back(footprint.addresses.begin(),
+                                             footprint.addresses.end());
+      captured.image_footprint_masks.push_back(footprint.lane_mask);
+    }
     captured.pre_routing_addresses.assign(access.pre_routing_addresses.begin(),
                                           access.pre_routing_addresses.end());
     captured.secondary_addresses.assign(access.secondary_addresses.begin(),
                                         access.secondary_addresses.end());
+    captured.lds_source_addresses.assign(access.lds_source_addresses.begin(),
+                                         access.lds_source_addresses.end());
+    captured.lds_allocation = access.lds_allocation;
+    captured.ds_suppressed_lanes = access.ds_suppressed_lanes;
+    captured.ds2_suppressed_lanes = access.ds2_suppressed_lanes;
     accesses.push_back(std::move(captured));
   }
 
@@ -546,8 +589,9 @@ public:
   }
 
   void onAmdgpuWriteScalarRegister(const amdgpu::Wavefront *wf, RegisterRef reg) override {
-    if (!wf || reg.cls != RegClass::SGPR)
+    if (!wf || reg.cls != RegClass::SGPR) {
       return;
+    }
     for (uint32_t offset = 0; offset < reg.width; ++offset) {
       HookEvent e{HookEvent::WRITE_SGPR};
       e.dispatch_id = wf->dispatch_id();
@@ -558,29 +602,64 @@ public:
     }
   }
 
-  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs) override {
+  void onAmdgpuBarrierResolved(std::span<amdgpu::Wavefront *> wfs, BarrierKind kind) override {
     HookEvent e{HookEvent::BARRIER_RESOLVED};
     if (!wfs.empty()) {
       e.dispatch_id = wfs[0]->dispatch_id();
       e.wg_id = wfs[0]->wg_id();
     }
+    e.barrier_kind = kind;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_SIGNALED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.barrier_round = round;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> wfs,
+                                     std::span<amdgpu::Wavefront *> /*armed*/,
+                                     const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_ROUND_COMPLETED};
+    if (!wfs.empty()) {
+      e.dispatch_id = wfs[0]->dispatch_id();
+      e.wg_id = wfs[0]->wg_id();
+    }
+    e.barrier_round = round;
+    events.push_back(e);
+  }
+
+  void onAmdgpuBarrierWaitPassed(const amdgpu::Wavefront &wf, const BarrierRound &round) override {
+    HookEvent e{HookEvent::BARRIER_WAIT_PASSED};
+    e.dispatch_id = wf.dispatch_id();
+    e.wg_id = wf.wg_id();
+    e.wf_id = wf.wf_id();
+    e.barrier_round = round;
     events.push_back(e);
   }
 };
 
 inline std::vector<HookEvent> vgpr_read_events(const OrderingPlugin &plugin) {
   std::vector<HookEvent> reads;
-  for (const HookEvent &e : plugin.events)
-    if (e.kind == HookEvent::READ_VGPR)
+  for (const HookEvent &e : plugin.events) {
+    if (e.kind == HookEvent::READ_VGPR) {
       reads.push_back(e);
+    }
+  }
   return reads;
 }
 
 inline std::vector<HookEvent> vgpr_write_events(const OrderingPlugin &plugin) {
   std::vector<HookEvent> writes;
-  for (const HookEvent &e : plugin.events)
-    if (e.kind == HookEvent::WRITE_VGPR)
+  for (const HookEvent &e : plugin.events) {
+    if (e.kind == HookEvent::WRITE_VGPR) {
       writes.push_back(e);
+    }
+  }
   return writes;
 }
 
@@ -679,8 +758,9 @@ struct PluginFixture {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
-      if (!links.empty())
+      if (!links.empty()) {
         links += ',';
+      }
       links += R"({"src":"xcd0.cp.req_)" + std::to_string(i) + R"(","dst":"xcd0.se0.cu)" +
                std::to_string(i) + R"(.cpl","latency":1,"weight":2})";
       links += R"(,{"src":"xcd0.se0.cu)" + std::to_string(i) + R"(.req","dst":"xcd0.l2.cpl_)" +
@@ -737,6 +817,11 @@ struct PluginFixture {
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                        granulated_sgpr_count);
     RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc2, COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    if (cu()->arch() == rocjitsu::IsaFamily::Cdna2 || cu()->arch() == rocjitsu::IsaFamily::Cdna3 ||
+        cu()->arch() == rocjitsu::IsaFamily::Cdna4) {
+      // These kernels use the 256-register allocation for ordinary VGPRs.
+      RJ_AMDHSA_BITS_SET(kd.compute_pgm_rsrc3, COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, 63);
+    }
     kd.group_segment_fixed_size = group_segment_fixed_size;
     mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), addr);
     mem->load_image(reinterpret_cast<const uint8_t *>(code), num_words * 4,
@@ -770,8 +855,9 @@ struct PluginFixture {
   }
 
   void shutdown() {
-    if (plugin_group_)
+    if (plugin_group_) {
       plugin_group_->onShutdown();
+    }
   }
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;

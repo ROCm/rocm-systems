@@ -1,7 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
@@ -21,7 +23,7 @@ namespace {
 using namespace rocjitsu;
 
 struct PcFetchArchitecture {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   bool swap;
   const char *name;
 };
@@ -29,7 +31,7 @@ struct PcFetchArchitecture {
 class PcFetchTest : public ::testing::TestWithParam<PcFetchArchitecture> {
 protected:
   void SetUp() override {
-    const auto profile = GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
+    const auto profile = GetParam().arch == rocjitsu::IsaFamily::Rdna4
                              ? amdgpu::Gfx12VmConfig::gfx12_0()
                              : amdgpu::Gfx12VmConfig::gfx12_1();
     first_page_table_shift = 12 + 9 * (profile.page_table_levels() - 1);
@@ -44,8 +46,8 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("pc_fetch", config, &memory, &cache);
-    ASSERT_NE(cu, nullptr);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "pc_fetch", config, &memory, &cache));
     cache.set_gpu_vm(vm.get());
     cu->set_gpu_vm(vm.get());
     wave = cu->dispatch_wf(0, kBranchPc, config.sgprs_per_wf, config.vgprs_per_wf);
@@ -73,8 +75,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wave && !wave->is_halted())
+    if (wave && !wave->is_halted()) {
       wave->halt();
+    }
   }
 
   void map_page(uint64_t virtual_address, uint64_t physical_address) {
@@ -143,16 +146,16 @@ protected:
 
 INSTANTIATE_TEST_SUITE_P(
     Gfx12Architectures, PcFetchTest,
-    ::testing::Values(PcFetchArchitecture{ROCJITSU_CODE_ARCH_RDNA4, false, "Gfx1201Setpc"},
-                      PcFetchArchitecture{ROCJITSU_CODE_ARCH_RDNA4, true, "Gfx1201Swappc"},
-                      PcFetchArchitecture{ROCJITSU_CODE_ARCH_CDNA5, false, "Gfx1250Setpc"},
-                      PcFetchArchitecture{ROCJITSU_CODE_ARCH_CDNA5, true, "Gfx1250Swappc"}),
+    ::testing::Values(PcFetchArchitecture{rocjitsu::IsaFamily::Rdna4, false, "Gfx1201Setpc"},
+                      PcFetchArchitecture{rocjitsu::IsaFamily::Rdna4, true, "Gfx1201Swappc"},
+                      PcFetchArchitecture{rocjitsu::IsaFamily::Cdna5, false, "Gfx1250Setpc"},
+                      PcFetchArchitecture{rocjitsu::IsaFamily::Cdna5, true, "Gfx1250Swappc"}),
     [](const ::testing::TestParamInfo<PcFetchArchitecture> &info) {
       return std::string(info.param.name);
     });
 
 TEST_P(PcFetchTest, FetchesMappedHighAddressAfterIndirectBranch) {
-  if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (GetParam().arch == rocjitsu::IsaFamily::Rdna4) {
     ASSERT_NO_FATAL_FAILURE(run_branch_and_fetch(0x0000800012345000ULL, 0x0000800012345000ULL));
     ASSERT_NO_FATAL_FAILURE(run_branch_and_fetch(0xFFFF800012345000ULL, 0x0000800012345000ULL));
     ASSERT_NO_FATAL_FAILURE(

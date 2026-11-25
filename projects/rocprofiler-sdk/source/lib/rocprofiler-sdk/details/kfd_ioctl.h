@@ -1820,7 +1820,13 @@ struct kfd_ioctl_pc_sample_args
     __u32 version;
 };
 
-#define KFD_IOC_PROFILER_VERSION_NUM 1
+/*
+ * KFD_IOC_PROFILER_VERSION_NUM history:
+ * - 1 - initial version
+ * - 2 - KFD_IOC_PROFILER_PMC lock also forces the perfmon clock on until the
+ *       lock is released or the process exits
+ */
+#define KFD_IOC_PROFILER_VERSION_NUM 2
 enum kfd_profiler_ops
 {
     KFD_IOC_PROFILER_PMC         = 0,

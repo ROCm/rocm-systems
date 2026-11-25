@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import RocprofsysTest, assert_resolved_settings
+from conftest import RocprofsysTest, assert_resolved_settings, host_counters_expected
 
 pytestmark = [pytest.mark.presets]
 
@@ -257,7 +257,6 @@ def _echoed_settings(pass_regex: list[str]) -> dict[str, object]:
 
 _RULE_FILES = {
     "baseline": "default-rules.json",
-    "amd-smi": "transpose/amd-smi-rules.json",
 }
 
 # trace-hpc disables sampling in the preset JSON; re-enable it for GPU metrics.
@@ -302,7 +301,7 @@ DOMAIN_ARTIFACT_CASES = [
         ["ROCPROFSYS_USE_AMD_SMI=true"],
         None,
         ["hip_runtime_api"],
-        ["baseline", "amd-smi"],
+        ["baseline", "gpu-default-metrics"],
         _ALL_GPU_COUNTERS,
         id="gpu_bare",
     ),
@@ -398,7 +397,7 @@ DOMAIN_ARTIFACT_CASES = [
         ],
         None,
         ["hip_runtime_api", "kernel_dispatch", "memory_copy"],
-        ["baseline", "amd-smi"],
+        ["baseline", "gpu-default-metrics"],
         _ALL_GPU_COUNTERS,
         id="gpu_rocm",
     ),
@@ -903,7 +902,7 @@ class TestCpuTargetFlags(RocprofsysTest):
                 result,
                 subtest_name="CPU frequency counters",
                 label_substrings=["fib"],
-                counter_names_present=["Frequency (S)"],
+                counter_names_present=host_counters_expected(["Frequency (S)"]),
             )
         self.assert_rocpd(
             result,

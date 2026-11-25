@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <gtest/gtest.h>
@@ -29,7 +30,7 @@ namespace {
 namespace kd = rocjitsu::amdhsa;
 using KD = kd::kernel_descriptor_t;
 
-constexpr rj_code_arch_t kArch = ROCJITSU_CODE_ARCH_CDNA4;
+constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna4;
 
 // The probe-call return-link pair. Passed as `reserved` so a run may sit below
 // it; the planner must not treat it as a floor.
@@ -66,15 +67,17 @@ public:
 /// expression that built it.
 class Kernel {
 public:
-  explicit Kernel(const std::vector<uint32_t> &words, rj_code_arch_t arch = kArch) : co_(words) {
+  explicit Kernel(const std::vector<uint32_t> &words, rocjitsu::IsaFamily arch = kArch)
+      : co_(words) {
     decoder_ = Decoder::create(arch);
     if (decoder_ == nullptr) {
       ADD_FAILURE() << "no decoder for the test arch";
       return;
     }
     blocks_ = build_valid_blocks(co_, *decoder_, arch);
-    for (const auto &block : blocks_)
+    for (const auto &block : blocks_) {
       scope_.push_back(block.get());
+    }
   }
 
   [[nodiscard]] KernelBlockScope scope() const { return KernelBlockScope(scope_); }
@@ -141,8 +144,9 @@ util::FailureOr<std::vector<uint32_t>> kernel_naming_sgpr(uint16_t sgpr) {
   static_assert(kEndpgmResult.succeeded());
 
   const auto move = build_s_mov_b32(sgpr, kInlineZero, kArch);
-  if (move.failed())
+  if (move.failed()) {
     return util::Result::failure();
+  }
   return std::vector<uint32_t>{move.value(), kEndpgmResult.value()};
 }
 
@@ -182,7 +186,7 @@ TEST(DbiEntryStorageFloor, DisabledWorkgroupDimensionsConsumeNoSgpr) {
 // RDNA decoders name v_cmp_eq_u32_e64 s1's mask as s[1:2]. A Wave32 kernel
 // writes s1 alone, so the floor is s2.
 TEST(DbiEntryStorageFloor, CountsAWave32CompareMaskAsOneSgpr) {
-  constexpr rj_code_arch_t kRdna4 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily kRdna4 = rocjitsu::IsaFamily::Rdna4;
   constexpr util::FailureOr<uint32_t> endpgm = build_s_endpgm(kRdna4);
   static_assert(endpgm.succeeded());
   constexpr auto compare = rdna4::build_vop3(rdna4::kVCmpEqU32Vop3,
@@ -294,7 +298,7 @@ TEST(PlanDbiEntryStorage, RdnaHasNoSpecialRegisterTail) {
   const Kernel kernel(words.value());
   const auto storage =
       plan_dbi_entry_storage(kernel.scope(), descriptor(/*user_sgpr_count=*/0),
-                             ROCJITSU_CODE_ARCH_RDNA4, /*kernel_sgpr_count=*/32, link_pair());
+                             rocjitsu::IsaFamily::Rdna4, /*kernel_sgpr_count=*/32, link_pair());
   ASSERT_TRUE(storage.has_value());
   EXPECT_EQ(storage->persistent_base, 26u);
 }
@@ -541,7 +545,7 @@ TEST(BuildDbiEntryPrologue, FailsClosedOnAKernargSizeThatOverflowsTheWrapper) {
 
 TEST(BuildDbiEntryPrologue, UnsupportedArchReturnsNoPrologueAndReportsTheError) {
   for (const auto arch :
-       {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
+       {rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Invalid}) {
     std::string error;
     const auto prologue = build_dbi_entry_prologue(
         kernarg_descriptor(), arch, {.persistent_base = 26, .entry_temp_base = 28}, &error);

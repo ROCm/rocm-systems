@@ -1,0 +1,41 @@
+# Named formulas that metric formulas use as $name. Analyze computes each one
+# on the first pass that holds all of its counters. A formula with SUM is one
+# value for all dispatches; one without SUM has a value per dispatch.
+# A collectable may use other collectables.
+GRBM_COUNT_PER_XCD: GRBM_COUNT / $num_xcd
+GRBM_GUI_ACTIVE_PER_XCD: GRBM_GUI_ACTIVE / $num_xcd
+GRBM_SPI_BUSY_PER_XCD: GRBM_SPI_BUSY / $num_xcd
+hbmBandwidth: $max_mclk / 1000 * 32 * $num_memory_channels
+kernelBusyCycles: ROUND(AVG((End_Timestamp - Start_Timestamp) / 1000 * $max_sclk), 0)
+numActiveCUs: TO_INT(MIN(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + MIN(MOD(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))
+vl1d_read_write_miss_rate: 100 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+vl1d_atomic_miss_rate: 100 * SUM(TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(TCP_TOTAL_CACHE_ACCESSES_sum)
+vl1d_read_write_miss_rate_per_dispatch: 100 * (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) / TCP_TOTAL_CACHE_ACCESSES_sum
+vl1d_atomic_miss_rate_per_dispatch: 100 * (TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / TCP_TOTAL_CACHE_ACCESSES_sum
+vl1d_accesses_minus_read_write_misses: TCP_TOTAL_CACHE_ACCESSES_sum - (TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
+vl1d_atomic_requests: TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum
+ipc_valu_vmem_salu_smem: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM) / SUM(SQ_ACTIVE_INST_ANY)
+ipc_branch_sendmsg_vskipped_lds: SUM(SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
+ipc_valu_vmem_salu_smem_per_dispatch: (SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM) / SQ_ACTIVE_INST_ANY
+ipc_branch_sendmsg_vskipped_lds_per_dispatch: (SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SQ_ACTIVE_INST_ANY
+td_load_wavefronts: TD_LOAD_WAVEFRONT_sum
+td_store_and_atomic_wavefronts: TD_STORE_WAVEFRONT_sum + TD_ATOMIC_WAVEFRONT_sum
+valu_f16_flops: $wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16)
+valu_f16_flop_rate: SUM($valu_f16_flops) / SUM(End_Timestamp - Start_Timestamp)
+valu_f32_flops: $wave_size * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32)
+valu_f32_flop_rate: SUM($valu_f32_flops) / SUM(End_Timestamp - Start_Timestamp)
+valu_f64_flops: $wave_size * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64)
+valu_f64_flop_rate: SUM($valu_f64_flops) / SUM(End_Timestamp - Start_Timestamp)
+mfma_f16_flops: 512 * SQ_INSTS_VALU_MFMA_MOPS_F16
+mfma_f16_flop_rate: SUM($mfma_f16_flops) / SUM(End_Timestamp - Start_Timestamp)
+mfma_bf16_flops: 512 * SQ_INSTS_VALU_MFMA_MOPS_BF16
+mfma_bf16_flop_rate: SUM($mfma_bf16_flops) / SUM(End_Timestamp - Start_Timestamp)
+mfma_f32_flops: 512 * SQ_INSTS_VALU_MFMA_MOPS_F32
+mfma_f32_flop_rate: SUM($mfma_f32_flops) / SUM(End_Timestamp - Start_Timestamp)
+mfma_f64_flops: 512 * SQ_INSTS_VALU_MFMA_MOPS_F64
+mfma_f64_flop_rate: SUM($mfma_f64_flops) / SUM(End_Timestamp - Start_Timestamp)
+hbm_read_bytes: TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64
+hbm_write_bytes: TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32
+l2_bytes: 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum)
+l1_bytes: 64 * TCP_TOTAL_CACHE_ACCESSES_sum
+lds_bytes: (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu

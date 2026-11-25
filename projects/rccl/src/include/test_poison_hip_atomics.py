@@ -25,6 +25,9 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 POISON_H = os.path.join(HERE, "poison_hip_atomics.h")
+RCCL_ROOT = os.path.dirname(os.path.dirname(HERE))
+TEST_CMAKE = os.path.join(RCCL_ROOT, "test", "CMakeLists.txt")
+HOST_TEST_CMAKE = os.path.join(RCCL_ROOT, "test", "host", "CMakeLists.txt")
 
 # Names the pragma in poison_hip_atomics.h must reject.  Kept in lockstep with
 # that file by test_pragma_matches_poisoned_tuple, which compares this tuple
@@ -73,6 +76,78 @@ def _pragma_poisoned_names(text):
         joined = _PRAGMA_RE.sub("", " ".join(parts), count=1)
         return tuple(joined.split())
     return ()
+
+
+_FORCE_INCLUDE_RE = re.compile(
+    r"\badd_compile_options\(\s*--include=\S*/poison_hip_atomics\.h\s*\)"
+)
+_OPTION_IF_RE = re.compile(r"^\s*if\(\s*RCCL_POISON_HIP_ATOMICS\s*\)")
+# ALIAS targets compile nothing, so the GTest aliases ahead of the poison in
+# rccl_standalone_setup() are not a gap.
+_TARGET_RE = re.compile(r"^\s*(add_executable|add_library|add_test_executable)\(")
+
+
+def _cmake_code_lines(text):
+    """(1-based line number, line) for every line that is not blank or a pure comment."""
+    return [
+        (n, line)
+        for n, line in enumerate(text.splitlines(), 1)
+        if line.strip() and not line.lstrip().startswith("#")
+    ]
+
+
+def _poison_wiring_errors(lines, where):
+    """Problems with the test force-include among `lines`, or [] if wired.
+
+    It has to be a directory-scope add_compile_options() under
+    if(RCCL_POISON_HIP_ATOMICS), ahead of the first target it is meant to reach:
+    add_compile_options() only applies to targets defined after it.
+    """
+    # Searched across lines so a call wrapped one argument per line (gersemi's
+    # style) still matches; the match start is the add_compile_options( line.
+    text = "\n".join(l for _, l in lines)
+    match = _FORCE_INCLUDE_RE.search(text)
+    if match is None:
+        return [f"{where}: no add_compile_options(--include=.../poison_hip_atomics.h)"]
+    include_at = text[: match.start()].count("\n")
+    errors = []
+    if include_at == 0 or not _OPTION_IF_RE.match(lines[include_at - 1][1]):
+        errors.append(
+            f"{where}: force-include is not directly under if(RCCL_POISON_HIP_ATOMICS)"
+        )
+    first_target = next(
+        ((n, l) for n, l in lines if _TARGET_RE.match(l) and "ALIAS" not in l), None
+    )
+    if first_target is not None and first_target[0] < lines[include_at][0]:
+        errors.append(
+            f"{where}: line {first_target[0]} defines a target before the force-include "
+            f"at line {lines[include_at][0]}, so it is built without the poison:\n"
+            f"    {first_target[1].strip()}"
+        )
+    return errors
+
+
+def _function_body(lines, name):
+    """The lines strictly inside `function(name)` ... `endfunction()`."""
+    start = next(
+        (
+            i
+            for i, (_, l) in enumerate(lines)
+            if re.match(rf"^\s*function\(\s*{name}\b", l)
+        ),
+        None,
+    )
+    if start is None:
+        return None
+    end = next(
+        (
+            i
+            for i in range(start + 1, len(lines))
+            if re.match(r"^\s*endfunction\(", lines[i][1])
+        ),
+        len(lines),
+    )
+    return lines[start + 1 : end]
 
 
 def _find_cxx():
@@ -173,6 +248,44 @@ class PoisonHeaderTest(unittest.TestCase):
             f"drifted.\n  only in pragma:   {sorted(set(pragma) - set(POISONED))}"
             f"\n  only in POISONED: {sorted(set(POISONED) - set(pragma))}",
         )
+
+
+class TestBuildWiringTest(unittest.TestCase):
+    """The test binaries get the poison through their own force-includes, not
+    the rccl target's.  Dropping or moving one of those would quietly let
+    __hip_atomic_* back into the test tree, so pin both.  CMake text only; no
+    HIP compiler or configured build is needed."""
+
+    def test_in_tree_test_build_force_includes_poison(self):
+        with open(TEST_CMAKE) as f:
+            lines = _cmake_code_lines(f.read())
+        errors = _poison_wiring_errors(lines, "test/CMakeLists.txt")
+        self.assertFalse(errors, "\n".join(errors))
+
+    def test_standalone_host_build_force_includes_poison(self):
+        """run_host_tests.sh configures test/host on its own, so the root and
+        test/ CMakeLists never run; rccl_standalone_setup() must add it."""
+        with open(HOST_TEST_CMAKE) as f:
+            body = _function_body(_cmake_code_lines(f.read()), "rccl_standalone_setup")
+        self.assertIsNotNone(
+            body, "rccl_standalone_setup() not found in test/host/CMakeLists.txt"
+        )
+        errors = _poison_wiring_errors(
+            body, "test/host/CMakeLists.txt rccl_standalone_setup()"
+        )
+        self.assertFalse(errors, "\n".join(errors))
+
+    def test_blank_and_comment_lines_do_not_separate_include_from_if(self):
+        text = (
+            "if(RCCL_POISON_HIP_ATOMICS)\n"
+            "\n"
+            "  # comment\n"
+            "  add_compile_options(--include=${X}/poison_hip_atomics.h)\n"
+            "endif()\n"
+            "add_executable(t t.cpp)\n"
+        )
+        errors = _poison_wiring_errors(_cmake_code_lines(text), "inline")
+        self.assertFalse(errors, "\n".join(errors))
 
 
 class ToolchainTest(unittest.TestCase):

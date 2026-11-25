@@ -5,7 +5,7 @@ executionctx:
   Unit_hipExecutionCtxStreamCreate_Sanity:
     <<: *level_default
   Unit_hipGreenCtx_kernelLaunch_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipGreenCtxCreate_Negative:
     <<: *level_default
   Unit_hipExecutionCtxStreamCreate_Negative:
@@ -65,7 +65,7 @@ executionctx:
       targets: [amd_windows, amd_linux]
       reason: "AIRUNTIME-2744 - fails on amd_linux. Needs re-triage on amd_linux. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
   Unit_hipExecutionCtxRecordEventFunctional:
-    <<: *level_default
+    level: [*level_0, *level_default]
   Unit_hipExecutionCtxRecordWait_Blocking:
     <<: *level_default
   Unit_hipExecutionCtxRecordEvent_ElapsedTime_SingleStream:

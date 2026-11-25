@@ -9,6 +9,8 @@
 
 #include "simdojo/sim/component.h"
 
+#include "util/diagnostic.h"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -30,7 +32,11 @@ public:
   Iod(std::string name, const Config &config, GpuMemory *memory,
       std::shared_ptr<DeviceCacheCoherence> coherence = std::make_shared<DeviceCacheCoherence>());
 
-  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
+  /// @brief Rebind to a device-local coherence domain before use.
+  /// @details A null domain fails without changing registration.
+  /// @param emit_error Destination for failure diagnostics.
+  util::Result set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence,
+                                    util::DiagnosticEmitter emit_error = {});
   void set_gpu_vm(GpuVm *gpu_vm) {
     msc_->set_gpu_vm(gpu_vm);
     hbm_->set_gpu_vm(gpu_vm);
@@ -39,7 +45,7 @@ public:
     msc_->set_legacy_maintenance_memory(memory);
   }
 
-  void initialize() override;
+  util::Result initialize(util::DiagnosticEmitter emit_error = {}) override;
 
   /// @brief Create a completer port for an XCD's L2 req connection.
   simdojo::Port *create_cpl_port(const std::string &xcd_name);

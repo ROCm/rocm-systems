@@ -28,6 +28,7 @@
 #include "../log_buffer_test_access.h"
 #include "dbi_sim.h"
 #include "log_record_probe.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "scalar_builders.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -76,18 +77,18 @@ constexpr uint32_t kNoWriterLane = 0xFFFFFFFF;
 
 struct LogRecordSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
   bool wave32;
 };
 
-constexpr LogRecordSimArch kCdna3{"cdna3", ROCJITSU_CODE_ARCH_CDNA3, EF_AMDGPU_MACH_AMDGCN_GFX942,
+constexpr LogRecordSimArch kCdna3{"cdna3", rocjitsu::IsaFamily::Cdna3, EF_AMDGPU_MACH_AMDGCN_GFX942,
                                   64, false};
-constexpr LogRecordSimArch kCdna4{"cdna4", ROCJITSU_CODE_ARCH_CDNA4, EF_AMDGPU_MACH_AMDGCN_GFX950,
+constexpr LogRecordSimArch kCdna4{"cdna4", rocjitsu::IsaFamily::Cdna4, EF_AMDGPU_MACH_AMDGCN_GFX950,
                                   64, false};
-constexpr LogRecordSimArch kRdna4{"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_MACH_AMDGCN_GFX1200,
-                                  32, true};
+constexpr LogRecordSimArch kRdna4{"rdna4", rocjitsu::IsaFamily::Rdna4,
+                                  EF_AMDGPU_MACH_AMDGCN_GFX1200, 32, true};
 
 // The kernarg image the CP delivers, with @p buffer_addr as the DBI payload.
 // Built through the production helper, so the offset the prologue loads from is
@@ -95,14 +96,16 @@ constexpr LogRecordSimArch kRdna4{"rdna4", ROCJITSU_CODE_ARCH_RDNA4, EF_AMDGPU_M
 std::vector<uint8_t> make_wrapper_image(uint64_t buffer_addr) {
   const std::array<KernargExtensionPayloadLayout, 1> payloads{kDbiEntryPayloadLayout};
   const auto layout = make_kernarg_extension_layout(kGuestKernargSize, payloads);
-  if (!layout)
+  if (!layout) {
     return {};
+  }
   const std::vector<uint8_t> guest_kernargs(kGuestKernargSize, 0x5A);
   const KernargExtensionPayloadWrite payload{&buffer_addr, sizeof(buffer_addr)};
   std::vector<uint8_t> wrapper(layout->wrapper_size, 0);
   if (!write_kernarg_extension_wrapper(wrapper, *layout, guest_kernargs.data(), kGuestKernargPtr,
-                                       std::span{&payload, 1}))
+                                       std::span{&payload, 1})) {
     return {};
+  }
   return wrapper;
 }
 
@@ -202,7 +205,7 @@ protected:
     out.before.assign(image.begin(), image.end());
 
     test::DbiSim sim;
-    ASSERT_NO_FATAL_FAILURE(sim.initialize(t_.sim_arch, t_.wave_size));
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(t_.sim_arch, t_.wave_size, kKernelSgprs / 8 - 1));
     sim.set_kernarg(wrapper);
     sim.set_entry_offset(kernel.entry);
     sim.write_memory(kBufferAddr, image);
@@ -368,8 +371,9 @@ protected:
     ASSERT_NO_FATAL_FAILURE(run(kernel, drained));
     EXPECT_EQ(drained.header.write_ptr, kTrips);
     ASSERT_EQ(drained.records.size(), kTrips);
-    for (const RjLogRecord &record : drained.records)
+    for (const RjLogRecord &record : drained.records) {
       expect_record(record, launch_mask(), /*site=*/4, t_.wave_size, /*writer_lane=*/0);
+    }
   }
 
   // Two sites share one copied body; each passes its own offset, and the

@@ -1,0 +1,143 @@
+/*************************************************************************
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * SPDX-License-Identifier: MIT
+ ************************************************************************/
+
+// GIN QP factory verbs over rccl's wrap_ibv_*. Only TU with rccl's ibv types
+// (they clash with rocSHMEM's gda/ibv_core.hpp); callers pass opaque struct
+// pointers. See gin_rocshmem_gda_ibv_shim.h for the rationale.
+
+#include "gin/gin_rocshmem_gda_ibv_shim.h"
+#include "ibvwrap.h"
+
+int gin_ibv_available(void) {
+  return wrap_ibv_symbols() == ncclSuccess ? 1 : 0;
+}
+
+struct ibv_device** gin_ibv_get_device_list(int* num_devices) {
+  struct ibv_device** list = nullptr;
+  if (wrap_ibv_get_device_list(&list, num_devices) != ncclSuccess) return nullptr;
+  return list;
+}
+
+void gin_ibv_free_device_list(struct ibv_device** list) {
+  (void)wrap_ibv_free_device_list(list);
+}
+
+const char* gin_ibv_get_device_name(struct ibv_device* device) {
+  return wrap_ibv_get_device_name(device);
+}
+
+struct ibv_context* gin_ibv_open_device(struct ibv_device* device) {
+  struct ibv_context* ctx = nullptr;
+  if (wrap_ibv_open_device(&ctx, device) != ncclSuccess) return nullptr;
+  return ctx;
+}
+
+int gin_ibv_close_device(struct ibv_context* context) {
+  return wrap_ibv_close_device(context) == ncclSuccess ? 0 : -1;
+}
+
+int gin_ibv_query_device(struct ibv_context* context, struct ibv_device_attr* device_attr) {
+  return wrap_ibv_query_device(context, device_attr) == ncclSuccess ? 0 : -1;
+}
+
+int gin_ibv_query_port(struct ibv_context* context, uint8_t port_num, struct ibv_port_attr* port_attr) {
+  return wrap_ibv_query_port(context, port_num, port_attr) == ncclSuccess ? 0 : -1;
+}
+
+struct ibv_pd* gin_ibv_alloc_pd(struct ibv_context* context) {
+  struct ibv_pd* pd = nullptr;
+  if (wrap_ibv_alloc_pd(&pd, context) != ncclSuccess) return nullptr;
+  return pd;
+}
+
+int gin_ibv_dealloc_pd(struct ibv_pd* pd) {
+  return wrap_ibv_dealloc_pd(pd) == ncclSuccess ? 0 : -1;
+}
+
+struct ibv_mr* gin_ibv_reg_mr(struct ibv_pd* pd, void* addr, size_t length, int access) {
+  struct ibv_mr* mr = nullptr;
+  if (wrap_ibv_reg_mr(&mr, pd, addr, length, access) != ncclSuccess) return nullptr;
+  return mr;
+}
+
+struct ibv_mr* gin_ibv_reg_mr_iova2(struct ibv_pd* pd, void* addr, size_t length, uint64_t iova, int access) {
+  struct ibv_mr* mr = nullptr;
+  if (wrap_ibv_reg_mr_iova2(&mr, pd, addr, length, iova, access) != ncclSuccess) return nullptr;
+  return mr;
+}
+
+struct ibv_mr* gin_ibv_reg_dmabuf_mr(struct ibv_pd* pd, uint64_t offset, size_t length, uint64_t iova, int fd,
+                                     int access) {
+  struct ibv_mr* mr = nullptr;
+  if (wrap_ibv_reg_dmabuf_mr(&mr, pd, offset, length, iova, fd, access) != ncclSuccess) return nullptr;
+  return mr;
+}
+
+int gin_ibv_dereg_mr(struct ibv_mr* mr) {
+  return wrap_ibv_dereg_mr(mr) == ncclSuccess ? 0 : -1;
+}
+
+int gin_ibv_destroy_cq(struct ibv_cq* cq) {
+  return wrap_ibv_destroy_cq(cq) == ncclSuccess ? 0 : -1;
+}
+
+int gin_ibv_modify_qp(struct ibv_qp* qp, struct ibv_qp_attr* attr, int attr_mask) {
+  return wrap_ibv_modify_qp(qp, attr, attr_mask) == ncclSuccess ? 0 : -1;
+}
+
+int gin_ibv_destroy_qp(struct ibv_qp* qp) {
+  return wrap_ibv_destroy_qp(qp) == ncclSuccess ? 0 : -1;
+}
+
+struct ibv_cq_ex* gin_ibv_create_cq_ex(struct ibv_context* context, struct ibv_cq_init_attr_ex* cq_attr) {
+  struct ibv_cq_ex* cq = nullptr;
+  if (wrap_ibv_create_cq_ex(&cq, context, cq_attr) != ncclSuccess) return nullptr;
+  return cq;
+}
+
+struct ibv_cq* gin_ibv_cq_ex_to_cq(struct ibv_cq_ex* cq) {
+  return wrap_ibv_cq_ex_to_cq(cq);
+}
+
+struct ibv_pd* gin_ibv_alloc_parent_domain(struct ibv_context* context, struct ibv_parent_domain_init_attr* attr) {
+  struct ibv_pd* pd = nullptr;
+  if (wrap_ibv_alloc_parent_domain(&pd, context, attr) != ncclSuccess) return nullptr;
+  return pd;
+}
+
+struct ibv_qp* gin_ibv_create_qp_ex(struct ibv_context* context, struct ibv_qp_init_attr_ex* qp_init_attr_ex) {
+  struct ibv_qp* qp = nullptr;
+  if (wrap_ibv_create_qp_ex(&qp, context, qp_init_attr_ex) != ncclSuccess) return nullptr;
+  return qp;
+}
+
+ssize_t gin_ibv_query_gid_table(struct ibv_context* context, struct ibv_gid_entry* entries, size_t max_entries,
+                                uint32_t flags) {
+  return wrap_ibv_query_gid_table(context, entries, max_entries, flags);
+}
+
+int gin_ibv_is_dmabuf_supported(struct ibv_pd* pd) {
+  return wrap_ibv_is_dmabuf_supported(pd);
+}
+
+struct ibv_ah* gin_ibv_create_ah(struct ibv_pd* pd, struct ibv_ah_attr* attr) {
+  struct ibv_ah* ah = nullptr;
+  if (wrap_ibv_create_ah(&ah, pd, attr) != ncclSuccess) return nullptr;
+  return ah;
+}
+
+int gin_ibv_destroy_ah(struct ibv_ah* ah) {
+  return wrap_ibv_destroy_ah(ah) == ncclSuccess ? 0 : -1;
+}
+
+uint16_t gin_ibv_flow_label_to_udp_sport(uint32_t flow_label) {
+  // Reimplements libibverbs' ibv_flow_label_to_udp_sport inline (we can't pull
+  // verbs.h here). Arithmetic fixed by the RoCEv2 spec (RFC 6438-style hashing
+  // into the IANA-ephemeral UDP source-port range 0xC000..0xFFFF).
+  uint32_t fl_low = flow_label & 0x03FFF;
+  uint32_t fl_high = (flow_label & 0xFC000) >> 14;
+  return static_cast<uint16_t>((fl_low ^ fl_high) | 0xC000);
+}

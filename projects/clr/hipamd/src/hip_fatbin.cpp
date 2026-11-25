@@ -61,7 +61,7 @@ FatBinaryInfo::FatBinaryInfo(KpackParams kpack_params)
 
 FatBinaryInfo::~FatBinaryInfo() {
   // Release per device fat bin info.
-  for (int dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
+  for (size_t dev_id = 0; dev_id < dev_programs_.size(); dev_id++) {
     if (dev_programs_[dev_id] != nullptr) {
       dev_programs_[dev_id]->release();
       dev_programs_[dev_id] = nullptr;
@@ -140,6 +140,7 @@ static std::string TargetGenericMap(const std::string& input) {
       {"amdgcn-amd-amdhsa--gfx1200", "amdgcn-amd-amdhsa--gfx12-generic"  },
       {"amdgcn-amd-amdhsa--gfx1201", "amdgcn-amd-amdhsa--gfx12-generic"  },
       {"amdgcn-amd-amdhsa--gfx1250", "amdgcn-amd-amdhsa--gfx12-5-generic"},
+      {"amdgcn-amd-amdhsa--gfx1251", "amdgcn-amd-amdhsa--gfx12-5-generic"},
       // clang-format on
   };
   if (auto i = target_map.find(input); i != target_map.end()) {

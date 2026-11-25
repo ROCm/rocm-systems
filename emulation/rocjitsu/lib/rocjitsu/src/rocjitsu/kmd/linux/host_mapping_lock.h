@@ -12,6 +12,45 @@
 
 namespace rocjitsu {
 
+class HostMappingLock {
+public:
+  class UpdateGuard {
+  public:
+    explicit UpdateGuard(HostMappingLock &owner) : guard_(owner.mutex_) {
+      // Readers of backing identities hold the shared lock. By the time any
+      // can observe the new generation, the mapping operation has finished.
+      owner.invalidate_backing_keys();
+    }
+
+    void unlock() { guard_.unlock(); }
+
+  private:
+    util::ObservableSharedMutex::ExclusiveGuard guard_;
+  };
+
+  [[nodiscard]] auto lock_shared() { return mutex_.lock_shared(); }
+  [[nodiscard]] uint64_t blocked_writers() const { return mutex_.blocked_writers(); }
+  [[nodiscard]] UpdateGuard lock_exclusive() { return UpdateGuard(*this); }
+  [[nodiscard]] uint64_t generation() const { return generation_; }
+  [[nodiscard]] bool mapping_changes_observed() const { return mapping_changes_observed_; }
+
+  // Change lock namespaces only after draining accesses using the old one.
+  void set_mapping_changes_observed(bool observed) {
+    const auto update = lock_exclusive();
+    mapping_changes_observed_ = observed;
+  }
+
+private:
+  friend void reset_host_mapping_lock_after_fork();
+  void invalidate_backing_keys() { ++generation_; }
+
+  util::ObservableSharedMutex mutex_;
+
+  // Shared accesses already synchronize with every exclusive mapping update.
+  alignas(64) uint64_t generation_ = 1;
+  bool mapping_changes_observed_ = false;
+};
+
 /// @brief Guards the process's mapping layout for the length of an access.
 ///
 /// @details Almost every emulated access asks the kernel to move the bytes, so
@@ -44,8 +83,8 @@ namespace rocjitsu {
 /// Mappings changed by a raw syscall rather than through libc are not seen by
 /// the interposer and so are not covered. Nothing in the emulated stack does
 /// that, and an application that does is mutating memory its own GPU is using.
-inline util::ObservableSharedMutex &host_mapping_lock() {
-  static util::ObservableSharedMutex lock;
+inline HostMappingLock &host_mapping_lock() {
+  static HostMappingLock lock;
   return lock;
 }
 
@@ -54,7 +93,12 @@ inline util::ObservableSharedMutex &host_mapping_lock() {
 /// No other thread survives fork, and the inherited lock must not be destroyed
 /// or acquired: a vanished parent thread may have held it.
 inline void reset_host_mapping_lock_after_fork() {
-  new (&host_mapping_lock()) util::ObservableSharedMutex();
+  auto &lock = host_mapping_lock();
+  const uint64_t old_generation = lock.generation();
+  const bool observed = lock.mapping_changes_observed();
+  new (&lock) HostMappingLock();
+  lock.generation_ = old_generation + 1;
+  lock.mapping_changes_observed_ = observed;
 }
 
 } // namespace rocjitsu

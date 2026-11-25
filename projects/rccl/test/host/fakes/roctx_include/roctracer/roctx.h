@@ -5,7 +5,7 @@
  ************************************************************************/
 
 // Stand-in for roctracer's <roctracer/roctx.h>, used only by the standalone
-// rccl-UnitTestsMicroRoctxNvml-roctx target so roctx.cc's ROCTX_ENABLE arm
+// rccl-UnitTestsMicroMiscRoctxNvmlStub-roctx target so roctx.cc's ROCTX_ENABLE arm
 // compiles whether or not roctracer is installed. Same C-linkage declarations
 // as the real header for the two entry points roctx.cc calls;
 // roctx-nvml-stub-test.cc defines them to record each call.

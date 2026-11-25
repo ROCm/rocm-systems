@@ -29,6 +29,12 @@
  * "2"            | Auto (2)| Auto (2)
  */
 
+// Calls hipGetDeviceCount. Parent cases run this by name.
+TEST_CASE("Unit_hipEnvGpuEnablePal_Probe", "[.]") {
+  int deviceCount = 0;
+  REQUIRE(hipGetDeviceCount(&deviceCount) == hipSuccess);
+}
+
 /**
  * Test Description
  * ------------------------
@@ -43,9 +49,11 @@
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_Default_UsesPlatformDefault) {
-  hip::SpawnProc proc("hipSetEnv_helper", true, /*captureStderr=*/true);
+  hip::SpawnProc proc(getSelfExePath(), true, /*captureStderr=*/true);
+  proc.setEnv("AMD_LOG_LEVEL", "7");
+  proc.clearEnv("GPU_ENABLE_PAL");
 
-  int result = proc.run("GPU_ENABLE_PAL UNSET");
+  int result = proc.run("Unit_hipEnvGpuEnablePal_Probe");
   std::string output = proc.getOutput();
 
   REQUIRE(result == 0);  // HIP should initialize successfully
@@ -83,9 +91,11 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_Default_UsesPlatformDefault) {
  *  - HIP_VERSION >= 6.0
  */
 HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_EmptyString_UsesPlatformDefault) {
-  hip::SpawnProc proc("hipSetEnv_helper", true, /*captureStderr=*/true);
+  hip::SpawnProc proc(getSelfExePath(), true, /*captureStderr=*/true);
+  proc.setEnv("AMD_LOG_LEVEL", "7");
+  proc.setEnv("GPU_ENABLE_PAL", "");
 
-  int result = proc.run("GPU_ENABLE_PAL \"\"");
+  int result = proc.run("Unit_hipEnvGpuEnablePal_Probe");
   std::string output = proc.getOutput();
 
   REQUIRE(result == 0);  // HIP should initialize successfully
@@ -127,8 +137,10 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
   // AIRUNTIME-2370. fails rocr init and conitinues to init PAL
   // Once the issue is fixed this can be enabled
   {
-    hip::SpawnProc proc0("hipSetEnv_helper", true, /*captureStderr=*/true);
-    int result0 = proc0.run("GPU_ENABLE_PAL 0");
+    hip::SpawnProc proc0(getSelfExePath(), true, /*captureStderr=*/true);
+    proc0.setEnv("AMD_LOG_LEVEL", "7");
+    proc0.setEnv("GPU_ENABLE_PAL", "0");
+    int result0 = proc0.run("Unit_hipEnvGpuEnablePal_Probe");
     std::string output0 = proc0.getOutput();
     // Debug: print what we received
     INFO("Received output length: " << output0.length());
@@ -143,8 +155,10 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
 
   // Test GPU_ENABLE_PAL="1" -> PAL
   {
-    hip::SpawnProc proc1("hipSetEnv_helper", true, /*captureStderr=*/true);
-    int result1 = proc1.run("GPU_ENABLE_PAL 1");
+    hip::SpawnProc proc1(getSelfExePath(), true, /*captureStderr=*/true);
+    proc1.setEnv("AMD_LOG_LEVEL", "7");
+    proc1.setEnv("GPU_ENABLE_PAL", "1");
+    int result1 = proc1.run("Unit_hipEnvGpuEnablePal_Probe");
     std::string output1 = proc1.getOutput();
     // Debug: print what we received
     INFO("Received output length: " << output1.length());
@@ -165,8 +179,10 @@ HIP_TEST_CASE(Unit_hipEnvGpuEnablePal_ExplicitValues_WorkCorrectly) {
 
   // Test GPU_ENABLE_PAL="2" -> Auto-select
   {
-    hip::SpawnProc proc2("hipSetEnv_helper", true, /*captureStderr=*/true);
-    int result2 = proc2.run("GPU_ENABLE_PAL 2");
+    hip::SpawnProc proc2(getSelfExePath(), true, /*captureStderr=*/true);
+    proc2.setEnv("AMD_LOG_LEVEL", "7");
+    proc2.setEnv("GPU_ENABLE_PAL", "2");
+    int result2 = proc2.run("Unit_hipEnvGpuEnablePal_Probe");
     std::string output2 = proc2.getOutput();
     // Debug: print what we received
     INFO("Received output length: " << output2.length());

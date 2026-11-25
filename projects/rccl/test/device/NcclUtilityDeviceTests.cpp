@@ -6,13 +6,16 @@
 
 // Device-side tests for nccl::utility (nccl_device/utility.h): device-only helpers and the NCCL_DEVICE_ARCH branches.
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <vector>
 
 #include "DeviceTestBase.hpp"
+#include "../common/ProcessIsolatedTestRunner.hpp"
 
+#include "nccl_device/coop.h"
 #include "nccl_device/utility.h"
 
 namespace RcclUnitTesting {
@@ -530,6 +533,95 @@ TEST_F(NcclUtilityDeviceTest, LoadConstLdgScalars) {
   ASSERT_NO_FATAL_FAILURE(runLoadConst<float>(0x74));
   ASSERT_NO_FATAL_FAILURE(runLoadConst<double>(0x75));
   ASSERT_NO_FATAL_FAILURE(runLoadConst<uint64_t>(0x76));
+}
+
+// ---------------------------------------------------------------------------
+// ncclCoopWarpSpan::sync, the software barrier on AMD: two 2-warp spans with distinct warp0 and id in one CTA.
+// Every round one warp per span is delayed, then both must see each other's write. Span 1 starts halfway through
+// span 0, so a barrier that waits on the whole CTA, or one barrier slot shared by both spans, fails too.
+// ---------------------------------------------------------------------------
+
+constexpr int kNumSpans = 2;
+constexpr int kWarpsPerSpan = 2;
+constexpr int kNumWarps = kNumSpans * kWarpsPerSpan;
+constexpr int kSpanRounds = 64;
+__global__ void kernelWarpSpanSync(int* mismatches, int* roundsDone, uint64_t delayTicks, uint64_t startWaitTicks) {
+  __shared__ int slot[kNumWarps];
+  __shared__ uint32_t span0Done;
+  const int w = threadIdx.x / warpSize;
+  const int lane = threadIdx.x % warpSize;
+  const int spanId = w / kWarpsPerSpan;
+  const int idx = w % kWarpsPerSpan;
+  if (threadIdx.x < kNumWarps) slot[threadIdx.x] = 0;
+  if (threadIdx.x == 0) span0Done = 0;
+  ncclCoopNamedBarrierInit();
+  __syncthreads();
+  ncclCoopWarpSpan span(/*warp0=*/kWarpsPerSpan * spanId, /*nWarps=*/kWarpsPerSpan, /*id=*/spanId);
+  volatile int* vslot = slot;
+  cuda::atomic_ref<uint32_t, cuda::thread_scope_block> spanStarted(span0Done);
+  int bad = 0;
+  // Span 1 starts once span 0 is halfway through. Span 0 only gets there if its sync() waits for span 0 alone,
+  // so a CTA-wide barrier times out here and counts as a mismatch. The second half runs both spans at once,
+  // so spans that share one barrier slot fail too.
+  if (spanId == 1) {
+    const uint64_t t0 = wall_clock64();
+    while (spanStarted.load(cuda::memory_order_acquire) == 0 && wall_clock64() - t0 < startWaitTicks) {}
+    if (spanStarted.load(cuda::memory_order_acquire) == 0) bad += kSpanRounds;
+  }
+  int rounds = 0;
+  for (int r = 1; r <= kSpanRounds; ++r) {
+    if (idx == (r & 1)) {
+      const uint64_t t0 = wall_clock64();
+      while (wall_clock64() - t0 < delayTicks) {}
+    }
+    if (lane == 0) vslot[w] = r;
+    span.sync();
+    if (lane == 0 && vslot[w ^ 1] != r) ++bad;
+    span.sync();
+    ++rounds;
+    if (w == 0 && r == kSpanRounds / 2 && lane == 0) {
+      spanStarted.store(1u, cuda::memory_order_release);
+    }
+  }
+  if (lane == 0) {
+    atomicAdd(&mismatches[spanId], bad);
+    roundsDone[w] = rounds;
+  }
+}
+
+TEST_F(NcclUtilityDeviceTest, CoopWarpSpanSplitSpansSyncReleasesAfterAllArriveAndIsReusable) {
+  RUN_ISOLATED_TESTS(
+      ProcessIsolatedTestRunner::TestConfig(
+          "NcclUtilityDeviceTest.CoopWarpSpanSplitSpansSyncReleasesAfterAllArriveAndIsReusable", []() {
+            int device = 0;
+            int warpSize = 0;
+            int wallClockRateKhz = 0;
+            ASSERT_EQ(hipGetDevice(&device), hipSuccess);
+            ASSERT_EQ(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device), hipSuccess);
+            ASSERT_EQ(hipDeviceGetAttribute(&wallClockRateKhz, hipDeviceAttributeWallClockRate, device), hipSuccess);
+            ASSERT_GT(wallClockRateKhz, 0);
+            const uint64_t delayTicks = static_cast<uint64_t>(wallClockRateKhz) / 10;
+            const uint64_t startWaitTicks = static_cast<uint64_t>(wallClockRateKhz) * 2000;
+            DeviceBuffer<int> badBuffer(kNumSpans);
+            DeviceBuffer<int> roundsBuffer(kNumWarps);
+            ASSERT_NO_FATAL_FAILURE(badBuffer.zero());
+            ASSERT_NO_FATAL_FAILURE(roundsBuffer.zero());
+            kernelWarpSpanSync<<<1, kNumWarps * warpSize>>>(badBuffer.ptr, roundsBuffer.ptr,
+                                                          delayTicks, startWaitTicks);
+            ASSERT_EQ(hipGetLastError(), hipSuccess);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            const std::vector<int> mismatches = badBuffer.copyTo();
+            const std::vector<int> rounds = roundsBuffer.copyTo();
+            for (int span = 0; span < kNumSpans; ++span) {
+              EXPECT_EQ(mismatches[span], 0) << "span " << span << ": partner write not visible/ordered after sync()";
+            }
+            for (int warp = 0; warp < kNumWarps; ++warp) {
+              EXPECT_EQ(rounds[warp], kSpanRounds) << "warp " << warp << " did not complete all rounds";
+            }
+          })
+          .withTimeout(std::chrono::seconds(60))
+          .withNumGpus(1));
 }
 
 }  // namespace

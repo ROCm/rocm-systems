@@ -4,8 +4,12 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 
+#include "rocjitsu/isa/arch/amdgpu/cdna1/alu_status.h"
+#include "rocjitsu/isa/arch/amdgpu/rdna3_5/valu.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include <bit>
@@ -59,10 +63,12 @@ uint32_t classify_mul_lanes(const Lhs &lhs, const Rhs &rhs, Wavefront &wf, Class
   const uint64_t exec = wf.exec();
   RegisterAccess regs(wf);
   auto visit = [&](auto read_lhs, auto read_rhs) {
-    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-      if (exec & (1ULL << lane))
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (exec & (1ULL << lane)) {
         causes |=
             classify(std::bit_cast<float>(read_lhs(lane)), std::bit_cast<float>(read_rhs(lane)));
+      }
+    }
   };
   // Views resolve contiguous VGPR storage and scalar broadcasts once while
   // retaining register ownership checks and plugin-visible active-lane reads.
@@ -93,70 +99,104 @@ uint32_t classify_mul_lanes(const Lhs &lhs, const Rhs &rhs, Wavefront &wf, Class
 inline uint32_t classify_mul_f32(float lhs, float rhs, float omod_scale = 1.0f) {
   assert(omod_scale == 1.0f || omod_scale == 2.0f || omod_scale == 4.0f || omod_scale == 0.5f);
   uint32_t causes = 0;
-  if (std::fpclassify(lhs) == FP_SUBNORMAL || std::fpclassify(rhs) == FP_SUBNORMAL)
+  if (std::fpclassify(lhs) == FP_SUBNORMAL || std::fpclassify(rhs) == FP_SUBNORMAL) {
     causes |= 1u << 1;
+  }
   // An F32 product needs at most 48 significand bits. The power-of-two OMOD
   // scales (1, 2, 4, 0.5) preserve that precision and stay normal in F64.
   const double exact = detail::widen_alu_f32(lhs) * detail::widen_alu_f32(rhs) * omod_scale;
   const float result = (lhs * rhs) * omod_scale;
-  if (std::isfinite(lhs) && std::isfinite(rhs) && std::isinf(result))
+  if (std::isfinite(lhs) && std::isfinite(rhs) && std::isinf(result)) {
     causes |= 1u << 3;
-  if (exact != 0.0 && (result == 0.0f || std::fpclassify(result) == FP_SUBNORMAL))
+  }
+  if (exact != 0.0 && (result == 0.0f || std::fpclassify(result) == FP_SUBNORMAL)) {
     causes |= 1u << 4;
-  if (std::isfinite(exact) && detail::widen_alu_f32(result) != exact)
+  }
+  if (std::isfinite(exact) && detail::widen_alu_f32(result) != exact) {
     causes |= 1u << 5;
+  }
   return causes;
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop2(const Inst &inst, Wavefront &wf) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) {
+    const uint32_t causes =
+        rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Multiply>(inst, wf, inst.vsrc1);
+    wf.raise_alu_causes(causes);
+    return causes;
+  }
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna1) {
+    const uint32_t causes = rocjitsu::cdna1::classify_binary_f32<true>(inst, wf, inst.vsrc1);
+    wf.raise_alu_causes(causes);
+    return causes;
+  }
   return detail::classify_mul_lanes(
       inst.src0, inst.vsrc1, wf, [](float lhs, float rhs) { return classify_mul_f32(lhs, rhs); });
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefront &wf) {
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) {
+    const uint32_t causes =
+        rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Multiply>(inst, wf, inst.src1);
+    wf.raise_alu_causes(causes);
+    return causes;
+  }
+  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna1) {
+    const uint32_t causes = rocjitsu::cdna1::classify_binary_f32<true>(inst, wf, inst.src1);
+    wf.raise_alu_causes(causes);
+    return causes;
+  }
   // OMOD scales the exact and rounded products alike. Its policy is uniform
   // across the wave, including which causes the target suppresses.
   const uint32_t omod = fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
                                                 wf.ieee_mode(), inst.inst_.omod);
   const float omod_scale = omod == 1 ? 2.0f : omod == 2 ? 4.0f : omod == 3 ? 0.5f : 1.0f;
-  const uint32_t suppressed = omod != 0 && (wf.cu().arch() == ROCJITSU_CODE_ARCH_RDNA4 ||
-                                            wf.cu().arch() == ROCJITSU_CODE_ARCH_CDNA5)
+  const uint32_t suppressed = omod != 0 && (wf.cu().arch() == rocjitsu::IsaFamily::Rdna4 ||
+                                            wf.cu().arch() == rocjitsu::IsaFamily::Cdna5)
                                   ? (1u << 4) | (1u << 5)
                                   : 0;
   return detail::classify_mul_lanes(inst.src0, inst.src1, wf, [&](float lhs, float rhs) {
-    if (inst.inst_.abs & 1u)
+    if (inst.inst_.abs & 1u) {
       lhs = std::fabs(lhs);
-    if (inst.inst_.neg & 1u)
+    }
+    if (inst.inst_.neg & 1u) {
       lhs = -lhs;
-    if (inst.inst_.abs & 2u)
+    }
+    if (inst.inst_.abs & 2u) {
       rhs = std::fabs(rhs);
-    if (inst.inst_.neg & 2u)
+    }
+    if (inst.inst_.neg & 2u) {
       rhs = -rhs;
+    }
     return classify_mul_f32(lhs, rhs, omod_scale) & ~suppressed;
   });
 }
 
 template <typename Inst> uint32_t classify_sqrt_f32_vop1(const Inst &inst, Wavefront &wf) {
   const uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if ((exec & (1ULL << lane)) &&
         std::bit_cast<float>(RegisterAccess(wf).read_lane(inst.src0, lane)) < 0.0f) {
       wf.raise_alu_causes(1u);
       return 1u;
     }
+  }
   return 0;
 }
 
 template <typename Inst> uint32_t classify_sqrt_f32_vop3(const Inst &inst, Wavefront &wf) {
   const uint64_t exec = wf.exec();
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     float source = std::bit_cast<float>(RegisterAccess(wf).read_lane(inst.src0, lane));
-    if (inst.inst_.abs & 1u)
+    if (inst.inst_.abs & 1u) {
       source = std::fabs(source);
-    if (inst.inst_.neg & 1u)
+    }
+    if (inst.inst_.neg & 1u) {
       source = -source;
+    }
     if (source < 0.0f) {
       wf.raise_alu_causes(1u);
       return 1u;
@@ -180,31 +220,37 @@ uint32_t classify_div_fixup(Float quotient, Float denominator, Float numerator, 
   const bool n_subnormal = n != 0 && F::exponent(n) == 0;
   uint32_t causes = (denorm & 1u) && (d_subnormal || n_subnormal) ? 1u << 1 : 0;
   if (!(denorm & 1u)) {
-    if (d_subnormal)
+    if (d_subnormal) {
       d = 0;
-    if (n_subnormal)
+    }
+    if (n_subnormal) {
       n = 0;
+    }
   }
   if ((d > F::infinity && !(d & F::quiet)) || (n > F::infinity && !(n & F::quiet)) ||
-      (d == 0 && n == 0) || (d == F::infinity && n == F::infinity))
+      (d == 0 && n == 0) || (d == F::infinity && n == F::infinity)) {
     causes |= 1u;
-  else if (d == 0 && n != 0 && n < F::infinity)
+  } else if (d == 0 && n != 0 && n < F::infinity) {
     causes |= 1u << 2;
-  if (d != 0 && d < F::infinity && n != 0 && n < F::infinity) {
-    if (F::exponent(n) - F::exponent(d) < -(F::bias + F::fraction))
-      causes |= (1u << 4) | (1u << 5);
-    else if ((std::bit_cast<Bits>(quotient) & ~F::sign) >= F::infinity)
-      causes |= (1u << 3) | (1u << 5);
   }
-  if (omod != 0)
+  if (d != 0 && d < F::infinity && n != 0 && n < F::infinity) {
+    if (F::exponent(n) - F::exponent(d) < -(F::bias + F::fraction)) {
+      causes |= (1u << 4) | (1u << 5);
+    } else if ((std::bit_cast<Bits>(quotient) & ~F::sign) >= F::infinity) {
+      causes |= (1u << 3) | (1u << 5);
+    }
+  }
+  if (omod != 0) {
     causes &= ~((1u << 4) | (1u << 5));
+  }
   // OMOD can overflow a finite quotient. Classify before CLAMP changes the
   // numeric result, and only when the architecture enables the encoded OMOD.
   if (omod == 1 || omod == 2) {
     const Float result = div_fixup(quotient, denominator, numerator, rounding, denorm);
     const Bits bits = std::bit_cast<Bits>(result) & ~F::sign;
-    if (bits < F::infinity && F::exponent(bits) + static_cast<int>(omod) >= 2 * F::bias + 1)
+    if (bits < F::infinity && F::exponent(bits) + static_cast<int>(omod) >= 2 * F::bias + 1) {
       causes |= 1u << 3;
+    }
   }
   return causes;
 }
@@ -221,8 +267,9 @@ uint32_t classify_div_fixup_exceptions(const Inst &inst, Wavefront &wf) {
       fp_mode::effective_omod(wf.cu().arch(), denorm, wf.ieee_mode(), inst.inst_.omod);
   uint32_t causes = 0;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(exec & (1ULL << lane)))
+    if (!(exec & (1ULL << lane))) {
       continue;
+    }
     Float q, d, n;
     if constexpr (std::is_same_v<Float, float>) {
       q = std::bit_cast<float>(RegisterAccess(wf).read_lane(inst.src0, lane));
@@ -234,18 +281,24 @@ uint32_t classify_div_fixup_exceptions(const Inst &inst, Wavefront &wf) {
       n = std::bit_cast<double>(RegisterAccess(wf).read_lane64(inst.src2, lane));
     }
     // Signs affect directed-rounding overflow recovery before OMOD is applied.
-    if (inst.inst_.abs & 1u)
+    if (inst.inst_.abs & 1u) {
       q = std::fabs(q);
-    if (inst.inst_.neg & 1u)
+    }
+    if (inst.inst_.neg & 1u) {
       q = -q;
-    if (inst.inst_.abs & 2u)
+    }
+    if (inst.inst_.abs & 2u) {
       d = std::fabs(d);
-    if (inst.inst_.neg & 2u)
+    }
+    if (inst.inst_.neg & 2u) {
       d = -d;
-    if (inst.inst_.abs & 4u)
+    }
+    if (inst.inst_.abs & 4u) {
       n = std::fabs(n);
-    if (inst.inst_.neg & 4u)
+    }
+    if (inst.inst_.neg & 4u) {
       n = -n;
+    }
     causes |= classify_div_fixup(q, d, n, rounding, denorm, omod);
   }
   wf.raise_alu_causes(causes);
@@ -265,12 +318,13 @@ uint32_t classify_div_fixup_f64_exceptions(const Inst &inst, Wavefront &wf) {
 template <typename Inst>
 uint32_t classify_rcp_iflag_f32_exceptions(const Inst &inst, Wavefront &wf) {
   const uint64_t exec = wf.exec();
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if ((exec & (1ULL << lane)) &&
         std::bit_cast<float>(RegisterAccess(wf).read_lane(inst.src0, lane)) == 0.0f) {
       wf.raise_alu_causes(1u << 6);
       return 1u << 6;
     }
+  }
   return 0;
 }
 

@@ -95,6 +95,14 @@ INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::AmdExtTable, 0);
 
 #if HSA_IMAGE_EXT_API_TABLE_STEP_VERSION == 0x00
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::ImageExtTable, 14);
+#elif HSA_IMAGE_EXT_API_TABLE_STEP_VERSION == 0x01
+// 0x01 appended hsa_ext_sampler_create_v2.
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::ImageExtTable, 15);
+#elif HSA_IMAGE_EXT_API_TABLE_STEP_VERSION == 0x02
+// 0x02 appended hsa_ext_sampler_create_v3 (anisotropic filtering).
+ROCP_SDK_ENFORCE_ABI_VERSIONING(::ImageExtTable, 16);
+#else
+INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(::ImageExtTable, 0);
 #endif
 
 #if HSA_FINALIZER_EXT_API_TABLE_STEP_VERSION == 0x00
@@ -394,6 +402,12 @@ ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_sampler_destroy_fn, 10);
 ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_image_get_capability_with_layout_fn, 11);
 ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_image_data_get_info_with_layout_fn, 12);
 ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_image_create_with_layout_fn, 13);
+#if HSA_IMAGE_EXT_API_TABLE_STEP_VERSION >= 0x01
+ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_sampler_create_v2_fn, 14);
+#endif
+#if HSA_IMAGE_EXT_API_TABLE_STEP_VERSION >= 0x02
+ROCP_SDK_ENFORCE_ABI(::ImageExtTable, hsa_ext_sampler_create_v3_fn, 15);
+#endif
 
 ROCP_SDK_ENFORCE_ABI(::FinalizerExtTable, hsa_ext_program_create_fn, 1);
 ROCP_SDK_ENFORCE_ABI(::FinalizerExtTable, hsa_ext_program_destroy_fn, 2);

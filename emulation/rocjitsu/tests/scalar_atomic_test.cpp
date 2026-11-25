@@ -1,12 +1,14 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/analysis/def_use_chain.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
@@ -43,21 +45,25 @@ public:
   }
   AtomicLoadResult atomic_load(VmMemoryDomain domain, uint64_t address, uint32_t width) override {
     ++load_attempts;
-    if (outcome != VmAccessOutcome::Complete)
+    if (outcome != VmAccessOutcome::Complete) {
       return {.outcome = outcome};
+    }
     return backing_.atomic_load(domain, address, width);
   }
   AtomicCompareExchangeResult compare_exchange(VmMemoryDomain domain, uint64_t address,
                                                uint32_t width, uint64_t expected,
                                                uint64_t desired) override {
     ++update_attempts;
-    if (outcome != VmAccessOutcome::Complete)
+    if (outcome != VmAccessOutcome::Complete) {
       return {.outcome = outcome};
-    if (exchange_outcome != VmAccessOutcome::Complete)
+    }
+    if (exchange_outcome != VmAccessOutcome::Complete) {
       return {.outcome = exchange_outcome};
+    }
     const auto result = backing_.compare_exchange(domain, address, width, expected, desired);
-    if (result.outcome == VmAccessOutcome::Complete && result.exchanged)
+    if (result.outcome == VmAccessOutcome::Complete && result.exchanged) {
       ++mutations;
+    }
     return result;
   }
 
@@ -78,8 +84,9 @@ public:
   VmAccessOutcome atomic_modify(VmMemoryDomain domain, uint64_t address, uint32_t width,
                                 const AtomicMutation &mutation) override {
     ++update_attempts;
-    if (outcome != VmAccessOutcome::Complete)
+    if (outcome != VmAccessOutcome::Complete) {
       return outcome;
+    }
     return backing_.atomic_modify(domain, address, width, [&](std::span<std::byte> bytes) {
       ++mutations;
       mutation(bytes);
@@ -94,7 +101,8 @@ constexpr uint16_t buffer_atomic_opcode(uint16_t opcode) { return opcode - 64; }
 static_assert(buffer_atomic_opcode(cdna3::kSAtomicSwapSmem) == cdna3::kSBufferAtomicSwapSmem);
 static_assert(buffer_atomic_opcode(cdna3::kSAtomicDecX2Smem) == cdna3::kSBufferAtomicDecX2Smem);
 
-class ScalarAtomicTest : public ::testing::TestWithParam<std::tuple<rj_code_arch_t, MemoryMode>> {
+class ScalarAtomicTest
+    : public ::testing::TestWithParam<std::tuple<rocjitsu::IsaFamily, MemoryMode>> {
 protected:
   static constexpr uint64_t kAddress = 0x1000;
   static constexpr uint32_t kRecords = 0x100;
@@ -111,19 +119,20 @@ protected:
     config.functional_quantum = 1;
     config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
     l2.set_backing_memory(&memory);
-    cu = ComputeUnitCore::create("scalar_atomic_cu", config, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_atomic_cu", config, &memory, &l2));
     decoder = Decoder::create(config.arch);
-    ASSERT_NE(cu, nullptr);
     ASSERT_NE(decoder, nullptr);
     wf = cu->dispatch_wf(0, kProgram, 104, 16);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(0);
     pipeline = std::make_unique<ScalarMemPipeline>(&cu->l1_scalar());
     if (memory_mode() != MemoryMode::Direct) {
-      if (memory_mode() == MemoryMode::CachedVm)
+      if (memory_mode() == MemoryMode::CachedVm) {
         backing = std::make_shared<CachedScalarAtomicBacking>(memory);
-      else
+      } else {
         backing = std::make_shared<ScalarAtomicBacking>(memory);
+      }
       const auto space = vm.register_address_space(
           7, std::make_shared<IdentityAddressSpaceTranslator>(), backing,
           [this](uint64_t address, VmAccessKind kind) { vm_faults.emplace_back(address, kind); },
@@ -138,8 +147,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wf)
+    if (wf) {
       wf->halt();
+    }
   }
 
   MemoryMode memory_mode() const { return std::get<1>(GetParam()); }
@@ -157,20 +167,23 @@ protected:
   }
   uint32_t read_sgpr(unsigned reg) { return cu->read_sgpr(wf->sgpr_alloc().base + reg); }
   void write_sgprs(unsigned reg, uint32_t dwords, uint64_t value) {
-    for (uint32_t i = 0; i < dwords; ++i)
+    for (uint32_t i = 0; i < dwords; ++i) {
       write_sgpr(reg + i, static_cast<uint32_t>(value >> (32 * i)));
+    }
   }
   uint64_t read_sgprs(unsigned reg, uint32_t dwords) {
     uint64_t value = 0;
-    for (uint32_t i = 0; i < dwords; ++i)
+    for (uint32_t i = 0; i < dwords; ++i) {
       value |= uint64_t{read_sgpr(reg + i)} << (32 * i);
+    }
     return value;
   }
   void write_memory(uint64_t address, uint32_t dwords, uint64_t value) {
-    if (dwords == 1)
+    if (dwords == 1) {
       memory.write32(address, static_cast<uint32_t>(value));
-    else
+    } else {
       memory.write64(address, value);
+    }
   }
   uint64_t read_memory(uint64_t address, uint32_t dwords) {
     return dwords == 1 ? memory.read32(address) : memory.read64(address);
@@ -181,8 +194,9 @@ protected:
           uint16_t opcode = cdna3::kSAtomicDecSmem) {
     const auto words = cdna3::build_smem(opcode, fields);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    if (!inst)
+    if (!inst) {
       return nullptr;
+    }
     if (cu->execute_instruction(inst.get(), *wf).failed()) {
       ADD_FAILURE() << inst->mnemonic() << " execution failed";
       return nullptr;
@@ -204,8 +218,8 @@ protected:
 
 INSTANTIATE_TEST_SUITE_P(
     Cdna, ScalarAtomicTest,
-    ::testing::Combine(::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4),
+    ::testing::Combine(::testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4),
                        ::testing::Values(MemoryMode::Direct, MemoryMode::CachedVm,
                                          MemoryMode::TranslatedVm)));
 
@@ -327,8 +341,9 @@ TEST_P(ScalarAtomicTest, CompareSwapReturnsOldAndPreservesCompare) {
         const unsigned guard_sgpr = 4 + 2 * dwords;
         // The V# bound fits only the memory element: CMPSWAP_X2 reads 16 bytes
         // of SGPRs but accesses 8 bytes of memory.
-        if (opcode != global_opcode)
+        if (opcode != global_opcode) {
           write_descriptor(dwords * 4);
+        }
         write_memory(kAddress, dwords, old);
         memory.write32(guard_address, 0xdeadbeef);
         write_sgprs(4, dwords, source);
@@ -426,8 +441,9 @@ TEST_P(ScalarAtomicTest, NamedScalarRegisterCanSupplyAndReceiveData) {
 }
 
 TEST_P(ScalarAtomicTest, AtomicPublishesCachedWritesAndInvalidatesScalarCopies) {
-  if (memory_mode() == MemoryMode::TranslatedVm)
+  if (memory_mode() == MemoryMode::TranslatedVm) {
     GTEST_SKIP() << "Translated accesses bypass the legacy cache hierarchy";
+  }
   memory.write32(kAddress, 8);
   uint32_t cached = 0;
   ASSERT_EQ(cu->l1_scalar().load(kAddress, 1, &cached, wf->process_id()),
@@ -460,8 +476,9 @@ constexpr auto kDecrementForms = std::to_array<DecrementForm>({
 });
 
 TEST_P(ScalarAtomicTest, UnavailableAtomicRetainsCounterAndUpdatesExactlyOnce) {
-  if (!backing)
+  if (!backing) {
     GTEST_SKIP() << "Retry injection requires a VM backing";
+  }
   for (const auto &[opcode, dwords] : kDecrementForms) {
     for (uint8_t glc : {0, 1}) {
       SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " glc=" << +glc);
@@ -599,8 +616,9 @@ TEST_P(ScalarAtomicTest, BufferAtomicRunsOnlyWhenWhollyInRange) {
 }
 
 TEST_P(ScalarAtomicTest, FailedAtomicDoesNotWriteBackOrLeakCounter) {
-  if (!backing)
+  if (!backing) {
     GTEST_SKIP() << "Fault injection requires a VM backing";
+  }
   backing->outcome = VmAccessOutcome::Faulted;
   for (const auto &[opcode, dwords] : kDecrementForms) {
     SCOPED_TRACE(testing::Message() << "opcode=" << opcode);
@@ -619,8 +637,9 @@ TEST_P(ScalarAtomicTest, FailedAtomicDoesNotWriteBackOrLeakCounter) {
 }
 
 TEST_P(ScalarAtomicTest, UnavailableCompareExchangeRetriesWithCurrentMemoryValue) {
-  if (memory_mode() != MemoryMode::TranslatedVm)
+  if (memory_mode() != MemoryMode::TranslatedVm) {
     GTEST_SKIP() << "Compare/exchange retries require a translated backing";
+  }
   for (const auto &[opcode, dwords] : kDecrementForms) {
     for (uint8_t glc : {0, 1}) {
       SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " glc=" << +glc);
@@ -660,8 +679,9 @@ TEST_P(ScalarAtomicTest, UnavailableCompareExchangeRetriesWithCurrentMemoryValue
 }
 
 TEST_P(ScalarAtomicTest, CompareSwapMismatchAfterLostExchangeDoesNotWrite) {
-  if (memory_mode() != MemoryMode::TranslatedVm)
+  if (memory_mode() != MemoryMode::TranslatedVm) {
     GTEST_SKIP() << "Compare/exchange retries require a translated backing";
+  }
   constexpr std::array<std::pair<uint16_t, uint32_t>, 2> kCompareSwapForms{
       {{cdna3::kSAtomicCmpswapSmem, 1}, {cdna3::kSAtomicCmpswapX2Smem, 2}}};
   for (const auto &[opcode, dwords] : kCompareSwapForms) {
@@ -690,8 +710,9 @@ TEST_P(ScalarAtomicTest, CompareSwapMismatchAfterLostExchangeDoesNotWrite) {
 }
 
 TEST_P(ScalarAtomicTest, FailedCompareExchangeDoesNotWriteBackOrLeakCounter) {
-  if (memory_mode() != MemoryMode::TranslatedVm)
+  if (memory_mode() != MemoryMode::TranslatedVm) {
     GTEST_SKIP() << "Compare/exchange faults require a translated backing";
+  }
   for (const auto &[opcode, dwords] : kDecrementForms) {
     for (uint8_t glc : {0, 1}) {
       SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " glc=" << +glc);
@@ -770,10 +791,12 @@ TEST_P(ScalarAtomicTest, ReturnedRegisterRequiresLgkmWait) {
             cdna3::build_sop1(cdna3::kSMovB32Sop1, {.ssrc0 = static_cast<uint8_t>(last),
                                                     .sdst = static_cast<uint8_t>(last + 1)})[0]);
         words.insert(words.end(), 4, kNop);
-        for (size_t i = 0; i < words.size(); ++i)
+        for (size_t i = 0; i < words.size(); ++i) {
           memory.write32(program + i * 4, words[i]);
-        for (unsigned i = 0; i < 3; ++i)
+        }
+        for (unsigned i = 0; i < 3; ++i) {
           (void)cu->step();
+        }
         ASSERT_FALSE(wf->is_halted());
         EXPECT_EQ(wf->pc, program + 16);
         EXPECT_EQ(read_sgpr(last + 1), glc ? (dwords == 1 ? 4u : 7u) : 9u);

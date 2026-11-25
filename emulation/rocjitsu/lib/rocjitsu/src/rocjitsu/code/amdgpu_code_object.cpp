@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/amdgpu_code_object.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/file_io.h"
@@ -62,14 +63,13 @@ bool is_elf(const Elf64_Ehdr &ehdr) { return !std::memcmp(ehdr.e_ident, EI_MAGIC
 using detail::fits_in_bounds;
 
 rj_code_target_id_t target_from_machine_flags(uint32_t flags) {
-  const IsaGpuTargetDescription *binding =
-      default_isa_target_registry().find_gpu_target_by_elf_machine(flags & EF_AMDGPU_MACH);
+  const IsaTargetBinding *binding =
+      default_isa_target_registry().find_target_by_elf_machine(flags & EF_AMDGPU_MACH);
   return binding == nullptr ? ROCJITSU_CODE_TARGET_INVALID : binding->public_id;
 }
 
 rj_code_target_id_t target_from_code_object_id(std::string_view id) {
-  const IsaGpuTargetDescription *binding =
-      default_isa_target_registry().find_gpu_target_by_code_object_id(id);
+  const IsaTargetBinding *binding = default_isa_target_registry().find_target_by_code_object_id(id);
   return binding == nullptr ? ROCJITSU_CODE_TARGET_INVALID : binding->public_id;
 }
 
@@ -118,8 +118,9 @@ AmdGpuCodeObject::AmdGpuCodeObject(const std::string &elf_path) {
     return;
   }
   load_sections();
-  if (!is_valid_)
+  if (!is_valid_) {
     return;
+  }
   target_id_ = target_from_machine_flags(header_->flags());
 }
 
@@ -147,8 +148,9 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size) {
     return;
   }
   load_sections();
-  if (!is_valid_)
+  if (!is_valid_) {
     return;
+  }
   target_id_ = target_from_machine_flags(header_->flags());
 }
 
@@ -178,8 +180,9 @@ AmdGpuCodeObject::AmdGpuCodeObject(const uint8_t *elf_bytes, size_t elf_size,
     return;
   }
   load_sections();
-  if (!is_valid_)
+  if (!is_valid_) {
     return;
+  }
   const rj_code_target_id_t bundle_target = target_from_code_object_id(target_triple_);
   const rj_code_target_id_t elf_target = target_from_machine_flags(header_->flags());
   // A recognized bundle target and inner ELF machine are two declarations of
@@ -230,8 +233,9 @@ void AmdGpuCodeObject::load_sections() {
 
   for (size_t section_index = 0; section_index < section_hdrs->size(); ++section_index) {
     const Elf64_Shdr &shdr = (*section_hdrs)[section_index];
-    if (shdr.sh_type == SHT_NULL)
+    if (shdr.sh_type == SHT_NULL) {
       continue;
+    }
     // Symbol relocation and descriptor updates in the patcher require fixed
     // records too; accepting extensions here would silently skip those updates.
     if ((shdr.sh_type == SHT_SYMTAB || shdr.sh_type == SHT_DYNSYM) &&
@@ -256,8 +260,9 @@ void AmdGpuCodeObject::load_sections() {
     }
     const bool allocated_executable =
         (shdr.sh_flags & (SHF_ALLOC | SHF_EXECINSTR)) == (SHF_ALLOC | SHF_EXECINSTR);
-    if (shdr.sh_type == SHT_NOBITS && !allocated_executable)
+    if (shdr.sh_type == SHT_NOBITS && !allocated_executable) {
       continue;
+    }
     if (shdr.sh_name >= shstrtab.sh_size) {
       if (allocated_executable) {
         is_valid_ = false;
@@ -278,8 +283,9 @@ void AmdGpuCodeObject::load_sections() {
     std::unique_ptr<char[]> sec_data;
     if (shdr.sh_type != SHT_NOBITS) {
       sec_data = std::make_unique<char[]>(shdr.sh_size);
-      if (shdr.sh_size != 0)
+      if (shdr.sh_size != 0) {
         std::memcpy(sec_data.get(), image_.data() + shdr.sh_offset, shdr.sh_size);
+      }
     }
     // SHT_NOBITS has no executable bytes to decode. Retain allocated executable
     // metadata above so the translator's sole-PROGBITS-.text gate rejects the
@@ -294,12 +300,14 @@ void AmdGpuCodeObject::load_sections() {
     sections_.emplace_back(
         std::make_unique<HsaSection>(sec_name, std::move(sec_data), shdr, section_index));
 
-    if (allocated_executable)
+    if (allocated_executable) {
       allocated_executable_sections_.push_back(sections_.back().get());
-    if (sec_name == ".text")
+    }
+    if (sec_name == ".text") {
       text_sections_.push_back(sections_.back().get());
-    else if (sec_name == ".rodata")
+    } else if (sec_name == ".rodata") {
       rodata_sections_.push_back(sections_.back().get());
+    }
   }
 
   // Parse symbol table for kernel descriptor offsets.
@@ -307,18 +315,22 @@ void AmdGpuCodeObject::load_sections() {
   // only have the latter.
   for (size_t section_index = 0; section_index < section_hdrs->size(); ++section_index) {
     if ((*section_hdrs)[section_index].sh_type != SHT_SYMTAB &&
-        (*section_hdrs)[section_index].sh_type != SHT_DYNSYM)
+        (*section_hdrs)[section_index].sh_type != SHT_DYNSYM) {
       continue;
+    }
     const Elf64_Shdr &symtab_shdr = (*section_hdrs)[section_index];
-    if (!fits_in_bounds(symtab_shdr.sh_offset, symtab_shdr.sh_size, image_.size()))
+    if (!fits_in_bounds(symtab_shdr.sh_offset, symtab_shdr.sh_size, image_.size())) {
       continue;
+    }
 
     // Read the string table linked to this symtab.
-    if (symtab_shdr.sh_link >= section_hdrs->size())
+    if (symtab_shdr.sh_link >= section_hdrs->size()) {
       continue;
+    }
     const Elf64_Shdr &strtab_shdr = (*section_hdrs)[symtab_shdr.sh_link];
-    if (!fits_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image_.size()))
+    if (!fits_in_bounds(strtab_shdr.sh_offset, strtab_shdr.sh_size, image_.size())) {
       continue;
+    }
     const char *sym_strtab = image_.data() + strtab_shdr.sh_offset;
 
     // Read symbols.
@@ -329,8 +341,9 @@ void AmdGpuCodeObject::load_sections() {
       const char *sym_data = symtab_data + sym_index * symtab_shdr.sh_entsize;
       Elf64_Sym sym;
       std::memcpy(&sym, sym_data, sizeof(sym));
-      if (sym.st_name >= strtab_shdr.sh_size)
+      if (sym.st_name >= strtab_shdr.sh_size) {
         continue;
+      }
       std::string sym_name(sym_strtab + sym.st_name,
                            strnlen(sym_strtab + sym.st_name, strtab_shdr.sh_size - sym.st_name));
       // AMDHSA kernel descriptors have a ".kd" suffix symbol.
@@ -357,25 +370,26 @@ namespace {
 // sgpr_count_is_descriptor_encoded(); kept as the short, stable CDNA
 // list so a new non-CDNA family falls through to the RDNA-style branch by
 // default. (Canonical copy: code/dbt/kernel_descriptor_translator.cpp.)
-[[nodiscard]] bool is_cdna_arch(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+[[nodiscard]] bool is_cdna_arch(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+         arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
 }
 
 // Decode one kernel descriptor's per-wave SGPR count from its granulated field.
-[[nodiscard]] uint32_t sgpr_count_from_granulated(uint32_t granulated, rj_code_arch_t arch) {
+[[nodiscard]] uint32_t sgpr_count_from_granulated(uint32_t granulated, rocjitsu::IsaFamily arch) {
   // Descriptor-encoded (granulated != 0, or a CDNA target): (granulated + 1) * 8.
   // Otherwise the field is an RDNA-style sentinel and the wave owns the fixed
   // per-wave SGPR pool.
-  if (granulated != 0 || is_cdna_arch(arch))
+  if (granulated != 0 || is_cdna_arch(arch)) {
     return (granulated + 1) * 8;
+  }
   return amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF;
 }
 
 } // namespace
 
 std::optional<uint32_t>
-AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
+AmdGpuCodeObject::min_kernel_sgpr_count(rocjitsu::IsaFamily arch,
                                         std::span<const KernelDescriptorInfo> kernels) {
   namespace kd = rocjitsu::amdhsa;
 
@@ -389,7 +403,7 @@ AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch,
   return min_count;
 }
 
-std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rj_code_arch_t arch) const {
+std::optional<uint32_t> AmdGpuCodeObject::min_kernel_sgpr_count(rocjitsu::IsaFamily arch) const {
   const std::span<const uint8_t> image{reinterpret_cast<const uint8_t *>(image_data()),
                                        image_size()};
   // Discover descriptors through the shared scanner rather than re-walking sections

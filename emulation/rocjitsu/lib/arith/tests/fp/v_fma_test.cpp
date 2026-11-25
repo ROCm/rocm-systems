@@ -6,6 +6,7 @@
 #include "common/cpu.h"
 #include "common/registers.h"
 #include "common/semantics.h"
+#include "fp/captured_gfx11_test.h"
 #include "fp/elementwise.h"
 #include "fp/fma_dpp_test.h"
 #include "fp/fma_reference.h"
@@ -13,7 +14,7 @@
 #include "fp/fma_test.h"
 #include "fp/half_fma_test.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 #include <bit>
 #include <gtest/gtest.h>
 #include <stdint.h>
@@ -117,6 +118,19 @@ template <bool Half, typename Call> static void check_guest_controls(Call call) 
                      1, 0, r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(r.v[3][0], 0U);
+
+      // A flushed subnormal times infinity overrides the addend's NaN payload.
+      r.v[0][0] = r.v[1][1] = 1;
+      r.v[1][0] = r.v[0][1] = 0x7f800000;
+      r.v[2][0] = r.v[2][1] = 0x7fc12345;
+      for (uint64_t flush : {uint64_t{0}, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS}) {
+        ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS | flush, 3, 0,
+                       r.v + 3, r.v, r.v + 1, r.v + 2, nullptr),
+                  RJ_ARITH_SUCCESS);
+        const uint32_t expected = flush ? 0xffc00000U : 0x7fc12345U;
+        EXPECT_EQ(r.v[3][0], expected);
+        EXPECT_EQ(r.v[3][1], expected);
+      }
     }
 
     for (uint64_t rounding :
@@ -178,6 +192,17 @@ TEST(FpFmaF64W64Gfx12, Arithmetic) {
 // Check fused arithmetic, modifiers, aliases, and supported FP-status behavior.
 TEST(FpFmaF64W64Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_fma<64, 64>(rj_arith_v_fma_f64_w64, /*gfx12=*/false);
+}
+
+// RDNA2 inherits the RDNA3 model but stays loose-only pending gfx10 captures.
+TEST(FpFmaF64W32Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_fma<64, 32>(rj_arith_v_fma_f64_w32_gfx10, /*gfx12=*/false,
+                                           /*exact=*/false);
+}
+
+TEST(FpFmaF64W64Gfx10, Arithmetic) {
+  rocjitsu::arith::test::check_fma<64, 64>(rj_arith_v_fma_f64_w64_gfx10, /*gfx12=*/false,
+                                           /*exact=*/false);
 }
 
 // gfx1201 WAVE_EXCP_FLAG_USER observations under MODE=0xf0 (RNE, preserve denormals).
@@ -748,23 +773,230 @@ TEST(FpFmaF64, GuestRounding) {
   }
 }
 
-// Loose output flushing retains a tiny value rounded to minimum normal, as in
-// the legacy emulator. This is an approximation, not a hardware golden.
+// Tininess is judged after rounding. (1 - 2^-53) * 2^-1022 is exact at full precision, so it
+// is tiny in every rounding mode although subnormal rounding can reach the smallest normal;
+// (1 - 2^-52) * (2^-1022 + 2^-1074) is not tiny unless rounded down. Flushing outputs and OMOD
+// zero tiny results, OMOD even when MODE keeps denormals. Adding the smallest subnormal to the
+// first product puts the exact sum half an ULP above the smallest normal, so the recheck must
+// include the addend. Expected results are gfx1201 captures of V_FMA_F64 (input denormals
+// kept), in nearest, up, down and zero rounding.
 TEST(FpFmaF64, RoundedMinimumNormal) {
   using namespace rocjitsu::arith::test;
+  const struct {
+    uint64_t a, b, c, fp_flags;
+    uint32_t instruction_flags;
+    uint64_t expected[4];
+  } cases[] = {
+      {0x3fefffffffffffffULL, 0x0010000000000000ULL, 0, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, 0, {}},
+      {0x3fefffffffffffffULL,
+       0x0010000000000000ULL,
+       0,
+       0,
+       0,
+       {0x0010000000000000ULL, 0x0010000000000000ULL, 0x000fffffffffffffULL,
+        0x000fffffffffffffULL}},
+      {0x3fefffffffffffffULL, 0x0010000000000000ULL, 0, 0, RJ_ARITH_ALU_OMOD_2, {}},
+      {0x3fefffffffffffffULL,
+       0x0010000000000000ULL,
+       1,
+       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+       0,
+       {0x0010000000000000ULL, 0x0010000000000001ULL, 0x0010000000000000ULL,
+        0x0010000000000000ULL}},
+      {0x3fefffffffffffffULL,
+       0x0010000000000000ULL,
+       1,
+       0,
+       RJ_ARITH_ALU_OMOD_2,
+       {0x0020000000000000ULL, 0x0020000000000001ULL, 0x0020000000000000ULL,
+        0x0020000000000000ULL}},
+      {0x3feffffffffffffeULL,
+       0x0010000000000001ULL,
+       0,
+       RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+       0,
+       {0x0010000000000000ULL, 0x0010000000000000ULL, 0, 0}},
+      {0x3feffffffffffffeULL,
+       0x0010000000000001ULL,
+       0,
+       0,
+       RJ_ARITH_ALU_OMOD_2,
+       {0x0020000000000000ULL, 0x0020000000000000ULL, 0, 0}},
+  };
   for (uint64_t cpu : supported_cpu_levels()) {
-    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY}) {
-      Registers<8, 32> r;
-      r.v[0][0] = 0;
-      r.v[1][0] = 0x00100000;
-      r.v[2][0] = 0xffffffff;
-      r.v[3][0] = 0x3fefffff;
-      r.v[4][0] = r.v[5][0] = 0;
-      ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx12(cpu | semantics | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
-                                             1, 0, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
-                RJ_ARITH_SUCCESS);
-      EXPECT_EQ(r.v[6][0], 0U);
-      EXPECT_EQ(r.v[7][0], 0x00100000U);
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_COMPATIBILITY,
+                               RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+      for (const auto &test : cases) {
+        for (unsigned rounding = 0; rounding < 4; ++rounding) {
+          Registers<8, 32> r;
+          write_fp(r.v, 0, 64, test.a);
+          write_fp(r.v + 2, 0, 64, test.b);
+          write_fp(r.v + 4, 0, 64, test.c);
+          ASSERT_EQ(rj_arith_v_fma_f64_w32_gfx12(
+                        cpu | semantics | test.fp_flags | (uint64_t(rounding) << 24), 1,
+                        test.instruction_flags, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(read_fp(r.v + 6, 0, 64), test.expected[rounding])
+              << std::hex << test.a << " * " << test.b << " + " << test.c << " rounding "
+              << rounding;
+        }
+      }
+    }
+  }
+}
+
+// gfx1201 captures: an invalid FP64 FMA product (0 * infinity, after input flushing) gives the
+// default NaN even when the addend is a NaN; otherwise the first NaN source is quieted. Check
+// under every guest rounding mode, in every lane and alone in the first lane (others 1 * 1 + 1),
+// in Compatibility and strict exact mode.
+template <int Lanes, typename Call> void check_fma_f64_nan(Call call) {
+  using namespace rocjitsu::arith::test;
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  constexpr uint64_t infinity = 0x7ff0000000000000ULL, default_nan = 0xfff8000000000000ULL;
+  constexpr uint64_t flush = RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  const struct {
+    uint64_t a, b, c, flags, expected;
+  } cases[] = {
+      {0, infinity, 0x7ff4000000000001ULL, 0, default_nan},
+      {0xfff0000000000000ULL, 0x8000000000000000ULL, 0x7ff8000000000005ULL, flush, default_nan},
+      {infinity, 1, 0x7ff0000000000001ULL, flush, default_nan},
+      {infinity, 1, 0x7ff0000000000001ULL, 0, 0x7ff8000000000001ULL},
+      {0x7ff4000000000007ULL, 0x7ff8000000000009ULL, 0x7ff800000000000bULL, 0,
+       0x7ffc000000000007ULL},
+      {0x3ff0000000000000ULL, 0x7ff4000000000007ULL, 0x7ff800000000000bULL, flush,
+       0x7ffc000000000007ULL},
+  };
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : hardware_semantics()) {
+      for (const auto &sample : cases) {
+        for (uint64_t rounding = 0; rounding < 4; ++rounding) {
+          for (bool alone : {false, true}) {
+            SCOPED_TRACE(::testing::Message()
+                         << std::hex << cpu << '/' << semantics << '/' << sample.a << '/'
+                         << sample.b << '/' << sample.c << '/' << rounding << '/' << alone);
+            constexpr uint64_t one = 0x3ff0000000000000ULL, two = 0x4000000000000000ULL;
+            Registers<8, Lanes> r;
+            for (int lane = 0; lane < Lanes; ++lane) {
+              const bool sampled = !alone || lane == 0;
+              write_fp(r.v, lane, 64, sampled ? sample.a : one);
+              write_fp(r.v + 2, lane, 64, sampled ? sample.b : one);
+              write_fp(r.v + 4, lane, 64, sampled ? sample.c : one);
+            }
+            ASSERT_EQ(call(cpu | semantics | sample.flags | (rounding << 24), ~Mask(0), 0, r.v + 6,
+                           r.v, r.v + 2, r.v + 4, nullptr),
+                      RJ_ARITH_SUCCESS);
+            for (int lane = 0; lane < Lanes; ++lane) {
+              EXPECT_EQ(read_fp(r.v + 6, lane, 64), !alone || lane == 0 ? sample.expected : two)
+                  << lane;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(FpFmaF64, NanPriority) {
+  check_fma_f64_nan<32>(rj_arith_v_fma_f64_w32_gfx12);
+  check_fma_f64_nan<64>(rj_arith_v_fma_f64_w64_gfx12);
+}
+
+namespace {
+
+using rocjitsu::arith::test::CapturedGfx11;
+
+// gfx1100 FMA_F64 lanes from the MODE.IEEE-clear corpus (hw1100-noieee): the first NaN source is
+// returned unquieted, and 0 * infinity gives the default NaN even with a NaN addend. IEEE-set
+// lanes are from the gfx1100 v2 capture (hw2-gfx1100).
+const CapturedGfx11 fma_f64_lanes[] = {
+    {"SignalingB", 0, 0x100, 0x0, 0x7ff0000000000001, 0x0, 0x7ff0000000000001},
+    {"SignalingBRoundDown", 0, 0x15a, 0x0, 0x7ff0000000000001, 0x0, 0x7ff0000000000001},
+    {"SignalingAddend", 0, 0x1f0, 0x0, 0x0, 0x7ff0000000000001, 0x7ff0000000000001},
+    {"SignalingBeforeQuiet", 0, 0x1f0, 0x7ff0000000000001, 0x7ff8000000000000, 0x0,
+     0x7ff0000000000001},
+    {"InvalidProductQuietAddend", 0, 0x1f0, 0x7ff0000000000000, 0x0, 0x7ff8000000000000,
+     0xfff8000000000000},
+    {"NegC", RJ_ARITH_ALU_NEG_C, 0x1f0, 0x7ff0000000000001, 0x0, 0x7ff8000000000000,
+     0x7ff0000000000001},
+    {"Div2", RJ_ARITH_ALU_OMOD_HALF, 0x100, 0x7ff0000000000001, 0x0, 0x0, 0x7ff0000000000001},
+    {"IeeeSetInvalidProductQuietAddend", 0, 0x300, 0x0, 0x7ff0000000000000, 0x7ff8000000000000,
+     0xfff8000000000000},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce captured gfx1100 FP64 FMA lanes.
+TEST(FpFmaF64Gfx11, CapturedNans) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_fma_f64_w32, fma_f64_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_fma_f64_w64, fma_f64_lanes);
+}
+
+namespace {
+
+// gfx1100 (W7900, mkm2) hw1100-noieee lanes (2026-09-25, MODE.IEEE clear): with input denormals
+// kept and output denormals flushed (0x150), a tiny product added to min normal keeps min normal
+// while 1.0 * min normal + min normal doubles it; with all denormals flushed (0x100) the tiny
+// sum -min normal + min normal is +0. Max + tiny product toward zero stays max.
+const CapturedGfx11 fma_f64_rules[] = {
+    {"TinyProductPlusMinNormal", 0, 0x150, 0x0010000000000000, 0x0010000000000000,
+     0x0010000000000000, 0x0010000000000000},
+    {"MinNormalPlusMinNormal", 0, 0x150, 0x3ff0000000000000, 0x0010000000000000, 0x0010000000000000,
+     0x0020000000000000},
+    {"NegMinNormalPlusMinNormalFlushed", 0, 0x100, 0xbff0000000000000, 0x0010000000000000,
+     0x0010000000000000, 0},
+    {"MaxPlusTinyProductRoundZero", 0, 0x1ff, 0x3ff8000000000000, 0x0010000000000000,
+     0x7fefffffffffffff, 0x7fefffffffffffff},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce the captured RDNA3 FMA tininess rules.
+TEST(FpFmaF64Gfx11, CapturedTininess) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_fma_f64_w32, fma_f64_rules);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_fma_f64_w64, fma_f64_rules);
+}
+
+// Every CPU path rounds CDNA OMOD underflow before deciding whether to flush the output.
+TEST(FpFmaF64Cdna, ScaledMinimumNormal) {
+  using namespace rocjitsu::arith::test;
+  for (auto cpu : supported_cpu_levels()) {
+    for (auto call : {rj_arith_v_fma_f64_w32_gfx942, rj_arith_v_fma_f64_w32_gfx950,
+                      rj_arith_v_fma_f64_w32_gfx1250}) {
+      // Output flushing precedes OMOD, which also canonicalizes tiny scaled results.
+      for (bool flush_core : {false, true}) {
+        if (call != rj_arith_v_fma_f64_w32_gfx1250) {
+          continue; // gfx942 disables OMOD when guest denormals are preserved.
+        }
+        Registers<8, 32> r;
+        r.v[0][0] = 0;
+        r.v[1][0] = flush_core ? 0x00080000U : 0x80100000U;
+        r.v[2][0] = 0;
+        r.v[3][0] = 0x3ff00000U;
+        r.v[4][0] = r.v[5][0] = 0;
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                               (flush_core ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0);
+        ASSERT_EQ(call(flags, 1, flush_core ? RJ_ARITH_ALU_OMOD_2 : RJ_ARITH_ALU_OMOD_HALF, r.v + 6,
+                       r.v, r.v + 2, r.v + 4, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[6][0], 0U);
+        EXPECT_EQ(r.v[7][0], 0U);
+      }
+      for (unsigned rounding = 0; rounding < 4; ++rounding) {
+        Registers<8, 32> r;
+        r.v[0][0] = 0xffffffffU;
+        r.v[1][0] = 0x001fffffU;
+        r.v[2][0] = 0;
+        r.v[3][0] = 0x3ff00000U;
+        r.v[4][0] = r.v[5][0] = 0;
+        const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                               RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | (uint64_t(rounding) << 24);
+        ASSERT_EQ(call(flags, 1, RJ_ARITH_ALU_OMOD_HALF, r.v + 6, r.v, r.v + 2, r.v + 4, nullptr),
+                  RJ_ARITH_SUCCESS);
+        EXPECT_EQ(r.v[6][0], 0U);
+        EXPECT_EQ(r.v[7][0], rounding <= 1 ? 0x00100000U : 0U);
+      }
     }
   }
 }

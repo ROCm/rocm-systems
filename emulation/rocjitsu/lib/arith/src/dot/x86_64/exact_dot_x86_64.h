@@ -7,6 +7,7 @@
 #pragma once
 
 #include "common/bits.h"
+#include "common/compiler.h"
 #include "dot/scalar_repair.h"
 #include "dot/x86_64/exact_dot_simd.h"
 
@@ -154,6 +155,7 @@ inline V dot(const V (&a)[N], const V (&b)[N], V acc, bool saturate) {
   Term<V> products[N];
   V grids[N], product_grid = constant<V>(-1024);
   auto bad = greater(bit_and(acc, constant<V>(0x7fffffff)), constant<V>(0x7f7fffff));
+  RJ_ARITH_UNROLL(4)
   for (int i = 0; i < N; ++i) {
     products[i] = product<Bf16, Rdna3>(a[i], b[i], grids[i], bad);
     product_grid = maximum(product_grid, grids[i]);
@@ -168,6 +170,7 @@ inline V dot(const V (&a)[N], const V (&b)[N], V acc, bool saturate) {
     if constexpr (Packed && !Bf16) {
       top = maximum(top, constant<V>(-14));
     }
+    RJ_ARITH_UNROLL(4)
     for (auto term : products) {
       top = maximum(top, leading(term));
     }
@@ -179,6 +182,7 @@ inline V dot(const V (&a)[N], const V (&b)[N], V acc, bool saturate) {
   if constexpr (Rdna3) {
     total = shifted(c, grid);
     auto any = c.magnitude;
+    RJ_ARITH_UNROLL(4)
     for (auto term : products) {
       auto magnitude = shifted(term, grid);
       auto opposite = bit_xor(term.negative, c.negative);
@@ -189,6 +193,7 @@ inline V dot(const V (&a)[N], const V (&b)[N], V acc, bool saturate) {
   } else {
     auto accumulator = greater(grid, constant<V>(Packed && !Bf16 ? -14 : -126));
     total = align(c, grid, accumulator);
+    RJ_ARITH_UNROLL(4)
     for (int i = 0; i < N; i += 2) {
       auto group_grid = maximum(grids[i], grids[i + 1]);
       auto group = add(align(products[i], group_grid), align(products[i + 1], group_grid));

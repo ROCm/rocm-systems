@@ -12,10 +12,11 @@
 #include <gtest/gtest.h>
 
 #include "rocjitsu/code/dbt/translation_store.h"
+#include "scoped_temp.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
-#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <future>
@@ -29,6 +30,7 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <sys/file.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -60,10 +62,10 @@ void translator_identity_anchor() {}
 class TranslationStoreTest : public ::testing::Test {
 protected:
   void SetUp() override {
-    std::strcpy(root_, "/tmp/rj-translation-store-XXXXXX");
-    ASSERT_NE(mkdtemp(root_), nullptr);
+    // TranslationStore requires a path without symlink components.
+    const auto parent = std::filesystem::canonical(std::filesystem::temp_directory_path());
+    ASSERT_TRUE(root_.initialize("rj-translation-store-", parent));
   }
-  void TearDown() override { std::filesystem::remove_all(root_); }
 
   /// @brief A writable store over @p path, or over this test's directory.
   /// @details Any address inside the translator would do in production; a test
@@ -73,7 +75,8 @@ protected:
                                                               const char *path = nullptr) {
     return std::make_unique<TranslationStore>(
         domain, reinterpret_cast<const void *>(&translator_identity_anchor),
-        path == nullptr ? root_ : path, access, TranslationStore::KeyMode::kTranslatorBuild);
+        path == nullptr ? root_.path().c_str() : path, access,
+        TranslationStore::KeyMode::kTranslatorBuild);
   }
 
   /// @brief The common case: a writable store over this test's directory.
@@ -89,7 +92,7 @@ protected:
     return store.lookup(store.key_for(kSource, kIdentity), kIdentity);
   }
 
-  char root_[64] = {};
+  rocjitsu::test::ScopedTempDirectory root_;
 };
 
 TEST_F(TranslationStoreTest, StoredObjectComesBack) {
@@ -97,6 +100,112 @@ TEST_F(TranslationStoreTest, StoredObjectComesBack) {
   put(*store, kObject);
   EXPECT_EQ(get(*store), kObject);
   EXPECT_EQ(store->hits_for_test(), 1u);
+}
+
+TEST_F(TranslationStoreTest, MalformedEntriesAreMisses) {
+  auto store = open("pair-a");
+  put(*store, kObject);
+  ASSERT_EQ(get(*store), kObject);
+
+  const std::filesystem::path entries = std::filesystem::path(root_.path()) / "pair-a" / "v1";
+  std::filesystem::path manifest;
+  std::filesystem::path object;
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
+    if (item.path().extension() == ".man") {
+      manifest = item.path();
+    }
+    if (item.path().extension() == ".obj") {
+      object = item.path();
+    }
+  }
+  ASSERT_FALSE(manifest.empty());
+  ASSERT_FALSE(object.empty());
+  std::ifstream manifest_stream(manifest);
+  const std::string original((std::istreambuf_iterator<char>(manifest_stream)), {});
+
+  for (const std::string &text : {std::string{}, std::string("bad magic\n"),
+                                  std::string("rjcache1\n"), original + std::string(4096, 'x')}) {
+    std::ofstream(manifest, std::ios::trunc) << text;
+    EXPECT_TRUE(get(*store).empty());
+  }
+  // A valid manifest must still reject a missing or corrupted object.
+  std::ofstream(manifest, std::ios::trunc) << original;
+  std::ofstream(object, std::ios::trunc) << "OUTPUT";
+  EXPECT_TRUE(get(*store).empty());
+  std::filesystem::remove(object);
+  EXPECT_TRUE(get(*store).empty());
+
+  put(*store, kObject);
+  EXPECT_EQ(get(*store), kObject);
+}
+
+TEST_F(TranslationStoreTest, OversizedObjectMismatchIsRejectedBeforeAllocation) {
+  if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init") ||
+      dlsym(RTLD_DEFAULT, "__msan_init")) {
+    GTEST_SKIP() << "address-space limits conflict with sanitizer shadow mappings";
+  }
+  auto store = open("pair-a");
+  put(*store, kObject);
+  ASSERT_EQ(get(*store), kObject);
+  const std::filesystem::path entries = std::filesystem::path(root_.path()) / "pair-a" / "v1";
+  std::filesystem::path object;
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
+    if (item.path().extension() == ".obj") {
+      object = item.path();
+    }
+  }
+  ASSERT_FALSE(object.empty());
+  std::filesystem::resize_file(object, 512u << 20);
+
+  ASSERT_EXIT(
+      {
+        struct rlimit limit {};
+        if (getrlimit(RLIMIT_AS, &limit) != 0) {
+          _exit(2);
+        }
+        limit.rlim_cur = std::min<rlim_t>(limit.rlim_max, 256u << 20);
+        if (setrlimit(RLIMIT_AS, &limit) != 0) {
+          _exit(3);
+        }
+        if (!get(*store).empty()) {
+          _exit(4);
+        }
+        put(*store, kObject);
+        _exit(get(*store) == kObject ? 0 : 5);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(TranslationStoreTest, FailedPublicationLeavesNoTemporaryOrPartialEntry) {
+  for (const char *suffix : {".man", ".obj"}) {
+    auto store = open("pair-a");
+    put(*store, kObject);
+    ASSERT_EQ(get(*store), kObject);
+
+    const std::filesystem::path entries = std::filesystem::path(root_.path()) / "pair-a" / "v1";
+    std::filesystem::path blocked;
+    for (const auto &item : std::filesystem::directory_iterator(entries)) {
+      if (item.path().extension() == suffix) {
+        blocked = item.path();
+      }
+    }
+    ASSERT_FALSE(blocked.empty());
+    for (const auto &item : std::filesystem::directory_iterator(entries)) {
+      std::filesystem::remove(item.path());
+    }
+    // renameat() cannot publish a regular file over this directory. Blocking
+    // the object also exercises cleanup after the manifest was published.
+    ASSERT_TRUE(std::filesystem::create_directory(blocked));
+    put(*store, kObject);
+    EXPECT_TRUE(get(*store).empty());
+    for (const auto &item : std::filesystem::directory_iterator(entries)) {
+      EXPECT_EQ(item.path(), blocked) << "failed publication left an entry or temporary";
+    }
+
+    std::filesystem::remove(blocked);
+    put(*store, kObject);
+    EXPECT_EQ(get(*store), kObject);
+  }
 }
 
 TEST_F(TranslationStoreTest, DomainsDoNotShareEntries) {
@@ -122,8 +231,9 @@ TEST_F(TranslationStoreTest, ADomainThatIsNotOneComponentDisablesTheStore) {
     EXPECT_FALSE(store->key_for(kSource, kIdentity).valid) << "domain: " << domain;
   }
   // Nothing was created outside the domain directories.
-  for (const auto &item : std::filesystem::recursive_directory_iterator(root_))
+  for (const auto &item : std::filesystem::recursive_directory_iterator(root_.path())) {
     EXPECT_TRUE(std::filesystem::is_directory(item)) << item.path();
+  }
 }
 
 TEST_F(TranslationStoreTest, AStoreRootMustBeAnAbsoluteDescendedPath) {
@@ -132,11 +242,11 @@ TEST_F(TranslationStoreTest, AStoreRootMustBeAnAbsoluteDescendedPath) {
   // This spelling would reach the fixture directory if it were incorrectly
   // interpreted relative to `/`, making the assertion independent of whether a
   // coincidentally named top-level directory exists on the host.
-  const std::string relative = std::string(root_).substr(1);
+  const std::string relative = std::filesystem::path(root_.path()).relative_path().string();
   auto store = open_shared("pair-a", TranslationStore::Access::kReadWrite, relative.c_str());
   EXPECT_FALSE(store->available());
   EXPECT_FALSE(store->key_for(kSource, kIdentity).valid);
-  EXPECT_TRUE(std::filesystem::is_empty(root_));
+  EXPECT_TRUE(std::filesystem::is_empty(root_.path()));
 }
 
 TEST_F(TranslationStoreTest, AnEmptyObjectIsNotStored) {
@@ -179,7 +289,7 @@ TEST_F(TranslationStoreTest, TheSharedTierIsReadableByWhoeverEventuallyRuns) {
   umask(previous);
 
   size_t files = 0;
-  for (const auto &item : std::filesystem::recursive_directory_iterator(root_)) {
+  for (const auto &item : std::filesystem::recursive_directory_iterator(root_.path())) {
     const auto mode = std::filesystem::status(item).permissions();
     EXPECT_NE(mode & std::filesystem::perms::others_read, std::filesystem::perms::none)
         << item.path();
@@ -216,7 +326,7 @@ TEST_F(TranslationStoreTest, AReadOnlySharedStoreCreatesNoTree) {
   auto runtime = open_shared("pair-a", TranslationStore::Access::kReadOnly);
   put(*runtime, kObject);
   EXPECT_TRUE(get(*runtime).empty());
-  EXPECT_TRUE(std::filesystem::is_empty(root_));
+  EXPECT_TRUE(std::filesystem::is_empty(root_.path()));
 }
 
 TEST_F(TranslationStoreTest, ASharedTreeAnyoneCanWriteIsRefused) {
@@ -231,7 +341,7 @@ TEST_F(TranslationStoreTest, ASharedTreeAnyoneCanWriteIsRefused) {
   for (const auto extra :
        {std::filesystem::perms::group_write, std::filesystem::perms::others_write}) {
     const std::string domain = "pair-" + std::to_string(domain_index++);
-    const std::filesystem::path leaf = std::filesystem::path(root_) / domain / "v1";
+    const std::filesystem::path leaf = std::filesystem::path(root_.path()) / domain / "v1";
     std::filesystem::create_directories(leaf);
     std::filesystem::permissions(leaf, std::filesystem::perms::owner_all | extra);
 
@@ -255,12 +365,14 @@ TEST_F(TranslationStoreTest, ASharedTreeAnyoneCanWriteIsRefused) {
 open_against_module(const char *module, std::string_view domain, const char *root) {
   void *handle = dlopen(module, RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
   EXPECT_NE(handle, nullptr) << dlerror();
-  if (handle == nullptr)
+  if (handle == nullptr) {
     return nullptr;
+  }
   void *anchor = dlsym(handle, "rj_probe_translator_anchor");
   EXPECT_NE(anchor, nullptr) << module;
-  if (anchor == nullptr)
+  if (anchor == nullptr) {
     return nullptr;
+  }
   return std::make_unique<TranslationStore>(domain, anchor, root,
                                             TranslationStore::Access::kReadWrite,
                                             TranslationStore::KeyMode::kTranslatorBuild);
@@ -271,18 +383,20 @@ open_portable_against_module(const char *module, std::string_view domain, const 
                              TranslationStore::Access access) {
   void *handle = dlopen(module, RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);
   EXPECT_NE(handle, nullptr) << dlerror();
-  if (handle == nullptr)
+  if (handle == nullptr) {
     return nullptr;
+  }
   void *anchor = dlsym(handle, "rj_probe_translator_anchor");
   EXPECT_NE(anchor, nullptr) << module;
-  if (anchor == nullptr)
+  if (anchor == nullptr) {
     return nullptr;
+  }
   return std::make_unique<TranslationStore>(domain, anchor, root, access,
                                             TranslationStore::KeyMode::kPortablePrebuilt);
 }
 
 TEST_F(TranslationStoreTest, SharedRootUsesTheResolvedTranslatorPath) {
-  const std::filesystem::path prefix(root_);
+  const std::filesystem::path prefix(root_.path());
   std::filesystem::create_directories(prefix / "bin");
   std::filesystem::create_directories(prefix / "lib");
   const std::filesystem::path copied = prefix / "lib" / "librj-probe.so";
@@ -307,12 +421,12 @@ TEST_F(TranslationStoreTest, ARebuiltTranslatorDoesNotReadTheOldEntries) {
   //
   // The two modules differ in build id and nothing else, which is what a rebuild
   // that changed emitted bytes looks like to the store.
-  auto first = open_against_module(RJ_TRANSLATOR_PROBE_a, "pair-a", root_);
+  auto first = open_against_module(RJ_TRANSLATOR_PROBE_a, "pair-a", root_.path().c_str());
   ASSERT_NE(first, nullptr);
   put(*first, kObject);
   ASSERT_EQ(get(*first), kObject) << "the entry was never written";
 
-  auto second = open_against_module(RJ_TRANSLATOR_PROBE_b, "pair-a", root_);
+  auto second = open_against_module(RJ_TRANSLATOR_PROBE_b, "pair-a", root_.path().c_str());
   ASSERT_NE(second, nullptr);
   EXPECT_TRUE(get(*second).empty()) << "a differently-built translator read a stale entry";
 
@@ -333,23 +447,24 @@ TEST_F(TranslationStoreTest, APortablePrebuiltEntrySurvivesATranslatorRebuild) {
   // compatibility boundary is the cache epoch plus translation identity, not
   // an incidental ELF build ID that packaging may change without changing the
   // translation contract.
-  auto tool = open_portable_against_module(RJ_TRANSLATOR_PROBE_a, "pair-a", root_,
+  auto tool = open_portable_against_module(RJ_TRANSLATOR_PROBE_a, "pair-a", root_.path().c_str(),
                                            TranslationStore::Access::kReadWrite);
   ASSERT_NE(tool, nullptr);
   put(*tool, kObject);
   ASSERT_EQ(get(*tool), kObject) << "the portable entry was never written";
 
   std::filesystem::path manifest;
-  for (const auto &item : std::filesystem::recursive_directory_iterator(root_)) {
-    if (item.path().extension() == ".man")
+  for (const auto &item : std::filesystem::recursive_directory_iterator(root_.path())) {
+    if (item.path().extension() == ".man") {
       manifest = item.path();
+    }
   }
   ASSERT_FALSE(manifest.empty());
   std::ifstream manifest_stream(manifest);
   const std::string manifest_text((std::istreambuf_iterator<char>(manifest_stream)), {});
   EXPECT_NE(manifest_text.find("\nbuild=unversioned-prebuilt-v1\n"), std::string::npos);
 
-  auto runtime = open_portable_against_module(RJ_TRANSLATOR_PROBE_b, "pair-a", root_,
+  auto runtime = open_portable_against_module(RJ_TRANSLATOR_PROBE_b, "pair-a", root_.path().c_str(),
                                               TranslationStore::Access::kReadOnly);
   ASSERT_NE(runtime, nullptr);
   EXPECT_EQ(get(*runtime), kObject);
@@ -357,7 +472,7 @@ TEST_F(TranslationStoreTest, APortablePrebuiltEntrySurvivesATranslatorRebuild) {
 
   // Exact and portable stores remain separate policies. Opting a packaged tier
   // into portability cannot weaken an ordinary build-specific cache.
-  auto exact = open_against_module(RJ_TRANSLATOR_PROBE_b, "pair-a", root_);
+  auto exact = open_against_module(RJ_TRANSLATOR_PROBE_b, "pair-a", root_.path().c_str());
   ASSERT_NE(exact, nullptr);
   EXPECT_TRUE(get(*exact).empty());
 }
@@ -408,24 +523,28 @@ TEST_F(TranslationStoreTest, AManifestWithNoObjectIsReclaimed) {
   put(*store, kObject);
   ASSERT_EQ(get(*store), kObject);
 
-  const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
-  for (const auto &item : std::filesystem::directory_iterator(entries))
-    if (item.path().extension() == ".obj")
+  const std::filesystem::path entries = std::filesystem::path(root_.path()) / "pair-a" / "v1";
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
+    if (item.path().extension() == ".obj") {
       std::filesystem::remove(item.path());
+    }
+  }
   ASSERT_GT(store->size_for_test(), 0u) << "the orphan manifest must still be accounted";
 
   // Age it past the threshold that separates an abandoned write from one still
   // in progress, then re-open: the sweep runs once when the store opens.
-  for (const auto &item : std::filesystem::directory_iterator(entries))
+  for (const auto &item : std::filesystem::directory_iterator(entries)) {
     std::filesystem::last_write_time(item.path(), std::filesystem::file_time_type::clock::now() -
                                                       std::chrono::hours(1));
+  }
   auto reopened = open("pair-a");
   EXPECT_TRUE(get(*reopened).empty());
 
   size_t orphans = 0;
   for (const auto &item : std::filesystem::directory_iterator(entries)) {
-    if (item.path().extension() != ".man")
+    if (item.path().extension() != ".man") {
       continue;
+    }
     auto object = item.path();
     object.replace_extension(".obj");
     orphans += std::filesystem::exists(object) ? 0 : 1;
@@ -438,7 +557,7 @@ TEST_F(TranslationStoreTest, AbandonedFileSweepWaitsForTheDirectoryWriter) {
     auto initial = open("pair-a");
     ASSERT_TRUE(initial->available());
   }
-  const std::filesystem::path entries = std::filesystem::path(root_) / "pair-a" / "v1";
+  const std::filesystem::path entries = std::filesystem::path(root_.path()) / "pair-a" / "v1";
   const std::filesystem::path temporary = entries / "entry.tmp.writer";
   std::ofstream(temporary) << "still publishing";
   std::filesystem::last_write_time(temporary, std::filesystem::file_time_type::clock::now() -
@@ -456,8 +575,9 @@ TEST_F(TranslationStoreTest, AbandonedFileSweepWaitsForTheDirectoryWriter) {
     const int fd = ::open(entries.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
     char token = 'x';
     if (fd < 0 || flock(fd, LOCK_EX) != 0 || write(ready[1], &token, 1) != 1 ||
-        read(release[0], &token, 1) != 1)
+        read(release[0], &token, 1) != 1) {
       _exit(1);
+    }
     close(fd);
     _exit(0);
   }
@@ -493,7 +613,7 @@ TEST_F(TranslationStoreTest, AGroupWritableStoreRootIsStillUsable) {
   // an unusable store is indistinguishable from a cold one. Ownership is what
   // matters for a root the store did not create; the stricter rule belongs to the
   // directories it creates and reads entries from.
-  const std::filesystem::path root = std::filesystem::path(root_) / "daemon-made";
+  const std::filesystem::path root = std::filesystem::path(root_.path()) / "daemon-made";
   std::filesystem::create_directories(root);
   std::filesystem::permissions(root, kSafeDirPerms | std::filesystem::perms::group_write);
 
@@ -504,8 +624,9 @@ TEST_F(TranslationStoreTest, AGroupWritableStoreRootIsStillUsable) {
 
   // The directories holding entries are still strict, whatever the root allows.
   for (const auto &item : std::filesystem::recursive_directory_iterator(root)) {
-    if (!std::filesystem::is_directory(item))
+    if (!std::filesystem::is_directory(item)) {
       continue;
+    }
     EXPECT_EQ(std::filesystem::status(item).permissions() &
                   (std::filesystem::perms::group_write | std::filesystem::perms::others_write),
               std::filesystem::perms::none)
@@ -530,13 +651,14 @@ TEST_F(TranslationStoreTest, ASymlinkedDomainIsRefusedRatherThanFollowed) {
   put(*ordinary, kObject);
   ASSERT_EQ(get(*ordinary), kObject) << "control: a plain domain must round-trip here";
 
-  const std::filesystem::path elsewhere = std::filesystem::path(root_) / "elsewhere";
+  const std::filesystem::path elsewhere = std::filesystem::path(root_.path()) / "elsewhere";
   std::filesystem::create_directories(elsewhere);
   // Explicit, because the ambient umask decides otherwise: a group-writable
   // directory is refused on its own merits, which would make the symlink
   // assertion below pass without testing the symlink at all.
   std::filesystem::permissions(elsewhere, kSafeDirPerms);
-  std::filesystem::create_directory_symlink(elsewhere, std::filesystem::path(root_) / "pair-a");
+  std::filesystem::create_directory_symlink(elsewhere,
+                                            std::filesystem::path(root_.path()) / "pair-a");
 
   for (auto access : {TranslationStore::Access::kReadWrite, TranslationStore::Access::kReadOnly}) {
     auto shared_store = open_shared("pair-a", access);
@@ -553,7 +675,7 @@ TEST_F(TranslationStoreTest, ASymlinkAboveTheDomainIsRefusedToo) {
   // The parent of the domain is just as load-bearing: redirecting it relocates
   // the whole tree, including entries a later reader would trust. Same structure
   // as above -- a real directory first, so refusing everything cannot pass.
-  const std::filesystem::path real_root = std::filesystem::path(root_) / "real";
+  const std::filesystem::path real_root = std::filesystem::path(root_.path()) / "real";
   std::filesystem::create_directories(real_root);
   std::filesystem::permissions(real_root, kSafeDirPerms);
   auto ordinary =
@@ -562,10 +684,10 @@ TEST_F(TranslationStoreTest, ASymlinkAboveTheDomainIsRefusedToo) {
   put(*ordinary, kObject);
   ASSERT_EQ(get(*ordinary), kObject);
 
-  const std::filesystem::path elsewhere = std::filesystem::path(root_) / "elsewhere";
+  const std::filesystem::path elsewhere = std::filesystem::path(root_.path()) / "elsewhere";
   std::filesystem::create_directories(elsewhere);
   std::filesystem::permissions(elsewhere, kSafeDirPerms);
-  const std::filesystem::path linked_root = std::filesystem::path(root_) / "link";
+  const std::filesystem::path linked_root = std::filesystem::path(root_.path()) / "link";
   std::filesystem::create_directory_symlink(elsewhere, linked_root);
 
   auto tool =

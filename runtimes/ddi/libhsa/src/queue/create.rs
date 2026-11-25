@@ -15,6 +15,7 @@ static COOPERATIVE_CREATE_GATE: Mutex<()> = Mutex::new(());
 #[allow(clippy::too_many_arguments)]
 pub(crate) unsafe fn create_hardware_queue(
     expected_generation: Option<u64>,
+    intercept: bool,
     agent: HsaAgent,
     size: u32,
     queue_type: u32,
@@ -23,7 +24,8 @@ pub(crate) unsafe fn create_hardware_queue(
     data: CallbackArg,
     private_segment_size: u32,
     ring_memory: QueueRingMemory,
-    cu_mask: Option<Vec<u32>>,
+    control_memory: QueueRingMemory,
+    mut cu_mask: Option<Vec<u32>>,
     queue: *mut *mut HsaQueue,
     created_log: &mut Option<(u64, usize)>,
 ) -> Status {
@@ -32,11 +34,12 @@ pub(crate) unsafe fn create_hardware_queue(
         id: u64,
         device: Device,
         gpu: GpuInfo,
+        scratch_policy: Arc<ScratchPolicy>,
         event: Arc<QueueEventOwner>,
         host_page_size: usize,
         stop: Arc<AtomicBool>,
-        health: Arc<crate::runtime::GenerationHealth>,
-        _token: crate::runtime::InFlightToken,
+        health: Arc<crate::session::SessionHealth>,
+        _token: crate::admission::InFlightToken,
     }
 
     let cooperative = queue_type == QUEUE_TYPE_COOPERATIVE;
@@ -48,7 +51,7 @@ pub(crate) unsafe fn create_hardware_queue(
     } else {
         None
     };
-    let (size, callback, data, private_segment_size) = if cooperative {
+    let (mut size, callback, data, private_segment_size) = if cooperative {
         (
             16_384 / AQL_PACKET_BYTES as u32,
             None,
@@ -58,9 +61,6 @@ pub(crate) unsafe fn create_hardware_queue(
         )
     } else {
         (size.max(64), callback, data, private_segment_size)
-    };
-    let Some(ring_size_bytes) = u64::from(size).checked_mul(AQL_PACKET_BYTES as u64) else {
-        return INVALID_QUEUE_CREATION;
     };
     let prepared = {
         let mut guard = match lock() {
@@ -77,14 +77,62 @@ pub(crate) unsafe fn create_hardware_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.stop_workers.load(Ordering::Acquire) {
+        if runtime.control.stop_workers.load(Ordering::Acquire) {
             return INVALID_RUNTIME_STATE;
         }
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
+        let info = runtime.agents.gpus[index].info();
+        if control_memory == QueueRingMemory::HostVisibleLocal
+            && !runtime
+                .agents
+                .route_from_nearest_cpu(index)
+                .is_some_and(|link| {
+                    link.kind == rocddi::topology::MemoryLinkType::Xgmi
+                        && link.coherent_support
+                        && link.atomic_support_32bit
+                        && link.atomic_support_64bit
+                })
+        {
+            return INVALID_QUEUE_CREATION;
+        }
+        if cu_mask.is_some() || runtime.agents.gpus[index].global_cu_mask.is_some() {
+            cu_mask = match constrain_cu_mask(
+                &info,
+                runtime.agents.gpus[index].global_cu_mask.as_deref(),
+                cu_mask.as_deref(),
+            ) {
+                Ok((mask, _)) => Some(mask),
+                Err(status) => return status,
+            };
+        }
+        let Some((minimum, maximum)) = aql_queue_limits(&info) else {
+            return INVALID_QUEUE_CREATION;
+        };
         if cooperative {
-            if runtime.gpus[index].info().gws_count == 0 {
+            let Some(selected) = cooperative_queue_size(&info) else {
+                return INVALID_QUEUE_CREATION;
+            };
+            size = selected;
+        }
+        if size < minimum
+            || size > maximum
+            || (queue_type != QUEUE_TYPE_SINGLE
+                && info
+                    .queues
+                    .aql
+                    .is_none_or(|controls| !controls.multiple_producers))
+        {
+            return INVALID_QUEUE_CREATION;
+        }
+        if cooperative {
+            if !runtime.agents.gpus[index]
+                .info()
+                .queues
+                .aql
+                .is_some_and(|queue| queue.cooperative)
+            {
                 return INVALID_QUEUE_CREATION;
             }
             if runtime
@@ -106,7 +154,12 @@ pub(crate) unsafe fn create_hardware_queue(
                 {
                     return OUT_OF_RESOURCES;
                 }
-                if ring_memory != record.ring_memory {
+                if ring_memory != record.ring_memory || control_memory != record.control_memory {
+                    return INVALID_QUEUE_CREATION;
+                }
+                // An already published plain cooperative queue cannot acquire
+                // a proxy without changing handles held by its existing users.
+                if intercept && record.public_handle == *public {
                     return INVALID_QUEUE_CREATION;
                 }
                 let Some(refs) = record.cooperative_refs.checked_add(1) else {
@@ -125,7 +178,7 @@ pub(crate) unsafe fn create_hardware_queue(
                 }
                 record.cooperative_refs = refs;
                 // SAFETY: The shared public queue remains in the registry.
-                unsafe { queue.write(*public as *mut HsaQueue) };
+                unsafe { queue.write(record.public_handle as *mut HsaQueue) };
                 return SUCCESS;
             }
         }
@@ -143,23 +196,25 @@ pub(crate) unsafe fn create_hardware_queue(
         if runtime.queue_state.queues.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        let tracker = runtime.inflight.clone();
+        let tracker = runtime.control.inflight.clone();
         let Some(token) = tracker.enter() else {
             return OUT_OF_RESOURCES;
         };
         Prepared {
             generation,
             id,
-            device: runtime.gpus[index].device.clone(),
-            gpu: runtime.gpus[index].info(),
+            device: runtime.agents.gpus[index].device.clone(),
+            gpu: runtime.agents.gpus[index].info(),
+            scratch_policy: runtime.agents.gpus[index].scratch.clone(),
             event,
-            host_page_size: runtime.host_page_size,
-            stop: runtime.stop_workers.clone(),
-            health: runtime.health.clone(),
+            host_page_size: runtime.agents.host_page_size,
+            stop: runtime.control.stop_workers.clone(),
+            health: runtime.control.health.clone(),
             _token: token,
         }
     };
 
+    let ring_size_bytes = u64::from(size) * AQL_PACKET_BYTES as u64;
     let inactive_signal = match QueueEventSignal::create(
         prepared.event.clone(),
         &prepared.device,
@@ -174,7 +229,7 @@ pub(crate) unsafe fn create_hardware_queue(
         } else {
             match allocate_scratch(
                 &prepared.device,
-                prepared.gpu,
+                &prepared.gpu,
                 private_segment_size,
                 prepared.gpu.wavefront_size,
             ) {
@@ -194,6 +249,7 @@ pub(crate) unsafe fn create_hardware_queue(
         unsafe {
             gpu.create_queue_with_dependencies(
                 QueueRequest {
+                    control_memory,
                     ring_size_bytes,
                     parameters: QueueParameters::Aql {
                         producer_mode: if queue_type == QUEUE_TYPE_SINGLE {
@@ -234,12 +290,26 @@ pub(crate) unsafe fn create_hardware_queue(
     };
     // The native owner retains its external backing if setup unwinds.
     let mut pending = native;
+    if prepared.scratch_policy.asynchronous && !cooperative {
+        // SAFETY: This queue is still private and its dependencies remain paired.
+        let (native, _) = unsafe { pending.parts_mut() };
+        if let Err(error) = native.enable_async_scratch() {
+            return abandon_unpublished_retained(pending, map_error(error), &mut creation_guard);
+        }
+    }
     if !saved_cu_mask.is_empty() {
         if let Err(error) = pending.set_cu_mask(&saved_cu_mask) {
             return abandon_unpublished_retained(pending, map_error(error), &mut creation_guard);
         }
     }
     let info = pending.info();
+    if prepared.scratch_policy.reclaim && !prepared.scratch_policy.asynchronous {
+        scratch::use_once(
+            &pending,
+            scratch
+                .is_some_and(|scratch| scratch.byte_length > prepared.scratch_policy.single_limit),
+        );
+    }
     let Some(control) = info.aql_control else {
         return abandon_unpublished_retained(pending, INVALID_QUEUE_CREATION, &mut creation_guard);
     };
@@ -269,6 +339,7 @@ pub(crate) unsafe fn create_hardware_queue(
     };
     if runtime.queue_state.queues.try_reserve(1).is_err()
         || runtime.queue_state.queues.contains_key(&public)
+        || (intercept && runtime.queue_state.intercept_queues.try_reserve(1).is_err())
     {
         drop(guard);
         return abandon_unpublished_retained(pending, OUT_OF_RESOURCES, &mut creation_guard);
@@ -287,11 +358,34 @@ pub(crate) unsafe fn create_hardware_queue(
         (*header).reserved = 0;
         (*header).id = prepared.id;
     }
+    let proxy = if intercept {
+        match crate::queue_intercept::InterceptQueue::create(
+            &prepared.device,
+            public,
+            size,
+            ring_memory,
+            control_memory,
+            callback,
+            data,
+        ) {
+            Ok(proxy) => Some(proxy),
+            Err(status) => {
+                drop(guard);
+                return abandon_unpublished_retained(pending, status, &mut creation_guard);
+            }
+        }
+    } else {
+        None
+    };
+    let published = proxy.as_ref().map_or(public, |proxy| proxy.public);
     runtime.queue_state.queues.insert(
         public,
         Queue {
+            scratch_policy: prepared.scratch_policy.clone(),
+            scratch_idle_since: None,
+            scratch_reclaim_pending: false,
             native: pending,
-            public_handle: public,
+            public_handle: published,
             scratch_event_visibility: ScratchEventVisibility::Unpublished,
             _doorbell: doorbell,
             event_alive,
@@ -304,6 +398,7 @@ pub(crate) unsafe fn create_hardware_queue(
             inactivated: false,
             cu_mask: saved_cu_mask,
             callback,
+            control_memory,
             callback_data: data,
             vm_faulted: false,
             vm_fault_callback_state: VmFaultCallbackState::Unseen,
@@ -313,7 +408,7 @@ pub(crate) unsafe fn create_hardware_queue(
         },
     );
     runtime.queue_state.released_counted_queues.remove(&public);
-    let observer_failed = runtime.system_event_failed.clone();
+    let observer_failed = runtime.events.failure_flag();
     let event_worker = thread::Builder::new()
         .name("rocddi-queue-events".into())
         .spawn(move || {
@@ -333,6 +428,7 @@ pub(crate) unsafe fn create_hardware_queue(
         drop(guard);
         if destroy_runtime_queue(&mut record).is_err() {
             std::mem::forget(record);
+            std::mem::forget(proxy);
         } else {
             creation_guard.disarm();
         }
@@ -344,10 +440,30 @@ pub(crate) unsafe fn create_hardware_queue(
     };
     record.event_worker = Some(event_worker);
     record.scratch_event_visibility = ScratchEventVisibility::Published;
+    if let Some(proxy) = proxy {
+        if let Err(status) = proxy.start() {
+            let Some(mut record) = runtime.queue_state.queues.remove(&public) else {
+                prepared.health.quarantine();
+                return ERROR;
+            };
+            drop(guard);
+            if destroy_runtime_queue(&mut record).is_err() {
+                std::mem::forget(record);
+                std::mem::forget(proxy);
+            } else {
+                creation_guard.disarm();
+            }
+            return status;
+        }
+        runtime
+            .queue_state
+            .intercept_queues
+            .insert(published, proxy);
+    }
     // SAFETY: The caller supplied writable output storage, and the registry
     // now owns the complete queue and its event worker.
-    unsafe { queue.write(public as *mut HsaQueue) };
-    *created_log = Some((prepared.id, public));
+    unsafe { queue.write(published as *mut HsaQueue) };
+    *created_log = Some((prepared.id, published));
     creation_guard.disarm();
     SUCCESS
 }
@@ -356,14 +472,14 @@ pub(crate) unsafe fn create_hardware_queue(
 /// unpublished queue whose cleanup cannot be proven complete.
 struct UnpublishedQueueGuard<'a> {
     /// Generation health retained until queue publication or rollback.
-    health: &'a crate::runtime::GenerationHealth,
+    health: &'a crate::session::SessionHealth,
     /// Whether dropping this guard must retire an unpublished queue.
     armed: bool,
 }
 
 impl<'a> UnpublishedQueueGuard<'a> {
     /// Arms rollback for an unpublished queue and retains its health record.
-    fn new(health: &'a crate::runtime::GenerationHealth) -> Self {
+    fn new(health: &'a crate::session::SessionHealth) -> Self {
         Self {
             health,
             armed: true,
@@ -422,17 +538,25 @@ fn abandon_unpublished_retained(
 
 /// # Safety
 /// `queue` addresses writable output storage. The caller serializes native
-/// queue publication and destruction with all producers.
+/// queue publication and destruction with all producers. The callback and its
+/// data remain valid until queue destruction joins the event worker.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "HSA descriptor fields stay explicit at the creation boundary"
+)]
 pub(crate) unsafe fn create_sdma_queue(
     expected_generation: Option<u64>,
     agent: HsaAgent,
     size_bytes: u32,
     selection: SdmaEngineSelection,
     ring_memory: QueueRingMemory,
+    control_memory: QueueRingMemory,
+    callback: QueueErrorCallback,
+    data: CallbackArg,
     queue: *mut *mut HsaQueue,
     created_log: &mut Option<(u64, usize, u32)>,
 ) -> Status {
-    let (generation, id, device, health, _token) = {
+    let (generation, id, device, health, stop, _token) = {
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -447,10 +571,10 @@ pub(crate) unsafe fn create_sdma_queue(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        if runtime.stop_workers.load(Ordering::Acquire) {
+        if runtime.control.stop_workers.load(Ordering::Acquire) {
             return INVALID_RUNTIME_STATE;
         }
-        let Some(index) = runtime.gpu_index(agent) else {
+        let Some(index) = runtime.agents.gpu_index(agent) else {
             return INVALID_AGENT;
         };
         let id = match runtime.queue_state.allocate_id() {
@@ -460,24 +584,34 @@ pub(crate) unsafe fn create_sdma_queue(
         if runtime.queue_state.sdma_queues.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        let tracker = runtime.inflight.clone();
+        let tracker = runtime.control.inflight.clone();
         let Some(token) = tracker.enter() else {
             return OUT_OF_RESOURCES;
         };
         (
             generation,
             id,
-            runtime.gpus[index].device.clone(),
-            runtime.health.clone(),
+            runtime.agents.gpus[index].device.clone(),
+            runtime.control.health.clone(),
+            runtime.control.stop_workers.clone(),
             token,
         )
     };
-    let mut control = Box::new(SdmaQueueControl {
-        read_index_host_address: 0,
-        write_index_host_address: 0,
-        _padding: [0; SDMA_QUEUE_HANDLE_BIT - 2 * std::mem::size_of::<usize>()],
-        header: [0; std::mem::size_of::<HsaQueue>()],
-    });
+    let (control_owner, control) = match sdma_control_storage(&device, control_memory) {
+        Ok(control) => control,
+        Err(status) => return status,
+    };
+    let subscription = if callback.is_some() {
+        match rocddi::device::event::subscribe(&device) {
+            Ok(subscription) => Some(subscription),
+            Err(error) if error.kind() == rocddi::ErrorKind::Unsupported => {
+                return INVALID_QUEUE_CREATION;
+            }
+            Err(error) => return map_error(error),
+        }
+    } else {
+        None
+    };
     let mut doorbell = Box::new(AmdSignal::doorbell(0, 0));
     let mut creation_guard = UnpublishedQueueGuard::new(&health);
     let native = match device.gpu().and_then(|gpu| {
@@ -485,6 +619,7 @@ pub(crate) unsafe fn create_sdma_queue(
         // remains unpublished until its transport has been validated.
         unsafe {
             gpu.create_queue(QueueRequest {
+                control_memory,
                 ring_size_bytes: u64::from(size_bytes),
                 parameters: QueueParameters::SdmaByEngine {
                     selection,
@@ -516,10 +651,14 @@ pub(crate) unsafe fn create_sdma_queue(
             &mut creation_guard,
         );
     };
-    let public = control.header.as_mut_ptr().cast::<HsaQueue>();
+    // SAFETY: The descriptor owner retains a writable aligned control object.
+    let public = unsafe { (&raw mut (*control).header).cast::<HsaQueue>() };
     let public_key = public as usize;
-    control.read_index_host_address = info.read_index_host_address;
-    control.write_index_host_address = info.write_index_host_address;
+    // SAFETY: The control object is initialized and not yet published.
+    unsafe {
+        (*control).read_index_host_address = info.read_index_host_address;
+        (*control).write_index_host_address = info.write_index_host_address;
+    }
     *doorbell = AmdSignal::doorbell(info.doorbell_host_address, public_key);
     // SAFETY: The public header has HsaQueue alignment and remains owned by
     // the SDMA record until successful native queue destruction.
@@ -558,16 +697,100 @@ pub(crate) unsafe fn create_sdma_queue(
         public_key,
         SdmaQueue {
             native,
-            _control: control,
+            _control: control_owner,
             _doorbell: doorbell,
+            event_alive: Arc::new(AtomicBool::new(true)),
+            event_worker: None,
+            callback,
+            callback_data: data,
             agent,
             hardware_id: u32::try_from(id).unwrap_or(u32::MAX),
             teardown_started: false,
         },
     );
+    if let Some(subscription) = subscription {
+        let alive = runtime.queue_state.sdma_queues[&public_key]
+            .event_alive
+            .clone();
+        let endpoint = device.endpoint().id;
+        let worker = thread::Builder::new()
+            .name("rocddi-sdma-events".into())
+            .spawn(move || {
+                sdma_event::worker(subscription, &stop, &alive, endpoint, public_key);
+            });
+        let Ok(worker) = worker else {
+            let Some(mut record) = runtime.queue_state.sdma_queues.remove(&public_key) else {
+                return ERROR;
+            };
+            drop(guard);
+            if destroy_runtime_sdma_queue(&mut record).is_err() {
+                std::mem::forget(record);
+            } else {
+                creation_guard.disarm();
+            }
+            return OUT_OF_RESOURCES;
+        };
+        let Some(record) = runtime.queue_state.sdma_queues.get_mut(&public_key) else {
+            return ERROR;
+        };
+        record.event_worker = Some(worker);
+    }
     // SAFETY: The registry owns the queue before the caller sees this header.
     unsafe { queue.write(public) };
     *created_log = Some((id, public_key, engine_id));
     creation_guard.disarm();
     SUCCESS
+}
+
+/// Allocates the public SDMA descriptor at its required handle-tag alignment.
+fn sdma_control_storage(
+    device: &Device,
+    placement: QueueRingMemory,
+) -> Result<(SdmaControlStorage, *mut SdmaQueueControl), Status> {
+    let initial = SdmaQueueControl {
+        read_index_host_address: 0,
+        write_index_host_address: 0,
+        _padding: [0; SDMA_QUEUE_HANDLE_BIT - 2 * std::mem::size_of::<usize>()],
+        header: [0; std::mem::size_of::<HsaQueue>()],
+    };
+    if placement == QueueRingMemory::System {
+        let mut backing = Box::new(initial);
+        let address = &raw mut *backing;
+        return Ok((SdmaControlStorage::System { _backing: backing }, address));
+    }
+    let backing = device
+        .allocate(
+            MemoryKind::DeviceLocal {
+                host_visible: true,
+                coherent: true,
+                extended_coherent: true,
+                uncached: false,
+                contiguous: false,
+            },
+            std::mem::size_of::<SdmaQueueControl>() as u64,
+            std::mem::align_of::<SdmaQueueControl>() as u64,
+            DeviceAccess::READ | DeviceAccess::WRITE,
+        )
+        .map_err(|error| {
+            if error.kind() == rocddi::ErrorKind::Unsupported {
+                INVALID_QUEUE_CREATION
+            } else {
+                map_error(error)
+            }
+        })?;
+    let info = backing.info();
+    let address = info.host_address.ok_or(INVALID_QUEUE_CREATION)?;
+    if address as u64 != info.device_address
+        || address % std::mem::align_of::<SdmaQueueControl>() != 0
+    {
+        return Err(INVALID_QUEUE_CREATION);
+    }
+    let control = address as *mut SdmaQueueControl;
+    // SAFETY: The owned coherent allocation is aligned, writable, and large
+    // enough for this descriptor, and no producer has observed it yet.
+    unsafe { control.write(initial) };
+    Ok((
+        SdmaControlStorage::DeviceLocal { _backing: backing },
+        control,
+    ))
 }

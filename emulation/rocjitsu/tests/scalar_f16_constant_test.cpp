@@ -4,6 +4,7 @@
 /// @file scalar_f16_constant_test.cpp
 /// @brief Decoded scalar F16 source formatting and full-word destination controls.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
@@ -15,6 +16,8 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/operand.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -39,14 +42,15 @@ TEST(ScalarF16CompatibilityTest, Rdna35MinFormatsNumericInlineFloats) {
   amdgpu::GpuMemory memory{"rdna35_scalar_f16"};
   amdgpu::L2Cache cache{"rdna35_scalar_f16_cache"};
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_RDNA3_5;
+  config.arch = rocjitsu::IsaFamily::Rdna3_5;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 16;
   config.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("rdna35_scalar_f16", config, &memory, &cache);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "rdna35_scalar_f16", config, &memory, &cache));
   auto decoder = Decoder::create(config.arch);
-  ASSERT_NE(cu, nullptr);
   ASSERT_NE(decoder, nullptr);
   auto *wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
   ASSERT_NE(wave, nullptr);
@@ -63,8 +67,145 @@ TEST(ScalarF16CompatibilityTest, Rdna35MinFormatsNumericInlineFloats) {
   wave->halt();
 }
 
+TEST(Rdna35ScalarFp, WaveModesAndExceptionsWithEmptyExec) {
+  amdgpu::GpuMemory memory{"scalar_fp_memory"};
+  amdgpu::L2Cache l2{"scalar_fp_l2"};
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = rocjitsu::IsaFamily::Rdna3_5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 16;
+  config.lds_size_kb = 64;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "scalar_fp", config, &memory, &l2));
+  auto decoder = Decoder::create(config.arch);
+  ASSERT_NE(decoder, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0);
+  const auto base = wf->sgpr_alloc().base;
+  struct Case {
+    const char *mnemonic;
+    uint32_t word, mode, a, b, old_dst, expected_dst, expected_causes;
+    bool expected_scc;
+  };
+  constexpr uint32_t ieee = 1u << 9, denorm = 0xf0u, sat = 1u << 23, sentinel = 0xdeadbeef;
+  constexpr std::array cases{
+      Case{"s_add_f32", 0xa0020100, ieee | 1, 0x3f800000, 0x33800000, 0, 0x3f800001, 32, false},
+      Case{"s_add_f16", 0xa4820100, ieee | 4, 0x3c00, 0x1000, sentinel, 0x3c01, 32, false},
+      Case{"s_cvt_f32_i32", 0xbe826400, ieee | 1, 0x1000001, 0, 0, 0x4b800001, 32, false},
+      Case{"s_cmp_eq_f32", 0xbf420100, ieee, 1, 0, sentinel, sentinel, 0, true},
+      Case{"s_cmp_eq_f16", 0xbf520100, ieee | denorm, 1, 0, sentinel, sentinel, 2, false},
+      Case{"s_ceil_f32", 0xbe826000, ieee, 1, 0, 0, 0, 0, false},
+      Case{"s_fmac_f16", 0xa7020100, ieee, 0x0561, 0x4df3, 0x46f2, 0x46f3, 32, false},
+      Case{"s_mul_f16", 0xa6820100, ieee | sat, 0x7bff, 0x4000, 0, 0x7bff, 40, false},
+      Case{"s_mul_f32", 0xa2020100, ieee, 0x7f800000, 0, 0, 0xffc00000, 1, false},
+      Case{"s_mul_f32", 0xa2020100, ieee | (1u << 8), 0x7f800000, 0, 0, 0xffc00000, 0, false},
+  };
+  for (const auto &test : cases) {
+    SCOPED_TRACE(test.mnemonic);
+    wf->set_mode_raw(test.mode);
+    wf->write_scc(false);
+    wf->set_trapsts(1u << 7); // Preserve causes from older instructions.
+    wf->clear_pending_alu_causes();
+    cu->write_sgpr(base, test.a);
+    cu->write_sgpr(base + 1, test.b);
+    cu->write_sgpr(base + 2, test.old_dst);
+    const std::array<uint32_t, 2> words{test.word, 0};
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(std::string_view(inst->mnemonic()), test.mnemonic);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    EXPECT_EQ(cu->read_sgpr(base + 2), test.expected_dst);
+    EXPECT_EQ(wf->read_scc(), test.expected_scc);
+    EXPECT_EQ(wf->trapsts(), (1u << 7) | test.expected_causes);
+    EXPECT_EQ(wf->pending_alu_causes(), test.expected_causes);
+  }
+  wf->halt();
+}
+
+// Scalar arithmetic executes with empty EXEC and reads sources before an aliased SGPR write.
+TEST(Rdna35ScalarFp, InheritedNanPolicyAndAliasing) {
+  struct Case {
+    uint32_t word, mode, a, b, expected, causes;
+    bool half;
+  };
+  constexpr Case cases[] = {
+      {0xa0020100, 0xf0, 0x7f800123, 0x3f800000, 0x7f800123, 1, false},
+      {0xa0020100, 0x2f0, 0x7f800123, 0x3f800000, 0x7fc00123, 1, false},
+      {0xa1020100, 0xf0, 0x7f800123, 0x3f800000, 0x3f800000, 1, false},
+      {0xa1020100, 0x2f0, 0x7f800123, 0x3f800000, 0x7fc00123, 1, false},
+      {0xbe826000, 0xf0, 0x7f800123, 0, 0x7f800123, 1, false},
+      {0xbe826000, 0x2f0, 0x7f800123, 0, 0x7fc00123, 1, false},
+      {0xbe826800, 0xf0, 0x7f812345, 0, 0x7e09, 1, true},
+      {0xbe826800, 0x2f0, 0x7f812345, 0, 0x7e09, 1, true},
+      {0xbe826a00, 0xf0, 0x7c11a55a, 0, 0x7f822000, 1, false},
+      {0xbe826a00, 0x2f0, 0x7c11a55a, 0, 0x7fc22000, 1, false},
+      {0xa4020100, 0xf0, 0x3f800001, 0x40000000, 0x40003c00, 32, false},
+      {0xa0020100, 0x2f1, 0x3f800000, 0x33800000, 0x3f800001, 32, false},
+  };
+  for (int lanes : {32, 64}) {
+    for (auto semantics :
+         {amdgpu::ArithmeticSemantics::Compatibility, amdgpu::ArithmeticSemantics::Loose}) {
+      amdgpu::GpuMemory memory("rdna35_scalar_policy");
+      amdgpu::L2Cache cache("rdna35_scalar_policy");
+      amdgpu::ComputeUnitCore::Config config{};
+      config.arch = rocjitsu::IsaFamily::Rdna3_5;
+      config.arithmetic = {semantics};
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 104;
+      config.vgprs_per_wf = 8;
+      config.lds_size_kb = 64;
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "scalar_policy", config, &memory, &cache));
+      auto decoder = Decoder::create(config.arch);
+      ASSERT_NE(decoder, nullptr);
+      auto *wave = cu->dispatch_wf(0, 0, 104, 8, lanes);
+      ASSERT_NE(wave, nullptr);
+      const auto base = wave->sgpr_alloc().base;
+      for (const auto &test : cases) {
+        for (uint32_t aliasing_offset : {0U, 2U}) {
+          SCOPED_TRACE(::testing::Message()
+                       << std::hex << test.word << ':' << test.mode << ':' << lanes << ':'
+                       << int(semantics) << ':' << aliasing_offset);
+          wave->set_exec(0);
+          wave->set_mode_raw(test.mode);
+          wave->set_trapsts(0x100);
+          wave->clear_pending_alu_causes();
+          wave->write_scc(true);
+          cu->write_sgpr(base, test.a);
+          cu->write_sgpr(base + 1, test.b);
+          cu->write_sgpr(base + 2, 0xdeadbeef);
+          const std::array<uint32_t, 2> words{(test.word & ~0x7f0000U) | (aliasing_offset << 16),
+                                              0};
+          auto instruction = decoder->decode_window(words);
+          ASSERT_TRUE(instruction.succeeded());
+          ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
+          const uint32_t actual = cu->read_sgpr(base + aliasing_offset);
+          const uint32_t magnitude = test.half ? 0x7fff : 0x7fffffff;
+          const uint32_t infinity = test.half ? 0x7c00 : 0x7f800000;
+          if (semantics == amdgpu::ArithmeticSemantics::Loose &&
+              (test.expected & magnitude) > infinity) {
+            EXPECT_GT(actual & magnitude, infinity);
+          } else {
+            EXPECT_EQ(actual, test.expected);
+          }
+          const uint32_t causes =
+              semantics == amdgpu::ArithmeticSemantics::Compatibility ? test.causes : 0;
+          EXPECT_EQ(wave->trapsts(), 0x100U | causes);
+          EXPECT_EQ(wave->pending_alu_causes(), causes);
+          EXPECT_TRUE(wave->read_scc());
+          EXPECT_EQ(wave->exec(), 0U);
+        }
+      }
+    }
+  }
+}
+
 struct ScalarF16Target {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *name;
 };
 
@@ -89,9 +230,9 @@ protected:
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu_ = amdgpu::ComputeUnitCore::create("scalar_f16_constants", config, &memory_, &cache_);
+    ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(cu_, "scalar_f16_constants",
+                                                                    config, &memory_, &cache_));
     decoder_ = Decoder::create(GetParam().arch);
-    ASSERT_NE(cu_, nullptr);
     ASSERT_NE(decoder_, nullptr);
     wave_ = cu_->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
     ASSERT_NE(wave_, nullptr);
@@ -105,8 +246,8 @@ protected:
   }
 
   uint16_t opcode(const ScalarOperation &operation) const {
-    return GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4 ? operation.rdna4_opcode
-                                                       : operation.cdna5_opcode;
+    return GetParam().arch == rocjitsu::IsaFamily::Rdna4 ? operation.rdna4_opcode
+                                                         : operation.cdna5_opcode;
   }
 
   void write_sgpr(uint32_t reg, uint32_t value) {
@@ -151,7 +292,7 @@ protected:
                      std::optional<uint32_t> literal = std::nullopt,
                      std::optional<uint32_t> raw_carrier = std::nullopt) {
     const std::array<uint32_t, 2> encoded =
-        GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
+        GetParam().arch == rocjitsu::IsaFamily::Rdna4
             ? rdna4::build_vop3(opcode(operation), {.vdst = kDestination,
                                                     .src0 = source,
                                                     .src1 = scalar_positive_inline_u32(0),
@@ -162,9 +303,9 @@ protected:
                                                     .src2 = scalar_positive_inline_u32(0)});
     const std::array<uint32_t, 3> words{encoded[0], encoded[1], literal.value_or(0)};
     if (raw_carrier) {
-      ScopedIsaExecutionBackend execution_backend_scope{GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
-                                                            ? &rdna4::execution_backend()
-                                                            : &cdna5::execution_backend()};
+      ScopedIsaExecutionBackend execution_backend_scope{
+          GetParam().arch == rocjitsu::IsaFamily::Rdna4 ? &rdna4::execution_backend()
+                                                        : &cdna5::execution_backend()};
       std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
       ASSERT_NE(instruction, nullptr);
       const Operand *operand = instruction->src_operand(0);
@@ -175,8 +316,9 @@ protected:
       EXPECT_EQ(regs.read_lane(*operand, 0), *raw_carrier);
       std::array<uint32_t, 3> values{};
       regs.read_chunk(*operand, 0, values.size(), values.data());
-      for (uint32_t value : values)
+      for (uint32_t value : values) {
         EXPECT_EQ(value, *raw_carrier);
+      }
     }
     ASSERT_NO_FATAL_FAILURE(
         expect_execution(words, literal ? 12u : 8u, operation.mnemonic, expected));
@@ -191,8 +333,8 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx12Targets, ScalarF16ConstantTest,
-                         ::testing::Values(ScalarF16Target{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201"},
-                                           ScalarF16Target{ROCJITSU_CODE_ARCH_CDNA5, "Gfx1250"}),
+                         ::testing::Values(ScalarF16Target{rocjitsu::IsaFamily::Rdna4, "Gfx1201"},
+                                           ScalarF16Target{rocjitsu::IsaFamily::Cdna5, "Gfx1250"}),
                          [](const ::testing::TestParamInfo<ScalarF16Target> &info) {
                            return std::string(info.param.name);
                          });
@@ -248,7 +390,7 @@ TEST_P(ScalarF16ConstantTest, ConversionsPreserveRegisterAndLiteralHalfSelection
 }
 
 TEST_P(ScalarF16ConstantTest, DelegationUsesTheEffectiveRegisterSource) {
-  ScopedIsaExecutionBackend execution_backend_scope{GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4
+  ScopedIsaExecutionBackend execution_backend_scope{GetParam().arch == rocjitsu::IsaFamily::Rdna4
                                                         ? &rdna4::execution_backend()
                                                         : &cdna5::execution_backend()};
   util::FailureOr<uint32_t> encoding =
@@ -258,7 +400,7 @@ TEST_P(ScalarF16ConstantTest, DelegationUsesTheEffectiveRegisterSource) {
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder_, words.data()));
   ASSERT_NE(instruction, nullptr);
   std::unique_ptr<Operand> replacement;
-  if (GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (GetParam().arch == rocjitsu::IsaFamily::Rdna4) {
     replacement = std::make_unique<rdna4::Operand>(16, rdna4::OperandType::OPR_SSRC, 0);
   } else {
     replacement = std::make_unique<cdna5::Operand>(16, cdna5::OperandType::OPR_SSRC, 0);
@@ -295,7 +437,7 @@ TEST_P(ScalarF16ConstantTest, PseudoScalarF16WritesOnlyOneZeroPaddedScalarWord) 
 }
 
 TEST_P(ScalarF16ConstantTest, PseudoScalarF16InlineFloatsRetainTheirRawCarrier) {
-  if (GetParam().arch != ROCJITSU_CODE_ARCH_CDNA5) {
+  if (GetParam().arch != rocjitsu::IsaFamily::Cdna5) {
     GTEST_SKIP() << "RDNA4 currently rejects these inline selectors";
   }
   struct PseudoCase {

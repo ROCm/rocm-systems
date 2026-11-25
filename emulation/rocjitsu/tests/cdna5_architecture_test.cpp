@@ -7,6 +7,7 @@
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/data_types.h"
 
 #include <gtest/gtest-spi.h>
@@ -58,10 +59,12 @@ std::array<uint32_t, 4> build_scaled_wmma_words(uint8_t prefix_op, uint32_t matr
 }
 
 uint32_t wmma_format_bits(uint32_t fmt) {
-  if (fmt == 4)
+  if (fmt == 4) {
     return 4;
-  if (fmt == 2 || fmt == 3)
+  }
+  if (fmt == 2 || fmt == 3) {
     return 6;
+  }
   return 8;
 }
 
@@ -169,10 +172,11 @@ std::array<uint32_t, 4> build_scaled_wmma_execution_words(
                                      .src1 = kVgprEncoding + 32,
                                      .src2 = 128,
                                      .opsel_hi = static_cast<uint8_t>(matrix_b_fmt & 0x3u)});
-  if (M == 32)
+  if (M == 32) {
     matrix[0] |= 1u << 14u;
-  else
+  } else {
     matrix[0] |= (matrix_b_fmt >> 2u) << 14u;
+  }
   return {prefix[0], prefix[1], matrix[0], matrix[1]};
 }
 
@@ -239,10 +243,10 @@ TEST(Gfx1250ConfigTest, ConfigLoadsTopology) {
   ASSERT_TRUE(test::load_valid_config(kGfx1250ConfigPath, loaded));
   auto *soc = loaded.soc();
   ASSERT_NE(soc, nullptr);
-  EXPECT_EQ(soc->arch(), ROCJITSU_CODE_ARCH_CDNA5);
-  EXPECT_EQ(config::parse_arch("cdna5"), ROCJITSU_CODE_ARCH_CDNA5);
+  EXPECT_EQ(soc->arch(), rocjitsu::IsaFamily::Cdna5);
+  EXPECT_EQ(config::parse_arch("cdna5"), rocjitsu::IsaFamily::Cdna5);
   EXPECT_EQ(loaded.target, ROCJITSU_CODE_TARGET_GFX1250);
-  EXPECT_STREQ(config::arch_to_string(ROCJITSU_CODE_ARCH_CDNA5), "cdna5");
+  EXPECT_STREQ(config::arch_to_string(rocjitsu::IsaFamily::Cdna5), "cdna5");
 
   EXPECT_TRUE(loaded.device.present);
   EXPECT_EQ(loaded.device.gfx_target_version, 120500u);
@@ -298,7 +302,7 @@ TEST(Gfx1250CodeObjectTest, MachineFlagMapsToTarget) {
   EXPECT_EQ(co.target_id(), ROCJITSU_CODE_TARGET_GFX1250);
   ASSERT_EQ(co.text_sections().size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   const auto *text = co.text_sections()[0];
   auto *words = reinterpret_cast<const uint32_t *>(text->data());
@@ -318,7 +322,7 @@ TEST(Gfx1250CodeObjectTest, InstrumentationPreservesGfx1251DecoderIdentity) {
   ASSERT_TRUE(co.is_valid());
   ASSERT_EQ(co.target_id(), ROCJITSU_CODE_TARGET_GFX1251);
 
-  Instrumentor instrumentor(co, ROCJITSU_CODE_ARCH_CDNA5);
+  Instrumentor instrumentor(co, rocjitsu::IsaFamily::Cdna5);
   instrumentor.add_point_by_offset(0);
   auto validation = instrumentor.validate_points();
   EXPECT_TRUE(validation.errors.empty());
@@ -329,7 +333,7 @@ TEST(Gfx1250CodeObjectTest, InstrumentationPreservesGfx1251DecoderIdentity) {
 TEST(Gfx1250CodeObjectTest, ProbeClobberPreservesConcreteTargetIdentity) {
   ProbeCallable callable;
   callable.symbol = "gfx1251_probe";
-  callable.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  callable.arch = rocjitsu::IsaFamily::Cdna5;
   callable.target = ROCJITSU_CODE_TARGET_GFX1251;
   callable.body_words = {0xCC3B4004u, 0x1C421908u};
 
@@ -366,20 +370,20 @@ TEST(Gfx1250DecodeTest, Gfx1251InstructionsAreTargetGated) {
   // LLVM: llvm/test/MC/AMDGPU/gfx1251_asm_vop3p.s and
   // llvm/test/MC/AMDGPU/gfx1251_asm_wmma_w32.s.
   constexpr GoldenEncoding kGfx1251Instructions[] = {
-      {"v_pk_fma_f64", {0xCC3B4004u, 0x1C421908u}},
-      {"v_pk_mul_f64", {0xCC3C4004u, 0x1A021908u}},
-      {"v_pk_add_f64", {0xCC4B4004u, 0x1A021908u}},
-      {"v_pk_add_nc_u64", {0xCC4C4004u, 0x1A021908u}},
-      {"v_pk_sub_nc_u64", {0xCC4D4004u, 0x1A021908u}},
-      {"v_pk_max_num_f64", {0xCC4E4004u, 0x1A021908u}},
-      {"v_pk_min_num_f64", {0xCC4F4004u, 0x1A021908u}},
-      {"v_pk_lshl_add_u64", {0xCC7E4004u, 0x1C421908u}},
+      {"v_pk_fma_f64", {0xCC3B0004u, 0x04421908u}},
+      {"v_pk_mul_f64", {0xCC3C0004u, 0x02021908u}},
+      {"v_pk_add_f64", {0xCC4B0004u, 0x02021908u}},
+      {"v_pk_add_nc_u64", {0xCC4C0004u, 0x02021908u}},
+      {"v_pk_sub_nc_u64", {0xCC4D0004u, 0x02021908u}},
+      {"v_pk_max_num_f64", {0xCC4E0004u, 0x02021908u}},
+      {"v_pk_min_num_f64", {0xCC4F0004u, 0x02021908u}},
+      {"v_pk_lshl_add_u64", {0xCC7E0004u, 0x04421908u}},
       {"v_wmma_f64_16x16x4_f64", {0xCC5B0008u, 0x1C220900u}},
   };
 
   auto gfx1250 = Decoder::create(default_isa_target_registry(), "gfx1250");
   auto architecture_default =
-      Decoder::create(default_isa_target_registry(), ROCJITSU_CODE_ARCH_CDNA5);
+      Decoder::create(default_isa_target_registry(), rocjitsu::IsaFamily::Cdna5);
   auto gfx1251 = Decoder::create(default_isa_target_registry(), "gfx1251");
   ASSERT_NE(gfx1250, nullptr);
   ASSERT_NE(architecture_default, nullptr);
@@ -403,14 +407,14 @@ TEST(Gfx1250DecodeTest, Gfx1251ImpliedLiteralIdentifiersAreTargetGated) {
   // Public LLVM gfx1251_asm_vop3p.s golden encodings exercise the
   // VOP3P_INST_LITERAL identifier added alongside each packed operation.
   constexpr GoldenEncoding kLiteralInstructions[] = {
-      {"v_pk_fma_f64", {0xCC3B4004u, 0x1C4210FFu, 0x40594000u}},
-      {"v_pk_mul_f64", {0xCC3C4004u, 0x1A0210FFu, 0x40594000u}},
-      {"v_pk_add_f64", {0xCC4B4004u, 0x1A0210FFu, 0x40594000u}},
-      {"v_pk_add_nc_u64", {0xCC4C4004u, 0x1A0210FFu, 0x00000065u}},
-      {"v_pk_sub_nc_u64", {0xCC4D4004u, 0x1A0210FFu, 0x00000065u}},
-      {"v_pk_max_num_f64", {0xCC4E4004u, 0x1A0210FFu, 0x40594000u}},
-      {"v_pk_min_num_f64", {0xCC4F4004u, 0x1A0210FFu, 0x40594000u}},
-      {"v_pk_lshl_add_u64", {0xCC7E4004u, 0x1C4210FFu, 0x00000065u}},
+      {"v_pk_fma_f64", {0xCC3B0004u, 0x044210FFu, 0x40594000u}},
+      {"v_pk_mul_f64", {0xCC3C0004u, 0x020210FFu, 0x40594000u}},
+      {"v_pk_add_f64", {0xCC4B0004u, 0x020210FFu, 0x40594000u}},
+      {"v_pk_add_nc_u64", {0xCC4C0004u, 0x020210FFu, 0x00000065u}},
+      {"v_pk_sub_nc_u64", {0xCC4D0004u, 0x020210FFu, 0x00000065u}},
+      {"v_pk_max_num_f64", {0xCC4E0004u, 0x020210FFu, 0x40594000u}},
+      {"v_pk_min_num_f64", {0xCC4F0004u, 0x020210FFu, 0x40594000u}},
+      {"v_pk_lshl_add_u64", {0xCC7E0004u, 0x044210FFu, 0x00000065u}},
   };
 
   auto gfx1250 = Decoder::create(default_isa_target_registry(), "gfx1250");
@@ -430,7 +434,7 @@ TEST(Gfx1250DecodeTest, Gfx1251ImpliedLiteralIdentifiersAreTargetGated) {
 TEST(Gfx1250DecodeTest, Gfx1251PackedU32LiteralReplicatesBothLanes) {
   // LLVM gfx1251_asm_vop3p.s:
   // v_pk_lshl_add_u64 v[4:7], v[8:11], 101, v[16:19]
-  constexpr std::array<uint32_t, 3> kWords{0xCC7E4004u, 0x1C41FF08u, 0x00000065u};
+  constexpr std::array<uint32_t, 3> kWords{0xCC7E0004u, 0x0441FF08u, 0x00000065u};
   auto gfx1251 = Decoder::create(default_isa_target_registry(), "gfx1251");
   ASSERT_NE(gfx1251, nullptr);
 
@@ -442,6 +446,43 @@ TEST(Gfx1250DecodeTest, Gfx1251PackedU32LiteralReplicatesBothLanes) {
   EXPECT_EQ(packed_shift->encoding_value(), 0x65);
   EXPECT_FALSE(packed_shift->literal64_value().has_value());
   EXPECT_EQ(decoded->disassemble(), "v_pk_lshl_add_u64 v[4:7], v[8:11], 0x65, v[16:19]");
+}
+
+TEST(Gfx1250DecodeTest, Gfx1251PackedAddDisassemblesBothLlvmEncodings) {
+  auto decoder = Decoder::create(default_isa_target_registry(), "gfx1251");
+  ASSERT_NE(decoder, nullptr);
+  // LLVM changed the unused op_sel_hi bits from 111 to 000 in October 2026.
+  constexpr std::array<std::array<uint32_t, 2>, 2> kEncodings{{
+      {0xCC4B0104u, 0x22021908u},
+      {0xCC4B4104u, 0x3A021908u},
+  }};
+  for (const auto &words : kEncodings) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(decoded->disassemble(),
+              "v_pk_add_f64 v[4:7], v[8:11], v[12:15] neg_lo:[1,0] neg_hi:[1,0]");
+  }
+}
+
+TEST(Gfx1250DecodeTest, Gfx1251WmmaF64DisassemblesMatrixReuse) {
+  auto decoder = Decoder::create(default_isa_target_registry(), "gfx1251");
+  ASSERT_NE(decoder, nullptr);
+  // LLVM orders matrix reuse hints before negation when they appear together.
+  struct Case {
+    const char *modifiers;
+    std::array<uint32_t, 2> words;
+  };
+  constexpr Case kCases[] = {
+      {"matrix_a_reuse", {0xCC5B2008u, 0x1C220900u}},
+      {"matrix_b_reuse", {0xCC5B4008u, 0x1C220900u}},
+      {"matrix_a_reuse matrix_b_reuse neg_lo:[1,0,1] neg_hi:[0,0,1]", {0xCC5B6408u, 0xBC220900u}},
+  };
+  for (const auto &[modifiers, words] : kCases) {
+    std::unique_ptr<Instruction> decoded(decode_valid(*decoder, words.data()));
+    ASSERT_NE(decoded, nullptr);
+    EXPECT_EQ(decoded->disassemble(),
+              std::string("v_wmma_f64_16x16x4_f64 v[8:23], v[0:3], v[4:7], v[8:23] ") + modifiers);
+  }
 }
 
 TEST(Gfx1250DecodeTest, AllLlvmGfx1251DppFormsAreTargetGated) {
@@ -538,10 +579,11 @@ TEST(Gfx1250DecodeTest, AllLlvmGfx1251DppFormsAreTargetGated) {
   std::set<std::string_view> normalized_mnemonics;
   for (const auto &[name, words] : kDppForms) {
     std::string_view normalized = name;
-    if (normalized.ends_with("_e64_dpp"))
+    if (normalized.ends_with("_e64_dpp")) {
       normalized.remove_suffix(std::string_view("_e64_dpp").size());
-    else if (normalized.ends_with("_dpp"))
+    } else if (normalized.ends_with("_dpp")) {
       normalized.remove_suffix(std::string_view("_dpp").size());
+    }
     normalized_mnemonics.insert(normalized);
   }
   ASSERT_EQ(normalized_mnemonics.size(), 44u);
@@ -555,9 +597,9 @@ TEST(Gfx1250DecodeTest, AllLlvmGfx1251DppFormsAreTargetGated) {
     std::unique_ptr<Instruction> decoded(decode_valid(*gfx1251, words.data()));
     ASSERT_NE(decoded, nullptr) << name;
     std::string expected_mnemonic(name);
-    if (std::string_view(name).ends_with("_e64_dpp"))
+    if (std::string_view(name).ends_with("_e64_dpp")) {
       expected_mnemonic.erase(expected_mnemonic.size() - std::string_view("_e64_dpp").size());
-    else {
+    } else {
       expected_mnemonic.erase(expected_mnemonic.size() - std::string_view("_dpp").size());
       expected_mnemonic += "_e32";
     }
@@ -599,7 +641,7 @@ TEST(Gfx1250DecodeTest, SMovB64Literal64ConsumesThreeDwords) {
       0xFFFFFFFFu,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -616,7 +658,7 @@ TEST(Gfx1250DecodeTest, ScalarSourceRejectsReservedSelector) {
       0x8C9000E2u, // s_or_b64 s[16:17], reserved selector 226, s0
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
@@ -628,7 +670,7 @@ TEST(Gfx1250DecodeTest, Vop3LiteralConsumesThreeDwords) {
       0x000000F8u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -642,7 +684,7 @@ TEST(Gfx1250DecodeTest, Vop3RejectsLiteral64Selector) {
       0x000000FEu,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
@@ -650,7 +692,7 @@ TEST(Gfx1250DecodeTest, Vop3RejectsLiteral64Selector) {
 TEST(Gfx1250DecodeTest, Vop1RejectsUnsupportedLiteral32WithoutExtensionWord) {
   const auto words = cdna5::build_vop1(cdna5::kVReadfirstlaneB32Vop1, {.src0 = 255});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words.data()));
 }
@@ -658,7 +700,7 @@ TEST(Gfx1250DecodeTest, Vop1RejectsUnsupportedLiteral32WithoutExtensionWord) {
 TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral32WithoutExtensionWord) {
   const auto words = cdna5::build_vop2(cdna5::kVFmamkF64Vop2, {.src0 = 255});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words.data()));
 }
@@ -666,7 +708,7 @@ TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral32WithoutExtensionWord) {
 TEST(Gfx1250DecodeTest, Vop2RejectsUnsupportedLiteral64WithoutExtensionWords) {
   const auto words = cdna5::build_vop2(cdna5::kVFmamkF32Vop2, {.src0 = 254});
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words.data()));
 }
@@ -678,7 +720,7 @@ TEST(Gfx1250DecodeTest, SaluRejectsMixedLiteralWidths) {
       0x00000000u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
@@ -688,7 +730,7 @@ TEST(Gfx1250DecodeTest, SendmsgRtnSelectorsAreNotLiterals) {
       0xBE804CFFu, // s_sendmsg_rtn_b32 s0, 255
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -703,7 +745,7 @@ TEST(Gfx1250DecodeTest, VopdRejectsLiteral64Selector) {
       0xFFFFFCFEu,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
@@ -715,7 +757,7 @@ TEST(Gfx1250DecodeTest, Vop3RejectsDppWithLiteral) {
       0x00001500u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
@@ -727,7 +769,7 @@ TEST(Gfx1250DecodeTest, Vop3RejectsInvalidScalarDestination) {
       0x00000000u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
@@ -738,7 +780,7 @@ TEST(Gfx1250DecodeTest, Vop3RejectsInvalidVgprSource) {
       0x0000F8D7u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
@@ -753,7 +795,7 @@ TEST(Gfx1250DecodeTest, Vop3ReadlaneValidatesLaneSelector) {
       0x0003D7D7u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> valid(decode_valid(*decoder, valid_words));
   ASSERT_NE(valid, nullptr);
@@ -771,7 +813,7 @@ TEST(Gfx1250DecodeTest, Vop3CmpxValidatesExecDestination) {
       0x00020300u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> valid(decode_valid(*decoder, valid_words));
   ASSERT_NE(valid, nullptr);
@@ -786,7 +828,7 @@ TEST(Gfx1250DecodeTest, Vop3SdstLiteralConsumesThreeDwords) {
       0x00000060u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -801,7 +843,7 @@ TEST(Gfx1250DecodeTest, VFmamkF64ImpliedLiteralConsumesThreeDwords) {
       0x7E042B02u, // v_cvt_u32_f64_e32 v2, v[2:3]
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> fmamk(decode_valid(*decoder, words));
   ASSERT_NE(fmamk, nullptr);
@@ -818,7 +860,7 @@ TEST(Gfx1250DecodeTest, SWaitXcntHasWaitcntMetadata) {
       0xBFC50000u, // s_wait_xcnt 0
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -834,7 +876,7 @@ TEST(Gfx1250DecodeTest, BufferOffenUsesSingleVaddrRegister) {
       0x00000007u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -875,7 +917,7 @@ TEST(Gfx1250DecodeTest, BufferWithoutIdxenOffenDoesNotExposeVaddrRegister) {
       0x00000007u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -904,7 +946,7 @@ TEST(Gfx1250DecodeTest, WmmaF8f6f4UsesMatrixFormatOperandWidths) {
       0x04421100u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -920,7 +962,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleF8f6f4ConsumesVop3px2Pair) {
       0x02026912u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -936,7 +978,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleAcceptsLlvmAndIsaFixedSrc2Encodings) {
   constexpr uint32_t kSrc2Mask = 0x1ffu << 18;
   llvm_words[1] = (llvm_words[1] & ~kSrc2Mask) | (0x080u << 18);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> isa_inst(decode_valid(*decoder, isa_words.data()));
   std::unique_ptr<Instruction> llvm_inst(decode_valid(*decoder, llvm_words.data()));
@@ -960,7 +1002,7 @@ TEST(Gfx1250DecodeTest, WmmaScalePairRejectsInvalidEmbeddedSourceSelectors) {
         0xD600D400u | embedded_src0,
     };
 
-    auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     EXPECT_TRUE(decode_fails(*decoder, words));
   }
@@ -986,7 +1028,7 @@ TEST(Gfx1250DecodeTest, WmmaScalePairRejectsInvalidFixedAndReservedFields) {
       InvalidField{"matrix_neg_reserved_1", 3, 1u << 30},
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   for (const auto &field : invalid_fields) {
     SCOPED_TRACE(field.name);
@@ -1012,7 +1054,7 @@ TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
       0x02021502u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -1026,7 +1068,7 @@ TEST(Gfx1250DecodeTest, WmmaScale16F8f6f4ConsumesVop3px2Pair) {
 TEST(Gfx1250DecodeTest, WmmaScale16ScalarSourcesUseSingleSgprs) {
   const auto words = build_scaled_wmma_words(0x3a, 0, 0, 0, 0, 0, 2);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
@@ -1038,7 +1080,7 @@ TEST(Gfx1250DecodeTest, WmmaScale16ScalarSourcesUseSingleSgprs) {
 TEST(Gfx1250DecodeTest, WmmaScale16InlineScaleSourcesRemainInline) {
   const auto words = build_scaled_wmma_words(0x3a, 0, 0, 0, 0, 128, 128);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
@@ -1055,7 +1097,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleF4_32x16x128ConsumesVop3px2Pair) {
       0x1A024110u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -1073,13 +1115,13 @@ TEST(Gfx1250DecodeTest, WmmaScalePrefixRejectsNonWmmaSuffix) {
       0x02026912u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
 
 TEST(Gfx1250DecodeTest, WmmaScaleEnforcesMatrixAndScaleFormatLegality) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   for (uint32_t matrix_a_fmt = 0; matrix_a_fmt <= 4; ++matrix_a_fmt) {
     for (uint32_t matrix_b_fmt = 0; matrix_b_fmt <= 4; ++matrix_b_fmt) {
@@ -1096,10 +1138,11 @@ TEST(Gfx1250DecodeTest, WmmaScaleEnforcesMatrixAndScaleFormatLegality) {
           const bool legal = both_e8 || (non_e8_only_on_f4 && matching_f4_scales);
           const auto words = build_scaled_wmma_words(0x35, matrix_a_fmt, matrix_b_fmt, scale_a_fmt,
                                                      scale_b_fmt, 128, 128);
-          if (legal)
+          if (legal) {
             EXPECT_FALSE(decode_fails(*decoder, words.data()));
-          else
+          } else {
             EXPECT_TRUE(decode_fails(*decoder, words.data()));
+          }
         }
       }
     }
@@ -1107,7 +1150,7 @@ TEST(Gfx1250DecodeTest, WmmaScaleEnforcesMatrixAndScaleFormatLegality) {
 }
 
 TEST(Gfx1250DecodeTest, WmmaScaleRejectsIllegalScaleSources) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   for (uint16_t selector : {106u, 127u, 129u, 255u}) {
     SCOPED_TRACE(selector);
@@ -1135,7 +1178,7 @@ TEST(Gfx1250ExecutionTest, WmmaScaleExecutesAllMatrixFormatPairs) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0xffffffffu);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   ForceScalarGuard scalar_guard;
 
@@ -1145,31 +1188,39 @@ TEST(Gfx1250ExecutionTest, WmmaScaleExecutesAllMatrixFormatPairs) {
       for (uint32_t matrix_b_fmt = 0; matrix_b_fmt <= 4; ++matrix_b_fmt) {
         SCOPED_TRACE(::testing::Message() << "force_scalar=" << force_scalar << " matrix_a_fmt="
                                           << matrix_a_fmt << " matrix_b_fmt=" << matrix_b_fmt);
-        for (uint32_t reg = 0; reg < 72; ++reg)
-          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+        for (uint32_t reg = 0; reg < 72; ++reg) {
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
             cu->write_vgpr(vgpr_base + reg, lane, 0);
+          }
+        }
 
         const uint32_t a_bits = wmma_format_bits(matrix_a_fmt);
         const uint32_t b_bits = wmma_format_bits(matrix_b_fmt);
         const uint8_t a_one = encode_wmma_one(matrix_a_fmt);
         const uint8_t b_one = encode_wmma_one(matrix_b_fmt);
-        for (uint32_t row = 0; row < 16; ++row)
-          for (uint32_t k = 0; k < 128; ++k)
+        for (uint32_t row = 0; row < 16; ++row) {
+          for (uint32_t k = 0; k < 128; ++k) {
             write_wmma_packed(*cu, vgpr_base,
-                              amdgpu::wmma_a_input_loc(16, 128, row, k, a_bits, b_bits), a_one);
-        for (uint32_t col = 0; col < 16; ++col)
-          for (uint32_t k = 0; k < 128; ++k)
+                              amdgpu::wmma_a_input_loc<16, 128>(row, k, a_bits, b_bits), a_one);
+          }
+        }
+        for (uint32_t col = 0; col < 16; ++col) {
+          for (uint32_t k = 0; k < 128; ++k) {
             write_wmma_packed(*cu, vgpr_base + 32,
-                              amdgpu::wmma_b_input_loc(16, 128, col, k, a_bits, b_bits), b_one);
+                              amdgpu::wmma_b_input_loc<16, 128>(col, k, a_bits, b_bits), b_one);
+          }
+        }
 
         const auto words =
             build_scaled_wmma_words(0x35, matrix_a_fmt, matrix_b_fmt, 0, 0, 128, 128);
         std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
         ASSERT_NE(inst, nullptr);
         EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-        for (uint32_t reg = 0; reg < 8; ++reg)
-          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+        for (uint32_t reg = 0; reg < 8; ++reg) {
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
             EXPECT_EQ(cu->read_vgpr(vgpr_base + 64 + reg, lane), std::bit_cast<uint32_t>(128.0f));
+          }
+        }
       }
     }
   }
@@ -1183,7 +1234,7 @@ TEST(Gfx1250ExecutionTest, WmmaMixedFormatsPairTheSameKElements) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0xffffffffu);
   const uint32_t base = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   ForceScalarGuard scalar_guard;
 
@@ -1191,13 +1242,16 @@ TEST(Gfx1250ExecutionTest, WmmaMixedFormatsPairTheSameKElements) {
     util::set_force_scalar_for_testing(force_scalar);
     for (uint32_t afmt = 0; afmt <= 4; ++afmt) {
       for (uint32_t bfmt = 0; bfmt <= 4; ++bfmt) {
-        if ((afmt < 2) == (bfmt < 2))
+        if ((afmt < 2) == (bfmt < 2)) {
           continue;
+        }
         SCOPED_TRACE(::testing::Message()
                      << "scalar=" << force_scalar << " A=" << afmt << " B=" << bfmt);
-        for (uint32_t reg = 0; reg < 72; ++reg)
-          for (uint32_t lane = 0; lane < 32; ++lane)
+        for (uint32_t reg = 0; reg < 72; ++reg) {
+          for (uint32_t lane = 0; lane < 32; ++lane) {
             cu->write_vgpr(base + reg, lane, 0);
+          }
+        }
         // A single nonzero product in each row/column isolates K pairing.
         // These independent physical locations also cover 6-bit word crossings.
         for (uint32_t row = 0; row < 16; ++row) {
@@ -1211,9 +1265,11 @@ TEST(Gfx1250ExecutionTest, WmmaMixedFormatsPairTheSameKElements) {
         }
         for (unsigned variant : {0u, 1u, 2u}) {
           SCOPED_TRACE(::testing::Message() << "scale variant=" << variant);
-          for (uint32_t reg = 64; reg < 72; ++reg)
-            for (uint32_t lane = 0; lane < 32; ++lane)
+          for (uint32_t reg = 64; reg < 72; ++reg) {
+            for (uint32_t lane = 0; lane < 32; ++lane) {
               cu->write_vgpr(base + reg, lane, 0);
+            }
+          }
           const auto words =
               build_scaled_wmma_execution_words(16, variant == 2, afmt, bfmt, 128, 128, 0, 0);
           // Exercise ordinary, scale32, and scale16 with neutral inline scales.
@@ -1221,7 +1277,7 @@ TEST(Gfx1250ExecutionTest, WmmaMixedFormatsPairTheSameKElements) {
               decode_valid(*decoder, words.data() + (variant ? 0 : 2)));
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-          for (uint32_t row = 0; row < 16; ++row)
+          for (uint32_t row = 0; row < 16; ++row) {
             for (uint32_t col = 0; col < 16; ++col) {
               const uint32_t lane = col + 16u * (row / 8u);
               const float expected = row == col ? 1.0f : 0.0f;
@@ -1229,6 +1285,7 @@ TEST(Gfx1250ExecutionTest, WmmaMixedFormatsPairTheSameKElements) {
                         std::bit_cast<uint32_t>(expected))
                   << "row=" << row << " col=" << col;
             }
+          }
         }
       }
     }
@@ -1267,11 +1324,13 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
   write_wave_sgpr(*cu, *wf, 0, 0x807e007fu);
   write_wave_sgpr(*cu, *wf, 1, 0x0102037fu);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
-  for (uint32_t reg = 0; reg < 32; ++reg)
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t reg = 0; reg < 32; ++reg) {
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(vgpr_base + reg, lane, 0x38383838u);
+    }
+  }
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> scalar_inst(decode_valid(*decoder, scalar_words.data()));
   std::unique_ptr<Instruction> inline_inst(decode_valid(*decoder, inline_words.data()));
@@ -1283,7 +1342,7 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
   EXPECT_TRUE(cu->execute_instruction(inline_inst.get(), *wf).succeeded());
   EXPECT_TRUE(cu->execute_instruction(llvm_inst.get(), *wf).succeeded());
 
-  for (uint32_t reg = 0; reg < 8; ++reg)
+  for (uint32_t reg = 0; reg < 8; ++reg) {
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       const uint32_t scalar_result = cu->read_vgpr(vgpr_base + 32 + reg, lane);
       EXPECT_EQ(scalar_result, std::bit_cast<uint32_t>(128.0f))
@@ -1293,6 +1352,7 @@ TEST(Gfx1250ExecutionTest, WmmaRegularScaleInlineZeroMatchesNeutralScalarSources
       EXPECT_EQ(cu->read_vgpr(vgpr_base + 48 + reg, lane), scalar_result)
           << "reg " << reg << ", lane " << lane;
     }
+  }
 }
 
 TEST(Gfx1250ExecutionTest, WmmaScale16InlineZeroAndSgprUseNeutralScaleForEveryBlock) {
@@ -1303,9 +1363,11 @@ TEST(Gfx1250ExecutionTest, WmmaScale16InlineZeroAndSgprUseNeutralScaleForEveryBl
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0xffffffffu);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
-  for (uint32_t reg = 0; reg < 48; ++reg)
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t reg = 0; reg < 48; ++reg) {
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(vgpr_base + reg, lane, 0x38383838u);
+    }
+  }
   write_wave_sgpr(*cu, *wf, 0, 0x0102037fu);
   write_wave_sgpr(*cu, *wf, 1, 0x11223344u);
   write_wave_sgpr(*cu, *wf, 2, 0xa0b0c07fu);
@@ -1313,7 +1375,7 @@ TEST(Gfx1250ExecutionTest, WmmaScale16InlineZeroAndSgprUseNeutralScaleForEveryBl
 
   const auto scalar_words = build_scaled_wmma_words(0x3a, 0, 0, 0, 0, 0, 2, 64);
   const auto inline_words = build_scaled_wmma_words(0x3a, 0, 0, 0, 0, 128, 128, 72);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> scalar_inst(decode_valid(*decoder, scalar_words.data()));
   std::unique_ptr<Instruction> inline_inst(decode_valid(*decoder, inline_words.data()));
@@ -1322,11 +1384,12 @@ TEST(Gfx1250ExecutionTest, WmmaScale16InlineZeroAndSgprUseNeutralScaleForEveryBl
   EXPECT_TRUE(cu->execute_instruction(scalar_inst.get(), *wf).succeeded());
   EXPECT_TRUE(cu->execute_instruction(inline_inst.get(), *wf).succeeded());
 
-  for (uint32_t reg = 0; reg < 8; ++reg)
+  for (uint32_t reg = 0; reg < 8; ++reg) {
     for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       EXPECT_EQ(cu->read_vgpr(vgpr_base + 64 + reg, lane), std::bit_cast<uint32_t>(128.0f));
       EXPECT_EQ(cu->read_vgpr(vgpr_base + 72 + reg, lane), std::bit_cast<uint32_t>(128.0f));
     }
+  }
 }
 
 TEST(Gfx1250ExecutionTest, WmmaScaleDecodesE5m3ForFp4Operand) {
@@ -1337,26 +1400,32 @@ TEST(Gfx1250ExecutionTest, WmmaScaleDecodesE5m3ForFp4Operand) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0xffffffffu);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
-  for (uint32_t row = 0; row < 16; ++row)
-    for (uint32_t k = 0; k < 128; ++k)
-      write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc(16, 128, row, k, 4, 8),
+  for (uint32_t row = 0; row < 16; ++row) {
+    for (uint32_t k = 0; k < 128; ++k) {
+      write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc<16, 128>(row, k, 4, 8),
                         util::f32_to_fp4_e2m1_rne(1.0f));
-  for (uint32_t col = 0; col < 16; ++col)
-    for (uint32_t k = 0; k < 128; ++k)
-      write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc(16, 128, col, k, 4, 8),
+    }
+  }
+  for (uint32_t col = 0; col < 16; ++col) {
+    for (uint32_t k = 0; k < 128; ++k) {
+      write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc<16, 128>(col, k, 4, 8),
                         util::f32_to_fp8_e4m3_rne(1.0f));
+    }
+  }
   write_wave_sgpr(*cu, *wf, 0, 0x78u);
   write_wave_sgpr(*cu, *wf, 1, 0x7fu);
 
   const auto words = build_scaled_wmma_words(0x35, 4, 0, 1, 0, 0, 1);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-  for (uint32_t reg = 0; reg < 8; ++reg)
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t reg = 0; reg < 8; ++reg) {
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       EXPECT_EQ(cu->read_vgpr(vgpr_base + 64 + reg, lane), std::bit_cast<uint32_t>(128.0f));
+    }
+  }
 }
 
 TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
@@ -1367,7 +1436,7 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0xffffffffu);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   ForceScalarGuard scalar_guard;
 
@@ -1388,20 +1457,28 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
       for (const auto &scale : scale_cases) {
         SCOPED_TRACE(::testing::Message() << "force_scalar=" << force_scalar << " scale16="
                                           << scale16 << " scale_format=" << scale.format);
-        for (uint32_t reg = 0; reg < 80; ++reg)
-          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+        for (uint32_t reg = 0; reg < 80; ++reg) {
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
             cu->write_vgpr(vgpr_base + reg, lane, 0);
-        for (uint32_t row = 0; row < 16; ++row)
-          for (uint32_t k = 0; k < 128; ++k)
-            write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc(16, 128, row, k, 4, 8),
+          }
+        }
+        for (uint32_t row = 0; row < 16; ++row) {
+          for (uint32_t k = 0; k < 128; ++k) {
+            write_wmma_packed(*cu, vgpr_base, amdgpu::wmma_a_input_loc<16, 128>(row, k, 4, 8),
                               util::f32_to_fp4_e2m1_rne(0.5f));
-        for (uint32_t col = 0; col < 16; ++col)
-          for (uint32_t k = 0; k < 128; ++k)
-            write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc(16, 128, col, k, 4, 8),
+          }
+        }
+        for (uint32_t col = 0; col < 16; ++col) {
+          for (uint32_t k = 0; k < 128; ++k) {
+            write_wmma_packed(*cu, vgpr_base + 32, amdgpu::wmma_b_input_loc<16, 128>(col, k, 4, 8),
                               util::f32_to_fp8_e4m3_rne(1.0f));
-        for (uint32_t reg = 0; reg < 8; ++reg)
-          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+          }
+        }
+        for (uint32_t reg = 0; reg < 8; ++reg) {
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
             cu->write_vgpr(vgpr_base + 64 + reg, lane, std::bit_cast<uint32_t>(kAccumulator));
+          }
+        }
         write_wave_sgpr(*cu, *wf, 0, scale.encoded);
         write_wave_sgpr(*cu, *wf, 1, 0x7fu);
 
@@ -1415,14 +1492,17 @@ TEST(Gfx1250ExecutionTest, WmmaNonE8ScalesApplyAfterEachBlockDot) {
         const uint32_t block_size = scale16 ? 16 : 32;
         for (uint32_t block = 0; block < 128 / block_size; ++block) {
           float block_dot = 0.0f;
-          for (uint32_t k = 0; k < block_size; ++k)
+          for (uint32_t k = 0; k < block_size; ++k) {
             block_dot = std::fma(0.5f, 1.0f, block_dot);
+          }
           block_dot *= scale.value;
           expected += block_dot;
         }
-        for (uint32_t reg = 0; reg < 8; ++reg)
-          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+        for (uint32_t reg = 0; reg < 8; ++reg) {
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
             EXPECT_EQ(cu->read_vgpr(vgpr_base + 64 + reg, lane), std::bit_cast<uint32_t>(expected));
+          }
+        }
       }
     }
   }
@@ -1436,7 +1516,7 @@ TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBloc
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0xffffffffu);
   const uint32_t vgpr_base = wf->vgpr_alloc().base;
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   ForceScalarGuard scalar_guard;
 
@@ -1487,38 +1567,48 @@ TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBloc
     const uint32_t scale_blocks = tc.scale16 ? 8u : 4u;
 
     auto seed_inputs_and_scales = [&]() {
-      for (uint32_t reg = 0; reg < 84; ++reg)
-        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+      for (uint32_t reg = 0; reg < 84; ++reg) {
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
           cu->write_vgpr(vgpr_base + reg, lane, 0);
+        }
+      }
 
-      for (uint32_t row = 0; row < tc.M; ++row)
-        for (uint32_t k = 0; k < K; ++k)
+      for (uint32_t row = 0; row < tc.M; ++row) {
+        for (uint32_t k = 0; k < K; ++k) {
           write_wmma_packed(*cu, vgpr_base + kMatrixA,
                             manual_block_scaled_wmma_loc(tc.M, row, k, a_bits),
                             matrix_a_raw(tc, row, k));
-      for (uint32_t col = 0; col < N; ++col)
-        for (uint32_t k = 0; k < K; ++k)
+        }
+      }
+      for (uint32_t col = 0; col < N; ++col) {
+        for (uint32_t k = 0; k < K; ++k) {
           write_wmma_packed(*cu, vgpr_base + kMatrixB,
                             manual_block_scaled_wmma_loc(N, col, k, b_bits),
                             matrix_b_raw(tc, col, k));
+        }
+      }
 
       for (uint32_t row = 0; row < tc.M; ++row) {
         uint64_t word = 0;
-        for (uint32_t block = 0; block < scale_blocks; ++block)
+        for (uint32_t block = 0; block < scale_blocks; ++block) {
           word |= static_cast<uint64_t>(scale_a_raw(row, block)) << (8u * block);
+        }
         const uint32_t lane = tc.M == 32 ? row : row + 16u * tc.scale_a_select;
         cu->write_vgpr(vgpr_base + kScaleA, lane, static_cast<uint32_t>(word));
-        if (tc.scale16)
+        if (tc.scale16) {
           cu->write_vgpr(vgpr_base + kScaleA + 1, lane, static_cast<uint32_t>(word >> 32u));
+        }
       }
       for (uint32_t col = 0; col < N; ++col) {
         uint64_t word = 0;
-        for (uint32_t block = 0; block < scale_blocks; ++block)
+        for (uint32_t block = 0; block < scale_blocks; ++block) {
           word |= static_cast<uint64_t>(scale_b_raw(col, block)) << (8u * block);
+        }
         const uint32_t lane = col + 16u * tc.scale_b_select;
         cu->write_vgpr(vgpr_base + kScaleB, lane, static_cast<uint32_t>(word));
-        if (tc.scale16)
+        if (tc.scale16) {
           cu->write_vgpr(vgpr_base + kScaleB + 1, lane, static_cast<uint32_t>(word >> 32u));
+        }
       }
     };
 
@@ -1530,16 +1620,19 @@ TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBloc
       seed_inputs_and_scales();
       std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
       EXPECT_NE(inst, nullptr);
-      if (!inst)
+      if (!inst) {
         return std::vector<uint32_t>{};
+      }
       EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
       std::vector<uint32_t> output;
       output.reserve(tc.M * N);
-      for (uint32_t row = 0; row < tc.M; ++row)
+      for (uint32_t row = 0; row < tc.M; ++row) {
         for (uint32_t col = 0; col < N; ++col) {
-          const auto loc = amdgpu::wmma_output_loc_32(tc.M, N, row, col);
+          const auto loc = tc.M == 32 ? amdgpu::wmma_output_loc_32<32, N>(row, col)
+                                      : amdgpu::wmma_output_loc_32<16, N>(row, col);
           output.push_back(cu->read_vgpr(vgpr_base + kOutput + loc.reg, loc.lane));
         }
+      }
       return output;
     };
 
@@ -1571,7 +1664,7 @@ TEST(Gfx1250ExecutionTest, WmmaScaledExecutionMatchesManualLayoutAndDistinctBloc
 }
 
 TEST(Gfx1250DecodeTest, SwmmacPrintsIndexKeyAndReuseModifiers) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
 
   const uint32_t index_key_words[] = {
@@ -1608,7 +1701,7 @@ TEST(Gfx1250DecodeTest, VopdXyConsumesTwoDwords) {
       0x02000080u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -1625,7 +1718,7 @@ TEST(Gfx1250DecodeTest, Vopd3ConsumesThreeDwords) {
       0x0A000001u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -1644,7 +1737,7 @@ TEST(Gfx1250DecodeTest, Vopd3RejectsSrcX0Literal32Selector) {
       0x0A000001u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
@@ -1656,7 +1749,7 @@ TEST(Gfx1250DecodeTest, Vopd3RejectsSrcY0Literal32Selector) {
       0x0A000001u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   EXPECT_TRUE(decode_fails(*decoder, words));
 }
@@ -1668,7 +1761,7 @@ TEST(Gfx1250DecodeTest, VopdLiteralConsumesThreeDwords) {
       0x4F7FFFFEu,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -1684,7 +1777,7 @@ TEST(Gfx1250DecodeTest, VopdSourceOperandsFollowPrintedSlots) {
       0x09000011u,
   };
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
   ASSERT_NE(inst, nullptr);
@@ -1696,6 +1789,21 @@ TEST(Gfx1250DecodeTest, VopdSourceOperandsFollowPrintedSlots) {
   EXPECT_EQ(*inst->src_operand(2)->to_register_ref(), (RegisterRef{RegClass::SGPR, 11, 1}));
 }
 
+TEST(Gfx1250DecodeTest, Vopd3CndmaskSelectorPrintsOneSgpr) {
+  const uint32_t words[] = {
+      0xCF249102u, // v_dual_cndmask_b32 v1, v2, v3, s4 :: v_dual_cndmask_b32 v6, v7, v8, s6
+      0x04030107u,
+      0x06060801u,
+  };
+
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
+  ASSERT_NE(decoder, nullptr);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+  ASSERT_NE(inst, nullptr);
+  EXPECT_EQ(inst->disassemble(),
+            "v_dual_cndmask_b32 v1, v2, v3, s4 :: v_dual_cndmask_b32 v6, v7, v8, s6");
+}
+
 TEST(Gfx1250DecodeTest, VopdRejectsInvalidOpcodes) {
   const std::array<std::array<uint32_t, 3>, 2> words = {{
       // Opcode 18 is valid in the Y slot, but not the X slot.
@@ -1704,10 +1812,11 @@ TEST(Gfx1250DecodeTest, VopdRejectsInvalidOpcodes) {
       {0xCF000000u | (3u << 18) | (32u << 12), 0, 0},
   }};
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
-  for (const auto &encoding : words)
+  for (const auto &encoding : words) {
     EXPECT_TRUE(decode_fails(*decoder, encoding.data()));
+  }
 }
 
 TEST(Gfx1250DecodeTest, PublicDecoderReportsInvalidVopdEncoding) {
@@ -1717,7 +1826,8 @@ TEST(Gfx1250DecodeTest, PublicDecoderReportsInvalidVopdEncoding) {
   };
 
   rj_code_decoder_t *decoder = nullptr;
-  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_ARCH_CDNA5, &decoder), ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_code_decoder_create(ROCJITSU_CODE_TARGET_GFX1250, &decoder),
+            ROCJITSU_STATUS_SUCCESS);
   ASSERT_NE(decoder, nullptr);
 
   auto *inst = reinterpret_cast<rj_code_inst_t *>(static_cast<uintptr_t>(1));
@@ -1734,10 +1844,11 @@ TEST(Gfx1250DecodeTest, Vopd3RejectsOverlappingDestinations) {
                       {.op = VopdOp::MulF32, .src0 = 0, .src1 = 1, .src2 = 2, .dst = 11}),
   }};
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
-  for (const auto &encoding : words)
+  for (const auto &encoding : words) {
     EXPECT_TRUE(decode_fails(*decoder, encoding.data()));
+  }
 }
 
 } // namespace

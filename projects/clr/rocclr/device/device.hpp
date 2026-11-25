@@ -326,6 +326,10 @@ struct Info : public amd::EmbeddedObject {
   //! Maximum grid dimensions (from HSA_AGENT_INFO_GRID_MAX_DIM). Work-items per dimension.
   uint32_t maxGridDim_[3];
 
+  //! Maximum number of work-groups per dimension a kernel can address, limited by the
+  //  width of the HW workgroup ID. 0 means no limit beyond the grid size checks.
+  uint32_t maxWorkGroupCount_[3];
+
   //! Preferred number of work-items in a work-group executing a kernel
   //  using the data-parallel execution model.
   size_t preferredWorkGroupSize_;
@@ -370,6 +374,9 @@ struct Info : public amd::EmbeddedObject {
 
   //! Size of L2 Cache in bytes.
   uint32_t l2CacheSize_;
+
+  //! Size of L3 Cache (MALL) in bytes, 0 if the device has none.
+  uint32_t l3CacheSize_;
 
   //! Maximum persisting L2 cache size in bytes.
   size_t persistingL2CacheMaxSize_;
@@ -1428,6 +1435,13 @@ class VirtualDevice : public amd::ReferenceCountedObject {
     return false;
   }
 
+  //! Puts on the queue a wait for a command of another queue, without a command of its own: no
+  //! completion signal, no batch. The anchor holds the waited command until it completes, so
+  //! its anchor's completion must follow the wait. False if the queue can't
+  virtual bool dispatchGraphForkWait(amd::Command* wait_cmd, amd::AccumulateCommand* anchor) {
+    return false;
+  }
+
   //! Returns the number of outstanding HSA async handlers
   std::atomic<uint64_t>& QueuedAsyncHandlers() const { return queued_async_handlers_; }
 
@@ -1561,10 +1575,14 @@ class MemObjMap : public AllStatic {
   static std::shared_mutex AllocatedLock_;
 
  private:
-  // Helper struct for memory object lookup results
+  //!< Helper struct for memory object lookup results.
   struct LookupResult {
     amd::Memory* memory;
     size_t offset;
+    size_t size;        //!< size == 0 for Windows overlapping VA range or a miss, and is
+                        //!< not cacheable. Otherwise (global map hit) the length from the entry's
+                        //!< start over which a fresh lookup returns this same entry: its size, cut
+                        //!< at the next key so overlapping entries cannot be served from the cache
   };
 
   //!< Core lookup helper used by all FindMemObj* functions. Caller must hold AllocatedLock_.
@@ -2355,10 +2373,13 @@ class Device : public RuntimeObject {
   struct HwEventPatch {
     static constexpr int kCompletionSignal = -1;
     static constexpr int kExtDispatchDepSignal = -2;
+    //! hw_event_index of a signal passed separately to ApplyHwEventPatches, which is
+    //! owned elsewhere and only waited on by this launch
+    static constexpr int kExternalHwEvent = -2;
 
     uint8_t* packet;      // original dispatchPackets pointer (for UpdateAQLPacket matching)
     uint8_t* flat_packet; // pointer into flatPacketData (patched directly at launch)
-    int hw_event_index;
+    int hw_event_index;   // index into the launch's hw_events, or kExternalHwEvent
     int dep_slot;  // kCompletionSignal, kExtDispatchDepSignal, or 0-4 for barrier dep_signal[slot]
   };
 
@@ -2368,9 +2389,11 @@ class Device : public RuntimeObject {
   //! single-signal field share an offset, so callers patch slot 0 either way.
   //! num_deps == 0 is a completion-only barrier.
   virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
-  //! profiled means the launch reads the timing of its patched completion signals
+  //! profiled means the launch reads the timing of its patched completion signals.
+  //! external_hw_event resolves kExternalHwEvent patches.
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events, bool profiled) const {}
+                                   const std::vector<void*>& hw_events, bool profiled,
+                                   void* external_hw_event) const {}
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;

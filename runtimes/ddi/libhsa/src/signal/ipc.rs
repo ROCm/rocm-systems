@@ -4,7 +4,7 @@
 //! ROCr-compatible IPC signal representation and retained native backing.
 
 use super::*;
-use crate::platform::memory::{self as linux_interop, KfdIpcMemoryHandle};
+use crate::platform::memory as native_memory;
 
 /// IPC signal allocation size in bytes.
 pub(super) const IPC_SIGNAL_ALLOCATION_BYTES: u64 = 4096;
@@ -87,7 +87,7 @@ impl SignalState {
     /// Creates IPC signal and records its ownership.
     pub(crate) fn create_ipc_signal(
         &mut self,
-        gpus: &[crate::runtime::Gpu],
+        gpus: &[crate::agent::Gpu],
         host_page_size: usize,
         value: SignalValue,
     ) -> Result<HsaSignal, Status> {
@@ -136,7 +136,7 @@ impl SignalState {
     pub(crate) unsafe fn attach_ipc_signal(
         &mut self,
         session: &rocddi::session::Session,
-        gpus: &[crate::runtime::Gpu],
+        gpus: &[crate::agent::Gpu],
         words: [u32; 8],
     ) -> Result<HsaSignal, Status> {
         reserve_wait_signal_slots(1)?;
@@ -162,17 +162,16 @@ impl SignalState {
 
         let allocation = {
             let devices = gpus.iter().map(|gpu| &gpu.device).collect::<Vec<_>>();
-            linux_interop::import_kfd_ipc_memory(
+            native_memory::import_ipc_memory(
                 session,
                 &devices,
                 &devices,
-                KfdIpcMemoryHandle { words },
+                words,
                 IPC_SIGNAL_ALLOCATION_BYTES,
             )
             .map_err(|error| match error.kind() {
-                rocddi::ErrorKind::InvalidArgument | rocddi::ErrorKind::Unsupported => {
-                    INVALID_ARGUMENT
-                }
+                rocddi::ErrorKind::InvalidArgument => INVALID_ARGUMENT,
+                rocddi::ErrorKind::Unsupported => NOT_SUPPORTED,
                 rocddi::ErrorKind::ResourceExhausted => OUT_OF_RESOURCES,
                 _ => ERROR,
             })?
@@ -221,9 +220,7 @@ impl SignalState {
                     .map(|signal| &signal.allocation)
             })
             .ok_or(INVALID_ARGUMENT)?;
-        linux_interop::export_kfd_ipc_memory(allocation)
-            .map(|handle| handle.words)
-            .map_err(map_error)
+        native_memory::export_ipc_memory(allocation).map_err(map_error)
     }
 }
 

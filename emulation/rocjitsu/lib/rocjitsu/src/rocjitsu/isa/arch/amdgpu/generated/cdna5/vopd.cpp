@@ -6,6 +6,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vopd.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/execution_backend.h"
+#include <cstring>
 #include <format>
 #include <string>
 
@@ -52,8 +53,9 @@ bool is_valid_opcode(uint16_t opcode, uint64_t mask) {
 }
 
 Operand make_src0(uint32_t bits, bool vopd3, bool use_literal, uint32_t literal, uint16_t encoded) {
-  if (use_literal && encoded == 255)
+  if (use_literal && encoded == 255) {
     return Operand(bits, OperandType::OPR_SIMM32, static_cast<int>(literal));
+  }
   return Operand(bits, vopd3 ? OperandType::OPR_SRC_SIMPLE : OperandType::OPR_SRC, encoded);
 }
 
@@ -122,6 +124,71 @@ const char *Vopd::op_name(uint16_t op) {
   }
 }
 
+amdgpu::Operation Vopd::operation(uint16_t op) {
+  switch (op) {
+  case kVopdFmacF32:
+    return amdgpu::Operation::V_DUAL_FMAC_F32;
+  case kVopdFmaakF32:
+    return amdgpu::Operation::V_DUAL_FMAAK_F32;
+  case kVopdFmamkF32:
+    return amdgpu::Operation::V_DUAL_FMAMK_F32;
+  case kVopdMulF32:
+    return amdgpu::Operation::V_DUAL_MUL_F32;
+  case kVopdAddF32:
+    return amdgpu::Operation::V_DUAL_ADD_F32;
+  case kVopdSubF32:
+    return amdgpu::Operation::V_DUAL_SUB_F32;
+  case kVopdSubrevF32:
+    return amdgpu::Operation::V_DUAL_SUBREV_F32;
+  case kVopdMulDx9ZeroF32:
+    return amdgpu::Operation::V_DUAL_MUL_DX9_ZERO_F32;
+  case kVopdMovB32:
+    return amdgpu::Operation::V_DUAL_MOV_B32;
+  case kVopdCndmaskB32:
+    return amdgpu::Operation::V_DUAL_CNDMASK_B32;
+  case kVopdMaxNumF32:
+    return amdgpu::Operation::V_DUAL_MAX_NUM_F32;
+  case kVopdMinNumF32:
+    return amdgpu::Operation::V_DUAL_MIN_NUM_F32;
+  case kVopdAddNcU32:
+    return amdgpu::Operation::V_DUAL_ADD_NC_U32;
+  case kVopdLshlrevB32:
+    return amdgpu::Operation::V_DUAL_LSHLREV_B32;
+  case kVopdBitop2B32:
+    return amdgpu::Operation::V_DUAL_BITOP2_B32;
+  case kVopdFmaF32:
+    return amdgpu::Operation::V_DUAL_FMA_F32;
+  case kVopdSubNcU32:
+    return amdgpu::Operation::V_DUAL_SUB_NC_U32;
+  case kVopdLshrrevB32:
+    return amdgpu::Operation::V_DUAL_LSHRREV_B32;
+  case kVopdAshrrevI32:
+    return amdgpu::Operation::V_DUAL_ASHRREV_I32;
+  case kVopdMaxI32:
+    return amdgpu::Operation::V_DUAL_MAX_I32;
+  case kVopdMinI32:
+    return amdgpu::Operation::V_DUAL_MIN_I32;
+  case kVopdFmaF64:
+    return amdgpu::Operation::V_DUAL_FMA_F64;
+  case kVopdAddF64:
+    return amdgpu::Operation::V_DUAL_ADD_F64;
+  case kVopdMulF64:
+    return amdgpu::Operation::V_DUAL_MUL_F64;
+  case kVopdMaxNumF64:
+    return amdgpu::Operation::V_DUAL_MAX_NUM_F64;
+  case kVopdMinNumF64:
+    return amdgpu::Operation::V_DUAL_MIN_NUM_F64;
+  default:
+    return amdgpu::Operation::Unknown;
+  }
+}
+
+void Vopd::implicit_uses(RegisterSet &uses) const {
+  if (x_.uses_vcc || y_.uses_vcc) {
+    uses.expand(RegisterRef{RegClass::VCC, 0, 1});
+  }
+}
+
 bool Vopd::is_float64_op(uint16_t op) {
   switch (op) {
   case kVopdFmaF64:
@@ -142,33 +209,40 @@ Result Vopd::validate_encoding(const MachineInst *inst, const util::DiagnosticEm
   if ((word0 >> 24) == 0xCF) {
     const uint16_t opx = static_cast<uint16_t>((word0 >> 18) & 0x3F);
     const uint16_t opy = static_cast<uint16_t>((word0 >> 12) & 0x3F);
-    if (!is_valid_opcode(opx, kVopd3XOpcodeMask)) [[unlikely]]
+    if (!is_valid_opcode(opx, kVopd3XOpcodeMask)) [[unlikely]] {
       return emit_error.emit() << "invalid VOPD3 X opcode";
-    if (!is_valid_opcode(opy, kVopd3YOpcodeMask)) [[unlikely]]
+    }
+    if (!is_valid_opcode(opy, kVopd3YOpcodeMask)) [[unlikely]] {
       return emit_error.emit() << "invalid VOPD3 Y opcode";
+    }
     const uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
     const uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
-    if (srcx0 == 254 || srcx0 == 255 || srcy0 == 254 || srcy0 == 255) [[unlikely]]
+    if (srcx0 == 254 || srcx0 == 255 || srcy0 == 254 || srcy0 == 255) [[unlikely]] {
       return emit_error.emit() << "VOPD3 does not support literal selectors";
+    }
     const uint32_t word2 = words[2];
     const uint16_t vdstx = static_cast<uint16_t>(word2 & 0xFF);
     const uint16_t vdsty = static_cast<uint16_t>((word2 >> 24) & 0xFF);
     const uint32_t x_end = vdstx + (is_float64_op(opx) ? 2 : 1);
     const uint32_t y_end = vdsty + (is_float64_op(opy) ? 2 : 1);
-    if (vdstx < y_end && vdsty < x_end) [[unlikely]]
+    if (vdstx < y_end && vdsty < x_end) [[unlikely]] {
       return emit_error.emit() << "VOPD3 destination ranges overlap";
+    }
     return Result::success();
   }
   const uint16_t opx = static_cast<uint16_t>((word0 >> 22) & 0xF);
   const uint16_t opy = static_cast<uint16_t>((word0 >> 17) & 0x1F);
-  if (!is_valid_opcode(opx, kVopdXOpcodeMask)) [[unlikely]]
+  if (!is_valid_opcode(opx, kVopdXOpcodeMask)) [[unlikely]] {
     return emit_error.emit() << "invalid VOPD X opcode";
-  if (!is_valid_opcode(opy, kVopdYOpcodeMask)) [[unlikely]]
+  }
+  if (!is_valid_opcode(opy, kVopdYOpcodeMask)) [[unlikely]] {
     return emit_error.emit() << "invalid VOPD Y opcode";
+  }
   const uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
   const uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
-  if (srcx0 == 254 || srcy0 == 254) [[unlikely]]
+  if (srcx0 == 254 || srcy0 == 254) [[unlikely]] {
     return emit_error.emit() << "VOPD does not support 64-bit literals";
+  }
   return Result::success();
 }
 
@@ -179,28 +253,28 @@ Vopd::Vopd(const MachineInst *inst)
       srcx2_(32, OperandType::OPR_VGPR, 0), srcy0_(32, OperandType::OPR_SRC, 0),
       srcy1_(32, OperandType::OPR_VGPR, 0), srcy2_(32, OperandType::OPR_VGPR, 0) {
   const auto *words = reinterpret_cast<const uint32_t *>(inst);
-  raw_encoding_ = words;
-  word0_ = words[0];
-  word1_ = words[1];
+  const uint32_t word0 = words[0];
+  const uint32_t word1 = words[1];
+  uint32_t word2 = 0;
 
-  if ((word0_ >> 24) == 0xCF) {
+  if ((word0 >> 24) == 0xCF) {
     format_ = Format::Vopd3;
     flags_ |= VALU;
     size_ = 12;
     encoding_id_ = 0xCF;
-    word2_ = words[2];
-    opx_ = static_cast<uint16_t>((word0_ >> 18) & 0x3F);
-    opy_ = static_cast<uint16_t>((word0_ >> 12) & 0x3F);
-    uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
-    uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
-    negx_ = static_cast<uint8_t>((word1_ >> 9) & 0x7);
-    negy_ = static_cast<uint8_t>((word1_ >> 12) & 0x7);
-    uint16_t vsrcx1 = static_cast<uint16_t>((word1_ >> 16) & 0xFF);
-    uint16_t vsrcx2 = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
-    uint16_t vdstx = static_cast<uint16_t>(word2_ & 0xFF);
-    uint16_t vsrcy1 = static_cast<uint16_t>((word2_ >> 8) & 0xFF);
-    uint16_t vsrcy2 = static_cast<uint16_t>((word2_ >> 16) & 0xFF);
-    uint16_t vdsty = static_cast<uint16_t>((word2_ >> 24) & 0xFF);
+    word2 = words[2];
+    opx_ = static_cast<uint16_t>((word0 >> 18) & 0x3F);
+    opy_ = static_cast<uint16_t>((word0 >> 12) & 0x3F);
+    uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+    uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+    negx_ = static_cast<uint8_t>((word1 >> 9) & 0x7);
+    negy_ = static_cast<uint8_t>((word1 >> 12) & 0x7);
+    uint16_t vsrcx1 = static_cast<uint16_t>((word1 >> 16) & 0xFF);
+    uint16_t vsrcx2 = static_cast<uint16_t>((word1 >> 24) & 0xFF);
+    uint16_t vdstx = static_cast<uint16_t>(word2 & 0xFF);
+    uint16_t vsrcy1 = static_cast<uint16_t>((word2 >> 8) & 0xFF);
+    uint16_t vsrcy2 = static_cast<uint16_t>((word2 >> 16) & 0xFF);
+    uint16_t vdsty = static_cast<uint16_t>((word2 >> 24) & 0xFF);
 
     uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
     uint32_t y_bits = is_float64_op(opy_) ? 64 : 32;
@@ -210,33 +284,35 @@ Vopd::Vopd(const MachineInst *inst)
     srcy0_ = make_src0(y_bits, true, false, 0, srcy0);
     srcx1_ = Operand(x_bits, OperandType::OPR_VGPR, vsrcx1);
     srcy1_ = Operand(y_bits, OperandType::OPR_VGPR, vsrcy1);
-    srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcx2)
+    srcx2_ = (opx_ == kVopdCndmaskB32) ? Operand(32, OperandType::OPR_SREG, vsrcx2)
                                        : Operand(x_bits, OperandType::OPR_VGPR, vsrcx2);
-    srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(64, OperandType::OPR_SREG, vsrcy2)
+    srcy2_ = (opy_ == kVopdCndmaskB32) ? Operand(32, OperandType::OPR_SREG, vsrcy2)
                                        : Operand(y_bits, OperandType::OPR_VGPR, vsrcy2);
-    if (opx_ == kVopdCndmaskB32)
+    if (opx_ == kVopdCndmaskB32) {
       srcx2_.set_wave_mask();
-    if (opy_ == kVopdCndmaskB32)
+    }
+    if (opy_ == kVopdCndmaskB32) {
       srcy2_.set_wave_mask();
+    }
   } else {
     format_ = Format::VopdXy;
     flags_ |= VALU;
     encoding_id_ = 0x32;
-    opx_ = static_cast<uint16_t>((word0_ >> 22) & 0xF);
-    opy_ = static_cast<uint16_t>((word0_ >> 17) & 0x1F);
-    uint16_t srcx0 = static_cast<uint16_t>(word0_ & 0x1FF);
-    uint16_t vsrcx1 = static_cast<uint16_t>((word0_ >> 9) & 0xFF);
-    uint16_t srcy0 = static_cast<uint16_t>(word1_ & 0x1FF);
-    uint16_t vsrcy1 = static_cast<uint16_t>((word1_ >> 9) & 0xFF);
-    uint16_t vdstx = static_cast<uint16_t>((word1_ >> 24) & 0xFF);
-    uint16_t vdsty_hi = static_cast<uint16_t>((word1_ >> 17) & 0x7F);
+    opx_ = static_cast<uint16_t>((word0 >> 22) & 0xF);
+    opy_ = static_cast<uint16_t>((word0 >> 17) & 0x1F);
+    uint16_t srcx0 = static_cast<uint16_t>(word0 & 0x1FF);
+    uint16_t vsrcx1 = static_cast<uint16_t>((word0 >> 9) & 0xFF);
+    uint16_t srcy0 = static_cast<uint16_t>(word1 & 0x1FF);
+    uint16_t vsrcy1 = static_cast<uint16_t>((word1 >> 9) & 0xFF);
+    uint16_t vdstx = static_cast<uint16_t>((word1 >> 24) & 0xFF);
+    uint16_t vdsty_hi = static_cast<uint16_t>((word1 >> 17) & 0x7F);
     uint16_t vdsty = static_cast<uint16_t>((vdsty_hi << 1) | ((~vdstx) & 1u));
     has_literal_ = srcx0 == 255 || srcy0 == 255 || opx_ == kVopdFmaakF32 || opx_ == kVopdFmamkF32 ||
                    opy_ == kVopdFmaakF32 || opy_ == kVopdFmamkF32;
     size_ = has_literal_ ? 12 : 8;
     if (has_literal_) {
-      word2_ = words[2];
-      literal_ = word2_;
+      word2 = words[2];
+      literal_ = word2;
     }
 
     uint32_t x_bits = is_float64_op(opx_) ? 64 : 32;
@@ -261,22 +337,29 @@ Vopd::Vopd(const MachineInst *inst)
   srcy2_.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
 
   opcode_ = static_cast<uint16_t>((opx_ << 8) | opy_);
+  // Own the encoding so the decoded-instruction cache can keep this
+  // instruction after the fetch window it was decoded from is gone.
+  std::memcpy(raw_words_.data(), words, size_);
+  raw_encoding_ = raw_words_.data();
   init_operands();
+  set_amdgpu_operation(operation(opx_), operation(opy_));
   // Evaluate the qualified operand restrictions once, at decode.
   const bool vopd3 = format_ == Format::Vopd3;
   const auto bank_conflict = [](const Operand &a, const Operand &b) {
     const auto ar = a.to_register_ref();
     const auto br = b.to_register_ref();
-    if (!ar || !br || ar->cls != RegClass::VGPR || br->cls != RegClass::VGPR)
+    if (!ar || !br || ar->cls != RegClass::VGPR || br->cls != RegClass::VGPR) {
       return false;
+    }
     const unsigned x = ar->index;
     const unsigned y = br->index;
     const bool shared = true && x == y && a.size_bits() == b.size_bits();
     const auto bank_mask = [](unsigned index, unsigned bits) {
       unsigned mask = 1u << (index % 4);
       // F64 sources occupy two adjacent 32-bit VGPR banks.
-      if (bits == 64)
+      if (bits == 64) {
         mask |= 1u << ((index + 1) % 4);
+      }
       return mask;
     };
     return !shared && (bank_mask(x, a.size_bits()) & bank_mask(y, b.size_bits())) != 0;
@@ -287,16 +370,19 @@ Vopd::Vopd(const MachineInst *inst)
   const auto uses_src1_port = [=](const Slot &slot) {
     return slot.op != kVopdMovB32 && (vopd3 || slot.op != kVopdFmamkF32);
   };
-  if (uses_src1_port(x_) && uses_src1_port(y_))
+  if (uses_src1_port(x_) && uses_src1_port(y_)) {
     invalid |= bank_conflict(srcx1_, srcy1_);
+  }
   if (vopd3) {
     // Only explicit SRC2 operands; no inferred implicit port usage.
-    if (x_.has_src2_operand && y_.has_src2_operand)
+    if (x_.has_src2_operand && y_.has_src2_operand) {
       invalid |= bank_conflict(srcx2_, srcy2_);
+    }
   } else {
     const auto src2_port = [](const Slot &slot) -> const Operand * {
-      if (slot.op == kVopdFmamkF32)
+      if (slot.op == kVopdFmamkF32) {
         return slot.src1;
+      }
 
       return nullptr;
     };
@@ -316,23 +402,28 @@ Vopd::Vopd(const MachineInst *inst)
   for (unsigned i = 0; i < num_src_; ++i) {
     const auto &source = *src_operands_[i];
     const auto reg = source.to_register_ref();
-    if ((reg && reg->cls == RegClass::VGPR) || source.const_value())
+    if ((reg && reg->cls == RegClass::VGPR) || source.const_value()) {
       continue;
+    }
     int selector = source.encoding_value();
     // Only GFX12 explicitly qualifies EXEC/SCC as scalar inputs.
-    if (true && (selector == 126 || selector == 127 || selector == 253))
+    if (true && (selector == 126 || selector == 127 || selector == 253)) {
       selector = 126;
-    else if (selector < 0 || selector >= 124)
+    } else if (selector < 0 || selector >= 124) {
       continue;
+    }
     bool seen = false;
-    for (unsigned j = 0; j < scalar_count; ++j)
+    for (unsigned j = 0; j < scalar_count; ++j) {
       seen |= scalar_selectors[j] == selector;
-    if (!seen)
+    }
+    if (!seen) {
       scalar_selectors[scalar_count++] = selector;
+    }
   }
   invalid |= scalar_count + unsigned(has_literal_) > 2;
-  if (invalid)
+  if (invalid) {
     flags_ |= INVALID_VOPD_OPERANDS;
+  }
   mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
   mnemonic_ = mnemonic_storage_;
 }
@@ -371,8 +462,9 @@ void Vopd::init_operands() {
   num_src_ = 0;
 
   const auto add_src = [this](Operand *op) {
-    if (op)
+    if (op) {
       src_operands_[num_src_++] = op;
+    }
   };
   const auto add_slot_sources = [&](const Slot &slot) {
     switch (slot.op) {
@@ -393,8 +485,9 @@ void Vopd::init_operands() {
     case kVopdCndmaskB32:
       add_src(slot.src0);
       add_src(slot.src1);
-      if (!slot.uses_vcc)
+      if (!slot.uses_vcc) {
         add_src(slot.src2);
+      }
       break;
     default:
       add_src(slot.src0);
@@ -408,8 +501,9 @@ void Vopd::init_operands() {
   const auto direct_slot = [](uint16_t op) {
     return op == kVopdFmacF32 || op == kVopdMovB32 || op == kVopdAddNcU32 || op == kVopdLshlrevB32;
   };
-  if (direct_slot(x_.op) && direct_slot(y_.op))
+  if (direct_slot(x_.op) && direct_slot(y_.op)) {
     flags_ |= DIRECT_REGISTER_ACCESSES;
+  }
 }
 
 std::string Vopd::format_slot(const Slot &slot) const {
@@ -421,8 +515,9 @@ std::string Vopd::format_slot(const Slot &slot) const {
     break;
   case kVopdCndmaskB32:
     out += operand_list(*slot.dst, *slot.src0, *slot.src1);
-    if (!slot.uses_vcc)
+    if (!slot.uses_vcc) {
       out += ", " + slot.src2->name();
+    }
     break;
   case kVopdBitop2B32:
     out += operand_list(*slot.dst, *slot.src0, *slot.src1);

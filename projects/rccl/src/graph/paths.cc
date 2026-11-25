@@ -17,8 +17,10 @@
 
 // Pre-compute GPU->NIC, GPU->GPU and NIC->GPU paths
 
+// RCCL: a BFS level can hold nodes of every type, e.g. all DEVs behind the shared UALoE fabric NVS
+// plus the base GPU's CPU and NIC. Entries are unique and each type has at most NCCL_TOPO_MAX_NODES.
 struct ncclTopoNodeList {
-  struct ncclTopoNode* list[NCCL_TOPO_MAX_NODES];
+  struct ncclTopoNode* list[NCCL_TOPO_MAX_NODES * NCCL_TOPO_NODE_TYPES];
   int count;
 };
 
@@ -420,8 +422,9 @@ ncclResult_t ncclTopoCheckP2p(struct ncclComm* comm, struct ncclTopoSystem* syst
   // explicit disable sentinel, not an allowed inter-rank path. This distinction
   // matters for ranks that share a DEV node (e.g. MLOPart partitions with
   // NCCL_TOPO_SPLIT_MLOPART=0) and therefore have a PATH_LOC path between them.
-  // For MNNVL clique peers (IFoE cross-node), no topology edge exists between the merged GPUs,
-  // so path->type is PATH_DIS. Treat them as PATH_NVL — fabric memory handles provide direct access.
+  // RCCL: MNNVL clique peers on another host always use P2P, as fabric memory handles give direct
+  // access. In a scale-out comm, peers on UALoE fabric hosts are PATH_NVL through the shared NVS
+  // anyway; other cross-host clique peers are PATH_DIS and need this bypass.
   if (mnnvl || ((g1 == g2 || p2pLevel != PATH_LOC) && path->type <= p2pLevel)) *p2p = 1;
 
 #if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
@@ -661,26 +664,6 @@ ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem* system, int rank, int64_t n
            distance, netGdrLevel, read, ncclTopoGdrModeStr[*gdrMode]);
   TRACE(NCCL_GRAPH | NCCL_NET, "GPU Direct RDMA Enabled for %s", gpuNetMsg);
 #endif
-  return ncclSuccess;
-}
-
-ncclResult_t ncclTopoIsGdrAvail(struct ncclTopoSystem* system, int rank, bool* avail) {
-  int netNum = system->nodes[NET].count;
-  enum ncclTopoGdrMode useGdr = ncclTopoGdrModeDisable;
-  *avail = false;
-  for (int n = 0; n < netNum; n++) {
-    int64_t netId = system->nodes[NET].nodes[n].id;
-    NCCLCHECK(ncclTopoCheckGdr(system, rank, netId, 1, &useGdr));
-    if (useGdr) {
-      *avail = true;
-      break;
-    }
-    NCCLCHECK(ncclTopoCheckGdr(system, rank, netId, 0, &useGdr));
-    if (useGdr) {
-      *avail = true;
-      break;
-    }
-  }
   return ncclSuccess;
 }
 
@@ -1108,9 +1091,9 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   NCCLCHECK(ncclCalloc(&domains, system->nodes[GPU].count));
   NCCLCHECKGOTO(ncclCalloc(&ids, system->nodes[GPU].count), ret, fail);
 
-  // TODO: Remove sameCliqueP2p once cross-node MNNVL pairs get PATH_NVL via the topology fix
-  // (ncclTopoAddMNNVLXmlLinks). At that point paths[GPU][p].type < PATH_NET is naturally true
-  // for clique peers and this block becomes redundant.
+  // RCCL: in a scale-out comm, clique peers on hosts with UALoE fabric entries (fabric_supported=1)
+  // are PATH_NVL through the shared NVS (ncclTopoAddXGMI), so paths[GPU][p].type < PATH_NET already
+  // holds for them. sameCliqueP2p covers the other cross-host clique peers, which have no topology path.
   {
     if (comm->MNNVL && comm->peerInfo != NULL) {
       INFO(NCCL_GRAPH, "ncclTopoTrimSystem: MNNVL enabled, checking clique membership for %d ranks (cliqueSize %d)",
@@ -1123,7 +1106,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
       ids[g] = gpu->id;
       for (int p = 0; p < g; p++) {
         bool sameCliqueP2p = false;
-        // MNNVL clique peers have no topology path (PATH_DIS) but are reachable via IFoE fabric.
+        // Cross-host clique peers off the shared NVS have no topology path (PATH_DIS) but are reachable via IFoE fabric.
         // Treat them as same domain so they are not trimmed from the topology.
         if (comm->MNNVL && comm->peerInfo != NULL) {
           struct ncclTopoNode* peerGpu = system->nodes[GPU].nodes + p;
@@ -1235,7 +1218,7 @@ ncclResult_t ncclTopoTrimSystem(struct ncclTopoSystem* system, struct ncclComm* 
   system->inter = system->nodes[GPU].count == comm->nRanks ? 0 : 1;
 exit:
   free(domains);
-  if (ids) free(ids);
+  free(ids);
   return ret;
 fail:
   goto exit;
@@ -1358,7 +1341,17 @@ NCCL_PARAM(P2pCuReduceScaleEnable, "P2P_CU_REDUCE_SCALE_ENABLE", 0);
 // uses deliberately oversubscribes channels across rounds.
 // Unset defaults to on for gfx1250, off elsewhere.
 RCCL_PARAM(SaturateP2pNChannels, "SATURATE_P2P_NCHANNELS", RCCL_VALUE_UNSET);
+// The gfx1250 CE P2P path allocates one staging buffer and event ring per channel;
+// its connections share one stream per proxy thread. Capping channels limits VMM
+// resources and avoids over-subscribing SDMA queues.
+RCCL_PARAM(P2pCeChannelsPerPeer, "P2P_CE_CHANNELS_PER_PEER", 16);
 extern int64_t ncclParamWorkArgsBytes();
+
+int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useMemcpy, int64_t configuredCap) {
+  if (!isGfx1250 || !useMemcpy || configuredCap <= 0 || pool <= 0) return current;
+  int cap = pow2Down((int)std::min<int64_t>(configuredCap, pool));
+  return std::min(current, std::max(1, cap));
+}
 
 ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) {
   int g = 0;
@@ -1377,7 +1370,6 @@ ncclResult_t ncclTopoComputeP2pChannelsPerPeer(struct ncclComm* comm) {
 }
 
 ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
-  /* here we already honor comm->max/minCTAs for p2pnChannels. */
   if (comm->sharedRes->owner != comm) {
     comm->p2pnChannels = std::min(comm->nChannels, ncclMaxP2pNchannels());
     comm->p2pnChannels =
@@ -1462,6 +1454,8 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     }
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, MAXCHANNELS);
   }
+  // Rounding up may exceed maxCTAs, which bounds the grid of every kernel; round down to honor it.
+  comm->p2pnChannels = std::min(comm->p2pnChannels, pow2Down(comm->config.maxCTAs));
 
   // Pick p2pnChannelsPerPeer so a P2P plan tiles the channel pool without wrapping.
   // Saturates gridDim.x for alltoall-style workloads. On by default for gfx1250,
@@ -1698,7 +1692,7 @@ ncclResult_t ncclTopoSplitNvLink(struct ncclTopoSystem* system, int* splitNvLink
   *splitNvLink = nvlDomains == 2 ? 1 : 0;
 
 exit:
-  if (nvlDomain) free(nvlDomain);
-  if (nvlDomainCount) free(nvlDomainCount);
+  free(nvlDomain);
+  free(nvlDomainCount);
   return res;
 }

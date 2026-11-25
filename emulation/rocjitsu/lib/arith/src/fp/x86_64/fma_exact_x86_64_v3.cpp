@@ -5,10 +5,11 @@
 // repair.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/compiler.h"
 #include "common/simd.h"
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/scalar_repair.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
 #include <stdint.h>
@@ -19,14 +20,15 @@ namespace rocjitsu::arith {
 // special/tiny lanes with that same scalar model; stage every result before
 // masked stores so repair remains safe when operands alias D. Directed guest
 // rounding requires AVX512 instruction-local rounding or the scalar path.
-void fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                         uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c,
-                         bool dx9_zero, bool rdna3) {
+[[gnu::always_inline]] static inline void
+fma_exact_wave(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *d,
+               const uint32_t *a, const uint32_t *b, const uint32_t *c, bool dx9_zero, bool rdna3) {
   uint32_t result[32];
   for (int lane = 0; lane < 32; lane += 8) {
     const uint32_t *inputs[] = {a, b, c};
     __m256 values[3];
     auto bad = _mm256_setzero_si256();
+    RJ_ARITH_UNROLL(3)
     for (int operand = 0; operand < 3; ++operand) {
       auto x = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(inputs[operand] + lane));
       if (instruction_flags & (RJ_ARITH_ALU_ABS_A << operand)) {
@@ -82,4 +84,16 @@ void fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instructio
                            _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result + lane)));
   }
 }
+
+void fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                         uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c,
+                         bool dx9_zero, bool rdna3) {
+  // A full, unmodified wave needs neither per-input modifier tests nor masked stores.
+  if (!instruction_flags && !dx9_zero && exec_mask == UINT32_MAX) {
+    fma_exact_wave(flags, UINT32_MAX, 0, d, a, b, c, false, rdna3);
+  } else {
+    fma_exact_wave(flags, exec_mask, instruction_flags, d, a, b, c, dx9_zero, rdna3);
+  }
+}
+
 } // namespace rocjitsu::arith

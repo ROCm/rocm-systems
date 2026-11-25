@@ -16,16 +16,29 @@ std::vector<DdaLaunch> g_ddaLaunches;
 RCCL_PARAM(DdaLL, "DDA_LL", 1);
 RCCL_PARAM(DdaLLOneShotThreshold, "DDA_LL_ONESHOT_THRESHOLD", (size_t)(1) * 1024 * 1024);
 RCCL_PARAM(DdaLL128OneShotThreshold, "DDA_LL128_ONESHOT_THRESHOLD", (size_t)(4) * 1024 * 1024);
+RCCL_PARAM(DdaLL128AsyncWire, "DDA_LL128_ASYNC_WIRE", 0);
+RCCL_PARAM(DdaLL128ArPeerParallel, "DDA_LL128_AR_PEER_PARALLEL", 1);
 
 static size_t DefaultDdaLLThreshold(const ncclComm*, ncclFunc_t) { return kDdaLLBaseDefault; }
 static size_t DefaultDdaLL128Threshold(const ncclComm*, ncclFunc_t) { return 0; }  // DDA_LL128 unset, no table: off
 static size_t DefaultDdaLLTwoShotThreshold(const ncclComm*) { return (size_t)(2) * 1024 * 1024; }
+static size_t DefaultDdaLLOneShotThreshold(const ncclComm*) { return (size_t)rcclParamDdaLLOneShotThreshold(); }
 static size_t DefaultDdaLL128TwoShotThreshold(const ncclComm*) { return (size_t)(64) * 1024 * 1024; }
+// No arch table: the env var's default (or the value a test loads), at every rank count.
+static size_t DefaultDdaLL128OneShotThreshold(const ncclComm*) { return (size_t)rcclParamDdaLL128OneShotThreshold(); }
 static int DefaultDdaFabricVmmBlocks(const ncclComm* comm) { return comm != nullptr ? comm->ddaFabricMaxBlocks : 0; }
 static int DefaultDdaFabricAgLL128Threads(const ncclComm*, size_t) { return 0; }  // no table: 512 threads
+static int DefaultDdaFabricNarrowThreads(const ncclComm*) { return 0; }  // no table: 512 / 1024 threads
 static int DefaultDdaFabricAgLL128Blocks(const ncclComm* comm, size_t) {
   return comm != nullptr ? comm->ddaFabricMaxBlocks : 0;
 }
+static int DefaultDdaFabricA2aLL128Threads(const ncclComm*, size_t) { return 0; }  // no table: 256 threads
+static int DefaultDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t) {
+  return comm != nullptr ? comm->ddaFabricMaxBlocks : 0;
+}
+static int DefaultDdaFabricBcLL128Threads(const ncclComm*) { return 0; }  // no table: 512 threads
+static int DefaultDdaFabricRsLL128Threads(const ncclComm*) { return 0; }  // no table: 512 threads
+static size_t DefaultDdaFabricRsLL128PeerMaxBytes(const ncclComm*) { return 0; }  // no table: batched at every size
 static bool DefaultDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
   switch (datatype) {
   case ncclFloat32:
@@ -43,16 +56,26 @@ static bool DefaultDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t dat
 std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
 std::function<size_t(const ncclComm*, ncclFunc_t)> g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
 std::function<size_t(const ncclComm*)> g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
+std::function<size_t(const ncclComm*)> g_rcclDdaLLOneShotThreshold = DefaultDdaLLOneShotThreshold;
 std::function<size_t(const ncclComm*)> g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
+std::function<size_t(const ncclComm*)> g_rcclDdaLL128OneShotThreshold = DefaultDdaLL128OneShotThreshold;
 std::function<int(const ncclComm*)> g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Threads = DefaultDdaFabricAgLL128Threads;
 std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricAgLL128Blocks = DefaultDdaFabricAgLL128Blocks;
+std::function<int(const ncclComm*)> g_rcclDdaFabricNarrowThreads = DefaultDdaFabricNarrowThreads;
+std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Threads = DefaultDdaFabricA2aLL128Threads;
+std::function<int(const ncclComm*, size_t)> g_rcclDdaFabricA2aLL128Blocks = DefaultDdaFabricA2aLL128Blocks;
+std::function<int(const ncclComm*)> g_rcclDdaFabricBcLL128Threads = DefaultDdaFabricBcLL128Threads;
+std::function<int(const ncclComm*)> g_rcclDdaFabricRsLL128Threads = DefaultDdaFabricRsLL128Threads;
+std::function<size_t(const ncclComm*)> g_rcclDdaFabricRsLL128PeerMaxBytes = DefaultDdaFabricRsLL128PeerMaxBytes;
 std::function<bool(const ncclComm*, ncclDataType_t)> g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
 
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLLThreshold(comm, func); }
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func) { return g_rcclDdaLL128Threshold(comm, func); }
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLLTwoShotThreshold(comm); }
+size_t rcclDdaLLOneShotThreshold(const ncclComm* comm) { return g_rcclDdaLLOneShotThreshold(comm); }
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm) { return g_rcclDdaLL128TwoShotThreshold(comm); }
+size_t rcclDdaLL128OneShotThreshold(const ncclComm* comm) { return g_rcclDdaLL128OneShotThreshold(comm); }
 int rcclDdaFabricVmmBlocks(const ncclComm* comm) { return g_rcclDdaFabricVmmBlocks(comm); }
 int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes) {
   return g_rcclDdaFabricAgLL128Threads(comm, totalBytes);
@@ -60,6 +83,16 @@ int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes) {
 int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes) {
   return g_rcclDdaFabricAgLL128Blocks(comm, totalBytes);
 }
+int rcclDdaFabricNarrowThreads(const ncclComm* comm) { return g_rcclDdaFabricNarrowThreads(comm); }
+int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes) {
+  return g_rcclDdaFabricA2aLL128Threads(comm, totalBytes);
+}
+int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes) {
+  return g_rcclDdaFabricA2aLL128Blocks(comm, totalBytes);
+}
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm) { return g_rcclDdaFabricBcLL128Threads(comm); }
+int rcclDdaFabricRsLL128Threads(const ncclComm* comm) { return g_rcclDdaFabricRsLL128Threads(comm); }
+size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm) { return g_rcclDdaFabricRsLL128PeerMaxBytes(comm); }
 bool rcclDdaDatatypeSupported(const ncclComm* comm, ncclDataType_t datatype) {
   return g_rcclDdaDatatypeSupported(comm, datatype);
 }
@@ -69,10 +102,18 @@ void ResetDdaCollSeams() {
   g_rcclDdaLLThreshold = DefaultDdaLLThreshold;
   g_rcclDdaLL128Threshold = DefaultDdaLL128Threshold;
   g_rcclDdaLLTwoShotThreshold = DefaultDdaLLTwoShotThreshold;
+  g_rcclDdaLLOneShotThreshold = DefaultDdaLLOneShotThreshold;
   g_rcclDdaLL128TwoShotThreshold = DefaultDdaLL128TwoShotThreshold;
+  g_rcclDdaLL128OneShotThreshold = DefaultDdaLL128OneShotThreshold;
   g_rcclDdaFabricVmmBlocks = DefaultDdaFabricVmmBlocks;
   g_rcclDdaFabricAgLL128Threads = DefaultDdaFabricAgLL128Threads;
   g_rcclDdaFabricAgLL128Blocks = DefaultDdaFabricAgLL128Blocks;
+  g_rcclDdaFabricNarrowThreads = DefaultDdaFabricNarrowThreads;
+  g_rcclDdaFabricA2aLL128Threads = DefaultDdaFabricA2aLL128Threads;
+  g_rcclDdaFabricA2aLL128Blocks = DefaultDdaFabricA2aLL128Blocks;
+  g_rcclDdaFabricBcLL128Threads = DefaultDdaFabricBcLL128Threads;
+  g_rcclDdaFabricRsLL128Threads = DefaultDdaFabricRsLL128Threads;
+  g_rcclDdaFabricRsLL128PeerMaxBytes = DefaultDdaFabricRsLL128PeerMaxBytes;
   g_rcclDdaDatatypeSupported = DefaultDdaDatatypeSupported;
 }
 

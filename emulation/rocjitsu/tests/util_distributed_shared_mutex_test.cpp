@@ -26,10 +26,11 @@ TEST(DistributedSharedMutexTest, CoherenceDomainWritersUnderOuterLocks) {
   std::array<util::DistributedSharedMutex, kCaches> mutexes;
   std::array<std::unique_lock<util::DistributedSharedMutex>, kCaches> writers;
   for (size_t i = 0; i < kCaches; ++i) {
-    if (i < kCaches / 2)
+    if (i < kCaches / 2) {
       writers[i] = std::unique_lock(mutexes[i]);
-    else
+    } else {
       writers[i] = std::unique_lock(mutexes[i], std::try_to_lock);
+    }
     ASSERT_TRUE(writers[i].owns_lock());
   }
 
@@ -68,12 +69,14 @@ TEST(DistributedSharedMutexTest, WriterExcludesReadersAndOtherWriters) {
   std::jthread contender([&] {
     const bool read_acquired = mutex.try_lock_shared();
     EXPECT_FALSE(read_acquired);
-    if (read_acquired)
+    if (read_acquired) {
       mutex.unlock_shared();
+    }
     const bool write_acquired = mutex.try_lock();
     EXPECT_FALSE(write_acquired);
-    if (write_acquired)
+    if (write_acquired) {
       mutex.unlock();
+    }
   });
   contender.join();
 }
@@ -93,8 +96,9 @@ TEST(DistributedSharedMutexTest, ConcurrentReadersObserveCompleteWriterUpdates) 
       start.arrive_and_wait();
       for (unsigned j = 0; j < kIterations; ++j) {
         std::shared_lock lock(mutex);
-        if (first != second)
+        if (first != second) {
           inconsistent.store(true, std::memory_order_relaxed);
+        }
       }
     });
   }

@@ -9,7 +9,6 @@
 #include "core/common_types.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
-#include "core/gpu_metrics.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto/category_registry.hpp"
 #include "core/perfetto/counter_track.hpp"

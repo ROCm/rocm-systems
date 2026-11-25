@@ -51,8 +51,16 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 
 option(PROFILER_HUB_BUILD_TESTS "Build unit tests" ON)
 option(PROFILER_HUB_BUILD_BENCHMARKS "Build performance benchmarks" OFF)
+option(PROFILER_HUB_BUILD_EXAMPLES "Build examples" ON)
 option(PROFILER_HUB_ENABLE_LOGGING "Enable logging" OFF)
+option(PROFILER_HUB_ENABLE_ROCPD_V2 "Read legacy rocpd schema 2 traces" ON)
+option(PROFILER_HUB_ENABLE_ROCPD_V3 "Read rocpd schema 3 traces" ON)
 option(PROFILER_HUB_ENABLE_COVERAGE "Enable code coverage" OFF)
+option(
+    PH_USE_NOMUTEX_OPTIMIZATION
+    "Open SQLite connections without the per-connection mutex. Faster, but every connection must then be used by one thread at a time (pooled connections are; a standalone reader_t or writer shared between threads is not)."
+    ON
+)
 option(
     PROFILER_HUB_FETCH_DEPENDENCIES
     "Download missing or unsuitable dependencies at configure time"
@@ -83,14 +91,28 @@ set_target_properties(
     PROPERTIES POSITION_INDEPENDENT_CODE ON
 )
 
+# get_storage_version() reports the library version. project() above sets
+# profiler-hub_VERSION_{MAJOR,MINOR,PATCH} from the VERSION file.
 target_compile_definitions(
     profiler-hub-objects
     PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MAJOR=${profiler-hub_VERSION_MAJOR}>
-    PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_MINOR=${profiler-hub_VERSION_MINOR}>
-    PRIVATE
         $<$<COMPILE_LANGUAGE:CXX>:PROFILER_HUB_VERSION_PATCH=${profiler-hub_VERSION_PATCH}>
+)
+
+if(PH_USE_NOMUTEX_OPTIMIZATION)
+    target_compile_definitions(
+        profiler-hub-objects
+        PRIVATE PH_USE_NOMUTEX_OPTIMIZATION
+    )
+endif()
+
+target_compile_definitions(
+    profiler-hub-objects
+    PRIVATE
+        PROFILER_HUB_ENABLE_ROCPD_V2=$<BOOL:${PROFILER_HUB_ENABLE_ROCPD_V2}>
+        PROFILER_HUB_ENABLE_ROCPD_V3=$<BOOL:${PROFILER_HUB_ENABLE_ROCPD_V3}>
 )
 
 target_compile_options(
@@ -120,16 +142,29 @@ add_subdirectory(source)
 # Public API
 # ------------------------------------------------------------ #
 
-set(profiler-hub_public_headers
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/storage.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/version.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/writer_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/reader_types.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/include/shared_types.hpp
+add_subdirectory(include/cpp)
+
+# Old-path forwarding headers; remove in a future release.
+list(
+    APPEND profiler-hub_public_headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/writer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/reader.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/storage.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/trimmer.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/version.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/writer_types.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/reader_types.hpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/shared_types.hpp
 )
 
+list(
+    APPEND profiler-hub_public_headers
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/c/profiler_hub.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/c/profiler_hub_trim.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/c/profiler_hub_types.h
+)
+
+file(REMOVE_RECURSE ${CMAKE_BINARY_DIR}/include/profiler-hub)
 foreach(HEADER_FILE ${profiler-hub_public_headers})
     file(
         RELATIVE_PATH
@@ -392,6 +427,7 @@ install(
     COMPONENT profiler-hub
     FILES_MATCHING
     PATTERN "*.hpp"
+    PATTERN "*.h"
 )
 
 install(
@@ -477,8 +513,11 @@ file(
     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
 )
 
-set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
-export(PACKAGE ${PACKAGE_NAME})
+# Registry entries are for standalone builds; a parent project's build must not write one.
+if(PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_EXPORT_PACKAGE_REGISTRY ON)
+    export(PACKAGE ${PACKAGE_NAME})
+endif()
 
 # ------------------------------------------------------------ #
 # Clang-Tidy Custom Target
@@ -504,6 +543,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -516,6 +556,7 @@ if(CLANG_TIDY_EXE)
         clang-tidy-fix
         COMMAND
             ${CLANG_TIDY_EXE} -p ${CMAKE_BINARY_DIR}
+            --extra-arg=-I${CMAKE_BINARY_DIR}/include
             --config-file=${CMAKE_SOURCE_DIR}/.clang-tidy --fix --fix-errors
             ${PROFILER_HUB_CLANG_TIDY_SOURCES}
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -535,4 +576,8 @@ endif()
 
 if(PROFILER_HUB_BUILD_TESTS OR PROFILER_HUB_BUILD_BENCHMARKS)
     add_subdirectory(tests)
+endif()
+
+if(PROFILER_HUB_BUILD_EXAMPLES)
+    add_subdirectory(examples/clients)
 endif()

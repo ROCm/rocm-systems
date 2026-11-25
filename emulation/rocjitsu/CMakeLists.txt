@@ -68,7 +68,7 @@ include(GNUInstallDirs)
 
 include(rj_sanitizers)
 
-# Sanitizer and static analysis options.
+# Sanitizer options.
 option(RJ_ENABLE_ASAN "Enable AddressSanitizer" OFF)
 option(RJ_ENABLE_UBSAN "Enable UndefinedBehaviorSanitizer" OFF)
 option(RJ_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
@@ -105,13 +105,28 @@ if(NOT RJ_SANITIZER_RUNTIME IN_LIST _rj_sanitizer_runtime_values)
     )
 endif()
 unset(_rj_sanitizer_runtime_values)
-option(RJ_CLANG_TIDY "Enable clang-tidy static analysis" OFF)
 option(
     RJ_ENABLE_EXPENSIVE_CHECKS
     "Enable expensive exhaustive test suites (MFMA/WMMA SIMD bit-exactness)"
     OFF
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
+option(
+    ROCJITSU_ENABLE_INTERPOSER
+    "Include the Linux LD_PRELOAD interposer in librocjitsu"
+    ON
+)
+option(
+    RJ_ENABLE_HOST_FAULT_RECOVERY
+    "Recover invalid host memory accesses using SIGSEGV and SIGBUS handlers"
+    ON
+)
+# GNU-unique symbols make glibc retain a DSO after dlclose. All objects in
+# an unloadable explicit library, including its static dependencies, must use
+# ordinary C++ symbol binding instead.
+if(NOT ROCJITSU_ENABLE_INTERPOSER AND NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+    add_compile_options($<$<COMPILE_LANG_AND_ID:CXX,GNU>:-fno-gnu-unique>)
+endif()
 option(
     ROCJITSU_ENABLE_PERFSIM_PLUGIN
     "Build the optional RocJITsu adapter for an external Perfsim observer plugin"
@@ -333,16 +348,6 @@ endif()
 unset(_rj_sanitizer_count)
 unset(_rj_sanitizer_kinds)
 
-if(RJ_CLANG_TIDY)
-    find_program(CLANG_TIDY_EXE NAMES clang-tidy)
-    if(CLANG_TIDY_EXE)
-        message(STATUS "clang-tidy found: ${CLANG_TIDY_EXE}")
-        set(CMAKE_CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-    else()
-        message(WARNING "clang-tidy not found, RJ_CLANG_TIDY ignored")
-    endif()
-endif()
-
 # Third-party dependencies (fetched into third_party/).
 # Third-party dependencies (fetched into third_party/).
 # Third-party dependencies (fetched into third_party/ by default).
@@ -372,6 +377,13 @@ set(FLATBUFFERS_INSTALL OFF CACHE BOOL "" FORCE)
 set(FLATBUFFERS_BUILD_FLATLIB ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest flatbuffers)
+
+if(NOT ROCJITSU_ENABLE_INTERPOSER)
+    add_compile_definitions(RJ_DISABLE_INTERPOSER)
+endif()
+if(NOT RJ_ENABLE_HOST_FAULT_RECOVERY)
+    add_compile_definitions(RJ_DISABLE_HOST_FAULT_RECOVERY)
+endif()
 
 include(rj_flatbuffers)
 
@@ -407,59 +419,70 @@ add_subdirectory(lib/simdojo)
 add_subdirectory(lib/rocjitsu)
 add_subdirectory(lib/rocjitsu/src/rocjitsu/vm/plugins)
 
-# Main shared library - assembles all object libraries.
-add_library(rocjitsu_shared SHARED)
-target_sources(
-    rocjitsu_shared
-    PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>
-)
-set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
-target_link_libraries(
-    rocjitsu_shared
-    PRIVATE
-        rocjitsu_analysis
-        rocjitsu_code
-        rocjitsu_code_object
-        rocjitsu_executable
-        rocjitsu_isa
-        rocjitsu_isa_registry
-        simdojo
-        rocjitsu_kmd
-        rocjitsu_vm
-        rocjitsu_vm_amdgpu
-        # Host-side plugin loader. The logging/race plugins are no longer
-        # linked in statically; they are separate librocjitsu_plugin_<name>.so
-        # modules discovered and dlopen()ed at runtime.
-        rocjitsu_plugin_loader
-        rocjitsu_vm_risc_v
-        rocjitsu_config
-        rocjitsu_dbt_config
-        rocjitsu_ip_discovery
-        rocm_runtime::runtime_headers
-        util
-        flatbuffers
-        Threads::Threads
-)
-target_include_directories(
-    rocjitsu_shared
-    PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
-)
-
-# Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_sources(
-        rocjitsu_shared
-        PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
+# Main shared library and the non-installed test interposer assemble the same
+# simulator objects. Only the latter compiles the interposer's test hooks.
+function(rj_configure_shared_interposer target)
+    target_sources(${target} PRIVATE $<TARGET_OBJECTS:rocjitsu_version_objects>)
+    target_link_libraries(
+        ${target}
+        PRIVATE
+            rocjitsu_analysis
+            rocjitsu_code
+            rocjitsu_code_object
+            rocjitsu_executable
+            rocjitsu_isa
+            rocjitsu_isa_registry
+            simdojo
+            rocjitsu_kmd
+            rocjitsu_vm
+            rocjitsu_vm_amdgpu
+            # Host-side plugin loader. The logging/race plugins are no longer
+            # linked in statically; they are separate librocjitsu_plugin_<name>.so
+            # modules discovered and dlopen()ed at runtime.
+            rocjitsu_plugin_loader
+            rocjitsu_vm_risc_v
+            rocjitsu_config
+            rocjitsu_dbt_config
+            rocjitsu_ip_discovery
+            rocm_runtime::runtime_headers
+            util
+            flatbuffers
+            Threads::Threads
     )
-    target_compile_definitions(rocjitsu_shared PRIVATE _GNU_SOURCE)
-    target_link_libraries(rocjitsu_shared PRIVATE dl)
-endif()
+    target_include_directories(
+        ${target}
+        PRIVATE ${ROCJITSU_INCLUDE_DIR} ${ROCJITSU_SRC_DIR} ${GENERATED_DIR}
+    )
 
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_link_options(rocjitsu_shared PRIVATE "LINKER:--exclude-libs,ALL")
-endif()
+    # Linux-only: KMD interposer (LD_PRELOAD shim) and its dependencies.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND ROCJITSU_ENABLE_INTERPOSER)
+        target_sources(
+            ${target}
+            PRIVATE ${ROCJITSU_SRC_DIR}/rocjitsu/kmd/linux/interposer.cpp
+        )
+        target_compile_definitions(${target} PRIVATE _GNU_SOURCE)
+        target_link_libraries(${target} PRIVATE dl)
+    endif()
 
-add_dependencies(rocjitsu_shared flatbuffers_schemas)
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(${target} PRIVATE "LINKER:--exclude-libs,ALL")
+    endif()
+
+    add_dependencies(${target} flatbuffers_schemas)
+endfunction()
+
+add_library(rocjitsu_shared SHARED)
+set_target_properties(rocjitsu_shared PROPERTIES OUTPUT_NAME rocjitsu)
+rj_configure_shared_interposer(rocjitsu_shared)
+
+if(BUILD_TESTING AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_library(rocjitsu_test_interposer SHARED)
+    rj_configure_shared_interposer(rocjitsu_test_interposer)
+    target_compile_definitions(
+        rocjitsu_test_interposer
+        PRIVATE RJ_INTERPOSER_TEST_HOOKS
+    )
+endif()
 
 # Developer and test workflow tools.
 add_subdirectory(tools)
@@ -467,6 +490,7 @@ add_subdirectory(tools/rj-ip-discovery)
 add_subdirectory(fuzz/decode)
 add_subdirectory(fuzz/code_object)
 add_subdirectory(fuzz/execution)
+add_subdirectory(fuzz/concurrent_dispatch)
 add_subdirectory(fuzz/multiplexer)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -494,6 +518,27 @@ install(
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    option(
+        RJ_INSTALL_MINIDEBUGINFO
+        "Compress private symbols in the installed Release librocjitsu.so"
+        ON
+    )
+    if(
+        RJ_INSTALL_MINIDEBUGINFO
+        AND NOT THEROCK_SPLIT_DEBUG_INFO
+        AND CMAKE_OBJCOPY
+        AND CMAKE_READELF
+    )
+        configure_file(
+            cmake/rj_install_minidebuginfo.cmake.in
+            rj_install_minidebuginfo.cmake
+            @ONLY
+        )
+        install(
+            SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/rj_install_minidebuginfo.cmake"
+        )
+    endif()
+
     # The translator ships alongside the hook: both must resolve to the SAME
     # shared object, or the cache identity they derive from it would differ and
     # neither could read what the other wrote.
@@ -502,6 +547,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
+
+# Ship the standalone host CLI for offline code-object mutation workflows.
+install(TARGETS rj_code_mutate RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # rj_pretranslate ships because the tier it fills is only worth having if an

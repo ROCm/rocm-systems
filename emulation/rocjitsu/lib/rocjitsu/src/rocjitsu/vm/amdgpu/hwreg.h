@@ -14,8 +14,12 @@ namespace amdgpu {
 
 class Wavefront;
 
-/// @brief Encode the GFX12 STATE_PRIV fields backed by internal STATUS.
-[[nodiscard]] uint32_t gfx12_state_priv_from_status(uint32_t status, bool scratch_enabled);
+/// @brief Encode GFX12 STATE_PRIV using the selected STATUS and live workgroup flags.
+[[nodiscard]] uint32_t gfx12_state_priv_from_status(const Wavefront &wf, uint32_t status,
+                                                    bool scratch_enabled);
+
+/// @brief Apply the one-shot sleep credit and workgroup barrier completion fields.
+void set_gfx12_state_priv_workgroup_flags(Wavefront &wf, uint32_t state_priv);
 
 /// @brief Replace internal STATUS fields represented by GFX12 STATE_PRIV.
 [[nodiscard]] uint32_t update_status_from_gfx12_state_priv(uint32_t status, uint32_t state_priv);

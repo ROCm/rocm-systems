@@ -122,24 +122,27 @@ using util::Sha256;
   } query{static_cast<const uint8_t *>(address), {}};
 
   dl_iterate_phdr(
-      [](struct dl_phdr_info *phdr_info, size_t, void *data) -> int {
+      [](struct dl_phdr_info *phdr_info, size_t, void *data) noexcept -> int {
         auto *q = static_cast<Query *>(data);
         bool holds_self = false;
         for (int i = 0; i < phdr_info->dlpi_phnum && !holds_self; ++i) {
           const ElfW(Phdr) &segment = phdr_info->dlpi_phdr[i];
-          if (segment.p_type != PT_LOAD)
+          if (segment.p_type != PT_LOAD) {
             continue;
+          }
           const auto *begin =
               reinterpret_cast<const uint8_t *>(phdr_info->dlpi_addr + segment.p_vaddr);
           holds_self = q->self >= begin && q->self < begin + segment.p_memsz;
         }
-        if (!holds_self)
+        if (!holds_self) {
           return 0;
+        }
 
         for (int i = 0; i < phdr_info->dlpi_phnum; ++i) {
           const ElfW(Phdr) &segment = phdr_info->dlpi_phdr[i];
-          if (segment.p_type != PT_NOTE)
+          if (segment.p_type != PT_NOTE) {
             continue;
+          }
           const auto *cursor =
               reinterpret_cast<const uint8_t *>(phdr_info->dlpi_addr + segment.p_vaddr);
           const uint8_t *end = cursor + segment.p_memsz;
@@ -150,8 +153,9 @@ using util::Sha256;
             const size_t desc_size = (note.n_descsz + 3u) & ~3u;
             const uint8_t *name = cursor + sizeof(note);
             const uint8_t *desc = name + name_size;
-            if (desc + desc_size > end)
+            if (desc + desc_size > end) {
               break;
+            }
             if (note.n_type == NT_GNU_BUILD_ID && note.n_namesz == 4 &&
                 std::memcmp(name, "GNU", 4) == 0) {
               q->result = to_hex({desc, note.n_descsz});
@@ -170,24 +174,28 @@ using util::Sha256;
 
 std::string shared_translation_root(const void *address) {
   Dl_info info{};
-  if (dladdr(address, &info) == 0 || info.dli_fname == nullptr)
+  if (dladdr(address, &info) == 0 || info.dli_fname == nullptr) {
     return {};
+  }
   // dladdr() preserves the spelling used by the loader, including relative
   // components. The secure descriptor walk intentionally rejects those, so
   // derive the installed root from the resolved module path instead.
   char *resolved = realpath(info.dli_fname, nullptr);
-  if (resolved == nullptr)
+  if (resolved == nullptr) {
     return {};
+  }
   const std::string resolved_path(resolved);
   free(resolved);
   const std::string_view path(resolved_path);
   const size_t file_at = path.rfind('/');
-  if (file_at == std::string_view::npos)
+  if (file_at == std::string_view::npos) {
     return {}; // A bare name means the loader resolved it by search; no prefix.
+  }
   const std::string_view library_dir = path.substr(0, file_at);
   const size_t prefix_at = library_dir.rfind('/');
-  if (prefix_at == std::string_view::npos)
+  if (prefix_at == std::string_view::npos) {
     return {};
+  }
 
   // Only an install layout gets a root. Stripping two components unconditionally
   // means a module loaded from anywhere at all names a sibling `share` -- a copy
@@ -201,14 +209,16 @@ std::string shared_translation_root(const void *address) {
                               // Debian/Ubuntu multiarch, e.g. lib/x86_64-linux-gnu, whose prefix is
                               // one level further up than the two-component strip above assumes.
                               library_dir_name.find('-') != std::string_view::npos;
-  if (!is_library_dir)
+  if (!is_library_dir) {
     return {};
+  }
   std::string_view prefix = library_dir.substr(0, prefix_at);
   if (library_dir_name.find('-') != std::string_view::npos) {
     const size_t multiarch_prefix_at = prefix.rfind('/');
     if (multiarch_prefix_at == std::string_view::npos ||
-        prefix.substr(multiarch_prefix_at + 1) != "lib")
+        prefix.substr(multiarch_prefix_at + 1) != "lib") {
       return {};
+    }
     prefix = prefix.substr(0, multiarch_prefix_at);
   }
   return std::string(prefix) + "/share/rocjitsu/translations";
@@ -239,10 +249,12 @@ namespace {
     const size_t next = path.find('/', at);
     const std::string_view component =
         path.substr(at, next == std::string_view::npos ? std::string_view::npos : next - at);
-    if (!component.empty())
+    if (!component.empty()) {
       components.emplace_back(component);
-    if (next == std::string_view::npos)
+    }
+    if (next == std::string_view::npos) {
       break;
+    }
     at = next + 1;
   }
   return components;
@@ -253,8 +265,9 @@ namespace {
 /// would silently reinterpret it as absolute. Requiring at least one ordinary
 /// component also rejects `/` before trust-boundary index arithmetic.
 [[nodiscard]] bool is_descended_absolute_path(std::string_view path) {
-  if (path.size() < 2 || path.front() != '/' || path.find('\0') != std::string_view::npos)
+  if (path.size() < 2 || path.front() != '/' || path.find('\0') != std::string_view::npos) {
     return false;
+  }
   const auto components = path_components(path);
   return !components.empty() && std::ranges::none_of(components, [](const std::string &component) {
     return component == "." || component == "..";
@@ -282,10 +295,12 @@ enum class DirectoryTrust {
 /// is group-writable, and demanding otherwise would disable the session tier
 /// wherever the daemon has run.
 [[nodiscard]] bool directory_owner_is_trusted(const struct stat &info, DirectoryTrust trust) {
-  if (!S_ISDIR(info.st_mode))
+  if (!S_ISDIR(info.st_mode)) {
     return false;
-  if (trust == DirectoryTrust::kOwnedByCaller)
+  }
+  if (trust == DirectoryTrust::kOwnedByCaller) {
     return info.st_uid == geteuid();
+  }
   return info.st_uid == 0 || info.st_uid == geteuid();
 }
 
@@ -326,12 +341,14 @@ enum class DirectoryTrust {
                                            DirectoryTrust trust, size_t owner_checked_from,
                                            size_t trusted_from) {
   const std::vector<std::string> components = path_components(path);
-  if (components.empty())
+  if (components.empty()) {
     return -1;
+  }
 
   int parent = open("/", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  if (parent < 0)
+  if (parent < 0) {
     return -1;
+  }
 
   for (size_t index = 0; index < components.size(); ++index) {
     const std::string &component = components[index];
@@ -349,10 +366,12 @@ enum class DirectoryTrust {
     const int child =
         openat(parent, component.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
     close(parent);
-    if (child < 0)
+    if (child < 0) {
       return -1;
-    if (created)
+    }
+    if (created) {
       (void)fchmod(child, create_mode);
+    }
     if (index >= owner_checked_from) {
       struct stat info {};
       const bool ok = fstat(child, &info) == 0 &&
@@ -396,8 +415,9 @@ public:
     held_ = dir_fd_ >= 0 && flock(dir_fd_, operation) == 0;
   }
   ~DirectoryWriteLock() {
-    if (held_)
+    if (held_) {
       (void)flock(dir_fd_, LOCK_UN);
+    }
   }
   DirectoryWriteLock(const DirectoryWriteLock &) = delete;
   DirectoryWriteLock &operator=(const DirectoryWriteLock &) = delete;
@@ -445,8 +465,9 @@ struct TranslationStore::Impl {
         key_mode_(key_mode) {}
 
   ~Impl() {
-    if (dir_fd_ >= 0)
+    if (dir_fd_ >= 0) {
       close(dir_fd_);
+    }
   }
 
   [[nodiscard]] bool available() {
@@ -469,8 +490,9 @@ struct TranslationStore::Impl {
 #if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
   void set_root_for_test(const char *root) {
     std::lock_guard lock(mutex_);
-    if (dir_fd_ >= 0)
+    if (dir_fd_ >= 0) {
       close(dir_fd_);
+    }
     dir_fd_ = -1;
     opened_ = false;
     hits_ = 0;
@@ -487,11 +509,13 @@ struct TranslationStore::Impl {
   [[nodiscard]] uint64_t size_for_test() {
     std::lock_guard lock(mutex_);
     ensure_open_locked();
-    if (dir_fd_ < 0)
+    if (dir_fd_ < 0) {
       return 0;
+    }
     uint64_t total = 0;
-    for (const Entry &entry : scan_locked())
+    for (const Entry &entry : scan_locked()) {
       total += entry.size;
+    }
     return total;
   }
 #endif
@@ -501,17 +525,20 @@ struct TranslationStore::Impl {
   [[nodiscard]] uint64_t max_object_bytes() const { return kMaxObjectBytes; }
 
   void ensure_open_locked() {
-    if (opened_)
+    if (opened_) {
       return;
+    }
     opened_ = true;
-    if (!is_single_path_component(domain_))
+    if (!is_single_path_component(domain_)) {
       return;
+    }
     if (key_mode_ == KeyMode::kPortablePrebuilt) {
       build_nonce_ = kPortablePrebuiltNonce;
     } else {
       build_nonce_ = read_build_id_of(translator_);
-      if (build_nonce_.empty())
+      if (build_nonce_.empty()) {
         return; // No stable identity: refuse to key on anything weaker.
+      }
     }
 
     std::string base;
@@ -521,12 +548,14 @@ struct TranslationStore::Impl {
     if (base.empty()) {
       // An empty root disables the store rather than defaulting somewhere: a
       // caller that could not locate its install has not told us where to look.
-      if (root_.empty())
+      if (root_.empty()) {
         return;
+      }
       base = root_;
     }
-    if (!is_descended_absolute_path(base))
+    if (!is_descended_absolute_path(base)) {
       return;
+    }
     const std::string path = base + "/" + domain_ + "/" + std::string(kSchemaDir);
     // The trust policy starts at the store's own root. Everything above it
     // belongs to the system -- /tmp is world-writable by design, and judging it
@@ -555,8 +584,9 @@ struct TranslationStore::Impl {
       // opportunistic; losing this race only leaves old files for the next
       // process to reclaim.
       const DirectoryWriteLock directory_lock(dir_fd_, DirectoryWriteLock::Mode::kNonBlocking);
-      if (directory_lock.held())
+      if (directory_lock.held()) {
         sweep_abandoned_locked();
+      }
     }
   }
 
@@ -566,8 +596,9 @@ struct TranslationStore::Impl {
 
   [[nodiscard]] uint64_t headroom_locked() const {
 #if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)
-    if (headroom_override_ != 0)
+    if (headroom_override_ != 0) {
       return headroom_override_;
+    }
 #endif
     return kHeadroomBytes;
   }
@@ -593,11 +624,13 @@ struct TranslationStore::Impl {
 
 std::vector<Entry> TranslationStore::Impl::scan_locked() const {
   std::vector<Entry> entries;
-  if (dir_fd_ < 0)
+  if (dir_fd_ < 0) {
     return entries;
+  }
   const int scan_fd = openat(dir_fd_, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  if (scan_fd < 0)
+  if (scan_fd < 0) {
     return entries;
+  }
   DIR *dir = fdopendir(scan_fd);
   if (dir == nullptr) {
     close(scan_fd);
@@ -615,15 +648,18 @@ std::vector<Entry> TranslationStore::Impl::scan_locked() const {
   while (const dirent *item = readdir(dir)) {
     const std::string_view name(item->d_name);
     const bool is_object = name.ends_with(".obj");
-    if (!is_object && !name.ends_with(".man"))
+    if (!is_object && !name.ends_with(".man")) {
       continue;
+    }
     struct stat info {};
-    if (fstatat(dir_fd_, item->d_name, &info, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(info.st_mode))
+    if (fstatat(dir_fd_, item->d_name, &info, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(info.st_mode)) {
       continue;
+    }
     std::string key(name.substr(0, name.size() - 4));
     Entry &entry = by_key[key];
-    if (entry.name.empty())
+    if (entry.name.empty()) {
       entry.name = key;
+    }
     entry.size += static_cast<uint64_t>(info.st_size);
     // The object's timestamp is the one lookups refresh, so it decides eviction
     // order whenever there is an object at all.
@@ -634,17 +670,20 @@ std::vector<Entry> TranslationStore::Impl::scan_locked() const {
   }
   closedir(dir);
   entries.reserve(by_key.size());
-  for (auto &[key, entry] : by_key)
+  for (auto &[key, entry] : by_key) {
     entries.push_back(std::move(entry));
+  }
   return entries;
 }
 
 void TranslationStore::Impl::sweep_abandoned_locked() const {
-  if (dir_fd_ < 0)
+  if (dir_fd_ < 0) {
     return;
+  }
   const int scan_fd = openat(dir_fd_, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-  if (scan_fd < 0)
+  if (scan_fd < 0) {
     return;
+  }
   DIR *dir = fdopendir(scan_fd);
   if (dir == nullptr) {
     close(scan_fd);
@@ -662,13 +701,16 @@ void TranslationStore::Impl::sweep_abandoned_locked() const {
         name.ends_with(".man") &&
         faccessat(dir_fd_, (std::string(name.substr(0, name.size() - 4)) + ".obj").c_str(), F_OK,
                   0) != 0;
-    if (!orphan_manifest && name.find(".tmp.") == std::string_view::npos)
+    if (!orphan_manifest && name.find(".tmp.") == std::string_view::npos) {
       continue;
+    }
     struct stat info {};
-    if (fstatat(dir_fd_, item->d_name, &info, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(info.st_mode))
+    if (fstatat(dir_fd_, item->d_name, &info, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISREG(info.st_mode)) {
       continue;
-    if (now - info.st_mtime > kAbandonedTempSeconds)
+    }
+    if (now - info.st_mtime > kAbandonedTempSeconds) {
       unlinkat(dir_fd_, item->d_name, 0);
+    }
   }
   closedir(dir);
 }
@@ -679,8 +721,9 @@ bool TranslationStore::Impl::reserve_space_locked(uint64_t needed) {
   // decision and leave a pre-translation pass with unpredictable output. It gets
   // a per-entry ceiling and the free-space floor, and nothing else.
   struct statvfs vfs {};
-  if (dir_fd_ < 0 || fstatvfs(dir_fd_, &vfs) != 0)
+  if (dir_fd_ < 0 || fstatvfs(dir_fd_, &vfs) != 0) {
     return false;
+  }
   const uint64_t free_now = static_cast<uint64_t>(vfs.f_bavail) * vfs.f_frsize;
   return needed <= kMaxObjectBytes && free_now >= needed + headroom_locked();
 }
@@ -711,24 +754,28 @@ namespace {
                                                         std::string_view name) {
   std::string needle = "\n" + std::string(name) + "=";
   const size_t at = text.find(needle);
-  if (at == std::string_view::npos)
+  if (at == std::string_view::npos) {
     return std::nullopt;
+  }
   const size_t begin = at + needle.size();
   const size_t end = text.find('\n', begin);
-  if (end == std::string_view::npos)
+  if (end == std::string_view::npos) {
     return std::nullopt;
+  }
   return std::string(text.substr(begin, end - begin));
 }
 
 template <typename Buffer>
-[[nodiscard]] std::optional<Buffer> read_whole(int dir_fd, const std::string &name,
-                                               uint64_t limit) {
+[[nodiscard]] std::optional<Buffer> read_whole(int dir_fd, const std::string &name, uint64_t limit,
+                                               std::optional<std::string_view> recorded_size = {}) {
   const int fd = openat(dir_fd, name.c_str(), O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
-  if (fd < 0)
+  if (fd < 0) {
     return std::nullopt;
+  }
   struct stat info {};
   if (fstat(fd, &info) != 0 || !S_ISREG(info.st_mode) ||
-      static_cast<uint64_t>(info.st_size) > limit) {
+      static_cast<uint64_t>(info.st_size) > limit ||
+      (recorded_size && std::to_string(info.st_size) != *recorded_size)) {
     close(fd);
     return std::nullopt;
   }
@@ -755,8 +802,9 @@ template <typename Buffer>
                            std::to_string(getpid());
   const int fd =
       openat(dir_fd, temp.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode);
-  if (fd < 0)
+  if (fd < 0) {
     return false;
+  }
   // open() applies the umask, which for a shared entry written during an image
   // build would leave a file the eventual reader cannot open. Set the mode on the
   // descriptor instead, before the rename makes the name visible.
@@ -810,23 +858,26 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
     dir_fd = dir_fd_;
     build_nonce = build_nonce_;
   }
-  if (dir_fd < 0)
+  if (dir_fd < 0) {
     return {};
+  }
 
   const std::string manifest_name = key + ".man";
   const std::string object_name = key + ".obj";
   constexpr uint64_t kManifestLimit = 4096;
   const std::optional<std::string> manifest =
       read_whole<std::string>(dir_fd, manifest_name, kManifestLimit);
-  if (!manifest || !manifest->starts_with(kManifestMagic))
+  if (!manifest || !manifest->starts_with(kManifestMagic)) {
     return {};
+  }
 
   // The key already covers these, so a mismatch means a digest collision or a
   // file left behind by a defect. Either way the object is not ours to use.
   const auto recorded_size = manifest_field(*manifest, "size");
   const auto recorded_sha = manifest_field(*manifest, "sha");
-  if (!recorded_size || !recorded_sha)
+  if (!recorded_size || !recorded_sha) {
     return {};
+  }
   const std::pair<std::string_view, std::string> expected[] = {
       {"key", key},
       {"build", build_nonce},
@@ -838,19 +889,22 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
   };
   for (const auto &[name, want] : expected) {
     const auto got = manifest_field(*manifest, name);
-    if (!got || *got != want)
+    if (!got || *got != want) {
       return {};
+    }
   }
 
   std::optional<std::vector<uint8_t>> object =
-      read_whole<std::vector<uint8_t>>(dir_fd, object_name, max_object_bytes());
-  if (!object || std::to_string(object->size()) != *recorded_size)
+      read_whole<std::vector<uint8_t>>(dir_fd, object_name, max_object_bytes(), *recorded_size);
+  if (!object) {
     return {};
+  }
 
   Sha256 hash;
   hash.update(object->data(), object->size());
-  if (to_hex(hash.finish()) != *recorded_sha)
+  if (to_hex(hash.finish()) != *recorded_sha) {
     return {};
+  }
 
   // Refresh for the eviction order. Failure only costs ordering accuracy, and
   // the shared tier never evicts, so it has no order to keep.
@@ -871,18 +925,21 @@ std::vector<uint8_t> TranslationStore::Impl::lookup(const std::string &key,
 void TranslationStore::Impl::store(const std::string &key, std::span<const uint8_t> object,
                                    const TranslationIdentity &identity) {
   std::lock_guard lock(mutex_);
-  if (!writable())
+  if (!writable()) {
     return;
+  }
   ensure_open_locked();
-  if (dir_fd_ < 0 || object.empty())
+  if (dir_fd_ < 0 || object.empty()) {
     return;
+  }
 
   // Everything from here to publication is one critical section across
   // processes, because the reservation below is only meaningful if nobody else
   // writes between the scan and the rename that consumes its result.
   const DirectoryWriteLock directory_lock(dir_fd_);
-  if (!directory_lock.held())
+  if (!directory_lock.held()) {
     return;
+  }
 
   // Refuse what cannot fit before hashing it. build_manifest() digests the whole
   // object, so a refused 64 MiB entry spent 234 ms on a SHA-256 whose result was
@@ -894,22 +951,26 @@ void TranslationStore::Impl::store(const std::string &key, std::span<const uint8
   // the manifest only makes it larger, so this can never reject something the
   // exact check below would have accepted. Anything subtler belongs to that
   // check, which still runs with the real size.
-  if (object.size() > kMaxObjectBytes)
+  if (object.size() > kMaxObjectBytes) {
     return;
+  }
 
   const std::string manifest = build_manifest(key, object, identity, build_nonce_);
-  if (!reserve_space_locked(object.size() + manifest.size()))
+  if (!reserve_space_locked(object.size() + manifest.size())) {
     return;
+  }
 
   // Entries must be readable by whoever eventually runs; the directory's
   // ownership, not the file's mode, is what keeps them trustworthy.
   constexpr mode_t mode = 0644;
   // Manifest first: a visible object must always have something to verify
   // against. A manifest with no object simply reads as a miss.
-  if (!write_atomically(dir_fd_, key + ".man", manifest.data(), manifest.size(), mode))
+  if (!write_atomically(dir_fd_, key + ".man", manifest.data(), manifest.size(), mode)) {
     return;
-  if (!write_atomically(dir_fd_, key + ".obj", object.data(), object.size(), mode))
+  }
+  if (!write_atomically(dir_fd_, key + ".obj", object.data(), object.size(), mode)) {
     unlinkat(dir_fd_, (key + ".man").c_str(), 0);
+  }
 }
 
 TranslationStore::TranslationStore(std::string_view domain, const void *translator,
@@ -920,28 +981,25 @@ bool TranslationStore::available() { return impl_->available(); }
 
 TranslationStore::~TranslationStore() = default;
 
-// Every public operation is contained here rather than at each internal step.
-// The documented contract is best effort -- a caller translates instead -- but
-// these paths allocate strings, vectors and file buffers, and this component is
-// reached from an HSA load callback. A std::bad_alloc escaping key_for() fails
-// that load outright, turning a cache that could not answer into a program that
-// cannot run. Returning an invalid key, a miss, or a no-op keeps the promise.
 CacheKey TranslationStore::key_for(std::span<const uint8_t> source,
-                                   const TranslationIdentity &identity) try {
+                                   const TranslationIdentity &identity) noexcept {
   CacheKey key;
-  if (source.empty())
+  if (source.empty()) {
     return key;
+  }
   const std::string build_nonce = impl_->build_nonce();
-  if (build_nonce.empty() || !impl_->available())
+  if (build_nonce.empty() || !impl_->available()) {
     return key;
+  }
 
   // The manifest is line oriented, so a newline here forges an earlier size= or
   // sha= field. The object still gets written, every later lookup rejects it,
   // and the entry is retried forever: a write-only cache slot. The one identity
   // this hook presents is safe, but the type accepts any string_view.
   if (identity.target_isa.find('\n') != std::string_view::npos ||
-      identity.target_isa.find('\r') != std::string_view::npos)
+      identity.target_isa.find('\r') != std::string_view::npos) {
     return key;
+  }
 
   Sha256 hash;
   hash.update(kKeyDomain);
@@ -956,26 +1014,22 @@ CacheKey TranslationStore::key_for(std::span<const uint8_t> source,
   key.digest = hash.finish();
   key.valid = true;
   return key;
-} catch (...) {
-  return CacheKey{};
 }
 
 std::vector<uint8_t> TranslationStore::lookup(const CacheKey &key,
-                                              const TranslationIdentity &identity) try {
-  if (!key.valid)
+                                              const TranslationIdentity &identity) noexcept {
+  if (!key.valid) {
     return {};
+  }
   return impl_->lookup(to_hex(key.digest), identity);
-} catch (...) {
-  return {};
 }
 
 void TranslationStore::store(const CacheKey &key, std::span<const uint8_t> translated,
-                             const TranslationIdentity &identity) noexcept try {
-  if (!key.valid || translated.empty())
+                             const TranslationIdentity &identity) noexcept {
+  if (!key.valid || translated.empty()) {
     return;
+  }
   impl_->store(to_hex(key.digest), translated, identity);
-} catch (...) {
-  // Declared never to throw, and now actually is.
 }
 
 #if defined(RJ_TRANSLATION_STORE_TEST_HOOKS)

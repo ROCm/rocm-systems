@@ -9,7 +9,8 @@
 #include "common/floating_point.h"
 #include "common/registers.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 #include "wmma/helpers.h"
 #include <limits>
 
@@ -139,6 +140,8 @@ TEST(SwmmacF32F16K32W32, Arithmetic) {
   // A occupies 4 registers, B 8, C/D 8. Reuse the same arithmetic
   // data for overlapping and disjoint destination ranges.
   const uint64_t modes[] = {0, RJ_ARITH_SWMMAC_INDEX_KEY_1};
+  rocjitsu::arith::test::expect_sparse_destination_order(rj_arith_v_swmmac_f32_16x16x32_f16_w32,
+                                                         input, /*b=*/4, /*index=*/20);
   const auto cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
   for (uint64_t cpu : cpu_levels) {
     for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {

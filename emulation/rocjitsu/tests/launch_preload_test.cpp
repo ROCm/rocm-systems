@@ -21,14 +21,16 @@ namespace {
 class ScopedUnsetLdPreload {
 public:
   ScopedUnsetLdPreload() {
-    if (const char *value = std::getenv("LD_PRELOAD"))
+    if (const char *value = std::getenv("LD_PRELOAD")) {
       original_value_ = value;
+    }
     unset_result_ = unsetenv("LD_PRELOAD");
   }
 
   ~ScopedUnsetLdPreload() {
-    if (original_value_)
+    if (original_value_) {
       setenv("LD_PRELOAD", original_value_->c_str(), 1);
+    }
   }
 
   int unset_result() const { return unset_result_; }
@@ -166,7 +168,8 @@ TEST(LaunchPreloadTest, SanitizerNamedExecutableAliasDoesNotPreloadExecutable) {
   const std::filesystem::path exe = std::filesystem::read_symlink("/proc/self/exe", ec);
   ASSERT_FALSE(ec) << ec.message();
 
-  const rocjitsu::test::ScopedTempDirectory temp_dir_owner("rocjitsu-launch-preload-");
+  rocjitsu::test::ScopedTempDirectory temp_dir_owner;
+  ASSERT_TRUE(temp_dir_owner.initialize("rocjitsu-launch-preload-"));
   const std::filesystem::path temp_dir(temp_dir_owner.path());
 
   static constexpr const char *alias_names[] = {"launch-asan-preload-test",

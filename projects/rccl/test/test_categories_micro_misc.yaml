@@ -1,6 +1,7 @@
 # CTest categories for the host-only src/misc/ microtests.
 #
-# One pattern per unit: every suite starts with the unit's stem.
+# Suites start with their test file's or source unit's stem; the exception is dvsymbols-test.cc's
+# DvSymbolsTestIsolated.
 test_categories:
   quick: &micro_misc_quick
     description: "Smoke - host-only src/misc/ micro-tests, sub-second."
@@ -12,6 +13,21 @@ test_categories:
       - "Ionicdvsymbols*"
       - "Ionicdvwrap*"
       - "GdrPeermem*"
+      - "GdrProbe*"
+      - "DvSymbols*"
+      - "AmdsmiWrap*"
+      - "ApiTrace*"
+      - "Argcheck*"
+      - "Crypt*"
+      - "Recorder*"
+      - "Shmutils*"
+      - "Signals*"
+      - "Socket*"
+      - "Rocmwrap*"
+      - "RoctxNvml*"
+      - "Strongstream*"
+      - "Utils*"
+      - "CollTrace*"
     exclude_windows:
       - "*"
     labels:

@@ -15,8 +15,10 @@
 #pragma once
 
 #include "../mma_test_util.h"
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -99,62 +101,85 @@ inline uint64_t encode_element(Fmt f, Mode mode, uint32_t idx, std::mt19937 &rng
   }
   switch (f) {
   case Fmt::F16:
-    if (mode == Mode::NaN)
+    if (mode == Mode::NaN) {
       return 0x7E00;
-    if (mode == Mode::Inf)
+    }
+    if (mode == Mode::Inf) {
       return (idx & 1) ? 0xFC00 : 0x7C00;
-    if (mode == Mode::Denorm)
+    }
+    if (mode == Mode::Denorm) {
       return 0x0001;
-    if (mode == Mode::MaxFinite)
+    }
+    if (mode == Mode::MaxFinite) {
       return 0x7BFF;
+    }
     return util::f32_to_f16(v);
   case Fmt::BF16:
-    if (mode == Mode::NaN)
+    if (mode == Mode::NaN) {
       return 0x7FC0;
-    if (mode == Mode::Inf)
+    }
+    if (mode == Mode::Inf) {
       return (idx & 1) ? 0xFF80 : 0x7F80;
-    if (mode == Mode::Denorm)
+    }
+    if (mode == Mode::Denorm) {
       return 0x0001;
-    if (mode == Mode::MaxFinite)
+    }
+    if (mode == Mode::MaxFinite) {
       return 0x7F7F;
+    }
     return util::f32_to_bf16(v);
   case Fmt::F32:
-    if (mode == Mode::NaN)
+    if (mode == Mode::NaN) {
       return 0x7FC00000u;
-    if (mode == Mode::Inf)
+    }
+    if (mode == Mode::Inf) {
       return (idx & 1) ? 0xFF800000u : 0x7F800000u;
-    if (mode == Mode::Denorm)
+    }
+    if (mode == Mode::Denorm) {
       return 0x00000001u;
-    if (mode == Mode::MaxFinite)
+    }
+    if (mode == Mode::MaxFinite) {
       return 0x7F7FFFFFu;
+    }
     return std::bit_cast<uint32_t>(v);
   case Fmt::F64:
-    if (mode == Mode::NaN)
+    if (mode == Mode::NaN) {
       return 0x7FF8000000000000ull;
-    if (mode == Mode::Inf)
+    }
+    if (mode == Mode::Inf) {
       return (idx & 1) ? 0xFFF0000000000000ull : 0x7FF0000000000000ull;
-    if (mode == Mode::Denorm)
+    }
+    if (mode == Mode::Denorm) {
       return 0x0000000000000001ull;
-    if (mode == Mode::MaxFinite)
+    }
+    if (mode == Mode::MaxFinite) {
       return 0x7FEFFFFFFFFFFFFFull;
+    }
     return std::bit_cast<uint64_t>(static_cast<double>(v));
   case Fmt::FP8: // e4m3: NaN 0x7F, no Inf, denorm 0x01, max 0x7E (448)
-    if (mode == Mode::NaN)
+    if (mode == Mode::NaN) {
       return 0x7F;
-    if (mode == Mode::Denorm)
+    }
+    if (mode == Mode::Denorm) {
       return 0x01;
-    if (mode == Mode::MaxFinite)
+    }
+    if (mode == Mode::MaxFinite) {
       return 0x7E;
+    }
     return util::f32_to_fp8_e4m3_rne(v);
   case Fmt::BF8: // e5m2: NaN 0x7E, Inf 0x7C, denorm 0x01, max 0x7B
-    if (mode == Mode::NaN)
+    if (mode == Mode::NaN) {
       return 0x7E;
-    if (mode == Mode::Inf)
+    }
+    if (mode == Mode::Inf) {
       return (idx & 1) ? 0xFC : 0x7C;
-    if (mode == Mode::Denorm)
+    }
+    if (mode == Mode::Denorm) {
       return 0x01;
-    if (mode == Mode::MaxFinite)
+    }
+    if (mode == Mode::MaxFinite) {
       return 0x7B;
+    }
     return util::f32_to_bf8_e5m2_rne(v);
   case Fmt::RAW4: // every e2m1 pattern is small and exact; random bits suffice
     return (mode == Mode::RandomInt) ? (rng() & 0xF) : (mode == Mode::Zeros ? 0 : (idx * 5) & 0xF);
@@ -162,14 +187,18 @@ inline uint64_t encode_element(Fmt f, Mode mode, uint32_t idx, std::mt19937 &rng
     return (mode == Mode::RandomInt) ? (rng() & 0x3F)
                                      : (mode == Mode::Zeros ? 0 : (idx * 11) & 0x3F);
   case Fmt::I8:
-    if (mode == Mode::MaxFinite)
+    if (mode == Mode::MaxFinite) {
       return 0x7F;
-    if (mode == Mode::Denorm)
+    }
+    if (mode == Mode::Denorm) {
       return 0x80; // INT8_MIN: the int analogue of the magnitude corner
-    if (mode == Mode::Cancel)
+    }
+    if (mode == Mode::Cancel) {
       return (idx & 1) ? 0xFF : 0x01;
-    if (mode == Mode::RandomInt)
+    }
+    if (mode == Mode::RandomInt) {
       return rng() & 0xFF;
+    }
     return 0;
   }
   return 0;
@@ -188,7 +217,7 @@ struct ExactFixture {
   uint32_t vbase = 0;
   uint32_t wf_size;
 
-  explicit ExactFixture(rj_code_arch_t arch, uint32_t wave_size)
+  explicit ExactFixture(rocjitsu::IsaFamily arch, uint32_t wave_size)
       : gpu_mem("mma_exact_mem"), l2("mma_exact_l2"), wf_size(wave_size) {
     amdgpu::ComputeUnitCore::Config cfg{};
     cfg.arch = arch;
@@ -196,10 +225,14 @@ struct ExactFixture {
     cfg.sgprs_per_wf = SGPRS;
     cfg.vgprs_per_wf = VGPRS;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_mma_exact", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_mma_exact", cfg, &gpu_mem, &l2);
+    if (!cu) {
+      return;
+    }
     wf = cu->dispatch_wf(0, 0, SGPRS, VGPRS);
-    if (wf)
+    if (wf) {
       vbase = wf->vgpr_alloc().base;
+    }
   }
 
   // Fill `regs` registers with elements of `fmt` in `mode`. 64-bit elements
@@ -209,35 +242,42 @@ struct ExactFixture {
     const uint32_t bits = fmt_bits(fmt);
     uint32_t idx = 0;
     if (bits == 64) {
-      for (uint32_t reg = 0; reg + 1 < regs; reg += 2)
+      for (uint32_t reg = 0; reg + 1 < regs; reg += 2) {
         for (uint32_t lane = 0; lane < wf_size; ++lane) {
           uint64_t v = encode_element(fmt, mode, idx++, rng);
           cu->write_vgpr(vbase + off + reg, lane, static_cast<uint32_t>(v));
           cu->write_vgpr(vbase + off + reg + 1, lane, static_cast<uint32_t>(v >> 32));
         }
+      }
       return;
     }
-    for (uint32_t reg = 0; reg < regs; ++reg)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
       for (uint32_t lane = 0; lane < wf_size; ++lane) {
         uint64_t word = 0;
-        for (uint32_t pos = 0; pos < 32; pos += bits)
+        for (uint32_t pos = 0; pos < 32; pos += bits) {
           word |= encode_element(fmt, mode, idx++, rng) << pos;
+        }
         cu->write_vgpr(vbase + off + reg, lane, static_cast<uint32_t>(word));
       }
+    }
   }
 
   void seed_words(uint32_t off, uint32_t regs, uint32_t seed) {
     std::mt19937 rng(seed);
-    for (uint32_t reg = 0; reg < regs; ++reg)
-      for (uint32_t lane = 0; lane < wf_size; ++lane)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
+      for (uint32_t lane = 0; lane < wf_size; ++lane) {
         cu->write_vgpr(vbase + off + reg, lane, rng());
+      }
+    }
   }
 
   std::vector<uint32_t> snapshot(uint32_t off, uint32_t regs) const {
     std::vector<uint32_t> out(static_cast<size_t>(regs) * wf_size);
-    for (uint32_t reg = 0; reg < regs; ++reg)
-      for (uint32_t lane = 0; lane < wf_size; ++lane)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
+      for (uint32_t lane = 0; lane < wf_size; ++lane) {
         out[static_cast<size_t>(reg) * wf_size + lane] = cu->read_vgpr(vbase + off + reg, lane);
+      }
+    }
     return out;
   }
 };
@@ -275,10 +315,11 @@ inline void expect_bit_exact(const char *label, Mode mode, ExactFixture &fx,
   kernel();
   auto simd = fx.snapshot(dst_off, dst_regs);
 
-  for (size_t i = 0; i < scalar.size(); ++i)
+  for (size_t i = 0; i < scalar.size(); ++i) {
     ASSERT_EQ(scalar[i], simd[i]) << label << " mode=" << static_cast<int>(mode)
                                   << ": SIMD diverges from scalar at word " << i << " (scalar=0x"
                                   << std::hex << scalar[i] << " simd=0x" << simd[i] << ")";
+  }
 }
 
 // All modes applicable to `fmt`, plus 4 random seeds.
@@ -288,10 +329,12 @@ inline std::vector<std::pair<Mode, uint32_t>> trials_for(Fmt fmt) {
       {Mode::RandomInt, 44}, {Mode::Zeros, 0},      {Mode::SignedZero, 0},
       {Mode::Denorm, 0},     {Mode::MaxFinite, 0},  {Mode::Cancel, 0},
   };
-  if (fmt_has_nan(fmt))
+  if (fmt_has_nan(fmt)) {
     t.push_back({Mode::NaN, 0});
-  if (fmt_has_inf(fmt))
+  }
+  if (fmt_has_inf(fmt)) {
     t.push_back({Mode::Inf, 0});
+  }
   return t;
 }
 

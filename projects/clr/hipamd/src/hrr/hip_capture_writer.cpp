@@ -39,12 +39,13 @@
  * each blobs/<xx> relative to blobs/ for every blob write. Every file inside the
  * archive is created, opened, renamed and removed relative to those
  * descriptors, so a directory renamed on the path after the check cannot
- * redirect a write. Only finding pid-<pid> and the root manifest in the base
- * directory go by path. On Windows none of this applies: every file is opened
- * by path and gets the access the base directory passes on.
+ * redirect a write. Only finding pid-<pid>, the root manifest and NOTICE.txt
+ * in the base directory go by path. On Windows none of this applies: every file
+ * is opened by path and gets the access the base directory passes on.
  */
 
 #include "hip_capture_writer.h"
+#include "hrr/hrr_archive_notice.h"
 #include "hip_capture.h"
 #include "hip_capture_metadata.h"
 #include "hip_capture_scrub.h"
@@ -125,18 +126,68 @@ namespace hrr_cap {
 namespace writer {
 
 // ---------------------------------------------------------------------------
-// FNV-1a 128-bit hash (same algorithm as out-of-tree writer)
+// 128-bit content hash of a blob or code object.
+//
+// The key only has to be unique within one archive: replay opens the file
+// named by the recorded hash and never recomputes it, so older archives still
+// replay. A byte-at-a-time FNV is too slow, though. A pinned host snapshot
+// hashes the whole allocation on every launch, and FNV runs at about 1 GB/s.
+//
+// Four independent lanes hide the multiply latency. Each lane uses xxHash64's
+// round, which is a bijection of the input word. A multiply alone is not
+// enough: top-bit flips in two words of one lane would cancel. The length is
+// mixed into the seed, so a prefix of a buffer does not share its hash.
 // ---------------------------------------------------------------------------
 
+static inline uint64_t hash_load64(const uint8_t* p) {
+  uint64_t v;
+  memcpy(&v, p, sizeof(v));
+  return v;
+}
+
+static inline uint64_t hash_avalanche(uint64_t x) {
+  x ^= x >> 32;
+  x *= 0x9E3779B185EBCA87ULL;
+  x ^= x >> 29;
+  x *= 0xC2B2AE3D27D4EB4FULL;
+  x ^= x >> 32;
+  return x;
+}
+
+static inline uint64_t hash_round(uint64_t acc, uint64_t in) {
+  acc += in * 0xC2B2AE3D27D4EB4FULL;
+  acc = (acc << 31) | (acc >> 33);
+  return acc * 0x9E3779B185EBCA87ULL;
+}
+
 static Hash128 hash_buffer(const void* data, size_t len) {
-  uint64_t h1 = 0xcbf29ce484222325ULL;
-  uint64_t h2 = 0x100000001b3ULL;
   const auto* p = static_cast<const uint8_t*>(data);
-  for (size_t i = 0; i < len; i++) {
-    h1 ^= p[i]; h1 *= 0x100000001b3ULL;
-    h2 ^= p[i]; h2 *= 0xcbf29ce484222325ULL;
+  const auto* end = p + len;
+  uint64_t a = 0x243F6A8885A308D3ULL ^ len;
+  uint64_t b = 0x13198A2E03707344ULL ^ len;
+  uint64_t c = 0xA4093822299F31D0ULL;
+  uint64_t d = 0x082EFA98EC4E6C89ULL;
+
+  while (p + 32 <= end) {
+    a = hash_round(a, hash_load64(p));
+    b = hash_round(b, hash_load64(p + 8));
+    c = hash_round(c, hash_load64(p + 16));
+    d = hash_round(d, hash_load64(p + 24));
+    p += 32;
   }
-  return {h1, h2};
+  uint64_t* lane[3] = {&a, &b, &c};
+  for (int i = 0; p + 8 <= end; i++, p += 8) *lane[i] = hash_round(*lane[i], hash_load64(p));
+  if (p < end) {
+    uint64_t tail = 0;
+    memcpy(&tail, p, static_cast<size_t>(end - p));
+    d = hash_round(d, tail);
+  }
+
+  uint64_t lo = hash_avalanche(a ^ len);
+  uint64_t hi = hash_avalanche(d ^ ~len);
+  lo = hash_avalanche(hash_avalanche(hash_avalanche(lo + b) + c) + d);
+  hi = hash_avalanche(hash_avalanche(hash_avalanche(hi + c) + b) + a);
+  return {lo, hi};
 }
 
 static void hash_hex(Hash128 h, char buf[33]) {
@@ -602,6 +653,12 @@ static FILE* fopen_read_regular(const std::string& path) {
 
 static bool atomic_write_file(int dir_fd, const std::string& dir, const std::string& name,
                               const void* data, size_t len);
+// The dir_fd that makes atomic_write_file() write at the archive root, g_base_dir.
+#ifdef _WIN32
+static constexpr int kBaseDir = -1;
+#else
+static constexpr int kBaseDir = AT_FDCWD;
+#endif
 
 static bool is_json_object_fragment(const std::string& json) {
   const auto begin = json.find_first_not_of(" \t\r\n");
@@ -852,11 +909,6 @@ static void update_root_manifest() {
   json += "  ]\n";
   json += "}\n";
 
-#ifdef _WIN32
-  constexpr int kBaseDir = -1;
-#else
-  constexpr int kBaseDir = AT_FDCWD;
-#endif
   (void)atomic_write_file(kBaseDir, g_base_dir, "manifest.json", json.data(), json.size());
 }
 
@@ -1311,6 +1363,12 @@ bool open(const char* output_dir) {
     g_blob_claims.clear();
   }
 
+  // Every process sharing the root writes the same text; the rename is atomic.
+  if (!atomic_write_file(kBaseDir, g_base_dir, "NOTICE.txt", kHrrArchiveNotice.data(),
+                         kHrrArchiveNotice.size()))
+    LogPrintfWarning("[HRR capture] Cannot write %s/NOTICE.txt: %s", g_base_dir.c_str(),
+                     strerror(errno));
+
   // The last step before the archive is published.
   if (!publish_active_marker(dirs.dir, out_dir)) {
     const int err = errno;
@@ -1707,7 +1765,7 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
 //
 // On POSIX a file inside the archive is written in the directory `dir_fd` as
 // <name>.tmp through open_private_fd, and renamed relative to it. The root
-// manifest, with dir_fd AT_FDCWD, takes its temp file from mkostemps: an
+// manifest and NOTICE.txt, with dir_fd AT_FDCWD, take its temp file from mkostemps: an
 // unpredictable name, created exclusively with mode 0600. This matters because
 // its directory is whatever HIP_HRR_CAPTURE_OUTPUT names and may be shared.
 // ---------------------------------------------------------------------------
@@ -1811,7 +1869,26 @@ class BlobClaim {
 // write_blob
 // ---------------------------------------------------------------------------
 
-Hash128 write_blob(const void* data, size_t len, bool capped) {
+Hash128 hash_bytes(const void* data, size_t len) { return hash_buffer(data, len); }
+
+// False whenever write_blob() would do more than return `h`. A write still in
+// flight counts as not written: it may fail and unpublish the key.
+bool blob_written(Hash128 h, size_t len) {
+  if (g_reopen_after_fork.load(std::memory_order_acquire)) return false;
+  if (g_max_blob_bytes != 0 && len > g_max_blob_bytes) return false;
+  {
+    std::lock_guard<std::mutex> lk(g_file_mu);
+    if (g_events_fd < 0 || g_events_finalized) return false;
+  }
+  char hex[33];
+  hash_hex(h, hex);
+  const std::string key(hex);
+  std::lock_guard<std::mutex> lk(g_blob_mu);
+  if (g_events_finalized) return false;
+  return g_written_blobs.count(key) != 0 && g_blob_claims.count(key) == 0;
+}
+
+static Hash128 write_blob_impl(const void* data, size_t len, bool capped, const Hash128* known) {
   reopen_after_fork();
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
@@ -1822,7 +1899,7 @@ Hash128 write_blob(const void* data, size_t len, bool capped) {
     return {};
   }
 
-  Hash128 h = hash_buffer(data, len);
+  const Hash128 h = known ? *known : hash_buffer(data, len);
 
   char hex[33];
   hash_hex(h, hex);
@@ -1870,6 +1947,14 @@ Hash128 write_blob(const void* data, size_t len, bool capped) {
   if (!ok) LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
   claim.done(ok);
   return h;
+}
+
+Hash128 write_blob(const void* data, size_t len, bool capped) {
+  return write_blob_impl(data, len, capped, nullptr);
+}
+
+Hash128 write_blob_hashed(const void* data, size_t len, Hash128 h, bool capped) {
+  return write_blob_impl(data, len, capped, &h);
 }
 
 // ---------------------------------------------------------------------------

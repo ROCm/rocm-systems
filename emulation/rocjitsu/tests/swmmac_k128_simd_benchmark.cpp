@@ -10,6 +10,7 @@
 /// the fast path is present. Each timed call starts with the same C state;
 /// restoring it is outside the timed interval.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
@@ -17,6 +18,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -106,16 +108,17 @@ struct BenchFixture {
 
   BenchFixture() {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    cfg.arch = rocjitsu::IsaFamily::Cdna5;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = mma_test::SGPRS_PER_WF;
     cfg.vgprs_per_wf = mma_test::VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_swmmac_k128_bench", cfg, &gpu_mem, &l2);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_swmmac_k128_bench", cfg, &gpu_mem, &l2);
     if (cu) {
       wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-      if (wf)
+      if (wf) {
         vbase = wf->vgpr_alloc().base;
+      }
     }
   }
 
@@ -152,8 +155,9 @@ struct BenchFixture {
     for (uint32_t reg = 0; reg < INDEX_REGS; ++reg) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint32_t word = 0;
-        for (uint32_t nibble = 0; nibble < 8; ++nibble)
+        for (uint32_t nibble = 0; nibble < 8; ++nibble) {
           word |= pairs[(lane + nibble + 3 * reg) % pairs.size()] << (4 * nibble);
+        }
         cu->write_vgpr(vbase + INDEX_OFF + reg, lane, word);
       }
     }
@@ -161,16 +165,19 @@ struct BenchFixture {
 
   std::vector<uint32_t> snapshot(uint32_t off, uint32_t regs) const {
     std::vector<uint32_t> words(static_cast<size_t>(regs) * WF_SIZE);
-    for (uint32_t reg = 0; reg < regs; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         words[static_cast<size_t>(reg) * WF_SIZE + lane] = cu->read_vgpr(vbase + off + reg, lane);
+      }
+    }
     return words;
   }
 
   void restore(uint32_t off, const std::vector<uint32_t> &words) {
-    for (size_t i = 0; i < words.size(); ++i)
+    for (size_t i = 0; i < words.size(); ++i) {
       cu->write_vgpr(vbase + off + static_cast<uint32_t>(i / WF_SIZE),
                      static_cast<uint32_t>(i % WF_SIZE), words[i]);
+    }
   }
 };
 
@@ -188,7 +195,7 @@ void benchmark_case(const BenchCase &test) {
   const auto words = cdna5::build_vop3p(
       test.opcode,
       {.vdst = ACC_OFF, .src0 = 256 + A_OFF, .src1 = 256 + B_OFF, .src2 = 256 + INDEX_OFF});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::unique_ptr<Instruction> instruction(decode_valid(*decoder, words.data()));
   ASSERT_NE(instruction, nullptr);
@@ -213,8 +220,9 @@ void benchmark_case(const BenchCase &test) {
   ASSERT_FALSE(execution_failed) << test.label;
   const auto simd = fx.snapshot(ACC_OFF, test.accumulator_regs);
   ASSERT_EQ(scalar.size(), simd.size());
-  for (size_t i = 0; i < scalar.size(); ++i)
+  for (size_t i = 0; i < scalar.size(); ++i) {
     ASSERT_EQ(scalar[i], simd[i]) << test.label << ": raw output mismatch at word " << i;
+  }
 
   const auto time_block = [&](bool force_scalar) {
     util::set_force_scalar_for_testing(force_scalar);
@@ -255,8 +263,9 @@ class SwmmacK128SimdBenchmark : public testing::TestWithParam<size_t> {};
 
 TEST_P(SwmmacK128SimdBenchmark, DecodedInstruction) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
+  if (util::native<float>::size() != 16) {
     GTEST_SKIP() << "the K=128 SWMMAC fast paths require 16-lane native SIMD";
+  }
   benchmark_case(BENCH_CASES[GetParam()]);
 }
 

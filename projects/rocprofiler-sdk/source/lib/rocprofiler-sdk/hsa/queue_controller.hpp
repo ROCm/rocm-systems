@@ -75,6 +75,13 @@ public:
                    std::unique_ptr<Queue>,
                    bool is_compute = true,
                    bool is_attach  = false);
+
+    // Register a queue that already existed before this process began intercepting. Checks
+    // and inserts under one lock acquisition, so two threads may construct a Queue for the
+    // same queue and only the first is registered; the loser is destroyed here along with
+    // its block_signal. Opens no signal-less window and creates no interposition state.
+    bool adopt_queue(hsa_queue_t*, std::unique_ptr<Queue>);
+
     void destroy_queue(hsa_queue_t*);
 
     // Add callback to queues associated with the agent. Returns a client
@@ -203,6 +210,12 @@ queue_controller_fini();
 // only want a fence may ignore it.
 bool
 queue_controller_sync();
+
+// Register a queue that already existed when interception began, so that records can be
+// emitted for it. Safe to call repeatedly; only the first call registers. Returns false
+// when the queue was not adopted, which is not an error.
+bool
+queue_controller_adopt_existing_queue(const hsa_queue_t* queue);
 
 void
 queue_controller_init(RocAttachDispatchTable* table);

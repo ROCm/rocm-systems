@@ -259,8 +259,23 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   }
 
   if (workgroup_clusters_supported_) {
-    const uint64_t num_cu_per_se = properties_.NumArrays * properties_.NumCUPerArray;
-    cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
+    // A cluster places each workgroup on its own CU and must fit in one shader
+    // engine. NumShaderBanks counts the shader engines on the whole agent,
+    // including every XCC, so it is not divided by NumXcc again. Harvesting is
+    // within one shader engine (8/8 or 9/7), so every engine has the same
+    // active CU count. NumArrays * NumCUPerArray is the pre-harvest CU count
+    // of one shader engine and overstates that count.
+    uint64_t num_cu_per_se = 0;
+    if (properties_.NumShaderBanks != 0 && properties_.NumSIMDPerCU != 0) {
+      const uint64_t num_cus =
+          static_cast<uint64_t>(properties_.NumFComputeCores) / properties_.NumSIMDPerCU;
+      num_cu_per_se = num_cus / properties_.NumShaderBanks;
+    }
+    // Topology that cannot describe a cluster leaves the max size at {1, 1, 1}.
+    if (num_cu_per_se == 0)
+      workgroup_clusters_supported_ = false;
+    else
+      cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
   }
 
   max_wave_scratch_ = (supported_isas_[0]->GetMajorVersion() >= 12) ? MAX_WAVE_SCRATCH_GFX12 : MAX_WAVE_SCRATCH;
@@ -306,9 +321,16 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     }
   }
 
-  auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
-  auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
-  xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
+  // Nearest CPU, not the first: with several CPU nodes the first may reach this GPU only over
+  // the fabric. The xGMI host check reads the link from the GPU side: the thunk keeps at most
+  // one link per remote node, so the CPU node can report a fabric link to this GPU while the GPU
+  // reports its xGMI link to the CPU.
+  const core::Agent* nearest_cpu = GetNearestCpuAgent();
+  const auto host_link =
+      core::Runtime::runtime_singleton_->GetLinkInfo(node_id(), nearest_cpu->node_id());
+  xgmi_cpu_gpu_ = (host_link.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
+  const auto link_info =
+      core::Runtime::runtime_singleton_->GetLinkInfo(nearest_cpu->node_id(), node_id());
 
   if (link_info.num_hop >= 1 && !properties_.Integrated) {
     large_bar_enabled_ = true;
@@ -695,16 +717,29 @@ void GpuAgent::ReserveScratch()
   assert(mem_err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
   std::lock_guard<std::mutex> lock(scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
+    // The reservation is an optimization: it pre-binds a block that
+    // AcquireQueueMainScratch can fall back on as one of its retry tiers. Queue
+    // creation does not depend on it, so a failure here continues without one.
     HSAuint64 alt_va;
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
-    if (reserved_base == nullptr)
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+    if (reserved_base == nullptr) {
+      if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
+        fprintf(stderr,
+                "Scratch reserve of %zu bytes failed, continuing without a reserved block.\n",
+                reserved_sz);
+      return;
+    }
 
     if (driver().MakeMemoryResident(reserved_base, reserved_sz, &alt_va) == HSA_STATUS_SUCCESS)
       scratch_cache_.reserve(reserved_sz, reserved_base);
     else {
       scratch_pool_.free(reserved_base);
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+      if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
+        fprintf(stderr,
+                "Scratch reserve of %zu bytes could not be mapped, continuing without a "
+                "reserved block.\n",
+                reserved_sz);
+      return;
     }
   }
 }
@@ -1462,7 +1497,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
   }
 
   // gfx125+ fast path: WaitSignal packets in one doorbell submission.
-  // Each chunk carries wait+copy+signal inline; no prologue signal needed.
+  // Profiled copies defer completion until after the end timestamp.
   if (blit->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
     if (sdma_blit->IsGfx125Plus()) {
@@ -2211,7 +2246,16 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     // that SDMA is enabled/disabled globally (the HSA_ENABLE_SDMA=0 case this
     // fallback targets). If per-direction SDMA availability ever diverges this
     // probe would need to move per-entry, but today all blits share one state.
-    if (!GetBlitObject(BlitHostToDev)->isSDMA()) {
+    //
+    // RECT ops read the flag instead: the probe creates an H2D SDMA queue on the copy agent, and
+    // those queues are few and shared by every process (8 per host-facing engine). A process
+    // that finds none would get a shader blit and have every RECT op rejected, though the op
+    // would not use that queue. DmaCopyRect checks the engine it does use.
+    const bool sdma_off =
+        (op.type == HSA_AMD_MEMORY_COPY_OP_RECT)
+            ? core::Runtime::runtime_singleton_->flag().enable_sdma() == Flag::SDMA_DISABLE
+            : !GetBlitObject(BlitHostToDev)->isSDMA();
+    if (sdma_off) {
       status = DmaCopyBatchFallback(op, dep_signals);
       if (status != HSA_STATUS_SUCCESS)
         return status;
@@ -2277,9 +2321,21 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     case HSA_AMD_MEMORY_COPY_OP_RECT: {
       const bool from_host =
           core::Agent::Convert(op.src_agent)->device_type() == core::Agent::kAmdCpuDevice;
-      status =
-          DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
-                      from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals, out_signal);
+      // The op completes as one, on one engine: only an op whose rects all go to one GPU can
+      // take the engine of the link to it.
+      core::Agent* peer = nullptr;
+      if (!from_host) {
+        peer = core::Agent::Convert(op.dst_agent_list[0]);
+        for (uint16_t e = 1; e < op.num_entries; ++e) {
+          if (op.dst_agent_list[e].handle != op.dst_agent_list[0].handle) {
+            peer = nullptr;
+            break;
+          }
+        }
+      }
+      status = DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
+                           from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals,
+                           out_signal, peer);
       break;
     }
     default:
@@ -2298,15 +2354,37 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
                                    const hsa_dim3_t* ranges, uint16_t num_rects,
                                    hsa_amd_copy_direction_t dir,
                                    std::vector<core::Signal*>& dep_signals,
-                                   core::Signal& out_signal) {
+                                   core::Signal& out_signal, core::Agent* peer_agent) {
   if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-  lazy_ptr<core::Blit>& blit = GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev :
-                                                                        BlitDevToHost);
 
-  if (!blit->isSDMA()) {
+  // On platforms with dedicated xGMI engines, rects to another GPU of the hive go on
+  // that link's engine, as DmaCopy does for linear copies; the blit queues are shared by every
+  // peer and copy direction, and a host-facing engine cannot drive the xGMI link. Elsewhere
+  // (PCIe peers, gfx125+ where every engine is equivalent) rects keep the blit queues.
+  const bool use_peer_engine =
+      dir != hsaHostToDevice && peer_agent != nullptr &&
+      peer_agent->device_type() == core::Agent::kAmdGpuDevice &&
+      peer_agent->public_handle().handle != public_handle_.handle && peer_agent->HiveId() &&
+      peer_agent->HiveId() == HiveId() && properties_.NumSdmaXgmiEngines &&
+      core::Runtime::runtime_singleton_->flag().enable_peer_sdma() != Flag::SDMA_DISABLE;
+  lazy_ptr<core::Blit>* blit = nullptr;
+  if (use_peer_engine) {
+    uint32_t rec_mask = 0;
+    DmaPreferredEngine(*peer_agent, *this, &rec_mask);
+    const uint32_t rec_sdma_eng = NthSdmaEngine(rec_mask, 0);
+    blit = (rec_sdma_eng >= DefaultBlitCount && rec_sdma_eng < blits_.size())
+               ? &GetBlitObject(rec_sdma_eng)
+               : &GetXgmiBlit(*peer_agent);
+    if (!(*blit)->isSDMA()) blit = nullptr;
+  }
+  if (blit == nullptr) {
+    blit = &GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev : BlitDevToHost);
+  }
+
+  if (!(*blit)->isSDMA()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -2316,7 +2394,7 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
   }
 
-  BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
+  BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((**blit).get());
   hsa_status_t stat =
       sdmaBlit->SubmitCopyRectCommand(srcs, dsts, ranges, num_rects, dep_signals, out_signal);
 
@@ -2366,8 +2444,12 @@ void GpuAgent::GetAqlInfoProperties(uint8_t value[8]) const {
   };
 
   // Fill the HSA_AMD_AQL_PROPERTY_EXT_DISPATCH
-  if (extended_aql_dispatch_supported_)
+  if (ExtendedAqlDispatchSupported())
       setFlag(HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
+
+  // Fill the HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS
+  if (SignalHintsSupported())
+      setFlag(HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
 }
 
 
@@ -2805,9 +2887,6 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED:
       *static_cast<bool*>(value) = HostAtomicsSupported();
       break;
-    case HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED:
-      *static_cast<bool*>(value) = SignalHintsSupported();
-      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -2816,9 +2895,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 }
 
 // CP FW writes amd_queue_t::caps only once it has processed a packet on the queue, so the first
-// query runs an empty barrier-AND on the utility queue and reads the bit there.
-bool GpuAgent::SignalHintsSupported() const {
-  std::call_once(signal_hints_once_, [this]() {
+// query runs an empty barrier-AND on the utility queue and reads the bits there.
+uint32_t GpuAgent::CpFirmwareCaps() const {
+  std::call_once(cp_caps_once_, [this]() {
     core::unique_signal_ptr completion(new core::DefaultSignal(1));
     if (!completion->IsValid()) return;
     core::Queue* queue = (*queues_[QueueUtility]).get();
@@ -2837,9 +2916,20 @@ bool GpuAgent::SignalHintsSupported() const {
                   std::memory_order_release);
     core::Signal::Convert(hsa_queue.doorbell_signal)->StoreRelease(index);
     completion->WaitAcquire(HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
-    signal_hints_supported_ = (queue->amd_queue_.caps & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+    cp_caps_ = queue->amd_queue_.caps;
   });
-  return signal_hints_supported_;
+  return cp_caps_;
+}
+
+bool GpuAgent::SignalHintsSupported() const {
+  return (CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+}
+
+// gfx12.5 supports the packet natively, without asking the firmware. The firmware's packet has
+// clusters of 1: cluster_max_dim_ stays {1, 1, 1}.
+bool GpuAgent::ExtendedAqlDispatchSupported() const {
+  return extended_aql_dispatch_supported_ ||
+         ((CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH) != 0);
 }
 
 hsa_status_t GpuAgent::SetAgentAttribute(hsa_agent_info_t attribute, void* value) {
@@ -3097,7 +3187,9 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       else
         scratch.main_queue_base = scratch_pool_.alloc(scratch.main_size);
 
-      scratch.large = large | (scratch.main_queue_base > scratch_pool_.high_split());
+      scratch.large = large |
+          (scratch.main_queue_base != nullptr &&
+           (scratch.main_queue_base > scratch_pool_.high_split()));
       assert(((!scratch.large) | use_reclaim) && "Large scratch used with reclaim disabled.");
 
       if (scratch.main_queue_base != nullptr) {
@@ -3517,6 +3609,22 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
                                  tma_size);
 }
 
+void GpuAgent::WarnIfNoSecondLevelTrapHandler() {
+  if (!trap_handler_unavailable_) return;
+
+  // One message per agent, however many queues it ends up with.
+  if (queue_exception_warned_.exchange(true)) return;
+
+  // Cap 0 is deliberate: the per-agent latch above bounds this, and a shared
+  // call-site cap would hide the second affected agent.
+  log_warning_n(0,
+                "No second-level trap handler bound for GPU node %u (%s): exception "
+                "debugging is not available to the runtime. A device-side abort will not "
+                "be reported, and on gfx11 the dispatch never retires, so the host may "
+                "wait indefinitely. PC sampling is unavailable.\n",
+                node_id(), supported_isas()[0]->GetIsaName().c_str());
+}
+
 void GpuAgent::BindTrapHandler() {
   if (supported_isas()[0]->GetMajorVersion() == 7) {
     // No trap handler support on Gfx7, soft error.
@@ -3536,8 +3644,9 @@ void GpuAgent::BindTrapHandler() {
         (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5)) ||
        (supported_isas()[0]->GetMajorVersion() == 10 && supported_isas()[0]->GetMinorVersion() == 3 &&
         supported_isas()[0]->GetStepping() == 6)) {
-      // No trap handler support without exception handling, soft error.
-      // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
+      // No second-level trap handler on this path, soft error. Record it so the
+      // first queue created on this agent can report it.
+      trap_handler_unavailable_ = true;
       return;
     }
 

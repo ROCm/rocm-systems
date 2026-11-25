@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstring>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "abce_test_harness.hpp"
@@ -71,6 +72,78 @@ TEST_P(Ring, AcquiredRegionIsZeroedEvenOverDirtyRingMemory) {
   ASSERT_EQ(abce_ring_release(fake.ring(), &reservation), ABCE_STATUS_OK);
 }
 
+// A ring with a writer (a device-memory ring behind a write-combined BAR) is not
+// zeroed on acquire; each region is written once, whole, through the writer.
+struct RingWrite {
+  size_t offset;
+  size_t src_bytes;
+  size_t dst_bytes;
+};
+
+void RecordAndWriteRegion(void* user_data, char* dst, const void* src, size_t src_bytes,
+                          size_t dst_bytes) {
+  auto* writes = static_cast<std::pair<char*, std::vector<RingWrite>>*>(user_data);
+  writes->second.push_back({static_cast<size_t>(dst - writes->first), src_bytes, dst_bytes});
+  if (src_bytes != 0) std::memcpy(dst, src, src_bytes);
+  std::memset(dst + src_bytes, 0, dst_bytes - src_bytes);
+}
+
+TEST_P(Ring, AWriterReplacesZeroingAndWritesEveryRegionWhole) {
+  std::pair<char*, std::vector<RingWrite>> writes{nullptr, {}};
+  RingOptions options;
+  options.size_bytes = 256;
+  options.align64 = true;
+  options.write = &RecordAndWriteRegion;
+  options.write_user_data = &writes;
+  options.readback_before_doorbell = true;
+  FakeRing fake(WithBackend(options));
+  writes.first = fake.base();
+  std::memset(fake.base(), 0xab, fake.size_bytes());
+
+  uint32_t reserve_bytes = 0;
+  ASSERT_EQ(abce_ring_padded_size(fake.ring(), 40, &reserve_bytes), ABCE_STATUS_OK);
+  ASSERT_EQ(reserve_bytes, 64u);
+  abce_ring_reservation_t reservation{};
+  char* buffer = nullptr;
+  ASSERT_EQ(abce_ring_acquire(fake.ring(), reserve_bytes, &reservation, &buffer), ABCE_STATUS_OK);
+  EXPECT_EQ(static_cast<uint8_t>(buffer[0]), 0xabu) << "acquire zeroed a ring that has a writer";
+  const std::vector<uint8_t> payload(40, 0x5a);
+  abce_ring_fill(fake.ring(), buffer, payload.data(), payload.size(), reserve_bytes);
+  ASSERT_EQ(abce_ring_release(fake.ring(), &reservation), ABCE_STATUS_OK);
+  EXPECT_EQ(static_cast<uint8_t>(buffer[39]), 0x5au);
+  EXPECT_EQ(buffer[40], 0) << "the pad tail must be NOPs";
+  EXPECT_EQ(buffer[63], 0);
+
+  AcquireAndRelease(fake, 128, 0x11);   // cursor at 192
+  const size_t writes_before_wrap = writes.second.size();
+  AcquireAndRelease(fake, 128, 0x22);   // straddles the end: [192, 256) becomes padding
+  ASSERT_GT(writes.second.size(), writes_before_wrap);
+  const RingWrite& padding = writes.second[writes_before_wrap];
+  EXPECT_EQ(padding.offset, 192u);
+  EXPECT_EQ(padding.src_bytes, 0u);
+  EXPECT_EQ(padding.dst_bytes, 64u);
+  EXPECT_EQ(fake.base()[192], 0) << "wrap padding must be written as NOPs through the writer";
+}
+
+// A readback stays inside the region it orders, whatever its size and
+// alignment: the first region here is a single 4-byte NOP at the ring base.
+// Without a writer, wrap padding and cancel read back their region too.
+TEST_P(Ring, AReadbackStaysInsideEveryRegionWithoutAWriter) {
+  RingOptions options;
+  options.size_bytes = 256;
+  options.readback_before_doorbell = true;
+  FakeRing fake(WithBackend(options));
+  AcquireAndRelease(fake, 4, 0x11);    // [0, 4)
+  AcquireAndRelease(fake, 244, 0x22);  // [4, 248)
+  abce_ring_reservation_t reservation{};
+  char* buffer = nullptr;
+  // 12 bytes would straddle the end, so [248, 256) is published as padding first.
+  ASSERT_EQ(abce_ring_acquire(fake.ring(), 12, &reservation, &buffer), ABCE_STATUS_OK);
+  EXPECT_EQ(reservation.start, 256u);
+  ASSERT_EQ(abce_ring_cancel(fake.ring(), &reservation), ABCE_STATUS_OK);
+  EXPECT_EQ(fake.doorbell_history(), (std::vector<uint64_t>{4, 248, 256, 268}));
+}
+
 TEST_P(Ring, AttachingToAQueueInUseSeedsTheCursorsFromItsWritePointer) {
   RingOptions options;
   options.size_bytes = 256;
@@ -106,6 +179,124 @@ TEST_P(Ring, PaddedSizeAppliesTheMinimumAndTheSixtyFourByteRounding) {
   EXPECT_EQ(reserve_bytes, 128u);
   ASSERT_EQ(abce_ring_padded_size(rounded.ring(), 64, &reserve_bytes), ABCE_STATUS_OK);
   EXPECT_EQ(reserve_bytes, 64u);
+}
+
+// A Windows native SDMA user queue writes its progress fence into the last 32 bytes of every
+// span it submits; the producer leaves them free after the padded payload.
+TEST_P(Ring, PaddedSizeReservesTheSubmissionTailAfterThePayload) {
+  RingOptions options;
+  options.submission_tail_bytes = 32;
+  FakeRing tail_only(WithBackend(options));
+  uint32_t reserve_bytes = 0;
+  ASSERT_EQ(abce_ring_padded_size(tail_only.ring(), 8, &reserve_bytes), ABCE_STATUS_OK);
+  EXPECT_EQ(reserve_bytes, 64u) << "8 + 32, rounded to the tail";
+  ASSERT_EQ(abce_ring_padded_size(tail_only.ring(), 32, &reserve_bytes), ABCE_STATUS_OK);
+  EXPECT_EQ(reserve_bytes, 64u);
+
+  options.align64 = true;
+  FakeRing dxg(WithBackend(options));
+  ASSERT_EQ(abce_ring_padded_size(dxg.ring(), 8, &reserve_bytes), ABCE_STATUS_OK);
+  EXPECT_EQ(reserve_bytes, 64u) << "8 + 32 fits one 64-byte line";
+  ASSERT_EQ(abce_ring_padded_size(dxg.ring(), 40, &reserve_bytes), ABCE_STATUS_OK);
+  EXPECT_EQ(reserve_bytes, 128u) << "40 + 32, rounded to whole 64-byte lines";
+}
+
+TEST_P(Ring, EveryPublishedSpanEndsWithTheZeroedTail) {
+  RingOptions options;
+  options.submission_tail_bytes = 32;
+  options.align64 = true;
+  FakeRing fake(WithBackend(options));
+  std::memset(fake.base(), 0xab, fake.size_bytes());
+  uint32_t reserve_bytes = 0;
+  for (uint8_t fill = 1; fill <= 3; ++fill) {
+    ASSERT_EQ(abce_ring_padded_size(fake.ring(), 40, &reserve_bytes), ABCE_STATUS_OK);
+    abce_ring_reservation_t reservation{};
+    char* buffer = nullptr;
+    ASSERT_EQ(abce_ring_acquire(fake.ring(), reserve_bytes, &reservation, &buffer), ABCE_STATUS_OK);
+    std::memset(buffer, fill, 40);
+    ASSERT_EQ(abce_ring_release(fake.ring(), &reservation), ABCE_STATUS_OK);
+  }
+  EXPECT_EQ(fake.doorbell_history(), (std::vector<uint64_t>{128, 256, 384}));
+  const std::vector<uint8_t>& stream = fake.stream();
+  ASSERT_EQ(stream.size(), 384u);
+  for (size_t span = 0; span < 3; ++span)
+    for (size_t byte_idx = span * 128 + 96; byte_idx < span * 128 + 128; ++byte_idx)
+      ASSERT_EQ(stream[byte_idx], 0x00) << "the last 32 bytes of span " << span << " must be free";
+}
+
+// The wrap pad is published as a span of its own, so it needs a tail too: with every
+// reservation a multiple of the tail, the distance to the ring end always is.
+TEST_P(Ring, AWrapPadIsNeverShorterThanTheSubmissionTail) {
+  RingOptions options;
+  options.size_bytes = 256;
+  options.submission_tail_bytes = 32;
+  FakeRing fake(WithBackend(options));
+  uint32_t reserve_bytes = 0;
+  for (uint32_t payload : {40u, 72u, 8u, 100u}) {
+    ASSERT_EQ(abce_ring_padded_size(fake.ring(), payload, &reserve_bytes), ABCE_STATUS_OK);
+    AcquireAndRelease(fake, reserve_bytes, 0x5a);
+  }
+  const std::vector<uint64_t>& history = fake.doorbell_history();
+  uint64_t previous = 0;
+  for (uint64_t end : history) {
+    EXPECT_GE(end - previous, 32u) << "span ending at " << end << " is shorter than the tail";
+    EXPECT_EQ(end % 32, 0u);
+    previous = end;
+  }
+  EXPECT_GT(history.size(), 4u) << "the sequence must wrap at least once";
+}
+
+// A ring writer fills whole 64-byte lines (MOVDIR64B), so with align64 the tail
+// must not leave a reservation, or the next one, part way into a line.
+TEST_P(Ring, AWriterWithTheTailOnlyEverWritesWholeLines) {
+  std::pair<char*, std::vector<RingWrite>> writes{nullptr, {}};
+  RingOptions options;
+  options.size_bytes = 512;
+  options.align64 = true;
+  options.submission_tail_bytes = 32;
+  options.write = &RecordAndWriteRegion;
+  options.write_user_data = &writes;
+  FakeRing fake(WithBackend(options));
+  writes.first = fake.base();
+
+  uint32_t reserve_bytes = 0;
+  for (uint32_t payload : {40u, 8u, 100u, 40u, 72u}) {
+    ASSERT_EQ(abce_ring_padded_size(fake.ring(), payload, &reserve_bytes), ABCE_STATUS_OK);
+    abce_ring_reservation_t reservation{};
+    char* buffer = nullptr;
+    ASSERT_EQ(abce_ring_acquire(fake.ring(), reserve_bytes, &reservation, &buffer),
+              ABCE_STATUS_OK);
+    const std::vector<uint8_t> bytes(payload, 0x5a);
+    abce_ring_fill(fake.ring(), buffer, bytes.data(), bytes.size(), reserve_bytes);
+    ASSERT_EQ(abce_ring_release(fake.ring(), &reservation), ABCE_STATUS_OK);
+  }
+  ASSERT_FALSE(writes.second.empty());
+  for (const RingWrite& write : writes.second) {
+    EXPECT_EQ(write.offset % 64, 0u) << "a region starts part way into a line";
+    EXPECT_EQ(write.dst_bytes % 64, 0u) << "a region of " << write.dst_bytes << " bytes";
+  }
+}
+
+// A queue whose doorbell is a runtime call (a Windows SDMA queue) keeps the
+// mapped write and read pointers, has no doorbell word, and rings through the
+// publish routine: every published index reaches it, wrap pads included.
+TEST(RingPublishWithoutDoorbell, EveryPublishedIndexReachesThePublishRoutine) {
+  RingOptions options;
+  options.size_bytes = 256;
+  options.publish_without_doorbell = true;
+  FakeRing fake(options);
+  AcquireAndRelease(fake, 64, 0x11);
+  AcquireAndRelease(fake, 32, 0x22);
+  AcquireAndRelease(fake, 200, 0x33);  // pads [96, 256) as its own span first
+
+  const std::vector<uint64_t> expected{64, 96, 256, 456};
+  EXPECT_EQ(fake.doorbell_history(), expected);
+  ASSERT_EQ(fake.publish_calls().size(), expected.size());
+  for (size_t i = 0; i < expected.size(); ++i) {
+    EXPECT_EQ(fake.publish_calls()[i].first, expected[i]);
+    EXPECT_EQ(fake.publish_calls()[i].second, nullptr) << "no doorbell word was configured";
+  }
+  EXPECT_EQ(fake.write_index(), 456u);
 }
 
 TEST_P(Ring, AnEmptyPayloadHasNoPaddedSize) {

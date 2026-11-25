@@ -696,6 +696,20 @@ ROCP_SDK_HIP_FORMATTER(hipArrayMemoryRequirements,
                        '}')
 #endif
 
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 41
+ROCP_SDK_HIP_FORMATTER(hipArraySparseProperties,
+                       "{}tileExtentWidth={}, tileExtentHeight={}, tileExtentDepth={}, "
+                       "miptailFirstLevel={}, miptailSize={}, flags={}{}",
+                       '{',
+                       v.tileExtent.width,
+                       v.tileExtent.height,
+                       v.tileExtent.depth,
+                       v.miptailFirstLevel,
+                       v.miptailSize,
+                       v.flags,
+                       '}')
+#endif
+
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 27
 template <>
 struct formatter<hipClusterSchedulingPolicy> : rocprofiler::hip::details::base_formatter

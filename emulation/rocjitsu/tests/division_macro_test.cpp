@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 #include "cdna5_sim_test_common.h"
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 
@@ -79,7 +81,7 @@ TEST(Gfx1250ExecutionTest, DivisionMacrosCoverScalingAndExceptionalQuotients) {
     wf->set_mode_raw(0xf0); // RNE, preserve input/output denormals in both formats.
     wf->set_exec(0x55555555u);
     const uint32_t base = wf->vgpr_alloc().base;
-    std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+    std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
     ASSERT_NE(decoder, nullptr);
     for (bool wide : {false, true}) {
       const std::span<const Case> cases =
@@ -131,7 +133,7 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
     util::set_force_scalar_for_testing(scalar);
     // RDNA4 is measured hardware; CDNA5 checks the shared model with the same
     // expectations. Physical gfx1250 has not been independently qualified.
-    for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
       SCOPED_TRACE(::testing::Message() << "arch=" << static_cast<int>(arch));
       amdgpu::GpuMemory memory("division_memory");
       amdgpu::L2Cache cache("division_cache");
@@ -142,17 +144,25 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
       config.sgprs_per_wf = 128;
       config.vgprs_per_wf = 32;
       config.lds_size_kb = 64;
-      // Policies are immutable while waves are active. FMAS needs numeric exactness;
-      // FIXUP additionally reports FP status, so give each its own CU.
-      config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
-      auto fmas_cu = amdgpu::ComputeUnitCore::create("division_fmas", config, &memory, &cache);
+      // Policies are immutable while waves are active. Use strict numeric semantics
+      // for the captured RDNA4 model; CDNA5 inherits the legacy model through
+      // Compatibility without claiming hardware-validated empirical semantics.
+      config.arithmetic = {arch == rocjitsu::IsaFamily::Cdna5
+                               ? amdgpu::ArithmeticSemantics::Compatibility
+                               : amdgpu::ArithmeticSemantics::BitExactEmpiricalNoFpStatus};
+      std::unique_ptr<amdgpu::ComputeUnitCore> fmas_cu;
+      ASSERT_NO_FATAL_FAILURE(rocjitsu::test::initialize_compute_unit(fmas_cu, "division_fmas",
+                                                                      config, &memory, &cache));
       auto *fmas_wf = fmas_cu->dispatch_wf(0, 0, 128, 32);
       ASSERT_NE(fmas_wf, nullptr);
       fmas_wf->set_exec(1);
       const uint32_t fmas_base = fmas_wf->vgpr_alloc().base;
-      config.arithmetic = {amdgpu::ArithmeticSemantics::BitExactEmpirical};
-      std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-          amdgpu::ComputeUnitCore::create("division", config, &memory, &cache);
+      config.arithmetic = {arch == rocjitsu::IsaFamily::Cdna5
+                               ? amdgpu::ArithmeticSemantics::Compatibility
+                               : amdgpu::ArithmeticSemantics::BitExactEmpirical};
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "division", config, &memory, &cache));
       amdgpu::Wavefront *wf = cu->dispatch_wf(0, 0, 128, 32);
       ASSERT_NE(wf, nullptr);
       wf->set_exec(1);
@@ -167,8 +177,9 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             wide ? std::bit_cast<uint64_t>(0x1p-947) : std::bit_cast<uint32_t>(0x1p-86f);
         const auto write = [&](uint32_t reg, uint64_t bits) {
           cu->write_vgpr(base + reg, 0, static_cast<uint32_t>(bits));
-          if (wide)
+          if (wide) {
             cu->write_vgpr(base + reg + 1, 0, static_cast<uint32_t>(bits >> 32));
+          }
         };
         const auto result = [&]() -> uint64_t {
           return cu->read_vgpr(base, 0) | (wide ? uint64_t{cu->read_vgpr(base + 1, 0)} << 32 : 0);
@@ -194,13 +205,15 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             for (uint32_t operand = 1; operand <= 3; ++operand) {
               const uint64_t bits = operand == 3 ? midpoint : 0;
               fmas_cu->write_vgpr(fmas_base + operand * stride, 0, static_cast<uint32_t>(bits));
-              if (wide)
+              if (wide) {
                 fmas_cu->write_vgpr(fmas_base + operand * stride + 1, 0,
                                     static_cast<uint32_t>(bits >> 32));
+              }
             }
             fmas_wf->set_vcc_mask(1);
             fmas_cu->write_vgpr(fmas_base, 1, 0x12345678u);
             fmas->execute(*fmas, fmas_wf);
+            ASSERT_FALSE(fmas_wf->instruction_execution_failed());
             const uint64_t fmas_result =
                 fmas_cu->read_vgpr(fmas_base, 0) |
                 (wide ? uint64_t{fmas_cu->read_vgpr(fmas_base + 1, 0)} << 32 : 0);
@@ -216,6 +229,7 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
             wf->set_trapsts(1u << 5); // An unrelated sticky cause must survive.
             wf->clear_pending_alu_causes();
             fixup->execute(*fixup, wf);
+            ASSERT_FALSE(wf->instruction_execution_failed());
             const uint32_t causes = (denorm & 1u) ? 1u << 1 : 1u << 2;
             EXPECT_EQ(result(), (denorm & 1u) ? one : inf);
             EXPECT_EQ(wf->pending_alu_causes(), causes);
@@ -227,7 +241,7 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
           // RDNA4 ISA 7.2.3.1 says exceptions precede CLAMP, but gfx1201
           // suppresses new FIXUP flags under CLAMP; old sticky flags survive.
           // Preserve the existing CDNA5 expectation (not measured here).
-          const uint32_t omod_causes = arch == ROCJITSU_CODE_ARCH_RDNA4 && clamp ? 0u : 1u << 3;
+          const uint32_t omod_causes = arch == rocjitsu::IsaFamily::Rdna4 && clamp ? 0u : 1u << 3;
           wf->set_mode_raw(0);
           write(stride, inf - 1); // Finite quotient before OMOD.
           write(2 * stride, one);
@@ -342,8 +356,9 @@ TEST(DivisionTest, GuestModeAndFixupCausesMatchGfx1201) {
         for (const FixupCase &test : fixup_cases) {
           for (uint32_t rounding = 0; rounding < 4; ++rounding) {
             for (bool use_modifiers : {false, true}) {
-              if (use_modifiers && !(test.abs | test.neg))
+              if (use_modifiers && !(test.abs | test.neg)) {
                 continue;
+              }
               SCOPED_TRACE(::testing::Message()
                            << "wide=" << wide << " scalar=" << scalar << " abs=" << test.abs
                            << " neg=" << test.neg << " use_modifiers=" << use_modifiers

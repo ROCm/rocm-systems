@@ -1,11 +1,14 @@
-# Rocjitsu Arithmetic Library design
+# rocjitsu Arithmetic Library design
 
-This document describes the Rocjitsu Arithmetic Library (`rj-arith`), located in
+This document describes the rocjitsu Arithmetic Library (`rj-arith`), located in
 [`lib/arith/`](../lib/arith/). It implements GPU arithmetic on a CPU. Its interface follows GPU
 instructions and register layouts; its implementation uses portable C++ and
 CPU-specific SIMD arithmetic.
 
 ## Scope and contract
+
+GETREG/SETREG hardware-register access stays in rocjitsu’s VM. Its register mapping,
+privilege checks, topology, and execution side effects are outside this arithmetic library.
 
 The library is a collection of C entry points mapping one-to-one to GPU instructions.
 Each aims to reproduce the instruction's arithmetic, synchronously on the calling
@@ -25,7 +28,8 @@ arithmetic may raise sticky exception flags.
 
 The library assumes the CPU's default floating-point environment: nearest-even
 rounding, denormal flushing disabled, and exceptions masked. Results are not
-guaranteed to be correct under a nondefault environment.
+guaranteed to be correct under a nondefault environment. The rest of rocjitsu makes
+the same assumption.
 
 The caller explicitly selects the CPU feature level through each entry point's
 `flags` argument, enabling internal SIMD paths such as AVX-512. Instruction calls
@@ -48,7 +52,7 @@ has none. Where no builtin distinguishes different instruction contracts,
 architecture suffixes disambiguate them. Scalar instructions omit wave width.
 
 The C interface constrains the API to a narrow, hermetic surface rather than
-making Rocjitsu a C project. Typed `constexpr` constants work in both languages.
+making rocjitsu a C project. Typed `constexpr` constants work in both languages.
 C++17 header checks always run; C23 checks run only when a compiler probe succeeds.
 Skipping C checks on older toolchains is intentional, including current CI.
 The project itself does not require C23.
@@ -145,21 +149,45 @@ loose arithmetic.
 ### Compatibility mode
 
 Mode 7 is a temporary, instruction-specific policy outside the ordered modes.
-Each entry point selects the arithmetic and FP status policy matching Rocjitsu's
+Each entry point selects the arithmetic and FP status policy matching rocjitsu's
 previous behavior. This can retain instruction-specific details beyond the
 other modes, such as rounding FP16 results before applying OMOD.
-FP32 MUL selects numeric-only exact semantics in every configuration. Its
-integration retains Rocjitsu's existing exception classifier for Compatibility;
-explicit mode 3 uses the library's qualified reporting domain instead.
+FP32 MUL retains rocjitsu's inherited numerical model for Compatibility and reports
+one hardware-fitted exception classifier in every guest mode, shared with explicit
+mode 3 inside its separately qualified reporting domain; gfx1250 MUL keeps the
+inherited range-only classifier because the shared rule has no capture there. Gfx12
+binary arithmetic and selection likewise own their inherited Compatibility causes in
+the library. Their status storage must be valid when these policies report. Gfx1250
+selection has a separate entry-point suffix because its inherited Compatibility
+policy does not report causes.
+
+Overflow and underflow causes for scalar arithmetic and conversions, FP32 MUL and
+FP16 FMA share one rule fitted to gfx1201 captures: the significand is rounded with the
+guest rounding mode and an unbounded exponent, and the result overflows or is tiny by
+that rounding, not by its stored encoding. A product stored as the minimum normal still
+raises UNDERFLOW when the unbounded rounding stays below it.
+
+Gfx12 scalar FP Compatibility computes the inherited numerical result and FP
+status inside the library; the VM commits the destination and raises guest traps.
+For arithmetic and conversion, this inherited reporting does not qualify explicit
+mode 3, which continues to reject unsupported status. Compatibility requires
+valid status storage for these operations, as specified by their declarations.
 Compatibility may retain demonstrated hardware-fidelity improvements over the
 previous interpreter; instruction contracts document such exceptions.
-Rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
+On RDNA4 the library also records invalid inputs to FP32 binary arithmetic
+and min/max, overflow of FP32 add/subtract before OMOD, and signaling
+floating-point compares on NaN. The comparison library owns the inherited
+Compatibility reporting gate: a nonfinite selected operand enables signaling
+causes across the wave, including denormal pairs in the other Wave64 half.
+The simulator only commits the comparison mask and causes.
+Dual FP32 arithmetic slots share the wave’s
+
+exception flags. Explicit numeric-only modes suppress these additional flags.
+rocjitsu's [`arithmetic.semantics`](configuration.md#cpu-arithmetic-policy)
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without `RJ_ARITH_SEMANTICS_`.
-The migrated families are RDNA3/RDNA4 dense WMMA, RDNA4 sparse WMMA, and RDNA3/RDNA4 fused floating-point
-arithmetic, basic floating-point arithmetic and selection, division and dot products.
-VOPD remains unmigrated. RDNA3.5, CDNA, and other handlers retain their existing
-implementations.
+[Instruction coverage](../lib/arith/COVERAGE.md) describes the migrated families.
+Other handlers retain their existing implementations.
 
 ### Guest FP controls
 
@@ -202,7 +230,7 @@ implement the same instruction contracts. This small duplication keeps those
 hardware-specific policies under the arithmetic library's ownership.
 
 
-Exact arithmetic follows validated Rocjitsu models or simple ISA-defined behavior.
+Exact arithmetic follows validated rocjitsu models or simple ISA-defined behavior.
 Sources and evidence stay beside the code and tests; optimizing a model does not
 establish that it matches hardware.
 
@@ -260,7 +288,7 @@ sanitizers provide broader validation; ordinary tests need no GPU.
 Each `*_test.cpp` builds as a separate executable, with individual GTest cases
 exposed to CTest. Public headers are compiled independently as C23 and C++17.
 
-## Benchmarking (planned)
+## Benchmarking
 
 No benchmark executable is built at this stage. The following describes its intended interface.
 

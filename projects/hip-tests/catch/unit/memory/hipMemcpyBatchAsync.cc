@@ -6,13 +6,19 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
@@ -1502,6 +1508,307 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedAttributes_DefaultSwapIndirect) {
 /**
  * Test Description
  * ------------------------
+ * - Verifies batches issued back to back on one stream with no synchronization in between, each
+ * mixing pinned host-to-device, device-to-pinned host and device-to-device copies. Two device
+ * sources each feed two destinations on the copy engines, so those copies alone become two
+ * operations, and one more device-to-device copy runs as a shader copy. Every operation of a batch
+ * waits on the stream's prior work while the stream's completion signals are reused many times
+ * over. The sources alternate between two patterns from batch to batch, so the final contents
+ * show that the last batch landed after all the others.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_MixedDirections_BackToBack")) {
+    return;
+  }
+  constexpr size_t kNumPatterns = 2;
+  const auto pattern = [](size_t source_idx, size_t pattern_idx) {
+    return std::vector<unsigned char>(
+        kBackToBackCopySize,
+        static_cast<unsigned char>(1 + source_idx * kNumPatterns + pattern_idx));
+  };
+
+  // Each source is copied to num_dsts destinations. The copies that prefer the copy engines
+  // follow the others, so a second attribute covers them.
+  struct SourceCopies {
+    LinearAllocs src_type;
+    LinearAllocs dst_type;
+    size_t num_dsts;
+    bool prefer_copy_engine;
+  };
+  const std::array<SourceCopies, 5> sources{
+      {{LinearAllocs::hipHostMalloc, LinearAllocs::hipMalloc, 1, false},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipHostMalloc, 1, false},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, 1, false},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, 2, true},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc, 2, true}}};
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  const std::vector<unsigned char> zeros(kBackToBackCopySize, 0);
+  std::array<std::vector<void*>, kNumPatterns> batch_srcs;
+  std::vector<void*> dst_ptrs;
+  std::vector<size_t> dst_source_idxs;
+  size_t first_copy_engine_idx = 0;
+  for (size_t source_idx = 0; source_idx < sources.size(); ++source_idx) {
+    const SourceCopies& source = sources[source_idx];
+    if (!source.prefer_copy_engine) {
+      first_copy_engine_idx += source.num_dsts;
+    }
+    std::array<void*, kNumPatterns> src_ptrs;
+    for (size_t pattern_idx = 0; pattern_idx < kNumPatterns; ++pattern_idx) {
+      src_ptrs[pattern_idx] =
+          addBuffer(allocations, pattern(source_idx, pattern_idx), source.src_type);
+    }
+    for (size_t i = 0; i < source.num_dsts; ++i) {
+      dst_ptrs.push_back(addBuffer(allocations, zeros, source.dst_type));
+      dst_source_idxs.push_back(source_idx);
+      for (size_t pattern_idx = 0; pattern_idx < kNumPatterns; ++pattern_idx) {
+        batch_srcs[pattern_idx].push_back(src_ptrs[pattern_idx]);
+      }
+    }
+  }
+
+  std::vector<size_t> sizes(dst_ptrs.size(), kBackToBackCopySize);
+  std::array<hipMemcpyAttributes, 2> attrs{
+      {{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault},
+       {hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE}}};
+  std::array<size_t, 2> attrs_idxs{0, first_copy_engine_idx};
+  HIP_CHECK(hipDeviceSynchronize());
+
+  for (size_t iteration = 0; iteration < kBackToBackIterations; ++iteration) {
+    std::vector<void*>& iteration_srcs = batch_srcs[iteration % kNumPatterns];
+    HIP_CHECK(hipMemcpyBatchAsync(dst_ptrs.data(), iteration_srcs.data(), sizes.data(),
+                                  sizes.size(), attrs.data(), attrs_idxs.data(), attrs.size(),
+                                  nullptr, stream_guard.stream()));
+  }
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  const size_t last_pattern_idx = (kBackToBackIterations - 1) % kNumPatterns;
+  for (size_t i = 0; i < dst_ptrs.size(); ++i) {
+    INFO("Destination " << i);
+    const size_t source_idx = dst_source_idxs[i];
+    requireBufferEquals(dst_ptrs[i], pattern(source_idx, last_pattern_idx),
+                        sources[source_idx].dst_type);
+  }
+}
+
+namespace {
+// Lets a host function block its stream until the host opens the gate
+struct HostFuncGate {
+  int open = 0;
+  int passed = 0;
+};
+
+// A host that never opens the gate must not keep the stream, and the process, stuck for good
+constexpr int kGateDeadlineSeconds = 10;
+
+void HoldUntilGateOpens(void* arg) {
+  auto* gate = static_cast<HostFuncGate*>(arg);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(kGateDeadlineSeconds);
+  while (__atomic_load_n(&gate->open, __ATOMIC_ACQUIRE) == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+  }
+  __atomic_store_n(&gate->passed, 1, __ATOMIC_RELEASE);
+}
+
+// Opens the gate and releases the spinning kernels when the test leaves, also through a failed
+// check, so that the streams can drain before their guards destroy them
+struct ReleaseOnExit {
+  HostFuncGate* gate;
+  int* release;
+  ~ReleaseOnExit() {
+    __atomic_store_n(&gate->open, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(release, 1, __ATOMIC_RELEASE);
+  }
+};
+__global__ void NopKernel() {}
+
+// Runs batches whose shader copy waits on the stream's prior work behind other streams' spin
+// kernels on the shared hardware queue (see the test cases below). launch_barriers also queues two
+// kernels on every other stream before each batch.
+void RunQueuedShaderWaitBackToBack(const bool launch_barriers) {
+  // More streams than hardware queues, so some stream shares the tested stream's queue
+  constexpr size_t kNumSpinStreams = 16;
+  constexpr size_t kHeldIteration = 2;
+  // Once the stream's signals wrapped around, so the second host function reuses the interrupt
+  // signals the first one returned
+  constexpr size_t kSecondHostFuncIteration = kHeldIteration + 100;
+  // Few enough that the queued batches do not exhaust the stream's signals while held. The
+  // barrier variant queues two kernels on every spin stream per batch, which needs fewer still, and
+  // more batches than the tracker lets pins wait for a fence (64)
+  const size_t kIterations = launch_barriers ? 100 : 200;
+  constexpr int kWatchdogSeconds = 10;
+  constexpr size_t kNumPatterns = 2;
+  const auto pattern = [](size_t copy_idx, size_t pattern_idx) {
+    return std::vector<unsigned char>(
+        kBackToBackCopySize, static_cast<unsigned char>(1 + copy_idx * kNumPatterns + pattern_idx));
+  };
+  // The host-to-device copy runs on the copy engines and the device-to-device copy as a shader copy
+  // The barrier variant has shader copies only: the consecutive barrier packets of a copy engine
+  // copy keep their barrier bit, which retires the waits of the earlier batches
+  const std::array<std::pair<LinearAllocs, LinearAllocs>, 2> copies{
+      {{launch_barriers ? LinearAllocs::hipMalloc : LinearAllocs::hipHostMalloc,
+        LinearAllocs::hipMalloc},
+       {LinearAllocs::hipMalloc, LinearAllocs::hipMalloc}}};
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<StreamGuard> spin_streams;
+  for (size_t i = 0; i < kNumSpinStreams; ++i) {
+    spin_streams.emplace_back(Streams::created);
+  }
+  LinearAllocGuard<int> release(LinearAllocs::hipHostMalloc, sizeof(int));
+  *release.ptr() = 0;
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  const std::vector<unsigned char> zeros(kBackToBackCopySize, 0);
+  std::array<std::vector<void*>, kNumPatterns> batch_srcs;
+  std::vector<void*> dst_ptrs;
+  for (size_t copy_idx = 0; copy_idx < copies.size(); ++copy_idx) {
+    for (size_t pattern_idx = 0; pattern_idx < kNumPatterns; ++pattern_idx) {
+      batch_srcs[pattern_idx].push_back(
+          addBuffer(allocations, pattern(copy_idx, pattern_idx), copies[copy_idx].first));
+    }
+    dst_ptrs.push_back(addBuffer(allocations, zeros, copies[copy_idx].second));
+  }
+
+  std::vector<size_t> sizes(dst_ptrs.size(), kBackToBackCopySize);
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagDefault};
+  size_t attrs_idx = 0;
+  const long long timeout_ticks =
+      static_cast<long long>(kWatchdogSeconds) * 1000000 * SpinTicksPerUs();
+  HostFuncGate gate;
+  ReleaseOnExit release_on_exit{&gate, release.ptr()};
+  HIP_CHECK(hipDeviceSynchronize());
+
+  std::chrono::steady_clock::time_point spin_start;
+  for (size_t iteration = 0; iteration < kIterations; ++iteration) {
+    if (iteration == kHeldIteration) {
+      HIP_CHECK(hipLaunchHostFunc(stream_guard.stream(), HoldUntilGateOpens, &gate));
+      spin_start = std::chrono::steady_clock::now();
+      for (StreamGuard& spin_stream : spin_streams) {
+        WaitForHostReleaseWithTimeout<<<1, 1, 0, spin_stream.stream()>>>(release.ptr(),
+                                                                         timeout_ticks);
+      }
+    }
+    if (iteration == kSecondHostFuncIteration) {
+      HIP_CHECK(hipLaunchHostFunc(stream_guard.stream(), [](void*) {}, nullptr));
+    }
+    if (launch_barriers && iteration > kHeldIteration) {
+      // The first kernel of a stream after the tested stream's last packet has no barrier bit,
+      // since that packet already orders it, and the second keeps it. That barrier packet follows
+      // the tested stream's last packet on a shared hardware queue, so the barrier-bit
+      // optimization drops the barrier bit of the tested stream's next packet
+      for (StreamGuard& spin_stream : spin_streams) {
+        NopKernel<<<1, 1, 0, spin_stream.stream()>>>();
+        NopKernel<<<1, 1, 0, spin_stream.stream()>>>();
+      }
+    }
+    const hipError_t batch_status = hipMemcpyBatchAsync(
+        dst_ptrs.data(), batch_srcs[iteration % kNumPatterns].data(), sizes.data(), sizes.size(),
+        &attr, &attrs_idx, 1, nullptr, stream_guard.stream());
+    if (iteration == kHeldIteration) {
+      // Completes the prior work only after the batch waits on it, then lets the copy engine copy
+      // finish before the stream's signals wrap around
+      __atomic_store_n(&gate.open, 1, __ATOMIC_RELEASE);
+      const auto deadline =
+          std::chrono::steady_clock::now() + std::chrono::seconds(kGateDeadlineSeconds);
+      while (__atomic_load_n(&gate.passed, __ATOMIC_ACQUIRE) == 0 &&
+             std::chrono::steady_clock::now() < deadline) {
+      }
+      REQUIRE(__atomic_load_n(&gate.passed, __ATOMIC_ACQUIRE) == 1);
+    }
+    HIP_CHECK(batch_status);
+  }
+  const double held_seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - spin_start).count();
+  __atomic_store_n(release.ptr(), 1, __ATOMIC_RELEASE);
+  HIP_CHECK(hipGetLastError());
+  // A stream that hangs on a re-armed signal fails the check below after the deadline
+  const auto sync_deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(kWatchdogSeconds);
+  hipError_t stream_status = hipStreamQuery(stream_guard.stream());
+  while (stream_status == hipErrorNotReady && std::chrono::steady_clock::now() < sync_deadline) {
+    std::this_thread::yield();
+    stream_status = hipStreamQuery(stream_guard.stream());
+  }
+  INFO("The stream did not complete within " << kWatchdogSeconds << " s of the release");
+  HIP_CHECK(stream_status);
+  HIP_CHECK(hipDeviceSynchronize());
+  // The spin kernels end by themselves after the watchdog, which releases the held waits early and
+  // lets the test pass without the case it is meant to cover
+  INFO("The batches were queued for " << held_seconds << " s, more than the spin kernels' "
+                                      << kWatchdogSeconds << " s watchdog allows");
+  REQUIRE(held_seconds < kWatchdogSeconds);
+
+  const size_t last_pattern_idx = (kIterations - 1) % kNumPatterns;
+  for (size_t copy_idx = 0; copy_idx < copies.size(); ++copy_idx) {
+    INFO("Copy " << copy_idx);
+    requireBufferEquals(dst_ptrs[copy_idx], pattern(copy_idx, last_pattern_idx),
+                        copies[copy_idx].second);
+  }
+}
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a batch whose shader copy waits on the stream's prior work behind another stream's
+ * kernel on the shared hardware queue. Each batch copies pinned host memory to the device on the
+ * copy engines and copies within the device as a shader copy, and both wait on the stream's prior
+ * work, here a host function that holds it until the batch is enqueued. Kernels spinning on a host
+ * flag on many other streams are launched between them, so one lands on the stream's hardware
+ * queue ahead of the shader copy's wait and holds that wait queued. The copy engine copy then
+ * finishes while the wait is still queued, and about two hundred more batches and another host
+ * function follow before the host releases the kernels, so the stream's completion signals are
+ * reused several times over meanwhile. The sources alternate between two patterns from batch to
+ * batch, so the final contents show that the last batch landed after all the others.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack")) {
+    return;
+  }
+  RunQueuedShaderWaitBackToBack(false);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Same as Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_BackToBack with shader copies only,
+ * a hundred batches, and two kernels queued on every other stream before each batch. The second
+ * kernel keeps its barrier bit and lands on the stream's hardware queue after its last packet, so
+ * the barrier-bit optimization clears the barrier bit of the stream's next packet. No packet of
+ * the stream then retires the waits of its earlier shader copies, and more of them pile up than
+ * the runtime keeps before it forces a barrier bit. The batches must neither hang the stream nor
+ * change the copies' results.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers) {
+  if (RunInEachSignalTracker("Unit_hipMemcpyBatchAsync_Mixed_QueuedShaderWait_OtherStreamBarriers")) {
+    return;
+  }
+  RunQueuedShaderWaitBackToBack(true);
+}
+
+/**
+ * Test Description
+ * ------------------------
  * - Verifies a large D2D batch through the shader and SDMA copy paths.
  * Test source
  * ------------------------
@@ -1543,7 +1850,383 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_LargeBatch) {
                             kPatternValue + static_cast<int>(i), i);
   }
 }
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a batch that becomes more SDMA operations than the device-memory signal ring holds
+ *   (16 x ROC_SIGNAL_POOL_SIZE). Each source is copied to two destinations, so every source is
+ *   its own broadcast operation.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts) {
+  // Eight times the ring's 16 x ROC_SIGNAL_POOL_SIZE signals (RetiringSignalTracker::max_signals_):
+  // 16384 copies with the default pool of 64.
+  const char* poolEnv = std::getenv("ROC_SIGNAL_POOL_SIZE");
+  const size_t pool =
+      poolEnv != nullptr ? std::clamp<size_t>(std::strtoul(poolEnv, nullptr, 10), 1, 1024) : 64;
+  const size_t kSources = 8 * 16 * pool;
+  constexpr size_t kDstsPerSource = 2;
+  const size_t kCopyCount = kSources * kDstsPerSource;
+  constexpr size_t kCopySize = 64;
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<unsigned char> srcValues(kSources * kCopySize);
+  std::vector<unsigned char> dstValues(kCopyCount * kCopySize);
+  for (size_t i = 0; i < kSources; ++i) {
+    std::fill_n(srcValues.begin() + i * kCopySize, kCopySize,
+                static_cast<unsigned char>(i % 251 + 1));
+  }
+  for (size_t i = 0; i < kCopyCount; ++i) {
+    std::copy_n(srcValues.begin() + i / kDstsPerSource * kCopySize, kCopySize,
+                dstValues.begin() + i * kCopySize);
+  }
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  char* src = static_cast<char*>(addBuffer(allocations, srcValues, LinearAllocs::hipMalloc));
+  char* dst = static_cast<char*>(addBuffer(
+      allocations, std::vector<unsigned char>(dstValues.size(), 0), LinearAllocs::hipMalloc));
+
+  std::vector<void*> srcPtrs(kCopyCount);
+  std::vector<void*> dstPtrs(kCopyCount);
+  std::vector<size_t> sizes(kCopyCount, kCopySize);
+  for (size_t i = 0; i < kCopyCount; ++i) {
+    srcPtrs[i] = src + i / kDstsPerSource * kCopySize;
+    dstPtrs[i] = dst + i * kCopySize;
+  }
+  // PreferCE keeps the same-device copies on SDMA, where equal sources become broadcasts.
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE};
+  size_t attrsIdx = 0;
+
+  HIP_CHECK(hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), kCopyCount, &attr,
+                                &attrsIdx, 1, nullptr, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  requireBufferEquals(dst, dstValues, LinearAllocs::hipMalloc);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies batches that are the first operation on their stream and mix a shader copy with
+ *   SDMA broadcast operations. Every count below ROC_SIGNAL_POOL_SIZE runs, so one of them makes
+ *   the device-memory signal ring rearm signals past the stream's prior signal.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_BroadcastsWithShaderCopy) {
+  const char* poolEnv = std::getenv("ROC_SIGNAL_POOL_SIZE");
+  const size_t pool =
+      poolEnv != nullptr ? std::clamp<size_t>(std::strtoul(poolEnv, nullptr, 10), 1, 1024) : 64;
+  if (pool < 2) {
+    HIP_SKIP_TEST("ROC_SIGNAL_POOL_SIZE is too small for this test");
+  }
+  const size_t kMaxSources = pool - 1;
+  constexpr size_t kDstsPerSource = 2;
+  constexpr size_t kCopySize = 64;
+
+  std::vector<unsigned char> srcValues(kMaxSources * kCopySize);
+  std::vector<unsigned char> dstValues(kMaxSources * kDstsPerSource * kCopySize);
+  for (size_t i = 0; i < kMaxSources; ++i) {
+    std::fill_n(srcValues.begin() + i * kCopySize, kCopySize,
+                static_cast<unsigned char>(i % 251 + 1));
+  }
+  for (size_t i = 0; i < kMaxSources * kDstsPerSource; ++i) {
+    std::copy_n(srcValues.begin() + i / kDstsPerSource * kCopySize, kCopySize,
+                dstValues.begin() + i * kCopySize);
+  }
+  const std::vector<unsigned char> shaderValues(kCopySize, 0xa5);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  char* src = static_cast<char*>(addBuffer(allocations, srcValues, LinearAllocs::hipMalloc));
+  char* dst = static_cast<char*>(addBuffer(
+      allocations, std::vector<unsigned char>(dstValues.size(), 0), LinearAllocs::hipMalloc));
+  void* shaderSrc = addBuffer(allocations, shaderValues, LinearAllocs::hipMalloc);
+  void* shaderDst = addBuffer(allocations, std::vector<unsigned char>(kCopySize, 0),
+                              LinearAllocs::hipMalloc);
+
+  // PreferCE keeps the broadcasts on SDMA; the last copy has no preference and uses a shader.
+  hipMemcpyAttributes attrs[2] = {
+      {hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE},
+      {hipMemcpySrcAccessOrderStream, {}, {}, 0}};
+
+  for (size_t sources = 1; sources <= kMaxSources; ++sources) {
+    CAPTURE(sources);
+    const size_t broadcastCopies = sources * kDstsPerSource;
+    HIP_CHECK(hipMemset(dst, 0, dstValues.size()));
+    HIP_CHECK(hipMemset(shaderDst, 0, kCopySize));
+    // Pending work on the default stream would give the new stream a prior operation.
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<void*> srcPtrs(broadcastCopies + 1);
+    std::vector<void*> dstPtrs(broadcastCopies + 1);
+    std::vector<size_t> sizes(broadcastCopies + 1, kCopySize);
+    for (size_t i = 0; i < broadcastCopies; ++i) {
+      srcPtrs[i] = src + i / kDstsPerSource * kCopySize;
+      dstPtrs[i] = dst + i * kCopySize;
+    }
+    srcPtrs[broadcastCopies] = shaderSrc;
+    dstPtrs[broadcastCopies] = shaderDst;
+    size_t attrsIdxs[2] = {0, broadcastCopies};
+
+    // The batch must be the stream's first operation.
+    StreamGuard stream_guard(Streams::created);
+    HIP_CHECK(hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), srcPtrs.size(),
+                                  attrs, attrsIdxs, 2, nullptr, stream_guard.stream()));
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+    const std::vector<unsigned char> expected(dstValues.begin(),
+                                              dstValues.begin() + broadcastCopies * kCopySize);
+    requireBufferEquals(dst, expected, LinearAllocs::hipMalloc);
+    requireBufferEquals(shaderDst, shaderValues, LinearAllocs::hipMalloc);
+  }
+}
 #endif
+
+#if HT_AMD && !defined(_WIN32)
+
+namespace {
+
+constexpr size_t kKiB = 1024;
+constexpr size_t kExternalBytes = 64 * kKiB;
+
+// Buffer views of one external allocation: the inner view sits inside the outer view.
+constexpr size_t kOuterOffset = 0;
+constexpr size_t kOuterSize = 32 * kKiB;
+constexpr size_t kInnerOffset = 8 * kKiB;
+constexpr size_t kInnerSize = 8 * kKiB;
+
+uint8_t PatternByte(size_t i) { return static_cast<uint8_t>(i * 7 + 3); }
+
+// Imports a dmabuf of a device allocation as external memory and creates the nested buffer views.
+// The views are separate memory objects that overlap in the runtime's global memory-object map.
+class NestedViews {
+ public:
+  NestedViews() = default;
+  NestedViews(const NestedViews&) = delete;
+  NestedViews& operator=(const NestedViews&) = delete;
+  ~NestedViews() {
+    static_cast<void>(Release());
+  }
+
+  // Frees the views, destroys the external memory, then closes the exported dmabuf descriptor.
+  // hipDestroyExternalMemory does not release the mapped buffers (each view has its own global-map
+  // entry and is freed with hipFree), and the runtime does not take ownership of the descriptor.
+  // Safe to call more than once and after a partly completed Create.
+  hipError_t Release() {
+    hipError_t result = hipSuccess;
+    const auto keep_first_error = [&result](hipError_t err) {
+      if (result == hipSuccess) {
+        result = err;
+      }
+    };
+    if (inner_ != nullptr) {
+      keep_first_error(hipFree(inner_));
+      inner_ = nullptr;
+    }
+    if (outer_ != nullptr) {
+      keep_first_error(hipFree(outer_));
+      outer_ = nullptr;
+    }
+    if (ext_mem_ != nullptr) {
+      keep_first_error(hipDestroyExternalMemory(ext_mem_));
+      ext_mem_ = nullptr;
+    }
+    if (fd_ >= 0) {
+      static_cast<void>(close(fd_));
+      fd_ = -1;
+    }
+    return result;
+  }
+
+  // Returns false if the device cannot export or import the allocation.
+  bool Create(void* device_alloc) {
+    int fd = -1;
+    hipError_t err = hipMemGetHandleForAddressRange(&fd, reinterpret_cast<hipDeviceptr_t>(device_alloc),
+                                                    kExternalBytes, hipMemRangeHandleTypeDmaBufFd, 0);
+    if (err == hipErrorNotSupported) {
+      consumeLastError();
+      return false;
+    }
+    HIP_CHECK(err);
+    fd_ = fd;
+
+    hipExternalMemoryHandleDesc handle_desc{};
+    handle_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
+    handle_desc.handle.fd = fd;
+    handle_desc.size = kExternalBytes;
+    err = hipImportExternalMemory(&ext_mem_, &handle_desc);
+    if (err == hipErrorNotSupported) {
+      consumeLastError();
+      return false;
+    }
+    HIP_CHECK(err);
+
+    hipExternalMemoryBufferDesc outer_desc{};
+    outer_desc.offset = kOuterOffset;
+    outer_desc.size = kOuterSize;
+    HIP_CHECK(hipExternalMemoryGetMappedBuffer(&outer_, ext_mem_, &outer_desc));
+    hipExternalMemoryBufferDesc inner_desc{};
+    inner_desc.offset = kInnerOffset;
+    inner_desc.size = kInnerSize;
+    HIP_CHECK(hipExternalMemoryGetMappedBuffer(&inner_, ext_mem_, &inner_desc));
+    return true;
+  }
+
+  uint8_t* outer() const { return static_cast<uint8_t*>(outer_); }
+  uint8_t* inner() const { return static_cast<uint8_t*>(inner_); }
+
+ private:
+  int fd_ = -1;
+  hipExternalMemory_t ext_mem_ = nullptr;
+  void* outer_ = nullptr;
+  void* inner_ = nullptr;
+};
+
+struct Copy {
+  void* src;
+  size_t dst_offset;
+  size_t size;
+};
+
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ * - The global memory-object map can hold nested entries: buffer views created by
+ * hipExternalMemoryGetMappedBuffer of one external allocation. A pointer inside the inner view
+ * belongs to the inner view, so a copy that starts there and runs past the inner view's end is out
+ * of bounds, even though it still lies inside the outer view.
+ * - Verifies that hipMemcpyBatchAsync reports that error whichever order the entries are in, and
+ * that valid copies from both views succeed and move the right data. The result must not depend on
+ * whether an earlier entry of the batch resolved to the outer view.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ *  - Linux, with dmabuf export and external memory import support
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_NestedBufferViews) {
+  HIP_CHECK(hipSetDevice(0));
+
+  LinearAllocGuard<uint8_t> external(LinearAllocs::hipMalloc, kExternalBytes);
+  std::vector<uint8_t> pattern(kExternalBytes);
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    pattern[i] = PatternByte(i);
+  }
+  HIP_CHECK(hipMemcpy(external.ptr(), pattern.data(), kExternalBytes, hipMemcpyHostToDevice));
+
+  NestedViews views;
+  if (!views.Create(external.ptr())) {
+    HIP_SKIP_TEST("Skipping because dmabuf export or external memory import is not supported");
+  }
+  REQUIRE(views.inner() == views.outer() + (kInnerOffset - kOuterOffset));
+
+  LinearAllocGuard<uint8_t> dst(LinearAllocs::hipMalloc, kExternalBytes);
+  HIP_CHECK(hipMemset(dst.ptr(), 0, kExternalBytes));
+  StreamGuard stream_guard(Streams::created);
+
+  // Entirely inside the outer view, before the inner view starts.
+  const Copy in_outer{views.outer() + kOuterOffset, 0, 4 * kKiB};
+  // Entirely inside the inner view.
+  const Copy in_inner{views.inner() + 1 * kKiB, 8 * kKiB, 2 * kKiB};
+  // Starts inside the inner view and runs 2 KiB past its end, still inside the outer view.
+  const Copy past_inner{views.inner() + 6 * kKiB, 16 * kKiB, 4 * kKiB};
+
+  const auto run = [&](const std::vector<Copy>& copies, size_t* fail_idx) {
+    std::vector<void*> dsts;
+    std::vector<void*> srcs;
+    std::vector<size_t> sizes;
+    for (const Copy& c : copies) {
+      srcs.push_back(c.src);
+      dsts.push_back(dst.ptr() + c.dst_offset);
+      sizes.push_back(c.size);
+    }
+    *fail_idx = ~size_t{0};
+    return hipMemcpyBatchAsync(dsts.data(), srcs.data(), sizes.data(), copies.size(), nullptr,
+                               nullptr, 0, fail_idx, stream_guard.stream());
+  };
+
+  // The expected content of the destination for a copy: the bytes of the external allocation that
+  // the source pointer addresses.
+  const auto expect_copied = [&](const Copy& c) {
+    const size_t ext_offset = static_cast<size_t>(static_cast<uint8_t*>(c.src) - views.outer()) +
+                              kOuterOffset;
+    std::vector<uint8_t> got(c.size);
+    HIP_CHECK(hipMemcpy(got.data(), dst.ptr() + c.dst_offset, c.size, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < c.size; ++i) {
+      INFO("dst offset " << c.dst_offset << " byte " << i);
+      REQUIRE(got[i] == PatternByte(ext_offset + i));
+    }
+  };
+
+  SECTION("Copy past the inner view alone is rejected") {
+    size_t fail_idx = 0;
+    HIP_CHECK_ERROR(run({past_inner}, &fail_idx), hipErrorInvalidValue);
+    consumeLastError();
+    REQUIRE(fail_idx == 0);
+  }
+
+  SECTION("Copies inside each view succeed, in either order") {
+    const bool outer_first = GENERATE(true, false);
+    const std::vector<Copy> copies = outer_first ? std::vector<Copy>{in_outer, in_inner}
+                                                 : std::vector<Copy>{in_inner, in_outer};
+    size_t fail_idx = 0;
+    HIP_CHECK(run(copies, &fail_idx));
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    expect_copied(in_outer);
+    expect_copied(in_inner);
+  }
+
+  SECTION("Copy past the inner view is rejected after an entry in the outer view") {
+    size_t fail_idx = 0;
+    HIP_CHECK_ERROR(run({in_outer, past_inner}, &fail_idx), hipErrorInvalidValue);
+    consumeLastError();
+    REQUIRE(fail_idx == 1);
+  }
+
+  SECTION("Copy past the inner view is rejected before an entry in the outer view") {
+    size_t fail_idx = 0;
+    HIP_CHECK_ERROR(run({past_inner, in_outer}, &fail_idx), hipErrorInvalidValue);
+    consumeLastError();
+    REQUIRE(fail_idx == 0);
+  }
+
+  SECTION("Copy past the inner view is rejected after an entry in the inner view") {
+    size_t fail_idx = 0;
+    HIP_CHECK_ERROR(run({in_inner, past_inner}, &fail_idx), hipErrorInvalidValue);
+    consumeLastError();
+    REQUIRE(fail_idx == 1);
+  }
+
+  // Release the views and the external memory, and check that the views are really gone: before,
+  // both pointers are registered device memory; after, the runtime no longer knows them.
+  const void* outer_ptr = views.outer();
+  const void* inner_ptr = views.inner();
+  const auto memory_type_of = [](const void* ptr) {
+    hipPointerAttribute_t attributes{};
+    HIP_CHECK(hipPointerGetAttributes(&attributes, ptr));
+    return attributes.type;
+  };
+  REQUIRE(memory_type_of(outer_ptr) == hipMemoryTypeDevice);
+  REQUIRE(memory_type_of(inner_ptr) == hipMemoryTypeDevice);
+  HIP_CHECK(views.Release());
+  REQUIRE(memory_type_of(outer_ptr) == hipMemoryTypeUnregistered);
+  REQUIRE(memory_type_of(inner_ptr) == hipMemoryTypeUnregistered);
+}
+
+#endif  // HT_AMD && !defined(_WIN32)
+
 /**
  * End doxygen group MemoryTest.
  * @}

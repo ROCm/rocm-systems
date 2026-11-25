@@ -10,7 +10,13 @@
 #
 # ------------------------------------------------------------------------------#
 
-add_library(rocprofiler-systems-rocsys-core STATIC cli_dispatcher.cpp)
+add_library(
+    rocprofiler-systems-rocsys-core
+    STATIC
+    cli_dispatcher.cpp
+    options.cpp
+    schema.cpp
+)
 
 target_include_directories(
     rocprofiler-systems-rocsys-core
@@ -19,7 +25,9 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-systems-rocsys-core
-    PUBLIC rocprofiler-systems::rocprofiler-systems-common-library
+    PUBLIC
+        rocprofiler-systems::rocprofiler-systems-common-library
+        rocprofiler-systems::rocprofiler-systems-parser
 )
 
 add_library(
@@ -47,6 +55,7 @@ target_link_libraries(
         rocprofiler-systems::rocprofiler-systems-bin-common
         rocprofiler-systems::rocprofiler-systems-rocsys-core
         rocprofiler-systems::rocprofiler-systems-core
+        rocprofiler-systems::rocprofiler-systems-rocm
         rocprofiler-systems::rocprofiler-systems-json
         rocprofiler-systems::rocprofiler-systems-sanitizer
 )

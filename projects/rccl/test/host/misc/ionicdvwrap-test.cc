@@ -134,7 +134,7 @@ TEST(IonicdvwrapSymbolsMicrotest, NoAinic_SucceedsWithoutLoadingLibionic) {
   EXPECT_TRUE(dl.opens.empty());
 }
 
-// Builds once per process, so runs isolated. Relies on ionicdvsymbols-test.cc's dl_seam.h build.
+// Builds once per process, so runs isolated. Relies on the dl_seam.h-built ionicdvsymbols.cc it links.
 TEST(IonicdvwrapSymbolsMicrotestIsolated, Ainic_BuildsOnceAndCachesFailure) {
   RUN_ISOLATED_TEST("IonicdvwrapSymbolsMicrotestIsolated_Ainic_BuildsOnceAndCachesFailure", []() {
     ScopedHook ainic(g_useAinic, [] { return true; });

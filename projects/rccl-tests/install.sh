@@ -9,6 +9,7 @@ function display_help()
     echo "RCCL-tests build & installation helper script"
     echo "./install [-h|--help] "
     echo "    [-h|--help] Prints this help message."
+    echo "    [-l|--local_gpu_only] Only compile for local GPU architecture(s) (ignored if --gpu_targets is set)."
     echo "    [-m|--mpi] Build RCCL-tests with MPI support. (see --mpi_home below.)"
     echo "    [-t|--test] Run unit-tests after building RCCL-Tests."
     echo "    [--enable-device-api] Build RCCL-tests with the device API enabled (ENABLE_DEVICE_API=1)."
@@ -34,6 +35,7 @@ mpi_dir=""
 # overridable via --hip_compiler.
 hip_compiler=${HIP_COMPILER:-${rocm_dir}/llvm/bin/amdclang++}
 gpu_targets=""
+build_local_gpu_only=false
 
 # #################################################
 # Parameter parsing
@@ -42,7 +44,7 @@ gpu_targets=""
 # check if we have a modern version of getopt that can handle whitespace and long parameters
 getopt -T
 if [[ $? -eq 4 ]]; then
-  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,mpi,test,enable-device-api,rocm_home:,rccl_home:,mpi_home:,hip_compiler:,gpu_targets: --options hmt -- "$@")
+  GETOPT_PARSE=$(getopt --name "${0}" --longoptions help,local_gpu_only,mpi,test,enable-device-api,rocm_home:,rccl_home:,mpi_home:,hip_compiler:,gpu_targets: --options hlmt -- "$@")
 else
   echo "Need a new version of getopt"
   exit 1
@@ -60,6 +62,9 @@ while true; do
     -h|--help)
        display_help
        exit 0 ;;
+    -l|--local_gpu_only)
+       build_local_gpu_only=true
+       shift ;;
     -m|--mpi)
        mpi_enabled=true
        shift ;;
@@ -132,6 +137,15 @@ if ! command -v ${hip_compiler} 2>&1 >/dev/null ; then
 fi
 echo "[INFO] Compiling with ${hip_compiler}"
 
+LOCAL_GPU_ONLY=""
+if ($build_local_gpu_only); then
+  if [[ -n ${gpu_targets} ]]; then
+    echo "[WARN] --gpu_targets specified; ignoring -l|--local_gpu_only"
+  else
+    LOCAL_GPU_ONLY="LOCAL_GPU_ONLY=1"
+  fi
+fi
+
 if [[ -n ${gpu_targets} ]]; then
   GPU_TARGETS="GPU_TARGETS=${gpu_targets}"
 fi
@@ -149,12 +163,12 @@ if ($mpi_enabled); then
   else
     echo "[INFO] Compiling with MPI support (Using MPI from ${mpi_dir})"
     echo
-    make NCCL_HOME=${rccl_dir} CUSTOM_RCCL_LIB=${rccl_dir}/lib/librccl.so MPI=1 MPI_HOME=${mpi_dir} HIPCC=${hip_compiler} ${GPU_TARGETS} ${DEVICE_API} -j$(nproc)
+    make NCCL_HOME=${rccl_dir} CUSTOM_RCCL_LIB=${rccl_dir}/lib/librccl.so MPI=1 MPI_HOME=${mpi_dir} HIPCC=${hip_compiler} ${GPU_TARGETS} ${LOCAL_GPU_ONLY} ${DEVICE_API} -j$(nproc)
   fi
 else
   echo "[INFO] Compiling without MPI support (MPI support requires -m and --mpi_home)"
   echo
-  make NCCL_HOME=${rccl_dir} CUSTOM_RCCL_LIB=${rccl_dir}/lib/librccl.so HIPCC=${hip_compiler} ${GPU_TARGETS} ${DEVICE_API} -j$(nproc)
+  make NCCL_HOME=${rccl_dir} CUSTOM_RCCL_LIB=${rccl_dir}/lib/librccl.so HIPCC=${hip_compiler} ${GPU_TARGETS} ${LOCAL_GPU_ONLY} ${DEVICE_API} -j$(nproc)
 fi
 check_exit_code "$?"
 

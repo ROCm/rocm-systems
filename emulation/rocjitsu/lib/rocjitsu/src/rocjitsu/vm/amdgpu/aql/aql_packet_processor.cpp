@@ -17,19 +17,22 @@ namespace {
 constexpr uint32_t kSignalValueOffset = 8;
 
 std::optional<uint64_t> signal_value_address(uint64_t handle) {
-  if (handle > std::numeric_limits<uint64_t>::max() - kSignalValueOffset)
+  if (handle > std::numeric_limits<uint64_t>::max() - kSignalValueOffset) {
     return std::nullopt;
+  }
   return handle + kSignalValueOffset;
 }
 
 std::optional<uint32_t> checked_grid_size(uint32_t cluster_count, uint32_t cluster_size,
                                           uint32_t workgroup_size) {
-  if (cluster_count == 0 || cluster_size == 0 || workgroup_size == 0)
+  if (cluster_count == 0 || cluster_size == 0 || workgroup_size == 0) {
     return std::nullopt;
+  }
   const uint64_t grid_size =
       static_cast<uint64_t>(cluster_count) * cluster_size * static_cast<uint64_t>(workgroup_size);
-  if (grid_size > std::numeric_limits<uint32_t>::max())
+  if (grid_size > std::numeric_limits<uint32_t>::max()) {
     return std::nullopt;
+  }
   return static_cast<uint32_t>(grid_size);
 }
 
@@ -50,8 +53,9 @@ AqlPacketProcessResult terminal(PacketProcessStatus status, AqlPacketDiagnostic 
 
 AqlPacketProcessResult AqlPacketProcessor::admit(const Request &request,
                                                  AqlPreparedPacket prepared) {
-  if (!callbacks_.admit)
+  if (!callbacks_.admit) {
     return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MissingAdmissionCallback);
+  }
   const bool blocks_following = prepared.blocks_following;
   const AqlAdmissionResult admission = callbacks_.admit(request, std::move(prepared));
   switch (admission.status) {
@@ -81,21 +85,27 @@ AqlPacketProcessor::process_barrier(const Request &request,
   bool dependencies_satisfied = is_and;
   bool has_dependencies = false;
   for (const hsa_signal_t dependency : barrier.dep_signal) {
-    if (dependency.handle == 0)
+    if (dependency.handle == 0) {
       continue;
+    }
     has_dependencies = true;
-    if (!callbacks_.load_signal)
+    if (!callbacks_.load_signal) {
       return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MissingSignalReader);
+    }
     const std::optional<uint64_t> address = signal_value_address(dependency.handle);
-    if (!address)
+    if (!address) {
       return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::InvalidSignalAddress);
+    }
     const AtomicLoadResult loaded = callbacks_.load_signal(request, *address);
-    if (loaded.outcome == VmAccessOutcome::Unavailable)
+    if (loaded.outcome == VmAccessOutcome::Unavailable) {
       return blocked(AqlBlockedReason::MemoryUnavailable);
-    if (loaded.outcome == VmAccessOutcome::Malformed)
+    }
+    if (loaded.outcome == VmAccessOutcome::Malformed) {
       return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::None);
-    if (loaded.outcome != VmAccessOutcome::Complete)
+    }
+    if (loaded.outcome != VmAccessOutcome::Complete) {
       return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
+    }
 
     const int64_t dependency_value = std::bit_cast<int64_t>(loaded.value);
     if (dependency_value > 0) {
@@ -108,15 +118,22 @@ AqlPacketProcessor::process_barrier(const Request &request,
       break;
     }
   }
-  if (!has_dependencies)
+  if (!has_dependencies) {
     dependencies_satisfied = true;
-  if (!dependencies_satisfied)
+  }
+  if (!dependencies_satisfied) {
     return blocked(AqlBlockedReason::DependencyUnsatisfied);
+  }
 
-  return admit(request, {.kind = AqlPreparedPacketKind::NonKernel,
-                         .completion_signal = barrier.completion_signal.handle,
-                         .barrier_bit = ((packet.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
-                         .blocks_following = true});
+  return admit(
+      request,
+      {.kind = AqlPreparedPacketKind::NonKernel,
+       .completion_signal = barrier.completion_signal.handle,
+       .barrier_bit = ((packet.header >> HSA_PACKET_HEADER_BARRIER) & 1) != 0,
+       .blocks_following = true,
+       .no_fence_aql_barrier =
+           ((packet.header >> HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) & 3) == HSA_FENCE_SCOPE_NONE &&
+           ((packet.header >> HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE) & 3) == HSA_FENCE_SCOPE_NONE});
 }
 
 AqlPacketProcessResult
@@ -128,18 +145,23 @@ AqlPacketProcessor::process_vendor(const Request &request,
     AmdBarrierValuePacket barrier{};
     std::memcpy(&barrier, &packet, sizeof(barrier));
     if (barrier.signal.handle != 0) {
-      if (!callbacks_.load_signal)
+      if (!callbacks_.load_signal) {
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MissingSignalReader);
+      }
       const std::optional<uint64_t> address = signal_value_address(barrier.signal.handle);
-      if (!address)
+      if (!address) {
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::InvalidSignalAddress);
+      }
       const AtomicLoadResult loaded = callbacks_.load_signal(request, *address);
-      if (loaded.outcome == VmAccessOutcome::Unavailable)
+      if (loaded.outcome == VmAccessOutcome::Unavailable) {
         return blocked(AqlBlockedReason::MemoryUnavailable);
-      if (loaded.outcome == VmAccessOutcome::Malformed)
+      }
+      if (loaded.outcome == VmAccessOutcome::Malformed) {
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::None);
-      if (loaded.outcome != VmAccessOutcome::Complete)
+      }
+      if (loaded.outcome != VmAccessOutcome::Complete) {
         return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
+      }
 
       const int64_t signal_value = std::bit_cast<int64_t>(loaded.value);
       const int64_t masked_value = signal_value & barrier.mask;
@@ -161,8 +183,9 @@ AqlPacketProcessor::process_vendor(const Request &request,
         return terminal(PacketProcessStatus::Unsupported,
                         AqlPacketDiagnostic::UnsupportedBarrierCondition);
       }
-      if (!satisfied)
+      if (!satisfied) {
         return blocked(AqlBlockedReason::DependencyUnsatisfied);
+      }
     }
     return admit(request,
                  {.kind = AqlPreparedPacketKind::NonKernel,
@@ -172,23 +195,30 @@ AqlPacketProcessor::process_vendor(const Request &request,
   }
 
   if (extension.amd_format == kHsaAmdPacketTypeExtKernelDispatch) {
-    if (!request.kernel_admission_enabled)
+    if (!request.kernel_admission_enabled) {
       return blocked(AqlBlockedReason::AdmissionUnavailable);
+    }
     if (extension.dep_signal.handle != 0) {
-      if (!callbacks_.load_signal)
+      if (!callbacks_.load_signal) {
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MissingSignalReader);
+      }
       const std::optional<uint64_t> address = signal_value_address(extension.dep_signal.handle);
-      if (!address)
+      if (!address) {
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::InvalidSignalAddress);
+      }
       const AtomicLoadResult loaded = callbacks_.load_signal(request, *address);
-      if (loaded.outcome == VmAccessOutcome::Unavailable)
+      if (loaded.outcome == VmAccessOutcome::Unavailable) {
         return blocked(AqlBlockedReason::MemoryUnavailable);
-      if (loaded.outcome == VmAccessOutcome::Malformed)
+      }
+      if (loaded.outcome == VmAccessOutcome::Malformed) {
         return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::None);
-      if (loaded.outcome != VmAccessOutcome::Complete)
+      }
+      if (loaded.outcome != VmAccessOutcome::Complete) {
         return terminal(PacketProcessStatus::Faulted, AqlPacketDiagnostic::None);
-      if (std::bit_cast<int64_t>(loaded.value) != 0)
+      }
+      if (std::bit_cast<int64_t>(loaded.value) != 0) {
         return blocked(AqlBlockedReason::DependencyUnsatisfied);
+      }
     }
 
     const std::optional<uint32_t> grid_size_x = checked_grid_size(
@@ -231,8 +261,9 @@ AqlPacketProcessor::process_vendor(const Request &request,
     std::array<uint32_t, 16> words{};
     std::memcpy(words.data(), &packet, sizeof(packet));
     if (words[1] != 0xc0023f00 || (words[2] & 3) || words[3] > 0xffff ||
-        (words[4] & ~0x000fffffu) != (1u << 23) || !(words[4] & 0xfffff) || words[5] != 10)
+        (words[4] & ~0x000fffffu) != (1u << 23) || !(words[4] & 0xfffff) || words[5] != 10) {
       return terminal(PacketProcessStatus::Malformed, AqlPacketDiagnostic::MalformedPm4Ib);
+    }
     return admit(request, {.kind = AqlPreparedPacketKind::Pm4Ib,
                            .pm4_ib_address = uint64_t{words[2]} | (uint64_t{words[3]} << 32),
                            .pm4_ib_dwords = words[4] & 0xfffff,
@@ -253,8 +284,9 @@ AqlPacketProcessResult AqlPacketProcessor::process(Request request) {
   case HSA_PACKET_TYPE_INVALID:
     return blocked(AqlBlockedReason::HeaderInvalid);
   case HSA_PACKET_TYPE_KERNEL_DISPATCH:
-    if (!request.kernel_admission_enabled)
+    if (!request.kernel_admission_enabled) {
       return blocked(AqlBlockedReason::AdmissionUnavailable);
+    }
     return admit(request,
                  {.kind = AqlPreparedPacketKind::KernelDispatch, .kernel_dispatch = packet});
   case HSA_PACKET_TYPE_BARRIER_AND:

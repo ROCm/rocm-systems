@@ -5,9 +5,11 @@
  ************************************************************************/
 
 // Unit tests for rcclComputeCheapPostSendFenceOff(), the host-side decision
-// for comm->cheapPostSendFenceOff. The return value gates whether the LL128 /
-// simple post-send path issues the full __threadfence_system() (return 1, cheap
-// fence OFF) or the cheap signal-only fence (return 0, cheap fence ON).
+// for comm->cheapPostSendFenceOff. The return value gates whether the Simple
+// post-send path issues the full __threadfence_system() (return 1, cheap fence
+// OFF) or the cheap signal-only fence (return 0, cheap fence ON). LL128 honors it
+// only where FIFO stores are system scope (gfx1250) and otherwise always uses the
+// full fence.
 //
 // Behavior under test:
 //   * cheap fence is only safe when cache-bypassing builtins are available
@@ -19,9 +21,15 @@
 
 #include "gtest/gtest.h"
 #include "rccl_common.h"
+#include "rccl_ptr.h"
 
 namespace RcclUnitTesting
 {
+
+// This TU is host code, so rccl_ptr.h takes the no-builtins arm. That is the
+// arm prims_simple.h compiles when DWORDX4_INTRINSICS is OFF.
+static_assert(RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS == 0,
+              "host test must compile the no-builtins post-send fence rule");
 
 // Numeric device archs (comm->cudaArch = 100*major + 10*minor).
 static constexpr int kGfx942 = 940;
@@ -86,6 +94,52 @@ TEST(CheapPostSendFenceTests, UnknownArchDefaultsOff)
     EXPECT_EQ(rcclComputeCheapPostSendFenceOff(/*cudaArch=*/0, kAuto, true), 1);
     EXPECT_EQ(rcclComputeCheapPostSendFenceOff(/*cudaArch=*/0, kForceOff, true), 1);
     EXPECT_EQ(rcclComputeCheapPostSendFenceOff(/*cudaArch=*/0, kForceOn, true), 0);
+}
+
+// Stand-in for the ncclDevWorkColl fields rcclSimplePostSendRegisteredOrP2p reads.
+// The fixture TU cannot include device.h. Dropping regUsed or netRegUsed from
+// the helper fails the test below.
+struct SimplePostSendRegFlags {
+    int regUsed;
+    int netRegUsed;
+};
+
+// RCCL_USE_CHEAP_POST_SEND_FENCE is what prims_simple.h assigns to skip_fence,
+// and rcclSimplePostSendRegisteredOrP2p is the predicate it passes. Host
+// compilation takes the no-builtins arm (the macro is 0 outside
+// __HIP_DEVICE_COMPILE__), which is the arm this change adds.
+TEST(CheapPostSendFenceTests, NoBuiltins_CheapFenceOn_UnregisteredCollectiveSkipsFullFence)
+{
+    const int off = rcclComputeCheapPostSendFenceOff(kGfx942, kAuto, true);
+    EXPECT_EQ(off, 0);
+    const SimplePostSendRegFlags unregistered{0, 0};
+    EXPECT_FALSE(rcclSimplePostSendRegisteredOrP2p(&unregistered));
+    EXPECT_TRUE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, rcclSimplePostSendRegisteredOrP2p(&unregistered)));
+}
+
+TEST(CheapPostSendFenceTests, NoBuiltins_RegisteredOrP2pKeepsFullFence)
+{
+    const int off = rcclComputeCheapPostSendFenceOff(kGfx942, kAuto, true);
+    EXPECT_EQ(off, 0);
+    const SimplePostSendRegFlags regUsed{1, 0};
+    const SimplePostSendRegFlags netRegUsed{0, 1};
+    EXPECT_TRUE(rcclSimplePostSendRegisteredOrP2p<SimplePostSendRegFlags>(nullptr));
+    EXPECT_TRUE(rcclSimplePostSendRegisteredOrP2p(&regUsed));
+    EXPECT_TRUE(rcclSimplePostSendRegisteredOrP2p(&netRegUsed));
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, rcclSimplePostSendRegisteredOrP2p<SimplePostSendRegFlags>(nullptr)));
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, rcclSimplePostSendRegisteredOrP2p(&regUsed)));
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(off, rcclSimplePostSendRegisteredOrP2p(&netRegUsed)));
+}
+
+TEST(CheapPostSendFenceTests, NoBuiltins_CheapFenceDisabled_KeepsFullFence)
+{
+    // gfx90a auto and an explicit force-off both leave the cheap fence disabled,
+    // so skip_fence stays false even for an unregistered collective.
+    const int gfx90a = rcclComputeCheapPostSendFenceOff(kGfx90a, kAuto, true);
+    EXPECT_EQ(gfx90a, 1);
+    const SimplePostSendRegFlags unregistered{0, 0};
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(gfx90a, rcclSimplePostSendRegisteredOrP2p(&unregistered)));
+    EXPECT_FALSE(RCCL_USE_CHEAP_POST_SEND_FENCE(kForceOff, rcclSimplePostSendRegisteredOrP2p(&unregistered)));
 }
 
 } // namespace RcclUnitTesting

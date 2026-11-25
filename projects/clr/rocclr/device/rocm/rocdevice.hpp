@@ -30,6 +30,7 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <unordered_map>
 #include <vector>
 
 /*! \addtogroup HSA
@@ -57,6 +58,7 @@ class Memory;
 class Resource;
 class VirtualDevice;
 class PrintfDbg;
+class AbceEngineSet;
 
 class ProfilingSignal : public amd::ReferenceCountedObject {
  public:
@@ -71,9 +73,10 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   uint32_t dispatch_slot_ = kNoDispatchSlot;
   std::recursive_mutex lock_;  //!< Signal lock for update
 
-  //! Reuse bookkeeping, touched only by the owning RetiringSignalTracker. Kept out of flags_
-  //! because timestamp processing updates flags_ from other threads.
-  uint64_t use_seq_ = 0;         //!< Queue sequence of the last use, 0 if unused
+  //! Reuse bookkeeping, touched only by the owning tracker: use_seq_ and use_fence_ by every
+  //! tracker, the rest by RetiringSignalTracker. Kept out of flags_ because timestamp processing
+  //! updates flags_ from other threads.
+  uint64_t use_seq_ = 0;         //!< Queue sequence of the last use, 0 if none or rolled back
   uint64_t use_aql_slot_ = kInvalidAqlSlot;  //!< AQL packet completing the use, if it retires
                                              //!< in queue order
   uint64_t use_queue_gen_ = 0;   //!< HW queue generation the packet was submitted to
@@ -81,12 +84,13 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   bool use_retired_ = true;      //!< The last use is known to be complete
   bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  uint32_t event_id_ = 0;          //!< amd_signal_t::event_id, which never changes
   bool binary_use_ = false;  //!< The current use starts at 1 and only its packet decrements it
   bool timed_use_ = true;    //!< The current use captures timestamps
-  //! Bit 0: a host check on any thread loaded the current use's value as 0, unlike use_retired_,
-  //! which only the owning tracker updates. The other bits count uses, so a check that loaded the
-  //! previous use can't mark this one. Holders keep the signal from being reused, so the value
-  //! stays 0 until the next use.
+  //! Bit 0: a host check or wait on any thread saw the current use's value reach 0, unlike
+  //! use_retired_, which only the owning tracker updates. The other bits count uses, so a check
+  //! that loaded the previous use can't mark this one. Holders keep the signal from being reused,
+  //! so the value stays 0 until the next use.
   std::atomic<uint64_t> use_completion_{0};
   static constexpr uint64_t kUseCompleteBit = 1;
 
@@ -95,6 +99,13 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   void StartUse() {
     const uint64_t completion = use_completion_.load(std::memory_order_relaxed);
     use_completion_.store((completion | kUseCompleteBit) + 1, std::memory_order_release);
+  }
+
+  //! Marks the use whose use_completion_ was loaded as completion finished. Fails if a newer use
+  //! started since, which must not be marked.
+  void MarkUseComplete(uint64_t completion) {
+    use_completion_.compare_exchange_strong(completion, completion | kUseCompleteBit,
+                                            std::memory_order_release, std::memory_order_relaxed);
   }
 
   typedef union {
@@ -192,7 +203,7 @@ class Sampler : public device::Sampler {
   );
 
  private:
-  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
+  void fillSampleDescriptor(hsa_ext_sampler_descriptor_v3_t& samplerDescriptor,
                             const amd::Sampler& sampler) const;
   Sampler& operator=(const Sampler&);
 
@@ -444,14 +455,13 @@ class Device : public NullDevice {
   //! Get the CPU agent with the least NUMA distance to this GPU
   const hsa_agent_t& getCpuAgent() const { return cpu_agent_info_->agent; }
 
-  //! Maps an HSA agent to a stable global index shared across all devices. GPU agents
-  //! occupy [0, numGpuAgents); CPU agents occupy [numGpuAgents, numGpuAgents + numCpuAgents).
-  //! Returns -1 if the agent is not one of the enumerated agents.
-  static int agentGlobalIndex(hsa_agent_t agent);
+  //! Returns the KFD topology node ID cached when the HSA agents were enumerated.
+  //! Returns UINT32_MAX if the agent was not enumerated.
+  static uint32_t agentDriverNodeId(hsa_agent_t agent);
 
   //! Get the CPU agent that is in a 'index' NUMA node
   const hsa_agent_t getCpuAgent(int index) const {
-    if ((index < 0) || (index >= cpu_agents_.size())) {
+    if ((index < 0) || (static_cast<size_t>(index) >= cpu_agents_.size())) {
       // Return default CPU agent
       return cpu_agent_info_->agent;
     }
@@ -581,6 +591,16 @@ class Device : public NullDevice {
   virtual cl_int virtualMap(void* va, size_t size, amd::Memory* phys) override;
   virtual cl_int virtualUnmap(void* va, size_t size) override;
 
+  //! Maps phys at va. With track_mapping, creates the VA sub-object, wires MemObjMap, resolves
+  //! the owning agent on its existing device views, and rolls the sub-object back if the map
+  //! fails. phys must not be nullptr.
+  [[nodiscard]] cl_int MapPhysicalToVirtual(void* va, size_t size, amd::Memory* phys,
+                                            bool track_mapping) const;
+
+  //! Unmaps va. With track_mapping, also tears down the VA sub-object bookkeeping, and va must
+  //! name a range this runtime previously mapped and bookkept.
+  [[nodiscard]] cl_int UnmapVirtual(void* va, size_t size, bool track_mapping) const;
+
   virtual bool SetMemAccess(void* va_addr, size_t va_size, VmmAccess access_flags,
                             VmmLocationType = VmmLocationType::kDevice,
                             int numaNode = -1) override;
@@ -628,8 +648,14 @@ class Device : public NullDevice {
   //! reports that stores to device memory come over PCIe, re-store the last one and read it back.
   //! last_stored must be in device memory, or the readback does not drain HDP.
   void FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const;
-  //! AQL completion signal handles carry hints the CP firmware decodes
-  bool SignalHints() const { return signal_hints_; }
+  //! Host stores to this device's memory come over PCIe through HDP and must be flushed before
+  //! the device can observe them (HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH)
+  bool PcieStoresNeedFlush() const { return pcie_stores_need_flush_; }
+  //! AQL completion signal handles carry hints the CP firmware decodes. Known once the device has
+  //! a VirtualGPU (ResolveCpFirmwareCaps); a signal created before that carries no hints. The pooled
+  //! signals rely on one existing first: graph instantiate captures its packets on a VirtualGPU
+  //! before it prepopulates the HW event pool, and gate signals are taken by a VirtualGPU.
+  bool SignalHints() const { return signal_hints_.load(std::memory_order_relaxed); }
   //! AQL queue ring buffers are placed in device memory. A profiler tool scans and rewrites the
   //! packets from the host, so its queues keep system-memory rings.
   bool AqlRingsInDeviceMemory() const {
@@ -644,8 +670,8 @@ class Device : public NullDevice {
   virtual void QuiesceHwEvents(const std::vector<void*>& hw_events) const override;
   virtual uint8_t* CreateBarrierPacket(int num_deps) const override;
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events,
-                                   bool profiled) const override;
+                                   const std::vector<void*>& hw_events, bool profiled,
+                                   void* external_hw_event) const override;
   virtual bool CreateUserEvent(amd::UserEvent* event) const override;
   virtual void SetUserEvent(amd::UserEvent* event) const override;
 
@@ -657,8 +683,10 @@ class Device : public NullDevice {
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;
 
   //! Pin a host pointer allocated by C/C++ or OS allocator (i.e. ordinary system DRAM) and
-  //! return a new device pointer accessible by the GPU agent.
-  void* hostLock(void* hostMem, size_t size, MemorySegment memSegment) const;
+  //! return a new device pointer accessible by the GPU agent(s).
+  //! mapAllAgents locks the range to every GPU agent in one call instead of just this one.
+  void* hostLock(void* hostMem, size_t size, MemorySegment memSegment,
+                 bool mapAllAgents = false) const;
 
   [[nodiscard]] bool writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
                                        const void* src) const override;
@@ -677,7 +705,7 @@ class Device : public NullDevice {
   bool addMapTarget(amd::Memory* memory) const;
 
   //! Returns a ROC memory object from AMD memory object
-  roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
+  [[nodiscard]] roc::Memory* getRocMemory(amd::Memory* mem  //!< Pointer to AMD memory object
   ) const;
 
   //! Create internal blit program
@@ -783,7 +811,7 @@ class Device : public NullDevice {
   void HiddenHeapAlloc(const VirtualGPU& gpu);
   //! Init hidden heap for device memory allocations
   void HiddenHeapInit(const VirtualGPU& gpu);
-  bool isXgmi() const override { return isXgmi_; }
+  bool isXgmi() const override { return !PcieStoresNeedFlush(); }
 
   //! SDMA engine allocation for per-stream affinity
   uint32_t AllocateSdmaEngine(VirtualGPU* vgpu, HwQueueEngine engine_type,
@@ -793,6 +821,11 @@ class Device : public NullDevice {
   void ReleaseSdmaEngine(VirtualGPU* vgpu) const {
     sdma_engine_allocator_.ReleaseEngine(vgpu);
   }
+  //! Lazily created device-owned ABCE engine set, or nullptr when disabled/unsupported.
+  AbceEngineSet* abceEngineSet() const { return abce_engine_set_.get(); }
+  //! As above, but brings the engine set up if this is the first caller, as the
+  //! first stream on the device is.
+  AbceEngineSet* getOrCreateAbceEngineSet();
   //! Returns the map of code objects to kernels
   const auto& KernelMap() const { return kernel_map_; }
   //! Adds a kernel to the kernel map
@@ -850,6 +883,7 @@ class Device : public NullDevice {
   static bool hostVmemSupported_;
   static std::vector<hsa_agent_t> gpu_agents_;
   static std::vector<AgentInfo> cpu_agents_;
+  static std::unordered_map<uint64_t, uint32_t> agent_driver_node_ids_;
   uint32_t preferred_numa_node_;
   std::vector<hsa_agent_t> p2p_agents_;   //!< List of P2P agents available for this device
   mutable std::mutex lock_allow_access_;  //!< To serialize allow_access calls
@@ -871,7 +905,14 @@ class Device : public NullDevice {
   mutable std::vector<void*> graph_hw_events_;
   mutable std::mutex graph_hw_events_lock_;
   bool pcie_stores_need_flush_ = true;  //!< Stores to device memory come over PCIe through HDP
-  bool signal_hints_ = false;           //!< AQL completion signal handles carry hints
+  //! AQL completion signal handles carry hints; set by ResolveCpFirmwareCaps while other threads
+  //! may create signals
+  std::atomic<bool> signal_hints_{false};
+  std::once_flag cpCapsOnce_;  //!< Guards ResolveCpFirmwareCaps
+
+  //! Asks ROCr for the CP firmware capabilities (ext dispatch packet, signal hints) once, before
+  //! the device's first VirtualGPU
+  void ResolveCpFirmwareCaps();
   hsa_signal_t prefetch_signal_;  //!< Prefetch signal, used to explicitly prefetch SVM on device
   std::atomic<int> cache_state_;  //!< State of cache, kUnknown/kFlushedToDevice/kFlushedToSystem
 
@@ -954,7 +995,6 @@ class Device : public NullDevice {
   //! Read and Write mask for device<->host
   uint32_t maxSdmaReadMask_;
   uint32_t maxSdmaWriteMask_;
-  bool isXgmi_;  //!< Flag to indicate if there is XGMI between CPU<->GPU
   bool isAPU_ = false;  //!< Flag to indicate the agent shares physical memory with the CPU
   bool pm4_emulation_ = false;  //!< Flag to indicate if PM4 emulation is enabled
   uint32_t numHwPipes_;  //!< Number of hardware pipes
@@ -980,6 +1020,11 @@ class Device : public NullDevice {
     void ReleaseEngine(VirtualGPU* vgpu);
   };
   mutable SdmaEngineAllocator sdma_engine_allocator_;
+
+  //! Device-owned ABCE engine set (host SDMA rings + shared orchestrator).
+  //! Null unless DEBUG_CLR_ENABLE_ABCE is set and the runtime supports it.
+  std::once_flag abce_engine_set_once_;
+  std::unique_ptr<AbceEngineSet> abce_engine_set_;
 
   //! Code object to kernel info map (used in the crash dump analysis)
   mutable std::map<uint64_t, Kernel&> kernel_map_;

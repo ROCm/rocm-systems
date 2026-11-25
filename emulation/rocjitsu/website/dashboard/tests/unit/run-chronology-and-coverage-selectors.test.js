@@ -50,8 +50,7 @@ test.each([
     run.provenance.rocjitsu.rocjitsu_commit_sha = index === 2 ? '2'.repeat(40) : sha;
     run.provenance.rocjitsu.rocjitsu_commit_timestamp = committed;
     run.provenance.corpus.corpus_commit_timestamp = committed;
-    run.execution_summary.timestamp = committed;
-    run.execution_summary.finished_at = index === 0 ? committed : index === 1 ? input.retry : input.finished;
+    run.execution_summary.timestamp = index === 0 ? committed : index === 1 ? input.retry : input.finished;
   });
   publication.runs.reverse();
   publication.index = { generatedAt: input.finished,

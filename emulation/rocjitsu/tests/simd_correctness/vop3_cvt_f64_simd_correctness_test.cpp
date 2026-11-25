@@ -1,34 +1,16 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-/// @file vop3_cvt_f64_simd_correctness_test.cpp
-/// @brief Bit-identity check (SIMD fast path vs scalar body) for the VOP3 form
-/// of the six mixed-width f64<->32-bit conversions on CDNA4. Unmodified VOP3
-/// encodings are bit-identical to their VOP1 forms: the float-result pair
-/// shares one stage object with the scalar body (shared/conversion.h), and the
-/// integer-result forms reuse the try_execute_cvt_f64_to_b32_simd glue via a
-/// `_vop3 -> _vop1` fallback in simd_probe_line. The float-result pair keeps
-/// its SIMD path with modifiers set; the integer-result forms run the scalar
-/// body when ABS or NEG is set. This file compares the unmodified encodings;
-/// valu_fp_mode_test covers the modified ones. The process runs one fixed execute mode
-/// (RJ_FORCE_SCALAR, immutable); each case runs TWICE in the same process -- once
-/// forcing the scalar body, once the SIMD fast path, with identical inputs/EXEC
-/// -- and the destination word pairs are asserted equal with EXPECT_EQ
-/// (util::set_force_scalar_for_testing flips the gate in-process). In-process
-/// inactive lanes must stay preserved under full and partial EXEC.
-///
-/// The float-result conversions (f32_f64 / f64_f32) are correctly rounded
-/// (vcvtpd2ps / vcvtps2pd), bit-exact for finite/Inf inputs; a NaN result may
-/// differ in payload between packed and scalar (accepted), so those words are
-/// excluded from the comparison — NaN-ness is deterministic from the inputs, so
-/// both runs skip the same words. The int conversions are exact (NaN -> 0,
-/// saturating clamp), compared with no carve-out.
+// Compare scalar and SIMD dispatch for six decoded CDNA4 FP64 conversions.
+// Check split VGPR operands and inactive lanes. NaN result words are omitted
+// from cross-path equality because Loose permits different NaN payloads.
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -126,13 +108,16 @@ struct Fixture {
 
   Fixture() : gpu_mem("vop3_cvt_f64_mem"), l2("vop3_cvt_f64_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("cu_vop3_cvt_f64", cfg, &gpu_mem, &l2);
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_cvt_f64", cfg, &gpu_mem, &l2);
+    if (!cu) {
+      return;
+    }
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -147,10 +132,11 @@ struct Fixture {
   void seed_inputs(const CvtCase &c, uint64_t exec) {
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      if (c.src64)
+      if (c.src64) {
         write64(vb + 0, lane, kF64In[lane % kF64In.size()]);
-      else
+      } else {
         cu->write_vgpr(vb + 0, lane, kB32In[lane % kB32In.size()]);
+      }
       write64(vb + 2, lane, dst_sentinel(lane));
     }
     wf->set_exec(exec);
@@ -161,8 +147,9 @@ struct Fixture {
     EXPECT_TRUE(cu->execute_instruction(inst, *wf).succeeded());
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = read64(vb + 2, lane);
+    }
     return out;
   }
 };
@@ -181,6 +168,9 @@ void check_case(const CvtCase &c, uint64_t exec) {
   auto run_mode = [&](bool force_scalar) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
+    if (::testing::Test::HasFatalFailure()) {
+      return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t words[4] = {0u, 0u, 0u, 0u};
@@ -235,8 +225,9 @@ TEST(Vop3CvtF64SimdCorrectness, FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/~0ULL);
+  }
 }
 
 TEST(Vop3CvtF64SimdCorrectness, PartialExec) {
@@ -244,8 +235,9 @@ TEST(Vop3CvtF64SimdCorrectness, PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  }
 }
 
 } // namespace

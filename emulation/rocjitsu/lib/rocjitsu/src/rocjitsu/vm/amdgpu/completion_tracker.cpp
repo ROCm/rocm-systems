@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/amdgpu/completion_tracker.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 
@@ -57,24 +58,16 @@ void CompletionTracker::notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id,
 CompletionDrainResult
 CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
   CompletionDrainResult result;
-  for (auto &qs : queues)
+  for (auto &qs : queues) {
     qs.publication_retry_pending = false;
+  }
 
   for (auto &qs : queues) {
-    // A faulted queue still retires work that its fault did not cancel. Queue
-    // cancellation removes the entries it cancels, so they cannot publish here.
-    const bool idle_generation_stale =
-        qs.idle_publication.active() &&
-        (!qs.entries.empty() || qs.idle_publication.activity_generation != qs.activity_generation);
-    const bool idle_publication_cancelable =
-        qs.idle_publication.phase == QueueIdlePublicationPhase::CaptureAccess ||
-        qs.idle_publication.phase == QueueIdlePublicationPhase::ReadSignalHandle ||
-        qs.idle_publication.phase == QueueIdlePublicationPhase::StoreIdleStatus;
-    if (idle_generation_stale && idle_publication_cancelable) {
-      // Before the status CAS commits, new work invalidates the prior empty
-      // transition. After it commits, the status is externally observable and
-      // its mailbox/interrupt tail must finish; ROCr clears the signal when its
-      // handler consumes that notification.
+    // The mailbox store is the first visible effect. New work supersedes an
+    // idle notification that is still waiting for backing.
+    if (qs.idle_publication.active() &&
+        (!qs.entries.empty() ||
+         qs.idle_publication.activity_generation != qs.activity_generation)) {
       qs.idle_publication.reset();
     }
     if (qs.idle_publication.active()) {
@@ -103,6 +96,8 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
     uint32_t last_queue_id = 0;
     AddressSpaceHandle last_address_space;
     bool publication_stalled = false;
+    // A faulted queue still retires work that its fault did not cancel. Queue
+    // cancellation removes the entries it cancels, so they cannot publish here.
     while (!qs.entries.empty() && qs.entries.front().fully_completed()) {
       auto &entry = qs.entries.front();
       last_process_id = entry.process_id;
@@ -111,8 +106,9 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
 
       // A peer may publish the shared terminal-fault latch before this CP has
       // drained its fault inbox. Leave the entry at the head for that path.
-      if (entry.grid_faulted())
+      if (entry.grid_faulted()) {
         break;
+      }
 
       util::Logger::vm([&](auto &os) {
         os << std::format("CT: drain d={} completed={}/{} sig={:#x}", entry.dispatch_id,
@@ -128,8 +124,9 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
       }
       if (outcome != VmAccessOutcome::Complete) {
         entry.terminal_faulted = true;
-        if (entry.grid_completion)
+        if (entry.grid_completion) {
           entry.grid_completion->mark_faulted();
+        }
         result.terminal_fault = CompletionDrainFault{
             .queue_id = entry.queue_id,
             .process_id = entry.process_id,
@@ -138,8 +135,9 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
         };
         return result;
       }
-      if (!entry.completion_notified)
+      if (!entry.completion_notified) {
         break;
+      }
       if (dispatch_retirement_gate_) {
         const VmAccessOutcome retirement = dispatch_retirement_gate_(qs, entry);
         if (retirement == VmAccessOutcome::Unavailable) {
@@ -150,8 +148,9 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
         }
         if (retirement != VmAccessOutcome::Complete) {
           entry.terminal_faulted = true;
-          if (entry.grid_completion)
+          if (entry.grid_completion) {
             entry.grid_completion->mark_faulted();
+          }
           result.terminal_fault = CompletionDrainFault{
               .queue_id = entry.queue_id,
               .process_id = entry.process_id,
@@ -161,16 +160,19 @@ CompletionTracker::drain_completions(std::vector<ComputeQueueRecord> &queues) {
           return result;
         }
       }
-      if (dispatch_retired_cb_)
+      if (dispatch_retired_cb_) {
         dispatch_retired_cb_(entry);
-      if (qs.next_dispatch_idx > 0)
+      }
+      if (qs.next_dispatch_idx > 0) {
         --qs.next_dispatch_idx;
+      }
       qs.entries.pop_front();
       result.progress_made = true;
     }
 
-    if (publication_stalled)
+    if (publication_stalled) {
       continue;
+    }
 
     // The queue-inactive notification has its own journal because its dispatch
     // entry no longer exists after retirement.
@@ -211,29 +213,52 @@ VmAccessOutcome CompletionTracker::complete_non_kernel(DispatchEntry &entry) {
 }
 
 VmAccessOutcome CompletionTracker::deliver_completion(DispatchEntry &entry) {
-  if (entry.completion_notified)
+  if (entry.completion_notified) {
     return VmAccessOutcome::Complete;
+  }
 
-  // Publish this XCD's share only after its own caches are flushed. The release
+  // Publish this XCD's share only after its effects are flushed. The release
   // in publish_share() pairs with the acquire in grid_retired(), so the signal
   // cannot fire while another XCD's results remain in its caches.
   if (!entry.grid_share_published) {
-    flush_caches(entry.process_id);
+    const GpuVmAccess *access = nullptr;
+    bool flush_required = true;
+    if (entry.address_space) {
+      const VmAccessOutcome prepared = prepare_completion_access(entry, flush_required);
+      if (prepared != VmAccessOutcome::Complete) {
+        return prepared;
+      }
+      if (entry.completion_publication.flush_access) {
+        access = &entry.completion_publication.flush_access->value;
+      }
+    } else if (entry.completion_signal != 0) {
+      return VmAccessOutcome::Faulted;
+    }
+    if (flush_required) {
+      const VmAccessOutcome flushed = flush_caches(entry.process_id, access);
+      if (flushed != VmAccessOutcome::Complete) {
+        return flushed;
+      }
+    }
+    entry.completion_publication.flush_access.reset();
     entry.grid_share_published = true;
     if (entry.grid_completion && entry.grid_completion->publish_share(entry.total_wgs) &&
-        grid_retired_cb_)
+        grid_retired_cb_) {
       grid_retired_cb_(entry);
+    }
   }
 
   // A completed local shard remains queued until all peer XCD shares retire.
-  if (!entry.grid_fully_completed())
+  if (!entry.grid_fully_completed()) {
     return VmAccessOutcome::Complete;
+  }
 
   // Only the XCD that read the packet advances guest-visible publication.
   if (!entry.fanout_peer) {
     const VmAccessOutcome outcome = advance_signal_publication(entry);
-    if (outcome != VmAccessOutcome::Complete)
+    if (outcome != VmAccessOutcome::Complete) {
       return outcome;
+    }
   }
   entry.completion_notified = true;
   return VmAccessOutcome::Complete;
@@ -242,10 +267,8 @@ VmAccessOutcome CompletionTracker::deliver_completion(DispatchEntry &entry) {
 VmAccessOutcome
 CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &state) {
   constexpr uint64_t kQueueInactiveSignalOffset = offsetof(amd_queue_t, queue_inactive_signal);
-  constexpr uint32_t kSignalValueOffset = 8;
   constexpr uint32_t kMailboxPointerOffset = 16;
   constexpr uint32_t kEventIdOffset = 24;
-  constexpr uint64_t kIdleStatus = 0x10;
 
   for (;;) {
     switch (state.phase) {
@@ -255,15 +278,17 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
 
     case QueueIdlePublicationPhase::CaptureAccess:
       if (state.queue_desc_va == 0) {
-        state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+        state.phase = QueueIdlePublicationPhase::NotifyIdle;
         continue;
       }
-      if (!state.address_space)
+      if (!state.address_space) {
         return VmAccessOutcome::Faulted;
-      if (std::optional<GpuVmAccess> access = gpu_vm_.snapshot_pinned(state.address_space))
+      }
+      if (std::optional<GpuVmAccess> access = gpu_vm_.snapshot_pinned(state.address_space)) {
         state.access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*access));
-      else
+      } else {
         return VmAccessOutcome::Faulted;
+      }
       state.phase = QueueIdlePublicationPhase::ReadSignalHandle;
       continue;
 
@@ -271,26 +296,18 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       const uint64_t address = state.queue_desc_va + kQueueInactiveSignalOffset;
       const VmAccessOutcome outcome = read_gpu(state.access->value, address, &state.signal_address,
                                                sizeof(state.signal_address));
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       if (state.signal_address == 0) {
-        state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+        state.phase = QueueIdlePublicationPhase::NotifyIdle;
         continue;
       }
-      if ((state.signal_address & 0x3f) != 0)
+      if ((state.signal_address & 0x3f) != 0) {
         return VmAccessOutcome::Malformed;
-      state.phase = QueueIdlePublicationPhase::StoreIdleStatus;
-      continue;
-    }
-
-    case QueueIdlePublicationPhase::StoreIdleStatus: {
-      // Preserve ROCR's destructor sentinel: a completed mismatch still needs
-      // the mailbox and event-age notification below.
-      const AtomicCompareExchangeResult idle =
-          compare_exchange_gpu(state.access->value, state.signal_address + kSignalValueOffset,
-                               sizeof(uint64_t), 0, kIdleStatus);
-      if (idle.outcome != VmAccessOutcome::Complete)
-        return idle.outcome;
+      }
+      // ROCr interprets a nonzero queue-inactive value as a scratch request
+      // or queue error. An idle notification only needs the event mailbox.
       state.phase = QueueIdlePublicationPhase::ReadMailboxPointer;
       continue;
     }
@@ -299,8 +316,9 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       const VmAccessOutcome outcome =
           read_gpu(state.access->value, state.signal_address + kMailboxPointerOffset,
                    &state.mailbox_pointer, sizeof(state.mailbox_pointer));
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       state.phase = QueueIdlePublicationPhase::ReadEventId;
       continue;
     }
@@ -309,8 +327,9 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       const VmAccessOutcome outcome =
           read_gpu(state.access->value, state.signal_address + kEventIdOffset, &state.event_id,
                    sizeof(state.event_id));
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       state.phase = QueueIdlePublicationPhase::StoreMailbox;
       continue;
     }
@@ -319,43 +338,149 @@ CompletionTracker::advance_queue_idle_publication(QueueIdlePublicationState &sta
       if (state.mailbox_pointer != 0) {
         const VmAccessOutcome outcome = atomic_store_gpu(
             state.access->value, state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
-        if (outcome != VmAccessOutcome::Complete)
+        if (outcome != VmAccessOutcome::Complete) {
           return outcome;
+        }
       }
       state.phase = QueueIdlePublicationPhase::DeliverEventInterrupt;
       continue;
 
     case QueueIdlePublicationPhase::DeliverEventInterrupt:
-      if (state.event_id != 0)
+      if (state.event_id != 0) {
         state.interrupt_sink.deliver(state.process_id, state.event_id);
-      state.phase = QueueIdlePublicationPhase::DeliverGenericInterrupt;
+      }
+      state.phase = QueueIdlePublicationPhase::NotifyIdle;
       continue;
 
-    case QueueIdlePublicationPhase::DeliverGenericInterrupt:
-      state.interrupt_sink.deliver(state.process_id, 0);
+    case QueueIdlePublicationPhase::NotifyIdle:
+      state.interrupt_sink.notify_idle(state.process_id);
       state.phase = QueueIdlePublicationPhase::Complete;
       return VmAccessOutcome::Complete;
     }
   }
 }
 
-void CompletionTracker::flush_caches(uint32_t vmid) {
+VmAccessOutcome CompletionTracker::prepare_completion_access(DispatchEntry &entry,
+                                                             bool &flush_required) {
+  CompletionPublicationState &state = entry.completion_publication;
+  if (state.flush_access) {
+    return state.flush_access->value.is_current() ? VmAccessOutcome::Complete
+                                                  : VmAccessOutcome::Revoked;
+  }
+  if (!entry.address_space) {
+    return VmAccessOutcome::Faulted;
+  }
+  if (entry.execution_access && entry.execution_access->value.revoked()) {
+    // A wave may recover a revoked fetch after only no-effect instructions.
+    // Recapture only when no potentially effectful instruction ran and no
+    // cache write was admitted since this dispatch began.
+    if (!entry.execution_effect_possible ||
+        entry.execution_effect_possible->load(std::memory_order_acquire) ||
+        entry.execution_cache_write_sequence == UINT64_MAX ||
+        entry.execution_access->value.cache_write_sequence() !=
+            entry.execution_cache_write_sequence) {
+      return VmAccessOutcome::Revoked;
+    }
+    std::optional<GpuVmAccess> replacement = gpu_vm_.snapshot_pinned(entry.address_space);
+    if (!replacement) {
+      return VmAccessOutcome::Faulted;
+    }
+    if (!entry.execution_access->value.same_root_lineage(*replacement)) {
+      return VmAccessOutcome::Revoked;
+    }
+    entry.execution_translation_epoch = replacement->info().translation_epoch;
+    entry.execution_access =
+        util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*replacement));
+  }
+
+  // L2 tags use the ordinary binding identity. A pinned dispatch snapshot has
+  // a distinct identity even when it names the same translation generation.
+  std::optional<GpuVmAccess> ordinary = gpu_vm_.snapshot(entry.address_space);
+  if (!ordinary) {
+    return VmAccessOutcome::Faulted;
+  }
+  if (entry.execution_translation_epoch != 0 &&
+      ordinary->info().translation_epoch != entry.execution_translation_epoch) {
+    // A no-fence AQL barrier has no cache effects of its own. Its retained
+    // transaction can finish after root replacement without flushing the
+    // replacement's cache; CP gates predecessors when the header requires it.
+    if (entry.is_non_kernel() && entry.no_fence_aql_barrier && entry.aql_pm4_ib_dwords == 0 &&
+        !entry.execution_begun && entry.execution_access &&
+        entry.execution_access->value.is_current()) {
+      state.signal_access =
+          util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(entry.execution_access->value);
+      flush_required = false;
+      return VmAccessOutcome::Complete;
+    }
+    return VmAccessOutcome::Revoked;
+  }
+  if (!entry.execution_access) {
+    // Standalone completion clients can provide an entry without an admission
+    // snapshot. Capture both views before any cache or signal effect.
+    std::optional<GpuVmAccess> pinned = gpu_vm_.snapshot_pinned(entry.address_space);
+    if (!pinned) {
+      return VmAccessOutcome::Faulted;
+    }
+    entry.execution_access =
+        util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*pinned));
+  }
+  const bool legacy_vmid_zero =
+      ordinary->info().vmid == 0 && ordinary->info().legacy_cache_compatible;
+  if (ordinary->cache_namespace() != entry.execution_access->value.cache_namespace() ||
+      (ordinary->info().vmid != entry.process_id && !legacy_vmid_zero) || !ordinary->is_current() ||
+      !entry.execution_access->value.is_current()) {
+    return VmAccessOutcome::Revoked;
+  }
+
+  state.flush_access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*ordinary));
+  state.signal_access =
+      util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(entry.execution_access->value);
+  return VmAccessOutcome::Complete;
+}
+
+VmAccessOutcome CompletionTracker::flush_caches(uint32_t vmid) {
+  return flush_caches(vmid, nullptr);
+}
+
+VmAccessOutcome CompletionTracker::flush_caches(uint32_t vmid, const GpuVmAccess *access) {
   std::set<L2Cache *> flushed_l2s;
+  const bool legacy_vmid_zero =
+      access && access->info().vmid == 0 && access->info().legacy_cache_compatible;
+  const bool scoped_flush = access && vmid != 0 && !legacy_vmid_zero;
+  const auto flush_l2 = [vmid, access, scoped_flush](L2Cache *l2) {
+    // Internal queues and legacy VMID-zero caches predate scoped cache tags.
+    // Keep their broad maintenance, but honor its refusal before completion.
+    return scoped_flush ? l2->flush_for_completion(*access) : l2->flush_all(vmid);
+  };
   for (auto *cu : cus_) {
-    cu->flush_l1(vmid);
-    if (auto *l2 = cu->l2(); l2 && flushed_l2s.insert(l2).second)
-      l2->flush_all(vmid);
+    if (scoped_flush) {
+      cu->flush_l1_for_completion(*access);
+    } else {
+      cu->flush_l1(vmid);
+    }
+    if (auto *l2 = cu->l2(); l2 && flushed_l2s.insert(l2).second) {
+      const VmAccessOutcome outcome = flush_l2(l2);
+      if (outcome != VmAccessOutcome::Complete) {
+        return outcome;
+      }
+    }
   }
   for (auto *l2 : l2_caches_) {
-    if (l2 && flushed_l2s.insert(l2).second)
-      l2->flush_all(vmid);
+    if (l2 && flushed_l2s.insert(l2).second) {
+      const VmAccessOutcome outcome = flush_l2(l2);
+      if (outcome != VmAccessOutcome::Complete) {
+        return outcome;
+      }
+    }
   }
+  return VmAccessOutcome::Complete;
 }
 
 bool CompletionTracker::all_complete(const std::vector<ComputeQueueRecord> &queues) const {
   for (const auto &qs : queues) {
-    if (!qs.entries.empty() || qs.idle_publication.active() || qs.scratch_reclaim.active())
+    if (!qs.entries.empty() || qs.idle_publication.active() || qs.scratch_reclaim.active()) {
       return false;
+    }
   }
   return true;
 }
@@ -371,62 +496,66 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
   for (;;) {
     switch (state.phase) {
     case CompletionPublicationPhase::ExecutionEnd:
-      if (!entry.is_non_kernel())
+      if (!entry.is_non_kernel()) {
         plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+      }
       state.phase = entry.completion_signal == 0 ? CompletionPublicationPhase::Complete
                                                  : CompletionPublicationPhase::CaptureAccess;
       continue;
 
-    case CompletionPublicationPhase::CaptureAccess:
-      if (!entry.address_space)
+    case CompletionPublicationPhase::CaptureAccess: {
+      if (!state.signal_access) {
         return VmAccessOutcome::Faulted;
-      if (std::optional<GpuVmAccess> access = gpu_vm_.snapshot_pinned(entry.address_space))
-        state.access = util::IntrusiveSharedPtr<GpuVmAccessSnapshot>::make(std::move(*access));
-      else
-        return VmAccessOutcome::Faulted;
+      }
+      const auto arch = cus_.empty() ? rocjitsu::IsaFamily::Invalid : cus_.front()->arch();
       state.start_timestamp = entry.profiling_start_timestamp;
-      if (state.start_timestamp == 0)
-        state.start_timestamp = hsa_system_timestamp();
-      state.end_timestamp = std::max(hsa_system_timestamp(), state.start_timestamp + 1);
+      if (state.start_timestamp == 0) {
+        state.start_timestamp = gpu_timestamp(arch);
+      }
+      state.end_timestamp = std::max(gpu_timestamp(arch), state.start_timestamp + 1);
       state.phase = CompletionPublicationPhase::ReadMailboxPointer;
       continue;
-
+    }
     case CompletionPublicationPhase::ReadMailboxPointer: {
       const VmAccessOutcome outcome =
-          read_gpu(state.access->value, entry.completion_signal + kMailboxPointerOffset,
+          read_gpu(state.signal_access->value, entry.completion_signal + kMailboxPointerOffset,
                    &state.mailbox_pointer, sizeof(state.mailbox_pointer));
-      if (outcome != VmAccessOutcome::Complete)
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       state.phase = CompletionPublicationPhase::ReadEventId;
       continue;
     }
 
     case CompletionPublicationPhase::ReadEventId: {
       const VmAccessOutcome outcome =
-          read_gpu(state.access->value, entry.completion_signal + kEventIdOffset, &state.event_id,
-                   sizeof(state.event_id));
-      if (outcome != VmAccessOutcome::Complete)
+          read_gpu(state.signal_access->value, entry.completion_signal + kEventIdOffset,
+                   &state.event_id, sizeof(state.event_id));
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       state.phase = CompletionPublicationPhase::StoreStartTimestamp;
       continue;
     }
 
     case CompletionPublicationPhase::StoreStartTimestamp: {
-      const VmAccessOutcome outcome =
-          atomic_store_gpu(state.access->value, entry.completion_signal + kStartTimestampOffset,
-                           sizeof(uint64_t), state.start_timestamp);
-      if (outcome != VmAccessOutcome::Complete)
+      const VmAccessOutcome outcome = atomic_store_gpu(
+          state.signal_access->value, entry.completion_signal + kStartTimestampOffset,
+          sizeof(uint64_t), state.start_timestamp);
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       state.phase = CompletionPublicationPhase::StoreEndTimestamp;
       continue;
     }
 
     case CompletionPublicationPhase::StoreEndTimestamp: {
-      const VmAccessOutcome outcome =
-          atomic_store_gpu(state.access->value, entry.completion_signal + kEndTimestampOffset,
-                           sizeof(uint64_t), state.end_timestamp);
-      if (outcome != VmAccessOutcome::Complete)
+      const VmAccessOutcome outcome = atomic_store_gpu(
+          state.signal_access->value, entry.completion_signal + kEndTimestampOffset,
+          sizeof(uint64_t), state.end_timestamp);
+      if (outcome != VmAccessOutcome::Complete) {
         return outcome;
+      }
       state.phase = CompletionPublicationPhase::DecrementSignal;
       continue;
     }
@@ -434,11 +563,12 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
     case CompletionPublicationPhase::DecrementSignal:
       for (;;) {
         const uint64_t desired = state.compare_expected - 1;
-        const AtomicCompareExchangeResult decremented =
-            compare_exchange_gpu(state.access->value, entry.completion_signal + kSignalValueOffset,
-                                 sizeof(uint64_t), state.compare_expected, desired);
-        if (decremented.outcome != VmAccessOutcome::Complete)
+        const AtomicCompareExchangeResult decremented = compare_exchange_gpu(
+            state.signal_access->value, entry.completion_signal + kSignalValueOffset,
+            sizeof(uint64_t), state.compare_expected, desired);
+        if (decremented.outcome != VmAccessOutcome::Complete) {
           return decremented.outcome;
+        }
         if (decremented.exchanged) {
           state.signal_old_value = state.compare_expected;
           state.signal_new_value = desired;
@@ -464,10 +594,12 @@ VmAccessOutcome CompletionTracker::advance_signal_publication(DispatchEntry &ent
 
     case CompletionPublicationPhase::StoreMailbox:
       if (state.mailbox_pointer != 0) {
-        const VmAccessOutcome outcome = atomic_store_gpu(
-            state.access->value, state.mailbox_pointer, sizeof(uint64_t), uint64_t(state.event_id));
-        if (outcome != VmAccessOutcome::Complete)
+        const VmAccessOutcome outcome =
+            atomic_store_gpu(state.signal_access->value, state.mailbox_pointer, sizeof(uint64_t),
+                             uint64_t(state.event_id));
+        if (outcome != VmAccessOutcome::Complete) {
           return outcome;
+        }
       }
       state.phase = CompletionPublicationPhase::DeliverInterrupt;
       continue;

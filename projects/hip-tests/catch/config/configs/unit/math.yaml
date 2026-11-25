@@ -82,7 +82,8 @@ math:
   Unit_Device_atan2_atan2f_Negative_RTC:
     <<: *level_default
     tags: [deviceLib]
-  Unit_Device_sincos_Accuracy_Positive_float: *level_default
+  Unit_Device_sincos_Accuracy_Positive_float:
+    level: [*level_0, *level_default]
   Unit_Device_sincos_Accuracy_Positive_double: *level_default
   Unit_Device_sincos_sincosf_Negative_RTC:
     <<: *level_default
@@ -385,7 +386,7 @@ math:
   Unit_Device___ffs_Sanity_Positive: *level_default
   Unit_Device___ffsll_Sanity_Positive: *level_default
   Unit_Device___popc_Sanity_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [deviceLib]
   Unit_Device___popcll_Sanity_Positive:
     <<: *level_default
@@ -454,7 +455,7 @@ math:
     <<: *level_default
     tags: [deviceLib]
   Unit_Device_sqrtf_Accuracy_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [deviceLib]
   Unit_Device_sqrt_Accuracy_Positive:
     <<: *level_default
@@ -794,7 +795,7 @@ math:
     <<: *level_default
     tags: [deviceLib]
   Unit_Device___float_as_int_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [deviceLib]
   Unit_Device___float_as_int_Negative_RTC:
     <<: *level_default
@@ -1274,7 +1275,7 @@ math:
     <<: *level_default
     tags: [deviceLib]
   Unit_Device___half2float_Accuracy_Positive:
-    <<: *level_default
+    level: [*level_0, *level_default]
     unsupported:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test; unit/CMakeLists.txt gates add_subdirectory(math) under if(UNIX), so it is never built or run on native Windows."
@@ -1312,7 +1313,8 @@ math:
   Unit_Device_frexp_frexpf_Negative_RTC:
     <<: *level_default
     tags: [deviceLib]
-  Unit_Device_pow_Accuracy_Positive: *level_default
+  Unit_Device_pow_Accuracy_Positive:
+    <<: *level_default
   Unit_Device_pow_powf_Negative_RTC:
     <<: *level_default
     tags: [deviceLib]

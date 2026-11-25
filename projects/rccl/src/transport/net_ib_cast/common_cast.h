@@ -216,13 +216,13 @@ extern bool IbCastUseInline;
  *
  *   31       24 23  22                           0
  *  +----------+----+-----------------------------+
- *  |  reqIdx  | SD |       size (23 bits)        |
+ *  |  reqIdx  | SD |           unused            |
  *  | (8 bits) |    |                             |
  *  +----------+----+-----------------------------+
  *
  *  reqIdx : receiver-side request index
  *  SD     : split-data flag (set when data spans >1 QPs)
- *  size   : transfer size in bytes
+ *  The receiver takes a one-request size from the completion byte count.
  */
 #define WR_IMM_RX_REQ_IDX_BITS  8
 #define WR_IMM_RX_REQ_IDX_BIT_POS 24
@@ -260,6 +260,10 @@ int64_t ncclParamIbCastOooRq();
 
 #define NCCL_IB_LLSTR(ll) \
   (((ll) == IBV_LINK_LAYER_INFINIBAND) ? "IB" : (((ll) == IBV_LINK_LAYER_ETHERNET) ? "RoCE" : "UNSPECIFIED"))
+
+// The alignment for IB writes that is required to make LL and LL128 protocols work
+#define IB_WRITE_CHUNK_ALIGNMENT 128
+#define IB_CAST_MAX_STACK_WRS 16
 
 // Per-Dev connection metadata
 struct ncclIbDevInfo {
@@ -543,6 +547,22 @@ struct ncclIbQp {
 static_assert(NET_IB_MAX_REQUESTS <= 256,
               "request id are encoded in wr_id and we need up to 8 requests ids per completion");
 
+// A data send is two WRs unless the payload is split under the post cap. The
+// queue keeps two WRs for every other in-flight request plus enough room to
+// post one maximum-sized request and its possible signal/completion tail as a
+// single chain.
+static inline uint32_t IbCastDataSendQueueDepth(uint32_t maxPostSendBytes, uint32_t depthMultiplier = 1) {
+  const uint32_t splitDataWrs =
+      1u + (static_cast<uint32_t>(MAX_NET_SIZE) - 1u) / maxPostSendBytes;
+  const uint32_t splitWrs = splitDataWrs + 1u;
+  // The Ionic QP creator applies depthMultiplier to this result for shared QPs.
+  // Scale only the ordinary request slots; a shared physical QP still needs
+  // room for one maximum-length split chain, not one chain per logical comm.
+  const uint32_t splitWrsPerUnit =
+      (splitWrs + depthMultiplier - 1) / depthMultiplier;
+  return 2u * (NET_IB_MAX_REQUESTS - 1) + splitWrsPerUnit;
+}
+
 // Structure to describe the completion records on the sender side.
 struct ncclIbRemCompletionsRecords {
   // A "shadow" structure of the receiver's completion records in which the
@@ -687,12 +707,13 @@ static inline ncclResult_t IbCastCommBaseGetQpByQpNum(struct ncclIbNetCommBase* 
   return ncclInternalError;
 }
 
-// Each request is transfered over all devices, and depending on the
-// "splitDataOnQps" configuration parameter, a request may be transffered over
-// a single QP per device or on all QPs of each device.
-static inline int IbCastCommBaseGetNqpsPerRequest(struct ncclIbNetCommBase* baseComm) {
+// Number of QPs a request is transferred over when the CAST scheduler is disabled.
+// Clamped to nqps: RMA connections use a single QP even when nDataQps > 1.
+static inline int IbCastCommBaseGetDefaultNqpsPerRequest(struct ncclIbNetCommBase* baseComm) {
   assert(baseComm->nqps != -1);
-  return (baseComm->schedParms.splitData || baseComm->schedParms.doWrr) ? baseComm->nqps : 1;
+  assert(baseComm->nDataQps != -1);
+  int nqps = (baseComm->splitDataOnQps == 1) ? baseComm->nqps : baseComm->nDataQps;
+  return (nqps < baseComm->nqps) ? nqps : baseComm->nqps;
 }
 
 static inline ncclResult_t IbCastPostRecvWorkRequest(struct ibv_qp* qp, struct ibv_recv_wr* wr) {
@@ -896,6 +917,8 @@ ncclResult_t IbCastInit(void** ctx, uint64_t commId, ncclNetCommConfig_t* config
 ncclResult_t IbCastDevices(int* ndev);
 ncclResult_t IbCastGetProperties(int dev, ncclNetProperties_t* props);
 ncclResult_t IbCastGetPhysProperties(int dev, ncclNetProperties_t* props);
+
+extern uint32_t IbCastMaxPostSendBytes;
 ncclResult_t IbCastListen(void* ctx, int dev, void* opaqueHandle, void** listenComm);
 ncclResult_t IbCastConnect(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                            ncclNetDeviceHandle_t** /*sendDevComm*/);

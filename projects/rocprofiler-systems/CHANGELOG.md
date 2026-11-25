@@ -8,10 +8,39 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- New options added for rocsys, `rocsys <subcommand> --traces` selects what is traced
+  with one list of names, for example `rocsys <subcommand> --traces hip mpi -- ./app`.
+  `rocsys <subcommand> --output-path` and `rocsys <subcommand> --log-level` set
+  `ROCPROFSYS_OUTPUT_PATH` and `ROCPROFSYS_LOG_LEVEL` for `profile`, `instrument`, `python`,
+  and `attach`.
 - Agent skills for choosing a profiling preset, discovering configuration options, and
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
+- `rocprof-sys-attach` re-attaches now use the output format selected for that attach (`-F`),
+  so a process can be profiled to rocpd in one session and to Perfetto in the next.
+- `rocprof-sys-attach` can attach to multiple processes in one invocation
+  (`-p 101,102` or `-p 101 -p 102`) and detach from each of them individually, or
+  from all of them at once, through an interactive session prompt.
+
+### Changed
+
+- The `wall_clock` profile (`wall_clock.txt` and `wall_clock.json`) is now generated from
+  the trace cache instead of Timemory. GPU kernels and memory copies are nested under the
+  API call that launched them, and each worker thread's tree starts at the top level
+  instead of under the `pthread_create` call that spawned it. The report is written
+  whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
+  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed, and the default of
+  that setting is now empty instead of `wall_clock`.
+- `rocsys` now requires a `--` separator between it's options and the application, even
+  when no profiling options are provided. For example, `rocsys profile ./app`is now
+  `rocsys profile -- ./app`.
+
+### Removed
+
+- The `--profile-diff` option of `rocprof-sys-run` and `rocprof-sys-sample`. It compared
+  timemory profiles against a previous run, and the `wall_clock` profile is no longer
+  produced by timemory. Passing `--profile-diff` is now an unknown-argument error.
 
 ### Resolved issues
 
@@ -27,6 +56,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Fixed the default `ROCPROFSYS_AMD_SMI_METRICS` value (`busy, temp, power, mem_usage`) failing
   validation because of the spaces after the commas, which enabled all 17 GPU metrics instead of
   the four defaults. Whitespace around `,` and `;` separators is now accepted.
+- The `profiler-hub` version is shown in the `rocprof-sys-*` version output. The tool now
+  aborts at startup with an error if the loaded `libprofiler-hub` version differs from the
+  version it was built against.
+- Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
+  reported several orders of magnitude too small.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 

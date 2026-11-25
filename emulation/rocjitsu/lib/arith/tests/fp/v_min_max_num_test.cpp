@@ -5,7 +5,7 @@
 
 #include "fp/reference.h"
 #include "fp/selection_test.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <gtest/gtest.h>
 
@@ -27,14 +27,16 @@ TEST(FpMinNumF16W64, Arithmetic) {
 TEST(FpMinNumF32W32, Arithmetic) {
   rocjitsu::arith::test::check_selection<32, 32, 2>(
       rj_arith_v_min_num_f32_w32,
-      [](double x, double y) { return rocjitsu::arith::test::select_fp(x, y, false, false); });
+      [](double x, double y) { return rocjitsu::arith::test::select_fp(x, y, false, false); },
+      /*compatibility_status=*/true);
 }
 
 // Check FP selection results with NaNs, modifiers, EXEC masks, and aliases.
 TEST(FpMinNumF32W64, Arithmetic) {
   rocjitsu::arith::test::check_selection<32, 64, 2>(
       rj_arith_v_min_num_f32_w64,
-      [](double x, double y) { return rocjitsu::arith::test::select_fp(x, y, false, false); });
+      [](double x, double y) { return rocjitsu::arith::test::select_fp(x, y, false, false); },
+      /*compatibility_status=*/true);
 }
 
 // Check FP selection results with NaNs, modifiers, EXEC masks, and aliases.
@@ -69,14 +71,16 @@ TEST(FpMaxNumF16W64, Arithmetic) {
 TEST(FpMaxNumF32W32, Arithmetic) {
   rocjitsu::arith::test::check_selection<32, 32, 2>(
       rj_arith_v_max_num_f32_w32,
-      [](double x, double y) { return rocjitsu::arith::test::select_fp(x, y, true, false); });
+      [](double x, double y) { return rocjitsu::arith::test::select_fp(x, y, true, false); },
+      /*compatibility_status=*/true);
 }
 
 // Check FP selection results with NaNs, modifiers, EXEC masks, and aliases.
 TEST(FpMaxNumF32W64, Arithmetic) {
   rocjitsu::arith::test::check_selection<32, 64, 2>(
       rj_arith_v_max_num_f32_w64,
-      [](double x, double y) { return rocjitsu::arith::test::select_fp(x, y, true, false); });
+      [](double x, double y) { return rocjitsu::arith::test::select_fp(x, y, true, false); },
+      /*compatibility_status=*/true);
 }
 
 // Check FP selection results with NaNs, modifiers, EXEC masks, and aliases.
@@ -91,4 +95,22 @@ TEST(FpMaxNumF64W64, Arithmetic) {
   rocjitsu::arith::test::check_selection<64, 64, 2>(
       rj_arith_v_max_num_f64_w64,
       [](double x, double y) { return rocjitsu::arith::test::select_fp(x, y, true, false); });
+}
+
+// gfx1250 shares selection arithmetic while keeping Compatibility status unused.
+TEST(FpMinNumF32Gfx1250, Arithmetic) {
+  auto reference = [](double x, double y) {
+    return rocjitsu::arith::test::select_fp(x, y, false, false);
+  };
+  rocjitsu::arith::test::check_selection<32, 32, 2>(rj_arith_v_min_num_f32_w32_gfx1250, reference);
+  rocjitsu::arith::test::check_selection<32, 64, 2>(rj_arith_v_min_num_f32_w64_gfx1250, reference);
+}
+
+// gfx1250 shares selection arithmetic while keeping Compatibility status unused.
+TEST(FpMaxNumF32Gfx1250, Arithmetic) {
+  auto reference = [](double x, double y) {
+    return rocjitsu::arith::test::select_fp(x, y, true, false);
+  };
+  rocjitsu::arith::test::check_selection<32, 32, 2>(rj_arith_v_max_num_f32_w32_gfx1250, reference);
+  rocjitsu::arith::test::check_selection<32, 64, 2>(rj_arith_v_max_num_f32_w64_gfx1250, reference);
 }

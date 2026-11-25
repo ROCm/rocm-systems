@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/result.h"
 
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
@@ -12,22 +13,24 @@
 #include <algorithm>
 #include <cassert>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
 namespace rocjitsu {
 namespace {
 
-amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
-  if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+amdgpu::SdmaPacketDialect sdma_dialect(rocjitsu::IsaFamily arch) {
+  if (arch == rocjitsu::IsaFamily::Cdna5) {
     return amdgpu::SdmaPacketDialect::Gfx1250;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+  }
+  if (arch == rocjitsu::IsaFamily::Rdna4) {
     return amdgpu::SdmaPacketDialect::Rdna4;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
+  }
+  if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) {
     return amdgpu::SdmaPacketDialect::Gfx11Plus;
-  if (arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_CDNA3 ||
-      arch == ROCJITSU_CODE_ARCH_CDNA4 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
+  }
+  if (arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Cdna3 ||
+      arch == rocjitsu::IsaFamily::Cdna4 || arch == rocjitsu::IsaFamily::Rdna2) {
     return amdgpu::SdmaPacketDialect::LegacyExtendedCount;
   }
   return amdgpu::SdmaPacketDialect::Legacy;
@@ -35,7 +38,7 @@ amdgpu::SdmaPacketDialect sdma_dialect(rj_code_arch_t arch) {
 
 } // namespace
 
-SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rj_code_arch_t arch)
+SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rocjitsu::IsaFamily arch)
     : simdojo::CompositeComponent(std::move(name)), arch_(arch),
       sdma_queue_scheduler_(gpu_vm_, cache_coherence_, sdma_dialect(arch_)),
       queue_registry_(gpu_vm_), mes_engine_(gpu_vm_, queue_registry_, *this), memory_(memory) {
@@ -47,8 +50,9 @@ SoC::SoC(std::string name, amdgpu::GpuMemory *memory, rj_code_arch_t arch)
 SoC::~SoC() { release_vm_resources(); }
 
 void SoC::release_vm_resources() {
-  if (vm_resources_released_)
+  if (vm_resources_released_) {
     return;
+  }
   vm_resources_released_ = true;
 
   // Composite children (including CPs) may be adopted by VirtualMachine.
@@ -61,16 +65,19 @@ void SoC::release_vm_resources() {
 }
 
 util::Result SoC::add_xcd(amdgpu::Xcd *xcd, util::DiagnosticEmitter emit_error) {
-  if (xcd == nullptr)
+  if (xcd == nullptr) {
     return emit_error.emit() << "cannot add a null XCD";
-  xcd->set_coherence_domain(cache_coherence_);
+  }
+  // The domain is non-null by construction; null is the setter's only failure.
+  (void)xcd->set_coherence_domain(cache_coherence_);
   if (xcd->l2_cache()) {
     xcd->l2_cache()->set_legacy_maintenance_memory(memory_);
     xcd->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
     xcd->l2_cache()->set_gpu_vm(&gpu_vm_);
   }
-  if (amdgpu::CommandProcessor *cp = xcd->command_processor())
+  if (amdgpu::CommandProcessor *cp = xcd->command_processor()) {
     cp->set_gpu_vm(&gpu_vm_, internal_address_space_);
+  }
   // GWS is device-global: share one store across every XCD so a dispatch that
   // fans out across XCDs still rendezvouses (see GwsDevice). Supersedes the XCD's
   // standalone default store. The XCD's CUs are already attached by this point.
@@ -89,9 +96,11 @@ void SoC::wire_gws_to_xcds() {
 }
 
 util::Result SoC::add_iod(amdgpu::Iod *iod, util::DiagnosticEmitter emit_error) {
-  if (iod == nullptr)
+  if (iod == nullptr) {
     return emit_error.emit() << "cannot add a null IOD";
-  iod->set_coherence_domain(cache_coherence_);
+  }
+  // The domain is non-null by construction; null is the setter's only failure.
+  (void)iod->set_coherence_domain(cache_coherence_);
   iod->set_gpu_vm(&gpu_vm_);
   iod->set_legacy_maintenance_memory(memory_);
   iod->msc()->set_legacy_maintenance_vm(&gpu_vm_);
@@ -102,27 +111,32 @@ util::Result SoC::add_iod(amdgpu::Iod *iod, util::DiagnosticEmitter emit_error) 
 bool SoC::install_internal_address_space(amdgpu::GpuMemory *memory) {
   const bool internal_registered =
       internal_address_space_ && gpu_vm_.lookup(internal_address_space_).has_value();
-  if (memory == memory_ && (memory == nullptr || internal_registered))
+  if (memory == memory_ && (memory == nullptr || internal_registered)) {
     return true;
-  if (memory_ != nullptr && memory != memory_)
+  }
+  if (memory_ != nullptr && memory != memory_) {
     return false;
+  }
   if (!internal_registered) {
     internal_address_space_ = {};
     internal_memory_access_.reset();
   }
   const std::size_t expected_address_spaces = internal_registered ? 1 : 0;
-  if (gpu_vm_.active_address_spaces() != expected_address_spaces)
+  if (gpu_vm_.active_address_spaces() != expected_address_spaces) {
     return false;
-  if (queue_registry_.active_queues() != 0 || sdma_queue_scheduler_.active_queues() != 0)
+  }
+  if (queue_registry_.active_queues() != 0 || sdma_queue_scheduler_.active_queues() != 0) {
     return false;
+  }
   for (const amdgpu::Xcd *xcd : xcds_) {
     const amdgpu::CommandProcessor *cp = xcd->command_processor();
     if (cp != nullptr && cp->has_registered_queues()) {
       return false;
     }
   }
-  if (internal_registered && !gpu_vm_.unregister_address_space(internal_address_space_))
+  if (internal_registered && !gpu_vm_.unregister_address_space(internal_address_space_)) {
     return false;
+  }
 
   memory_ = memory;
   internal_memory_access_.reset();
@@ -142,25 +156,28 @@ bool SoC::install_internal_address_space(amdgpu::GpuMemory *memory) {
 }
 
 bool SoC::set_memory(amdgpu::GpuMemory *memory) {
-  if (!install_internal_address_space(memory))
+  if (!install_internal_address_space(memory)) {
     return false;
+  }
   for (amdgpu::Xcd *xcd : xcds_) {
     if (xcd->l2_cache()) {
       xcd->l2_cache()->set_legacy_maintenance_memory(memory_);
       xcd->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
       xcd->l2_cache()->set_gpu_vm(&gpu_vm_);
     }
-    if (amdgpu::CommandProcessor *cp = xcd->command_processor())
+    if (amdgpu::CommandProcessor *cp = xcd->command_processor()) {
       cp->set_gpu_vm(&gpu_vm_, internal_address_space_);
+    }
   }
   for (amdgpu::Iod *iod : iods_) {
     iod->set_legacy_maintenance_memory(memory_);
     iod->msc()->set_legacy_maintenance_vm(&gpu_vm_);
   }
   // Create a standalone HBM controller for the config-loader path where the
-  // parameterized constructor (which creates it) was not used.
-  if (memory && !hbm_standalone_ && iods_.empty())
+  // configured factory (which creates it) was not used.
+  if (memory && !hbm_standalone_ && iods_.empty()) {
     hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory, &gpu_vm_);
+  }
   return true;
 }
 
@@ -169,8 +186,9 @@ void SoC::wire_backing(simdojo::Topology &topo) {
     return;
   }
   for (auto *x : xcds_) {
-    if (!x->l2_cache())
+    if (!x->l2_cache()) {
       continue;
+    }
     auto *l2_req = x->l2_cache()->req_port();
     if (l2_req->link() == nullptr) {
       auto *hbm_cpl = hbm_standalone_->create_cpl_port(x->name());
@@ -180,11 +198,17 @@ void SoC::wire_backing(simdojo::Topology &topo) {
   }
 }
 
-SoC::SoC(std::string name, const Config &config)
-    : simdojo::CompositeComponent(std::move(name)), arch_(config.arch),
-      exec_mode_(config.exec_mode),
-      sdma_queue_scheduler_(gpu_vm_, cache_coherence_, sdma_dialect(arch_)),
-      queue_registry_(gpu_vm_), mes_engine_(gpu_vm_, queue_registry_, *this) {
+std::unique_ptr<SoC> SoC::create(std::string name, const Config &config,
+                                 util::DiagnosticEmitter emit_error) {
+  auto soc = std::make_unique<SoC>(std::move(name), nullptr, config.arch);
+  if (soc->configure(config, emit_error).failed()) {
+    return nullptr;
+  }
+  return soc;
+}
+
+util::Result SoC::configure(const Config &config, util::DiagnosticEmitter emit_error) {
+  exec_mode_ = config.exec_mode;
   set_weight(0); // Structural container, not a work-producing component.
   auto soc_name = this->name();
 
@@ -211,8 +235,11 @@ SoC::SoC(std::string name, const Config &config)
     // Create XCDs, each assigned to its parent IOD.
     for (uint32_t i = 0; i < config.num_xcds; ++i) {
       auto xcd_ptr =
-          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
-                                        config.arch, memory_, config.exec_mode, cache_coherence_);
+          amdgpu::Xcd::create(soc_name + ".xcd" + std::to_string(i), config.xcd, config.arch,
+                              memory_, config.exec_mode, cache_coherence_, emit_error);
+      if (!xcd_ptr) {
+        return util::Result::failure();
+      }
       xcd_ptr->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
       xcd_ptr->l2_cache()->set_gpu_vm(&gpu_vm_);
       xcds_.push_back(xcd_ptr.get());
@@ -223,8 +250,11 @@ SoC::SoC(std::string name, const Config &config)
     hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory_, &gpu_vm_);
     for (uint32_t i = 0; i < config.num_xcds; ++i) {
       auto xcd_ptr =
-          std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
-                                        config.arch, memory_, config.exec_mode, cache_coherence_);
+          amdgpu::Xcd::create(soc_name + ".xcd" + std::to_string(i), config.xcd, config.arch,
+                              memory_, config.exec_mode, cache_coherence_, emit_error);
+      if (!xcd_ptr) {
+        return util::Result::failure();
+      }
       xcd_ptr->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
       xcd_ptr->l2_cache()->set_gpu_vm(&gpu_vm_);
       xcds_.push_back(xcd_ptr.get());
@@ -234,23 +264,27 @@ SoC::SoC(std::string name, const Config &config)
   // GWS is device-global: share one store across every XCD (see GwsDevice). The
   // XCDs above were pushed directly rather than through add_xcd, so wire here.
   wire_gws_to_xcds();
-  if (config.scratch_slots_per_cu != 0)
+  if (config.scratch_slots_per_cu != 0) {
     for_each_cp([&](amdgpu::CommandProcessor *cp) {
       cp->set_scratch_slots_per_cu(config.scratch_slots_per_cu);
     });
+  }
+  return util::Result::success();
 }
 
-util::Result SoC::set_arch(rj_code_arch_t arch, util::DiagnosticEmitter emit_error) {
-  if (!sdma_queue_scheduler_.set_packet_dialect(sdma_dialect(arch)))
+util::Result SoC::set_arch(rocjitsu::IsaFamily arch, util::DiagnosticEmitter emit_error) {
+  if (!sdma_queue_scheduler_.set_packet_dialect(sdma_dialect(arch))) {
     return emit_error.emit() << "SoC architecture cannot change while copy queues are active";
+  }
   arch_ = arch;
   return util::Result::success();
 }
 
 std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_ordinal*/) {
   amdgpu::CommandProcessor *owner = assign_queue_owner_cp(0);
-  if (owner == nullptr)
+  if (owner == nullptr) {
     return std::nullopt;
+  }
   // The PCI discovery profile currently exposes one graphics instance even
   // when the simulation config contains additional XCDs. A MES-created queue
   // must therefore stay on its selected owner: fanning it out would execute on
@@ -263,8 +297,9 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_aql(uint32_t /*queue_or
 std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_ordinal*/,
                                                              amdgpu::Pm4PacketCallbacks callbacks) {
   amdgpu::CommandProcessor *owner = assign_queue_owner_cp(0);
-  if (owner == nullptr)
+  if (owner == nullptr) {
     return std::nullopt;
+  }
   return amdgpu::ComputeQueueBindingPlan{
       .factory = amdgpu::make_compute_queue_binding_factory(*owner, std::move(callbacks)),
       .xcd_fanout = false};
@@ -272,8 +307,9 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_or
 
 void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
   plugin_group_ = plugin_group ? plugin_group : ExecutionPluginGroup::empty_group();
-  for (auto *xcd : xcds_)
+  for (auto *xcd : xcds_) {
     xcd->set_plugin_group(plugin_group_);
+  }
 }
 
 void SoC::set_dispatch_threads(uint32_t threads) {
@@ -287,17 +323,20 @@ void SoC::apply_dispatch_threads() {
   // Fewer engine partitions can leave some of this maximum capacity unused.
   size_t capacity = 1;
   for_each_cp([&capacity](auto *cp) {
-    if (!cp->compute_units().empty())
+    if (!cp->compute_units().empty()) {
       capacity += cp->compute_units().size() - 1;
+    }
   });
   uint32_t effective_threads =
       static_cast<uint32_t>(std::min<size_t>(requested_dispatch_threads_, capacity));
-  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL)
+  if (exec_mode_ != simdojo::ExecMode::FUNCTIONAL) {
     effective_threads = 1;
+  }
 
   std::unique_ptr<amdgpu::CpuDispatchPool> new_pool;
-  if (effective_threads > 1)
+  if (effective_threads > 1) {
     new_pool = std::make_unique<amdgpu::CpuDispatchPool>(effective_threads);
+  }
 
   auto *pool = new_pool.get();
   for_each_cp([pool, effective_threads](auto *cp) {
@@ -313,23 +352,27 @@ void SoC::flush_all() {
   for (auto *x : xcds_) {
     for (uint32_t si = 0; si < x->num_shader_engines(); ++si) {
       auto *se = x->shader_engine(si);
-      for (uint32_t ci = 0; ci < se->num_compute_units(); ++ci)
+      for (uint32_t ci = 0; ci < se->num_compute_units(); ++ci) {
         se->compute_unit(ci)->flush_l1();
+      }
     }
   }
 
   // Flush each XCD's L2 once (L2 is shared across all CUs in an XCD).
-  for (auto *x : xcds_)
+  for (auto *x : xcds_) {
     x->l2_cache()->flush_all();
+  }
 
   // Flush all IOD memory-side caches (MSC → HBM).
-  for (auto *i : iods_)
+  for (auto *i : iods_) {
     i->msc()->flush_all();
+  }
 }
 
-void SoC::initialize() {
-  if (!cache_coherence_->has_legacy_maintenance_backing())
-    throw std::logic_error("SoC cache hierarchy lacks legacy maintenance backing");
+util::Result SoC::initialize(util::DiagnosticEmitter emit_error) {
+  if (!cache_coherence_->has_legacy_maintenance_backing()) {
+    return emit_error.emit() << "SoC cache hierarchy lacks legacy maintenance backing";
+  }
 
   // Let every XCD's command processor see its siblings, so a queue marked for
   // fan-out can split its dispatches across the whole device. Each CP's rank is
@@ -338,25 +381,28 @@ void SoC::initialize() {
   {
     std::vector<amdgpu::CommandProcessor *> cps;
     cps.reserve(xcds_.size());
-    for (auto *xcd_ptr : xcds_)
+    for (auto *xcd_ptr : xcds_) {
       if (auto *cp = xcd_ptr->command_processor()) {
         cp->set_gpu_vm(&gpu_vm_, internal_address_space_);
         cps.push_back(cp);
       } else {
         cps.push_back(nullptr);
       }
+    }
     if (std::ranges::find(cps, nullptr) == cps.end()) {
-      for (uint32_t i = 0; i < cps.size(); ++i)
+      for (uint32_t i = 0; i < cps.size(); ++i) {
         cps[i]->set_xcd_topology(i, cps);
+      }
     }
   }
 
   if (iods_.empty()) {
     // No IOD modeling: wire each L2's req port directly to the standalone HBM controller.
     // Create the HBM controller lazily if set_memory() was called but the
-    // parameterized constructor (which creates it) was not used.
-    if (!hbm_standalone_ && memory_)
+    // configured factory (which creates it) was not used.
+    if (!hbm_standalone_ && memory_) {
       hbm_standalone_ = std::make_unique<amdgpu::HbmController>(memory_, &gpu_vm_);
+    }
     if (hbm_standalone_) {
       auto &topo = engine()->topology();
       for (auto *x : xcds_) {
@@ -368,7 +414,7 @@ void SoC::initialize() {
         }
       }
     }
-    return;
+    return util::Result::success();
   }
 
   auto &topo = engine()->topology();
@@ -378,11 +424,13 @@ void SoC::initialize() {
   // Skip if the port already has a link (set by the declarative topology config).
   for (uint32_t i = 0; i < xcds_.size(); ++i) {
     auto *xcd_out = xcds_[i]->l2_cache()->req_port();
-    if (xcd_out->link() != nullptr)
+    if (xcd_out->link() != nullptr) {
       continue;
+    }
     uint32_t iod_idx = i / xcds_per_iod;
-    if (iod_idx >= iods_.size())
+    if (iod_idx >= iods_.size()) {
       iod_idx = static_cast<uint32_t>(iods_.size()) - 1;
+    }
     auto *iod_in = iods_[iod_idx]->create_cpl_port(xcds_[i]->name());
     auto *link = topo.add_link(xcd_out, iod_in, /*latency=*/1,
                                /*weight=*/3);
@@ -392,8 +440,9 @@ void SoC::initialize() {
   // Wire IOD peer interconnect links (bidirectional between all IOD pairs).
   // Skip if already wired by the declarative topology config.
   for (uint32_t a = 0; a < iods_.size(); ++a) {
-    if (iods_[a]->peer_req_port()->link() != nullptr)
+    if (iods_[a]->peer_req_port()->link() != nullptr) {
       continue;
+    }
     for (uint32_t b = a + 1; b < iods_.size(); ++b) {
       auto *link_ab =
           topo.add_link(iods_[a]->peer_req_port(), iods_[b]->peer_cpl_port(), /*latency=*/1);
@@ -403,14 +452,18 @@ void SoC::initialize() {
       link_ba->set_exec_mode(exec_mode_);
     }
   }
+  return util::Result::success();
 }
 
 const std::vector<amdgpu::ComputeUnitCore *> &SoC::all_cus() {
   if (all_cus_cache_.empty()) {
-    for (auto *x : xcds_)
-      for (uint32_t s = 0; s < x->num_shader_engines(); ++s)
-        for (auto *cu : x->shader_engine(s)->compute_units())
+    for (auto *x : xcds_) {
+      for (uint32_t s = 0; s < x->num_shader_engines(); ++s) {
+        for (auto *cu : x->shader_engine(s)->compute_units()) {
           all_cus_cache_.push_back(cu);
+        }
+      }
+    }
   }
   return all_cus_cache_;
 }

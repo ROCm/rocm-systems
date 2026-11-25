@@ -457,12 +457,15 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->soffset_en && inst->imm)
+    if (inst->soffset_en && inst->imm) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->nv)
+    }
+    if (inst->nv) {
       out += " nv";
+    }
   }
   using OpEncoding = SmemMachineInst;
   const OpEncoding inst_;
@@ -513,14 +516,16 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 == amdgpu::SRC_SDWA)
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
       amdgpu::sdwa::append_destination_attributes(out, sdwa_clamp_, sdwa_omod_, sdwa_dst_sel_,
                                                   sdwa_dst_unused_, sdwa_src0_sel_,
                                                   sdwa_src1_operand_, sdwa_src1_sel_);
-    if (has_encoded_dpp())
+    }
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, false,
                                             amdgpu::dpp::DppCtrlDialect::Gfx9);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -582,9 +587,10 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 == amdgpu::SRC_SDWA)
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
       amdgpu::sdwa::append_source_attributes(out, sdwa_src0_sel_, sdwa_src1_operand_,
                                              sdwa_src1_sel_);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -659,14 +665,16 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 == amdgpu::SRC_SDWA)
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
       amdgpu::sdwa::append_destination_attributes(out, sdwa_clamp_, sdwa_omod_, sdwa_dst_sel_,
                                                   sdwa_dst_unused_, sdwa_src0_sel_,
                                                   sdwa_src1_operand_, sdwa_src1_sel_);
-    if (has_encoded_dpp())
+    }
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, false,
                                             amdgpu::dpp::DppCtrlDialect::Gfx9);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -766,17 +774,21 @@ public:
     auto *inst = &inst_;
     (void)inst;
     if (uses_split_ds_offsets()) {
-      if (inst->offset0)
+      if (inst->offset0) {
         out += " offset0:" + std::to_string(inst->offset0);
-      if (inst->offset1)
+      }
+      if (inst->offset1) {
         out += " offset1:" + std::to_string(inst->offset1);
+      }
     } else {
       const uint32_t offset = inst->offset0 | (inst->offset1 << 8);
-      if (offset)
+      if (offset) {
         out += " offset:" + std::to_string(offset);
+      }
     }
-    if (inst->gds)
+    if (inst->gds) {
       out += " gds";
+    }
   }
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
@@ -785,23 +797,40 @@ public:
 class Mubuf : public IsaInstruction<Isa> {
 public:
   Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const MubufMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if (inst_.lds && !(inst_.op == 0 || (inst_.op >= 16 && inst_.op <= 20) ||
+                       (inst_.op >= 22 && inst_.op <= 23))) [[unlikely]] {
+      return emit_error.emit() << mnemonic << " does not support LDS";
+    }
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
+    if (inst->offen) {
       out += " offen";
-    if (inst->idxen)
+    }
+    if (inst->idxen) {
       out += " idxen";
-    if (inst->offset)
+    }
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->sc0)
+    }
+    if (inst->sc0) {
       out += " sc0";
-    if (inst->sc1)
+    }
+    if (inst->sc1) {
       out += " sc1";
-    if (inst->nt)
+    }
+    if (inst->nt) {
       out += " nt";
-    if (inst->lds)
+    }
+    if (inst->lds) {
       out += " lds";
+    }
   }
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
@@ -813,16 +842,21 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
+    if (inst->offen) {
       out += " offen";
-    if (inst->offset)
+    }
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->sc0)
+    }
+    if (inst->sc0) {
       out += " sc0";
-    if (inst->sc1)
+    }
+    if (inst->sc1) {
       out += " sc1";
-    if (inst->nt)
+    }
+    if (inst->nt) {
       out += " nt";
+    }
   }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
@@ -831,22 +865,42 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const FlatMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    static constexpr uint8_t segment_masks[128] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 6, 6, 6, 6, 6, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5, 5, 5, 5, 5,
+        5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0};
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]] {
+      return emit_error.emit() << mnemonic << " has an invalid segment";
+    }
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
     int flat_offset = inst->offset | (inst->pad_12 << 12);
-    if (inst->seg == 0)
+    if (inst->seg == 0) {
       flat_offset = inst->offset;
-    else if (flat_offset & 0x1000)
+    } else if (flat_offset & 0x1000) {
       flat_offset -= 0x2000;
-    if (flat_offset)
+    }
+    if (flat_offset) {
       out += " offset:" + std::to_string(flat_offset);
-    if (inst->sc0)
+    }
+    if (inst->sc0) {
       out += " sc0";
-    if (inst->sc1)
+    }
+    if (inst->sc1) {
       out += " sc1";
-    if (inst->nt)
+    }
+    if (inst->nt) {
       out += " nt";
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = FlatMachineInst;

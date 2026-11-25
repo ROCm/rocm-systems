@@ -264,6 +264,42 @@ The following example:
 
    ROCPROFSYS_ROCM_EVENTS = GPUBusy     SQ_WAVES:device=0    SQ_INSTS_VALU:device=1
 
+ROCPROFSYS_GPU_PERF_COUNTERS
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``ROCPROFSYS_GPU_PERF_COUNTERS`` collects GPU hardware counters by periodically polling
+the device. It takes a comma-separated list of counter names. If the setting is empty,
+no counters are polled.
+
+``ROCPROFSYS_GPU_PERF_COUNTERS`` is separate from ``ROCPROFSYS_ROCM_EVENTS``.
+``ROCPROFSYS_ROCM_EVENTS`` collects counters for each kernel dispatch, while
+``ROCPROFSYS_GPU_PERF_COUNTERS`` samples counters for the device over time.
+Do not use the two settings together.
+
+This setting requires ROCprofiler-SDK 0.6.0 or later.
+
+.. code-block:: shell
+
+   ROCPROFSYS_GPU_PERF_COUNTERS = SQ_WAVES,SQ_BUSY_CYCLES
+
+.. note::
+
+   Starting with ROCm 10.3, collecting GPU performance counters with
+   ``ROCPROFSYS_GPU_PERF_COUNTERS`` requires the ``CAP_PERFMON`` Linux capability
+   (``CAP_SYS_ADMIN`` also satisfies this requirement). Without either capability,
+   which is normal for an unprivileged account, the GPU cannot be locked for exclusive
+   profiling and device-wide counter collection is degraded. If another process profiles
+   the same GPU, the counter values might be inaccurate.
+
+   To get exact counter values and complete device-wide collection, run the profiler
+   with ``CAP_PERFMON``, for example as root:
+
+   .. code-block:: shell
+
+      sudo -E rocprof-sys-run ...
+
+   Use ``capsh --print`` to list the capabilities of the current shell.
+
 ROCPROFSYS_ROCM_GROUP_BY_QUEUE
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -493,7 +529,7 @@ Generating a default configuration file
    ROCPROFSYS_SAMPLING_FREQ                            = 10
    ROCPROFSYS_SAMPLING_GPUS                            = all
    ROCPROFSYS_TIME_OUTPUT                              = true
-   ROCPROFSYS_TIMEMORY_COMPONENTS                      = wall_clock
+   ROCPROFSYS_TIMEMORY_COMPONENTS                      =
    ROCPROFSYS_TRACE_THREAD_LOCKS                       = false
    ROCPROFSYS_VERBOSE                                  = 0
    ROCPROFSYS_COLLAPSE_PROCESSES                       = false

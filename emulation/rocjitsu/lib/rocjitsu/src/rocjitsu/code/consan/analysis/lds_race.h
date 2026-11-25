@@ -9,6 +9,8 @@ namespace rocjitsu::consan {
 
 inline constexpr uint32_t kMaxIntegrityIssueExamples = 128;
 
+enum class LdsRaceOrdering { Unordered, Ordered, Unresolved };
+
 enum class LdsRaceFindingKind { CrossWave, InstructionCollision };
 
 struct LdsRaceParticipant {
@@ -20,15 +22,22 @@ struct LdsRaceParticipant {
   uint32_t width = 0;
   uint64_t original_offset = 0;
   AccessKind access = AccessKind::Read;
+  uint32_t phase = 0;
+  uint32_t workgroup = 0;
+  uint32_t range_id = 0;
+  // For transpose reads, mask identifies physical request lanes and this
+  // preserves the distinct guest EXEC at the instruction.
+  std::optional<uint64_t> transpose_exec = std::nullopt;
   bool operator==(const LdsRaceParticipant &) const = default;
 };
 
 struct LdsRaceFinding {
   LdsRaceFindingKind kind = LdsRaceFindingKind::CrossWave;
   LdsRaceParticipant first;
-  // Collision participants are the lanes in first.mask; second is unused.
+  // A collision between two range ordinals carries a second participant.
   LdsRaceParticipant second;
   uint64_t lane_pairs = 0;
+  LdsRaceOrdering ordering = LdsRaceOrdering::Unordered;
   bool operator==(const LdsRaceFinding &) const = default;
 };
 
@@ -37,17 +46,32 @@ struct LdsRaceIntegrityIssue {
   uint32_t wave = UINT32_MAX;
   uint32_t site = UINT32_MAX;
   std::string reason;
+  uint32_t workgroup = UINT32_MAX;
   bool operator==(const LdsRaceIntegrityIssue &) const = default;
 };
 
 struct LdsRaceExecutionResult {
   uint64_t serial = 0;
+  EntryKey entry_key = 0;
+  std::string entry = {};
+  uint32_t workgroup_count = 1;
+  uint32_t waves_per_workgroup = 0;
   uint64_t valid_observations = 0;
   uint64_t rejected_records = 0;
-  // Loss counts exhausted instruction occurrences, not missing lane records.
+  // Legacy access-loss total: dropped representatives plus occurrences that
+  // exceed the four-address-group limit. Saturated counts are lower bounds.
   uint64_t lost_occurrences = 0;
-  // Conflicting address-group record pairs across waves, then their lane-pair
-  // multiplicity. Read/read pairs do not contribute to either count.
+  uint64_t dropped_representatives = 0;
+  uint64_t synchronization_loss = 0;
+  uint64_t address_group_exhaustion = 0;
+  uint32_t counter_exhausted_waves = 0;
+  // Qualified candidate pairs excluded by a complete workgroup certificate.
+  uint64_t ordered_pairs = 0;
+  uint64_t ordering_unresolved_pairs = 0;
+  uint32_t required_barrier_waves = 0;
+  uint32_t completed_barrier_waves = 0;
+  // Confirmed unordered address-group pairs, then lane pairs.
+  // Read/read pairs contribute to neither count.
   uint64_t cross_wave_pairs = 0;
   uint64_t cross_wave_lane_pairs = 0;
   // Each write observation with multiple lanes sharing its address contributes
@@ -56,25 +80,43 @@ struct LdsRaceExecutionResult {
   uint64_t collision_lane_pairs = 0;
   bool coverage_complete = true;
   // Unordered applies only to independently valid observations in the admitted
-  // no-synchronization scope. Gaps never establish ordering for missing data.
+  // scope. Gaps never establish ordering for missing data.
   bool ordering_uncertain = false;
   uint64_t integrity_events = 0;
-  // Retain at most kMaxIntegrityIssueExamples; integrity_events remains complete.
+  // Bounded reasons include coverage loss; integrity_events counts only malformed evidence.
   std::vector<LdsRaceIntegrityIssue> issues;
   std::vector<LdsRaceFinding> cross_wave_examples;
   std::vector<LdsRaceFinding> collision_examples;
+  std::vector<LdsRaceFinding> ordered_examples;
+  std::vector<LdsRaceFinding> unresolved_examples;
   bool operator==(const LdsRaceExecutionResult &) const = default;
+};
+
+class LdsRaceImageEntry {
+public:
+  EntryKey key = 0;
+  std::string name;
+  EntryDisposition disposition = EntryDisposition::Native;
+  bool operator==(const LdsRaceImageEntry &) const = default;
 };
 
 struct LdsRaceResult {
   std::array<uint8_t, 16> run_identity{};
   ImageIdentity original;
+  // Single-entry convenience; image entries are authoritative for multiple entries.
   std::string entry;
+  std::vector<LdsRaceImageEntry> entries;
+  Digest selection_profile{};
   uint32_t execution_conditions = 0;
   uint32_t target = 0;
   uint32_t wave_size = 0;
+  ScopeKind scope = ScopeKind::NativeLdsNoSynchronization;
+  bool has_dual_ranges = false;
+  bool has_transpose = false;
   // Totals over executions, using the same record-pair/group units as above.
+  uint64_t ordered_pairs = 0;
   uint64_t cross_wave_pairs = 0;
+  uint64_t ordering_unresolved_pairs = 0;
   uint64_t collision_groups = 0;
   bool coverage_complete = false;
   std::vector<LdsRaceExecutionResult> executions;

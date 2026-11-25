@@ -7,7 +7,7 @@
 #pragma once
 
 #include "common/isa.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <stdint.h>
 
@@ -75,6 +75,10 @@ int execute_dpp(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
   int error = execute(0, a);
   if (error || !exec_mask) {
     return error;
+  }
+  if ((instruction_flags & RJ_ARITH_DPP16) && (!(instruction_flags & RJ_ARITH_DPP_ROW_MASK) ||
+                                               !(instruction_flags & RJ_ARITH_DPP_BANK_MASK))) {
+    return RJ_ARITH_SUCCESS;
   }
   uint32_t permuted[32];
   const uint32_t *source = permuted;

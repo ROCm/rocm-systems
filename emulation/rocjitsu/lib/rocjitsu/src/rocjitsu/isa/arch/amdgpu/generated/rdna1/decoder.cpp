@@ -209,9 +209,9 @@ DecodeResult DecoderImpl::subDecodeMimg(const MachineInst *opcode,
                                         const DecodeErrorEmitter &emit_error) {
   Mimg::OpEncoding op = *reinterpret_cast<const decltype(op) *>(opcode);
 #if RJ_HOST_HAS_X86_64_ELF_REL32
-  return sub_decode_mimg[op.op](opcode, emit_error);
+  return sub_decode_mimg[op.op | (op.opm << 7)](opcode, emit_error);
 #else
-  switch (static_cast<unsigned>(op.op)) { RJ_SUB_DECODE_MIMG_ROWS }
+  switch (static_cast<unsigned>(op.op | (op.opm << 7))) { RJ_SUB_DECODE_MIMG_ROWS }
 #endif
 }
 

@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -48,7 +50,7 @@ constexpr DotCase kDots[] = {
 };
 
 TEST(Rdna4DotDppTest, DecodesHardwareQualifiedForms) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(decoder, nullptr);
   for (const auto &dot : kDots) {
     // LLVM gfx1201 encodings, also executed on physical gfx1201:
@@ -76,12 +78,14 @@ TEST(Rdna4DotDppTest, PermutesSourcesAndPreservesMaskedDestinations) {
       amdgpu::GpuMemory memory("dot_dpp_memory");
       amdgpu::L2Cache l2("dot_dpp_l2");
       amdgpu::ComputeUnitCore::Config cfg{};
-      cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+      cfg.arch = rocjitsu::IsaFamily::Rdna4;
       cfg.num_wf_slots = 1;
       cfg.sgprs_per_wf = 106;
       cfg.vgprs_per_wf = 32;
       cfg.lds_size_kb = 64;
-      auto cu = amdgpu::ComputeUnitCore::create("dot_dpp", cfg, &memory, &l2);
+      std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+      ASSERT_NO_FATAL_FAILURE(
+          rocjitsu::test::initialize_compute_unit(cu, "dot_dpp", cfg, &memory, &l2));
       auto decoder = Decoder::create(cfg.arch);
       auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf, wave_size);
       ASSERT_NE(wf, nullptr);
@@ -136,11 +140,13 @@ TEST(Rdna4DotDppTest, FloatingDot4UsesEachOperandFormat) {
   amdgpu::GpuMemory memory("dot4_format_memory");
   amdgpu::L2Cache l2("dot4_format_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  cfg.arch = rocjitsu::IsaFamily::Rdna4;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 32;
-  auto cu = amdgpu::ComputeUnitCore::create("dot4_format", cfg, &memory, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "dot4_format", cfg, &memory, &l2));
   auto decoder = Decoder::create(cfg.arch);
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf, 32);
   ASSERT_NE(wf, nullptr);
@@ -149,8 +155,9 @@ TEST(Rdna4DotDppTest, FloatingDot4UsesEachOperandFormat) {
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
     for (const auto &dot : kDots) {
-      if (dot.opcode == rdna4::kVDot2F32F16Vop3p || dot.opcode == rdna4::kVDot2F32Bf16Vop3p)
+      if (dot.opcode == rdna4::kVDot2F32F16Vop3p || dot.opcode == rdna4::kVDot2F32Bf16Vop3p) {
         continue;
+      }
       for (unsigned form = 0; form != 3; ++form) {
         SCOPED_TRACE(std::format("{} form={} scalar={}", dot.mnemonic, form, force_scalar));
         const uint32_t words[] = {0xcc004010u | (dot.opcode << 16),

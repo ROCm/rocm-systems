@@ -124,9 +124,17 @@ def _import_real_amdsmi_helpers():
         amdsmi_init=lambda _flag: None,
         amdsmi_shut_down=lambda: None,
         amdsmi_get_processor_handles=lambda: [],
+        # amdsmi_init runs _any_nic_present() at import on a host without the amdgpu/hsmp
+        # drivers; report one NIC so the CLI init does not exit before the helpers load.
+        amdsmi_get_socket_handles=lambda: [object()],
+        amdsmi_get_processor_handles_by_type=lambda _socket, _type: {
+            "processor_handles": [object()]
+        },
+        AmdSmiProcessorType=types.SimpleNamespace(AMD_AINIC="AMD_AINIC"),
     )
     exception = fake_module(
         "amdsmi.amdsmi_exception",
+        AmdSmiException=_FakeLibraryException,
         AmdSmiLibraryException=_FakeLibraryException,
         AmdSmiParameterException=_FakeLibraryException,
     )
@@ -436,8 +444,10 @@ class _StubHelpersForSetGpu:
 
 
 _AmppConfigureArgs = collections.namedtuple(
-    "_AmppConfigureArgs", ["profile_name", "fields", "file_path"], defaults=[None]
+    "_AmppConfigureArgs", ["profile_name", "fields", "file_path"]
 )
+# namedtuple(defaults=) is Python 3.7+.
+_AmppConfigureArgs.__new__.__defaults__ = (None,)
 
 
 class TestSetGpuAmppConfigureCallSite(unittest.TestCase):

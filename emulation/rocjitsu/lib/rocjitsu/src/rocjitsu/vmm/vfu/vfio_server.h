@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -40,7 +42,7 @@ enum class ServerSignalAction {
 /// function to its guest as a real PCI device. The config must contain one
 /// local GPU; use the socket-list overload for a multi-GPU node.
 int run_vfio_server(const std::string &config_path, const std::string &socket_path,
-                    int ready_fd = -1);
+                    int ready_fd = -1, bool trace_fabric_effects = false);
 
 /// @brief Serve every local GPU in one node through its own PCI function.
 /// @param[in] config_path Simulation config describing the local GPU node.
@@ -53,7 +55,7 @@ int run_vfio_server(const std::string &config_path, const std::string &socket_pa
 /// lifetime. A permanently stopped function fails the multi-function session.
 /// SIGUSR1 requests an interrupt on every function in the group.
 int run_vfio_server(const std::string &config_path, const std::vector<std::string> &socket_paths,
-                    int ready_fd = -1);
+                    int ready_fd = -1, bool trace_fabric_effects = false);
 
 /// @brief Run the server and request a simulation failure after readiness.
 /// @details Test-only entry point for proving that an engine failure after the
@@ -67,5 +69,12 @@ int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
 int run_vfio_server_with_engine_exit_for_test(const std::string &config_path,
                                               const std::vector<std::string> &socket_paths,
                                               int ready_fd, int exit_code);
+
+/// @brief Fail serving-thread startup after the specified number of successful starts.
+/// @details Test-only entry point that substitutes EAGAIN for pthread_create on the selected
+/// worker, exercising native error propagation and cleanup through ServingThread::start().
+int run_vfio_server_with_serving_thread_failure_for_test(
+    const std::string &config_path, const std::vector<std::string> &socket_paths, int ready_fd,
+    std::size_t successful_threads);
 
 } // namespace rocjitsu

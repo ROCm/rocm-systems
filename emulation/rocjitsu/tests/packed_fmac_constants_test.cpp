@@ -1,9 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -27,21 +29,21 @@ constexpr uint32_t pack16(uint16_t lo, uint16_t hi) {
   return static_cast<uint32_t>(lo) | (static_cast<uint32_t>(hi) << 16);
 }
 
-class PackedFmacConstantTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class PackedFmacConstantTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   bool gfx9() const {
     const auto arch = GetParam();
-    return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-           arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+    return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+           arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
   }
 };
 
 INSTANTIATE_TEST_SUITE_P(AllArchitectures, PackedFmacConstantTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                           ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                           ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA1,
-                                           ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                                           ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                           rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna1,
+                                           rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                           rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5));
 
 TEST_P(PackedFmacConstantTest, PackedFmacDistinguishesInlineAndLiteralPairs) {
   for (auto arch : {GetParam()}) {
@@ -53,18 +55,22 @@ TEST_P(PackedFmacConstantTest, PackedFmacDistinguishesInlineAndLiteralPairs) {
     cfg.sgprs_per_wf = gfx9() ? 102 : 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("packed_inline", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "packed_inline", cfg, &mem, &l2));
     auto decoder = Decoder::create(arch);
     auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(5);
     const auto vb = wf->vgpr_alloc().base;
     for (bool vop3 : {false, true}) {
-      if (vop3 && !gfx9())
+      if (vop3 && !gfx9()) {
         continue;
+      }
       for (uint32_t selector : {244u, 255u}) {
-        if (vop3 && selector == 255)
+        if (vop3 && selector == 255) {
           continue; // GFX9 VOP3 has no appended literal encoding.
+        }
         for (uint32_t lane = 0; lane < 3; ++lane) {
           cu->write_vgpr(vb + 1, lane, pack16(0x3c00, 0x3c00));
           cu->write_vgpr(vb + 2, lane, lane == 1 ? 0xdeadbeef : 0);

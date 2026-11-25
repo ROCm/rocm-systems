@@ -1097,8 +1097,6 @@ TEST_F(BootstrapMicrotest, BcastGrowHandle_CoordinatorReachesOnlyTheBoundaryRank
   ncclBootstrapHandle h = {};
   EXPECT_EQ(ncclInvalidArgument, bcastGrowHandle(nullptr, self_.comm.get(), true));
   EXPECT_EQ(ncclInvalidArgument, bcastGrowHandle(&h, nullptr, false));
-  self_.comm->nRanks = 1;
-  EXPECT_EQ(ncclSuccess, bcastGrowHandle(&h, self_.comm.get(), false));  // would block if it received
 
   ASSERT_EQ(ncclSuccess, InitRanks(4));
   ncclBootstrapHandle got[4] = {};
@@ -1113,6 +1111,23 @@ TEST_F(BootstrapMicrotest, BcastGrowHandle_CoordinatorReachesOnlyTheBoundaryRank
   EXPECT_EQ(4, got[3].nRanks);
   for (int r : {1, 2})  // neither the coordinator nor an inner rank was sent anything
     EXPECT_EQ(0u, PendingOn(static_cast<struct bootstrapState*>(State(r))->listen.peerSocket)) << r;
+  EXPECT_TRUE(AllOk(CloseRanks()));
+}
+
+// Since v2.32.6 a single-rank parent no longer short-circuits: the coordinator (rank 0 == nRanks-1) sends the
+// handle once, to itself, and its own ncclCommGrow receive as boundary rank picks it up.
+TEST_F(BootstrapMicrotest, BcastGrowHandle_SingleRankParent_CoordinatorSendsOneCopyToItself) {
+  ASSERT_EQ(ncclSuccess, InitRanks(1));
+  ncclBootstrapHandle sent = {};
+  sent.magic = 0xCD;
+  sent.nRanks = 1;
+  ncclBootstrapHandle got = {};
+  ASSERT_EQ(ncclSuccess, bcastGrowHandle(&sent, Comm(0), /*isRoot=*/true));
+  ASSERT_EQ(ncclSuccess, bcastGrowHandle(&got, Comm(0), /*isRoot=*/false));
+  EXPECT_EQ(0xCDu, got.magic);
+  EXPECT_EQ(1, got.nRanks);
+  EXPECT_EQ(0u, PendingOn(static_cast<struct bootstrapState*>(State(0))->listen.peerSocket))
+    << "only one copy may be sent when rank 0 is also the last rank";
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 

@@ -26,6 +26,8 @@
 #include "ShaderStore.hpp"
 #include "Assemble.hpp"
 
+#include <llvm/Config/llvm-config.h>
+
 void KFDASMTest::SetUp() {}
 void KFDASMTest::TearDown() {}
 
@@ -44,6 +46,7 @@ static const std::vector<uint32_t> TargetList = {
     0x09000a,
     0x09000c,
     0x090402,
+    0x090500,
     0x0a0100,
     0x0a0101,
     0x0a0102,
@@ -55,23 +58,45 @@ static const std::vector<uint32_t> TargetList = {
     0x0a0304,
     0x0a0305,
     0x0a0306,
+    0x0b0000,
+    0x0b0001,
+    0x0b0002,
+    0x0b0003,
+    0x0b0500,
+    0x0b0501,
+    0x0b0502,
+    0x0b0503,
     0x0c0000,
+    0x0c0001,
     0x0c0500,
     0x0c0501,
+    0x0d0100,
 };
 
 TEST_F(KFDASMTest, AssembleShaders) {
     TEST_START(TESTPROFILE_RUNALL)
 
+    unsigned int tested = 0;
+
     for (auto &t : TargetList) {
         Assembler asmblr(t);
+
+        /* A new ASIC can be ahead of the linked LLVM; test the ones it knows */
+        if (!asmblr.IsTargetSupported()) {
+            LOG() << "Skipping ASM test for target " << asmblr.GetTargetAsic()
+                  << ": not supported by LLVM " << LLVM_VERSION_STRING << std::endl;
+            continue;
+        }
 
         LOG() << "Running ASM test for target " << asmblr.GetTargetAsic() << std::endl;
 
         for (auto &s : ShaderList) {
             EXPECT_SUCCESS(asmblr.RunAssemble(s));
         }
+        tested++;
     }
+
+    EXPECT_GT(tested, 0u) << "LLVM " << LLVM_VERSION_STRING << " supports no kfdtest target";
 
     TEST_END
 }

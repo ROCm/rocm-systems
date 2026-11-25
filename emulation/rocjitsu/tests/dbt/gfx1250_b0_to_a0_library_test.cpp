@@ -2,10 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 /// @file gfx1250_b0_to_a0_library_test.cpp
-/// @brief Tests the fixed-profile gfx1250 B0-to-A0 shared-library API.
+/// @brief Tests the fixed-profile gfx1250 B0-to-A0 private shared-library interface.
 
+#include "../test_paths.h"
 #include "rocjitsu/code/dbt/gfx1250_b0_to_a0_diagnostics.h"
-#include "rocjitsu/code/rj_gfx1250_b0_to_a0.h"
+#include "rocjitsu/code/dbt/gfx1250_b0_to_a0_library.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
@@ -34,7 +35,7 @@ struct CapturedDiagnostic {
   bool required_work = false;
 };
 
-void capture_diagnostic(const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void *user_data) {
+void capture_diagnostic(const rocjitsu::Gfx1250B0ToA0DiagnosticView *diagnostic, void *user_data) {
   auto *captured = static_cast<std::vector<CapturedDiagnostic> *>(user_data);
   captured->push_back(
       {diagnostic->severity != nullptr ? diagnostic->severity : "",
@@ -43,7 +44,7 @@ void capture_diagnostic(const rj_gfx1250_b0_to_a0_diagnostic_t *diagnostic, void
        diagnostic->message != nullptr ? diagnostic->message : "", diagnostic->required_work != 0});
 }
 
-#ifdef GFX1250_B0_TO_A0_FIXTURE
+#ifdef KERNEL_DIR
 uint64_t source_identity(const std::vector<uint8_t> &bytes) {
   constexpr uint64_t kOffsetBasis = 14695981039346656037ULL;
   constexpr uint64_t kPrime = 1099511628211ULL;
@@ -74,40 +75,32 @@ TEST(Gfx1250B0ToA0Library, InternalErrorsTakePrecedenceOverInputRejection) {
             ROCJITSU_STATUS_INVALID_CODE_OBJECT);
 }
 
-TEST(Gfx1250B0ToA0Library, RejectsInvalidArgumentsAndClearsOutputs) {
-  auto *output = reinterpret_cast<uint8_t *>(0x1);
-  size_t output_size = 1;
-  rj_gfx1250_b0_to_a0_translation_info_t info{1, 1};
-  EXPECT_EQ(
-      rj_gfx1250_b0_to_a0_translate(nullptr, 0, &output, &output_size, &info, nullptr, nullptr),
-      ROCJITSU_STATUS_INVALID_ARGUMENT);
-  EXPECT_EQ(output, nullptr);
-  EXPECT_EQ(output_size, 0u);
+TEST(Gfx1250B0ToA0Library, RejectsEmptyInputAndClearsOutputs) {
+  std::vector<uint8_t> output{1};
+  rocjitsu::Gfx1250B0ToA0TranslationInfo info{1, 1};
+  EXPECT_EQ(rocjitsu::translate_gfx1250_b0_to_a0({}, output, info),
+            ROCJITSU_STATUS_INVALID_ARGUMENT);
+  EXPECT_TRUE(output.empty());
   EXPECT_EQ(info.source_code_object_id, 0u);
   EXPECT_EQ(info.changed_instruction_count, 0u);
 
   constexpr std::array<uint8_t, 64> kNotElf = {'N', 'O', 'T', 'E', 'L', 'F'};
-  EXPECT_EQ(rj_gfx1250_b0_to_a0_translate(kNotElf.data(), kNotElf.size(), &output, &output_size,
-                                          &info, nullptr, nullptr),
+  EXPECT_EQ(rocjitsu::translate_gfx1250_b0_to_a0(kNotElf, output, info, nullptr, nullptr),
             ROCJITSU_STATUS_INVALID_CODE_OBJECT);
-  EXPECT_EQ(output, nullptr);
-  EXPECT_EQ(output_size, 0u);
+  EXPECT_TRUE(output.empty());
   EXPECT_NE(info.source_code_object_id, 0u);
   EXPECT_EQ(info.changed_instruction_count, 0u);
-
-  rj_gfx1250_b0_to_a0_free(nullptr);
 }
 
 TEST(Gfx1250B0ToA0Library, ReportsInvalidCodeObjectDiagnostic) {
   constexpr std::array<uint8_t, 64> kNotElf = {'N', 'O', 'T', 'E', 'L', 'F'};
-  uint8_t *output = nullptr;
-  size_t output_size = 0;
-  rj_gfx1250_b0_to_a0_translation_info_t info{};
+  std::vector<uint8_t> output;
+  rocjitsu::Gfx1250B0ToA0TranslationInfo info{};
   std::vector<CapturedDiagnostic> diagnostics;
 
-  EXPECT_EQ(rj_gfx1250_b0_to_a0_translate(kNotElf.data(), kNotElf.size(), &output, &output_size,
-                                          &info, capture_diagnostic, &diagnostics),
-            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
+  EXPECT_EQ(
+      rocjitsu::translate_gfx1250_b0_to_a0(kNotElf, output, info, capture_diagnostic, &diagnostics),
+      ROCJITSU_STATUS_INVALID_CODE_OBJECT);
   ASSERT_FALSE(diagnostics.empty());
   const auto matching = std::ranges::find_if(diagnostics, [](const auto &item) {
     return item.severity == "error" && item.kind == "input-invalid-code-object" &&
@@ -151,16 +144,14 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   const std::array<uint32_t, 4> text = {conversion[0], conversion[1], conversion[2], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
-  uint8_t *output = nullptr;
-  size_t output_size = 0;
-  rj_gfx1250_b0_to_a0_translation_info_t info{};
+  std::vector<uint8_t> output;
+  rocjitsu::Gfx1250B0ToA0TranslationInfo info{};
   std::vector<CapturedDiagnostic> diagnostics;
 
-  EXPECT_EQ(rj_gfx1250_b0_to_a0_translate(source.data(), source.size(), &output, &output_size,
-                                          &info, capture_diagnostic, &diagnostics),
-            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
-  EXPECT_EQ(output, nullptr);
-  EXPECT_EQ(output_size, 0u);
+  EXPECT_EQ(
+      rocjitsu::translate_gfx1250_b0_to_a0(source, output, info, capture_diagnostic, &diagnostics),
+      ROCJITSU_STATUS_INVALID_CODE_OBJECT);
+  EXPECT_TRUE(output.empty());
   ASSERT_FALSE(diagnostics.empty());
 
   const auto primary = std::ranges::find_if(diagnostics, [](const auto &item) {
@@ -175,7 +166,7 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorDiagnostics) {
 }
 
 // The diagnostic above carries no required work. This one does, so it covers
-// the fan-out through the public C entry point rather than the emit helper
+// the fan-out through the private translation entry point rather than the emit helper
 // exercised by FansOutRequiredWorkAsCallbackViews.
 TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
   constexpr auto conversion =
@@ -183,16 +174,14 @@ TEST(Gfx1250B0ToA0Library, ReportsTranslatorExpandFailedAndRequiredWork) {
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   const std::array<uint32_t, 2> text = {conversion[0], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
-  uint8_t *output = nullptr;
-  size_t output_size = 0;
-  rj_gfx1250_b0_to_a0_translation_info_t info{};
+  std::vector<uint8_t> output;
+  rocjitsu::Gfx1250B0ToA0TranslationInfo info{};
   std::vector<CapturedDiagnostic> diagnostics;
 
-  EXPECT_EQ(rj_gfx1250_b0_to_a0_translate(source.data(), source.size(), &output, &output_size,
-                                          &info, capture_diagnostic, &diagnostics),
-            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
-  EXPECT_EQ(output, nullptr);
-  EXPECT_EQ(output_size, 0u);
+  EXPECT_EQ(
+      rocjitsu::translate_gfx1250_b0_to_a0(source, output, info, capture_diagnostic, &diagnostics),
+      ROCJITSU_STATUS_INVALID_CODE_OBJECT);
+  EXPECT_TRUE(output.empty());
   ASSERT_FALSE(diagnostics.empty());
 
   const auto primary = std::ranges::find_if(diagnostics, [](const auto &item) {
@@ -276,16 +265,14 @@ TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslatio
   constexpr uint32_t kEndpgm = 0xBFB00000u;
   const std::array<uint32_t, 3> text = {deferred[0], deferred[0], kEndpgm};
   const auto source = rocjitsu::test_support::make_gfx1250_code_object(text);
-  uint8_t *output = nullptr;
-  size_t output_size = 0;
-  rj_gfx1250_b0_to_a0_translation_info_t info{};
+  std::vector<uint8_t> output;
+  rocjitsu::Gfx1250B0ToA0TranslationInfo info{};
   std::vector<CapturedDiagnostic> diagnostics;
 
-  ASSERT_EQ(rj_gfx1250_b0_to_a0_translate(source.data(), source.size(), &output, &output_size,
-                                          &info, capture_diagnostic, &diagnostics),
-            ROCJITSU_STATUS_SUCCESS);
-  EXPECT_NE(output, nullptr);
-  rj_gfx1250_b0_to_a0_free(output);
+  ASSERT_EQ(
+      rocjitsu::translate_gfx1250_b0_to_a0(source, output, info, capture_diagnostic, &diagnostics),
+      ROCJITSU_STATUS_SUCCESS);
+  EXPECT_FALSE(output.empty());
 
   const auto reported = std::ranges::find_if(diagnostics, [](const auto &item) {
     return item.severity == "warning" && item.kind == "translator-legalization" &&
@@ -301,28 +288,25 @@ TEST(Gfx1250B0ToA0Library, ReportsDeferredFamilyDiagnosticOnSuccessfulTranslatio
   EXPECT_EQ(count, 1);
 }
 
-#ifdef GFX1250_B0_TO_A0_FIXTURE
+#ifdef KERNEL_DIR
 TEST(Gfx1250B0ToA0Library, TranslatesRealGfx1250CodeObject) {
-  std::ifstream input(GFX1250_B0_TO_A0_FIXTURE, std::ios::binary);
-  ASSERT_TRUE(input) << GFX1250_B0_TO_A0_FIXTURE;
+  const auto path = rocjitsu::test::kernel_hsaco_path("relocation_function_table_dispatch_gfx1250");
+  std::ifstream input(path, std::ios::binary);
+  ASSERT_TRUE(input) << path;
   const std::vector<uint8_t> source((std::istreambuf_iterator<char>(input)),
                                     std::istreambuf_iterator<char>());
   ASSERT_GE(source.size(), 4u);
 
-  uint8_t *output = nullptr;
-  size_t output_size = 0;
-  rj_gfx1250_b0_to_a0_translation_info_t info{};
-  ASSERT_EQ(rj_gfx1250_b0_to_a0_translate(source.data(), source.size(), &output, &output_size,
-                                          &info, nullptr, nullptr),
+  std::vector<uint8_t> output;
+  rocjitsu::Gfx1250B0ToA0TranslationInfo info{};
+  ASSERT_EQ(rocjitsu::translate_gfx1250_b0_to_a0(source, output, info, nullptr, nullptr),
             ROCJITSU_STATUS_SUCCESS);
-  ASSERT_NE(output, nullptr);
+  ASSERT_FALSE(output.empty());
   EXPECT_EQ(info.source_code_object_id, source_identity(source));
   EXPECT_GT(info.changed_instruction_count, 0u);
   constexpr std::array<uint8_t, 4> kElfMagic = {0x7f, 'E', 'L', 'F'};
-  ASSERT_GE(output_size, kElfMagic.size());
-  EXPECT_TRUE(std::ranges::equal(kElfMagic, std::span(output, kElfMagic.size())));
-
-  rj_gfx1250_b0_to_a0_free(output);
+  ASSERT_GE(output.size(), kElfMagic.size());
+  EXPECT_TRUE(std::ranges::equal(kElfMagic, std::span(output).first(kElfMagic.size())));
 }
 #endif
 
