@@ -7,6 +7,13 @@ set(_uniform_store_cases
     uniform_store_write
     uniform_store_varying
 )
+foreach(_bits IN ITEMS 64 96 128)
+    list(
+        APPEND _uniform_store_cases
+        uniform_b${_bits}_read
+        uniform_b${_bits}_varying
+    )
+endforeach()
 foreach(
     _gpu
     IN
@@ -95,7 +102,9 @@ foreach(
         )
             set(_case_number ${_case})
             set(_layout_options)
-            set(_metadata_target "amdgcn-amd-amdhsa--${_gpu}")
+            set(_source fixtures/native_lds.s)
+            set(_includes)
+            set(_metadata_option)
             set(_fixture_name native-${_case})
             set(_group_options -DCONSAN_GROUP_BYTES=128)
             list(FIND _names ${_case} _named_index)
@@ -112,13 +121,20 @@ foreach(
             endif()
             if(_case STREQUAL "unknown-environment")
                 set(_case_number 1)
-                set(_metadata_target "amdgcn-amd-amdhsa-unknown-${_gpu}")
+                set(_metadata_option
+                    -DCONSAN_METADATA_TARGET="amdgcn-amd-amdhsa-unknown-${_gpu}"
+                )
             endif()
-            if(_case MATCHES "^uniform_store_")
+            if(_case MATCHES "^uniform_")
                 set(_case_number 1)
                 set(_fixture_name ${_case})
                 set(_layout_options -DCONSAN_UNIFORM_STORE=1)
-                if(_case STREQUAL "uniform_store_varying")
+                if(_case MATCHES "^uniform_b([0-9]+)_")
+                    set(_source fixtures/uniform_multiword.s)
+                    set(_includes fixtures/lds_fixture_macros.s)
+                    set(_layout_options -DCONSAN_WIDTH=${CMAKE_MATCH_1})
+                endif()
+                if(_case MATCHES "_varying$")
                     list(APPEND _layout_options -DCONSAN_VARYING_VALUE=1)
                 elseif(_case STREQUAL "uniform_store_write")
                     list(APPEND _layout_options -DCONSAN_PEER_WRITE=1)
@@ -145,13 +161,12 @@ foreach(
                     assembler-with-cpp -P -target amdgcn-amd-amdhsa
                     -mcpu=${_gpu} -mcode-object-version=5 ${_wave_size_options}
                     -DCONSAN_TARGET="amdgcn-amd-amdhsa--${_gpu}"
-                    -DCONSAN_METADATA_TARGET="${_metadata_target}"
-                    -DCONSAN_WAVE_SIZE=${_wave_size} -DCONSAN_LEGACY=${_legacy}
-                    -DCONSAN_GFX12=${_gfx12} -DCONSAN_CASE=${_case_number}
-                    ${_group_options} ${_layout_options} -c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_lds.s -o
-                    ${_object}
-                DEPENDS fixtures/native_lds.s ${AMDCXX}
+                    ${_metadata_option} -DCONSAN_WAVE_SIZE=${_wave_size}
+                    -DCONSAN_LEGACY=${_legacy} -DCONSAN_GFX12=${_gfx12}
+                    -DCONSAN_CASE=${_case_number} ${_group_options}
+                    ${_layout_options} -c ${CMAKE_CURRENT_SOURCE_DIR}/${_source}
+                    -o ${_object}
+                DEPENDS ${_source} ${_includes} ${AMDCXX}
                 VERBATIM
             )
             add_custom_command(

@@ -1193,6 +1193,37 @@ private:
   Masks &masks_;
 };
 
+TEST_P(ConSanTargetSim, UniformStoreWideTuplesIssueOnceAndPreserveEveryWord) {
+  const test::TargetMode target = GetParam();
+  const uint32_t threads = 2 * target.wave_size;
+  const bool legacy =
+      std::string_view(target.target) == "gfx942" || std::string_view(target.target) == "gfx950";
+  for (uint32_t bits : {64u, 96u, 128u}) {
+    const std::string mnemonic =
+        std::string(legacy ? "ds_write_b" : "ds_store_b") + std::to_string(bits);
+    for (const char *variant : {"read", "varying"}) {
+      const std::string fixture = "uniform_b" + std::to_string(bits) + "_" + variant;
+      SCOPED_TRACE(fixture);
+      RunResult before, after;
+      GuestIssueTrace::Masks original_masks, prepared_masks;
+      ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::None, before, target, threads, true, 4, false,
+                                  1, std::make_unique<GuestIssueTrace>(mnemonic, original_masks)));
+      ASSERT_NO_FATAL_FAILURE(run(fixture, Bootstrap::Instrumented, after, target, threads, true, 4,
+                                  false, 1,
+                                  std::make_unique<GuestIssueTrace>(mnemonic, prepared_masks)));
+      EXPECT_EQ(original_masks[0],
+                (std::vector<uint64_t>{target.wave_size == 64 ? uint64_t{3} << 62 : 3}));
+      EXPECT_TRUE(original_masks[1].empty());
+      EXPECT_EQ(prepared_masks, original_masks);
+      expect_guest_state(before, after);
+      const uint32_t third = bits >= 96 ? 0x13579bdfu : 0x76543210u;
+      const uint32_t fourth = bits == 128 ? 0xfedcba98u : 0xa5a5a5a5u;
+      EXPECT_EQ(before.full_output, (std::vector<uint32_t>{7, 0x89abcdefu, third, fourth, 8,
+                                                           0x89abcdefu, third, fourth}));
+    }
+  }
+}
+
 class GroupFlatIssues final : public ExecutionPlugin {
 public:
   using Trace = std::array<std::vector<std::string>, 2>;

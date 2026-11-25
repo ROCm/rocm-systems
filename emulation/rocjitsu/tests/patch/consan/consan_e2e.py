@@ -22,6 +22,7 @@ from consan_runtime_e2e import (
     identity,
     parse_target_arguments,
     uniform_store_masks,
+    uniform_store_width,
 )
 
 
@@ -74,7 +75,7 @@ class AnalysisDriver(Driver):
                 for proof in entry.get('uniform_store_proofs', [])
                 if proof['site'] == 0
             ]
-            proven = case != 'uniform_store_varying'
+            proven = not case.endswith('_varying')
             assert len(proofs) == int(proven)
             if proven:
                 assert proofs[0]['source'] == 'block_local_broadcast'
@@ -91,11 +92,10 @@ class AnalysisDriver(Driver):
                         row[count],
                     ) == (1, suppressed, 1 - suppressed)
                 assert row['cross_wave_pairs'] == 1
-            assert (
-                execution['valid_observations']
-                == execution['cross_wave_lane_pairs']
-                == 2
-            )
+            width = uniform_store_width(case)
+            peer_site = 2 if width > 4 else 1
+            assert execution['valid_observations'] == peer_site + 1
+            assert execution['cross_wave_lane_pairs'] == 2
             assert len(execution['collision_examples']) == 1 - suppressed
             (pair,) = execution['cross_wave_examples']
             assert pair['ordering'] == 'unordered'
@@ -103,12 +103,15 @@ class AnalysisDriver(Driver):
                 (pair['first'], pair['second']), key=lambda endpoint: endpoint['wave']
             )
             writer_mask, peer_mask = uniform_store_masks(self.args.wave_size)
-            for endpoint, site, mask, access in (
-                (writer, 0, writer_mask, 'write'),
+            for endpoint, wave, site, mask, offset, size, access in (
+                (writer, 0, 0, writer_mask, 0, width, 'write'),
                 (
                     peer,
                     1,
+                    peer_site,
                     peer_mask,
+                    width - 4,
+                    4,
                     'write' if case == 'uniform_store_write' else 'read',
                 ),
             ):
@@ -116,13 +119,13 @@ class AnalysisDriver(Driver):
                     endpoint['workgroup_x'],
                     endpoint['wave'],
                     endpoint['site'],
-                ) == (0, site, site)
+                ) == (0, wave, site)
                 assert (
                     endpoint['mask'],
                     endpoint['offset'],
                     endpoint['width'],
                     endpoint['access'],
-                ) == (mask, 0, 4, access)
+                ) == (mask, offset, size, access)
         hidden = json.loads(
             self.run(
                 'analyze-uniform-store-no-examples',
@@ -180,7 +183,7 @@ class AnalysisDriver(Driver):
             if case == 'wide_collision'
             else (1 if case == 'collision' else 0)
         )
-        if case.startswith('uniform_store_'):
+        if case.startswith('uniform_'):
             pairs = collisions = 1
         if case.startswith('atomic_') and case.endswith(('_read', '_write')):
             pairs = 1
@@ -720,7 +723,7 @@ class AnalysisDriver(Driver):
                 finding = analyzed['collision_examples'][0]
                 assert finding['first']['mask'] == 3 and finding['lane_pairs'] == 1
                 assert analyzed['valid_observations'] == 1
-        if case.startswith('uniform_store_'):
+        if case.startswith('uniform_'):
             self.assert_uniform_store_policy(capture, raw, result)
         hidden = json.loads(
             self.run(

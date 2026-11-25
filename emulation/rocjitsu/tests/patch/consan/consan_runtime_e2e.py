@@ -31,6 +31,11 @@ CASES = (
     'uniform_store_read',
     'uniform_store_write',
     'uniform_store_varying',
+    *(
+        f'uniform_b{bits}_{case}'
+        for bits in (64, 96, 128)
+        for case in ('read', 'varying')
+    ),
     'single_lane',
     'repeat',
     'repeat_race',
@@ -180,6 +185,12 @@ def build_root(path):
         if (parent / 'CMakeCache.txt').is_file():
             return parent
     raise AssertionError(f'no worktree CMake build owns {path}')
+
+
+def uniform_store_width(case):
+    if case.startswith('uniform_b'):
+        return int(case.split('_')[1][1:]) // 8
+    return 4
 
 
 def uniform_store_masks(wave_size):
@@ -397,6 +408,8 @@ class Driver:
         wide = fixture_name.startswith('wide_')
         if fixture_name.startswith('transpose_'):
             mode = fixture_name
+        if fixture_name.startswith('uniform_b'):
+            mode = 'wide_' + fixture_name.split('_')[1]
         if fixture_name.startswith('uniform_store_'):
             mode = 'defined'
         if fixture_name.startswith('atomic_'):
@@ -443,9 +456,7 @@ class Driver:
         if (
             synchronized
             or wide
-            or fixture_name.startswith(
-                ('transpose_', 'atomic_', 'flat_', 'uniform_store_')
-            )
+            or fixture_name.startswith(('transpose_', 'atomic_', 'flat_', 'uniform_'))
             or fixture_name == 'mixed_barrier'
             or (grouped and args.case not in ('grouped_oversized', 'grouped_edge'))
             or (
@@ -951,7 +962,8 @@ class Driver:
                 sequences = set()
                 for record in row['records']:
                     assert record['commit'] == 0x43534143
-                    assert record['width'] == 4 and record['flags'] == 1
+                    width = uniform_store_width(fixture) if record['site'] < 2 else 4
+                    assert record['width'] == width and record['flags'] == 1
                     assert record['site'] in kinds
                     assert record['mask'] > 0
                     sequences.add(record['sequence'])
@@ -966,20 +978,27 @@ class Driver:
                     else (
                         wave_count
                         if self.args.fixture_kind == 'hip' and fixture == 'read_read'
-                        else expected[fixture]
+                        else (
+                            3 if fixture.startswith('uniform_b') else expected[fixture]
+                        )
                     )
                 )
             )
             assert len(observations) == count, observations
-            if fixture.startswith('uniform_store_'):
+            if fixture.startswith('uniform_'):
+                width = uniform_store_width(fixture)
                 writer_mask, peer_mask = uniform_store_masks(self.args.wave_size)
+                expected_rows = [(0, 2, 0, writer_mask, 0)]
+                if width > 4:
+                    expected_rows.append((0, 1, 1, writer_mask, 0))
+                peer_kind = 2 if fixture == 'uniform_store_write' else 1
+                expected_rows.append(
+                    (1, peer_kind, len(expected_rows), peer_mask, width - 4)
+                )
                 assert [
                     (wave, kind, record['site'], record['mask'], record['offset'])
                     for wave, kind, record in observations
-                ] == [
-                    (0, 2, 0, writer_mask, 0),
-                    (1, 2 if fixture == 'uniform_store_write' else 1, 1, peer_mask, 0),
-                ]
+                ] == expected_rows
             if fixture in ('race', 'read_read', 'high_lane'):
                 assert [
                     (wave, kind, record['mask'], record['offset'])
