@@ -13,6 +13,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -23,6 +24,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -62,6 +64,14 @@ private:
 util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &, RaceDetector &);
 
 inline constexpr size_t kTraceHistorySize = 256;
+/// The disassembly of the barrier `violation` names
+/// (RaceViolation::crossedBarrier), or an empty string, without calling
+/// `disassemble`, if it names none. Returns failure when `disassemble` fails.
+/// The callback must not throw.
+util::FailureOr<std::string> formatCrossedBarrier(
+    const RaceViolation &violation,
+    const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble);
+
 /// Default instruction context before formatTrace elides the middle of a report.
 inline constexpr size_t kDefaultTraceContext = 128;
 
@@ -93,11 +103,16 @@ util::FailureOr<std::string> formatTrace(
 /// `access_pc`, the conflicting event, and that event's completion and
 /// synchronization observed by the detector, with counter names for `arch`.
 /// Wave-local GDS source locks supply their producing instruction directly.
+/// When the violation carries a barrier (RaceViolation::crossedBarrier), a
+/// last line names the conflicting wave, that barrier and the counters to wait
+/// for before it. `barrier_instruction` is the disassembly of that barrier,
+/// shown beside its PC when not empty.
 /// @throws std::out_of_range if `events` no longer holds the conflicting event.
 /// @throws std::invalid_argument for an architecture without a wait-counter model.
 /// @throws std::logic_error if the event is already retired.
 std::string formatRaceDescription(const RaceViolation &violation, const EventRegistry &events,
-                                  uint64_t access_pc, rocjitsu::IsaFamily arch);
+                                  uint64_t access_pc, rocjitsu::IsaFamily arch,
+                                  std::string_view barrier_instruction = {});
 
 struct RaceWavefrontState : WavefrontState {
   /// The wave's most recently issued instructions, oldest first. Each entry owns
@@ -260,6 +275,10 @@ private:
 
   mutable std::mutex dispatch_mutex_;
   std::map<WorkgroupKey, std::unique_ptr<RaceDetector>> detectors_;
+
+  /// Whether this plugin has warned about a barrier signal it could not
+  /// attribute to a signalling instruction. It warns once.
+  std::atomic<bool> warned_unattributed_signal_ = false;
 
   mutable std::mutex report_mutex_;
   uint64_t reports_emitted_ = 0;

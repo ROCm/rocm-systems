@@ -549,6 +549,22 @@ void WaveRaceState::handOffPending(BarrierCellArrival kind, uint32_t epoch) {
   }
 }
 
+void WaveRaceState::noteLdsAccessesInFlight(const InstructionSnapshot &barrier, uint32_t epoch) {
+  const EventRegistry &events = detector->events();
+  // Resolved at the first access in flight, once for the signal.
+  std::optional<uint16_t> index;
+  for (const EventId eventId : waveMemoryEvents) {
+    // An event with no LDS bytes has nothing a barrier could order, and one
+    // whose LDS access has completed is released by this signal.
+    if ((!events.hasLiveLdsIntervals(eventId) && !events.hasLdsSourceReads(eventId)) ||
+        events.ldsAccessComplete(eventId))
+      continue;
+    if (!index)
+      index = detector->barrierIndex(barrier);
+    detector->markBarrierCrossedInFlight(eventId, *index, epoch);
+  }
+}
+
 void WaveRaceState::queueForBarrier(EventId eventId) {
   detector->stampReleaseEpoch(eventId);
   if (barrierPendingEvents.empty())

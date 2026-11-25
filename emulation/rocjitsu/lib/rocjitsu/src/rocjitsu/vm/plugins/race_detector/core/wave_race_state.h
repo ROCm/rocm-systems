@@ -294,6 +294,12 @@ public:
   /// an async load.
   void handOffPending(BarrierCellArrival kind, uint32_t epoch);
 
+  /// Record `barrier` and the wave's barrier epoch `epoch` on each event of
+  /// this wave with LDS bytes whose LDS access is in flight: the wave is
+  /// signalling that barrier, which therefore does not order those accesses
+  /// for the other waves. Reports nothing.
+  void noteLdsAccessesInFlight(const InstructionSnapshot &barrier, uint32_t epoch);
+
   /// Check a VGPR read by a set of lanes for races. Calls the RaceHandler on violation.
   void checkVgprReadLanes(int reg, uint64_t laneMask, uint8_t byteMask) const;
 

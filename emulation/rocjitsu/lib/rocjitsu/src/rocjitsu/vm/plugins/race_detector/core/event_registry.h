@@ -66,14 +66,7 @@ class EventRegistry {
     uint64_t execMask;
     std::vector<uint32_t> registers;
     IntervalSet ldsIntervals;
-    // Younger counter-only units in this FIFO, before its next tracked event.
-    std::array<uint8_t, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> followingUnits{};
     ConditionalVgprWrite feedback{};
-    bool hasLdsSourceReads = false;
-    /// The owning wave's barrier epoch when the event's LDS access completed,
-    /// or 0 until it has. The wave's next barrier signal or barrier-cell
-    /// arrival releases the event to other waves.
-    uint32_t releaseEpoch = 0;
     /// Set when an LDS barrier arrival that the event's LDS access is ordered
     /// before handed it off while the access was in flight (see RaceDetector,
     /// LDS barrier cells): the kind of that arrival and the owning wave's
@@ -82,6 +75,21 @@ class EventRegistry {
     /// of the wave carries.
     std::optional<BarrierCellArrival> handoffKind = std::nullopt;
     uint32_t handoffEpoch = 0;
+    /// The owning wave's barrier epoch when the event's LDS access completed,
+    /// or 0 until it has. The wave's next barrier signal or barrier-cell
+    /// arrival releases the event to other waves.
+    uint32_t releaseEpoch = 0;
+    /// The first and the most recent barrier signal of the owning wave that
+    /// the event's LDS access was in flight at (see markBarrierCrossedInFlight):
+    /// the wave's epoch at that signal and one more than the index of the
+    /// barrier instruction in `barriers_`, or 0 for none.
+    uint32_t firstBarrierEpoch = 0;
+    uint32_t lastBarrierEpoch = 0;
+    uint16_t firstBarrierCrossed = 0;
+    uint16_t lastBarrierCrossed = 0;
+    // Younger counter-only units in this FIFO, before its next tracked event.
+    std::array<uint8_t, amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS> followingUnits{};
+    bool hasLdsSourceReads = false;
   };
 
 public:
@@ -377,6 +385,58 @@ public:
   std::optional<BarrierCellArrival> handoffKind(EventId id) const { return get(id).handoffKind; }
   uint32_t handoffEpoch(EventId id) const { return get(id).handoffEpoch; }
 
+  /// The most distinct barrier instructions the registry can refer to. A
+  /// kernel signals barriers from a handful of instructions.
+  static constexpr size_t kMaxBarriers = std::numeric_limits<uint16_t>::max();
+
+  /// The index events use to refer to the barrier instruction `barrier`, or 0
+  /// if the registry already refers to kMaxBarriers others.
+  uint16_t barrierIndex(const InstructionSnapshot &barrier) {
+    // The event keeps an index into the distinct barriers seen, not a copy.
+    auto known = std::ranges::find(barriers_, barrier);
+    if (known == barriers_.end()) {
+      if (barriers_.size() == kMaxBarriers)
+        return 0;
+      known = barriers_.insert(barriers_.end(), barrier);
+    }
+    return static_cast<uint16_t>(known - barriers_.begin() + 1);
+  }
+
+  /// Record that the event's LDS access was in flight when its wave signalled
+  /// the barrier `barrier`, an index from barrierIndex(), in the wave's
+  /// barrier epoch `epoch`. The CDNA5 ISA specifies no wait for a memory
+  /// counter at a barrier signal (5.6 and 15.3, S_BARRIER_SIGNAL), so that
+  /// barrier does not order the access for the other waves. The first such
+  /// signal and the most recent one are kept. Index 0 records nothing.
+  void markBarrierCrossedInFlight(EventId id, uint16_t barrier, uint32_t epoch) {
+    if (barrier == 0)
+      return;
+    EventInfo &event = get(id);
+    if (event.firstBarrierCrossed == 0) {
+      event.firstBarrierCrossed = barrier;
+      event.firstBarrierEpoch = epoch;
+    }
+    event.lastBarrierCrossed = barrier;
+    event.lastBarrierEpoch = epoch;
+  }
+
+  /// A barrier the event's wave signalled with the event's LDS access in
+  /// flight, for a wave that has acquired epoch `acquiredEpoch` of the event's
+  /// wave: the most recent such signal if the wave has acquired its epoch,
+  /// else the first if it has acquired that one, else nullptr. A wave that
+  /// has acquired a signal's epoch is ordered after that signal: it was
+  /// released by the round the signal was counted toward, or it synchronized
+  /// with a wave that was. A wait before that signal would have ordered the
+  /// access for it. The pointer may be invalidated by the next barrierIndex().
+  const InstructionSnapshot *barrierCrossedInFlight(EventId id, uint32_t acquiredEpoch) const {
+    const EventInfo &event = get(id);
+    if (event.lastBarrierCrossed != 0 && acquiredEpoch >= event.lastBarrierEpoch)
+      return &barriers_[event.lastBarrierCrossed - 1];
+    if (event.firstBarrierCrossed != 0 && acquiredEpoch >= event.firstBarrierEpoch)
+      return &barriers_[event.firstBarrierCrossed - 1];
+    return nullptr;
+  }
+
   uint64_t registerLanes(EventId id, uint32_t reg, uint8_t bytes = 0xf) const {
     const auto &event = get(id);
     const uint64_t lanes =
@@ -463,6 +523,9 @@ private:
   }
 
   std::vector<EventInfo> entries_;
+  /// The distinct barrier instructions some event crossed in flight. Kept for
+  /// the life of the workgroup: a kernel has a handful.
+  std::vector<InstructionSnapshot> barriers_;
   std::unordered_map<int, EventInfo> completed_lds_;
   int base_offset_ = 0;
 };

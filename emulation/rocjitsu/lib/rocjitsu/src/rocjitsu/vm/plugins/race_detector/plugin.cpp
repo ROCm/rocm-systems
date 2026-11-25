@@ -58,6 +58,13 @@ void report_plugin_failure(const amdgpu::Wavefront &wf, const char *detail) {
     wf.report_instruction_execution_error(amdgpu::InstructionExecutionError::PluginFailure, detail);
 }
 
+/// Whether `mnemonic` is an instruction that signals a barrier. The other
+/// s_barrier_* instructions (wait, init, join, leave) signal nothing.
+bool signals_barrier(std::string_view mnemonic) {
+  return mnemonic == "s_barrier" || mnemonic == "s_barrier_signal" ||
+         mnemonic == "s_barrier_signal_isfirst";
+}
+
 util::FailureOr<InstructionSnapshot> capture_instruction(uint64_t pc, const Instruction &inst,
                                                          const amdgpu::Wavefront &wf) {
   static_assert(InstructionSnapshot::kMaxWords == amdgpu::DecodedInstructionCache::kNumWords);
@@ -67,12 +74,15 @@ util::FailureOr<InstructionSnapshot> capture_instruction(uint64_t pc, const Inst
     return util::Result::failure();
   }
   // Some synchronization operations lack the BARRIER flag.
+  const bool names_barrier = inst.mnemonic().find("barrier") != std::string_view::npos;
   const bool preserve_in_trace = inst.is_waitcnt() || inst.has_embedded_memory_wait() ||
-                                 inst.is_barrier() ||
-                                 inst.mnemonic().find("barrier") != std::string_view::npos ||
+                                 inst.is_barrier() || names_barrier ||
                                  inst.mnemonic().starts_with("ds_gws_") || inst.writes_pc();
+  // This runs for every instruction, so the mnemonic is compared with the
+  // signalling instructions only when it names a barrier at all.
   return InstructionSnapshot{pc, std::span(inst.raw_encoding(), inst.size() / sizeof(uint32_t)),
-                             preserve_in_trace, inst.mnemonic() == "s_nop"};
+                             preserve_in_trace, inst.mnemonic() == "s_nop",
+                             names_barrier && signals_barrier(inst.mnemonic())};
 }
 
 // Before-execute records the instruction before its register or memory hooks.
@@ -379,6 +389,14 @@ util::FailureOr<MarkedInstruction> findConflict(const RaceViolation &v, RaceDete
                            detector.events().waveId(event_id).value, -1};
 }
 
+util::FailureOr<std::string> formatCrossedBarrier(
+    const RaceViolation &violation,
+    const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble) {
+  if (!violation.crossedBarrier)
+    return std::string();
+  return disassemble(*violation.crossedBarrier);
+}
+
 util::FailureOr<std::string> formatTrace(
     const RingBuffer<InstructionSnapshot, kTraceHistorySize> &trace,
     const std::function<util::FailureOr<std::string>(const InstructionSnapshot &)> &disassemble,
@@ -552,10 +570,35 @@ std::string_view event_description(const EventRegistry &events, EventId event,
   throw std::logic_error("race event has an unknown memory operation");
 }
 
+/// The names of `event`'s wait counters, each once, in the order of its
+/// obligations, separated by ", ". With `pending_only`, only the counters the
+/// event is still pending on; with `lds_access_only`, for the LDS access of a
+/// FLAT event, only the counter that access completes on.
+std::string counter_names(const EventRegistry &events, EventId event, amdgpu::WaitcntModel model,
+                          bool pending_only, bool lds_access_only) {
+  std::vector<amdgpu::WaitCounterKind> named;
+  std::string names;
+  for (const amdgpu::MemoryCounterObligation obligation : events.counterObligations(event)) {
+    const amdgpu::WaitCounterType counter = obligation.wait_counter_type();
+    if (pending_only && !events.hasPendingWaitCounter(event, counter))
+      continue;
+    const amdgpu::WaitCounterKind kind = amdgpu::canonical_wait_counter(counter, model);
+    if ((lds_access_only && kind != amdgpu::WaitCounterKind::Ds) ||
+        std::ranges::find(named, kind) != named.end())
+      continue;
+    if (!named.empty())
+      names += ", ";
+    names += amdgpu::wait_counter_name(kind, model);
+    named.push_back(kind);
+  }
+  return names;
+}
+
 } // namespace
 
 std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &events,
-                                  uint64_t access_pc, rocjitsu::IsaFamily arch) {
+                                  uint64_t access_pc, rocjitsu::IsaFamily arch,
+                                  std::string_view barrier_instruction) {
   if (!v.sourceInstruction && !events.contains(v.conflictingEvent))
     throw std::out_of_range("race violation references an unavailable conflicting event");
   const util::FailureOr<amdgpu::WaitcntModel> model = amdgpu::waitcnt_model(arch);
@@ -614,22 +657,8 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
     oss << "  Wait requirements satisfied for the LDS access in wave " << owner << ".\n";
   } else if (status == EventStatus::ACTIVE) {
     oss << (flat_lds ? "  Completion of the LDS access for wave " : "  Completion for wave ")
-        << owner << " is not guaranteed; pending counters: ";
-    std::vector<amdgpu::WaitCounterKind> displayed;
-    for (const amdgpu::MemoryCounterObligation obligation : events.counterObligations(event)) {
-      const amdgpu::WaitCounterType counter = obligation.wait_counter_type();
-      if (!events.hasPendingWaitCounter(event, counter))
-        continue;
-      const amdgpu::WaitCounterKind kind = amdgpu::canonical_wait_counter(counter, model.value());
-      if ((flat_lds && kind != amdgpu::WaitCounterKind::Ds) ||
-          std::ranges::find(displayed, kind) != displayed.end())
-        continue;
-      if (!displayed.empty())
-        oss << ", ";
-      oss << amdgpu::wait_counter_name(kind, model.value());
-      displayed.push_back(kind);
-    }
-    oss << ".\n";
+        << owner << " is not guaranteed; pending counters: "
+        << counter_names(events, event, model.value(), /*pending_only=*/true, flat_lds) << ".\n";
   } else if (status == EventStatus::WAVE_COMPLETE) {
     oss << "  Wait requirements satisfied for this operation in wave " << owner << ".\n";
   } else {
@@ -638,6 +667,25 @@ std::string formatRaceDescription(const RaceViolation &v, const EventRegistry &e
   if (owner != v.wave)
     oss << "  The detector observed no synchronization between waves " << owner << " and " << v.wave
         << " for this access.\n";
+  // The conflicting access was in flight when its wave signalled this barrier,
+  // and the accessing wave is ordered after that signal (see
+  // RaceViolation::crossedBarrier). The CDNA5 ISA specifies no wait for a
+  // memory counter at a barrier signal (5.6 and 15.3, S_BARRIER_SIGNAL), so
+  // the barrier did not order the access, and a wait before the signal would
+  // have.
+  if (v.crossedBarrier) {
+    // The counters the LDS access completes on, whether or not its wave has
+    // waited for them since: for a FLAT access, its LDS-side counter alone.
+    const std::string counters =
+        counter_names(events, event, model.value(), /*pending_only=*/false, flat_lds);
+    assert(!counters.empty());
+    oss << "  Wave " << owner << " arrived at the barrier at PC 0x" << std::hex
+        << v.crossedBarrier->pc() << std::dec;
+    if (!barrier_instruction.empty())
+      oss << " (" << barrier_instruction << ")";
+    oss << " with this access in flight, so that barrier does not order it. Wait for " << counters
+        << " before the barrier.\n";
+  }
   return oss.str();
 }
 
@@ -730,8 +778,23 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
     }
     const MarkedInstruction &conflict = maybe_conflict.value();
 
+    // The barrier the report names is shown as issued.
+    util::StringDiagnostic barrier_diagnostic;
+    util::FailureOr<std::string> barrier_instruction =
+        formatCrossedBarrier(v, [wf, &barrier_diagnostic](const InstructionSnapshot &instruction) {
+          return wf->disassemble_instruction(instruction.encoding(), instruction.pc(),
+                                             barrier_diagnostic.emitter());
+        });
+    if (barrier_instruction.failed()) {
+      report_plugin_failure(*wf, "race detector could not disassemble a barrier instruction");
+      std::lock_guard<std::mutex> lock(report_mutex_);
+      sink().write(barrier_diagnostic.message());
+      return;
+    }
+
     std::ostringstream oss;
-    oss << formatRaceDescription(v, detector->events(), pc, wf->cu().arch());
+    oss << formatRaceDescription(v, detector->events(), pc, wf->cu().arch(),
+                                 barrier_instruction.value());
 
     MarkedInstruction access_mark{*current, v.wave, v.lane};
     util::StringDiagnostic diagnostic;
@@ -1796,7 +1859,29 @@ void RaceDetectorPlugin::onAmdgpuBarrierSignaled(const amdgpu::Wavefront &wf,
   WaveRaceState *race = tracked_race_state(wf);
   if (!race)
     return;
-  race->getDetector()->barrierSignaled(race->getWaveId(), roundId(round));
+  // The detector records the signalling instruction on the LDS accesses the
+  // wave still has in flight, for the report of a race with one of them. The
+  // simulator counts a signal while the wave's newest instruction is the one
+  // that signals: s_barrier_signal reports its signal as it executes, and a
+  // wave parked at s_barrier issues nothing before the barrier resolves. This
+  // relies on the trace holding the wave's newest instruction: a capture that
+  // failed has already recorded a plugin failure on the wave. The trap
+  // barriers are signalled by the trap handler, not by the kernel, and are
+  // not recorded.
+  const InstructionSnapshot *barrier = nullptr;
+  if (round.completion_bit != amdgpu::kWorkgroupTrapBarrierBit &&
+      round.completion_bit != amdgpu::kClusterTrapBarrierBit) {
+    const auto &trace = get_state(wf)->trace;
+    if (trace.size() != 0 && trace[trace.size() - 1].signals_barrier()) {
+      barrier = &trace[trace.size() - 1];
+    } else if (!warned_unattributed_signal_.exchange(true)) {
+      util::Logger::warn(std::format(
+          "race detector: wave {} signalled a barrier at PC {:#x} from an instruction that does "
+          "not signal one; race reports will not name barriers signalled this way",
+          race->getWaveId().value, wf.pc));
+    }
+  }
+  race->getDetector()->barrierSignaled(race->getWaveId(), roundId(round), barrier);
 }
 
 void RaceDetectorPlugin::onAmdgpuBarrierRoundCompleted(std::span<amdgpu::Wavefront *> notified,

@@ -113,6 +113,13 @@ struct RaceViolation {
   bool conflictsWithSrc2Read = false; ///< The conflicting bytes are the LDS source operand.
   /// The conflicting bytes are the barrier cell a tensor transfer arrives at.
   bool conflictsWithBarrierArrive = false;
+  /// For an LDS race with another wave's access: a barrier that wave signalled
+  /// with the access in flight and that the violating wave is ordered after,
+  /// if there is one. The violating wave passed that barrier or synchronized
+  /// with a wave that did. The CDNA5 ISA specifies no wait for a memory
+  /// counter at a barrier signal (5.6 and 15.3, S_BARRIER_SIGNAL), so the
+  /// barrier did not order the access; a wait before the signal would have.
+  std::optional<InstructionSnapshot> crossedBarrier;
 
   RaceViolation(Space space, int index, int wave, int lane, bool isWrite, Dim3d workgroupId,
                 EventId conflictingEvent)

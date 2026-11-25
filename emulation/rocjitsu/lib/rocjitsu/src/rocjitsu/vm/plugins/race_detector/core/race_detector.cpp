@@ -191,7 +191,13 @@ void RaceDetector::closeRound(BarrierRoundState &state) {
   --openRounds_;
 }
 
-void RaceDetector::barrierSignaled(WaveId wave, BarrierRoundId round) {
+void RaceDetector::barrierSignaled(WaveId wave, BarrierRoundId round,
+                                   const InstructionSnapshot *barrier) {
+  // Before the epoch advances: a wave this round releases acquires the epoch
+  // the wave signals in, so that is the epoch an access in flight now crossed
+  // this barrier at. With no other wave there is nothing to order.
+  if (barrier && waveCount() > 1)
+    waveRaceStates[wave.value].noteLdsAccessesInFlight(*barrier, acquired(wave, wave));
   BarrierRoundState &state = roundState(round);
   joinReleased(state.clock, wave);
   state.signalled |= uint64_t{1} << wave.value;
@@ -345,6 +351,23 @@ bool RaceDetector::ordered(WaveId accessor, EventId eventId) const {
   // An event has a release epoch once its LDS access has completed.
   const uint32_t releaseEpoch = events_.releaseEpoch(eventId);
   return releaseEpoch != 0 && acquired(accessor, events_.waveId(eventId)) >= releaseEpoch;
+}
+
+RaceViolation RaceDetector::withCrossedBarrier(RaceViolation violation, WaveId accessor,
+                                               EventId eventId) const {
+  // A barrier orders accesses between waves; a wave's race with its own
+  // access is not one a barrier could have ordered.
+  const WaveId owner = events_.waveId(eventId);
+  if (owner == accessor)
+    return violation;
+  // The signal released the owner's epoch into its round (see
+  // barrierSignaled()). An accessor that has acquired that epoch is ordered
+  // after the signal: it passed the barrier, or it synchronized with a wave
+  // that did. A wait before the signal would have ordered the access for it.
+  if (const InstructionSnapshot *barrier =
+          events_.barrierCrossedInFlight(eventId, acquired(accessor, owner)))
+    violation.crossedBarrier = *barrier;
+  return violation;
 }
 
 bool RaceDetector::handedOffTo(WaveId accessor, EventId eventId) const {
@@ -506,8 +529,9 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
         // Report a byte both accesses touch, not the start of this access.
         if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
             byte && !handedOffTo(wave, eventId)) {
-          raceHandler(
-              {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId});
+          raceHandler(withCrossedBarrier(
+              {RaceViolation::Space::LDS, *byte, wave.value, lane, false, workgroupId, eventId},
+              wave, eventId));
         }
         // Report every conflicting event.
         return false;
@@ -531,7 +555,7 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
           RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, source.id};
       (source.barrierArrive ? violation.conflictsWithBarrierArrive
                             : violation.conflictsWithSrc2Read) = true;
-      raceHandler(violation);
+      raceHandler(withCrossedBarrier(std::move(violation), wave, source.id));
     }
     // Report every conflicting event.
     return false;
@@ -543,8 +567,9 @@ void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
         // Report a byte both accesses touch, not the start of this access.
         if (const auto byte = events_.ldsIntervals(eventId).firstOverlap(addr, addr + nBytes);
             byte && !handedOffTo(wave, eventId)) {
-          raceHandler(
-              {RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId});
+          raceHandler(withCrossedBarrier(
+              {RaceViolation::Space::LDS, *byte, wave.value, lane, true, workgroupId, eventId},
+              wave, eventId));
         }
         // Report every conflicting event.
         return false;

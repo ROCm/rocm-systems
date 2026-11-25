@@ -124,6 +124,18 @@ public:
     events_.markHandedOff(eventId, kind, epoch);
   }
 
+  /// The index events use to refer to the barrier instruction `barrier`
+  /// (see EventRegistry::barrierIndex()).
+  uint16_t barrierIndex(const InstructionSnapshot &barrier) {
+    return events_.barrierIndex(barrier);
+  }
+  /// Record that an event's LDS access was in flight when its wave signalled
+  /// the barrier `barrier`, an index from barrierIndex(), in the wave's
+  /// barrier epoch `epoch`.
+  void markBarrierCrossedInFlight(EventId eventId, uint16_t barrier, uint32_t epoch) {
+    events_.markBarrierCrossedInFlight(eventId, barrier, epoch);
+  }
+
   /// Satisfy the event's obligations covered by one wait-counter update.
   /// Returns true once every obligation for the event has been satisfied.
   bool satisfyEventWaitCounter(EventId, amdgpu::WaitCounterType);
@@ -229,8 +241,15 @@ public:
   // -- Barrier ordering --
 
   /// `wave`'s signal was counted toward `round`: release into the round
-  /// everything the wave has completed or acquired.
-  void barrierSignaled(WaveId wave, BarrierRoundId round);
+  /// everything the wave has completed or acquired. `barrier` is the
+  /// instruction that signalled, when the caller knows it. The signal does not
+  /// release what the wave still has in flight, so `barrier` and the wave's
+  /// epoch are recorded on each of its LDS accesses in flight; a race between
+  /// such an access and a wave ordered after this signal names the barrier (see
+  /// RaceViolation::crossedBarrier). Nothing is recorded in a single-wave
+  /// workgroup, which has no other wave to race with.
+  void barrierSignaled(WaveId wave, BarrierRoundId round,
+                       const InstructionSnapshot *barrier = nullptr);
 
   /// `round` completed. `armed` lists the waves whose completion bit the
   /// round set, whose next wait on this barrier it releases; not every wave
@@ -328,6 +347,11 @@ private:
   /// Whether a barrier has ordered another wave's completed event before
   /// `accessor`'s access.
   bool ordered(WaveId accessor, EventId) const;
+
+  /// `violation`, a race between `accessor` and the LDS access of `eventId`,
+  /// with the barrier that access crossed in flight and that `accessor` has
+  /// passed, if another wave owns the access and there is such a barrier.
+  RaceViolation withCrossedBarrier(RaceViolation violation, WaveId accessor, EventId eventId) const;
 
   /// Whether `accessor` has acquired the handoff of another wave's event at an
   /// LDS barrier arrival, which orders the event's LDS access before

@@ -187,6 +187,24 @@ observe, such as an LDS barrier phase wait; see [Limitations](#limitations).
 Completion and inter-wave synchronization are separate conditions; one wait
 instruction is not a universal fix for every reported hazard.
 
+When the conflicting access of an LDS race belongs to another wave, was still
+in flight as that wave signalled a barrier, and the accessing wave is ordered
+after that signal, the description ends with a line that names the wave, the
+barrier and the counters to wait for before it:
+
+```
+  Wave 0 arrived at the barrier at PC 0x1b0 (s_barrier_signal -1) with this access in flight, so that barrier does not order it. Wait for dscnt before the barrier.
+```
+
+The two accesses a report names can be far apart; this line points at the
+barrier between them, where the wait is missing: a wait before that signal
+would have ordered the access for the accessing wave. It is shown whether the
+conflicting access is still pending or its wave has waited for it since: a
+wait after the signal completes the access for that wave, but the barrier
+still did not order it for the others. A report without the line names no
+barrier. See [Barriers](#barriers) for when a barrier is named and for the
+signals that are not recorded.
+
 Each trace row is disassembled from its own captured bytes, so code rewrites or
 unmapping do not change the reported instructions. Within the reporting wave,
 the displayed span starts at the first matching producer PC and encoding and
@@ -460,6 +478,69 @@ s_wait_dscnt 0                   s_barrier_wait -1
 s_barrier_wait -1                ds_load_b32 v2, v0   ; race: the store
                                                       ; completed after the signal
 ```
+
+The CDNA5 ISA specifies no wait for a memory counter at a barrier signal (5.6
+and 15.3, `S_BARRIER_SIGNAL`), so a wave that signals with an LDS access in
+flight has told the other waves to proceed while that access may not have
+reached LDS. On targets with a single `s_barrier`, which that ISA does not
+define, the simulator models the instruction as a signal and a wait that
+coincide, and the detector treats its signal the same way. At each counted
+signal the detector records, on each LDS access its wave still has in flight,
+the barrier instruction the wave was executing. This covers every LDS access
+alike: DS instructions, the LDS lanes of FLAT instructions, direct-to-LDS
+loads, async copies and tensor DMA. Recording reports nothing and orders
+nothing. If such an access later races with another wave, as the store does
+above, the report names the barrier (see
+[Reading a report](#reading-a-report)), and the fix is the access's wait
+before that signal: `s_wait_dscnt 0` before `s_barrier_signal` here.
+
+- Leaving an access in flight at a barrier is not reported by itself. A
+  pipelined kernel starts loading one buffer, crosses a barrier that
+  coordinates work on another, then waits for the load and lets the next
+  barrier order it; and a wave whose bytes no other wave touches has nothing
+  to order. Neither is a race.
+- A report names a barrier when the accessing wave is ordered after the
+  conflicting wave's signal of it. A wait before that signal would then have
+  ordered the access for the accessing wave, so the line is the fix. The
+  accessing wave is ordered after the signal when it has passed that barrier,
+  and also when it has synchronized since with a wave that did:
+  - through another barrier, including a trap barrier. A wave outside a named
+    barrier that later passes a barrier with one of its members is ordered
+    after the signals of the named barrier too;
+  - through an LDS barrier cell the conflicting wave arrived at after the
+    signal. This matters for an access the arrival does not hand off, such as
+    an async load ahead of a DS arrive. An access the arrival hands off does
+    not race with a wave that reads the cell.
+- A wave that is not ordered after the signal gets the report without the
+  line: it has not reached its barrier wait, or it is outside a named barrier
+  and has not synchronized with a member since. The missing synchronization
+  is then its own.
+- An access can cross several barriers in flight. The detector keeps the first
+  and the most recent, and names the most recent if the accessing wave is
+  ordered after it, else the first. When the conflicting wave runs ahead of
+  the accessing wave, the accessing wave is ordered after only the earlier
+  signal, and that is the one named, even after the conflicting wave has
+  waited for the access and signalled again.
+- With three or more barriers crossed, and the accessing wave ordered after
+  some but not the most recent, the first is named. It may be a barrier the
+  accessing wave did not itself wait on. The wait belongs before the first in
+  any case.
+- Reports are deduplicated by the PC of the access. If the first observation
+  at a PC is by a wave not yet ordered after the signal, the report has no
+  line, and a later observation that would carry it is suppressed.
+- The counters named are the ones the LDS access completes on: for a FLAT
+  access its LDS-side counter (CDNA5 ISA 5.7.1.3), whatever its LOADcnt or
+  STOREcnt.
+- The workgroup barrier, named barriers and the cluster barrier are recorded,
+  on targets with `s_barrier_signal` and on targets with a single `s_barrier`,
+  where every member is recorded as the barrier resolves. The trap barriers,
+  which the trap handler signals, are not recorded, and neither is a signal the
+  hardware ignores.
+- A signal is recorded from the wave's newest instruction, which is the
+  signalling instruction when the simulator counts the signal. If it is not,
+  the signal still orders what it always did and records no barrier, and the
+  detector warns about the first such signal of the run, naming the wave and
+  its PC.
 
 ### LDS barrier cells
 
@@ -841,7 +922,10 @@ Tests are part of the rocjitsu test suite (`emulation/rocjitsu/tests/`):
   for the combined counters before GFX12 and the gfx1250 split counters.
 - `interval_set_tests.cpp` — unit tests for `IntervalSet`.
 - `execution_plugin_race_test.cpp` — drives the plugin's hooks, including
-  tensor DMA transfers, async copies and LDS barrier cells on gfx1250.
+  tensor DMA transfers, async copies and LDS barrier cells on gfx1250, and
+  runs two-wave kernels whose race reports name the barrier an access crossed
+  in flight.
+- `race_report_test.cpp` — the report's description and trace.
 - `wait_hazard_test.cpp` — wait/readiness tests shared with the core checker.
 - The `race` suite in
   [ROCm/rocjitsu-test-corpus](https://github.com/ROCm/rocjitsu-test-corpus)
