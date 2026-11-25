@@ -231,6 +231,13 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
       {"ReduceScatter_RailA2A_LsaLD_avg_f8e5m2", ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD, ncclDevSumPostDiv,
        ncclFloat8e5m2, (void*)ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e5m2,
        (void*)ncclSymkDevKernel_ReduceScatter_RailA2A_LsaLD_avg_f8e5m2_profile},
+
+      {"ReduceScatter_HierLsaLDST_sum_f32", ncclSymkKernelId_ReduceScatter_HierLsaLDST, ncclDevSum, ncclFloat32,
+       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f32,
+       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_f32_profile},
+      {"ReduceScatter_HierLsaLDST_sum_bf16", ncclSymkKernelId_ReduceScatter_HierLsaLDST, ncclDevSum, ncclBfloat16,
+       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_bf16,
+       (void*)ncclSymkDevKernel_ReduceScatter_HierLsaLDST_sum_bf16_profile},
   };
   static const std::vector<ExpectedKernelCase> kAll = [] {
     std::vector<ExpectedKernelCase> all = kCases;
@@ -243,7 +250,7 @@ const std::vector<ExpectedKernelCase>& ValidCases() {
 INSTANTIATE_TEST_SUITE_P(SymAllEmittedCombinations, SymKernelIndexValidTest, ::testing::ValuesIn(ValidCases()),
                          [](const ::testing::TestParamInfo<ExpectedKernelCase>& info) { return info.param.name; });
 
-// A 44th generated kernel would otherwise fail elsewhere (link error or the Python EXPECTED_TOTAL) unnoticed here.
+// A 50th generated kernel would otherwise fail elsewhere (link error or the Python EXPECTED_TOTAL) unnoticed here.
 TEST(SymKernelIndexValidCasesTest, CoversEveryGeneratedKernel) {
   EXPECT_EQ(static_cast<int>(ValidCases().size()), ncclSymkKernelCount);
 }
@@ -311,6 +318,9 @@ const std::vector<InvalidKernelCase>& InvalidCases() {
       {"AllReduce_AGxLL_R_UnknownRed_Prod", ncclSymkKernelId_AllReduce_AGxLL_R, ncclDevProd, ncclFloat32},
       // Inner switch(red) default: AllReduce implements sum only (generate.py skips avg for it).
       {"AllReduce_AGxLL_R_UnsupportedRed_Avg", ncclSymkKernelId_AllReduce_AGxLL_R, ncclDevSumPostDiv, ncclFloat32},
+      // Inner switch(red) default: the hierarchical ReduceScatter is sum only (generate.py skips avg for it).
+      {"ReduceScatter_HierLsaLDST_UnsupportedRed_Avg", ncclSymkKernelId_ReduceScatter_HierLsaLDST, ncclDevSumPostDiv,
+       ncclFloat32},
       {"ReduceScatter_LL_UnknownRed_Prod", ncclSymkKernelId_ReduceScatter_LL, ncclDevProd, ncclFloat32},
 
       // Innermost switch(ty) default: a real ncclDataType_t this (id, red) has no case for.

@@ -293,18 +293,6 @@ inline bool quiets_nan(rocjitsu::IsaFamily arch, bool ieee_mode) {
   return arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5 || ieee_mode;
 }
 
-/// @brief Apply V_CVT_F32_F16 policy to an already decoded and modified half.
-/// @details Raw half decoding preserves signaling NaNs. The caller flushes the
-/// half under MODE before widening it; this applies target-specific NaN quieting.
-inline uint32_t cvt_f32_f16(float source, rocjitsu::IsaFamily arch, bool ieee_mode) {
-  uint32_t bits = std::bit_cast<uint32_t>(source);
-  const uint32_t magnitude = bits & 0x7fffffffu;
-  if (quiets_nan(arch, ieee_mode) && magnitude > 0x7f800000u) {
-    bits |= 0x00400000u;
-  }
-  return bits;
-}
-
 /// @brief Pack two rounded F16 results, applying the destination denormal mode to each half.
 /// @details gfx1250 flushes the exact subnormal 2^-20. At the normal boundary,
 /// the packed conversion models tininess using the rounded FP16 encoding.
@@ -1014,39 +1002,6 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
       });
 }
 
-/// @brief V_MULLIT_F32 on sources with ABS/NEG applied, before OMOD and CLAMP.
-/// @details MODE flushes the sources first, so a subnormal S2 counts as zero.
-/// S1 equal to -MAX_FLOAT, -INF or NaN, or S2 that is zero, negative or NaN,
-/// gives -MAX_FLOAT. Otherwise a zero factor gives +0, as in the legacy multiply,
-/// even with an infinite or NaN S0. Other products use the architectural F32
-/// multiply: MODE rounding, tininess before F32 exponent packing, and quiets_nan
-/// for a NaN S0. `force_output_flush` is set by an effective OMOD, which flushes a
-/// tiny product before scaling, as for V_MUL_F32.
-/// Measured on gfx1201 and gfx1100 (IEEE=0 and 1); other targets with
-/// V_MULLIT_F32 inherit these rules without measurement.
-inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
-                           uint32_t denorm_mode, rocjitsu::IsaFamily arch, bool ieee_mode,
-                           bool force_output_flush) {
-  using F32 = fp_format::F32;
-  constexpr uint32_t kNegativeMax = F32::kSign | (F32::kInfinity - 1);
-  const auto input = input_denormal::Policy::make(denorm_mode);
-  s0 = input_denormal::flush_input<F32>(s0, input);
-  s1 = input_denormal::flush_input<F32>(s1, input);
-  s2 = input_denormal::flush_input<F32>(s2, input);
-  const auto is_nan = [](uint32_t bits) { return (bits & F32::kMagnitude) > F32::kInfinity; };
-  const bool s2_positive = (s2 & F32::kSign) == 0 && s2 != 0;
-  if (s1 == kNegativeMax || s1 == (F32::kSign | F32::kInfinity) || is_nan(s1) || !s2_positive ||
-      is_nan(s2)) {
-    return kNegativeMax;
-  }
-  if ((s0 & F32::kMagnitude) == 0 || (s1 & F32::kMagnitude) == 0) {
-    return 0;
-  }
-  return std::bit_cast<uint32_t>(
-      arithmetic<Arithmetic::MUL>(std::bit_cast<float>(s0), std::bit_cast<float>(s1), 0.0f,
-                                  round_mode, denorm_mode, arch, ieee_mode, force_output_flush));
-}
-
 /// @brief Evaluate prepared F16 arithmetic operands in F64.
 /// @details The caller flushes each raw source half before widening. Destination
 /// rounding and output flushing belong to finish_arithmetic_f16; migrated VOP3
@@ -1210,61 +1165,6 @@ inline uint64_t fma_f64(uint64_t src0, uint64_t src1, uint64_t src2, uint32_t ro
     // evaluate_arithmetic keeps the FMA inside the guest rounding environment.
     const double value = detail::evaluate_arithmetic<Arithmetic::FMA>(
         std::bit_cast<double>(src0), std::bit_cast<double>(src1), std::bit_cast<double>(src2));
-    result = std::bit_cast<uint64_t>(value);
-  }
-  return output_denormal::flush_output<fp_format::F64>(result,
-                                                       output_denormal::Policy::make(denorm_mode));
-}
-
-/// @brief Binary F64 operations implemented by the shared MODE-aware helper.
-enum class BinaryF64Op { Add, Multiply, MaximumNumber, MinimumNumber };
-
-/// @brief Execute a binary F64 operation under MODE.FP_ROUND and MODE.FP_DENORM.
-/// @details MaximumNumber and MinimumNumber return the numeric operand for a
-/// one-NaN input and explicitly select +0/-0 for signed-zero ties respectively.
-inline uint64_t binary_f64(uint64_t src0, uint64_t src1, BinaryF64Op operation, uint32_t round_mode,
-                           uint32_t denorm_mode) {
-  const auto input = input_denormal::Policy::make(denorm_mode);
-  src0 = input_denormal::flush_input<fp_format::F64>(src0, input);
-  src1 = input_denormal::flush_input<fp_format::F64>(src1, input);
-
-  uint64_t result;
-  {
-    detail::ScopedFenv environment(round_mode);
-    const double lhs = std::bit_cast<double>(src0);
-    const double rhs = std::bit_cast<double>(src1);
-    const double value = [&] {
-      switch (operation) {
-      // evaluate_arithmetic keeps these inside the guest rounding environment.
-      case BinaryF64Op::Add:
-        return detail::evaluate_arithmetic<Arithmetic::ADD>(lhs, rhs, 0.0);
-      case BinaryF64Op::Multiply:
-        return detail::evaluate_arithmetic<Arithmetic::MUL>(lhs, rhs, 0.0);
-      case BinaryF64Op::MaximumNumber:
-        if (std::isnan(lhs)) {
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        }
-        if (std::isnan(rhs)) {
-          return lhs;
-        }
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0) {
-          return std::bit_cast<double>((src0 & src1) & 0x8000000000000000ULL);
-        }
-        return std::fmax(lhs, rhs);
-      case BinaryF64Op::MinimumNumber:
-        if (std::isnan(lhs)) {
-          return std::isnan(rhs) ? std::numeric_limits<double>::quiet_NaN() : rhs;
-        }
-        if (std::isnan(rhs)) {
-          return lhs;
-        }
-        if ((src0 & 0x7fffffffffffffffULL) == 0 && (src1 & 0x7fffffffffffffffULL) == 0) {
-          return std::bit_cast<double>((src0 | src1) & 0x8000000000000000ULL);
-        }
-        return std::fmin(lhs, rhs);
-      }
-      return std::numeric_limits<double>::quiet_NaN();
-    }();
     result = std::bit_cast<uint64_t>(value);
   }
   return output_denormal::flush_output<fp_format::F64>(result,

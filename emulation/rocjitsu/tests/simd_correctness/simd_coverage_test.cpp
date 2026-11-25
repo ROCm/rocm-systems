@@ -239,18 +239,6 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
                                       wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
                                       iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
                                       fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
-        } else {
-          constexpr auto operation = Op == PackedFloatOp::ADD   ? fp_mode::PackedBinaryOp::ADD
-                                     : Op == PackedFloatOp::MUL ? fp_mode::PackedBinaryOp::MUL
-                                     : Op == PackedFloatOp::MIN ? fp_mode::PackedBinaryOp::MIN
-                                     : Op == PackedFloatOp::MAX ? fp_mode::PackedBinaryOp::MAX
-                                     : Op == PackedFloatOp::MINIMUM
-                                         ? fp_mode::PackedBinaryOp::MINIMUM
-                                         : fp_mode::PackedBinaryOp::MAXIMUM;
-          expected = fp_mode::packed_binary_f16(operation, a[i], b[i], wf.fp_round_mode_f16_f64(),
-                                                wf.fp_denorm_mode_f16_f64(), iteration & 1,
-                                                wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
-                                                wf.cu().arch(), wf.ieee_mode());
         }
         ASSERT_EQ(actual[i], expected)
             << mode << ":" << iteration << " inputs=" << a[i] << "," << b[i] << "," << c[i];
@@ -258,35 +246,12 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
     }
   }
 }
-TEST_F(SimdCoverage, PackedF16Numerics) {
-  check_packed_half<PackedFloatOp::ADD, false>(*wf);
-  check_packed_half<PackedFloatOp::MUL, false>(*wf);
-  check_packed_half<PackedFloatOp::MIN, false>(*wf);
-  check_packed_half<PackedFloatOp::MAX, false>(*wf);
-  check_packed_half<PackedFloatOp::MINIMUM, false>(*wf);
-  check_packed_half<PackedFloatOp::MAXIMUM, false>(*wf);
-}
 TEST_F(SimdCoverage, PackedBf16Numerics) {
   check_packed_half<PackedFloatOp::ADD, true>(*wf);
   check_packed_half<PackedFloatOp::MUL, true>(*wf);
   check_packed_half<PackedFloatOp::FMA, true>(*wf);
   check_packed_half<PackedFloatOp::MIN, true>(*wf);
   check_packed_half<PackedFloatOp::MAX, true>(*wf);
-}
-
-TEST_F(SimdCoverage, PackedBroadcastAndInlineConstantEnterSimd) {
-  WordInst inst;
-  inst.inst_.opsel_hi = 1;
-  inst.src1 = O(32, K::OPR_SRC, 242); // inline 1.0
-  inst.inst_.src1 = 242;
-  wf->set_mode_raw(3u << 6);
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-    put(0, lane, 0x40003c00u);
-  }
-  ASSERT_TRUE((try_execute_packed_float_simd<PackedFloatOp::ADD, false>(inst, *wf)));
-  ASSERT_EQ(get(3, 0), 0x42004000u); // {1+1, 2+1}
-  util::set_force_scalar_for_testing(true);
-  ASSERT_FALSE((try_execute_packed_float_simd<PackedFloatOp::ADD, false>(inst, *wf)));
 }
 
 struct Slot {

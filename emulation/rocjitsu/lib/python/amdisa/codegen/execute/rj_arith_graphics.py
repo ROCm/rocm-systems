@@ -18,7 +18,14 @@ INTERP_NAMES = {
 # Architecture suffix of the MULLIT entry points. RDNA3 owns the unsuffixed entry and RDNA4
 # the _gfx12 entry; both accept bit-exact semantics. gfx1250 inherits the same model through a
 # loose-only entry until its captures are reviewed.
-MULLIT_ARCH_SUFFIX = {'rdna3': '', 'rdna4': '_gfx12', 'cdna5': '_gfx1250'}
+MULLIT_ARCH_SUFFIX = {
+    'rdna1': '_gfx10',
+    'rdna2': '_gfx10',
+    'rdna3_5': '_gfx1150',
+    'rdna3': '',
+    'rdna4': '_gfx12',
+    'cdna5': '_gfx1250',
+}
 
 
 def gen_interp(ctx: ExecuteContext) -> str | None:
@@ -68,7 +75,19 @@ def gen_cube(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
+        arch
+        not in (
+            'cdna1',
+            'cdna2',
+            'cdna3',
+            'cdna4',
+            'cdna5',
+            'rdna1',
+            'rdna2',
+            'rdna3',
+            'rdna3_5',
+            'rdna4',
+        )
         or mnemonic not in CUBE_NAMES
         or not is_vop3
     ):
@@ -85,7 +104,7 @@ def gen_cube(ctx: ExecuteContext) -> str | None:
         '  flags |= uint64_t(wf.fp_round_mode_f32()) << 24;',
         '  if (wf.ieee_mode()) flags |= RJ_ARITH_FP_IEEE_MODE;',
     ]
-    if arch in ('rdna3', 'cdna3', 'cdna4'):
+    if arch not in ('rdna4', 'cdna5'):
         lines += ['  if (!wf.dx10_clamp()) flags |= RJ_ARITH_FP_DX10_CLAMP_OFF;']
     lines += [
         '  const uint64_t modifiers = ((inst_.abs & 1) ? RJ_ARITH_ALU_ABS_A : 0u) |',
@@ -110,7 +129,7 @@ def gen_mullit(ctx: ExecuteContext) -> str | None:
     src = ctx.src_ops
     is_vop3 = ctx.is_vop3
     if (
-        arch not in ('rdna3', 'rdna4', 'cdna5')
+        arch not in ('rdna1', 'rdna2', 'rdna3', 'rdna3_5', 'rdna4', 'cdna5')
         or mnemonic != 'V_MULLIT_F32'
         or not is_vop3
     ):
@@ -133,6 +152,6 @@ def gen_mullit(ctx: ExecuteContext) -> str | None:
             '  const uint64_t modifiers = ' + ' | '.join(terms) + ';',
             f'  amdgpu::arith::execute_float_ternary32(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
             '      wf.cu().arithmetic_flags(), modifiers,',
-            f'      {dst[0]}, {", ".join(src)}, {str(arch == "rdna3").lower()});',
+            f'      {dst[0]}, {", ".join(src)}, {str(arch not in ("rdna4", "cdna5")).lower()});',
         ]
     )

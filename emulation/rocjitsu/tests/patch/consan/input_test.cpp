@@ -9,6 +9,8 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -30,6 +32,32 @@ namespace rocjitsu::consan {
 namespace {
 
 constexpr const TargetProfile &kTarget = kNativeLdsTargets[2];
+
+TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
+  const auto decoder = Decoder::create(IsaFamily::Cdna4);
+  ASSERT_NE(decoder, nullptr);
+  const auto check = [&](uint16_t opcode, cdna4::DsBuilderFields fields, InputErrorCode expected) {
+    const DecodeResult decoded = decoder->decode_window(cdna4::build_ds(opcode, fields));
+    ASSERT_TRUE(decoded.succeeded());
+    std::vector<NativeLdsAccess> sites;
+    InputError error;
+    EXPECT_TRUE(classify_lds_race_instruction(*decoded.value(), IsaFamily::Cdna4, 8, sites, error)
+                    .failed());
+    EXPECT_EQ(error.code, expected);
+    EXPECT_TRUE(sites.empty());
+  };
+  check(cdna4::kDsAddU32Ds, {.gds = 1, .addr = 3, .data0 = 7},
+        InputErrorCode::UnsupportedSynchronization);
+  check(cdna4::kDsAddRtnU32Ds, {.addr = 3, .data0 = 7, .vdst = 2},
+        InputErrorCode::UnsupportedSynchronization);
+  check(cdna4::kDsAddU32Ds, {.acc = 1, .addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsAddU32Ds, {.addr = 3, .data0 = 8}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsAddU64Ds, {.addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsCmpstRtnB32Ds, {.addr = 3, .data0 = 7, .data1 = 8, .vdst = 3},
+        InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsCmpstRtnB32Ds, {.addr = 3, .data0 = 7, .data1 = 2, .vdst = 8},
+        InputErrorCode::UnsupportedAccess);
+}
 
 TEST(ConSanInput, Gfx1100UsesConcreteModelOnlyDecoder) {
   const IsaTargetRegistry &registry = default_isa_target_registry();
@@ -496,10 +524,14 @@ TEST_F(ConSanInputFixture, BarrierAndExcludedAccessCannotBecomeNoSyncFacts) {
   EXPECT_TRUE(inspect(load("barrier")).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedSynchronization);
   EXPECT_TRUE(error_.text_offset.has_value());
-  const std::vector<uint8_t> excluded =
-      test::read_fixture(test::target_fixture_path({"gfx1100", 32}, "width-excluded-b8"));
-  ASSERT_FALSE(excluded.empty());
-  EXPECT_TRUE(inspect(excluded).failed());
+  const FailureOr<InputProgram> ordinary = inspect(image_);
+  ASSERT_TRUE(ordinary.succeeded());
+  ASSERT_FALSE(ordinary.value().accesses.empty());
+  const size_t offset = text_offset_ + ordinary.value().accesses.front().original_offset;
+  const std::array<uint32_t, 2> gds = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.gds = 1});
+  ASSERT_LE(offset + sizeof(gds), image_.size());
+  std::memcpy(image_.data() + offset, gds.data(), sizeof(gds));
+  EXPECT_TRUE(inspect(image_).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedAccess);
   EXPECT_TRUE(error_.text_offset.has_value());
 }

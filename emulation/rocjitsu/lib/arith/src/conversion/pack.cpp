@@ -279,26 +279,56 @@ int rj_arith_v_sat_pk_u8_i16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
   return run_wave64<true>(flags, exec_mask, instruction_flags, d, a, nullptr, true, false);
 }
 
-// gfx942/gfx950 share the RDNA3 packing model; strict exact is unsupported pending CDNA captures.
+// gfx942 shares the RDNA3 packing model; empirically exact on MI300X.
 int rj_arith_v_pack_b32_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        [[maybe_unused]] uint32_t *trapsts) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
-    return error;
-  }
   return rj_arith_v_pack_b32_f16_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// gfx942/gfx950 share the RDNA3 packing model; strict exact is unsupported pending CDNA captures.
 int rj_arith_v_pack_b32_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        [[maybe_unused]] uint32_t *trapsts) {
+  return rj_arith_v_pack_b32_f16_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+// gfx950 shares the gfx942 numeric model; empirically exact on MI350X.
+int rj_arith_v_pack_b32_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  return rj_arith_v_pack_b32_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_pack_b32_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  return rj_arith_v_pack_b32_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 packing model; strict exact
+// stays unsupported pending per-architecture captures.
+int rj_arith_v_pack_b32_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      [[maybe_unused]] uint32_t *trapsts) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  return rj_arith_v_pack_b32_f16_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+  return rj_arith_v_pack_b32_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_pack_b32_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      [[maybe_unused]] uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_pack_b32_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
 // gfx1250 shares the gfx12 packing model, including its input flushing and NaN quieting;

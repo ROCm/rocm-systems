@@ -8,6 +8,7 @@ Documentation for rocJPEG is available at
 ### Added
 
 * Added the `-n` option to the `jpegDecodePerf` sample to decode the input images the given number of times, so that a run lasts long enough to measure. With `-n`, `jpegDecodePerf` can run more threads than there are images.
+* Support for gfx1251
 
 ### Resolved issues
 

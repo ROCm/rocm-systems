@@ -170,23 +170,44 @@ TEST(ConversionCvtNormU16F16W64, Arithmetic) {
 }
 
 TEST(ConversionCvtNormI16F16W32Gfx942, Arithmetic) {
-  check_normalized<32, 1, true, false>(rj_arith_v_cvt_norm_i16_f16_w32_gfx942,
-                                       Normalized::SignedHalf);
+  check_normalized<32, 1, true, true>(rj_arith_v_cvt_norm_i16_f16_w32_gfx942,
+                                      Normalized::SignedHalf);
 }
 
 TEST(ConversionCvtNormI16F16W64Gfx942, Arithmetic) {
-  check_normalized<64, 1, true, false>(rj_arith_v_cvt_norm_i16_f16_w64_gfx942,
-                                       Normalized::SignedHalf);
+  check_normalized<64, 1, true, true>(rj_arith_v_cvt_norm_i16_f16_w64_gfx942,
+                                      Normalized::SignedHalf);
 }
 
 TEST(ConversionCvtNormU16F16W32Gfx942, Arithmetic) {
-  check_normalized<32, 1, true, false>(rj_arith_v_cvt_norm_u16_f16_w32_gfx942,
-                                       Normalized::UnsignedHalf);
+  check_normalized<32, 1, true, true>(rj_arith_v_cvt_norm_u16_f16_w32_gfx942,
+                                      Normalized::UnsignedHalf);
 }
 
 TEST(ConversionCvtNormU16F16W64Gfx942, Arithmetic) {
-  check_normalized<64, 1, true, false>(rj_arith_v_cvt_norm_u16_f16_w64_gfx942,
-                                       Normalized::UnsignedHalf);
+  check_normalized<64, 1, true, true>(rj_arith_v_cvt_norm_u16_f16_w64_gfx942,
+                                      Normalized::UnsignedHalf);
+}
+
+// gfx950 shares the gfx942 unary model and matches MI350X captures.
+TEST(ConversionCvtNormI16F16W32Gfx950, Arithmetic) {
+  check_normalized<32, 1, true, true>(rj_arith_v_cvt_norm_i16_f16_w32_gfx950,
+                                      Normalized::SignedHalf);
+}
+
+TEST(ConversionCvtNormI16F16W64Gfx950, Arithmetic) {
+  check_normalized<64, 1, true, true>(rj_arith_v_cvt_norm_i16_f16_w64_gfx950,
+                                      Normalized::SignedHalf);
+}
+
+TEST(ConversionCvtNormU16F16W32Gfx950, Arithmetic) {
+  check_normalized<32, 1, true, true>(rj_arith_v_cvt_norm_u16_f16_w32_gfx950,
+                                      Normalized::UnsignedHalf);
+}
+
+TEST(ConversionCvtNormU16F16W64Gfx950, Arithmetic) {
+  check_normalized<64, 1, true, true>(rj_arith_v_cvt_norm_u16_f16_w64_gfx950,
+                                      Normalized::UnsignedHalf);
 }
 
 // gfx1201 captures: normalized results round once, saturate, and map NaNs to zero; the unary
@@ -277,52 +298,160 @@ TEST(ConversionCvtPkNormU16F32W64Gfx1250, Arithmetic) {
                                         Normalized::UnsignedPackedFloat);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
+// gfx942 shares the RDNA3 packed normalized model and matches MI300X captures.
 TEST(ConversionCvtPkNormI16F16W32Gfx942, Arithmetic) {
-  check_normalized<32, 2, false, false>(rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx942,
-                                        Normalized::SignedPackedHalf);
+  check_normalized<32, 2, false, true>(rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx942,
+                                       Normalized::SignedPackedHalf);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
 TEST(ConversionCvtPkNormI16F16W64Gfx942, Arithmetic) {
-  check_normalized<64, 2, false, false>(rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx942,
+  check_normalized<64, 2, false, true>(rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx942,
+                                       Normalized::SignedPackedHalf);
+}
+
+TEST(ConversionCvtPkNormU16F16W32Gfx942, Arithmetic) {
+  check_normalized<32, 2, false, true>(rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx942,
+                                       Normalized::UnsignedPackedHalf);
+}
+
+TEST(ConversionCvtPkNormU16F16W64Gfx942, Arithmetic) {
+  check_normalized<64, 2, false, true>(rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx942,
+                                       Normalized::UnsignedPackedHalf);
+}
+
+TEST(ConversionCvtPkNormI16F32W32Gfx942, Arithmetic) {
+  check_normalized<32, 2, false, true>(rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx942,
+                                       Normalized::SignedPackedFloat);
+}
+
+TEST(ConversionCvtPkNormI16F32W64Gfx942, Arithmetic) {
+  check_normalized<64, 2, false, true>(rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx942,
+                                       Normalized::SignedPackedFloat);
+}
+
+TEST(ConversionCvtPkNormU16F32W32Gfx942, Arithmetic) {
+  check_normalized<32, 2, false, true>(rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx942,
+                                       Normalized::UnsignedPackedFloat);
+}
+
+TEST(ConversionCvtPkNormU16F32W64Gfx942, Arithmetic) {
+  check_normalized<64, 2, false, true>(rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx942,
+                                       Normalized::UnsignedPackedFloat);
+}
+
+// gfx950 shares the RDNA3/gfx942 model and matches MI350X captures.
+TEST(ConversionCvtPkNormI16F16W32Gfx950, Arithmetic) {
+  check_normalized<32, 2, false, true>(rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx950,
+                                       Normalized::SignedPackedHalf);
+}
+
+TEST(ConversionCvtPkNormI16F16W64Gfx950, Arithmetic) {
+  check_normalized<64, 2, false, true>(rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx950,
+                                       Normalized::SignedPackedHalf);
+}
+
+TEST(ConversionCvtPkNormU16F16W32Gfx950, Arithmetic) {
+  check_normalized<32, 2, false, true>(rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx950,
+                                       Normalized::UnsignedPackedHalf);
+}
+
+TEST(ConversionCvtPkNormU16F16W64Gfx950, Arithmetic) {
+  check_normalized<64, 2, false, true>(rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx950,
+                                       Normalized::UnsignedPackedHalf);
+}
+
+TEST(ConversionCvtPkNormI16F32W32Gfx950, Arithmetic) {
+  check_normalized<32, 2, false, true>(rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx950,
+                                       Normalized::SignedPackedFloat);
+}
+
+TEST(ConversionCvtPkNormI16F32W64Gfx950, Arithmetic) {
+  check_normalized<64, 2, false, true>(rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx950,
+                                       Normalized::SignedPackedFloat);
+}
+
+TEST(ConversionCvtPkNormU16F32W32Gfx950, Arithmetic) {
+  check_normalized<32, 2, false, true>(rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx950,
+                                       Normalized::UnsignedPackedFloat);
+}
+
+TEST(ConversionCvtPkNormU16F32W64Gfx950, Arithmetic) {
+  check_normalized<64, 2, false, true>(rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx950,
+                                       Normalized::UnsignedPackedFloat);
+}
+
+// gfx10/gfx115x/gfx908/gfx90a share the RDNA3/gfx942 models via loose-only _gfx10 wrappers.
+TEST(ConversionCvtNormI16F16W32Gfx10, Arithmetic) {
+  check_normalized<32, 1, true, false>(rj_arith_v_cvt_norm_i16_f16_w32_gfx10,
+                                       Normalized::SignedHalf);
+}
+
+TEST(ConversionCvtNormI16F16W64Gfx10, Arithmetic) {
+  check_normalized<64, 1, true, false>(rj_arith_v_cvt_norm_i16_f16_w64_gfx10,
+                                       Normalized::SignedHalf);
+}
+
+TEST(ConversionCvtNormU16F16W32Gfx10, Arithmetic) {
+  check_normalized<32, 1, true, false>(rj_arith_v_cvt_norm_u16_f16_w32_gfx10,
+                                       Normalized::UnsignedHalf);
+}
+
+TEST(ConversionCvtNormU16F16W64Gfx10, Arithmetic) {
+  check_normalized<64, 1, true, false>(rj_arith_v_cvt_norm_u16_f16_w64_gfx10,
+                                       Normalized::UnsignedHalf);
+}
+
+TEST(ConversionCvtPkNormI16F16W32Gfx10, Arithmetic) {
+  check_normalized<32, 2, false, false>(rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx10,
                                         Normalized::SignedPackedHalf);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtPkNormU16F16W32Gfx942, Arithmetic) {
-  check_normalized<32, 2, false, false>(rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx942,
+TEST(ConversionCvtPkNormI16F16W64Gfx10, Arithmetic) {
+  check_normalized<64, 2, false, false>(rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx10,
+                                        Normalized::SignedPackedHalf);
+}
+
+TEST(ConversionCvtPkNormU16F16W32Gfx10, Arithmetic) {
+  check_normalized<32, 2, false, false>(rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx10,
                                         Normalized::UnsignedPackedHalf);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtPkNormU16F16W64Gfx942, Arithmetic) {
-  check_normalized<64, 2, false, false>(rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx942,
+TEST(ConversionCvtPkNormU16F16W64Gfx10, Arithmetic) {
+  check_normalized<64, 2, false, false>(rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx10,
                                         Normalized::UnsignedPackedHalf);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtPkNormI16F32W32Gfx942, Arithmetic) {
-  check_normalized<32, 2, false, false>(rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx942,
+TEST(ConversionCvtPkNormI16F32W32Gfx10, Arithmetic) {
+  check_normalized<32, 2, false, false>(rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx10,
                                         Normalized::SignedPackedFloat);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtPkNormI16F32W64Gfx942, Arithmetic) {
-  check_normalized<64, 2, false, false>(rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx942,
+TEST(ConversionCvtPkNormI16F32W64Gfx10, Arithmetic) {
+  check_normalized<64, 2, false, false>(rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx10,
                                         Normalized::SignedPackedFloat);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtPkNormU16F32W32Gfx942, Arithmetic) {
-  check_normalized<32, 2, false, false>(rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx942,
+TEST(ConversionCvtPkNormU16F32W32Gfx10, Arithmetic) {
+  check_normalized<32, 2, false, false>(rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx10,
                                         Normalized::UnsignedPackedFloat);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
-TEST(ConversionCvtPkNormU16F32W64Gfx942, Arithmetic) {
-  check_normalized<64, 2, false, false>(rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx942,
+TEST(ConversionCvtPkNormU16F32W64Gfx10, Arithmetic) {
+  check_normalized<64, 2, false, false>(rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx10,
                                         Normalized::UnsignedPackedFloat);
+}
+
+// MI300X (2026-11-24) captures: unary normalized forms zero-extend low-half results and preserve
+// bit[15:0] when HIGH_D is selected.
+TEST(ConversionNormalizedGfx942, ExactMatchesHardware) {
+  constexpr uint64_t d = 0xa5a5a5a5U;
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_norm_i16_f16_w32_gfx942, 0, 0xa5fe3c00U, 0, 0, d,
+                                   0x00007fffU);
+  expect_captured_conversion<1, 1>(rj_arith_v_cvt_norm_u16_f16_w32_gfx942, 0, 0xa6af7bffU, 0, 0, d,
+                                   0x0000ffffU);
+  expect_captured_conversion_lane<1, 1>(rj_arith_v_cvt_norm_i16_f16_w32_gfx942,
+                                        RJ_ARITH_FP_IEEE_MODE, RJ_ARITH_ALU_HIGH_D, 0xa5fe3c00U, 0,
+                                        0, d, 0x7fffa5a5U);
 }
 
 // gfx1100 (W7900, mkm2) hw1100-noieee lanes (2026-09-25, MODE.IEEE clear): NaN sources

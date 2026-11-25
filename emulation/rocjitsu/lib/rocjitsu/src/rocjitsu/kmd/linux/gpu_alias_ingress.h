@@ -49,7 +49,7 @@ public:
     auto operator<=>(const Key &) const = default;
   };
 
-  using OwnerPost = std::function<void(std::function<void()>)>;
+  using OwnerPost = std::function<bool(std::function<int()>)>;
 
   /// @brief Authority for one exact closed generation or closed batch while its
   /// drained owner continuation is running. A retained copy expires on return.
@@ -73,7 +73,7 @@ public:
     std::weak_ptr<Batch> batch_;
     std::shared_ptr<State> state_;
   };
-  using DrainedOwner = std::function<void(const DrainAuthority &)>;
+  using DrainedOwner = std::function<int(const DrainAuthority &)>;
 
   /// @brief Exclusive, reversible admission freeze for one live effect.
   /// @details Destruction restores admission after any effect bypass permits
@@ -169,8 +169,8 @@ public:
   /// @brief Close one generation and post @p drained when all permits leave.
   /// @pre @p owner_post queues work to the gate owner's thread; it must not run
   ///      the continuation inline on the releasing thread. It either accepts
-  ///      one callback and returns, or throws without retaining that callback.
-  [[nodiscard]] bool close(Key alias, OwnerPost owner_post, std::function<void()> drained);
+  ///      one callback and returns true, or returns false without retaining it.
+  [[nodiscard]] bool close(Key alias, OwnerPost owner_post, std::function<int()> drained);
   /// @brief Close one generation and give its drained owner exact authority.
   /// @details The callback runs through @p owner_post on the gate owner's
   /// thread, never inline on a releasing thread. The authority covers only
@@ -181,9 +181,9 @@ public:
                                                 DrainedOwner drained);
   /// @brief Retry maintenance for a closed generation after its posted work failed.
   /// @details A continuation that is merely queued is not retryable. Failed
-  /// posting or a throwing callback leaves the generation closed until the
+  /// posting or a callback returning a nonzero status leaves the generation closed until the
   /// owner supplies another continuation through this method.
-  [[nodiscard]] bool retry_closed(Key alias, OwnerPost owner_post, std::function<void()> drained);
+  [[nodiscard]] bool retry_closed(Key alias, OwnerPost owner_post, std::function<int()> drained);
   /// @brief Retry a closed generation with fresh drained-owner authority.
   /// @details The callback runs on the owner's thread and receives authority
   /// only for this closed generation. Copied authority expires on return.
@@ -203,7 +203,7 @@ public:
   /// closed generation. Closing a batch adopts it together with open aliases.
   /// @pre @p owner_post obeys the same owner-thread, no-inline contract as close().
   [[nodiscard]] bool close_batch(std::span<const Key> aliases, OwnerPost owner_post,
-                                 std::function<void()> drained);
+                                 std::function<int()> drained);
   /// @brief Close a batch and give its drained owner authority for that batch.
   /// @details The callback runs through @p owner_post on the gate owner's
   /// thread, never inline on a releasing thread. Authority covers exactly
@@ -213,7 +213,7 @@ public:
                                                       OwnerPost owner_post, DrainedOwner drained);
   /// @brief Retry one failed batch without admitting new ingress.
   [[nodiscard]] bool retry_closed_batch(std::span<const Key> aliases, OwnerPost owner_post,
-                                        std::function<void()> drained);
+                                        std::function<int()> drained);
   /// @brief Retry a closed batch with fresh authority for its exact members.
   /// @details The callback runs on the owner's thread. Retained copies of the
   /// authority expire when it returns.
@@ -247,7 +247,7 @@ public:
 private:
   struct Drain {
     OwnerPost owner_post;
-    std::function<void()> continuation;
+    std::function<int()> continuation;
   };
   struct Batch {
     std::vector<Key> keys;
@@ -267,7 +267,7 @@ private:
     std::shared_ptr<Batch> batch;
   };
 
-  [[nodiscard]] std::function<void()> make_drain_continuation(Key alias, DrainedOwner drained);
+  [[nodiscard]] std::function<int()> make_drain_continuation(Key alias, DrainedOwner drained);
   [[nodiscard]] std::optional<amdgpu::MemoryIngressPermit>
   try_acquire_impl(std::span<const Key> aliases, const DrainAuthority *authority,
                    const EffectWindow *window) noexcept;
@@ -278,8 +278,8 @@ private:
   void release_effect_window(const std::shared_ptr<EffectWindow::State> &state) noexcept;
   void finish_effect_window_if_quiescent_locked() noexcept;
   void set_drain_authority_active(const DrainAuthority &authority, bool active) noexcept;
-  [[nodiscard]] std::function<void()> make_batch_drain_continuation(std::shared_ptr<Batch> batch,
-                                                                    DrainedOwner drained);
+  [[nodiscard]] std::function<int()> make_batch_drain_continuation(std::shared_ptr<Batch> batch,
+                                                                   DrainedOwner drained);
   void release(std::span<const Key> aliases) noexcept;
   void fail_drain(Key alias) noexcept;
   void finish_drain(Key alias) noexcept;

@@ -26,12 +26,12 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <fcntl.h>
 #include <future>
 #include <memory>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
@@ -120,18 +120,20 @@ config::LoadedConfig load_assembly_config(std::string json, std::string_view nod
   auto loaded = config::load_config_from_string_for_node(json, kEmbeddedSchema, node_id,
                                                          diagnostic.emitter());
   if (loaded.failed()) {
-    throw std::runtime_error(diagnostic.message());
+    ADD_FAILURE() << diagnostic.message();
+    std::abort();
   }
   return std::move(loaded.value());
 }
 
-VirtualMachine *assemble_topology_or_throw(config::LoadedConfig &loaded,
-                                           simdojo::Topology &topology, bool daemon_mode) {
+VirtualMachine *assemble_test_topology(config::LoadedConfig &loaded, simdojo::Topology &topology,
+                                       bool daemon_mode) {
   util::StringDiagnostic diagnostic;
   auto assembled =
       assemble_virtual_machine_topology(loaded, topology, daemon_mode, diagnostic.emitter());
   if (assembled.failed()) {
-    throw std::runtime_error(diagnostic.message());
+    ADD_FAILURE() << diagnostic.message();
+    std::abort();
   }
   return assembled.value();
 }
@@ -348,12 +350,23 @@ private:
   std::array<std::byte, 2 * sizeof(uint32_t)> bytes_{};
 };
 
+TEST(FabricEndpointConfigTest, RejectsNullAndRepeatedCoherenceDomains) {
+  util::StringDiagnostic diagnostic;
+  EXPECT_EQ(FabricEndpoint::create({}, {nullptr}, diagnostic.emitter()), nullptr);
+  EXPECT_EQ(diagnostic.message(), "fabric coherence domains must be non-null and distinct");
+  auto domain = std::make_shared<amdgpu::DeviceCacheCoherence>();
+  EXPECT_EQ(FabricEndpoint::create({}, {domain, domain}, diagnostic.emitter()), nullptr);
+  EXPECT_EQ(diagnostic.message(), "fabric coherence domains must be non-null and distinct");
+  EXPECT_NE(FabricEndpoint::create({}, {domain}), nullptr);
+}
+
 class FabricEndpointTest : public ::testing::Test {
 protected:
   void SetUp() override {
     ASSERT_TRUE(backing_.valid());
     auto root = std::make_unique<simdojo::CompositeComponent>("root");
-    auto fabric = std::make_unique<FabricEndpoint>(fanout_routes());
+    auto fabric = FabricEndpoint::create(fanout_routes());
+    ASSERT_NE(fabric, nullptr);
     endpoint_ = fabric.get();
     root->add_child(std::move(fabric));
     engine_.topology().set_root(std::move(root));
@@ -386,7 +399,8 @@ protected:
     auto root = std::make_unique<simdojo::CompositeComponent>("root");
     std::vector<config::SystemPeerRoute> routes = {
         {"g0", "g1", kRequester, kOwner, {"e0", "sw", "e1"}}};
-    auto fabric = std::make_unique<FabricEndpoint>(std::move(routes));
+    auto fabric = FabricEndpoint::create(std::move(routes));
+    ASSERT_NE(fabric, nullptr);
     endpoint_ = fabric.get();
     root->add_child(std::move(fabric));
     engine_.topology().set_root(std::move(root));
@@ -423,7 +437,8 @@ class FabricEndpointLocalTest : public ::testing::Test {
 protected:
   void SetUp() override {
     auto root = std::make_unique<simdojo::CompositeComponent>("root");
-    auto fabric = std::make_unique<FabricEndpoint>(std::vector<config::SystemPeerRoute>{});
+    auto fabric = FabricEndpoint::create(std::vector<config::SystemPeerRoute>{});
+    ASSERT_NE(fabric, nullptr);
     endpoint_ = fabric.get();
     root->add_child(std::move(fabric));
     engine_.topology().set_root(std::move(root));
@@ -459,8 +474,9 @@ protected:
     auto root = std::make_unique<simdojo::CompositeComponent>("root");
     std::vector<config::SystemPeerRoute> routes = {
         {"g0", "g1", kRequester, kOwner, {"e0", "sw", "e1"}}};
-    auto fabric = std::make_unique<FabricEndpoint>(std::move(routes),
-                                                   std::vector{requester_domain_, owner_domain_});
+    auto fabric =
+        FabricEndpoint::create(std::move(routes), std::vector{requester_domain_, owner_domain_});
+    ASSERT_NE(fabric, nullptr);
     endpoint_ = fabric.get();
     root->add_child(std::move(fabric));
     engine_.topology().set_root(std::move(root));
@@ -1227,7 +1243,8 @@ TEST_F(FabricEndpointTest, MissingAndAmbiguousRoutesFaultBeforeSubmission) {
   ambiguous.push_back({"g0", "g1", kRequester, kOwner, {"e0", "alternate", "e1"}});
   simdojo::SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<simdojo::CompositeComponent>("root");
-  auto duplicate = std::make_unique<FabricEndpoint>(std::move(ambiguous));
+  auto duplicate = FabricEndpoint::create(std::move(ambiguous));
+  ASSERT_NE(duplicate, nullptr);
   auto *endpoint = duplicate.get();
   root->add_child(std::move(duplicate));
   engine.topology().set_root(std::move(root));
@@ -1250,7 +1267,8 @@ TEST_F(FabricEndpointTest, OverlongManualRouteFailsClosedBeforeWiring) {
 
   simdojo::SimulationEngine engine({.num_threads = 1});
   auto root = std::make_unique<simdojo::CompositeComponent>("root");
-  auto fabric = std::make_unique<FabricEndpoint>(std::vector{std::move(route)});
+  auto fabric = FabricEndpoint::create(std::vector{std::move(route)});
+  ASSERT_NE(fabric, nullptr);
   auto *endpoint = fabric.get();
   root->add_child(std::move(fabric));
   engine.topology().set_root(std::move(root));
@@ -1899,8 +1917,8 @@ protected:
   void SetUp() override {
     auto loaded = load_assembly_config(assembly_coherence_config());
     ASSERT_EQ(loaded.num_gpus, 2u);
-    machine_ = assemble_topology_or_throw(loaded, engine_.topology(),
-                                          /*daemon_mode=*/false);
+    machine_ = assemble_test_topology(loaded, engine_.topology(),
+                                      /*daemon_mode=*/false);
     ASSERT_NE(machine_, nullptr);
     ASSERT_EQ(machine_->num_socs(), 2u);
     endpoint_ = machine_->fabric_endpoint();
@@ -2006,6 +2024,28 @@ TEST_F(FabricEndpointAssemblyCoherenceTest,
   EXPECT_EQ(write.operation->poll({}), amdgpu::VmAccessOutcome::Complete);
 }
 
+TEST(FabricEndpointAssemblyTest, RejectsInvalidWritebackGpuIdentityAndClearsTopology) {
+  for (uint32_t gpu_id : {0u, kRequester}) {
+    SCOPED_TRACE(gpu_id);
+    auto loaded = load_assembly_config(assembly_config(kLocalSwitchManifest));
+    ASSERT_EQ(loaded.devices.size(), 2u);
+    loaded.devices[1].gpu_id = gpu_id;
+    simdojo::Topology topology;
+    util::StringDiagnostic diagnostic;
+    auto assembled =
+        assemble_virtual_machine_topology(loaded, topology, false, diagnostic.emitter());
+    EXPECT_TRUE(assembled.failed());
+    EXPECT_EQ(diagnostic.message(), "fabric cache writeback domain identity is invalid");
+    EXPECT_EQ(topology.root(), nullptr);
+    EXPECT_TRUE(topology.links().empty());
+
+    auto valid = load_assembly_config(assembly_config(kLocalSwitchManifest));
+    EXPECT_TRUE(assemble_virtual_machine_topology(valid, topology, false, diagnostic.emitter())
+                    .succeeded());
+    ASSERT_NE(topology.root(), nullptr);
+  }
+}
+
 TEST(FabricEndpointAssemblyTest, RetainsExplicitLocalRouteAfterLoadedConfigIsReleased) {
   simdojo::Topology topology;
   VirtualMachine *machine = nullptr;
@@ -2013,7 +2053,7 @@ TEST(FabricEndpointAssemblyTest, RetainsExplicitLocalRouteAfterLoadedConfigIsRel
     auto loaded = load_assembly_config(assembly_config(kLocalSwitchManifest));
     ASSERT_EQ(loaded.num_gpus, 2u);
     ASSERT_EQ(loaded.extra_gpu_builds.size(), 1u);
-    machine = assemble_topology_or_throw(loaded, topology, /*daemon_mode=*/false);
+    machine = assemble_test_topology(loaded, topology, /*daemon_mode=*/false);
     ASSERT_NE(machine, nullptr);
     loaded.system_graph = {}; // the VM must retain an independent projection
   }
@@ -2041,7 +2081,7 @@ TEST(FabricEndpointAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForS
   auto loaded = load_assembly_config(assembly_config());
   simdojo::SimulationEngine engine{{.num_threads = 1}};
   VirtualMachine *machine =
-      assemble_topology_or_throw(loaded, engine.topology(), /*daemon_mode=*/false);
+      assemble_test_topology(loaded, engine.topology(), /*daemon_mode=*/false);
   ASSERT_NE(machine, nullptr);
   FabricEndpoint *endpoint = machine->fabric_endpoint();
   ASSERT_NE(endpoint, nullptr);
@@ -2071,7 +2111,8 @@ TEST(FabricEndpointAssemblyTest, RouteFreeLegacyOwnerResolvesLateGpuIdentityForS
         [&resolved_dirty_line](uint32_t, uint32_t, uint64_t,
                                size_t) -> amdgpu::PreparedCanonicalWriteback {
       resolved_dirty_line = true;
-      throw std::runtime_error("unexpected dirty line in route-free endpoint test");
+      ADD_FAILURE() << "unexpected dirty line in route-free endpoint test";
+      std::abort();
     };
     return authority;
   };
@@ -2098,7 +2139,7 @@ TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCo
   auto loaded = load_assembly_config(assembly_config());
   simdojo::SimulationEngine engine{{.num_threads = 1}};
   VirtualMachine *machine =
-      assemble_topology_or_throw(loaded, engine.topology(), /*daemon_mode=*/false);
+      assemble_test_topology(loaded, engine.topology(), /*daemon_mode=*/false);
   ASSERT_NE(machine, nullptr);
   FabricEndpoint *endpoint = machine->fabric_endpoint();
   ASSERT_NE(endpoint, nullptr);
@@ -2147,7 +2188,8 @@ TEST(FabricEndpointAssemblyTest, RetryablePreparedMaintenanceReleasesPermitAndCo
                                        .backing_offset = kAddress});
     authority.resolve_writeback = [](uint32_t, uint32_t, uint64_t,
                                      size_t) -> amdgpu::PreparedCanonicalWriteback {
-      throw std::runtime_error("selected line unexpectedly dirty");
+      ADD_FAILURE() << "selected line unexpectedly dirty";
+      std::abort();
     };
     authority.resolve_witness = [&](uint32_t, uint32_t, uint64_t, size_t, uint64_t,
                                     uint64_t) -> std::optional<amdgpu::CanonicalLineWitness> {
@@ -2187,8 +2229,8 @@ TEST(FabricEndpointAssemblyTest, LegacyAndRemoteSharedSwitchInstallRouteFreeOwne
   VirtualMachine *legacy_machine = nullptr;
   {
     auto loaded = load_assembly_config(assembly_config());
-    legacy_machine = assemble_topology_or_throw(loaded, legacy_topology,
-                                                /*daemon_mode=*/false);
+    legacy_machine = assemble_test_topology(loaded, legacy_topology,
+                                            /*daemon_mode=*/false);
   }
   ASSERT_NE(legacy_machine, nullptr);
   EXPECT_TRUE(legacy_machine->peer_routes().routes().empty());
@@ -2202,8 +2244,8 @@ TEST(FabricEndpointAssemblyTest, LegacyAndRemoteSharedSwitchInstallRouteFreeOwne
   {
     auto loaded = load_assembly_config(assembly_config(kRemoteSharedSwitchManifest), "local");
     ASSERT_EQ(loaded.num_gpus, 2u);
-    remote_machine = assemble_topology_or_throw(loaded, remote_topology,
-                                                /*daemon_mode=*/false);
+    remote_machine = assemble_test_topology(loaded, remote_topology,
+                                            /*daemon_mode=*/false);
     loaded.system_graph = {};
   }
   ASSERT_NE(remote_machine, nullptr);

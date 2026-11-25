@@ -249,7 +249,7 @@ public:
     local_range_handler_ = std::move(handler);
   }
   using PreparedAtomicBoundaryHandler =
-      std::function<std::optional<DeviceCacheMaintenanceLease>(uint32_t vmid)>;
+      std::function<util::FailureOr<std::optional<CacheMaintenanceResult>>(uint32_t vmid)>;
 
   GlobalMemPipeline(L1VectorCache *l1, L2Cache *l2)
       : MemoryPipeline(WaitCounterType::VMCNT), l1_(l1), l2_(l2) {}

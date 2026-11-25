@@ -59,8 +59,7 @@ void VfioQuiesceWake::notify() const noexcept {
 
 VfioTargetGrants::VfioTargetGrants(std::size_t host_count)
     : hosts_(host_count, nullptr), wakes_(host_count), gpu_ids_(host_count, 0),
-      quiescing_(host_count, false), failed_peer_range_records_(host_count, false),
-      admission_lifetime_(std::make_shared<AdmissionLifetime>()) {
+      quiescing_(host_count, false), admission_lifetime_(std::make_shared<AdmissionLifetime>()) {
   admission_lifetime_->owner = this;
 }
 
@@ -160,14 +159,8 @@ std::optional<uint64_t> VfioTargetGrants::register_standard_map(uint32_t request
       return std::nullopt;
     }
     if (!requester_host->can_route_peer(gpu_ids_[owner->function])) {
-      try {
-        remember_peer_range_locked({requester, session->generation()}, region.guest_phys,
-                                   region.length);
-      } catch (...) {
-        // The protocol cannot reject DMA_MAP. Deny all copies for this host
-        // until its session retires if a rejected peer interval cannot be kept.
-        failed_peer_range_records_[requester] = true;
-      }
+      remember_peer_range_locked({requester, session->generation()}, region.guest_phys,
+                                 region.length);
       return std::nullopt;
     }
     if (next_standard_map_id_ == UINT64_MAX) {
@@ -369,23 +362,15 @@ std::optional<uint64_t> VfioTargetGrants::register_map(uint32_t requester, const
                     .requester_session = requester_session,
                     .owner_session = owner_session,
                     .effect_gate = std::make_shared<amdgpu::VmTransferEffectGate>()};
-  const auto [entry, inserted] = grants_.emplace(key, grant);
+  const bool inserted = grants_.emplace(key, grant).second;
   if (!inserted) {
     return std::nullopt;
   }
-  try {
-    // Allocate the new node before changing any retained tombstones. If that
-    // allocation fails, an old peer range must not fall through to guest RAM.
-    remember_peer_range_locked(session, map.iova, map.size);
-    if (highest != highest_map_ids_.end()) {
-      highest->second = map.map_id;
-    } else {
-      highest_map_ids_.emplace(session, map.map_id);
-    }
-  } catch (...) {
-    grants_.erase(entry);
-    failed_peer_range_records_[requester] = true;
-    throw;
+  remember_peer_range_locked(session, map.iova, map.size);
+  if (highest != highest_map_ids_.end()) {
+    highest->second = map.map_id;
+  } else {
+    highest_map_ids_.emplace(session, map.map_id);
   }
   return requester_generation;
 }
@@ -422,7 +407,6 @@ void VfioTargetGrants::revoke_session(uint32_t ordinal, uint64_t generation) {
     }
     highest_map_ids_.erase({ordinal, generation});
     known_peer_ranges_.erase({ordinal, generation});
-    failed_peer_range_records_[ordinal] = false;
   }
   for (;;) {
     std::shared_ptr<amdgpu::VmTransferEffectGate> gate;
@@ -503,10 +487,6 @@ VfioTargetGrants::PeerPreparation VfioTargetGrants::prepare_peer(uint32_t reques
             .snapshot = {}};
   }
   const std::lock_guard lock(mutex_);
-  if (requester < failed_peer_range_records_.size() && failed_peer_range_records_[requester]) {
-    return {
-        .kind = PeerKind::Rejected, .outcome = simdojo::DmaAccessOutcome::Faulted, .snapshot = {}};
-  }
   auto it = grants_.lower_bound({requester, iova});
   if (it != grants_.begin()) {
     const auto prior = std::prev(it);
@@ -696,9 +676,6 @@ VfioTargetGrants::PrepareResult VfioTargetGrants::prepare(uint32_t requester,
   std::vector<Candidate> candidates;
   {
     const std::lock_guard lock(mutex_);
-    if (requester < failed_peer_range_records_.size() && failed_peer_range_records_[requester]) {
-      return {.outcome = simdojo::DmaAccessOutcome::Faulted, .segments = {}};
-    }
     const SessionKey session{requester, requester_generation};
     uint64_t uncovered_begin = iova;
     auto it = grants_.lower_bound({requester, iova});

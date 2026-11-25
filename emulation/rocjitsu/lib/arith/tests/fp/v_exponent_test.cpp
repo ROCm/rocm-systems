@@ -12,10 +12,12 @@
 #include "common/cpu.h"
 #include "common/semantics.h"
 #include <algorithm>
+#include <array>
 #include <random>
 
 #include <cmath>
 #include <gtest/gtest.h>
+#include <stdint.h>
 
 // Check integer exponent results, operand selection, and inactive-lane preservation.
 TEST(FpFrexpExpI16F16W32Gfx12, Arithmetic) {
@@ -519,6 +521,68 @@ TEST(FpLdexpCdna, Qualification) {
         if (expected != RJ_ARITH_SUCCESS) {
           EXPECT_EQ(r.v[4][0], 0xdeadbeefU);
           EXPECT_EQ(r.v[5][0], 0xdeadbeefU);
+        }
+      }
+    }
+  }
+}
+
+// The existing scalar integer model remains the reference when normal lanes
+// use SIMD and neighboring exceptional lanes require individual repair.
+TEST(FpLdexpF64, SimdMatchesInheritedScalar) {
+  using namespace rocjitsu::arith::test;
+  auto input = make_ldexp_inputs<64, 64>();
+  const int exponents[] = {INT32_MIN, -1075, -1, 0, 1, 1024, INT32_MAX};
+  for (int lane = 0; lane < 64; ++lane) {
+    input.v[2][lane] = uint32_t(exponents[lane % 7]);
+  }
+  const uint64_t special[] = {
+      0x7ff0000000000001ULL, 0x7ff8000000000123ULL, 0x7ff0000000000000ULL, 1ULL,
+      0x0010000000000000ULL, 0x7fefffffffffffffULL, 0x8000000000000000ULL};
+  for (int lane = 0; lane < 7; ++lane) {
+    input.v[0][lane] = uint32_t(special[lane]);
+    input.v[1][lane] = uint32_t(special[lane] >> 32);
+  }
+  using Call = decltype(&rj_arith_v_ldexp_f64_w64_gfx942);
+  const Call functions[] = {rj_arith_v_ldexp_f64_w64_gfx942, rj_arith_v_ldexp_f64_w64,
+                            rj_arith_v_ldexp_f64_w64_gfx12};
+  const uint64_t fp_cases[] = {
+      0, RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS,
+      RJ_ARITH_FP_ROUND_ZERO | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE};
+  for (Call call : functions) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+      if (call == rj_arith_v_ldexp_f64_w64_gfx942 &&
+          semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+        continue; // The inherited CDNA model is exercised through Compatibility.
+      }
+      for (uint64_t fp : fp_cases) {
+        for (uint64_t mode : {0U, RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A, RJ_ARITH_ALU_CLAMP,
+                              RJ_ARITH_ALU_OMOD_2, RJ_ARITH_ALU_OMOD_HALF}) {
+          for (int aliasing_offset : {0, 1, 6}) {
+            constexpr uint64_t exec_mask = 0xa5a5a5a55a5a5a7fULL;
+            auto expected = input;
+            uint32_t status = 0x10000;
+            ASSERT_EQ(call(semantics | fp, exec_mask, mode, expected.v + aliasing_offset,
+                           expected.v, expected.v + 2, &status),
+                      RJ_ARITH_SUCCESS);
+            for (uint64_t cpu : supported_cpu_levels()) {
+              SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << fp << '/'
+                                                << mode << '/' << aliasing_offset);
+              auto actual = input;
+              ASSERT_EQ(call(cpu | semantics | fp, exec_mask, mode, actual.v + aliasing_offset,
+                             actual.v, actual.v + 2, &status),
+                        RJ_ARITH_SUCCESS);
+              EXPECT_EQ(status, 0x10000U);
+              actual.expect_preserved(input, aliasing_offset, 2);
+              for (int word = 0; word < 2; ++word) {
+                for (int lane = 0; lane < 64; ++lane) {
+                  EXPECT_EQ(actual.v[aliasing_offset + word][lane],
+                            expected.v[aliasing_offset + word][lane]);
+                }
+              }
+            }
+          }
         }
       }
     }

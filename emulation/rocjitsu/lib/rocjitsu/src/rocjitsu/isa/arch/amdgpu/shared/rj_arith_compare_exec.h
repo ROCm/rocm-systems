@@ -12,7 +12,6 @@
 
 #include <bit>
 #include <cstdint>
-#include <type_traits>
 
 namespace rocjitsu::amdgpu::arith {
 
@@ -112,17 +111,10 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
     // GFX10 uses CLAMP to request a signaling compare, including quiet NaNs.
     if constexpr (Gfx10Signaling) {
       if (modifiers & RJ_ARITH_ALU_CLAMP) {
-        using F =
-            std::conditional_t<Bits == 16, fp_format::F16,
-                               std::conditional_t<Bits == 32, fp_format::F32, fp_format::F64>>;
+        static_assert(Bits == 16);
+        using F = fp_format::F16;
         auto is_nan = [&](const uint32_t *const *source, uint64_t high, unsigned lane) {
-          uint64_t bits = source[0][lane];
-          if constexpr (Bits == 64) {
-            bits |= uint64_t{source[1][lane]} << 32;
-          }
-          if constexpr (Bits == 16) {
-            bits >>= (modifiers & high) ? 16 : 0;
-          }
+          const uint32_t bits = (source[0][lane] >> ((modifiers & high) ? 16 : 0)) & 0xffffu;
           return (bits & F::kMagnitude) > F::kInfinity;
         };
         for (uint64_t lanes = exec_mask; lanes; lanes &= lanes - 1) {
@@ -158,6 +150,21 @@ inline void execute_float_compare(Wavefront &wave, FloatCompare32Function wave32
   commit(result);
   wave.set_trapsts(wave.trapsts() | causes);
   wave.raise_alu_causes(causes);
+}
+
+// Execute a Wave64-only predicate. Unsupported test-CU wave sizes fail before
+// source observation or mask/status commits; ordinary Wave32 bridges are unaffected.
+template <unsigned Bits, typename Commit>
+inline void execute_float_compare_wave64(Wavefront &wave, FloatCompare64Function function,
+                                         uint64_t flags, uint64_t modifiers,
+                                         const Operand &source_a, const Operand &source_b,
+                                         bool constant, Commit commit, uint64_t exec_mask) {
+  if (wave.wf_size() != 64) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    return;
+  }
+  execute_float_compare<Bits>(wave, nullptr, function, flags, modifiers, source_a, source_b,
+                              constant, commit, exec_mask);
 }
 
 } // namespace rocjitsu::amdgpu::arith

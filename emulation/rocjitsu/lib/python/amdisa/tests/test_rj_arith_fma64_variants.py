@@ -18,7 +18,7 @@ def context(arch, name, operands, vop3=False):
     )
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
+@pytest.mark.parametrize('arch', ['cdna2', 'cdna3', 'cdna4', 'cdna5'])
 @pytest.mark.parametrize('vop3', [False, True])
 def test_accumulate(arch, vop3):
     body = gen_fma64_variants(context(arch, 'V_FMAC_F64', ['src0', 'src1'], vop3))

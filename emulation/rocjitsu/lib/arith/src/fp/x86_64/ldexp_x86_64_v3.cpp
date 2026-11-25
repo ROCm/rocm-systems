@@ -1,9 +1,10 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX2 FP32 scaling by powers of two with guest rounding and denormal policies.
+// AVX2 FP32/FP64 scaling by powers of two with guest rounding and denormal policies.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
+#include "common/compiler.h"
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/ldexp.h"
 #include "rj_arith/detail/rj_arith_fp.h"
@@ -214,6 +215,78 @@ void run(bool fp64, uint64_t flags, uint32_t exec_mask, uint32_t instruction_fla
 }
 
 } // namespace
+
+// Stage exact normal scales and preserved/quieted NaNs. Return only the lanes
+// whose subnormal input or rounded result needs the baseline integer helper.
+uint32_t ldexp_f64_normal_x86_64_v3(uint64_t flags, uint32_t instruction_flags, bool quiet_snan,
+                                    uint32_t result[2][32], const uint32_t *const *a,
+                                    const uint32_t *b) {
+  uint32_t scalar_lanes = 0;
+  const auto zero = _mm256_setzero_si256(), maximum = _mm256_set1_epi64x(2047);
+  RJ_ARITH_UNROLL(8)
+  for (int lane = 0; lane < 32; lane += 4) {
+    auto low =
+        _mm256_cvtepu32_epi64(_mm_loadu_si128(reinterpret_cast<const __m128i *>(a[0] + lane)));
+    auto high =
+        _mm256_cvtepu32_epi64(_mm_loadu_si128(reinterpret_cast<const __m128i *>(a[1] + lane)));
+    auto raw = _mm256_or_si256(low, _mm256_slli_epi64(high, 32));
+    if (instruction_flags & RJ_ARITH_ALU_ABS_A) {
+      raw = _mm256_and_si256(raw, _mm256_set1_epi64x(INT64_MAX));
+    }
+    if (instruction_flags & RJ_ARITH_ALU_NEG_A) {
+      raw = _mm256_xor_si256(raw, _mm256_set1_epi64x(INT64_MIN));
+    }
+    auto magnitude = _mm256_and_si256(raw, _mm256_set1_epi64x(INT64_MAX));
+    auto exponent = _mm256_srli_epi64(magnitude, 52);
+    auto adjustment =
+        _mm256_cvtepi32_epi64(_mm_loadu_si128(reinterpret_cast<const __m128i *>(b + lane)));
+    auto scaled_exponent = _mm256_add_epi64(exponent, clamp64(adjustment, -4096, 4096));
+    auto normal =
+        _mm256_and_si256(_mm256_cmpgt_epi64(exponent, zero), _mm256_cmpgt_epi64(maximum, exponent));
+    normal =
+        _mm256_and_si256(normal, _mm256_and_si256(_mm256_cmpgt_epi64(scaled_exponent, zero),
+                                                  _mm256_cmpgt_epi64(maximum, scaled_exponent)));
+    auto bits =
+        _mm256_or_si256(_mm256_and_si256(raw, _mm256_set1_epi64x(INT64_MIN | 0x000fffffffffffffLL)),
+                        _mm256_slli_epi64(scaled_exponent, 52));
+    bits = _mm256_blendv_epi8(raw, bits, normal);
+    if (quiet_snan) {
+      bits = _mm256_or_si256(
+          bits,
+          _mm256_and_si256(_mm256_cmpgt_epi64(magnitude, _mm256_set1_epi64x(0x7ff0000000000000LL)),
+                           _mm256_set1_epi64x(0x0008000000000000LL)));
+    }
+    auto resolved = _mm256_or_si256(normal, _mm256_or_si256(_mm256_cmpeq_epi64(magnitude, zero),
+                                                            _mm256_cmpeq_epi64(exponent, maximum)));
+    if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
+      auto tiny = _mm256_cmpeq_epi64(exponent, zero);
+      bits = _mm256_blendv_epi8(bits, _mm256_and_si256(raw, _mm256_set1_epi64x(INT64_MIN)), tiny);
+      resolved = _mm256_or_si256(resolved, tiny);
+    }
+    scalar_lanes |= uint32_t(~_mm256_movemask_pd(_mm256_castsi256_pd(resolved)) & 15) << lane;
+    auto packed = _mm256_permutevar8x32_epi32(bits, _mm256_setr_epi32(0, 2, 4, 6, 1, 3, 5, 7));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(result[0] + lane), _mm256_castsi256_si128(packed));
+    _mm_storeu_si128(reinterpret_cast<__m128i *>(result[1] + lane),
+                     _mm256_extracti128_si256(packed, 1));
+  }
+  return scalar_lanes;
+}
+
+// Publish staged words only after every source and scalar repair has been read.
+void ldexp_f64_store_x86_64_v3(uint32_t exec_mask, uint32_t *const *d,
+                               const uint32_t result[2][32]) {
+  RJ_ARITH_UNROLL(2)
+  for (int reg = 0; reg < 2; ++reg) {
+    RJ_ARITH_UNROLL(4)
+    for (int lane = 0; lane < 32; lane += 8) {
+      auto lane_exec_mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
+                                              _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+      _mm256_maskstore_epi32(
+          reinterpret_cast<int *>(d[reg] + lane), lane_exec_mask,
+          _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result[reg] + lane)));
+    }
+  }
+}
 
 // Scale FP32 by powers of two. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.

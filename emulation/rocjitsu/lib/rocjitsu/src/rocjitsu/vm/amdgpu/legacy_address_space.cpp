@@ -21,7 +21,6 @@ constexpr uint64_t PROCMAP_QUERY_VMA_WRITABLE = 2;
 #endif
 
 namespace rocjitsu::amdgpu {
-
 bool LegacyAddressSpace::local_ingress_mapped(
     std::span<const MemoryIngressSpan> spans, uint64_t begin, uint64_t end, uint32_t vmid,
     const std::shared_ptr<util::DistributedSharedMutex> &expected,
@@ -167,47 +166,43 @@ LegacyAddressSpace::find_backing_key_range(uintptr_t address, uint64_t generatio
       const int saved_errno = errno;
       const long fd = ::syscall(SYS_openat, AT_FDCWD, "/proc/self/maps", O_RDONLY | O_CLOEXEC);
       if (fd >= 0) {
-        try {
-          std::string pending;
-          char buffer[8192];
-          bool valid = true;
-          while (valid) {
-            const long got = ::syscall(SYS_read, fd, buffer, sizeof(buffer));
-            if (got < 0 && errno == EINTR) {
-              continue;
-            }
-            if (got <= 0) {
-              index.complete = got == 0 && pending.empty();
+        std::string pending;
+        char buffer[8192];
+        bool valid = true;
+        while (valid) {
+          const long got = ::syscall(SYS_read, fd, buffer, sizeof(buffer));
+          if (got < 0 && errno == EINTR) {
+            continue;
+          }
+          if (got <= 0) {
+            index.complete = got == 0 && pending.empty();
+            break;
+          }
+          pending.append(buffer, static_cast<size_t>(got));
+          size_t begin = 0;
+          for (size_t end = pending.find('\n'); end != std::string::npos;
+               end = pending.find('\n', begin)) {
+            uintptr_t first, last, offset;
+            unsigned major, minor;
+            unsigned long long inode;
+            char permissions[5]{};
+            if (std::sscanf(pending.c_str() + begin, "%zx-%zx %4s %zx %x:%x %llu", &first, &last,
+                            permissions, &offset, &major, &minor, &inode) != 7) {
+              valid = false;
               break;
             }
-            pending.append(buffer, static_cast<size_t>(got));
-            size_t begin = 0;
-            for (size_t end = pending.find('\n'); end != std::string::npos;
-                 end = pending.find('\n', begin)) {
-              uintptr_t first, last, offset;
-              unsigned major, minor;
-              unsigned long long inode;
-              char permissions[5]{};
-              if (std::sscanf(pending.c_str() + begin, "%zx-%zx %4s %zx %x:%x %llu", &first, &last,
-                              permissions, &offset, &major, &minor, &inode) != 7) {
-                valid = false;
-                break;
-              }
-              // System V shmid 0 appears as a shared mapping with inode 0.
-              if (permissions[3] == 's') {
-                const uintptr_t file =
-                    (inode * 0x9e3779b97f4a7c15ULL ^ (uint64_t{major} << 32) ^ minor)
-                    << kBackingAtomicGranuleShift;
-                index.shared_mappings.push_back({first, last, UINTPTR_MAX, file + offset - first});
-              }
-              begin = end + 1;
+            // System V shmid 0 appears as a shared mapping with inode 0.
+            if (permissions[3] == 's') {
+              const uintptr_t file =
+                  (inode * 0x9e3779b97f4a7c15ULL ^ (uint64_t{major} << 32) ^ minor)
+                  << kBackingAtomicGranuleShift;
+              index.shared_mappings.push_back({first, last, UINTPTR_MAX, file + offset - first});
             }
-            pending.erase(0, begin);
+            begin = end + 1;
           }
-        } catch (const std::bad_alloc &) {
-          // Keep one lock namespace for the whole layout, even if the lookup
-          // ran out of memory partway through building the index.
+          pending.erase(0, begin);
         }
+
         ::syscall(SYS_close, fd);
       }
       errno = saved_errno;

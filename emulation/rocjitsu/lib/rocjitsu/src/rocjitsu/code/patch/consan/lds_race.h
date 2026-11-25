@@ -29,6 +29,7 @@ struct NativeLdsAccess {
   uint16_t immediate_bytes = 0;
   // Byte count set by decoding; zero is unspecified and cannot qualify a site.
   uint32_t width = 0;
+  LdsRangeRecipe lds_ranges{};
 };
 
 /// @brief Qualify LDS scope and select sites without owning binary/CFG machinery.

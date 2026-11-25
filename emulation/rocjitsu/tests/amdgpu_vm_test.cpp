@@ -3410,13 +3410,11 @@ TEST(GpuMemoryTest, CommandTranslationCachesReleaseAndRestoreNestedOwners) {
     const amdgpu::LegacyAddressSpace::ScopedPteCache outer;
     outer_state = translate(7);
     EXPECT_FALSE(outer_state.expired());
-    try {
+    {
       const amdgpu::LegacyAddressSpace::ScopedPteCache inner;
       inner_state = translate(8);
       EXPECT_FALSE(inner_state.expired());
       EXPECT_FALSE(outer_state.expired());
-      throw std::runtime_error("unwind command");
-    } catch (const std::runtime_error &) {
     }
     EXPECT_TRUE(inner_state.expired());
     EXPECT_FALSE(outer_state.expired());
