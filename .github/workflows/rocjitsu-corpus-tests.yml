@@ -687,19 +687,53 @@ jobs:
             'https://github.com/iree-org/iree/releases/download/iree-3.13.0rc20261006/iree_base_compiler-3.13.0rc20261006-cp312-abi3-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl#sha256=b1de2208a8b9b9e8fcedfd130bc00f096e0e8924c789f70ca38bf7b50dffdbf3' \
             2>&1 | tee "${prefill_evidence}/install.log"
 
-      - name: Require ConSan prefill capture and offline replay
+      - name: Compile ConSan prefill fixture and run native baseline
+        id: prepare_consan_prefill_fixture
         if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.setup_consan_prefill.outcome == 'success' }}
         timeout-minutes: 3
         shell: bash
         run: |
-          # Run once outside full CTest and required-ConSan selection. The
-          # original and instrumented applications share the same inputs.
+          # Compile and execute the baseline once for the two independent tests.
+          prefill_fixture="${ROCJITSU_BUILD_DIR}/Testing/ConSanPrefill/fixture-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           "${ROCJITSU_PREFILL_VENV}/bin/python" -B \
             "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/consan_iree_prefill_e2e.py" \
             --source "${ROCJITSU_SOURCE_DIR}" \
             --build "${ROCJITSU_BUILD_DIR}" \
             --suite "${ROCJITSU_PREFILL_SUITE}" \
             --root "${ROCJITSU_BUILD_DIR}/Testing/ConSanPrefill" \
+            --case setup --fixture "${prefill_fixture}" \
+            --cpu-thread-budget "${ROCJITSU_CPU_THREAD_BUDGET}" \
+            --timeout 60
+          printf 'fixture=%s\n' "${prefill_fixture}" >> "${GITHUB_OUTPUT}"
+
+      - name: Require ConSan prefill execution trace and offline replay
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.prepare_consan_prefill_fixture.outcome == 'success' }}
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          "${ROCJITSU_PREFILL_VENV}/bin/python" -B \
+            "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/consan_iree_prefill_e2e.py" \
+            --source "${ROCJITSU_SOURCE_DIR}" \
+            --build "${ROCJITSU_BUILD_DIR}" \
+            --suite "${ROCJITSU_PREFILL_SUITE}" \
+            --root "${ROCJITSU_BUILD_DIR}/Testing/ConSanPrefill" \
+            --case trace --fixture "${{ steps.prepare_consan_prefill_fixture.outputs.fixture }}" \
+            --cpu-thread-budget "${ROCJITSU_CPU_THREAD_BUDGET}" \
+            --timeout 60
+
+      - name: Require ConSan prefill LDS analysis and offline replay
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.prepare_consan_prefill_fixture.outcome == 'success' }}
+        timeout-minutes: 3
+        shell: bash
+        run: |
+          # This still runs when the execution-trace test failed.
+          "${ROCJITSU_PREFILL_VENV}/bin/python" -B \
+            "${ROCJITSU_SOURCE_DIR}/tests/patch/consan/consan_iree_prefill_e2e.py" \
+            --source "${ROCJITSU_SOURCE_DIR}" \
+            --build "${ROCJITSU_BUILD_DIR}" \
+            --suite "${ROCJITSU_PREFILL_SUITE}" \
+            --root "${ROCJITSU_BUILD_DIR}/Testing/ConSanPrefill" \
+            --case lds --fixture "${{ steps.prepare_consan_prefill_fixture.outputs.fixture }}" \
             --cpu-thread-budget "${ROCJITSU_CPU_THREAD_BUDGET}" \
             --timeout 60
 
