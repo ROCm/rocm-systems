@@ -67,9 +67,6 @@ const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
 };
 
 amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status);
-
-// Message for an ESMI status. Covers codes the vendored esmi_get_err_msg() lacks.
-const char* esmi_status_message(esmi_status_t status);
 #endif
 
 // Define a map of smi nic status codes to amdsmi status codes

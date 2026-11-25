@@ -29,6 +29,7 @@ namespace amd::smi::test_hooks {
 void SetSysfsDrmRoot(const std::string& root);
 void SetKfdNodesPathRoot(const std::string& root);
 void SetAppTmpDir(const std::string& dir);
+void SetEsmiStatusOverride(int status);
 }  // namespace amd::smi::test_hooks
 
 // Generic (not RAS-specific) fake-sysfs fixture tree, reusable by any unit

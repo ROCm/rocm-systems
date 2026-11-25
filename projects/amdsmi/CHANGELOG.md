@@ -152,6 +152,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Hardened the `@<path>` file loader shared by `--ampp-configure` and `--power-stabilization-configure`**.  
   - The loader now requires a regular file (rejecting symlinks, so not `/dev/stdin`), enforces a 1 MiB cap against bytes actually read, and guards against `UnicodeDecodeError`/`RecursionError`.
 
+- **CPU APIs return `AMDSMI_STATUS_MAP_ERROR` instead of success for ESMI errors without a mapping** (behavior change).  
+  - Previously an unmapped ESMI status was reported as `AMDSMI_STATUS_SUCCESS`, and the output parameters were left unset. Callers now get an error they can act on.
+  - `ESMI_PRE_REQ_NOT_SAT`, `ESMI_SMU_BUSY` and `ESMI_METRICS_TABLE_NOT_SUPPORTED` now map to `AMDSMI_STATUS_API_FAILED`, `AMDSMI_STATUS_BUSY` and `AMDSMI_STATUS_NOT_SUPPORTED`. Before, the first two could reach callers as success and the third was never mapped.
+
 ### Removed
 
 - **Removed the ``FW`` block from ``amd-smi static --nic``** (breaking).  
@@ -258,6 +262,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed board temperatures showing `-1 °C` for sensors the board does not have**.  
   - `amd-smi metric --base-board` and `--gpu-board` now show `N/A` for them, and `amdsmi_get_temp_metric()` returns `AMDSMI_STATUS_NOT_SUPPORTED`.
+
+- **Fixed `amdsmi_get_esmi_err_msg()` returning the wrong message**.  
+  - The lookup compared the AMD SMI status with ESMI enum values, so `AMDSMI_STATUS_INVAL` returned "Energy driver not present". It now looks up by the mapped status, and returns `AMDSMI_STATUS_MAP_ERROR` for an unknown status instead of success.
 
 - **Fixed `amdsmi_get_gpu_total_ecc_count()` in the Rust API returning wrong totals**.  
   - The counts were added to uninitialized memory, so the totals could be wrong. The Rust activity, power, clock and per-block ECC queries now also zero their output before the call.

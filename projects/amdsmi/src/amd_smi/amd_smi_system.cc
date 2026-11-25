@@ -76,56 +76,51 @@ static const char* nic_status_str(smi_nic_status_t status) {
 
 #ifdef ENABLE_ESMI_LIB
 amdsmi_status_t AMDSmiSystem::get_cpu_family(uint32_t* cpu_family) {
-  amdsmi_status_t ret;
-  ret = static_cast<amdsmi_status_t>(esmi_cpu_family_get(cpu_family));
+  const esmi_status_t esmi_ret = esmi_cpu_family_get(cpu_family);
 
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    std::cout << "Failed to get cpu family, Err[" << ret << "]" << std::endl;
-    return ret;
+  if (esmi_ret != ESMI_SUCCESS) {
+    std::cout << "Failed to get cpu family, Err[" << esmi_ret << "]" << std::endl;
+    return esmi_to_amdsmi_status(esmi_ret);
   }
   return AMDSMI_STATUS_SUCCESS;
 }
 
 amdsmi_status_t AMDSmiSystem::get_cpu_model(uint32_t* cpu_model) {
-  amdsmi_status_t ret;
-  ret = static_cast<amdsmi_status_t>(esmi_cpu_model_get(cpu_model));
+  const esmi_status_t esmi_ret = esmi_cpu_model_get(cpu_model);
 
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    std::cout << "Failed to get cpu model, Err[" << ret << "]" << std::endl;
-    return ret;
+  if (esmi_ret != ESMI_SUCCESS) {
+    std::cout << "Failed to get cpu model, Err[" << esmi_ret << "]" << std::endl;
+    return esmi_to_amdsmi_status(esmi_ret);
   }
   return AMDSMI_STATUS_SUCCESS;
 }
 
 static amdsmi_status_t get_nr_cpu_cores(uint32_t* num_cpus) {
-  amdsmi_status_t ret;
-  ret = static_cast<amdsmi_status_t>(esmi_number_of_cpus_get(num_cpus));
+  const esmi_status_t esmi_ret = esmi_number_of_cpus_get(num_cpus);
 
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    std::cout << "Failed to get number of cpus, Err[" << ret << "]" << std::endl;
-    return ret;
+  if (esmi_ret != ESMI_SUCCESS) {
+    std::cout << "Failed to get number of cpus, Err[" << esmi_ret << "]" << std::endl;
+    return esmi_to_amdsmi_status(esmi_ret);
   }
   return AMDSMI_STATUS_SUCCESS;
 }
 
 static amdsmi_status_t get_nr_threads_per_core(uint32_t* threads_per_core) {
-  amdsmi_status_t ret;
-  ret = static_cast<amdsmi_status_t>(esmi_threads_per_core_get(threads_per_core));
+  const esmi_status_t esmi_ret = esmi_threads_per_core_get(threads_per_core);
 
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    std::cout << "Failed to get threads per core, Err[" << ret << "]" << std::endl;
-    return ret;
+  if (esmi_ret != ESMI_SUCCESS) {
+    std::cout << "Failed to get threads per core, Err[" << esmi_ret << "]" << std::endl;
+    return esmi_to_amdsmi_status(esmi_ret);
   }
   return AMDSMI_STATUS_SUCCESS;
 }
 
 static amdsmi_status_t get_nr_cpu_sockets(uint32_t* num_socks) {
-  amdsmi_status_t ret;
-  ret = static_cast<amdsmi_status_t>(esmi_number_of_sockets_get(num_socks));
+  const esmi_status_t esmi_ret = esmi_number_of_sockets_get(num_socks);
 
-  if (ret != AMDSMI_STATUS_SUCCESS) {
-    std::cout << "Failed to get number of sockets, Err[" << ret << "]" << std::endl;
-    return ret;
+  if (esmi_ret != ESMI_SUCCESS) {
+    std::cout << "Failed to get number of sockets, Err[" << esmi_ret << "]" << std::endl;
+    return esmi_to_amdsmi_status(esmi_ret);
   }
   return AMDSMI_STATUS_SUCCESS;
 }
