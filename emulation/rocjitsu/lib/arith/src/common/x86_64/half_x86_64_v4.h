@@ -25,14 +25,28 @@ inline __m512 half_input(__m512i words, int shift, uint32_t instruction_flags) {
   return _mm512_cvtph_ps(_mm512_cvtepi32_epi16(halves));
 }
 
-// Nearest-even narrowing with the same finite-saturation/NaN policy as the
-// existing AVX2 arithmetic helper.
-inline __m512i half_narrow(__m512 value, bool saturate) {
+// Narrow with instruction-local guest rounding and the same finite-saturation/NaN
+// policy as the existing AVX2 arithmetic helper.
+inline __m512i half_narrow(__m512 value, bool saturate, unsigned rounding = 0) {
   auto bits = _mm512_castps_si512(value);
   auto magnitude = _mm512_and_si512(bits, _mm512_set1_epi32(INT32_MAX));
 
-  auto result =
-      _mm512_cvtepu16_epi32(_mm512_cvtps_ph(value, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  __m256i half;
+  switch (rounding) {
+  case 1:
+    half = _mm512_cvtps_ph(value, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+    break;
+  case 2:
+    half = _mm512_cvtps_ph(value, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+    break;
+  case 3:
+    half = _mm512_cvtps_ph(value, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    break;
+  default:
+    half = _mm512_cvtps_ph(value, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    break;
+  }
+  auto result = _mm512_cvtepu16_epi32(half);
   if (saturate) {
     auto finite = _mm512_cmplt_epi32_mask(magnitude, _mm512_set1_epi32(0x7f800000));
     auto infinity = _mm512_cmpeq_epi32_mask(_mm512_and_si512(result, _mm512_set1_epi32(0x7fff)),

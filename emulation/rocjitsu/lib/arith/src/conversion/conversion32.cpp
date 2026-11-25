@@ -533,134 +533,185 @@ int rj_arith_v_cvt_nearest_i32_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mas
   return rj_arith_v_cvt_nearest_i32_f32_w64(flags, exec_mask, instruction_flags, d, a);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
+// gfx942 shares the RDNA3 numeric model; empirically exact on MI300X.
 int rj_arith_v_cvt_f32_i32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
-    return error;
-  }
   return rj_arith_v_cvt_f32_i32_w32(flags, exec_mask, instruction_flags, d, a);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_f32_i32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
-    return error;
-  }
   return rj_arith_v_cvt_f32_i32_w64(flags, exec_mask, instruction_flags, d, a);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_f32_u32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
-    return error;
-  }
   return rj_arith_v_cvt_f32_u32_w32(flags, exec_mask, instruction_flags, d, a);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_f32_u32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a) {
+  return rj_arith_v_cvt_f32_u32_w64(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_i32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  return rj_arith_v_cvt_i32_f32_w32(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_i32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  return rj_arith_v_cvt_i32_f32_w64(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_u32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  return rj_arith_v_cvt_u32_f32_w32(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_u32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  return rj_arith_v_cvt_u32_f32_w64(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_floor_i32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a) {
+  return rj_arith_v_cvt_floor_i32_f32_w32(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_floor_i32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a) {
+  return rj_arith_v_cvt_floor_i32_f32_w64(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_nearest_i32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a) {
+  return rj_arith_v_cvt_nearest_i32_f32_w32(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_nearest_i32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a) {
+  return rj_arith_v_cvt_nearest_i32_f32_w64(flags, exec_mask, instruction_flags, d, a);
+}
+
+// gfx950 inherits the RDNA3/gfx942 numeric model; strict exact stays unsupported pending
+// architecture-specific captures.
+int rj_arith_v_cvt_f32_i32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
     return error;
   }
-  return rj_arith_v_cvt_f32_u32_w64(flags, exec_mask, instruction_flags, d, a);
+  return rj_arith_v_cvt_f32_i32_w32_gfx942(flags, exec_mask, instruction_flags, d, a);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
-int rj_arith_v_cvt_i32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+int rj_arith_v_cvt_f32_i32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f32_i32_w64_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_f32_u32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f32_u32_w32_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_f32_u32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f32_u32_w64_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_i32_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  return rj_arith_v_cvt_i32_f32_w32(flags, exec_mask, instruction_flags, d, a, trapsts);
+  return rj_arith_v_cvt_i32_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
-int rj_arith_v_cvt_i32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+int rj_arith_v_cvt_i32_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  return rj_arith_v_cvt_i32_f32_w64(flags, exec_mask, instruction_flags, d, a, trapsts);
+  return rj_arith_v_cvt_i32_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
-int rj_arith_v_cvt_u32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+int rj_arith_v_cvt_u32_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  return rj_arith_v_cvt_u32_f32_w32(flags, exec_mask, instruction_flags, d, a, trapsts);
+  return rj_arith_v_cvt_u32_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
-int rj_arith_v_cvt_u32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+int rj_arith_v_cvt_u32_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  return rj_arith_v_cvt_u32_f32_w64(flags, exec_mask, instruction_flags, d, a, trapsts);
+  return rj_arith_v_cvt_u32_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
-int rj_arith_v_cvt_floor_i32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+int rj_arith_v_cvt_floor_i32_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                             uint64_t instruction_flags, uint32_t *const *d,
                                             const uint32_t *const *a) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
     return error;
   }
-  return rj_arith_v_cvt_floor_i32_f32_w32(flags, exec_mask, instruction_flags, d, a);
+  return rj_arith_v_cvt_floor_i32_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
-int rj_arith_v_cvt_floor_i32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+int rj_arith_v_cvt_floor_i32_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                             uint64_t instruction_flags, uint32_t *const *d,
                                             const uint32_t *const *a) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
     return error;
   }
-  return rj_arith_v_cvt_floor_i32_f32_w64(flags, exec_mask, instruction_flags, d, a);
+  return rj_arith_v_cvt_floor_i32_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
-int rj_arith_v_cvt_nearest_i32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+int rj_arith_v_cvt_nearest_i32_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
     return error;
   }
-  return rj_arith_v_cvt_nearest_i32_f32_w32(flags, exec_mask, instruction_flags, d, a);
+  return rj_arith_v_cvt_nearest_i32_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
-int rj_arith_v_cvt_nearest_i32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+int rj_arith_v_cvt_nearest_i32_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
     return error;
   }
-  return rj_arith_v_cvt_nearest_i32_f32_w64(flags, exec_mask, instruction_flags, d, a);
+  return rj_arith_v_cvt_nearest_i32_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a);
 }

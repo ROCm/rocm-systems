@@ -318,3 +318,57 @@ int rj_arith_v_mullit_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
   return run_wave64<false>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user,
                            compatibility);
 }
+
+// gfx10 inherits the gfx11 MULLIT model; strict exact is unsupported pending gfx10 captures.
+// Compatibility keeps the hardware model without claiming exactness.
+int rj_arith_v_mullit_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, const uint32_t *const *c,
+                                    uint32_t *excp_flag_user) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return run<true>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user, compatibility);
+}
+
+// gfx10 inherits the gfx11 MULLIT model; strict exact is unsupported pending gfx10 captures.
+// Compatibility keeps the hardware model without claiming exactness.
+int rj_arith_v_mullit_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                    uint32_t *const *d, const uint32_t *const *a,
+                                    const uint32_t *const *b, const uint32_t *const *c,
+                                    uint32_t *excp_flag_user) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return run_wave64<true>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user,
+                          compatibility);
+}
+
+// gfx1150 inherits the gfx11 MULLIT model; strict exact is unsupported pending gfx1150 captures.
+// Compatibility keeps the hardware model without claiming exactness.
+int rj_arith_v_mullit_f32_w32_gfx1150(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return run<true>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user, compatibility);
+}
+
+// gfx1150 inherits the gfx11 MULLIT model; strict exact is unsupported pending gfx1150 captures.
+// Compatibility keeps the hardware model without claiming exactness.
+int rj_arith_v_mullit_f32_w64_gfx1150(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c, uint32_t *excp_flag_user) {
+  const bool compatibility = (flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_COMPATIBILITY;
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return run_wave64<true>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user,
+                          compatibility);
+}

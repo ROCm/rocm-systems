@@ -214,14 +214,76 @@ TEST(ConversionCvtPkU8F32W64Gfx1250, Arithmetic) {
   check_byte_pack<64, false, false>(rj_arith_v_cvt_pk_u8_f32_w64_gfx1250);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
+// gfx942 shares the RDNA3 numeric model and matches MI300X captures.
 TEST(ConversionCvtPkU8F32W32Gfx942, Arithmetic) {
-  check_byte_pack<32, false, false>(rj_arith_v_cvt_pk_u8_f32_w32_gfx942);
+  check_byte_pack<32, false, true>(rj_arith_v_cvt_pk_u8_f32_w32_gfx942);
 }
 
-// gfx942/gfx950 inherit the RDNA3 model but stay loose-only until the CDNA captures are reviewed.
 TEST(ConversionCvtPkU8F32W64Gfx942, Arithmetic) {
-  check_byte_pack<64, false, false>(rj_arith_v_cvt_pk_u8_f32_w64_gfx942);
+  check_byte_pack<64, false, true>(rj_arith_v_cvt_pk_u8_f32_w64_gfx942);
+}
+
+// gfx950 inherits the RDNA3/gfx942 model but stays loose-only until gfx950 captures are reviewed.
+TEST(ConversionCvtPkU8F32W32Gfx950, Arithmetic) {
+  check_byte_pack<32, false, false>(rj_arith_v_cvt_pk_u8_f32_w32_gfx950);
+}
+
+TEST(ConversionCvtPkU8F32W64Gfx950, Arithmetic) {
+  check_byte_pack<64, false, false>(rj_arith_v_cvt_pk_u8_f32_w64_gfx950);
+}
+
+// MI300X (2026-11-24) captures: unmodified V_CVT_PKACCUM_U8_F32 honors guest FP32 rounding and
+// input-denormal flushing and accepts mode 2; VOP3 modifiers remain loose-only.
+TEST(ConversionCvtPkaccumU8F32Gfx942, ExactAndModifiers) {
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx942, 0, 0x3fc00000U, 0,
+                                   0xaabbccddU, 0, 0xaabbcc02U);
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx942, RJ_ARITH_FP_ROUND_ZERO,
+                                   0x3fc00000U, 0, 0xaabbccddU, 0, 0xaabbcc01U);
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx942, RJ_ARITH_FP_ROUND_UP,
+                                   0x00000001U, 2, 0xaabbccddU, 0, 0xaa01ccddU);
+  expect_captured_conversion<3, 1>(rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx942,
+                                   RJ_ARITH_FP_ROUND_UP | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS,
+                                   0x00000001U, 2, 0xaabbccddU, 0, 0xaa00ccddU);
+
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (bool wave64 : {false, true}) {
+      uint32_t av[64]{}, bv[64]{}, cv[64]{}, dv[64]{};
+      av[0] = 0x3fc00000U;
+      bv[0] = 1;
+      cv[0] = 0x11223344U;
+      const uint32_t *a = av, *b = bv, *c = cv;
+      uint32_t *d = dv;
+      uint32_t status = 0x55;
+      auto invoke = [&](uint64_t flags, uint64_t modifiers) {
+        return wave64 ? rj_arith_v_cvt_pkaccum_u8_f32_w64_gfx942(flags, 1ULL, modifiers, &d, &a, &b,
+                                                                 &c, &status)
+                      : rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx942(flags, 1U, modifiers, &d, &a, &b,
+                                                                 &c, &status);
+      };
+      dv[0] = 0xdeadbeefU;
+      EXPECT_EQ(invoke(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 0),
+                RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+      EXPECT_EQ(dv[0], 0xdeadbeefU);
+      EXPECT_EQ(invoke(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(dv[0], 0x11220244U);
+
+      dv[0] = 0xdeadbeefU;
+      EXPECT_EQ(
+          invoke(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, RJ_ARITH_ALU_CLAMP),
+          RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(dv[0], 0xdeadbeefU);
+      EXPECT_EQ(invoke(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_ALU_CLAMP),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(dv[0], 0x11220244U);
+
+      dv[0] = 0xdeadbeefU;
+      EXPECT_EQ(invoke(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_ALU_ABS_B),
+                RJ_ARITH_ERROR_INVALID_FLAGS);
+      EXPECT_EQ(dv[0], 0xdeadbeefU);
+      EXPECT_EQ(status, 0x55U);
+    }
+  }
 }
 
 // gfx1100 (W7900, mkm2) hw1100-noieee lanes (2026-09-25, MODE.IEEE clear): byte packing

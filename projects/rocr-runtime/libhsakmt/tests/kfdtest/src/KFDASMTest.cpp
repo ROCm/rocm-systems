@@ -26,6 +26,8 @@
 #include "ShaderStore.hpp"
 #include "Assemble.hpp"
 
+#include <llvm/Config/llvm-config.h>
+
 void KFDASMTest::SetUp() {}
 void KFDASMTest::TearDown() {}
 
@@ -74,15 +76,27 @@ static const std::vector<uint32_t> TargetList = {
 TEST_F(KFDASMTest, AssembleShaders) {
     TEST_START(TESTPROFILE_RUNALL)
 
+    unsigned int tested = 0;
+
     for (auto &t : TargetList) {
         Assembler asmblr(t);
+
+        /* A new ASIC can be ahead of the linked LLVM; test the ones it knows */
+        if (!asmblr.IsTargetSupported()) {
+            LOG() << "Skipping ASM test for target " << asmblr.GetTargetAsic()
+                  << ": not supported by LLVM " << LLVM_VERSION_STRING << std::endl;
+            continue;
+        }
 
         LOG() << "Running ASM test for target " << asmblr.GetTargetAsic() << std::endl;
 
         for (auto &s : ShaderList) {
             EXPECT_SUCCESS(asmblr.RunAssemble(s));
         }
+        tested++;
     }
+
+    EXPECT_GT(tested, 0u) << "LLVM " << LLVM_VERSION_STRING << " supports no kfdtest target";
 
     TEST_END
 }

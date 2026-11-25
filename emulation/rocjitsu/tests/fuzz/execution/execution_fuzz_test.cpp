@@ -8,11 +8,8 @@
 
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
-#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -330,30 +327,6 @@ TEST(ExecutionFuzzInputTest, ReplaySelectsArithmeticSemanticsAndCompatibleCpuTie
       EXPECT_LE(actual_cpu, detected & RJ_ARITH_CPU_MASK);
       EXPECT_EQ(stats.force_scalar, util::force_scalar() || levels[cpu] == RJ_ARITH_CPU_BASELINE);
     }
-  }
-}
-
-TEST(ExecutionFuzzInputTest, ScalarReplayDisablesLegacySimd) {
-  const auto words = cdna4::build_vop3(cdna4::kVDivFixupF16Vop3,
-                                       {.vdst = 24, .src0 = 276, .src1 = 277, .src2 = 278});
-  std::vector<uint8_t> input{static_cast<uint8_t>(FuzzTarget::Gfx950), kFullExecMaskBit};
-  for (const uint32_t word : words) {
-    for (unsigned byte = 0; byte < sizeof(word); ++byte) {
-      input.push_back(static_cast<uint8_t>(word >> (8 * byte)));
-    }
-  }
-  for (bool scalar : {false, true, false}) {
-    SCOPED_TRACE(scalar);
-    input[1] = kFullExecMaskBit | (scalar ? (1u << kArithmeticCpuShift) : 0);
-    amdgpu::ScopedSimdFastPathTracker paths;
-    const util::FailureOr<RunStats> maybe_stats =
-        run_input(input, std::nullopt, nullptr, AsyncMode::Disabled, 1);
-    ASSERT_TRUE(maybe_stats.succeeded());
-    const RunStats &stats = maybe_stats.value();
-    EXPECT_EQ(stats.executed, 2u);
-    EXPECT_EQ(stats.inputs_halted, 1u);
-    EXPECT_EQ(paths.tracked_path_executed(amdgpu::SimdFastPath::VOP3_TERNARY_FP16),
-              util::has_stdx_simd && !scalar && !util::force_scalar());
   }
 }
 

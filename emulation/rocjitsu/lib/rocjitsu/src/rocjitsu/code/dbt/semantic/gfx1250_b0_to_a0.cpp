@@ -15,6 +15,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds2_addressing.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/vgpr_msb.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_family.h"
@@ -689,69 +690,6 @@ ExpandResult expand_gfx1250_barrier_signal_isfirst(const Instruction &inst, uint
       {"Use a different barrier id, or signal it without the first-signal form."});
 }
 
-struct Gfx1250Ds2Shape {
-  uint16_t replacement_opcode = 0;
-  uint8_t element_dwords = 0;
-  bool stride64 = false;
-  enum class Kind : uint8_t { Load, Store, StoreExchange } kind = Kind::Load;
-};
-
-/// @brief Describe one B0 DS2 opcode and its A0 single-address replacement.
-[[nodiscard]] Gfx1250Ds2Shape gfx1250_ds2_shape(uint16_t opcode) {
-  using Kind = Gfx1250Ds2Shape::Kind;
-  switch (opcode) {
-  case cdna5::kDsLoad2addrB32Vds:
-    return {cdna5::kDsLoadB32Vds, 1, false, Kind::Load};
-  case cdna5::kDsLoad2addrStride64B32Vds:
-    return {cdna5::kDsLoadB32Vds, 1, true, Kind::Load};
-  case cdna5::kDsStore2addrB32Vds:
-    return {cdna5::kDsStoreB32Vds, 1, false, Kind::Store};
-  case cdna5::kDsStore2addrStride64B32Vds:
-    return {cdna5::kDsStoreB32Vds, 1, true, Kind::Store};
-  case cdna5::kDsStorexchg2addrRtnB32Vds:
-    return {cdna5::kDsStorexchgRtnB32Vds, 1, false, Kind::StoreExchange};
-  case cdna5::kDsStorexchg2addrStride64RtnB32Vds:
-    return {cdna5::kDsStorexchgRtnB32Vds, 1, true, Kind::StoreExchange};
-  case cdna5::kDsLoad2addrB64Vds:
-    return {cdna5::kDsLoadB64Vds, 2, false, Kind::Load};
-  case cdna5::kDsLoad2addrStride64B64Vds:
-    return {cdna5::kDsLoadB64Vds, 2, true, Kind::Load};
-  case cdna5::kDsStore2addrB64Vds:
-    return {cdna5::kDsStoreB64Vds, 2, false, Kind::Store};
-  case cdna5::kDsStore2addrStride64B64Vds:
-    return {cdna5::kDsStoreB64Vds, 2, true, Kind::Store};
-  case cdna5::kDsStorexchg2addrRtnB64Vds:
-    return {cdna5::kDsStorexchgRtnB64Vds, 2, false, Kind::StoreExchange};
-  case cdna5::kDsStorexchg2addrStride64RtnB64Vds:
-    return {cdna5::kDsStorexchgRtnB64Vds, 2, true, Kind::StoreExchange};
-  default:
-    return {};
-  }
-}
-
-/// @brief Build one single-address DS instruction from a DS2 operand half.
-[[nodiscard]] std::array<uint32_t, 2> build_gfx1250_ds2_half(const cdna5::VdsMachineInst &source,
-                                                             const Gfx1250Ds2Shape &shape,
-                                                             uint16_t byte_offset,
-                                                             bool second_half) {
-  const uint8_t tuple_delta = second_half ? shape.element_dwords : 0;
-  // Plain DS stores have no destination operand, and their reserved VDST field
-  // must remain zero. Loads and returning exchanges use consecutive VDST
-  // tuples for the two halves.
-  const uint8_t vdst = shape.kind == Gfx1250Ds2Shape::Kind::Store
-                           ? 0
-                           : static_cast<uint8_t>(source.vdst + tuple_delta);
-  return cdna5::build_vds(shape.replacement_opcode,
-                          {.offset0 = static_cast<uint8_t>(byte_offset),
-                           .offset1 = static_cast<uint8_t>(byte_offset >> 8),
-                           .addr = static_cast<uint8_t>(source.addr),
-                           // A single-address store/exchange consumes DATA0. The second DS2 data
-                           // operand therefore moves from the source DATA1 field into DATA0.
-                           .data0 = static_cast<uint8_t>(second_half ? source.data1 : source.data0),
-                           .data1 = 0,
-                           .vdst = vdst});
-}
-
 /// @brief Expand a gfx1250 B0 two-address DS operation for A0.
 ///
 /// @details A0 and B0 use different DS2 offset alignment rules. The B0-to-A0
@@ -769,18 +707,13 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
 
   cdna5::VdsMachineInst source{};
   std::memcpy(&source, raw, sizeof(source));
-  const Gfx1250Ds2Shape shape = gfx1250_ds2_shape(inst.opcode());
-  if (shape.element_dwords == 0) {
+  const std::optional<amdgpu::Ds2Addressing> addressing =
+      amdgpu::ds2_addressing(inst.amdgpu_operation());
+  if (!addressing)
     return ExpandResult::failed("gfx1250 DS2 semantic rule received an unsupported opcode");
-  }
 
-  // DS2 immediates are element indices. Stride64 forms add another factor of
-  // 64; ordinary single-address DS instructions instead encode a 16-bit byte
-  // offset directly.
-  const uint32_t byte_scale =
-      static_cast<uint32_t>(shape.element_dwords) * sizeof(uint32_t) * (shape.stride64 ? 64u : 1u);
-  const uint32_t offset0 = static_cast<uint32_t>(source.offset0) * byte_scale;
-  const uint32_t offset1 = static_cast<uint32_t>(source.offset1) * byte_scale;
+  const uint32_t offset0 = addressing->byte_offset(source.offset0);
+  const uint32_t offset1 = addressing->byte_offset(source.offset1);
   constexpr uint32_t kSingleAddressOffsetMax = 0xffff;
   if (offset0 > kSingleAddressOffsetMax || offset1 > kSingleAddressOffsetMax) {
     return ExpandResult::failed(
@@ -788,8 +721,39 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
         {"Use a scratch-address lowering for DS2 offsets larger than 65535 bytes."});
   }
 
-  const auto first = build_gfx1250_ds2_half(source, shape, static_cast<uint16_t>(offset0), false);
-  const auto second = build_gfx1250_ds2_half(source, shape, static_cast<uint16_t>(offset1), true);
+  const uint8_t element_dwords = static_cast<uint8_t>(addressing->element_bytes / sizeof(uint32_t));
+  const bool b64 = element_dwords == 2;
+  const amdgpu::MemoryKind kind = inst.amdgpu_memory_kind();
+  uint16_t replacement_opcode;
+  switch (kind) {
+  case amdgpu::MemoryKind::Load:
+    replacement_opcode = b64 ? cdna5::kDsLoadB64Vds : cdna5::kDsLoadB32Vds;
+    break;
+  case amdgpu::MemoryKind::Store:
+    replacement_opcode = b64 ? cdna5::kDsStoreB64Vds : cdna5::kDsStoreB32Vds;
+    break;
+  case amdgpu::MemoryKind::Atomic:
+    replacement_opcode = b64 ? cdna5::kDsStorexchgRtnB64Vds : cdna5::kDsStorexchgRtnB32Vds;
+    break;
+  default:
+    return ExpandResult::failed("gfx1250 DS2 semantic rule received an unsupported memory kind");
+  }
+
+  const auto build_half = [&](uint32_t offset, bool second) {
+    // Stores reserve VDST; loads and returning exchanges write consecutive tuples.
+    const uint8_t vdst = kind == amdgpu::MemoryKind::Store
+                             ? 0
+                             : static_cast<uint8_t>(source.vdst + (second ? element_dwords : 0));
+    return cdna5::build_vds(replacement_opcode,
+                            {.offset0 = static_cast<uint8_t>(offset),
+                             .offset1 = static_cast<uint8_t>(offset >> 8),
+                             .addr = static_cast<uint8_t>(source.addr),
+                             .data0 = static_cast<uint8_t>(second ? source.data1 : source.data0),
+                             .data1 = 0,
+                             .vdst = vdst});
+  };
+  const std::array<uint32_t, 2> first = build_half(offset0, false);
+  const std::array<uint32_t, 2> second = build_half(offset1, true);
   FailureOr<Gfx1250VgprBanks> maybe_banks = gfx1250_vgpr_banks_before(inst, liveness);
   if (maybe_banks.failed()) {
     return ExpandResult::liveness_unavailable();
@@ -813,10 +777,9 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
   };
 
   const uint16_t first_dst = physical(static_cast<uint8_t>(source.vdst), *dst_bank);
-  const uint32_t second_dst_wide = static_cast<uint32_t>(first_dst) + shape.element_dwords;
-  if ((shape.kind == Gfx1250Ds2Shape::Kind::Load ||
-       shape.kind == Gfx1250Ds2Shape::Kind::StoreExchange) &&
-      second_dst_wide + shape.element_dwords > 1024u) {
+  const uint32_t second_dst_wide = static_cast<uint32_t>(first_dst) + element_dwords;
+  if ((kind == amdgpu::MemoryKind::Load || kind == amdgpu::MemoryKind::Atomic) &&
+      second_dst_wide + element_dwords > 1024u) {
     return ExpandResult::failed("gfx1250 DS2 destination tuple exceeds the VGPR address space");
   }
   const uint16_t second_dst = static_cast<uint16_t>(second_dst_wide);
@@ -824,33 +787,30 @@ ExpandResult expand_gfx1250_ds2(const Instruction &inst, uint32_t, uint64_t,
 
   // DATA1 is a SRC2 operand in DS2 but becomes DATA0/SRC1 in the second
   // single-address instruction. Select its original bank for the new role.
-  const uint8_t second_src1_bank =
-      shape.kind == Gfx1250Ds2Shape::Kind::Load ? *src1_bank : *src2_bank;
+  const uint8_t second_src1_bank = kind == amdgpu::MemoryKind::Load ? *src1_bank : *src2_bank;
   const uint8_t second_mode = static_cast<uint8_t>(*src0_bank | (second_src1_bank << 2) |
                                                    (*src2_bank << 4) | (second_dst_bank << 6));
   bool second_first = false;
 
-  if (shape.kind == Gfx1250Ds2Shape::Kind::Load) {
+  if (kind == amdgpu::MemoryKind::Load) {
     // The compound load captures ADDR before writing either destination half.
     // If the first half aliases ADDR, issue the independent second load first.
-    second_first = physical_overlap(first_dst, shape.element_dwords,
+    second_first = physical_overlap(first_dst, element_dwords,
                                     physical(static_cast<uint8_t>(source.addr), *src0_bank), 1);
-  } else if (shape.kind == Gfx1250Ds2Shape::Kind::StoreExchange) {
+  } else if (kind == amdgpu::MemoryKind::Atomic) {
     // Each exchange writes one destination half while the other still needs
     // ADDR and its input data. Pick a safe direction. A dependency in both
     // directions needs scratch storage and must fail closed for now.
     const bool first_clobbers_second =
-        physical_overlap(first_dst, shape.element_dwords,
+        physical_overlap(first_dst, element_dwords,
                          physical(static_cast<uint8_t>(source.addr), *src0_bank), 1) ||
-        physical_overlap(first_dst, shape.element_dwords,
-                         physical(static_cast<uint8_t>(source.data1), *src2_bank),
-                         shape.element_dwords);
+        physical_overlap(first_dst, element_dwords,
+                         physical(static_cast<uint8_t>(source.data1), *src2_bank), element_dwords);
     const bool second_clobbers_first =
-        physical_overlap(second_dst, shape.element_dwords,
+        physical_overlap(second_dst, element_dwords,
                          physical(static_cast<uint8_t>(source.addr), *src0_bank), 1) ||
-        physical_overlap(second_dst, shape.element_dwords,
-                         physical(static_cast<uint8_t>(source.data0), *src1_bank),
-                         shape.element_dwords);
+        physical_overlap(second_dst, element_dwords,
+                         physical(static_cast<uint8_t>(source.data0), *src1_bank), element_dwords);
     if (first_clobbers_second && second_clobbers_first) {
       return ExpandResult::failed("gfx1250 DS2 exchange has cyclic destination/source overlap",
                                   {"Add a scratch-VGPR DS2 exchange lowering for cyclic overlap."});

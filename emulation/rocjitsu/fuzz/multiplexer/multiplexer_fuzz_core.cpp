@@ -73,11 +73,17 @@ util::FailureOr<uint64_t> run_code_object(std::span<const uint8_t> payload,
   return stats.code_objects_valid + stats.executables_valid;
 }
 
-uint64_t run_concurrent_dispatch(std::span<const uint8_t> payload) {
+util::FailureOr<uint64_t> run_concurrent_dispatch(std::span<const uint8_t> payload,
+                                                  util::DiagnosticEmitter diagnostic) {
   if (payload.empty() || payload.size() > concurrent_dispatch_fuzz::kMaxInputSize) {
     return 0;
   }
-  return concurrent_dispatch_fuzz::run_input(payload).instructions;
+  const util::FailureOr<concurrent_dispatch_fuzz::RunStats> result =
+      concurrent_dispatch_fuzz::run_input(payload, diagnostic);
+  if (result.failed()) {
+    return util::Result::failure();
+  }
+  return result.value().instructions;
 }
 
 } // namespace
@@ -115,7 +121,7 @@ util::FailureOr<std::optional<DispatchResult>> run_input(std::span<const uint8_t
     work_units = run_code_object(payload, diagnostic);
     break;
   case FuzzTarget::ConcurrentDispatch:
-    work_units = run_concurrent_dispatch(payload);
+    work_units = run_concurrent_dispatch(payload, diagnostic);
     break;
   }
   if (work_units.failed()) {
@@ -159,9 +165,13 @@ util::FailureOr<std::vector<std::vector<uint8_t>>> seed_corpus(util::DiagnosticE
     code_object_seed.insert(code_object_seed.begin(), static_cast<uint8_t>(FuzzTarget::CodeObject));
     seeds.push_back(std::move(code_object_seed));
   }
+  const util::FailureOr<std::vector<std::vector<uint8_t>>> concurrent_seeds =
+      concurrent_dispatch_fuzz::seed_corpus(diagnostic);
+  if (concurrent_seeds.failed()) {
+    return util::Result::failure();
+  }
   std::vector<uint8_t> concurrent_seed =
-      concurrent_dispatch_fuzz::seed_corpus()[static_cast<std::size_t>(
-          execution_fuzz::FuzzTarget::Gfx950)];
+      concurrent_seeds.value()[static_cast<std::size_t>(execution_fuzz::FuzzTarget::Gfx950)];
   concurrent_seed.insert(concurrent_seed.begin(),
                          static_cast<uint8_t>(FuzzTarget::ConcurrentDispatch));
   seeds.push_back(std::move(concurrent_seed));
