@@ -279,7 +279,7 @@ void VPkMinF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()) ? 1u : 0u) |
       (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u);
   amdgpu::arith::execute_packed_binary16(
-      wf, rj_arith_v_pk_min_f16_w32_gfx942, rj_arith_v_pk_min_f16_w64_gfx942,
+      wf, rj_arith_v_pk_min_f16_w32_gfx950, rj_arith_v_pk_min_f16_w64_gfx950,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true, narrow_sources);
 }
 
@@ -297,7 +297,7 @@ void VPkMaxF16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()) ? 1u : 0u) |
       (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u);
   amdgpu::arith::execute_packed_binary16(
-      wf, rj_arith_v_pk_max_f16_w32_gfx942, rj_arith_v_pk_max_f16_w64_gfx942,
+      wf, rj_arith_v_pk_max_f16_w32_gfx950, rj_arith_v_pk_max_f16_w64_gfx950,
       wf.cu().arithmetic_flags(), modifiers, vdst, src0, src1, true, narrow_sources);
 }
 
@@ -341,8 +341,8 @@ void VPkMinimum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u) |
       (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()) ? 4u : 0u);
   const unsigned replicate_sources = 0;
-  amdgpu::arith::execute_packed_fma16<false>(wf, rj_arith_v_pk_minimum3_f16_w32,
-                                             rj_arith_v_pk_minimum3_f16_w64,
+  amdgpu::arith::execute_packed_fma16<false>(wf, rj_arith_v_pk_minimum3_f16_w32_gfx950,
+                                             rj_arith_v_pk_minimum3_f16_w64_gfx950,
                                              wf.cu().arithmetic_flags(), modifiers, vdst, src0,
                                              src1, src2, true, narrow_sources, replicate_sources);
 }
@@ -366,8 +366,8 @@ void VPkMaximum3F16Vop3p::execute_impl(amdgpu::Wavefront &wf) {
       (amdgpu::pk16_src_needs_narrowing(inst_.src1, src1.size_bits()) ? 2u : 0u) |
       (amdgpu::pk16_src_needs_narrowing(inst_.src2, src2.size_bits()) ? 4u : 0u);
   const unsigned replicate_sources = 0;
-  amdgpu::arith::execute_packed_fma16<false>(wf, rj_arith_v_pk_maximum3_f16_w32,
-                                             rj_arith_v_pk_maximum3_f16_w64,
+  amdgpu::arith::execute_packed_fma16<false>(wf, rj_arith_v_pk_maximum3_f16_w32_gfx950,
+                                             rj_arith_v_pk_maximum3_f16_w64_gfx950,
                                              wf.cu().arithmetic_flags(), modifiers, vdst, src0,
                                              src1, src2, true, narrow_sources, replicate_sources);
 }

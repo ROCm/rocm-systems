@@ -121,12 +121,12 @@ TEST(FpFmacF64W64Gfx942, Arithmetic) {
   check_min_normal<64>(rj_arith_v_fmac_f64_w64_gfx942);
 }
 TEST(FpFmacF64W32Gfx950, Arithmetic) {
-  check_variant<32, false>(accumulating<32>(rj_arith_v_fmac_f64_w32_gfx950));
+  check_variant<32, true>(accumulating<32>(rj_arith_v_fmac_f64_w32_gfx950));
   check_accumulator_alias<32>(rj_arith_v_fmac_f64_w32_gfx950);
   check_min_normal<32>(rj_arith_v_fmac_f64_w32_gfx950);
 }
 TEST(FpFmacF64W64Gfx950, Arithmetic) {
-  check_variant<64, false>(accumulating<64>(rj_arith_v_fmac_f64_w64_gfx950));
+  check_variant<64, true>(accumulating<64>(rj_arith_v_fmac_f64_w64_gfx950));
   check_accumulator_alias<64>(rj_arith_v_fmac_f64_w64_gfx950);
   check_min_normal<64>(rj_arith_v_fmac_f64_w64_gfx950);
 }
@@ -183,7 +183,7 @@ TEST(FpF64Cdna, ProductRoundThenFlush) {
   });
 }
 
-// gfx942 FP64 entry points accept mode 2 against MI300X captures; gfx950 stays loose-only.
+// gfx942 and gfx950 FP64 entry points accept mode 2 against MI300X and MI350X captures.
 TEST(FpF64Cdna, ExactAndLooseOnlyQualification) {
   using Unary32 = decltype(&rj_arith_v_trunc_f64_w32_gfx942);
   using Unary64 = decltype(&rj_arith_v_trunc_f64_w64_gfx942);
@@ -219,11 +219,7 @@ TEST(FpF64Cdna, ExactAndLooseOnlyQualification) {
       const int expected_942 = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
                                    ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
                                    : RJ_ARITH_SUCCESS;
-      const int expected_950 = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
-                                   ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
-                               : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                                   ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
-                                   : RJ_ARITH_SUCCESS;
+      const int expected_950 = expected_942;
       uint32_t av[2][64]{}, bv[2][64]{}, cv[2][64]{}, dv[2][64]{};
       av[1][0] = 0x3ff80000U;
       bv[1][0] = 0x40000000U;

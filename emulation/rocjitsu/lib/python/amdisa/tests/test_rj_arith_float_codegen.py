@@ -23,21 +23,21 @@ from amdisa.codegen.execute.rj_arith_float import (
 from rj_arith_headers import public_headers
 
 # Expected architecture routing of the shared entry points. RDNA3 owns the unsuffixed
-# entries, RDNA4 the _gfx12 entries, and CDNA3 (gfx942) the _gfx942 entries; all three
-# accept bit-exact semantics. The remaining architectures must reach a suffixed loose-only
-# wrapper. These are spelled out rather than imported from the generator so that changing
-# its map fails these tests.
+# entries, RDNA4 the _gfx12 entries, CDNA3 (gfx942) the _gfx942 entries, and CDNA4
+# (gfx950) the _gfx950 entries; all four accept bit-exact semantics. The remaining
+# architectures must reach a suffixed loose-only wrapper. These are spelled out rather
+# than imported from the generator so that changing its map fails these tests.
 CONVERSION_SUFFIX = {
     'rdna3': '',
     'rdna4': '_gfx12',
-    'cdna1': '_gfx950',
-    'cdna2': '_gfx950',
+    'cdna1': '_gfx10',
+    'cdna2': '_gfx10',
     'cdna3': '_gfx942',
     'cdna4': '_gfx950',
     'cdna5': '_gfx1250',
-    'rdna1': '_gfx950',
-    'rdna2': '_gfx950',
-    'rdna3_5': '_gfx950',
+    'rdna1': '_gfx10',
+    'rdna2': '_gfx10',
+    'rdna3_5': '_gfx10',
 }
 
 # Byte and nibble conversions predate the per-architecture split: every architecture shares
@@ -1698,18 +1698,14 @@ def test_cdna_byte_accumulator_keeps_legacy_policy(arch):
     body = gen_bit_pack(
         context(arch, 'V_CVT_PKACCUM_U8_F32', ['d'], ['a', 'b'], is_vop3=True)
     )
+    suffix = '_gfx950' if arch == 'cdna4' else '_gfx942'
     assert 'd, a, b, d' in body
-    if arch == 'cdna3':
-        assert 'rj_arith_v_cvt_pkaccum_u8_f32_w64_gfx942' in body
-        assert 'fp_round_mode_f32' in body
-        assert 'RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body
-        assert 'RJ_ARITH_ALU_ABS_A' in body
-        assert 'RJ_ARITH_ALU_OMOD_2' in body
-        assert 'RJ_ARITH_ALU_CLAMP' in body
-    else:
-        assert 'rj_arith_v_cvt_pkaccum_u8_f32_w64,' in body
-        assert 'fp_round_mode' not in body
-        assert 'RJ_ARITH_ALU_' not in body
+    assert f'rj_arith_v_cvt_pkaccum_u8_f32_w64{suffix}' in body
+    assert 'fp_round_mode_f32' in body
+    assert 'RJ_ARITH_FP_FLUSH_INPUT_DENORMALS' in body
+    assert 'RJ_ARITH_ALU_ABS_A' in body
+    assert 'RJ_ARITH_ALU_OMOD_2' in body
+    assert 'RJ_ARITH_ALU_CLAMP' in body
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4', 'cdna5'])
@@ -2123,10 +2119,16 @@ def test_cdna_ternary_selection_mapping(arch):
                 + name.lower()
                 + '_w'
                 + str(wave)
-                + ('_gfx942' if arch != 'cdna5' else '')
+                + (
+                    '_gfx950'
+                    if arch == 'cdna4'
+                    else '_gfx942' if arch == 'cdna3' else ''
+                )
             )
             assert api in body
             assert api in generated
+        if name.endswith('_F16'):
+            assert (', true, true);' in body) == (arch == 'cdna3')
         assert 'RJ_ARITH_ALU_NEG_C' in body
 
 
@@ -2170,7 +2172,9 @@ def test_cdna_half_selection_policy_mapping(arch):
                     opsel_exprs=('low', 'high'),
                 )
             )
-            suffix = '_gfx942' if arch != 'cdna5' else ''
+            suffix = (
+                '_gfx950' if arch == 'cdna4' else '_gfx942' if arch == 'cdna3' else ''
+            )
             for wave in (32, 64):
                 api = 'rj_arith_' + name.lower() + '_w' + str(wave) + suffix
                 assert api in body
@@ -2198,8 +2202,8 @@ def test_cdna_packed_ternary_selection(arch, op):
     if arch == 'cdna4' and '_NUM' in op:
         assert body is None
         return
-    for wave in (32, 64):
-        assert f'rj_arith_{name.lower()}_w{wave}' in body
+    suffix = '_gfx950' if arch == 'cdna4' else ''
+    assert_routes_to(body, f'rj_arith_{name.lower()}', suffix)
     for operand in 'ABC':
         assert f'RJ_ARITH_PK_NEG_HI_{operand}' in body
         assert f'RJ_ARITH_PK_LO_{operand}_HIGH' in body

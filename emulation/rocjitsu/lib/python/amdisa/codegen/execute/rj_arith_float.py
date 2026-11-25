@@ -83,24 +83,25 @@ NORMALIZED_NAMES = {
 }
 
 # Architecture suffix of the shared conversion entry points. RDNA3 owns the unsuffixed
-# entries, RDNA4 the _gfx12 entries, and CDNA3 (gfx942) the MI300X-calibrated _gfx942
-# entries; all three accept bit-exact semantics. CDNA1/2/4, RDNA1/2/3.5, and gfx1250
-# call loose-only entries until their captures are reviewed per instruction.
+# entries, RDNA4 the _gfx12 entries, and CDNA3/CDNA4 the MI300X/MI350X-calibrated _gfx942
+# and _gfx950 entries; all four accept bit-exact semantics. Older CDNA, RDNA1/2/3.5, and
+# gfx1250 call loose-only _gfx10 and _gfx1250 entries until their captures are reviewed.
 CONVERSION_ARCH_SUFFIX = {
     'rdna3': '',
     'rdna4': '_gfx12',
-    'cdna1': '_gfx950',
-    'cdna2': '_gfx950',
+    'cdna1': '_gfx10',
+    'cdna2': '_gfx10',
     'cdna3': '_gfx942',
     'cdna4': '_gfx950',
     'cdna5': '_gfx1250',
-    'rdna1': '_gfx950',
-    'rdna2': '_gfx950',
-    'rdna3_5': '_gfx950',
+    'rdna1': '_gfx10',
+    'rdna2': '_gfx10',
+    'rdna3_5': '_gfx10',
 }
 
-# Architecture suffix of the FP64 FMA entry points. RDNA2 and CDNA4 have no captures
-# yet, so they call loose-only _gfx10 and _gfx950 entries respectively.
+# Architecture suffix of the FP64 FMA entry points. RDNA2 has no capture yet,
+# so it calls the loose-only _gfx10 entry; RDNA3, RDNA4, CDNA3, and CDNA4 accept
+# bit-exact semantics.
 FMA64_ARCH_SUFFIX = {
     'rdna2': '_gfx10',
     'rdna3': '',
@@ -1607,7 +1608,8 @@ def gen_bit_pack(ctx: ExecuteContext) -> str | None:
     ):
         if not is_vop3 or len(dst) != 1 or len(src) != 2:
             return None
-        if arch == 'cdna3':
+        if arch in ('cdna3', 'cdna4'):
+            suffix = CONVERSION_ARCH_SUFFIX[arch]
             return '\n'.join(
                 [
                     '  uint64_t flags = wf.cu().arithmetic_flags();',
@@ -1617,8 +1619,8 @@ def gen_bit_pack(ctx: ExecuteContext) -> str | None:
                     '      ((inst_.neg & 1) ? RJ_ARITH_ALU_NEG_A : 0u) |',
                     '      (uint64_t(inst_.omod) * RJ_ARITH_ALU_OMOD_2) |',
                     '      (inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u);',
-                    '  amdgpu::arith::execute_byte_pack(wf, rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx942,',
-                    '      rj_arith_v_cvt_pkaccum_u8_f32_w64_gfx942, flags, modifiers,',
+                    f'  amdgpu::arith::execute_byte_pack(wf, rj_arith_v_cvt_pkaccum_u8_f32_w32{suffix},',
+                    f'      rj_arith_v_cvt_pkaccum_u8_f32_w64{suffix}, flags, modifiers,',
                     f'      {dst[0]}, {src[0]}, {src[1]}, {dst[0]});',
                 ]
             )
@@ -2161,7 +2163,9 @@ def gen_packed_fma16(ctx: ExecuteContext) -> str | None:
         if selection
         else 'rj_arith_v_pk_fma' + ('c' if accumulate else '') + '_f16'
     )
-    if not selection and arch in ('rdna4', 'cdna5'):
+    if selection and arch == 'cdna4':
+        api += '_gfx950'
+    elif not selection and arch in ('rdna4', 'cdna5'):
         api += '_gfx12'
     elif accumulate and arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
         api += '_gfx942'
@@ -2237,7 +2241,7 @@ def gen_packed_binary16(ctx: ExecuteContext) -> str | None:
         + ('_gfx12' if arch in ('rdna4', 'cdna5') and arithmetic else '')
     )
     if not arithmetic and arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
-        api += '_gfx942'
+        api += '_gfx950' if arch == 'cdna4' else '_gfx942'
     if arch == 'cdna5' and mnemonic in ('V_PK_MINIMUM_F16', 'V_PK_MAXIMUM_F16'):
         api += '_gfx1250'
     if (older or arch in ('cdna3', 'cdna4')) and mnemonic == 'V_PK_ADD_F16':
@@ -2520,7 +2524,7 @@ def gen_float_binary16(ctx: ExecuteContext) -> str | None:
     if older_selection:
         lines = ['  if (!wf.exec()) {', '    return;', '  }'] + lines
     if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4') and mnemonic in CDNA_HALF_SELECTION:
-        api += '_gfx942'
+        api += '_gfx950' if arch == 'cdna4' else '_gfx942'
     modifiers = '0'
     if (
         arch in ('cdna1', 'cdna2', 'rdna1', 'rdna2', 'cdna3', 'cdna4')
@@ -2868,8 +2872,8 @@ def gen_float_ternary_selection(ctx: ExecuteContext) -> str | None:
         + mnemonic.lower()
         + (
             '_gfx950'
-            if mnemonic in {'V_MINIMUM3_F32', 'V_MAXIMUM3_F32'} and arch == 'cdna4'
-            else '_gfx942' if arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4') else ''
+            if arch == 'cdna4'
+            else '_gfx942' if arch in ('cdna1', 'cdna2', 'cdna3') else ''
         )
     )
     lines = (
@@ -2899,7 +2903,7 @@ def gen_float_ternary_selection(ctx: ExecuteContext) -> str | None:
         f'  amdgpu::arith::execute_float_ternary{width}(wf, {wave_api(api, 32)}, {wave_api(api, 64)},',
         '      wf.cu().arithmetic_flags(), modifiers,',
         f'      {dst[0]}, {", ".join(src)}, {str(arch not in ("rdna4", "cdna5")).lower()}'
-        + (', true' if half and arch in ('cdna1', 'cdna2', 'cdna3', 'cdna4') else '')
+        + (', true' if half and arch in ('cdna1', 'cdna2', 'cdna3') else '')
         + ');',
     ]
     return '\n'.join(lines)

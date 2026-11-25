@@ -52,12 +52,12 @@ have no FP-status output and are excluded from these denominators.
 FP64 ADD/MUL/FMA, TRUNC/CEIL/RNDNE/FLOOR, FRACT, FREXP_MANT and FREXP_EXP, the FP16/FP32
 FRACT forms, the FP16/FP32/FP64 and normalized/packed/byte conversions, PACK_B32_F16 and
 VINTERP accept mode 2 on RDNA3 and RDNA4 since the gfx1100 and gfx1201 captures match their
-single numeric model; Compatibility resolves to mode 2 for them. The CDNA3 (`_gfx942`) FP64
-ADD/MUL/FMA/FMAC and TRUNC/CEIL/RNDNE/FLOOR/FRACT/FREXP_MANT, conversion (excluding SDWA F16
-prescaling), PACK_B32_F16 and unmodified CVT_PKACCUM_U8_F32 entry points likewise accept mode 2
-and resolve Compatibility to mode 2 against MI300X captures. The CDNA4 (`_gfx950`), gfx1250
-(`_gfx1250`) and RDNA2 (`_gfx10`) entry points of the shared conversion, PACK and FP64 kernels
-stay loose-only until their captures are reviewed per instruction.
+single numeric model; Compatibility resolves to mode 2 for them. The CDNA3 (`_gfx942`) and CDNA4
+(`_gfx950`) FP64 ADD/MUL/FMA/FMAC and TRUNC/CEIL/RNDNE/FLOOR/FRACT/FREXP_MANT, conversion
+(excluding SDWA F16 prescaling), PACK_B32_F16 and unmodified CVT_PKACCUM_U8_F32 entry points
+likewise accept mode 2 and resolve Compatibility to mode 2 against MI300X and MI350X captures.
+The gfx1250 (`_gfx1250`) and older/RDNA (`_gfx10`) entry points of the shared conversion, PACK and
+FP64 kernels stay loose-only until their captures are reviewed per instruction.
 
 FP16 ADD/SUB/SUBREV/MUL, MULLIT and the RDNA4 V_S_EXP_F16/V_S_LOG_F16 carry their hardware
 rules (first-source NaN priority, FP16 rounding before OMOD, the RDNA3 signaling-NaN and OMOD
@@ -116,17 +116,23 @@ and honor guest denormal flushing (`FP_FLUSH_OUTPUT_DENORMALS` on widening and
 ### Floating-point selection
 
 CDNA3/4 legacy MIN/MAX and MIN3/MAX3/MED3 support FP16/FP32, with binary
-FP64 MIN/MAX as well. gfx950 also has propagating FP32 MINIMUM3/MAXIMUM3.
-gfx1250 supports numeric and propagating binary/ternary selection, including
-packed FP16 forms. Loose and Compatibility retain their respective numerical
-and output-control policies, with scalar, AVX2 and AVX-512 paths.
+FP64 MIN/MAX as well: CDNA3 (`_gfx942`) uses second-NaN priority and equates
+signed zeros in MED3's largest-source match, while CDNA4 (`_gfx950`) uses
+first-NaN priority on F16/packed-F16 MIN/MAX and F16/F32 MIN3/MAX3/MED3 and
+orders `-0.0 < +0.0` in MED3, calibrated against MI350X captures. gfx950 also
+has propagating FP32 MINIMUM3/MAXIMUM3 and MI350X-calibrated packed FP16
+MINIMUM3/MAXIMUM3 (`_gfx950`, preserving quieted first-NaN payloads and
+selected denormals). gfx1250 supports numeric and propagating binary/ternary
+selection, including packed FP16 forms. Loose and Compatibility retain their
+respective numerical and output-control policies, with scalar, AVX2 and AVX-512
+paths.
 
 Gfx1250 binary FP32 selection uses `_gfx1250` entry points to preserve its
 numeric-only Compatibility policy separately from gfx12's reporting policy.
 FP-status reporting is not implemented for these CDNA selection entry points, so
 explicit mode 3 stops execution. Mode 2 also rejects effective OMOD scaling on
 gfx950 propagating FP32 ternary selection. Selected NaN inputs are also rejected
-for gfx950/gfx1250 packed FP16 MINIMUM3/MAXIMUM3 and gfx1250 packed FP16
+for gfx1250 packed FP16 MINIMUM3/MAXIMUM3 and gfx1250 packed FP16
 MINIMUM/MAXIMUM, pending target qualification. Rejection leaves
 the destination unchanged; Compatibility continues to support these cases.
 
