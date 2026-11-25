@@ -94,7 +94,8 @@ bool ncclAllGatherDdaIpcEligible(ncclComm* comm, const void* sendbuff, void* rec
     return false;
   }
 
-  size_t need = sendcount * ncclTypeSize(datatype);
+  // Gate on the gathered total: the launcher rejects totals above scratch.
+  size_t need = sendcount * comm->nRanks * ncclTypeSize(datatype);
   if (need > comm->ddaScratchBytes) {
     return false;
   }
