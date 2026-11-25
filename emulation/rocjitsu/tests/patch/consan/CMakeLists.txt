@@ -180,6 +180,7 @@ if(AMDCXX AND EXISTS "${ROCM_PATH}/lib/llvm/bin/ld.lld")
             CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE="${_fixture_dir}/multi-entry-native-global.hsaco"
             CONSAN_MULTI_ENTRY_UNREACHABLE_PC_FIXTURE="${_fixture_dir}/multi-entry-unreachable-pc.hsaco"
             CONSAN_MULTI_ENTRY_UNSUPPORTED_FIXTURE="${_fixture_dir}/multi-entry-unsupported.hsaco"
+            CONSAN_MULTI_ENTRY_UNKNOWN_MATRIX_FIXTURE="${_fixture_dir}/multi-entry-unknown-matrix.hsaco"
     )
 else()
     message(
@@ -215,6 +216,19 @@ set_tests_properties(
     PROPERTIES TIMEOUT 30 LABELS "consan;required-consan"
 )
 if(TARGET consan_original_fixtures)
+    add_test(
+        NAME ConSanPrepareCli.TraceCapabilityCoverage
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/prepare_cli_trace_capability_test.py
+            --prepare $<TARGET_FILE:rj_consan_prepare> --fixture
+            ${_fixture_dir}/multi-entry-unknown-matrix.hsaco --root
+            ${RJ_CONSAN_TEST_ARTIFACT_ROOT}
+    )
+    set_tests_properties(
+        ConSanPrepareCli.TraceCapabilityCoverage
+        PROPERTIES TIMEOUT 180 LABELS "consan;required-consan"
+    )
     add_test(
         NAME ConSanPrepareCli.CompositionCapacity
         COMMAND
@@ -1074,6 +1088,43 @@ if(TARGET consan_multi_entry_runner AND TARGET rj_consan_analyze)
                 ${PROJECT_SOURCE_DIR}/configs/gfx1250_mi455x.json --root
                 ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --source ${PROJECT_SOURCE_DIR}
                 --workgroups ${_groups}
+        )
+        rj_test_runtime_dir_env(_runtime ${_test})
+        set_tests_properties(
+            ${_test}
+            PROPERTIES
+                TIMEOUT 240
+                LABELS "consan;simulator;required-consan"
+                ENVIRONMENT "${_runtime}"
+        )
+    endforeach()
+endif()
+
+if(TARGET consan_hsa_runner AND TARGET rj_consan_analyze)
+    foreach(
+        _mode
+        IN
+        ITEMS
+            gfx942:64
+            gfx950:64
+            gfx1100:32
+            gfx1100:64
+            gfx1201:32
+            gfx1201:64
+            gfx1250:32
+    )
+        string(REPLACE ":" ";" _parts "${_mode}")
+        list(GET _parts 0 _gpu)
+        list(GET _parts 1 _wave)
+        set(_test ConSanTargetApplicationSim.${_gpu}.wave${_wave})
+        add_test(
+            NAME ${_test}
+            COMMAND
+                ${Python3_EXECUTABLE} -B
+                ${CMAKE_CURRENT_SOURCE_DIR}/consan_target_application_e2e.py
+                --source ${PROJECT_SOURCE_DIR} --build ${PROJECT_BINARY_DIR}
+                --root ${RJ_CONSAN_TEST_ARTIFACT_ROOT} --target ${_gpu}
+                --wave-size ${_wave}
         )
         rj_test_runtime_dir_env(_runtime ${_test})
         set_tests_properties(

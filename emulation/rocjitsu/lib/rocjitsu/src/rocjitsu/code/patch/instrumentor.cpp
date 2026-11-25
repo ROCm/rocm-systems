@@ -85,6 +85,7 @@ struct Instrumentor::ResolvedPoints {
   std::vector<ProbeCallable> probes;
   std::vector<std::string> errors;
   std::optional<TextEditError> edit_error;
+  std::optional<CallableCapabilityError> callable_capability_error;
   // The object's kernel descriptors and the wave size they share. A probe-call
   // site is resolved only when there is at least one kernel and one wave size.
   std::vector<KernelDescriptorInfo> kernels;
@@ -123,14 +124,6 @@ std::optional<uint64_t> kernarg_preload_firmware_entry(const KernelDescriptorInf
     return std::nullopt;
   }
   return kernel.entry_text_offset + kFirmwareSkip;
-}
-
-bool requires_cdna5_valu_follower(const Instruction &inst) {
-  // These gfx1250/1251 permutes need an immediately issuing safe VALU.
-  // https://github.com/llvm/llvm-project/commit/0c8e5777423c2e657d7e5c61b2cc812253f9b3ec
-  const std::string_view mnemonic = inst.mnemonic();
-  return mnemonic == "v_perm_pk16_b4_u4" || mnemonic == "v_perm_pk16_b6_u4" ||
-         mnemonic == "v_perm_pk16_b8_u4";
 }
 
 // Ownership requires a complete descriptor inventory. The shared scanner and
@@ -2142,9 +2135,7 @@ public:
         has_cdna5_producer_ |=
             arch == rocjitsu::IsaFamily::Cdna5 && may_require_cdna5_valu_spacing(inst);
         unknown_cdna5_producer_ |=
-            arch == rocjitsu::IsaFamily::Cdna5 && may_require_cdna5_valu_spacing(inst) &&
-            inst.amdgpu_operation() != amdgpu::Operation::V_WMMA_F32_16X16X32_F16 &&
-            !inst.is_transcendental();
+            arch == rocjitsu::IsaFamily::Cdna5 && is_unsupported_cdna5_valu_producer(inst);
         has_cdna5_packed_permute_ |=
             arch == rocjitsu::IsaFamily::Cdna5 && requires_cdna5_valu_follower(inst);
       }
@@ -3440,6 +3431,13 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   };
 
   // All-or-nothing: per-point errors accumulate
+  size_t capability_errors = 0;
+  std::optional<CallableCapabilityError> first_capability_error;
+  const auto record_capability = [&](CallableCapabilityError code) {
+    ++capability_errors;
+    if (!first_capability_error)
+      first_capability_error = code;
+  };
   std::vector<ResolvedInstrumentationSite> sites;
   std::unordered_set<uint64_t> site_offsets;
   std::unordered_set<uint64_t> entry_offsets;
@@ -3529,6 +3527,13 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
                              "per code object");
         continue;
       }
+      // Validate the callback itself before a guest capability can qualify for
+      // native fallback. An invalid callback must never be hidden by that gate.
+      const std::optional<size_t> index = resolve_probe_index(pt, perr);
+      if (!index) {
+        out.errors.push_back(std::move(perr));
+        continue;
+      }
       if (pt.kind == InstrumentationKind::KernelEntry) {
         // Only dispatch executes the entry stub. Guest backedges to the original
         // entry do not change the storage available to this callback.
@@ -3564,11 +3569,13 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
         if (cdna5_spacing && callable_state_analysis_->has_cdna5_packed_permute()) {
           out.errors.emplace_back(
               "CDNA5 callable spacing cannot preserve packed permute adjacency");
+          record_capability(CallableCapabilityError::UnsupportedSpacing);
           continue;
         }
         if (cdna5_spacing && callable_state_analysis_->unknown_cdna5_producer()) {
           out.errors.emplace_back(
               "CDNA5 callable spacing does not admit an unknown matrix producer");
+          record_capability(CallableCapabilityError::UnsupportedProducer);
           continue;
         }
         if (pt.kind == InstrumentationKind::AfterInst &&
@@ -3605,11 +3612,6 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
           continue;
         }
       }
-      auto index = resolve_probe_index(pt, perr);
-      if (!index) {
-        out.errors.push_back(std::move(perr));
-        continue;
-      }
       site->probe_index = *index;
       site->probe_args = pt.probe_args;
     }
@@ -3621,6 +3623,8 @@ Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   if (out.errors.empty()) {
     out.sites = std::move(sites);
   } else {
+    if (capability_errors == out.errors.size())
+      out.callable_capability_error = first_capability_error;
     out.probes.clear(); // all-or-nothing: no partial registry on failure.
   }
   return out;
@@ -3763,6 +3767,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
       ValidationResult validation = validator.validate_points();
       if (!validation.errors.empty()) {
         result.errors = std::move(validation.errors);
+        result.callable_capability_error = validation.callable_capability_error;
         return result;
       }
       sites.insert(sites.end(), std::make_move_iterator(validation.sites.begin()),
@@ -3807,6 +3812,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_entries() {
       result.errors = std::move(planned.errors);
       result.edit_error = std::move(planned.edit_error);
       result.trampoline_error = planned.trampoline_error;
+      result.callable_capability_error = planned.callable_capability_error;
       return result;
     }
     cursor = plans[index].cave_end;
@@ -4094,12 +4100,14 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
     const InstrumentedCodeObjectDebug validation = patch_entries();
     entry_validation_ = nullptr;
     result.errors = validation.errors;
+    result.callable_capability_error = validation.callable_capability_error;
     return result;
   }
   ResolvedPoints resolved = resolve_points();
   ValidationResult result;
   result.errors = std::move(resolved.errors);
   result.edit_error = std::move(resolved.edit_error);
+  result.callable_capability_error = resolved.callable_capability_error;
   result.sites = std::move(resolved.sites);
   return result;
 }
@@ -4165,6 +4173,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   if (!resolved.errors.empty()) {
     result.errors = std::move(resolved.errors);
     result.edit_error = std::move(resolved.edit_error);
+    result.callable_capability_error = resolved.callable_capability_error;
     return result;
   }
 

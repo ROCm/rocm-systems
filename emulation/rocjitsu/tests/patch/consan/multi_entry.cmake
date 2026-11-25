@@ -38,6 +38,7 @@ foreach(
         trace-exits
         unsupported
         unsupported-only
+        unknown-matrix
         native-scalar-only
 )
     set(_variant_object ${_fixture_dir}/multi-entry-${_variant}.o)
@@ -61,6 +62,8 @@ foreach(
         set(_variant_defines -DMK_UNSUPPORTED_C=1)
     elseif(_variant STREQUAL "unsupported-only")
         set(_variant_defines -DMK_UNSUPPORTED_C=1 -DMK_ENTRY_MASK=4)
+    elseif(_variant STREQUAL "unknown-matrix")
+        set(_variant_defines -DMK_UNKNOWN_MATRIX_C=1)
     elseif(_variant STREQUAL "native-scalar-only")
         set(_variant_defines -DMK_NATIVE_SCALAR=1 -DMK_ENTRY_MASK=4)
     endif()

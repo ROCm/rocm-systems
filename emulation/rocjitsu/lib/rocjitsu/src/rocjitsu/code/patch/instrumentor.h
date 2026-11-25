@@ -236,6 +236,9 @@ enum class GuestStatePreservation { LiveRegisters, DeclaredRegisters };
 /// families and packed-permute adjacency remain excluded.
 enum class Cdna5CallableSpacing { Default, ConservativeKnownProducers };
 
+/// @brief A recognized guest capability unsupported by callable preservation.
+enum class CallableCapabilityError { UnsupportedProducer, UnsupportedSpacing };
+
 /// @brief Original SGPR/VGPR metadata counts needed to request register growth.
 struct OriginalRegisterCounts {
   uint32_t sgprs = 0;
@@ -267,6 +270,9 @@ struct InstrumentedCodeObject {
   std::optional<TextEditError> edit_error;
   /// Present only when every accumulated failure is the same typed branch-capacity limit.
   std::optional<TrampolineBuildErrorCode> trampoline_error;
+  /// Present only when every accumulated error is a known guest capability rejection.
+  /// Identifies the first kind; callback, ABI and preservation errors remain untyped.
+  std::optional<CallableCapabilityError> callable_capability_error;
   std::vector<std::string> warnings;
   std::vector<InstrumentedSite> sites;
   /// Legacy-path resources; zero for explicit entry requests, even one selection.
@@ -559,6 +565,7 @@ public:
     /// Present for source-facts or structural replacement-batch failures.
     /// Request-shape and option errors use errors only, as in the patch result.
     std::optional<TextEditError> edit_error;
+    std::optional<CallableCapabilityError> callable_capability_error;
   };
 
   /// @brief Look up each queued point's anchor and validate it.

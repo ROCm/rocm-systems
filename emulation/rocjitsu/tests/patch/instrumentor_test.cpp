@@ -7548,6 +7548,296 @@ TEST(InstrumentorProbePatch, OptInCdna5SpacingProtectsKnownProducersAndRejectsUn
   }
 }
 
+std::vector<uint8_t> callable_capability_kernel(std::span<const uint32_t> producer) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
+  std::vector<uint32_t> words = {build_s_nop(0, kArch).value()};
+  words.insert(words.end(), producer.begin(), producer.end());
+  // Keep the original guest independent of envelope placement. Packed permutes
+  // have their required VALU follower; dense WMMA has its four coexecution slots.
+  words.insert(words.end(), 4, cdna5::build_vop1(cdna5::kVNopVop1)[0]);
+  words.push_back(build_s_endpgm(kArch).value());
+  return test::with_resource_metadata(make_kernarg_kernel_elf(words, 0,
+                                                              EF_AMDGPU_MACH_AMDGCN_GFX1250,
+                                                              kTestKernargSize, true, 3, 0, 3),
+                                      {{"test_kernel", kTestKernargSize, 32, 64, 0}});
+}
+
+InstrumentationOptions callable_capability_options(const KernelDescriptorInfo &kernel,
+                                                   bool explicit_entry) {
+  if (explicit_entry)
+    return {.register_growth = std::nullopt,
+            .entries = {{.descriptor_file_offset = kernel.descriptor_file_offset,
+                         .preservation = GuestStatePreservation::DeclaredRegisters,
+                         .register_growth = OriginalRegisterCounts{.sgprs = 32, .vgprs = 64},
+                         .cdna5_spacing = Cdna5CallableSpacing::ConservativeKnownProducers}}};
+  return {.preservation = GuestStatePreservation::DeclaredRegisters,
+          .register_growth = OriginalRegisterCounts{.sgprs = 32, .vgprs = 64},
+          .cdna5_spacing = Cdna5CallableSpacing::ConservativeKnownProducers};
+}
+
+TEST(InstrumentorCallableCapability, KnownProducerControlsRetainSuccessfulAdmission) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
+  const std::array<uint32_t, 2> dense =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x32F16Vop3p,
+                         {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 264, .opsel_hi = 3});
+  const uint32_t nop = build_s_nop(0, kArch).value();
+  const std::array<std::array<uint32_t, 2>, 2> producers = {dense, std::array{nop, nop}};
+  const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+      "capability", {build_s_setpc_b64(30, kArch).value()}, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const std::array<uint32_t, 2> &producer : producers) {
+    const std::vector<uint8_t> image = callable_capability_kernel(producer);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(image, text.sectionOffset(), text.size());
+    ASSERT_EQ(kernels.size(), 1u);
+    for (const bool explicit_entry : {false, true}) {
+      for (const bool validate_only : {false, true}) {
+        SCOPED_TRACE(producer.front());
+        SCOPED_TRACE(explicit_entry);
+        SCOPED_TRACE(validate_only);
+        Instrumentor instrumentor(object, kArch,
+                                  callable_capability_options(kernels.front(), explicit_entry));
+        instrumentor.add_point({.anchor_offset = 28,
+                                .kind = InstrumentationKind::KernelExit,
+                                .probe_obj = &probe,
+                                .probe_symbol = "capability",
+                                .probe_args = {}});
+        if (validate_only) {
+          const Instrumentor::ValidationResult result = instrumentor.validate_points();
+          ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+          EXPECT_FALSE(result.callable_capability_error);
+          EXPECT_EQ(result.sites.size(), 1u);
+        } else {
+          const InstrumentedCodeObject result = instrumentor.patch();
+          ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+          EXPECT_FALSE(result.callable_capability_error);
+          EXPECT_FALSE(result.elf_bytes.empty());
+          EXPECT_EQ(result.sites.size(), 1u);
+        }
+      }
+    }
+  }
+}
+
+TEST(InstrumentorCallableCapability, ProducerAndSpacingFailuresRemainTypedAcrossEntryPaths) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
+  struct Case {
+    std::array<uint32_t, 2> words;
+    CallableCapabilityError error;
+    std::string_view diagnostic;
+  };
+  const std::array cases = {
+      Case{.words = cdna5::build_vop3p(
+               cdna5::kVWmmaF3216x16x32Bf16Vop3p,
+               {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 264, .opsel_hi = 3}),
+           .error = CallableCapabilityError::UnsupportedProducer,
+           .diagnostic = "unknown matrix producer"},
+      Case{.words = cdna5::build_vop3(cdna5::kVPermPk16B4U4Vop3,
+                                      {.vdst = 8, .src0 = 256, .src1 = 258, .src2 = 260}),
+           .error = CallableCapabilityError::UnsupportedSpacing,
+           .diagnostic = "packed permute adjacency"},
+  };
+  const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+      "capability", {build_s_setpc_b64(30, kArch).value()}, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  for (const Case &test_case : cases) {
+    const std::vector<uint8_t> image = callable_capability_kernel(test_case.words);
+    const AmdGpuCodeObject object(image.data(), image.size());
+    ASSERT_TRUE(object.is_valid());
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(image, text.sectionOffset(), text.size());
+    ASSERT_EQ(kernels.size(), 1u);
+    for (const bool explicit_entry : {false, true}) {
+      for (const bool validate_only : {false, true}) {
+        SCOPED_TRACE(test_case.diagnostic);
+        SCOPED_TRACE(explicit_entry);
+        SCOPED_TRACE(validate_only);
+        Instrumentor instrumentor(object, kArch,
+                                  callable_capability_options(kernels.front(), explicit_entry));
+        instrumentor.add_point({.anchor_offset = 28,
+                                .kind = InstrumentationKind::KernelExit,
+                                .probe_obj = &probe,
+                                .probe_symbol = "capability",
+                                .probe_args = {}});
+        if (validate_only) {
+          const Instrumentor::ValidationResult result = instrumentor.validate_points();
+          ASSERT_EQ(result.errors.size(), 1u);
+          EXPECT_EQ(result.callable_capability_error, test_case.error);
+          EXPECT_NE(result.errors.front().find(test_case.diagnostic), std::string::npos);
+          EXPECT_TRUE(result.sites.empty());
+        } else {
+          const InstrumentedCodeObject result = instrumentor.patch();
+          ASSERT_EQ(result.errors.size(), 1u);
+          EXPECT_EQ(result.callable_capability_error, test_case.error);
+          EXPECT_NE(result.errors.front().find(test_case.diagnostic), std::string::npos);
+          EXPECT_TRUE(result.elf_bytes.empty());
+          EXPECT_TRUE(result.sites.empty());
+          EXPECT_TRUE(result.entries.empty());
+        }
+      }
+    }
+  }
+}
+
+TEST(InstrumentorCallableCapability, MixedInvalidProbeOrAbiFailuresStayFatalInEitherPointOrder) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
+  const std::array<uint32_t, 2> producer =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x32Bf16Vop3p,
+                         {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 264, .opsel_hi = 3});
+  const std::vector<uint8_t> image = callable_capability_kernel(producer);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const Section &text = *object.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text.sectionOffset(), text.size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const std::vector<uint8_t> body = make_amdgpu_probe_elf(
+      "capability", {build_s_setpc_b64(30, kArch).value()}, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const std::vector<uint8_t> invalid_body = make_amdgpu_probe_elf(
+      "invalid",
+      {build_v_mov_b32_src(1, 256 + 7, kArch).value(), build_s_setpc_b64(30, kArch).value()},
+      EF_AMDGPU_MACH_AMDGCN_GFX1250);
+  const AmdGpuCodeObject probe(body.data(), body.size());
+  const AmdGpuCodeObject invalid_probe(invalid_body.data(), invalid_body.size());
+  for (const bool explicit_entry : {false, true}) {
+    for (const bool invalid_abi : {false, true}) {
+      for (const bool reverse : {false, true}) {
+        for (const bool validate_only : {false, true}) {
+          SCOPED_TRACE(explicit_entry);
+          SCOPED_TRACE(invalid_abi);
+          SCOPED_TRACE(reverse);
+          SCOPED_TRACE(validate_only);
+          Instrumentor instrumentor(object, kArch,
+                                    callable_capability_options(kernels.front(), explicit_entry));
+          InstrumentationPoint invalid = {.anchor_offset = 0,
+                                          .kind = InstrumentationKind::KernelEntry,
+                                          .probe_obj = &invalid_probe,
+                                          .probe_symbol = "invalid",
+                                          .probe_args = {}};
+          if (invalid_abi)
+            invalid.probe_args.assign(kMaxProbeArgVgprs + 1, probe_arg_imm(0));
+          const InstrumentationPoint capability = {.anchor_offset = 28,
+                                                   .kind = InstrumentationKind::KernelExit,
+                                                   .probe_obj = &probe,
+                                                   .probe_symbol = "capability",
+                                                   .probe_args = {}};
+          if (reverse) {
+            instrumentor.add_point(capability);
+            instrumentor.add_point(invalid);
+          } else {
+            instrumentor.add_point(invalid);
+            instrumentor.add_point(capability);
+          }
+          const std::string_view fatal = invalid_abi ? "the limit is" : "reads v7 before defining";
+          if (validate_only) {
+            const Instrumentor::ValidationResult result = instrumentor.validate_points();
+            ASSERT_EQ(result.errors.size(), 2u);
+            EXPECT_FALSE(result.callable_capability_error);
+            EXPECT_TRUE(result.sites.empty());
+            EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {
+              return error.find(fatal) != std::string::npos;
+            }));
+            EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+              return error.find("unknown matrix producer") != std::string::npos;
+            }));
+          } else {
+            const InstrumentedCodeObject result = instrumentor.patch();
+            ASSERT_EQ(result.errors.size(), 2u);
+            EXPECT_FALSE(result.callable_capability_error);
+            EXPECT_FALSE(result.trampoline_error);
+            EXPECT_TRUE(result.elf_bytes.empty());
+            EXPECT_TRUE(result.sites.empty());
+            EXPECT_TRUE(result.entries.empty());
+            EXPECT_TRUE(std::ranges::any_of(result.errors, [&](const std::string &error) {
+              return error.find(fatal) != std::string::npos;
+            }));
+            EXPECT_TRUE(std::ranges::any_of(result.errors, [](const std::string &error) {
+              return error.find("unknown matrix producer") != std::string::npos;
+            }));
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(InstrumentorCallableCapability, InvalidCallbackAtCapabilitySiteRemainsFatal) {
+  constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
+  const std::array<uint32_t, 2> producer =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x32Bf16Vop3p,
+                         {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 264, .opsel_hi = 3});
+  const std::array<uint32_t, 2> callback_producer =
+      cdna5::build_vop3p(cdna5::kVWmmaF3216x16x32F16Vop3p,
+                         {.vdst = 8, .src0 = 272, .src1 = 280, .src2 = 264, .opsel_hi = 3});
+  const std::vector<uint8_t> image = callable_capability_kernel(producer);
+  const AmdGpuCodeObject object(image.data(), image.size());
+  ASSERT_TRUE(object.is_valid());
+  const Section &text = *object.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(image, text.sectionOffset(), text.size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const uint32_t ret = build_s_setpc_b64(30, kArch).value();
+  enum class InvalidCallback { LiveIn, ArgumentLimit, Producer };
+  struct Case {
+    InvalidCallback kind;
+    std::vector<uint32_t> body;
+    std::string_view diagnostic;
+  };
+  const std::array cases = {
+      Case{.kind = InvalidCallback::LiveIn,
+           .body = {build_v_mov_b32_src(1, 256 + 7, kArch).value(), ret},
+           .diagnostic = "reads v7 before defining"},
+      Case{.kind = InvalidCallback::ArgumentLimit, .body = {ret}, .diagnostic = "the limit is"},
+      Case{.kind = InvalidCallback::Producer,
+           .body = {callback_producer[0], callback_producer[1], ret},
+           .diagnostic = "completion"},
+  };
+  for (const Case &test_case : cases) {
+    const std::vector<uint8_t> body =
+        make_amdgpu_probe_elf("invalid", test_case.body, EF_AMDGPU_MACH_AMDGCN_GFX1250);
+    const AmdGpuCodeObject probe(body.data(), body.size());
+    for (const bool explicit_entry : {false, true}) {
+      for (const bool validate_only : {false, true}) {
+        SCOPED_TRACE(test_case.diagnostic);
+        SCOPED_TRACE(explicit_entry);
+        SCOPED_TRACE(validate_only);
+        Instrumentor instrumentor(object, kArch,
+                                  callable_capability_options(kernels.front(), explicit_entry));
+        InstrumentationPoint point = {.anchor_offset = 28,
+                                      .kind = InstrumentationKind::KernelExit,
+                                      .probe_obj = &probe,
+                                      .probe_symbol = "invalid",
+                                      .probe_args = {}};
+        if (test_case.kind == InvalidCallback::ArgumentLimit)
+          point.probe_args.assign(kMaxProbeArgVgprs + 1, probe_arg_imm(0));
+        instrumentor.add_point(point);
+        if (validate_only) {
+          const Instrumentor::ValidationResult result = instrumentor.validate_points();
+          ASSERT_EQ(result.errors.size(), 1u);
+          EXPECT_FALSE(result.callable_capability_error);
+          EXPECT_NE(result.errors.front().find(test_case.diagnostic), std::string::npos)
+              << result.errors.front();
+          EXPECT_TRUE(result.sites.empty());
+        } else {
+          const InstrumentedCodeObject result = instrumentor.patch();
+          ASSERT_EQ(result.errors.size(), 1u);
+          EXPECT_FALSE(result.callable_capability_error);
+          EXPECT_NE(result.errors.front().find(test_case.diagnostic), std::string::npos)
+              << result.errors.front();
+          EXPECT_FALSE(result.trampoline_error);
+          EXPECT_TRUE(result.elf_bytes.empty());
+          EXPECT_TRUE(result.sites.empty());
+          EXPECT_TRUE(result.entries.empty());
+        }
+      }
+    }
+  }
+}
+
 TEST(InstrumentorProbePatch, AfterInstRejectsCdna5AnchorsAndPendingValuDependencies) {
   constexpr rocjitsu::IsaFamily kArch = rocjitsu::IsaFamily::Cdna5;
   const std::array<uint32_t, 2> dense =

@@ -222,7 +222,7 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
       (manifest.scope != ScopeKind::NativeLdsNoSynchronization &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrier &&
        manifest.scope != ScopeKind::NativeLdsWorkgroupBarrierLoop && !trace) ||
-      (trace && (manifest.target != 1250 || manifest.wave_size != 32)) ||
+      (trace && !supports_execution_trace(*target, manifest.wave_size)) ||
       (trace ? manifest.options != profile_options_digest(manifest.scope)
              : (!admits_b96 && manifest.options != kPriorWidths))) {
     return diagnostic.emit() << "empty image or unsupported target, ABI, scope or options";

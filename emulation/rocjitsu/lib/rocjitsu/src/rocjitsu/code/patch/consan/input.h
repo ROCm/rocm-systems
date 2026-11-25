@@ -32,10 +32,14 @@ enum class InputErrorCode {
   ResourceLimit,
 };
 
+/// @brief Provenance for the narrow recovery of an already-qualified lowering failure.
+enum class InputErrorRecovery { None, NativeCallableCapability };
+
 struct InputError {
   InputErrorCode code = InputErrorCode::None;
   std::optional<uint64_t> text_offset;
   std::string message;
+  InputErrorRecovery recovery = InputErrorRecovery::None;
 };
 
 struct InputLimits {

@@ -13,6 +13,7 @@
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
+#include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/target_registry.h"
@@ -198,6 +199,19 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
           latest = access;
         }
       } else {
+        // KernelExit callbacks can read VGPRs whose MFMA/SMFMAC result is still
+        // pending. No callable spacing proof exists for these producers, even
+        // when every operand uses ordinary VGPRs rather than accumulators.
+        if (instruction.is_mfma())
+          return reject(error, InputErrorCode::UnsupportedInstruction,
+                        "execution tracing requires proven MFMA/SMFMAC register spacing", offset);
+        if (program.target->arch == IsaFamily::Cdna5 &&
+            is_unsupported_cdna5_valu_producer(instruction))
+          return reject(error, InputErrorCode::UnsupportedInstruction,
+                        "execution tracing does not admit an unknown matrix producer", offset);
+        if (program.target->arch == IsaFamily::Cdna5 && requires_cdna5_valu_follower(instruction))
+          return reject(error, InputErrorCode::UnsupportedInstruction,
+                        "execution tracing does not admit packed permute adjacency", offset);
         const std::string_view name = instruction.mnemonic();
         if (name == "s_getpc_b64" || name == "s_get_pc_i64")
           return reject(error, InputErrorCode::UnsupportedFlow,
@@ -335,11 +349,13 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
   if (scope != ScopeKind::NativeLdsNoSynchronization && scope != ScopeKind::ExecutionTrace)
     return reject(error, InputErrorCode::UnsupportedEntry, "unknown preparation profile");
   if (scope == ScopeKind::ExecutionTrace &&
-      (profile->id != 1250 ||
+      (!supports_execution_trace(*profile, kernel_wavefront_size(arch, kernel.descriptor)) ||
        RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc2,
-                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) == 0))
-    return reject(error, InputErrorCode::UnsupportedEntry,
-                  "execution trace requires gfx1250 and an original workgroup-X input");
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) == 0)) {
+    return reject(
+        error, InputErrorCode::UnsupportedEntry,
+        "execution trace requires a qualified target/wave and original workgroup-X input");
+  }
   if (validate_entry_abi(kernel.descriptor, *profile, error).failed()) {
     return Result::failure();
   }
