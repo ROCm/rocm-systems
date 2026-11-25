@@ -4,9 +4,12 @@
 """Load memory chart layouts and check them against the format rules in README.md.
 
 A layout states where every block goes and how every part is drawn, so loading only
-checks the file and groups its blocks for the renderer.
+checks the file and groups its blocks for the renderer. A layout file names each
+metric by its metric library id; the layout of an arch shows the numeric row id the
+arch's memory chart view gives the metric, the id of the analysis values.
 """
 
+import copy
 import json
 from collections import defaultdict
 from collections.abc import Iterator
@@ -18,7 +21,13 @@ import config
 from membw_analysis.models import BOTTLENECK_LEVELS
 from utils.analysis_views import arch_panel_configs
 from utils.logger import console_warning
-from utils.utils_common import MEMORY_CHART_PANEL_ID, canonical_config_arch
+from utils.utils_common import (
+    MEMORY_CHART_PANEL_ID,
+    canonical_config_arch,
+    iter_view_rows,
+    load_views,
+    row_metric_ids,
+)
 
 LAYOUTS_DIR = config.rocprof_compute_home / "memory_chart" / "layouts"
 
@@ -185,15 +194,62 @@ def layout_files() -> list[Path]:
     return sorted(LAYOUTS_DIR.glob("*.json"))
 
 
-def load_layout(path: Path) -> Layout:
-    """Read and check a layout file; raise LayoutError if missing or malformed."""
+def load_layout(path: Path, arch: Optional[str] = None) -> Layout:
+    """Read and check a layout file; raise LayoutError if missing or malformed.
+
+    With arch, each metric id is arch's numeric memory chart row id (layout_json()).
+    """
+    return layout_from_json(path, layout_json(path, arch))
+
+
+def layout_json(path: Path, arch: Optional[str] = None) -> Dict[str, Any]:
+    """Read and check a layout file and return its JSON; raise LayoutError if missing
+    or malformed.
+
+    Args:
+        path: A layout file.
+        arch: If given, each metric library id becomes the numeric row id of the metric
+            in arch's memory chart view, such as "3.1.0"; a metric the view does not
+            show is an error.
+    """
     try:
-        layout_json = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:  # ValueError covers invalid JSON
         _fail(path, f"cannot read the layout: {error}")
-    if not isinstance(layout_json, dict):
+    if not isinstance(data, dict):
         _fail(path, "the layout must be a JSON object")
-    return layout_from_json(path, layout_json)
+    layout_from_json(path, data)
+    if arch is None:
+        return data
+    row_ids = memory_chart_row_ids(arch)
+    resolved = copy.deepcopy(data)
+    for entry in _metric_entries(resolved):
+        if entry["metric_id"] not in row_ids:
+            _fail(
+                path, f"{entry['metric_id']!r} is not in the {arch} memory chart view"
+            )
+        entry["metric_id"] = row_ids[entry["metric_id"]]
+    return resolved
+
+
+def memory_chart_row_ids(arch: str) -> Dict[str, str]:
+    """Return metric library id -> numeric row id of arch's memory chart view, such as
+    "3.1.0"; raise LayoutError if the view shows a metric in two rows."""
+    views = load_views(arch)
+    row_ids: Dict[str, str] = {}
+    if MEMORY_CHART_PANEL_ID not in views:
+        return row_ids
+    for row_id, row in iter_view_rows({
+        MEMORY_CHART_PANEL_ID: views[MEMORY_CHART_PANEL_ID]
+    }):
+        for metric_id in row_metric_ids(row):
+            if metric_id in row_ids:
+                raise LayoutError(
+                    f"the {arch} memory chart view shows {metric_id} in rows "
+                    f"{row_ids[metric_id]} and {row_id}"
+                )
+            row_ids[metric_id] = row_id
+    return row_ids
 
 
 def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
@@ -236,11 +292,11 @@ def _index_by_arch(paths: list[Path]) -> dict[str, Layout]:
     index: dict[str, Layout] = {}
     for path in paths:
         try:
-            layout = load_layout(path)
+            archs = load_layout(path).archs
         except LayoutError as error:
             console_warning("memory chart", f"skipping {error}")
             continue
-        for arch in layout.archs:
+        for arch in archs:
             if arch in index:
                 console_warning(
                     "memory chart",
@@ -248,8 +304,18 @@ def _index_by_arch(paths: list[Path]) -> dict[str, Layout]:
                     f"also listed by {index[arch].path.name}",
                 )
                 continue
-            index[arch] = layout
+            try:
+                index[arch] = load_layout(path, arch)
+            except LayoutError as error:
+                console_warning("memory chart", f"skipping {arch}: {error}")
     return index
+
+
+def _metric_entries(data: Dict[str, Any]) -> Iterator[Dict[str, Any]]:
+    """The metrics of a checked layout file's blocks, then its arrows."""
+    for block in data["blocks"]:
+        yield from block.get("content", [])
+    yield from data["arrows"]
 
 
 def _with_descendants(block: LayoutBlock) -> Iterator[LayoutBlock]:

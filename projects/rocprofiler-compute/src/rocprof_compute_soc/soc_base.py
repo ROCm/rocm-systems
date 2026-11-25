@@ -42,6 +42,7 @@ from utils.utils_common import (
     INVALID_BLOCK_HINT,
     MEMBW_ANALYSIS_PANEL_ID,
     METRIC_ID_RE,
+    METRIC_LIBRARY_ID_RE,
     METRIC_TABLE,
     add_counter_extra_config_input_yaml,
     convert_metric_id_to_panel_info,
@@ -51,12 +52,15 @@ from utils.utils_common import (
     is_tcc_channel_counter,
     iter_view_rows,
     load_views,
+    metric_placements,
     numbered_view_tables,
     parse_sets_yaml,
+    row_ids_as_metric_ids,
     row_metric_ids,
     selects_roofline,
     validate_roofline_csv,
     view_table_render,
+    warn_numeric_metric_ids,
 )
 from utils.utils_counter_defs import (
     metric_expressions,
@@ -246,9 +250,14 @@ class OmniSoC_Base:
         return gpu_model
 
     def _filter_token_metric_ids(self, raw_token: str) -> List[str]:
-        """Return the metric ids of the view rows that a -b block, table or row id,
-        or a block alias, selects."""
+        """Return the metric ids that a -b token selects: a metric library id
+        itself, or the metric ids of the view rows of a block, table or row id, or
+        of a block alias."""
         block_id = raw_token
+        if METRIC_LIBRARY_ID_RE.match(block_id):
+            # An id the arch's views don't show is an error, as in analyze.
+            metric_placements(block_id, self._mspec.gpu_arch)
+            return [block_id]
         if METRIC_ID_RE.match(block_id):
             pass
         else:
@@ -302,6 +311,9 @@ class OmniSoC_Base:
         args = self.get_args()
 
         filter_blocks = args.filter_blocks
+        if filter_blocks and self.__arch:
+            warn_numeric_metric_ids(filter_blocks, self.__arch)
+            filter_blocks = row_ids_as_metric_ids(filter_blocks, self.__arch)
         if args.set_selected and self.__arch:
             sets_info = parse_sets_yaml(self.__arch)
             if args.set_selected not in sets_info:

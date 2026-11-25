@@ -15,7 +15,6 @@ import pytest
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult
 from utils.tty import (
     _render_membw_guidance,
-    _scales_bandwidth,
     convert_time_columns,
     format_table_output,
     has_time_data,
@@ -189,21 +188,6 @@ def test_process_table_data_scales_bandwidth_before_rounding() -> None:
         "MB/s",
         2866176.0,
     ]
-
-
-@pytest.mark.parametrize(
-    ("gpu_arch", "table_id", "scaled"),
-    [
-        ("gfx1151", 1301, True),
-        ("gfx1201", 201, True),
-        ("gfx942", 301, True),
-        ("gfx942", 1701, False),
-    ],
-)
-def test_bandwidth_is_scaled_on_gfx115x_and_gfx1201_and_in_the_memory_chart(
-    gpu_arch, table_id, scaled
-) -> None:
-    assert _scales_bandwidth(gpu_arch, table_id) == scaled
 
 
 def test_has_time_data_detection() -> None:
@@ -487,14 +471,14 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
     metric_dataframe = pd.DataFrame({
         "Metric_ID": ["3.1.0"],
         "Metric": ["DRAM Read Bandwidth"],
-        "Value": [512e9],
-        "Unit": ["Bytes/s"],
+        "Value": [512.0],
+        "Unit": ["GB/s"],
     }).set_index("Metric_ID")
     table_config = {
         "id": 301,
         "title": "Instruction Cache",
         "header": {"metric": "Metric", "value": "Value", "unit": "Unit"},
-        "metric": {"DRAM Read Bandwidth": {"value": "X", "unit": "Bytes/s"}},
+        "metric": {"DRAM Read Bandwidth": {"value": "X", "unit": "GB/s"}},
     }
     arch_configs = SimpleNamespace(
         panel_configs={
@@ -535,13 +519,13 @@ def test_show_all_draws_the_memory_chart_from_raw_values_and_config_units(
         profiling_config={"filter_blocks": []},
     )
 
-    # Values are unscaled Bytes/s; units are the config's, not the display's
+    # Values are unscaled GB/s; units are the config's, not the display's
     assert calls == [
         (
-            {"3.1.0": 512e9},
+            {"3.1.0": 512.0},
             "3. Memory Chart (Normalization: per_wave)",
             "gfx1250",
-            {"3.1.0": "Bytes/s"},
+            {"3.1.0": "GB/s"},
         )
     ]
     assert "rendered gfx1250 memory chart" in rendered_output.getvalue()

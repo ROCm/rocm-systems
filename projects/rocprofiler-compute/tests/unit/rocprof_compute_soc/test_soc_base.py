@@ -10,12 +10,13 @@ required.
 
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from unittest.mock import MagicMock, patch
 
 import common
 import pytest
 
+from rocprof_compute_soc.metric_library import loader
 from rocprof_compute_soc.metric_library.loader import Collectables
 from rocprof_compute_soc.soc_base import (
     OmniSoC_Base,
@@ -27,7 +28,9 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import (
     MEMBW_ANALYSIS_PANEL_ID,
     canonical_config_arch,
+    iter_view_rows,
     load_views,
+    row_metric_ids,
 )
 from utils.utils_counter_defs import extract_counters_and_variables
 
@@ -477,14 +480,14 @@ def test_membw_analysis_counter_selection(
         pytest.param([], id="no_filter"),
         pytest.param(["2"], id="file"),
         pytest.param(["2.1"], id="table"),
-        pytest.param(["2.1.0"], id="metric"),
     ],
 )
 def test_detect_counters_reads_only_metric_expressions(
     membw_analysis_soc: OmniSoC_Base, filter_blocks: list[str]
 ) -> None:
-    """Titles, descriptions and metric names add no counters, whichever way the
-    metric is selected."""
+    """Titles, descriptions and metric names add no counters, whether a block or a
+    table is selected. A row id selects its metric through the views and the metric
+    library."""
     membw_analysis_soc._profile_views()[200] = PROSE_VIEW
     membw_analysis_soc._profile_library().metrics.update(PROSE_METRICS)
     membw_analysis_soc.get_args().filter_blocks = filter_blocks
@@ -559,6 +562,36 @@ def test_every_metric_reads_one_pass(gpu_arch: str) -> None:
         f"{gpu_arch}: split these metrics into collectables "
         "(see the metric library README and tools/counter_grouping_inspector.py)"
     )
+
+
+def _metrics_to_select(gpu_arch: str) -> List[str]:
+    """The metric shown in the most rows of gpu_arch's views, and the first two
+    metrics shown in one row."""
+    rows_by_metric: Dict[str, int] = {}
+    for _, row in iter_view_rows(load_views(gpu_arch)):
+        for metric_id in row_metric_ids(row):
+            rows_by_metric[metric_id] = rows_by_metric.get(metric_id, 0) + 1
+    single = [metric for metric, count in rows_by_metric.items() if count == 1]
+    return [max(rows_by_metric, key=rows_by_metric.__getitem__), *single[:2]]
+
+
+@pytest.mark.parametrize(
+    "gpu_arch", [arch for arch in CONFIG_ARCHS if loader.has_metric_library(arch)]
+)
+def test_metric_id_collects_the_counters_of_its_rows(gpu_arch: str) -> None:
+    """-b <metric id> takes its counters from the metric library and saves the id.
+    Typing the ids analyze shows for its rows collects the same counters and saves
+    the metric id instead of the row ids."""
+    for metric_id in _metrics_to_select(gpu_arch):
+        by_id, typed = offline_soc(gpu_arch, [metric_id], False).detect_counters()
+        rows = [
+            position
+            for position, row in iter_view_rows(load_views(gpu_arch))
+            if row_metric_ids(row) == [metric_id]
+        ]
+        by_rows, saved = offline_soc(gpu_arch, rows, False).detect_counters()
+        assert (by_id, typed) == (by_rows, [metric_id]), metric_id
+        assert saved == [metric_id], metric_id
 
 
 # =============================================================================

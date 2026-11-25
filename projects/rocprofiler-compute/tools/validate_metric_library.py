@@ -34,7 +34,11 @@ sys.path.insert(0, str(PROJECT_ROOT / "src"))
 from rocprof_compute_soc.metric_library import loader
 from utils.metrics.expression import build_eval_string, normalize_equation
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.utils_common import canonical_config_arch, mapping_field_errors
+from utils.utils_common import (
+    METRIC_LIBRARY_ID_RE,
+    canonical_config_arch,
+    mapping_field_errors,
+)
 from utils.utils_counter_defs import counter_to_block
 
 # Categories named after panels, not hardware.
@@ -52,8 +56,6 @@ UNIT_ALIASES = {
     "Wave": "Wavefronts",
     "Waves": "Wavefronts",
 }
-# Metric id format: {category}.{subcategory}_{name}, in lowercase with underscores.
-METRIC_LIBRARY_ID_RE = re.compile(r"^[a-z][a-z0-9]*\.[a-z0-9]+(_[a-z0-9]+)*$")
 METRIC_REQUIRED_FIELDS = ("name", "formula", "unit", "description")
 METRIC_OPTIONAL_FIELDS = ("peak", "peak_empirical")
 DESCRIPTION_MAX_LENGTH = 300
