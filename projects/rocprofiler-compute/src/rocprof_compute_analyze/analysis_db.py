@@ -55,6 +55,7 @@ from pc_sampling.source_snapshot_analysis import (
     resolve_snapshot_path,
 )
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
+from rocprof_compute_soc.metric_library.loader import Collectables
 from roofline.roofline_main import ROOFLINE_SUPPORTED
 from utils import file_io, schema
 from utils.analysis_orm import Database
@@ -105,7 +106,6 @@ from utils.utils_common import (
     panel_id_of,
 )
 from utils.utils_counter_defs import (
-    Collectables,
     extract_counters_and_variables,
 )
 

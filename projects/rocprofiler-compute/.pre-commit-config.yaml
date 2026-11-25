@@ -66,7 +66,7 @@ repos:
         name: Sets metric ID validation
         entry: bash -lc 'cd projects/rocprofiler-compute && python3 tools/validate_sets_metric_ids.py'
         language: system
-        files: (sets/gfx.*_sets\.yaml|analysis_configs/gfx.*/\d{4}_.*\.yaml|mi_gpu_spec\.yaml)$
+        files: (sets/gfx.*_sets\.yaml|rocprof_compute_soc/views/.*\.yaml|metric_library/.*\.yaml|mi_gpu_spec\.yaml|utils/(analysis_views|utils_common)\.py)$
         pass_filenames: false
         stages: [pre-commit]
 
@@ -78,7 +78,7 @@ repos:
         entry: bash -lc 'cd projects/rocprofiler-compute && python tools/config_management/check_metric_config.py --fix'
         language: python
         additional_dependencies: [pyyaml==6.0.3, ruamel.yaml==0.19.1]
-        files: (metric_library/.*\.(yaml|py)|rocprof_compute_soc/views/.*\.yaml|mi_gpu_spec\.yaml|_membw_tree_spec\.yaml|_membw_guidance\.yaml|3000_mem_bw.*\.yaml|membw_analysis/models\.py|utils/(analysis_views|metrics/expression|utils_common|utils_counter_defs)\.py|tools/(validate_metric_library|validate_views|validate_membw_tree_spec)\.py|tools/config_management/.*|docs/data/metrics/.*)$
+        files: (metric_library/.*\.(yaml|py)|rocprof_compute_soc/views/.*\.yaml|mi_gpu_spec\.yaml|_membw_tree_spec\.yaml|_membw_guidance\.yaml|membw_analysis/models\.py|utils/(analysis_views|metrics/expression|utils_common|utils_counter_defs)\.py|tools/(validate_metric_library|validate_views|validate_membw_tree_spec)\.py|tools/config_management/.*|docs/data/metrics/.*)$
         pass_filenames: false
         stages: [pre-commit]
 
@@ -101,6 +101,6 @@ repos:
         entry: python projects/rocprofiler-compute/tools/format_yaml.py --fix
         language: python
         additional_dependencies: [pyyaml==6.0.3]
-        files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/(analysis_configs/(gfx|collectables/)|metric_library/gfx).*\.yaml$
+        files: ^projects/rocprofiler-compute/src/rocprof_compute_soc/metric_library/gfx.*\.yaml$
         pass_filenames: true
         stages: [pre-commit]

@@ -2,8 +2,8 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Write the metric equations of the panel configs, panel collectables and metric
-library YAML files in one form, which CONTRIBUTING.md describes."""
+"""Write the metric equations of the metric library YAML files in one form, which
+CONTRIBUTING.md describes."""
 
 import argparse
 import re
@@ -21,58 +21,25 @@ from utils.metrics.expression import normalize_equation
 # Configuration - Edit these to accommodate future YAML updates
 # =============================================================================
 
-# Path pattern of the panel collectables, whose top-level values are all equations
-COLLECTABLES_FILE_PATTERN = "analysis_configs/collectables/"
+# Path pattern of the metric library files, whose equations are normalized (a
+# substring of the path)
+LIBRARY_FILE_PATTERN = "metric_library/gfx"
+# Path pattern of build copies, which are skipped
+BUILD_DIR_PATTERN = "/build/"
 
-# Path patterns that contain metric equations to check (substrings matched against path)
-EQUATION_FILE_PATTERNS = [
-    "analysis_configs/gfx",
-    "metric_library/gfx",
-    COLLECTABLES_FILE_PATTERN,
-]
-
-# Path suffixes to exclude from equation checking
-EQUATION_FILE_EXCLUDE_SUFFIXES = [
-    "_template.yaml",
-]
-
-# Path patterns to skip entirely (substrings matched against path)
-SKIP_FILE_PATTERNS = [
-    "/build/",
-    "profiling_config.yaml",
-]
-
-# YAML keys that contain metric equations ("formula" and "peak_empirical" in metric
-# library files)
-EQUATION_KEYS = {
-    "value",
-    "avg",
-    "min",
-    "max",
-    "std dev",
-    "expr",
-    "peak",
-    "formula",
-    "peak_empirical",
-}
-
-# Key of the column titles of a metric_table. The titles use the equation keys, but
-# they are not equations.
-HEADER_KEY = "header"
+# YAML keys of the metric library that contain metric equations
+EQUATION_KEYS = {"formula", "peak", "peak_empirical"}
 
 
 def extract_metric_equations(
     data: Dict[str, Any], path: str = ""
 ) -> List[Tuple[str, str]]:
-    """Return (key path, equation) for each equation in YAML data. Table headers
-    are skipped."""
+    """Return (key path, equation) of each equation field in YAML data."""
     equations = []
 
     if isinstance(data, dict):
         for key, value in data.items():
             current_path = f"{path}.{key}" if path else key
-            if key == HEADER_KEY:
-                continue
             if key in EQUATION_KEYS and isinstance(value, str):
                 equations.append((current_path, value))
             elif isinstance(value, dict):
@@ -84,34 +51,6 @@ def extract_metric_equations(
                             extract_metric_equations(item, f"{current_path}[{i}]")
                         )
     return equations
-
-
-def file_equations(path: Path, data: Dict[str, Any]) -> List[Tuple[str, str]]:
-    """Return (key path, equation) of each equation in the YAML data of a file."""
-    if COLLECTABLES_FILE_PATTERN in str(path):
-        return [(name, value) for name, value in data.items() if isinstance(value, str)]
-    return extract_metric_equations(data)
-
-
-def _should_check_equations(path: Path) -> bool:
-    """Return True if the file contains metric equations to check."""
-    path_str = str(path)
-    for exclude_suffix in EQUATION_FILE_EXCLUDE_SUFFIXES:
-        if path_str.endswith(exclude_suffix):
-            return False
-    for pattern in EQUATION_FILE_PATTERNS:
-        if pattern in path_str:
-            return True
-    return False
-
-
-def _should_skip_file(path: Path) -> bool:
-    """Return True if the file should be skipped entirely."""
-    path_str = str(path)
-    for pattern in SKIP_FILE_PATTERNS:
-        if pattern in path_str:
-            return True
-    return False
 
 
 def _apply_fixes(content: str, fixes: List[Tuple[str, str]]) -> str:
@@ -126,8 +65,9 @@ def _apply_fixes(content: str, fixes: List[Tuple[str, str]]) -> str:
 def check_file(
     path: Path, fix: bool = False, show_diff: bool = False
 ) -> Tuple[bool, List[str]]:
-    """Check a YAML file for formatting issues. Returns (is_valid, issues)."""
-    if _should_skip_file(path):
+    """Check a metric library file for formatting issues. Returns (is_valid,
+    issues); other files have none."""
+    if LIBRARY_FILE_PATTERN not in str(path) or BUILD_DIR_PATTERN in str(path):
         return True, []
 
     try:
@@ -137,14 +77,14 @@ def check_file(
     except (yaml.YAMLError, OSError, UnicodeDecodeError) as e:
         return False, [f"Failed to parse YAML: {e}"]
 
-    if data is None or not _should_check_equations(path):
+    if data is None:
         return True, []
 
     parse_errors = []
     format_issues = []
     fixes = []
 
-    for eq_path, value in file_equations(path, data):
+    for eq_path, value in extract_metric_equations(data):
         try:
             normalized = normalize_equation(value)
         except ValueError as e:
@@ -168,7 +108,8 @@ def check_file(
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="YAML metric equation formatter for rocprofiler-compute"
+        description="YAML metric equation and description formatter for "
+        "rocprofiler-compute"
     )
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="Check without modifying")

@@ -13,8 +13,8 @@ New developer tool `tools/validate_metric_library.py`, following the existing
 `tools/validate_*.py` checks: it loads each arch's metric library through the
 inheritance loader, collects every schema error, and exits 1 if there are any. Every
 `formula`, `peak` and `peak_empirical` must be accepted by the runtime's expression
-parser (`build_eval_string()`). It runs as a pre-commit hook on `metric_library/` files
-and from `master_config_workflow_script.py --validate-only`. It needs only the standard
+parser (`build_eval_string()`). It runs as a pre-commit hook on `metric_library/` files.
+It needs only the standard
 library and the vendored YAML, so the hook runs with the system `python3`, like the
 other `tools/validate_*.py` hooks. As with today's panel files, the runtime does not
 re-validate the files it loads.
@@ -71,8 +71,8 @@ So a new ceiling, or a new arch, fails validation until a metric claims each cei
 An arch without a benchmark (gfx908) has no measured peaks; the first `peak_empirical`
 of a CDNA metric is in the gfx90a override files.
 
-A metric's numeric positional ID (`legacy_id`) is not a metric field either; see
-[Transition mechanism](lld-index.md#transition-mechanism-legacy_id).
+A metric's numeric positional ID is not a metric field either; it is the row's position
+in a view (see [Transition mechanism](lld-index.md#transition-mechanism-positional-ids)).
 
 A metric concept has one `id` on every architecture. Each family base (gfx908 for CDNA,
 gfx115x for RDNA, and gfx1250) defines the id with that family's formula, as the HLD's
@@ -101,36 +101,38 @@ compute.salu_util:
 columns, so they stay as display data in the analysis config rows, not on
 `MetricDefinition`. There is no separate `FabricStallMetric` schema.
 
-`VariableDefinition` fields:
+### Layer 1.5 -- Collectables
+
+Each arch's `collectables.yaml`, inherited like the metric files, holds the collectables:
+named formulas that metric formulas use as `$name`. They include the per-XCD GRBM
+counts, `hbmBandwidth`, `kernelBusyCycles` and `numActiveCUs`, and the parts of metrics
+whose counters do not fit one pass. How to write them, including the
+`<name>_per_dispatch` partner of a summed ratio, is in the
+[metric library README](../../../src/rocprof_compute_soc/metric_library/README.md#collectables).
+
+Collectable fields:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `name` | str | yes | The key: variable name without `$`, e.g. `GRBM_GUI_ACTIVE_PER_XCD` |
-| `formula` | str | yes | Expression, e.g. `"(GRBM_GUI_ACTIVE / $num_xcd)"` |
+| `name` | str | yes | The key: collectable name without `$`, e.g. `GRBM_GUI_ACTIVE_PER_XCD` |
+| `formula` | str | yes | Expression, e.g. `"GRBM_GUI_ACTIVE / $num_xcd"` |
 
-Evaluation order stays in code: `calc_builtin_vars()` evaluates the `PER_XCD` variables
-first.
+Analyze evaluates each collectable after the collectables it uses, so the file order does
+not affect evaluation.
 
 ```yaml
-# gfx908/variables.yaml
-GRBM_COUNT_PER_XCD:
-  formula: GRBM_COUNT / $num_xcd
+# gfx908/collectables.yaml (excerpt)
 GRBM_GUI_ACTIVE_PER_XCD:
   formula: GRBM_GUI_ACTIVE / $num_xcd
-GRBM_SPI_BUSY_PER_XCD:
-  formula: GRBM_SPI_BUSY / $num_xcd
 hbmBandwidth:
   formula: $max_mclk / 1000 * 32 * $num_memory_channels
-kernelBusyCycles:
-  formula: ROUND(AVG((End_Timestamp - Start_Timestamp) / 1000 * $max_sclk), 0)
-numActiveCUs:
-  formula: TO_INT(MIN(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + MIN(MOD(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))
+ipc_valu_vmem_salu_smem:
+  formula: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM) / SUM(SQ_ACTIVE_INST_ANY)
+ipc_valu_vmem_salu_smem_per_dispatch:
+  formula: (SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM) / SQ_ACTIVE_INST_ANY
 ```
 
-### Layer 1.5 -- Collectables
-
-Phase A has no collectables: the metric library has no collectable file, field or
-reference. Collectables are designed in the single-pass metrics plan
+Collectables are designed in the single-pass metrics plan
 ([Terms](../single-pass-and-multi-pass-metrics/hld-plan.md#terms) and
 [splitting multi-pass metrics](../single-pass-and-multi-pass-metrics/hld-plan.md#phase-2--splitting-multi-pass-metrics-into-single-pass-parts))
 and its [grouping algorithm](../single-pass-and-multi-pass-metrics/lld-metrics-grouping-algorithm.md).
@@ -263,8 +265,9 @@ and README, as `src/memory_chart/loader.py` sits next to its layouts.
    `MetricLibraryError` on duplicate ids, like any other load failure. In Phase A the
    entries are the loaded mappings, as `load_panel_configs()` returns today; a typed
    model can come with the cutover.
-6. Load `variables.yaml` (inherited like the metric files) into
-   `MetricLibrary.variables`, in file order.
+6. Load `collectables.yaml` (inherited like the metric files) into
+   `MetricLibrary.collectables`; `collectable_formulas()` returns each one's formula by
+   name.
 
 7. Load `sets.yaml` from the arch directory (inherited along
    `METRIC_LIBRARY_PARENT_ARCH` like the metric files) into `MetricLibrary.sets` (set
@@ -277,15 +280,15 @@ and README, as `src/memory_chart/loader.py` sits next to its layouts.
 class MetricLibrary:
     arch: str                       # the canonical arch, e.g. "gfx115x"
     metrics: dict[str, dict]        # metric id -> its fields
-    variables: dict[str, dict]      # variable name -> {formula}, in file order
+    collectables: dict[str, dict]   # collectable name -> {formula}
     sets: dict[str, dict]           # set option -> {title, metrics}
 
     @classmethod
     def load(cls, metric_dir: Path, arch: str) -> "MetricLibrary": ...
 
-    def get_counters_for_metrics(
-        self, metric_ids: list[str], gpu_series: str
-    ) -> set[str]: ...
+    def get_counters_for_metrics(self, metric_ids: list[str]) -> set[str]: ...
+
+    def collectable_formulas(self) -> dict[str, str]: ...
 ```
 
 Each `load()` reads the files again; a caller loads an arch once and passes the
@@ -299,15 +302,16 @@ is not a metric of the arch raises `ValueError` naming the ids and the arch):
    does for the panel equations. In both paths, comments, descriptions and labels add no
    counters, so the two counter sets are equal on every arch.
 3. **Delegate to `extract_counters_and_variables()`** in `utils_counter_defs.py` for
-   regex-based HW counter extraction and transitive built-in variable resolution.
+   regex-based HW counter extraction and transitive resolution of the library's
+   collectables.
 
 ### Tests
 
 - Integration test: load a synthetic family (a base and a four-deep chain of children)
   from test fixtures. Verify: correct number of metrics, inheritance
-  overrides applied, variable definitions present, duplicate id raises error.
+  overrides applied, collectables read apart from the metrics, duplicate id raises error.
 - Counter extraction: `get_counters_for_metrics()` takes counters from `formula` and
-  `peak`, and resolves built-in variables. Equivalence with
+  `peak`, and resolves collectables. Equivalence with
   `detect_counters()` over the whole library is the Stage 3 counter test.
 - String metric IDs follow the hierarchical convention
   (`{category}.{subcategory}_{name}`).
@@ -332,13 +336,15 @@ flowchart LR
         SETS["profile_configs/sets/"]
         LPC["load_panel_configs()"]
         DC["detect_counters()"]
-        GBV["get_build_in_vars()<br/>hardcoded dicts"]
+        COL["analysis_configs/collectables/<br/>{arch}_collectables.yaml"]
+        CO["Collectables.of_arch()"]
         AN["analyze"]
         PR["profile"]
         PY --> LPC --> AN
         PY --> DC --> PR
         SETS --> DC
-        GBV --> AN
+        COL --> CO --> AN
+        CO --> DC
     end
     subgraph lib["Metric library, not read in production"]
         ML["metric_library/{arch}/*.yaml"]
@@ -353,7 +359,7 @@ flowchart LR
     LML --> SYNC
     LPC -.->|"formulas, units, peaks"| SYNC
     DC -.->|counters| SYNC
-    GBV -.->|variables| SYNC
+    CO -.->|collectables| SYNC
     SETS -.->|sets| SYNC
     SYNC --> CI
 ```
@@ -373,8 +379,8 @@ At the cutover, counters come from the metrics that the selected views place
 
 ### Validation
 
-The unit test `tools/test_metric_library_sync.py`
-compares each arch's library with today's analysis configs. An arch without a roofline
+Until the cutover, the unit test `tools/test_metric_library_sync.py` compared each arch's
+library with the analysis configs ([Removal](#removal)). An arch without a roofline
 benchmark (gfx908) never shows its roofline panel, so the test leaves that panel out and
 the arch's library holds none of the metrics only that panel lists:
 
@@ -391,7 +397,8 @@ the arch's library holds none of the metrics only that panel lists:
 - **Counters:** the counters the whole library selects equal the counters
   `detect_counters()` selects for every panel checked (with `--membw-analysis` where the
   arch has panel 3000).
-- **Built-in variables:** the library variables equal `get_build_in_vars()`.
+- **Collectables:** the library collectables equal the analysis config collectables
+  (`Collectables.of_arch()`), formulas compared in `format_yaml.py` form.
 - **Peaks:** every row's `peak` is its metric's `peak` or `peak_empirical`, and every
   library peak is the peak of some row that shows the metric (a measured peak whose
   ceiling the benchmark does not measure on the arch is skipped). A display variant
@@ -407,9 +414,10 @@ an install tree (`TEST_FROM_INSTALL`), which has no `tools/format_yaml.py`.
 
 The sync test is transitional and goes at the cutover
 ([cutover timeline](lld-index.md#cutover-timeline)), with the old panel files:
-`detect_counters()` and `get_build_in_vars()` then read the library, so the counter and
-variable checks would compare it with itself, and the row checks (equations, units and
-peaks, with `DISPLAY_VARIANTS` and `UNIT_VARIANTS`) have no panel files left to compare.
+`detect_counters()` and `Collectables.of_arch()` then read the library, so the counter
+and collectable checks would compare it with itself, and the row checks (equations,
+units and peaks, with `DISPLAY_VARIANTS` and `UNIT_VARIANTS`) have no panel files left
+to compare.
 
 The schema checks of `tools/validate_metric_library.py` (file loading, fields, id rules,
 shared formulas and names, measured peaks, unit spelling, key order, and one name and
@@ -420,14 +428,14 @@ unit per id) stay.
 
 The largest stage. Parallelizable by hardware concept (compute, memory, system) and by
 architecture. The deliverable is the actual Layer 2 YAML files and the migration of
-built-in variables and sets.
+collectables and sets.
 
 ### New directory structure
 
 ```
 metric_library/          # sibling of analysis_configs/ (see Stage 3)
   gfx908/                # CDNA base (first arch) -- complete standalone definitions
-    variables.yaml
+    collectables.yaml
     sets.yaml            # Stage 4, sets migration
     compute.yaml         # SQ instruction issue and execution
     cp.yaml              # CPC/CPF
@@ -458,10 +466,10 @@ names its file. The validator enforces this. The RDNA and gfx1250 bases add file
 their own categories.
 
 Top-level keys are sorted in every file (a `remove:` list aside): metric ids, and the
-variable names in `variables.yaml`. Where a metric is shown no longer orders the
+collectable names in `collectables.yaml`. Where a metric is shown no longer orders the
 library, and the `{category}.{subcategory}_{name}` form keeps related metrics together.
-The validator rejects unsorted files. The order of `variables.yaml` does not affect
-evaluation (see `VariableDefinition`).
+The validator rejects unsorted files. The order of `collectables.yaml` does not affect
+evaluation (see [Layer 1.5](#layer-15----collectables)).
 
 Which arch is a base and which arch each child inherits from is set in the
 [HLD](hld-analysis-config-redesign.md#yaml-inheritance) and in
@@ -673,27 +681,29 @@ compute_thruput_util:
   `get_counters_for_metrics()` to confirm that each set's counters fit in one pass on
   every GPU arch the directory serves.
 - **Transition.** Production `--set` and `--list-sets` keep reading
-  `profile_configs/sets/` until the cutover. The sync test checks that each string-ID
-  set has the title of the numeric set it replaces and lists the metrics of its rows, in
-  order. A numeric set whose rows show no formula on an arch has no library set there:
-  gfx908 has no MFMA counters, so it has no `compute_thruput_flops` set.
+  `profile_configs/sets/` until they read `metric_library/{arch}/sets.yaml`. The numeric
+  ids select view rows by position, and `validate_sets_metric_ids.py` checks them against
+  the views. An arch has no set whose metrics it cannot compute: gfx908 has no MFMA
+  counters, so it has no `compute_thruput_flops` set.
 
 ### Built-in variable migration
 
-The built-in variables move into each base arch's `variables.yaml`. In Phase A,
-`get_build_in_vars()` in `utils_counter_defs.py` keeps its hardcoded dicts, and the
-Stage 3 equivalence check asserts that the library variables equal `get_build_in_vars()`
-for every arch. At the cutover, `get_build_in_vars()` loads from
-`MetricLibrary.variables` ([Stage 8](lld-phase-b-display-view.md#stage-8----cutover)).
+The built-in variables are collectables in each arch's `collectables.yaml`. Until the
+cutover, production reads the same collectables from
+`analysis_configs/collectables/{arch}_collectables.yaml` through `Collectables.of_arch()`
+in `utils_counter_defs.py`, and the Stage 3 equivalence check asserts that the library
+collectables equal them for every arch. At the cutover, `Collectables.of_arch()` moves to
+the metric library loader and reads the library
+([Stage 8](lld-phase-b-display-view.md#stage-8----cutover)).
 
-The evaluation pipeline (`calc_builtin_vars()` in `evaluation_pipeline.py`) is
-unchanged -- it receives the same `dict[str, str]` regardless of source.
+The evaluation pipeline (`calc_builtin_vars()` in `evaluation_pipeline.py`) evaluates
+the collectables that `Collectables.of_arch()` returns, whichever file they come from.
 
 ### Tooling updates
 
 | Tool | What changes |
 |---|---|
-| `validate_sets_metric_ids.py` | No change: the numeric files keep their positional and one-pass checks until the cutover. `tools/validate_metric_library.py` checks `metric_library/{arch}/sets.yaml` with its own copy of the one-pass check. |
+| `validate_sets_metric_ids.py` | No change in Phase A; Phase B checks the numeric set files against the views, and deletes it with them ([Tooling cleanup](lld-phase-b-display-view.md#tooling-cleanup)). `tools/validate_metric_library.py` checks `metric_library/{arch}/sets.yaml`, including the one-pass check. |
 | `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula`, `peak` and `peak_empirical` keys. Core equation formatting logic (factoring constants out of aggregation) is unchanged. |
 | `hash_manager.py` | No change: it keeps hashing the analysis configs, and `tools/validate_metric_library.py` checks the metric library files. |
 | `verify_against_config_template.py` | No change: `tools/validate_metric_library.py` checks the metric library files, and this script keeps checking the old panel files until the cutover. |
@@ -730,6 +740,6 @@ equivalence); there is no round trip through an adapter.
 
 ### Validation
 
-- Per-arch equivalence check (Stage 3): formulas, no-filter counters and built-in
-  variables match today's analysis configs.
+- Per-arch equivalence check (Stage 3): formulas, no-filter counters and collectables
+  match today's analysis configs.
 - Schema check: `tools/validate_metric_library.py` passes.

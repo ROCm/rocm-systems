@@ -4,9 +4,8 @@ Each directory here defines one GPU architecture's metrics, once each, keyed by 
 id such as `compute.salu_util`. The files hold what a metric is (its formula, unit and
 peaks), not how a panel shows it. `loader.py` loads them.
 
-Production does not read these files yet: `analyze` and `profile` still use
-[`analysis_configs/`](../analysis_configs/). Until production reads the library, a metric
-change goes into both trees.
+`analyze` and `profile` read the metrics from here. The analysis views in
+[`views/`](../views/) say which metrics each panel shows.
 
 ## Layout
 
@@ -88,7 +87,9 @@ A description says what the metric counts. It follows the
 ## Sets
 
 `sets.yaml` lists each profiling set by metric id. A set's counters must fit in one
-profiling pass.
+profiling pass. `--set` still reads the numeric set files in
+[`profile_configs/sets/`](../profile_configs/sets/), whose ids select view rows by
+position.
 
 ```yaml
 compute_thruput_util:
@@ -100,8 +101,7 @@ compute_thruput_util:
 
 ## Collectables
 
-`collectables.yaml` names formulas that metric formulas use as `$name`. Production reads
-the same collectables from `analysis_configs/collectables/<arch>_collectables.yaml`.
+`collectables.yaml` names formulas that metric formulas use as `$name`.
 Analyze computes a collectable on the first pass that holds all of its counters, so a
 metric whose counters do not fit one pass is written with collectables:
 
@@ -149,9 +149,3 @@ lists every check. The `check-yaml` hook rejects duplicate keys.
 The same hook regenerates the metric lock and the metric description files; the
 [metric config management README](../../../tools/config_management/README.md) says how to
 review them.
-
-While production reads `analysis_configs/`,
-`tools/test_metric_library_sync.py` checks that
-the library matches `analysis_configs/` and `profile_configs/sets/`: every equation of a
-panel row is a library formula, and the units, peaks, counters, collectables and
-sets match. CI runs it.

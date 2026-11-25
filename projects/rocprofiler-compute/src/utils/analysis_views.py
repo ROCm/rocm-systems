@@ -14,10 +14,8 @@ from the workload's CSV files. The panel id comes from the file name
 (0300_memory_chart.yaml is panel 300), table and row ids from their position (301 is
 the first table, 3.1.0 its first row).
 
-views_to_panel_configs() builds the panel configs that load_panel_configs() reads from
-analysis_configs/. Analyze reads its panel configs through arch_panel_configs(). Profile
-still reads analysis_configs/, which test_metric_library_sync.py keeps equal in
-structure to the views' panel configs.
+Analyze reads the panel configs through arch_panel_configs(); profile reads the views
+through utils_common, and only its listings build panel configs.
 view_schema_errors() and view_metric_errors() check the views.
 Standard library and vendored YAML only, so that profile mode can import it.
 """
@@ -89,7 +87,7 @@ def views_to_panel_configs(
     metrics: Dict[str, Dict[str, Any]],
     collectables: Dict[str, str],
 ) -> "OrderedDict[int, Dict[str, Any]]":
-    """Return the panel configs of an arch's views, as load_panel_configs() does.
+    """Return the panel configs of an arch's views.
 
     Args:
         views: The arch's views (load_views()).

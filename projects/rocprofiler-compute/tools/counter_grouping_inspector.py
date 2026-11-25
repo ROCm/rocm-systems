@@ -43,11 +43,13 @@ if str(_SRC_DIR) not in sys.path:
 
 # Import from existing modules to maintain single source of truth
 import config
+from rocprof_compute_soc.metric_library.loader import Collectables, has_metric_library
 from rocprof_compute_soc.soc_base import (
     OmniSoC_Base,
     is_tcc_channel_counter,
-    iter_analysis_config_metrics,
+    iter_panel_config_metrics,
 )
+from utils.analysis_views import arch_panel_configs
 from utils.counters.allocator import metric_counter_sets, reads_one_pass
 from utils.counters.counter_file import (
     CounterFile,
@@ -56,7 +58,7 @@ from utils.counters.counter_file import (
 from utils.logger import console_error
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils_common import canonical_config_arch
-from utils.utils_counter_defs import BLOCK_REMAP, Collectables
+from utils.utils_counter_defs import BLOCK_REMAP
 
 
 def _counter_display_ip_prefix(counter: str) -> str:
@@ -263,7 +265,6 @@ def _bucket_counter_sets(
 
 def generate_bucket_metrics(
     output_files: list[CounterFile],
-    config_dir: Path,
     arch: str,
 ) -> str:
     """Generate metrics that span multiple buckets as a string.
@@ -281,7 +282,7 @@ def generate_bucket_metrics(
 
     collectables = Collectables.of_arch(arch)
     config_arch = canonical_config_arch(arch)
-    for metric in iter_analysis_config_metrics(config_dir / config_arch, set()):
+    for metric in iter_panel_config_metrics(arch_panel_configs(arch), set()):
         total_metrics += 1
         metric_sets = metric_counter_sets(
             [metric.expressions], collectables, plan_counters
@@ -303,7 +304,7 @@ def generate_bucket_metrics(
             metric.expressions, collectables, list(bucket_counters.values())
         ):
             single_rows.append((
-                metric.stem_id,
+                f"{metric.panel_id:04d}",
                 panel_label,
                 metric.metric_idx,
                 metric.metric_name,
@@ -316,7 +317,7 @@ def generate_bucket_metrics(
             if metric_set & counters
         ]
         multi_rows.append((
-            metric.stem_id,
+            f"{metric.panel_id:04d}",
             panel_label,
             metric.metric_idx,
             metric.metric_name,
@@ -332,10 +333,10 @@ def generate_bucket_metrics(
         f"({len(multi_rows)} of {total_metrics} metrics, {multi_pct:.1f}%)\n"
     )
     buf.write(
-        "Lists every arch config metric that reads a collected counter. Buckets "
-        "are the ones holding any of its counters.\n"
+        "Lists every metric of the arch's views that reads a collected counter. "
+        "Buckets are the ones holding any of its counters.\n"
     )
-    buf.write(f"Config tree: {config_dir / config_arch}\n")
+    buf.write(f"Views: {config.analysis_views_dir / config_arch}\n")
 
     if multi_rows:
         # Calculate column widths
@@ -402,17 +403,15 @@ def generate_bucket_metrics(
 
 def print_bucket_metrics(
     output_files: list[CounterFile],
-    config_dir: Path,
     arch: str,
 ) -> None:
     """Print metrics that span multiple buckets."""
-    output = generate_bucket_metrics(output_files, config_dir, arch)
+    output = generate_bucket_metrics(output_files, arch)
     print(output, end="")
 
 
 def render_perfmon_plan_svg(
     output_files: list[CounterFile],
-    config_dir: Path,
     arch: str,
     title: str = "Perfmon Bucket Plan",
 ) -> str:
@@ -470,7 +469,7 @@ def render_perfmon_plan_svg(
     console.print(_format_display_column_comments())
     console.print()
 
-    metrics_output = generate_bucket_metrics(output_files, config_dir, arch)
+    metrics_output = generate_bucket_metrics(output_files, arch)
     console.print(metrics_output)
 
     return console.export_svg(title=title)
@@ -543,8 +542,6 @@ Examples:
     )
     args = parser.parse_args()
 
-    config_dir = config.analysis_configs_dir
-
     arch = args.arch
 
     # Get perfmon config from mi_gpu_specs (single source of truth)
@@ -552,11 +549,9 @@ Examples:
     if not perfmon_config:
         console_error(f"Error: No perfmon config found for architecture: {arch}")
 
-    config_arch_name = canonical_config_arch(arch)
-    config_arch_path = config_dir / config_arch_name
-    if not config_arch_path.is_dir():
+    if not has_metric_library(arch):
         console_error(
-            f"Error: Architecture config directory not found: {config_arch_path}"
+            f"Error: No metric library or analysis views for architecture: {arch}"
         )
 
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
@@ -581,13 +576,12 @@ Examples:
                     print(f"  - {name}")
                 print()
 
-        _emit_inspector_output(args, output_files, config_dir, arch)
+        _emit_inspector_output(args, output_files, arch)
 
 
 def _emit_inspector_output(
     args: argparse.Namespace,
     output_files: list[CounterFile],
-    config_dir: Path,
     arch: str,
 ) -> None:
     """Write or print bucket plan and multi-bucket metrics (stdout or --output)."""
@@ -598,7 +592,7 @@ def _emit_inspector_output(
 
         if suffix == ".svg":
             try:
-                svg_content = render_perfmon_plan_svg(output_files, config_dir, arch)
+                svg_content = render_perfmon_plan_svg(output_files, arch)
                 output_path.write_text(svg_content, encoding="utf-8")
             except OSError as exc:
                 console_error(
@@ -607,7 +601,7 @@ def _emit_inspector_output(
             print(f"SVG saved to {output_path}")
         elif suffix == ".txt":
             bucket_output = generate_bucket_plan(output_files, arch)
-            metrics_output = generate_bucket_metrics(output_files, config_dir, arch)
+            metrics_output = generate_bucket_metrics(output_files, arch)
             try:
                 output_path.write_text(
                     bucket_output + metrics_output,
@@ -626,10 +620,10 @@ def _emit_inspector_output(
             )
             print("Falling back to stdout output.\n", file=sys.stderr)
             print_bucket_plan(output_files, arch)
-            print_bucket_metrics(output_files, config_dir, arch)
+            print_bucket_metrics(output_files, arch)
     else:
         print_bucket_plan(output_files, arch)
-        print_bucket_metrics(output_files, config_dir, arch)
+        print_bucket_metrics(output_files, arch)
 
 
 if __name__ == "__main__":

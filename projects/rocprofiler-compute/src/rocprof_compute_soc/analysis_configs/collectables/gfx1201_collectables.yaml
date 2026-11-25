@@ -1,5 +1,0 @@
-# Named formulas that metric formulas use as $name. Analyze computes each one
-# on the first pass that holds all of its counters. A formula with SUM is one
-# value for all dispatches; one without SUM has a value per dispatch.
-# A collectable may use other collectables.
-GRBM_GUI_ACTIVE_PER_XCD: GRBM_GUI_ACTIVE / $num_xcd

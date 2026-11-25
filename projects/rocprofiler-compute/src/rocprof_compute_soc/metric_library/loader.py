@@ -10,8 +10,9 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
+from utils.logger import console_error
 from utils.utils_common import canonical_config_arch
-from utils.utils_counter_defs import extract_counters_and_variables
+from utils.utils_counter_defs import extract_counters_and_variables, parse_counters_text
 from vendored import yaml
 
 # Each arch inherits from its immediate predecessor; None marks a family base.
@@ -174,6 +175,23 @@ def _kind(value: object) -> str:
     return "list" if isinstance(value, list) else "scalar"
 
 
+def _dependency_order(formulas: Dict[str, str]) -> Dict[str, str]:
+    """Return formulas ordered so each collectable comes after those it uses."""
+    ordered: Dict[str, str] = {}
+    pending = dict(formulas)
+    while pending:
+        ready = {
+            name: formula
+            for name, formula in pending.items()
+            if not parse_counters_text(formula)[1] & pending.keys()
+        }
+        if not ready:
+            console_error(f"Collectables use each other in a loop: {sorted(pending)}")
+        ordered.update(ready)
+        pending = {name: pending[name] for name in pending.keys() - ready.keys()}
+    return ordered
+
+
 class MetricLibrary:
     """One arch's metrics, collectables and sets."""
 
@@ -214,16 +232,45 @@ class MetricLibrary:
                 f"Unknown metric ids for {self.arch}: {unknown_metric_ids}"
             )
         expressions = [
-            str(self.metrics[metric_id][field])
+            expression
             for metric_id in metric_ids
-            for field in COUNTER_EXPRESSION_FIELDS
-            if self.metrics[metric_id].get(field) is not None
+            for expression in self.counter_expressions(metric_id)
         ]
         counters, _ = extract_counters_and_variables(
             "\n".join(expressions), self.collectable_formulas()
         )
         return counters
 
+    def counter_expressions(self, metric_id: str) -> List[str]:
+        """Return the formula and peak of a metric as text: the expressions that
+        name its counters."""
+        return [
+            str(self.metrics[metric_id][field])
+            for field in COUNTER_EXPRESSION_FIELDS
+            if self.metrics[metric_id].get(field) is not None
+        ]
+
     def collectable_formulas(self) -> Dict[str, str]:
         """Return the formula of each collectable, by name."""
         return {name: entry["formula"] for name, entry in self.collectables.items()}
+
+
+class Collectables:
+    """The collectables of each arch: named formulas that metric formulas use
+    as $name, from the arch's metric library. Each arch's are read once, and
+    kept so that each one comes after the collectables it uses."""
+
+    _formulas_by_arch: Dict[str, Dict[str, str]] = {}
+
+    @classmethod
+    def of_arch(cls, gpu_arch: str) -> Dict[str, str]:
+        """Return the formula of each collectable of gpu_arch, by name."""
+        config_arch = canonical_config_arch(gpu_arch)
+        if config_arch not in cls._formulas_by_arch:
+            if not has_metric_library(gpu_arch):
+                console_error(f"No metric library for {gpu_arch}")
+            library = MetricLibrary.load(default_metric_library_dir(), config_arch)
+            cls._formulas_by_arch[config_arch] = _dependency_order(
+                library.collectable_formulas()
+            )
+        return cls._formulas_by_arch[config_arch]

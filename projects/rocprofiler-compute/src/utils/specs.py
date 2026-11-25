@@ -1082,7 +1082,7 @@ class MachineSpecsRDNA(MachineSpecs):
         metadata={
             "doc": (
                 "The number of GL1 caches (one per Shader Array) on the GPU. "
-                "Used for GL1 bandwidth-ceiling calculations in analysis configs."
+                "Used for GL1 bandwidth-ceiling calculations in metric formulas."
             ),
             "name": "Num GL1 Caches",
             "show_in_table": True,
