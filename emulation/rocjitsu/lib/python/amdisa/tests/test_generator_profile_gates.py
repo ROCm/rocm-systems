@@ -27,7 +27,6 @@ from amdisa.codegen.execute.floating_policy import (
 )
 from amdisa.codegen.execute.vector_special import (
     gen_cvt_fp8,
-    gen_vector_mad_64_32,
     gen_vector_div_scale,
     gen_vector_movrel,
     gen_vector_cvt_pk,
@@ -35,11 +34,7 @@ from amdisa.codegen.execute.vector_special import (
 from amdisa.codegen.execute.sema_lower import LoweringContext, lower_sema_block
 from amdisa.sema_derive import derive_sema_block
 from amdisa.codegen.execute.matrix import gen_mfma as emit_mfma
-from amdisa.codegen.execute.vector_cmp import (
-    gen_vector_add_co,
-    gen_vector_cmp,
-    gen_vector_cmpx,
-)
+from amdisa.codegen.execute.vector_cmp import gen_vector_cmp, gen_vector_cmpx
 from amdisa.codegen.execute.simd_codegen import simd_probe_line
 from amdisa.cross_isa import CrossIsaAnalyzer
 from amdisa.gpuisa import Instruction, Operand
@@ -1982,62 +1977,6 @@ def test_vop3_cmp_writes_explicit_mask_width_for_wave_size():
     assert 'wf.set_vcc' not in body
 
 
-def test_vop3_add_co_writes_explicit_sdst_mask_width_for_wave_size():
-    body = gen_vector_add_co(['vdst', 'sdst'], ['src0', 'src1'], 'add', 'u32')
-
-    assert 'amdgpu::write_wave_mask_scalar(sdst, wf, vcc);' in body
-    assert 'wf.set_vcc' not in body
-
-
-def test_vop3_mad_u64_u32_writes_explicit_sdst_carry():
-    body = gen_vector_mad_64_32(['vdst', 'sdst'], ['src0', 'src1', 'src2'], 'u64')
-
-    assert 'uint64_t carry = 0;' in body
-    assert 'uint64_t product = s0 * s1;' in body
-    assert 'bool overflow = result < product;' in body
-    assert 'carry |= 1ULL << lane;' in body
-    assert 'amdgpu::write_wave_mask_scalar(sdst, wf, carry);' in body
-    assert 'wf.set_vcc' not in body
-
-    callback_body = gen_vector_mad_64_32(
-        ['vdst', 'sdst'],
-        ['src0', 'src1', 'src2'],
-        'u64',
-        result_writer='commit_result',
-    )
-    assert 'commit_result(carry);' in callback_body
-    assert 'write_wave_mask_scalar' not in callback_body
-
-
-def test_vop3_mad_64_32_clamps_exact_result_without_changing_carry():
-    unsigned = gen_vector_mad_64_32(
-        ['vdst', 'sdst'],
-        ['src0', 'src1', 'src2'],
-        'u64',
-        integer_clamp=True,
-    )
-    signed = gen_vector_mad_64_32(
-        ['vdst', 'sdst'],
-        ['src0', 'src1', 'src2'],
-        'i64',
-        integer_clamp=True,
-    )
-
-    assert 'bool overflow = result < product;' in unsigned
-    assert 'inst_.clamp && overflow' in unsigned
-    assert unsigned.index('carry |= 1ULL << lane') < unsigned.index('inst_.clamp')
-    assert 'amdgpu::signed_add_overflows(product, s2)' in signed
-    assert 'inst_.clamp && overflow' in signed
-    assert '(product & (1ULL << 63))' in signed
-    assert signed.index('carry |= 1ULL << lane') < signed.index('inst_.clamp')
-    assert '__int128' not in unsigned
-    assert '__int128' not in signed
-
-    policy = Cdna4Profile().integer_clamp_dtypes
-    assert policy['V_MAD_U64_U32'] == 'u64'
-    assert policy['V_MAD_I64_I32'] == 'i64'
-
-
 def test_vector_cmpx_can_delegate_exec_commit():
     body = gen_vector_cmpx(
         ['src0', 'src1'],
@@ -2068,24 +2007,6 @@ def test_vop3_compare_simd_probe_can_commit_raw_result():
     assert commit_probe is not None
     assert 'ROCJITSU_TRY_SIMD_VOPC_VOP3_INT(' in default_probe
     assert 'ROCJITSU_TRY_SIMD_VOPC_VOP3_INT_RESULT(commit_result,' in commit_probe
-
-
-@pytest.mark.parametrize(
-    'template_name',
-    (
-        'v_add_co_ci_u32_vop2',
-        'v_sub_co_ci_u32_vop2',
-        'v_subrev_co_ci_u32_vop2',
-    ),
-)
-def test_vop2_carry_simd_probe_can_commit_raw_result(template_name: str):
-    default_probe = simd_probe_line(template_name)
-    commit_probe = simd_probe_line(template_name, result_writer='commit_result')
-
-    assert default_probe is not None
-    assert commit_probe is not None
-    assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY(' in default_probe
-    assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result,' in commit_probe
 
 
 def test_true16_vop3_cmp_uses_selected_source_halves():
@@ -7093,17 +7014,6 @@ def test_generated_modern_dpp_source_policy_covers_non_vop1_families(
     assert 'dpp_write_mask_scope_.restore();' in sdst_body
 
 
-def test_shared_vop3_secondary_result_writer_keeps_simd_enabled(
-    execute_shared_path: Path,
-):
-    shared = execute_shared_path.read_text()
-    body = _shared_execute_body(shared, 'v_add_co_ci_u32_vop3', 'v_add_co_u32_vop2')
-    assert 'CommitResult commit_result' in body
-    assert 'ROCJITSU_TRY_SIMD_VOP3_CIN_RESULT(commit_result,' in body
-    assert 'commit_result(vcc);' in body
-    assert 'write_wave_mask_scalar' not in body
-
-
 def test_generated_rdna12_sdwa_explicit_compare_uses_wave_width_destination(
     amdgpu_generated_root: Path,
 ):
@@ -7119,26 +7029,6 @@ def test_generated_rdna12_sdwa_explicit_compare_uses_wave_width_destination(
         )
         assert 'sb + sdwa_sdst_ + 1' not in body
         assert 'wf.set_vcc_raw(dpp_old_vcc_);' in body
-
-
-@pytest.mark.parametrize(
-    'template_name',
-    (
-        'v_add_co_ci_u32_vop2',
-        'v_sub_co_ci_u32_vop2',
-        'v_subrev_co_ci_u32_vop2',
-    ),
-)
-def test_shared_vop2_carry_result_writer_keeps_simd_enabled(
-    execute_shared_path: Path,
-    template_name: str,
-):
-    shared = execute_shared_path.read_text()
-    body = _generated_function_body(shared, f'inline void execute_{template_name}')
-    assert 'CommitResult commit_result' in body
-    assert 'ROCJITSU_TRY_SIMD_VOP2_CARRY_RESULT(commit_result,' in body
-    assert 'commit_result(vcc);' in body
-    assert 'wf.set_vcc' not in body
 
 
 @pytest.mark.parametrize(

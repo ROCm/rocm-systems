@@ -617,67 +617,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
 }
 
 
-# template_name -> cpp_carry_op_functor
-#
-# Same keying as SIMD_VOP2_BINARY. The functor is invoked as
-#   carry_op(simd<uint32_t> src0, simd<uint32_t> vsrc1, simd<uint32_t> cin)
-#     -> SimdCarry<simd<uint32_t>, mask>
-# inside try_execute_binary_vop2_carry_simd (lane type fixed to uint32_t).
-# `cin` is the incoming VCC bit (0/1 per lane); the add_co/sub_co/subrev_co
-# forms have no carry-in and ignore it (unnamed third parameter). Each functor
-# returns the 32-bit result and a per-lane carry/borrow mask via make_simd_carry;
-# the glue masked-stores the result and merges the carry into VCC for active
-# lanes only. Bit-identical to the scalar bodies:
-#   add_co:     w = (u64)a + (u64)b;          carry  = w > 0xFFFFFFFF
-#   sub_co:     dst = a - b;                  borrow = a < b
-#   subrev_co:  dst = b - a;                  borrow = b < a   (operands swapped)
-#   addc:       w = (u64)a + (u64)b + cin;    carry  = w > 0xFFFFFFFF
-#   subb:       dst = a - b - cin;            borrow = a < b + cin
-#   subbrev:    dst = b - a - cin;            borrow = b < a + cin (operands swapped)
-# The unsigned-wraparound carry/borrow identities (e.g. add carry = (a+b) < a;
-# subtract-with-borrow chain) reproduce the scalar u64-domain results exactly.
-SIMD_VOP2_CARRY: dict[str, str] = {
-    'v_add_co_u32_vop2': (
-        '[](auto a, auto b, auto) {'
-        ' auto s = a + b;'
-        ' return make_simd_carry(s, s < a); }'
-    ),
-    'v_sub_co_u32_vop2': (
-        '[](auto a, auto b, auto) { return make_simd_carry(a - b, a < b); }'
-    ),
-    'v_subrev_co_u32_vop2': (
-        '[](auto a, auto b, auto) { return make_simd_carry(b - a, b < a); }'
-    ),
-    'v_addc_co_u32_vop2': (
-        '[](auto a, auto b, auto cin) {'
-        ' auto t1 = a + b; auto c1 = t1 < a;'
-        ' auto t2 = t1 + cin; auto c2 = t2 < t1;'
-        ' return make_simd_carry(t2, c1 | c2); }'
-    ),
-    'v_subb_co_u32_vop2': (
-        '[](auto a, auto b, auto cin) {'
-        ' auto t1 = a - b; auto bw1 = a < b;'
-        ' auto t2 = t1 - cin; auto bw2 = t1 < cin;'
-        ' return make_simd_carry(t2, bw1 | bw2); }'
-    ),
-    'v_subbrev_co_u32_vop2': (
-        '[](auto a, auto b, auto cin) {'
-        ' auto t1 = b - a; auto bw1 = b < a;'
-        ' auto t2 = t1 - cin; auto bw2 = t1 < cin;'
-        ' return make_simd_carry(t2, bw1 | bw2); }'
-    ),
-}
-# RDNA spells the carry-in forms *_CO_CI. Their VOP2 encoding reads carry-in
-# from VCC, exactly like addc/subb/subbrev, so they use the same fast path.
-SIMD_VOP2_CARRY.update(
-    {
-        'v_add_co_ci_u32_vop2': SIMD_VOP2_CARRY['v_addc_co_u32_vop2'],
-        'v_sub_co_ci_u32_vop2': SIMD_VOP2_CARRY['v_subb_co_u32_vop2'],
-        'v_subrev_co_ci_u32_vop2': SIMD_VOP2_CARRY['v_subbrev_co_u32_vop2'],
-    }
-)
-
-
 # template_name -> (cpp_type, k_literal_expr, cpp_fma_op_functor)
 #
 # Same keying as SIMD_VOP2_BINARY. The VOP2 FMA/MAC/MAD family has three operand
@@ -1684,81 +1623,6 @@ SIMD_VOP3_TERNARY_TRUE16_SRC01: dict[str, tuple[str, str]] = {
 }
 
 
-# --- VOP3 64-bit reverse shifts --------------------------------------------
-#
-# v_lshlrev_b64 / v_lshrrev_b64 / v_ashrrev_i64: shift the 64-bit src1 by the
-# 32-bit src0 (masked to [0,63]). Routed through try_execute_shift64_vop3_simd,
-# whose functor receives (native<uint64_t> value, native<uint64_t> shift) with
-# the count already widened+masked. Logical shifts are plain `<< / >>` on the
-# uint64 lane; the signed (arithmetic) form casts through int64.
-SIMD_SHIFT64_VOP3: dict[str, str] = {
-    'v_lshlrev_b64_vop3': '[](auto v, auto sh) { return ::rocjitsu::amdgpu::simd_lshl_u64(v, sh); }',
-    'v_lshrrev_b64_vop3': '[](auto v, auto sh) { return ::rocjitsu::amdgpu::simd_lshr_u64(v, sh); }',
-    'v_ashrrev_i64_vop3': (
-        '[](auto v, auto sh) {' ' return ::rocjitsu::amdgpu::simd_ashr_i64(v, sh); }'
-    ),
-}
-
-# v_lshl_add_u64 uses a 64-bit value and addend with a 32-bit shift source.
-# The shift encoding differs from the 64-bit reverse shifts.
-SIMD_LSHL_ADD_U64: set[str] = {'v_lshl_add_u64_vop3'}
-
-# --- VOP3 wide 32x32->64 multiply-add (v_mad_u64_u32 / v_mad_i64_i32) -------
-#
-# 32-bit src0/src1 multiplicands widened to 64 (zero-/sign-extend), 64-bit
-# low-half product, plus the 64-bit src2 addend. SDST holds unsigned carry-out
-# or signed bit 64 of the 65-bit sum, independently of saturation. Routed through
-# try_execute_mad_wide64_vop3_simd; the functor receives the two narrow operands
-# and the 64-bit addend and returns SimdCarry<native<uint64_t>, mask>.
-SIMD_MAD_WIDE64: dict[str, str] = {
-    'v_mad_u64_u32_vop3': (
-        '[](auto a, auto b, auto c) {'
-        ' auto product = util::stdx::static_simd_cast<util::native<uint64_t>>(a)'
-        ' * util::stdx::static_simd_cast<util::native<uint64_t>>(b);'
-        ' auto result = product + c;'
-        ' return make_simd_carry(result, result < product); }'
-    ),
-    'v_mad_i64_i32_vop3': (
-        '[](auto a, auto b, auto c) {'
-        ' auto wa = util::stdx::static_simd_cast<util::native<uint64_t>>('
-        'util::stdx::static_simd_cast<util::native<int64_t>>('
-        'util::stdx::static_simd_cast<util::narrow32<int32_t>>(a)));'
-        ' auto wb = util::stdx::static_simd_cast<util::native<uint64_t>>('
-        'util::stdx::static_simd_cast<util::native<int64_t>>('
-        'util::stdx::static_simd_cast<util::narrow32<int32_t>>(b)));'
-        ' auto product = wa * wb;'
-        ' auto result = product + c;'
-        ' return make_simd_carry(result,'
-        ' (((product ^ c) >> 63) != 0) ^ (result < product)); }'
-    ),
-}
-
-# --- VOP3 carry binary (carry-out -> SGPR sdst, carry-in <- SGPR src2) ------
-#
-# Same SimdCarry functors as the VOP2 carry family, keyed by _vop3, split by
-# whether the form has a carry-in (and thus a src2 member): the carry-OUT forms
-# (add_co/sub_co/subrev_co) have no src2 and route through the _co glue; the
-# carry-IN forms (addc/subb/subbrev) read src2 and route through the _cin glue.
-_VOP3_CARRY_CIN_NAMES = {
-    'v_addc_co_u32',
-    'v_subb_co_u32',
-    'v_subbrev_co_u32',
-    'v_add_co_ci_u32',
-    'v_sub_co_ci_u32',
-    'v_subrev_co_ci_u32',
-}
-SIMD_VOP3_CARRY_CO: dict[str, str] = {
-    name.replace('_vop2', '_vop3'): functor
-    for name, functor in SIMD_VOP2_CARRY.items()
-    if name.replace('_vop2', '') not in _VOP3_CARRY_CIN_NAMES
-}
-SIMD_VOP3_CARRY_CIN: dict[str, str] = {
-    name.replace('_vop2', '_vop3'): functor
-    for name, functor in SIMD_VOP2_CARRY.items()
-    if name.replace('_vop2', '') in _VOP3_CARRY_CIN_NAMES
-}
-
-
 def _indent_probe(probe: str) -> str:
     return '\n'.join(('  ' + line) if line else line for line in probe.splitlines())
 
@@ -1963,14 +1827,6 @@ def _simd_probe_line(
             ovfl_probe = f'  ROCJITSU_TRY_SIMD_VOP1_UNARY({cpp_tin}, {cpp_tout}, {_fp16_ovfl_cpp_op(cpp_op)});'
             return _mode_aware_f16_result_simd_probe(probe, ovfl_probe)
         return probe
-    specc = SIMD_VOP2_CARRY.get(template_name)
-    if specc is not None:
-        writer_arg = f'{result_writer}, ' if result_writer is not None else ''
-        suffix = '_RESULT' if result_writer is not None else ''
-        reads_carry = str(
-            template_name.replace('_vop2', '') in _VOP3_CARRY_CIN_NAMES
-        ).lower()
-        return f'  ROCJITSU_TRY_SIMD_VOP2_CARRY{suffix}({writer_arg}{reads_carry}, {specc});'
     spect = SIMD_VOP2_TERNARY.get(template_name)
     if spect is not None:
         cpp_t, k_expr, cpp_op = spect
@@ -2051,29 +1907,6 @@ def _simd_probe_line(
     if spec3tern is not None:
         cpp_t, cpp_op = spec3tern
         return f'  ROCJITSU_TRY_SIMD_VOP3_TERNARY_INT({cpp_t}, {cpp_op});'
-    # 64-bit reverse shifts (src0 = 32-bit count, src1 = 64-bit value).
-    specshift64 = SIMD_SHIFT64_VOP3.get(template_name)
-    if specshift64 is not None:
-        return f'  ROCJITSU_TRY_SIMD_SHIFT64_VOP3({specshift64});'
-    if template_name in SIMD_LSHL_ADD_U64:
-        return '  ROCJITSU_TRY_SIMD_LSHL_ADD_U64();'
-    specmad64 = SIMD_MAD_WIDE64.get(template_name)
-    if specmad64 is not None:
-        writer_arg = f'{result_writer}, ' if result_writer is not None else ''
-        suffix = '_RESULT' if result_writer is not None else ''
-        return (
-            f'  ROCJITSU_TRY_SIMD_MAD_WIDE64_VOP3{suffix}(' f'{writer_arg}{specmad64});'
-        )
-    specv3co = SIMD_VOP3_CARRY_CO.get(template_name)
-    if specv3co is not None:
-        writer_arg = f'{result_writer}, ' if result_writer is not None else ''
-        suffix = '_RESULT' if result_writer is not None else ''
-        return f'  ROCJITSU_TRY_SIMD_VOP3_CO{suffix}({writer_arg}{specv3co});'
-    specv3cin = SIMD_VOP3_CARRY_CIN.get(template_name)
-    if specv3cin is not None:
-        writer_arg = f'{result_writer}, ' if result_writer is not None else ''
-        suffix = '_RESULT' if result_writer is not None else ''
-        return f'  ROCJITSU_TRY_SIMD_VOP3_CIN{suffix}({writer_arg}{specv3cin});'
     # VOP3 fp ternary (FMA / MAD family). Per-source abs/neg + omod/clamp in
     # the f32 / f16 / f64 domain. NaN-input lanes skipped by test (gcc-13
     # packed FMA quiets a different NaN operand vs scalar std::fma).

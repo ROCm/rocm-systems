@@ -906,7 +906,10 @@ void VAddCoCiU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_vcc_mask(raw_result); };
-  amdgpu::execute_v_add_co_ci_u32_vop2(*this, wf, commit_result);
+  const uint64_t input_carry = wf.exec() ? wf.vcc() : 0u;
+  amdgpu::arith::execute_carry32<true>(wf, rj_arith_v_add_co_ci_u32_w32,
+                                       rj_arith_v_add_co_ci_u32_w64, wf.cu().arithmetic_flags(), 0u,
+                                       vdst, src0, vsrc1, input_carry, commit_result);
 }
 
 RJ_NOINLINE void VAddCoCiU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -936,7 +939,10 @@ RJ_NOINLINE void VAddCoCiU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     }
     wf.set_vcc_mask(final_result);
   };
-  amdgpu::execute_v_add_co_ci_u32_vop2(*this, wf, commit_result);
+  const uint64_t input_carry = wf.exec() ? wf.vcc() : 0u;
+  amdgpu::arith::execute_carry32<true>(wf, rj_arith_v_add_co_ci_u32_w32,
+                                       rj_arith_v_add_co_ci_u32_w64, wf.cu().arithmetic_flags(), 0u,
+                                       vdst, src0, vsrc1, input_carry, commit_result);
   dpp_write_mask_scope_.restore();
 }
 
@@ -946,7 +952,10 @@ void VSubCoCiU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_vcc_mask(raw_result); };
-  amdgpu::execute_v_sub_co_ci_u32_vop2(*this, wf, commit_result);
+  const uint64_t input_carry = wf.exec() ? wf.vcc() : 0u;
+  amdgpu::arith::execute_carry32<true>(wf, rj_arith_v_sub_co_ci_u32_w32,
+                                       rj_arith_v_sub_co_ci_u32_w64, wf.cu().arithmetic_flags(), 0u,
+                                       vdst, src0, vsrc1, input_carry, commit_result);
 }
 
 RJ_NOINLINE void VSubCoCiU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -976,7 +985,10 @@ RJ_NOINLINE void VSubCoCiU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     }
     wf.set_vcc_mask(final_result);
   };
-  amdgpu::execute_v_sub_co_ci_u32_vop2(*this, wf, commit_result);
+  const uint64_t input_carry = wf.exec() ? wf.vcc() : 0u;
+  amdgpu::arith::execute_carry32<true>(wf, rj_arith_v_sub_co_ci_u32_w32,
+                                       rj_arith_v_sub_co_ci_u32_w64, wf.cu().arithmetic_flags(), 0u,
+                                       vdst, src0, vsrc1, input_carry, commit_result);
   dpp_write_mask_scope_.restore();
 }
 
@@ -986,7 +998,10 @@ void VSubrevCoCiU32Vop2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   auto commit_result = [&](uint64_t raw_result) { wf.set_vcc_mask(raw_result); };
-  amdgpu::execute_v_subrev_co_ci_u32_vop2(*this, wf, commit_result);
+  const uint64_t input_carry = wf.exec() ? wf.vcc() : 0u;
+  amdgpu::arith::execute_carry32<true>(wf, rj_arith_v_subrev_co_ci_u32_w32,
+                                       rj_arith_v_subrev_co_ci_u32_w64, wf.cu().arithmetic_flags(),
+                                       0u, vdst, src0, vsrc1, input_carry, commit_result);
 }
 
 RJ_NOINLINE void VSubrevCoCiU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
@@ -1016,7 +1031,10 @@ RJ_NOINLINE void VSubrevCoCiU32Vop2::execute_modifier_impl(amdgpu::Wavefront &wf
     }
     wf.set_vcc_mask(final_result);
   };
-  amdgpu::execute_v_subrev_co_ci_u32_vop2(*this, wf, commit_result);
+  const uint64_t input_carry = wf.exec() ? wf.vcc() : 0u;
+  amdgpu::arith::execute_carry32<true>(wf, rj_arith_v_subrev_co_ci_u32_w32,
+                                       rj_arith_v_subrev_co_ci_u32_w64, wf.cu().arithmetic_flags(),
+                                       0u, vdst, src0, vsrc1, input_carry, commit_result);
   dpp_write_mask_scope_.restore();
 }
 
