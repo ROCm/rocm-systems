@@ -616,6 +616,23 @@ IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout
   return INVALID_SOCKET_VALUE;
 }
 
+IPCSocket CreateIPCServerUnique(uint32_t* token_out, int backlog) {
+  // Windows process ids are globally unique system-wide and named pipes live
+  // in a global namespace, so a pid-derived pipe name cannot alias the way
+  // Linux namespaced pids can in a shared network namespace.
+  *token_out = static_cast<uint32_t>(GetCurrentProcessId());
+  char name[32];
+  snprintf(name, sizeof(name), "xhsa%u", *token_out);
+  return CreateIPCServer(name, backlog);
+}
+
+IPCSocket ConnectToIPCServerByToken(uint32_t token, std::chrono::milliseconds timeout,
+                                    std::chrono::milliseconds retryInterval) {
+  char name[32];
+  snprintf(name, sizeof(name), "xhsa%u", token);
+  return ConnectToIPCServer(name, timeout, retryInterval);
+}
+
 void SetIPCSocketRecvTimeout(IPCSocket sock, std::chrono::seconds timeout) {
   auto* info = reinterpret_cast<IPCPipeInfo*>(sock);
   info->recvTimeoutMs = static_cast<DWORD>(

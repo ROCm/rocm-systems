@@ -54,6 +54,8 @@
 #include <sys/utsname.h>
 #include <unistd.h>
 #include <errno.h>
+#include <cstddef>
+#include <cstdlib>
 #include <cstring>
 #include <atomic>
 #include <memory>
@@ -1052,6 +1054,75 @@ IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout
   auto deadline = std::chrono::steady_clock::now() + timeout;
   while (std::chrono::steady_clock::now() < deadline) {
     if (connect(fd, (struct sockaddr*)&address, sizeof(address)) == 0)
+      return FdToIPCSock(fd);
+    usleep(static_cast<useconds_t>(retryInterval.count()) * 1000);
+  }
+
+  close(fd);
+  return INVALID_SOCKET_VALUE;
+}
+
+IPCSocket CreateIPCServerUnique(uint32_t* token_out, int backlog) {
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd == -1) return INVALID_SOCKET_VALUE;
+
+  struct sockaddr_un address;
+  memset(&address, 0, sizeof(address));
+  address.sun_family = AF_UNIX;
+
+  // Autobind: pass only the family length; the kernel assigns a unique
+  // abstract-namespace name of the form "\0XXXXX" (5 lowercase hex digits),
+  // guaranteed unique within this network namespace (see unix(7)). Unlike
+  // pid-derived names, autobound names cannot collide across containers
+  // that share a network namespace but have separate pid namespaces.
+  if (bind(fd, (struct sockaddr*)&address, sizeof(sa_family_t)) != 0) {
+    close(fd);
+    return INVALID_SOCKET_VALUE;
+  }
+
+  // Read back the kernel-assigned name.
+  socklen_t addrlen = sizeof(address);
+  if (getsockname(fd, (struct sockaddr*)&address, &addrlen) != 0 ||
+      address.sun_path[0] != '\0' ||
+      addrlen != offsetof(struct sockaddr_un, sun_path) + 1 + 5) {
+    close(fd);
+    return INVALID_SOCKET_VALUE;
+  }
+  char hexname[6];
+  memcpy(hexname, &address.sun_path[1], 5);
+  hexname[5] = '\0';
+  *token_out = static_cast<uint32_t>(strtoul(hexname, nullptr, 16));
+
+  if (listen(fd, backlog) != 0) {
+    close(fd);
+    return INVALID_SOCKET_VALUE;
+  }
+  return FdToIPCSock(fd);
+}
+
+IPCSocket ConnectToIPCServerByToken(uint32_t token, std::chrono::milliseconds timeout,
+                                    std::chrono::milliseconds retryInterval) {
+  int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd == -1) return INVALID_SOCKET_VALUE;
+
+  struct sockaddr_un address;
+  memset(&address, 0, sizeof(address));
+  address.sun_family = AF_UNIX;
+  address.sun_path[0] = '\0';  // abstract namespace
+  char hexname[6];
+  // The kernel formats autobound names with lowercase %05x; reproduce exactly.
+  snprintf(hexname, sizeof(hexname), "%05x", token);
+  memcpy(&address.sun_path[1], hexname, 5);
+  // Abstract socket names are defined by the address LENGTH, not by NUL
+  // termination. Autobound names are exactly 5 bytes, so the exact length
+  // must be passed; padding to sizeof(address) would address a different
+  // socket.
+  const socklen_t addrlen =
+      static_cast<socklen_t>(offsetof(struct sockaddr_un, sun_path) + 1 + 5);
+
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (connect(fd, (struct sockaddr*)&address, addrlen) == 0)
       return FdToIPCSock(fd);
     usleep(static_cast<useconds_t>(retryInterval.count()) * 1000);
   }

@@ -370,6 +370,29 @@ IPCSocket AcceptIPCConnection(IPCSocket server);
 IPCSocket ConnectToIPCServer(const char* name, std::chrono::milliseconds timeout,
                              std::chrono::milliseconds retryInterval);
 
+/// @brief Create an IPC server with an OS-generated, collision-free name.
+/// The OS layer chooses the name and returns a 32-bit token that importers
+/// pass to ConnectToIPCServerByToken(). Tokens are only meaningful on the
+/// same host (and, on Linux, within the same network namespace).
+/// Linux:   abstract-socket autobind; the token is the kernel-assigned
+///          5-hex-digit name, unique per network namespace, which avoids the
+///          cross-container collisions of pid-derived names (identical
+///          namespaced pids in a shared network namespace).
+/// Windows: named pipe derived from the process id, which is globally unique
+///          system-wide (no pid-namespace aliasing).
+/// @param token_out Receives the connection token for importers.
+/// @param backlog Maximum pending connections.
+/// @return IPCSocket handle, or invalid handle (-1) on failure.
+IPCSocket CreateIPCServerUnique(uint32_t* token_out, int backlog);
+
+/// @brief Connect to a server created by CreateIPCServerUnique on this host.
+/// @param token Token produced by CreateIPCServerUnique.
+/// @param timeout Total timeout.
+/// @param retryInterval Sleep interval between retries.
+/// @return Connected IPCSocket handle, or invalid handle (-1) on failure/timeout.
+IPCSocket ConnectToIPCServerByToken(uint32_t token, std::chrono::milliseconds timeout,
+                                    std::chrono::milliseconds retryInterval);
+
 /// @brief Set the receive timeout on an IPC socket.
 /// @param sock IPCSocket connection handle.
 /// @param timeout Receive timeout.

@@ -1075,6 +1075,11 @@ class Runtime {
 
   // IPC DMA buf socket server for dmabuf FD passing
   os::IPCSocket ipc_sock_server_fd_;
+  // Connection token of the live IPC socket server, produced by
+  // os::CreateIPCServerUnique (Linux: kernel-autobound abstract socket name;
+  // Windows: process id). Published to importers via
+  // hsa_amd_ipc_memory_t handle[2]; guarded by ipc_sock_server_lock_.
+  uint32_t ipc_sock_server_token_;
   std::map<uint64_t, size_t> ipc_sock_server_conns_;
   std::mutex ipc_sock_server_lock_;
   os::Thread ipc_sock_server_thread_;
