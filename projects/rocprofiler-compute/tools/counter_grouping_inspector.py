@@ -550,7 +550,9 @@ Examples:
         console_error(f"Error: No perfmon config found for architecture: {arch}")
 
     if not has_metric_library(arch):
-        console_error(f"Error: No analysis views for architecture: {arch}")
+        console_error(
+            f"Error: No metric library or analysis views for architecture: {arch}"
+        )
 
     with tempfile.TemporaryDirectory(prefix="rocprof_counter_inspector_") as tmpdir:
         workload_root = Path(tmpdir)

@@ -6,7 +6,7 @@ hook that keeps it current (check_metric_config.py).
 
 The hook checks that the shipped lock is current; these tests cover what that check
 takes on trust: a metric's lock entry follows inheritance, and the hook reports and
-rewrites every lock file that is out of date.
+rewrites every generated file that is out of date.
 """
 
 import shutil
@@ -46,15 +46,17 @@ def test_a_parent_edit_reaches_the_lock_of_every_arch_that_inherits_it(tmp_path)
         assert (ADDED_COUNTER in entry.get("counters", [])) == inherits, arch
 
 
-def test_stale_lock_files_are_reported_and_rewritten(tmp_path):
-    """A changed, a removed and an extra lock file are each reported, and --fix
-    rewrites the lock to the regenerated one."""
+def test_stale_generated_files_are_reported_and_rewritten(tmp_path):
+    """A changed, a removed and an extra lock file, and the description file of an
+    arch without a metric library, are each reported, and --fix rewrites the
+    generated files to the regenerated ones."""
     generated_dirs = (tmp_path / "metric_lock", tmp_path / "metrics")
     regenerate(*generated_dirs)
-    lock_dir = generated_dirs[0]
+    lock_dir, docs_dir = generated_dirs
     (lock_dir / "gfx942.yaml").write_text("compute.bf16_ops: {}\n", encoding="utf-8")
     (lock_dir / "gfx950.yaml").unlink()
     (lock_dir / "gfx000.yaml").write_text("", encoding="utf-8")
+    (docs_dir / "gfx000_metrics.yaml").write_text("", encoding="utf-8")
 
     copies = regenerated_copies(generated_dirs, tmp_path / "copies")
     stale = stale_files(generated_dirs, copies)
@@ -62,6 +64,7 @@ def test_stale_lock_files_are_reported_and_rewritten(tmp_path):
         lock_dir / "gfx000.yaml",
         lock_dir / "gfx942.yaml",
         lock_dir / "gfx950.yaml",
+        docs_dir / "gfx000_metrics.yaml",
     ]
     write_stale_files(stale)
     assert stale_files(generated_dirs, copies) == []
