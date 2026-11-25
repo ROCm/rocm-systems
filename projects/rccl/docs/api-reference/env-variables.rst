@@ -832,6 +832,20 @@ in the following table.
           pipeline.
         | Other values log a warning and fall back to ``0``.
 
+    * - | ``RCCL_AINIC_SQ_CMB``
+        | Places the send queues of ``IB-CAST`` queue pairs in the AINIC
+          controller memory buffer (CMB) or in host memory. Applies only to
+          AINIC. ``IONIC_SQ_CMB``, the libionic variable, takes priority; RCCL
+          logs a warning if the two disagree.
+        | The ``ionic_rdma`` driver can override the request through
+          ``/sys/kernel/config/ionic_rdma/``: with ``sqcmb_order`` set to ``0``
+          every send queue stays in host memory. Whether CMB is faster depends
+          on the platform, so compare both settings with rccl-tests.
+      - | ``-1``: Keep the libionic default, which uses CMB (default).
+        | ``0``: Host memory.
+        | ``1``: CMB.
+        | Other values log a warning and are ignored.
+
     * - | ``NCCL_NCHANNELS_PER_NET_PEER``
         | Sets the number of channels used per network (remote) peer.
         | This overrides the value of the ``nChannelsPerNetPeer`` field in

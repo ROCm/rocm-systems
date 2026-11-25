@@ -985,6 +985,13 @@ TEST_F(NetIbCastInitDataDirectMicrotest, InitDevices_DataDirectOff_SkipsTheProbe
 }
 
 
+TEST_F(NetIbCastInitDevicesMicrotest, InitDevices_NotAinic_DoesNotResolveSqCmb) {
+  World().AddHca("mlx5_0");
+  ASSERT_EQ(Init(), ncclSuccess);
+  EXPECT_FALSE(IbCastAinicRoce);
+  EXPECT_EQ(g_ibCastSetUseSqCmbCalls, 0);
+}
+
 class NetIbCastInitAinicMicrotest : public NetIbCastInitDevicesMicrotest {
  protected:
   void SetUp() override {
@@ -996,6 +1003,7 @@ class NetIbCastInitAinicMicrotest : public NetIbCastInitDevicesMicrotest {
 TEST_F(NetIbCastInitAinicMicrotest, InitDevices_Ainic_EnablesCtsOffloadAndInlineByDefault) {
   ASSERT_EQ(Init(), ncclSuccess);
   EXPECT_TRUE(IbCastAinicRoce);
+  EXPECT_EQ(g_ibCastSetUseSqCmbCalls, 1);
   EXPECT_TRUE(IbCastOffloadEnabled);
   EXPECT_TRUE(IbCastUseInline);
   EXPECT_TRUE(IbCastAinicCtsInlineData);

@@ -182,6 +182,43 @@ void IbCastReportMatchingScheme()
        IbCastIsCtsOffloadEnabled(1)? "ON":"OFF" , IbCastResolveRecvMatchingScheme(IbCastIsCtsOffloadEnabled(1)));
 }
 
+// -1: leave the libionic default, 0: send queues in host memory, 1: send queues in CMB.
+RCCL_PARAM(AinicSqCmb, "AINIC_SQ_CMB", -1);
+static int IbCastUseSqCmb = -1;
+
+void IbCastSetUseSqCmb() {
+  IbCastUseSqCmb = (int) rcclParamAinicSqCmb();
+  if (IbCastUseSqCmb != -1 && IbCastUseSqCmb != 0 && IbCastUseSqCmb != 1) {
+    WARN("NET/IB : RCCL_AINIC_SQ_CMB=%d is not -1, 0 or 1; using the libionic default", IbCastUseSqCmb);
+    IbCastUseSqCmb = -1;
+  }
+  if (IbCastUseSqCmb == -1) return;
+
+  const char* ionicEnv = ncclGetEnv("IONIC_SQ_CMB");
+  if (ionicEnv != NULL && strlen(ionicEnv) > 0) {
+    // As libionic parses it: a number or flag characters, where bit 0 or e enables CMB and x implies e.
+    bool ionicOn = (atoi(ionicEnv) & 1) || strchr(ionicEnv, 'e') || strchr(ionicEnv, 'x');
+    if (ionicOn != (IbCastUseSqCmb == 1)) {
+      WARN("NET/IB : IONIC_SQ_CMB=%s conflicts with RCCL_AINIC_SQ_CMB=%d; IONIC_SQ_CMB takes priority", ionicEnv,
+           IbCastUseSqCmb);
+    }
+    // IONIC_SQ_CMB wins: libionic already applies it to every PD, so RCCL leaves the PD alone.
+    IbCastUseSqCmb = -1;
+    INFO(NCCL_INIT | NCCL_NET, "NET/IB : RCCL_AINIC_SQ_CMB ignored; AINIC send queues follow IONIC_SQ_CMB=%s", ionicEnv);
+    return;
+  }
+  INFO(NCCL_INIT | NCCL_NET, "NET/IB : RCCL_AINIC_SQ_CMB=%d: AINIC send queues in %s", IbCastUseSqCmb,
+       IbCastUseSqCmb ? "CMB" : "host memory");
+}
+
+static inline void IbCastApplyAinicSqCmb(const ncclIbDev* ibDev) {
+  // Express doorbell only where the device supports it, as in the libionic default.
+  if (IbCastUseSqCmb == -1) return;
+  if (wrap_ionicdv_pd_set_sqcmb(ibDev->pd, IbCastUseSqCmb == 1, true, false) != ncclSuccess) {
+    WARN("NET/IB : %s: ionic_dv_pd_set_sqcmb failed or is missing from libionic; send queues keep the libionic "
+         "default", ibDev->devName);
+  }
+}
 
 ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base, void* cq_context, int64_t cqSize) {
   base->ibDevN = ibDevN;
@@ -190,6 +227,9 @@ ncclResult_t IbCastInitCommDevBase(int ibDevN, struct ncclIbNetCommDevBase* base
     std::lock_guard<std::mutex> lock(ibDev->mutex);
     if (0 == ibDev->pdRefs++) {
       NCCLCHECK(wrap_ibv_alloc_pd(&ibDev->pd, ibDev->context));
+      if (IbCastAinicRoce) {
+        IbCastApplyAinicSqCmb(ibDev);
+      }
     }
     base->pd = ibDev->pd;
   }

@@ -99,6 +99,7 @@ std::function<ncclResult_t(struct ibv_context*, uint8_t, struct ibv_port_attr*, 
     g_ibCastGidInfoQuery = DefaultIbCastGidInfoQuery;
 std::function<void(void*, int)> g_ibCastSetTrafficClass = DefaultIbCastSetTrafficClass;
 int g_ibCastReportMatchingSchemeCalls = 0;
+int g_ibCastSetUseSqCmbCalls = 0;
 
 ASSERT_HOOK_MATCHES_PROD(g_ibCastQpCreate, IbCastQpCreate);
 ASSERT_HOOK_MATCHES_PROD(g_ibCastBuildDataQpCreateAttr, IbCastBuildDataQpCreateAttr);
@@ -161,6 +162,7 @@ ncclResult_t IbCastGidInfoQuery(struct ibv_context* context, uint8_t portNum, st
 }
 void IbCastSetTrafficClass(void* ctx, int trafficClass) { g_ibCastSetTrafficClass(ctx, trafficClass); }
 void IbCastReportMatchingScheme() { g_ibCastReportMatchingSchemeCalls++; }
+void IbCastSetUseSqCmb() { g_ibCastSetUseSqCmbCalls++; }
 
 static ncclResult_t DefaultCastNetP2pPolicy(void*, int) {
   FailLoudUnfaked("net_ib_cast_connect_fakes", "rcclCastNetP2pPolicy");
@@ -189,5 +191,6 @@ void ResetNetIbCastConnectFakes() {
   g_ibCastGidInfoQuery = DefaultIbCastGidInfoQuery;
   g_ibCastSetTrafficClass = DefaultIbCastSetTrafficClass;
   g_ibCastReportMatchingSchemeCalls = 0;
+  g_ibCastSetUseSqCmbCalls = 0;
   g_rcclCastNetP2pPolicy = DefaultCastNetP2pPolicy;
 }
