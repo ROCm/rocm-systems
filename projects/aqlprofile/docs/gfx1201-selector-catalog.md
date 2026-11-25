@@ -32,3 +32,14 @@ spelling and EA_WRREQ_STALL both select 122 in that gfx1201 contract.
 The seven selectors without a public chip-specific reference require
 maintainer IP/RDL review before a hardware semantic claim. The catalog
 describes the experimental configuration contract.
+
+## Runtime control evidence (2026-11-25)
+
+The author supplied 41 control results: 33 scoped model passes, 6 reference
+matches and 2 zero/unproven GL1C 32B classes. The
+[counter-specific validation summary](../../rocprofiler-compute/docs/reference/gfx1201-counter-definitions.md#runtime-validation-2026-11-25)
+records each model, measured mean and limit.
+
+These controls provide empirical support for the experimental configuration.
+The existing public chip-specific IP/RDL gaps remain documented. Results from
+different controls are independent entries, not one accounting window.
