@@ -1,8 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Wide low-precision widening: gfx950 PK32 uses an FP32 exponent and preserves D
-// for special scales; gfx1250 PK8/PK16 selects an E8M0 byte, including its NaN.
+// Wide low-precision widening: gfx950 PK32 uses an FP32 exponent, writing
+// canonical -qNaN on active lanes when the scale exponent is 255 and retaining
+// D only on inactive lanes; gfx1250 PK8/PK16 selects an E8M0 byte, including its NaN.
 // Both share finite decoding, output rounding, and alias-safe SIMD backends.
 
 #include "common/float_encoding.h"
@@ -38,12 +39,16 @@ template <ScaledSource Src> float decode(uint32_t code) {
 template <int Lanes, ScaledSource Src, ScaledDestination Dst, bool ByteScale = false>
 int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b) {
-  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags =
+      resolve_compatibility(flags, ByteScale ? RJ_ARITH_SEMANTICS_LOOSE
+                                             : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   constexpr uint64_t allowed_mode = ByteScale ? RJ_ARITH_CVT_BYTE_3 : 0;
-  if (int error = validate(flags, mode & ~allowed_mode)) {
+  constexpr uint64_t allowed_flags = ByteScale ? 0 : RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+  if (int error = validate(flags, mode & ~allowed_mode, allowed_flags)) {
     return error;
   }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+  if (ByteScale &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   constexpr int bits = Src == ScaledSource::Fp4                                 ? 4
@@ -54,45 +59,45 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  const bool saturate = ByteScale && (flags & RJ_ARITH_FP16_OVFL) != 0;
+  const bool flush_output = !ByteScale && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) != 0;
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    wide_scaled_widen_x86_64_v4<Src, ByteScale>(Lanes, exec_mask, Dst, flags & RJ_ARITH_FP16_OVFL,
+  if ((exec_mask & (exec_mask - 1)) && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    wide_scaled_widen_x86_64_v4<Src, ByteScale>(Lanes, exec_mask, Dst, saturate, flush_output,
                                                 scale_shift, d, a, b[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    wide_scaled_widen_x86_64_v3<Src, ByteScale>(Lanes, exec_mask, Dst, flags & RJ_ARITH_FP16_OVFL,
+    wide_scaled_widen_x86_64_v3<Src, ByteScale>(Lanes, exec_mask, Dst, saturate, flush_output,
                                                 scale_shift, d, a, b[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
   constexpr bool f32 = Dst == ScaledDestination::F32;
   constexpr int words = f32 ? elements : elements / 2;
+  constexpr uint32_t nan_bits = ByteScale ? 0x7fc00000U : 0xffc00000U;
   uint32_t result[words][Lanes];
-  uint64_t write_mask = exec_mask;
   for (int lane = 0; lane < Lanes; ++lane) {
     if (!((exec_mask >> lane) & 1)) {
       continue;
     }
     uint32_t exponent = (b[0][lane] >> scale_shift) & 255;
-    if (!ByteScale && exponent == 255) {
-      write_mask &= ~(1ULL << lane);
-      continue;
-    }
-    float scale = as_float(exponent == 255 ? 0x7fc00000U : exponent ? exponent << 23 : 0x00400000U);
+    float scale = as_float(exponent == 255 ? nan_bits : exponent ? exponent << 23 : 0x00400000U);
     for (int element = 0; element < elements; ++element) {
-      int bit = bits * element, word = bit / 32, shift = bit % 32;
-      uint32_t code = a[word][lane] >> shift;
-      if (shift + bits > 32) {
-        code |= a[word + 1][lane] << (32 - shift);
+      uint32_t code = 0;
+      if (exponent != 255) {
+        int bit = bits * element, word = bit / 32, shift = bit % 32;
+        code = a[word][lane] >> shift;
+        if (shift + bits > 32) {
+          code |= a[word + 1][lane] << (32 - shift);
+        }
       }
-      // E8M0 NaN scales have a canonical result even if the input is also NaN.
-      // Avoid relying on host operand ordering to choose between two NaN signs.
+      // Special scales emit a canonical NaN (+qNaN on gfx1250 E8M0, -qNaN on gfx950).
       float value_f32 =
-          exponent == 255 ? as_float(0x7fc00000U) : decode<Src>(code & ((1U << bits) - 1)) * scale;
-      uint32_t value = encode_scaled_widen<Dst>(value_f32, flags & RJ_ARITH_FP16_OVFL);
+          exponent == 255 ? as_float(nan_bits) : decode<Src>(code & ((1U << bits) - 1)) * scale;
+      uint32_t value = encode_scaled_widen<Dst>(value_f32, saturate, flush_output);
       if constexpr (f32) {
         result[element][lane] = value;
       } else if (element % 2) {
@@ -104,7 +109,7 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   }
   for (int word = 0; word < words; ++word) {
     for (int lane = 0; lane < Lanes; ++lane) {
-      if ((write_mask >> lane) & 1) {
+      if ((exec_mask >> lane) & 1) {
         d[word][lane] = result[word][lane];
       }
     }

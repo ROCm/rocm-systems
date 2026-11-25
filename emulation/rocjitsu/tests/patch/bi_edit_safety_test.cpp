@@ -64,12 +64,14 @@ public:
     header.e_phnum = static_cast<uint16_t>(segments.size());
     header.e_shnum = static_cast<uint16_t>(sections.size());
     test_support::write_elf_struct_for_test(image, 0, header);
-    for (size_t index = 0; index < segments.size(); ++index)
+    for (size_t index = 0; index < segments.size(); ++index) {
       test_support::write_elf_struct_for_test(image, header.e_phoff + index * sizeof(Elf64_Phdr),
                                               segments[index]);
-    for (size_t index = 0; index < sections.size(); ++index)
+    }
+    for (size_t index = 0; index < sections.size(); ++index) {
       test_support::write_elf_struct_for_test(image, header.e_shoff + index * sizeof(Elf64_Shdr),
                                               sections[index]);
+    }
   }
 
   void rebind_kernel(uint64_t text_vaddr, uint64_t descriptor_vaddr) {
@@ -137,8 +139,9 @@ void patch_eligible_points(const AmdGpuCodeObject &source, InstrumentedCodeObjec
                            std::initializer_list<uint64_t> offsets = {0},
                            rocjitsu::IsaFamily arch = kArch) {
   Instrumentor instrumentor(source, arch);
-  for (uint64_t offset : offsets)
+  for (uint64_t offset : offsets) {
     instrumentor.add_point_by_offset(offset);
+  }
   const Instrumentor::ValidationResult eligible = instrumentor.validate_points();
   ASSERT_TRUE(eligible.errors.empty()) << eligible.errors.front();
   ASSERT_EQ(eligible.sites.size(), offsets.size());
@@ -404,10 +407,11 @@ void expect_load_alias_mapping_preserved(const LoadAliasFixture &fixture,
   const int compared = std::memcmp(result.elf_bytes.data() + alias->p_offset,
                                    fixture.image.data() + fixture.alias.p_offset,
                                    static_cast<size_t>(fixture.alias.p_filesz));
-  if (unchanged_bytes)
+  if (unchanged_bytes) {
     EXPECT_EQ(compared, 0);
-  else
+  } else {
     EXPECT_NE(compared, 0);
+  }
 }
 
 TEST(BiEditSafety, RejectsDivergentLoadFileAliasesAtEditedInstructions) {
@@ -534,13 +538,15 @@ void replay_load_segments(std::span<const uint8_t> image, std::span<uint8_t> loa
   // The modern loader shares one zero-initialized allocation between segments.
   std::ranges::fill(loaded, 0);
   for (const Elf64_Phdr &segment : *segments) {
-    if (segment.p_type != PT_LOAD)
+    if (segment.p_type != PT_LOAD) {
       continue;
+    }
     ASSERT_LE(segment.p_filesz, segment.p_memsz);
     ASSERT_LE(segment.p_vaddr, loaded.size());
     ASSERT_LE(segment.p_memsz, loaded.size() - segment.p_vaddr);
-    if (segment.p_filesz == 0)
+    if (segment.p_filesz == 0) {
       continue;
+    }
     ASSERT_LE(segment.p_offset, image.size());
     ASSERT_LE(segment.p_filesz, image.size() - segment.p_offset);
     std::memcpy(loaded.data() + segment.p_vaddr, image.data() + segment.p_offset, segment.p_filesz);
@@ -583,11 +589,13 @@ void expect_unmoved_load_growth_policy(const UnmovedLoadRange &range) {
                    static_cast<size_t>(delta), 0);
   elf.header.e_shoff += delta;
   for (Elf64_Shdr &section : elf.sections) {
-    if (section.sh_type != SHT_NULL && section.sh_offset >= original_text.sectionOffset())
+    if (section.sh_type != SHT_NULL && section.sh_offset >= original_text.sectionOffset()) {
       section.sh_offset += delta;
+    }
   }
-  for (Elf64_Phdr &segment : elf.segments)
+  for (Elf64_Phdr &segment : elf.segments) {
     segment.p_offset += delta;
+  }
   elf.segments[0].p_vaddr = kTextVaddr;
   elf.segments[0].p_paddr = kTextVaddr;
   elf.segments[1].p_vaddr = kDescriptorVaddr;
@@ -789,8 +797,9 @@ void expect_anchor_load_backing_policy(AnchorLoadBacking backing) {
       backing == AnchorLoadBacking::SameFile ? text.sectionOffset() : 0x2100 + word_offset;
   const uint64_t file_size = backing == AnchorLoadBacking::ZeroFill ? 0 : 4;
   elf.image.resize(0x2108, 0);
-  if (backing != AnchorLoadBacking::SameFile)
+  if (backing != AnchorLoadBacking::SameFile) {
     std::memcpy(elf.image.data() + file_offset, text.data() + word_offset, sizeof(uint32_t));
+  }
   elf.segments.push_back({.p_type = PT_LOAD,
                           .p_flags = 0x4,
                           .p_offset = file_offset,
@@ -803,8 +812,9 @@ void expect_anchor_load_backing_policy(AnchorLoadBacking backing) {
       elf.segments.begin(), elf.segments.end(),
       [](const Elf64_Phdr &left, const Elf64_Phdr &right) { return left.p_vaddr < right.p_vaddr; });
   ASSERT_LE(elf.header.e_phoff + elf.segments.size() * sizeof(Elf64_Phdr), text.sectionOffset());
-  for (const Elf64_Phdr &segment : elf.segments)
+  for (const Elf64_Phdr &segment : elf.segments) {
     ASSERT_EQ(segment.p_offset % segment.p_align, segment.p_vaddr % segment.p_align);
+  }
   elf.write_tables();
   const std::vector<uint8_t> pristine = elf.image;
   const AmdGpuCodeObject source(elf.image.data(), elf.image.size());
@@ -894,8 +904,9 @@ void expect_growth_load_contract(const GrowthLoadContract &layout) {
     ASSERT_LE(section.sh_size, elf.image.size() - section.sh_offset);
     std::memcpy(elf.image.data() + section.sh_offset, original_image.data() + old_offset,
                 section.sh_size);
-    if (index >= 3)
+    if (index >= 3) {
       metadata_offset = test::align_up_for_test(section.sh_offset + section.sh_size, 8);
+    }
   }
   ASSERT_NO_FATAL_FAILURE(elf.rebind_kernel(kTextVaddr, layout.descriptor_vaddr));
   const amdhsa::kernel_descriptor_t descriptor =
@@ -969,16 +980,18 @@ void expect_growth_load_contract(const GrowthLoadContract &layout) {
     }
   }
   std::ranges::sort(elf.segments, {}, &Elf64_Phdr::p_vaddr);
-  for (const Elf64_Phdr &segment : elf.segments)
+  for (const Elf64_Phdr &segment : elf.segments) {
     ASSERT_EQ(segment.p_offset % segment.p_align, segment.p_vaddr % segment.p_align);
+  }
   elf.header.e_shoff = metadata_offset;
   ASSERT_LE(elf.header.e_phoff + elf.segments.size() * sizeof(Elf64_Phdr), 0x200u);
   test_support::write_value_for_test(elf.image, layout.tail_file_offset, kDataWord);
   elf.write_tables();
   elf.image.resize(elf.header.e_shoff + elf.sections.size() * sizeof(Elf64_Shdr));
   const uint64_t original_allocation = elf.segments.back().p_vaddr + elf.segments.back().p_memsz;
-  for (const Elf64_Phdr &segment : elf.segments)
+  for (const Elf64_Phdr &segment : elf.segments) {
     ASSERT_LE(segment.p_vaddr + segment.p_memsz, original_allocation);
+  }
   const std::vector<uint8_t> pristine = elf.image;
   const AmdGpuCodeObject source(elf.image.data(), elf.image.size());
   ASSERT_TRUE(source.is_valid());
@@ -1006,8 +1019,9 @@ void expect_growth_load_contract(const GrowthLoadContract &layout) {
     ASSERT_TRUE(emitted_segments);
     ASSERT_EQ(emitted_segments->front().p_vaddr, 0u);
     const uint64_t allocation = emitted_segments->back().p_vaddr + emitted_segments->back().p_memsz;
-    for (const Elf64_Phdr &segment : *emitted_segments)
+    for (const Elf64_Phdr &segment : *emitted_segments) {
       EXPECT_LE(segment.p_vaddr + segment.p_memsz, allocation);
+    }
     ASSERT_NO_FATAL_FAILURE(replay_load_segments(result.elf_bytes, loaded));
     EXPECT_EQ(std::memcmp(loaded.data() + text.vaddr(), text.data(), text.size()), 0);
     const Elf64_Shdr &emitted_descriptor = emitted_sections[2];

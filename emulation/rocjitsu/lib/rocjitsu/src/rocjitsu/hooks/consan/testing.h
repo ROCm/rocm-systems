@@ -14,5 +14,7 @@ struct rj_consan_statistics {
   uint64_t copied;
   uint64_t written;
   uint64_t reused;
+  uint64_t native_submitted;
+  uint64_t native_completed;
 };
 using rj_consan_statistics_fn = rj_consan_statistics (*)();

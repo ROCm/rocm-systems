@@ -1888,8 +1888,9 @@ public:
     append_interp_operand(out, index, src0, &src1);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 & 0x100u)
+    if (inst_.src0 & 0x100u) {
       out += " high";
+    }
     Vop3::build_modifiers(out);
   }
   VInterpP1llF16Vop3(const MachineInst *inst);
@@ -1905,8 +1906,9 @@ public:
     append_interp_operand(out, index, src0, &src1);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 & 0x100u)
+    if (inst_.src0 & 0x100u) {
       out += " high";
+    }
     Vop3::build_modifiers(out);
   }
   VInterpP1lvF16Vop3(const MachineInst *inst);
@@ -1923,8 +1925,9 @@ public:
     append_interp_operand(out, index, src0, &src1);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 & 0x100u)
+    if (inst_.src0 & 0x100u) {
       out += " high";
+    }
     Vop3::build_modifiers(out);
   }
   VInterpP2LegacyF16Vop3(const MachineInst *inst);
@@ -1942,8 +1945,9 @@ public:
     append_interp_operand(out, index, src0, &src1);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 & 0x100u)
+    if (inst_.src0 & 0x100u) {
       out += " high";
+    }
     Vop3::build_modifiers(out);
   }
   VInterpP2F16Vop3(const MachineInst *inst);

@@ -1720,6 +1720,49 @@ const _: () = {
     ["Offset of field: AmdsmiDriverInfoT::driver_name"]
         [::std::mem::offset_of!(AmdsmiDriverInfoT, driver_name) - 512usize];
 };
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiDriverPackageT {
+    AmdsmiDriverPackageNone = 0,
+    AmdsmiDriverPackageDkms = 1,
+    AmdsmiDriverPackageKmod = 2,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiDriverInfoV2T {
+    pub driver_version: [::std::os::raw::c_char; 256usize],
+    pub driver_date: [::std::os::raw::c_char; 256usize],
+    pub driver_name: [::std::os::raw::c_char; 256usize],
+    pub driver_kernel_version: [::std::os::raw::c_char; 256usize],
+    pub amdgpu_driver_version: [::std::os::raw::c_char; 256usize],
+    pub driver_build_version: [::std::os::raw::c_char; 256usize],
+    pub driver_full_version: [::std::os::raw::c_char; 256usize],
+    pub driver_package: AmdsmiDriverPackageT,
+    pub reserved: [u32; 575usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiDriverInfoV2T"][::std::mem::size_of::<AmdsmiDriverInfoV2T>() - 4096usize];
+    ["Alignment of AmdsmiDriverInfoV2T"][::std::mem::align_of::<AmdsmiDriverInfoV2T>() - 4usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_version) - 0usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_date"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_date) - 256usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_name"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_name) - 512usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_kernel_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_kernel_version) - 768usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::amdgpu_driver_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, amdgpu_driver_version) - 1024usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_build_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_build_version) - 1280usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_full_version"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_full_version) - 1536usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::driver_package"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, driver_package) - 1792usize];
+    ["Offset of field: AmdsmiDriverInfoV2T::reserved"]
+        [::std::mem::offset_of!(AmdsmiDriverInfoV2T, reserved) - 1796usize];
+};
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiBoardInfoT {
@@ -5392,6 +5435,12 @@ extern "C" {
     pub fn amdsmi_get_gpu_driver_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiDriverInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_gpu_driver_info_v2(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiDriverInfoV2T,
     ) -> AmdsmiStatusT;
 }
 extern "C" {

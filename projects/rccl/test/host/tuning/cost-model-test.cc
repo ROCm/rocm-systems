@@ -16,6 +16,9 @@
 //
 // Neighbours are out of scope: ncclTuningExpandId's decode/reject is
 // tuning-general-test.cc, ncclTuningCompute's selection is AICOMRCCL-2448.
+//
+// The LL-cap tests at the end read the per-GPU-row LL bandwidth cap that only
+// ncclTunerConstantsDefaults ships, through the real Ring and Tree models.
 
 #include <gtest/gtest.h>
 
@@ -48,8 +51,8 @@ const char* ncclSymkKernelIdToString(int kernelId) {
 namespace {
 
 // Model-function seams. modelMap[] points at per-family functions, and defining them here makes
-// dispatch observable. They are renamed below rather than left at external linkage: ring.cc IS on
-// this link line, via tuning-general-test.cc.
+// dispatch observable. They are renamed below, not left under their production names: the real
+// ring.cc and tree.cc are in this TU too, for the LL-cap tests.
 
 enum class ModelKind { None, Tree, Ring, Collnet, Nvls, Pat, Symk, Ce, Pipeline };
 
@@ -81,11 +84,11 @@ ncclResult_t RecordSim(ModelKind kind, struct ncclTuningResult_t* tuning) {
 
 }  // namespace
 
-// Rename every model entry point before defining it. tuning-general-test.cc includes the real
-// ring.cc into this same binary (CMakeLists.txt:323-324), so an unrenamed fake is a second
-// definition of ring.cc:21 and :92. cost_model.cc is included below and its modelMap[] binds
-// through these same macros, so dispatch still lands on the fakes. All seven families are renamed,
-// not just Ring, so the next sibling include does not reintroduce the collision.
+// Rename every model entry point before defining it. The real ring.cc and tree.cc are included
+// below, so an unrenamed fake is a second definition of their model entry points. cost_model.cc is
+// included below and its modelMap[] binds through these same macros, so dispatch still lands on the
+// fakes. All seven families are renamed, not just Ring and Tree, so the next sibling include does not
+// reintroduce the collision.
 #define ncclTuningTreeModelInit CostModelTreeModelInit
 #define ncclTuningTreeModelSim CostModelTreeModelSim
 #define ncclTuningRingModelInit CostModelRingModelInit
@@ -155,6 +158,15 @@ ncclResult_t ncclTuningPipelineModelSim(struct ncclTuningInput_t* const, struct 
 #include COST_MODEL_CC_PATH
 // After cost_model.cc: algorithm_registry.cc defines unguarded ALGBIT/F_* macros.
 #include ALGORITHM_REGISTRY_CC_PATH
+
+// The real Ring and Tree models, for the LL-cap tests. modelMap[] is already bound to the fakes, so
+// these two families take their production names back.
+#undef ncclTuningTreeModelInit
+#undef ncclTuningTreeModelSim
+#undef ncclTuningRingModelInit
+#undef ncclTuningRingModelSim
+#include RING_CC_PATH
+#include TREE_CC_PATH
 
 namespace {
 
@@ -538,6 +550,67 @@ TEST_F(CostModelMicrotest, RubinPipelineModelsAreNeverSelectedOnAmd) {
   for (int compCap : {90, 94, 95, 100, 120, 125}) {
     EXPECT_FALSE(ncclTuningIsRubinPlatform(compCap)) << "compCap " << compCap;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-GPU-row LL bandwidth cap
+// ---------------------------------------------------------------------------
+
+class CostModelLlCapMicrotest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    ResetNcclFakes();
+    ResetEnvFakes();
+    comm_ = std::make_unique<ncclComm>();
+    comm_->nRanks = 8;
+    comm_->nNodes = 1;
+    comm_->maxTreePattern = NCCL_TOPO_PATTERN_BALANCED_TREE;
+    // Links fast enough that the per-arch LL cap, not the graph, bounds LL bandwidth. At 32 channels the
+    // gfx12 Tree/LL bandwidth before the cap is about twice the cap, so the Tree per-channel cap never binds.
+    for (int algo : {NCCL_ALGO_TREE, NCCL_ALGO_RING}) {
+      comm_->graphs[algo].nChannels = 32;
+      comm_->graphs[algo].bwIntra = comm_->graphs[algo].bwInter = 100.0f;
+    }
+  }
+
+  void TearDown() override {
+    ResetEnvFakes();
+    ResetNcclFakes();
+  }
+
+  // The constants comm init installs (ncclTuningInit runs ncclTuningCostModelPreInit), through the inits
+  // of the Ring/LL and Tree/LL rows. modelMap[] here dispatches to the fakes, so call the real ones.
+  void InitLlModels(int compCap) {
+    comm_->minCompCap = comm_->maxCompCap = compCap;
+    ASSERT_EQ(ncclSuccess, ncclTuningCostModelPreInit(comm_.get()));
+    const int ringLl = NCCL_ALGO_RING * NCCL_NUM_PROTOCOLS + NCCL_PROTO_LL;
+    const int treeLl = NCCL_ALGO_TREE * NCCL_NUM_PROTOCOLS + NCCL_PROTO_LL;
+    ASSERT_EQ(ncclSuccess, ncclTuningRingModelInit(comm_.get(), ringLl, comm_->tuningContext.enabled[ringLl], &state_));
+    ASSERT_EQ(ncclSuccess, ncclTuningTreeModelInit(comm_.get(), treeLl, comm_->tuningContext.enabled[treeLl], &state_));
+  }
+
+  float LlBandwidth(ncclFunc_t func, int algo) {
+    return comm_->tuningContext.generalBandwidths[func][algo][NCCL_PROTO_LL];
+  }
+
+  std::unique_ptr<ncclComm> comm_;
+  ncclTuningModelState state_{};
+};
+
+// HIP reports compCap as gfx major*10+minor, so a gfx12 GPU (120) takes the Blackwell row.
+TEST_F(CostModelLlCapMicrotest, Gfx12SingleNodeLlUsesBlackwellCap) {
+  InitLlModels(120);
+  // Ring/LL bus bandwidth is the cap; Broadcast runs nRanks steps over nRanks ranks.
+  EXPECT_FLOAT_EQ(2 * 141.2f, LlBandwidth(ncclFuncBroadcast, NCCL_ALGO_RING));
+  // Tree/LL AllReduce reports half its capped bus bandwidth.
+  EXPECT_FLOAT_EQ(141.2f, LlBandwidth(ncclFuncAllReduce, NCCL_ALGO_TREE));
+}
+
+// gfx942 (94) takes the Hopper row.
+TEST_F(CostModelLlCapMicrotest, Gfx942SingleNodeLlUsesHopperCap) {
+  InitLlModels(94);
+  EXPECT_FLOAT_EQ(141.0f, LlBandwidth(ncclFuncBroadcast, NCCL_ALGO_RING));
+  EXPECT_FLOAT_EQ(70.5f, LlBandwidth(ncclFuncAllReduce, NCCL_ALGO_TREE));
 }
 
 }  // namespace

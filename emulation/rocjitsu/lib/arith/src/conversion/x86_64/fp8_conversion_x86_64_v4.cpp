@@ -26,7 +26,7 @@ void fp8_conversion_x86_64_v4(uint32_t exec_mask, unsigned shift, uint32_t *cons
     if (policy == Fp8WidenPolicy::Gfx942) {
       return widen_fp8<Bf8, false, true>(value);
     }
-    if (policy == Fp8WidenPolicy::Gfx950) {
+    if (policy == Fp8WidenPolicy::OcpSignedNan) {
       return widen_fp8<Bf8, false>(value);
     }
     return widen_fp8<Bf8, true>(value);

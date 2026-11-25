@@ -40,6 +40,10 @@ class ArithmeticExecution {
 public:
   explicit ArithmeticExecution(ArithmeticPolicy policy = {});
 
+  /// @brief Cap the arithmetic CPU tier before execution. A scalar limit also disables legacy SIMD.
+  void limit_cpu_level(uint64_t max_level);
+  bool force_scalar() const { return force_scalar_ || util::force_scalar(); }
+
   /// @brief Return cached CPU/semantics flags with the live scalar-test override.
   /// Guest instruction controls are added separately by the execution adapters.
   uint64_t flags() const { return util::force_scalar() ? flags_ & ~cpu_flags_mask : flags_; }
@@ -49,6 +53,7 @@ private:
   // constructor.
   static constexpr uint64_t cpu_flags_mask = 0xffff;
   uint64_t flags_;
+  bool force_scalar_ = false;
 };
 
 } // namespace rocjitsu::amdgpu

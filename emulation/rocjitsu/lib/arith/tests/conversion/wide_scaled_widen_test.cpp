@@ -24,9 +24,13 @@ using namespace rocjitsu::arith::test;
 
 // Decode finite fields mathematically, supplying OCP special encodings explicitly.
 // Scale in FP32 and round to the output format using the independent reference.
-uint32_t reference(int source, int destination, uint32_t code, int scale, bool saturate) {
+uint32_t reference(int source, int destination, uint32_t code, int scale, bool saturate,
+                   bool byte_scale, bool flush_output) {
   if (scale == 255) {
-    return destination == 0 ? 0x7fc00000U : destination == 1 ? 0x7e00U : 0x7fc0U;
+    if (byte_scale) {
+      return destination == 0 ? 0x7fc00000U : destination == 1 ? 0x7e00U : 0x7fc0U;
+    }
+    return destination == 0 ? 0xffc00000U : destination == 1 ? 0xfe00U : 0xffc0U;
   }
   int width = source == 0 ? 4 : source >= 3 ? 6 : 8;
   int fraction = source == 0 ? 1 : (source == 1 || source == 3) ? 3 : 2;
@@ -47,7 +51,7 @@ uint32_t reference(int source, int destination, uint32_t code, int scale, bool s
   float value = decoded * multiplier;
   uint32_t bits = std::bit_cast<uint32_t>(value);
   if (!destination) {
-    return bits;
+    return flush_output && (bits & 0x7f800000U) == 0 ? (bits & 0x80000000U) : bits;
   }
   uint32_t result = uint32_t(
       conversion_reencode(bits, 23, 127, destination == 1 ? 10 : 7, destination == 1 ? 15 : 127));
@@ -55,7 +59,7 @@ uint32_t reference(int source, int destination, uint32_t code, int scale, bool s
   if (saturate && (bits & 0x7fffffffU) < 0x7f800000U && (result & 0x7fff) == infinity) {
     --result;
   }
-  return result;
+  return flush_output && (result & infinity) == 0 ? (result & 0x8000U) : result;
 }
 
 // Share each entry point's API contract, deterministic data, exact reference
@@ -94,7 +98,8 @@ void check(Call call) {
       for (int scenario = 0; scenario < 5; ++scenario) {
         SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << scenario);
         Mask exec_mask = exec_mask_for_case<Lanes>(scenario);
-        uint64_t flags = cpu | semantics | (scenario % 2 ? RJ_ARITH_FP16_OVFL : 0);
+        uint64_t flags = cpu | semantics | (scenario % 2 ? RJ_ARITH_FP16_OVFL : 0) |
+                         (!ByteScale && (scenario & 2) ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0);
         int destination = scenario == 0 ? 8 : scenario == 2 ? 0 : scenario == 3 ? 3 : 6;
         int shift = ByteScale ? (scenario % 4) * 8 : 23;
         uint64_t mode = ByteScale ? uint64_t(scenario % 4) << 16 : 0;
@@ -102,12 +107,13 @@ void check(Call call) {
         int error = call(flags, exec_mask, mode, actual.v + destination, actual.v, actual.v + 6);
         bool exact = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
                      semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL;
-        ASSERT_EQ(error, exact ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS : RJ_ARITH_SUCCESS);
+        bool rejected = ByteScale && exact;
+        ASSERT_EQ(error, rejected ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS : RJ_ARITH_SUCCESS);
         auto expected = input;
-        if (!exact) {
+        if (!rejected) {
           for (int lane = 0; lane < Lanes; ++lane) {
             int scale = (input.v[6][lane] >> shift) & 255;
-            if (!((exec_mask >> lane) & 1) || (!ByteScale && scale == 255)) {
+            if (!((exec_mask >> lane) & 1)) {
               continue;
             }
             for (int element = 0; element < elements; ++element) {
@@ -117,7 +123,9 @@ void check(Call call) {
                 int offset = element * width + bit;
                 code |= ((input.v[offset / 32][lane] >> (offset % 32)) & 1) << bit;
               }
-              uint32_t value = reference(Source, Dst, code, scale, flags & RJ_ARITH_FP16_OVFL);
+              uint32_t value =
+                  reference(Source, Dst, code, scale, ByteScale && (flags & RJ_ARITH_FP16_OVFL),
+                            ByteScale, flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
               int reg = destination + (Dst == 0 ? element : element / 2);
               if (Dst == 0 || element % 2 == 0) {
                 expected.v[reg][lane] = value;
@@ -133,7 +141,7 @@ void check(Call call) {
                 << "word=" << reg << ", lane=" << lane;
           }
         }
-        actual.expect_preserved(input, destination, exact ? 0 : words);
+        actual.expect_preserved(input, destination, rejected ? 0 : words);
       }
     }
   }

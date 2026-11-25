@@ -71,8 +71,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vopc_class", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -83,8 +84,9 @@ struct Fixture {
     wf->set_exec(~0ULL);
     wf->set_vcc(0);
     cu->write_vgpr(vb + 0, 0, static_cast<uint32_t>(src_bits));
-    if (is_f64)
+    if (is_f64) {
       cu->write_vgpr(vb + 1, 0, static_cast<uint32_t>(src_bits >> 32));
+    }
     cu->write_vgpr(vb + 2, 0, mask);
     uint32_t enc = vopc_encode(op, /*src0=*/256, /*vsrc1=*/2);
     uint32_t words[4] = {enc, 0u, 0u, 0u};

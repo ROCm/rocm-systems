@@ -100,6 +100,36 @@ rocprofiler_test_c_replay_offset_replay_stop_context(void)
     return offsetof(replay_data_c_t, replay_stop_context);
 }
 
+size_t
+rocprofiler_test_c_replay_offset_replay_options(void)
+{
+    return offsetof(replay_data_c_t, replay_options);
+}
+
+size_t
+rocprofiler_test_c_replay_options_size(void)
+{
+    return sizeof(rocprofiler_kernel_replay_options_t);
+}
+
+size_t
+rocprofiler_test_c_replay_options_offset_flags(void)
+{
+    return offsetof(rocprofiler_kernel_replay_options_t, flags);
+}
+
+int
+rocprofiler_test_c_replay_option_snapshot_host_pinned(void)
+{
+    return (int) ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_HOST_PINNED;
+}
+
+int
+rocprofiler_test_c_replay_option_snapshot_disk(void)
+{
+    return (int) ROCPROFILER_KERNEL_REPLAY_OPTION_SNAPSHOT_DISK;
+}
+
 // Enum values as C sees them. An enum whose underlying type differs between the languages would
 // show up as a mismatch here rather than as a wrong branch taken at runtime in a tool.
 int

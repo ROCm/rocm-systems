@@ -91,17 +91,20 @@ public:
   // Call with mutex held. The caller releases the detached permit outside the
   // mutex, then calls finish_reservation_release() before it can return.
   amdgpu::MemoryIngressPermit take_idle_reservation(Request &request) {
-    if (request.active_handler)
+    if (request.active_handler) {
       return {};
+    }
     amdgpu::MemoryIngressPermit reservation = std::move(request.request_reservation);
-    if (reservation)
+    if (reservation) {
       ++active_reservation_releases;
+    }
     return reservation;
   }
 
   void finish_reservation_release(amdgpu::MemoryIngressPermit &reservation) {
-    if (!reservation)
+    if (!reservation) {
       return;
+    }
     reservation.reset();
     std::lock_guard lock(mutex);
     --active_reservation_releases;
@@ -146,8 +149,9 @@ public:
 
   EdgePorts add_edge(const std::string &neighbor) {
     const auto found = edges_.find(neighbor);
-    if (found != edges_.end())
+    if (found != edges_.end()) {
       return found->second;
+    }
     const auto ordinal = edges_.size();
     const auto out_id = static_cast<simdojo::PortID>(ports().size());
     auto *out = add_port(std::make_unique<simdojo::Port>("out" + std::to_string(ordinal), out_id,
@@ -158,8 +162,9 @@ public:
                                                         simdojo::PortDirection::IN,
                                                         simdojo::PortProtocol::MEMORY));
     in->set_handler([this](simdojo::Tick, simdojo::Message *message) {
-      if (auto *wire = dynamic_cast<WireMessage *>(message))
+      if (auto *wire = dynamic_cast<WireMessage *>(message)) {
         fabric_.receive(*this, *wire);
+      }
     });
     return edges_.emplace(neighbor, EdgePorts{out, in}).first->second;
   }
@@ -189,8 +194,9 @@ public:
       : state_(std::move(state)), request_(std::move(request)) {}
 
   void submit() override {
-    if (submitted_.exchange(true, std::memory_order_acq_rel))
+    if (submitted_.exchange(true, std::memory_order_acq_rel)) {
       return;
+    }
     std::lock_guard lock(state_->mutex);
     if (!state_->accepting || state_->generation != request_->generation ||
         state_->owner == nullptr || request_->cancelled.load(std::memory_order_acquire)) {
@@ -213,17 +219,20 @@ public:
         request_->cancelled.load(std::memory_order_acquire)) {
       const Request::EffectPhase phase = request_->phase.load(std::memory_order_acquire);
       if (phase == Request::EffectPhase::Queued || phase == Request::EffectPhase::Entered ||
-          phase == Request::EffectPhase::Committing)
+          phase == Request::EffectPhase::Committing) {
         return VmAccessOutcome::Unavailable;
+      }
       request_->outcome =
           phase == Request::EffectPhase::Done ? request_->effect_outcome : VmAccessOutcome::Revoked;
       if (phase == Request::EffectPhase::Done && !request_->write &&
-          request_->effect_outcome == VmAccessOutcome::Complete)
+          request_->effect_outcome == VmAccessOutcome::Complete) {
         request_->response = request_->effect_response;
+      }
     }
     if (request_->outcome == VmAccessOutcome::Complete && !request_->write) {
-      if (result.size() < request_->response.size())
+      if (result.size() < request_->response.size()) {
         return VmAccessOutcome::Malformed;
+      }
       std::copy(request_->response.begin(), request_->response.end(), result.begin());
     }
     return request_->outcome;
@@ -245,11 +254,13 @@ public:
       release_reservation_if_idle();
       return VmAccessOutcome::Revoked;
     }
-    if (phase == Request::EffectPhase::Entered || phase == Request::EffectPhase::Committing)
+    if (phase == Request::EffectPhase::Entered || phase == Request::EffectPhase::Committing) {
       return VmAccessOutcome::Unavailable;
+    }
     if (request_->effect_outcome == VmAccessOutcome::Complete && !request_->write) {
-      if (result.size() < request_->effect_response.size())
+      if (result.size() < request_->effect_response.size()) {
         return VmAccessOutcome::Malformed;
+      }
       std::copy(request_->effect_response.begin(), request_->effect_response.end(), result.begin());
     }
     return request_->effect_outcome;
@@ -257,8 +268,9 @@ public:
 
   std::optional<CanonicalLineFreshness::ReadStamp> completed_read_stamp() const override {
     if (request_->phase.load(std::memory_order_acquire) != Request::EffectPhase::Done ||
-        request_->write || request_->effect_outcome != VmAccessOutcome::Complete)
+        request_->write || request_->effect_outcome != VmAccessOutcome::Complete) {
       return std::nullopt;
+    }
     return request_->read_stamp;
   }
 
@@ -282,25 +294,39 @@ private:
   std::atomic<bool> submitted_{false};
 };
 
+std::unique_ptr<FabricEndpoint>
+FabricEndpoint::create(std::vector<config::SystemPeerRoute> routes,
+                       std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains,
+                       util::DiagnosticEmitter emit_error) {
+  std::unordered_set<const amdgpu::DeviceCacheCoherence *> seen_domains;
+  for (const std::shared_ptr<amdgpu::DeviceCacheCoherence> &domain : coherence_domains) {
+    if (!domain || !seen_domains.insert(domain.get()).second) {
+      emit_error.emit() << "fabric coherence domains must be non-null and distinct";
+      return nullptr;
+    }
+  }
+  return std::unique_ptr<FabricEndpoint>(
+      new FabricEndpoint(std::move(routes), std::move(coherence_domains)));
+}
+
 FabricEndpoint::FabricEndpoint(
     std::vector<config::SystemPeerRoute> routes,
     std::vector<std::shared_ptr<amdgpu::DeviceCacheCoherence>> coherence_domains)
     : CompositeComponent("fabric"), routes_(std::move(routes)),
       coherence_domains_(std::move(coherence_domains)), state_(std::make_shared<State>()) {
-  std::unordered_set<const amdgpu::DeviceCacheCoherence *> seen_domains;
-  for (const std::shared_ptr<amdgpu::DeviceCacheCoherence> &domain : coherence_domains_)
-    if (!domain || !seen_domains.insert(domain.get()).second)
-      throw util::ConfigError("fabric coherence domains must be non-null and distinct");
   set_weight(0);
   inbox_event_.set_handler([this](simdojo::Tick, simdojo::Message *) { service_inbox(); });
 }
 
 FabricEndpoint::~FabricEndpoint() { shutdown(); }
 
-void FabricEndpoint::configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain> domains,
-                                               amdgpu::PreparedWritebackResolver resolver) {
-  if (wired_ || !resolver || domains.size() != coherence_domains_.size())
-    throw util::ConfigError("fabric cache writeback domains are incomplete");
+util::Result
+FabricEndpoint::configure_cache_writeback(std::vector<amdgpu::DeviceCacheDomain> domains,
+                                          amdgpu::PreparedWritebackResolver resolver,
+                                          util::DiagnosticEmitter emit_error) {
+  if (wired_ || !resolver || domains.size() != coherence_domains_.size()) {
+    return emit_error.emit() << "fabric cache writeback domains are incomplete";
+  }
   std::unordered_set<uint32_t> gpu_ids;
   // A legacy single-GPU KFD receives its public GPU ID in setup_topology(),
   // after topology assembly. Resolve that one domain from the admitted
@@ -308,29 +334,36 @@ void FabricEndpoint::configure_cache_writeback(std::vector<amdgpu::DeviceCacheDo
   const bool deferred_owner_id = domains.size() == 1 && routes_.empty();
   for (size_t i = 0; i < domains.size(); ++i) {
     if (domains[i].coherence != coherence_domains_[i] ||
-        (domains[i].gpu_id == 0 && !deferred_owner_id) || !gpu_ids.insert(domains[i].gpu_id).second)
-      throw util::ConfigError("fabric cache writeback domain identity is invalid");
+        (domains[i].gpu_id == 0 && !deferred_owner_id) ||
+        !gpu_ids.insert(domains[i].gpu_id).second) {
+      return emit_error.emit() << "fabric cache writeback domain identity is invalid";
+    }
   }
   prepared_domains_ = std::move(domains);
   resolve_cache_writeback_ = std::move(resolver);
+  return util::Result::success();
 }
 
 void FabricEndpoint::wire(simdojo::Topology &topology, simdojo::ExecMode mode) {
-  if (wired_)
+  if (wired_) {
     return;
+  }
   wired_ = true;
   std::unordered_map<std::string, Node *> nodes;
   for (const auto &projected : routes_) {
     if (projected.endpoints.size() < 2 ||
         projected.endpoints.size() > config::kMaxPeerRouteEndpoints ||
-        projected.source_gpu_id == projected.target_gpu_id)
+        projected.source_gpu_id == projected.target_gpu_id) {
       continue;
+    }
     std::unordered_set<std::string> visited;
     bool valid = true;
-    for (const auto &id : projected.endpoints)
+    for (const auto &id : projected.endpoints) {
       valid &= !id.empty() && visited.insert(id).second;
-    if (!valid)
+    }
+    if (!valid) {
       continue;
+    }
     Route route{projected.source_gpu_id, projected.target_gpu_id, {}};
     for (const auto &id : projected.endpoints) {
       auto found = nodes.find(id);
@@ -360,8 +393,9 @@ void FabricEndpoint::wire(simdojo::Topology &topology, simdojo::ExecMode mode) {
     for (size_t i = 1; i < route.nodes.size(); ++i) {
       Node &a = *route.nodes[i - 1];
       Node &b = *route.nodes[i];
-      if (!wired_edges.insert(std::minmax(a.endpoint_id(), b.endpoint_id())).second)
+      if (!wired_edges.insert(std::minmax(a.endpoint_id(), b.endpoint_id())).second) {
         continue;
+      }
       const auto a_ports = a.add_edge(b.endpoint_id());
       const auto b_ports = b.add_edge(a.endpoint_id());
       auto [forward, reverse] =
@@ -420,8 +454,9 @@ void FabricEndpoint::shutdown() {
       request->outcome =
           phase == Request::EffectPhase::Done ? request->effect_outcome : VmAccessOutcome::Revoked;
       if (phase == Request::EffectPhase::Done && !request->write &&
-          request->effect_outcome == VmAccessOutcome::Complete)
+          request->effect_outcome == VmAccessOutcome::Complete) {
         request->response = request->effect_response;
+      }
     }
   }
 }
@@ -452,16 +487,18 @@ FabricEndpoint::PreparedTransfer FabricEndpoint::prepare_local_write(
 }
 
 bool FabricEndpoint::can_route(uint32_t requester_gpu_id, uint32_t owner_gpu_id) const {
-  if (requester_gpu_id == owner_gpu_id)
+  if (requester_gpu_id == owner_gpu_id) {
     return false;
+  }
   bool found = false;
   for (const Route &route : wired_routes_) {
     const bool match =
         (route.source_gpu_id == requester_gpu_id && route.target_gpu_id == owner_gpu_id) ||
         (route.target_gpu_id == requester_gpu_id && route.source_gpu_id == owner_gpu_id);
     if (match) {
-      if (found)
+      if (found) {
         return false;
+      }
       found = true;
     }
   }
@@ -476,11 +513,13 @@ FabricEndpoint::prepare(uint32_t requester_gpu_id, uint32_t owner_gpu_id, Fabric
                         TraceOrigin trace_origin) {
   if (!backing || !effect_gate || (local && (owner_gpu_id == 0 || !admit_effect)) ||
       backing.owner_gpu_id() != owner_gpu_id ||
-      (local ? (requester_gpu_id != owner_gpu_id || !write) : requester_gpu_id == owner_gpu_id))
+      (local ? (requester_gpu_id != owner_gpu_id || !write) : requester_gpu_id == owner_gpu_id)) {
     return {};
+  }
   if (backing.extent() == 0 || backing.extent() > std::numeric_limits<uint32_t>::max() ||
-      (write && bytes.size() != backing.extent()))
+      (write && bytes.size() != backing.extent())) {
     return {.outcome = VmAccessOutcome::Malformed, .operation = {}};
+  }
 
   size_t route_index = wired_routes_.size();
   size_t source_position = 0;
@@ -491,18 +530,21 @@ FabricEndpoint::prepare(uint32_t requester_gpu_id, uint32_t owner_gpu_id, Fabric
       const Route &route = wired_routes_[i];
       bool forward = route.source_gpu_id == requester_gpu_id && route.target_gpu_id == owner_gpu_id;
       bool reverse = route.target_gpu_id == requester_gpu_id && route.source_gpu_id == owner_gpu_id;
-      if (!forward && !reverse)
+      if (!forward && !reverse) {
         continue;
+      }
       // Multiple paths for one pair are ambiguous even if their endpoints agree.
-      if (route_index != wired_routes_.size())
+      if (route_index != wired_routes_.size()) {
         return {};
+      }
       route_index = i;
       source_position = forward ? 0 : route.nodes.size() - 1;
       target_position = forward ? route.nodes.size() - 1 : 0;
       step = forward ? 1 : -1;
     }
-    if (route_index == wired_routes_.size())
+    if (route_index == wired_routes_.size()) {
       return {};
+    }
   }
 
   auto request = std::make_shared<Request>();
@@ -517,18 +559,21 @@ FabricEndpoint::prepare(uint32_t requester_gpu_id, uint32_t owner_gpu_id, Fabric
   request->effect_gate = std::move(effect_gate);
   request->admit_effect = std::move(admit_effect);
   request->admit_pre_effect = std::move(admit_pre_effect);
-  if (write)
+  if (write) {
     request->payload.assign(bytes.begin(), bytes.end());
-  else
+  } else {
     request->effect_response.resize(request->backing.extent());
+  }
   {
     std::lock_guard lock(state_->mutex);
-    if (!state_->accepting)
+    if (!state_->accepting) {
       return {.outcome = VmAccessOutcome::Revoked, .operation = {}};
+    }
     request->generation = state_->generation;
     request->id = ++state_->next_id;
-    if (request->id == 0)
+    if (request->id == 0) {
       request->id = ++state_->next_id;
+    }
   }
   return {.outcome = VmAccessOutcome::Complete,
           .operation = std::make_unique<Operation>(state_, std::move(request))};
@@ -587,8 +632,9 @@ bool FabricEndpoint::retry_request(const std::shared_ptr<Request> &request) noex
     std::lock_guard lock(state_->mutex);
     if (!state_->accepting || state_->owner != this || state_->generation != request->generation ||
         !state_->pending.contains(request->id) ||
-        request->cancelled.load(std::memory_order_acquire))
+        request->cancelled.load(std::memory_order_acquire)) {
       return false;
+    }
     state_->inbox.push_back(request);
     Request::EffectPhase expected = Request::EffectPhase::Entered;
     if (!request->phase.compare_exchange_strong(expected, Request::EffectPhase::Queued,
@@ -618,14 +664,16 @@ void FabricEndpoint::receive(Node &node, WireMessage &message) {
   {
     std::lock_guard lock(state_->mutex);
     auto found = state_->pending.find(message.id);
-    if (found == state_->pending.end())
+    if (found == state_->pending.end()) {
       return;
+    }
     request = found->second;
     state_->diagnostics.handler_thread = std::this_thread::get_id();
-    if (message.response)
+    if (message.response) {
       ++state_->diagnostics.response_messages;
-    else
+    } else {
       ++state_->diagnostics.request_messages;
+    }
   }
   if (request->cancelled.load(std::memory_order_acquire)) {
     finish(message.id, VmAccessOutcome::Revoked);
@@ -649,8 +697,9 @@ void FabricEndpoint::receive(Node &node, WireMessage &message) {
         std::lock_guard lock(request->mutex);
         if (request->outcome == VmAccessOutcome::Unavailable) {
           request->outcome = message.outcome;
-          if (!request->write && message.outcome == VmAccessOutcome::Complete)
+          if (!request->write && message.outcome == VmAccessOutcome::Complete) {
             request->response = message.bytes;
+          }
         }
       }
       amdgpu::MemoryIngressPermit reservation;
@@ -712,16 +761,18 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
     State &state_;
     bool active_ = false;
   } pre_admission_guard{*state_, this, *request};
-  if (!pre_admission_guard.active())
+  if (!pre_admission_guard.active()) {
     return;
+  }
   if (request->cancelled.load(std::memory_order_acquire)) {
     finish(request->id, VmAccessOutcome::Revoked);
     return;
   }
   amdgpu::MemoryIngressAdmission pre_effect;
   try {
-    if (request->admit_pre_effect)
+    if (request->admit_pre_effect) {
       pre_effect = request->admit_pre_effect();
+    }
   } catch (...) {
     pre_effect.outcome = VmAccessOutcome::Faulted;
   }
@@ -760,8 +811,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
       }
     }
   }
-  if (deferred)
+  if (deferred) {
     return;
+  }
   if (!admitted) {
     finish(request->id, VmAccessOutcome::Revoked);
     return;
@@ -779,8 +831,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
             state_.generation == request_.generation && state_.pending.contains(request_.id) &&
             !request_.cancelled.load(std::memory_order_acquire) &&
             request_.phase.load(std::memory_order_acquire) == Request::EffectPhase::Queued;
-        if (!retry_pending)
+        if (!retry_pending) {
           reservation = std::move(request_.request_reservation);
+        }
         request_.active_handler = false;
       }
       reservation.reset();
@@ -803,9 +856,10 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
     effect_authority.outcome = pre_effect.outcome;
   } else {
     try {
-      if (request->admit_effect)
+      if (request->admit_effect) {
         effect_authority =
             request->admit_effect(request->backing, request->write, request->request_reservation);
+      }
     } catch (...) {
       effect_authority.outcome = VmAccessOutcome::Faulted;
     }
@@ -816,8 +870,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
 
   if (!authority_ready && effect_authority.outcome == VmAccessOutcome::Unavailable) {
     effect_authority.permit.reset();
-    if (retry_request(request))
+    if (retry_request(request)) {
       return;
+    }
     Request::EffectPhase expected = Request::EffectPhase::Entered;
     request->phase.compare_exchange_strong(expected, Request::EffectPhase::Revoked,
                                            std::memory_order_acq_rel);
@@ -827,8 +882,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
 
   if (authority_ready && !coherence_domains_.empty() && !line_freshness_.try_invalidate_all()) {
     effect_authority.permit.reset();
-    if (retry_request(request))
+    if (retry_request(request)) {
       return;
+    }
     Request::EffectPhase expected = Request::EffectPhase::Entered;
     request->phase.compare_exchange_strong(expected, Request::EffectPhase::Revoked,
                                            std::memory_order_acq_rel);
@@ -838,8 +894,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
 
   std::vector<amdgpu::DeviceCacheMaintenanceLease> maintenance;
   const auto release_maintenance = [&] {
-    while (!maintenance.empty())
+    while (!maintenance.empty()) {
       maintenance.pop_back();
+    }
   };
   bool maintenance_ready = authority_ready;
   if (maintenance_ready) {
@@ -867,8 +924,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
     } catch (const amdgpu::CacheMaintenanceUnavailable &) {
       release_maintenance();
       effect_authority.permit.reset();
-      if (retry_request(request))
+      if (retry_request(request)) {
         return;
+      }
       Request::EffectPhase expected = Request::EffectPhase::Entered;
       request->phase.compare_exchange_strong(expected, Request::EffectPhase::Revoked,
                                              std::memory_order_acq_rel);
@@ -895,27 +953,32 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
     if (!writer) {
       release_maintenance();
       effect_authority.permit.reset();
-      if (retry_request(request))
+      if (retry_request(request)) {
         return;
+      }
       Request::EffectPhase expected = Request::EffectPhase::Entered;
       request->phase.compare_exchange_strong(expected, Request::EffectPhase::Revoked,
                                              std::memory_order_acq_rel);
       finish(request->id, VmAccessOutcome::Revoked);
       return;
     }
-    if (!coherence_domains_.empty())
+    if (!coherence_domains_.empty()) {
       writer.invalidate_all();
+    }
     bool gate_entered = false;
     try {
       gate_entered = request->effect_gate->commit([&] {
-        if (request->phase.load(std::memory_order_acquire) != Request::EffectPhase::Entered)
+        if (request->phase.load(std::memory_order_acquire) != Request::EffectPhase::Entered) {
           return;
-        if (effect_probe_for_testing_)
+        }
+        if (effect_probe_for_testing_) {
           effect_probe_for_testing_();
+        }
         Request::EffectPhase expected = Request::EffectPhase::Entered;
         if (!request->phase.compare_exchange_strong(expected, Request::EffectPhase::Committing,
-                                                    std::memory_order_acq_rel))
+                                                    std::memory_order_acq_rel)) {
           return;
+        }
         const bool complete = request->write ? request->backing.write(request->payload)
                                              : request->backing.read(request->effect_response);
         if (complete) {
@@ -993,8 +1056,9 @@ void FabricEndpoint::handle_target(const std::shared_ptr<Request> &request,
   const Request::EffectPhase phase = request->phase.load(std::memory_order_acquire);
   effect_outcome =
       phase == Request::EffectPhase::Done ? request->effect_outcome : VmAccessOutcome::Revoked;
-  if (phase == Request::EffectPhase::Done)
+  if (phase == Request::EffectPhase::Done) {
     response = request->effect_response;
+  }
   if (request->local) {
     finish(request->id, effect_outcome);
   } else {
@@ -1010,8 +1074,9 @@ void FabricEndpoint::finish(uint64_t request_id, VmAccessOutcome outcome) {
   {
     std::lock_guard lock(state_->mutex);
     const auto found = state_->pending.find(request_id);
-    if (found == state_->pending.end())
+    if (found == state_->pending.end()) {
       return;
+    }
     request = std::move(found->second);
     state_->pending.erase(found);
     reservation = state_->take_idle_reservation(*request);
@@ -1026,8 +1091,9 @@ void FabricEndpoint::finish(uint64_t request_id, VmAccessOutcome outcome) {
             ? VmAccessOutcome::Unavailable
             : outcome;
     if (phase == Request::EffectPhase::Done && !request->write &&
-        request->effect_outcome == VmAccessOutcome::Complete)
+        request->effect_outcome == VmAccessOutcome::Complete) {
       request->response = request->effect_response;
+    }
   }
 }
 
@@ -1053,8 +1119,9 @@ FabricEndpoint::Diagnostics FabricEndpoint::diagnostics() const {
 bool FabricEndpoint::enable_effect_trace(std::size_t capacity) {
   std::lock_guard lock(state_->mutex);
   if (capacity == 0 || state_->effect_trace_capacity != 0 || state_->diagnostics.submissions != 0 ||
-      !state_->pending.empty())
+      !state_->pending.empty()) {
     return false;
+  }
   state_->diagnostics.committed_effects.reserve(capacity);
   state_->effect_trace_capacity = capacity;
   return true;

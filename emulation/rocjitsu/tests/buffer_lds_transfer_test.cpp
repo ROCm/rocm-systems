@@ -45,8 +45,9 @@ protected:
     pipeline_ = std::make_unique<amdgpu::GlobalMemPipeline>(&cu_->l1_vector(), &l2_);
   }
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
   }
   void scalar(unsigned reg, uint32_t value) {
     cu_->write_sgpr(wave_->sgpr_alloc().base + reg, value);
@@ -66,8 +67,9 @@ protected:
     EXPECT_EQ(wave_->wait_counters().lgkmcnt, 0u);
   }
   void clear_lds() {
-    for (uint32_t a = 0; a < 4608; a += 4)
+    for (uint32_t a = 0; a < 4608; a += 4) {
       wave_->lds().write32(a, 0xcccccccc);
+    }
   }
   amdgpu::GpuMemory memory_{"lds_transfer_memory"};
   amdgpu::L2Cache l2_{"lds_transfer_l2"};
@@ -78,8 +80,9 @@ protected:
 };
 
 TEST_P(BufferLdsTransfer, Cdna2InvalidatePreservesDirtyLocalMemory) {
-  if (GetParam() != rocjitsu::IsaFamily::Cdna2)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna2) {
     GTEST_SKIP();
+  }
   constexpr uint64_t address = 0x4000;
   memory_.write32(address, 1);
   std::array<uint8_t, amdgpu::L2Cache::LINE_SIZE> line{};
@@ -96,8 +99,9 @@ TEST_P(BufferLdsTransfer, Cdna2InvalidatePreservesDirtyLocalMemory) {
 }
 
 TEST_P(BufferLdsTransfer, Cdna2StoreLdsUsesM0OffsetAndCapturedActiveLanes) {
-  if (GetParam() != rocjitsu::IsaFamily::Cdna2)
+  if (GetParam() != rocjitsu::IsaFamily::Cdna2) {
     GTEST_SKIP();
+  }
   const auto missing_lds = cdna2::build_mubuf(cdna2::kBufferStoreLdsDword);
   EXPECT_TRUE(decoder_->decode_window(missing_lds).failed());
 
@@ -181,8 +185,9 @@ TEST_P(BufferLdsTransfer, BufferNarrowAndX3TransfersUseDwordLaneLayout) {
     scalar(3, kGfx9DataFormat32);
     for (unsigned lane = 0; lane < 64; ++lane) {
       vector(2, lane, lane * 16);
-      for (unsigned component = 0; component < 4; ++component)
+      for (unsigned component = 0; component < 4; ++component) {
         memory_.write32(0x4000 + lane * 16 + component * 4, 0x76548081 + component);
+      }
     }
     auto words = cdna4::build_mubuf(
         opcode, {.offen = 1, .lds = 1, .vaddr = 2, .vdata = 8, .srsrc = 0, .soffset = 128});
@@ -219,7 +224,7 @@ TEST(BufferLdsDecode, Mi100RequiresOneOfSixLoadsOrTheDedicatedStore) {
 }
 
 TEST_P(BufferLdsTransfer, RawAndFormatBufferLoadsShareM0WidthAndAllocationBounds) {
-  for (auto opcode : {cdna4::kBufferLoadDwordMubuf, cdna4::kBufferLoadFormatXMubuf})
+  for (auto opcode : {cdna4::kBufferLoadDwordMubuf, cdna4::kBufferLoadFormatXMubuf}) {
     for (uint32_t m0 : {0x10040u, 0xfffc0042u}) {
       SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " m0=" << m0);
       clear_lds();
@@ -253,6 +258,7 @@ TEST_P(BufferLdsTransfer, RawAndFormatBufferLoadsShareM0WidthAndAllocationBounds
         EXPECT_EQ(wave_->lds().read32(128 + 64), 0xccccccccu);
       }
     }
+  }
 }
 
 TEST_P(BufferLdsTransfer, UnboundRawLoadsStoresAndAtomicsDoNotAccessMemory) {

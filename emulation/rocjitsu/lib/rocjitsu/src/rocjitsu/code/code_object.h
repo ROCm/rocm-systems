@@ -144,12 +144,14 @@ public:
   std::size_t mem_size() const {
     uint64_t max_va = 0;
     for (const Elf64_Phdr &phdr : program_headers_) {
-      if (phdr.p_type != PT_LOAD)
+      if (phdr.p_type != PT_LOAD) {
         continue;
+      }
       max_va = std::max(max_va, phdr.p_vaddr + phdr.p_memsz);
     }
-    if (max_va > std::numeric_limits<std::size_t>::max())
+    if (max_va > std::numeric_limits<std::size_t>::max()) {
       return image_.size();
+    }
     return max_va > 0 ? static_cast<std::size_t>(max_va) : image_.size();
   }
 
@@ -164,16 +166,19 @@ public:
   template <typename Memory> bool load_to_memory(Memory *memory, uint64_t base_addr) const {
     bool loaded_any = false;
     for (const Elf64_Phdr &phdr : program_headers_) {
-      if (phdr.p_type != PT_LOAD)
+      if (phdr.p_type != PT_LOAD) {
         continue;
+      }
       if (phdr.p_vaddr > std::numeric_limits<uint64_t>::max() - base_addr ||
-          phdr.p_memsz > std::numeric_limits<uint64_t>::max() - base_addr - phdr.p_vaddr)
+          phdr.p_memsz > std::numeric_limits<uint64_t>::max() - base_addr - phdr.p_vaddr) {
         return false;
+      }
       loaded_any = true;
     }
     if (!loaded_any) {
-      if (image_.size() > std::numeric_limits<uint64_t>::max() - base_addr)
+      if (image_.size() > std::numeric_limits<uint64_t>::max() - base_addr) {
         return false;
+      }
       memory->load_image(reinterpret_cast<const uint8_t *>(image_.data()), image_.size(),
                          base_addr);
       return true;
@@ -181,9 +186,10 @@ public:
 
     const auto *image = reinterpret_cast<const uint8_t *>(image_.data());
     for (const Elf64_Phdr &phdr : program_headers_) {
-      if (phdr.p_type == PT_LOAD && phdr.p_filesz != 0)
+      if (phdr.p_type == PT_LOAD && phdr.p_filesz != 0) {
         memory->load_image(image + phdr.p_offset, static_cast<std::size_t>(phdr.p_filesz),
                            base_addr + phdr.p_vaddr);
+      }
     }
     return true;
   }
@@ -199,16 +205,19 @@ protected:
   ///          segments whose file range or virtual-address arithmetic overflows.
   bool load_program_headers(const Elf64_Ehdr &ehdr) {
     // The patcher rewrites contiguous records and cannot preserve extensions.
-    if (ehdr.e_phnum != 0 && ehdr.e_phentsize != sizeof(Elf64_Phdr))
+    if (ehdr.e_phnum != 0 && ehdr.e_phentsize != sizeof(Elf64_Phdr)) {
       return false;
+    }
     const std::span image(reinterpret_cast<const uint8_t *>(image_.data()), image_.size());
     std::optional<std::vector<Elf64_Phdr>> phdrs =
         read_elf_table<Elf64_Phdr>(image, ehdr.e_phoff, ehdr.e_phnum, ehdr.e_phentsize);
-    if (!phdrs)
+    if (!phdrs) {
       return false;
+    }
     for (const Elf64_Phdr &phdr : *phdrs) {
-      if (phdr.p_type != PT_LOAD)
+      if (phdr.p_type != PT_LOAD) {
         continue;
+      }
       if ((phdr.p_filesz != 0 &&
            (phdr.p_offset > image_.size() || phdr.p_filesz > image_.size() - phdr.p_offset)) ||
           phdr.p_filesz > phdr.p_memsz ||

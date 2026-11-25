@@ -14,39 +14,49 @@ extern "C" {
 #endif
 // Sparse signed-byte MFMA: A/B/D use 4/8/16 VGPRs, index one Wave64 VGPR.
 // CBSZ/ABID select metadata; wide forms ignore them. Accumulation wraps by default.
-// All semantics are exact. RJ_ARITH_FP16_OVFL saturates the final signed sum;
-// other FP controls and EXEC are ignored. D is the tied accumulator;
-// D may overlap A, B or index. Errors leave all operands unchanged.
+// All semantics are exact. RJ_ARITH_FP16_OVFL saturates signed accumulation after
+// each 8-group (K=32) hardware pass; other FP controls and EXEC are ignored.
+// D is the tied accumulator; D may overlap A, B or index. Errors leave all operands unchanged.
 int rj_arith_v_smfmac_i32_32x32x64_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
                                           const uint32_t *const *index);
 
 // Sparse signed-byte MFMA: A/B/D use 4/8/4 VGPRs, index one Wave64 VGPR.
 // CBSZ/ABID select metadata; wide forms ignore them. Accumulation wraps by default.
-// All semantics are exact. RJ_ARITH_FP16_OVFL saturates the final signed sum;
-// other FP controls and EXEC are ignored. D is the tied accumulator;
-// D may overlap A, B or index. Errors leave all operands unchanged.
+// All semantics are exact. RJ_ARITH_FP16_OVFL saturates signed accumulation after
+// each 8-group (K=32) hardware pass; other FP controls and EXEC are ignored.
+// D is the tied accumulator; D may overlap A, B or index. Errors leave all operands unchanged.
 int rj_arith_v_smfmac_i32_16x16x128_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                            const uint32_t *const *a, const uint32_t *const *b,
                                            const uint32_t *const *index);
 
 // Sparse signed-byte MFMA: A/B/D use 2/4/16 VGPRs, index one Wave64 VGPR.
 // CBSZ/ABID select metadata; wide forms ignore them. Accumulation wraps by default.
-// All semantics are exact. RJ_ARITH_FP16_OVFL saturates the final signed sum;
-// other FP controls and EXEC are ignored. D is the tied accumulator;
-// D may overlap A, B or index. Errors leave all operands unchanged.
+// All semantics are exact. Under RJ_ARITH_FP16_OVFL, the unsuffixed entry point
+// saturates the final sum while _gfx950 saturates after each 8-group (K=32) pass;
+// other FP controls and EXEC are ignored.
+// D is the tied accumulator; D may overlap A, B or index. Errors leave all operands unchanged.
 int rj_arith_v_smfmac_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
                                           const uint32_t *const *index);
+int rj_arith_v_smfmac_i32_32x32x32_i8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *index);
 
 // Sparse signed-byte MFMA: A/B/D use 2/4/4 VGPRs, index one Wave64 VGPR.
 // CBSZ/ABID select metadata; wide forms ignore them. Accumulation wraps by default.
-// All semantics are exact. RJ_ARITH_FP16_OVFL saturates the final signed sum;
-// other FP controls and EXEC are ignored. D is the tied accumulator;
-// D may overlap A, B or index. Errors leave all operands unchanged.
+// All semantics are exact. Under RJ_ARITH_FP16_OVFL, the unsuffixed entry point
+// saturates the final sum while _gfx950 saturates after each 8-group (K=32) pass;
+// other FP controls and EXEC are ignored.
+// D is the tied accumulator; D may overlap A, B or index. Errors leave all operands unchanged.
 int rj_arith_v_smfmac_i32_16x16x64_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
                                           const uint32_t *const *index);
+int rj_arith_v_smfmac_i32_16x16x64_i8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *index);
 
 // Encoded A broadcast block size/source and B lane permutation, matching CBSZ/ABID/BLGP.
 constexpr uint64_t RJ_ARITH_MFMA_CBSZ_MASK = 7ULL;
@@ -87,8 +97,11 @@ int rj_arith_v_mfma_f64_4x4x4_4b_f64_w64(uint64_t flags, uint64_t controls, uint
                                          const uint32_t *const *c);
 
 // Signed-byte MFMA: A/B use M*K*batch/256 VGPRs, C/D use M*M*batch/64.
-// Accumulation wraps at 32 bits by default. On gfx942 and gfx950 RJ_ARITH_FP16_OVFL
-// saturates the final signed sum. CBSZ/ABID/BLGP select the MFMA source lanes.
+// Accumulation wraps at 32 bits by default. Unsuffixed shared forms preserve the
+// gfx942 rules: CBSZ/ABID/BLGP permute source lanes on all shapes and
+// RJ_ARITH_FP16_OVFL saturates the final sum. On _gfx950 and the gfx950-only
+// 16x16x64/32x32x32 forms, single-batch shapes ignore CBSZ/ABID/BLGP and
+// RJ_ARITH_FP16_OVFL saturates signed accumulation after each K<=16 hardware pass.
 // All semantics share exact integer arithmetic.
 // All 64 lanes participate, EXEC is ignored, and operands may overlap D.
 int rj_arith_v_mfma_i32_32x32x4_2b_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
@@ -103,9 +116,15 @@ int rj_arith_v_mfma_i32_4x4x4_16b_i8_w64(uint64_t flags, uint64_t controls, uint
 int rj_arith_v_mfma_i32_32x32x16_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c);
+int rj_arith_v_mfma_i32_32x32x16_i8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c);
 int rj_arith_v_mfma_i32_16x16x32_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c);
+int rj_arith_v_mfma_i32_16x16x32_i8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c);
 int rj_arith_v_mfma_i32_16x16x64_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c);
@@ -124,8 +143,12 @@ int rj_arith_v_mfma_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint3
 // within the chosen block count. BLGP 0..7 selects the legacy B lane permutation.
 // For gfx950 BF16 instructions, set RJ_ARITH_FP16_OVFL to saturate finite FP32
 // overflow. Infinities from source operands are preserved.
-// Loose, allow-Loose and Compatibility use approximate arithmetic; strict exact
-// modes return UNSUPPORTED_SEMANTICS. All inputs are consumed before D is stored
+// gfx942 approximate arithmetic ignores FP16_OVFL, preserving its legacy policy.
+// Compatibility and Loose retain approximate arithmetic. On gfx942, the five
+// original FP16/BF16 shapes and both XF32 shapes support exact modes with zero
+// CBSZ/ABID/BLGP and FP16_OVFL clear. Exact-allow-Loose falls back otherwise.
+// The wider gfx950-only forms and the _gfx950 variants remain approximate;
+// strict requests return UNSUPPORTED_SEMANTICS. All inputs are consumed before D is stored
 // in register order. Aliasing is supported; errors leave D unchanged.
 int rj_arith_v_mfma_f32_32x32x4_2b_f16_w64(uint64_t flags, uint64_t instruction_flags,
                                            uint32_t *const *d, const uint32_t *const *a,
@@ -183,9 +206,11 @@ int rj_arith_v_mfma_f32_32x32x16_bf16_w64(uint64_t flags, uint64_t instruction_f
                                           uint32_t *const *d, const uint32_t *const *a,
                                           const uint32_t *const *b, const uint32_t *const *c);
 
-// gfx942 XF32 approximation: A/B two FP32 VGPRs, C/D four for 16x16 or sixteen
-// for 32x32. Both inputs are truncated to ten fraction bits before the FP32 reduction.
-// Loose, allow-Loose and Compatibility are supported.
+// gfx942 XF32 MFMA: A/B two FP32 VGPRs, C/D four for 16x16 or sixteen
+// for 32x32. Both inputs are truncated to ten fraction bits before the FP32 reduction
+// (inferred to turn NaNs with payload only in bits 12:0 into infinities; the
+// MI300X captures exercised canonical quiet NaNs).
+// Exact-mode qualification follows the gfx942 half-input contract above.
 // Source controls, whole-wave participation, aliasing and error rules above apply.
 int rj_arith_v_mfma_f32_16x16x8_xf32_w64(uint64_t flags, uint64_t instruction_flags,
                                          uint32_t *const *d, const uint32_t *const *a,
@@ -198,7 +223,8 @@ int rj_arith_v_mfma_f32_32x32x4_xf32_w64(uint64_t flags, uint64_t instruction_fl
 // FP8/BF8 MFMA: A/B two packed VGPRs, C/D four for 16x16 or sixteen for 32x32.
 // Unsuffixed forms use gfx942 FNUZ (bias 8/16, sole NaN 0x80); gfx950 forms use
 // OCP E4M3FN/E5M2 (bias 7/15). The suffix distinguishes different arithmetic
-// behind the same ISA mnemonic. Only Loose/allow-Loose/Compatibility are supported.
+// behind the same ISA mnemonic. gfx942 exact-mode qualification follows the
+// half-input contract above; gfx950 strict modes remain unsupported.
 // Source controls, whole-wave participation, aliasing and error rules above apply.
 int rj_arith_v_mfma_f32_16x16x32_fp8_fp8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
@@ -307,22 +333,42 @@ int rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64(uint64_t flags, uint64_t contr
 // an index byte by ABID[1:0] for F16/BF16, or halfword by ABID[0] for FP8/BF8.
 // Wide F16/BF16 forms likewise select a halfword by ABID[0]. Otherwise the
 // first set is used; wide FP8/BF8 forms consume all 32 bits and ignore ABID.
-// Compatibility preserves the legacy fused reduction
-// and NaN priority. Strict empirical modes are unsupported. FP status is untouched.
+// Compatibility preserves the legacy fused reduction and NaN priority.
+// The 12 compact gfx942 forms (unsuffixed 16x16x32/32x32x16 F16/BF16 and
+// 16x16x64/32x32x32 FNUZ FP8/BF8) support empirical bit-exact modes when
+// RJ_ARITH_FP16_OVFL is clear; BitExactEmpiricalAllowLoose falls back outside
+// that qualification. Wide and *_gfx950 forms remain loose-only. FP status is untouched.
 // FP8 unsuffixed compact forms use gfx942 FNUZ; gfx950 forms use OCP encodings.
-// RJ_ARITH_FP16_OVFL saturates finite-input overflow, as on gfx950.
+// RJ_ARITH_FP16_OVFL saturates finite-input overflow on gfx950, and delimits
+// exact-mode qualification on gfx942 while approximate gfx942 paths ignore it.
 int rj_arith_v_smfmac_f32_16x16x32_f16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                            const uint32_t *const *a, const uint32_t *const *b,
                                            const uint32_t *const *index);
+int rj_arith_v_smfmac_f32_16x16x32_f16_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *index);
 int rj_arith_v_smfmac_f32_16x16x32_bf16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                             const uint32_t *const *a, const uint32_t *const *b,
                                             const uint32_t *const *index);
+int rj_arith_v_smfmac_f32_16x16x32_bf16_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *index);
 int rj_arith_v_smfmac_f32_32x32x16_f16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                            const uint32_t *const *a, const uint32_t *const *b,
                                            const uint32_t *const *index);
+int rj_arith_v_smfmac_f32_32x32x16_f16_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *index);
 int rj_arith_v_smfmac_f32_32x32x16_bf16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                             const uint32_t *const *a, const uint32_t *const *b,
                                             const uint32_t *const *index);
+int rj_arith_v_smfmac_f32_32x32x16_bf16_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *index);
 int rj_arith_v_smfmac_f32_16x16x64_f16_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                            const uint32_t *const *a, const uint32_t *const *b,
                                            const uint32_t *const *index);
@@ -431,6 +477,63 @@ int rj_arith_v_smfmac_f32_32x32x64_bf8_bf8_w64(uint64_t flags, uint64_t controls
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b,
                                                const uint32_t *const *index);
+
+// gfx950 variants of the shared half/XF32 mnemonics retain approximate arithmetic.
+// They do not inherit gfx942's empirical qualification.
+int rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_16x16x16_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_16x16x4_4b_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_16x16x8_xf32_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                   uint32_t *const *d, const uint32_t *const *a,
+                                                   const uint32_t *const *b,
+                                                   const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_32x32x4_xf32_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_32x32x8_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_32x32x8_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                  uint32_t *const *d, const uint32_t *const *a,
+                                                  const uint32_t *const *b,
+                                                  const uint32_t *const *c);
+
+int rj_arith_v_mfma_f32_4x4x4_16b_f16_w64_gfx950(uint64_t flags, uint64_t instruction_flags,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c);
 
 #ifdef __cplusplus
 } // extern "C"

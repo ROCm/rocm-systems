@@ -116,8 +116,9 @@ struct BenchFixture {
     rocjitsu::test::initialize_compute_unit(cu, "cu_swmmac_k128_bench", cfg, &gpu_mem, &l2);
     if (cu) {
       wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
-      if (wf)
+      if (wf) {
         vbase = wf->vgpr_alloc().base;
+      }
     }
   }
 
@@ -154,8 +155,9 @@ struct BenchFixture {
     for (uint32_t reg = 0; reg < INDEX_REGS; ++reg) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint32_t word = 0;
-        for (uint32_t nibble = 0; nibble < 8; ++nibble)
+        for (uint32_t nibble = 0; nibble < 8; ++nibble) {
           word |= pairs[(lane + nibble + 3 * reg) % pairs.size()] << (4 * nibble);
+        }
         cu->write_vgpr(vbase + INDEX_OFF + reg, lane, word);
       }
     }
@@ -163,16 +165,19 @@ struct BenchFixture {
 
   std::vector<uint32_t> snapshot(uint32_t off, uint32_t regs) const {
     std::vector<uint32_t> words(static_cast<size_t>(regs) * WF_SIZE);
-    for (uint32_t reg = 0; reg < regs; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         words[static_cast<size_t>(reg) * WF_SIZE + lane] = cu->read_vgpr(vbase + off + reg, lane);
+      }
+    }
     return words;
   }
 
   void restore(uint32_t off, const std::vector<uint32_t> &words) {
-    for (size_t i = 0; i < words.size(); ++i)
+    for (size_t i = 0; i < words.size(); ++i) {
       cu->write_vgpr(vbase + off + static_cast<uint32_t>(i / WF_SIZE),
                      static_cast<uint32_t>(i % WF_SIZE), words[i]);
+    }
   }
 };
 
@@ -215,8 +220,9 @@ void benchmark_case(const BenchCase &test) {
   ASSERT_FALSE(execution_failed) << test.label;
   const auto simd = fx.snapshot(ACC_OFF, test.accumulator_regs);
   ASSERT_EQ(scalar.size(), simd.size());
-  for (size_t i = 0; i < scalar.size(); ++i)
+  for (size_t i = 0; i < scalar.size(); ++i) {
     ASSERT_EQ(scalar[i], simd[i]) << test.label << ": raw output mismatch at word " << i;
+  }
 
   const auto time_block = [&](bool force_scalar) {
     util::set_force_scalar_for_testing(force_scalar);
@@ -257,8 +263,9 @@ class SwmmacK128SimdBenchmark : public testing::TestWithParam<size_t> {};
 
 TEST_P(SwmmacK128SimdBenchmark, DecodedInstruction) {
   SKIP_IF_NO_SIMD();
-  if (util::native<float>::size() != 16)
+  if (util::native<float>::size() != 16) {
     GTEST_SKIP() << "the K=128 SWMMAC fast paths require 16-lane native SIMD";
+  }
   benchmark_case(BENCH_CASES[GetParam()]);
 }
 

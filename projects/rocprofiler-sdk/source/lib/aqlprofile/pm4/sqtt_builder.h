@@ -387,7 +387,7 @@ public:
                     if(sqtt_size == 0) continue;
 
                     bool     is_double_buffer = config->buffer_data.at(global_se).size() > 1;
-                    uint32_t ctrl_val         = Primitives::sqtt_ctrl_value(true, is_double_buffer);
+                    uint32_t ctrl_val = Primitives::sqtt_ctrl_value(bMaskedIn, is_double_buffer);
 
                     Select_GRBM_SE_SH0(cmd_buffer, local_se);
                     builder.BuildPrimeL2(cmd_buffer, base_addr);
@@ -559,39 +559,42 @@ public:
             builder.BuildWriteShRegPacket(
                 cmd_buffer, Primitives::COMPUTE_THREAD_TRACE_ENABLE_ADDR, 0);
 
-            if(Primitives::GFXIP_LEVEL >= 12) builder.BuildThreadTraceEventFinish(cmd_buffer);
+            builder.BuildThreadTraceEventFinish(cmd_buffer);
 
-            {
-                // Wait for FINISH_PENDING
-                const uint32_t mask_val      = Primitives::sqtt_pending_mask();
-                auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
-                builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
-            }
-
-            // Program the thread trace ctrl register to set mode to 0
-            const uint32_t ctrl_val = Primitives::sqtt_ctrl_value(false, false);
-            WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR, ctrl_val);
-
-            {
-                // Wait until SQTT_BUSY is 0
-                const uint32_t mask_val      = Primitives::sqtt_busy_mask();
-                auto           status_offset = Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
-                builder.BuildWaitRegMemCommand(cmd_buffer, false, status_offset, true, mask_val, 0);
-            }
+            const uint32_t pending   = Primitives::sqtt_pending_mask();
+            const uint32_t busy_mask = Primitives::sqtt_busy_mask();
+            const auto     status    = Primitives::SQ_THREAD_TRACE_STATUS_ADDR;
+            const uint32_t ctrl_val  = Primitives::sqtt_ctrl_value(false, false);
 
             for(int xcc = 0; xcc < xcc_number_; xcc++)
             {
                 if(!isXccEnabled(xcc, se_number_xcc, config)) continue;
-
                 XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
+
                 for(uint64_t index = 0; index < se_number_xcc; index++)
                 {
+                    if(config->target_cu_per_se.at(index + xcc * se_number_xcc) < 0) continue;
+
                     Select_GRBM_SE_SH0(cmd_buffer, index);
+
+                    builder.BuildWaitRegMemCommand(cmd_buffer, false, status, true, pending, 0);
+                    WriteConfigPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_CTRL_ADDR, ctrl_val);
+                    builder.BuildWaitRegMemCommand(cmd_buffer, false, status, true, busy_mask, 0);
+
                     ReadValues(cmd_buffer, config, index + xcc * se_number_xcc);
                 }
             }
         }
         SetGRBMToBroadcast(cmd_buffer);
+        auto write_if_not_zero = [&](const Register& reg) {
+            if(!(reg == Register{})) WriteConfigPacket(cmd_buffer, reg, 0);
+        };
+        write_if_not_zero(Primitives::SQ_THREAD_TRACE_SIZE_ADDR);
+        write_if_not_zero(Primitives::SQ_THREAD_TRACE_BASE_ADDR);
+        write_if_not_zero(Primitives::SQ_THREAD_TRACE_BASE2_ADDR);
+        write_if_not_zero(Primitives::SQ_THREAD_TRACE_BUF0_SIZE_ADDR);
+        write_if_not_zero(Primitives::SQ_THREAD_TRACE_BUF0_BASE_LO_ADDR);
+        write_if_not_zero(Primitives::SQ_THREAD_TRACE_BUF0_BASE_HI_ADDR);
 
         builder.BuildCacheFlushPacket(
             cmd_buffer, size_t(config->data_buffer_ptr), config->data_buffer_size);

@@ -133,8 +133,9 @@ struct KernelResourceRequirements {
   /// @details This is monotonic across all lowerings for the kernel. It only
   /// raises the required count and never reduces an earlier requirement.
   void require_vgprs(uint32_t count) {
-    if (required_vgpr_count < count)
+    if (required_vgpr_count < count) {
       required_vgpr_count = count;
+    }
   }
 
   /// @brief Record that semantic lowering requires at least @p count SGPRs.
@@ -142,8 +143,9 @@ struct KernelResourceRequirements {
   /// @details This is monotonic across all lowerings for the kernel. It only
   /// raises the required count and never reduces an earlier requirement.
   void require_sgprs(uint32_t count) {
-    if (required_sgpr_count < count)
+    if (required_sgpr_count < count) {
       required_sgpr_count = count;
+    }
   }
 
   /// @brief Record a minimum per-lane private segment size.
@@ -152,8 +154,9 @@ struct KernelResourceRequirements {
   /// are allocated. Keeping the high-water update here leaves descriptor
   /// feedback independent of the target instructions used to access the slots.
   void require_private_segment_bytes(uint32_t bytes) {
-    if (required_private_segment_fixed_size < bytes)
+    if (required_private_segment_fixed_size < bytes) {
       required_private_segment_fixed_size = bytes;
+    }
   }
 
   /// @brief Reserve @p dwords persistent 32-bit per-lane spill slots.
@@ -170,8 +173,9 @@ struct KernelResourceRequirements {
   /// treat nullopt as a kernel translation failure.
   [[nodiscard]] std::optional<uint32_t> reserve_persistent_semantic_spill_dwords(uint32_t dwords) {
     const auto reservation = semantic_spill_reservation(dwords);
-    if (!reservation)
+    if (!reservation) {
       return std::nullopt;
+    }
     semantic_spill_persistent_end = reservation->second;
     require_private_segment_bytes(reservation->second);
     return reservation->first;
@@ -192,8 +196,9 @@ struct KernelResourceRequirements {
   /// persistent variant this does not advance semantic_spill_persistent_end.
   [[nodiscard]] std::optional<uint32_t> reserve_semantic_spill_dwords(uint32_t dwords) {
     const auto reservation = semantic_spill_reservation(dwords);
-    if (!reservation)
+    if (!reservation) {
       return std::nullopt;
+    }
     require_private_segment_bytes(reservation->second);
     return reservation->first;
   }
@@ -210,8 +215,9 @@ private:
     const uint64_t base =
         util::align_up(static_cast<uint64_t>(semantic_spill_persistent_end), kSpillAlignment);
     const uint64_t end = base + static_cast<uint64_t>(dwords) * 4u;
-    if (base > kMax || end > kMax)
+    if (base > kMax || end > kMax) {
       return std::nullopt;
+    }
     return std::pair<uint32_t, uint32_t>{static_cast<uint32_t>(base), static_cast<uint32_t>(end)};
   }
 };
@@ -471,9 +477,10 @@ public:
                                  context == RewriteDischargeContext::BasicBlock;
       return check != nullptr && rationale == nullptr && valid_context;
     }
-    if (disposition == RewriteDischargeDisposition::NoSuccessfulExpansion)
+    if (disposition == RewriteDischargeDisposition::NoSuccessfulExpansion) {
       return check == nullptr && rationale != nullptr && rationale[0] != '\0' &&
              context == RewriteDischargeContext::Instruction;
+    }
     return false;
   }
 
@@ -546,8 +553,9 @@ struct TranslationRule {
         requires_liveness(needs_liveness), discharge(audit) {}
 
   constexpr auto operator<=>(const TranslationRule &rhs) const {
-    if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0)
+    if (auto cmp = src_encoding_id <=> rhs.src_encoding_id; cmp != 0) {
       return cmp;
+    }
     return src_opcode <=> rhs.src_opcode;
   }
   constexpr bool operator==(const TranslationRule &rhs) const {
@@ -624,18 +632,23 @@ public:
   }
 
   [[nodiscard]] constexpr bool has_complete_discharge() const {
-    if (opcode_rules.empty() && instruction_rules.empty())
+    if (opcode_rules.empty() && instruction_rules.empty()) {
       return false;
+    }
     for (size_t rule_index = 0; rule_index < opcode_rules.size(); ++rule_index) {
       const TranslationRule &rule = opcode_rules[rule_index];
-      if (rule.action != RuleAction::Expand || rule.expand_fn == nullptr || !rule.discharge.valid())
+      if (rule.action != RuleAction::Expand || rule.expand_fn == nullptr ||
+          !rule.discharge.valid()) {
         return false;
-      if (rule_index != 0 && !(opcode_rules[rule_index - 1] < rule))
+      }
+      if (rule_index != 0 && !(opcode_rules[rule_index - 1] < rule)) {
         return false;
+      }
     }
     for (const RegisteredInstructionRewrite &rule : instruction_rules) {
-      if (!rule.valid())
+      if (!rule.valid()) {
         return false;
+      }
     }
     return true;
   }
@@ -689,8 +702,9 @@ struct LanePermutation {
 
 /// @brief Compute the row-to-lane base for a given layout and row index.
 [[nodiscard]] constexpr uint8_t lane_for_row(const LaneLayout &layout, uint8_t row) {
-  if (layout.kind == LayoutKind::WMMA)
+  if (layout.kind == LayoutKind::WMMA) {
     return static_cast<uint8_t>(32 * ((row / 4) % 2) + 16 * (row / 8));
+  }
   return static_cast<uint8_t>(16 * (row / 4)); // MFMA
 }
 

@@ -40,10 +40,12 @@ inline int div_top_bit(util::uint128_t value) {
 }
 
 inline util::uint128_t div_shift_right_jam(util::uint128_t value, int distance) {
-  if (distance <= 0)
+  if (distance <= 0) {
     return value;
-  if (distance >= 128)
+  }
+  if (distance >= 128) {
     return value != 0;
+  }
   return (value >> distance) | ((value << (128 - distance)) != 0);
 }
 
@@ -63,11 +65,13 @@ inline Float div_round(util::uint128_t significand, int exponent, bool negative,
   using F = DivisionFormat<Float>;
   using Bits = typename F::Bits;
   const Bits sign = negative ? F::sign : 0;
-  if (significand == 0)
+  if (significand == 0) {
     return std::bit_cast<Float>(sign);
+  }
   const int highest = div_top_bit(significand);
-  if (highest + exponent > F::bias)
+  if (highest + exponent > F::bias) {
     return div_overflow<Float>(negative, rounding);
+  }
   const int minimum = 1 - F::bias - F::fraction;
   const int normal_shift = highest - F::fraction;
   const int subnormal_shift = minimum - exponent;
@@ -83,18 +87,21 @@ inline Float div_round(util::uint128_t significand, int exponent, bool negative,
   }
   const bool inexact = guard || sticky;
   if ((rounding == 0 && guard && (sticky || (kept & 1))) ||
-      (rounding == 1 && !negative && inexact) || (rounding == 2 && negative && inexact))
+      (rounding == 1 && !negative && inexact) || (rounding == 2 && negative && inexact)) {
     ++kept;
+  }
   int result_exponent = exponent + shift + F::fraction;
   if (kept >= (util::uint128_t{1} << (F::fraction + 1))) {
     kept >>= 1;
     ++result_exponent;
   }
-  if (result_exponent > F::bias)
+  if (result_exponent > F::bias) {
     return div_overflow<Float>(negative, rounding);
+  }
   if (kept < (util::uint128_t{1} << F::fraction)) {
-    if (!(denorm & 2u))
+    if (!(denorm & 2u)) {
       kept = 0;
+    }
     return std::bit_cast<Float>(Bits(sign | static_cast<Bits>(kept)));
   }
   return std::bit_cast<Float>(Bits(sign | (Bits(result_exponent + F::bias) << F::fraction) |
@@ -121,12 +128,15 @@ inline DivisionScaleResult<Float> div_scale(Float value, Float denominator, Floa
   Bits vbits = std::bit_cast<Bits>(value), dbits = std::bit_cast<Bits>(denominator),
        nbits = std::bit_cast<Bits>(numerator);
   if (!(denorm & 1u)) {
-    if (F::exponent(vbits) == 0)
+    if (F::exponent(vbits) == 0) {
       vbits &= F::sign;
-    if (F::exponent(dbits) == 0)
+    }
+    if (F::exponent(dbits) == 0) {
       dbits &= F::sign;
-    if (F::exponent(nbits) == 0)
+    }
+    if (F::exponent(nbits) == 0) {
       nbits &= F::sign;
+    }
   }
   const Bits d = dbits & ~F::sign, n = nbits & ~F::sign;
   const int de = F::exponent(d), ne = F::exponent(n);
@@ -148,12 +158,14 @@ inline DivisionScaleResult<Float> div_scale(Float value, Float denominator, Floa
   } else if (ne <= (sizeof(Float) == 4 ? 24 : 53)) {
     adjustment = F::scale;
   }
-  if (d == 0 || n == 0)
+  if (d == 0 || n == 0) {
     return {std::bit_cast<Float>(Bits(F::sign | F::infinity | F::quiet)), post_scale};
-  if ((vbits & ~F::sign) >= F::infinity)
+  }
+  if ((vbits & ~F::sign) >= F::infinity) {
     return {std::bit_cast<Float>(
                 Bits(vbits | (quiet_nan && (vbits & F::fraction_mask) ? F::quiet : 0))),
             post_scale};
+  }
   const int ve = F::exponent(vbits);
   const Bits significand = (vbits & F::fraction_mask) | (ve ? Bits{1} << F::fraction : 0);
   return {div_round<Float>(significand, (ve ? ve : 1) - F::bias - F::fraction + adjustment,
@@ -174,22 +186,28 @@ inline Float div_fmas(Float first, Float second, Float third, bool post_scale, u
   const Bits a = std::bit_cast<Bits>(first), b = std::bit_cast<Bits>(second),
              c = std::bit_cast<Bits>(third);
   const Bits am = a & ~F::sign, bm = b & ~F::sign, cm = c & ~F::sign;
-  if (am > F::infinity)
+  if (am > F::infinity) {
     return std::bit_cast<Float>(Bits(a | F::quiet));
-  if (bm > F::infinity)
+  }
+  if (bm > F::infinity) {
     return std::bit_cast<Float>(Bits(b | F::quiet));
+  }
   const bool product_negative = ((a ^ b) & F::sign) != 0;
   const bool addend_negative = (c & F::sign) != 0;
   if ((am == F::infinity && bm == 0) || (bm == F::infinity && am == 0) ||
       ((am == F::infinity || bm == F::infinity) && cm == F::infinity &&
-       product_negative != addend_negative))
+       product_negative != addend_negative)) {
     return std::bit_cast<Float>(Bits(F::sign | F::infinity | F::quiet));
-  if (cm > F::infinity)
+  }
+  if (cm > F::infinity) {
     return std::bit_cast<Float>(Bits(c | F::quiet));
-  if (am == F::infinity || bm == F::infinity)
+  }
+  if (am == F::infinity || bm == F::infinity) {
     return std::bit_cast<Float>(Bits((product_negative ? F::sign : 0) | F::infinity));
-  if (cm == F::infinity)
+  }
+  if (cm == F::infinity) {
     return third;
+  }
   const int ae = F::exponent(a), be = F::exponent(b), ce = F::exponent(c);
   const Bits as = (a & F::fraction_mask) | (ae ? Bits{1} << F::fraction : 0);
   const Bits bs = (b & F::fraction_mask) | (be ? Bits{1} << F::fraction : 0);
@@ -202,10 +220,12 @@ inline Float div_fmas(Float first, Float second, Float third, bool post_scale, u
     const bool negative = product_negative == addend_negative ? product_negative : rounding == 2;
     return std::bit_cast<Float>(Bits(negative ? F::sign : 0));
   }
-  if (product == 0)
+  if (product == 0) {
     return div_round<Float>(addend, se + adjustment, addend_negative, rounding, denorm);
-  if (addend == 0)
+  }
+  if (addend == 0) {
     return div_round<Float>(product, pe + adjustment, product_negative, rounding, denorm);
+  }
   const int pt = div_top_bit(product), ct = div_top_bit(addend);
   const int exponent = pe + pt > se + ct ? pe + pt : se + ct;
   product = div_shift_right_jam(product << (126 - pt), exponent - pe - pt);
@@ -229,27 +249,36 @@ inline Float div_fixup(Float quotient, Float denominator, Float numerator, uint3
   const Bits p = std::bit_cast<Bits>(quotient);
   Bits d = std::bit_cast<Bits>(denominator), n = std::bit_cast<Bits>(numerator);
   if (!(denorm & 1u)) {
-    if (F::exponent(d) == 0)
+    if (F::exponent(d) == 0) {
       d &= F::sign;
-    if (F::exponent(n) == 0)
+    }
+    if (F::exponent(n) == 0) {
       n &= F::sign;
+    }
   }
   const Bits dm = d & ~F::sign, nm = n & ~F::sign;
   const Bits sign = (d ^ n) & F::sign;
-  if (nm > F::infinity)
+  if (nm > F::infinity) {
     return std::bit_cast<Float>(Bits(n | F::quiet));
-  if (dm > F::infinity)
+  }
+  if (dm > F::infinity) {
     return std::bit_cast<Float>(Bits(d | F::quiet));
-  if ((dm == 0 && nm == 0) || (dm == F::infinity && nm == F::infinity))
+  }
+  if ((dm == 0 && nm == 0) || (dm == F::infinity && nm == F::infinity)) {
     return std::bit_cast<Float>(Bits(F::sign | F::infinity | F::quiet));
-  if (dm == 0 || nm == F::infinity)
+  }
+  if (dm == 0 || nm == F::infinity) {
     return std::bit_cast<Float>(Bits(sign | F::infinity));
-  if (nm == 0 || dm == F::infinity)
+  }
+  if (nm == 0 || dm == F::infinity) {
     return std::bit_cast<Float>(sign);
-  if (F::exponent(n) - F::exponent(d) < -(F::bias + F::fraction))
+  }
+  if (F::exponent(n) - F::exponent(d) < -(F::bias + F::fraction)) {
     return div_round<Float>(1, -2 * F::bias - 2 * F::fraction, sign != 0, rounding, denorm);
-  if ((p & ~F::sign) >= F::infinity)
+  }
+  if ((p & ~F::sign) >= F::infinity) {
     return div_overflow<Float>(sign != 0, rounding);
+  }
   return std::bit_cast<Float>(Bits(sign | (p & ~F::sign)));
 }
 
@@ -262,25 +291,32 @@ inline float div_fixup_f16(float quotient, float denominator, float numerator,
   uint32_t numerator_bits = std::bit_cast<uint32_t>(numerator);
   if (!(denorm & 1u)) {
     // Inputs are promoted F16, whose minimum normal has F32 bits 0x38800000.
-    if ((denominator_bits & 0x7fffffffu) < 0x38800000u)
+    if ((denominator_bits & 0x7fffffffu) < 0x38800000u) {
       denominator_bits &= 0x80000000u;
-    if ((numerator_bits & 0x7fffffffu) < 0x38800000u)
+    }
+    if ((numerator_bits & 0x7fffffffu) < 0x38800000u) {
       numerator_bits &= 0x80000000u;
+    }
   }
   const uint32_t denominator_magnitude = denominator_bits & 0x7fffffffu;
   const uint32_t numerator_magnitude = numerator_bits & 0x7fffffffu;
   const uint32_t sign = (denominator_bits ^ numerator_bits) & 0x80000000u;
-  if (numerator_magnitude > 0x7f800000u)
+  if (numerator_magnitude > 0x7f800000u) {
     return std::bit_cast<float>(numerator_bits | 0x00400000u);
-  if (denominator_magnitude > 0x7f800000u)
+  }
+  if (denominator_magnitude > 0x7f800000u) {
     return std::bit_cast<float>(denominator_bits | 0x00400000u);
+  }
   if ((denominator_magnitude == 0 && numerator_magnitude == 0) ||
-      (denominator_magnitude == 0x7f800000u && numerator_magnitude == 0x7f800000u))
+      (denominator_magnitude == 0x7f800000u && numerator_magnitude == 0x7f800000u)) {
     return std::bit_cast<float>(0xffc00000u);
-  if (denominator_magnitude == 0 || numerator_magnitude == 0x7f800000u)
+  }
+  if (denominator_magnitude == 0 || numerator_magnitude == 0x7f800000u) {
     return std::bit_cast<float>(sign | 0x7f800000u);
-  if (numerator_magnitude == 0 || denominator_magnitude == 0x7f800000u)
+  }
+  if (numerator_magnitude == 0 || denominator_magnitude == 0x7f800000u) {
     return std::bit_cast<float>(sign);
+  }
   const uint32_t magnitude = std::bit_cast<uint32_t>(quotient) & 0x7fffffffu;
   if (magnitude >= 0x7f800000u) {
     const bool to_infinity = rounding == 0 || (rounding == 1 && !sign) || (rounding == 2 && sign);
@@ -298,16 +334,20 @@ inline Float div_apply_omod(Float value, uint32_t rounding, uint32_t omod) {
   using F = DivisionFormat<Float>;
   using Bits = typename F::Bits;
   const Bits bits = std::bit_cast<Bits>(value);
-  if (omod == 0 || (bits & ~F::sign) >= F::infinity)
+  if (omod == 0 || (bits & ~F::sign) >= F::infinity) {
     return value;
+  }
   const int exponent = F::exponent(bits);
-  if (exponent == 0)
+  if (exponent == 0) {
     return Float{0};
+  }
   const int adjusted = exponent + (omod == 3 ? -1 : static_cast<int>(omod));
-  if (adjusted <= 0)
+  if (adjusted <= 0) {
     return std::bit_cast<Float>(Bits(bits & F::sign));
-  if (adjusted >= 2 * F::bias + 1)
+  }
+  if (adjusted >= 2 * F::bias + 1) {
     return div_overflow<Float>((bits & F::sign) != 0, rounding);
+  }
   return std::bit_cast<Float>(Bits((bits & ~F::infinity) | (Bits(adjusted) << F::fraction)));
 }
 

@@ -35,10 +35,11 @@ inline util::FailureOr<amdgpu::ArithmeticPolicy>
 parse_arithmetic_config(std::string_view semantics, util::DiagnosticEmitter emit_error,
                         std::string_view field = "arithmetic.semantics") {
   auto policy = amdgpu::parse_arithmetic_policy(semantics);
-  if (policy.failed())
+  if (policy.failed()) {
     return emit_error.emit()
            << field << ": Arithmetic semantics must be loose, bit_exact_empirical_allow_loose, "
            << "bit_exact_empirical_no_fp_status, bit_exact_empirical, or compatibility";
+  }
   return policy;
 }
 
@@ -62,12 +63,15 @@ enum class WaitChecking { Off, On, All };
 
 /// @brief Parse the on/off/all launch modes, distinct from per-CU warn/off policies.
 inline std::optional<WaitChecking> parse_wait_checking(std::string_view value) {
-  if (value == "off")
+  if (value == "off") {
     return WaitChecking::Off;
-  if (value == "on")
+  }
+  if (value == "on") {
     return WaitChecking::On;
-  if (value == "all")
+  }
+  if (value == "all") {
     return WaitChecking::All;
+  }
   return std::nullopt;
 }
 
@@ -76,8 +80,9 @@ inline std::optional<uint32_t> parse_uint32(std::string_view text) {
   uint32_t value = 0;
   const std::from_chars_result result =
       std::from_chars(text.data(), text.data() + text.size(), value);
-  if (result.ec != std::errc{} || result.ptr != text.data() + text.size())
+  if (result.ec != std::errc{} || result.ptr != text.data() + text.size()) {
     return std::nullopt;
+  }
   return value;
 }
 
@@ -88,13 +93,15 @@ inline std::optional<uint32_t> parse_uint32(std::string_view text) {
 inline util::FailureOr<std::string> read_config_file(const std::string &path,
                                                      util::DiagnosticEmitter emit_error) {
   std::ifstream file(path);
-  if (!file.is_open())
+  if (!file.is_open()) {
     return emit_error.emit() << "Cannot open file: " << path;
+  }
 
   std::ostringstream contents;
   file >> std::noskipws >> contents.rdbuf();
-  if (file.bad() || !file.eof())
+  if (file.bad() || !file.eof()) {
     return emit_error.emit() << "Cannot read file: " << path;
+  }
   return contents.str();
 }
 
@@ -120,10 +127,12 @@ auto with_parsed_simulation_config_json(const std::string &json, const std::stri
   options.force_defaults = true;
   flatbuffers::Parser parser(options);
   parser.opts.skip_unexpected_fields_in_json = skip_unexpected_fields;
-  if (!parser.Parse(schema_text.c_str()))
+  if (!parser.Parse(schema_text.c_str())) {
     return emit_error.emit() << "Failed to parse schema: " << parser.error_;
-  if (!parser.Parse(json.c_str()))
+  }
+  if (!parser.Parse(json.c_str())) {
     return emit_error.emit() << "Failed to parse JSON config: " << parser.error_;
+  }
   const fb::SimulationConfig *config =
       flatbuffers::GetRoot<fb::SimulationConfig>(parser.builder_.GetBufferPointer());
   return std::forward<Callback>(callback)(config);
@@ -134,13 +143,15 @@ inline Result validate_arithmetic_config_json(const std::string &json,
                                               const std::string &schema_text,
                                               util::DiagnosticEmitter emit_error) {
   auto policy = json_top_level_field(json, "arithmetic", emit_error);
-  if (policy.failed())
+  if (policy.failed()) {
     return Result::failure();
+  }
   flatbuffers::Parser parser;
   if (!parser.Parse(schema_text.c_str()) ||
       !parser.SetRootType("rocjitsu.fb.ArithmeticPolicyConfig") ||
-      !parser.Parse(policy.value().c_str()))
+      !parser.Parse(policy.value().c_str())) {
     return emit_error.emit() << "Invalid arithmetic config: " << parser.error_;
+  }
   return Result::success();
 }
 
@@ -150,8 +161,9 @@ inline Result validate_arithmetic_config_json(const std::string &json,
 /// describe a compute GPU with apertures big enough for the driver to work with.
 inline PciDeviceConfig pci_device_from_fb(const fb::PciDeviceInfo *pci) {
   PciDeviceConfig config;
-  if (pci == nullptr)
+  if (pci == nullptr) {
     return config;
+  }
 
   config.class_code = pci->class_code();
   config.subsystem_vendor_id = pci->subsystem_vendor_id();
@@ -172,8 +184,9 @@ inline util::FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceIn
                                                            std::string_view json_path,
                                                            util::DiagnosticEmitter emit_error) {
   KfdDeviceConfig config;
-  if (device == nullptr)
+  if (device == nullptr) {
     return config;
+  }
 
   config.present = true;
   config.gpu_id = device->gpu_id();
@@ -182,8 +195,9 @@ inline util::FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceIn
   config.device_id = device->device_id();
   config.family_id = device->family_id();
   config.unique_id = device->unique_id();
-  if (device->marketing_name())
+  if (device->marketing_name()) {
     config.marketing_name = device->marketing_name()->str();
+  }
   config.drm_render_minor = device->drm_render_minor();
   config.revision_id = device->revision_id();
   config.pci_revision_id = device->pci_revision_id();
@@ -230,9 +244,10 @@ inline util::FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceIn
   config.num_sdma_engines = device->num_sdma_engines();
   config.num_sdma_xgmi_engines = device->num_sdma_xgmi_engines();
   config.num_sdma_queues_per_engine = device->num_sdma_queues_per_engine();
-  if (config.num_sdma_engines != 0 && config.num_sdma_queues_per_engine == 0)
+  if (config.num_sdma_engines != 0 && config.num_sdma_queues_per_engine == 0) {
     return emit_error.emit() << json_path << ".num_sdma_queues_per_engine must be nonzero when "
                              << json_path << ".num_sdma_engines is nonzero";
+  }
   config.num_cp_queues = device->num_cp_queues();
   config.max_engine_clk_fcompute = device->max_engine_clk_fcompute();
   config.location_id = device->location_id();
@@ -243,13 +258,15 @@ inline util::FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceIn
   config.debug_prop = device->debug_prop();
   if (const auto *versions = device->ip_versions()) {
     for (const auto *version : *versions) {
-      if (version->hardware_id() == 0 || version->major() == 0)
+      if (version->hardware_id() == 0 || version->major() == 0) {
         return emit_error.emit() << json_path
                                  << ".ip_versions requires nonzero hardware_id and major";
+      }
       if (std::ranges::any_of(config.ip_versions, [&](const DeviceIpVersion &existing) {
             return existing.hardware_id == version->hardware_id();
-          }))
+          })) {
         return emit_error.emit() << json_path << ".ip_versions contains a duplicate hardware_id";
+      }
       config.ip_versions.push_back(
           {version->hardware_id(), version->major(), version->minor(), version->revision()});
     }

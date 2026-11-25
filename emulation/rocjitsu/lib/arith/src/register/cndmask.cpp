@@ -43,13 +43,9 @@ int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  // Half-word selection is faster in the portable path than AVX2's
-  // shift/merge/masked-word stores, including with nondefault selectors.
-  if constexpr (!Half) {
-    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-      rocjitsu::arith::cndmask_x86_64_v3(exec_mask, mode, d[0], a[0], b[0], condition);
-      return RJ_ARITH_SUCCESS;
-    }
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::cndmask_x86_64_v3<Half>(exec_mask, mode, d[0], a[0], b[0], condition);
+    return RJ_ARITH_SUCCESS;
   }
 #endif
 
