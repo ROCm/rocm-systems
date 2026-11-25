@@ -282,6 +282,124 @@ TEST(MfmaHalf, Gfx950Bf16ClampsFiniteOverflowAndPreservesInfinities) {
   }
 }
 
+TEST(MfmaHalf, Gfx950BatchedBf16ClampsSelectedFiniteOperands) {
+  std::array<uint32_t, 64> a, b;
+  std::array<std::array<uint32_t, 64>, 32> result;
+  const uint32_t *sources_a[] = {a.data(), a.data()};
+  const uint32_t *sources_b[] = {b.data(), b.data()};
+  uint32_t *dest[32];
+  const uint32_t *acc[32];
+  for (int reg = 0; reg < 32; ++reg) {
+    acc[reg] = dest[reg] = result[reg].data();
+  }
+
+  a.fill(0x7f7f7f7fu);
+  b.fill(0x40004000u);
+  b[33] = 0x7f807f80u;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (std::array<uint32_t, 64> &reg : result) {
+      reg.fill(0);
+    }
+    const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_LOOSE | RJ_ARITH_FP16_OVFL;
+    ASSERT_EQ(rj_arith_v_mfma_f32_32x32x4_2b_bf16_w64_gfx950(flags, 2u << 7, dest, sources_a,
+                                                             sources_b, acc),
+              RJ_ARITH_SUCCESS);
+    for (const std::array<uint32_t, 64> &reg : result) {
+      for (int lane = 0; lane < 64; ++lane) {
+        EXPECT_EQ(reg[lane], lane % 32 == 1 ? 0x7f800000u : 0x7f7fffffu);
+      }
+    }
+  }
+}
+
+TEST(MfmaHalf, Bf16SpecialValuesAndFallbacks) {
+  // Exercise Zen4 vdpbf16ps guard fallbacks (subnormal C, subnormal/extreme BF16 exponents,
+  // signed zero, NaN/Inf, and FP16_OVFL clamping) against independent expected values.
+  struct Case {
+    uint16_t a, b;
+    uint32_t c;
+    bool clamp;
+    bool exact_bits;
+    uint32_t expected_bits;
+  };
+  auto check_shape = [&]<int OutputRegs, int InputRegs, int K>(Entry entry) {
+    // Independent expected values for uniform A, B, C across all K products.
+    const auto bf16_to_f32 = [](uint16_t bits) {
+      return std::bit_cast<float>(uint32_t(bits) << 16);
+    };
+    const auto fma_k = [&](uint16_t a_bits, uint16_t b_bits, uint32_t c_bits) {
+      float sum = std::bit_cast<float>(c_bits);
+      const float fa = bf16_to_f32(a_bits);
+      const float fb = bf16_to_f32(b_bits);
+      for (int k = 0; k < K; ++k) {
+        sum = std::fma(fa, fb, sum);
+      }
+      return std::bit_cast<uint32_t>(sum);
+    };
+    const Case cases[] = {
+        {0x0000, 0x0000, 0x00000001u, false, true, 0x00000001u}, // +subnormal C preserved
+        {0x0000, 0x0000, 0x80000001u, false, true, 0x80000001u}, // -subnormal C preserved
+        {0x0000, 0x0000, 0x007fffffu, false, true, 0x007fffffu}, // max subnormal C preserved
+        {0x0001, 0x3f80, 0x00000000u, false, true, fma_k(0x0001, 0x3f80, 0)},  // BF16 subnormal A
+        {0x3f80, 0x0001, 0x00000000u, false, true, fma_k(0x3f80, 0x0001, 0)},  // BF16 subnormal B
+        {0x0080, 0x3f80, 0x00000000u, false, false, fma_k(0x0080, 0x3f80, 0)}, // exp=1 (< 96)
+        {0x7f7f, 0x3f80, 0x00000000u, false, true, 0x7f800000u}, // exp=254 (> 159), K>=4 -> +Inf
+        {0x7f7f, 0x4000, 0x00000000u, true, true, 0x7f7fffffu},  // finite overflow clamped
+        {0x7f80, 0x3f80, 0x00000000u, true, true, 0x7f800000u},  // infinite input preserved
+        {0x0000, 0x8000, 0x80000000u, false, true, 0x80000000u}, // signed zero (-0 + +0*-0)
+        {0x7fc0, 0x3f80, 0x3f800000u, false, false, kF32QuietNaNBits}, // qNaN A propagates
+    };
+    for (const Case tc : cases) {
+      std::array<std::array<uint32_t, 64>, InputRegs> a_buf, b_buf;
+      for (std::array<uint32_t, 64> &r : a_buf) {
+        r.fill(uint32_t(tc.a) * 0x10001u);
+      }
+      for (std::array<uint32_t, 64> &r : b_buf) {
+        r.fill(uint32_t(tc.b) * 0x10001u);
+      }
+      std::array<const uint32_t *, InputRegs> a_ptrs, b_ptrs;
+      for (int i = 0; i < InputRegs; ++i) {
+        a_ptrs[i] = a_buf[i].data();
+        b_ptrs[i] = b_buf[i].data();
+      }
+      const float expected_f = std::bit_cast<float>(tc.expected_bits);
+      for (uint64_t cpu : supported_cpu_levels()) {
+        for (bool in_place : {false, true}) {
+          std::array<std::array<uint32_t, 64>, OutputRegs> c_buf, d_buf{};
+          for (std::array<uint32_t, 64> &r : c_buf) {
+            r.fill(tc.c);
+          }
+          std::array<const uint32_t *, OutputRegs> c_ptrs;
+          std::array<uint32_t *, OutputRegs> d_ptrs;
+          for (int i = 0; i < OutputRegs; ++i) {
+            c_ptrs[i] = c_buf[i].data();
+            d_ptrs[i] = in_place ? c_buf[i].data() : d_buf[i].data();
+          }
+          const uint64_t flags =
+              cpu | RJ_ARITH_SEMANTICS_LOOSE | (tc.clamp ? RJ_ARITH_FP16_OVFL : 0);
+          ASSERT_EQ(entry(flags, 0, d_ptrs.data(), a_ptrs.data(), b_ptrs.data(), c_ptrs.data()),
+                    RJ_ARITH_SUCCESS);
+          const std::array<std::array<uint32_t, 64>, OutputRegs> &got = in_place ? c_buf : d_buf;
+          for (int r = 0; r < OutputRegs; ++r) {
+            for (int lane = 0; lane < 64; ++lane) {
+              if (tc.exact_bits) {
+                EXPECT_EQ(got[r][lane], tc.expected_bits);
+              } else {
+                expect_f32(got[r][lane], expected_f, RJ_ARITH_SEMANTICS_LOOSE, /*atol=*/1e-5f,
+                           /*rtol=*/1e-5f);
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  check_shape.template operator()<4, 2, 16>(rj_arith_v_mfma_f32_16x16x16_bf16_w64_gfx950);
+  check_shape.template operator()<4, 4, 32>(rj_arith_v_mfma_f32_16x16x32_bf16_w64);
+  check_shape.template operator()<16, 4, 16>(rj_arith_v_mfma_f32_32x32x16_bf16_w64);
+  check_shape.template operator()<4, 2, 4>(rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64_gfx950);
+}
+
 TEST(MfmaHalf, mfma_f32_32x32x4_2b_f16) {
   arithmetic<32, 4, 2, false>(rj_arith_v_mfma_f32_32x32x4_2b_f16_w64_gfx950, UINT32_MAX,
                               rj_arith_v_mfma_f32_32x32x4_2b_f16_w64);
