@@ -367,7 +367,7 @@ def test_get_diff_changed_files_diffs_against_given_base(monkeypatch):
 def test_get_diff_changed_files_skips_missing_files(monkeypatch):
     monkeypatch.setattr(ctc, "_git", lambda git_args, cwd=None: _DIFF)
     monkeypatch.setattr(ctc.os.path, "isfile", lambda p: False)
-    assert ctc.get_diff_changed_files("/repo", None) == {}
+    assert ctc.get_diff_changed_files("/repo", "HEAD") == {}
 
 
 def test_get_diff_changed_files_single_line_hunk(monkeypatch):
@@ -382,7 +382,7 @@ def test_get_diff_changed_files_single_line_hunk(monkeypatch):
     )
     monkeypatch.setattr(ctc, "_git", lambda git_args, cwd=None: diff)
     monkeypatch.setattr(ctc.os.path, "isfile", lambda p: True)
-    changed = ctc.get_diff_changed_files("/repo", None)
+    changed = ctc.get_diff_changed_files("/repo", "HEAD")
     assert changed["x.cpp"].line_ranges == [(7, 7)]
 
 
@@ -416,7 +416,7 @@ def test_get_changed_files_untracked_overrides_diff_on_same_path(monkeypatch):
     monkeypatch.setattr(
         ctc, "get_untracked_changed_files", lambda repo: {"a.cpp": untracked_version}
     )
-    result = {cf.path: cf for cf in ctc.get_changed_files("/repo", None)}
+    result = {cf.path: cf for cf in ctc.get_changed_files("/repo", "HEAD")}
     assert set(result) == {"a.cpp", "b.cpp"}
     # untracked entry wins for the shared path (dict.update override semantic)
     assert result["a.cpp"] is untracked_version

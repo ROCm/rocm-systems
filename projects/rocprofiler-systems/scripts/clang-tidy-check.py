@@ -142,15 +142,13 @@ def resolve_base(base: str) -> str:
     return get_fork_point() if base == FORK_SELECTOR else base
 
 
-def get_diff_changed_files(repo_root: str, base: str | None) -> dict[str, ChangedFile]:
+def get_diff_changed_files(repo_root: str, base: str) -> dict[str, ChangedFile]:
     """Parse a git diff into per-file changed line ranges.
 
-    Diffs `base` (or HEAD, by default) against the working tree, so the
-    result covers committed changes since `base` plus any staged/unstaged
-    changes on top, in one pass.
+    Diffs `base` against the working tree, so the result covers committed
+    changes since `base` plus any staged/unstaged changes on top, in one pass.
     """
-    ref = base or "HEAD"
-    diff = _git(["diff", "--no-color", "-U0", ref], cwd=repo_root)
+    diff = _git(["diff", "--no-color", "-U0", base], cwd=repo_root)
 
     changed: dict[str, ChangedFile] = {}
     current_path: str | None = None
@@ -205,7 +203,7 @@ def get_untracked_changed_files(repo_root: str) -> dict[str, ChangedFile]:
     return untracked
 
 
-def get_changed_files(repo_root: str, base: str | None) -> list[ChangedFile]:
+def get_changed_files(repo_root: str, base: str) -> list[ChangedFile]:
     """Return changed files: committed/staged/unstaged diff plus new files."""
     changed = get_diff_changed_files(repo_root, base)
     changed.update(get_untracked_changed_files(repo_root))
