@@ -27,6 +27,8 @@ constexpr unsigned kDdaLL128BcDefaultThreads = 512;
 
 RCCL_PARAM(DdaLL128BcThreads, "DDA_LL128_BC_THREADS", kDdaLL128BcDefaultThreads);
 RCCL_PARAM(DdaLL128BcFanOut, "DDA_LL128_BC_FANOUT", 0);
+RCCL_PARAM(DdaDpxWarpsPerPeer, "DDA_DPX_WARPS_PER_PEER", 2);
+RCCL_PARAM(DdaDpxScaleInPct, "DDA_DPX_SCALE_IN_PCT", 25);
 
 namespace {
 
@@ -55,20 +57,39 @@ unsigned ddaLL128BcBlocksPerPeer(size_t chunkSlices, size_t warps, int nPeers, s
   return bpp < 1 ? 1u : (unsigned)bpp;
 }
 
-static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128DpxGeom(ncclComm* comm, size_t totalBytes) {
+using dda::common::DpxWsGeom;
+using dda::common::ddaDpxWsGeom;
+
+struct DpxLaunchGeom {
+  dim3 grid;
+  dim3 block;
+  DpxWsGeom ws;
+};
+
+static inline DpxLaunchGeom ddaBroadcastFabricLL128DpxGeom(ncclComm* comm, size_t totalBytes) {
   const int archThreadsRaw = rcclDdaFabricBcLL128Threads(comm);
   const unsigned archThreads = archThreadsRaw > 0 ? (unsigned)archThreadsRaw : 0;
   const bool envSet = (getenv("RCCL_DDA_LL128_BC_THREADS") != nullptr);
   const unsigned threads = envSet ? ddaLL128BcThreads()
                          : (archThreads > 0 ? archThreads : kDdaLL128BcDefaultThreads);
-  const size_t warps   = threads / (unsigned)kDdaLL128Warp;
-  const int nNonRoot   = comm->nRanks - 2;
-  int nBlocksMax       = (int)ncclBroadcastDdaBlockBudget(comm);
+  const int nwarps   = (int)(threads / (unsigned)kDdaLL128Warp);
+  const int nNonRoot = comm->nRanks - 2;
+  const int budget   = (int)ncclBroadcastDdaBlockBudget(comm);
 
-  const size_t slices = ddaLL128Slices(totalBytes);
-  const size_t cs     = ddaLL128BcDpxChunkSlices(slices, comm->nRanks);
-  const unsigned bpp  = ddaLL128BcBlocksPerPeer(cs, warps, nNonRoot, (size_t)nBlocksMax);
-  return std::make_pair(dim3((unsigned)nNonRoot, bpp), dim3(threads));
+  int wpp = (int)rcclParamDdaDpxWarpsPerPeer();
+  if (wpp < 1) wpp = 1;
+  if (wpp >= nwarps) wpp = nwarps - 1;
+  int pct = (int)rcclParamDdaDpxScaleInPct();
+  if (pct < 1) pct = 1;
+  if (pct > 99) pct = 99;
+
+  // Same-parity non-root peer count (from root's perspective; conservative estimate)
+  const int nSameParityPeers = (nNonRoot + 1) / 2;
+
+  DpxWsGeom ws = ddaDpxWsGeom(nwarps, wpp, pct, nSameParityPeers, budget);
+  dim3 grid((unsigned)ws.gridWidth, (unsigned)ws.bpp);
+  dim3 block(threads);
+  return {grid, block, ws};
 }
 
 static inline std::pair<dim3, dim3> ddaBroadcastFabricLL128Geom(ncclComm* comm, size_t totalBytes) {
@@ -150,18 +171,25 @@ static ncclResult_t ncclBroadcastDdaFabricLL128DpxLaunch(
   const size_t cs     = ddaLL128BcDpxChunkSlices(slices, comm->nRanks);
   const size_t bank   = ddaBankSize(comm->ddaScratchBytes);
 
-  auto [grid, block] = ddaBroadcastFabricLL128DpxGeom(comm, bytes);
+  auto geom = ddaBroadcastFabricLL128DpxGeom(comm, bytes);
+  const auto& grid = geom.grid;
+  const auto& block = geom.block;
+  const auto& ws = geom.ws;
 
   int8_t** peers     = reinterpret_cast<int8_t**>(comm->ddaPeerPtrsDev);
   uint32_t* epochDev = comm->ddaLLEpochDev;
   const int epochLen = comm->ddaLLEpochLen;
   const int nRanks   = comm->nRanks;
 
+  int wpp = (int)rcclParamDdaDpxWarpsPerPeer();
+  if (wpp < 1) wpp = 1;
+
   INFO(NCCL_COLL,
-       "DDA fabric Broadcast LL128 DPX two-shot: nRanks=%d root=%d bytes=%zu slices=%zu "
-       "chunkSlices=%zu grid=%ux%u block=%u bankSize=%zu scaleInSize=%d fanOut=%d",
+       "DDA fabric Broadcast LL128 DPX WS two-shot: nRanks=%d root=%d bytes=%zu slices=%zu "
+       "chunkSlices=%zu grid=%ux%u block=%u bankSize=%zu scaleInSize=%d "
+       "warpsPerPeer=%d suWarps=%d siWarps=%d peersPerBlock=%d",
        nRanks, root, bytes, slices, cs, grid.x, grid.y, block.x, bank,
-       comm->ddaFabricScaleInSize, (int)rcclParamDdaLL128BcFanOut());
+       comm->ddaFabricScaleInSize, wpp, ws.suWarps, ws.siWarps, ws.peersPerBlock);
 
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
   const hipEvent_t stopEvent = rcclTakeAddonStopEvent(comm);
@@ -176,7 +204,8 @@ static ncclResult_t ncclBroadcastDdaFabricLL128DpxLaunch(
     bytes,
     comm->rank, nRanks, root,
     epochDev, epochLen,
-    slices, cs, bank, params, (int)rcclParamDdaLL128BcFanOut());
+    slices, cs, bank, params,
+    wpp, ws.suWarps, ws.siWarps, ws.peersPerBlock);
 
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;
