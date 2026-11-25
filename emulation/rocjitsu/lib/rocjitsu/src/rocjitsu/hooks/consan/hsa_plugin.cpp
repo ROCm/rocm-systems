@@ -74,6 +74,7 @@ struct EntryBinding {
   hsa_executable_symbol_t symbol = {};
   uint64_t kernel_object = 0;
   uint32_t kernarg_alignment = 0;
+  bool dynamic_callstack = false;
   std::shared_ptr<const Manifest> facts;
 };
 
@@ -257,6 +258,7 @@ public:
                               .symbol = {},
                               .kernel_object = 0,
                               .kernarg_alignment = 0,
+                              .dynamic_callstack = false,
                               .facts = {}};
       const std::string symbol = entry.binding.name + ".kd";
       status = core_.hsa_executable_get_symbol_by_name_fn(executable, symbol.c_str(),
@@ -282,6 +284,11 @@ public:
       if (status == HSA_STATUS_SUCCESS) {
         status = core_.hsa_executable_symbol_get_info_fn(
             binding.symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE, &private_bytes);
+      }
+      if (status == HSA_STATUS_SUCCESS && entry.disposition == EntryDisposition::Native) {
+        status = core_.hsa_executable_symbol_get_info_fn(
+            binding.symbol, HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_DYNAMIC_CALLSTACK,
+            &binding.dynamic_callstack);
       }
       uint32_t expected_kernarg = entry.binding.original_kernarg_bytes;
       if (entry.selected) {
@@ -332,11 +339,11 @@ public:
           if (symbol.handle != entry.symbol.handle) {
             continue;
           }
-          // ROCR's v5 API alignment is independent of the metadata note.
-          // Forward that query instead of projecting the note's alignment.
           const uint32_t *original = nullptr;
           if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_SIZE) {
             original = &entry.binding.original_kernarg_bytes;
+          } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_KERNARG_SEGMENT_ALIGNMENT) {
+            original = &entry.kernarg_alignment;
           } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_GROUP_SEGMENT_SIZE) {
             original = &entry.binding.original_group_bytes;
           } else if (attribute == HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_PRIVATE_SEGMENT_SIZE) {
@@ -911,7 +918,8 @@ private:
         const uint16_t acquire = (packet.header >> HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) & 3;
         const uint16_t release_scope =
             (packet.header >> HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE) & 3;
-        if (dimensions.grid != dimensions.workgroup || dimensions.workgroup[0] == 0 ||
+        if (binding->dynamic_callstack || dimensions.grid != dimensions.workgroup ||
+            dimensions.workgroup[0] == 0 ||
             dimensions.workgroup[0] > entry.maximum_workgroup_size ||
             dimensions.workgroup[1] != 1 || dimensions.workgroup[2] != 1 ||
             (entry.required_workgroup_size[0] != 0 &&

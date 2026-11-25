@@ -19,6 +19,9 @@ extern "C" __global__ void sel(unsigned input, unsigned *output) {
   access_lds(input, output);
 }
 
+#if CONSAN_NATIVE_AGPR == 3
+extern "C" __global__ void sib() {}
+#else
 extern "C" __global__
 #if CONSAN_NATIVE_AGPR == 2
     __launch_bounds__(64)
@@ -36,3 +39,4 @@ extern "C" __global__
   access_lds(input, output);
 #endif
 }
+#endif

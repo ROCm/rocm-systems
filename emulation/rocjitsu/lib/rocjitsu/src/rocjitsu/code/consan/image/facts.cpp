@@ -132,8 +132,8 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
   uint64_t previous_descriptor_end = 0;
   for (const ImageEntryFacts &entry : image.entries) {
     const EntryFacts &binding = entry.binding;
-    const uint32_t maximum_vgprs =
-        entry.disposition == EntryDisposition::Native ? native_vgpr_capacity : 256;
+    const bool native = entry.disposition == EntryDisposition::Native;
+    const uint32_t maximum_vgprs = native ? native_vgpr_capacity : 256;
     if (binding.name.size() > limits.string_bytes) {
       return diagnostic.emit() << "entry name exceeds budget";
     }
@@ -147,12 +147,13 @@ Result validate_image_facts(const ImageFacts &image, util::DiagnosticEmitter dia
         !util::is_range_in_bounds(binding.original_entry_offset, 4, image.original_text_bytes) ||
         !util::is_range_in_bounds(binding.prepared_entry_offset, 4, image.prepared_text_bytes) ||
         binding.original_entry_offset % 4 != 0 || binding.prepared_entry_offset % 4 != 0 ||
-        !std::has_single_bit(binding.kernarg_alignment) || binding.original_kernarg_bytes == 0 ||
+        !std::has_single_bit(binding.kernarg_alignment) ||
+        (!native && (binding.original_kernarg_bytes == 0 || entry.original_vgprs == 0)) ||
         binding.maximum_workgroup_size == 0 || binding.maximum_workgroup_size > 1024 ||
         binding.original_group_bytes > 65536 || binding.prepared_group_bytes > 65536 ||
         !valid_workgroup_requirement(binding.required_workgroup_size,
                                      binding.maximum_workgroup_size) ||
-        entry.original_sgprs == 0 || entry.original_sgprs > 106 || entry.original_vgprs == 0 ||
+        entry.original_sgprs == 0 || entry.original_sgprs > 106 ||
         entry.original_vgprs > maximum_vgprs || binding.prepared_sgprs < entry.original_sgprs ||
         binding.prepared_sgprs > 106 || binding.prepared_vgprs < entry.original_vgprs ||
         binding.prepared_vgprs > maximum_vgprs) {

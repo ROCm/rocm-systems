@@ -641,6 +641,92 @@ TEST(ConSanPrepareImageCdna, NativeUnifiedVgprMetadataUsesFullDescriptorCapacity
   }
 }
 
+TEST(ConSanPrepareImageCdna, EmptyNativeSiblingPreservesZeroResourceAbi) {
+  for (const char *name : {"gfx942", "gfx950"}) {
+    SCOPED_TRACE(name);
+    const TargetProfile &target = *target_profile(name);
+    const std::vector<uint8_t> original = test::read_fixture(
+        test::target_fixture_path({.target = name, .wave_size = 64}, "cdna-multi-3"));
+    ASSERT_FALSE(original.empty());
+    const AmdGpuCodeObject object(original.data(), original.size());
+    ASSERT_TRUE(object.is_valid());
+    ASSERT_EQ(object.text_sections().size(), 1u);
+    const Section &text = *object.text_sections().front();
+    const std::vector<KernelDescriptorInfo> kernels =
+        scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+    ASSERT_EQ(kernels.size(), 2u);
+    const std::vector<KernelDescriptorInfo>::const_iterator sibling =
+        std::ranges::find(kernels, std::string("sib"), &KernelDescriptorInfo::kernel_name);
+    ASSERT_NE(sibling, kernels.end());
+    EXPECT_EQ(sibling->descriptor.kernarg_size, 0u);
+    const FailureOr<amdhsa::MetadataDocument> document = amdhsa::MetadataDocument::parse(original);
+    ASSERT_TRUE(document.succeeded());
+    const amdhsa::MetadataValue *entries = document.value().root().field("amdhsa.kernels");
+    ASSERT_NE(entries, nullptr);
+    const amdhsa::MetadataValue *sibling_metadata = nullptr;
+    for (const amdhsa::MetadataValue &entry : entries->array) {
+      if (entry.text_field_is(".name", "sib")) {
+        sibling_metadata = &entry;
+      }
+    }
+    ASSERT_NE(sibling_metadata, nullptr);
+    EXPECT_EQ(sibling_metadata->integer_field(".kernarg_segment_size"), 0u);
+    EXPECT_EQ(sibling_metadata->integer_field(".vgpr_count"), 0u);
+    const amdhsa::MetadataValue *arguments = sibling_metadata->field(".args");
+    if (arguments != nullptr) {
+      ASSERT_EQ(arguments->kind, amdhsa::MetadataValue::Kind::Array);
+      EXPECT_TRUE(arguments->array.empty());
+    }
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, *sibling, nullptr, MetadataPolicy::Native);
+    ASSERT_TRUE(metadata.succeeded());
+    EXPECT_EQ(metadata.value().vgprs, 0u);
+    EXPECT_TRUE(inspect_metadata(original, *sibling).failed());
+    const FailureOr<NativeImageInventory> inventory = inspect_native_image(original, name);
+    ASSERT_TRUE(inventory.succeeded());
+    ASSERT_EQ(inventory.value().entries.size(), 2u);
+    const std::vector<ImageEntryFacts>::const_iterator native_inventory = std::ranges::find(
+        inventory.value().entries, sibling->descriptor_file_offset, &ImageEntryFacts::key);
+    ASSERT_NE(native_inventory, inventory.value().entries.end());
+    EXPECT_EQ(native_inventory->binding.original_kernarg_bytes, 0u);
+    EXPECT_EQ(native_inventory->original_vgprs, 0u);
+    EXPECT_FALSE(native_inventory->selected);
+
+    const std::array<std::string_view, 1> selected = {"sel"};
+    InputError error;
+    const FailureOr<PreparedImageArtifact> artifact =
+        prepare_image(original, target, selected, error);
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    const ImageEntryFacts *native =
+        find_image_entry(artifact.value().facts, sibling->descriptor_file_offset);
+    ASSERT_NE(native, nullptr);
+    EXPECT_EQ(native->disposition, EntryDisposition::Native);
+    EXPECT_EQ(native->binding.original_kernarg_bytes, 0u);
+    EXPECT_EQ(native->original_vgprs, 0u);
+    EXPECT_EQ(native->binding.prepared_vgprs, 0u);
+    EXPECT_FALSE(native->selected);
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(verify_artifact_images(artifact.value().facts, original, artifact.value().image,
+                                       diagnostic.emitter())
+                    .succeeded())
+        << diagnostic.message();
+    const FailureOr<std::vector<uint8_t>> encoded =
+        encode_image_facts(artifact.value().facts, diagnostic.emitter());
+    ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+    const FailureOr<ImageFacts> decoded = decode_image_facts(encoded.value(), diagnostic.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+    EXPECT_EQ(decoded.value(), artifact.value().facts);
+    const FailureOr<std::vector<uint8_t>> reencoded = encode_image_facts(decoded.value());
+    ASSERT_TRUE(reencoded.succeeded());
+    EXPECT_EQ(reencoded.value(), encoded.value());
+
+    // The argument-pointer bootstrap remains restricted to selected kernels
+    // with a nonempty argument block.
+    const std::array<std::string_view, 1> select_empty = {"sib"};
+    EXPECT_TRUE(prepare_image(original, target, select_empty, error).failed());
+  }
+}
+
 TEST(ConSanPrepareImageCdna, NativeMetadataRejectsCountsAboveDescriptorCapacity) {
   for (const char *name : {"gfx942", "gfx950"}) {
     SCOPED_TRACE(name);

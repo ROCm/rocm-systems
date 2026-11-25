@@ -96,6 +96,8 @@ Register counts and kernarg size in the prepared descriptor and AMDHSA note
 are updated together by the shared code-object editor. Missing fields or integer
 encodings too narrow for the requested sizes reject preparation before artifact
 publication. ConSan keeps its own target, argument, and launch admission checks.
+Unselected native entries can retain zero-byte kernarg segments and zero VGPR
+usage; selected entries still require the resources needed for instrumentation.
 
 The compiled probes use [`DeviceWaveState`](../lib/rocjitsu/src/rocjitsu/code/patch/consan/wave_state.h)
 for counters owned by each wave. State persists in runtime-owned memory across
@@ -117,6 +119,11 @@ ABI and prepared resource plan. Known unselected entries retain their original
 packet, resources and completion signal and are native/uncovered. Unknown kernel
 objects are rejected. One module, a controlled queue, nonoverlap and dedicated
 completion signals remain required, including for native siblings.
+For a bound symbol, the kernarg alignment query reports the maximum of the
+original metadata alignment and ROCr's alignment, matching packet admission.
+Native siblings using a dynamic callstack can remain in the prepared image, but
+the controlled runtime rejects their dispatches because it supports only the
+static private-segment size.
 Admission recognizes a native completion already visible to the application even
 if the observer has not yet processed it. The observer retains its signal lease
 until its wait returns, so callers still drain before releasing that signal.

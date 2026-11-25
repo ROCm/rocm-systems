@@ -177,7 +177,7 @@ foreach(
             list(APPEND _target_fixtures ${_image})
         endforeach()
         if(_legacy)
-            foreach(_native_agpr IN ITEMS 0 1 2)
+            foreach(_native_agpr IN ITEMS 0 1 2 3)
                 set(_bundle ${_directory}/cdna-multi-${_native_agpr}.bundle)
                 set(_image ${_directory}/cdna-multi-${_native_agpr}.hsaco)
                 add_custom_command(

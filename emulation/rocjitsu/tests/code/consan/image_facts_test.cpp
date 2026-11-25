@@ -209,6 +209,70 @@ TEST(ConSanImageFacts, NativeKernargAlignmentPreservesSmallPowersOfTwo) {
   }
 }
 
+TEST(ConSanImageFacts, NativeZeroKernargAndVgprUsageRoundTrip) {
+  for (const TargetProfile &target : kNativeLdsTargets) {
+    SCOPED_TRACE(target.name);
+    for (const std::array<uint32_t, 2> resources :
+         {std::array<uint32_t, 2>{0, 8}, {16, 0}, {0, 0}}) {
+      SCOPED_TRACE(resources[0]);
+      SCOPED_TRACE(resources[1]);
+      ImageFacts image =
+          qualified_image(target, target.default_wave_size, ScopeKind::NativeLdsNoSynchronization);
+      ImageEntryFacts &native = image.entries.back();
+      native.binding.original_kernarg_bytes = resources[0];
+      native.original_vgprs = resources[1];
+      native.binding.prepared_vgprs = resources[1];
+      util::StringDiagnostic diagnostic;
+      const FailureOr<std::vector<uint8_t>> encoded =
+          encode_image_facts(image, diagnostic.emitter());
+      ASSERT_TRUE(encoded.succeeded()) << diagnostic.message();
+      const FailureOr<ImageFacts> decoded =
+          decode_image_facts(encoded.value(), diagnostic.emitter());
+      ASSERT_TRUE(decoded.succeeded()) << diagnostic.message();
+      EXPECT_EQ(decoded.value(), image);
+      const FailureOr<std::vector<uint8_t>> reencoded = encode_image_facts(decoded.value());
+      ASSERT_TRUE(reencoded.succeeded());
+      EXPECT_EQ(reencoded.value(), encoded.value());
+    }
+  }
+}
+
+TEST(ConSanImageFacts, SelectedEntriesRetainNonemptyKernargRequirement) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &selected = image.entries.front();
+  selected.binding.original_kernarg_bytes = 0;
+  selected.selected->entry = selected.binding;
+  EXPECT_TRUE(validate_manifest(*selected.selected).failed());
+  EXPECT_TRUE(validate_image_facts(image).failed());
+  EXPECT_TRUE(encode_image_facts(image).failed());
+}
+
+TEST(ConSanImageFacts, SelectedEntriesRetainNonzeroOriginalVgprRequirement) {
+  for (const uint32_t prepared_vgprs : {0u, 8u}) {
+    SCOPED_TRACE(prepared_vgprs);
+    ImageFacts image = example_image();
+    ImageEntryFacts &selected = image.entries.front();
+    selected.original_vgprs = 0;
+    selected.binding.prepared_vgprs = prepared_vgprs;
+    selected.selected->entry = selected.binding;
+    EXPECT_EQ(validate_manifest(*selected.selected).succeeded(), prepared_vgprs != 0);
+    EXPECT_TRUE(validate_image_facts(image).failed());
+    EXPECT_TRUE(encode_image_facts(image).failed());
+  }
+}
+
+TEST(ConSanImageFacts, NativeZeroVgprUsageCannotChangeDuringPreparation) {
+  ImageFacts image = example_image();
+  ImageEntryFacts &native = image.entries.back();
+  native.original_vgprs = 0;
+  native.binding.prepared_vgprs = 0;
+  ASSERT_TRUE(validate_image_facts(image).succeeded());
+  native.binding.prepared_vgprs = 1;
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(validate_image_facts(image, diagnostic.emitter()).failed());
+  EXPECT_EQ(diagnostic.message(), "native entry changes ABI or resources");
+}
+
 TEST(ConSanImageFacts, NativeVgprsPreserveTheGfx1250AddressableRange) {
   for (const uint32_t vgprs : {384u, 1024u}) {
     SCOPED_TRACE(vgprs);

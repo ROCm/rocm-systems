@@ -106,9 +106,9 @@ bool parse(std::span<const uint8_t> image, const KernelDescriptorInfo &kernel,
   const std::optional<uint32_t> vgprs = entry.integer_field(".vgpr_count");
   const uint32_t allocated_vgpr_units = 1 + (kernel.descriptor.compute_pgm_rsrc1 & 63);
   const bool valid_vgprs =
-      vgprs && *vgprs != 0 &&
-      (policy == MetadataPolicy::Native ? *vgprs <= allocated_vgpr_units * granule
-                                        : (*vgprs + granule - 1) / granule == allocated_vgpr_units);
+      vgprs && (policy == MetadataPolicy::Native
+                    ? *vgprs <= allocated_vgpr_units * granule
+                    : *vgprs != 0 && (*vgprs + granule - 1) / granule == allocated_vgpr_units);
   const bool is_cdna =
       target->arch == rocjitsu::IsaFamily::Cdna3 || target->arch == rocjitsu::IsaFamily::Cdna4;
   if (is_cdna && policy == MetadataPolicy::Native) {
