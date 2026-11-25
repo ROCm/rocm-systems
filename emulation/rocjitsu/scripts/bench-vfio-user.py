@@ -250,6 +250,7 @@ class VfioUserClient:
     def __init__(self, path: str, timeout: float = 30.0):
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.settimeout(timeout)
+        self.timeout = timeout
         self.sock.connect(path)
         self.msg_id = 0
         self.spin = False
@@ -263,6 +264,14 @@ class VfioUserClient:
     def request(
         self, cmd: int, payload: bytes = b"", fd: int = -1, reply: bool = True
     ) -> bytes:
+        try:
+            return self._exchange(cmd, payload, fd, reply)
+        except TimeoutError:
+            raise HarnessError(
+                f"vfio-user command {cmd} got no reply within {self.timeout:g}s"
+            ) from None
+
+    def _exchange(self, cmd: int, payload: bytes, fd: int, reply: bool) -> bytes:
         self.msg_id = (self.msg_id + 1) & 0xFFFF
         flags = 0 if reply else F_NO_REPLY
         message = (
@@ -278,9 +287,14 @@ class VfioUserClient:
         if not reply:
             return b""
         if self.spin:
-            # Burn a core instead of sleeping, to take this side's wake-up out of the round trip.
-            while not select.select([self.sock], [], [], 0)[0]:
-                pass
+            # Burn a core instead of sleeping, to take this side's wake-up out
+            # of the round trip. A zero-timeout select never reaches the socket
+            # timeout, so the same limit is kept here, read between batches of
+            # polls to leave the clock out of the interval being measured.
+            deadline = time.monotonic() + self.timeout
+            while not self._poll_reply():
+                if time.monotonic() > deadline:
+                    raise TimeoutError
         # Descriptors ride with the first byte of a reply.
         first, self.reply_fds, _, _ = socket.recv_fds(self.sock, HEADER.size, 8)
         if not first:
@@ -291,6 +305,14 @@ class VfioUserClient:
         if flags & F_ERROR:
             raise HarnessError(f"vfio-user command {cmd} failed: {os.strerror(error)}")
         return body
+
+    def _poll_reply(self) -> bool:
+        """Whether a reply arrived within one batch of non-blocking polls."""
+        poll, sockets = select.select, [self.sock]
+        for _ in range(1024):
+            if poll(sockets, (), (), 0)[0]:
+                return True
+        return False
 
     def _recv(self, length: int) -> bytes:
         chunks = bytearray()
@@ -427,15 +449,26 @@ def find_objdump(clang: str) -> str:
     raise HarnessError(f"no llvm-objdump found beside {clang} or on PATH")
 
 
+TOOL_TIMEOUT = 300.0
+
+
 def run_tool(command: list[str], purpose: str, capture: bool = False) -> str:
     """Run a toolchain command and return what it printed when `capture` is set."""
     try:
         completed = subprocess.run(
-            command, check=True, capture_output=capture, text=True
+            command,
+            check=True,
+            capture_output=capture,
+            text=True,
+            timeout=TOOL_TIMEOUT,
         )
     except OSError as error:
         raise HarnessError(
             f"cannot run {command[0]} to {purpose}: {error.strerror}"
+        ) from error
+    except subprocess.TimeoutExpired as error:
+        raise HarnessError(
+            f"{command[0]} did not {purpose} within {TOOL_TIMEOUT:g}s"
         ) from error
     except subprocess.CalledProcessError as error:
         raise HarnessError(
@@ -782,14 +815,16 @@ class Device:
         unpack, mem = struct.unpack_from, self.mem
         deadline = time.monotonic() + timeout
         while irq and unpack("<q", mem, value)[0] != 0:
+            # Interrupts that complete nothing must not extend the wait.
+            if time.monotonic() > deadline:
+                raise HarnessError(
+                    f"dispatch did not complete in {timeout:g}s; see {server.log}"
+                )
             # Sleep until the device raises its vector, as a driver would.
-            if not select.select([self.irq], [], [], 1.0)[0]:
-                if server.process.poll() is not None or time.monotonic() > deadline:
-                    raise HarnessError(
-                        f"no completion interrupt arrived; see {server.log}"
-                    )
-                continue
-            os.eventfd_read(self.irq)
+            if select.select([self.irq], [], [], min(1.0, timeout))[0]:
+                os.eventfd_read(self.irq)
+            elif server.process.poll() is not None:
+                raise HarnessError(f"no completion interrupt arrived; see {server.log}")
         spins = 0
         while unpack("<q", mem, value)[0] != 0:
             spins += 1
@@ -800,7 +835,7 @@ class Device:
                     )
                 if time.monotonic() > deadline:
                     raise HarnessError(
-                        f"dispatch did not complete in {timeout:.0f}s; see {server.log}"
+                        f"dispatch did not complete in {timeout:g}s; see {server.log}"
                     )
 
     def run(
@@ -1045,8 +1080,18 @@ class Server:
                     f"server was not ready within {ready_timeout:g}s; see {self.log}"
                 )
             if ready.read(1) != b"\x01":
-                self.stop()
-                raise HarnessError(f"server did not become ready; see {self.log}")
+                try:
+                    # Let a server that is exiting report how, before stop()
+                    # signals it.
+                    self.process.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    pass
+                fault = self.stop()
+                raise HarnessError(
+                    "server did not become ready"
+                    + (f" ({fault})" if fault else "")
+                    + f"; see {self.log}"
+                )
 
     def cpu_seconds(self) -> dict[str, tuple[float, float]]:
         return process_cpu_seconds(self.process.pid)
@@ -1059,14 +1104,37 @@ class Server:
             else None
         )
 
-    def stop(self) -> None:
-        if self.process.poll() is None:
-            self.process.send_signal(signal.SIGTERM)
+    stop_timeout = 20.0
+
+    def stop(self) -> str:
+        """Stop the server; returns what was wrong with how it ended, or "".
+
+        The server ends its session and exits with status 0 when it is sent
+        SIGTERM, and with another status when the simulation or the serving
+        thread failed. It blocks SIGTERM until its status is final, and stays
+        up after its client leaves, so one that dies of the SIGTERM sent here
+        was already leaving because it had failed. Only status 0 is a clean
+        end: a non-zero status, death by any signal, and a server that had to
+        be killed are faults.
+        """
+        process = self.process
+        if process.poll() is None:
+            process.send_signal(signal.SIGTERM)
             try:
-                self.process.wait(timeout=20)
+                process.wait(timeout=self.stop_timeout)
             except subprocess.TimeoutExpired:
-                self.process.kill()
-                self.process.wait()
+                process.kill()
+                process.wait()
+                return f"did not stop within {self.stop_timeout:g}s of SIGTERM and was killed"
+        status = process.returncode
+        if status == 0:
+            return ""
+        if status > 0:
+            return f"exited with status {status}"
+        try:
+            return f"was killed by {signal.Signals(-status).name}"
+        except ValueError:
+            return f"was killed by signal {-status}"
 
 
 # Expected results
@@ -1559,8 +1627,13 @@ def run_variant(
         if client is not None:
             client.close()
         if server is not None:
-            server.stop()
+            fault = server.stop()
             result["server_exit"] = server.process.returncode
+            if fault:
+                # Results from a server that ended this way are not to be used,
+                # even when every check before it passed.
+                result["server_fault"] = f"server {fault}"
+                result.setdefault("server_log_tail", log_tail(server.log))
     return result
 
 
@@ -1573,7 +1646,7 @@ def print_report(results: list[dict]) -> None:
         print(
             f"| {result['variant']} | {result['target']} | {result['wave_lanes']} | "
             + " | ".join(verify.get(name, "-") for name in BENCHMARKS)
-            + f" | {result.get('error', '')} |"
+            + f" | {result.get('error') or result.get('server_fault', '')} |"
         )
     results = [result for result in results if "throughput" in result]
     if not results:
@@ -1823,10 +1896,14 @@ def main(arguments: list[str] | None = None) -> int:
                 print(f"[{result['variant']}] server log: {line}", file=sys.stderr)
             for line in wrong_outputs(result):
                 print(f"[{result['variant']}] wrong output: {line}", file=sys.stderr)
+            if "server_fault" in result:
+                print(
+                    f"[{result['variant']}] {result['server_fault']}", file=sys.stderr
+                )
         failed = [
             result["variant"]
             for result in results
-            if "error" in result or wrong_outputs(result)
+            if "error" in result or "server_fault" in result or wrong_outputs(result)
         ]
         if failed:
             raise HarnessError(f"variants failed: {', '.join(failed)}")

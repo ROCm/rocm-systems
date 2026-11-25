@@ -404,6 +404,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             ${Python3_EXECUTABLE} -B
             ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_bench_vfio_user.py -v
     )
+    # Its deadline tests fail by hanging.
+    set_tests_properties(VfioUserBenchUnitTest PROPERTIES TIMEOUT 300)
     add_test(
         NAME RcclScaleoutRunUnitTest
         COMMAND

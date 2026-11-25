@@ -498,16 +498,52 @@ The script compares kernel output with models it carries, at two points:
   work items in the worst of the `--repeats` dispatches; `results.json` holds
   the count for each one in `wrong_items`.
 
-A wrong output at either point, or a server that fails, makes the script exit
-with status 1. It names the failed check on standard error and keeps the work
-directory that holds the full logs; when the server itself failed it also
-prints the end of the server log. A variant whose timed output is wrong still
-has its rates in the tables; do not use them.
+The script exits with status 1 when any variant meets one of these, and with
+status 0 otherwise:
+
+- A work item of the check before timing is wrong.
+- A work item of any timed dispatch is wrong.
+- The variant did not finish. The server did not report readiness within
+  `--ready-timeout`, could not be started or reached, or exited while it was
+  in use. A vfio-user request failed, or the server sent nothing for 30
+  seconds while a reply was due; the limit is the same whether the client
+  sleeps or spins for the reply. The MES
+  did not complete a command within 10 seconds, or a dispatch did not complete
+  within `--timeout`.
+- The server ended badly once the variant was done with it. The script closes
+  its connection and sends SIGTERM, and expects exit status 0. A non-zero
+  status, death by a signal the script did not send, and a server that is
+  still running 20 seconds after SIGTERM and has to be killed all fail the
+  variant, even when every output was right. That includes a server that dies
+  of the script's own SIGTERM: the server handles that signal until its exit
+  status is final, so it can only die of it while leaving on a failure.
+
+A bad command line exits with status 2. Inputs that cannot work (a missing
+binary or config, no usable clang, kernels that do not compile, a results file
+that cannot be written) exit with status 1 before or after the variants run.
+A compiler or disassembler that runs for more than 300 seconds is one of
+those. SIGTERM stops the server and exits with status 143; an interrupt
+(SIGINT) also stops the server, and ends the script with a traceback. Neither
+writes `results.json`.
+
+The script names each failure on standard error (`wrong output:`, `server
+exited with status N`, `server was killed by SIGNAL`, `server did not stop
+within 20s of SIGTERM and was killed`) and in the report
+tables, lists the failed variants, and keeps the work directory that holds the
+full logs. When the variant did not finish or its server ended
+badly it also prints the end of the server log. `results.json` is written
+either way, with the exit status in `server_exit` and the reason, if any, in
+`server_fault`; a server that never reported readiness has neither, and how it
+ended is part of `error`. The other variants still run. A failed variant can still have
+rates in the tables; do not use them.
 
 What the checks do not cover:
 
-- The dispatches that calibrate the iteration count are not checked, and the
-  no-op dispatches of the Transport table write no output to check.
+- Every row of the Throughput table is checked; there is no unchecked state.
+  The dispatches that calibrate the iteration count are not checked. The
+  Transport table has no output to compare: its no-op dispatches write none,
+  and the value of the register it reads is not examined. Those rows show
+  that each operation completed.
 - The timed output is compared with closed-form models, because walking tens
   of millions of iterations per work item in Python is not affordable. The
   unit tests hold those models to the stepwise one for every kernel: at
@@ -544,7 +580,7 @@ by a negligible fraction unless `--target-seconds` is set to milliseconds.
 
 | Report table | Content |
 |---|---|
-| Verify | Per-kernel verdict of the check before timing, and any startup or dispatch error |
+| Verify | Per-kernel verdict of the check before timing, and any startup, dispatch or server-exit error |
 | Transport | Register-read round trip, no-op dispatch latency (polled, interrupt-driven, posted doorbell), and dispatches per second when one doorbell covers a batch |
 | Throughput | Per kernel and grid: lane-iterations and wave-instructions per second, server cores in use, system-time share, run-queue wait share, voluntary context switches, and the verdict on the timed output |
 

@@ -1347,6 +1347,16 @@ class CodeObjectTest(unittest.TestCase):
             ):
                 BENCH.build_code_object(self.clang, "gfx1250", self.toolchain)
 
+    def test_compiler_that_hangs_is_stopped_and_reported(self) -> None:
+        Path(self.clang).write_text("#!/bin/sh\nexec sleep 60\n")
+
+        with mock.patch.object(BENCH, "TOOL_TIMEOUT", 0.2):
+            with self.assertRaisesRegex(
+                BENCH.HarnessError,
+                "clang did not compile the kernels for gfx1250 within 0.2s",
+            ):
+                BENCH.build_code_object(self.clang, "gfx1250", self.toolchain)
+
     def test_compiler_that_cannot_be_started_is_reported(self) -> None:
         # The stand-in is a file the kernel refuses to execute.
         Path(self.clang).write_bytes(b"\0not a program")
@@ -1504,13 +1514,13 @@ class FakeVfioUserServer:
         self.peer.close()
         self.client_end.close()
 
-    def connect(self) -> BENCH.VfioUserClient:
+    def connect(self, timeout: float = 2.0) -> BENCH.VfioUserClient:
         """Run the client's constructor against this server; returns the client."""
         self.queue_reply(struct.pack("<HH", 0, 2) + b'{"capabilities":{}}\0')
         with mock.patch.object(
             BENCH.socket, "socket", return_value=self.client_end
         ) as factory:
-            client = BENCH.VfioUserClient("/run/rocjitsu/fake.sock", timeout=2.0)
+            client = BENCH.VfioUserClient("/run/rocjitsu/fake.sock", timeout=timeout)
         factory.assert_called_once_with(socket.AF_UNIX, socket.SOCK_STREAM)
         return client
 
@@ -1663,6 +1673,29 @@ class VfioUserClientTest(unittest.TestCase):
 
         with self.assertRaisesRegex(BENCH.HarnessError, "closed the connection"):
             self.client.region_read(BENCH.BAR_REGISTERS, 0, 4)
+
+    def test_reply_withheld_by_a_connected_server_ends_the_wait(self) -> None:
+        for spin in (False, True):
+            with self.subTest(spin=spin):
+                server = FakeVfioUserServer()
+                self.addCleanup(server.close)
+                client = server.connect(timeout=0.05)
+                server.take_request()
+                client.spin = spin
+                start = time.monotonic()
+
+                with self.assertRaisesRegex(
+                    BENCH.HarnessError,
+                    f"command {BENCH.CMD_REGION_READ} got no reply within 0.05s",
+                ):
+                    client.region_read(BENCH.BAR_REGISTERS, 0, 4)
+
+                waited = time.monotonic() - start
+                self.assertGreaterEqual(waited, 0.05)
+                # Far below the minutes a run allows, with room for a busy host.
+                self.assertLess(waited, 5.0)
+                # The server did receive the request it left unanswered.
+                self.assertEqual(server.take_request().command, BENCH.CMD_REGION_READ)
 
     def test_reply_cut_short_raises(self) -> None:
         self.server.peer.sendall(BENCH.HEADER.pack(0, 0, 32, 1, 0)[:8])
@@ -2101,6 +2134,58 @@ class DeviceDispatchTest(DeviceTestCase):
         ):
             self.device.wait(slot, 1.0, server)
 
+    def test_wait_gives_up_on_a_live_server_that_never_completes(self) -> None:
+        server = types.SimpleNamespace(
+            process=types.SimpleNamespace(poll=lambda: None, returncode=None),
+            log="server.log",
+        )
+        for irq in (False, True):
+            with self.subTest(irq=irq):
+                slot = self.device.enqueue(
+                    self.code.kernels["noop"], BENCH.WORKGROUP, b""
+                )
+                start = time.monotonic()
+
+                with self.assertRaisesRegex(
+                    BENCH.HarnessError, "did not complete in 0.05s; see server.log"
+                ):
+                    self.device.wait(slot, 0.05, server, irq)
+
+                self.assertLess(time.monotonic() - start, 5.0)
+
+    def test_interrupts_that_complete_nothing_do_not_extend_the_wait(self) -> None:
+        slot = self.device.enqueue(self.code.kernels["noop"], BENCH.WORKGROUP, b"")
+        server = types.SimpleNamespace(
+            process=types.SimpleNamespace(poll=lambda: None, returncode=None),
+            log="server.log",
+        )
+        select = BENCH.select.select
+
+        def raise_again(*arguments: object) -> object:
+            os.eventfd_write(self.device.irq, 1)
+            return select(*arguments)
+
+        start = time.monotonic()
+        with mock.patch.object(BENCH.select, "select", side_effect=raise_again):
+            with self.assertRaisesRegex(
+                BENCH.HarnessError, "did not complete in 0.05s"
+            ):
+                self.device.wait(slot, 0.05, server, irq=True)
+
+        self.assertLess(time.monotonic() - start, 5.0)
+
+    def test_interrupt_wait_reports_a_server_that_exited(self) -> None:
+        slot = self.device.enqueue(self.code.kernels["noop"], BENCH.WORKGROUP, b"")
+        server = types.SimpleNamespace(
+            process=types.SimpleNamespace(poll=lambda: -11, returncode=-11),
+            log="server.log",
+        )
+
+        with self.assertRaisesRegex(
+            BENCH.HarnessError, "no completion interrupt arrived; see server.log"
+        ):
+            self.device.wait(slot, 0.05, server, irq=True)
+
 
 class BenchTest(DeviceTestCase):
     def setUp(self) -> None:
@@ -2503,6 +2588,14 @@ with open(config) as file:
 with open(os.environ["RJ_BENCH_TEST_RECORD"], "w") as file:
     json.dump({"argv": arguments, "config": document}, file)
 print("fake server started", flush=True)
+on_term = os.environ.get("RJ_BENCH_TEST_ON_TERM")
+if on_term is not None:
+    import signal
+
+    signal.signal(
+        signal.SIGTERM,
+        signal.SIG_IGN if on_term == "ignore" else lambda *_: os._exit(int(on_term)),
+    )
 if os.environ.get("RJ_BENCH_TEST_READY") == "1":
     os.write(int(arguments[arguments.index("--vfio-ready-fd") + 1]), b"\\x01")
 if os.environ.get("RJ_BENCH_TEST_READY") == "never":
@@ -2512,7 +2605,9 @@ if os.environ.get("RJ_BENCH_TEST_READY") == "never":
 if os.environ.get("RJ_BENCH_TEST_LINGER") == "1":
     import time
 
-    time.sleep(60)
+    while True:
+        time.sleep(60)
+sys.exit(int(os.environ.get("RJ_BENCH_TEST_EXIT", "0")))
 """
 
 # Starts a server as the harness does, reports its process id, and waits to be killed.
@@ -2605,6 +2700,16 @@ class ServerTest(unittest.TestCase):
 
         self.assertIn("fake server started", (self.workdir / "silent.log").read_text())
 
+    def test_server_that_fails_before_readiness_says_how_it_ended(self) -> None:
+        variant = self.variant("broken", ready="0")
+        variant.env["RJ_BENCH_TEST_EXIT"] = "2"
+
+        with self.assertRaisesRegex(
+            BENCH.HarnessError,
+            r"did not become ready \(exited with status 2\); see .*broken.log",
+        ):
+            BENCH.Server(variant, self.workdir)
+
     def test_server_that_never_signals_readiness_is_stopped_after_the_timeout(
         self,
     ) -> None:
@@ -2626,6 +2731,72 @@ class ServerTest(unittest.TestCase):
         (process,) = started
         # The server was terminated and reaped, not left behind.
         self.assertEqual(process.returncode, -signal.SIGTERM)
+
+    def lingering(self, name: str, **env: str) -> BENCH.Server:
+        """A started server that stays up until it is signalled."""
+        variant = self.variant(name)
+        variant.env.update(env, RJ_BENCH_TEST_LINGER="1")
+        server = BENCH.Server(variant, self.workdir)
+        self.addCleanup(server.stop)
+        return server
+
+    def test_server_that_exits_zero_when_asked_to_stop_ended_cleanly(self) -> None:
+        server = self.lingering("clean", RJ_BENCH_TEST_ON_TERM="0")
+
+        self.assertEqual(server.stop(), "")
+        self.assertEqual(server.process.returncode, 0)
+        # Asking again changes nothing.
+        self.assertEqual(server.stop(), "")
+
+    def test_server_ended_by_the_signal_that_stops_it_is_a_fault(self) -> None:
+        # The server handles SIGTERM until its status is final, so the default
+        # action can only end one that was already leaving on a failure.
+        server = self.lingering("default-action")
+
+        self.assertEqual(server.stop(), "was killed by SIGTERM")
+        self.assertEqual(server.process.returncode, -signal.SIGTERM)
+
+    def test_server_that_reports_a_failure_when_stopped_is_a_fault(self) -> None:
+        server = self.lingering("failing", RJ_BENCH_TEST_ON_TERM="3")
+
+        self.assertEqual(server.stop(), "exited with status 3")
+        self.assertEqual(server.stop(), "exited with status 3")
+
+    def test_server_that_exited_with_a_failure_before_the_stop_is_a_fault(
+        self,
+    ) -> None:
+        variant = self.variant("early")
+        variant.env["RJ_BENCH_TEST_EXIT"] = "2"
+        server = BENCH.Server(variant, self.workdir)
+        server.process.wait(timeout=10)
+
+        self.assertEqual(server.stop(), "exited with status 2")
+
+    def test_server_that_exited_zero_before_the_stop_ended_cleanly(self) -> None:
+        server = BENCH.Server(self.variant("done"), self.workdir)
+        server.process.wait(timeout=10)
+
+        self.assertEqual(server.stop(), "")
+
+    def test_server_killed_by_a_signal_the_harness_did_not_send_is_a_fault(
+        self,
+    ) -> None:
+        for number in (signal.SIGSEGV, signal.SIGTERM):
+            with self.subTest(signal=number.name):
+                server = self.lingering(f"struck-{number.name}")
+                server.process.send_signal(number)
+                server.process.wait(timeout=10)
+
+                self.assertEqual(server.stop(), f"was killed by {number.name}")
+
+    def test_server_that_ignores_the_stop_is_killed_and_is_a_fault(self) -> None:
+        server = self.lingering("deaf", RJ_BENCH_TEST_ON_TERM="ignore")
+        server.stop_timeout = 0.2
+
+        self.assertEqual(
+            server.stop(), "did not stop within 0.2s of SIGTERM and was killed"
+        )
+        self.assertEqual(server.process.returncode, -signal.SIGKILL)
 
     def test_server_does_not_outlive_a_harness_that_is_killed(self) -> None:
         owner = subprocess.Popen(
@@ -2858,11 +3029,14 @@ class StubServer:
         self.process = types.SimpleNamespace(pid=4242, returncode=None)
         self.process.poll = lambda: self.process.returncode
         self.stopped = False
+        self.stop_status = 0
+        self.fault = ""
 
-    def stop(self) -> None:
+    def stop(self) -> str:
         self.stopped = True
         if self.process.returncode is None:
-            self.process.returncode = -signal.SIGTERM
+            self.process.returncode = self.stop_status
+        return self.fault
 
     def cpu_seconds(self) -> dict[str, tuple[float, float]]:
         return {"4242 rocjitsu": (0.5, 0.1), "4243 rj-dispatch-0": (0.2, 0.0)}
@@ -2871,7 +3045,9 @@ class StubServer:
         return None
 
 
-class RunVariantTest(unittest.TestCase):
+class RunVariantTestCase(unittest.TestCase):
+    """run_variant() over a stub server and a fake device that executes kernels."""
+
     def setUp(self) -> None:
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
@@ -2920,6 +3096,19 @@ class RunVariantTest(unittest.TestCase):
             self.variant, self.code, self.options, self.workdir, "shim.so"
         )
 
+    def faulty_server(self, status: int, fault: str) -> None:
+        """Make the variant's server end with `status`, which stop() calls `fault`."""
+
+        def start(*arguments: object) -> StubServer:
+            server = self.start_server(*arguments)
+            server.stop_status, server.fault = status, fault
+            server.log.write_text("ready\nvfu: simulation engine stopped\n")
+            return server
+
+        self.patch(BENCH, "Server", start)
+
+
+class RunVariantTest(RunVariantTestCase):
     def test_verify_only_run_reports_the_variant_the_bars_and_the_verdicts(
         self,
     ) -> None:
@@ -2940,7 +3129,7 @@ class RunVariantTest(unittest.TestCase):
                 "wave_lanes": 32,
                 "bar_bytes": ExecutingDevice.REGION_BYTES,
                 "verify": {name: "ok" for name in BENCH.BENCHMARKS},
-                "server_exit": -signal.SIGTERM,
+                "server_exit": 0,
             },
         )
         self.assertEqual(self.connections, [server.socket_path])
@@ -3066,7 +3255,7 @@ class RunVariantTest(unittest.TestCase):
 
         self.assertIn("Connection refused", result["error"])
         self.assertTrue(self.servers[0].stopped)
-        self.assertEqual(result["server_exit"], -signal.SIGTERM)
+        self.assertEqual(result["server_exit"], 0)
         self.assertNotIn("verify", result)
 
     def test_device_that_cannot_be_brought_up_is_recorded_and_released(self) -> None:
@@ -3104,6 +3293,42 @@ class RunVariantTest(unittest.TestCase):
         self.assertNotIn("verify", result)
         self.assertTrue(self.fake.closed)
 
+    def test_server_that_ends_badly_after_a_passing_check_is_recorded(self) -> None:
+        self.faulty_server(1, "exited with status 1")
+
+        result = self.run_variant()
+
+        self.assertEqual(result["server_fault"], "server exited with status 1")
+        self.assertEqual(result["server_exit"], 1)
+        self.assertEqual(
+            result["server_log_tail"], ["ready", "vfu: simulation engine stopped"]
+        )
+        # The check itself passed, and that is still what the result says.
+        self.assertEqual(result["verify"], {name: "ok" for name in BENCH.BENCHMARKS})
+        self.assertNotIn("error", result)
+
+    def test_server_that_ends_cleanly_has_no_fault_and_no_log_tail(self) -> None:
+        self.faulty_server(0, "")
+
+        result = self.run_variant()
+
+        self.assertEqual(result["server_exit"], 0)
+        self.assertNotIn("server_fault", result)
+        self.assertNotIn("server_log_tail", result)
+
+    def test_a_failed_run_keeps_its_own_log_tail_when_the_server_also_ends_badly(
+        self,
+    ) -> None:
+        self.fake.completes_dispatches = False
+        self.faulty_server(-signal.SIGSEGV, "was killed by SIGSEGV")
+        self.options.timeout = 0.05
+
+        result = self.run_variant()
+
+        self.assertIn("did not complete", result["error"])
+        self.assertEqual(result["server_fault"], "server was killed by SIGSEGV")
+        self.assertEqual(len(result["server_log_tail"]), 2)
+
     def test_a_defect_propagates_but_still_stops_the_server(self) -> None:
         def defective(bench: BENCH.Bench) -> dict[str, str]:
             raise TypeError("unsupported operand")
@@ -3115,6 +3340,124 @@ class RunVariantTest(unittest.TestCase):
 
         self.assertTrue(self.servers[0].stopped)
         self.assertTrue(self.fake.closed)
+
+
+class FinalStatusTest(RunVariantTestCase):
+    """main() over the real run_variant(), with a stub server and a fake device."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.binary = make_tool(self.workdir / "rocjitsu")
+        self.config = self.workdir / "base.json"
+        self.config.write_text("{}")
+        self.results = self.workdir / "results.json"
+        self.kept: list[Path] = []
+        self.patch(BENCH, "find_clang", lambda requested: "clang")
+        self.patch(BENCH, "build_code_object", self.build_code_object)
+
+    def build_code_object(
+        self, clang: str, target: str, workdir: Path
+    ) -> BENCH.CodeObject:
+        self.kept.append(workdir)
+        self.addCleanup(BENCH.shutil.rmtree, workdir, ignore_errors=True)
+        return self.code
+
+    def main(self, *arguments: str) -> tuple[int, str, str]:
+        output, errors = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(errors):
+            status = BENCH.main(
+                [
+                    "--rocjitsu",
+                    self.binary,
+                    "--config",
+                    str(self.config),
+                    "--output",
+                    str(self.results),
+                    "--memory-mib",
+                    "3",
+                    *arguments,
+                ]
+            )
+        return status, output.getvalue(), errors.getvalue()
+
+    def test_a_server_that_ends_badly_fails_a_run_whose_checks_all_passed(
+        self,
+    ) -> None:
+        self.faulty_server(1, "exited with status 1")
+
+        status, output, errors = self.main("--verify-only")
+
+        self.assertEqual(status, 1)
+        self.assertIn("[default] server exited with status 1\n", errors)
+        self.assertIn("[default] server log: vfu: simulation engine stopped\n", errors)
+        self.assertIn("error: variants failed: default\n", errors)
+        (workdir,) = self.kept
+        self.assertIn(f"work directory kept: {workdir}\n", errors)
+        self.assertTrue(workdir.is_dir())
+        (written,) = json.loads(self.results.read_text())
+        self.assertEqual(written["server_exit"], 1)
+        self.assertEqual(written["server_fault"], "server exited with status 1")
+        self.assertEqual(written["verify"], {name: "ok" for name in BENCH.BENCHMARKS})
+        # The Verify table says so in the row whose kernels are all "ok".
+        row = markdown_tables(output)["Verify"][1]
+        self.assertEqual(row[-1], "server exited with status 1")
+
+    def test_only_the_variant_whose_server_ended_badly_is_named(self) -> None:
+        def start(*arguments: object) -> StubServer:
+            server = self.start_server(*arguments)
+            if server.variant.name == "second":
+                server.stop_status, server.fault = -9, "was killed by SIGKILL"
+            return server
+
+        def connect(path: str) -> ExecutingDevice:
+            # A device serves one variant; it is closed with its client.
+            device = ExecutingDevice(full_code_object()[1])
+            self.addCleanup(device.close)
+            return device
+
+        self.patch(BENCH, "Server", start)
+        self.patch(BENCH, "VfioUserClient", connect)
+
+        status, _, errors = self.main(
+            "--verify-only", "--variant", "first", "--variant", "second"
+        )
+
+        self.assertEqual(status, 1)
+        self.assertIn("[second] server was killed by SIGKILL\n", errors)
+        self.assertIn("error: variants failed: second\n", errors)
+        self.assertNotIn("[first] server", errors)
+
+    def test_a_server_that_exits_zero_leaves_a_passing_run_at_zero(self) -> None:
+        self.faulty_server(0, "")
+
+        status, _, errors = self.main("--verify-only")
+
+        self.assertEqual(status, 0)
+        self.assertEqual(errors, f"[default] {self.binary} (gfx1250)\n")
+        (workdir,) = self.kept
+        self.assertFalse(workdir.exists())
+        (written,) = json.loads(self.results.read_text())
+        self.assertEqual(written["server_exit"], 0)
+        self.assertNotIn("server_fault", written)
+
+    def test_a_withheld_reply_fails_the_variant_and_stops_its_server(self) -> None:
+        def unanswered(*arguments: object) -> bytes:
+            raise BENCH.HarnessError("vfio-user command 9 got no reply within 30s")
+
+        self.patch(self.fake, "region_read", unanswered)
+        self.options.latency_samples = 2
+
+        status, _, errors = self.main(
+            "--kernels", "int_loop", "--grids", "64", "--latency-samples", "2"
+        )
+
+        self.assertEqual(status, 1)
+        self.assertIn("error: variants failed: default\n", errors)
+        self.assertTrue(self.servers[0].stopped)
+        (written,) = json.loads(self.results.read_text())
+        self.assertEqual(
+            written["error"], "vfio-user command 9 got no reply within 30s"
+        )
 
 
 class MainTest(unittest.TestCase):
@@ -3330,6 +3673,29 @@ class MainTest(unittest.TestCase):
         self.assertEqual(status, 1)
         self.assertIn("error: ", errors)
         self.assertIn("absent/results.json", errors)
+
+    def test_a_recorded_server_fault_fails_the_run(self) -> None:
+        self.results["default"] = {
+            "server_exit": -11,
+            "server_fault": "server was killed by SIGSEGV",
+            "server_log_tail": ["ready", "Segmentation fault"],
+        }
+
+        status, _, errors = self.main()
+
+        self.assertEqual(status, 1)
+        self.assertIn("[default] server was killed by SIGSEGV\n", errors)
+        self.assertIn("[default] server log: Segmentation fault\n", errors)
+        self.assertIn("error: variants failed: default\n", errors)
+        self.assertTrue(self.workdirs[0].is_dir())
+
+    def test_a_recorded_clean_exit_does_not_fail_the_run(self) -> None:
+        self.results["default"] = {"server_exit": 0}
+
+        status, _, errors = self.main()
+
+        self.assertEqual(status, 0)
+        self.assertNotIn("error:", errors)
 
     def test_keep_preserves_the_work_directory_of_a_passing_run(self) -> None:
         status, _, _ = self.main("--keep")
