@@ -28,9 +28,9 @@ DIFF_FILE_RE = re.compile(r'^\+\+\+\ "?b/([^ \t\n"]*)')
 DIFF_HUNK_RE = re.compile(r"^@@.*\+(\d+)(,(\d+))?")
 DIAGNOSTIC_RE = re.compile(r"^(.*):(\d+):(\d+): (warning|error): (.*) \[([\w,.\-]+)\]$")
 
-# `--base fork` selects the point where the current branch diverged from this ref.
-FORK_SELECTOR = "fork"
-FORK_REF = "origin/develop"
+# `--base merge-base` selects the point where the current branch diverged from this ref.
+MERGE_BASE_SELECTOR = "merge-base"
+BASE_REF = "origin/develop"
 
 _ANSI = {
     "reset": "\033[0m",
@@ -132,14 +132,14 @@ def get_repo_root() -> str:
     return _git(["rev-parse", "--show-toplevel"]).strip()
 
 
-def get_fork_point() -> str:
-    """Return the SHA where the current branch diverged from FORK_REF."""
-    return _git(["merge-base", "HEAD", FORK_REF]).strip()
+def get_merge_base() -> str:
+    """Return the SHA where the current branch diverged from BASE_REF."""
+    return _git(["merge-base", "HEAD", BASE_REF]).strip()
 
 
 def resolve_base(base: str) -> str:
-    """Resolve the `fork` selector to a SHA; any other value is used as-is."""
-    return get_fork_point() if base == FORK_SELECTOR else base
+    """Resolve the `merge-base` selector to a SHA; any other value is used as-is."""
+    return get_merge_base() if base == MERGE_BASE_SELECTOR else base
 
 
 def get_diff_changed_files(repo_root: str, base: str) -> dict[str, ChangedFile]:
@@ -378,8 +378,8 @@ def parse_args() -> argparse.Namespace:
         default="HEAD",
         help=(
             "Diff against this ref (default: %(default)s). "
-            f"Use '{FORK_SELECTOR}' for the point where this "
-            f"branch diverged from {FORK_REF}, or pass any ref/SHA. "
+            f"Use '{MERGE_BASE_SELECTOR}' for the point where this "
+            f"branch diverged from {BASE_REF}, or pass any ref/SHA. "
             "Covers committed changes since the ref plus any "
             "staged/unstaged changes on top."
         ),

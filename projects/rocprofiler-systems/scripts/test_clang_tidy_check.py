@@ -269,9 +269,9 @@ def test_git_failure_surfaces_stderr(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
-# get_fork_point / resolve_base
+# get_merge_base / resolve_base
 # --------------------------------------------------------------------------- #
-def test_get_fork_point_returns_merge_base_sha(monkeypatch):
+def test_get_merge_base_returns_merge_base_sha(monkeypatch):
     calls = []
 
     def fake_git(git_args, **_kwargs):
@@ -279,12 +279,12 @@ def test_get_fork_point_returns_merge_base_sha(monkeypatch):
         return "abc123\n"
 
     monkeypatch.setattr(ctc, "_git", fake_git)
-    assert ctc.get_fork_point() == "abc123"
-    assert calls == [["merge-base", "HEAD", ctc.FORK_REF]]
+    assert ctc.get_merge_base() == "abc123"
+    assert calls == [["merge-base", "HEAD", ctc.BASE_REF]]
 
 
-def test_get_fork_point_failure_exits_instead_of_falling_back(monkeypatch):
-    # An explicit `--base fork` must not silently degrade to HEAD: a failing
+def test_get_merge_base_failure_exits_instead_of_falling_back(monkeypatch):
+    # An explicit `--base merge-base` must not silently degrade to HEAD: a failing
     # `git merge-base` has to reach the user as git's own error.
     commands = []
 
@@ -298,14 +298,14 @@ def test_get_fork_point_failure_exits_instead_of_falling_back(monkeypatch):
 
     monkeypatch.setattr(ctc.subprocess, "run", boom)
     with pytest.raises(SystemExit) as excinfo:
-        ctc.get_fork_point()
+        ctc.get_merge_base()
     assert "Not a valid object name origin/develop" in str(excinfo.value)
-    assert commands == [["git", "merge-base", "HEAD", ctc.FORK_REF]]
+    assert commands == [["git", "merge-base", "HEAD", ctc.BASE_REF]]
 
 
-def test_resolve_base_fork_selector_resolves_to_fork_point(monkeypatch):
-    monkeypatch.setattr(ctc, "get_fork_point", lambda: "abc123")
-    assert ctc.resolve_base("fork") == "abc123"
+def test_resolve_base_merge_base_selector_resolves_to_merge_base(monkeypatch):
+    monkeypatch.setattr(ctc, "get_merge_base", lambda: "abc123")
+    assert ctc.resolve_base("merge-base") == "abc123"
 
 
 @pytest.mark.parametrize("base", ["HEAD", "origin/release", "deadbeef"])
@@ -313,7 +313,7 @@ def test_resolve_base_other_values_pass_through(monkeypatch, base):
     def fail():
         raise AssertionError("git must not be called")
 
-    monkeypatch.setattr(ctc, "get_fork_point", fail)
+    monkeypatch.setattr(ctc, "get_merge_base", fail)
     assert ctc.resolve_base(base) == base
 
 
@@ -325,7 +325,7 @@ def test_parse_args_base_defaults_to_head(monkeypatch):
     assert ctc.parse_args().base == "HEAD"
 
 
-@pytest.mark.parametrize("base", ["fork", "origin/release", "deadbeef"])
+@pytest.mark.parametrize("base", ["merge-base", "origin/release", "deadbeef"])
 def test_parse_args_explicit_base_is_kept_verbatim(monkeypatch, base):
     monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build", "--base", base])
     assert ctc.parse_args().base == base
@@ -490,20 +490,20 @@ def test_main_prints_base(monkeypatch, capsys):
     assert "Checking changes since base commit: abc123" in capsys.readouterr().out
 
 
-def test_main_fork_selector_passes_resolved_sha(monkeypatch, capsys):
+def test_main_merge_base_selector_passes_resolved_sha(monkeypatch, capsys):
     changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
     seen = []
     monkeypatch.setattr(ctc, "get_repo_root", lambda: "/repo")
-    monkeypatch.setattr(ctc, "get_fork_point", lambda: "fork123")
+    monkeypatch.setattr(ctc, "get_merge_base", lambda: "merge123")
     monkeypatch.setattr(
         ctc, "get_changed_files", lambda repo, base: seen.append(base) or [changed_file]
     )
     monkeypatch.setattr(ctc, "has_enabled_checks", lambda args: True)
     monkeypatch.setattr(ctc, "run_clang_tidy", lambda a, f, t: ("", True))
-    monkeypatch.setattr(ctc, "parse_args", lambda: _args(base="fork"))
+    monkeypatch.setattr(ctc, "parse_args", lambda: _args(base="merge-base"))
     assert ctc.main() == 0
-    assert seen == ["fork123"]
-    assert "base commit: fork123" in capsys.readouterr().out
+    assert seen == ["merge123"]
+    assert "base commit: merge123" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("verbose", [False, True])
