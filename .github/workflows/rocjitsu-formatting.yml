@@ -24,6 +24,7 @@ on:
       - ".github/scripts/tests/test_run_rocjitsu_afl_campaign.py"
       - ".github/workflows/rocjitsu-*.yml"
       - ".pre-commit-config.yaml"
+      - "projects/clr/opencl/**"
 
 permissions:
   contents: read
@@ -45,6 +46,7 @@ jobs:
           sparse-checkout: |
             emulation/mirage
             emulation/rocjitsu
+            projects/clr/opencl
             .github
           persist-credentials: false
 
