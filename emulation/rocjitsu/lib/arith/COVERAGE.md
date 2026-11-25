@@ -346,8 +346,9 @@ that mode. Loose skips reporting. Scalar, AVX2 and AVX-512 paths remain wide.
 
 Gfx1010/gfx1030 FP16 relational comparisons now use the same shared CLAMP-only
 Compatibility status composition as native precisions, on both wave sizes.
-The VM preserves ignored VOP3 OPSEL and normalized SDWA source halves; strict
-FP-status mode remains unsupported. Gfx1150 retains its separate signaling policy.
+The VM preserves ignored VOP3 OPSEL and normalized SDWA source halves. F/T
+predicates, including CMPX F/T, accept strict FP-status mode; other predicates
+reject it. Gfx1150 retains its separate signaling policy.
 ## Older Radeon FP64 arithmetic
 
 Rocjitsu uses rj-arith for ADD, MUL, FMA and LDEXP on gfx1010, gfx1030 and

@@ -45,6 +45,15 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
+- Fixed overflow sampling on hardware events, including the default
+  `perf::PERF_COUNT_HW_CACHE_REFERENCES`, failing at startup with
+  `Failed to open perf event: Invalid argument`.
+- Fixed overflow sampling on hardware cache events. `ROCPROFSYS_SAMPLING_OVERFLOW_EVENT`
+  values such as `perf::PERF_COUNT_HW_CACHE_LL:MISS` or
+  `perf::PERF_COUNT_HW_CACHE_L1D:WRITE:ACCESS` failed with `Unknown perf hardware config`.
+  The operation (`READ`, `WRITE`, `PREFETCH`) and result (`ACCESS`, `MISS`) modifiers are now
+  both honored, in any order, defaulting to `READ` and `MISS`; an unknown or repeated
+  modifier is an error.
 - Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
   finalization. Regions that never received their end callback are now emitted with the
   finalization timestamp and an `[incomplete]` name suffix instead of being dropped.

@@ -3034,7 +3034,8 @@ int rj_arith_v_fract_f64_w64_gfx908(uint64_t flags, uint64_t exec_mask, uint64_t
                                     uint32_t *trapsts);
 
 // Older native FP64 math inherits host-double evaluation with raw subnormal inputs/results.
-// Guest IEEE does not quiet a returned source NaN; MODE still gates OMOD/CLAMP.
+// Source NaNs retain their payload; IEEE mode quiets signaling NaNs, otherwise
+// they pass through unchanged. MODE gates OMOD/CLAMP.
 // Compatibility and Loose share the model; strict numeric/reporting modes are unsupported.
 int rj_arith_v_rcp_f64_w32_gfx908(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
