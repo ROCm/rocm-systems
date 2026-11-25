@@ -6,8 +6,10 @@
 import pytest
 
 from ml_api_tracing.analyze.operator_patterns import (
+    OPERATOR_LABELS,
     bind_operator_patterns,
     check_backends_traced,
+    operator_backend_labels,
     split_backend_prefix,
     traced_frameworks_from_config,
 )
@@ -45,6 +47,7 @@ def test_check_backends_traced_rejects(backends, traced_frameworks, message):
     "pattern, expected",
     [
         ("torch:*conv*", ("torch", "*conv*")),
+        ("jax:*train_step*", ("jax", "*train_step*")),
         ("torch:*/aten::addmm", ("torch", "*/aten::addmm")),
         ("*/aten::addmm", (None, "*/aten::addmm")),
         ("*relu*", (None, "*relu*")),
@@ -99,6 +102,11 @@ def test_bind_operator_patterns(patterns, traced_frameworks, expected):
 def test_bind_operator_patterns_rejects(patterns, traced_frameworks, message):
     with pytest.raises(ValueError, match=message):
         bind_operator_patterns(patterns, traced_frameworks)
+
+
+def test_operator_backend_labels_include_jax():
+    assert OPERATOR_LABELS["jax"] == "JAX"
+    assert operator_backend_labels(["jax"]) == "JAX"
 
 
 def test_operator_comma_joined_token_is_one_glob():

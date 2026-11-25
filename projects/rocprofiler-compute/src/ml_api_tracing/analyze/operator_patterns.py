@@ -11,7 +11,12 @@ from ml_api_tracing.constants import (
     USER_REGION_BACKEND,
 )
 
-OPERATOR_LABELS = {"torch": "PyTorch", "triton": "Triton", USER_REGION_BACKEND: "User"}
+OPERATOR_LABELS = {
+    "torch": "PyTorch",
+    "triton": "Triton",
+    "jax": "JAX",
+    USER_REGION_BACKEND: "User",
+}
 
 
 def operator_backend_labels(backends: List[str]) -> str:

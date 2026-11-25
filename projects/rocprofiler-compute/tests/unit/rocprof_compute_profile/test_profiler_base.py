@@ -13,6 +13,7 @@ import common
 import pytest
 import yaml
 
+from ml_api_tracing.constants import KNOWN_ML_API_BACKENDS
 from ml_api_tracing.profiling import orchestrator as ml_api_profile
 from pc_sampling.pc_sampling_profile import PCSamplingLimits
 from rocprof_compute_base import RocProfCompute
@@ -1381,14 +1382,26 @@ def test_run_profiling_native_tool_path(
         assert mocks.console_error.called is expect_error
 
 
-@pytest.mark.parametrize("trace_ml_api", [["torch", "triton"], []])
-def test_sanitize_trace_ml_api_injects_torch_and_triton(tmp_path, trace_ml_api):
-    """Inject both frameworks for a bare selection."""
+@pytest.mark.parametrize(
+    "trace_ml_api, expected_inject",
+    [
+        (["torch", "triton"], "--frameworks torch triton --"),
+        (
+            [],
+            "--frameworks " + " ".join(sorted(KNOWN_ML_API_BACKENDS)) + " --",
+        ),
+    ],
+)
+def test_sanitize_trace_ml_api_injects_all_supported_backends(
+    tmp_path, trace_ml_api, expected_inject
+):
+    """A named list injects those names. A bare --trace-ml-api injects every
+    KNOWN_ML_API_BACKENDS entry."""
     remaining = _setup_test_files(tmp_path, [sys.executable, "{script}"], "script")
     args = _make_sanitize_args(remaining, trace_ml_api=list(trace_ml_api))
     profiler = RocProfCompute_Base(args, profiler_mode="rocprofiler-sdk", soc=None)
     profiler.sanitize()
-    assert "--frameworks torch triton --" in args.remaining
+    assert expected_inject in args.remaining
 
 
 @pytest.mark.parametrize(
@@ -1418,7 +1431,7 @@ def test_sanitize_rejects_ml_api_trace_with_attach_pid(tmp_path, raw_selection):
     "raw_selection, expected_selection",
     [
         pytest.param(None, None, id="absent"),
-        pytest.param([], ["torch", "triton"], id="bare"),
+        pytest.param([], list(KNOWN_ML_API_BACKENDS), id="bare"),
         pytest.param(["triton"], ["triton"], id="named"),
         pytest.param(
             ["triton", "torch", "triton"],
