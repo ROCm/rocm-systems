@@ -46,8 +46,9 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
     return error;
   }
   // Each conversion has one model. Entry points accept exact requests once their results have
-  // been checked against hardware captures; none reports FP status.
-  if (!AcceptExact &&
+  // been checked against hardware captures; none reports FP status. SDWA F16 prescaling stays
+  // loose-only until SDWA captures are reviewed.
+  if ((!AcceptExact || (mode & RJ_ARITH_CVT_SDWA)) &&
       (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
@@ -578,12 +579,15 @@ int rj_arith_v_cvt_f32_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t inst
       flags, exec_mask, instruction_flags, d, a, (flags & RJ_ARITH_FP_IEEE_MODE) != 0);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_f16_i16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, (instruction_flags & RJ_ARITH_CVT_SDWA)
+                 ? RJ_ARITH_SEMANTICS_LOOSE
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -591,16 +595,19 @@ int rj_arith_v_cvt_f16_i16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert<rocjitsu::arith::Conversion16::SignedToHalf>(flags, exec_mask, instruction_flags,
-                                                              d, a, true, false);
+  return convert<rocjitsu::arith::Conversion16::SignedToHalf, true>(
+      flags, exec_mask, instruction_flags, d, a, true, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_f16_i16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, (instruction_flags & RJ_ARITH_CVT_SDWA)
+                 ? RJ_ARITH_SEMANTICS_LOOSE
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -608,16 +615,19 @@ int rj_arith_v_cvt_f16_i16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert_wave64<rocjitsu::arith::Conversion16::SignedToHalf>(
+  return convert_wave64<rocjitsu::arith::Conversion16::SignedToHalf, true>(
       flags, exec_mask, instruction_flags, d, a, true, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_f16_u16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, (instruction_flags & RJ_ARITH_CVT_SDWA)
+                 ? RJ_ARITH_SEMANTICS_LOOSE
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -625,16 +635,19 @@ int rj_arith_v_cvt_f16_u16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert<rocjitsu::arith::Conversion16::UnsignedToHalf>(flags, exec_mask, instruction_flags,
-                                                                d, a, true, false);
+  return convert<rocjitsu::arith::Conversion16::UnsignedToHalf, true>(
+      flags, exec_mask, instruction_flags, d, a, true, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_f16_u16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, (instruction_flags & RJ_ARITH_CVT_SDWA)
+                 ? RJ_ARITH_SEMANTICS_LOOSE
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -642,16 +655,17 @@ int rj_arith_v_cvt_f16_u16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert_wave64<rocjitsu::arith::Conversion16::UnsignedToHalf>(
+  return convert_wave64<rocjitsu::arith::Conversion16::UnsignedToHalf, true>(
       flags, exec_mask, instruction_flags, d, a, true, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_i16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -659,16 +673,17 @@ int rj_arith_v_cvt_i16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert<rocjitsu::arith::Conversion16::HalfToSigned>(flags, exec_mask, instruction_flags,
-                                                              d, a, true, false);
+  return convert<rocjitsu::arith::Conversion16::HalfToSigned, true>(
+      flags, exec_mask, instruction_flags, d, a, true, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_i16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -676,16 +691,17 @@ int rj_arith_v_cvt_i16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert_wave64<rocjitsu::arith::Conversion16::HalfToSigned>(
+  return convert_wave64<rocjitsu::arith::Conversion16::HalfToSigned, true>(
       flags, exec_mask, instruction_flags, d, a, true, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_u16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -693,16 +709,17 @@ int rj_arith_v_cvt_u16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert<rocjitsu::arith::Conversion16::HalfToUnsigned>(flags, exec_mask, instruction_flags,
-                                                                d, a, true, false);
+  return convert<rocjitsu::arith::Conversion16::HalfToUnsigned, true>(
+      flags, exec_mask, instruction_flags, d, a, true, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_u16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -710,16 +727,19 @@ int rj_arith_v_cvt_u16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert_wave64<rocjitsu::arith::Conversion16::HalfToUnsigned>(
+  return convert_wave64<rocjitsu::arith::Conversion16::HalfToUnsigned, true>(
       flags, exec_mask, instruction_flags, d, a, true, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_f16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, (instruction_flags & RJ_ARITH_CVT_SDWA)
+                 ? RJ_ARITH_SEMANTICS_LOOSE
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -727,16 +747,19 @@ int rj_arith_v_cvt_f16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert<rocjitsu::arith::Conversion16::FloatToHalf>(flags, exec_mask, instruction_flags, d,
-                                                             a, true, false);
+  return convert<rocjitsu::arith::Conversion16::FloatToHalf, true>(
+      flags, exec_mask, instruction_flags, d, a, true, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_f16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a,
                                       [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, (instruction_flags & RJ_ARITH_CVT_SDWA)
+                 ? RJ_ARITH_SEMANTICS_LOOSE
+                 : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -744,8 +767,99 @@ int rj_arith_v_cvt_f16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   instruction_flags = rocjitsu::arith::rdna3_output_modifiers(flags, instruction_flags);
-  return convert_wave64<rocjitsu::arith::Conversion16::FloatToHalf>(
+  return convert_wave64<rocjitsu::arith::Conversion16::FloatToHalf, true>(
       flags, exec_mask, instruction_flags, d, a, true, false);
+}
+
+// gfx950 inherits the gfx942 numeric model; strict exact is unsupported pending gfx950 captures.
+int rj_arith_v_cvt_f16_i16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f16_i16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_f16_i16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f16_i16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_f16_u16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f16_u16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_f16_u16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f16_u16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_i16_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_i16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_i16_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_i16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_u16_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_u16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_u16_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_u16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_f16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f16_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f16_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
 }
 
 // gfx1250 inherits the gfx12 numeric model; strict exact is unsupported pending gfx1250 captures.
@@ -880,24 +994,35 @@ int rj_arith_v_cvt_u16_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                           excp_flag_user);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
+// gfx942 shares the RDNA3 F16-to-F32 widening model; empirically exact on MI300X.
 int rj_arith_v_cvt_f32_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
-    return error;
-  }
   return rj_arith_v_cvt_f32_f16_w32(flags, exec_mask, instruction_flags, d, a, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_f32_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  return rj_arith_v_cvt_f32_f16_w64(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+// gfx950 inherits the RDNA3/gfx942 widening model; strict exact stays unsupported pending
+// architecture-specific captures.
+int rj_arith_v_cvt_f32_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  return rj_arith_v_cvt_f32_f16_w64(flags, exec_mask, instruction_flags, d, a, trapsts);
+  return rj_arith_v_cvt_f32_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cvt_f32_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_f32_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
 }

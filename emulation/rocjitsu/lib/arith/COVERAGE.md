@@ -52,9 +52,12 @@ have no FP-status output and are excluded from these denominators.
 FP64 ADD/MUL/FMA, TRUNC/CEIL/RNDNE/FLOOR, FRACT, FREXP_MANT and FREXP_EXP, the FP16/FP32
 FRACT forms, the FP16/FP32/FP64 and normalized/packed/byte conversions, PACK_B32_F16 and
 VINTERP accept mode 2 on RDNA3 and RDNA4 since the gfx1100 and gfx1201 captures match their
-single numeric model; Compatibility resolves to mode 2 for them. The CDNA3/CDNA4 (`_gfx942`),
-gfx1250 (`_gfx1250`) and RDNA2 (`_gfx10`) entry points of the shared conversion, PACK and
-FP64 FMA kernels stay loose-only until their captures are reviewed per instruction.
+single numeric model; Compatibility resolves to mode 2 for them. The CDNA3 (`_gfx942`) FP64
+ADD/MUL/FMA/FMAC and TRUNC/CEIL/RNDNE/FLOOR/FRACT/FREXP_MANT, conversion (excluding SDWA F16
+prescaling), PACK_B32_F16 and unmodified CVT_PKACCUM_U8_F32 entry points likewise accept mode 2
+and resolve Compatibility to mode 2 against MI300X captures. The CDNA4 (`_gfx950`), gfx1250
+(`_gfx1250`) and RDNA2 (`_gfx10`) entry points of the shared conversion, PACK and FP64 kernels
+stay loose-only until their captures are reviewed per instruction.
 
 FP16 ADD/SUB/SUBREV/MUL, MULLIT and the RDNA4 V_S_EXP_F16/V_S_LOG_F16 carry their hardware
 rules (first-source NaN priority, FP16 rounding before OMOD, the RDNA3 signaling-NaN and OMOD
