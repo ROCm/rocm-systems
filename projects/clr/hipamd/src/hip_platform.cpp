@@ -48,13 +48,13 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const uint32_t deviceSimdPerCU = device.info().simdPerCU_;
   // For older platforms: limited by SPI 32 per CU, hence 8 per SIMD
   const size_t MaxWavesPerSimd =
-      (device.isa().versionMajor() <= 9) ? 8 : device.info().maxWavesPerCU_ / simdPerCU;
+      (device.isa().versionMajor() <= 9) ? 8 : device.info().maxWavesPerCU_ / deviceSimdPerCU;
   // The occupancy is computed per scheduling unit of the kernel and converted
   // to the device one below, so rescale the SIMD count if the modes differ.
   const uint32_t simdPerCU = (wrkGrpInfo->isWGPMode_ == device.settings().enableWgpMode_)
                                  ? deviceSimdPerCU
-                             : deviceWGP ? deviceSimdPerCU / 2
-                                         : deviceSimdPerCU * 2;
+                             : device.settings().enableWgpMode_ ? deviceSimdPerCU / 2
+                                                                : deviceSimdPerCU * 2;
   const size_t wavefrontSize = wrkGrpInfo->wavefrontSize_;
   const bool adjust_for_wave64 = device.isa().versionMajor() >= 10 && wavefrontSize == 64;
   const uint32_t VgprGranularity = adjust_for_wave64
