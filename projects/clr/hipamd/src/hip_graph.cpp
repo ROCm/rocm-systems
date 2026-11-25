@@ -2455,6 +2455,29 @@ hipError_t hipGraphGetEdges_common(hipGraph_t graph, hipGraphNode_t* from, hipGr
   return hipSuccess;
 }
 
+hipError_t hipGraphRemoveDependencies_v2(hipGraph_t graph, const hipGraphNode_t* from,
+                                         const hipGraphNode_t* to,
+                                         const hipGraphEdgeData* edgeData,
+                                         size_t numDependencies)
+{
+  HIP_INIT_API(hipGraphRemoveDependencies_v2, graph, from, to, edgeData, numDependencies);
+   if (edgeData) {
+    // TODO g-h-c check equivalent CUDA error codes
+    size_t dependency = 0;
+
+    while (dependency < numDependencies) {
+      const hipGrahpEdgeData& edgeData = edgeData[dependency];
+      hipGrahpEdgeData zeroedEdgeData = {};
+
+      // at the time of this writing only hipGraphKernelNodePortDefault (0) type is supported
+      // (the hipGrahpEdgeData::reserved bytes must be zero too)
+      if (std::memcmp(&edgeData, &zeroedEdgeData, sizeof(hipGrahpEdgeData))) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+    }
+  }
+  HIP_RETURN(hipGraphRemoveDependencies_common(graph, from, to, numDependencies));
+}
 hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
                             size_t* numEdges) {
   HIP_INIT_API(hipGraphGetEdges, graph, from, to, numEdges);
