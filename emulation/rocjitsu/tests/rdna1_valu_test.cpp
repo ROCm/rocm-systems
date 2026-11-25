@@ -40,8 +40,9 @@ protected:
     wf->set_lds_size(256);
   }
   void TearDown() override {
-    if (wf)
+    if (wf) {
       wf->halt();
+    }
   }
   void execute(uint32_t first, uint32_t second = 0) {
     const std::array<uint32_t, 3> words{first, second, 0};
@@ -82,8 +83,9 @@ TEST_F(Rdna1ValuTest, MadRoundsProductBeforeAddAndFlushesSubnormals) {
   };
   for (const auto &c : cases) {
     SCOPED_TRACE(c.first);
-    for (unsigned i = 0; i < c.inputs.size(); ++i)
+    for (unsigned i = 0; i < c.inputs.size(); ++i) {
       set(i, c.inputs[i]);
+    }
     ASSERT_NO_FATAL_FAILURE(execute(c.first, c.second));
     EXPECT_EQ(get(0), c.expected);
   }

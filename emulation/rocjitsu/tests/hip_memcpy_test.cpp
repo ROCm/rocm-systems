@@ -35,8 +35,9 @@ TEST(HipMemcpyTest, RoundTripFloat) {
   constexpr size_t bytes = N * sizeof(float);
 
   std::vector<float> src(N), dst(N, 0.0f);
-  for (int i = 0; i < N; ++i)
+  for (int i = 0; i < N; ++i) {
     src[i] = static_cast<float>(i + 1) * 1.5f;
+  }
 
   float *d_buf = nullptr;
   HIP_ASSERT(hipMalloc(&d_buf, bytes));
@@ -44,8 +45,9 @@ TEST(HipMemcpyTest, RoundTripFloat) {
   HIP_ASSERT(hipMemcpy(d_buf, src.data(), bytes, hipMemcpyHostToDevice));
   HIP_ASSERT(hipMemcpy(dst.data(), d_buf, bytes, hipMemcpyDeviceToHost));
 
-  for (int i = 0; i < N; ++i)
+  for (int i = 0; i < N; ++i) {
     EXPECT_FLOAT_EQ(dst[i], src[i]) << "mismatch at index " << i;
+  }
 
   (void)hipFree(d_buf);
 }
@@ -54,14 +56,16 @@ namespace {
 
 __global__ void write_reused_lds(uint32_t words, uint32_t cookie) {
   extern __shared__ volatile uint32_t lds[];
-  for (uint32_t i = threadIdx.x; i < words; i += blockDim.x)
+  for (uint32_t i = threadIdx.x; i < words; i += blockDim.x) {
     lds[i] = cookie ^ i;
+  }
 }
 
 __global__ void read_reused_lds(uint32_t *output, uint32_t words) {
   extern __shared__ volatile uint32_t lds[];
-  for (uint32_t i = threadIdx.x; i < words; i += blockDim.x)
+  for (uint32_t i = threadIdx.x; i < words; i += blockDim.x) {
     output[i] = lds[i];
+  }
 }
 
 } // namespace
@@ -98,14 +102,16 @@ TEST(HipMemcpyTest, MaskedStreamLdsReuse) {
       HIP_ASSERT(hipGetLastError());
       HIP_ASSERT(hipStreamSynchronize(streams[i]));
       HIP_ASSERT(hipMemcpy(host.data(), output, bytes, hipMemcpyDeviceToHost));
-      for (uint32_t word = 0; word < words; ++word)
+      for (uint32_t word = 0; word < words; ++word) {
         ASSERT_EQ(host[word], cookie ^ word)
             << "round=" << round << " stream=" << i << " word=" << word;
+      }
     }
   }
   HIP_ASSERT(hipFree(output));
-  for (hipStream_t stream : streams)
+  for (hipStream_t stream : streams) {
     HIP_ASSERT(hipStreamDestroy(stream));
+  }
 }
 
 TEST(HipMemcpyTest, RoundTripInt) {
@@ -113,8 +119,9 @@ TEST(HipMemcpyTest, RoundTripInt) {
   constexpr size_t bytes = N * sizeof(int);
 
   std::vector<int> src(N), dst(N, 0);
-  for (int i = 0; i < N; ++i)
+  for (int i = 0; i < N; ++i) {
     src[i] = i * 42 + 7;
+  }
 
   int *d_buf = nullptr;
   HIP_ASSERT(hipMalloc(&d_buf, bytes));
@@ -122,8 +129,9 @@ TEST(HipMemcpyTest, RoundTripInt) {
   HIP_ASSERT(hipMemcpy(d_buf, src.data(), bytes, hipMemcpyHostToDevice));
   HIP_ASSERT(hipMemcpy(dst.data(), d_buf, bytes, hipMemcpyDeviceToHost));
 
-  for (int i = 0; i < N; ++i)
+  for (int i = 0; i < N; ++i) {
     EXPECT_EQ(dst[i], src[i]) << "mismatch at index " << i;
+  }
 
   (void)hipFree(d_buf);
 }
@@ -162,8 +170,9 @@ TEST(HipMemcpyTest, VmmShareableAliasesRoundTrip) {
   HIP_ASSERT(hipMemSetAccess(imported_address, granularity, &access, 1));
 
   std::vector<uint8_t> source(granularity), result(granularity);
-  for (size_t index = 0; index < granularity; ++index)
+  for (size_t index = 0; index < granularity; ++index) {
     source[index] = static_cast<uint8_t>(index * 17 + index / 4096);
+  }
   HIP_ASSERT(hipMemcpy(original_address, source.data(), granularity, hipMemcpyHostToDevice));
   HIP_ASSERT(hipMemcpy(result.data(), imported_address, granularity, hipMemcpyDeviceToHost));
   EXPECT_EQ(result, source);
@@ -202,8 +211,9 @@ TEST(HipMemcpyTest, RoundTripPageableAbovePinThreshold) {
   // Knuth's multiplicative hash. The index is narrowed first so the multiply
   // wraps in 32 bits; computing it in size_t would leave a 64-bit product whose
   // top half survives the shift and cannot be represented as an int.
-  for (size_t i = 0; i < N; ++i)
+  for (size_t i = 0; i < N; ++i) {
     src[i] = static_cast<int>((static_cast<uint32_t>(i) * 2654435761u) >> 1);
+  }
 
   int *d_buf = nullptr;
   HIP_ASSERT(hipMalloc(&d_buf, bytes));
@@ -212,8 +222,9 @@ TEST(HipMemcpyTest, RoundTripPageableAbovePinThreshold) {
   HIP_ASSERT(hipMemcpy(dst.data(), d_buf, bytes, hipMemcpyDeviceToHost));
 
   size_t mismatches = 0;
-  for (size_t i = 0; i < N; ++i)
+  for (size_t i = 0; i < N; ++i) {
     mismatches += static_cast<size_t>(dst[i] != src[i]);
+  }
   EXPECT_EQ(mismatches, 0u);
 
   (void)hipFree(d_buf);
@@ -224,8 +235,9 @@ TEST(HipMemcpyTest, DeviceToDevice) {
   constexpr size_t bytes = N * sizeof(float);
 
   std::vector<float> src(N), dst(N, 0.0f);
-  for (int i = 0; i < N; ++i)
+  for (int i = 0; i < N; ++i) {
     src[i] = static_cast<float>(i) * 3.14f;
+  }
 
   float *d_src = nullptr, *d_dst = nullptr;
   HIP_ASSERT(hipMalloc(&d_src, bytes));
@@ -235,8 +247,9 @@ TEST(HipMemcpyTest, DeviceToDevice) {
   HIP_ASSERT(hipMemcpy(d_dst, d_src, bytes, hipMemcpyDeviceToDevice));
   HIP_ASSERT(hipMemcpy(dst.data(), d_dst, bytes, hipMemcpyDeviceToHost));
 
-  for (int i = 0; i < N; ++i)
+  for (int i = 0; i < N; ++i) {
     EXPECT_FLOAT_EQ(dst[i], src[i]) << "mismatch at index " << i;
+  }
 
   (void)hipFree(d_src);
   (void)hipFree(d_dst);

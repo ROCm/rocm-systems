@@ -35,8 +35,9 @@ namespace rocjitsu::test_support {
 static uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
   names.resize(names.size() + name.size() + 1);
-  if (!name.empty())
+  if (!name.empty()) {
     std::memcpy(names.data() + offset, name.data(), name.size());
+  }
   return offset;
 }
 
@@ -213,8 +214,9 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text(
   }
   std::memcpy(image.data() + ehdr.e_phoff, phdrs.data(), phdrs.size() * sizeof(Elf64_Phdr));
 
-  if (!text_words.empty())
+  if (!text_words.empty()) {
     std::memcpy(image.data() + text_offset, text_words.data(), text_size);
+  }
 
   const auto descriptor = make_kernel_descriptor_bytes(static_cast<int64_t>(text_vaddr) -
                                                        static_cast<int64_t>(rodata_vaddr));
@@ -355,8 +357,9 @@ std::vector<uint8_t> make_minimal_amdgpu_kernel_elf(const std::vector<uint32_t> 
 
 std::unique_ptr<Instruction> decode_one(uint32_t word, rocjitsu::IsaFamily arch) {
   auto decoder = Decoder::create(arch);
-  if (!decoder)
+  if (!decoder) {
     return nullptr;
+  }
   return std::unique_ptr<Instruction>(decode_valid(*decoder, &word));
 }
 
@@ -400,8 +403,9 @@ std::vector<uint8_t> make_minimal_amdgpu_elf_with_two_kernels_and_function_point
   const uint32_t kernel0_name = add_elf_name(strtab, "kernel0.kd");
   const uint32_t kernel1_name = add_elf_name(strtab, "kernel1.kd");
   std::vector<uint32_t> helper_names;
-  for (size_t i = 0; i < functions.size(); ++i)
+  for (size_t i = 0; i < functions.size(); ++i) {
     helper_names.push_back(add_elf_name(strtab, "helper" + std::to_string(i)));
+  }
   const uint32_t table_symbol_name = add_elf_name(strtab, "function_table");
 
   const uint64_t rodata_off = align_up_for_test(text_offset + text_size, 8);

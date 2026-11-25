@@ -50,15 +50,17 @@ std::string read_text_file(const fs::path &path) {
   const std::string path_str = path.string();
   auto &real = libc_passthrough();
   int fd = real.openat(AT_FDCWD, path_str.c_str(), O_RDONLY | O_CLOEXEC);
-  if (fd < 0)
+  if (fd < 0) {
     return {};
+  }
 
   std::string out;
   std::array<char, 4096> buffer{};
   for (;;) {
     ssize_t n = real.read(fd, buffer.data(), buffer.size());
-    if (n == 0)
+    if (n == 0) {
       break;
+    }
     if (n < 0) {
       real.close(fd);
       return {};
@@ -73,15 +75,17 @@ void write_text_file(const fs::path &path, const std::string &text) {
   const std::string path_str = path.string();
   auto &real = libc_passthrough();
   int fd = real.openat(AT_FDCWD, path_str.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
-  if (fd < 0)
+  if (fd < 0) {
     return;
+  }
 
   const char *cursor = text.data();
   size_t remaining = text.size();
   while (remaining > 0) {
     ssize_t written = real.write(fd, cursor, remaining);
-    if (written <= 0)
+    if (written <= 0) {
       break;
+    }
     cursor += written;
     remaining -= static_cast<size_t>(written);
   }
@@ -93,8 +97,9 @@ uint32_t read_u32_property(const fs::path &path, std::string_view key, uint32_t 
   std::string name;
   uint64_t value = 0;
   while (input >> name >> value) {
-    if (name == key)
+    if (name == key) {
       return static_cast<uint32_t>(value);
+    }
   }
   return fallback;
 }
@@ -112,8 +117,9 @@ std::string set_property(std::string text, std::string_view key, uint64_t value)
       output << line << "\n";
     }
   }
-  if (!replaced)
+  if (!replaced) {
     output << key << " " << value << "\n";
+  }
   return output.str();
 }
 
@@ -121,8 +127,9 @@ bool make_temp_dir(const char *prefix, std::string *out) {
   std::error_code ec;
   fs::path base = rpc_default_runtime_dir();
   fs::create_directories(base, ec);
-  if (ec)
+  if (ec) {
     return false;
+  }
 
   // Keep generated overlay trees under the rocjitsu runtime directory instead
   // of raw /tmp. That gives test/daemon callers one directory to clean and
@@ -131,8 +138,9 @@ bool make_temp_dir(const char *prefix, std::string *out) {
   std::vector<char> tmpl_buffer(tmpl.begin(), tmpl.end());
   tmpl_buffer.push_back('\0');
   char *dir = mkdtemp(tmpl_buffer.data());
-  if (!dir)
+  if (!dir) {
     return false;
+  }
   *out = dir;
   return true;
 }
@@ -141,13 +149,15 @@ uint32_t count_numeric_dirs(const fs::path &dir) {
   uint32_t count = 0;
   std::error_code ec;
   for (const auto &entry : fs::directory_iterator(dir, ec)) {
-    if (!entry.is_directory(ec))
+    if (!entry.is_directory(ec)) {
       continue;
+    }
     auto name = entry.path().filename().string();
     uint32_t ignored = 0;
     auto [ptr, err] = std::from_chars(name.data(), name.data() + name.size(), ignored);
-    if (err == std::errc{} && ptr == name.data() + name.size())
+    if (err == std::errc{} && ptr == name.data() + name.size()) {
       ++count;
+    }
   }
   return count;
 }
@@ -155,8 +165,9 @@ uint32_t count_numeric_dirs(const fs::path &dir) {
 std::optional<uint32_t> read_u32_file(const fs::path &path) {
   std::istringstream in(read_text_file(path));
   uint32_t value = 0;
-  if (!(in >> value))
+  if (!(in >> value)) {
     return std::nullopt;
+  }
   return value;
 }
 
@@ -168,19 +179,22 @@ uint32_t max_numeric_dir(const fs::path &dir) {
   // interposed directory functions for real sysfs would re-enter
   // redirect_sysfs_path(), which takes the same mutex.
   DIR *stream = real.opendir(dir_str.c_str());
-  if (!stream)
+  if (!stream) {
     return max_id;
+  }
 
   while (struct dirent *entry = real.readdir(stream)) {
     std::string_view name(entry->d_name);
     const std::string child = (dir / name).string();
     struct stat st {};
-    if (real.stat(child.c_str(), &st) != 0 || !S_ISDIR(st.st_mode))
+    if (real.stat(child.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
       continue;
+    }
     uint32_t id = 0;
     auto [ptr, err] = std::from_chars(name.data(), name.data() + name.size(), id);
-    if (err == std::errc{} && ptr == name.data() + name.size())
+    if (err == std::errc{} && ptr == name.data() + name.size()) {
       max_id = std::max(max_id, id);
+    }
   }
   real.closedir(stream);
   return max_id;
@@ -189,15 +203,17 @@ uint32_t max_numeric_dir(const fs::path &dir) {
 bool gpu_id_matches_isa_in_topology(const fs::path &topology_root, uint32_t gpu_id,
                                     std::string_view host_isa) {
   std::optional<uint32_t> target_version = kmd::gfx_target_version_from_name(host_isa);
-  if (!target_version)
+  if (!target_version) {
     return false;
+  }
 
   fs::path nodes_dir = topology_root / "nodes";
   const uint32_t max_node = max_numeric_dir(nodes_dir);
   for (uint32_t node_id = 1; node_id <= max_node; ++node_id) {
     fs::path node_dir = nodes_dir / std::to_string(node_id);
-    if (read_u32_file(node_dir / "gpu_id") != gpu_id)
+    if (read_u32_file(node_dir / "gpu_id") != gpu_id) {
       continue;
+    }
     return read_u32_property(node_dir / "properties", "gfx_target_version", 0) == *target_version;
   }
   return false;
@@ -205,8 +221,9 @@ bool gpu_id_matches_isa_in_topology(const fs::path &topology_root, uint32_t gpu_
 
 bool real_gpu_id_matches_isa(uint32_t gpu_id, std::string_view host_isa) {
   for (std::string_view topology_path : kRealTopologyPaths) {
-    if (gpu_id_matches_isa_in_topology(fs::path(topology_path), gpu_id, host_isa))
+    if (gpu_id_matches_isa_in_topology(fs::path(topology_path), gpu_id, host_isa)) {
       return true;
+    }
   }
   return false;
 }
@@ -255,11 +272,13 @@ uint32_t choose_render_minor(uint32_t requested) {
            !fs::exists("/dev/dri/renderD" + std::to_string(minor));
   };
 
-  if (requested >= kRenderMinorBegin && requested < kRenderMinorEnd && available(requested))
+  if (requested >= kRenderMinorBegin && requested < kRenderMinorEnd && available(requested)) {
     return requested;
+  }
   for (uint32_t minor = kRenderMinorBegin; minor < kRenderMinorEnd; ++minor) {
-    if (available(minor))
+    if (available(minor)) {
       return minor;
+    }
   }
   return (requested >= kRenderMinorBegin && requested < kRenderMinorEnd) ? requested
                                                                          : kRenderMinorEnd - 1;
@@ -280,8 +299,9 @@ bool passthrough_lstat(const std::string &path, struct stat *st) {
 bool passthrough_copy_file(const std::string &src, const std::string &dst) {
   auto &real = libc_passthrough();
   int in = real.openat(AT_FDCWD, src.c_str(), O_RDONLY | O_CLOEXEC);
-  if (in < 0)
+  if (in < 0) {
     return false;
+  }
 
   std::error_code ec;
   fs::create_directories(fs::path(dst).parent_path(), ec);
@@ -299,8 +319,9 @@ bool passthrough_copy_file(const std::string &src, const std::string &dst) {
   std::array<char, 4096> buffer{};
   for (;;) {
     ssize_t n = real.read(in, buffer.data(), buffer.size());
-    if (n == 0)
+    if (n == 0) {
       break;
+    }
     if (n < 0) {
       real.close(out);
       real.close(in);
@@ -391,13 +412,15 @@ GuestKfd::TopologyOverlay::~TopologyOverlay() { cleanup(); }
 bool GuestKfd::TopologyOverlay::copy_tree(const std::string &src, const std::string &dst) {
   std::error_code ec;
   fs::create_directories(dst, ec);
-  if (ec)
+  if (ec) {
     return false;
+  }
 
   auto &real = libc_passthrough();
   DIR *dir = real.opendir(src.c_str());
-  if (!dir)
+  if (!dir) {
     return false;
+  }
 
   bool ok = true;
   for (;;) {
@@ -409,14 +432,16 @@ bool GuestKfd::TopologyOverlay::copy_tree(const std::string &src, const std::str
     }
 
     std::string name = entry->d_name;
-    if (name == "." || name == "..")
+    if (name == "." || name == "..") {
       continue;
+    }
 
     std::string child_src = src + "/" + name;
     std::string child_dst = dst + "/" + name;
     struct stat st {};
-    if (!passthrough_lstat(child_src, &st))
+    if (!passthrough_lstat(child_src, &st)) {
       continue;
+    }
 
     if (S_ISDIR(st.st_mode)) {
       if (!copy_tree(child_src, child_dst)) {
@@ -439,18 +464,21 @@ bool GuestKfd::TopologyOverlay::copy_tree(const std::string &src, const std::str
 
     (void)passthrough_copy_file(child_src, child_dst);
   }
-  if (real.closedir(dir) != 0)
+  if (real.closedir(dir) != 0) {
     ok = false;
+  }
   return ok;
 }
 
 bool GuestKfd::TopologyOverlay::copy_host_topology(const std::string &host_topology_path) {
-  if (!host_topology_path.empty())
+  if (!host_topology_path.empty()) {
     return copy_tree(host_topology_path, topology_dir_);
+  }
 
   for (std::string_view topology_path : kRealTopologyPaths) {
-    if (copy_tree(std::string(topology_path), topology_dir_))
+    if (copy_tree(std::string(topology_path), topology_dir_)) {
       return true;
+    }
 
     // If the first topology root is absent or only partially copyable, reset
     // the destination before trying the alternate root. This mirrors the
@@ -464,8 +492,9 @@ bool GuestKfd::TopologyOverlay::copy_host_topology(const std::string &host_topol
 }
 
 bool GuestKfd::TopologyOverlay::copy_guest_node(const Sysfs::GpuInfo &guest) {
-  if (guest_sysfs_.generate(guest).empty())
+  if (guest_sysfs_.generate(guest).empty()) {
     return false;
+  }
   guest_drm_dir_ = guest_sysfs_.drm_path();
 
   fs::path nodes_dir = fs::path(topology_dir_) / "nodes";
@@ -502,8 +531,9 @@ bool GuestKfd::TopologyOverlay::patch_topology_files() {
 bool GuestKfd::TopologyOverlay::generate(const Sysfs::GpuInfo &guest,
                                          const std::string &host_topology_path) {
   cleanup();
-  if (!make_temp_dir("rocjitsu_guest_topology", &topology_dir_))
+  if (!make_temp_dir("rocjitsu_guest_topology", &topology_dir_)) {
     return false;
+  }
   if (!copy_host_topology(host_topology_path)) {
     cleanup();
     return false;
@@ -544,18 +574,21 @@ GuestKfd::~GuestKfd() {
   // The synthetic descriptor is this object's own; nothing else closes it once the
   // driver is gone.
   const int synthetic = app_fd_.exchange(-1, std::memory_order_acq_rel);
-  if (synthetic >= 0)
+  if (synthetic >= 0) {
     libc_passthrough().close(synthetic);
+  }
   int kfd_fd = real_kfd_fd_.load(std::memory_order_acquire);
-  if (execution_driver_ && owns_execution_driver_open_)
+  if (execution_driver_ && owns_execution_driver_open_) {
     execution_driver_->close();
-  else if (kfd_fd >= 0 && !execution_driver_)
+  } else if (kfd_fd >= 0 && !execution_driver_) {
     libc_passthrough().close(kfd_fd);
+  }
 }
 
 bool GuestKfd::ensure_real_kfd_locked() {
-  if (real_kfd_fd_.load(std::memory_order_acquire) >= 0)
+  if (real_kfd_fd_.load(std::memory_order_acquire) >= 0) {
     return true;
+  }
   if (execution_driver_) {
     int fd = execution_driver_->fd();
     if (fd < 0) {
@@ -581,8 +614,9 @@ bool GuestKfd::ensure_real_kfd_locked() {
     return true;
   }
   int fd = libc_passthrough().openat(AT_FDCWD, "/dev/kfd", O_RDWR | O_CLOEXEC, 0);
-  if (fd < 0)
+  if (fd < 0) {
     return false;
+  }
   // Remember which device this is. The fd number alone is not identity: it can be
   // closed and recycled onto an unrelated file, so anything that holds the
   // descriptor across a window re-checks against this before using it.
@@ -592,22 +626,25 @@ bool GuestKfd::ensure_real_kfd_locked() {
 }
 
 bool GuestKfd::ensure_ready() {
-  if (ready_.load(std::memory_order_acquire))
+  if (ready_.load(std::memory_order_acquire)) {
     return true;
+  }
 
   std::lock_guard lock(mutex_);
   return ensure_ready_locked();
 }
 
 bool GuestKfd::ensure_ready_locked() {
-  if (ready_.load(std::memory_order_acquire))
+  if (ready_.load(std::memory_order_acquire)) {
     return true;
+  }
   if (!config_.enabled || !config_.guest_device.present) {
     errno = EINVAL;
     return false;
   }
-  if (!ensure_real_kfd_locked())
+  if (!ensure_real_kfd_locked()) {
     return false;
+  }
   if (host_gpu_id_ == 0) {
     // The launcher resolves the host GPU once and publishes it in the runtime handoff, and
     // load_dbt_guest_config_from_handoff() refuses an enabled DBT config that arrives here
@@ -642,25 +679,29 @@ bool GuestKfd::ensure_ready_locked() {
 bool GuestKfd::prepare_for_discovery() { return ensure_ready(); }
 
 bool GuestKfd::ensure_app_fd_locked() {
-  if (app_fd_.load(std::memory_order_acquire) >= 0)
+  if (app_fd_.load(std::memory_order_acquire) >= 0) {
     return true;
+  }
   const int minted = memfd_create("rocjitsu_guest_kfd", MFD_CLOEXEC);
-  if (minted < 0)
+  if (minted < 0) {
     return false;
+  }
   app_fd_.store(minted, std::memory_order_release);
   return true;
 }
 
 int GuestKfd::open() {
   std::lock_guard lock(mutex_);
-  if (!ensure_ready_locked())
+  if (!ensure_ready_locked()) {
     return -1;
+  }
 
   bool opened_execution_driver = false;
   if (execution_driver_ && !owns_execution_driver_open_) {
     const int execution_fd = execution_driver_->open();
-    if (execution_fd < 0)
+    if (execution_fd < 0) {
       return -1;
+    }
     real_kfd_fd_.store(execution_fd, std::memory_order_release);
     owns_execution_driver_open_ = true;
     opened_execution_driver = true;
@@ -738,37 +779,42 @@ void GuestKfd::begin_local_shutdown() {
     std::lock_guard lock(mutex_);
     execution_driver = execution_driver_;
   }
-  if (execution_driver)
+  if (execution_driver) {
     execution_driver->begin_local_shutdown();
-  else
+  } else {
     hw_closing_.store(true, std::memory_order_release);
+  }
 }
 
 LinuxKfd::PrimaryInvalidation GuestKfd::invalidate_primary_fd(int fd) {
-  if (fd < 0)
+  if (fd < 0) {
     return PrimaryInvalidation::kNotPrimary;
+  }
   std::lock_guard lock(mutex_);
   // The synthetic backing memfd is internal, like the real fd: app-facing dups
   // carry the counted references, so an overwrite of this number must NOT release
   // one. A later open() re-mints the backing.
   int expected_app = fd;
-  if (app_fd_.compare_exchange_strong(expected_app, -1, std::memory_order_acq_rel))
+  if (app_fd_.compare_exchange_strong(expected_app, -1, std::memory_order_acq_rel)) {
     return PrimaryInvalidation::kClearedKeepRefs;
+  }
 
   // Compare-and-clear the hidden real fd number. Do NOT close it: dup2/dup3
   // already atomically replaced whatever this number named, so closing it here
   // would close the app's replacement. A concurrent overwrite that already
   // cleared it is reported as kNotPrimary.
   int expected = fd;
-  if (!real_kfd_fd_.compare_exchange_strong(expected, -1, std::memory_order_acq_rel))
+  if (!real_kfd_fd_.compare_exchange_strong(expected, -1, std::memory_order_acq_rel)) {
     return PrimaryInvalidation::kNotPrimary;
-  if (execution_driver_)
+  }
+  if (execution_driver_) {
     // Clear the simulator's stale primary-fd classification, but do not honor
     // kClearedDropRef here. That counted reference is the execution-backend
     // open GuestKfd owns and must keep pinned while app-facing dups are live.
     // ensure_real_kfd_locked() balances the extra retain if a later open has to
     // re-mint the simulator primary.
     (void)execution_driver_->invalidate_primary_fd(fd);
+  }
   // Also drop out of the ready state (mirroring close()'s teardown, minus the
   // fd close / overlay cleanup / ref decrement). This matters because GuestKfd
   // forwards every ioctl/mmap through real_kfd_fd_: with the number now cleared,
@@ -805,10 +851,11 @@ GuestKfd::begin_final_close_locked(std::unique_ptr<TopologyOverlay> fresh_overla
 
 void GuestKfd::finish_final_close(FinalCloseWork work) {
   work.overlay.reset();
-  if (work.execution_driver)
+  if (work.execution_driver) {
     work.execution_driver->close();
-  else if (work.kfd_fd >= 0 && !execution_driver_)
+  } else if (work.kfd_fd >= 0 && !execution_driver_) {
     libc_passthrough().close(work.kfd_fd);
+  }
 }
 
 int GuestKfd::close() {
@@ -816,11 +863,13 @@ int GuestKfd::close() {
   auto fresh_overlay = std::make_unique<TopologyOverlay>();
   {
     std::lock_guard lock(mutex_);
-    if (open_refs_ == 0)
+    if (open_refs_ == 0) {
       return 0;
+    }
     --open_refs_;
-    if (open_refs_ != 0)
+    if (open_refs_ != 0) {
       return 0;
+    }
 
     // The app sees only the synthetic descriptor; the interposer owns close
     // ordering so app-facing references keep the host KFD connection alive. Only
@@ -871,8 +920,9 @@ bool GuestKfd::acquire_wait_lease() {
     return false;
   }
   if (!ensure_ready_locked()) {
-    if (errno == 0)
+    if (errno == 0) {
       errno = ENODEV;
+    }
     return false;
   }
   if (real_kfd_fd_.load(std::memory_order_acquire) < 0) {
@@ -888,8 +938,9 @@ int GuestKfd::wait_events(unsigned long request, void *arg) {
   // releases the simulator's backend open exactly as it retires a host connection, and
   // the simulated wait that was already running would then return EBADF.
   WaitLease lease(*this);
-  if (!lease.held())
+  if (!lease.held()) {
     return -(errno != 0 ? errno : ENODEV);
+  }
 
   int rc = 0;
   std::exception_ptr failure;
@@ -902,10 +953,11 @@ int GuestKfd::wait_events(unsigned long request, void *arg) {
     // takes ONE ordinary blocking forward -- slicing it would add repolling that buys
     // nothing. Only the kernel, which nothing in this process can interrupt, needs the
     // wait broken into cancellable slices.
-    if (!arg || execution_driver_)
+    if (!arg || execution_driver_) {
       rc = forward_ioctl(request, arg);
-    else
+    } else {
       rc = forward_wait_events_bounded(request, arg);
+    }
   } catch (...) {
     failure = std::current_exception();
   }
@@ -918,8 +970,9 @@ int GuestKfd::wait_events(unsigned long request, void *arg) {
   // with a first exception already in flight. The result is captured by now, so nothing
   // this does can disturb it.
   lease.release();
-  if (failure)
+  if (failure) {
     std::rethrow_exception(failure);
+  }
   return rc;
 }
 
@@ -946,15 +999,17 @@ void GuestKfd::release_wait_lease() {
     // The exchange inside is what makes this safe against a dup2 that landed on the
     // hidden number: invalidate_primary_fd() already cleared it WITHOUT closing, so this
     // finds -1 and closes nothing rather than closing the app's file.
-    if (--wait_leases_ == 0 && close_deferred_ && open_refs_ == 0)
+    if (--wait_leases_ == 0 && close_deferred_ && open_refs_ == 0) {
       work = begin_final_close_locked(std::move(deferred_overlay_));
+    }
   }
   finish_final_close(std::move(work));
 }
 
 int GuestKfd::forward_ioctl(unsigned long request, void *arg) {
-  if (execution_driver_)
+  if (execution_driver_) {
     return execution_driver_->ioctl(request, arg);
+  }
 
   int kfd_fd = host_fd();
   if (kfd_fd < 0) {
@@ -962,19 +1017,21 @@ int GuestKfd::forward_ioctl(unsigned long request, void *arg) {
     return -1;
   }
   int ret = libc_passthrough().ioctl(kfd_fd, request, arg);
-  if (ret < 0)
+  if (ret < 0) {
     // A Driver returns the KERNEL convention, -errno, and the interposer's single
     // conversion turns that into libc's -1/errno for the application. libc's ioctl gives
     // this path the libc convention instead, so translate rather than pass it through:
     // returning -1 would be read as -EPERM, which is how an interrupted wait reached the
     // runtime as EPERM and defeated its EINTR retry.
     return -(errno != 0 ? errno : EIO);
+  }
   return ret;
 }
 
 int GuestKfd::forward_wait_events_bounded(unsigned long request, void *arg) {
-  if (host_fd() < 0)
+  if (host_fd() < 0) {
     return -ENODEV;
+  }
   auto *wait_args = static_cast<kfd_ioctl_wait_events_args *>(arg);
 
   // Each slice re-loads the hidden descriptor and re-checks its identity rather than
@@ -1002,11 +1059,13 @@ int GuestKfd::forward_wait_events_bounded(unsigned long request, void *arg) {
   // the load/use race, and wait_events_poll_loop issues them unsliced anyway.
   return wait_events_poll_loop(*wait_args, hw_closing_, [&] {
     const int slice_fd = host_fd();
-    if (slice_fd < 0 || !fd_is_expected_kfd(slice_fd))
+    if (slice_fd < 0 || !fd_is_expected_kfd(slice_fd)) {
       return -ENODEV;
+    }
     int ret = libc_passthrough().ioctl(slice_fd, request, arg);
-    if (ret < 0)
+    if (ret < 0) {
       return -(errno != 0 ? errno : EIO);
+    }
     return ret;
   });
 }
@@ -1014,22 +1073,26 @@ int GuestKfd::forward_wait_events_bounded(unsigned long request, void *arg) {
 void GuestKfd::record_kfd_identity(int kfd_fd) {
   auto &real = libc_passthrough();
   struct stat st {};
-  if (real.fstat_fn && real.fstat_fn(kfd_fd, &st) == 0 && S_ISCHR(st.st_mode))
+  if (real.fstat_fn && real.fstat_fn(kfd_fd, &st) == 0 && S_ISCHR(st.st_mode)) {
     real_kfd_rdev_.store(st.st_rdev, std::memory_order_release);
-  else
+  } else {
     real_kfd_rdev_.store(0, std::memory_order_release);
+  }
 }
 
 bool GuestKfd::fd_is_expected_kfd(int fd) const {
   const dev_t expected = real_kfd_rdev_.load(std::memory_order_acquire);
-  if (expected == 0)
+  if (expected == 0) {
     return false; // identity was never established: fail closed rather than guess.
+  }
   auto &real = libc_passthrough();
-  if (!real.fstat_fn)
+  if (!real.fstat_fn) {
     return false;
+  }
   struct stat st {};
-  if (real.fstat_fn(fd, &st) != 0)
+  if (real.fstat_fn(fd, &st) != 0) {
     return false;
+  }
   return S_ISCHR(st.st_mode) && st.st_rdev == expected;
 }
 
@@ -1039,8 +1102,9 @@ int GuestKfd::wait_events_poll_loop(kfd_ioctl_wait_events_args &args,
   const uint32_t original_timeout = args.timeout;
 
   // A zero-timeout poll already returns promptly; forward it unchanged.
-  if (original_timeout == 0)
+  if (original_timeout == 0) {
     return poll();
+  }
 
   // Break a long/indefinite wait into short kernel polls, re-checking the
   // cancellation flag between iterations so begin_local_shutdown() can cancel it
@@ -1105,10 +1169,12 @@ int GuestKfd::wait_events_poll_loop(kfd_ioctl_wait_events_args &args,
       return rc;
     }
     args.timeout = original_timeout;
-    if (args.wait_result != KFD_IOC_WAIT_RESULT_TIMEOUT)
+    if (args.wait_result != KFD_IOC_WAIT_RESULT_TIMEOUT) {
       return 0;
-    if (!indefinite && std::chrono::steady_clock::now() >= deadline)
+    }
+    if (!indefinite && std::chrono::steady_clock::now() >= deadline) {
       return 0; // real timeout: leave wait_result == TIMEOUT
+    }
   }
 }
 
@@ -1121,8 +1187,9 @@ int GuestKfd::get_process_apertures_ioctl(void *arg) {
 
   kfd_ioctl_get_process_apertures_new_args count_args{};
   int ret = forward_ioctl(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &count_args);
-  if (ret != 0)
+  if (ret != 0) {
     return ret;
+  }
   const uint32_t host_count = count_args.num_of_nodes;
 
   if (args->num_of_nodes == 0 || args->kfd_process_device_apertures_ptr == 0) {
@@ -1144,11 +1211,13 @@ int GuestKfd::get_process_apertures_ioctl(void *arg) {
         reinterpret_cast<uint64_t>(reinterpret_cast<uintptr_t>(host.data()));
     host_args.num_of_nodes = host_capacity;
     ret = forward_ioctl(AMDKFD_IOC_GET_PROCESS_APERTURES_NEW, &host_args);
-    if (ret != 0)
+    if (ret != 0) {
       return ret;
+    }
     const uint32_t host_to_copy = std::min(host_capacity, host_args.num_of_nodes);
-    for (uint32_t i = 0; i < host_to_copy; ++i)
+    for (uint32_t i = 0; i < host_to_copy; ++i) {
       out[i] = host[i];
+    }
     if (requested > host_to_copy) {
       out[host_to_copy] = guest_apertures();
       args->num_of_nodes = host_to_copy + 1;
@@ -1170,8 +1239,9 @@ int GuestKfd::get_clock_counters_ioctl(void *arg) {
     errno = EINVAL;
     return -1;
   }
-  if (args->gpu_id != guest_.gpu_id)
+  if (args->gpu_id != guest_.gpu_id) {
     return forward_ioctl(AMDKFD_IOC_GET_CLOCK_COUNTERS, arg);
+  }
 
   return fill_get_clock_counters_ioctl(arg, guest_.clock_frequency_mhz());
 }
@@ -1182,8 +1252,9 @@ int GuestKfd::acquire_vm_ioctl(void *arg) {
     errno = EINVAL;
     return -1;
   }
-  if (args->gpu_id == guest_.gpu_id)
+  if (args->gpu_id == guest_.gpu_id) {
     return 0;
+  }
   return forward_ioctl(AMDKFD_IOC_ACQUIRE_VM, arg);
 }
 
@@ -1206,8 +1277,9 @@ int GuestKfd::set_memory_policy_ioctl(void *arg) {
     errno = EINVAL;
     return -1;
   }
-  if (args->gpu_id == guest_.gpu_id)
+  if (args->gpu_id == guest_.gpu_id) {
     return 0;
+  }
   return forward_ioctl(AMDKFD_IOC_SET_MEMORY_POLICY, arg);
 }
 
@@ -1219,8 +1291,9 @@ int GuestKfd::alloc_memory_ioctl(void *arg) {
   }
   if (args->gpu_id != guest_.gpu_id) {
     int ret = forward_ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, arg);
-    if (ret == 0)
+    if (ret == 0) {
       assert(args->handle < kSyntheticHandleBase);
+    }
     return ret;
   }
 
@@ -1256,8 +1329,9 @@ int GuestKfd::map_or_unmap_memory_ioctl(Args *args, unsigned long request) {
     errno = EINVAL;
     return -1;
   }
-  if (args->n_success > args->n_devices)
+  if (args->n_success > args->n_devices) {
     return -EINVAL;
+  }
 
   uint32_t host_gpu_id = 0;
   {
@@ -1273,12 +1347,14 @@ int GuestKfd::map_or_unmap_memory_ioctl(Args *args, unsigned long request) {
     return forward_ioctl(request, args);
   }
 
-  if (args->n_devices > kMaxPayloadBytes / sizeof(uint32_t))
+  if (args->n_devices > kMaxPayloadBytes / sizeof(uint32_t)) {
     return -E2BIG;
+  }
   std::vector<uint32_t> translated_ids(args->n_devices);
   if (copy_ioctl_user_buffer(translated_ids.data(), args->device_ids_array_ptr,
-                             translated_ids.size() * sizeof(uint32_t)) != 0)
+                             translated_ids.size() * sizeof(uint32_t)) != 0) {
     return -EFAULT;
+  }
   bool has_guest = false;
   for (uint32_t &id : translated_ids) {
     if (id == guest_.gpu_id) {
@@ -1301,21 +1377,24 @@ int GuestKfd::map_or_unmap_memory_ioctl(Args *args, unsigned long request) {
   for (uint32_t id : translated_ids) {
     const auto [position, inserted] =
         host_positions.try_emplace(id, static_cast<uint32_t>(host_ids.size()));
-    if (inserted)
+    if (inserted) {
       host_ids.push_back(id);
+    }
     required_host_position.push_back(position->second);
   }
   const uint32_t completed = args->n_success;
   uint32_t host_completed = 0;
   for (uint32_t i = 0; i < completed; ++i) {
-    if (required_host_position[i] == host_completed)
+    if (required_host_position[i] == host_completed) {
       ++host_completed;
+    }
   }
   std::vector<uint32_t> original_progress(host_ids.size() + 1);
   uint32_t consumed = 0;
   for (size_t host_success = 0; host_success <= host_ids.size(); ++host_success) {
-    while (consumed < translated_ids.size() && required_host_position[consumed] < host_success)
+    while (consumed < translated_ids.size() && required_host_position[consumed] < host_success) {
       ++consumed;
+    }
     original_progress[host_success] = consumed;
   }
 
@@ -1326,8 +1405,9 @@ int GuestKfd::map_or_unmap_memory_ioctl(Args *args, unsigned long request) {
   host_args.n_devices = static_cast<uint32_t>(host_ids.size());
   host_args.n_success = host_completed;
   const int ret = forward_ioctl(request, &host_args);
-  if (host_args.n_success < host_completed || host_args.n_success > host_ids.size())
+  if (host_args.n_success < host_completed || host_args.n_success > host_ids.size()) {
     return -EIO;
+  }
   args->n_success = original_progress[host_args.n_success];
   return ret;
 }
@@ -1346,10 +1426,12 @@ int GuestKfd::ioctl(unsigned long request, void *arg) {
   // WAIT_EVENTS establishes readiness and takes its operation lease as one locked step,
   // so it must not come through the generic ensure_ready() first -- that would reopen
   // the very gap the single step exists to close.
-  if (canonical_ioctl_request(request) == AMDKFD_IOC_WAIT_EVENTS)
+  if (canonical_ioctl_request(request) == AMDKFD_IOC_WAIT_EVENTS) {
     return wait_events(request, arg);
-  if (!ensure_ready())
+  }
+  if (!ensure_ready()) {
     return -(errno != 0 ? errno : ENODEV);
+  }
 
   switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_GET_PROCESS_APERTURES_NEW:
@@ -1376,15 +1458,17 @@ int GuestKfd::ioctl(unsigned long request, void *arg) {
   case AMDKFD_IOC_RUNTIME_ENABLE:
     return forward_ioctl(request, arg);
   default:
-    if (request_targets_guest(request, arg))
+    if (request_targets_guest(request, arg)) {
       return reject_guest_execution_ioctl(request, arg);
+    }
     return forward_ioctl(request, arg);
   }
 }
 
 void *GuestKfd::mmap(void *addr, size_t length, int prot, int flags, off_t offset) {
-  if (!ensure_ready())
+  if (!ensure_ready()) {
     return MAP_FAILED;
+  }
   int kfd_fd = host_fd();
   if (kfd_fd < 0) {
     errno = ENODEV;
@@ -1404,8 +1488,9 @@ void *GuestKfd::mmap(void *addr, size_t length, int prot, int flags, off_t offse
     errno = ENODEV;
     return MAP_FAILED;
   }
-  if (execution_driver_)
+  if (execution_driver_) {
     return execution_driver_->mmap(addr, length, prot, flags, offset);
+  }
   return libc_passthrough().mmap(addr, length, prot, flags, kfd_fd, offset);
 }
 
@@ -1414,12 +1499,15 @@ int GuestKfd::munmap(void *addr, size_t length) {
 }
 
 bool GuestKfd::owns_fd(int fd) const {
-  if (fd < 0)
+  if (fd < 0) {
     return false;
-  if (fd == app_fd_.load(std::memory_order_acquire))
+  }
+  if (fd == app_fd_.load(std::memory_order_acquire)) {
     return true;
-  if (fd == real_kfd_fd_.load(std::memory_order_acquire))
+  }
+  if (fd == real_kfd_fd_.load(std::memory_order_acquire)) {
     return true;
+  }
   return execution_driver_ && execution_driver_->owns_fd(fd);
 }
 
@@ -1428,15 +1516,17 @@ int GuestKfd::fd() const { return real_kfd_fd_.load(std::memory_order_acquire); 
 int GuestKfd::host_fd() const { return real_kfd_fd_.load(std::memory_order_acquire); }
 
 std::string GuestKfd::redirect_sysfs_path(const char *path) const {
-  if (!path)
+  if (!path) {
     return {};
+  }
 
   std::string topology_path;
   std::string guest_drm_path;
   {
     std::lock_guard lock(mutex_);
-    if (!ready_.load(std::memory_order_acquire))
+    if (!ready_.load(std::memory_order_acquire)) {
       return {};
+    }
     // Snapshot mutable overlay strings while serialized with close() teardown.
     // The returned path must not reference buffers that cleanup() may clear.
     topology_path = overlay_->topology_path();
@@ -1444,18 +1534,22 @@ std::string GuestKfd::redirect_sysfs_path(const char *path) const {
   }
 
   auto redirected = redirect_sysfs_root_path(path, topology_path, {});
-  if (!redirected.empty())
+  if (!redirected.empty()) {
     return redirected;
-  if (guest_drm_path.empty())
+  }
+  if (guest_drm_path.empty()) {
     return {};
+  }
 
   std::string_view sv(path);
   uint32_t minor = 0;
   std::string_view suffix;
-  if (parse_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor)
+  if (parse_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor) {
     return guest_drm_path + "/renderD" + std::to_string(minor) + std::string(suffix);
-  if (parse_sys_dev_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor)
+  }
+  if (parse_sys_dev_drm_render_path(sv, &minor, &suffix) && minor == guest_.drm_render_minor) {
     return guest_drm_path + "/renderD" + std::to_string(minor) + std::string(suffix);
+  }
 
   constexpr std::string_view kDevDriRenderPrefix = "/dev/dri/renderD";
   if (sv.starts_with(kDevDriRenderPrefix)) {
@@ -1480,29 +1574,33 @@ bool GuestKfd::is_doorbell_range(const void *addr, size_t length) const {
 
 void *GuestKfd::mmap_replacing_client_doorbell_views(void *addr, size_t length, int prot, int flags,
                                                      int fd, off_t offset) {
-  if (execution_driver_)
+  if (execution_driver_) {
     return execution_driver_->mmap_replacing_client_doorbell_views(addr, length, prot, flags, fd,
                                                                    offset);
+  }
   return libc_passthrough().mmap(addr, length, prot, flags, fd, offset);
 }
 
 void GuestKfd::run_host_vma_replacement(std::span<const std::pair<uint64_t, uint64_t>> ranges,
                                         const std::function<bool()> &bare_mapping_change) {
-  if (execution_driver_)
+  if (execution_driver_) {
     execution_driver_->run_host_vma_replacement(ranges, bare_mapping_change);
-  else
+  } else {
     (void)bare_mapping_change();
+  }
 }
 
 void *GuestKfd::mmap_observing_host_vma_change(void *addr, size_t length, int prot, int flags,
                                                off_t offset,
                                                const std::function<void()> &on_change) {
-  if (execution_driver_)
+  if (execution_driver_) {
     return execution_driver_->mmap_observing_host_vma_change(addr, length, prot, flags, offset,
                                                              on_change);
+  }
   void *mapped = mmap(addr, length, prot, flags, offset);
-  if (mapped != MAP_FAILED && (flags & MAP_FIXED))
+  if (mapped != MAP_FAILED && (flags & MAP_FIXED)) {
     on_change();
+  }
   return mapped;
 }
 
@@ -1514,14 +1612,16 @@ int GuestKfd::munmap_observing_host_vma_change(void *addr, size_t length,
 }
 
 bool GuestKfd::handles_drm_render_minor(uint32_t minor) const {
-  if (ready_.load(std::memory_order_acquire) && minor == guest_.drm_render_minor)
+  if (ready_.load(std::memory_order_acquire) && minor == guest_.drm_render_minor) {
     return true;
+  }
   return execution_driver_ && execution_driver_->handles_drm_render_minor(minor);
 }
 
 const Sysfs::GpuInfo *GuestKfd::gpu_info_for_render_minor(uint32_t minor) const {
-  if (ready_.load(std::memory_order_acquire) && minor == guest_.drm_render_minor)
+  if (ready_.load(std::memory_order_acquire) && minor == guest_.drm_render_minor) {
     return &guest_;
+  }
   return execution_driver_ ? execution_driver_->gpu_info_for_render_minor(minor) : nullptr;
 }
 
@@ -1542,8 +1642,9 @@ int GuestKfd::reject_guest_execution_ioctl(unsigned long request, void *) const 
 }
 
 bool GuestKfd::request_targets_guest(unsigned long request, void *arg) const {
-  if (!arg)
+  if (!arg) {
     return false;
+  }
   switch (canonical_ioctl_request(request)) {
   case AMDKFD_IOC_CREATE_QUEUE:
     return static_cast<kfd_ioctl_create_queue_args *>(arg)->gpu_id == guest_.gpu_id;
@@ -1565,8 +1666,9 @@ bool GuestKfd::request_targets_guest(unsigned long request, void *arg) const {
            attr.type == KFD_IOCTL_SVM_ATTR_PREFETCH_LOC || attr.type == KFD_IOCTL_SVM_ATTR_ACCESS ||
            attr.type == KFD_IOCTL_SVM_ATTR_ACCESS_IN_PLACE ||
            attr.type == KFD_IOCTL_SVM_ATTR_NO_ACCESS) &&
-          attr.value == guest_.gpu_id)
+          attr.value == guest_.gpu_id) {
         return true;
+      }
     }
     return false;
   }

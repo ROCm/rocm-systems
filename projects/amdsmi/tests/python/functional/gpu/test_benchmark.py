@@ -894,6 +894,33 @@ class TestGpuBenchmark(unittest.TestCase):
             "amdsmi_get_gpu_driver_info", "Processors", "get_gpu_driver_info"
         )
 
+    def test_performance_get_gpu_driver_info_v2(self):
+        self.common.print_func_name("")
+
+        for i, processor in enumerate(self.processors):
+            self._log_test_start("amdsmi_get_gpu_driver_info_v2", "Processor", i)
+
+            self._print_api_result(amdsmi.amdsmi_get_gpu_driver_info_v2, i, processor)
+
+            stats = self._measure_api_performance(
+                amdsmi.amdsmi_get_gpu_driver_info_v2, f"get_gpu_driver_info_v2_gpu_{i}", processor
+            )
+
+            self.perf_results[f"get_gpu_driver_info_v2_gpu_{i}"] = stats
+
+            if stats["successful_runs"] > 0:
+                self._print_performance_results(stats)
+            else:
+                self.common.print(
+                    f"  Processor {i}: All calls failed - {stats['errors'][0]['error_info'] if stats['errors'] else 'Unknown'}"
+                )
+
+            self._log_test_completion("Processor", i)
+
+        self._log_performance_summary(
+            "amdsmi_get_gpu_driver_info_v2", "Processors", "get_gpu_driver_info_v2"
+        )
+
     def test_performance_get_gpu_ecc_count(self):
         self.common.print_func_name("")
 
@@ -4171,11 +4198,6 @@ class TestGpuBenchmark(unittest.TestCase):
 
     def test_performance_status_code_to_string(self):
         self.common.print_func_name("")
-
-        if self.TODO_SKIP_FAIL:
-            self.skipTest(
-                "Skipping test_performance_status_code_to_string as it fails (Unhashable type)."
-            )
 
         for error_num, error_name in error_map.items():
             self._log_test_start("amdsmi_status_code_to_string", "ErrorCode", error_num)

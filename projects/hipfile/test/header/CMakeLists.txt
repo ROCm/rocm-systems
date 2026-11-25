@@ -7,14 +7,27 @@
 # build. These are the oldest standards the header supports. The objects
 # are never linked.
 #
+# -Wundef catches a preprocessor test of a macro that only one language
+# defines, such as __STDC_VERSION__ (C only) or __cplusplus (C++ only),
+# that isn't guarded by defined().
+#
 # header-check.c is copied to a .cpp file in the build directory to
 # compile it as C++. configure_file() reruns CMake when header-check.c
 # changes, so the copy stays up to date.
 #
-# The hipFile include directory isn't SYSTEM, since that would suppress
-# warnings from the header. The HIP include directory comes from
-# hip::host and is SYSTEM, since it's an imported target, so warnings
-# from the HIP headers are not reported.
+# The target links hipfile, as a consumer would, and gets the hipFile
+# include directory from it. That also checks that hipfile doesn't
+# impose a language standard on its consumers: CMake compiles a target
+# with the highest standard any of its dependencies require, so a
+# cxx_std_* or c_std_* usage requirement on hipfile would raise this
+# target above C11 or C++11, and header-check.c fails with #error if
+# it isn't compiled as exactly those.
+#
+# The hipFile include directory isn't SYSTEM, since hipfile is a target
+# in this build rather than an imported one, so warnings from the header
+# are reported. The HIP include directory comes from hip::host and is
+# SYSTEM, since it's an imported target, so warnings from the HIP
+# headers are not reported.
 #
 # clang-tidy is disabled for this target. It finds its config by searching
 # upward from the source file, and the generated .cpp file is in the build
@@ -39,14 +52,10 @@ set_target_properties(hipfile_header_check PROPERTIES
     CXX_CLANG_TIDY ""
 )
 
-target_include_directories(hipfile_header_check
-    PRIVATE ${HIPFILE_INCLUDE_PATH}
-)
-
 target_link_libraries(hipfile_header_check
-    PRIVATE hip::host
+    PRIVATE hipfile hip::host
 )
 
 target_compile_options(hipfile_header_check
-    PRIVATE -Wall -Wextra -Werror -pedantic
+    PRIVATE -Wall -Wextra -Wundef -Werror -pedantic
 )

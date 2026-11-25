@@ -36,40 +36,83 @@ SDMAWriteDataPacket::SDMAWriteDataPacket(unsigned int familyId, void* destAddr, 
                                          unsigned int packetSizeOffset):
     packetData(NULL) {
     m_FamilyId = familyId;
-    InitPacket(destAddr, 1, &data, packetSizeOffset);
+    if (familyId < FAMILY_GFX13)
+        InitPacket(destAddr, 1, &data, packetSizeOffset);
+    else
+        InitPacket_v8(destAddr, 1, &data, packetSizeOffset);
 }
 
 SDMAWriteDataPacket::SDMAWriteDataPacket(unsigned int familyId, void* destAddr, unsigned int ndw,
                                          void *data):
     packetData(NULL) {
     m_FamilyId = familyId;
-    InitPacket(destAddr, ndw, data);
+    if (familyId < FAMILY_GFX13)
+        InitPacket(destAddr, ndw, data);
+    else
+        InitPacket_v8(destAddr, ndw, data);
 }
 
 void SDMAWriteDataPacket::InitPacket(void* destAddr, unsigned int ndw,
                                      void *data, unsigned int packetSizeOffset) {
+    SDMA_PKT_WRITE_UNTILED *pSDMA;
     packetSize = sizeof(SDMA_PKT_WRITE_UNTILED) +
         (ndw - 1) * sizeof(unsigned int);
     packetSize -= packetSizeOffset;
-    packetData = reinterpret_cast<SDMA_PKT_WRITE_UNTILED *>(AllocPacket());
+    pSDMA = reinterpret_cast<SDMA_PKT_WRITE_UNTILED *>(AllocPacket());
+    packetData = reinterpret_cast<void *>(pSDMA);
 
-    packetData->HEADER_UNION.op = SDMA_OP_WRITE;
-    packetData->HEADER_UNION.sub_op = SDMA_SUBOP_WRITE_LINEAR;
+    pSDMA->HEADER_UNION.op = SDMA_OP_WRITE;
+    pSDMA->HEADER_UNION.sub_op = SDMA_SUBOP_WRITE_LINEAR;
 
     SplitU64(reinterpret_cast<HSAuint64>(destAddr),
-             packetData->DST_ADDR_LO_UNION.DW_1_DATA,  // dst_addr_31_0
-             packetData->DST_ADDR_HI_UNION.DW_2_DATA);  // dst_addr_63_32
+             pSDMA->DST_ADDR_LO_UNION.DW_1_DATA,  // dst_addr_31_0
+             pSDMA->DST_ADDR_HI_UNION.DW_2_DATA);  // dst_addr_63_32
 
-    packetData->DW_3_UNION.count = SDMA_COUNT(ndw);
+    pSDMA->DW_3_UNION.count = SDMA_COUNT(ndw);
     if (m_FamilyId >= FAMILY_GFX125X)
-        packetData->DW_3_UNION.scope = SDMA_SCOPE_SYS;
-    memcpy(&packetData->DATA0_UNION.DW_4_DATA, data, ndw*sizeof(unsigned int));
+        pSDMA->DW_3_UNION.scope = SDMA_SCOPE_SYS;
+    memcpy(&pSDMA->DATA0_UNION.DW_4_DATA, data, ndw*sizeof(unsigned int));
+}
+
+void SDMAWriteDataPacket::InitPacket_v8(void* destAddr, unsigned int ndw,
+                                     void *data, unsigned int packetSizeOffset) {
+    SDMA_V8_PKT_WRITE_UNTILED *pSDMA;
+    packetSize = sizeof(SDMA_V8_PKT_WRITE_UNTILED) +
+        (ndw - 1) * sizeof(unsigned int);
+    packetSize -= packetSizeOffset;
+    pSDMA = reinterpret_cast<SDMA_V8_PKT_WRITE_UNTILED *>(AllocPacket());
+    packetData = reinterpret_cast<void *>(pSDMA);
+
+    pSDMA->HEADER_UNION.op = SDMA_OP_WRITE;
+    pSDMA->HEADER_UNION.sub_op = SDMA_SUBOP_WRITE_LINEAR;
+    pSDMA->HEADER_UNION.dst_uc_sel = uc_sel_override_io_space;
+
+    SplitU64(reinterpret_cast<HSAuint64>(destAddr),
+             pSDMA->DST_ADDR_LO_UNION.DW_1_DATA,  // dst_addr_31_0
+             pSDMA->DST_ADDR_HI_UNION.DW_2_DATA);  // dst_addr_63_32
+
+    pSDMA->DW_3_UNION.count = SDMA_COUNT(ndw);
+    pSDMA->DW_4_UNION.DW_4_DATA = 0;
+    memcpy(&pSDMA->DATA0_UNION.DW_5_DATA, data, ndw*sizeof(unsigned int));
+}
+
+SDMACopyDataPacket::SDMACopyDataPacket(unsigned int familyId,
+                        void *const dsts[], void *src, int n, unsigned int surfsize):
+    packetData(NULL) {
+    m_FamilyId = familyId;
+    if (familyId < FAMILY_GFX13)
+        InitPacket(dsts, src, n, surfsize);
+    else
+        InitPacket_v8(dsts, src, n, surfsize);
+}
+
+SDMACopyDataPacket::SDMACopyDataPacket(unsigned int familyId, void* dst, void *src, unsigned int surfsize) {
+    new (this)SDMACopyDataPacket(familyId, &dst, src, 1, surfsize);
 }
 
 #define BITS (21)
 #define TWO_MEG (1 << BITS)
-SDMACopyDataPacket::SDMACopyDataPacket(unsigned int familyId,
-                        void *const dsts[], void *src, int n, unsigned int surfsize) {
+void SDMACopyDataPacket::InitPacket(void *const dsts[], void *src, int n, unsigned int surfsize) {
     int32_t size = 0, i;
     void **dst = reinterpret_cast<void**>(malloc(sizeof(void*) * n));
     const int singlePacketSize = sizeof(SDMA_PKT_COPY_LINEAR) +
@@ -78,13 +121,12 @@ SDMACopyDataPacket::SDMACopyDataPacket(unsigned int familyId,
     if (n > 2)
         WARN() << "SDMACopyDataPacket does not support more than 2 dst addresses!" << std::endl;
 
-    m_FamilyId = familyId;
     memcpy(dst, dsts, sizeof(void*) * n);
 
     packetSize = ((surfsize + TWO_MEG - 1) >> BITS) * singlePacketSize;
 
     SDMA_PKT_COPY_LINEAR *pSDMA = reinterpret_cast<SDMA_PKT_COPY_LINEAR *>(AllocPacket());
-    packetData = pSDMA;
+    packetData = reinterpret_cast<void *>(pSDMA);
 
     while (surfsize > 0) {
         /* SDMA support maximum 0x3fffe0 byte in one copy, take 2M here */
@@ -99,8 +141,8 @@ SDMACopyDataPacket::SDMACopyDataPacket(unsigned int familyId,
         pSDMA->HEADER_UNION.broadcast       = n > 1 ? 1 : 0;
         pSDMA->COUNT_UNION.count             = SDMA_COUNT(size);
         if (m_FamilyId >= FAMILY_GFX125X) {
-            packetData->PARAMETER_UNION.src_scope = SDMA_SCOPE_SYS;
-            packetData->PARAMETER_UNION.dst_scope = SDMA_SCOPE_SYS;
+            pSDMA->PARAMETER_UNION.src_scope = SDMA_SCOPE_SYS;
+            pSDMA->PARAMETER_UNION.dst_scope = SDMA_SCOPE_SYS;
         }
 
         SplitU64(reinterpret_cast<HSAuint64>(src),
@@ -121,8 +163,53 @@ SDMACopyDataPacket::SDMACopyDataPacket(unsigned int familyId,
     free(dst);
 }
 
-SDMACopyDataPacket::SDMACopyDataPacket(unsigned int familyId, void* dst, void *src, unsigned int surfsize) {
-    new (this)SDMACopyDataPacket(familyId, &dst, src, 1, surfsize);
+void SDMACopyDataPacket::InitPacket_v8(void *const dsts[], void *src, int n, unsigned int surfsize) {
+    int32_t size = 0, i;
+    void **dst = reinterpret_cast<void**>(malloc(sizeof(void*) * n));
+    const int singlePacketSize = sizeof(SDMA_V8_PKT_COPY_LINEAR) +
+                        sizeof(SDMA_V8_PKT_COPY_LINEAR::DST_ADDR[0]) * n;
+
+    if (n > 2)
+        WARN() << "SDMACopyDataPacket does not support more than 2 dst addresses!" << std::endl;
+
+    memcpy(dst, dsts, sizeof(void*) * n);
+
+    packetSize = ((surfsize + TWO_MEG - 1) >> BITS) * singlePacketSize;
+
+    SDMA_V8_PKT_COPY_LINEAR *pSDMA = reinterpret_cast<SDMA_V8_PKT_COPY_LINEAR *>(AllocPacket());
+    packetData = reinterpret_cast<void *>(pSDMA);
+
+    while (surfsize > 0) {
+        /* SDMA support maximum 0x3fffe0 byte in one copy, take 2M here */
+        if (surfsize > TWO_MEG)
+            size = TWO_MEG;
+        else
+            size = surfsize;
+
+        memset(pSDMA, 0, singlePacketSize);
+        pSDMA->HEADER_UNION.op           = SDMA_OP_COPY;
+        pSDMA->HEADER_UNION.sub_op       = SDMA_SUBOP_COPY_LINEAR;
+        pSDMA->HEADER_UNION.broadcast       = n > 1 ? 1 : 0;
+        pSDMA->COUNT_UNION.count             = SDMA_COUNT(size);
+        pSDMA->PARAMETER_UNION.dst_uc_sel = uc_sel_override_io_space;
+        pSDMA->PARAMETER_UNION.src_uc_sel = uc_sel_override_io_space;
+
+        SplitU64(reinterpret_cast<HSAuint64>(src),
+                 pSDMA->SRC_ADDR_LO_UNION.DW_4_DATA,  // src_addr_31_0
+                 pSDMA->SRC_ADDR_HI_UNION.DW_5_DATA);  // src_addr_63_32
+
+        for (i = 0; i < n; i++)
+            SplitU64(reinterpret_cast<HSAuint64>(dst[i]),
+                    pSDMA->DST_ADDR[i].DST_ADDR_LO_UNION.DW_6_DATA,  // dst_addr_31_0
+                    pSDMA->DST_ADDR[i].DST_ADDR_HI_UNION.DW_7_DATA);  // dst_addr_63_32
+
+        pSDMA = reinterpret_cast<SDMA_V8_PKT_COPY_LINEAR *>(reinterpret_cast<char *>(pSDMA) + singlePacketSize);
+        for (i = 0; i < n; i++)
+            dst[i] = reinterpret_cast<char *>(dst[i]) + size;
+        src = reinterpret_cast<char *>(src) + size;
+        surfsize -= size;
+    }
+    free(dst);
 }
 
 SDMAFillDataPacket::SDMAFillDataPacket(unsigned int familyId, void *dst, unsigned int data, unsigned int size) {
@@ -131,8 +218,10 @@ SDMAFillDataPacket::SDMAFillDataPacket(unsigned int familyId, void *dst, unsigne
 
     m_FamilyId = familyId;
     /* SDMA support maximum 0x3fffe0 byte in one copy. Use 2M copy_size */
-    m_PacketSize = ((size + TWO_MEG - 1) >> BITS) * sizeof(SDMA_PKT_CONSTANT_FILL);
+    m_PacketSize = ((size + TWO_MEG - 1) >> BITS) * (sizeof(SDMA_PKT_CONSTANT_FILL) +
+                    (familyId < FAMILY_GFX13 ? 0 : 4));
     pSDMA = reinterpret_cast<SDMA_PKT_CONSTANT_FILL *>(AllocPacket());
+    memset(pSDMA, 0, m_PacketSize);
     m_PacketData = pSDMA;
 
     while (size > 0) {
@@ -156,12 +245,19 @@ SDMAFillDataPacket::SDMAFillDataPacket(unsigned int familyId, void *dst, unsigne
             pSDMA->COUNT_UNION.count = SDMA_COUNT(copy_size);
         }
 
+        if (familyId >= FAMILY_GFX13)
+            /* override IO space mtype to uc */
+            pSDMA->COUNT_UNION.reserved_0 = uc_sel_override_io_space;
+
         SplitU64(reinterpret_cast<HSAuint64>(dst),
             pSDMA->DST_ADDR_LO_UNION.DW_1_DATA, /*dst_addr_31_0*/
             pSDMA->DST_ADDR_HI_UNION.DW_2_DATA); /*dst_addr_63_32*/
 
         pSDMA->DATA_UNION.DW_3_DATA = data;
         pSDMA++;
+
+        if (familyId >= FAMILY_GFX13)
+            pSDMA = reinterpret_cast<SDMA_PKT_CONSTANT_FILL *>(reinterpret_cast<char *>(pSDMA) + 4);
 
         dst = reinterpret_cast<char *>(dst) + copy_size;
         size -= copy_size;

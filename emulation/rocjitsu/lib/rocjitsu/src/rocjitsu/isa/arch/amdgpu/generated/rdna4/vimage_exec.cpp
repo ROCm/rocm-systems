@@ -289,8 +289,9 @@ void ImageAtomicSwapVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -314,8 +315,9 @@ void ImageAtomicCmpswapVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -339,8 +341,9 @@ void ImageAtomicAddUintVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -364,8 +367,9 @@ void ImageAtomicSubUintVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -389,8 +393,9 @@ void ImageAtomicMinIntVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -414,8 +419,9 @@ void ImageAtomicMinUintVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -439,8 +445,9 @@ void ImageAtomicMaxIntVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -464,8 +471,9 @@ void ImageAtomicMaxUintVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -489,8 +497,9 @@ void ImageAtomicAndVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -514,8 +523,9 @@ void ImageAtomicOrVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -539,8 +549,9 @@ void ImageAtomicXorVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -564,8 +575,9 @@ void ImageAtomicIncUintVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -589,8 +601,9 @@ void ImageAtomicDecUintVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -644,8 +657,9 @@ void ImageAtomicAddFltVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -672,8 +686,9 @@ void ImageAtomicMinFltVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -700,8 +715,9 @@ void ImageAtomicMaxFltVimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -726,8 +742,9 @@ void ImageAtomicPkAddF16Vimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -752,8 +769,9 @@ void ImageAtomicPkAddBf16Vimage::execute_impl(amdgpu::Wavefront &wf) {
                                           .tfe = bool(inst_.tfe),
                                           .da = true,
                                           .unorm = true})
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 

@@ -214,14 +214,16 @@ TEST_F(CliTest, RegistrationRejectsAllCollisionDirections) {
 }
 
 TEST_F(CliTest, InvalidDefinitionsAndNullFlagsFail) {
-  for (const char *name : {"", "--", "-", "---x", "-long", "plain", "--a=b", "--two words"})
+  for (const char *name : {"", "--", "-", "---x", "-long", "plain", "--a=b", "--two words"}) {
     EXPECT_TRUE(
         root.add_flag(std::make_shared<Int64Flag>(FlagInfo{name, {}, ""}), diagnostic.emitter())
             .failed())
         << name;
+  }
   EXPECT_TRUE(root.add_flag(nullptr, diagnostic.emitter()).failed());
-  for (const char *name : {"", "--x", "two words", "a=b"})
+  for (const char *name : {"", "--x", "two words", "a=b"}) {
     EXPECT_TRUE(root.add_command(name, diagnostic.emitter()).failed());
+  }
 }
 
 TEST_F(CliTest, BuiltInValueFlagsRejectSwitchMode) {
@@ -434,11 +436,12 @@ TEST_F(CliTest, MetadataAndHelpRemainStableWhileRegistering) {
   auto value = std::make_shared<Int64Flag>(FlagInfo{"--count", {"-c"}, "Item count"});
   ASSERT_TRUE(root.add_flag(value, diagnostic.emitter()).succeeded());
   std::shared_ptr<Flag> first = root.find_flag("--count");
-  for (int i = 0; i < 100; ++i)
+  for (int i = 0; i < 100; ++i) {
     ASSERT_TRUE(
         root.add_flag(std::make_shared<Int64Flag>(FlagInfo{"--x" + std::to_string(i), {}, ""}),
                       diagnostic.emitter())
             .succeeded());
+  }
   std::shared_ptr<Flag> alias = root.find_flag("-c");
   EXPECT_EQ(alias, first);
   EXPECT_NE(format_help(root).find("--count, -c VALUE"), std::string::npos);
@@ -456,13 +459,15 @@ TEST(CliValues, IntegerBoundariesAndWholeInputConversion) {
     EXPECT_EQ(signed_value.format_value(), text);
   }
   for (const char *text :
-       {"", "9223372036854775808", "-9223372036854775809", "1x", " 1", "1 ", "+1", "0x10"})
+       {"", "9223372036854775808", "-9223372036854775809", "1x", " 1", "1 ", "+1", "0x10"}) {
     EXPECT_TRUE(signed_value.parse_and_set(text, diagnostic.emitter()).failed()) << text;
+  }
   ASSERT_TRUE(
       unsigned_value.parse_and_set("18446744073709551615", diagnostic.emitter()).succeeded());
   EXPECT_EQ(unsigned_value.value(), std::numeric_limits<uint64_t>::max());
-  for (const char *text : {"18446744073709551616", "-1", "-0", ""})
+  for (const char *text : {"18446744073709551616", "-1", "-0", ""}) {
     EXPECT_TRUE(unsigned_value.parse_and_set(text, diagnostic.emitter()).failed()) << text;
+  }
   EXPECT_TRUE(
       signed_value.parse_and_set(std::string_view("1\0x", 3), diagnostic.emitter()).failed());
 }
@@ -472,8 +477,9 @@ public:
   using Flag::Flag;
   int64_t value() const { return value_; }
   Result set_value(int64_t value, DiagnosticEmitter diagnostic) {
-    if (value <= 0)
+    if (value <= 0) {
       return diagnostic.emit() << "must be positive";
+    }
     value_ = value;
     return Result::success();
   }
@@ -482,8 +488,9 @@ public:
 private:
   Result parse_value(std::string_view text, DiagnosticEmitter diagnostic) override {
     FailureOr<int64_t> parsed = parse_int(text, diagnostic);
-    if (parsed.failed())
+    if (parsed.failed()) {
       return Result::failure();
+    }
     return set_value(parsed.value(), diagnostic);
   }
 
@@ -497,8 +504,9 @@ public:
   std::string format_value() const override {
     std::string result;
     for (const std::string &value : values_) {
-      if (!result.empty())
+      if (!result.empty()) {
         result += ",";
+      }
       result += value;
     }
     return result;
@@ -586,8 +594,9 @@ TEST(CliValues, DeterministicRoundTripsAndMalformedArguments) {
     EXPECT_EQ(decoded.value(), expected);
 
     std::string bytes(random() % 48, '\0');
-    for (char &byte : bytes)
+    for (char &byte : bytes) {
       byte = static_cast<char>(random() & 0xff);
+    }
     ASSERT_TRUE(text->parse_and_set(bytes, diagnostic.emitter()).succeeded());
     EXPECT_EQ(text->format_value(), bytes);
     const std::array<std::string_view, 5> args{iteration % 2 ? "--number" : "--text", bytes,
@@ -596,10 +605,11 @@ TEST(CliValues, DeterministicRoundTripsAndMalformedArguments) {
     bool emitted = false;
     auto sink = [&](std::string_view message) { emitted = !message.empty(); };
     FailureOr<ParsedArguments> parsed = parse(command, args, DiagnosticEmitter(sink));
-    if (parsed.failed())
+    if (parsed.failed()) {
       EXPECT_TRUE(emitted);
-    else
+    } else {
       EXPECT_EQ(parsed.value().positional, (std::vector<std::string>{"--number", "42"}));
+    }
   }
 }
 

@@ -211,7 +211,8 @@ int rj_arith_v_pack_b32_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_pack_b32_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                 uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -223,9 +224,6 @@ int rj_arith_v_pack_b32_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t ins
                                     RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                         RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return error;
-  }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   return run<false>(flags, exec_mask, instruction_flags, d, a, b,
                     bool(flags & RJ_ARITH_FP_IEEE_MODE));
@@ -237,7 +235,8 @@ int rj_arith_v_pack_b32_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t ins
 int rj_arith_v_pack_b32_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                 uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, [[maybe_unused]] uint32_t *trapsts) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
@@ -249,9 +248,6 @@ int rj_arith_v_pack_b32_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t ins
                                     RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
                                         RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return error;
-  }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   return run_wave64<false>(flags, exec_mask, instruction_flags, d, a, b,
                            bool(flags & RJ_ARITH_FP_IEEE_MODE));
@@ -281,4 +277,67 @@ int rj_arith_v_sat_pk_u8_i16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
     return error;
   }
   return run_wave64<true>(flags, exec_mask, instruction_flags, d, a, nullptr, true, false);
+}
+
+// gfx942 shares the RDNA3 packing model; empirically exact on MI300X.
+int rj_arith_v_pack_b32_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  return rj_arith_v_pack_b32_f16_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_pack_b32_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  return rj_arith_v_pack_b32_f16_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+// gfx950 inherits the RDNA3/gfx942 packing model; strict exact is unsupported pending
+// architecture-specific captures.
+int rj_arith_v_pack_b32_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_pack_b32_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+int rj_arith_v_pack_b32_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       [[maybe_unused]] uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_pack_b32_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+// gfx1250 shares the gfx12 packing model, including its input flushing and NaN quieting;
+// strict exact is unsupported pending gfx1250 captures.
+int rj_arith_v_pack_b32_f16_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        [[maybe_unused]] uint32_t *excp_flag_user) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_pack_b32_f16_w32_gfx12(flags, exec_mask, instruction_flags, d, a, b,
+                                           excp_flag_user);
+}
+
+// gfx1250 shares the gfx12 packing model, including its input flushing and NaN quieting;
+// strict exact is unsupported pending gfx1250 captures.
+int rj_arith_v_pack_b32_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        [[maybe_unused]] uint32_t *excp_flag_user) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_pack_b32_f16_w64_gfx12(flags, exec_mask, instruction_flags, d, a, b,
+                                           excp_flag_user);
 }

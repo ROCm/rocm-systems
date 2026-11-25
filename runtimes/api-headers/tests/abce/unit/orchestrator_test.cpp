@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -732,5 +734,56 @@ INSTANTIATE_TEST_SUITE_P(AllIsas, SubmitMatchesMap,
                          ::testing::Values("gfx90a", "gfx942", "gfx950", "gfx1030", "gfx1100",
                                            "gfx1201", "gfx1250"),
                          [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
+
+//===----------------------------------------------------------------------===//
+// Submission tail (Windows native SDMA queue)
+//===----------------------------------------------------------------------===//
+
+// Maps |ops| on |num_engines| gfx1201 rings set up as a Windows native SDMA queue
+// (align64, 32-byte tail), submits, and checks every span each ring published
+// starts with its frame where it has one and ends in 32 zero bytes, the room the
+// thunk writes its fence into.
+void ExpectEverySpanEndsInTheTail(uint32_t num_engines, const std::vector<abce_copy_op_t>& ops,
+                                  uint32_t min_frames) {
+  constexpr uint32_t kTail = 32;
+  MapperOptions options;
+  options.num_engines = num_engines;
+  options.ring_options.align64 = true;
+  options.ring_options.submission_tail_bytes = kTail;
+  Mapper mapper(IsaByName("gfx1201"), options);
+  abce_plan_t plan;
+  const abce_copy_metadata_t metadata = mapper.NewMetadata();
+  ASSERT_EQ(mapper.Map(ops, metadata, &plan), ABCE_STATUS_OK);
+  ASSERT_GE(plan.num_frames, min_frames);
+  std::vector<std::vector<uint8_t>> frames;
+  std::vector<uint32_t> engines;
+  for (uint32_t frame_idx = 0; frame_idx < plan.num_frames; ++frame_idx) {
+    frames.push_back(Mapper::FrameBytes(plan, frame_idx));
+    engines.push_back(plan.frames[frame_idx].engine);
+  }
+  ASSERT_EQ(mapper.Submit(&plan), ABCE_STATUS_OK);
+
+  for (uint32_t frame_idx = 0; frame_idx < frames.size(); ++frame_idx) {
+    SCOPED_TRACE(frame_idx);
+    abce_test::FakeRing& ring = mapper.ring(engines[frame_idx]);
+    const std::vector<uint8_t>& stream = ring.stream();
+    ASSERT_EQ(ring.doorbell_history().size(), 1u) << "one frame, one span on its ring";
+    const uint64_t end = ring.doorbell_history()[0];
+    ASSERT_EQ(stream.size(), end);
+    ASSERT_GE(end, frames[frame_idx].size() + kTail);
+    EXPECT_EQ(end % 64, 0u) << "align64 keeps every span whole lines";
+    EXPECT_TRUE(std::equal(frames[frame_idx].begin(), frames[frame_idx].end(), stream.begin()));
+    for (uint64_t byte_idx = end - kTail; byte_idx < end; ++byte_idx)
+      ASSERT_EQ(stream[byte_idx], 0) << "the fence's 32 bytes must be free";
+  }
+}
+
+TEST(SubmissionTail, ASingleFrameEndsInTheTail) {
+  ExpectEverySpanEndsInTheTail(1, {MakeHostToDevice(0x1000, 0x8000, 4 * kKiB)}, 1);
+}
+
+TEST(SubmissionTail, EveryFrameOfAFanOutEndsInTheTail) {
+  ExpectEverySpanEndsInTheTail(4, MakeLinearBatch(4, 1 * kMiB), 2);
+}
 
 }  // namespace

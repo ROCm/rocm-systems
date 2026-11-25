@@ -98,7 +98,7 @@ other project without asking.
   this (see the top-level [`CMakeLists.txt`](CMakeLists.txt)). Put
   `/opt/rocm/bin` on `PATH` when running binaries you build.
 - **Compiler**: hipFile is C++20 plus one HIP kernel
-  (`src/amd_detail/backend/memcpy-kernel.hip`), so the project enables the C,
+  (`test/system/amd/io-data-modification-kernel.hip`), so the project enables the C,
   CXX, and HIP languages, and configuring needs ROCm's HIP compiler.
   `amdclang++` is the usual C++ compiler, and the one TheRock uses, but the
   code has to build with upstream Clang and GCC too (see
@@ -172,7 +172,9 @@ Notes:
   ([hipfile-ci-system.yml](../../.github/workflows/hipfile-ci-system.yml))
   on several kinds of storage, along with
   [`util/ci-aiscp-test.sh`](util/ci-aiscp-test.sh), which copies files with
-  the `aiscp` example on both I/O paths.
+  the `aiscp` example on both I/O paths. To save runner time, they run only
+  in the `amdclang++` C++20 builds; the `clang++`, `g++`, and C++23 builds
+  run just the unit tests.
 - **Every change to library behavior needs tests**
   ([STYLEGUIDE.md](STYLEGUIDE.md)): new functionality gets tests, including
   its error paths, and a bug fix gets a test that fails before the fix and

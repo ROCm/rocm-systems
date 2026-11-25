@@ -43,8 +43,9 @@ using rocjitsu::test::kernel_path;
 
 const rocjitsu::Section *find_section(const rocjitsu::CodeObject &co, std::string_view name) {
   for (const auto &section : co.all_sections()) {
-    if (section->name() == name)
+    if (section->name() == name) {
       return section.get();
+    }
   }
   return nullptr;
 }
@@ -61,12 +62,14 @@ MutableKernelDescriptorImage mutable_vector_add_descriptor(rocjitsu::IsaFamily g
                                                            rocjitsu::IsaFamily host_arch) {
   MutableKernelDescriptorImage fixture;
   rocjitsu::Executable exec(kernel_path("vector_add"));
-  if (!exec.is_valid() || exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950) == 0)
+  if (!exec.is_valid() || exec.num_code_objects(ROCJITSU_CODE_TARGET_GFX950) == 0) {
     return fixture;
+  }
 
   const auto *co = exec.code_object(ROCJITSU_CODE_TARGET_GFX950, 0);
-  if (co == nullptr || co->text_sections().empty())
+  if (co == nullptr || co->text_sections().empty()) {
     return fixture;
+  }
 
   fixture.image.resize(co->image_size());
   std::memcpy(fixture.image.data(), co->image_data(), fixture.image.size());
@@ -77,8 +80,9 @@ MutableKernelDescriptorImage mutable_vector_add_descriptor(rocjitsu::IsaFamily g
   const auto translations =
       translator.translate_image(fixture.image, fixture.text_offset, fixture.text_size,
                                  rocjitsu::KernelDescriptorTranslationOptions{});
-  if (translations.empty())
+  if (translations.empty()) {
     return fixture;
+  }
 
   fixture.kd_file_off = translations[0].descriptor_file_offset;
   fixture.valid =
@@ -181,8 +185,9 @@ TEST(BinaryTranslatorE2E, TranslateVectorAddCdna4ToCdna3) {
         continue;
       }
       const std::string_view mnemonic(inst->mnemonic());
-      if (mnemonic.starts_with("v_add_"))
+      if (mnemonic.starts_with("v_add_")) {
         has_vector_add = true;
+      }
       pc += inst->size() / 4;
       ++inst_count;
     }
@@ -898,8 +903,9 @@ TEST(BinaryTranslatorE2E, DumpTranslation) {
 
   auto dump = [](const char *label, const uint8_t *text, size_t size, rocjitsu::IsaFamily arch) {
     auto dec = Decoder::create(arch);
-    if (!dec)
+    if (!dec) {
       return;
+    }
     const auto *data = reinterpret_cast<const uint32_t *>(text);
     size_t words = size / 4, pc = 0;
     printf("\n--- %s (%zu bytes, %zu words) ---\n", label, size, words);
@@ -912,8 +918,9 @@ TEST(BinaryTranslatorE2E, DumpTranslation) {
           continue;
         }
         printf("  0x%04zx: %-45s [", pc * 4, inst->disassemble().c_str());
-        for (int i = 0; i < inst->size() / 4; i++)
+        for (int i = 0; i < inst->size() / 4; i++) {
           printf("%s%08X", i ? " " : "", data[pc + i]);
+        }
         printf("]\n");
         pc += inst->size() / 4;
       } catch (...) {
@@ -923,22 +930,25 @@ TEST(BinaryTranslatorE2E, DumpTranslation) {
     }
   };
 
-  for (const auto *sec : co->text_sections())
+  for (const auto *sec : co->text_sections()) {
     dump("CDNA4 source", reinterpret_cast<const uint8_t *>(sec->data()), sec->size(),
          rocjitsu::IsaFamily::Cdna4);
+  }
 
   BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4);
   auto result = translator.translate(*co);
   ASSERT_FALSE(result.elf_bytes.empty());
 
   rocjitsu::AmdGpuCodeObject translated(result.elf_bytes.data(), result.elf_bytes.size());
-  for (const auto *sec : translated.text_sections())
+  for (const auto *sec : translated.text_sections()) {
     dump("RDNA4 translated", reinterpret_cast<const uint8_t *>(sec->data()), sec->size(),
          rocjitsu::IsaFamily::Rdna4);
+  }
 
   if (!result.diagnostics.empty()) {
     printf("\n--- Diagnostics (%zu) ---\n", result.diagnostics.size());
-    for (const auto &diagnostic : result.diagnostics)
+    for (const auto &diagnostic : result.diagnostics) {
       printf("  %s\n", diagnostic.message.c_str());
+    }
   }
 }

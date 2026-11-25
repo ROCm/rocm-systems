@@ -55,8 +55,9 @@ protected:
     IntervalSet intervals;
     for (auto range : ranges) {
       intervals.append(range.start, range.end);
-      for (int byte = range.start; byte < range.end; ++byte)
+      for (int byte = range.start; byte < range.end; ++byte) {
         event.bytes.set(byte);
+      }
     }
     intervals.finalize();
     const auto type = !write                            ? MemoryEventType::LDS_TO_VGPR
@@ -88,25 +89,29 @@ protected:
                  << "wave=" << access.wave << " order=" << int(access.order)
                  << " write=" << access.write << " range=[" << addr << "," << addr + bytes << ")");
     std::bitset<kLdsBytes> query;
-    for (int byte = addr; byte < addr + bytes; ++byte)
+    for (int byte = addr; byte < addr + bytes; ++byte) {
       query.set(byte);
+    }
     std::vector<int> expected;
     for (const auto &event : events_) {
-      if (event.write == access.write || (event.bytes & query).none())
+      if (event.write == access.write || (event.bytes & query).none()) {
         continue;
+      }
       // A completed event is safe only for its own wave. Otherwise,
       // that wave needs both accesses to share an ordered class.
       if (event.wave == access.wave &&
           (event.complete ||
-           (access.order != MemoryOrderClass::UNORDERED && event.order == access.order)))
+           (access.order != MemoryOrderClass::UNORDERED && event.order == access.order))) {
         continue;
+      }
       expected.push_back(event.id.value);
     }
     observed_.clear();
-    if (access.write)
+    if (access.write) {
       detector_.validateWrite(addr, WaveId{access.wave}, /*lane=*/0, bytes, access.order);
-    else
+    } else {
       detector_.validateRead(addr, WaveId{access.wave}, /*lane=*/0, bytes, access.order);
+    }
     // Retirement may reorder the detector's lists. Compare exact event
     // identities, so a missing report cannot cancel out an extra report.
     std::ranges::sort(expected);
@@ -153,15 +158,17 @@ TEST_F(LdsHistoryTest, DeterministicSoak) {
         }
         // Include duplicate, overlapping and disjoint input intervals; the
         // byte-set oracle never calls the detector's interval-merging code.
-        if (random() % 4 == 0)
+        if (random() % 4 == 0) {
           ranges.push_back(ranges.front());
+        }
         add(wave, write, order, ranges);
       } else {
         const size_t index = random() % events_.size();
-        if (random() % 2)
+        if (random() % 2) {
           ASSERT_NO_FATAL_FAILURE(complete(index));
-        else
+        } else {
           ASSERT_NO_FATAL_FAILURE(retire(index));
+        }
       }
       const int addr = step % 2 ? random() % kLdsBytes : boundaries[random() % boundaries.size()];
       const int bytes = std::min(1 + int(random() % 64), kLdsBytes - addr);
