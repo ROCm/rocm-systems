@@ -62,8 +62,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop2_cndmask", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -83,8 +84,9 @@ struct Fixture {
   std::array<uint32_t, WF_SIZE> snapshot_dst() const {
     std::array<uint32_t, WF_SIZE> out{};
     uint32_t vbase = wf->vgpr_alloc().base;
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vbase + 2, lane);
+    }
     return out;
   }
 
@@ -116,8 +118,9 @@ void check_case(uint64_t exec) {
   auto run_mode = [&](bool force_scalar, uint64_t vcc) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     uint32_t enc = vop2_encode(/*opcode=*/0, /*vdst=*/2, /*vsrc1=*/1, /*src0=*/256);

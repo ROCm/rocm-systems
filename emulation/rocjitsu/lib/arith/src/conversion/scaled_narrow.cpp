@@ -7,6 +7,7 @@
 #include "conversion/scaled_narrow.h"
 #include "common/float_encoding.h"
 #include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "conversion/scaled_narrow_impl.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_conversion.h"
@@ -55,8 +56,11 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   if constexpr (fp4 && Stochastic && Src == Source::F32) {
     upper_a = a[1];
   }
+  [[maybe_unused]] const auto level =
+      wave_cpu_level(flags, !Stochastic || Src != Source::Bf16 || Dst != Destination::Fp8 ||
+                                (exec_mask & (exec_mask - 1)));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     scaled_narrow_x86_64_v4<Dst, Stochastic>(Lanes, exec_mask, Src, flags & RJ_ARITH_FP16_OVFL,
                                              flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, shift, d[0],
                                              a[0], b[0], scale, upper_a);
@@ -64,7 +68,7 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     scaled_narrow_x86_64_v3<Dst, Stochastic>(Lanes, exec_mask, Src, flags & RJ_ARITH_FP16_OVFL,
                                              flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, shift, d[0],
                                              a[0], b[0], scale, upper_a);

@@ -39,8 +39,9 @@ public:
   Pm4QueueMemory() : bytes_(0x4000) {}
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
-    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {
         .outcome = VmAccessOutcome::Complete,
         .translation = {.domain = VmMemoryDomain::System,
@@ -51,10 +52,12 @@ public:
   }
 
   VmAccessOutcome read(VmMemoryDomain, uint64_t address, std::span<std::byte> bytes) override {
-    if (unavailable_read_ && address == *unavailable_read_)
+    if (unavailable_read_ && address == *unavailable_read_) {
       return VmAccessOutcome::Unavailable;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
                         bytes.begin());
     return VmAccessOutcome::Complete;
@@ -62,17 +65,20 @@ public:
 
   VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                         std::span<const std::byte> bytes) override {
-    if (write_failure_ && address == write_failure_->first)
+    if (write_failure_ && address == write_failure_->first) {
       return write_failure_->second;
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
-    if (unavailable_read_ && address == *unavailable_read_)
+    if (unavailable_read_ && address == *unavailable_read_) {
       return {.outcome = VmAccessOutcome::Unavailable};
+    }
     if ((width != 2 && width != 4 && width != 8) || address % width != 0 ||
         address > bytes_.size() || width > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Malformed};
@@ -84,10 +90,12 @@ public:
 
   VmAccessOutcome atomic_store(VmMemoryDomain, uint64_t address, uint32_t width,
                                uint64_t value) override {
-    if (unavailable_store_ && address == *unavailable_store_)
+    if (unavailable_store_ && address == *unavailable_store_) {
       return VmAccessOutcome::Unavailable;
-    if (faulted_store_ && address == *faulted_store_)
+    }
+    if (faulted_store_ && address == *faulted_store_) {
       return VmAccessOutcome::Faulted;
+    }
     if ((width != 4 && width != 8) || address % width != 0 || address > bytes_.size() ||
         width > bytes_.size() - address) {
       return VmAccessOutcome::Malformed;
@@ -193,8 +201,9 @@ TEST_F(Pm4ComputeQueueTest, RejectsSubmissionsForUnknownQueueOrProcess) {
       cp->register_drm_queue({.address_space = address_space, .process_id = 7, .queue_id = 1}));
   constexpr uint32_t kOutput = 0x300;
   const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
-  for (size_t word_index = 0; word_index < words.size(); ++word_index)
+  for (size_t word_index = 0; word_index < words.size(); ++word_index) {
     memory->store<uint32_t>(kRing + word_index * 4, words[word_index]);
+  }
 
   uint32_t completions = 0;
   for (const auto &[queue_id, process_id] : {std::pair{2u, 7u}, std::pair{1u, 8u}}) {
@@ -221,8 +230,9 @@ TEST_F(Pm4ComputeQueueTest, RejectsSubmissionsForNativeRingQueue) {
   ASSERT_NE(registration, 0u);
   constexpr uint32_t kOutput = 0x300;
   const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
-  for (size_t word_index = 0; word_index < words.size(); ++word_index)
+  for (size_t word_index = 0; word_index < words.size(); ++word_index) {
     memory->store<uint32_t>(kRing + word_index * 4, words[word_index]);
+  }
 
   uint32_t completions = 0;
   Pm4Submission submission;
@@ -348,15 +358,17 @@ TEST_F(Pm4ComputeQueueTest, BlockedSubmissionsKeepStallRecheckWorkBounded) {
   // A persistent dependency must back off even when several queues and several
   // service sites request a retry. Duplicate retries would multiply at each tick
   // and prevent later shader or dependency-completion events from progressing.
-  while (engine->context(cp->partition_id()).current_tick() < 20000u)
+  while (engine->context(cp->partition_id()).current_tick() < 20000u) {
     ASSERT_TRUE(engine->step());
+  }
   EXPECT_LT(cp->doorbell_handle_count_for_test(), 64u);
   EXPECT_EQ(completed, 0u);
 
   ready = true;
   // Readiness alone must be observed by the coalesced timer.
-  for (uint32_t i = 0; i < 8 && completed != 2; ++i)
+  for (uint32_t i = 0; i < 8 && completed != 2; ++i) {
     service();
+  }
   EXPECT_EQ(completed, 2u);
 }
 
@@ -401,14 +413,16 @@ public:
   Pm4FlushPlugin() : ExecutionPlugin("pm4-flush") {}
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &) override {
     ++processed;
-    if (on_processed)
+    if (on_processed) {
       on_processed();
+    }
   }
   void onAmdgpuDispatchExecutionBegin(uint32_t id) override { begins.push_back(id); }
   void onAmdgpuDispatchExecutionEnd(uint32_t id) override { ends.push_back(id); }
   void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override {
-    if (on_completed)
+    if (on_completed) {
       on_completed();
+    }
   }
   void onAmdgpuWavefrontDispatched(Wavefront &wave) override {
     wave_process_ids.push_back(wave.process_id());
@@ -461,8 +475,9 @@ protected:
                            0x40u,
                            0xdeadbeefu};
     memory->store<uint32_t>(0x2000, 0xbf810000u); // s_endpgm
-    for (size_t i = 0; i < words.size(); ++i)
+    for (size_t i = 0; i < words.size(); ++i) {
       memory->store<uint32_t>(kRing + i * 4, words[i]);
+    }
     ComputeQueueConfig queue{
         .address_space = address_space,
         .process_id = process_id,
@@ -493,8 +508,9 @@ protected:
   }
 
   void expect_cancelled() {
-    for (uint32_t i = 0; i < 100 && !completions; ++i)
+    for (uint32_t i = 0; i < 100 && !completions; ++i) {
       service();
+    }
     EXPECT_EQ(completions, 1u);
     EXPECT_EQ(successors, 0u);
     service();
@@ -540,8 +556,9 @@ TEST_F(Pm4DispatchFlushTest, AqlVendorIbFlushFailurePreventsWritesCompletionAndS
   ASSERT_NO_FATAL_FAILURE(inject_flush_failure());
   testing::internal::CaptureStderr();
   engine->schedule_event_now(cp->doorbell_event());
-  for (unsigned step = 0; step < 100 && !cp->queue_faulted_for_test(1, kProcessId); ++step)
+  for (unsigned step = 0; step < 100 && !cp->queue_faulted_for_test(1, kProcessId); ++step) {
     EXPECT_NO_THROW(service());
+  }
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   EXPECT_NE(diagnostic.find("PM4 cache flush failed"), std::string::npos) << diagnostic;
   EXPECT_TRUE(cp->queue_faulted_for_test(1, kProcessId));
@@ -587,8 +604,9 @@ TEST_F(Pm4DispatchFlushTest, RetirementPublishesDirtyLineUnderWaveProcessId) {
     EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0u);
   };
   ASSERT_NO_FATAL_FAILURE(submit_dispatch(true));
-  for (uint32_t i = 0; i < 100 && !completions; ++i)
+  for (uint32_t i = 0; i < 100 && !completions; ++i) {
     service();
+  }
   EXPECT_EQ(completions, 1u);
   EXPECT_EQ(successors, 1u);
   ASSERT_EQ(plugin->begins.size(), 1u);
@@ -612,8 +630,9 @@ TEST_F(Pm4DispatchFlushTest, MismatchedProcessIdFaultsBeforeDispatch) {
 TEST_F(Pm4DispatchFlushTest, NativeMismatchedProcessIdFaultsBeforeDispatch) {
   ASSERT_NO_FATAL_FAILURE(submit_dispatch(true, 0, true));
   testing::internal::CaptureStderr();
-  for (uint32_t i = 0; i < 100 && !cp->queue_faulted_for_test(1, 0); ++i)
+  for (uint32_t i = 0; i < 100 && !cp->queue_faulted_for_test(1, 0); ++i) {
     service();
+  }
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   EXPECT_NE(diagnostic.find("PM4 dispatch process ID does not match address-space VMID"),
             std::string::npos)
@@ -639,8 +658,9 @@ TEST_F(Pm4ComputeQueueTest, ForeignFlushFailureDoesNotBlockFreshQueues) {
   ASSERT_TRUE(healthy_space);
   constexpr uint32_t kOutput = 0x300;
   const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
-  for (size_t i = 0; i < words.size(); ++i)
+  for (size_t i = 0; i < words.size(); ++i) {
     healthy_memory->store<uint32_t>(kRing + i * 4, words[i]);
+  }
   uint32_t completions = 0;
   for (uint32_t id : {1u, 2u}) {
     ASSERT_TRUE(cp->register_drm_queue({.address_space = healthy_space, .queue_id = id}));
@@ -652,8 +672,9 @@ TEST_F(Pm4ComputeQueueTest, ForeignFlushFailureDoesNotBlockFreshQueues) {
       ++completions;
     };
     ASSERT_TRUE(cp->submit_pm4(id, 0, std::move(submission)));
-    for (uint32_t i = 0; i < 10 && completions != id; ++i)
+    for (uint32_t i = 0; i < 10 && completions != id; ++i) {
       service();
+    }
     EXPECT_EQ(completions, id);
     EXPECT_EQ(healthy_memory->load<uint32_t>(kOutput), 0xdeadbeefu);
     EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0u);
@@ -673,8 +694,9 @@ TEST_P(Pm4QueueCacheFlushFailureTest, CancellationCompletesEvenWhenCleanupFlushA
   constexpr uint64_t kDirtyLine = 0x1000;
   constexpr uint32_t kOutput = 0x300;
   const std::array words{0xc0033700u, 0x100u, kOutput, 0u, 0xdeadbeefu};
-  for (size_t i = 0; i < words.size(); ++i)
+  for (size_t i = 0; i < words.size(); ++i) {
     memory->store<uint32_t>(kRing + i * 4, words[i]);
+  }
   std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
   dirty.fill(0xab);
   ASSERT_EQ(l2->writeback_line(kDirtyLine, dirty.data(), Mtype::RW, 1), VmAccessOutcome::Complete);
@@ -715,8 +737,9 @@ TEST_F(Pm4ComputeQueueTest, ProducerCompletionWakesEarlierConsumerPromptly) {
   };
   ASSERT_TRUE(cp->submit_pm4(1, 0, std::move(consumer)));
   auto tick = [&] { return engine->context(cp->partition_id()).current_tick(); };
-  while (tick() < 20000)
+  while (tick() < 20000) {
     ASSERT_TRUE(engine->step());
+  }
   Pm4Submission producer;
   producer.complete = [&](bool success) {
     EXPECT_TRUE(success);
@@ -728,14 +751,16 @@ TEST_F(Pm4ComputeQueueTest, ProducerCompletionWakesEarlierConsumerPromptly) {
   ASSERT_TRUE(engine->step());
   ASSERT_EQ(producer_done, 1u);
   ASSERT_EQ(consumer_done, 0u);
-  for (unsigned i = 0; i < 8 && consumer_done == 0; ++i)
+  for (unsigned i = 0; i < 8 && consumer_done == 0; ++i) {
     ASSERT_TRUE(engine->step());
+  }
   EXPECT_EQ(consumer_done, 1u);
   EXPECT_LE(tick() - start, 1u);
   const auto passes = cp->doorbell_handle_count_for_test();
   unsigned stale_steps = 0;
-  while (engine->step())
+  while (engine->step()) {
     ASSERT_LT(++stale_steps, 20u);
+  }
   // Completing both submissions may request one final retry, but superseded
   // long deadlines must not enter the CP handler after all work is retired.
   EXPECT_LE(cp->doorbell_handle_count_for_test() - passes, 1u);
@@ -759,8 +784,9 @@ TEST_F(Pm4ComputeQueueTest, CancelsDeferredDataBeforeTheCompletionCallback) {
     ++completions;
   };
   ASSERT_TRUE(cp->submit_pm4(1, 2, std::move(submission)));
-  while (!deferred->backing->posts && !completions)
+  while (!deferred->backing->posts && !completions) {
     ASSERT_TRUE(engine->step());
+  }
   ASSERT_EQ(completions, 0u);
   ASSERT_EQ(deferred->backing->posts, 1u);
   EXPECT_EQ(deferred->backing->write_effects, 0u);
@@ -776,8 +802,9 @@ TEST_F(Pm4ComputeQueueTest, BoundsEachQueueServiceTurn) {
   constexpr uint64_t kLargeReadPointer = 0xe00;
   constexpr uint32_t kPacketCount = 257;
   constexpr uint32_t kLargeRingBytes = 512 * sizeof(uint32_t);
-  for (uint32_t packet = 0; packet < kPacketCount; ++packet)
+  for (uint32_t packet = 0; packet < kPacketCount; ++packet) {
     memory->store<uint32_t>(kLargeRing + packet * sizeof(uint32_t), 0xffff1000);
+  }
   memory->store<uint32_t>(kLargeReadPointer, 0);
 
   ASSERT_TRUE(cp->register_drm_queue({.address_space = address_space, .queue_id = 99}));
@@ -785,8 +812,9 @@ TEST_F(Pm4ComputeQueueTest, BoundsEachQueueServiceTurn) {
   blocked.ready = [](util::DiagnosticEmitter) -> util::FailureOr<bool> { return false; };
   ASSERT_TRUE(cp->submit_pm4(99, 0, std::move(blocked)));
   auto tick = [&] { return engine->context(cp->partition_id()).current_tick(); };
-  while (tick() < 20000)
+  while (tick() < 20000) {
     ASSERT_TRUE(engine->step());
+  }
   const auto start = tick();
 
   const auto registration = attach({}, kLargeRing, kLargeReadPointer, kLargeRingBytes);
@@ -1305,11 +1333,12 @@ TEST_F(Pm4ComputeQueueTest, NativeRegisterWritesRequireSupportedCallbacks) {
     memory->store<uint32_t>(kRing + 8, 0xdeadbeef);
     uint32_t writes = 0;
     Pm4PacketCallbacks callbacks;
-    if (opcode == 0xbe)
+    if (opcode == 0xbe) {
       callbacks.write_uconfig_register = [&](uint64_t, uint32_t) {
         ++writes;
         return Pm4RegisterWriteStatus::Complete;
       };
+    }
     const auto id = attach(std::move(callbacks));
     ASSERT_NE(id, 0u);
     ASSERT_EQ(cp->notify_pm4_queue_doorbell(id, 3), QueueSubmissionStatus::Accepted);
@@ -1525,10 +1554,12 @@ TEST_F(Pm4ComputeQueueTest, ComputeQueueCancellationDropsItsNestedStreamAndVmLea
   constexpr uint64_t child = 0x400, gate = 0x700;
   const std::array<uint32_t, 4> root{0xc0023f00, uint32_t(child), 0, (1u << 23) | 7};
   const std::array<uint32_t, 7> wait{0xc0053c00, 0x13, uint32_t(gate), 0, 1, 0xffffffff, 4};
-  for (uint32_t i = 0; i < root.size(); ++i)
+  for (uint32_t i = 0; i < root.size(); ++i) {
     memory->store<uint32_t>(kRing + i * 4, root[i]);
-  for (uint32_t i = 0; i < wait.size(); ++i)
+  }
+  for (uint32_t i = 0; i < wait.size(); ++i) {
     memory->store<uint32_t>(child + i * 4, wait[i]);
+  }
   const auto id = cp.register_pm4_queue({.address_space = address_space,
                                          .ring_base = kRing,
                                          .ring_size_bytes = kRingBytes,

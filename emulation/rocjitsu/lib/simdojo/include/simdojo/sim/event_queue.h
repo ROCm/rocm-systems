@@ -100,10 +100,12 @@ public:
   /// @brief Greater-than for min-heap ordering: smallest timestamp first,
   /// then event type priority, then sequence number.
   bool operator>(const EventQueueEntry &other) const {
-    if (timestamp != other.timestamp)
+    if (timestamp != other.timestamp) {
       return timestamp > other.timestamp;
-    if (event->type() != other.event->type())
+    }
+    if (event->type() != other.event->type()) {
       return event->type() > other.event->type();
+    }
     return sequence > other.sequence;
   }
 };
@@ -152,8 +154,9 @@ public:
     const EventQueueEntry &asynchronous = asynchronous_entries_.front();
     if (!has_same_priority(local, asynchronous)) {
       consecutive_async_events_ = 0;
-      if (asynchronous > local)
+      if (asynchronous > local) {
         return pop_from(local_entries_);
+      }
       return pop_from(asynchronous_entries_);
     }
 
@@ -189,10 +192,12 @@ public:
   /// @retval true The queue contains exactly one entry for @p event.
   /// @retval false The queue is empty or contains any other entry.
   bool contains_only(const Event *event) const {
-    if (size() != 1)
+    if (size() != 1) {
       return false;
-    if (!local_entries_.empty())
+    }
+    if (!local_entries_.empty()) {
       return local_entries_.front().event == event;
+    }
     return asynchronous_entries_.front().event == event;
   }
 
@@ -253,8 +258,9 @@ public:
       std::lock_guard<util::Spinlock> guard(lock_);
       drain_buf_.swap(entries_);
     }
-    for (auto &e : drain_buf_)
+    for (auto &e : drain_buf_) {
       local_queue.push(std::move(e));
+    }
     size_t count = drain_buf_.size();
     drain_buf_.clear(); // Clear but keep capacity for reuse.
     return count;

@@ -82,27 +82,29 @@ void ds_load(Program &program, rocjitsu::IsaFamily arch, uint8_t dst = 0, bool g
 
 // flat_load_dword (flat_load_b32 on RDNA4) v0, v[8:9].
 void flat_load(Program &program, rocjitsu::IsaFamily arch) {
-  if (arch == rocjitsu::IsaFamily::Cdna3)
+  if (arch == rocjitsu::IsaFamily::Cdna3) {
     append(program, cdna3::build_flat(cdna3::kFlatLoadDwordFlat, {.addr = 8, .saddr = 127}));
-  else if (arch == rocjitsu::IsaFamily::Rdna4)
+  } else if (arch == rocjitsu::IsaFamily::Rdna4) {
     append(program, rdna4::build_vflat(rdna4::kFlatLoadB32Vflat, {.saddr = 124, .vaddr = 8}));
-  else
+  } else {
     ADD_FAILURE() << "no FLAT encoding for arch " << arch;
+  }
 }
 
 void direct_load(Program &program, rocjitsu::IsaFamily arch, bool parameter, uint8_t dst = 2) {
-  if (arch == rocjitsu::IsaFamily::Rdna3)
+  if (arch == rocjitsu::IsaFamily::Rdna3) {
     append(program,
            rdna3::build_ldsdir(parameter ? rdna3::kLdsParamLoadLdsdir : rdna3::kLdsDirectLoadLdsdir,
                                {.vdst = dst}));
-  else if (arch == rocjitsu::IsaFamily::Rdna3_5)
+  } else if (arch == rocjitsu::IsaFamily::Rdna3_5) {
     append(program, rdna3_5::build_ldsdir(parameter ? rdna3_5::kLdsParamLoadLdsdir
                                                     : rdna3_5::kLdsDirectLoadLdsdir,
                                           {.vdst = dst}));
-  else
+  } else {
     append(program,
            rdna4::build_vdsdir(parameter ? rdna4::kDsParamLoadVdsdir : rdna4::kDsDirectLoadVdsdir,
                                {.vdst = dst}));
+  }
 }
 
 WaitcheckStreamReport analyze(const Program &program,
@@ -113,8 +115,9 @@ WaitcheckStreamReport analyze(const Program &program,
       program, arch, {.wave_size = wave_size, .expert_scheduling = expert_scheduling},
       error.emitter());
   EXPECT_TRUE(result.succeeded()) << error.message();
-  if (result.failed())
+  if (result.failed()) {
     return {{}, WaitcheckStreamStop{0, "", error.message()}, 0};
+  }
   return std::move(result).value();
 }
 
@@ -251,36 +254,40 @@ TEST(WaitcheckStream, TypedPartialExpcntWaitsReleaseOnlyOlderRequestsOfTheSameTy
         Program program;
         for (size_t i = 0; i < test.targets.size(); ++i) {
           const auto reg = static_cast<uint8_t>(10 + i);
-          if (test.targets[i] == lds_direct)
+          if (test.targets[i] == lds_direct) {
             direct_load(program, arch, false, reg);
-          else if (arch == rocjitsu::IsaFamily::Rdna4)
+          } else if (arch == rocjitsu::IsaFamily::Rdna4) {
             append(program, rdna4::build_vexport({.en = 1,
                                                   .tgt = static_cast<uint8_t>(test.targets[i]),
                                                   .done = test.targets[i] == 20,
                                                   .vsrc0 = reg}));
-          else
+          } else {
             append(program, rdna3_5::build_exp({.en = 1,
                                                 .tgt = static_cast<uint8_t>(test.targets[i]),
                                                 .done = test.targets[i] == 20,
                                                 .vsrc0 = reg}));
+          }
         }
         if (threshold >= 0) {
-          if (arch == rocjitsu::IsaFamily::Rdna4)
+          if (arch == rocjitsu::IsaFamily::Rdna4) {
             append(program, rdna4::build_sopp(rdna4::kSWaitExpcntSopp,
                                               {.simm16 = static_cast<uint16_t>(threshold)}));
-          else
+          } else {
             append(program,
                    rdna3_5::build_sopp(rdna3_5::kSWaitcntSopp,
                                        {.simm16 = static_cast<uint16_t>(0xfff0 | threshold)}));
+          }
         }
-        for (size_t i = 0; i < test.targets.size(); ++i)
+        for (size_t i = 0; i < test.targets.size(); ++i) {
           program.push_back(v_mov(10 + i, 30));
+        }
         const auto report = analyze(program, arch, false, 32);
         ASSERT_FALSE(report.incomplete);
         size_t diagnostic = 0;
         for (size_t i = 0; i < test.targets.size(); ++i) {
-          if (threshold >= 0 && younger[i] >= static_cast<unsigned>(threshold))
+          if (threshold >= 0 && younger[i] >= static_cast<unsigned>(threshold)) {
             continue;
+          }
           ASSERT_LT(diagnostic, report.diagnostics.size()) << "source " << i;
           const auto &hazard = report.diagnostics[diagnostic++];
           EXPECT_EQ(hazard.counter, amdgpu::WaitCounterKind::Exp);
@@ -299,8 +306,9 @@ TEST(WaitcheckStream, Gfx1251PackedArithmeticPreservesSubsequentMemoryChecks) {
     // v_pk_fma_f64 v[4:7], v[8:11], v[12:15], v[16:19].
     Program program{0xcc3b4004u, 0x1c421908u};
     load(program);
-    if (waited)
+    if (waited) {
       program.push_back(0xbfc00000u); // s_wait_loadcnt 0.
+    }
     program.push_back(v_mov(1, 0));
 
     // Architecture-only CDNA5 lookup selects gfx1250, which rejects the FMA.
@@ -418,8 +426,9 @@ TEST(WaitcheckStream, CounterOnlyLoadsStillAgePendingResults) {
 TEST(WaitcheckStream, CounterBoundsSaturateWithoutWrapping) {
   Program program;
   load(program, 0);
-  for (unsigned i = 0; i < 300; ++i)
+  for (unsigned i = 0; i < 300; ++i) {
     program.insert(program.end(), {0xee0ac07cu, 0, 0}); // global_inv ages LOAD_CNT.
+  }
   program.insert(program.end(), {0xbfc0003eu, v_mov(4, 0)});
   const auto report = analyze(program);
   EXPECT_FALSE(report.incomplete);
@@ -453,33 +462,37 @@ TEST(WaitcheckStream, EveryUnorderedPendingLoadProtectsItsDestination) {
 
 TEST(WaitcheckStream, LdsDirectAndParameterResultsUseQualifiedWritebackOrder) {
   for (auto arch :
-       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4})
-    for (bool first_parameter : {false, true})
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
+    for (bool first_parameter : {false, true}) {
       for (bool second_parameter : {false, true}) {
         SCOPED_TRACE(arch);
         SCOPED_TRACE(first_parameter);
         SCOPED_TRACE(second_parameter);
         Program program;
-        for (bool parameter : {first_parameter, second_parameter})
+        for (bool parameter : {first_parameter, second_parameter}) {
           direct_load(program, arch, parameter);
+        }
         const auto report = analyze(program, arch);
         ASSERT_FALSE(report.incomplete);
         EXPECT_TRUE(report.diagnostics.empty());
       }
+    }
+  }
 }
 
 TEST(WaitcheckStream, DirectAndIndexedLdsKeepIndependentWritebackOrder) {
   for (auto arch :
-       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4})
+       {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4}) {
     for (bool direct_first : {false, true}) {
       SCOPED_TRACE(arch);
       SCOPED_TRACE(direct_first);
       Program program;
       for (unsigned i = 0; i < 2; ++i) {
-        if (direct_first != static_cast<bool>(i))
+        if (direct_first != static_cast<bool>(i)) {
           direct_load(program, arch, /*parameter=*/false);
-        else
+        } else {
           ds_load(program, arch, 2);
+        }
       }
       const auto report = analyze(program, arch);
       ASSERT_FALSE(report.incomplete);
@@ -488,6 +501,7 @@ TEST(WaitcheckStream, DirectAndIndexedLdsKeepIndependentWritebackOrder) {
                 direct_first ? amdgpu::WaitCounterKind::Exp : amdgpu::WaitCounterKind::Ds);
       EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
     }
+  }
 }
 
 TEST(WaitcheckStream, LdsOverwritesKeepIssueOrder) {
@@ -518,7 +532,7 @@ TEST(WaitcheckStream, OrdinaryDsAtomicResultsRetainDependencyChecks) {
 
 TEST(WaitcheckStream, GdsAndLdsOverwritesRequireAWait) {
   for (auto arch :
-       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5})
+       {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     for (bool gds_first : {false, true}) {
       SCOPED_TRACE(arch);
       SCOPED_TRACE(gds_first);
@@ -531,24 +545,28 @@ TEST(WaitcheckStream, GdsAndLdsOverwritesRequireAWait) {
       EXPECT_EQ(report.diagnostics[0].counter, amdgpu::WaitCounterKind::Ds);
       EXPECT_EQ(report.diagnostics[0].access, WaitcheckAccess::Write);
     }
+  }
 }
 
 TEST(WaitcheckStream, FlatAndLdsOverwritesRequireAWait) {
   // The analyzer cannot tell which FLAT lanes LDS services, so these overwrites
   // need a wait even where the runtime checker exempts LDS-serviced lanes.
-  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Rdna4})
+  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Rdna4}) {
     for (bool flat_first : {false, true}) {
       SCOPED_TRACE(arch);
       SCOPED_TRACE(flat_first);
       Program program;
-      for (bool flat : {flat_first, !flat_first})
+      for (bool flat : {flat_first, !flat_first}) {
         flat ? flat_load(program, arch) : ds_load(program, arch);
+      }
       auto report = analyze(program, arch);
       ASSERT_FALSE(report.incomplete);
       ASSERT_FALSE(report.diagnostics.empty());
-      for (const auto &diagnostic : report.diagnostics)
+      for (const auto &diagnostic : report.diagnostics) {
         EXPECT_EQ(diagnostic.access, WaitcheckAccess::Write);
+      }
     }
+  }
 }
 
 TEST(WaitcheckStream, LdsOrderDoesNotEndExpertModeDsSourceLifetimes) {
@@ -571,8 +589,9 @@ TEST(WaitcheckStream, UnorderedVmemWritebackRequiresAWait) {
     for (bool waited : {false, true}) {
       Program program;
       load(program);
-      if (waited)
+      if (waited) {
         program.push_back(0xbfc00000u);
+      }
       load(program);
       const auto report = analyze(program, arch);
       ASSERT_FALSE(report.incomplete);
@@ -696,7 +715,7 @@ TEST(WaitcheckStream, FlatLoadRequiresBothMemoryCounters) {
 }
 
 TEST(WaitcheckStream, MixedFlatAndGlobalStoreSourcesRequireTheirCompletionRoutes) {
-  for (auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5})
+  for (auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (bool flat_first : {false, true}) {
       SCOPED_TRACE(arch);
       SCOPED_TRACE(flat_first);
@@ -705,23 +724,26 @@ TEST(WaitcheckStream, MixedFlatAndGlobalStoreSourcesRequireTheirCompletionRoutes
         const uint8_t data = 8 + i;
         if (flat_first != static_cast<bool>(i)) {
           // v[0:1] has no address-space proof and may point into the LDS aperture.
-          if (arch == rocjitsu::IsaFamily::Cdna5)
+          if (arch == rocjitsu::IsaFamily::Cdna5) {
             append(program, cdna5::build_vflat(cdna5::kFlatStoreB32Vflat,
                                                {.saddr = 124, .vsrc = data, .vaddr = 0}));
-          else
+          } else {
             append(program, rdna4::build_vflat(rdna4::kFlatStoreB32Vflat,
                                                {.saddr = 124, .vsrc = data, .vaddr = 0}));
+          }
         } else {
-          if (arch == rocjitsu::IsaFamily::Cdna5)
+          if (arch == rocjitsu::IsaFamily::Cdna5) {
             append(program, cdna5::build_vglobal(cdna5::kGlobalStoreB32Vglobal,
                                                  {.saddr = 124, .vsrc = data, .vaddr = 4}));
-          else
+          } else {
             append(program, rdna4::build_vglobal(rdna4::kGlobalStoreB32Vglobal,
                                                  {.saddr = 124, .vsrc = data, .vaddr = 4}));
+          }
         }
       }
-      if (arch == rocjitsu::IsaFamily::Cdna5)
+      if (arch == rocjitsu::IsaFamily::Cdna5) {
         program.push_back(0xbfc50000u); // s_wait_xcnt 0; isolate the VM_VSRC lifetime.
+      }
       constexpr uint32_t store_zero = 0xbfc10000u;
       constexpr uint32_t store_one = 0xbfc10001u;
       constexpr uint32_t ds_zero = 0xbfc60000u;
@@ -753,13 +775,16 @@ TEST(WaitcheckStream, MixedFlatAndGlobalStoreSourcesRequireTheirCompletionRoutes
         const auto report = analyze(waited, arch, /*expert_scheduling=*/true);
         ASSERT_FALSE(report.incomplete);
         std::vector<uint16_t> expected;
-        if (flat_first ? test.flat_pending : test.global_pending)
+        if (flat_first ? test.flat_pending : test.global_pending) {
           expected.push_back(8);
-        if (flat_first ? test.global_pending : test.flat_pending)
+        }
+        if (flat_first ? test.global_pending : test.flat_pending) {
           expected.push_back(9);
+        }
         EXPECT_EQ(report.diagnostics.size(), expected.size());
-        if (report.diagnostics.size() != expected.size())
+        if (report.diagnostics.size() != expected.size()) {
           continue;
+        }
         for (size_t i = 0; i < expected.size(); ++i) {
           EXPECT_EQ(report.diagnostics[i].counter, amdgpu::WaitCounterKind::VmVsrc);
           EXPECT_EQ(report.diagnostics[i].reg, (RegisterRef{RegClass::VGPR, expected[i], 1}));
@@ -767,6 +792,7 @@ TEST(WaitcheckStream, MixedFlatAndGlobalStoreSourcesRequireTheirCompletionRoutes
         }
       }
     }
+  }
 }
 
 TEST(WaitcheckStream, FlatLoadSourcesRequireBothCompletionRoutes) {
@@ -917,11 +943,13 @@ TEST(WaitcheckStream, CdnaWritesCannotReuseAnOldRegisterGeneration) {
     for (bool old_value : {false, true}) {
       for (bool waited : {false, true}) {
         Program program;
-        if (old_value)
+        if (old_value) {
           program.push_back(v_mov(0, 2));
+        }
         program.insert(program.end(), {0xe0501000u, 0x80000008u});
-        if (waited)
+        if (waited) {
           program.push_back(0xbf8c0f70u);
+        }
         program.push_back(v_mov(0, 2));
         const auto report = analyze(program, arch);
         ASSERT_FALSE(report.incomplete);
@@ -1013,8 +1041,8 @@ TEST(WaitcheckStream, DirectToLdsParityOrderingIsIncomplete) {
 }
 
 TEST(WaitcheckStream, FlatFamilyLdsTransfersDoNotCertifyUnwaitedLdsConsumers) {
-  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4})
-    for (uint32_t segment : {1u, 2u})
+  for (auto arch : {rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    for (uint32_t segment : {1u, 2u}) {
       for (uint32_t opcode = 38; opcode <= 42; ++opcode) {
         SCOPED_TRACE(testing::Message()
                      << "arch=" << arch << " segment=" << segment << " opcode=" << opcode);
@@ -1027,6 +1055,8 @@ TEST(WaitcheckStream, FlatFamilyLdsTransfersDoNotCertifyUnwaitedLdsConsumers) {
         EXPECT_EQ(report.instructions_analyzed, 0u);
         EXPECT_NE(report.incomplete->reason.find("parity"), std::string::npos);
       }
+    }
+  }
 }
 
 TEST(WaitcheckStream, InvalidOptionsAndTruncatedInputFail) {
@@ -1124,16 +1154,19 @@ TEST(WaitcheckStream, ScratchAddressEnableDistinguishesV0FromNoAddress) {
     const bool split = arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
     for (bool enabled : {false, true}) {
       Program program;
-      if (split)
+      if (split) {
         load(program);
-      else
+      } else {
         program = cdna ? Program{0xe0501000u, 0x80000008u} : Program{0xdc520000u, 8};
+      }
       // scratch_load_{dword,b32} v1, {v0,off}, {off,s0}.
       const Program scratch = [&]() -> Program {
-        if (split)
+        if (split) {
           return enabled ? Program{0xed05007cu, 0x00020001u, 0} : Program{0xed050000u, 1, 0};
-        if (cdna)
+        }
+        if (cdna) {
           return enabled ? Program{0xdc506000u, 0x017f0000u} : Program{0xdc504000u, 0x01000000u};
+        }
         return enabled ? Program{0xdc510000u, 0x01fc0000u} : Program{0xdc510000u, 0x01000000u};
       }();
       const auto scratch_offset = program.size() * sizeof(uint32_t);
@@ -1194,8 +1227,9 @@ TEST(WaitcheckStream, ControlFlowBoundaryChecksKnownScalarOperands) {
     for (bool waited : {false, true}) {
       // s_load_b64 s[0:1] or s[4:5], s[2:3], 0.
       Program program{write ? 0xf4002101u : 0xf4002001u, 0xf8000000u};
-      if (waited)
+      if (waited) {
         program.push_back(0xbfc70000u); // s_wait_kmcnt 0.
+      }
       // s_setpc_b64 s[0:1] or s_swappc_b64 s[4:5], s[0:1].
       const auto boundary = program.size() * sizeof(uint32_t);
       program.push_back(write ? 0xbe844900u : 0xbe804800u);

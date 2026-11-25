@@ -66,10 +66,11 @@ inline void append_gfx12_cache_policy(std::string &out, uint8_t th, uint8_t scop
     if (kind == Gfx12TemporalHintKind::Atomic) {
       out += "TH_ATOMIC_";
       if ((th & GFX12_TH_ATOMIC_CASCADE) != 0) {
-        if (scope >= 2)
+        if (scope >= 2) {
           out += (th & GFX12_TH_ATOMIC_NT) != 0 ? "CASCADE_NT" : "CASCADE_RT";
-        else
+        } else {
           append_gfx12_hex_hint(out, th);
+        }
       } else if ((th & GFX12_TH_ATOMIC_NT) != 0) {
         out += (th & GFX12_TH_ATOMIC_RETURN) != 0 ? "NT_RETURN" : "NT";
       } else if ((th & GFX12_TH_ATOMIC_RETURN) != 0) {

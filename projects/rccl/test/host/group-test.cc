@@ -486,7 +486,7 @@ TEST_F(GroupEndInternalTest, SymmetricExtractionAndGeneralOnlyMaskPrepareInline)
     task.datatype = ncclFloat32;
     task.count = 1024;
     task.symkExtract = denyExtraction ? RCCL_SYMK_EXTRACT_DENY : RCCL_SYMK_EXTRACT_ALLOW;
-    task.algMask = denyExtraction ? 0 : (1ULL << kRingSimple);
+    task.algMask = denyExtraction ? rcclTuningMask() : rcclTuningMask::bit(kRingSimple);
     comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
     ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
 
@@ -530,7 +530,7 @@ TEST_F(GroupEndInternalTest, GlobalForcedSymmetricSelectionOverridesGeneralOnlyT
   task.opDev.op = ncclDevSum;
   task.datatype = ncclFloat32;
   task.count = 1024;
-  task.algMask = 1ULL << kRingSimple;
+  task.algMask = rcclTuningMask::bit(kRingSimple);
   comm->tuningContext.forced[task.func] = 1;
   comm->tuningContext.enabled[NCCL_TUNING_SYM_KERNEL_ID_OFFSET][task.func] = 1;
   ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));

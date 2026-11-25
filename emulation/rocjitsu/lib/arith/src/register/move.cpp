@@ -4,6 +4,7 @@
 // Whole-word and selected-halfword moves with EXEC masking.
 // Owns public entry points and their validation/dispatch policy.
 
+#include "register/move.h"
 #include "common/simd.h"
 #include "common/validation.h"
 #include "register/dpp.h"
@@ -34,6 +35,18 @@ int rj_arith_v_mov_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::move_words_x86_64_v4(exec_mask, instruction_flags, d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::move_words_x86_64_v3(exec_mask, instruction_flags, d[0], a[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   if (instruction_flags) {
     // ABS precedes NEG; all other bits, including NaN payloads, are preserved.
     uint32_t keep = instruction_flags & RJ_ARITH_ALU_ABS_A ? 0x7fffffffU : UINT32_MAX;
@@ -42,6 +55,14 @@ int rj_arith_v_mov_b32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
       if ((exec_mask >> lane) & 1) {
         d[0][lane] = (a[0][lane] & keep) ^ toggle;
       }
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+  if (exec_mask == UINT32_MAX) {
+    const uint32_t *src = a[0];
+    uint32_t *dst = d[0];
+    for (int lane = 0; lane < 32; ++lane) {
+      dst[lane] = src[lane];
     }
     return RJ_ARITH_SUCCESS;
   }

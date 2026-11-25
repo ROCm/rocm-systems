@@ -11,21 +11,6 @@
 #include <stdint.h>
 
 namespace rocjitsu::arith {
-namespace {
-
-// Saturate a signed/unsigned 32-bit integer to 16 bits; return its low-halfword encoding.
-template <bool Unsigned> __m512i narrow(__m512i raw) {
-  if constexpr (Unsigned) {
-    return _mm512_min_epu32(raw, _mm512_set1_epi32(65535));
-  } else {
-    return _mm512_and_si512(_mm512_min_epi32(_mm512_max_epi32(raw, _mm512_set1_epi32(-32768)),
-                                             _mm512_set1_epi32(32767)),
-                            _mm512_set1_epi32(65535));
-  }
-}
-
-} // namespace
-
 // Narrow or extend integer halfwords. Preserve destination lanes outside exec_mask.
 // Requires the named CPU features and validated instruction controls.
 template <bool Unsigned, bool Packed>
@@ -37,7 +22,15 @@ void integer_conversion_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d
     __m512i result;
     if constexpr (Packed) {
       auto vb = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(b + lane));
-      result = _mm512_or_si512(narrow<Unsigned>(raw), _mm512_slli_epi32(narrow<Unsigned>(vb), 16));
+      if constexpr (Unsigned) {
+        result =
+            _mm512_or_si512(_mm512_min_epu32(raw, _mm512_set1_epi32(65535)),
+                            _mm512_slli_epi32(_mm512_min_epu32(vb, _mm512_set1_epi32(65535)), 16));
+      } else {
+        // VPACKSSDW narrows and interleaves adjacent 128-bit blocks; interleave A/B first.
+        auto lo = _mm512_unpacklo_epi32(raw, vb), hi = _mm512_unpackhi_epi32(raw, vb);
+        result = _mm512_packs_epi32(lo, hi);
+      }
     } else {
       result = _mm512_and_si512(_mm512_srl_epi32(raw, shift), _mm512_set1_epi32(65535));
       if constexpr (!Unsigned) {

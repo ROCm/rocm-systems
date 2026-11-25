@@ -4,13 +4,14 @@
 // FP32 and XF32 MFMA use the shared floating-point reduction.
 #include "common/internal.h"
 #include "mfma/backends.h"
+#include "mfma/gfx942_exact.h"
 #include "mfma/reduction.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 
 namespace {
 // Validate the approximate model and evaluate a full matrix; errors do not touch operands.
-template <int M, int K, int Batch, bool Xf32 = false>
+template <int M, int K, int Batch, bool Xf32 = false, bool Gfx942 = false>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *c) {
   using namespace rocjitsu::arith;
@@ -18,6 +19,14 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
   if (int error = validate(flags, controls & ~0x3ffULL,
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
+  }
+  // Only the captured gfx942 forms with default source controls are qualified.
+  // Compatibility retains the existing fast approximate implementation.
+  if constexpr (Gfx942) {
+    if (is_exact(flags) && !controls && !(flags & RJ_ARITH_FP16_OVFL)) {
+      mfma_gfx942_exact(MfmaGfx942Format::Xf32, M, K, Batch, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
@@ -50,13 +59,13 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
 int rj_arith_v_mfma_f32_16x16x8_xf32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c) {
-  return evaluate<16, 8, 1, true>(flags, controls, d, a, b, c);
+  return evaluate<16, 8, 1, true, true>(flags, controls, d, a, b, c);
 }
 // Evaluate 32x32x4 XF32 MFMA.
 int rj_arith_v_mfma_f32_32x32x4_xf32_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c) {
-  return evaluate<32, 4, 1, true>(flags, controls, d, a, b, c);
+  return evaluate<32, 4, 1, true, true>(flags, controls, d, a, b, c);
 }
 
 // Evaluate 2 independent 32x32x1 FP32 matrices.
@@ -92,4 +101,20 @@ int rj_arith_v_mfma_f32_16x16x4_f32_w64(uint64_t flags, uint64_t controls, uint3
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         const uint32_t *const *c) {
   return evaluate<16, 4, 1>(flags, controls, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_16x16x8_xf32_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return evaluate<16, 8, 1, true>(flags, controls, d, a, b, c);
+}
+
+// Evaluate the gfx950 form using the existing approximate model.
+int rj_arith_v_mfma_f32_32x32x4_xf32_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return evaluate<32, 4, 1, true>(flags, controls, d, a, b, c);
 }

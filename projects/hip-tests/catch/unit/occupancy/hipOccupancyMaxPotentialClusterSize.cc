@@ -36,7 +36,7 @@ static __global__ void reverse(int* d, int n) {
   d[t] = shBuf[tr];
 };
 
-TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation") {
+HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation) {
   int clusterSize;
   hipDeviceProp_t props;
   hipLaunchConfig_t config = {};
@@ -62,7 +62,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Positive_RangeValidation") {
   REQUIRE(clusterSize <= 16);
 }
 
-TEST_CASE("Unit_hipOccupancyMaxPotentialClusterSize_Negative_Parameters") {
+HIP_TEST_CASE(Unit_hipOccupancyMaxPotentialClusterSize_Negative_Parameters) {
   hipLaunchConfig_t config = {};
   hipError_t hip_error;
   int clusterSize = -1;

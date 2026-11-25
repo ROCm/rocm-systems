@@ -27,13 +27,15 @@ public:
       }
       return;
     }
-    for (auto &word : values_)
+    for (auto &word : values_) {
       word.fill(0);
+    }
     const auto reg = operand.to_register_ref();
     const bool vgpr = reg && reg->cls == RegClass::VGPR;
     for (int lane = 0; lane < 32; ++lane) {
-      if (!(exec_mask >> lane & 1))
+      if (!(exec_mask >> lane & 1)) {
         continue;
+      }
       if constexpr (Words == 2) {
         // Scalar count operands broadcast one word, rather than reading a scalar pair.
         const auto value = registers.read_lane_pair32(operand, lane, ScalarPairMode::Replicate32);
@@ -53,8 +55,9 @@ public:
         values_[3][lane] = uint32_t(hi >> 32);
       }
     }
-    for (int word = 0; word < Words; ++word)
+    for (int word = 0; word < Words; ++word) {
       data[word] = values_[word].data();
+    }
   }
   std::array<const uint32_t *, Words> data;
 
@@ -71,16 +74,19 @@ inline void execute_packed_u64(Wavefront &wave, Function function, uint64_t modi
                                const C *third = nullptr) {
   assert(wave.wf_size() == 32);
   const uint32_t exec_mask = uint32_t(wave.exec());
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   PackedU64Input<4, A> a(registers, lhs, exec_mask);
   PackedU64Input<ShiftAdd ? 2 : 4, B> b(registers, rhs, exec_mask);
   std::optional<PackedU64Input<4, C>> c;
-  if constexpr (ShiftAdd)
+  if constexpr (ShiftAdd) {
     c.emplace(registers, *third, exec_mask);
-  if (wave.instruction_execution_failed())
+  }
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   if constexpr (ShiftAdd) {
     for (int lane = 0; lane < 32; ++lane) {
       if ((exec_mask >> lane & 1) && (b.data[0][lane] > 4 || b.data[1][lane] > 4)) {
@@ -90,16 +96,18 @@ inline void execute_packed_u64(Wavefront &wave, Function function, uint64_t modi
     }
   }
   auto invoke = [&](uint32_t *const *d, uint64_t write_mask) {
-    if constexpr (ShiftAdd)
+    if constexpr (ShiftAdd) {
       return function(wave.cu().arithmetic_flags(), uint32_t(write_mask), modifiers, d,
                       a.data.data(), b.data.data(), c->data.data());
-    else
+    } else {
       return function(wave.cu().arithmetic_flags(), uint32_t(write_mask), modifiers, d,
                       a.data.data(), b.data.data());
+    }
   };
   if (auto status = registers.try_bulk_write_operand<4>(destination, exec_mask, invoke)) {
-    if (*status != RJ_ARITH_SUCCESS)
+    if (*status != RJ_ARITH_SUCCESS) {
       wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    }
     return;
   }
   // Stage observed destinations before asking for any write view.
@@ -114,9 +122,11 @@ inline void execute_packed_u64(Wavefront &wave, Function function, uint64_t modi
   word.size_bits_ = 32;
   for (int reg = 0; reg < 4; ++reg) {
     word.encoding_value_ = destination.encoding_value_ + reg;
-    for (int lane = 0; lane < 32; ++lane)
-      if (write_mask >> lane & 1)
+    for (int lane = 0; lane < 32; ++lane) {
+      if (write_mask >> lane & 1) {
         registers.write_lane(word, lane, result[reg][lane]);
+      }
+    }
   }
 }
 } // namespace rocjitsu::amdgpu::arith
