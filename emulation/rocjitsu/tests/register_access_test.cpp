@@ -2841,6 +2841,40 @@ TEST(RegisterAccessTest, PartialByteRawRegionOperationsRejectBeforeSideEffects) 
   EXPECT_FALSE(visited);
   expect_failure([&] { return region.copy_to(std::span(words).first(fx.wf->wf_size())); });
   expect_failure([&] { return region.copy_dwords_lane_major(bytes, 1); });
+  expect_failure([&] { return region.copy_byte_to(0, 2, words); });
+  expect_failure([&] { return region.copy_byte_to(0, 4, words); });
+}
+
+TEST(RegisterAccessTest, CopyByteToExtractsObservedByteAndRejectsUndersizedDestination) {
+  Fixture fx(rocjitsu::IsaFamily::Cdna4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
+             /*wave_size=*/64);
+  ASSERT_NE(fx.wf, nullptr);
+  ASSERT_EQ(fx.wf->wf_size(), 64u);
+  for (uint32_t lane = 0; lane < 64u; ++lane) {
+    fx.cu->write_vgpr(fx.vgpr_base(), lane,
+                      ((0xC0u + lane) << 24) | ((0x80u + lane) << 16) | ((0x40u + lane) << 8) |
+                          lane);
+  }
+  for (uint32_t byte = 0; byte < 4u; ++byte) {
+    fx.plugin->reads.clear();
+    auto region = RegisterAccess(*fx.wf).read_vgpr_region(fx.vgpr_base(), /*reg_count=*/1,
+                                                          /*lane_mask=*/~uint64_t{0},
+                                                          static_cast<uint8_t>(1u << byte));
+    ASSERT_TRUE(region.valid());
+    EXPECT_EQ(fx.plugin->reads.size(), 1u);
+    std::array<uint32_t, 64> extracted{};
+    EXPECT_TRUE(region.copy_byte_to(0, byte, extracted).succeeded());
+    for (uint32_t lane = 0; lane < 64u; ++lane) {
+      EXPECT_EQ(extracted[lane], (byte * 0x40u + lane) & 0xffu);
+    }
+    std::array<uint32_t, 32> too_small;
+    too_small.fill(0xDEADBEEFu);
+    fx.wf->clear_instruction_execution_error();
+    EXPECT_TRUE(region.copy_byte_to(0, byte, too_small).failed());
+    EXPECT_EQ(fx.wf->instruction_execution_error(),
+              InstructionExecutionError::InvalidRegisterAccess);
+    EXPECT_EQ(too_small[0], 0xDEADBEEFu);
+  }
 }
 
 TEST(RegisterAccessTest, OversizedRawRegionCopyRejectsBeforeSideEffects) {

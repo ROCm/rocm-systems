@@ -237,4 +237,97 @@ TEST(MfmaMixed, ScaleClampsFiniteOverflowAndPreservesNonfiniteInputs) {
     }
   }
 }
+
+TEST(MfmaMixed, ScaleE8m0ExtremeExponentsAndSpecialsMatchLdexpAcrossCpuLevels) {
+  // Exercise extreme E8M0 scale exponents (subnormal underflow, split-exponent boundaries
+  // 0/1/2/3/253/254, NaN scale 255) across BF8 inputs (normal, min subnormal, +/-0, +/-Inf, NaN).
+  constexpr uint8_t kBf8Samples[16] = {
+      0x3c, // +1.0
+      0xbc, // -1.0
+      0x01, // +2^-16 (min BF8 subnormal)
+      0x81, // -2^-16
+      0x7b, // +57344 (max finite BF8)
+      0xfb, // -57344
+      0x00, // +0.0
+      0x80, // -0.0
+      0x7c, // +Inf
+      0xfc, // -Inf
+      0x7e, // qNaN
+      0x40, // +2.0
+      0x3e, // +1.5
+      0xbe, // -1.5
+      0x04, // +2^-14
+      0x84, // -2^-14
+  };
+  constexpr uint8_t kScalesA[16] = {0,   0,   1,   2,   3,   40,  64,  100,
+                                    127, 150, 190, 220, 253, 254, 255, 126};
+  constexpr uint8_t kScalesB[16] = {0,   1,   2,   3,   16,  50,  80,  127,
+                                    127, 170, 210, 240, 253, 254, 255, 0};
+
+  std::array<std::array<uint32_t, 64>, 8> a_buf{}, b_buf{};
+  std::array<std::array<uint32_t, 64>, 16> c_buf{};
+  std::array<uint32_t, 64> scale_a{}, scale_b{};
+  // Populate block 0 only (lane 0..15 for 16x16x128) with one nonzero element per lane so the
+  // 32-element block dot equals left[row][0] * right[col][0] exactly; blocks 1..3 remain 0 with
+  // neutral scale 127 so each row/col tests one (dot, ea, eb) tuple cleanly.
+  for (int lane = 0; lane < 64; ++lane) {
+    scale_a[lane] = 127u;
+    scale_b[lane] = 127u;
+  }
+  for (int i = 0; i < 16; ++i) {
+    a_buf[0][i] = uint32_t{kBf8Samples[i]}; // k = 0 only; k = 1..31 are +0.0
+    b_buf[0][i] = uint32_t{kBf8Samples[(i * 5 + 3) % 16]};
+    scale_a[i] = kScalesA[i];
+    scale_b[i] = kScalesB[i];
+  }
+
+  std::array<const uint32_t *, 8> a_ptrs{}, b_ptrs{};
+  std::array<const uint32_t *, 16> c_ptrs{};
+  for (int r = 0; r < 8; ++r) {
+    a_ptrs[r] = a_buf[r].data();
+    b_ptrs[r] = b_buf[r].data();
+  }
+  for (int r = 0; r < 16; ++r) {
+    c_ptrs[r] = c_buf[r].data();
+  }
+
+  constexpr uint64_t kBf8Pair = 1u | (1u << 3);
+  for (uint64_t cpu : supported_cpu_levels()) {
+    std::array<std::array<uint32_t, 64>, 4> d_buf{};
+    std::array<uint32_t *, 4> d_ptrs{};
+    for (int r = 0; r < 4; ++r) {
+      d_ptrs[r] = d_buf[r].data();
+    }
+    ASSERT_EQ(rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64(
+                  cpu | RJ_ARITH_SEMANTICS_LOOSE, kBf8Pair, d_ptrs.data(), a_ptrs.data(),
+                  b_ptrs.data(), c_ptrs.data(), scale_a.data(), scale_b.data()),
+              RJ_ARITH_SUCCESS);
+    for (int row = 0; row < 16; ++row) {
+      const float av = decode_matrix_format(kBf8Samples[row], 1);
+      for (int col = 0; col < 16; ++col) {
+        const float bv = decode_matrix_format(kBf8Samples[(col * 5 + 3) % 16], 1);
+        float partial = std::fma(av, bv, 0.0f);
+        for (int k = 1; k < 32; ++k) {
+          partial = std::fma(0.0f, 0.0f, partial);
+        }
+        const int ea = kScalesA[row];
+        const int eb = kScalesB[col];
+        float expected = ea == 255 || eb == 255 ? std::bit_cast<float>(0x7fc00000u)
+                                                : std::ldexp(partial, ea + eb - 254);
+        // Add the three zero blocks (blocks 1..3), matching the kernel's four block additions.
+        expected = (((0.0f + expected) + 0.0f) + 0.0f) + 0.0f;
+        const int reg = row % 4;
+        const int lane = (row / 4) * 16 + col;
+        const uint32_t actual = d_buf[reg][lane];
+        SCOPED_TRACE(::testing::Message() << "cpu=" << cpu << " row=" << row << " col=" << col
+                                          << " ea=" << ea << " eb=" << eb);
+        if (std::isnan(expected)) {
+          EXPECT_TRUE(std::isnan(std::bit_cast<float>(actual)));
+        } else {
+          EXPECT_EQ(actual, std::bit_cast<uint32_t>(expected));
+        }
+      }
+    }
+  }
+}
 } // namespace
