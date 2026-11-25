@@ -133,6 +133,7 @@ def gen_float_compare(ctx: ExecuteContext) -> str | None:
             'rdna3_5',
             'rdna4',
             'cdna1',
+            'cdna2',
             'cdna3',
             'cdna4',
             'cdna5',

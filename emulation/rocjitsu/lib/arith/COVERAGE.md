@@ -244,3 +244,11 @@ Compatibility's CLAMP-only INVALID classification, including quiet NaNs and
 constant predicates. Loose and numeric-only modes leave status untouched;
 mode 3 remains unsupported. This carries the existing emulator model without
 claiming new empirical qualification. Other older profiles migrate separately.
+### gfx90a floating comparisons
+
+FP16/FP32/FP64 relational CMP/CMPX, including F/TRU, use the existing shared
+comparison APIs and scalar, AVX2 and AVX-512 backends. Compatibility carries
+raw ordering, guest input flushing and the existing absence of FP-status
+reporting; CLAMP does not add a classifier on this target. Mode 3 remains
+unsupported. The VM owns explicit SGPR/VCC and EXEC commits, including both
+mask writes for CMPX. This migration does not newly qualify a numerical model.
