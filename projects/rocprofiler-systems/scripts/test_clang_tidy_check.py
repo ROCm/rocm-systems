@@ -284,13 +284,23 @@ def test_get_fork_point_returns_merge_base_sha(monkeypatch):
 
 
 def test_get_fork_point_failure_exits_instead_of_falling_back(monkeypatch):
-    # An explicit `--base fork` must not silently degrade to HEAD.
-    def boom(_git_args, **_kwargs):
-        sys.exit("error: unknown revision")
+    # An explicit `--base fork` must not silently degrade to HEAD: a failing
+    # `git merge-base` has to reach the user as git's own error.
+    commands = []
 
-    monkeypatch.setattr(ctc, "_git", boom)
-    with pytest.raises(SystemExit):
+    def boom(cmd, **_kwargs):
+        commands.append(cmd)
+        raise subprocess.CalledProcessError(
+            returncode=128,
+            cmd=cmd,
+            stderr="fatal: Not a valid object name origin/develop",
+        )
+
+    monkeypatch.setattr(ctc.subprocess, "run", boom)
+    with pytest.raises(SystemExit) as excinfo:
         ctc.get_fork_point()
+    assert "Not a valid object name origin/develop" in str(excinfo.value)
+    assert commands == [["git", "merge-base", "HEAD", ctc.FORK_REF]]
 
 
 def test_resolve_base_fork_selector_resolves_to_fork_point(monkeypatch):
