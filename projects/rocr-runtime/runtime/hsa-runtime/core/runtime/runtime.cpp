@@ -1772,6 +1772,8 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
   HsaGraphicsResourceInfo info{};
   HSA_REGISTER_MEM_FLAGS regFlags{0};
   regFlags.ui32.requiresVAddr = !isDmabufSysmem;
+  // Device memory has no CPU mapping from the import, so ask for one here.
+  regFlags.ui32.cpuAccess = !isDmabufSysmem;
   int err = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt(static_cast<HSAuint64>(dmabuf_fd),
                                                                &info, numNodes, nodes, regFlags));
   if (err == HSAKMT_STATUS_SUCCESS) {
@@ -1836,6 +1838,10 @@ int Runtime::IPCClientImport(uint32_t conn_handle, uint64_t dmabuf_fd_handle, un
           // and a second map of the same address in its VM would fail.
           if (std::find(importedDevices.begin(), importedDevices.end(), peerDesc.device_handle) !=
               importedDevices.end())
+            continue;
+          // A peer without a direct IO link to the exporter cannot map the buffer, and a GPU
+          // hidden by ROCR_VISIBLE_DEVICES is not enabled. Skip both rather than failing the attach.
+          if (!peer->Enabled() || GetLinkInfo(agent->node_id(), peer->node_id()).num_hop == 0)
             continue;
 
           // An attach naming no agents grants every agent access, so a device

@@ -44,6 +44,7 @@
 #include "rbtree.h"
 #include <amdgpu.h>
 #include "xf86drm.h"
+#include "hsakmt/drm/amdgpu_drm.h"
 
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -5202,6 +5203,41 @@ HSAKMT_STATUS hsakmt_fmm_register_memory(HsaKFDContext *ctx,
 }
 
 #define GRAPHICS_METADATA_DEFAULT_SIZE 64
+/*
+ * Maps an imported dma-buf at addr for CPU access. The KFD dma-buf import
+ * returns no mmap offset, so look the buffer up as a GEM handle on the GPU's
+ * render node and take the DRM mmap offset from amdgpu, as amdgpu_bo_cpu_map()
+ * does.
+ */
+static HSAKMT_STATUS fmm_map_dmabuf_to_cpu(int render_fd, int dmabuf_fd,
+					   void *addr, uint64_t size)
+{
+	union drm_amdgpu_gem_mmap args;
+	uint32_t gem_handle;
+	void *ret;
+
+	if (render_fd < 0)
+		return HSAKMT_STATUS_ERROR;
+	if (drmPrimeFDToHandle(render_fd, dmabuf_fd, &gem_handle))
+		return HSAKMT_STATUS_ERROR;
+
+	memset(&args, 0, sizeof(args));
+	args.in.handle = gem_handle;
+	if (drmCommandWriteRead(render_fd, DRM_AMDGPU_GEM_MMAP, &args, sizeof(args))) {
+		drmCloseBufferHandle(render_fd, gem_handle);
+		return HSAKMT_STATUS_ERROR;
+	}
+
+	/* The mapping keeps the buffer object alive, so the handle can go. */
+	ret = fmm_map_to_cpu(addr, size, true, render_fd, args.out.addr_ptr);
+	drmCloseBufferHandle(render_fd, gem_handle);
+	if (ret == MAP_FAILED) {
+		pr_err("CPU mapping of imported dma-buf failed: %s\n", strerror(errno));
+		return HSAKMT_STATUS_ERROR;
+	}
+	return HSAKMT_STATUS_SUCCESS;
+}
+
 HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 					   HSAuint64 GraphicsResourceHandle,
 					   HsaGraphicsResourceInfo *GraphicsResourceInfo,
@@ -5282,6 +5318,16 @@ HSAKMT_STATUS hsakmt_fmm_register_graphics_handle(HsaKFDContext *ctx,
 	if (r) {
 		pthread_mutex_unlock(&aperture->fmm_mutex);
 		goto error_release_aperture;
+	}
+
+	/* Map for CPU access at the same address the GPUs use, before the object is published */
+	if (RegisterFlags.ui32.cpuAccess) {
+		r = fmm_map_dmabuf_to_cpu(fmm_ctx->gpu_mem[gpu_mem_id].drm_render_fd,
+					  GraphicsResourceHandle, mem, infoArgs.size);
+		if (r) {
+			pthread_mutex_unlock(&aperture->fmm_mutex);
+			goto error_release_buffer;
+		}
 	}
 
 	/* Atomically update and register the object */

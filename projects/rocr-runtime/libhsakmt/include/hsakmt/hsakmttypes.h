@@ -1525,6 +1525,7 @@ typedef union
     {
         unsigned int requiresVAddr : 1;  // Requires virtual address
         unsigned int kmtHandle     : 1;  // Handle is a KMT handle
+        unsigned int cpuAccess     : 1;  // Also map the buffer for CPU access at MemoryAddress
     } ui32;
 } HSA_REGISTER_MEM_FLAGS;
 
