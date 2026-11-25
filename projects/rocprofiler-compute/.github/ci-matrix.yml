@@ -25,4 +25,4 @@ matrix-ubuntu:
   - { os-release: '22.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151', modes: [nightly], test-label: 'full', timeout-minutes: 120 }
   - { os-release: '24.04', gpu: 'strix-halo', arch: 'gfx1151', gfx-target: 'gfx1151', modes: [continuous, nightly], test-label: 'full', timeout-minutes: 120, continuous: { test-label: 'standard', timeout-minutes: 30 } }
   # Navi 4. A gfx120X runner has either a gfx1200 or a gfx1201 GPU.
-  - { os-release: '24.04', gpu: 'navi4', arch: 'gfx120X', gfx-target: ['gfx1200', 'gfx1201'], modes: [continuous, nightly], test-label: 'full', timeout-minutes: 120 }
+  - { os-release: '24.04', gpu: 'navi4', arch: 'gfx120X', gfx-target: ['gfx1200', 'gfx1201'], modes: [continuous, nightly], test-label: 'full', timeout-minutes: 120, continuous: { timeout-minutes: 90 } }

@@ -37,7 +37,7 @@ rocprof_compute_script_path = str(rocprof_compute_script_path)
 
 
 def experimental_gpu_options() -> List[str]:
-    """["--experimental"] when the GPU under test needs it to profile or analyze."""
+    """Return ["--experimental"] if the GPU under test is experimental, else []."""
     gpu_arch, _ = gpu_soc()
     if gpu_arch in mi_gpu_specs.get_experimental_archs():
         return ["--experimental"]
