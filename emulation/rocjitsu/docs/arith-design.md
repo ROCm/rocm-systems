@@ -239,6 +239,61 @@ outside a fast path without unnecessarily discarding SIMD work for other lanes.
 Reporting and non-reporting modes share arithmetic, with FP status calculations
 performed only when requested. EXEC masks generally control stores, not computation.
 
+### When a speedup justifies more code
+
+An extra code path must earn its size and complexity through speedup. The same
+trade-off applies within a path, for example when unrolling a loop.
+
+#### CPU paths
+
+`RJ_ARITH_CPU_*` paths implement equivalent behavior. Always keep
+`RJ_ARITH_CPU_BASELINE` as a simple reference for even the oldest supported
+CPUs. Its speed is secondary, and it never needs extra complexity for speed.
+
+Benchmark each additional path against the implementation dispatch would select
+without it, on the same host with the same inputs and requested semantics. If
+a Zen 4 host would fall back to V3 for that entry point, compare against V3.
+
+Run `rj_arith_benchmark > results.csv` to obtain the measurements. The CSV's
+`Speedup` column compares against scalar, not against the path being replaced.
+For a V4 path that otherwise falls back to V3, divide V3 `ns/wave` by V4
+`ns/wave`, matching the instruction, requested semantics, variant and input kind.
+A V4 speedup above 1.2x against scalar does not establish a 1.2x gain over V3.
+
+Use these thresholds as guidelines. Raise borderline cases and exceptions for
+discussion.
+
+- **Dense WMMA/MFMA and other typically performance-critical instructions.**
+  Unless a different threshold applies, generally omit paths below 1.1x speedup,
+  discuss 1.1x through 1.2x, and keep paths above 1.2x.
+- **Sparse WMMA/MFMA.** Less frequent use raises the discussion range to
+  1.2x–1.4x. For both dense and sparse WMMA/MFMA, the thresholds apply across
+  element types and tile shapes.
+- **Other instructions.** Adjust the threshold to the instruction's importance
+  in real workloads. For rarely performance-critical operations such as sine
+  and cosine, use at least 2x.
+
+`RJ_ARITH_CPU_X86_64_V3` is the effective baseline for many older CPUs. With
+no feature level between V3 and baseline x86-64, V3 should readily clear the
+usual thresholds.
+
+`RJ_ARITH_CPU_X86_64_V4` plays a narrower role between V3 and
+`RJ_ARITH_CPU_X86_64_ZEN4`. Use V4 when it lets older CPUs run the same
+AVX-512 code. Require Zen 4 features when they help. Keeping both paths for
+the same instruction and semantics should be rare and warrants discussion.
+
+#### Semantics paths
+
+A stricter implementation already satisfies the looser semantics contract, so a
+separate looser path must justify its cost with a speedup. Benchmark the same
+request with and without the looser path, applying the same instruction-specific
+thresholds used for CPU paths. Share common arithmetic when both paths earn
+their place.
+
+To isolate the gain from looser semantics, compare reasonably optimized paths
+at the same CPU feature level. If dispatch falls back to a different level,
+the measured gain includes both CPU specialization and the change in semantics.
+
 ## Testing
 
 ### Explicit tests with shared family helpers
