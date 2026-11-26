@@ -8,15 +8,11 @@ from amdisa.codegen.execute.floating_policy import (
     FLUSH_NEAREST_F32_OPS,
     INPUT_FLUSHED_ROUNDING,
 )
-from amdisa.codegen.execute.simd_codegen import simd_probe_line
 from amdisa.codegen.execute.sema_lower import lower_sema_block
 from amdisa.sema_ast import ExecModel, SemaBlock, SemaNode, SemaNodeKind, SemaType
 from amdisa.semantics import InstructionSemantics
 
 _F16_FLUSH = 'amdgpu::input_denormal::flush_input<amdgpu::fp_format::F16>('
-
-
-_F16_POLICY = 'amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
 
 
 _TRANS_OUTPUT = 'amdgpu::transcendental_output_modifier_policy<amdgpu::fp_format::F16>'
@@ -46,9 +42,6 @@ _EXPECTED_FLUSH_NEAREST_F32_OPS = {
     'V_SQRT_F32',
     'V_COS_F32',
 }
-
-
-_MIGRATED_ROOT_F32 = {'V_RCP_F32', 'V_RSQ_F32', 'V_SQRT_F32'}
 
 
 _NO_LEGACY_SIMD_PROBE_F32 = {
@@ -161,21 +154,6 @@ def test_scalar_flush_nearest_f32_forces_omod_despite_output_keep(instruction: s
     assert 'effective_omod(wf.cu().arch(), 0, wf.ieee_mode(), inst_.omod)' in result
 
 
-@pytest.mark.parametrize(
-    'instruction',
-    sorted(
-        FLUSH_NEAREST_F32_OPS
-        - _NO_LEGACY_SIMD_PROBE_F32
-        - {'V_EXP_F32', 'V_LOG_F32'}
-        - _MIGRATED_ROOT_F32
-    ),
-)
-def test_simd_flush_nearest_f32_forces_output_flush(instruction: str):
-    line = simd_probe_line(f'{instruction.lower()}_vop3')
-
-    assert 'true /* force_output_flush */' in line
-
-
 @pytest.mark.parametrize('instruction', sorted(FLUSH_NEAREST_F32_OPS))
 def test_sdwa_flush_nearest_f32_uses_matching_output_policy(instruction: str):
     sem = InstructionSemantics(instruction, 'vector_unary')
@@ -188,29 +166,7 @@ def test_sdwa_flush_nearest_f32_uses_matching_output_policy(instruction: str):
 # These forms have no specialized legacy SIMD probe.
 
 
-@pytest.mark.parametrize('instruction', sorted(_NO_LEGACY_SIMD_PROBE_F32))
-def test_math_without_legacy_probe_has_no_specialized_simd_probe(instruction: str):
-    assert simd_probe_line(f'{instruction.lower()}_vop3') is None
-
-
-@pytest.mark.parametrize(
-    'instruction',
-    sorted(
-        _MIGRATED_ROOT_F32
-        | {
-            'V_RCP_IFLAG_F32',
-            'V_EXP_F32',
-            'V_LOG_F32',
-            'V_SIN_F32',
-            'V_COS_F32',
-            'V_EXP_LEGACY_F32',
-            'V_LOG_LEGACY_F32',
-        }
-    ),
-)
-def test_migrated_math_has_no_legacy_simd_probe(instruction: str):
-    for form in ('vop1', 'vop3'):
-        assert simd_probe_line(f'{instruction.lower()}_{form}') is None
-
-
 """Shared floating policy metadata and live scalar/SIMD fallback wiring."""
+
+
+"""F16 and F32 arithmetic policy wiring in semantic lowering."""

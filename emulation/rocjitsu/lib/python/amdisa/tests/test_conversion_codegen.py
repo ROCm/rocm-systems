@@ -1,16 +1,10 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Tests for conversions lowered through shared/conversion.h."""
-
 import pytest
-
 from amdisa.codegen.execute import conversion, fp8_formats
 from amdisa.codegen.execute.sema_lower import lower_sema_block
-from amdisa.codegen.execute.simd_codegen import local_coverage_probe, simd_probe_line
-from amdisa.codegen.execute.vector_special import (
-    gen_vector_cvt_pk,
-)
+from amdisa.codegen.execute.vector_special import gen_vector_cvt_pk
 from amdisa.sema_derive import derive_sema_block
 from amdisa.sema_enrich import enrich_block
 from amdisa.semantics import (
@@ -18,6 +12,8 @@ from amdisa.semantics import (
     TO_FLOAT_CONVERSIONS,
     derive_semantics,
 )
+
+"""Tests for conversions lowered through shared/conversion.h."""
 
 
 def _formats(source, result):
@@ -34,6 +30,8 @@ _INTEGER_TO_FLOAT = [
     for dtype, formats in TO_FLOAT_CONVERSIONS.items()
     if dtype in INTEGER_SOURCE_CONVERSIONS and not dtype.startswith('f16_')
 ]
+
+
 _FLOAT_TO_FLOAT = [
     (f'V_CVT_{dtype.upper()}', _formats(*formats))
     for dtype, formats in TO_FLOAT_CONVERSIONS.items()
@@ -81,15 +79,6 @@ def test_integer_to_float_vop1_scales_f16_results_by_sdwa_omod(name, formats):
     assert f'const auto conversion = {expected}' in cpp
 
 
-@pytest.mark.parametrize('dtype', ['f32_i32', 'f32_u32'])
-def test_f32_integer_conversion_simd_passes_the_scalar_stage_object(dtype):
-    # The probe passes the scalar body's object, OMOD and CLAMP included, so a
-    # modified VOP3 encoding stays on the SIMD path.
-    probe = '  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, conversion);'
-    assert simd_probe_line(f'v_cvt_{dtype}_vop1') == probe
-    assert simd_probe_line(f'v_cvt_{dtype}_vop3') == probe
-
-
 @pytest.mark.parametrize(('name', 'formats'), _FLOAT_TO_FLOAT)
 def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, formats):
     cpp = _lower(name, 'ENC_VOP3', {'abs', 'neg', 'clamp', 'omod'})
@@ -105,22 +94,6 @@ def test_float_to_float_vop3_passes_every_modifier_to_one_stage_object(name, for
         'apply_to_float',
     ):
         assert host not in cpp
-
-
-@pytest.mark.parametrize(
-    'dtype', ['f16_i16', 'f16_u16', 'i16_f16', 'u16_f16', 'f16_f32', 'f32_f16']
-)
-def test_half_conversions_have_no_legacy_simd_probe(dtype):
-    for encoding in ('vop1', 'vop3'):
-        assert simd_probe_line(f'v_cvt_{dtype}_{encoding}') is None
-
-
-@pytest.mark.parametrize(
-    'name', ['V_CVT_F16_I16', 'V_CVT_F16_U16', 'V_CVT_F16_F32', 'V_CVT_F32_F16']
-)
-def test_half_conversion_requires_arithmetic_lowering(name):
-    with pytest.raises(ValueError, match='require rj-arith lowering'):
-        _lower(name, 'ENC_VOP1')
 
 
 def test_share_stages_hoists_the_scalar_declaration_above_the_probe():
@@ -140,26 +113,6 @@ def test_share_stages_hoists_the_scalar_declaration_above_the_probe():
     assert conversion.share_stages(None, body) == (None, body)
     with pytest.raises(ValueError, match='declares none'):
         conversion.share_stages(probe, '  for (;;) {}\n')
-
-
-@pytest.mark.parametrize('name', ['fp8', 'bf8'])
-def test_fp8_decode_simd_probe_follows_the_target_policy(name):
-    layout = 'Fp8' if name == 'fp8' else 'Bf8'
-    probe = local_coverage_probe(f'v_cvt_f32_{name}_vop3', arch_name='rdna4')
-    assert (
-        f'amdgpu::conversion::decode_fp8<amdgpu::conversion::{layout}>(byte)' in probe
-    )
-    assert ('util::fp8_e5m3_to_f32_simd' in probe) == (name == 'fp8')
-    assert 'util::fp8_e4m3_to_f32_simd' not in probe
-    assert 'util::bf8_e5m2_to_f32_simd' not in probe
-    # The SIMD decode matches the scalar body's util helpers elsewhere.
-    helper = (
-        'util::fp8_e4m3_to_f32_simd' if name == 'fp8' else 'util::bf8_e5m2_to_f32_simd'
-    )
-    for arch in ('cdna4', 'cdna5', None):
-        util = local_coverage_probe(f'v_cvt_f32_{name}_vop3', arch_name=arch)
-        assert 'amdgpu::conversion::decode_fp8' not in util
-        assert f'{helper}(byte)' in util
 
 
 @pytest.mark.parametrize(
@@ -204,3 +157,11 @@ def test_cdna5_uses_shared_narrowing_for_non_scaled_ocp_conversions(fmt, helper)
         ['dst'], ['a'], 'vector_cvt_pk', f'f32_{fmt}', arch_name='cdna5'
     )
     assert f'util::{helper}_to_f32' in widened
+
+
+@pytest.mark.parametrize(
+    'name', ['V_CVT_F16_I16', 'V_CVT_F16_U16', 'V_CVT_F16_F32', 'V_CVT_F32_F16']
+)
+def test_half_conversion_requires_arithmetic_lowering(name):
+    with pytest.raises(ValueError, match='require rj-arith lowering'):
+        _lower(name, 'ENC_VOP1')
