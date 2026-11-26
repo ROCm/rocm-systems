@@ -53,6 +53,7 @@ struct InputProgram {
   KernelDescriptorInfo kernel;
   // Canonical static table entry; never borrows the caller's aggregate/name.
   const TargetProfile *target = nullptr;
+  ScopeKind scope = ScopeKind::NativeLdsNoSynchronization;
   uint32_t wave_size = 0;
   uint32_t maximum_workgroup_size = 0;
   uint32_t kernarg_alignment = 8;
@@ -79,10 +80,9 @@ struct InputProgram {
 /// @brief Qualify one selected entry inside an intact multi-entry source image.
 /// @details Generic SBI independently proves disjoint ownership for the whole
 /// image. This analysis rejects selected control flow that enters a sibling.
-[[nodiscard]] FailureOr<InputProgram> build_image_entry_program(std::span<const uint8_t> image,
-                                                                const TargetProfile &target,
-                                                                std::string_view entry,
-                                                                InputError &error,
-                                                                const InputLimits &limits = {});
+[[nodiscard]] FailureOr<InputProgram>
+build_image_entry_program(std::span<const uint8_t> image, const TargetProfile &target,
+                          std::string_view entry, InputError &error, const InputLimits &limits = {},
+                          ScopeKind scope = ScopeKind::NativeLdsNoSynchronization);
 
 } // namespace rocjitsu::consan

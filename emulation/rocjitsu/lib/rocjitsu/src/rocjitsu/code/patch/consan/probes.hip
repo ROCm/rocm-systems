@@ -216,6 +216,50 @@ rj_consan_exit(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup)
                      : 0u));
 }
 
+extern "C" __device__ __attribute__((noinline, used, visibility("default"))) void
+rj_consan_trace_entry(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup) {
+  GlobalWords dispatch = context(low, high);
+  const u32 threads = uniform(dispatch[wire::kContextWorkgroup / 4]);
+  if (threads == 0 || uniform(workgroup) >= rocjitsu::consan::kTraceMaxWorkgroups ||
+      uniform(workgroup) * threads >= dispatch[wire::kContextGrid / 4])
+    return;
+  const u32 waves = (threads + CONSAN_PROBE_WAVE_SIZE - 1) / CONSAN_PROBE_WAVE_SIZE;
+  const u32 local_wave = uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE;
+  if (local_wave >= waves)
+    return;
+  const u32 index = uniform(workgroup) * waves + local_wave;
+  GlobalWords output = row(dispatch, local_wave, stride, workgroup);
+  wave_state(output).initialize(lane_id());
+  if (lane_id() == 0) {
+    output[wire::kRowSerial / 4] = dispatch[wire::kContextSerial / 4];
+    output[wire::kRowSerial / 4 + 1] = dispatch[wire::kContextSerial / 4 + 1];
+    output[wire::kRowEntry / 4] = 0;
+    output[wire::kRowWave / 4] = index;
+    output[wire::kTraceRowWorkgroup / 4] = uniform(workgroup);
+    output[wire::kTraceRowLocalWave / 4] = local_wave;
+    output[wire::kTraceRowEntries / 4] = output[wire::kTraceRowEntries / 4] + 1;
+    publish(output + wire::kRowStatus / 4, output[wire::kRowStatus / 4] | wire::kRowEntered);
+  }
+}
+
+extern "C" __device__ __attribute__((noinline, used, visibility("default"))) void
+rj_consan_trace_exit(u32 low, u32 high, u32 first_workitem, u32 stride, u32 workgroup) {
+  GlobalWords dispatch = context(low, high);
+  const u32 threads = uniform(dispatch[wire::kContextWorkgroup / 4]);
+  if (threads == 0 || uniform(workgroup) >= rocjitsu::consan::kTraceMaxWorkgroups ||
+      uniform(workgroup) * threads >= dispatch[wire::kContextGrid / 4])
+    return;
+  const u32 waves = (threads + CONSAN_PROBE_WAVE_SIZE - 1) / CONSAN_PROBE_WAVE_SIZE;
+  const u32 local_wave = uniform(first_workitem) / CONSAN_PROBE_WAVE_SIZE;
+  if (local_wave >= waves)
+    return;
+  GlobalWords output = row(dispatch, local_wave, stride, workgroup);
+  if (lane_id() == 0) {
+    output[wire::kTraceRowExits / 4] = output[wire::kTraceRowExits / 4] + 1;
+    publish(output + wire::kRowStatus / 4, output[wire::kRowStatus / 4] | wire::kRowExited);
+  }
+}
+
 // Retain standalone functions through HIP device internalization and linking.
 __device__ auto rj_consan_entry_keepalive = &rj_consan_entry;
 __device__ auto rj_consan_access_keepalive = &rj_consan_access;
@@ -223,3 +267,6 @@ __device__ auto rj_consan_transpose_keepalive = &rj_consan_transpose;
 __device__ auto rj_consan_exit_keepalive = &rj_consan_exit;
 
 __device__ auto rj_consan_barrier_keepalive = &rj_consan_barrier;
+__device__ decltype(&rj_consan_trace_entry) rj_consan_trace_entry_keepalive =
+    &rj_consan_trace_entry;
+__device__ decltype(&rj_consan_trace_exit) rj_consan_trace_exit_keepalive = &rj_consan_trace_exit;

@@ -22,6 +22,7 @@
 #include <cstring>
 #include <deque>
 #include <fcntl.h>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <set>
@@ -115,6 +116,7 @@ struct Launch {
   bool native_completion_visible = false;
   bool application_native = false;
   uint64_t sequence = 0;
+  uint64_t serial = 0;
   hsa_queue_t *queue = nullptr;
   std::shared_ptr<const Module> module;
   std::unique_ptr<DispatchLifecycle> lifecycle;
@@ -926,8 +928,17 @@ private:
             HSA_STATUS_SUCCESS ||
         info.size < offsetof(hsa_amd_pointer_info_t, global_flags) + sizeof(info.global_flags) ||
         info.type != HSA_EXT_POINTER_TYPE_HSA || info.hostBaseAddress == nullptr ||
-        info.agentBaseAddress != info.hostBaseAddress ||
-        (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED) == 0) {
+        info.agentBaseAddress != info.hostBaseAddress) {
+      return false;
+    }
+    // The application owns its original kernargs before publication. CPU-mapped
+    // coarse HSA allocations are readable here too; only the new wrapper/report
+    // transport must be fine-grained. Unknown, locked, unmapped and aliased
+    // pointers never acquire host-read permission through this path.
+    const uint32_t allowed_grain =
+        HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED |
+        (application_profile_ ? HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_COARSE_GRAINED : 0);
+    if ((info.global_flags & allowed_grain) == 0) {
       return false;
     }
     const uintptr_t base = reinterpret_cast<uintptr_t>(info.hostBaseAddress);
@@ -943,6 +954,7 @@ private:
     }
     CaptureHeader header;
     header.image = facts;
+    header.execution_conditions = capture_execution_conditions(facts);
     const FailureOr<std::vector<uint8_t>> encoded_facts = encode_image_facts(facts);
     if (encoded_facts.failed()) {
       fail_locked(RuntimeStatus::InvalidFacts, "cannot encode capture facts");
@@ -1064,6 +1076,139 @@ private:
     }
   }
 
+  bool prepare_selected_locked(const std::shared_ptr<Launch> &launch, const EntryBinding *binding,
+                               hsa_kernel_dispatch_packet_t &packet,
+                               const LaunchDimensions &dimensions) {
+    if (launch->module != module_) {
+      reject_packet_locked(packet, "selected dispatch does not own the prepared image");
+      return false;
+    }
+    const Manifest &facts = *binding->facts;
+    const FailureOr<LaunchLayout> layout =
+        plan_launch(facts, dimensions, packet.group_segment_size, packet.private_segment_size);
+    if (layout.failed() ||
+        (reinterpret_cast<uintptr_t>(packet.kernarg_address) % binding->kernarg_alignment) != 0 ||
+        !host_arguments_locked(packet.kernarg_address, facts.entry.original_kernarg_bytes)) {
+      reject_packet_locked(
+          packet, "unsupported geometry/segments or inaccessible original kernarg allocation");
+      return false;
+    }
+    const uint64_t capture_bytes =
+        48 + 144 + uint64_t{facts.entry.original_kernarg_bytes} + layout.value().report_bytes;
+    if (capture_bytes > CaptureLimits{}.file_bytes - planned_capture_bytes_) {
+      reject_packet_locked(packet, "capture budget exhausted before submission");
+      return false;
+    }
+    // Prepare sufficient idle report capacity and per-launch wrapper/context
+    // plus proxy signal. Rollback owns all unsubmitted acquisitions.
+    for (size_t index = 0; index < slots_.size(); ++index) {
+      if (!slots_[index].leased) {
+        launch->slot = static_cast<uint32_t>(index + 1);
+        break;
+      }
+    }
+    if (launch->slot == 0 &&
+        slots_.size() < (application_profile_ ? CaptureLimits{}.executions : 16)) {
+      ReportSlot slot;
+      slot.capacity = layout.value().report_bytes;
+      if (allocate_locked(slot.capacity, &slot.memory)) {
+        const auto free = [this](void *memory) { (void)amd_.hsa_amd_memory_pool_free_fn(memory); };
+        std::unique_ptr<void, decltype(free)> uninstalled(slot.memory, free);
+        slots_.push_back(slot);
+        (void)uninstalled.release();
+        launch->slot = static_cast<uint32_t>(slots_.size());
+      }
+    }
+    if (launch->slot == 0) {
+      reject_packet_locked(packet, "report allocation/backlog admission failed before submission");
+      return false;
+    }
+    ReportSlot &slot = slots_[launch->slot - 1];
+    const bool reused = slot.generation != 0 && slot.capacity >= layout.value().report_bytes;
+    if (slot.capacity < layout.value().report_bytes) {
+      void *replacement = nullptr;
+      if (!allocate_locked(layout.value().report_bytes, &replacement)) {
+        reject_packet_locked(packet, "report growth allocation failed before submission");
+        return false;
+      }
+      // Only an unleased slot reaches here: completion and an independent
+      // snapshot already permit replacement. Keep the old allocation on failure.
+      (void)amd_.hsa_amd_memory_pool_free_fn(slot.memory);
+      slot.memory = replacement;
+      slot.capacity = layout.value().report_bytes;
+    }
+    slot.leased = true;
+    if (slot.generation == UINT32_MAX || (reinterpret_cast<uintptr_t>(slot.memory) % 64) != 0 ||
+        !allocate_locked(layout.value().wrapper_bytes, &launch->wrapper) ||
+        reinterpret_cast<uintptr_t>(launch->wrapper) % binding->kernarg_alignment != 0 ||
+        !allocate_locked(kContextBytes, &launch->context) ||
+        core_.hsa_signal_create_fn(1, 0, nullptr, &launch->proxy) != HSA_STATUS_SUCCESS) {
+      reject_packet_locked(packet, "wrapper/context/proxy allocation failed before submission");
+      return false;
+    }
+    const uint64_t serial = statistics_.submitted + 1;
+    launch->serial = serial;
+    const FailureOr<TransportImage> transport = initialize_transport(
+        facts, dimensions, layout.value().group_bytes, layout.value().private_bytes, serial,
+        reinterpret_cast<uint64_t>(slot.memory));
+    if (transport.failed()) {
+      reject_packet_locked(packet, "canonical transport initialization failed before submission");
+      return false;
+    }
+    std::memcpy(slot.memory, transport.value().report.data(), transport.value().report.size());
+    std::memcpy(launch->context, transport.value().context.data(), kContextBytes);
+    std::span<uint8_t> wrapper =
+        std::span(static_cast<uint8_t *>(launch->wrapper), layout.value().wrapper_bytes);
+    const std::optional<rocjitsu::KernargExtensionLayout> kernarg =
+        rocjitsu::make_kernarg_extension_layout(facts.entry.original_kernarg_bytes,
+                                                kContextPointerPayloads);
+    const uint64_t context_pointer = reinterpret_cast<uint64_t>(launch->context);
+    const std::array<rocjitsu::KernargExtensionPayloadWrite, 1> payloads = {
+        {{.data = &context_pointer, .size = sizeof(context_pointer)}}};
+    if (!kernarg || !rocjitsu::write_kernarg_extension_wrapper(
+                        wrapper, *kernarg, packet.kernarg_address,
+                        reinterpret_cast<uint64_t>(packet.kernarg_address), payloads)) {
+      reject_packet_locked(packet, "kernarg wrapper initialization failed before submission");
+      return false;
+    }
+    // Bind execution identity and original arguments to an empty report
+    // envelope. Lifecycle admission does not itself submit the HSA packet.
+    CapturedExecution envelope;
+    envelope.serial = serial;
+    envelope.entry_key = binding->key;
+    envelope.dimensions = dimensions;
+    envelope.group_bytes = layout.value().group_bytes;
+    envelope.private_bytes = layout.value().private_bytes;
+    envelope.storage_slot = launch->slot;
+    envelope.storage_generation = ++slot.generation;
+    envelope.completion = 0;
+    envelope.context = transport.value().context;
+    envelope.arguments.assign(wrapper.begin(),
+                              wrapper.begin() + facts.entry.original_kernarg_bytes);
+    launch->original = packet.completion_signal;
+    launch->lifecycle = std::make_unique<DispatchLifecycle>(binding->facts, std::move(envelope));
+    if (launch->lifecycle->submitted() != RuntimeStatus::Success) {
+      reject_packet_locked(packet, "dispatch ownership initialization failed before submission");
+      return false;
+    }
+    packet.kernarg_address = launch->wrapper;
+    packet.completion_signal = launch->proxy;
+    packet.group_segment_size = layout.value().group_bytes;
+    packet.private_segment_size = layout.value().private_bytes;
+    constexpr uint16_t fences = (3u << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                                (3u << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    packet.header = (packet.header & ~fences) |
+                    (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                    (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+    pending_.push_back(launch);
+    ++statistics_.submitted;
+    planned_capture_bytes_ += capture_bytes;
+    if (reused)
+      ++statistics_.reused;
+    condition_.notify_all();
+    return true;
+  }
+
   void intercept_application(QueueState &queue, const void *packets, uint64_t count,
                              hsa_amd_queue_intercept_packet_writer writer) {
     {
@@ -1157,8 +1302,7 @@ private:
                 (dimension < packet.setup || (workgroup[dimension] == 1 && grid[dimension] == 1));
       if (!valid || closed_ || queue.closing || status_ != RuntimeStatus::Success ||
           statistics_.submitted + statistics_.native_submitted >= CaptureLimits{}.executions ||
-          binding == nullptr || binding->disposition != EntryDisposition::Native ||
-          packet.completion_signal.handle != 0) {
+          binding == nullptr || packet.completion_signal.handle != 0) {
         fail_locked(RuntimeStatus::InvalidFacts, "application native packet violates binding, "
                                                  "format, geometry or null-completion profile");
         return;
@@ -1176,22 +1320,51 @@ private:
         fail_locked(RuntimeStatus::InvalidFacts, "application native packet violates original ABI");
         return;
       }
-      if (core_.hsa_signal_create_fn(1, 0, nullptr, &launch->proxy) != HSA_STATUS_SUCCESS) {
-        fail_locked(RuntimeStatus::InvalidFacts, "application native completion allocation failed");
+      // Trace rows currently use TTMP9 as the global workgroup X identity.
+      // Format 3 supplies a cluster coordinate there for nonunit clusters.
+      if (binding->disposition == EntryDisposition::Selected && is_extended &&
+          (extended.cluster_size_x != 1 || extended.cluster_size_y != 1 ||
+           extended.cluster_size_z != 1)) {
+        reject_packet_locked(packet, "application execution tracing requires unit cluster sizes");
         return;
       }
-      launch->native = launch->application_native = true;
       launch->module = std::move(owner);
       launch->queue = queue.queue;
       launch->sequence = ++next_sequence_;
-      pending_.push_back(launch);
-      ++statistics_.native_submitted;
-      start_observer_locked();
-      condition_.notify_all();
+      if (binding->disposition == EntryDisposition::Selected) {
+        const auto release = [this](Launch *unsubmitted) {
+          release_unsubmitted_locked(*unsubmitted);
+        };
+        std::unique_ptr<Launch, decltype(release)> rollback(launch.get(), release);
+        if (!binding->facts || binding->facts->scope != ScopeKind::ExecutionTrace) {
+          reject_packet_locked(packet,
+                               "application selected dispatch requires execution-trace facts");
+          return;
+        }
+        if (!prepare_selected_locked(launch, binding, packet,
+                                     {.grid = grid, .workgroup = workgroup}))
+          return;
+        (void)rollback.release();
+      } else {
+        if (core_.hsa_signal_create_fn(1, 0, nullptr, &launch->proxy) != HSA_STATUS_SUCCESS) {
+          fail_locked(RuntimeStatus::InvalidFacts,
+                      "application native completion allocation failed");
+          return;
+        }
+        launch->native = launch->application_native = true;
+        pending_.push_back(launch);
+        ++statistics_.native_submitted;
+        start_observer_locked();
+        condition_.notify_all();
+      }
     }
-    // A null application completion has no owner or timestamp consumer. Replace
-    // only that field, adding completion observation without a dependency edge.
+    // Preserve the packet representation and dependencies. Selected transport
+    // also wraps kernargs and strengthens fences for system-visible reports.
     if (is_extended) {
+      extended.header = packet.header;
+      extended.kernarg_address = packet.kernarg_address;
+      extended.group_segment_size = packet.group_segment_size;
+      extended.private_segment_size = packet.private_segment_size;
       extended.completion_signal = launch->proxy;
       writer(&extended, 1);
     } else {
@@ -1343,137 +1516,10 @@ private:
         (void)rollback.release();
         condition_.notify_all();
       } else {
-        const Manifest &facts = *binding->facts;
-        const FailureOr<LaunchLayout> layout =
-            plan_launch(facts, dimensions, packet.group_segment_size, packet.private_segment_size);
-        if (layout.failed() ||
-            (reinterpret_cast<uintptr_t>(packet.kernarg_address) % binding->kernarg_alignment) !=
-                0 ||
-            !host_arguments_locked(packet.kernarg_address, facts.entry.original_kernarg_bytes)) {
-          reject_packet_locked(
-              packet,
-              "unsupported geometry/segments or non-fine-grained original kernarg allocation");
+        if (!prepare_selected_locked(launch, binding, packet, dimensions))
           return;
-        }
-        const uint64_t capture_bytes =
-            48 + 144 + uint64_t{facts.entry.original_kernarg_bytes} + layout.value().report_bytes;
-        if (capture_bytes > CaptureLimits{}.file_bytes - planned_capture_bytes_) {
-          reject_packet_locked(packet, "capture budget exhausted before submission");
-          return;
-        }
-        // Prepare sufficient idle report capacity and per-launch wrapper/context
-        // plus proxy signal. Rollback owns all unsubmitted acquisitions.
-        for (size_t index = 0; index < slots_.size(); ++index) {
-          if (!slots_[index].leased) {
-            launch->slot = static_cast<uint32_t>(index + 1);
-            break;
-          }
-        }
-        if (launch->slot == 0 && slots_.size() < 16) {
-          ReportSlot slot;
-          slot.capacity = layout.value().report_bytes;
-          if (allocate_locked(slot.capacity, &slot.memory)) {
-            const auto free = [this](void *memory) {
-              (void)amd_.hsa_amd_memory_pool_free_fn(memory);
-            };
-            std::unique_ptr<void, decltype(free)> uninstalled(slot.memory, free);
-            slots_.push_back(slot);
-            (void)uninstalled.release();
-            launch->slot = static_cast<uint32_t>(slots_.size());
-          }
-        }
-        if (launch->slot == 0) {
-          reject_packet_locked(packet,
-                               "report allocation/backlog admission failed before submission");
-          return;
-        }
-        ReportSlot &slot = slots_[launch->slot - 1];
-        const bool reused = slot.generation != 0 && slot.capacity >= layout.value().report_bytes;
-        if (slot.capacity < layout.value().report_bytes) {
-          void *replacement = nullptr;
-          if (!allocate_locked(layout.value().report_bytes, &replacement)) {
-            reject_packet_locked(packet, "report growth allocation failed before submission");
-            return;
-          }
-          // Only an unleased slot reaches here: completion and an independent
-          // snapshot already permit replacement. Keep the old allocation on failure.
-          (void)amd_.hsa_amd_memory_pool_free_fn(slot.memory);
-          slot.memory = replacement;
-          slot.capacity = layout.value().report_bytes;
-        }
-        slot.leased = true;
-        if (slot.generation == UINT32_MAX || (reinterpret_cast<uintptr_t>(slot.memory) % 64) != 0 ||
-            !allocate_locked(layout.value().wrapper_bytes, &launch->wrapper) ||
-            reinterpret_cast<uintptr_t>(launch->wrapper) % binding->kernarg_alignment != 0 ||
-            !allocate_locked(kContextBytes, &launch->context) ||
-            core_.hsa_signal_create_fn(1, 0, nullptr, &launch->proxy) != HSA_STATUS_SUCCESS) {
-          reject_packet_locked(packet, "wrapper/context/proxy allocation failed before submission");
-          return;
-        }
-        const uint64_t serial = statistics_.submitted + 1;
-        const FailureOr<TransportImage> transport = initialize_transport(
-            facts, dimensions, layout.value().group_bytes, layout.value().private_bytes, serial,
-            reinterpret_cast<uint64_t>(slot.memory));
-        if (transport.failed()) {
-          reject_packet_locked(packet,
-                               "canonical transport initialization failed before submission");
-          return;
-        }
-        std::memcpy(slot.memory, transport.value().report.data(), transport.value().report.size());
-        std::memcpy(launch->context, transport.value().context.data(), kContextBytes);
-        std::span<uint8_t> wrapper =
-            std::span(static_cast<uint8_t *>(launch->wrapper), layout.value().wrapper_bytes);
-        const std::optional<rocjitsu::KernargExtensionLayout> kernarg =
-            rocjitsu::make_kernarg_extension_layout(facts.entry.original_kernarg_bytes,
-                                                    kContextPointerPayloads);
-        const uint64_t context_pointer = reinterpret_cast<uint64_t>(launch->context);
-        const std::array<rocjitsu::KernargExtensionPayloadWrite, 1> payloads = {
-            {{.data = &context_pointer, .size = sizeof(context_pointer)}}};
-        if (!kernarg || !rocjitsu::write_kernarg_extension_wrapper(
-                            wrapper, *kernarg, packet.kernarg_address,
-                            reinterpret_cast<uint64_t>(packet.kernarg_address), payloads)) {
-          reject_packet_locked(packet, "kernarg wrapper initialization failed before submission");
-          return;
-        }
-        // Bind execution identity and original arguments to an empty report
-        // envelope. Lifecycle admission does not itself submit the HSA packet.
-        CapturedExecution envelope;
-        envelope.serial = serial;
-        envelope.entry_key = binding->key;
-        envelope.dimensions = dimensions;
-        envelope.group_bytes = layout.value().group_bytes;
-        envelope.private_bytes = layout.value().private_bytes;
-        envelope.storage_slot = launch->slot;
-        envelope.storage_generation = ++slot.generation;
-        envelope.completion = 0;
-        envelope.context = transport.value().context;
-        envelope.arguments.assign(wrapper.begin(),
-                                  wrapper.begin() + facts.entry.original_kernarg_bytes);
-        launch->original = packet.completion_signal;
-        launch->lifecycle =
-            std::make_unique<DispatchLifecycle>(binding->facts, std::move(envelope));
-        if (launch->lifecycle->submitted() != RuntimeStatus::Success) {
-          reject_packet_locked(packet,
-                               "dispatch ownership initialization failed before submission");
-          return;
-        }
-        packet.kernarg_address = launch->wrapper;
-        packet.completion_signal = launch->proxy;
-        packet.group_segment_size = layout.value().group_bytes;
-        packet.private_segment_size = layout.value().private_bytes;
-        constexpr uint16_t fences = (3u << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-                                    (3u << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-        packet.header = (packet.header & ~fences) |
-                        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-                        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
-        pending_.push_back(launch);
         signal->second.used = signal->second.pending = true;
         active_gpu_ = true;
-        ++statistics_.submitted;
-        planned_capture_bytes_ += capture_bytes;
-        if (reused) {
-          ++statistics_.reused;
-        }
         (void)rollback.release();
         condition_.notify_all();
       }
@@ -1501,7 +1547,8 @@ private:
       if (observed != 0) {
         std::lock_guard lock(mutex_);
         // Controlled admission relies on the newest launch remaining at back().
-        if (launch->application_native)
+        // Application launches may complete out of order, including selected traces.
+        if (application_profile_)
           std::rotate(pending_.begin(), pending_.begin() + 1, pending_.end());
         continue; // A timeout/fault is never completion/visibility proof.
       }
@@ -1525,68 +1572,84 @@ private:
         condition_.notify_all();
         continue;
       }
+      void *source = nullptr;
+      RuntimeStatus observed_status;
       {
         std::lock_guard lock(mutex_);
-        const RuntimeStatus status = launch->lifecycle->observe(true, true, [&] {
-          core_.hsa_signal_subtract_screlease_fn(launch->original, 1);
+        observed_status = launch->lifecycle->observe(true, true, [&] {
+          if (launch->original.handle != 0)
+            core_.hsa_signal_subtract_screlease_fn(launch->original, 1);
           return true;
         });
-        if (status != RuntimeStatus::Success) {
-          fail_locked(status, "completion forwarding failed");
+        if (observed_status != RuntimeStatus::Success)
+          fail_locked(observed_status, "completion forwarding failed");
+        if (launch->original.handle != 0) {
+          signals_[launch->original.handle].pending = false;
+          ++statistics_.forwarded;
         }
-        signals_[launch->original.handle].pending = false;
-        active_gpu_ = false;
-        ++statistics_.forwarded;
-        pending_.pop_front();
-        // The collector may take this reference before the cleanup below.
-        // Our local shared_ptr keeps Launch alive while both workers use it;
-        // it does not synchronize mutable lifecycle state.
-        completed_.push_back(launch);
-        condition_.notify_all();
-      }
-      (void)core_.hsa_signal_destroy_fn(launch->proxy);
-      (void)amd_.hsa_amd_memory_pool_free_fn(launch->wrapper);
-      (void)amd_.hsa_amd_memory_pool_free_fn(launch->context);
-    }
-  }
-
-  void collector_loop() {
-    for (;;) {
-      std::shared_ptr<Launch> launch;
-      {
-        std::unique_lock lock(mutex_);
-        condition_.wait(lock, [&] { return stop_ || !completed_.empty(); });
-        if (stop_ && completed_.empty()) {
-          break;
-        }
-        launch = completed_.front();
-        completed_.pop_front();
-      }
-      OwnedSnapshot snapshot;
-      void *source = nullptr;
-      {
-        std::lock_guard lock(mutex_);
+        if (!application_profile_)
+          active_gpu_ = false;
         source = slots_[launch->slot - 1].memory;
       }
-      const RuntimeStatus copied = launch->lifecycle->snapshot(
-          [source](std::span<uint8_t> bytes) {
-            std::memcpy(bytes.data(), source, bytes.size());
-            return CopyResult{RuntimeStatus::Success, bytes.size()};
-          },
-          snapshot);
+      // Snapshot before allowing slot reuse, independently of file I/O. The
+      // observer alone mutates this lifecycle after admission. Original args
+      // were copied before publication and are never read from the app again.
+      OwnedSnapshot snapshot;
+      const RuntimeStatus copied =
+          observed_status == RuntimeStatus::Success
+              ? launch->lifecycle->snapshot(
+                    [source](std::span<uint8_t> bytes) {
+                      std::memcpy(bytes.data(), source, bytes.size());
+                      return CopyResult{RuntimeStatus::Success, bytes.size()};
+                    },
+                    snapshot)
+              : observed_status;
+      const hsa_status_t signal_destroyed = core_.hsa_signal_destroy_fn(launch->proxy);
+      const hsa_status_t wrapper_freed = amd_.hsa_amd_memory_pool_free_fn(launch->wrapper);
+      const hsa_status_t context_freed = amd_.hsa_amd_memory_pool_free_fn(launch->context);
       {
         std::lock_guard lock(mutex_);
         if (copied == RuntimeStatus::Success) {
           slots_[launch->slot - 1].leased = false;
           ++statistics_.copied;
+          completed_.emplace(launch->serial, std::move(snapshot));
         } else {
           fail_locked(copied, "independent host snapshot failed; slice remains retained");
+          completed_.emplace(launch->serial, std::nullopt);
         }
+        if (signal_destroyed != HSA_STATUS_SUCCESS || wrapper_freed != HSA_STATUS_SUCCESS ||
+            context_freed != HSA_STATUS_SUCCESS)
+          fail_locked(RuntimeStatus::InvalidTransition,
+                      "selected completion resource cleanup failed");
+        pending_.pop_front();
+        condition_.notify_all();
       }
-      // The slice can be leased again before this blocking write. The writer
-      // receives only independent bytes and the original immutable facts lease.
+    }
+  }
+
+  void collector_loop() {
+    uint64_t next_serial = 1;
+    for (;;) {
+      std::optional<OwnedSnapshot> snapshot;
+      {
+        std::unique_lock lock(mutex_);
+        condition_.wait(lock, [&] { return stop_ || completed_.contains(next_serial); });
+        const std::map<uint64_t, std::optional<OwnedSnapshot>>::iterator found =
+            completed_.find(next_serial);
+        if (found == completed_.end()) {
+          if (stop_)
+            break;
+          continue;
+        }
+        snapshot = std::move(found->second);
+        completed_.erase(found);
+      }
+      // Completion may arrive out of order. The stream and its storage
+      // generations retain submission order without blocking observation/copy.
+      if (!snapshot)
+        writer_.cancel(RuntimeStatus::CopyFailed);
       const RuntimeStatus written =
-          copied == RuntimeStatus::Success ? writer_.append(snapshot) : copied;
+          snapshot ? writer_.append(*snapshot) : RuntimeStatus::CopyFailed;
       {
         std::lock_guard lock(mutex_);
         if (written == RuntimeStatus::Success) {
@@ -1595,6 +1658,7 @@ private:
           fail_locked(written, "capture execution write failed");
         }
         ++processed_;
+        ++next_serial;
         condition_.notify_all();
       }
     }
@@ -1641,7 +1705,8 @@ private:
   bool workers_started_ = false;
   bool queue_cleanup_failed_ = false;
   std::vector<ReportSlot> slots_;
-  std::deque<std::shared_ptr<Launch>> pending_, completed_;
+  std::deque<std::shared_ptr<Launch>> pending_;
+  std::map<uint64_t, std::optional<OwnedSnapshot>> completed_;
   std::thread observer_, collector_;
   SnapshotWriter writer_;
   rj_consan_statistics statistics_{};

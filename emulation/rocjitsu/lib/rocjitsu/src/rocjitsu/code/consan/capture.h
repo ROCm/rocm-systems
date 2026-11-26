@@ -20,9 +20,17 @@ inline constexpr uint32_t kExecutionSystemFineGrain = 8;
 inline constexpr uint32_t kSupportedExecutionConditions =
     kExecutionSingleQueue | kExecutionNonoverlapping | kExecutionProfilingDisabled |
     kExecutionSystemFineGrain;
+inline constexpr uint32_t kApplicationTraceExecutionConditions = kExecutionSystemFineGrain;
 // Evidence of completion, host visibility and signal forwarding. The contract
 // accepts only this complete value; individual bits are not separate states.
 inline constexpr uint32_t kCompletionVisibleForwarded = 7;
+inline constexpr uint32_t kCompletionVisible = 3;
+
+[[nodiscard]] inline uint32_t completion_evidence(ScopeKind scope) {
+  return scope == ScopeKind::ExecutionTrace ? kCompletionVisible : kCompletionVisibleForwarded;
+}
+
+[[nodiscard]] uint32_t capture_execution_conditions(const ImageFacts &image);
 
 class CaptureHeader {
 public:
@@ -68,6 +76,12 @@ struct Capture {
   CaptureHeader header;
   std::vector<CapturedExecution> executions;
 };
+
+/// @brief Check the saved context, launch and ownership without inspecting GPU rows.
+[[nodiscard]] Result validate_captured_execution(const Manifest &manifest,
+                                                 const CapturedExecution &execution,
+                                                 util::DiagnosticEmitter diagnostic = {},
+                                                 const CaptureLimits &limits = {});
 
 /// @brief Incremental encoding with an explicit, checksummed End dependency.
 /// @details Owns immutable run facts. Returned chunks belong to the caller;

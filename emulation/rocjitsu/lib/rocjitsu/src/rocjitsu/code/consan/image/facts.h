@@ -60,8 +60,9 @@ public:
 /// @details Input keys must be strictly ascending; validation enforces this.
 [[nodiscard]] Digest
 selection_profile_digest(std::span<const EntryKey> selected_keys,
-                         ScopeKind scope = ScopeKind::NativeLdsNoSynchronization,
-                         const Digest &options = mvp_options_digest());
+                         ScopeKind scope = ScopeKind::NativeLdsNoSynchronization);
+[[nodiscard]] Digest selection_profile_digest(std::span<const EntryKey> selected_keys,
+                                              ScopeKind scope, const Digest &options);
 
 /// @brief Return the common selected scope; mixed or missing scopes are invalid.
 [[nodiscard]] std::optional<ScopeKind> selected_scope(const ImageFacts &image);

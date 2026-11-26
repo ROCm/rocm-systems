@@ -107,6 +107,20 @@ int main(int argc, char **argv) {
         std::cout << ',';
       }
       const size_t row = kReportHeaderBytes + wave * layout.value().row_stride;
+      if (manifest->scope == ScopeKind::ExecutionTrace) {
+        std::cout << "{\"wave\":" << *wire::read_u32(execution.report, row + wire::kRowWave)
+                  << ",\"workgroup_x\":"
+                  << *wire::read_u32(execution.report, row + wire::kTraceRowWorkgroup)
+                  << ",\"local_wave\":"
+                  << *wire::read_u32(execution.report, row + wire::kTraceRowLocalWave)
+                  << ",\"serial\":" << *wire::read_u64(execution.report, row + wire::kRowSerial)
+                  << ",\"status\":" << *wire::read_u32(execution.report, row + wire::kRowStatus)
+                  << ",\"entries\":"
+                  << *wire::read_u32(execution.report, row + wire::kTraceRowEntries)
+                  << ",\"exits\":" << *wire::read_u32(execution.report, row + wire::kTraceRowExits)
+                  << '}';
+        continue;
+      }
       std::cout << "{\"wave\":" << *wire::read_u32(execution.report, row + wire::kRowWave)
                 << ",\"workgroup_x\":"
                 << *wire::read_u32(execution.report, row + wire::kRowWorkgroupX)

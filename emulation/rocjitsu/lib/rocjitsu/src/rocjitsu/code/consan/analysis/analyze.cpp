@@ -12,6 +12,8 @@ FailureOr<LdsRaceResult> analyze_capture(const Capture &capture, const AnalysisO
   if (validate_image_facts(capture.header.image, diagnostic).failed()) {
     return Result::failure();
   }
+  if (selected_scope(capture.header.image) == ScopeKind::ExecutionTrace)
+    return diagnostic.emit() << "LDS analysis requires LDS scope";
   // Native names are also rendered as image dispositions, without detector facts.
   for (const ImageEntryFacts &entry : capture.header.image.entries) {
     if (!util::is_valid_utf8(entry.binding.name)) {

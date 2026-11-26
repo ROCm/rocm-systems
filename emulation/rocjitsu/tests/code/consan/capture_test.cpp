@@ -13,6 +13,34 @@
 namespace rocjitsu::consan {
 namespace {
 
+TEST(ConSanTraceCapture, SavesMultiWorkgroupEvidenceWithoutClaimingSignalForwarding) {
+  CaptureHeader header = test::trace_capture_header();
+  ASSERT_EQ(header.execution_conditions, kApplicationTraceExecutionConditions);
+  const Manifest &facts = test::manifest(header);
+  CapturedExecution execution = test::execution(facts, 1, 1, {{512, 1, 1}, {32, 1, 1}});
+  EXPECT_EQ(execution.completion, kCompletionVisible);
+  CaptureEncoder encoder;
+  const FailureOr<std::vector<uint8_t>> prefix = encoder.start(header);
+  ASSERT_TRUE(prefix.succeeded());
+  const FailureOr<std::vector<uint8_t>> frame = encoder.append(execution);
+  ASSERT_TRUE(frame.succeeded());
+  const FailureOr<std::vector<uint8_t>> end = encoder.finish();
+  ASSERT_TRUE(end.succeeded());
+  std::vector<uint8_t> bytes = prefix.value();
+  bytes.insert(bytes.end(), frame.value().begin(), frame.value().end());
+  bytes.insert(bytes.end(), end.value().begin(), end.value().end());
+  const FailureOr<Capture> captured = decode_capture(bytes);
+  ASSERT_TRUE(captured.succeeded());
+  EXPECT_EQ(captured.value().header, header);
+  EXPECT_EQ(captured.value().executions[0].report, execution.report);
+  EXPECT_TRUE(validate_captured_execution(facts, execution).succeeded());
+  execution.completion = kCompletionVisibleForwarded;
+  EXPECT_TRUE(validate_captured_execution(facts, execution).failed());
+  header.execution_conditions = kSupportedExecutionConditions;
+  CaptureEncoder wrong_conditions;
+  EXPECT_TRUE(wrong_conditions.start(header).failed());
+}
+
 class ConSanCapture : public ::testing::Test {
 protected:
   void SetUp() override {

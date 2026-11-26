@@ -41,6 +41,8 @@ uint32_t workgroup_id_scalar(const InputProgram &program) {
 }
 
 ScopeKind program_scope(const InputProgram &program) {
+  if (program.scope == ScopeKind::ExecutionTrace)
+    return ScopeKind::ExecutionTrace;
   return program.barriers.empty() ? ScopeKind::NativeLdsNoSynchronization
                                   : (program.repeated ? ScopeKind::NativeLdsWorkgroupBarrierLoop
                                                       : ScopeKind::NativeLdsWorkgroupBarrier);
@@ -68,11 +70,11 @@ Result finish_manifest(const InputProgram &program, std::span<const uint8_t> ima
   const KernelDescriptorInfo &kernel = *found;
   manifest.original = program.identity;
   manifest.prepared = {digest(image), image.size()};
-  manifest.options = mvp_options_digest();
+  manifest.scope = program_scope(program);
+  manifest.options = profile_options_digest(manifest.scope);
   manifest.target = program.target->id;
   manifest.wave_size = program.wave_size;
   manifest.code_object_abi = 5;
-  manifest.scope = program_scope(program);
   manifest.original_text_bytes = program.text_bytes;
   manifest.prepared_text_bytes = section.size();
   manifest.entry = {.name = program.kernel.kernel_name,
@@ -112,6 +114,7 @@ void add_program_points(Instrumentor &instrumentor, const InputProgram &program,
       {.source = ProbeArgSource::EntryVgprLane0, .register_index = 0},
       probe_arg_imm(stride),
       workgroup_arg};
+  const bool trace = program.scope == ScopeKind::ExecutionTrace;
   auto add = [&](uint64_t offset, InstrumentationKind kind, const char *symbol,
                  std::vector<ProbeArgValue> args) {
     InstrumentationPoint point;
@@ -126,8 +129,8 @@ void add_program_points(Instrumentor &instrumentor, const InputProgram &program,
     point.force_full_exec = true;
     instrumentor.add_point(point);
   };
-  add(program.kernel.entry_text_offset, InstrumentationKind::KernelEntry, "rj_consan_entry",
-      context_args);
+  add(program.kernel.entry_text_offset, InstrumentationKind::KernelEntry,
+      trace ? "rj_consan_trace_entry" : "rj_consan_entry", context_args);
   for (const NativeLdsAccess &access : program.accesses) {
     std::vector<ProbeArgValue> args = context_args;
     args.push_back(probe_arg_imm(access.site));
@@ -153,12 +156,38 @@ void add_program_points(Instrumentor &instrumentor, const InputProgram &program,
         std::move(args));
   }
   for (const uint64_t offset : program.exit_offsets) {
-    add(offset, InstrumentationKind::KernelExit, "rj_consan_exit", context_args);
+    add(offset, InstrumentationKind::KernelExit, trace ? "rj_consan_trace_exit" : "rj_consan_exit",
+        context_args);
   }
 }
 
 Result append_program_facts(const InputProgram &program, const std::vector<InstrumentedSite> &sites,
                             Manifest &manifest, InputError &error) {
+  if (program.scope == ScopeKind::ExecutionTrace) {
+    const auto add_boundary = [&](InstrumentationKind kind, uint64_t offset) -> bool {
+      const std::vector<InstrumentedSite>::const_iterator site =
+          std::ranges::find_if(sites, [&](const InstrumentedSite &candidate) {
+            return candidate.kind == kind && candidate.original_offset == offset;
+          });
+      if (site == sites.end())
+        return false;
+      manifest.boundaries.push_back({.kind = kind == InstrumentationKind::KernelEntry
+                                                 ? BoundaryKind::Entry
+                                                 : BoundaryKind::Exit,
+                                     .original_offset = offset,
+                                     .prepared_guest_offset = site->guest_offset,
+                                     .prepared_guest_size = site->guest_size,
+                                     .probe_offset = site->instrumentation_offset,
+                                     .probe_size = site->instrumentation_size});
+      return true;
+    };
+    if (!add_boundary(InstrumentationKind::KernelEntry, program.kernel.entry_text_offset))
+      return reject(error, "SBI omitted the entry-owned trace boundary");
+    for (const uint64_t offset : program.exit_offsets)
+      if (!add_boundary(InstrumentationKind::KernelExit, offset))
+        return reject(error, "SBI omitted an entry-owned trace exit");
+    return Result::success();
+  }
   for (const NativeLdsAccess &access : program.accesses) {
     const std::vector<InstrumentedSite>::const_iterator mapping =
         std::ranges::find_if(sites, [&](const auto &site) {
@@ -282,13 +311,32 @@ Result validate_image_entry_cfg(const InputProgram &program, const Manifest &man
       return reject(error, "final CFG has an invalid successor or implicit terminator");
     }
   }
+  if (program.scope == ScopeKind::ExecutionTrace) {
+    if (manifest.boundaries.size() != program.exit_offsets.size() + 1)
+      return reject(error, "trace boundary attribution differs from original exits");
+    for (size_t index = 1; index < manifest.boundaries.size(); ++index) {
+      const BoundaryFacts &boundary = manifest.boundaries[index];
+      if (boundary.original_offset != program.exit_offsets[index - 1] ||
+          boundary.prepared_guest_size != sizeof(uint32_t) ||
+          boundary.prepared_guest_offset >= prepared_text.size() ||
+          prepared_text.size() - boundary.prepared_guest_offset < sizeof(uint32_t))
+        return reject(error, "trace exit mapping differs from original program");
+      uint32_t terminal = 0;
+      std::memcpy(&terminal, prepared_text.data() + boundary.prepared_guest_offset,
+                  sizeof(terminal));
+      const DecodeResult decoded = decoder->decode_window(std::span(&terminal, 1));
+      if (!decoded.succeeded() || decoded.value()->mnemonic() != "s_endpgm")
+        return reject(error, "trace mapped exit is not the original kernel terminator");
+    }
+    return Result::success();
+  }
   return validate_lds_race_accesses(program, manifest, scope, prepared_text, error);
 }
 
 FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
                                              const TargetProfile &target,
                                              std::span<const std::string_view> entries,
-                                             InputError &error) {
+                                             InputError &error, ScopeKind requested_scope) {
   const InputLimits limits;
   // Each selected program owns a copy of the image. Divide to bound their total
   // bytes without overflowing a size * count product; the empty check must stay
@@ -312,7 +360,8 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
                .message = "duplicate selected entry name"};
       return Result::failure();
     }
-    FailureOr<InputProgram> program = build_image_entry_program(original, target, name, error);
+    FailureOr<InputProgram> program =
+        build_image_entry_program(original, target, name, error, {}, requested_scope);
     if (program.failed()) {
       return Result::failure();
     }
@@ -355,7 +404,9 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
   Instrumentor instrumentor(object, first.target->arch, options);
   for (const InputProgram &program : programs) {
     const FailureOr<uint32_t> stride =
-        lds_race_row_stride(program.accesses.size(), error, !program.barriers.empty());
+        program.scope == ScopeKind::ExecutionTrace
+            ? FailureOr<uint32_t>(kRowHeaderBytes)
+            : lds_race_row_stride(program.accesses.size(), error, !program.barriers.empty());
     if (stride.failed()) {
       return Result::failure();
     }
@@ -614,12 +665,13 @@ FailureOr<PreparedArtifact> prepare(std::span<const uint8_t> original, const Tar
 FailureOr<PreparedImageArtifact> prepare_image(std::span<const uint8_t> original,
                                                const TargetProfile &target,
                                                std::span<const std::string_view> entries,
-                                               InputError &error) {
-  FailureOr<PreparedImageArtifact> artifact = lower_image(original, target, entries, error);
+                                               InputError &error, ScopeKind scope) {
+  FailureOr<PreparedImageArtifact> artifact = lower_image(original, target, entries, error, scope);
   if (artifact.failed()) {
     return Result::failure();
   }
-  const FailureOr<PreparedImageArtifact> canonical = lower_image(original, target, entries, error);
+  const FailureOr<PreparedImageArtifact> canonical =
+      lower_image(original, target, entries, error, scope);
   if (canonical.failed()) {
     return Result::failure();
   }

@@ -109,24 +109,36 @@ Result validate_entry_abi(const kd::kernel_descriptor_t &descriptor, const Targe
 Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
                              InputProgram &program, RegisterSet &used, const InputLimits &limits,
                              InputError &error) {
-  const FailureOr<std::vector<const BasicBlock *>> ordered = qualify_lds_race_cfg(blocks, error);
-  if (ordered.failed()) {
-    return Result::failure();
+  const bool trace = program.scope == ScopeKind::ExecutionTrace;
+  std::vector<const BasicBlock *> ordered;
+  if (trace) {
+    ordered.reserve(blocks.size());
+    for (const std::unique_ptr<BasicBlock> &block : blocks)
+      ordered.push_back(block.get());
+  } else {
+    const FailureOr<std::vector<const BasicBlock *>> qualified =
+        qualify_lds_race_cfg(blocks, error);
+    if (qualified.failed())
+      return Result::failure();
+    ordered = qualified.value();
   }
   std::unordered_map<const BasicBlock *, std::optional<uint64_t>> latest_access;
-  latest_access.reserve(ordered.value().size());
-  for (const BasicBlock *block : ordered.value()) {
-    latest_access.emplace(block, std::nullopt);
+  if (!trace) {
+    latest_access.reserve(ordered.size());
+    for (const BasicBlock *block : ordered)
+      latest_access.emplace(block, std::nullopt);
   }
   size_t instruction_count = 0;
-  for (const BasicBlock *block : ordered.value()) {
+  for (const BasicBlock *block : ordered) {
     if (block->has_implicit_terminator() ||
         block->successor_issue() != BasicBlock::SuccessorIssue::None ||
         !block->call_edges().empty()) {
       return reject(error, InputErrorCode::UnsupportedFlow, "original control flow is not closed",
                     block->start_offset());
     }
-    std::optional<uint64_t> latest = latest_access.find(block)->second;
+    std::optional<uint64_t> latest;
+    if (!trace)
+      latest = latest_access.find(block)->second;
     for (const Instruction &instruction : block->instructions()) {
       if (instruction_count++ >= limits.instructions) {
         return reject(error, InputErrorCode::ResourceLimit, "instruction analysis budget exceeded");
@@ -136,22 +148,35 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         return reject(error, InputErrorCode::UnsupportedFlow, "indirect transfer is outside MVP",
                       offset);
       }
-      const size_t previous_accesses = program.accesses.size();
-      if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
-                                        program.accesses, error)
-              .failed()) {
-        return Result::failure();
-      }
-      // The analyzer's site IDs follow source-PC order. Acyclic control flow
-      // may return from a cave, but native accesses must retain that same order
-      // on every path; a larger predecessor PC would invert valid record sequences.
-      for (size_t index = previous_accesses; index < program.accesses.size(); ++index) {
-        const uint64_t access = program.accesses[index].original_offset;
-        if (latest && access <= *latest) {
-          return reject(error, InputErrorCode::UnsupportedFlow,
-                        "MVP requires increasing LDS access order along every CFG path", access);
+      if (!trace) {
+        const size_t previous_accesses = program.accesses.size();
+        if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
+                                          program.accesses, error)
+                .failed())
+          return Result::failure();
+        // The analyzer's site IDs follow source-PC order. Acyclic control flow
+        // may return from a cave, but native accesses must retain that same order
+        // on every path; a larger predecessor PC would invert valid record sequences.
+        for (size_t index = previous_accesses; index < program.accesses.size(); ++index) {
+          const uint64_t access = program.accesses[index].original_offset;
+          if (latest && access <= *latest)
+            return reject(error, InputErrorCode::UnsupportedFlow,
+                          "MVP requires increasing LDS access order along every CFG path", access);
+          latest = access;
         }
-        latest = access;
+      } else {
+        const std::string_view name = instruction.mnemonic();
+        if (name == "s_getpc_b64" || name == "s_get_pc_i64")
+          return reject(error, InputErrorCode::UnsupportedFlow,
+                        "execution tracing does not admit guest code-address introspection",
+                        offset);
+        // OPR_SENDMSG's seven-bit MSG field belongs to the non-return message
+        // namespace. MSG_DEALLOC_VGPRS releases the registers the exit callback
+        // needs and requires an immediate s_endpgm, which lowering would replace.
+        if ((name == "s_sendmsg" || name == "s_sendmsghalt") &&
+            (instruction.raw_encoding()[0] & 0x7f) == 3)
+          return reject(error, InputErrorCode::UnsupportedFlow,
+                        "execution tracing does not admit guest VGPR deallocation", offset);
       }
       const InstDefUse effects(instruction, program.wave_size);
       used |= effects.uses;
@@ -165,25 +190,29 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         }
       }
       if ((instruction.flags() & PROGRAM_TERMINATOR) != 0) {
+        if (instruction.mnemonic() != "s_endpgm")
+          return reject(error, InputErrorCode::UnsupportedFlow,
+                        "kernel exit requires a recognized s_endpgm", offset);
         program.exit_offsets.push_back(offset);
       }
     }
-    for (const BasicBlock *successor : block->successors()) {
-      // The deferred self-edge starts another repeated epoch if the later
-      // barrier gate qualifies it; propagate this epoch's maximum only to exits.
-      if (successor == block) {
-        continue;
-      }
-      std::optional<uint64_t> &incoming = latest_access.find(successor)->second;
-      if (latest && (!incoming || *latest > *incoming)) {
-        incoming = latest;
+    if (!trace) {
+      for (const BasicBlock *successor : block->successors()) {
+        // The deferred self-edge starts another repeated epoch if the later
+        // barrier gate qualifies it; propagate this epoch's maximum only to exits.
+        if (successor == block)
+          continue;
+        std::optional<uint64_t> &incoming = latest_access.find(successor)->second;
+        if (latest && (!incoming || *latest > *incoming))
+          incoming = latest;
       }
     }
   }
-  if (program.accesses.empty()) {
+  if (program.scope == ScopeKind::NativeLdsNoSynchronization && program.accesses.empty())
     return reject(error, InputErrorCode::UnsupportedAccess,
                   "selected entry has no native LDS sites");
-  }
+  if (program.exit_offsets.empty())
+    return reject(error, InputErrorCode::UnsupportedFlow, "selected entry has no kernel exit");
   std::ranges::sort(program.exit_offsets);
   std::ranges::sort(program.accesses, {}, &NativeLdsAccess::original_offset);
   for (size_t index = 0; index < program.accesses.size(); ++index) {
@@ -212,7 +241,7 @@ Result validate_original_registers(const RegisterSet &used, uint32_t declared_vg
 FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
                                             const TargetProfile &target, std::string_view entry,
                                             InputError &error, const InputLimits &limits,
-                                            bool allow_siblings) {
+                                            bool allow_siblings, ScopeKind scope) {
   error = {};
   if (image.size() > limits.image_bytes) {
     return reject(error, InputErrorCode::ResourceLimit, "code object exceeds image budget");
@@ -270,14 +299,24 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
                       std::to_string(kernels.size()) + " kernels");
   }
   const KernelDescriptorInfo &kernel = *selected;
+  if (scope != ScopeKind::NativeLdsNoSynchronization && scope != ScopeKind::ExecutionTrace)
+    return reject(error, InputErrorCode::UnsupportedEntry, "unknown preparation profile");
+  if (scope == ScopeKind::ExecutionTrace &&
+      (profile->id != 1250 ||
+       RJ_AMDHSA_BITS_GET(kernel.descriptor.compute_pgm_rsrc2,
+                          kd::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X) == 0))
+    return reject(error, InputErrorCode::UnsupportedEntry,
+                  "execution trace requires gfx1250 and an original workgroup-X input");
   if (validate_entry_abi(kernel.descriptor, *profile, error).failed()) {
     return Result::failure();
   }
   InputProgram program;
   program.kernel = kernel;
   program.target = profile;
+  program.scope = scope;
   program.wave_size = kernel_wavefront_size(arch, kernel.descriptor);
-  if (qualify_lds_race_entry(program, error).failed()) {
+  if (scope == ScopeKind::NativeLdsNoSynchronization &&
+      qualify_lds_race_entry(program, error).failed()) {
     return Result::failure();
   }
   if (text.vaddr() > std::numeric_limits<uint64_t>::max() - kernel.entry_text_offset ||
@@ -350,12 +389,12 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
       validate_original_registers(used, metadata.value().vgprs, program, error).failed()) {
     return Result::failure();
   }
-  std::vector<BasicBlock *> scope;
-  for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
-    scope.push_back(block.get());
-  }
-  if (qualify_lds_race_barrier(program, scope, error).failed()) {
-    return Result::failure();
+  if (scope != ScopeKind::ExecutionTrace) {
+    std::vector<BasicBlock *> entry_scope;
+    for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+      entry_scope.push_back(block.get());
+    if (qualify_lds_race_barrier(program, entry_scope, error).failed())
+      return Result::failure();
   }
   program.identity = {.sha256 = digest(image), .bytes = image.size()};
   program.image.assign(image.begin(), image.end());
@@ -367,14 +406,15 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
 FailureOr<InputProgram> build_input_program(std::span<const uint8_t> image,
                                             const TargetProfile &target, std::string_view entry,
                                             InputError &error, const InputLimits &limits) {
-  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/false);
+  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/false,
+                             ScopeKind::NativeLdsNoSynchronization);
 }
 
 FailureOr<InputProgram> build_image_entry_program(std::span<const uint8_t> image,
                                                   const TargetProfile &target,
                                                   std::string_view entry, InputError &error,
-                                                  const InputLimits &limits) {
-  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/true);
+                                                  const InputLimits &limits, ScopeKind scope) {
+  return build_entry_program(image, target, entry, error, limits, /*allow_siblings=*/true, scope);
 }
 
 } // namespace rocjitsu::consan

@@ -1361,10 +1361,19 @@ if(RJ_BUILD_CONSAN_RUNTIME)
 endif()
 
 if(RJ_BUILD_CONSAN_ANALYZER)
-    add_executable(consan_analysis_test code/consan/analyze_test.cpp)
+    add_executable(
+        consan_analysis_test
+        code/consan/analyze_test.cpp
+        code/consan/execution_trace_test.cpp
+    )
     target_link_libraries(
         consan_analysis_test
         PRIVATE rocjitsu_consan_analysis GTest::gtest_main
+    )
+    add_dependencies(consan_analysis_test rj_consan_analyze)
+    target_compile_definitions(
+        consan_analysis_test
+        PRIVATE CONSAN_ANALYZER_FIXTURE="$<TARGET_FILE:rj_consan_analyze>"
     )
     rj_configure_target(consan_analysis_test WARNINGS)
     rj_add_gtest_tests(consan_analysis_test)

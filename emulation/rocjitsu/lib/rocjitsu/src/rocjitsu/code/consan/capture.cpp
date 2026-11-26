@@ -31,8 +31,8 @@ bool all_zero(std::span<const uint8_t> bytes) {
 }
 
 bool valid_header(const CaptureHeader &header) {
-  return header.execution_conditions == kSupportedExecutionConditions &&
-         !all_zero(header.run_identity);
+  const uint32_t expected = capture_execution_conditions(header.image);
+  return expected != 0 && header.execution_conditions == expected && !all_zero(header.run_identity);
 }
 
 Result validate_execution(const Manifest &manifest, const CapturedExecution &execution,
@@ -48,7 +48,7 @@ Result validate_execution(const Manifest &manifest, const CapturedExecution &exe
   }
   if (execution.entry_key != manifest.entry.original_descriptor_offset || execution.serial == 0 ||
       execution.storage_slot == 0 || execution.storage_generation == 0 ||
-      execution.completion != kCompletionVisibleForwarded ||
+      execution.completion != completion_evidence(manifest.scope) ||
       execution.arguments.size() != manifest.entry.original_kernarg_bytes ||
       execution.report.size() != layout.value().report_bytes ||
       execution.group_bytes != layout.value().group_bytes ||
@@ -151,6 +151,25 @@ FailureOr<CapturedExecution> decode_execution(std::span<const uint8_t> payload,
 }
 
 } // namespace
+
+uint32_t capture_execution_conditions(const ImageFacts &image) {
+  const std::optional<ScopeKind> scope = selected_scope(image);
+  if (!scope)
+    return 0;
+  if (*scope == ScopeKind::ExecutionTrace)
+    return kApplicationTraceExecutionConditions;
+  return *scope == ScopeKind::NativeLdsNoSynchronization ||
+                 *scope == ScopeKind::NativeLdsWorkgroupBarrier ||
+                 *scope == ScopeKind::NativeLdsWorkgroupBarrierLoop
+             ? kSupportedExecutionConditions
+             : 0;
+}
+
+Result validate_captured_execution(const Manifest &manifest, const CapturedExecution &execution,
+                                   util::DiagnosticEmitter diagnostic,
+                                   const CaptureLimits &limits) {
+  return validate_execution(manifest, execution, diagnostic, limits);
+}
 
 FailureOr<std::vector<uint8_t>> CaptureEncoder::start(const CaptureHeader &header,
                                                       util::DiagnosticEmitter diagnostic) {
