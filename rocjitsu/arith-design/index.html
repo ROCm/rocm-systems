@@ -2441,9 +2441,11 @@ floating-point compares on NaN. The comparison library owns the inherited
 Compatibility reporting gate: a nonfinite selected operand enables signaling
 causes across the wave, including denormal pairs in the other Wave64 half.
 The simulator only commits the comparison mask and causes.
-Dual FP32 arithmetic slots share the wave’s</p>
-<p>exception flags. Explicit numeric-only modes suppress these additional flags.
-rocjitsu's <a href="../configuration/#cpu-arithmetic-policy"><code>arithmetic.semantics</code></a>
+Dual FP32 arithmetic slots share the wave's exception flags. Gfx12 dual MUL
+owns its inherited FMA-style Compatibility classifier inside the library,
+including guest rounding and denormal controls; its VM adapter commits only
+results and causes. Explicit numeric-only modes suppress these additional flags.
+Rocjitsu's <a href="../configuration/#cpu-arithmetic-policy"><code>arithmetic.semantics</code></a>
 setting maps directly to these modes and defaults to compatibility. Its string
 values are the lowercase constant names without <code>RJ_ARITH_SEMANTICS_</code>.
 <a href="https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/lib/arith/COVERAGE.md">Instruction coverage</a> describes the migrated families.
