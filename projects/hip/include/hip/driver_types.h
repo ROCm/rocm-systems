@@ -728,11 +728,15 @@ typedef enum hipPointer_attribute {
                                                      ///< GPUDirect RDMA API
                                                      ///< @warning This attribute is not supported
                                                      ///< in HIP
-  HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS,   ///< Returns the access flags the device associated with
-                                        ///< for the corresponding memory referenced by the ptr
-  HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE  ///< Returns the mempool handle for the allocation if
-                                        ///< it was allocated from a mempool
-                                        ///< @warning This attribute is not supported in HIP
+  HIP_POINTER_ATTRIBUTE_ACCESS_FLAGS,    ///< Returns the access flags the device associated with
+                                         ///< for the corresponding memory referenced by the ptr
+  HIP_POINTER_ATTRIBUTE_MEMPOOL_HANDLE,  ///< Returns the mempool handle for the allocation if
+                                         ///< it was allocated from a mempool
+                                         ///< @warning This attribute is not supported in HIP
+  HIP_POINTER_ATTRIBUTE_AMD_DMABUF_OFFSET =
+      0x1000  ///< AMD only: uint64_t byte offset of the pointer inside the dma-buf that
+              ///< hipMemGetHandleForAddressRange exports for it. Pass it as the offset when
+              ///< importing the fd (e.g. ibv_reg_dmabuf_mr)
 } hipPointer_attribute;
 
 // doxygen end DriverTypes

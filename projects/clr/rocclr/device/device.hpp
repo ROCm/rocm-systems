@@ -1025,9 +1025,10 @@ class Memory {
   //! Get current access of the memory in device.
   MemAccess GetAccess() const { return memAccess_; }
 
-  //! Retrieves shareable handle for hipMalloc'ed address range.
+  //! Retrieves shareable handle for hipMalloc'ed address range. dmabuf_offset, if not null,
+  //! receives the offset of dev_ptr inside the exported dma-buf.
   virtual HandleExportResult GetFDHandleForMem(void* dev_ptr, size_t size, bool vmm, void* handle,
-                                               unsigned long long flags) {
+                                               unsigned long long flags, uint64_t* dmabuf_offset) {
     return HandleExportResult::kError;
   }
 
@@ -2559,8 +2560,11 @@ class Device : public RuntimeObject {
   static bool IsGPUInError() { return (gpu_error_.load(std::memory_order_relaxed) != CL_SUCCESS); }
   static cl_int GetGPUError() { return gpu_error_.load(std::memory_order_relaxed); }
 
+  //! Exports a dma-buf fd for [dev_ptr, dev_ptr+size). dmabuf_offset, if not null, receives the
+  //! offset of dev_ptr inside the dma-buf. With a null handle only the offset is returned.
   HandleExportResult GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
-                                              unsigned long long flags);
+                                              unsigned long long flags,
+                                              uint64_t* dmabuf_offset = nullptr);
 
   // Registers a memory object allocated via hostcall for later cleanup.
   void TrackHostcallMemory(amd::Memory* memory);
