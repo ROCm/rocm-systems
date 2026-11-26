@@ -424,4 +424,33 @@ TEST(SystemUnit, DiscoverGpuCpuLinksIgnoresNonCpuNeighbors) {
   EXPECT_EQ(links[0].type, amd::smi::IOLINK_TYPE_PCIEXPRESS);
 }
 
+// GPU node 1 has two io_link neighbors: a real CPU (node 0) and a peer whose
+// gpu_id file exists but can't be read as a clean number (node 2) -- e.g. a
+// real GPU peer whose sysfs read is permission-denied by a container/device
+// cgroup restriction, which ReadKFDGpuId() observes as empty content (not a
+// missing file) and reports as ENXIO, not ENOENT. The unreadable neighbor's
+// identity can't be determined, so it must be skipped -- neither
+// misclassified as a CPU link nor treated as a hard failure for the whole
+// query.
+TEST(SystemUnit, DiscoverGpuCpuLinksSkipsNeighborWithUnreadableGpuId) {
+  FakeSysfsTree tree;
+  WriteCpuNode(tree, /*node_idx=*/0);
+  WriteGpuNode(tree, /*node_idx=*/1, /*card_idx=*/0, /*gpu_id=*/12345);
+  tree.WriteFile("2/gpu_id", "");  // exists but empty: ReadKFDGpuId() -> ENXIO
+  WriteIoLink(tree, /*node_idx=*/1, /*link_idx=*/0, /*node_to=*/0, amd::smi::IOLINK_TYPE_PCIEXPRESS,
+              /*weight=*/20);
+  WriteIoLink(tree, /*node_idx=*/1, /*link_idx=*/1, /*node_to=*/2, amd::smi::IOLINK_TYPE_XGMI,
+              /*weight=*/15);
+  amd::smi::testing::ScopedOverride<std::string> kfd_root(amd::smi::test_hooks::KfdNodesPathRoot,
+                                                          amd::smi::test_hooks::SetKfdNodesPathRoot,
+                                                          tree.root());
+
+  std::vector<amd::smi::GpuCpuLink> links;
+  ASSERT_EQ(amd::smi::DiscoverGpuCpuLinks(1, &links), 0);
+
+  ASSERT_EQ(links.size(), 1u);
+  EXPECT_EQ(links[0].numa_node_id, 0u);
+  EXPECT_EQ(links[0].type, amd::smi::IOLINK_TYPE_PCIEXPRESS);
+}
+
 }  // namespace

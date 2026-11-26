@@ -45,6 +45,15 @@ int DiscoverGpuCpuLinks(uint32_t gpu_kfd_node_indx, std::vector<GpuCpuLink>* out
     int gpu_id_ret = ReadKFDGpuId(node_to, &node_to_gpu_id);
     if (gpu_id_ret == ENOENT) {
       // No gpu_id file at all: node_to is a CPU, not a GPU.
+    } else if (gpu_id_ret == ENXIO) {
+      // gpu_id exists but didn't read as a clean number. The driver only
+      // ever writes a plain decimal value here, so in practice this is a
+      // neighbor this process can't see the identity of -- e.g. a peer GPU
+      // whose device node isn't granted in a container/cgroup-restricted
+      // environment, where the read is denied at the syscall level and
+      // ReadKFDGpuId() observes that as empty content rather than a distinct
+      // errno. Its identity is unknown, so skip it rather than guessing.
+      continue;
     } else if (gpu_id_ret != 0) {
       fprintf(stderr,
               "[CPU_LINK_DEBUG] ReadKFDGpuId(node=%u, neighbor node_to=%u, link_type=%d) failed: "
