@@ -499,8 +499,6 @@ class Flag {
 
   void set_ipc_mode_legacy(bool enable) { enable_ipc_mode_legacy_ = enable; }
 
-  void set_ipc_cross_user(bool enable) { enable_ipc_cross_user_ = enable; }
-
   bool disable_pc_sampling() const { return disable_pc_sampling_; }
 
   bool disable_gfx12_strict() const { return disable_gfx12_strict_; }

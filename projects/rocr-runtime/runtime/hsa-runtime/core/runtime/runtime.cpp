@@ -1564,9 +1564,9 @@ void Runtime::AsyncIPCSockServerConnLoop(void*) {
       int err = HSAKMT_CALL(hsaKmtExportDMABufHandle(ptr, len, &dmabuf_fd, &fragOffset));
       if (err != HSAKMT_STATUS_SUCCESS) continue;
       err = os::IPCSendHandle(conn, dmabuf_fd);
-      if (err == -1) break;
+      if (err == -1) continue;
       err = os::IPCSocketRead(conn, buf, sizeof(buf));
-      if (err == -1) break;
+      if (err == -1) continue;
     }
   }
 
