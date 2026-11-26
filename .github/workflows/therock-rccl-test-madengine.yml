@@ -130,11 +130,9 @@ jobs:
       ARTIFACT_RUN_ID: "${{ inputs.artifact_run_id }}"
       CLUSTER: "${{ inputs.cluster }}"
       # The runner user owns none of the directories this job used to write to;
-      # /apps/rccl-ci itself is world-writable, so keep our own subtree there.
-      # On Crusoe the same tree lives under /shared_nfs/rccl-ci. Either way it
-      # must be on storage the compute nodes mount: they run madengine out of
-      # WORK_DIR. Anything but crusoe gets Ruby's paths, and the script then
-      # rejects a cluster it does not know.
+      # /apps/rccl-ci itself is world-writable, so keep our own subtree there
+      # (/shared_nfs/rccl-ci on Crusoe). The compute nodes must mount it: they
+      # run madengine out of WORK_DIR.
       RESULTS_DIR: "${{ inputs.cluster == 'crusoe' && '/shared_nfs/rccl-ci' || '/apps/rccl-ci' }}/madengine/perf"
       # run_attempt too: run_id is stable across re-runs, and the cleanup step
       # leaves the result files behind, so a re-run could parse a previous
@@ -183,12 +181,8 @@ jobs:
             exit 1
           fi
 
-      # The SPUR CLI finds its controller only through SPUR_CONTROLLER_ADDR, and
-      # Crusoe sets that in /etc/environment and /etc/profile.d -- neither of
-      # which a runner started as a systemd service reads. Without it salloc
-      # dials a default address and fails with "failed to connect to spurctld".
-      # Take the host's value rather than a copy, so a moved controller needs
-      # no change here.
+      # A runner started by systemd skips /etc/profile.d, which sets
+      # SPUR_CONTROLLER_ADDR. Without it salloc cannot reach spurctld.
       - name: Load SPUR client environment
         if: inputs.cluster == 'crusoe'
         run: |

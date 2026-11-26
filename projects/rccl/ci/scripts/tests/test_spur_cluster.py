@@ -3,6 +3,7 @@
 Run from projects/rccl/ci/scripts:  python3 -m unittest discover -s tests
 """
 
+import argparse
 import json
 import os
 import pwd
@@ -53,9 +54,8 @@ class ManifestTest(TempWork):
 
     def test_denied_options_cover_every_workload(self):
         for name, config in tm.WORKLOAD_CONFIGS.items():
-            rest = config.get("docker_run_options", "")
-            for denied in CRUSOE["docker_run_options_denied"]:
-                rest = rest.replace(denied, "")
+            rest = tm.drop_docker_run_options(config.get("docker_run_options", ""),
+                                              CRUSOE["docker_run_options_denied"])
             self.assertNotIn("--privileged", rest, name)
             self.assertNotIn("/run/udev", rest, name)
 
@@ -131,6 +131,16 @@ class AllocationTest(TempWork):
         self.assertNotIn("--gpus-per-node", cmd)
         self.assertIsNone(popen.call_args.kwargs["stdin"])
 
+    def test_repro_salloc_takes_the_clusters_options(self):
+        cmd = self.run_allocation(CRUSOE).call_args.args[0]
+        args = tm.repro_env(WORKLOAD, CONFIG, CRUSOE, 2, {}, {}, "", {})[
+            "REPRO_SALLOC_ARGS"].split()
+        self.assertEqual(args[::2], ["--qos", "--account", "--gpus-per-node"])
+        for name, value in zip(args[::2], args[1::2]):
+            self.assertEqual(self.option(cmd, name), value)
+        self.assertNotIn("REPRO_SALLOC_ARGS",
+                         tm.repro_env(WORKLOAD, CONFIG, RUBY, 2, {}, {}, "", {}))
+
     def test_release_cancels_by_user_and_name(self):
         self.run_allocation(CRUSOE, timeout=True)
         name = (self.work / "allocation.name").read_text().strip()
@@ -138,6 +148,20 @@ class AllocationTest(TempWork):
         scancel = [c.args[0] for c in self.subprocess_run.call_args_list
                    if c.args[0][0] == "scancel"]
         self.assertEqual(scancel, [["scancel", "--user", user, "--name", name]])
+
+
+class ReportTest(unittest.TestCase):
+    def test_subject_names_the_cluster(self):
+        subjects = set()
+        for cluster in ("ruby", "crusoe"):
+            args = argparse.Namespace(workload=WORKLOAD, cluster=cluster,
+                                      notify_email="ci@example.com", teams_webhook="")
+            with mock.patch.object(tm, "send_email_report") as send:
+                tm.send_report(args, "report", 0)
+            subject = send.call_args.kwargs["subject_prefix"]
+            self.assertIn(cluster, subject)
+            subjects.add(subject)
+        self.assertEqual(len(subjects), 2)
 
 
 if __name__ == "__main__":

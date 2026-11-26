@@ -4,6 +4,7 @@ Run from projects/rccl/ci/scripts:  python3 -m unittest discover -s tests
 """
 
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -82,11 +83,13 @@ class WorkflowsMatchConfigs(unittest.TestCase):
     def test_results_dir_is_each_clusters_results_base(self):
         callee = load_workflow("therock-rccl-test-madengine.yml")
         results_dir = callee["jobs"]["test_madengine"]["env"]["RESULTS_DIR"]
+        m = re.fullmatch(r"\$\{\{ inputs\.cluster == '(\w+)' && '([^']+)' "
+                         r"\|\| '([^']+)' \}\}(/\S+)", results_dir)
+        self.assertIsNotNone(m, results_dir)
+        cluster, tree, default_tree, tail = m.groups()
         for name, config in tm.CLUSTER_CONFIGS.items():
-            tree, sep, tail = config["results_base"].partition("/madengine/")
-            self.assertTrue(sep, name)
-            self.assertIn(f"'{tree}'", results_dir, name)
-            self.assertTrue(results_dir.endswith(f"/madengine/{tail}"), name)
+            got = (tree if name == cluster else default_tree) + tail
+            self.assertEqual(got, config["results_base"], name)
 
     def test_spur_clusters_load_the_controller_address_first(self):
         callee = load_workflow("therock-rccl-test-madengine.yml")

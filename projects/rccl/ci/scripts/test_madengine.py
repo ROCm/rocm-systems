@@ -1583,6 +1583,28 @@ def slurm_time_seconds(limit: str) -> int:
     return (hours * 60 + minutes) * 60 + seconds
 
 
+def drop_docker_run_options(opts: str, denied: list[str]) -> str:
+    """*opts* without each of *denied*, matched only as whole options."""
+    for option in denied:
+        opts = " ".join(re.sub(
+            rf"(?:^|\s){re.escape(option)}(?=\s|$)", " ", opts).split())
+    return opts
+
+
+def salloc_cluster_args(cluster_config: dict, workload_config: dict) -> list[str]:
+    """The salloc options a cluster needs beyond nodes, partition and time."""
+    args = []
+    qos = cluster_config.get("slurm_qos", "")
+    if qos:
+        args += ["--qos", qos]
+    account = cluster_config.get("slurm_account", "")
+    if account:
+        args += ["--account", account]
+    if cluster_config.get("scheduler") == "spur":
+        args += ["--gpus-per-node", str(workload_config["gpus_per_node"])]
+    return args
+
+
 def generate_manifest(
     workload_name: str,
     workload_config: dict,
@@ -1664,10 +1686,9 @@ def generate_manifest(
         docker_env_vars["GLOO_SOCKET_IFNAME"] = socket_ifname
 
     docker_mounts = dict(workload_config.get("docker_mounts", {}))
-    docker_run_opts = workload_config.get("docker_run_options", "")
-    for denied in cluster_config.get("docker_run_options_denied", ()):
-        docker_run_opts = " ".join(re.sub(
-            rf"(?:^|\s){re.escape(denied)}(?=\s|$)", " ", docker_run_opts).split())
+    docker_run_opts = drop_docker_run_options(
+        workload_config.get("docker_run_options", ""),
+        cluster_config.get("docker_run_options_denied", []))
 
     # Mount the host's rdma-core stack into the container.
     # The host's libibverbs has a compiled-in provider search path of
@@ -2025,6 +2046,7 @@ def repro_env(
             "slurm_partition", workload_config["slurm_partition"]
         ),
         "REPRO_TIME_LIMIT": workload_config["time_limit"],
+        "REPRO_SALLOC_ARGS": " ".join(salloc_cluster_args(cluster_config, workload_config)),
         # ruby's per-job /tmp is invisible to the Docker daemon; the workflow
         # sets this, and a run by hand has to as well.
         "SLURM_TMPDIR": env.get("SLURM_TMPDIR", ""),
@@ -2053,8 +2075,9 @@ the refs, image digests and cluster settings. The run's own numbers are in the
 3. `export MAD_DOCKER_BUILDS=<shared dir>` and `chmod 0777` it: node 0 saves the
    image there for the others through `sudo docker`, which a root-squashed NFS
    maps to `nobody`.
-4. `salloc -p "$REPRO_PARTITION" -N "$REPRO_NODES" --exclusive -t "$REPRO_TIME_LIMIT"`, then inside it:
-   `madengine run --manifest-file manifest.repro.json --live-output`
+4. `salloc -p "$REPRO_PARTITION" -N "$REPRO_NODES" --exclusive -t "$REPRO_TIME_LIMIT" $REPRO_SALLOC_ARGS`
+   (unquoted: the cluster's QoS, account and GPU options, if it needs any),
+   then inside it: `madengine run --manifest-file manifest.repro.json --live-output`
    madengine runs in place in the allocation; node 0 builds the image from
    `overlay_ctx/` and the other nodes load it.
 
@@ -2330,14 +2353,7 @@ def run_ab_in_one_allocation(
         "--time", workload_config["time_limit"],
         "--job-name", job_name,
     ]
-    qos = cluster_config.get("slurm_qos", "")
-    if qos:
-        cmd += ["--qos", qos]
-    account = cluster_config.get("slurm_account", "")
-    if account:
-        cmd += ["--account", account]
-    if spur:
-        cmd += ["--gpus-per-node", str(workload_config["gpus_per_node"])]
+    cmd += salloc_cluster_args(cluster_config, workload_config)
     # Set from a repository variable by the workflow: the nodes to avoid are
     # the cluster's business and their names do not belong in this file.
     exclude = os.environ.get("MADENGINE_SLURM_EXCLUDE", "").strip()
@@ -3013,10 +3029,15 @@ def resolve_baseline(
     return build
 
 
+def report_subject(args: argparse.Namespace) -> str:
+    """Subject prefix of this run's reports; two clusters run the same workload."""
+    return f"RCCL MADEngine {args.workload} on {args.cluster}"
+
+
 def send_report(args: argparse.Namespace, report: str, exit_code: int) -> None:
     """Send *report* to the email and Teams channel the run was given."""
     status = "PASSED" if exit_code == 0 else "FAILED"
-    subject_prefix = f"RCCL MADEngine {args.workload}"
+    subject_prefix = report_subject(args)
     if args.notify_email:
         send_email_report(report, args.notify_email, status,
                           subject_prefix=subject_prefix)
@@ -3130,8 +3151,7 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-    setup_report.notify(args.notify_email, args.teams_webhook,
-                        f"RCCL MADEngine {args.workload}")
+    setup_report.notify(args.notify_email, args.teams_webhook, report_subject(args))
     setup_report.step("Check arguments")
     # madengine runs inside our allocation only for multi-node workloads; a
     # single-node phase gets its own sbatch, possibly on other nodes.
