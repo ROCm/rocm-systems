@@ -16968,12 +16968,11 @@ class CodeGenerator:
                                     '    return;\n'
                                 )
                             _result_commit_setup += capture
-                        gfx10_half_predicate = FLOAT_COMPARISONS.get(inst.name)
                         integer_half = INTEGER_COMPARISONS.get(inst.name) == (16, False)
                         arch = self.isa_spec.arch_name
                         gfx10_half = (
                             arch in ('rdna1', 'rdna2')
-                            and (integer_half or gfx10_half_predicate == (16, False))
+                            and integer_half
                             and (
                                 _enc_upper == 'ENC_VOPC'
                                 or (

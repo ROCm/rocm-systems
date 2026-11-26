@@ -163,8 +163,9 @@ the library.
 Gfx12 signaling FP comparisons classify Compatibility causes inside rj-arith,
 including the inherited whole-wave nonfinite gate. The VM owns operand views,
 VCC/EXEC writes and trap delivery. Ordinary Compatibility comparisons remain
-numeric-only; explicit reporting qualification is unchanged. Gfx10 signaling
-policy remains in the partially migrated RDNA2 adapter until that migration.
+numeric-only; explicit reporting qualification is unchanged. Gfx1010/gfx1030
+FP16/FP32/FP64 comparisons classify their Compatibility CLAMP signaling
+inside rj-arith. The VM owns VCC/EXEC publication and trap delivery.
 
 Gfx1150 floating relational predicates use scalar/AVX2/AVX-512 numeric and
 classification kernels on both waves. Compatibility preserves the inherited
@@ -342,7 +343,12 @@ and gfx1030 for both waves. Shared gfx908/gfx10 status composition preserves
 Compatibility's CLAMP-only INVALID policy. F/T predicates retain strict
 FP-status support for this simple classification; other predicates still reject
 that mode. Loose skips reporting. Scalar, AVX2 and AVX-512 paths remain wide.
-FP16 migration is separate; its existing VM-side signaling path remains live.
+
+Gfx1010/gfx1030 FP16 relational comparisons now use the same shared CLAMP-only
+Compatibility status composition as native precisions, on both wave sizes.
+The VM preserves ignored VOP3 OPSEL and normalized SDWA source halves. F/T
+predicates, including CMPX F/T, accept strict FP-status mode; other predicates
+reject it. Gfx1150 retains its separate signaling policy.
 
 ## Older Radeon FP64 arithmetic
 

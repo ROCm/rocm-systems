@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Gfx1010/gfx1030 native-precision masks, signaling constants and scalar aliases.
+// Gfx1010/gfx1030 floating masks, signaling constants and scalar aliases.
 // CMPX updates EXEC without introducing the GFX9 scalar-mask side effect.
 
 #include "rocjitsu/code/rj_code.h"
@@ -26,7 +26,7 @@ namespace rocjitsu {
 
 // Literal mask/status expectations distinguish signaling NaNs, F/TRU reads,
 // Wave32's untouched neighboring SGPR, and CMPX's EXEC-only result.
-TEST(Gfx10ComparisonTest, NativeMasksAndSignaling) {
+TEST(Gfx10ComparisonTest, MasksAndSignaling) {
   struct Format {
     int bits;
     uint16_t equal, never, always, cmpx;
@@ -35,6 +35,11 @@ TEST(Gfx10ComparisonTest, NativeMasksAndSignaling) {
   for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     const bool gfx1030 = arch == rocjitsu::IsaFamily::Rdna2;
     const Format formats[] = {
+        {16, gfx1030 ? rdna2::kVCmpEqF16Vop3 : rdna1::kVCmpEqF16Vop3,
+         gfx1030 ? rdna2::kVCmpFF16Vop3 : rdna1::kVCmpFF16Vop3,
+         gfx1030 ? rdna2::kVCmpTruF16Vop3 : rdna1::kVCmpTruF16Vop3,
+         gfx1030 ? rdna2::kVCmpxEqF16Vop3 : rdna1::kVCmpxEqF16Vop3, 0x7e013c00, 0x3c007e01,
+         0x3c007c01},
         {32, gfx1030 ? rdna2::kVCmpEqF32Vop3 : rdna1::kVCmpEqF32Vop3,
          gfx1030 ? rdna2::kVCmpFF32Vop3 : rdna1::kVCmpFF32Vop3,
          gfx1030 ? rdna2::kVCmpTruF32Vop3 : rdna1::kVCmpTruF32Vop3,
@@ -67,12 +72,14 @@ TEST(Gfx10ComparisonTest, NativeMasksAndSignaling) {
         const auto scalar = wave->sgpr_alloc().base;
         // The fields have the same meaning but remain bound to each real decoder.
         auto words = [&](uint16_t opcode, bool clamp, uint16_t source_b = 258,
-                         uint8_t destination = 0) {
+                         uint8_t destination = 0, uint8_t op_sel = 0) {
           return gfx1030 ? rdna2::build_vop3(opcode, {.vdst = destination,
+                                                      .op_sel = op_sel,
                                                       .clamp = uint8_t(clamp),
                                                       .src0 = 256,
                                                       .src1 = source_b})
                          : rdna1::build_vop3(opcode, {.vdst = destination,
+                                                      .op_sel = op_sel,
                                                       .clamp = uint8_t(clamp),
                                                       .src0 = 256,
                                                       .src1 = source_b});
@@ -100,8 +107,8 @@ TEST(Gfx10ComparisonTest, NativeMasksAndSignaling) {
                 cu->write_sgpr(scalar, 0xdeadbeef);
                 cu->write_sgpr(scalar + 1, 0xa5a5a5a5);
                 // CMPX's destination field must encode EXEC rather than an SGPR.
-                auto instruction =
-                    decoder->decode_window(words(opcode, clamp, 258, opcode == f.cmpx ? 126 : 0));
+                auto instruction = decoder->decode_window(
+                    words(opcode, clamp, 258, opcode == f.cmpx ? 126 : 0, f.bits == 16 ? 3 : 0));
                 ASSERT_TRUE(instruction.succeeded()) << opcode << "/clamp=" << clamp;
                 ASSERT_TRUE(cu->execute_instruction(instruction.value().get(), *wave).succeeded());
                 const uint64_t expected = opcode == f.never    ? 0
@@ -125,7 +132,7 @@ TEST(Gfx10ComparisonTest, NativeMasksAndSignaling) {
           wave->set_exec(1ULL | (1ULL << (lanes - 1)));
           cu->write_sgpr(scalar, uint32_t(f.one));
           cu->write_sgpr(scalar + 1, uint32_t(f.one >> 32));
-          auto alias = decoder->decode_window(words(f.equal, true, 0));
+          auto alias = decoder->decode_window(words(f.equal, true, 0, 0, f.bits == 16 ? 3 : 0));
           ASSERT_TRUE(alias.succeeded());
           ASSERT_TRUE(cu->execute_instruction(alias.value().get(), *wave).succeeded());
           EXPECT_EQ(cu->read_sgpr(scalar), 1U);
