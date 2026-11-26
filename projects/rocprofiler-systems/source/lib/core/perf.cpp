@@ -2,31 +2,92 @@
 // SPDX-License-Identifier: MIT
 
 #include "perf.hpp"
+#include "common/clocks.hpp"
 #include "logger/debug.hpp"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <ctime>
+#include <fmt/format.h>
 #include <linux/perf_event.h>
+#include <optional>
+#include <ranges>
+#include <stdexcept>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 using namespace std::chrono_literals;
 
 namespace rocprofsys::perf
 {
 
-event_type
-get_event_type(std::string_view _v)
+namespace
 {
-    if(_v.find("PERF_COUNT_SW_") != std::string_view::npos)
+constexpr std::string_view k_hw_cache_prefix    = "PERF_COUNT_HW_CACHE_";
+constexpr char             k_modifier_separator = ':';
+
+// Bit positions of the operation and result ids in a PERF_TYPE_HW_CACHE config,
+// see perf_event_open(2).
+constexpr int k_hw_cache_op_shift     = 8;
+constexpr int k_hw_cache_result_shift = 16;
+
+template <typename Tp>
+using named_value = std::pair<std::string_view, Tp>;
+
+// Names follow the libpfm4 perf event table, which is what rocprof-sys-avail lists.
+constexpr auto k_hw_cache_ids = std::to_array<named_value<hw_cache_config>>({
+    { "L1D", hw_cache_config::l1d },
+    { "L1I", hw_cache_config::l1i },
+    { "LL", hw_cache_config::ll },
+    { "DTLB", hw_cache_config::dtlb },
+    { "ITLB", hw_cache_config::itlb },
+    { "BPU", hw_cache_config::bpu },
+    { "NODE", hw_cache_config::node },
+});
+
+constexpr auto k_hw_cache_ops = std::to_array<named_value<hw_cache_op>>({
+    { "READ", hw_cache_op::read },
+    { "WRITE", hw_cache_op::write },
+    { "PREFETCH", hw_cache_op::prefetch },
+});
+
+constexpr auto k_hw_cache_results = std::to_array<named_value<hw_cache_op_result>>({
+    { "ACCESS", hw_cache_op_result::access },
+    { "MISS", hw_cache_op_result::miss },
+});
+
+template <typename Tp, std::size_t N>
+constexpr std::optional<Tp>
+find_named(const std::array<named_value<Tp>, N>& table, std::string_view name)
+{
+    const auto* const itr = std::ranges::find(table, name, &named_value<Tp>::first);
+    if(itr == table.end())
+    {
+        return std::nullopt;
+    }
+    return itr->second;
+}
+}  // namespace
+
+event_type
+get_event_type(std::string_view name)
+{
+    if(name.find("PERF_COUNT_SW_") != std::string_view::npos)
     {
         return event_type::software;
     }
-    if(_v.find("PERF_COUNT_SW_") != std::string_view::npos &&
-       !std::regex_search(_v.data(),
-                          std::regex{ "PERF_COUNT_HW_CACHE_(MISSES|REFERENCES)$" }))
+    // These two share the cache prefix but are plain hardware events.
+    const bool is_plain_hardware_event = name.ends_with("PERF_COUNT_HW_CACHE_MISSES") ||
+                                         name.ends_with("PERF_COUNT_HW_CACHE_REFERENCES");
+    if(name.find(k_hw_cache_prefix) != std::string_view::npos && !is_plain_hardware_event)
     {
         return event_type::hw_cache;
     }
-    if(_v.find("PERF_COUNT_HW_") != std::string_view::npos)
+    if(name.find("PERF_COUNT_HW_") != std::string_view::npos)
     {
         return event_type::hardware;
     }
@@ -136,88 +197,71 @@ get_sw_config(std::string_view _v)
 }
 
 int
-get_hw_cache_config(std::string_view _v)
+get_hw_cache_config(std::string_view name)
 {
-    int _value = 0;
+    const auto make_error = [name](std::string_view reason) {
+        return std::runtime_error(
+            fmt::format("Unknown perf hw cache config: {} ({})", name, reason));
+    };
 
-#define HW_CACHE_CONFIG_REGEX(KEY)                                                       \
-    std::regex_search(_v.data(), std::regex{ "(HW_CACHE_" KEY ")" })
-
-    if(HW_CACHE_CONFIG_REGEX("L1D"))
+    const auto prefix_pos = name.find(k_hw_cache_prefix);
+    if(prefix_pos == std::string_view::npos)
     {
-        _value |= static_cast<int>(hw_cache_config::l1d);
-    }
-    else if(HW_CACHE_CONFIG_REGEX("L1I"))
-    {
-        _value |= static_cast<int>(hw_cache_config::l1i);
-    }
-    else if(HW_CACHE_CONFIG_REGEX("LL"))
-    {
-        _value |= static_cast<int>(hw_cache_config::ll);
-    }
-    else if(HW_CACHE_CONFIG_REGEX("DTLB"))
-    {
-        _value |= static_cast<int>(hw_cache_config::dtlb);
-    }
-    else if(HW_CACHE_CONFIG_REGEX("ITLB"))
-    {
-        _value |= static_cast<int>(hw_cache_config::itlb);
-    }
-    else if(HW_CACHE_CONFIG_REGEX("BPU"))
-    {
-        _value |= static_cast<int>(hw_cache_config::bpu);
-    }
-    else if(HW_CACHE_CONFIG_REGEX("NODE"))
-    {
-        _value |= static_cast<int>(hw_cache_config::node);
-    }
-    else
-    {
-        throw std::runtime_error(
-            fmt::format("Unknown perf hw cache config: {}", _v.data()));
+        throw make_error("missing PERF_COUNT_HW_CACHE_ prefix");
     }
 
-#undef HW_CACHE_CONFIG_REGEX
-#define HW_CACHE_OP_REGEX(KEY)                                                           \
-    std::regex_search(_v.data(), std::regex{ "(HW_CACHE_([A-Z1]+):" KEY ")" })
-
-    if(HW_CACHE_OP_REGEX("READ"))
+    // Split by hand: the pieces of std::views::split are not contiguous in GCC 11, so a
+    // string_view cannot be built from them. Always yields at least one token.
+    const auto spec = name.substr(prefix_pos + k_hw_cache_prefix.size());
+    std::vector<std::string_view> tokens;
+    for(std::size_t token_pos = 0; token_pos <= spec.size();)
     {
-        _value |= (static_cast<int>(hw_cache_op::read) << 8);
-    }
-    else if(HW_CACHE_OP_REGEX("WRITE"))
-    {
-        _value |= (static_cast<int>(hw_cache_op::write) << 8);
-    }
-    else if(HW_CACHE_OP_REGEX("PREFETCH"))
-    {
-        _value |= (static_cast<int>(hw_cache_op::prefetch) << 8);
-    }
-    else
-    {
-        _value |= (static_cast<int>(hw_cache_op::read) << 8);
+        const auto separator_pos = spec.find(k_modifier_separator, token_pos);
+        tokens.emplace_back(spec.substr(token_pos, separator_pos - token_pos));
+        if(separator_pos == std::string_view::npos)
+        {
+            break;
+        }
+        token_pos = separator_pos + 1;
     }
 
-#undef HW_CACHE_OP_REGEX
-#define HW_CACHE_OP_RESULT_REGEX(KEY)                                                    \
-    std::regex_search(_v.data(), std::regex{ "(HW_CACHE_([A-Z1]+):" KEY ")" })
-
-    if(HW_CACHE_OP_RESULT_REGEX("READ"))
+    const auto cache = find_named(k_hw_cache_ids, tokens.front());
+    if(!cache)
     {
-        _value |= (static_cast<int>(hw_cache_op_result::access) << 16);
-    }
-    else if(HW_CACHE_OP_RESULT_REGEX("WRITE"))
-    {
-        _value |= (static_cast<int>(hw_cache_op_result::miss) << 16);
-    }
-    else
-    {
-        _value |= (static_cast<int>(hw_cache_op_result::access) << 16);
+        throw make_error("unknown cache id");
     }
 
-#undef HW_CACHE_OP_RESULT_REGEX
+    std::optional<hw_cache_op>        cache_op;
+    std::optional<hw_cache_op_result> cache_result;
+    for(const auto modifier : tokens | std::views::drop(1))
+    {
+        const auto named_op     = find_named(k_hw_cache_ops, modifier);
+        const auto named_result = find_named(k_hw_cache_results, modifier);
+        if(!named_op && !named_result)
+        {
+            throw make_error("unknown modifier");
+        }
+        if((named_op && cache_op) || (named_result && cache_result))
+        {
+            throw make_error("more than one operation or result modifier");
+        }
+        if(named_op)
+        {
+            cache_op = named_op;
+        }
+        else
+        {
+            cache_result = named_result;
+        }
+    }
 
-    return _value;
+    // Unspecified groups take the libpfm4 defaults (READ, MISS), so a name means the
+    // same thing here as it does as a PAPI counter.
+    return static_cast<int>(*cache) |
+           (static_cast<int>(cache_op.value_or(hw_cache_op::read))
+            << k_hw_cache_op_shift) |
+           (static_cast<int>(cache_result.value_or(hw_cache_op_result::miss))
+            << k_hw_cache_result_shift);
 }
 
 void
@@ -265,5 +309,13 @@ config_overflow_sampling(struct perf_event_attr& perf_event_att, std::string_vie
     {
         perf_event_att.sample_period = static_cast<std::uint64_t>(freq);
     }
+
+    // perf_event_open() fails with EINVAL when a hardware event asks for the timeline
+    // clock (CLOCK_BOOTTIME), so only software events sample on it. Hardware samples are
+    // stamped in CLOCK_MONOTONIC and shifted onto the timeline when they are parsed.
+    perf_event_att.use_clockid = 1;
+    perf_event_att.clockid     = (perf_event_att.type == PERF_TYPE_SOFTWARE)
+                                     ? clocks::timeline::k_timeline_clock_id
+                                     : CLOCK_MONOTONIC;
 }
 }  // namespace rocprofsys::perf

@@ -113,14 +113,16 @@ public:
   [[nodiscard]] std::size_t extent() const noexcept override { return length_; }
   [[nodiscard]] uint64_t backing_id() const noexcept override { return backing_id_; }
   [[nodiscard]] bool read(uint64_t offset, std::span<std::byte> result) noexcept override {
-    if (offset != offset_ || result.size() != length_ || bytes_ == nullptr)
+    if (offset != offset_ || result.size() != length_ || bytes_ == nullptr) {
       return false;
+    }
     std::memmove(result.data(), bytes_.get(), length_);
     return true;
   }
   [[nodiscard]] bool write(uint64_t offset, std::span<const std::byte> source) noexcept override {
-    if (offset != offset_ || source.size() != length_ || bytes_ == nullptr)
+    if (offset != offset_ || source.size() != length_ || bytes_ == nullptr) {
       return false;
+    }
     std::memmove(bytes_.get(), source.data(), length_);
     return true;
   }
@@ -141,19 +143,21 @@ struct PreparedMappedSpan {
   std::unique_ptr<iovec[]> segments;
 
   ~PreparedMappedSpan() {
-    if (segments != nullptr)
+    if (segments != nullptr) {
       vfu_sgl_put(ctx, reinterpret_cast<dma_sg_t *>(sgl_storage.get()), segments.get(),
                   segment_count);
+    }
   }
 
   void copy(void *data, bool to_guest) const {
     auto *cursor = static_cast<std::byte *>(data);
     for (std::size_t index = 0; index < segment_count; ++index) {
       const iovec &segment = segments[index];
-      if (to_guest)
+      if (to_guest) {
         std::memcpy(segment.iov_base, cursor, segment.iov_len);
-      else
+      } else {
         std::memcpy(cursor, segment.iov_base, segment.iov_len);
+      }
       cursor += segment.iov_len;
     }
   }
@@ -163,16 +167,19 @@ std::unique_ptr<PreparedMappedSpan> prepare_mapped_span(vfu_ctx_t *ctx, uint64_t
                                                         std::size_t length, bool to_guest) {
   const std::size_t sg_entry_size = dma_sg_size();
   if (sg_entry_size == 0 ||
-      sg_entry_size > std::numeric_limits<std::size_t>::max() / kInitialSgEntries)
+      sg_entry_size > std::numeric_limits<std::size_t>::max() / kInitialSgEntries) {
     return nullptr;
+  }
   auto prepared = std::unique_ptr<PreparedMappedSpan>(new (std::nothrow) PreparedMappedSpan{});
-  if (prepared == nullptr)
+  if (prepared == nullptr) {
     return nullptr;
+  }
   prepared->ctx = ctx;
   std::size_t capacity = kInitialSgEntries;
   prepared->sgl_storage.reset(new (std::nothrow) std::byte[sg_entry_size * capacity]{});
-  if (prepared->sgl_storage == nullptr)
+  if (prepared->sgl_storage == nullptr) {
     return nullptr;
+  }
 
   int nr_sgs = vfu_addr_to_sgl(ctx, reinterpret_cast<vfu_dma_addr_t>(guest_phys), length,
                                reinterpret_cast<dma_sg_t *>(prepared->sgl_storage.get()), capacity,
@@ -181,18 +188,21 @@ std::unique_ptr<PreparedMappedSpan> prepare_mapped_span(vfu_ctx_t *ctx, uint64_t
     // The library reports an insufficient SG array as -(needed) - 1.
     const std::size_t needed = static_cast<std::size_t>(-nr_sgs - 1);
     if (needed <= capacity || needed > LIBVFIO_USER_MAX_DMA_REGIONS ||
-        needed > std::numeric_limits<std::size_t>::max() / sg_entry_size)
+        needed > std::numeric_limits<std::size_t>::max() / sg_entry_size) {
       return nullptr;
+    }
     capacity = needed;
     prepared->sgl_storage.reset(new (std::nothrow) std::byte[sg_entry_size * capacity]{});
-    if (prepared->sgl_storage == nullptr)
+    if (prepared->sgl_storage == nullptr) {
       return nullptr;
+    }
     nr_sgs = vfu_addr_to_sgl(ctx, reinterpret_cast<vfu_dma_addr_t>(guest_phys), length,
                              reinterpret_cast<dma_sg_t *>(prepared->sgl_storage.get()), capacity,
                              to_guest ? PROT_WRITE : PROT_READ);
   }
-  if (nr_sgs <= 0)
+  if (nr_sgs <= 0) {
     return nullptr;
+  }
   prepared->segment_count = static_cast<std::size_t>(nr_sgs);
   for (std::size_t index = 0; index < prepared->segment_count; ++index) {
     auto *segment =
@@ -206,8 +216,9 @@ std::unique_ptr<PreparedMappedSpan> prepare_mapped_span(vfu_ctx_t *ctx, uint64_t
   }
 
   prepared->segments.reset(new (std::nothrow) iovec[prepared->segment_count]{});
-  if (prepared->segments == nullptr)
+  if (prepared->segments == nullptr) {
     return nullptr;
+  }
   auto *sgl = reinterpret_cast<dma_sg_t *>(prepared->sgl_storage.get());
   if (vfu_sgl_get(ctx, sgl, prepared->segments.get(), prepared->segment_count, 0) < 0) {
     prepared->segments.reset();
@@ -217,12 +228,14 @@ std::unique_ptr<PreparedMappedSpan> prepare_mapped_span(vfu_ctx_t *ctx, uint64_t
   for (std::size_t index = 0; index < prepared->segment_count; ++index) {
     const iovec &segment = prepared->segments[index];
     if (segment.iov_base == nullptr || segment.iov_len == 0 ||
-        segment.iov_len > length - mapped_length)
+        segment.iov_len > length - mapped_length) {
       return nullptr;
+    }
     mapped_length += segment.iov_len;
   }
-  if (mapped_length != length)
+  if (mapped_length != length) {
     return nullptr;
+  }
   return prepared;
 }
 
@@ -287,8 +300,9 @@ void dma_register_trampoline(vfu_ctx_t *ctx, vfu_dma_info_t *info) {
   // the protocol offers no way to refuse one window -- so the window is counted
   // and dropped here rather than handed on.
   if (!is_mmap_backed(*info)) {
-    if (host_of(ctx).register_standard_peer_map(region))
+    if (host_of(ctx).register_standard_peer_map(region)) {
       return;
+    }
     host_of(ctx).note_unreachable_region(region);
     return;
   }
@@ -310,12 +324,7 @@ void dma_unregister_trampoline(vfu_ctx_t *ctx, vfu_dma_info_t *info) {
   host_of(ctx).forget_guest_region(region);
 }
 
-int quiesce_trampoline(vfu_ctx_t *ctx) try {
-  return host_of(ctx).begin_target_quiesce();
-} catch (...) {
-  errno = EIO;
-  return -1;
-}
+int quiesce_trampoline(vfu_ctx_t *ctx) { return host_of(ctx).begin_target_quiesce(); }
 
 simdojo::ResetKind to_reset_kind(vfu_reset_type_t type) {
   switch (type) {
@@ -347,8 +356,9 @@ VfioDeviceHost::VfioDeviceHost(std::string socket_path, simdojo::PciDevice &devi
   if (owns_device_) {
     std::shared_ptr<simdojo::PciTransportSession> idle =
         device_.revoke_transport_session(&transport_);
-    if (idle != nullptr)
+    if (idle != nullptr) {
       idle->wait_until_drained();
+    }
   }
   if (!owns_device_) {
     util::Logger::warn(std::format(
@@ -385,10 +395,12 @@ void VfioDeviceHost::detach() {
     client_session_.reset();
     guest_regions_.clear();
   }
-  if (closing != nullptr && target_grants_ != nullptr)
+  if (closing != nullptr && target_grants_ != nullptr) {
     target_grants_->revoke_session(target_ordinal_, closing->generation());
-  if (closing != nullptr)
+  }
+  if (closing != nullptr) {
     (void)finish_session_reset(simdojo::ResetKind::LostConnection, std::move(closing));
+  }
 
   // Checked against this host's own record, so a host that never won the device
   // cannot release the one that did. detach_transport also drains a session if
@@ -407,8 +419,9 @@ bool VfioDeviceHost::enable_target_grants(VfioTargetGrants &grants, uint32_t ord
                                           uint32_t gpu_id, FabricEndpoint *fabric) {
   const std::lock_guard lock(state_mutex_);
   if (ctx_ != nullptr || target_grants_ != nullptr || quiesce_wake_->fd() < 0 ||
-      !grants.bind(ordinal, *this, gpu_id))
+      !grants.bind(ordinal, *this, gpu_id)) {
     return false;
+  }
   target_grants_ = &grants;
   target_ordinal_ = ordinal;
   target_gpu_id_ = gpu_id;
@@ -428,20 +441,26 @@ VfioDeviceHost::prepare_peer_read(uint64_t requester_generation, uint64_t iova, 
                                   const amdgpu::GpuVmAccess *executing_access, uint64_t gpu_va,
                                   const amdgpu::VmTranslation *selected_translation,
                                   const std::optional<amdgpu::MemoryPtEpoch> &pt_epoch) {
-  if (target_grants_ == nullptr || length == 0)
+  if (target_grants_ == nullptr || length == 0) {
     return std::nullopt;
+  }
   auto prepared =
       target_grants_->prepare_peer(target_ordinal_, requester_generation, iova, length, false);
-  if (prepared.kind == VfioTargetGrants::PeerKind::OrdinaryRam)
+  if (prepared.kind == VfioTargetGrants::PeerKind::OrdinaryRam) {
     return std::nullopt;
-  if (prepared.kind != VfioTargetGrants::PeerKind::Ready || fabric_ == nullptr)
+  }
+  if (prepared.kind != VfioTargetGrants::PeerKind::Ready || fabric_ == nullptr) {
     return terminal_peer_token(length, amdgpu::VmAccessOutcome::Faulted);
-  if (executing_access == nullptr || selected_translation == nullptr || !pt_epoch || !*pt_epoch)
+  }
+  if (executing_access == nullptr || selected_translation == nullptr || !pt_epoch || !*pt_epoch) {
     return terminal_peer_token(length, amdgpu::VmAccessOutcome::Revoked);
-  if (executing_access->retain_effect_gate() != gate)
+  }
+  if (executing_access->retain_effect_gate() != gate) {
     return terminal_peer_token(length, amdgpu::VmAccessOutcome::Revoked);
-  if (unsupported_cacheable_peer_pte(*executing_access, *selected_translation))
+  }
+  if (unsupported_cacheable_peer_pte(*executing_access, *selected_translation)) {
     return terminal_peer_token(length, amdgpu::VmAccessOutcome::Faulted);
+  }
   auto snapshot = std::move(prepared.snapshot);
   const FabricEndpoint::TraceOrigin trace_origin{
       .map_id = snapshot.map_id, .gpu_va = gpu_va, .iova = iova};
@@ -454,13 +473,15 @@ VfioDeviceHost::prepare_peer_read(uint64_t requester_generation, uint64_t iova, 
   auto admission = [captured_admission = std::move(captured_admission), captured_access, selected,
                     gpu_va, iova,
                     length](const FabricBacking &, bool write, amdgpu::MemoryIngressPermit &) {
-    if (write)
+    if (write) {
       return FabricEndpoint::EffectAuthority(
           {.outcome = amdgpu::VmAccessOutcome::Revoked, .permit = {}});
+    }
     const amdgpu::VmAccessOutcome outcome = captured_access.validate_deferred_system_span(
         gpu_va, iova, length, amdgpu::VmAccessKind::Read, selected);
-    if (outcome != amdgpu::VmAccessOutcome::Complete)
+    if (outcome != amdgpu::VmAccessOutcome::Complete) {
       return FabricEndpoint::EffectAuthority({.outcome = outcome, .permit = {}});
+    }
     return FabricEndpoint::EffectAuthority(captured_admission());
   };
   FabricEndpoint::PreEffectAdmission admit_pt = [captured_access, expected = *pt_epoch] {
@@ -468,8 +489,9 @@ VfioDeviceHost::prepare_peer_read(uint64_t requester_generation, uint64_t iova, 
   };
   auto transfer = fabric_->prepare_read(target_gpu_id_, owner_gpu_id, std::move(backing), gate,
                                         std::move(admission), std::move(admit_pt), trace_origin);
-  if (!transfer)
+  if (!transfer) {
     return terminal_peer_token(length, transfer.outcome);
+  }
   return amdgpu::VmTransferToken(std::move(transfer.operation), length,
                                  amdgpu::VmDeferredWriteMaintenance::Caller,
                                  /*peer_origin=*/true);
@@ -482,20 +504,26 @@ VfioDeviceHost::prepare_peer_write(uint64_t requester_generation, uint64_t iova,
                                    const amdgpu::GpuVmAccess *executing_access, uint64_t gpu_va,
                                    const amdgpu::VmTranslation *selected_translation,
                                    const std::optional<amdgpu::MemoryPtEpoch> &pt_epoch) {
-  if (target_grants_ == nullptr || bytes.empty())
+  if (target_grants_ == nullptr || bytes.empty()) {
     return std::nullopt;
+  }
   auto prepared =
       target_grants_->prepare_peer(target_ordinal_, requester_generation, iova, bytes.size(), true);
-  if (prepared.kind == VfioTargetGrants::PeerKind::OrdinaryRam)
+  if (prepared.kind == VfioTargetGrants::PeerKind::OrdinaryRam) {
     return std::nullopt;
-  if (prepared.kind != VfioTargetGrants::PeerKind::Ready || fabric_ == nullptr)
+  }
+  if (prepared.kind != VfioTargetGrants::PeerKind::Ready || fabric_ == nullptr) {
     return terminal_peer_token(bytes.size(), amdgpu::VmAccessOutcome::Faulted);
-  if (executing_access == nullptr || selected_translation == nullptr || !pt_epoch || !*pt_epoch)
+  }
+  if (executing_access == nullptr || selected_translation == nullptr || !pt_epoch || !*pt_epoch) {
     return terminal_peer_token(bytes.size(), amdgpu::VmAccessOutcome::Revoked);
-  if (executing_access->retain_effect_gate() != gate)
+  }
+  if (executing_access->retain_effect_gate() != gate) {
     return terminal_peer_token(bytes.size(), amdgpu::VmAccessOutcome::Revoked);
-  if (unsupported_cacheable_peer_pte(*executing_access, *selected_translation))
+  }
+  if (unsupported_cacheable_peer_pte(*executing_access, *selected_translation)) {
     return terminal_peer_token(bytes.size(), amdgpu::VmAccessOutcome::Faulted);
+  }
   auto snapshot = std::move(prepared.snapshot);
   const FabricEndpoint::TraceOrigin trace_origin{
       .map_id = snapshot.map_id, .gpu_va = gpu_va, .iova = iova};
@@ -508,13 +536,15 @@ VfioDeviceHost::prepare_peer_write(uint64_t requester_generation, uint64_t iova,
   auto admission = [captured_admission = std::move(captured_admission), captured_access, selected,
                     gpu_va, iova, length = bytes.size()](const FabricBacking &, bool write,
                                                          amdgpu::MemoryIngressPermit &) {
-    if (!write)
+    if (!write) {
       return FabricEndpoint::EffectAuthority(
           {.outcome = amdgpu::VmAccessOutcome::Revoked, .permit = {}});
+    }
     const amdgpu::VmAccessOutcome outcome = captured_access.validate_deferred_system_span(
         gpu_va, iova, length, amdgpu::VmAccessKind::Write, selected);
-    if (outcome != amdgpu::VmAccessOutcome::Complete)
+    if (outcome != amdgpu::VmAccessOutcome::Complete) {
       return FabricEndpoint::EffectAuthority({.outcome = outcome, .permit = {}});
+    }
     return FabricEndpoint::EffectAuthority(captured_admission());
   };
   FabricEndpoint::PreEffectAdmission admit_pt = [captured_access, expected = *pt_epoch] {
@@ -523,19 +553,22 @@ VfioDeviceHost::prepare_peer_write(uint64_t requester_generation, uint64_t iova,
   auto transfer =
       fabric_->prepare_write(target_gpu_id_, owner_gpu_id, std::move(backing), bytes, gate,
                              std::move(admission), std::move(admit_pt), trace_origin);
-  if (!transfer)
+  if (!transfer) {
     return terminal_peer_token(bytes.size(), transfer.outcome);
+  }
   return amdgpu::VmTransferToken(std::move(transfer.operation), bytes.size());
 }
 
 int VfioDeviceHost::begin_target_quiesce() {
-  if (target_grants_ == nullptr)
+  if (target_grants_ == nullptr) {
     return 0;
+  }
   quiesce_gates_ = target_grants_->begin_quiesce(target_ordinal_);
   quiescing_ = true;
   quiesce_pending_ = !target_quiesce_drained();
-  if (!quiesce_pending_)
+  if (!quiesce_pending_) {
     return 0;
+  }
   errno = EBUSY;
   return -1;
 }
@@ -545,8 +578,9 @@ bool VfioDeviceHost::target_quiesce_drained() const noexcept {
 }
 
 void VfioDeviceHost::end_target_quiesce() noexcept {
-  if (!quiescing_)
+  if (!quiescing_) {
     return;
+  }
   target_grants_->end_quiesce(target_ordinal_);
   quiesce_gates_.clear();
   quiesce_pending_ = false;
@@ -564,24 +598,28 @@ bool VfioDeviceHost::register_standard_peer_map(const simdojo::DmaRegion &region
 }
 
 void VfioDeviceHost::unregister_standard_peer_map(const simdojo::DmaRegion &region) {
-  if (target_grants_ == nullptr)
+  if (target_grants_ == nullptr) {
     return;
+  }
   const auto session = target_session_snapshot();
-  if (session != nullptr)
+  if (session != nullptr) {
     target_grants_->unregister_standard_map(target_ordinal_, session->generation(),
                                             region.guest_phys, region.length);
+  }
 }
 
 void VfioDeviceHost::refresh_peer_bar_window() {
-  if (target_grants_ == nullptr || ctx_ == nullptr)
+  if (target_grants_ == nullptr || ctx_ == nullptr) {
     return;
+  }
   std::optional<simdojo::PciBarAddressDecoder::Window> window;
   const auto session = target_session_snapshot();
   // The reset callback closes this generation before its reply. Its grants
   // are drained after vfu_run_ctx releases the library lock, so do not retire
   // the BAR window here: publication can wait on an admitted peer effect.
-  if (session != nullptr && session->state() != simdojo::PciTransportSession::State::Open)
+  if (session != nullptr && session->state() != simdojo::PciTransportSession::State::Open) {
     return;
+  }
   if (session != nullptr && session->state() == simdojo::PciTransportSession::State::Open) {
     const auto *config = reinterpret_cast<const std::byte *>(vfu_pci_get_config_space(ctx_));
     const auto read16 = [config](std::size_t offset) {
@@ -600,15 +638,18 @@ void VfioDeviceHost::refresh_peer_bar_window() {
     const bool memory_enabled = (read16(PCI_COMMAND) & PCI_COMMAND_MEMORY) != 0;
     for (const simdojo::BarSpec &bar : device_.bars()) {
       if (bar.index != GpuPciDevice::kVramBar || !bar.mem || bar.backing_fd < 0 ||
-          bar.mmap_areas.empty() || !memory_enabled || (low & PCI_BASE_ADDRESS_SPACE_IO) != 0)
+          bar.mmap_areas.empty() || !memory_enabled || (low & PCI_BASE_ADDRESS_SPACE_IO) != 0) {
         continue;
+      }
       const bool configured_64bit =
           (low & PCI_BASE_ADDRESS_MEM_TYPE_MASK) == PCI_BASE_ADDRESS_MEM_TYPE_64;
-      if (configured_64bit != bar.is_64bit)
+      if (configured_64bit != bar.is_64bit) {
         continue;
+      }
       uint64_t base = low & PCI_BASE_ADDRESS_MEM_MASK;
-      if (configured_64bit)
+      if (configured_64bit) {
         base |= static_cast<uint64_t>(read32(kVramBarConfigOffset + sizeof(uint32_t))) << 32;
+      }
       window = simdojo::PciBarAddressDecoder::Window{.function = target_ordinal_,
                                                      .bar = GpuPciDevice::kVramBar,
                                                      .base = base,
@@ -619,21 +660,24 @@ void VfioDeviceHost::refresh_peer_bar_window() {
       break;
     }
   }
-  if (window == last_published_peer_bar_)
+  if (window == last_published_peer_bar_) {
     return;
+  }
   target_grants_->publish_bar_window(target_ordinal_, window);
   last_published_peer_bar_ = window;
 }
 
 void VfioDeviceHost::request_reset(simdojo::ResetKind kind) {
   const std::lock_guard lock(state_mutex_);
-  if (!pending_reset_.has_value() || kind == simdojo::ResetKind::LostConnection)
+  if (!pending_reset_.has_value() || kind == simdojo::ResetKind::LostConnection) {
     pending_reset_ = kind;
+  }
   // A VFIO-user reset reply can be observed before the serving loop has left
   // vfu_run_ctx. Refuse fresh peer leases at the callback boundary; the loop
   // drains admitted effects and retires the generation outside its locks.
-  if (client_session_ != nullptr)
+  if (client_session_ != nullptr) {
     (void)client_session_->begin_revoke();
+  }
 }
 
 bool VfioDeviceHost::finish_session_reset(
@@ -641,8 +685,9 @@ bool VfioDeviceHost::finish_session_reset(
   // Never called with either host mutex held. Revocation prevents new leases;
   // drain the admitted operations before reset tears down the routes and
   // storage they can reach.
-  if (closing_session != nullptr)
+  if (closing_session != nullptr) {
     closing_session->wait_until_drained();
+  }
   util::StringDiagnostic diagnostic;
   if (device_.reset(kind, diagnostic.emitter()).failed()) {
     util::Logger::warn("vfu: deferred device reset failed: ", diagnostic.message());
@@ -845,8 +890,9 @@ bool VfioDeviceHost::build() {
     util::Logger::warn(std::format("vfu: cannot set up DMA: {}", std::strerror(errno)));
     return false;
   }
-  if (target_grants_ != nullptr)
+  if (target_grants_ != nullptr) {
     vfu_setup_device_quiesce_cb(ctx_, &quiesce_trampoline);
+  }
 
   if (vfu_setup_device_reset_cb(ctx_, &reset_trampoline) < 0) {
     util::Logger::warn(std::format("vfu: cannot set up reset: {}", std::strerror(errno)));
@@ -924,8 +970,9 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
     // A pending command has no new socket traffic to read. The fabric owner
     // keeps running while this thread waits for its final grant permit; the
     // eventfd wakes us as soon as that permit leaves its effect body.
-    if (quiesce_pending_ && !target_quiesce_drained())
+    if (quiesce_pending_ && !target_quiesce_drained()) {
       continue;
+    }
 
     if (needs_attach) {
       int attach_result = 0;
@@ -981,25 +1028,29 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
         end_target_quiesce();
       } else {
         run_result = vfu_run_ctx(ctx_);
-        if (quiescing_ && !quiesce_pending_)
+        if (quiescing_ && !quiesce_pending_) {
           end_target_quiesce();
+        }
       }
       run_error = errno;
       refresh_peer_bar_window();
     }
-    if (run_result < 0 && run_error == EBUSY && quiesce_pending_)
+    if (run_result < 0 && run_error == EBUSY && quiesce_pending_) {
       continue;
+    }
     {
       const std::lock_guard lock(state_mutex_);
       reset = std::exchange(pending_reset_, std::nullopt);
 
       disconnected = run_result < 0 && run_error == ENOTCONN;
-      if (reset == simdojo::ResetKind::LostConnection)
+      if (reset == simdojo::ResetKind::LostConnection) {
         disconnected = true;
+      }
       // ENOTCONN can arrive without a reset callback. Revoke the old session
       // before resetting the device or accepting another client in that case.
-      if (disconnected)
+      if (disconnected) {
         reset = simdojo::ResetKind::LostConnection;
+      }
 
       if (reset.has_value()) {
         // Refuse fresh leases before reset. Draining and device teardown happen
@@ -1020,11 +1071,13 @@ VfioDeviceHost::ServeResult VfioDeviceHost::run(std::stop_token stop_token) {
       }
     }
 
-    if (closing_session != nullptr && target_grants_ != nullptr)
+    if (closing_session != nullptr && target_grants_ != nullptr) {
       target_grants_->revoke_session(target_ordinal_, closing_session->generation());
+    }
 
-    if (reset.has_value() && !finish_session_reset(*reset, std::move(closing_session)))
+    if (reset.has_value() && !finish_session_reset(*reset, std::move(closing_session))) {
       return ServeResult::Failed;
+    }
 
     if (disconnected) {
       // Publish completion only after reset and admitted transport work are
@@ -1124,8 +1177,9 @@ simdojo::DmaAccessOutcome VfioDeviceHost::write_outcome(uint64_t guest_phys,
   const simdojo::DmaAccessOutcome outcome =
       copy_guest_memory(guest_phys, const_cast<std::byte *>(src.data()), src.size(),
                         /*to_guest=*/true);
-  if (outcome != simdojo::DmaAccessOutcome::Complete)
+  if (outcome != simdojo::DmaAccessOutcome::Complete) {
     return outcome;
+  }
   // DmaEngine::write() promises the bytes are guest-visible on return, and that
   // writes become visible in the order they return. The copy above lands in
   // memory the guest has mapped, so completeness is already met; this is what
@@ -1137,12 +1191,14 @@ simdojo::DmaAccessOutcome VfioDeviceHost::write_outcome(uint64_t guest_phys,
 
 simdojo::DmaAccessOutcome VfioDeviceHost::atomic_destination(uint64_t guest_phys, uint32_t width,
                                                              bool to_guest) const {
-  if (target_grants_ == nullptr || client_session_ == nullptr)
+  if (target_grants_ == nullptr || client_session_ == nullptr) {
     return simdojo::DmaAccessOutcome::Complete;
+  }
   const auto peer = target_grants_->prepare_peer(target_ordinal_, client_session_->generation(),
                                                  guest_phys, width, to_guest);
-  if (peer.kind == VfioTargetGrants::PeerKind::OrdinaryRam)
+  if (peer.kind == VfioTargetGrants::PeerKind::OrdinaryRam) {
     return simdojo::DmaAccessOutcome::Complete;
+  }
   // The peer endpoint does not advertise AtomicOp completion. A peer BAR's
   // shared bytes are mappable, but that alone cannot authorize a peer atomic.
   return peer.kind == VfioTargetGrants::PeerKind::Rejected ? peer.outcome
@@ -1157,11 +1213,13 @@ simdojo::DmaAtomicLoadResult VfioDeviceHost::atomic_load(uint64_t guest_phys, ui
 
   const std::lock_guard lock(vfu_mutex_);
   const std::lock_guard state_lock(state_mutex_);
-  if (ctx_ == nullptr || !attached_ || quiescing_)
+  if (ctx_ == nullptr || !attached_ || quiescing_) {
     return {.outcome = simdojo::DmaAccessOutcome::Unavailable};
+  }
   if (const auto outcome = atomic_destination(guest_phys, width, false);
-      outcome != simdojo::DmaAccessOutcome::Complete)
+      outcome != simdojo::DmaAccessOutcome::Complete) {
     return {.outcome = outcome};
+  }
 
   std::vector<std::byte> sgl_storage(dma_sg_size());
   auto *sgl = reinterpret_cast<dma_sg_t *>(sgl_storage.data());
@@ -1172,8 +1230,9 @@ simdojo::DmaAtomicLoadResult VfioDeviceHost::atomic_load(uint64_t guest_phys, ui
   }
 
   iovec segment{};
-  if (vfu_sgl_get(ctx_, sgl, &segment, 1, 0) < 0)
+  if (vfu_sgl_get(ctx_, sgl, &segment, 1, 0) < 0) {
     return {.outcome = simdojo::DmaAccessOutcome::Faulted};
+  }
   if (segment.iov_base == nullptr || segment.iov_len < width ||
       reinterpret_cast<uintptr_t>(segment.iov_base) % width != 0) {
     vfu_sgl_put(ctx_, sgl, &segment, 1);
@@ -1204,11 +1263,13 @@ simdojo::DmaAccessOutcome VfioDeviceHost::atomic_store(uint64_t guest_phys, uint
 
   const std::lock_guard lock(vfu_mutex_);
   const std::lock_guard state_lock(state_mutex_);
-  if (ctx_ == nullptr || !attached_ || quiescing_)
+  if (ctx_ == nullptr || !attached_ || quiescing_) {
     return simdojo::DmaAccessOutcome::Unavailable;
+  }
   if (const auto outcome = atomic_destination(guest_phys, width, true);
-      outcome != simdojo::DmaAccessOutcome::Complete)
+      outcome != simdojo::DmaAccessOutcome::Complete) {
     return outcome;
+  }
 
   std::vector<std::byte> sgl_storage(dma_sg_size());
   auto *sgl = reinterpret_cast<dma_sg_t *>(sgl_storage.data());
@@ -1219,8 +1280,9 @@ simdojo::DmaAccessOutcome VfioDeviceHost::atomic_store(uint64_t guest_phys, uint
   }
 
   iovec segment{};
-  if (vfu_sgl_get(ctx_, sgl, &segment, 1, 0) < 0)
+  if (vfu_sgl_get(ctx_, sgl, &segment, 1, 0) < 0) {
     return simdojo::DmaAccessOutcome::Faulted;
+  }
   if (segment.iov_base == nullptr || segment.iov_len < width ||
       reinterpret_cast<uintptr_t>(segment.iov_base) % width != 0) {
     vfu_sgl_put(ctx_, sgl, &segment, 1);
@@ -1249,11 +1311,13 @@ simdojo::DmaAtomicCompareExchangeResult VfioDeviceHost::compare_exchange(uint64_
 
   const std::lock_guard lock(vfu_mutex_);
   const std::lock_guard state_lock(state_mutex_);
-  if (ctx_ == nullptr || !attached_ || quiescing_)
+  if (ctx_ == nullptr || !attached_ || quiescing_) {
     return {.outcome = simdojo::DmaAccessOutcome::Unavailable};
+  }
   if (const auto outcome = atomic_destination(guest_phys, width, true);
-      outcome != simdojo::DmaAccessOutcome::Complete)
+      outcome != simdojo::DmaAccessOutcome::Complete) {
     return {.outcome = outcome};
+  }
 
   std::vector<std::byte> sgl_storage(dma_sg_size());
   auto *sgl = reinterpret_cast<dma_sg_t *>(sgl_storage.data());
@@ -1264,8 +1328,9 @@ simdojo::DmaAtomicCompareExchangeResult VfioDeviceHost::compare_exchange(uint64_
   }
 
   iovec segment{};
-  if (vfu_sgl_get(ctx_, sgl, &segment, 1, 0) < 0)
+  if (vfu_sgl_get(ctx_, sgl, &segment, 1, 0) < 0) {
     return {.outcome = simdojo::DmaAccessOutcome::Faulted};
+  }
   if (segment.iov_base == nullptr || segment.iov_len < width ||
       reinterpret_cast<uintptr_t>(segment.iov_base) % width != 0) {
     vfu_sgl_put(ctx_, sgl, &segment, 1);
@@ -1300,8 +1365,9 @@ simdojo::DmaAccessOutcome VfioDeviceHost::copy_guest_memory(uint64_t guest_phys,
   if (length == 0) {
     return simdojo::DmaAccessOutcome::Complete;
   }
-  if (length > std::numeric_limits<uint64_t>::max() - guest_phys)
+  if (length > std::numeric_limits<uint64_t>::max() - guest_phys) {
     return simdojo::DmaAccessOutcome::Malformed;
+  }
 
   const std::lock_guard lock(vfu_mutex_);
   const std::lock_guard state_lock(state_mutex_);
@@ -1313,8 +1379,9 @@ simdojo::DmaAccessOutcome VfioDeviceHost::copy_guest_memory(uint64_t guest_phys,
   if (target_grants_ != nullptr && client_session_ != nullptr) {
     targets = target_grants_->prepare(target_ordinal_, client_session_->generation(), guest_phys,
                                       length, to_guest);
-    if (targets.outcome != simdojo::DmaAccessOutcome::Complete)
+    if (targets.outcome != simdojo::DmaAccessOutcome::Complete) {
       return targets.outcome;
+    }
   }
 
   // Any gaps between target intervals must be ordinary mmap-backed guest RAM.
@@ -1328,19 +1395,22 @@ simdojo::DmaAccessOutcome VfioDeviceHost::copy_guest_memory(uint64_t guest_phys,
   const auto prepare_gap = [&](uint64_t start, uint64_t stop) {
     auto mapping =
         prepare_mapped_span(ctx_, start, static_cast<std::size_t>(stop - start), to_guest);
-    if (mapping == nullptr)
+    if (mapping == nullptr) {
       return false;
+    }
     ordinary.push_back({start, std::move(mapping)});
     return true;
   };
   uint64_t cursor = guest_phys;
   for (const auto &target : targets.segments) {
-    if (cursor < target.iova && !prepare_gap(cursor, target.iova))
+    if (cursor < target.iova && !prepare_gap(cursor, target.iova)) {
       return simdojo::DmaAccessOutcome::Faulted;
+    }
     cursor = target.iova + target.length;
   }
-  if (cursor < end && !prepare_gap(cursor, end))
+  if (cursor < end && !prepare_gap(cursor, end)) {
     return simdojo::DmaAccessOutcome::Faulted;
+  }
 
   // Every remaining copy uses a retained local mapping and cannot report a
   // short BAR read or write after an earlier segment has moved.

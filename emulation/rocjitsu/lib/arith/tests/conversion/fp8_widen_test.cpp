@@ -41,7 +41,7 @@ void check_fp8_widen(Call call) {
           uint32_t raw =
               Arch == 1250 && (mode & RJ_ARITH_ALU_CLAMP)
                   ? e5m3_reference(code)
-                  : fp8_conversion_reference(Bf8, code, Arch == 942, Arch == 950 || Arch == 1250);
+                  : fp8_conversion_reference(Bf8, code, Arch == 942, Half || Arch >= 1250);
           if constexpr (Half) {
             uint32_t result = uint32_t(conversion_reencode(raw, 23, 127, 10, 15));
             if ((flags & RJ_ARITH_FP16_OVFL) && (raw & 0x7fffffff) < 0x7f800000 &&
@@ -67,7 +67,7 @@ void check_fp8_widen(Call call) {
           (Half ? RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_MASK |
                       RJ_ARITH_ALU_HIGH_D | RJ_ARITH_ALU_CLAMP
                 : 0),
-      true);
+      Arch != 1251);
 }
 
 } // namespace
@@ -197,9 +197,8 @@ TEST(ConversionCdnaFp8, AllCodes) {
         for (int lane = 0; lane < 64; ++lane) {
           uint8_t code = uint8_t(start + lane);
           uint32_t expected =
-              operation == 4
-                  ? e5m3_reference(code)
-                  : fp8_conversion_reference(operation & 1, code, operation < 2, operation >= 2);
+              operation == 4 ? e5m3_reference(code)
+                             : fp8_conversion_reference(operation & 1, code, operation < 2, false);
           EXPECT_EQ(result[lane], expected);
         }
       }
@@ -213,6 +212,80 @@ TEST(ConversionCvtF32Fp8W32Gfx1250, Arithmetic) {
 
 TEST(ConversionCvtF32Fp8W64Gfx1250, Arithmetic) {
   check_fp8_widen<64, false, false, 1250>(rj_arith_v_cvt_f32_fp8_w64_gfx1250);
+}
+
+TEST(ConversionCvtF32Bf8W32Gfx1250, Arithmetic) {
+  check_fp8_widen<32, false, true, 1251>(rj_arith_v_cvt_f32_bf8_w32_gfx1250);
+}
+
+TEST(ConversionCvtF32Bf8W64Gfx1250, Arithmetic) {
+  check_fp8_widen<64, false, true, 1251>(rj_arith_v_cvt_f32_bf8_w64_gfx1250);
+}
+
+TEST(ConversionCvtPkF32Fp8W32Gfx1250, Arithmetic) {
+  check_fp8_widen<32, true, false, 1251>(rj_arith_v_cvt_pk_f32_fp8_w32_gfx1250);
+}
+
+TEST(ConversionCvtPkF32Fp8W64Gfx1250, Arithmetic) {
+  check_fp8_widen<64, true, false, 1251>(rj_arith_v_cvt_pk_f32_fp8_w64_gfx1250);
+}
+
+TEST(ConversionCvtPkF32Bf8W32Gfx1250, Arithmetic) {
+  check_fp8_widen<32, true, true, 1251>(rj_arith_v_cvt_pk_f32_bf8_w32_gfx1250);
+}
+
+TEST(ConversionCvtPkF32Bf8W64Gfx1250, Arithmetic) {
+  check_fp8_widen<64, true, true, 1251>(rj_arith_v_cvt_pk_f32_bf8_w64_gfx1250);
+}
+
+TEST(ConversionGfx1250WidenLooseOnly, Bf8NanCode0x7dAndPackedStrictRejection) {
+  for (uint64_t cpu : supported_cpu_levels()) {
+    uint32_t src[64], d0[64], d1[64];
+    const uint32_t *a = src;
+    uint32_t *d[] = {d0, d1};
+    for (int lane = 0; lane < 64; ++lane) {
+      src[lane] = 0x7d7d7d7dU;
+    }
+    auto reset_dst = [&]() {
+      for (int lane = 0; lane < 64; ++lane) {
+        d0[lane] = 0xdeadbeefU;
+        d1[lane] = 0xdeadbeefU;
+      }
+    };
+    for (uint64_t strict : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                            RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      reset_dst();
+      EXPECT_EQ(rj_arith_v_cvt_f32_bf8_w32_gfx1250(cpu | strict, ~0U, 0, d, &a),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(rj_arith_v_cvt_f32_bf8_w64_gfx1250(cpu | strict, ~0ULL, 0, d, &a),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(rj_arith_v_cvt_pk_f32_fp8_w32_gfx1250(cpu | strict, ~0U, 0, d, &a),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(rj_arith_v_cvt_pk_f32_fp8_w64_gfx1250(cpu | strict, ~0ULL, 0, d, &a),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(rj_arith_v_cvt_pk_f32_bf8_w32_gfx1250(cpu | strict, ~0U, 0, d, &a),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(rj_arith_v_cvt_pk_f32_bf8_w64_gfx1250(cpu | strict, ~0ULL, 0, d, &a),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      for (int lane = 0; lane < 64; ++lane) {
+        EXPECT_EQ(d0[lane], 0xdeadbeefU);
+        EXPECT_EQ(d1[lane], 0xdeadbeefU);
+      }
+    }
+    const uint64_t compat = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY;
+    reset_dst();
+    ASSERT_EQ(rj_arith_v_cvt_f32_bf8_w64_gfx1250(compat, ~0ULL, 0, d, &a), RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d0[0], 0x7fc00000U);
+    EXPECT_EQ(d0[63], 0x7fc00000U);
+    reset_dst();
+    ASSERT_EQ(rj_arith_v_cvt_pk_f32_bf8_w64_gfx1250(compat, ~0ULL, 0, d, &a), RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d0[0], 0x7fc00000U);
+    EXPECT_EQ(d1[0], 0x7fc00000U);
+    reset_dst();
+    ASSERT_EQ(rj_arith_v_cvt_pk_f32_fp8_w64_gfx1250(compat, ~0ULL, 0, d, &a), RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d0[0], 0x43d00000U);
+    EXPECT_EQ(d1[0], 0x43d00000U);
+  }
 }
 
 TEST(ConversionCvtF16Fp8W32, Arithmetic) {

@@ -42,16 +42,16 @@ TEST(FpMulF16W64Gfx11, Arithmetic) {
 TEST(FpMulF16W32Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 32>(
       rj_arith_v_mul_f16_w32_gfx10, [](double x, double y) { return x * y; },
-      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
-      /*half_exact=*/false);
+      /*gfx12=*/false, /*fp_status_supported=*/false,
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 // RDNA2 keeps the RDNA3 model but refuses strict exact until its captures are reviewed.
 TEST(FpMulF16W64Gfx10, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<16, 64>(
       rj_arith_v_mul_f16_w64_gfx10, [](double x, double y) { return x * y; },
-      /*gfx12=*/false, /*fp_status_supported=*/false, /*compatibility_status=*/false,
-      /*half_exact=*/false);
+      /*gfx12=*/false, /*fp_status_supported=*/false,
+      /*options=*/{.compatibility_reports_status = false, .half_exact = false});
 }
 
 namespace {
@@ -125,7 +125,7 @@ template <int Lanes, typename Call> void check_status(Call call) {
 TEST(FpMulF32W32Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
       rj_arith_v_mul_f32_w32_gfx12, [](double x, double y) { return x * y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/true, /*compatibility_status=*/true);
+      /*fp_status_supported=*/true, {.compatibility_reports_status = true});
   check_status<32>(rj_arith_v_mul_f32_w32_gfx12);
 }
 
@@ -133,14 +133,14 @@ TEST(FpMulF32W32Gfx12, Arithmetic) {
 TEST(FpMulF32W32Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 32>(
       rj_arith_v_mul_f32_w32, [](double x, double y) { return x * y; }, /*gfx12=*/false,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
 TEST(FpMulF32W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
       rj_arith_v_mul_f32_w64_gfx12, [](double x, double y) { return x * y; }, /*gfx12=*/true,
-      /*fp_status_supported=*/true, /*compatibility_status=*/true);
+      /*fp_status_supported=*/true, {.compatibility_reports_status = true});
   check_status<64>(rj_arith_v_mul_f32_w64_gfx12);
 }
 
@@ -148,7 +148,7 @@ TEST(FpMulF32W64Gfx12, Arithmetic) {
 TEST(FpMulF32W64Gfx11, Arithmetic) {
   rocjitsu::arith::test::check_binary_arithmetic<32, 64>(
       rj_arith_v_mul_f32_w64, [](double x, double y) { return x * y; }, /*gfx12=*/false,
-      /*fp_status_supported=*/false, /*compatibility_status=*/true);
+      /*fp_status_supported=*/false, {.compatibility_reports_status = true});
 }
 
 // Check arithmetic results, modifiers, masks, aliases, and supported FP status.
@@ -742,7 +742,8 @@ TEST(FpMulF16Cdna, RoundedMinimumNormal) {
       r.v[1][0] = 0x0400;
       const uint64_t flags =
           cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
-      ASSERT_EQ(call(flags, 1, RJ_ARITH_ALU_OMOD_2, r.v + 2, r.v, r.v + 1, nullptr),
+      uint32_t status = 0;
+      ASSERT_EQ(call(flags, 1, RJ_ARITH_ALU_OMOD_2, r.v + 2, r.v, r.v + 1, &status),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(r.v[2][0] & 0xffffU, 0x0800U);
     }

@@ -75,10 +75,12 @@ public:
   }
   void expect_drained() const {
     EXPECT_TRUE(state_.empty());
-    for (size_t i = 0; i < kWaitCounterCount; ++i)
+    for (size_t i = 0; i < kWaitCounterCount; ++i) {
       EXPECT_EQ(state_.outstanding(static_cast<WaitCounterKind>(i)), 0u);
-    for (size_t i = 0; i < MemoryWaitShadow::kRegisters; ++i)
+    }
+    for (size_t i = 0; i < MemoryWaitShadow::kRegisters; ++i) {
       EXPECT_FALSE(shadow_.test(i, true));
+    }
   }
   bool reports(unsigned reg, uint64_t lanes = 1, uint8_t bytes = 0xf, bool write = false) {
     const auto before = reports_;
@@ -104,8 +106,9 @@ public:
     config.lds_size_kb = 64;
     config.memory_wait_diagnostics = MemoryWaitDiagnostics::Off;
     rocjitsu::test::initialize_compute_unit(cu_, "shared_wait_cu", config, &memory_, &l2_);
-    if (!cu_)
+    if (!cu_) {
       return;
+    }
     PluginSinkConfig sinks;
     sink_ = &sinks.emplace<StringSink>();
     plugins_ = std::make_shared<ExecutionPluginGroup>(std::move(sinks));
@@ -115,8 +118,9 @@ public:
     cu_->set_plugin_group(plugins_);
     plugins_->onInit();
     wave_ = cu_->dispatch_wf(0, 0x100, 104, 256);
-    if (!wave_)
+    if (!wave_) {
       return;
+    }
     wave_->set_exec(1);
     std::array<Wavefront *, 1> waves{wave_};
     plugins_->onAmdgpuWorkgroupDispatched(1, 0, 256, 104, waves);
@@ -153,13 +157,15 @@ public:
     auto decoder = Decoder::create(cu_->arch());
     auto probe = decoder->decode_window(std::span<const uint32_t>(&kProbeWord, 1), wave_->pc);
     EXPECT_TRUE(probe.succeeded());
-    if (probe.failed())
+    if (probe.failed()) {
       return false;
+    }
     plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, *probe.value(), *wave_);
-    if (write)
+    if (write) {
       plugins_->onAmdgpuWriteVgprLanes(wave_, wave_->vgpr_alloc().base + reg, lanes, bytes);
-    else
+    } else {
       plugins_->onAmdgpuReadVgprLanes(wave_, wave_->vgpr_alloc().base + reg, lanes, bytes);
+    }
     return sink_->str().size() != before;
   }
 
@@ -236,8 +242,9 @@ TYPED_TEST(WaitHazardTest, TargetWaitEncodingsRetireTheirCounter) {
        {WaitCounterKind::Tensor, WaitCounterType::TENSORCNT}},
   };
   for (const auto &c : cases) {
-    if (!TypeParam::supports(c.counter))
+    if (!TypeParam::supports(c.counter)) {
       continue;
+    }
     SCOPED_TRACE(static_cast<unsigned>(c.arch));
     SCOPED_TRACE(c.word);
     TypeParam backend(c.arch);
@@ -253,8 +260,9 @@ TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
   for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
                     rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (uint32_t word : {0xbf890000u, 0xbf89fc07u, 0xbf89ffffu, 0xbf8a0000u}) {
-      if (arch != rocjitsu::IsaFamily::Rdna4 && word != 0xbf8a0000u)
+      if (arch != rocjitsu::IsaFamily::Rdna4 && word != 0xbf8a0000u) {
         continue;
+      }
       SCOPED_TRACE(static_cast<unsigned>(arch));
       SCOPED_TRACE(word);
       TypeParam backend(arch);
@@ -270,25 +278,30 @@ TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
                                         {WaitCounterKind::Tensor, WaitCounterType::TENSORCNT}};
       unsigned reg = 0;
       for (const auto counter : counters) {
-        if (!TypeParam::supports(counter))
+        if (!TypeParam::supports(counter)) {
           continue;
+        }
         if (arch != rocjitsu::IsaFamily::Cdna5 &&
-            (counter.core == WaitCounterKind::Async || counter.core == WaitCounterKind::Tensor))
+            (counter.core == WaitCounterKind::Async || counter.core == WaitCounterKind::Tensor)) {
           continue;
+        }
         if (arch != rocjitsu::IsaFamily::Rdna4 &&
-            (counter.core == WaitCounterKind::Sample || counter.core == WaitCounterKind::Bvh))
+            (counter.core == WaitCounterKind::Sample || counter.core == WaitCounterKind::Bvh)) {
           continue;
+        }
         // GFX11 scalar-memory results belong to the combined LGKM domain.
         auto domain = counter;
         if ((arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) &&
-            domain.core == WaitCounterKind::Km)
+            domain.core == WaitCounterKind::Km) {
           domain.core = WaitCounterKind::Ds;
+        }
         backend.load(domain, reg++, true);
       }
       backend.wait(word);
       backend.expect_drained();
-      for (unsigned i = 0; i < reg; ++i)
+      for (unsigned i = 0; i < reg; ++i) {
         EXPECT_FALSE(backend.reports(i)) << "register " << i;
+      }
     }
   }
 }
@@ -303,12 +316,14 @@ TYPED_TEST(WaitHazardTest, Rdna1WaitIdleRetiresAggregateCounters) {
       {WaitCounterKind::Exp, WaitCounterType::EXPCNT},
   };
   unsigned reg = 0;
-  for (const auto counter : counters)
+  for (const auto counter : counters) {
     backend.load(counter, reg++, true);
+  }
   backend.wait(0xbfa20000u); // RDNA1 s_wait_idle has a different opcode from GFX11/12.
   backend.expect_drained();
-  for (unsigned i = 0; i < reg; ++i)
+  for (unsigned i = 0; i < reg; ++i) {
     EXPECT_FALSE(backend.reports(i)) << "register " << i;
+  }
 }
 
 TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
@@ -344,10 +359,11 @@ TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitRetiresOnlyTheSpecifiedExports) {
         backend.wait(std::array{0xcd000009u | (threshold << 8u), 0x040e0501u});
         // The control uses a fresh backend: probing a hazard before this wait
         // could suppress a repeated report and hide a failure to retire it.
-        if (explicit_wait)
+        if (explicit_wait) {
           backend.wait(arch == rocjitsu::IsaFamily::Rdna4
                            ? 0xbfc40000u   // s_wait_expcnt 0.
                            : 0xbd7c0000u); // s_waitcnt_expcnt null, 0.
+        }
         EXPECT_EQ(backend.reports(5), !explicit_wait && threshold == 7);
         EXPECT_EQ(backend.reports(6), !explicit_wait && threshold != 0);
         EXPECT_TRUE(backend.reports(7));
@@ -408,8 +424,9 @@ TYPED_TEST(WaitHazardTest, UpperImmediateBitsAreIgnoredBeforeCheckingTheSentinel
        {WaitCounterKind::Tensor, WaitCounterType::TENSORCNT}},
   };
   for (const auto &c : cases) {
-    if (!TypeParam::supports(c.counter))
+    if (!TypeParam::supports(c.counter)) {
       continue;
+    }
     for (uint32_t count : {0u, 1u, c.mask}) {
       // Check both the bit just above the counter field and a higher SIMM16 bit.
       for (uint32_t upper : {c.mask + 1u, 0x100u}) {

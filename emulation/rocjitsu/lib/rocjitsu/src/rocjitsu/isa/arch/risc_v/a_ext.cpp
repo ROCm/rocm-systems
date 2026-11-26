@@ -481,10 +481,12 @@ void AmomaxuDInst::execute_impl(HartState &ctx) {
 // All A-extension atomics share the same aq/rl modifier pattern.
 #define RV_ATOMIC_BUILD_MODIFIERS(cls)                                                             \
   void cls::build_modifiers(std::string &out) const {                                              \
-    if (inst_.funct7 & 0x02)                                                                       \
+    if (inst_.funct7 & 0x02) {                                                                     \
       out += " aq";                                                                                \
-    if (inst_.funct7 & 0x01)                                                                       \
+    }                                                                                              \
+    if (inst_.funct7 & 0x01) {                                                                     \
       out += " rl";                                                                                \
+    }                                                                                              \
   }
 
 RV_ATOMIC_BUILD_MODIFIERS(LrWInst)

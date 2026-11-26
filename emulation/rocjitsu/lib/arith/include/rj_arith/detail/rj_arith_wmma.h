@@ -248,6 +248,19 @@ constexpr uint32_t RJ_ARITH_WMMA_NEG_HI_A = 1U << 3;
 constexpr uint32_t RJ_ARITH_WMMA_NEG_HI_B = 1U << 4;
 constexpr uint32_t RJ_ARITH_WMMA_ABS_C = 1U << 5;
 
+// gfx1251 FP64 WMMA: four A/B VGPRs and sixteen C/D VGPRs, each with 32 lane words.
+// A[row][k]/B[col][k] use pair 2*(k%2), lane row-or-col+16*(k/2).
+// C/D[row][col] use pair 2*(row%8), lane col+16*(row/8). All inputs precede stores.
+// NEG_LO_A/B, ABS_C then NEG_C are supported; other instruction flags are rejected.
+// Common guest rounding, denormal, IEEE, DX10 and FP16_OVFL flags are ignored.
+// Four ordered nearest-even FMA steps preserve subnormals under the default host environment.
+// Loose, allow-Loose and Compatibility share this inherited model; strict empirical modes are
+// unsupported. There is no EXEC argument: this computes the whole tile; decoded execution requires
+// Wave32 with full EXEC. Overlap is supported; errors leave D unchanged.
+int rj_arith_v_wmma_f64_16x16x4_f64_w32(uint64_t flags, uint64_t instruction_flags,
+                                        uint32_t *const *d, const uint32_t *const *a,
+                                        const uint32_t *const *b, const uint32_t *const *c);
+
 // RDNA3 packed WMMA OPSEL selects the same half of C and D. The other half
 // of D is preserved. This is not a packed adjacent-row output as on RDNA4.
 constexpr uint32_t RJ_ARITH_WMMA_HIGH_C_D = 1U << 8;

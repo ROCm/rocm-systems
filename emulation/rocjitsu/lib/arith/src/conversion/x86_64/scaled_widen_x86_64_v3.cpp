@@ -12,13 +12,13 @@
 
 namespace rocjitsu::arith::x86_64_v3 {
 
-// Widen narrow codes, retaining sign for zero, infinity and canonical NaN.
+// Widen narrow codes, retaining sign for zero and infinity and emitting -qNaN on NaNs.
 inline __m256 decode(__m256i raw, ScaledSource source) {
   if (source == ScaledSource::Fp8) {
-    return widen_fp8<false>(raw);
+    return widen_fp8<false, true>(raw);
   }
   if (source == ScaledSource::Bf8) {
-    return widen_fp8<true>(raw);
+    return widen_fp8<true, true>(raw);
   }
   const auto magnitude = _mm256_setr_ps(0, 0.5f, 1, 1.5f, 2, 3, 4, 6);
   auto value = _mm256_permutevar8x32_ps(magnitude, _mm256_and_si256(raw, _mm256_set1_epi32(7)));
@@ -32,9 +32,9 @@ namespace rocjitsu::arith {
 // Execute a validated wave, reading both sources before any possibly aliased
 // destination store. All formats share scaling, masking and layout handling.
 void scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledSource source,
-                            ScaledDestination destination, bool packed, bool saturate, int shift,
-                            int destination_shift, uint32_t *const *d, const uint32_t *a,
-                            const uint32_t *b) {
+                            ScaledDestination destination, bool packed, bool saturate,
+                            bool flush_output, int shift, int destination_shift, uint32_t *const *d,
+                            const uint32_t *a, const uint32_t *b) {
   for (int lane = 0; lane < lanes; lane += 8) {
     if (uint8_t(exec_mask >> lane) == 0) {
       continue;
@@ -52,17 +52,18 @@ void scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledSource source,
     // unnecessary infinity arithmetic before that override.
     scale_bits = _mm256_blendv_epi8(scale_bits, _mm256_set1_epi32(0x3f800000), exceptional);
     auto scale = _mm256_castsi256_ps(scale_bits);
-    const int nan = destination == ScaledDestination::F32   ? 0x7fc00000
-                    : destination == ScaledDestination::F16 ? 0x7e00
-                                                            : 0x7fc0;
+    const int nan = destination == ScaledDestination::F32   ? int(0xffc00000U)
+                    : destination == ScaledDestination::F16 ? 0xfe00
+                                                            : 0xffc0;
     auto low = x86_64_v3::scaled_widen_detail::encode(
-        _mm256_mul_ps(x86_64_v3::decode(raw, source), scale), destination, saturate);
+        _mm256_mul_ps(x86_64_v3::decode(raw, source), scale), destination, saturate, flush_output);
     low = _mm256_blendv_epi8(low, _mm256_set1_epi32(nan), exceptional);
     auto high = _mm256_setzero_si256();
     if (packed) {
       auto upper = _mm256_srl_epi32(raw, _mm_cvtsi32_si128(source == ScaledSource::Fp4 ? 4 : 8));
       high = x86_64_v3::scaled_widen_detail::encode(
-          _mm256_mul_ps(x86_64_v3::decode(upper, source), scale), destination, saturate);
+          _mm256_mul_ps(x86_64_v3::decode(upper, source), scale), destination, saturate,
+          flush_output);
       high = _mm256_blendv_epi8(high, _mm256_set1_epi32(nan), exceptional);
       if (destination != ScaledDestination::F32) {
         low = _mm256_or_si256(low, _mm256_slli_epi32(high, 16));

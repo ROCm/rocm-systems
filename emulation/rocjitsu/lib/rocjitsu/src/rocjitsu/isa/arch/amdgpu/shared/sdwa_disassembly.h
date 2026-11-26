@@ -23,32 +23,39 @@ namespace rocjitsu::amdgpu::sdwa {
 /// negate and absolute-value modifiers.
 inline void append_source(std::string &out, const Operand &source, SourceModifierFormat format,
                           bool sign_extend, bool negate, bool absolute) {
-  if (format == SourceModifierFormat::NONE && sign_extend)
+  if (format == SourceModifierFormat::NONE && sign_extend) {
     out += "sext(";
-  if (format != SourceModifierFormat::NONE && negate)
+  }
+  if (format != SourceModifierFormat::NONE && negate) {
     out += '-';
-  if (format != SourceModifierFormat::NONE && absolute)
+  }
+  if (format != SourceModifierFormat::NONE && absolute) {
     out += '|';
+  }
   out += source.name();
-  if (format != SourceModifierFormat::NONE && absolute)
+  if (format != SourceModifierFormat::NONE && absolute) {
     out += '|';
-  if (format == SourceModifierFormat::NONE && sign_extend)
+  }
+  if (format == SourceModifierFormat::NONE && sign_extend) {
     out += ')';
+  }
 }
 
 inline std::string selection_name(uint32_t selection) {
   constexpr std::array<std::string_view, 7> names = {"BYTE_0", "BYTE_1", "BYTE_2", "BYTE_3",
                                                      "WORD_0", "WORD_1", "DWORD"};
-  if (selection < names.size())
+  if (selection < names.size()) {
     return std::string(names[selection]);
+  }
   return "invalid(" + std::to_string(selection) + ")";
 }
 
 inline std::string destination_unused_name(uint32_t unused) {
   constexpr std::array<std::string_view, 3> names = {"UNUSED_PAD", "UNUSED_SEXT",
                                                      "UNUSED_PRESERVE"};
-  if (unused < names.size())
+  if (unused < names.size()) {
     return std::string(names[unused]);
+  }
   return "invalid(" + std::to_string(unused) + ")";
 }
 
@@ -66,8 +73,9 @@ inline void append_destination_attributes(std::string &out, bool clamp, uint32_t
                                           uint32_t destination_selection,
                                           uint32_t destination_unused, uint32_t src0_selection,
                                           const Operand *src1, uint32_t src1_selection) {
-  if (clamp)
+  if (clamp) {
     out += " clamp";
+  }
   switch (omod) {
   case 1:
     out += " mul:2";

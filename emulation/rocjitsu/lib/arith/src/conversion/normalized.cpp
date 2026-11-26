@@ -409,52 +409,119 @@ int rj_arith_v_cvt_pk_norm_u16_f16_w64(uint64_t flags, uint64_t exec_mask, uint6
   return rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx12(flags, exec_mask, mode, d, a, b, nullptr);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_norm_i16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                            uint64_t instruction_flags, uint32_t *const *d,
                                            const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<false, rocjitsu::arith::NormalizedForm::Half>(flags, exec_mask, instruction_flags,
-                                                               d, a, nullptr, false);
+  return convert<false, rocjitsu::arith::NormalizedForm::Half, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_norm_i16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                            uint64_t instruction_flags, uint32_t *const *d,
                                            const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<false, rocjitsu::arith::NormalizedForm::Half>(
+  return convert_wave64<false, rocjitsu::arith::NormalizedForm::Half, true>(
       flags, exec_mask, instruction_flags, d, a, nullptr, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_norm_u16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                            uint64_t instruction_flags, uint32_t *const *d,
                                            const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert<true, rocjitsu::arith::NormalizedForm::Half>(flags, exec_mask, instruction_flags,
-                                                              d, a, nullptr, false);
+  return convert<true, rocjitsu::arith::NormalizedForm::Half, true>(
+      flags, exec_mask, instruction_flags, d, a, nullptr, false);
 }
 
-// Convert with gfx942/gfx950 low-half zero-extension and high-half preservation.
+// Convert with gfx942 low-half zero-extension and high-half preservation.
 int rj_arith_v_cvt_norm_u16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                            uint64_t instruction_flags, uint32_t *const *d,
                                            const uint32_t *const *a) {
-  flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  return convert_wave64<true, rocjitsu::arith::NormalizedForm::Half>(
+  return convert_wave64<true, rocjitsu::arith::NormalizedForm::Half, true>(
       flags, exec_mask, instruction_flags, d, a, nullptr, false);
+}
+
+// gfx950 shares the gfx942 numeric model; empirically exact on MI350X.
+int rj_arith_v_cvt_norm_i16_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a) {
+  return rj_arith_v_cvt_norm_i16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_norm_i16_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a) {
+  return rj_arith_v_cvt_norm_i16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_norm_u16_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a) {
+  return rj_arith_v_cvt_norm_u16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_norm_u16_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a) {
+  return rj_arith_v_cvt_norm_u16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the zero-extending unary normalized
+// model; strict exact stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_norm_i16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_norm_i16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_norm_i16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_norm_i16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_norm_u16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_norm_u16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a);
+}
+
+int rj_arith_v_cvt_norm_u16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_norm_u16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a);
 }
 
 // gfx1250 inherits the gfx12 numeric model; strict exact is unsupported pending gfx1250 captures.
@@ -593,94 +660,194 @@ int rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mas
   return rj_arith_v_cvt_pk_norm_u16_f32_w64(flags, exec_mask, instruction_flags, d, a, b);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
+// gfx942 shares the RDNA3 packed normalized model; empirically exact on MI300X.
 int rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
                                               uint32_t *trapsts) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
-    return error;
-  }
   return rj_arith_v_cvt_pk_norm_i16_f16_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
                                               uint32_t *trapsts) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
-    return error;
-  }
   return rj_arith_v_cvt_pk_norm_i16_f16_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
                                               uint32_t *trapsts) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
-    return error;
-  }
   return rj_arith_v_cvt_pk_norm_u16_f16_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
                                               uint32_t *trapsts) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
-    return error;
-  }
   return rj_arith_v_cvt_pk_norm_u16_f16_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
-    return error;
-  }
   return rj_arith_v_cvt_pk_norm_i16_f32_w32(flags, exec_mask, instruction_flags, d, a, b);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
-    return error;
-  }
   return rj_arith_v_cvt_pk_norm_i16_f32_w64(flags, exec_mask, instruction_flags, d, a, b);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
-    return error;
-  }
   return rj_arith_v_cvt_pk_norm_u16_f32_w32(flags, exec_mask, instruction_flags, d, a, b);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b) {
+  return rj_arith_v_cvt_pk_norm_u16_f32_w64(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// gfx950 shares the gfx942 numeric model; empirically exact on MI350X.
+int rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b,
+                                              uint32_t *trapsts) {
+  return rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                   trapsts);
+}
+
+int rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b,
+                                              uint32_t *trapsts) {
+  return rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                   trapsts);
+}
+
+int rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b,
+                                              uint32_t *trapsts) {
+  return rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                   trapsts);
+}
+
+int rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b,
+                                              uint32_t *trapsts) {
+  return rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                   trapsts);
+}
+
+int rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b) {
+  return rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+int rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b) {
+  return rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+int rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b) {
+  return rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+int rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                              uint64_t instruction_flags, uint32_t *const *d,
+                                              const uint32_t *const *a, const uint32_t *const *b) {
+  return rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 packed normalized model;
+// strict exact stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                   trapsts);
+}
+
+int rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                   trapsts);
+}
+
+int rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                   trapsts);
+}
+
+int rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                   trapsts);
+}
+
+int rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
     return error;
   }
-  return rj_arith_v_cvt_pk_norm_u16_f32_w64(flags, exec_mask, instruction_flags, d, a, b);
+  return rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+int rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+int rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b);
+}
+
+int rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/false)) {
+    return error;
+  }
+  return rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b);
 }

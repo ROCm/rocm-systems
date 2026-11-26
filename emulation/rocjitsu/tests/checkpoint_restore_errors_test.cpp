@@ -120,22 +120,27 @@ struct InvalidCheckpoint {
     wave.add_gfx10_resources(wave_resources);
 
     wave.add_kernel_wave_size(input.kernel_wave_size);
-    if (input.rdna2_process_id)
+    if (input.rdna2_process_id) {
       wave.add_rdna2_process_id(*input.rdna2_process_id);
+    }
     wave.add_rdna2_internal_address_space(input.rdna2_internal_address_space);
     wave.add_halted(input.halted);
-    if (has_lds)
+    if (has_lds) {
       wave.add_lds_window(&empty_window);
-    if (sgprs.o)
+    }
+    if (sgprs.o) {
       wave.add_sgprs(sgprs);
-    if (input.num_sgprs)
+    }
+    if (input.num_sgprs) {
       wave.add_num_sgprs(*input.num_sgprs);
+    }
     if (!input.program.empty()) {
       wave.add_pc(0x1000);
       wave.add_exec(1);
     }
-    if (input.graphics_wait)
+    if (input.graphics_wait) {
       wave.add_graphics_wait(*input.graphics_wait);
+    }
     wave.add_status(input.status);
     wave.add_wf_id(input.wf_id);
     wave.add_sleep_cycles(input.sleep_cycles);
@@ -145,8 +150,9 @@ struct InvalidCheckpoint {
     wave.add_barrier_complete_mask(input.barrier_complete_mask);
     wave.add_vgpr_lane_count(input.vgpr_lane_count);
     wave.add_vgprs(vgprs);
-    if (input.num_vgprs)
+    if (input.num_vgprs) {
       wave.add_num_vgprs(*input.num_vgprs);
+    }
     wave.add_accum_vgpr_base(input.accum_vgpr_base);
     auto wave_offset = wave.Finish();
     auto waves = builder.CreateVector(&wave_offset, 1);
@@ -159,8 +165,9 @@ struct InvalidCheckpoint {
 
     state.add_wavefronts(waves);
     state.add_lds(lds);
-    if (input.has_lds_cursor)
+    if (input.has_lds_cursor) {
       state.add_lds_cursor(0);
+    }
     state.add_rdna2_register_blocks(blocks);
     state.add_rdna4_workgroups(groups);
     auto cu = state.Finish();
@@ -174,15 +181,17 @@ struct InvalidCheckpoint {
     memory = fb::CreateGpuMemoryState(builder, builder.CreateVector(&page, 1));
   }
   flatbuffers::Offset<fb::CommandProcessorState> cp;
-  if (input.has_cp_cursor || input.dispatch_cursor)
+  if (input.has_cp_cursor || input.dispatch_cursor) {
     cp = fb::CreateCommandProcessorState(
         builder, 0, 0, 0,
         builder.CreateVector(std::vector<uint32_t>{input.dispatch_cursor.value_or(1)}));
+  }
   auto checkpoint = fb::CreateSimulationCheckpoint(
       builder, 0, input.missing_config ? 0 : simulation, cus, cp, memory);
   builder.Finish(checkpoint);
-  if (testing::AssertionResult result = file.initialize("rocjitsu-restore-errors-"); !result)
+  if (testing::AssertionResult result = file.initialize("rocjitsu-restore-errors-"); !result) {
     return result;
+  }
   return file.write(std::string_view(reinterpret_cast<const char *>(builder.GetBufferPointer()),
                                      builder.GetSize()));
 }
@@ -419,12 +428,15 @@ TEST(CheckpointTest, RetiredShaderExportRowsSurviveASecondExportAfterRestore) {
     auto *wave = cu->wf(0);
     ASSERT_NE(wave, nullptr);
     wave->set_exec(5);
-    for (unsigned reg : {4u, 5u})
-      for (unsigned lane : {0u, 2u})
+    for (unsigned reg : {4u, 5u}) {
+      for (unsigned lane : {0u, 2u}) {
         cu->write_vgpr(wave->vgpr_alloc().base + reg, lane, 0x11220000 + reg * 256 + lane);
+      }
+    }
     const auto next = wave->pc + 12;
-    for (unsigned i = 0; i < 32 && wave->pc != next; ++i)
+    for (unsigned i = 0; i < 32 && wave->pc != next; ++i) {
       ASSERT_TRUE(cu->step());
+    }
     ASSERT_EQ(wave->pc, next);
     ASSERT_EQ(wave->shader_exports().size(), 1u);
     test::ScopedTempFile saved;
@@ -437,8 +449,9 @@ TEST(CheckpointTest, RetiredShaderExportRowsSurviveASecondExportAfterRestore) {
     ASSERT_EQ(copy->wf(0)->shader_exports().size(), 1u);
     for (auto *device : {cu, copy}) {
       auto *live = device->wf(0);
-      for (unsigned i = 0; i < 32 && live->shader_exports().size() < 2; ++i)
+      for (unsigned i = 0; i < 32 && live->shader_exports().size() < 2; ++i) {
         ASSERT_TRUE(device->step());
+      }
       ASSERT_EQ(live->shader_exports().size(), 2u);
       for (unsigned target = 0; target < 2; ++target) {
         const auto &row = live->shader_exports()[target];
@@ -447,8 +460,9 @@ TEST(CheckpointTest, RetiredShaderExportRowsSurviveASecondExportAfterRestore) {
         EXPECT_EQ(row.components, 1u);
         EXPECT_EQ(row.done, bool(target));
         EXPECT_EQ(row.valid_lanes, 5u);
-        for (unsigned lane : {0u, 2u})
+        for (unsigned lane : {0u, 2u}) {
           EXPECT_EQ(row.values[lane][0], 0x11220000u + (4 + target) * 256 + lane);
+        }
       }
     }
   }
@@ -467,8 +481,9 @@ TEST(CheckpointTest, GraphicsGrantMigrationAndHeldFrontendSurvivePublicRestore) 
   for (const std::string_view arch : {"rdna3", "rdna3_5", "rdna4"}) {
     const bool gfx12 = arch == "rdna4";
     for (const auto op : {Op::Export, Op::Parameters, Op::WaitEvent}) {
-      if ((gfx12 && op == Op::Parameters) || (op == Op::WaitEvent && arch != "rdna3_5"))
+      if ((gfx12 && op == Op::Parameters) || (op == Op::WaitEvent && arch != "rdna3_5")) {
         continue;
+      }
       const auto mask = op == Op::Parameters ? Wavefront::kStatusParamReadyMask
                                              : Wavefront::kStatusExportReadyMask;
       const auto parked = op == Op::Parameters ? WfState::PARAM_WAIT : WfState::EXPORT_WAIT;
@@ -486,18 +501,20 @@ TEST(CheckpointTest, GraphicsGrantMigrationAndHeldFrontendSurvivePublicRestore) 
         record.has_lds_state = true;
         record.has_cp_cursor = format != Format::Legacy;
         record.has_lds_cursor = format == Format::ResourceOnly || format == Format::Marked;
-        if (format == Format::ExplicitLaunch)
+        if (format == Format::ExplicitLaunch) {
           record.graphics_wait = fb::GraphicsWait_LaunchDefaults;
-        else if (format == Format::Marked)
+        } else if (format == Format::Marked) {
           record.graphics_wait = fb::GraphicsWait_None;
+        }
 
         record.program = {nop};
-        if (op == Op::Parameters)
+        if (op == Op::Parameters) {
           record.program.insert(record.program.end(), parameter.begin(), parameter.end());
-        else if (op == Op::WaitEvent)
+        } else if (op == Op::WaitEvent) {
           record.program.push_back(wait_event);
-        else
+        } else {
           record.program.insert(record.program.end(), words.begin(), words.end());
+        }
         record.program.push_back(endpgm);
         test::ScopedTempFile legacy;
         ASSERT_TRUE(write_checkpoint(legacy, record));
@@ -540,8 +557,9 @@ TEST(CheckpointTest, GraphicsGrantMigrationAndHeldFrontendSurvivePublicRestore) 
             test::ScopedTempFile file;
             const auto initialized = file.initialize("rocjitsu-graphics-checkpoint-");
             EXPECT_TRUE(initialized);
-            if (!initialized)
+            if (!initialized) {
               return Vm(nullptr, &rj_vm_destroy);
+            }
             EXPECT_EQ(rj_vm_save_checkpoint(vm.get(), file.path().c_str(), 0),
                       ROCJITSU_STATUS_SUCCESS);
             return restore(file.path());
@@ -661,8 +679,9 @@ TEST(CheckpointRestoreErrorsTest, Rdna2RestoresSharedResourcesAndRegisterBlockPl
                           .kernel_wave_size = 32,
                           .num_sgprs = 96};
   for (bool explicit_block : {false, true}) {
-    if (explicit_block)
+    if (explicit_block) {
       input.register_blocks = std::vector<uint32_t>{1};
+    }
     test::ScopedTempFile file;
     ASSERT_TRUE(write_checkpoint(file, input));
     auto loaded = config::restore_checkpoint(file.path(), {});
