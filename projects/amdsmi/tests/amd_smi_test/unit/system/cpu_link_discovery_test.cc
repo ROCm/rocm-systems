@@ -12,15 +12,25 @@
 
 #include <gtest/gtest.h>
 
+#include <dirent.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <fstream>
 #include <iostream>
+#include <limits>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi_cpu_link.h"
 #include "rocm_smi/rocm_smi_io_link.h"
@@ -46,7 +56,7 @@ std::string RunCommandCaptureOutput(const std::string& cmd) {
   return out;
 }
 
-TEST(SystemUnit, DebugDumpXgmiCliOutput) {
+void DumpXgmiCliOutputOnce(int iteration) {
   std::array<char, 4096> self_path{};
   ssize_t len = readlink("/proc/self/exe", self_path.data(), self_path.size() - 1);
   std::string exe_dir;
@@ -65,23 +75,243 @@ TEST(SystemUnit, DebugDumpXgmiCliOutput) {
   }
 
   for (const auto& cmd : candidates) {
-    std::cerr << "[CPU_LINK_DEBUG][xgmi-cli] trying: " << cmd << "\n";
+    std::cerr << "[CPU_LINK_DEBUG][xgmi-cli][iter " << iteration << "] trying: " << cmd << "\n";
     std::string out = RunCommandCaptureOutput(cmd);
-    std::cerr << "[CPU_LINK_DEBUG][xgmi-cli] ---- output begin ----\n"
-              << out << "\n[CPU_LINK_DEBUG][xgmi-cli] ---- output end ----\n";
+    std::cerr << "[CPU_LINK_DEBUG][xgmi-cli][iter " << iteration << "] ---- output begin ----\n"
+              << out << "\n[CPU_LINK_DEBUG][xgmi-cli][iter " << iteration
+              << "] ---- output end ----\n";
   }
 }
 
+// Run twice: the CI history shows this failing identically on every nightly,
+// which points to something deterministic rather than a race -- but a second,
+// cheap run costs nothing and would catch it if we're wrong about that.
+TEST(SystemUnit, DebugDumpXgmiCliOutput) {
+  DumpXgmiCliOutputOnce(1);
+  DumpXgmiCliOutputOnce(2);
+}
+
 // TEMP DIAGNOSTIC -- not for commit. Dumps the real /sys/class/kfd/kfd/topology
-// tree (gpu_id + io_links/*/properties for every node) as a base64 tarball, so
-// it can be extracted from the CI job log afterward and replayed offline via
-// the KfdNodesPathRoot test hook -- no need to re-dispatch CI to try a fix
-// against this exact topology.
+// tree as a base64 tarball, so it can be extracted and replayed offline
+// afterward (e.g. via the KfdNodesPathRoot test hook) without needing to
+// re-dispatch CI.
 TEST(SystemUnit, DebugDumpKfdTopologySysfs) {
+  // Deliberately scoped to just the KFD topology tree -- exactly what
+  // DiscoverGpuCpuLinks() reads, confirmed fast (~10ms, ~10KB) locally.
+  // An earlier version of this also tried to tar each GPU's real PCI device
+  // directory (to capture gpu_metrics/xgmi_port_num for offline replay), but
+  // that combination made tar pathologically slow locally (60s+ timeout) for
+  // reasons not fully root-caused, and isn't needed anyway: gpu_metrics is
+  // already dumped via the public API in DebugDumpRawGpuMetricsAndLinkMetrics
+  // below, and xgmi_port_num presence is checked directly in
+  // DebugDumpDriverVersionInfo. Not worth the risk of eating the one CI run
+  // we get on a tool quirk for data we already have another way.
   std::string out = RunCommandCaptureOutput(
-      "tar czf - -C / sys/class/kfd/kfd/topology sys/class/drm 2>/dev/null | base64 -w 0");
+      "timeout 20 tar czf - -C / sys/class/kfd/kfd/topology 2>/dev/null | base64 -w 0");
   std::cerr << "[CPU_LINK_DEBUG][sysfs-capture] ---- BEGIN KFD TOPOLOGY TARBALL ----\n"
             << out << "\n[CPU_LINK_DEBUG][sysfs-capture] ---- END KFD TOPOLOGY TARBALL ----\n";
+}
+
+namespace {
+std::vector<int> ListNumericEntries(const std::string& dir_path) {
+  std::vector<int> result;
+  DIR* dir = opendir(dir_path.c_str());
+  if (!dir) return result;
+  struct dirent* ent;
+  while ((ent = readdir(dir)) != nullptr) {
+    std::string name = ent->d_name;
+    if (!name.empty() && std::all_of(name.begin(), name.end(), [](unsigned char c) {
+          return std::isdigit(c);
+        })) {
+      result.push_back(std::stoi(name));
+    }
+  }
+  closedir(dir);
+  std::sort(result.begin(), result.end());
+  return result;
+}
+
+// Mirrors OpenKFDNodeFile()/ReadKFDGpuId() exactly (rocm_smi_kfd.cc): stat()
+// then open()+read(), reporting the literal errno at whichever step fails --
+// this is the precise question "what errno does DiscoverGpuCpuLinks() hit",
+// answered directly instead of inferred from a sysfs snapshot.
+std::string ProbeFile(const std::string& path) {
+  struct stat st{};
+  std::ostringstream oss;
+  if (stat(path.c_str(), &st) != 0) {
+    oss << "stat() FAILED errno=" << errno << " (" << strerror(errno) << ")";
+    return oss.str();
+  }
+  if (!S_ISREG(st.st_mode)) {
+    oss << "stat() OK but not a regular file (mode=" << std::oct << st.st_mode << std::dec << ")";
+    return oss.str();
+  }
+  std::ifstream f(path);
+  if (!f.is_open()) {
+    oss << "open() FAILED errno=" << errno << " (" << strerror(errno) << ")";
+    return oss.str();
+  }
+  std::ostringstream content;
+  content << f.rdbuf();
+  std::string c = content.str();
+  c.erase(std::remove(c.begin(), c.end(), '\n'), c.end());
+  if (c.size() > 120) c = c.substr(0, 120) + "...(truncated)";
+  oss << "OK content=[" << c << "]";
+  return oss.str();
+}
+}  // namespace
+
+TEST(SystemUnit, DebugProbeKfdNodeFileAccess) {
+  const std::string topo_root = "/sys/class/kfd/kfd/topology/nodes";
+  std::vector<int> nodes = ListNumericEntries(topo_root);
+  std::cerr << "[CPU_LINK_DEBUG][file-probe] found " << nodes.size()
+            << " topology nodes under " << topo_root << "\n";
+
+  for (int n : nodes) {
+    std::string node_dir = topo_root + "/" + std::to_string(n);
+    std::cerr << "[CPU_LINK_DEBUG][file-probe] node=" << n
+              << " gpu_id: " << ProbeFile(node_dir + "/gpu_id") << "\n";
+
+    std::vector<int> links = ListNumericEntries(node_dir + "/io_links");
+    std::cerr << "[CPU_LINK_DEBUG][file-probe] node=" << n << " has " << links.size()
+              << " io_links entries\n";
+    for (int l : links) {
+      std::string props_path = node_dir + "/io_links/" + std::to_string(l) + "/properties";
+      std::string result = ProbeFile(props_path);
+      std::cerr << "[CPU_LINK_DEBUG][file-probe] node=" << n << " io_link=" << l
+                << " properties: " << result << "\n";
+
+      // Mirror DiscoverGpuCpuLinks() exactly: parse node_to out of properties,
+      // then probe THAT node's gpu_id -- the literal second file read that
+      // can return AMDSMI_STATUS_FILE_ERROR.
+      std::ifstream pf(props_path);
+      if (pf.is_open()) {
+        std::string key;
+        uint64_t val;
+        while (pf >> key >> val) {
+          if (key == "node_to") {
+            std::string target_gpu_id = topo_root + "/" + std::to_string(val) + "/gpu_id";
+            std::cerr << "[CPU_LINK_DEBUG][file-probe]   -> node_to=" << val
+                      << " gpu_id: " << ProbeFile(target_gpu_id) << "\n";
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+// TEMP DIAGNOSTIC -- not for commit. Calls the raw public APIs directly (not
+// through the CLI) for every discovered GPU, printing xgmi_read_data_acc /
+// xgmi_write_data_acc / link_speed / link_width with explicit sentinel
+// (UINT64_MAX / UINT16_MAX) flags -- this is what the xgmi CLI's Read/Write
+// "N/A" columns ultimately come from, and lets us tell apart "PMFW never
+// populates this for a GPU<->CPU link" from "amdsmi_get_link_metrics()'s
+// xgmi_port_num-gated num_links hides an otherwise-valid value" without
+// needing another CI run to check.
+TEST(SystemUnit, DebugDumpRawGpuMetricsAndLinkMetrics) {
+  amdsmi_status_t init_status = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+  std::cerr << "[CPU_LINK_DEBUG][raw-metrics] amdsmi_init status=" << init_status << "\n";
+  if (init_status != AMDSMI_STATUS_SUCCESS) {
+    std::cerr << "[CPU_LINK_DEBUG][raw-metrics] init failed, skipping\n";
+    return;
+  }
+
+  amdsmi_socket_handle sockets[32];
+  uint32_t socket_count = 32;
+  if (amdsmi_get_socket_handles(&socket_count, sockets) != AMDSMI_STATUS_SUCCESS) {
+    std::cerr << "[CPU_LINK_DEBUG][raw-metrics] amdsmi_get_socket_handles failed\n";
+    amdsmi_shut_down();
+    return;
+  }
+  std::cerr << "[CPU_LINK_DEBUG][raw-metrics] socket_count=" << socket_count << "\n";
+
+  for (uint32_t s = 0; s < socket_count; ++s) {
+    amdsmi_processor_handle procs[32];
+    uint32_t proc_count = 32;
+    if (amdsmi_get_processor_handles(sockets[s], &proc_count, procs) != AMDSMI_STATUS_SUCCESS) {
+      continue;
+    }
+    for (uint32_t p = 0; p < proc_count; ++p) {
+      amdsmi_bdf_t bdf{};
+      amdsmi_get_gpu_device_bdf(procs[p], &bdf);
+      std::cerr << "[CPU_LINK_DEBUG][raw-metrics] socket=" << s << " proc=" << p
+                << " bdf=" << std::hex << bdf.domain_number << ":"
+                << static_cast<int>(bdf.bus_number) << ":" << static_cast<int>(bdf.device_number)
+                << "." << static_cast<int>(bdf.function_number) << std::dec << "\n";
+
+      uint32_t num_cpu_links = 0;
+      amdsmi_status_t cpu_st = amdsmi_get_gpu_cpu_links(procs[p], &num_cpu_links, nullptr);
+      std::cerr << "[CPU_LINK_DEBUG][raw-metrics]   amdsmi_get_gpu_cpu_links status=" << cpu_st
+                << " num_cpu_links=" << num_cpu_links << "\n";
+
+      amdsmi_link_metrics_t link_metrics{};
+      amdsmi_status_t link_st = amdsmi_get_link_metrics(procs[p], &link_metrics);
+      std::cerr << "[CPU_LINK_DEBUG][raw-metrics]   amdsmi_get_link_metrics status=" << link_st
+                << " num_links=" << link_metrics.num_links << "\n";
+      if (link_st == AMDSMI_STATUS_SUCCESS) {
+        for (uint32_t i = 0; i < link_metrics.num_links && i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
+          const auto& l = link_metrics.links[i];
+          bool read_max = l.read == std::numeric_limits<uint64_t>::max();
+          bool write_max = l.write == std::numeric_limits<uint64_t>::max();
+          std::cerr << "[CPU_LINK_DEBUG][raw-metrics]     link[" << i
+                    << "] bit_rate=" << l.bit_rate << " max_bandwidth=" << l.max_bandwidth
+                    << " link_type=" << l.link_type << " read=" << l.read
+                    << (read_max ? " (SENTINEL)" : "") << " write=" << l.write
+                    << (write_max ? " (SENTINEL)" : "") << "\n";
+        }
+      }
+
+      amdsmi_gpu_metrics_t metrics{};
+      amdsmi_status_t metrics_st = amdsmi_get_gpu_metrics_info(procs[p], &metrics);
+      std::cerr << "[CPU_LINK_DEBUG][raw-metrics]   amdsmi_get_gpu_metrics_info status="
+                << metrics_st << "\n";
+      if (metrics_st == AMDSMI_STATUS_SUCCESS) {
+        std::cerr << "[CPU_LINK_DEBUG][raw-metrics]   xgmi_link_width=" << metrics.xgmi_link_width
+                  << " xgmi_link_speed=" << metrics.xgmi_link_speed << "\n";
+        constexpr uint64_t kU64Max = std::numeric_limits<uint64_t>::max();
+        constexpr uint16_t kU16Max = std::numeric_limits<uint16_t>::max();
+        for (int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
+          uint64_t r = metrics.xgmi_read_data_acc[i];
+          uint64_t w = metrics.xgmi_write_data_acc[i];
+          uint16_t ls = metrics.xgmi_link_status[i];
+          std::cerr << "[CPU_LINK_DEBUG][raw-metrics]     gpu_metrics.xgmi[" << i
+                    << "] read=" << r << (r == kU64Max ? " (SENTINEL)" : "") << " write=" << w
+                    << (w == kU64Max ? " (SENTINEL)" : "") << " link_status=" << ls
+                    << (ls == kU16Max ? " (SENTINEL)" : "") << "\n";
+        }
+      }
+    }
+  }
+  amdsmi_shut_down();
+}
+
+// TEMP DIAGNOSTIC -- not for commit. Driver/kernel version context for the
+// "do we need a particular driver version for this?" question -- cheap to
+// grab now, nothing we could add later without another CI run.
+TEST(SystemUnit, DebugDumpDriverVersionInfo) {
+  std::string out = RunCommandCaptureOutput(
+      "echo ===uname===; uname -a; "
+      "echo ===amdgpu_module_version===; cat /sys/module/amdgpu/version 2>&1; "
+      "echo ===modinfo_amdgpu===; modinfo amdgpu 2>&1 | grep -iE 'version|vermagic'; "
+      "echo ===xgmi_port_num_presence===; "
+      // Several /sys/class/drm/cardN-<connector> entries resolve to the same
+      // underlying GPU device dir; dedupe so each real device prints once.
+      "for d in /sys/class/drm/card*/device; do "
+      "  readlink -f \"$d\" 2>/dev/null; "
+      "done | sort -u | while read -r r; do "
+      "  if [ -f \"$r/xgmi_port_num\" ]; then "
+      "    echo \"$r: xgmi_port_num=$(cat $r/xgmi_port_num 2>&1)\"; "
+      "  else "
+      "    echo \"$r: xgmi_port_num MISSING\"; "
+      "  fi; "
+      "  ls \"$r\" 2>&1 | grep -i xgmi | tr '\\n' ' '; echo; "
+      "done; "
+      "echo ===dmesg_amdgpu_xgmi_kfd===; "
+      "(dmesg 2>&1 || sudo -n dmesg 2>&1) | grep -iE 'amdgpu|xgmi|kfd|pcie.*error' | tail -200 "
+      "|| echo 'dmesg unavailable (no permission, neither plain nor sudo -n worked)'");
+  std::cerr << "[CPU_LINK_DEBUG][driver-info] ---- BEGIN ----\n"
+            << out << "\n[CPU_LINK_DEBUG][driver-info] ---- END ----\n";
 }
 
 // MI450-like topology: GPU node 1 has a direct XGMI io_link to CPU node 0.
