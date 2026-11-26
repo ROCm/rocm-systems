@@ -76,6 +76,11 @@ class MemoryTest : public TestBase {
 
   void MemAvailableTest(void);
 
+  // @Brief: Attach user data to allocations in every pool with
+  // hsa_amd_pointer_info_set_userdata and read it back through
+  // hsa_amd_pointer_info.
+  void PointerInfoUserDataTest(void);
+
   hsa_status_t TestAllocate(hsa_amd_memory_pool_t pool, size_t sz);
 
  private:

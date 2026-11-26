@@ -59,6 +59,8 @@
 #include "suites/functional/memory_fragment.h"
 #include "suites/functional/device_mem_no_host_access.h"
 #include "suites/functional/memory_fill.h"
+#include "suites/functional/memory_copy_engine.h"
+#include "suites/functional/scratch_memory.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/loader_reserved_address.h"
@@ -410,6 +412,77 @@ TEST(rocrtstFunc, Memory_Max_Mem) {
     RunCustomTestEpilog(&mt);
 }
 
+TEST(rocrtstFunc, Memory_Pointer_Info_UserData) {
+    MemoryTest mt;
+
+    if (!RunCustomTestProlog(&mt)) return;
+    mt.PointerInfoUserDataTest();
+    RunCustomTestEpilog(&mt);
+}
+
+TEST(rocrtstFunc, MemoryCopyEngine_Basic) {
+    MemoryCopyEngineTest ce;
+    if (!RunCustomTestProlog(&ce)) return;
+    ce.CopyOnEngineTest();
+    RunCustomTestEpilog(&ce);
+}
+
+TEST(rocrtstFunc, MemoryCopyEngine_Negative) {
+    MemoryCopyEngineTest ce;
+    if (!RunCustomTestProlog(&ce)) return;
+    ce.CopyOnEngineNegativeTest();
+    RunCustomTestEpilog(&ce);
+}
+
+TEST(rocrtstFunc, MemoryCopyEngine_Profiling) {
+    MemoryCopyEngineTest ce;
+    if (!RunCustomTestProlog(&ce)) return;
+    ce.AsyncCopyProfilingTest();
+    RunCustomTestEpilog(&ce);
+}
+
+TEST(rocrtstFunc, MemoryCopyEngine_Peer) {
+    MemoryCopyEngineTest ce;
+    if (!RunCustomTestProlog(&ce)) return;
+    ce.PeerCopyTest();
+    RunCustomTestEpilog(&ce);
+}
+
+TEST(rocrtstFunc, Scratch_Dynamic_Growth_Test) {
+    ScratchMemoryTest sm;
+    if (!RunCustomTestProlog(&sm)) return;
+    sm.DynamicScratchGrowthTest();
+    RunCustomTestEpilog(&sm);
+}
+
+TEST(rocrtstFunc, Scratch_Full_Device_And_Small_Grid_Test) {
+    ScratchMemoryTest sm;
+    if (!RunCustomTestProlog(&sm)) return;
+    sm.ScratchFullDeviceAndSmallGridTest();
+    RunCustomTestEpilog(&sm);
+}
+
+TEST(rocrtstFunc, Scratch_Queue_Create_Hint_Test) {
+    ScratchMemoryTest sm;
+    if (!RunCustomTestProlog(&sm)) return;
+    sm.QueueCreateScratchHintTest();
+    RunCustomTestEpilog(&sm);
+}
+
+TEST(rocrtstFunc, Scratch_Multi_Queue_Test) {
+    ScratchMemoryTest sm;
+    if (!RunCustomTestProlog(&sm)) return;
+    sm.MultiQueueScratchTest();
+    RunCustomTestEpilog(&sm);
+}
+
+TEST(rocrtstFunc, Scratch_Async_Limit_Test) {
+    ScratchMemoryTest sm;
+    if (!RunCustomTestProlog(&sm)) return;
+    sm.AsyncScratchLimitTest();
+    RunCustomTestEpilog(&sm);
+}
+
 TEST(rocrtstFunc, Memory_Available) {
     if (rocrtst::SkipOnWsl("MEMORY_AVAIL uses WDDM adapter-wide dynamic accounting on WSL/DXG")) return;
     MemoryTest mt;
@@ -433,6 +506,13 @@ TEST(rocrtstFunc, Heap_Reservation) {
     if (!RunCustomTestProlog(&hr)) return;
     hr.HeapReservationSurvivesConstrainedAddressSpace();
     RunCustomTestEpilog(&hr);
+}
+
+TEST(rocrtstFunc, TimeStamp_ConvertTickToSystemDomain) {
+  TimeStamp ts;
+  if (!RunCustomTestProlog(&ts)) return;
+  ts.ConvertTickToSystemDomainTest();
+  RunCustomTestEpilog(&ts);
 }
 
 TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
@@ -822,6 +902,8 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
     propTest.QueryAgentUUID();
     propTest.QueryAgentClockCounters();
     propTest.QueryGpuShaderEngineTopology();
+    propTest.QuerySystemInfo();
+    propTest.QueryGpuAgentInfo();
     RunCustomTestEpilog(&propTest);
 }
 
@@ -1072,6 +1154,20 @@ TEST(rocrtstFunc, Queue_Create_Invalid_Args_Test) {
   QueueCreateTest qt;
   if (!RunCustomTestProlog(&qt)) return;
   qt.InvalidArgsTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_Aql_Info_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.AqlQueueInfoTest();
+  RunCustomTestEpilog(&qt);
+}
+
+TEST(rocrtstFunc, Queue_Create_Aql_Priority_CuMask_Test) {
+  QueueCreateTest qt;
+  if (!RunCustomTestProlog(&qt)) return;
+  qt.AqlQueuePriorityAndCuMaskTest();
   RunCustomTestEpilog(&qt);
 }
 

@@ -39,6 +39,15 @@ class QueueCreateTest : public TestBase {
   /// @brief Validate descriptor argument checks for hsa_amd_queue_create.
   void InvalidArgsTest();
 
+  /// @brief Query hsa_amd_queue_get_info attributes on a compute (AQL) queue
+  /// and check that attributes that do not apply to it are rejected.
+  void AqlQueueInfoTest();
+
+  /// @brief Change the priority and the CU mask of a compute queue with
+  /// hsa_amd_queue_set_priority and hsa_amd_queue_cu_set_mask, and check that
+  /// the queue still dispatches correctly after each change.
+  void AqlQueuePriorityAndCuMaskTest();
+
  private:
   void DispatchAndVerify(hsa_queue_t* queue, const char* test_label);
 };

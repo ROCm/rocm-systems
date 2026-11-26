@@ -84,6 +84,16 @@ class AgentPropTest : public TestBase {
   // shader engine is an invalid topology. Cluster limits use that topology.
   void QueryGpuShaderEngineTopology();
 
+  // @Brief: Query every HSA_SYSTEM_INFO_* and HSA_AMD_SYSTEM_INFO_* attribute
+  // through hsa_system_get_info and check the values for consistency. Also
+  // checks that an unknown attribute and a NULL value are rejected.
+  void QuerySystemInfo();
+
+  // @Brief: Query every hsa_agent_get_info attribute that a GPU agent
+  // implements, and walk the agent's regions, caches, ISAs and memory pools.
+  // Also checks that an unknown attribute and a NULL value are rejected.
+  void QueryGpuAgentInfo();
+
  private:
   // Capture value for all agents on system
   std::vector<std::string> propList_;
