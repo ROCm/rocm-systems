@@ -69,6 +69,15 @@ struct Allocation {
 
 static std::map<const void *, Allocation>* allocation_map_ = new std::map<const void *, Allocation>();
 static std::mutex* allocation_map_lock_ = new std::mutex();
+
+// A userptr map request inside an existing userptr allocation reuses that mapping and takes a
+// reference on it. Record which allocation, so the matching unmap releases exactly that one.
+struct UserptrReuse {
+  wsl::thunk::GpuMemoryHandle handle;  // allocation the reference was taken on
+  const void* cpu_key;                 // its allocation_map_ key
+};
+static std::multimap<const void *, UserptrReuse>* userptr_reuse_map_ =
+    new std::multimap<const void *, UserptrReuse>();
 static rocr::SimpleHeap<BlockAllocator>* fragment_allocator_ = new rocr::SimpleHeap<BlockAllocator>();
 
 // ================================================================================================
@@ -95,6 +104,8 @@ void clear_allocation_map(void) {
   std::lock_guard<std::mutex> lock(*allocation_map_lock_);
   delete allocation_map_;
   allocation_map_ = new std::map<const void *, Allocation>();
+  delete userptr_reuse_map_;
+  userptr_reuse_map_ = new std::multimap<const void *, UserptrReuse>();
 }
 
 // ================================================================================================
@@ -940,8 +951,15 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPUNodes(
       *AlternateVAGPU = (uintptr_t)allocation->gpu_addr +
           ((uintptr_t)MemoryAddress - (uintptr_t)allocation->cpu_addr);
       auto status = map_to_nodes(mapped, NumberOfNodes, NodeArray);
-      if (status == HSAKMT_STATUS_SUCCESS)
+      if (status == HSAKMT_STATUS_SUCCESS) {
         mapped->IncMappingCount();
+        // The allocation's own address is a key in allocation_map_; any other address is not,
+        // so remember the owner for the matching unmap.
+        if (MemoryAddress != allocation->user_data) {
+          userptr_reuse_map_->emplace(MemoryAddress,
+                                      UserptrReuse{allocation->handle, allocation->user_data});
+        }
+      }
       return status;
     }
   }
@@ -1011,23 +1029,29 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
 
+    // Unmap of a request that reused an enclosing userptr allocation: drop the reference on the
+    // allocation recorded at map time. Otherwise the mapping leaks and keeps stale pinned pages.
+    auto reuse = userptr_reuse_map_->find(MemoryAddress);
+    if (reuse != userptr_reuse_map_->end()) {
+      UserptrReuse owner = reuse->second;
+      gpu_mem = wsl::thunk::GpuMemory::Convert(owner.handle);
+      if (gpu_mem->IsQueueReferenced())
+        return HSAKMT_STATUS_ERROR;
+      userptr_reuse_map_->erase(reuse);
+      if (gpu_mem->DecMappingCount() == 0) {
+        auto gpu_it = allocation_map_->find((void*)gpu_mem->GpuAddress());
+        if (gpu_it != allocation_map_->end() && gpu_it->second.handle == owner.handle)
+          allocation_map_->erase(gpu_it);
+        auto cpu_it = allocation_map_->find(owner.cpu_key);
+        if (cpu_it != allocation_map_->end() && cpu_it->second.handle == owner.handle)
+          allocation_map_->erase(cpu_it);
+        delete gpu_mem;
+      }
+      return HSAKMT_STATUS_SUCCESS;
+    }
+
     auto it = allocation_map_->find(MemoryAddress);
     if (it == allocation_map_->end()) {
-      // A map call inside an existing userptr allocation reuses that mapping and takes a
-      // reference on it but it is unmapped with its own address, which is not a key in the map.
-      // Drop the reference on the enclosing allocation, otherwise the mapping leaks and keeps stale
-      // pinned pages for that range.
-      Allocation* alloc = FindAllocation(MemoryAddress, 1);
-      if (alloc != nullptr && alloc->userptr && alloc->user_data != nullptr) {
-        gpu_mem = wsl::thunk::GpuMemory::Convert(alloc->handle);
-        if (gpu_mem->DecMappingCount() == 0) {
-          const void* cpu_key = alloc->user_data;
-          allocation_map_->erase((void*)alloc->gpu_addr);
-          allocation_map_->erase(cpu_key);
-          delete gpu_mem;
-        }
-        return HSAKMT_STATUS_SUCCESS;
-      }
       return HSAKMT_STATUS_ERROR;
     }
 
