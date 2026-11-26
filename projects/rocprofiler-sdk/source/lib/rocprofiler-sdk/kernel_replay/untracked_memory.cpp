@@ -276,14 +276,15 @@ is_idempotent_runtime_kernel(std::string_view kernel_name)
 }
 
 std::vector<address_span_t>
-covered_spans(const memory_snapshot::device_snapshot_t& snapshot)
+covered_spans(const memory_snapshot::snapshot_t& snapshot)
 {
     auto out = std::vector<address_span_t>{};
-    out.reserve(snapshot.blocks.size());
-    for(const auto& block : snapshot.blocks)
+    out.reserve(snapshot.regions.size());
+    for(const auto& region : snapshot.regions)
     {
-        const auto begin = reinterpret_cast<uint64_t>(block.gpu_addr);
-        out.push_back({begin, begin + block.host_copy.size()});
+        if(region.liveness == memory_snapshot::liveness_kind::retired) continue;
+        const auto begin = reinterpret_cast<uint64_t>(region.live_address);
+        out.push_back({begin, begin + region.size});
     }
     std::sort(
         out.begin(), out.end(), [](const auto& l, const auto& r) { return l.begin < r.begin; });
@@ -347,7 +348,7 @@ bool
 can_replay_dispatch(const uint8_t*                                    kernarg,
                     size_t                                            segment_size,
                     const std::vector<code_object::kernarg_region_t>* pointer_regions,
-                    const memory_snapshot::device_snapshot_t&         snapshot,
+                    const memory_snapshot::snapshot_t&                snapshot,
                     const pointer_facts_fn_t&                         facts)
 {
     try
@@ -415,8 +416,8 @@ can_replay_dispatch(const uint8_t*                                    kernarg,
 }
 
 bool
-can_replay_dispatch(const hsa_kernel_dispatch_packet_t&       packet,
-                    const memory_snapshot::device_snapshot_t& snapshot)
+can_replay_dispatch(const hsa_kernel_dispatch_packet_t& packet,
+                    const memory_snapshot::snapshot_t&  snapshot)
 {
     try
     {

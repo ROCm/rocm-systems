@@ -125,13 +125,8 @@ bool plan_argument_moves(std::span<const ProbeArgValue> args, const ProbeAbi &ab
     report(err, "trampoline plan: original_size must be nonzero and dword aligned");
     return false;
   }
-  if (plan.emit_original && plan.original_size != 4 && plan.original_size != 8) {
-    report(err, "trampoline plan: original_size must be 4 or 8 when relocating the original");
-    return false;
-  }
-  if (plan.patch_anchor && plan.original_size != 4 && plan.original_size != 8 &&
-      plan.original_size != 12) {
-    report(err, "trampoline plan: original_size must be 4, 8 or 12 when patching the anchor");
+  if ((plan.emit_original || plan.patch_anchor) && plan.original_size > 12) {
+    report(err, "trampoline plan: original_size must be 4, 8 or 12 for anchor replay or splice");
     return false;
   }
   const size_t expected_words = plan.original_size / sizeof(uint32_t);
@@ -462,6 +457,13 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // cross-ISA allocatable limit.
   const uint32_t sgpr_bound = ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count);
 
+  for (const ProbeArgValue &arg : plan.probe_args) {
+    if (arg.source == ProbeArgSource::AnchorSgpr && arg.register_index >= sgpr_bound) {
+      report(error_out, "guest SGPR argument exceeds the kernel's ordinary SGPR allocation");
+      return false;
+    }
+  }
+
   // The entry-storage pair holds a value produced once at kernel entry and read
   // at arbitrary later sites, so both lanes must be inside the range the temps
   // are drawn from.
@@ -552,11 +554,16 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // Target-address pair: dead, even-aligned, and not the link pair. It is
   // read by s_swappc before the probe body runs, so it may overlap
   // probe_body_clobbers.
+  if (entry_storage.intersects(observed)) {
+    report(error_out, "observed guest register overlaps persistent entry storage");
+    return false;
+  }
   if (entry_storage.intersects(save_destinations)) {
     report(error_out, "register preservation overlaps the framework's entry storage");
     return false;
   }
-  const RegisterSet target_unavail = live_at_anchor | link_pair | entry_storage | save_destinations;
+  const RegisterSet target_unavail =
+      live_at_anchor | observed | link_pair | entry_storage | save_destinations;
   const std::optional<uint16_t> target_pair = find_free_sgpr_pair(target_unavail, sgpr_bound);
   if (!target_pair) {
     report(error_out, "probe-call resource planning: no dead SGPR pair available for the probe "
@@ -665,6 +672,9 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // field names, a register source does not.
   for (const ProbeArgValue &arg : plan.probe_args) {
     switch (arg.source) {
+    case ProbeArgSource::AnchorSgpr:
+      envelope_words += 1;
+      break;
     case ProbeArgSource::AnchorVgpr:
       break; // Parallel copies are counted together, including cycle breaks.
     case ProbeArgSource::Immediate:
@@ -883,26 +893,30 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     report(error_out, "probe-call emission: argument block does not fit the call ABI");
     return std::nullopt;
   }
-  RegisterSet unavailable_backups = arg_registers(*argument_abi);
+  // These registers hold framework values before the envelope copies guest arguments.
+  RegisterSet overwritten_before_args;
+  for (const SpecialStateSlot &save : plan.special_state_saves) {
+    overwritten_before_args.expand({RegClass::SGPR, save.temp_base, save.width});
+  }
+  if (plan.entry_storage_base) {
+    overwritten_before_args.expand({RegClass::SGPR, *plan.entry_storage_base, 2});
+  }
+  for (const EntryRegisterCapture &capture : plan.entry_register_captures) {
+    overwritten_before_args.expand({RegClass::SGPR, capture.sgpr, 1});
+  }
+
+  RegisterSet unavailable_backups = arg_registers(*argument_abi) | overwritten_before_args;
   unavailable_backups.expand(probe_link_pair(*argument_abi));
   unavailable_backups.expand({RegClass::SGPR, target_lo, 2});
   if (plan.preserve_scc) {
     unavailable_backups.expand({RegClass::SGPR, plan.scc_temp, 1});
-  }
-  for (const SpecialStateSlot &save : plan.special_state_saves) {
-    unavailable_backups.expand({RegClass::SGPR, save.temp_base, save.width});
-  }
-  if (plan.entry_storage_base) {
-    unavailable_backups.expand({RegClass::SGPR, *plan.entry_storage_base, 2});
-  }
-  for (const EntryRegisterCapture &capture : plan.entry_register_captures) {
-    unavailable_backups.expand({RegClass::SGPR, capture.sgpr, 1});
   }
   RegisterSet register_save_destinations;
   if (!validate_register_saves(plan, {}, unavailable_backups, register_save_destinations,
                                error_out)) {
     return std::nullopt;
   }
+  overwritten_before_args |= register_save_destinations;
   for (const RegisterSave &save : plan.register_saves) {
     if (save.cls == RegClass::SGPR) {
       if (!append_scalar(build_s_mov_b32(save.destination, save.source, plan.arch, &error))) {
@@ -968,6 +982,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
       case ProbeArgSource::EntryVgprLane0:
         source = "EntryVgprLane0";
         break;
+      case ProbeArgSource::AnchorSgpr:
+        source = "AnchorSgpr";
+        break;
       case ProbeArgSource::AnchorVgpr:
         source = "AnchorVgpr";
         break;
@@ -1025,6 +1042,22 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
       if (word.failed()) {
         return std::nullopt;
       }
+      env.push_back(word.value());
+      break;
+    }
+    case ProbeArgSource::AnchorSgpr: {
+      if (arg.register_index >= ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count)) {
+        report(error_out, "probe-call emission: invalid anchor SGPR");
+        return std::nullopt;
+      }
+      if (overwritten_before_args.intersects(
+              {.cls = RegClass::SGPR, .index = arg.register_index})) {
+        report(error_out, "probe-call emission: anchor SGPR overwritten before argument capture");
+        return std::nullopt;
+      }
+      const auto word = build_v_mov_b32_src(vdst, arg.register_index, plan.arch, &error);
+      if (word.failed())
+        return std::nullopt;
       env.push_back(word.value());
       break;
     }

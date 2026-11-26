@@ -35,7 +35,7 @@ def _args(**overrides) -> argparse.Namespace:
         "build_path": "/build",
         "jobs": 4,
         "timeout": None,
-        "base": None,
+        "base": "HEAD",
         "verbose": False,
     }
     defaults.update(overrides)
@@ -269,6 +269,69 @@ def test_git_failure_surfaces_stderr(monkeypatch):
 
 
 # --------------------------------------------------------------------------- #
+# get_merge_base / resolve_base
+# --------------------------------------------------------------------------- #
+def test_get_merge_base_returns_merge_base_sha(monkeypatch):
+    calls = []
+
+    def fake_git(git_args, **_kwargs):
+        calls.append(git_args)
+        return "abc123\n"
+
+    monkeypatch.setattr(ctc, "_git", fake_git)
+    assert ctc.get_merge_base() == "abc123"
+    assert calls == [["merge-base", "HEAD", ctc.BASE_REF]]
+
+
+def test_get_merge_base_failure_exits_instead_of_falling_back(monkeypatch):
+    # An explicit `--base merge-base` must not silently degrade to HEAD: a failing
+    # `git merge-base` has to reach the user as git's own error.
+    commands = []
+
+    def boom(cmd, **_kwargs):
+        commands.append(cmd)
+        raise subprocess.CalledProcessError(
+            returncode=128,
+            cmd=cmd,
+            stderr="fatal: Not a valid object name origin/develop",
+        )
+
+    monkeypatch.setattr(ctc.subprocess, "run", boom)
+    with pytest.raises(SystemExit) as excinfo:
+        ctc.get_merge_base()
+    assert "Not a valid object name origin/develop" in str(excinfo.value)
+    assert commands == [["git", "merge-base", "HEAD", ctc.BASE_REF]]
+
+
+def test_resolve_base_merge_base_selector_resolves_to_merge_base(monkeypatch):
+    monkeypatch.setattr(ctc, "get_merge_base", lambda: "abc123")
+    assert ctc.resolve_base("merge-base") == "abc123"
+
+
+@pytest.mark.parametrize("base", ["HEAD", "origin/release", "deadbeef"])
+def test_resolve_base_other_values_pass_through(monkeypatch, base):
+    def fail():
+        raise AssertionError("git must not be called")
+
+    monkeypatch.setattr(ctc, "get_merge_base", fail)
+    assert ctc.resolve_base(base) == base
+
+
+# --------------------------------------------------------------------------- #
+# parse_args  (--base)
+# --------------------------------------------------------------------------- #
+def test_parse_args_base_defaults_to_head(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build"])
+    assert ctc.parse_args().base == "HEAD"
+
+
+@pytest.mark.parametrize("base", ["merge-base", "origin/release", "deadbeef"])
+def test_parse_args_explicit_base_is_kept_verbatim(monkeypatch, base):
+    monkeypatch.setattr(sys, "argv", ["prog", "--build-path", "/build", "--base", base])
+    assert ctc.parse_args().base == base
+
+
+# --------------------------------------------------------------------------- #
 # get_diff_changed_files
 # --------------------------------------------------------------------------- #
 _DIFF = """\
@@ -299,10 +362,22 @@ def test_get_diff_changed_files_parses_ranges_and_filters(monkeypatch):
     assert changed["src/foo.cpp"].line_ranges == [(11, 13)]
 
 
+def test_get_diff_changed_files_diffs_against_given_base(monkeypatch):
+    calls = []
+
+    def fake_git(git_args, cwd=None):
+        calls.append(git_args)
+        return ""
+
+    monkeypatch.setattr(ctc, "_git", fake_git)
+    ctc.get_diff_changed_files("/repo", "origin/release")
+    assert calls == [["diff", "--no-color", "-U0", "origin/release"]]
+
+
 def test_get_diff_changed_files_skips_missing_files(monkeypatch):
     monkeypatch.setattr(ctc, "_git", lambda git_args, cwd=None: _DIFF)
     monkeypatch.setattr(ctc.os.path, "isfile", lambda p: False)
-    assert ctc.get_diff_changed_files("/repo", None) == {}
+    assert ctc.get_diff_changed_files("/repo", "HEAD") == {}
 
 
 def test_get_diff_changed_files_single_line_hunk(monkeypatch):
@@ -317,7 +392,7 @@ def test_get_diff_changed_files_single_line_hunk(monkeypatch):
     )
     monkeypatch.setattr(ctc, "_git", lambda git_args, cwd=None: diff)
     monkeypatch.setattr(ctc.os.path, "isfile", lambda p: True)
-    changed = ctc.get_diff_changed_files("/repo", None)
+    changed = ctc.get_diff_changed_files("/repo", "HEAD")
     assert changed["x.cpp"].line_ranges == [(7, 7)]
 
 
@@ -351,7 +426,7 @@ def test_get_changed_files_untracked_overrides_diff_on_same_path(monkeypatch):
     monkeypatch.setattr(
         ctc, "get_untracked_changed_files", lambda repo: {"a.cpp": untracked_version}
     )
-    result = {cf.path: cf for cf in ctc.get_changed_files("/repo", None)}
+    result = {cf.path: cf for cf in ctc.get_changed_files("/repo", "HEAD")}
     assert set(result) == {"a.cpp", "b.cpp"}
     # untracked entry wins for the shared path (dict.update override semantic)
     assert result["a.cpp"] is untracked_version
@@ -402,6 +477,33 @@ def test_main_gates_preexisting_diagnostics_on_verbose(monkeypatch, capsys, verb
     assert "check-a" in out
     assert ("Pre-existing issues (outside this diff):" in out) is verbose
     assert ("check-b" in out) is verbose
+
+
+def test_main_prints_base(monkeypatch, capsys):
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    monkeypatch.setattr(ctc, "get_repo_root", lambda: "/repo")
+    monkeypatch.setattr(ctc, "get_changed_files", lambda repo, base: [changed_file])
+    monkeypatch.setattr(ctc, "has_enabled_checks", lambda args: True)
+    monkeypatch.setattr(ctc, "run_clang_tidy", lambda a, f, t: ("", True))
+    monkeypatch.setattr(ctc, "parse_args", lambda: _args(base="abc123"))
+    assert ctc.main() == 0
+    assert "Checking changes since base commit: abc123" in capsys.readouterr().out
+
+
+def test_main_merge_base_selector_passes_resolved_sha(monkeypatch, capsys):
+    changed_file = ctc.ChangedFile("src/foo.cpp", [(10, 20)])
+    seen = []
+    monkeypatch.setattr(ctc, "get_repo_root", lambda: "/repo")
+    monkeypatch.setattr(ctc, "get_merge_base", lambda: "merge123")
+    monkeypatch.setattr(
+        ctc, "get_changed_files", lambda repo, base: seen.append(base) or [changed_file]
+    )
+    monkeypatch.setattr(ctc, "has_enabled_checks", lambda args: True)
+    monkeypatch.setattr(ctc, "run_clang_tidy", lambda a, f, t: ("", True))
+    monkeypatch.setattr(ctc, "parse_args", lambda: _args(base="merge-base"))
+    assert ctc.main() == 0
+    assert seen == ["merge123"]
+    assert "base commit: merge123" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("verbose", [False, True])

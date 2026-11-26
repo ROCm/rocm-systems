@@ -7,6 +7,8 @@
 #include "halt_snapshot_plugin.h"
 #include "instruction_failure_test_util.h"
 #include "legacy_gpu_memory_fixture.h"
+#include "mfma_f64_test_dispatch.h"
+#include "mfma_half_test_dispatch.h"
 #include "rocjitsu/isa/isa_family.h"
 
 #include "gws_test_encoding.h"
@@ -3410,13 +3412,11 @@ TEST(GpuMemoryTest, CommandTranslationCachesReleaseAndRestoreNestedOwners) {
     const amdgpu::LegacyAddressSpace::ScopedPteCache outer;
     outer_state = translate(7);
     EXPECT_FALSE(outer_state.expired());
-    try {
+    {
       const amdgpu::LegacyAddressSpace::ScopedPteCache inner;
       inner_state = translate(8);
       EXPECT_FALSE(inner_state.expired());
       EXPECT_FALSE(outer_state.expired());
-      throw std::runtime_error("unwind command");
-    } catch (const std::runtime_error &) {
     }
     EXPECT_TRUE(inner_state.expired());
     EXPECT_FALSE(outer_state.expired());
@@ -10768,35 +10768,35 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
   uint32_t vb = wf->vgpr_alloc().base;
 
   // Test v_mfma_f32_16x16x32_f16: M=16, N=16, K=32, B=1, in_bits=16
-  // Set up src0 (A matrix) at vb+10 (8 VGPRs for 32 FP16 packed as 16 dwords)
-  // Set up src1 (B matrix) at vb+18 (8 VGPRs)
-  // Set up dst/src2 (accumulator) at vb+256 (4 VGPRs, AccVGPR bank)
+  // Each packed FP16 source occupies four Wave64 VGPRs.
+  // Set up src1 (B matrix) at vb+18 (4 VGPRs)
+  // Set up dst/src2 (accumulator) at vb+128 (4 VGPRs)
 
   // Fill A and B with known FP16 values (all 1.0h = 0x3C00)
   uint32_t packed_ones = 0x3C003C00; // two FP16 1.0 values
-  for (uint32_t r = 0; r < 8; r++) {
+  for (uint32_t r = 0; r < 4; r++) {
     for (uint32_t lane = 0; lane < 64; lane++) {
       cu->write_vgpr(vb + 10 + r, lane, packed_ones); // A
       cu->write_vgpr(vb + 18 + r, lane, packed_ones); // B
     }
   }
 
-  // Zero the accumulator (AccVGPR bank at +256)
+  // Zero the accumulator.
   for (uint32_t r = 0; r < 4; r++) {
     for (uint32_t lane = 0; lane < 64; lane++) {
-      cu->write_vgpr(vb + 256 + r, lane, 0);
+      cu->write_vgpr(vb + 128 + r, lane, 0);
     }
   }
 
   // Execute MFMA: D[16x16] = 0 + A[16x32] * B[32x16]
   // With all-ones inputs, each output element = sum of K=32 products of 1.0*1.0 = 32.0
-  uint32_t dst = vb + 256;
+  uint32_t dst = vb + 128;
   uint32_t s0 = vb + 10;
   uint32_t s1 = vb + 18;
-  uint32_t s2 = vb + 256;
+  uint32_t s2 = vb + 128;
   uint32_t const_acc = amdgpu::ACC_FROM_VGPR;
-  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, s0, s1, s2, amdgpu::extract_f16,
-                                  amdgpu::extract_f16, const_acc);
+  rocjitsu::test::execute_mfma_half_shape<false, 16, 16, 32>(*cu, dst, s0, s1, s2, const_acc, 0, 0,
+                                                             0);
 
   // Verify: every output element should be exactly 32.0f
   float expected = 32.0f;
@@ -10817,60 +10817,6 @@ TEST_P(IsaTest, MfmaF16Accumulation) {
     }
   }
   EXPECT_EQ(mismatches, 0u) << mismatches << "/256 elements differ";
-}
-
-TEST_P(IsaTest, MfmaF16AccumulationPatterned) {
-  VmFixture f;
-  ASSERT_NO_FATAL_FAILURE(f.initialize(arch()));
-
-  // Resident scratch wave (see MfmaF16Accumulation): driven directly, not to endpgm.
-  auto *cu = f.cu();
-  auto *wf = f.dispatch_scratch_wf();
-  ASSERT_NE(wf, nullptr);
-  uint32_t vb = wf->vgpr_alloc().base;
-
-  // Test with patterned data: A[i][k] = (i+1) as FP16, B[k][j] = 1.0h
-  // Expected: C[i][j] = (i+1) * K = (i+1) * 32
-  for (uint32_t r = 0; r < 8; r++) {
-    for (uint32_t lane = 0; lane < 64; lane++) {
-      // B = all ones
-      cu->write_vgpr(vb + 18 + r, lane, 0x3C003C00);
-      // A = row-dependent value: use lane to determine row
-      // input_loc maps (row, k) to (vgpr_offset, lane, sub_element)
-      // For simplicity, just use uniform values per lane
-      cu->write_vgpr(vb + 10 + r, lane, 0x3C003C00); // 1.0
-    }
-  }
-
-  // Zero accumulator
-  for (uint32_t r = 0; r < 4; r++) {
-    for (uint32_t lane = 0; lane < 64; lane++) {
-      cu->write_vgpr(vb + 256 + r, lane, 0);
-    }
-  }
-
-  // Execute MFMA with zero accumulator (const_acc = 0.0f)
-  uint32_t dst = vb + 256;
-  amdgpu::exec_f32<16, 16, 32, 1>(*cu, 16, dst, vb + 10, vb + 18, dst, amdgpu::extract_f16,
-                                  amdgpu::extract_f16, std::bit_cast<uint32_t>(0.0f));
-
-  // With const_acc=0.0, all outputs should be 32.0 (sum of 32 ones*ones)
-  float expected = 32.0f;
-  uint32_t mismatches = 0;
-  for (uint32_t row = 0; row < 16; row++) {
-    for (uint32_t col = 0; col < 16; col++) {
-      auto out = amdgpu::output_loc_32(16, 16, row, col, 0);
-      float got = std::bit_cast<float>(cu->read_vgpr(dst + out.reg, out.lane));
-      if (got != expected) {
-        if (mismatches < 5) {
-          ADD_FAILURE() << "MFMA patterned: C[" << row << "][" << col << "] = " << got
-                        << " (expected " << expected << ")";
-        }
-        mismatches++;
-      }
-    }
-  }
-  EXPECT_EQ(mismatches, 0u);
 }
 
 void init_mfma_f64_neg_inputs(amdgpu::ComputeUnitCore *cu, uint32_t s0, uint32_t s1, uint32_t s2,
@@ -10920,7 +10866,7 @@ void expect_mfma_f64_neg_modifier(const std::string &arch) {
   auto *wf = f.dispatch_scratch_wf();
   ASSERT_NE(wf, nullptr);
   uint32_t vb = wf->vgpr_alloc().base;
-  uint32_t dst = vb + amdgpu::ACC_VGPR_OFFSET;
+  uint32_t dst = vb + 128;
   uint32_t s0 = vb + 10;
   uint32_t s1 = vb + 20;
   uint32_t s2 = dst;
@@ -10929,14 +10875,16 @@ void expect_mfma_f64_neg_modifier(const std::string &arch) {
 
   // CDNA f64 MFMA uses the BLGP bit range as NEG[2:0]. NEG=5 negates A and C:
   // D = -C + (-A * B) * K = -1 + (-1 * 1) * 4 = -5.
-  amdgpu::exec_f64(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR, 5);
+  rocjitsu::test::execute_mfma_f64_shape(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR,
+                                         5);
   expect_mfma_f64_outputs(cu, dst, -5.0);
 
   init_mfma_f64_neg_inputs(cu, s0, s1, s2);
 
   // NEG=2 isolates the B operand negate bit:
   // D = C + (A * -B) * K = 1 + (1 * -1) * 4 = -3.
-  amdgpu::exec_f64(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR, 2);
+  rocjitsu::test::execute_mfma_f64_shape(*cu, 4, 4, 4, 4, dst, s0, s1, s2, amdgpu::ACC_FROM_VGPR,
+                                         2);
   expect_mfma_f64_outputs(cu, dst, -3.0);
 }
 

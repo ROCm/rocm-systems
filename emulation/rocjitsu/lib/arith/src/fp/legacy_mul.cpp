@@ -6,6 +6,7 @@
 
 #include "fp/legacy_mul.h"
 #include "common/alu.h"
+#include "common/sdwa_dispatch.h"
 #include "common/validation.h"
 #include "fp/fma_scalar.h"
 #include "register/dpp.h"
@@ -43,6 +44,14 @@ namespace {
 template <bool Older>
 int run(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
         const uint32_t *const *a, const uint32_t *const *b) {
+  if constexpr (Older) {
+    if (mode & RJ_ARITH_ALU_SDWA) {
+      mode = rocjitsu::arith::rdna3_output_modifiers(flags, mode);
+      return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+          flags, exec_mask, mode, d,
+          [&](uint64_t core_mode) { return run<Older>(flags, exec_mask, core_mode, d, a, b); });
+    }
+  }
   flags = rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
   const uint32_t known = RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_A |
                          RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_OMOD_MASK | RJ_ARITH_ALU_CLAMP;

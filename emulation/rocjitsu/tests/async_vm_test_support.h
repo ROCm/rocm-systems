@@ -14,13 +14,14 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <span>
-#include <stdexcept>
 #include <vector>
 
 namespace rocjitsu::test {
@@ -353,7 +354,8 @@ public:
     owner = static_cast<AsyncVmOwner *>(root->add_child(std::make_unique<AsyncVmOwner>()));
     engine.topology().set_root(std::move(root));
     if (engine.create().failed()) {
-      throw std::runtime_error("cannot create asynchronous VM test engine");
+      std::fputs("cannot create asynchronous VM test engine\n", stderr);
+      std::abort();
     }
   }
 

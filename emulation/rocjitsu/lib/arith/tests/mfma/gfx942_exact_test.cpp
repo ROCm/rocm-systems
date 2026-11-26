@@ -292,15 +292,213 @@ TEST(MfmaGfx942Exact, Xf32LowPayloadNansTruncateToInfinity) {
 TEST(MfmaGfx942Exact, QualificationIsLocalToTargetAndControls) {
   for (const auto &form : kForms) {
     SCOPED_TRACE(form.name);
+    const int per_word = form.format_a == 2 ? 1 : form.format_a < 2 ? 2 : 4;
+    const int inputs = form.m * form.k * form.batches / (64 * per_word);
+    const int outputs = form.m * form.m * form.batches / 64;
+    std::array<std::array<uint32_t, 64>, 32> a_buf{}, b_buf{}, c_buf{}, d_buf{};
+    const uint32_t *a[8], *b[8], *c[32];
+    uint32_t *d[32];
+    for (int reg = 0; reg < inputs; ++reg) {
+      a[reg] = a_buf[reg].data();
+      b[reg] = b_buf[reg].data();
+    }
+    for (int reg = 0; reg < outputs; ++reg) {
+      c[reg] = c_buf[reg].data();
+      d[reg] = d_buf[reg].data();
+    }
+    // Dense source-lane controls (CBSZ, ABID, BLGP, including wrapping ABID >= 2^CBSZ)
+    // remain gated in strict modes pending simulator A-lane read-mask alignment, leaving D
+    // untouched while Loose and ExactAllowLoose execute the approximate fallback.
+    for (uint64_t unqualified_control : {1ULL, 8ULL, 1ULL | (5ULL << 3), 4ULL, 1ULL << 7}) {
+      for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
+                                 RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+        for (uint64_t ovfl : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
+          d_buf[0][0] = 0xdeadbeefU;
+          EXPECT_EQ(form.entry(semantics | ovfl, unqualified_control, d, a, b, c),
+                    RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+          EXPECT_EQ(d_buf[0][0], 0xdeadbeefU);
+        }
+      }
+      for (uint64_t ovfl : {uint64_t{0}, RJ_ARITH_FP16_OVFL}) {
+        // Seed C with both +0.0 and qNaN so ExactAllowLoose with FP16_OVFL is verified to
+        // preserve NaN identically to Loose rather than flushing to +0.0 via the exact path.
+        for (uint32_t c_init : {0U, 0x7fc00000U}) {
+          c_buf[0][0] = c_init;
+          d_buf[0][0] = 0xdeadbeefU;
+          EXPECT_EQ(form.entry(RJ_ARITH_SEMANTICS_LOOSE | ovfl, unqualified_control, d, a, b, c),
+                    RJ_ARITH_SUCCESS);
+          const uint32_t loose_out = d_buf[0][0];
+          EXPECT_EQ(loose_out, c_init);
+          d_buf[0][0] = 0xdeadbeefU;
+          EXPECT_EQ(form.entry(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE | ovfl,
+                               unqualified_control, d, a, b, c),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(d_buf[0][0], loose_out);
+        }
+      }
+      c_buf[0][0] = 0U;
+    }
     for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
                                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
-      EXPECT_EQ(form.entry(semantics, 1, nullptr, nullptr, nullptr, nullptr),
-                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
-      EXPECT_EQ(form.entry(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
-                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
       EXPECT_EQ(form.gfx950(semantics, 0, nullptr, nullptr, nullptr, nullptr),
                 RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(form.gfx950(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
     }
+  }
+}
+
+TEST(MfmaGfx942Exact, Fp16OvflSanitizesEachStepOutput) {
+  // MI300X MODE.FP16_OVFL flushes NaN to +0.0 and clamps +-Inf to +-MAX_FLOAT after each K-step.
+  for (const auto &form : kForms) {
+    SCOPED_TRACE(form.name);
+    const int per_word = form.format_a == 2 ? 1 : form.format_a < 2 ? 2 : 4;
+    const int inputs = form.m * form.k * form.batches / (64 * per_word);
+    const int outputs = form.m * form.m * form.batches / 64;
+    std::array<std::array<uint32_t, 64>, 32> a_buf{}, b_buf{}, c_buf{}, d_buf{};
+    const uint32_t *a[8], *b[8], *c[32];
+    uint32_t *d[32];
+    for (int reg = 0; reg < inputs; ++reg) {
+      a[reg] = a_buf[reg].data();
+      b[reg] = b_buf[reg].data();
+    }
+    for (int reg = 0; reg < outputs; ++reg) {
+      c[reg] = c_buf[reg].data();
+      d[reg] = d_buf[reg].data();
+    }
+    // Nonfinite C (+Inf, -Inf, NaN) with zero products verifies output clamping across all 20
+    // forms.
+    struct CCase {
+      uint32_t c_bits, expected;
+    };
+    for (const CCase tc : {CCase{0x7f800000U, 0x7f7fffffU}, CCase{0xff800000U, 0xff7fffffU},
+                           CCase{0x7fc00001U, 0x00000000U}}) {
+      c_buf[0][0] = tc.c_bits;
+      ASSERT_EQ(
+          form.entry(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, c),
+          RJ_ARITH_SUCCESS);
+      EXPECT_EQ(d_buf[0][0], tc.expected);
+    }
+  }
+
+  // On two-step 16x16x16 BF16, clamping step 0's +Inf to 0x7f7fffff before step 1 adds -2^127
+  // yields 0x7efffffe (whereas clamping only the final result would yield 0x7f7fffff), and
+  // flushing step 0's NaN to +0.0 lets step 1's 1.0 * 3.0 survive as 3.0.
+  {
+    std::array<std::array<uint32_t, 64>, 4> a_buf{}, b_buf{}, c_buf{}, d_buf{};
+    const uint32_t *a[] = {a_buf[0].data(), a_buf[1].data()};
+    const uint32_t *b[] = {b_buf[0].data(), b_buf[1].data()};
+    const uint32_t *c[] = {c_buf[0].data(), c_buf[1].data(), c_buf[2].data(), c_buf[3].data()};
+    uint32_t *d[] = {d_buf[0].data(), d_buf[1].data(), d_buf[2].data(), d_buf[3].data()};
+    // Step 0 (lane 0, reg 0 low): 2^64 * 2^64 -> +Inf -> 0x7f7fffff.
+    // Step 1 (lane 32, reg 0 low, depth = 8): -2^64 * 2^63 = -2^127 -> 0x7efffffe.
+    a_buf[0][0] = 0x00005f80U;
+    b_buf[0][0] = 0x00005f80U;
+    a_buf[0][32] = 0x0000df80U;
+    b_buf[0][32] = 0x00005f00U;
+    ASSERT_EQ(rj_arith_v_mfma_f32_16x16x16_bf16_w64(
+                  RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, c),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d_buf[0][0], 0x7efffffeU);
+
+    // Step 0: +Inf * 0.0 -> NaN -> +0.0; Step 1: 1.0 * 3.0 -> 3.0 (0x40400000).
+    a_buf[0][0] = 0x00007f80U;
+    b_buf[0][0] = 0U;
+    a_buf[0][32] = 0x00003f80U;
+    b_buf[0][32] = 0x00004040U;
+    ASSERT_EQ(rj_arith_v_mfma_f32_16x16x16_bf16_w64(
+                  RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, c),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d_buf[0][0], 0x40400000U);
+
+    // Nonfinite initial C = qNaN is NOT flushed before step 0: with step-0 1.0 * 2.0 and
+    // zero step-1 products, step 0 produces qNaN -> +0.0 (0x00000000), whereas flushing C
+    // on input would return +2.0 (0x40000000).
+    a_buf = {};
+    b_buf = {};
+    c_buf = {};
+    a_buf[0][0] = 0x00003f80U;
+    b_buf[0][0] = 0x00004000U;
+    c_buf[0][0] = 0x7fc00000U;
+    ASSERT_EQ(rj_arith_v_mfma_f32_16x16x16_bf16_w64(
+                  RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, c),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d_buf[0][0], 0x00000000U);
+  }
+
+  // MI300X-captured rows (AMD Instinct MI300X VF, gfx942, ROCm 7.2.4 / HIP 7.2.53211,
+  // mfma_fp16_ovfl.bin) with initial C = qNaN (0x7fc00000) and a single nonzero step-0 product:
+  // hardware preserves C into step 0 so qNaN + product flushes to 0x00000000 under FP16_OVFL=1
+  // (0xffc00000 under FP16_OVFL=0), rather than flushing C on input to yield the product.
+  {
+    // bf16_4x4x4_16b wave 11, batch 2, row 0, col 3 (a_lane=8, b_lane=11, out_reg=0, out_lane=11):
+    // k=0 has 118.5 * -109.5 = -12975.75 (0xc64abf00) and k=1..3 are zero.
+    std::array<std::array<uint32_t, 64>, 4> a_buf{}, b_buf{}, c_buf{}, d_buf{};
+    const uint32_t *a[] = {a_buf[0].data(), a_buf[1].data()};
+    const uint32_t *b[] = {b_buf[0].data(), b_buf[1].data()};
+    const uint32_t *c[] = {c_buf[0].data(), c_buf[1].data(), c_buf[2].data(), c_buf[3].data()};
+    uint32_t *d[] = {d_buf[0].data(), d_buf[1].data(), d_buf[2].data(), d_buf[3].data()};
+    a_buf[0][8] = 0x800042edU;
+    a_buf[1][8] = 0x42cd8000U;
+    b_buf[0][11] = 0x8000c2dbU;
+    b_buf[1][11] = 0x8000c2cbU;
+    c_buf[0][11] = 0x7fc00000U;
+    ASSERT_EQ(rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 0, d,
+                                                     a, b, c),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d_buf[0][11], 0xffc00000U);
+    ASSERT_EQ(rj_arith_v_mfma_f32_4x4x4_16b_bf16_w64(
+                  RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, c),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d_buf[0][11], 0x00000000U);
+  }
+  {
+    // bf16_16x16x4_4b wave 23, batch 3, row 2, col 0 (a_lane=50, b_lane=48, out_reg=14,
+    // out_lane=0): k=1 has -85.5 * -110.5 = +9447.75 (0x46139f00) and k=0,2,3 are zero.
+    std::array<std::array<uint32_t, 64>, 16> a_buf{}, b_buf{}, c_buf{}, d_buf{};
+    const uint32_t *a[] = {a_buf[0].data(), a_buf[1].data()};
+    const uint32_t *b[] = {b_buf[0].data(), b_buf[1].data()};
+    const uint32_t *c[16];
+    uint32_t *d[16];
+    for (int reg = 0; reg < 16; ++reg) {
+      c[reg] = c_buf[reg].data();
+      d[reg] = d_buf[reg].data();
+    }
+    a_buf[0][50] = 0xc2ab42dcU;
+    a_buf[1][50] = 0x00000001U;
+    b_buf[0][48] = 0xc2dd0000U;
+    b_buf[1][48] = 0xc2b48000U;
+    c_buf[14][0] = 0x7fc00000U;
+    ASSERT_EQ(rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 0, d,
+                                                      a, b, c),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d_buf[14][0], 0xffc00000U);
+    ASSERT_EQ(rj_arith_v_mfma_f32_16x16x4_4b_bf16_w64(
+                  RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, c),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d_buf[14][0], 0x00000000U);
+  }
+
+  // Verify the same two-step behavior on sparse 16x16x32 BF16.
+  {
+    std::array<std::array<uint32_t, 64>, 2> a_buf{};
+    std::array<std::array<uint32_t, 64>, 4> b_buf{}, d_buf{};
+    std::array<uint32_t, 64> idx_buf{};
+    idx_buf.fill(0x44444444U);
+    const uint32_t *a[] = {a_buf[0].data(), a_buf[1].data()};
+    const uint32_t *b[] = {b_buf[0].data(), b_buf[1].data(), b_buf[2].data(), b_buf[3].data()};
+    const uint32_t *index[] = {idx_buf.data()};
+    uint32_t *d[] = {d_buf[0].data(), d_buf[1].data(), d_buf[2].data(), d_buf[3].data()};
+    // t=0 (q=0, s=0 -> A reg 0 low lane 0, B depth 0 -> reg 0 low lane 0): 2^64 * 2^64.
+    // t=8 (q=4, s=0 -> A reg 0 low lane 32, B depth 16 -> reg 0 low lane 32): -2^64 * 2^63.
+    a_buf[0][0] = 0x00005f80U;
+    b_buf[0][0] = 0x00005f80U;
+    a_buf[0][32] = 0x0000df80U;
+    b_buf[0][32] = 0x00005f00U;
+    ASSERT_EQ(rj_arith_v_smfmac_f32_16x16x32_bf16_w64(
+                  RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL, 0, d, a, b, index),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(d_buf[0][0], 0x7efffffeU);
   }
 }
 
@@ -428,14 +626,14 @@ TEST(MfmaGfx942Exact, SparseCapturedOutputsControlsAndAliasing) {
   }
 }
 
-TEST(MfmaGfx942Exact, SparseQualificationIsLocalToTargetAndOverflow) {
+TEST(MfmaGfx942Exact, SparseQualificationIsLocalToTarget) {
   for (const auto &form : kSparseForms) {
     SCOPED_TRACE(form.name);
     for (uint64_t semantics : {RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS,
                                RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
-      EXPECT_EQ(form.entry(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
-                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
       EXPECT_EQ(form.gfx950(semantics, 0, nullptr, nullptr, nullptr, nullptr),
+                RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+      EXPECT_EQ(form.gfx950(semantics | RJ_ARITH_FP16_OVFL, 0, nullptr, nullptr, nullptr, nullptr),
                 RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
     }
   }

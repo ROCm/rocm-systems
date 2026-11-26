@@ -7,6 +7,7 @@
 #include "common/cpu.h"
 #include "common/registers.h"
 #include "common/semantics.h"
+#include "common/wave.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_math.h"
 
@@ -24,7 +25,8 @@ template <int Lanes, typename Call> void check_inherited(Call call, Call referen
   Registers<2, Lanes> input;
   std::minstd_rand rng;
   for (int lane = 0; lane < Lanes; ++lane) {
-    input.v[0][lane] = (uint32_t(rng() >> 15) << 16) | uint32_t(rng() >> 15);
+    const uint32_t high = uint32_t(rng() >> 15), low = uint32_t(rng() >> 15);
+    input.v[0][lane] = (high << 16) | low;
   }
   input.v[0][0] = 0x7f800001U;
   input.v[0][1] = 0x7f800000U;
@@ -202,4 +204,146 @@ TEST(CdnaMath, LegacyExp) {
 TEST(CdnaMath, LegacyLog) {
   check_inherited<32>(rj_arith_v_log_legacy_f32_w32_gfx942, rj_arith_v_log_f32_w32_gfx942);
   check_inherited<64>(rj_arith_v_log_legacy_f32_w64_gfx942, rj_arith_v_log_f32_w64_gfx942);
+}
+
+namespace {
+// Check each CDNA integral core's rounded output scaling, aliasing and selected stores.
+template <int Bits, int Lanes, typename Call>
+void check_integral_sdwa(Call call, uint32_t expected) {
+  using namespace rocjitsu::arith::test;
+  using Mask = WaveMask<Lanes>;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (int aliasing_offset : {0, 1}) {
+      Registers<2, Lanes> input;
+      for (int reg = 0; reg < 2; ++reg) {
+        for (int lane = 0; lane < Lanes; ++lane) {
+          input.v[reg][lane] = Bits == 16 ? 0x3e003e00U : 0x3fc00000U;
+        }
+      }
+      Registers<2, Lanes> data = input;
+      const uint64_t flags =
+          cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
+      const uint64_t mode = RJ_ARITH_ALU_SDWA | RJ_ARITH_ALU_OMOD_2 |
+                            (Bits == 16 ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D : 0U);
+      const Mask exec_mask = Mask(1) | (Mask(1) << (Lanes - 1));
+      uint32_t status = 0x12345678U;
+      ASSERT_EQ(call(flags, exec_mask, mode, data.v + aliasing_offset, data.v, &status), 0);
+      for (int lane = 0; lane < Lanes; ++lane) {
+        const uint32_t output = Bits == 16 ? (expected << 16) | 0x3e00U : expected;
+        EXPECT_EQ(data.v[aliasing_offset][lane],
+                  (exec_mask >> lane) & 1U ? output : input.v[aliasing_offset][lane]);
+      }
+      data.expect_preserved(input, aliasing_offset, 1);
+      EXPECT_EQ(status, 0x12345678U);
+      EXPECT_EQ(call(flags, Mask(0), mode, nullptr, nullptr, nullptr), 0);
+      EXPECT_EQ(call(flags, Mask(0), mode | RJ_ARITH_DPP16, nullptr, nullptr, nullptr),
+                RJ_ARITH_ERROR_INVALID_FLAGS);
+    }
+  }
+}
+} // namespace
+
+// The same literal input distinguishes the six operations; no computed arithmetic oracle.
+TEST(CdnaIntegral, SdwaOutput) {
+  using Call32 = decltype(&rj_arith_v_trunc_f16_w32_gfx942);
+  using Call64 = decltype(&rj_arith_v_trunc_f16_w64_gfx942);
+  struct Case {
+    Call32 f16_wave32;
+    Call64 f16_wave64;
+    Call32 f32_wave32;
+    Call64 f32_wave64;
+    uint32_t f16_output, f32_output;
+  };
+  const Case cases[] = {
+      {rj_arith_v_trunc_f16_w32_gfx942, rj_arith_v_trunc_f16_w64_gfx942,
+       rj_arith_v_trunc_f32_w32_gfx942, rj_arith_v_trunc_f32_w64_gfx942, 0x4000, 0x40000000U},
+      {rj_arith_v_ceil_f16_w32_gfx942, rj_arith_v_ceil_f16_w64_gfx942,
+       rj_arith_v_ceil_f32_w32_gfx942, rj_arith_v_ceil_f32_w64_gfx942, 0x4400, 0x40800000U},
+      {rj_arith_v_floor_f16_w32_gfx942, rj_arith_v_floor_f16_w64_gfx942,
+       rj_arith_v_floor_f32_w32_gfx942, rj_arith_v_floor_f32_w64_gfx942, 0x4000, 0x40000000U},
+      {rj_arith_v_rndne_f16_w32_gfx942, rj_arith_v_rndne_f16_w64_gfx942,
+       rj_arith_v_rndne_f32_w32_gfx942, rj_arith_v_rndne_f32_w64_gfx942, 0x4400, 0x40800000U},
+      {rj_arith_v_frexp_mant_f16_w32_gfx942, rj_arith_v_frexp_mant_f16_w64_gfx942,
+       rj_arith_v_frexp_mant_f32_w32_gfx942, rj_arith_v_frexp_mant_f32_w64_gfx942, 0x3e00,
+       0x3fc00000U},
+      {rj_arith_v_fract_f16_w32_gfx942, rj_arith_v_fract_f16_w64_gfx942,
+       rj_arith_v_fract_f32_w32_gfx942, rj_arith_v_fract_f32_w64_gfx942, 0x3c00, 0x3f800000U},
+  };
+  for (const Case &sample : cases) {
+    check_integral_sdwa<16, 32>(sample.f16_wave32, sample.f16_output);
+    check_integral_sdwa<16, 64>(sample.f16_wave64, sample.f16_output);
+    check_integral_sdwa<32, 32>(sample.f32_wave32, sample.f32_output);
+    check_integral_sdwa<32, 64>(sample.f32_wave64, sample.f32_output);
+  }
+}
+
+namespace {
+// Check the output gate on exact power-of-two results without recreating native math models.
+template <int Lanes, typename Call> void check_sdwa(Call call, uint32_t bits, uint32_t expected) {
+  using namespace rocjitsu::arith::test;
+  using Mask = WaveMask<Lanes>;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : semantics_modes()) {
+      for (int aliasing_offset : {0, 1}) {
+        Registers<2, Lanes> input;
+        for (int lane = 0; lane < Lanes; ++lane) {
+          input.v[0][lane] = bits;
+        }
+        auto actual = input;
+        const uint64_t flags = cpu | semantics | RJ_ARITH_FP_ROUND_UP;
+        const uint64_t mode = RJ_ARITH_ALU_SDWA | RJ_ARITH_ALU_OMOD_2;
+        const Mask exec_mask = Mask(1) | (Mask(1) << (Lanes - 1));
+        uint32_t status = 0x80000000U;
+        const int error =
+            call(flags, exec_mask, mode, actual.v + aliasing_offset, actual.v, &status);
+        EXPECT_EQ(status, 0x80000000U);
+        if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS ||
+            semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+          EXPECT_EQ(error, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+          actual.expect_preserved(input, 0, 0);
+          continue;
+        }
+        ASSERT_EQ(error, RJ_ARITH_SUCCESS);
+        for (int lane = 0; lane < Lanes; ++lane) {
+          EXPECT_EQ(actual.v[aliasing_offset][lane],
+                    (exec_mask >> lane) & 1U ? expected : input.v[aliasing_offset][lane]);
+        }
+        actual.expect_preserved(input, aliasing_offset, 1);
+        EXPECT_EQ(call(flags, Mask(0), mode, nullptr, nullptr, nullptr), RJ_ARITH_SUCCESS);
+        EXPECT_EQ(call(flags, Mask(0), mode | RJ_ARITH_DPP16, nullptr, nullptr, nullptr),
+                  RJ_ARITH_ERROR_INVALID_FLAGS);
+      }
+    }
+  }
+}
+} // namespace
+
+// Native nearest output scales despite preserved guest denormals; SIN/IFLAG keep the MODE gate.
+TEST(CdnaUnary, SdwaOutput) {
+  struct Case {
+    decltype(&rj_arith_v_rcp_f32_w32_gfx942) wave32;
+    decltype(&rj_arith_v_rcp_f32_w64_gfx942) wave64;
+    uint32_t input, expected;
+  };
+  const Case cases[] = {
+      {rj_arith_v_rcp_f32_w32_gfx942, rj_arith_v_rcp_f32_w64_gfx942, 0x3f800000U, 0x40000000U},
+      {rj_arith_v_rcp_iflag_f32_w32_gfx942, rj_arith_v_rcp_iflag_f32_w64_gfx942, 0x3f800000U,
+       0x3f800000U},
+      {rj_arith_v_rsq_f32_w32_gfx942, rj_arith_v_rsq_f32_w64_gfx942, 0x3f800000U, 0x40000000U},
+      {rj_arith_v_sqrt_f32_w32_gfx942, rj_arith_v_sqrt_f32_w64_gfx942, 0x40800000U, 0x40800000U},
+      {rj_arith_v_exp_f32_w32_gfx942, rj_arith_v_exp_f32_w64_gfx942, 0, 0x40000000U},
+      {rj_arith_v_log_f32_w32_gfx942, rj_arith_v_log_f32_w64_gfx942, 0x40800000U, 0x40800000U},
+      {rj_arith_v_sin_f32_w32_gfx942, rj_arith_v_sin_f32_w64_gfx942, 0x80000000U, 0x80000000U},
+      {rj_arith_v_cos_f32_w32_gfx942, rj_arith_v_cos_f32_w64_gfx942, 0, 0x40000000U},
+      {rj_arith_v_exp_legacy_f32_w32_gfx942, rj_arith_v_exp_legacy_f32_w64_gfx942, 0, 0x40000000U},
+      {rj_arith_v_log_legacy_f32_w32_gfx942, rj_arith_v_log_legacy_f32_w64_gfx942, 0x40800000U,
+       0x40800000U},
+  };
+  for (const Case &sample : cases) {
+    check_sdwa<32>(sample.wave32, sample.input, sample.expected);
+    check_sdwa<64>(sample.wave64, sample.input, sample.expected);
+  }
+  EXPECT_EQ(rj_arith_v_rcp_f32_w32_gfx1250(RJ_ARITH_SEMANTICS_LOOSE, 0, RJ_ARITH_ALU_SDWA, nullptr,
+                                           nullptr, nullptr),
+            RJ_ARITH_ERROR_INVALID_FLAGS);
 }

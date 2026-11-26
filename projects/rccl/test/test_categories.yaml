@@ -123,6 +123,8 @@ test_categories:
       - "DdaAllReduceFabricLL.*"
       - "DdaAllReduceFabricLL128PeerPar.*"
       - "RasDiagnostics.*"
+      - "RasClientHelpers.*"
+      - "UniqueIdHex.*"
       - "ProfilerApiEventRank.*"
       - "Diagnostics.*"
       - "HipProbe.*"
