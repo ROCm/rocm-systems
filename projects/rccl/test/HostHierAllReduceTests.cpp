@@ -33,6 +33,7 @@ struct HostHierMockComm
     ncclComm&                 comm    = *storage;
     std::vector<ncclPeerInfo> peers;
     char                      archBuf[16]{};
+    char                      fakeDdaHandler = 0;
 
     HostHierMockComm(const std::vector<int>& hostOf, int rank, const char* arch = "gfx1250", bool mnnvl = true)
     {
@@ -43,6 +44,8 @@ struct HostHierMockComm
         comm.nRanks   = static_cast<int>(hostOf.size());
         // One clique holding every rank, as on a single MNNVL fabric.
         comm.clique.size = mnnvl ? comm.nRanks : 0;
+        // A parent comm on that fabric sets up DDA; eligibility only checks that it did.
+        comm.ddaFabricMemHandler = mnnvl ? reinterpret_cast<ncclFabricMemHandler*>(&fakeDdaHandler) : nullptr;
         comm.rank     = rank;
         setHosts(hostOf);
         comm.hostHierState = rcclHostHierUnprobed;
@@ -259,6 +262,12 @@ TEST(HostHierAllReduce, EligibilityPerMode_Isolated)
                 mock.comm.clique.size = 8;
                 EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
                     << "two MNNVL cliques";
+            }
+            {
+                HostHierMockComm mock(blockHosts(2, 8), 0);
+                mock.comm.ddaFabricMemHandler = nullptr;
+                EXPECT_FALSE(rcclHostHierAllReduceEligible(mock.get(), floats(2 * kMiB), ncclFloat32, ncclSum, false))
+                    << "no DDA fabric, as on a comm made by ncclCommSplit";
             }
         })
         .withTimeout(std::chrono::seconds(30))

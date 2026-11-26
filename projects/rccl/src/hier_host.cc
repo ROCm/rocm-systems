@@ -238,9 +238,11 @@ bool rcclHostHierAllReduceEligible(struct ncclComm* comm, size_t count, ncclData
   if (count == 0 || !opSplitsAcrossStages(op, datatype)) return false;
   const bool forced = mode == 1;
   // Registered windows are left to the symmetric and CE paths: the child comms do not see the registrations.
-  // The windows were measured on one MNNVL clique; a job spanning several stays on the default path.
-  const bool oneClique = ncclDdaUseFabricPath(comm) && comm->clique.size == comm->nRanks;
-  if (!forced && (registeredBuffers || !(oneClique && datatype == ncclFloat32 && op == ncclSum))) {
+  // The windows were measured on one MNNVL clique; a job spanning several stays on the default path. So does a comm
+  // without DDA fabric, such as one made by ncclCommSplit, whose default path was not measured.
+  const bool measured =
+    ncclDdaUseFabricPath(comm) && comm->clique.size == comm->nRanks && comm->ddaFabricMemHandler != nullptr;
+  if (!forced && (registeredBuffers || !(measured && datatype == ncclFloat32 && op == ncclSum))) {
     return false;
   }
   const struct rcclHostLayout* layout = rcclHostHierGetLayout(comm);
