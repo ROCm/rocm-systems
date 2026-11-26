@@ -2109,6 +2109,9 @@ void VMadLegacyI16Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VPermB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (!wf.exec() || amdgpu::arith::try_cdna4_perm_b32(wf, vdst, src0, src1, src2)) {
+    return;
+  }
   amdgpu::arith::execute_ternary32(wf, rj_arith_v_perm_b32_w32, rj_arith_v_perm_b32_w64,
                                    wf.cu().arithmetic_flags(),
                                    inst_.clamp ? RJ_ARITH_ALU_CLAMP : 0u, vdst, src0, src1, src2);

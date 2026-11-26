@@ -1702,6 +1702,52 @@ TEST(RegisterAccessTest, CdnaValuAllocationRedirectsSourcesAndSuppressesEveryRes
   }
 }
 
+// The VALU discard decision follows the ordinary VGPR bank for every destination register,
+// including a two-word result that crosses the end of the allocation, a destination moved by
+// GPR indexing, and an allocation split by an accumulator bank.
+TEST(RegisterAccessTest, CdnaValuDiscardFollowsTheBankForEveryDestinationRegister) {
+  constexpr uint32_t kOrdinaryVgprs = 8;
+  for (const auto arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
+    SCOPED_TRACE(arch);
+    auto decoder = Decoder::create(arch);
+    ASSERT_NE(decoder, nullptr);
+    for (bool split : {false, true}) {
+      if (split && arch == rocjitsu::IsaFamily::Cdna1) {
+        continue;
+      }
+      SCOPED_TRACE(split);
+      Fixture fx(arch, kSgprsPerWave, 1, 64, 64, split ? 2 * kOrdinaryVgprs : kOrdinaryVgprs);
+      ASSERT_NE(fx.wf, nullptr);
+      if (split) {
+        fx.wf->set_accum_vgpr_base(kOrdinaryVgprs);
+      }
+      for (uint32_t index : {0u, 3u}) {
+        SCOPED_TRACE(index);
+        // M0[15:12] bit 3 applies the M0[7:0] index to the destination.
+        fx.wf->set_mode_raw(index ? Wavefront::GPR_IDX_EN_BIT : 0u);
+        fx.wf->set_m0(index | (0x8u << 12));
+        ASSERT_EQ(fx.wf->gpr_idx_en(), index != 0);
+        for (uint32_t reg = 0; reg < 256; ++reg) {
+          SCOPED_TRACE(reg);
+          const uint32_t mov[] = {0x7e000300u | (reg << 17), 0}; // v_mov_b32 vREG, v0
+          auto one_word = decoder->decode(mov);
+          ASSERT_TRUE(one_word.succeeded());
+          ASSERT_EQ(std::string_view(one_word.value()->mnemonic()), "v_mov_b32_e32");
+          EXPECT_EQ(fx.wf->discards_valu_result(*one_word.value()),
+                    reg + index + 1 > kOrdinaryVgprs);
+          const uint32_t add[] = {0xd2800000u | reg, 0x00020100u}; // v_add_f64 vREG, v0, v0
+          auto two_words = decoder->decode(add);
+          ASSERT_TRUE(two_words.succeeded());
+          ASSERT_EQ(std::string_view(two_words.value()->mnemonic()), "v_add_f64");
+          EXPECT_EQ(fx.wf->discards_valu_result(*two_words.value()),
+                    reg + index + 2 > kOrdinaryVgprs);
+        }
+      }
+    }
+  }
+}
+
 TEST(RegisterAccessTest, OutOfRangeScalarWritesDoNotAcquirePendingDestinations) {
   constexpr uint64_t code = 0x1000, data = 0x4000;
   for (const auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
