@@ -24,20 +24,20 @@ int mfma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
-  // Only the captured gfx942 forms with default source controls are qualified.
-  // Compatibility retains the existing fast approximate implementation.
+  // Captured gfx942 forms with default source controls support exact modes for
+  // both FP16_OVFL=0 and 1. Compatibility retains the fast approximate reduction.
   if constexpr (Gfx942) {
-    if (is_exact(flags) && !instruction_flags && !(flags & RJ_ARITH_FP16_OVFL)) {
-      mfma_gfx942_exact(Bf16 ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16, M, K, Batch, d, a, b,
-                        c);
+    if (is_exact(flags) && !instruction_flags) {
+      mfma_gfx942_exact(Bf16 ? MfmaGfx942Format::Bf16 : MfmaGfx942Format::F16, M, K, Batch,
+                        (flags & RJ_ARITH_FP16_OVFL) != 0, d, a, b, c);
       return RJ_ARITH_SUCCESS;
     }
   }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
-  // Qualification observes FP16_OVFL; gfx942 approximate arithmetic ignores it
-  // in every backend, including SIMD implementations that receive the flags.
+  // Exact gfx942 modes clamp each K-step above; gfx942 approximate arithmetic
+  // ignores FP16_OVFL in every backend, including SIMD implementations.
   if constexpr (Gfx942) {
     flags &= ~RJ_ARITH_FP16_OVFL;
   }
