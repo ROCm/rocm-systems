@@ -18,6 +18,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * The analyze option `--decimal` is now the debug option `--debug-table-decimal`, which sets the decimals of the analyze tables.
 
+* The Memory Chart now uses the same metric names as the metric tables.
+  * Scratch Allocation is in bytes per work-item, and LDS Allocation is in bytes, as in the Wavefront panel.
+  * Counts show what they count, such as instr or req.
+  * Only percentages use the Util, Hit and Stall colors, and each shows a bar.
+  * The Compute Unit box shows AGPRs on GPUs that have them.
+
 ### Removed
 
 ### Optimized
@@ -35,6 +41,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed the peak of the `L2 Cache BW` metric in the `System Speed-of-Light` panel on MI200 (gfx90a). The peak was half the intended value, so the metric could exceed its peak.
 
 * Fixed Memory Chart values that did not match the same metrics in the analyze tables.
+
+* Fixed Wavefront Occupancy in the System Speed-of-Light panel on gfx1250, which counted wavefronts per CU but compared them with the peak of all CUs.
 
 ### Upcoming changes
 

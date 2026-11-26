@@ -107,21 +107,21 @@ Panel Config:
         value: Value
         unit: Unit
       metric:
-        LDS Load Requests:
+        LDS Load Instructions:
           value: SUM(TX_VCA_LDS_LOAD_WAVEFRONTS_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        LDS Store Requests:
+          unit: (Instructions + $normUnit)
+        LDS Store Instructions:
           value: SUM(TX_VCA_LDS_STORE_WAVEFRONTS_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        LDS Atomic Requests:
+          unit: (Instructions + $normUnit)
+        LDS Atomic Instructions:
           value: SUM(TX_VCA_LDS_ATOMIC_WAVEFRONTS_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        Async Load Requests:
+          unit: (Instructions + $normUnit)
+        Async Load Instructions:
           value: SUM(TX_VCA_ASYNC_LOAD_WAVEFRONT_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
-        Async Store Requests:
+          unit: (Instructions + $normUnit)
+        Async Store Instructions:
           value: SUM(TX_VCA_ASYNC_STORE_WAVEFRONT_sum) / SUM($denom)
-          unit: (Requests + $normUnit)
+          unit: (Instructions + $normUnit)
         LDS Utilization:
           value: 100 * SUM(TX_VMW_LDS_INPUT_ACTIVE_sum) / SUM(TX_VMW_VMW_BUSY_sum)
           unit: Percent
@@ -289,42 +289,46 @@ Panel Config:
         Wavefront Occupancy:
           value: 100 * SUM(SQG_WAVE_CYCLES_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu * $max_waves_per_cu)
           unit: Percent
-        VGPR:
+        VGPRs:
           value: AVG(Arch_VGPR)
           unit: Registers
-        SGPR:
+        SGPRs:
           value: AVG(SGPR)
           unit: Registers
         LDS Allocation:
           value: AVG(LDS_Per_Workgroup)
           unit: Bytes per Workgroup
         Scratch Allocation:
-          value: AVG(Scratch_Per_Workitem) * $wave_size / 1024
-          unit: KB per Wave
+          value: AVG(Scratch_Per_Workitem)
+          unit: Bytes per Work-item
         Workgroups:
           value: AVG(Grid_Size / Workgroup_Size) / $cu_per_gpu
           unit: Workgroups per WGP
+        AGPRs:
+          value: AVG(Accum_VGPR)
+          unit: Registers
 
   metrics_description:
     Wavefront Occupancy: >-
       Resident wavefronts per WGP, averaged over GPU-active cycles, as a percent of the
       maximum wavefronts per WGP.
-    VGPR: >-
+    VGPRs: >-
       The number of architected vector general-purpose registers allocated
       for the kernel. Note: this may not exactly match the number of VGPRs
       requested by the compiler due to allocation granularity.
-    SGPR: >-
+    SGPRs: >-
       The number of scalar general-purpose registers allocated for the kernel.
       Note: this may not exactly match the number of SGPRs requested by
       the compiler due to allocation granularity.
+    AGPRs: >-
+      Number of accumulation VGPRs allocated per wave.
     LDS Allocation: >-
       The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
       This may also be larger than what was requested at compile time due to both allocation
       granularity and dynamic per-dispatch LDS allocations.
-    Scratch Allocation: >-
-      The amount of scratch memory requested per wavefront, in KB: the scratch bytes
-      requested per work-item multiplied by the wavefront size. Scratch memory is used for
-      stack memory on the accelerator, as well as for register spills and restores.
+    Scratch Allocation: The number of bytes of scratch memory requested per work-item
+      for this kernel. Scratch memory is used for stack memory on the accelerator,
+      as well as for register spills and restores.
     Workgroups: >-
       The number of workgroups in the launch divided by the number of WGPs.
     ICache Requests: >-
@@ -387,20 +391,20 @@ Panel Config:
     GL0 Hit Rate: >-
       GL0 cache hit rate.
 
-    LDS Load Requests: >-
-      Number of LDS load requests.
+    LDS Load Instructions: >-
+      Number of LDS load instructions.
 
-    LDS Store Requests: >-
-      Number of LDS store requests.
+    LDS Store Instructions: >-
+      Number of LDS store instructions.
 
-    LDS Atomic Requests: >-
-      Number of LDS atomic requests.
+    LDS Atomic Instructions: >-
+      Number of LDS atomic instructions.
 
-    Async Load Requests: >-
-      Number of async load requests.
+    Async Load Instructions: >-
+      Number of async load instructions.
 
-    Async Store Requests: >-
-      Number of async store requests.
+    Async Store Instructions: >-
+      Number of async store instructions.
 
     LDS Utilization: >-
       Percentage of VMW-busy cycles the LDS is executing any operation.

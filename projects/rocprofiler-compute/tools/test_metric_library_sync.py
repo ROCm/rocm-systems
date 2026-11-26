@@ -148,7 +148,7 @@ UNIT_VARIANTS = {
     arch: CDNA_UNIT_VARIANTS for arch in ("gfx908", "gfx90a", "gfx942", "gfx950")
 }
 UNIT_VARIANTS["gfx115x"] = {
-    "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
+    "3.4.0": ("LDS Instructions", "(Instructions + $normUnit)"),
     "7.2.4": ("LDS Allocation", "Bytes"),
     "9.2.0": ("Total Requests", "(Count + $normUnit)"),
     "9.2.1": ("Read Requests", "(Count + $normUnit)"),
@@ -164,7 +164,7 @@ UNIT_VARIANTS["gfx115x"] = {
 }
 UNIT_VARIANTS["gfx120x"] = {
     "2.1.6": ("LDS Bank Conflicts", "Cycles"),
-    "3.4.0": ("LDS Req", "(Requests + $normUnit)"),
+    "3.4.0": ("LDS Instructions", "(Instructions + $normUnit)"),
     "3.9.0": ("Memory Read Requests", "(Requests + $normUnit)"),
     "3.9.1": ("Memory Write Requests", "(Requests + $normUnit)"),
     "7.2.4": ("LDS Allocation", "Bytes"),
@@ -173,11 +173,11 @@ UNIT_VARIANTS["gfx120x"] = {
 }
 UNIT_VARIANTS["gfx1250"] = {
     "2.1.17": ("Active WGPs", "WGPs per Cycle"),
-    "3.4.0": ("LDS Load Requests", "(Requests + $normUnit)"),
-    "3.4.1": ("LDS Store Requests", "(Requests + $normUnit)"),
-    "3.4.2": ("LDS Atomic Requests", "(Requests + $normUnit)"),
-    "3.4.3": ("Async Load Requests", "(Requests + $normUnit)"),
-    "3.4.4": ("Async Store Requests", "(Requests + $normUnit)"),
+    "3.4.0": ("LDS Load Instructions", "(Instructions + $normUnit)"),
+    "3.4.1": ("LDS Store Instructions", "(Instructions + $normUnit)"),
+    "3.4.2": ("LDS Atomic Instructions", "(Instructions + $normUnit)"),
+    "3.4.3": ("Async Load Instructions", "(Instructions + $normUnit)"),
+    "3.4.4": ("Async Store Instructions", "(Instructions + $normUnit)"),
     "3.4.14": ("TDM Load Requests", "(Requests + $normUnit)"),
     "3.4.15": ("TDM Store Requests", "(Requests + $normUnit)"),
     "6.2.0": ("Dispatched Workgroups", "Count"),

@@ -50,7 +50,6 @@ UNIT_ALIASES = {
     "Instr/cycle": "Instructions per Cycle",
     "Waves/cycle": "Wavefronts per Cycle",
     "Cycles/wave": "Cycles per Wavefront",
-    "KB per Wave": "KB per Wavefront",
     "Wave": "Wavefronts",
     "Waves": "Wavefronts",
 }
