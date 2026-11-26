@@ -22,7 +22,7 @@ it does, down to the hardware block level.
 AMD Instinct MI-Series GPUs are data center-class GPUs designed for
 compute and have some graphics capabilities disabled or removed.
 ROCm Compute Profiler primarily targets use with
-:doc:`GPUs in the AMD Instinct MI300, MI200, and MI100 Series <rocm:conceptual/gpu-arch>`.
+:doc:`GPUs in the AMD Instinct MI300, MI200, and MI100 Series <rocm:reference/gpu-arch/index>`.
 Development is in progress to support Radeon™ (RDNA) GPUs.
 
 ROCm Compute Profiler is built on top of :doc:`ROCprofiler-SDK <rocprofiler-sdk:index>` to
