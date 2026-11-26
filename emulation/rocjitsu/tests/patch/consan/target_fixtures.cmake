@@ -198,6 +198,9 @@ foreach(
             else()
                 set(_scenarios overlap adjacent ordered tail)
             endif()
+            if(_gpu STREQUAL "gfx1250")
+                list(APPEND _scenarios scalar backward)
+            endif()
             string(TOUPPER "${_direction}" _direction_define)
             foreach(_scenario IN LISTS _scenarios)
                 set(_name flat-${_direction}-${_scenario})
@@ -219,6 +222,112 @@ foreach(
             flat-load-unknownstrict
             flat-load-nongroupstrict
         )
+        foreach(_scenario IN ITEMS values overlap adjacent)
+            set(_name flat-half-${_scenario})
+            string(TOUPPER "${_scenario}" _scenario_define)
+            list(APPEND _flat_specs "${_name}:16:0:0:0:0")
+            set(_flat_options_${_name} -DFLAT_${_scenario_define}=1)
+            list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+        endforeach()
+        foreach(_bits IN ITEMS 64 128)
+            foreach(_scenario IN ITEMS values overlap adjacent)
+                set(_name flat-b${_bits}-${_scenario})
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _flat_specs "${_name}:${_bits}:0:0:0:0")
+                set(_flat_options_${_name} -DFLAT_${_scenario_define}=1)
+                list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+            endforeach()
+        endforeach()
+        if(_gpu STREQUAL "gfx1250")
+            foreach(_form IN ITEMS half b64 b128)
+                foreach(_scenario IN ITEMS values overlap adjacent)
+                    set(_name flat-saddr${_form}-${_scenario})
+                    set(_source flat-${_form}-${_scenario})
+                    if(_form STREQUAL "half")
+                        set(_width 16)
+                    else()
+                        string(SUBSTRING "${_form}" 1 -1 _width)
+                    endif()
+                    list(APPEND _flat_specs "${_name}:${_width}:0:0:0:0")
+                    set(_flat_options_${_name}
+                        ${_flat_options_${_source}}
+                        -DFLAT_SCALAR_WIDTH=1
+                    )
+                    list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+                endforeach()
+            endforeach()
+        endif()
+        foreach(_direction IN ITEMS load store)
+            string(TOUPPER "${_direction}" _direction_define)
+            foreach(_scenario IN ITEMS helper helperordered)
+                set(_name flat-${_direction}-${_scenario})
+                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                set(_flat_options_${_name}
+                    -DFLAT_HELPER=1
+                    -DFLAT_${_direction_define}=1
+                    -DFLAT_UNKNOWN=1
+                )
+                if(_scenario STREQUAL "helperordered")
+                    list(APPEND _flat_options_${_name} -DFLAT_ORDERED=1)
+                endif()
+                list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+            endforeach()
+            list(
+                APPEND _flat_cases_${_gpu}_${_wave_size}
+                flat-${_direction}-helperstrict
+            )
+        endforeach()
+        if(_gpu STREQUAL "gfx950" OR _gpu STREQUAL "gfx1250")
+            list(
+                APPEND _flat_specs
+                "flat-load-helper-barrier-after-call:32:0:0:0:0"
+                "flat-store-helper-barrier-before-call:32:0:0:0:0"
+            )
+            set(_flat_options_flat-load-helper-barrier-after-call
+                ${_flat_options_flat-load-helper}
+                -DHELPER_BARRIER_AFTER_CALL=1
+            )
+            set(_flat_options_flat-store-helper-barrier-before-call
+                ${_flat_options_flat-store-helper}
+                -DHELPER_BARRIER_BEFORE_CALL=1
+            )
+        endif()
+        if(_gpu STREQUAL "gfx950")
+            list(APPEND _flat_specs "flat-store-helper-after-caller:32:0:0:0:0")
+            set(_flat_options_flat-store-helper-after-caller
+                ${_flat_options_flat-store-helper}
+                -DHELPER_AFTER_CALLER=1
+            )
+            foreach(
+                _control
+                IN
+                ITEMS
+                    lookalike
+                    other
+                    width
+                    earlier
+                    wrong
+                    private
+                    global
+                    alias
+                    badreturn
+                    clobber
+            )
+                string(TOUPPER "${_control}" _define)
+                set(_name flat-load-helper${_control})
+                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                set(_flat_options_${_name}
+                    -DFLAT_HELPER=1
+                    -DFLAT_LOAD=1
+                    -DHELPER_${_define}=1
+                )
+                if(_control STREQUAL "global")
+                    list(APPEND _flat_options_${_name} -DFLAT_NONGROUP=1)
+                elseif(NOT _control STREQUAL "private")
+                    list(APPEND _flat_options_${_name} -DFLAT_UNKNOWN=1)
+                endif()
+            endforeach()
+        endif()
         set(_atomic_specs)
         set(_atomic_forms u32 u64 f32 cas)
         if(_legacy OR _gpu STREQUAL "gfx1250")
@@ -398,6 +507,11 @@ foreach(
             if(_name MATCHES "^flat-")
                 set(_fixture_source fixtures/group_flat.s)
                 set(_fixture_deps)
+                if(_width EQUAL 16)
+                    set(_fixture_source fixtures/group_flat_half.s)
+                elseif(_width EQUAL 64 OR _width EQUAL 128)
+                    set(_fixture_source fixtures/group_flat_wide.s)
+                endif()
             else()
                 set(_fixture_source fixtures/native_widths.s)
                 set(_fixture_deps

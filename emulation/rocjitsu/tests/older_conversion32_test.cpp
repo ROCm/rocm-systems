@@ -1,10 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Decoded older-target FP32/integer conversions: inherited arithmetic, guest
+// Decoded older-target FP32/integer conversions: independent arithmetic, guest
 // controls, source staging, destination placement, aliases and inactive lanes.
 
 #include "compute_unit_test_util.h"
+#include "conversion32_reference.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
@@ -16,7 +17,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/opcodes.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/execution_backend.h"
 #include "rocjitsu/isa/instruction.h"
@@ -39,44 +39,15 @@
 namespace rocjitsu::amdgpu {
 namespace {
 
-// Preserve the original scalar conversion model independently of API dispatch.
+// Resolve the older profiles' MODE fields for the independent scalar reference.
 uint32_t reference(int operation, uint32_t raw, const Wavefront &wave, unsigned omod, bool clamp,
                    bool absolute, bool negate) {
-  if (operation == 0) {
-    return conversion_to_float<conversion::I32, fp_format::F32>(wave, 0, 0, omod, clamp)(raw);
+  if (wave.ieee_mode() || (wave.fp_denorm_mode_f32() & 2)) {
+    omod = 0;
   }
-  if (operation == 1) {
-    return conversion_to_float<conversion::U32, fp_format::F32>(wave, 0, 0, omod, clamp)(raw);
-  }
-  raw = (absolute ? raw & 0x7fffffffU : raw) ^ (negate ? 0x80000000U : 0);
-  if (operation >= 4) {
-    // The inherited integer model predates the rj-arith routing tested here.
-    raw = input_denormal::flush_input<fp_format::F32>(raw,
-                                                      input_denormal_policy<fp_format::F32>(wave));
-    return conversion::f32_to_integer<int32_t>(
-        raw, operation == 4 ? conversion::Rounding::NEAREST_UP : conversion::Rounding::FLOOR,
-        conversion::NanResult::SATURATE_BY_SIGN);
-  }
-  const float x = std::bit_cast<float>(raw);
-  if (std::isnan(x)) {
-    return 0;
-  }
-  if (operation == 2) {
-    if (x >= 0x1p31f) {
-      return uint32_t(INT32_MAX);
-    }
-    if (x < -0x1p31f) {
-      return uint32_t(INT32_MIN);
-    }
-    return uint32_t(static_cast<int32_t>(x));
-  }
-  if (x < 0) {
-    return 0;
-  }
-  if (x >= 0x1p32f) {
-    return UINT32_MAX;
-  }
-  return static_cast<uint32_t>(x);
+  return rocjitsu::test::convert32(operation, raw,
+                                   {omod, wave.fp_round_mode_f32(), clamp, wave.dx10_clamp()},
+                                   (wave.fp_denorm_mode_f32() & 1) == 0, absolute, negate);
 }
 
 // Restore the caller's test override even when an assertion exits the test.
@@ -199,10 +170,13 @@ TEST(OlderConversion32, Arithmetic) {
           auto decoder = Decoder::create(family.arch);
           const auto base = wave->vgpr_alloc().base;
           std::minstd_rand random;
+          const auto next_word = [&] {
+            const uint32_t high = uint32_t(random() >> 15);
+            return (high << 16) | uint32_t(random() >> 15);
+          };
           std::array<uint32_t, 64> input{};
           for (int lane = 0; lane < lanes; ++lane) {
-            input[lane] = lane < 16 ? special[lane]
-                                    : (uint32_t(random() >> 15) << 16) | uint32_t(random() >> 15);
+            input[lane] = lane < 16 ? special[lane] : next_word();
           }
           for (int operation = 0; operation < 6; ++operation) {
             for (const auto &sample : scenarios) {

@@ -63,8 +63,14 @@ enum class AnalysisKind : uint32_t { Invalid = 0, LdsRaceDetection = 1 };
 enum class RecordKind : uint32_t { Access = 1 };
 // A GroupFlat site records the premise, if any, used to interpret the guest address.
 enum class FlatPolicy { Likely, Strict };
-enum class FlatAssumption : uint32_t { None, SelectedSharedHigh };
+enum class FlatAssumption : uint32_t { None, SelectedSharedHigh, HelperLoadAt, HelperStoreAt };
 constexpr std::string_view flat_assumption_text(FlatAssumption assumption) {
+  if (assumption == FlatAssumption::HelperLoadAt)
+    return "the terminal read uses the LDS pointer passed to "
+           "hip_moi::context::lds_load_at<unsigned>";
+  if (assumption == FlatAssumption::HelperStoreAt)
+    return "the terminal write uses the LDS pointer passed to "
+           "hip_moi::context::lds_store_at<unsigned>";
   if (assumption == FlatAssumption::SelectedSharedHigh)
     return "the selected pointer high word belongs to this workgroup's shared aperture";
   return {};

@@ -430,7 +430,7 @@ class _ScalarUnary(_ScalarDeriver):
             }
             k = kind_map[op]
             if k == SemaNodeKind.CALL:
-                fn = 'std::ceil' if op == 'ceil' else 'util::rndne_scalar'
+                fn = 'std::ceil' if op == 'ceil' else 'std::nearbyint'
                 result = SemaNode(
                     SemaNodeKind.CALL,
                     ty=ty,

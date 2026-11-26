@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/lds_race.h"
+#include "rocjitsu/code/patch/consan/local_helper.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
 #include "rocjitsu/isa/isa_family.h"
 
@@ -218,18 +219,41 @@ std::optional<RegisterRef> allocated_vgpr_tuple(const Operand *operand, uint32_t
   return reg;
 }
 
-bool is_flat_b32(const Instruction &instruction) {
+uint32_t group_flat_width(const Instruction &instruction) {
   if (instruction.amdgpu_memory_addressing() != amdgpu::MemoryAddressing::Flat)
-    return false;
+    return 0;
   using Op = amdgpu::Operation;
   switch (instruction.amdgpu_operation()) {
+  case Op::FLAT_LOAD_USHORT:
+  case Op::FLAT_LOAD_U16:
+  case Op::FLAT_LOAD_SSHORT:
+  case Op::FLAT_LOAD_I16:
+  case Op::FLAT_LOAD_SHORT_D16:
+  case Op::FLAT_LOAD_D16_B16:
+  case Op::FLAT_LOAD_SHORT_D16_HI:
+  case Op::FLAT_LOAD_D16_HI_B16:
+  case Op::FLAT_STORE_SHORT:
+  case Op::FLAT_STORE_B16:
+  case Op::FLAT_STORE_SHORT_D16_HI:
+  case Op::FLAT_STORE_D16_HI_B16:
+    return 2;
   case Op::FLAT_LOAD_B32:
   case Op::FLAT_LOAD_DWORD:
   case Op::FLAT_STORE_B32:
   case Op::FLAT_STORE_DWORD:
-    return true;
+    return 4;
+  case Op::FLAT_LOAD_DWORDX2:
+  case Op::FLAT_LOAD_B64:
+  case Op::FLAT_STORE_DWORDX2:
+  case Op::FLAT_STORE_B64:
+    return 8;
+  case Op::FLAT_LOAD_DWORDX4:
+  case Op::FLAT_LOAD_B128:
+  case Op::FLAT_STORE_DWORDX4:
+  case Op::FLAT_STORE_B128:
+    return 16;
   default:
-    return false;
+    return 0;
   }
 }
 
@@ -259,7 +283,8 @@ Result qualify_lds_race_block(const BasicBlock &block, InputError &error) {
 }
 
 FailureOr<std::vector<const BasicBlock *>>
-qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputError &error) {
+qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, const LocalHelper &call,
+                     InputError &error) {
   // A trampoline return can point backward without revisiting any executed block.
   // Defer only conditional self-edges to the later whole-program barrier gate;
   // every other edge must form a DAG. This ordering alone does not admit a loop.
@@ -269,7 +294,11 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
     incoming.emplace(block.get(), 0);
   }
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
-    for (const BasicBlock *successor : block->successors()) {
+    for (const BasicBlock *successor : call.successors(*block)) {
+      if (successor == block.get() && call.caller)
+        return reject_instruction(error, InputErrorCode::UnsupportedFlow,
+                                  "LDS helper calls require an acyclic kernel",
+                                  block->start_offset());
       if (successor == block.get() && block->successors().size() == 2) {
         continue;
       }
@@ -290,7 +319,7 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
     }
   }
   for (size_t index = 0; index < ready.size(); ++index) {
-    for (const BasicBlock *successor : ready[index]->successors()) {
+    for (const BasicBlock *successor : call.successors(*ready[index])) {
       if (successor == ready[index] && ready[index]->successors().size() == 2) {
         continue;
       }
@@ -314,7 +343,7 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
 Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                                      uint32_t allocated_vgprs,
                                      std::vector<NativeLdsAccess> &accesses, InputError &error,
-                                     const FlatSitePolicy *flat_policy) {
+                                     const FlatSitePolicy *flat_policy, uint32_t allocated_sgprs) {
   const std::string_view name = instruction.mnemonic();
   const amdgpu::Operation operation = instruction.amdgpu_operation();
   const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
@@ -324,18 +353,32 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
       (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER)) {
     return Result::success(); // The complete original group/CFG is qualified below.
   }
-  if (is_flat_b32(instruction)) {
+  if (const uint32_t flat_width = group_flat_width(instruction)) {
     const bool rdna = arch == IsaFamily::Rdna3;
     const bool wide = arch == IsaFamily::Rdna4 || arch == IsaFamily::Cdna5;
     const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
     const uint32_t *words = instruction.raw_encoding();
     int32_t immediate;
+    std::optional<uint16_t> scalar_base;
+    bool scaled_vector_offset = false;
     if (wide) {
-      // VFLAT uses a VGPR pair when SADDR is null. Exclude routing, scale,
-      // cache/scope and reserved bits. The unused load/store value must be zero.
+      // SADDR changes VADDR into a signed single-dword displacement on CDNA5.
+      // The null selector keeps the VGPR-pair form on both architectures.
       const uint32_t value_mask = read ? 0xffu : (0xffu << 23);
-      if (instruction.size() != 12 || (words[0] & 0x00c03fffu) != 0x7c ||
-          (words[1] & ~value_mask) != 0)
+      const uint16_t saddr = words[0] & 0x7fu;
+      if (saddr != 0x7c && arch == IsaFamily::Cdna5) {
+        const auto base =
+            instruction.src_operand(instruction.num_src_operands() - 1)->to_register_ref();
+        if (!base || base->cls != RegClass::SGPR || base->width != 2 || base->index != saddr ||
+            (saddr & 1u) || saddr + 2u > allocated_sgprs)
+          return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                    "FLAT scalar base exceeds ordinary SGPR allocation", offset);
+        scalar_base = saddr;
+        scaled_vector_offset = (words[1] & (1u << 16)) != 0;
+      }
+      const uint32_t operand_mask = value_mask | (scalar_base ? 1u << 16 : 0u);
+      if (instruction.size() != 12 || (words[0] & 0x00c03f80u) || (saddr != 0x7c && !scalar_base) ||
+          (words[1] & ~operand_mask) != 0)
         return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                   "unsupported Group-FLAT encoding", offset);
       immediate = static_cast<int32_t>(words[2]) >> 8;
@@ -349,13 +392,16 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                                   "unsupported Group-FLAT encoding", offset);
       immediate = words[0] & 0xfff;
     }
-    const auto address = allocated_vgpr_tuple(instruction.src_operand(0), 2, allocated_vgprs);
-    const auto value = allocated_vgpr_tuple(
-        read ? instruction.dst_operand(0) : instruction.src_operand(1), 1, allocated_vgprs);
+    const auto address =
+        allocated_vgpr_tuple(instruction.src_operand(0), scalar_base ? 1 : 2, allocated_vgprs);
+    const auto value =
+        allocated_vgpr_tuple(read ? instruction.dst_operand(0) : instruction.src_operand(1),
+                             (flat_width + 3) / 4, allocated_vgprs);
     if (!address || !value)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                 "FLAT operands exceed allocation", offset);
-    const RegisterRef high{RegClass::VGPR, static_cast<uint16_t>(address->index + 1), 1};
+    const RegisterRef high{scalar_base ? RegClass::SGPR : RegClass::VGPR,
+                           static_cast<uint16_t>(scalar_base.value_or(address->index) + 1), 1};
     if (!flat_policy)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                 "FLAT access requires aperture classification", offset);
@@ -363,6 +409,8 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     if (!flat_policy->shared_high.contains(high)) {
       if (flat_policy->selected_shared_high.contains(high))
         assumption = FlatAssumption::SelectedSharedHigh;
+      else if (flat_policy->helper_api == (read ? AccessKind::Read : AccessKind::Write))
+        assumption = read ? FlatAssumption::HelperLoadAt : FlatAssumption::HelperStoreAt;
       if (flat_policy->non_group_high.contains(high) || assumption == FlatAssumption::None ||
           flat_policy->mode == FlatPolicy::Strict) {
         const auto reason = flat_policy->non_group_high.contains(high)
@@ -370,20 +418,22 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                             : assumption == FlatAssumption::None ? FlatExclusionReason::Unresolved
                                                                  : FlatExclusionReason::Strict;
         flat_policy->exclusions.push_back(
-            {offset, static_cast<uint32_t>(instruction.size()), reason, assumption});
+            {offset, static_cast<uint32_t>(instruction.size()), reason,
+             reason == FlatExclusionReason::Strict ? assumption : FlatAssumption::None});
         return Result::success();
       }
     }
     // The shared aperture is 4-GiB aligned. Under the saved classification,
-    // BeforeInst captures its relative byte offset in the low VGPR. The
-    // ordinary probe widens before adding the immediate and flags overflow.
+    // its low word and the anchor operands determine the offset for each lane.
     accesses.push_back({.site = static_cast<uint32_t>(accesses.size()),
                         .original_offset = offset,
                         .kind = read ? AccessKind::Read : AccessKind::Write,
                         .address_vgpr = address->index,
+                        .scalar_base = scalar_base,
+                        .scaled_vector_offset = scaled_vector_offset,
                         .immediate_bytes = immediate,
                         .guest_size = static_cast<uint32_t>(instruction.size()),
-                        .width = 4,
+                        .width = flat_width,
                         .origin = AccessOrigin::GroupFlat,
                         .assumption = assumption});
     return Result::success();
@@ -666,7 +716,7 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
           operation == amdgpu::Operation::S_BARRIER_WAIT) {
         barrier_offsets.insert(instruction.src_loc());
       }
-      if (native_lds_form(instruction).width != 0 || is_flat_b32(instruction)) {
+      if (native_lds_form(instruction).width != 0 || group_flat_width(instruction) != 0) {
         access_offsets.insert(instruction.src_loc());
       }
     }

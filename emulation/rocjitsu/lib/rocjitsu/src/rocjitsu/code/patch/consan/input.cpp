@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/patch/consan/input.h"
 #include "rocjitsu/code/consan/image/metadata.h"
+#include "rocjitsu/code/patch/consan/local_helper.h"
 #include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
@@ -217,27 +218,40 @@ struct FlatPointers {
 };
 
 Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blocks,
-                             InputProgram &program, RegisterSet &used, const InputLimits &limits,
-                             InputError &error) {
-  const FailureOr<std::vector<const BasicBlock *>> ordered = qualify_lds_race_cfg(blocks, error);
-  if (ordered.failed()) {
-    return Result::failure();
-  }
-  std::unordered_map<const BasicBlock *, std::optional<uint64_t>> latest_access;
-  latest_access.reserve(ordered.value().size());
-  for (const BasicBlock *block : ordered.value()) {
-    latest_access.emplace(block, std::nullopt);
-  }
+                             const AmdGpuCodeObject &object, InputProgram &program,
+                             RegisterSet &used, const InputLimits &limits, InputError &error) {
   std::vector<BasicBlock *> scope;
   for (const auto &block : blocks)
     scope.push_back(block.get());
-  const ExecMaskAnalysis exec(scope, program.wave_size);
+  const auto helper = qualify_local_helper(object, scope, program.wave_size, error);
+  if (helper.failed())
+    return Result::failure();
+  const LocalHelper &call = helper.value();
+  program.has_local_helper = call.caller != nullptr;
+  const auto ordered = qualify_lds_race_cfg(blocks, call, error);
+  if (ordered.failed()) {
+    return Result::failure();
+  }
+  std::unordered_map<const BasicBlock *, const Instruction *> latest_observation;
+  latest_observation.reserve(ordered.value().size());
+  for (const BasicBlock *block : ordered.value()) {
+    latest_observation.emplace(block, nullptr);
+  }
+  const auto root =
+      std::ranges::find(scope, program.kernel.entry_text_offset, &BasicBlock::start_offset);
+  if (root == scope.end())
+    return reject(error, InputErrorCode::UnsupportedFlow,
+                  "selected entry is absent from original CFG");
+  const std::array<const BasicBlock *, 1> entries{*root};
+  const ExecMaskAnalysis exec(scope, program.wave_size, call.edges, entries);
   std::unordered_map<const BasicBlock *, FlatPointers> outgoing;
   size_t instruction_count = 0;
   for (const BasicBlock *block : ordered.value()) {
     if (block->has_implicit_terminator() ||
-        block->successor_issue() != BasicBlock::SuccessorIssue::None ||
-        !block->call_edges().empty()) {
+        (block->successor_issue() != BasicBlock::SuccessorIssue::None &&
+         !(block == call.callee &&
+           block->successor_issue() == BasicBlock::SuccessorIssue::IndirectControlFlow)) ||
+        (!block->call_edges().empty() && block != call.caller)) {
       return reject(error, InputErrorCode::UnsupportedFlow, "original control flow is not closed",
                     block->start_offset());
     }
@@ -251,7 +265,7 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       aperture.non_group.all_lanes.expand(kernarg_high);
     }
     bool first = true;
-    for (const BasicBlock *predecessor : block->predecessors()) {
+    for (const BasicBlock *predecessor : call.predecessors(*block)) {
       // A deferred backedge cannot inherit first-iteration proofs.
       const auto it = outgoing.find(predecessor);
       if (it == outgoing.end()) {
@@ -264,35 +278,44 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
         aperture.intersect(it->second);
       first = false;
     }
-    std::optional<uint64_t> latest = latest_access.find(block)->second;
+    const Instruction *latest = latest_observation.at(block);
     for (const Instruction &instruction : block->instructions()) {
       if (instruction_count++ >= limits.instructions) {
         return reject(error, InputErrorCode::ResourceLimit, "instruction analysis budget exceeded");
       }
       const uint64_t offset = instruction.src_loc();
-      if ((instruction.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0) {
+      if ((instruction.flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) != 0 &&
+          !call.is_transfer(instruction)) {
         return reject(error, InputErrorCode::UnsupportedFlow, "indirect transfer is outside MVP",
                       offset);
       }
       const size_t previous_accesses = program.accesses.size();
-      const FlatSitePolicy flat{aperture.shared.active, aperture.non_group.active,
-                                aperture.selected.active, program.flat_policy,
-                                program.flat_exclusions};
-      if (classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
-                                        program.accesses, error, &flat)
+      const FlatSitePolicy flat{
+          aperture.shared.active,   aperture.non_group.active,
+          aperture.selected.active, program.flat_policy,
+          program.flat_exclusions,  &instruction == call.terminal_access ? call.api : std::nullopt};
+      if (!call.is_transfer(instruction) &&
+          classify_lds_race_instruction(instruction, program.target->arch, program.original_vgprs,
+                                        program.accesses, error, &flat, program.original_sgprs)
               .failed()) {
         return Result::failure();
       }
-      // The analyzer's site IDs follow source-PC order. Acyclic control flow
-      // may return from a cave, but native accesses must retain that same order
-      // on every path; a larger predecessor PC would invert valid record sequences.
-      for (size_t index = previous_accesses; index < program.accesses.size(); ++index) {
-        const uint64_t access = program.accesses[index].original_offset;
-        if (latest && access <= *latest) {
+      // Replay orders LDS sites by PC and counts preceding barrier completions
+      // to derive each site's phase. Follow both across the call and return.
+      const amdgpu::Operation operation = instruction.amdgpu_operation();
+      const bool caller_barrier = call.caller && (operation == amdgpu::Operation::S_BARRIER ||
+                                                  operation == amdgpu::Operation::S_BARRIER_WAIT);
+      if (program.accesses.size() != previous_accesses || caller_barrier) {
+        if (latest && offset <= latest->src_loc()) {
+          if (caller_barrier || latest->is_barrier())
+            return reject(
+                error, InputErrorCode::UnsupportedFlow,
+                "observed LDS accesses and barrier completions must follow source PC order",
+                offset);
           return reject(error, InputErrorCode::UnsupportedFlow,
-                        "MVP requires increasing LDS access order along every CFG path", access);
+                        "MVP requires increasing LDS access order along every CFG path", offset);
         }
-        latest = access;
+        latest = &instruction;
       }
       const InstDefUse effects(instruction, program.wave_size);
       aperture.transfer(instruction, effects, exec.before(instruction));
@@ -311,14 +334,14 @@ Result collect_original_code(const std::vector<std::unique_ptr<BasicBlock>> &blo
       }
     }
     outgoing.emplace(block, std::move(aperture));
-    for (const BasicBlock *successor : block->successors()) {
+    for (const BasicBlock *successor : call.successors(*block)) {
       // The deferred self-edge starts another repeated epoch if the later
       // barrier gate qualifies it; propagate this epoch's maximum only to exits.
       if (successor == block) {
         continue;
       }
-      std::optional<uint64_t> &incoming = latest_access.find(successor)->second;
-      if (latest && (!incoming || *latest > *incoming)) {
+      const Instruction *&incoming = latest_observation.at(successor);
+      if (latest && (!incoming || latest->src_loc() > incoming->src_loc())) {
         incoming = latest;
       }
     }
@@ -468,8 +491,13 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
   if (blocks.failed()) {
     return reject(error, InputErrorCode::DecodeFailure, "invalid original CFG: " + decode_message);
   }
-  if (allow_siblings) {
+  if (kernels.size() > 1) {
     for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
+      if (!block->call_edges().empty()) {
+        return reject(error, InputErrorCode::UnsupportedFlow,
+                      "LDS helper calls require a single-kernel code object",
+                      block->start_offset());
+      }
       for (const Instruction &instruction : block->instructions()) {
         for (const KernelDescriptorInfo &sibling : kernels) {
           if (sibling.descriptor_file_offset != kernel.descriptor_file_offset &&
@@ -482,7 +510,7 @@ FailureOr<InputProgram> build_entry_program(std::span<const uint8_t> image,
     }
   }
   RegisterSet used;
-  if (collect_original_code(blocks.value(), program, used, limits, error).failed() ||
+  if (collect_original_code(blocks.value(), object, program, used, limits, error).failed() ||
       validate_original_registers(used, metadata.value().vgprs, program, error).failed()) {
     return Result::failure();
   }
