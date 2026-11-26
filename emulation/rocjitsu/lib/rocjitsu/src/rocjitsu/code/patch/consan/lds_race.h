@@ -18,6 +18,7 @@ class Instruction;
 } // namespace rocjitsu
 
 namespace rocjitsu::consan {
+struct LocalHelper;
 struct InputError;
 struct InputProgram;
 
@@ -44,6 +45,7 @@ struct FlatSitePolicy {
   const RegisterSet &selected_shared_high;
   FlatPolicy mode;
   std::vector<FlatExclusion> &exclusions;
+  std::optional<AccessKind> helper_api = {};
 };
 
 /// @brief Qualify LDS scope and select sites without owning binary/CFG machinery.
@@ -63,7 +65,8 @@ struct FlatSitePolicy {
 /// increasing native LDS access PCs along paths with backward trampoline edges.
 /// A deferred self-edge is admitted only if qualify_lds_race_barrier() later succeeds.
 [[nodiscard]] FailureOr<std::vector<const BasicBlock *>>
-qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputError &error);
+qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, const LocalHelper &call,
+                     InputError &error);
 [[nodiscard]] Result
 classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                               uint32_t allocated_vgprs, std::vector<NativeLdsAccess> &accesses,

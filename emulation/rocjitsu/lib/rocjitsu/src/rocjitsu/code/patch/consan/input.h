@@ -62,6 +62,7 @@ struct InputProgram {
   std::vector<FlatExclusion> flat_exclusions;
   std::vector<BarrierFacts> barriers;
   bool repeated = false;
+  bool has_local_helper = false;
 };
 
 /// @brief Build an owning, qualified input program for the bounded native LDS profile.

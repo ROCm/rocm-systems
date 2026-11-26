@@ -971,6 +971,24 @@ TEST_F(ConSanContract, GroupFlatOriginSurvivesRoundTripOnlyInItsProvenProfile) {
   EXPECT_TRUE(validate_manifest(manifest).succeeded());
 }
 
+TEST_F(ConSanContract, UnsignedHelperPremisesRequireMatchingFourByteReadsOrWrites) {
+  Manifest facts = example();
+  SiteFacts &site = facts.sites[1];
+  site.origin = AccessOrigin::GroupFlat;
+  for (const AccessKind access : {AccessKind::Read, AccessKind::Write}) {
+    site.access = access;
+    site.width = 4;
+    site.assumption =
+        access == AccessKind::Read ? FlatAssumption::HelperLoadAt : FlatAssumption::HelperStoreAt;
+    EXPECT_TRUE(validate_manifest(facts).succeeded());
+    site.width = 8;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+    site.width = 4;
+    site.access = access == AccessKind::Read ? AccessKind::Write : AccessKind::Read;
+    EXPECT_TRUE(validate_manifest(facts).failed());
+  }
+}
+
 TEST_F(ConSanContract, OnlyLikelyCanRetainConditionalSitesAndStrictPersistsItsReason) {
   Manifest facts = example();
   SiteFacts &site = facts.sites[1];

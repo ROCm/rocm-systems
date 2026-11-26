@@ -258,6 +258,24 @@ branch. If the other arm selects a valid global address, its sampled low word
 can fall outside the LDS allocation. Replay then reports
 `invalid_or_out_of_bounds_effective_range` and marks coverage incomplete.
 
+The default policy also recognizes two local hip-moi specializations,
+`hip_moi::context::lds_load_at<unsigned>` and `lds_store_at<unsigned>`.
+A single kernel calls a uniquely named, sized ELF function with one direct call.
+The straight-line body must preserve the call's return SGPR pair and return to the
+caller's continuation. The matching four-byte read or write must be the body's
+last memory operation. Its condition is the API contract that the pointer
+belongs to this workgroup's LDS. Known non-group address facts take precedence.
+The saved site retains the calling kernel as its owner and identifies the helper
+premise at the original instruction PC. Other specializations, ambiguous
+function symbols and additional calls have no helper-contract qualification.
+
+The original PCs of observed LDS accesses and workgroup barrier completions
+must increase along the executed path through the caller and helper. Replay
+uses those PCs to assign each access to its barrier phase. For example, a
+helper load that executes before a caller barrier must have a lower PC than
+the barrier completion. A helper store that executes before a caller LDS read
+must likewise have a lower PC than that read.
+
 Append `--flat-policy=strict` to the prepare command to observe proven sites
 only. Known global/private accesses and unresolved pointers are excluded under
 both policies. Saved analysis reports the policy, original site offsets,

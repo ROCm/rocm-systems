@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/consan/lds_race.h"
+#include "rocjitsu/code/patch/consan/local_helper.h"
 #include "rocjitsu/code/patch/consan/prepare.h"
 #include "rocjitsu/isa/isa_family.h"
 
@@ -282,7 +283,8 @@ Result qualify_lds_race_block(const BasicBlock &block, InputError &error) {
 }
 
 FailureOr<std::vector<const BasicBlock *>>
-qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputError &error) {
+qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, const LocalHelper &call,
+                     InputError &error) {
   // A trampoline return can point backward without revisiting any executed block.
   // Defer only conditional self-edges to the later whole-program barrier gate;
   // every other edge must form a DAG. This ordering alone does not admit a loop.
@@ -292,7 +294,11 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
     incoming.emplace(block.get(), 0);
   }
   for (const std::unique_ptr<BasicBlock> &block : blocks) {
-    for (const BasicBlock *successor : block->successors()) {
+    for (const BasicBlock *successor : call.successors(*block)) {
+      if (successor == block.get() && call.caller)
+        return reject_instruction(error, InputErrorCode::UnsupportedFlow,
+                                  "LDS helper calls require an acyclic kernel",
+                                  block->start_offset());
       if (successor == block.get() && block->successors().size() == 2) {
         continue;
       }
@@ -313,7 +319,7 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
     }
   }
   for (size_t index = 0; index < ready.size(); ++index) {
-    for (const BasicBlock *successor : ready[index]->successors()) {
+    for (const BasicBlock *successor : call.successors(*ready[index])) {
       if (successor == ready[index] && ready[index]->successors().size() == 2) {
         continue;
       }
@@ -403,6 +409,8 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
     if (!flat_policy->shared_high.contains(high)) {
       if (flat_policy->selected_shared_high.contains(high))
         assumption = FlatAssumption::SelectedSharedHigh;
+      else if (flat_policy->helper_api == (read ? AccessKind::Read : AccessKind::Write))
+        assumption = read ? FlatAssumption::HelperLoadAt : FlatAssumption::HelperStoreAt;
       if (flat_policy->non_group_high.contains(high) || assumption == FlatAssumption::None ||
           flat_policy->mode == FlatPolicy::Strict) {
         const auto reason = flat_policy->non_group_high.contains(high)
@@ -410,7 +418,8 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                             : assumption == FlatAssumption::None ? FlatExclusionReason::Unresolved
                                                                  : FlatExclusionReason::Strict;
         flat_policy->exclusions.push_back(
-            {offset, static_cast<uint32_t>(instruction.size()), reason, assumption});
+            {offset, static_cast<uint32_t>(instruction.size()), reason,
+             reason == FlatExclusionReason::Strict ? assumption : FlatAssumption::None});
         return Result::success();
       }
     }

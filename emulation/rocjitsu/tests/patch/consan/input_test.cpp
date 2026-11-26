@@ -7,7 +7,9 @@
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
+#include "rocjitsu/code/consan/encoding.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/consan/local_helper.h"
 #include "rocjitsu/code/patch/instrumentor.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
@@ -261,6 +263,170 @@ TEST(ConSanInput, GroupFlatChecksBothAddressWordsAndTheCompleteValueTuple) {
   check(cdna4::kFlatStoreDwordx4Flat, {.addr = 0, .data = 5});
 }
 
+TEST(ConSanInput, CallableProbeInsideLocalHelperInheritsTheCallersMode) {
+  for (const test::TargetMode mode : {test::TargetMode{"gfx950", 64}, {"gfx1250", 32}}) {
+    SCOPED_TRACE(mode.target);
+    const auto &profile = *target_profile(mode.target);
+    const std::filesystem::path fixture = test::target_fixture_path(mode, "width-flat-load-helper");
+    if (fixture.empty())
+      GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+    auto image = test::read_fixture(fixture);
+    ASSERT_FALSE(image.empty());
+    InputError error;
+    const auto input = build_input_program(image, profile, "lds_producer_consumer", error);
+    ASSERT_TRUE(input.succeeded()) << error.message;
+    ASSERT_EQ(input.value().accesses.size(), 2u);
+    ASSERT_EQ(input.value().accesses.back().assumption, FlatAssumption::HelperLoadAt);
+    const uint64_t guest_pc = input.value().accesses.back().original_offset;
+    const auto ret = build_s_setpc_b64(30, profile.arch);
+    ASSERT_TRUE(ret.succeeded());
+    const auto body =
+        ::rocjitsu::test::make_amdgpu_probe_elf("observe", {ret.value()}, profile.elf_machine);
+    const AmdGpuCodeObject probe(body.data(), body.size());
+
+    // Replace the scalar-to-vector move in the caller with a mode change of
+    // the same size. The helper has no ordinary CFG predecessor to expose it.
+    const auto file = input.value().text_file_offset;
+    std::optional<uint64_t> move;
+    for (uint64_t offset = input.value().kernel.entry_text_offset; offset < guest_pc; offset += 4) {
+      if (wire::read_u32(image, file + offset) == 0x7e0a0204u) { // v_mov_b32_e32 v5, s4
+        ASSERT_FALSE(move);
+        move = file + offset;
+      }
+    }
+    ASSERT_TRUE(move);
+    for (const bool unsafe : {false, true}) {
+      if (unsafe)
+        wire::write_u32(image, *move,
+                        profile.arch == IsaFamily::Cdna4
+                            ? 0xbf110104u   // s_set_gpr_idx_on s4, gpr_idx(SRC0)
+                            : 0xbf860001u); // s_set_vgpr_msb 1
+      const AmdGpuCodeObject object(image.data(), image.size());
+      Instrumentor instrumentor(object, profile.arch);
+      instrumentor.add_point({.anchor_offset = guest_pc,
+                              .kind = InstrumentationKind::BeforeInst,
+                              .probe_obj = &probe,
+                              .probe_symbol = "observe",
+                              .probe_args = {}});
+      const auto sites = instrumentor.validate_points();
+      EXPECT_EQ(sites.errors.empty(), !unsafe)
+          << (sites.errors.empty() ? "" : sites.errors.front());
+    }
+  }
+}
+
+TEST(ConSanInput, DirectLocalHelperRequiresTheTerminalApiOperationAndMatchingReturn) {
+  const auto &profile = *target_profile("gfx950");
+  const test::TargetMode mode{"gfx950", 64};
+  for (std::string_view control : {"lookalike", "other", "width", "earlier", "wrong", "private",
+                                   "global", "alias", "badreturn", "clobber"}) {
+    SCOPED_TRACE(control);
+    const std::filesystem::path fixture =
+        test::target_fixture_path(mode, "width-flat-load-helper" + std::string(control));
+    if (fixture.empty())
+      GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+    const auto image = test::read_fixture(fixture);
+    ASSERT_FALSE(image.empty());
+    InputError error;
+    if (control == "width") {
+      const AmdGpuCodeObject object(image.data(), image.size());
+      auto decoder = Decoder::create(default_isa_target_registry(), profile.public_id);
+      const std::array<uint64_t, 1> entries{0};
+      const auto blocks = BasicBlock::build_reachable(object, *decoder, profile.arch, entries);
+      ASSERT_TRUE(blocks.succeeded());
+      std::vector<BasicBlock *> scope;
+      for (auto &block : blocks.value())
+        scope.push_back(block.get());
+      const auto helper = qualify_local_helper(object, scope, mode.wave_size, error);
+      ASSERT_TRUE(helper.succeeded()) << error.message;
+      EXPECT_EQ(helper.value().api, AccessKind::Read);
+      EXPECT_EQ(helper.value().terminal_access, nullptr);
+    }
+    const auto artifact = prepare(image, profile, "lds_producer_consumer", error);
+    if (control == "alias" || control == "badreturn" || control == "clobber") {
+      EXPECT_TRUE(artifact.failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+      continue;
+    }
+    ASSERT_TRUE(artifact.succeeded()) << error.message;
+    ASSERT_TRUE(validate_prepared(image, artifact.value(), error).succeeded()) << error.message;
+    const auto &manifest = artifact.value().manifest;
+    ASSERT_EQ(manifest.flat_exclusions.size(), 1u);
+    EXPECT_EQ(manifest.flat_exclusions.front().assumption, FlatAssumption::None);
+    EXPECT_EQ(manifest.flat_exclusions.front().reason, control == "global" || control == "private"
+                                                           ? FlatExclusionReason::NonGroup
+                                                           : FlatExclusionReason::Unresolved);
+    if (control == "earlier") {
+      ASSERT_EQ(manifest.sites.size(), 2u);
+      EXPECT_EQ(manifest.sites.back().assumption, FlatAssumption::HelperLoadAt);
+      EXPECT_GT(manifest.sites.back().original_offset,
+                manifest.flat_exclusions.front().original_offset);
+    } else {
+      ASSERT_EQ(manifest.sites.size(), 1u);
+      EXPECT_EQ(manifest.sites.front().origin, AccessOrigin::Native);
+    }
+  }
+}
+
+TEST(ConSanInput, HelperStoreMustPrecedeItsLaterObservedCallerSiteInSourceOrder) {
+  constexpr test::TargetMode mode = {.target = "gfx950", .wave_size = 64};
+  const TargetProfile &profile = *target_profile(mode.target);
+  InputError error;
+  const std::filesystem::path fixture = test::target_fixture_path(mode, "width-flat-store-helper");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> placed_before = test::read_fixture(fixture);
+  ASSERT_FALSE(placed_before.empty());
+  const FailureOr<PreparedArtifact> accepted =
+      prepare(placed_before, profile, "lds_producer_consumer", error);
+  ASSERT_TRUE(accepted.succeeded()) << error.message;
+  ASSERT_EQ(accepted.value().manifest.sites.size(), 2u);
+  EXPECT_EQ(accepted.value().manifest.sites.front().assumption, FlatAssumption::HelperStoreAt);
+
+  const std::vector<uint8_t> placed_after =
+      test::read_fixture(test::target_fixture_path(mode, "width-flat-store-helper-after-caller"));
+  ASSERT_FALSE(placed_after.empty());
+  EXPECT_TRUE(prepare(placed_after, profile, "lds_producer_consumer", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow);
+  EXPECT_EQ(error.message, "MVP requires increasing LDS access order along every CFG path");
+}
+
+TEST(ConSanInput, LocalHelperAndCallerBarrierMustFollowTheirSourcePcOrder) {
+  for (const test::TargetMode mode : {test::TargetMode{"gfx950", 64}, {"gfx1250", 32}}) {
+    SCOPED_TRACE(mode.target);
+    const TargetProfile &profile = *target_profile(mode.target);
+    for (const bool load : {true, false}) {
+      SCOPED_TRACE(load);
+      const std::filesystem::path fixture = test::target_fixture_path(
+          mode, load ? "width-flat-load-helperordered" : "width-flat-store-helperordered");
+      if (fixture.empty())
+        GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+      InputError error;
+      const std::vector<uint8_t> ordered = test::read_fixture(fixture);
+      ASSERT_FALSE(ordered.empty());
+      const FailureOr<PreparedArtifact> accepted =
+          prepare(ordered, profile, "lds_producer_consumer", error);
+      ASSERT_TRUE(accepted.succeeded()) << error.message;
+      const Manifest &manifest = accepted.value().manifest;
+      ASSERT_EQ(manifest.barriers.size(), 1u);
+      ASSERT_EQ(manifest.sites.size(), 2u);
+      EXPECT_LT(manifest.sites.front().original_offset, manifest.barriers.front().original_wait);
+      EXPECT_LT(manifest.barriers.front().original_wait, manifest.sites.back().original_offset);
+      EXPECT_EQ(load ? manifest.sites.back().assumption : manifest.sites.front().assumption,
+                load ? FlatAssumption::HelperLoadAt : FlatAssumption::HelperStoreAt);
+
+      const std::vector<uint8_t> crossed = test::read_fixture(
+          test::target_fixture_path(mode, load ? "width-flat-load-helper-barrier-after-call"
+                                               : "width-flat-store-helper-barrier-before-call"));
+      ASSERT_FALSE(crossed.empty());
+      EXPECT_TRUE(prepare(crossed, profile, "lds_producer_consumer", error).failed());
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+      EXPECT_EQ(error.message,
+                "observed LDS accesses and barrier completions must follow source PC order");
+    }
+  }
+}
+
 TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
   const auto decoder = Decoder::create(IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
@@ -382,6 +548,19 @@ TEST(ConSanInputImage, QualifiesDistinctEntriesWithoutExtractingTheirImage) {
   EXPECT_EQ(first.value().accesses.size(), 2u);
   EXPECT_EQ(second.value().accesses.size(), 2u);
   EXPECT_NE(first.value().accesses[0].original_offset, second.value().accesses[0].original_offset);
+}
+
+TEST(ConSanInputImage, SelectingOneEntryDoesNotAdmitALocalHelperInAMultiKernelImage) {
+  std::ifstream file(CONSAN_MULTI_ENTRY_LOCAL_HELPER_FIXTURE, std::ios::binary);
+  const std::vector<uint8_t> image = {std::istreambuf_iterator<char>(file),
+                                      std::istreambuf_iterator<char>()};
+  const TargetProfile &target = *target_profile("gfx1250");
+  const std::array<std::string_view, 1> entries = {"mk_a"};
+  InputError error;
+  ASSERT_FALSE(image.empty());
+  EXPECT_TRUE(prepare_image(image, target, entries, error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow) << error.message;
+  EXPECT_EQ(error.message, "LDS helper calls require a single-kernel code object");
 }
 
 TEST(ConSanInputImage, SelectedFlowCannotEnterASiblingKernel) {

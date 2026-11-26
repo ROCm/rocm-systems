@@ -292,6 +292,26 @@ Result validate_image_entry_cfg(const InputProgram &program, const Manifest &man
   return validate_lds_race_accesses(program, manifest, scope, prepared_text, error);
 }
 
+FailureOr<PreparedImageArtifact> finalize_image(PreparedImageArtifact artifact,
+                                                std::span<const uint8_t> original,
+                                                std::span<const InputProgram> programs,
+                                                InputError &error) {
+  util::StringDiagnostic contract_error;
+  if (verify_artifact_images(artifact.facts, original, artifact.image, contract_error.emitter())
+          .failed()) {
+    return reject(error, contract_error.message());
+  }
+  for (const InputProgram &program : programs) {
+    const Manifest *manifest =
+        selected_manifest(artifact.facts, program.kernel.descriptor_file_offset);
+    if (manifest == nullptr ||
+        validate_image_entry_cfg(program, *manifest, artifact.image, error).failed()) {
+      return Result::failure();
+    }
+  }
+  return artifact;
+}
+
 FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
                                              const TargetProfile &target,
                                              std::span<const std::string_view> entries,
@@ -330,6 +350,25 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
     return program.kernel.descriptor_file_offset;
   });
   const InputProgram &first = programs.front();
+  if (first.has_local_helper) {
+    // This call was qualified in an image with exactly one kernel descriptor.
+    // The per-entry DBI planner only admits disjoint, call-free kernels.
+    FailureOr<PreparedArtifact> single = lower(first, error);
+    if (single.failed()) {
+      return Result::failure();
+    }
+    std::string metadata_error;
+    const FailureOr<MetadataResources> metadata =
+        inspect_metadata(original, first.kernel, &metadata_error);
+    if (metadata.failed()) {
+      return reject(error, metadata_error);
+    }
+    return finalize_image(
+        {.facts = single_entry_image_facts(single.value().manifest, metadata.value().sgprs,
+                                           metadata.value().vgprs),
+         .image = std::move(single.value().image)},
+        original, programs, error);
+  }
   const ScopeKind scope = program_scope(first);
   for (const InputProgram &program : programs) {
     if (program.wave_size != first.wave_size) {
@@ -499,18 +538,7 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
   std::ranges::sort(selected_keys);
   facts.selection_profile =
       selection_profile_digest(selected_keys, scope, mvp_options_digest(flat_policy));
-  util::StringDiagnostic contract_error;
-  if (verify_artifact_images(facts, original, artifact.image, contract_error.emitter()).failed()) {
-    return reject(error, contract_error.message());
-  }
-  for (const InputProgram &program : programs) {
-    const Manifest *manifest = selected_manifest(facts, program.kernel.descriptor_file_offset);
-    if (manifest == nullptr ||
-        validate_image_entry_cfg(program, *manifest, artifact.image, error).failed()) {
-      return Result::failure();
-    }
-  }
-  return artifact;
+  return finalize_image(std::move(artifact), original, programs, error);
 }
 
 } // namespace
