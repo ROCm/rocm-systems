@@ -1317,7 +1317,7 @@ __device__ T GDAContext::internal_amo_swap(void *dst, T value, int pe,
  *    - QP[i,j]             →  i-th QP of PE j
  *    - **[ QP2,2 ]**       →  The 3rd QP (QP index 2) of PE2
  */
-__device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
+__device__ inline uint32_t GDAContext::get_qp_index(int pe,
     ActiveWFInfo wf_info) {
 
   uint32_t qp_index   {0};
@@ -1347,14 +1347,14 @@ __device__ __forceinline__ uint32_t GDAContext::get_qp_index(int pe,
 // worker, callers fall back to a leader-sequential path rather than leave most
 // workers idle. Unequal per-worker chunk counts are safe either way: each
 // posting round is a collective over whichever lanes are still in the loop.
-__device__ __forceinline__ bool gda_tile_use_multi_wqe(size_t num_chunks,
+__device__ inline bool gda_tile_use_multi_wqe(size_t num_chunks,
                                                        int worker_count) {
   return worker_count > 1 &&
          num_chunks >= static_cast<size_t>(worker_count);
 }
 
 // Synchronize outstanding tile PUT operations (IPC quiet or GDA QP quiet)
-__device__ __forceinline__ void GDAContext::tile_finish_put(int pe, int qp_index,
+__device__ inline void GDAContext::tile_finish_put(int pe, int qp_index,
                                                             ActiveWFInfo &wf_info) {
   int local_pe{-1};
   if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe)) {
@@ -1365,7 +1365,7 @@ __device__ __forceinline__ void GDAContext::tile_finish_put(int pe, int qp_index
 }
 
 // GET completion uses the same quiet path as PUT
-__device__ __forceinline__ void GDAContext::tile_finish_get(int pe, int qp_index,
+__device__ inline void GDAContext::tile_finish_get(int pe, int qp_index,
                                                             ActiveWFInfo &wf_info) {
   tile_finish_put(pe, qp_index, wf_info);
 }
@@ -1532,7 +1532,7 @@ struct GdaTileNdChunks {
   size_t num_chunks;
 };
 
-__device__ __forceinline__ GdaTileNdChunks
+__device__ inline GdaTileNdChunks
 gda_tile_nd_chunks(const TileView &view) {
   const int last = view.ndim - 1;
   const bool inner_contig = view.src_s[last] == 1 && view.dst_s[last] == 1;
@@ -1545,7 +1545,7 @@ gda_tile_nd_chunks(const TileView &view) {
   return c;
 }
 
-__device__ __forceinline__ void gda_tile_nd_chunk_offsets(
+__device__ inline void gda_tile_nd_chunk_offsets(
     const TileView &view, int outer_ndim, size_t idx, size_t *dst_off,
     size_t *src_off) {
   size_t s = 0, d_off = 0, rem = idx;

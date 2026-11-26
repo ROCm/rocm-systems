@@ -90,9 +90,9 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
-  __device__ __forceinline__ uint64_t cq_target();
+  __device__ inline uint64_t cq_target();
 
-  __device__ __forceinline__ bool poll_cq_once(uint64_t target);
+  __device__ inline bool poll_cq_once(uint64_t target);
 
 private:
   __device__ void ring_doorbell(uint32_t slot_idx);
@@ -409,12 +409,12 @@ __device__ inline __noinline__ void QueuePairBNXT::quiet_single() {
   poll_cq_until(sq.depth);
 }
 
-__device__ __forceinline__ uint64_t QueuePairBNXT::cq_target() {
+__device__ inline uint64_t QueuePairBNXT::cq_target() {
   return __scoped_atomic_load_n(&sq.posted, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_DEVICE);
 }
 
 // Only reads queue state, so lanes sharing a queue pair can call it.
-__device__ __forceinline__ bool QueuePairBNXT::poll_cq_once(uint64_t target) {
+__device__ inline bool QueuePairBNXT::poll_cq_once(uint64_t target) {
   struct bnxt_re_req_cqe *cqe = (struct bnxt_re_req_cqe *) cq.buf;
   uint32_t sq_depth = sq.depth;
 
@@ -482,7 +482,7 @@ __device__ inline void QueuePairBNXT::poll_cq_until(uint32_t requested_available
   } while (available_slots < requested_available_slots);
 }
 
-__device__ __forceinline__ void QueuePairBNXT::ring_doorbell(uint32_t slot_idx) {
+__device__ inline void QueuePairBNXT::ring_doorbell(uint32_t slot_idx) {
   struct bnxt_re_db_hdr hdr;
   uint32_t epoch;
   uint64_t key_lo;
@@ -502,7 +502,7 @@ __device__ __forceinline__ void QueuePairBNXT::ring_doorbell(uint32_t slot_idx) 
   __scoped_atomic_store_n(dbr, hdr.typ_qid_indx, __ATOMIC_SEQ_CST, __MEMORY_SCOPE_SYSTEM);
 }
 
-__device__ __forceinline__ void* QueuePairBNXT::get_hwqe(
+__device__ inline void* QueuePairBNXT::get_hwqe(
     const bnxt_device_sq& sq, uint32_t idx) {
   idx += sq.tail;
   if (idx >= sq.depth)
@@ -510,7 +510,7 @@ __device__ __forceinline__ void* QueuePairBNXT::get_hwqe(
   return (void *)((char*)sq.buf + (idx << 4));
 }
 
-__device__ __forceinline__ void QueuePairBNXT::fill_psns_for_msntbl(
+__device__ inline void QueuePairBNXT::fill_psns_for_msntbl(
     bnxt_device_sq& sq, uint32_t msg_len) {
   uint32_t npsn = 0, start_psn = 0, next_psn = 0;
   struct bnxt_re_msns msns;
@@ -547,7 +547,7 @@ __device__ __forceinline__ void QueuePairBNXT::fill_psns_for_msntbl(
   memcpy(msns_ptr, &msns, sizeof(uint64_t));
 }
 
-__device__ __forceinline__ void QueuePairBNXT::incr_tail(
+__device__ inline void QueuePairBNXT::incr_tail(
     bnxt_device_sq& sq, uint8_t cnt) {
   sq.posted += cnt;
   sq.tail += cnt;
@@ -558,12 +558,12 @@ __device__ __forceinline__ void QueuePairBNXT::incr_tail(
   }
 }
 
-__device__ __forceinline__ struct bnxt_re_msns* QueuePairBNXT::pull_psn_buff(
+__device__ inline struct bnxt_re_msns* QueuePairBNXT::pull_psn_buff(
     const bnxt_device_sq& sq) {
   return (struct bnxt_re_msns*)(((char *) sq.msntbl) + ((sq.msn) << sq.psn_sz_log2));
 }
 
-__device__ __forceinline__ uint64_t QueuePairBNXT::update_msn_tbl(
+__device__ inline uint64_t QueuePairBNXT::update_msn_tbl(
     uint32_t st_idx, uint32_t npsn, uint32_t start_psn) {
   return ((((uint64_t)(st_idx)    << BNXT_RE_SQ_MSN_SEARCH_START_IDX_SHIFT)
                                             & BNXT_RE_SQ_MSN_SEARCH_START_IDX_MASK) |
@@ -573,7 +573,7 @@ __device__ __forceinline__ uint64_t QueuePairBNXT::update_msn_tbl(
                                             & BNXT_RE_SQ_MSN_SEARCH_START_PSN_MASK));
 }
 
-__device__ __forceinline__ void QueuePairBNXT::acquire_lock(uint32_t* lock) {
+__device__ inline void QueuePairBNXT::acquire_lock(uint32_t* lock) {
   uint32_t expected;
 
   do {
@@ -584,7 +584,7 @@ __device__ __forceinline__ void QueuePairBNXT::acquire_lock(uint32_t* lock) {
                                                     __MEMORY_SCOPE_SYSTEM));
 }
 
-__device__ __forceinline__ void QueuePairBNXT::release_lock(uint32_t* lock) {
+__device__ inline void QueuePairBNXT::release_lock(uint32_t* lock) {
   __scoped_atomic_store_n(lock, 0, __ATOMIC_RELEASE, __MEMORY_SCOPE_SYSTEM);
 }
 

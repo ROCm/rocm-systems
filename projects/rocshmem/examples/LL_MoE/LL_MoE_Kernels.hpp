@@ -44,7 +44,7 @@ __host__ __device__ T cell_div(T a, T b) {
 }
 
 // Warp synchronization function
-__forceinline__ __device__ void warp_sync() {
+inline __device__ void warp_sync() {
   atomic::threadfence<atomic::memory_scope::wavefront,
                       atomic::memory_order::release>();
   __builtin_amdgcn_wave_barrier();
@@ -57,7 +57,7 @@ __forceinline__ __device__ void warp_sync() {
  * All the work-groups must be co-resident on the GPU for this to work
  * correctly.
  */
-__forceinline__ __device__ void grid_barrier(int* global_counter,
+inline __device__ void grid_barrier(int* global_counter,
     int num_blocks) {
   __threadfence();
   __syncthreads();
@@ -76,7 +76,7 @@ __forceinline__ __device__ void grid_barrier(int* global_counter,
 }
 
 // Warp reduction sum function
-__forceinline__ __device__ int warp_reduce_sum(int val) {
+inline __device__ int warp_reduce_sum(int val) {
   for (int offset = kWaveSize / 2; offset > 0; offset /= 2) {
     val += __shfl_down(val, offset);
   }

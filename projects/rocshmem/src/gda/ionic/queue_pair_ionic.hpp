@@ -96,9 +96,9 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
-  __device__ __forceinline__ uint64_t cq_target();
+  __device__ inline uint64_t cq_target();
 
-  __device__ __forceinline__ bool poll_cq_once(uint64_t target);
+  __device__ inline bool poll_cq_once(uint64_t target);
 
 private:
   /**
@@ -418,12 +418,12 @@ __device__ inline __noinline__ void QueuePairIONIC::quiet_single() {
   poll_cq_until(sq.pos);
 }
 
-__device__ __forceinline__ uint64_t QueuePairIONIC::cq_target() {
+__device__ inline uint64_t QueuePairIONIC::cq_target() {
   return __scoped_atomic_load_n(&sq.pos, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 }
 
 // Only reads queue state, so lanes sharing a queue pair can call it.
-__device__ __forceinline__ bool QueuePairIONIC::poll_cq_once(uint64_t target) {
+__device__ inline bool QueuePairIONIC::poll_cq_once(uint64_t target) {
   volatile struct ionic_v1_cqe *cqe = &cq.buf[0];
   uint32_t qtf_be = cqe->qid_type_flags;
   uint32_t msn = endian::from_be(cqe->send.msg_msn);
@@ -449,7 +449,7 @@ __device__ __forceinline__ bool QueuePairIONIC::poll_cq_once(uint64_t target) {
 
 // precondition: called with all active lanes using different QPs
 template <typename PostOptions>
-__device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(uint32_t num_wqes) {
+__device__ inline uint32_t QueuePairIONIC::reserve_sq(uint32_t num_wqes) {
   // reserve space for wqes in sq
   uint32_t my_sq_prod = 0;
   if constexpr (PostOptions::ThreadSafe) {
@@ -473,7 +473,7 @@ __device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(uint32_t num_wqes
 
 // precondition: called with all active lanes using different QPs
 template <typename PostOptions>
-__device__ __forceinline__ uint32_t QueuePairIONIC::commit_sq(
+__device__ inline uint32_t QueuePairIONIC::commit_sq(
     uint32_t my_sq_prod, uint32_t num_wqes) {
   uint32_t dbprod = my_sq_prod + num_wqes;
 
@@ -495,7 +495,7 @@ __device__ __forceinline__ uint32_t QueuePairIONIC::commit_sq(
 }
 
 // precondition: called with all active lanes using different QPs
-__device__ __forceinline__ void QueuePairIONIC::ring_doorbell(uint32_t pos) {
+__device__ inline void QueuePairIONIC::ring_doorbell(uint32_t pos) {
   /*
    * Notes on ionic doorbell ringing:
    *   - The size of doorbell page is 4 KiB.

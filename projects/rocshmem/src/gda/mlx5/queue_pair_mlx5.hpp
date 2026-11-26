@@ -102,13 +102,13 @@ public:
 
   __device__ __noinline__ void quiet_single();
 
-  __device__ __forceinline__ uint64_t cq_target();
+  __device__ inline uint64_t cq_target();
 
-  __device__ __forceinline__ bool poll_cq_once(uint64_t target);
+  __device__ inline bool poll_cq_once(uint64_t target);
 
 private:
 #if GDA_MLX5_LOCK_USE_S_WAKEUP
-  static __device__ __forceinline__ void amdgcn_s_wakeup() {
+  static __device__ inline void amdgcn_s_wakeup() {
     /* why doesn't __builtin_amdgcn_s_wakeup() exist?
      * signals other wavefronts in the same workgroup to exit early from s_sleep */
     asm volatile("s_wakeup");
@@ -121,11 +121,11 @@ private:
   static __device__ void acquire_lock(uint32_t* lock);
   static __device__ void release_lock(uint32_t* lock);
 
-  __device__ __forceinline__ uint16_t get_wqe_idx(uint8_t lane_id) {
+  __device__ inline uint16_t get_wqe_idx(uint8_t lane_id) {
     return static_cast<uint16_t>(sq.post + lane_id);
   }
 
-  __device__ __forceinline__ uint16_t get_sq_idx(uint16_t wqe_idx) {
+  __device__ inline uint16_t get_sq_idx(uint16_t wqe_idx) {
     // sq.depth is a power of 2, so just mask off everything above that
     return wqe_idx & sq.depth_mask;
   }
@@ -346,13 +346,13 @@ __device__ inline __noinline__ void QueuePairMLX5::quiet_single() {
   poll_cq_until(sq.depth);
 }
 
-__device__ __forceinline__ uint64_t QueuePairMLX5::cq_target() {
+__device__ inline uint64_t QueuePairMLX5::cq_target() {
   return __scoped_atomic_load_n(&sq.post, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_DEVICE);
 }
 
 // Follows one poll_cq_until() iteration, but checks the WQEs before target instead of the free slots.
 // Only reads queue state, so lanes sharing a queue pair can call it.
-__device__ __forceinline__ bool QueuePairMLX5::poll_cq_once(uint64_t target) {
+__device__ inline bool QueuePairMLX5::poll_cq_once(uint64_t target) {
   // nothing was posted before target
   if (target == 0) {
     return true;
@@ -458,7 +458,7 @@ __device__ inline void QueuePairMLX5::poll_cq_until(uint16_t requested_available
   }
 }
 
-__device__ __forceinline__ void QueuePairMLX5::ring_doorbell(
+__device__ inline void QueuePairMLX5::ring_doorbell(
     uint64_t sq_post, const gda_mlx5_wqe& wqe) {
   // sq_wqebb_counter is the least significant bits of the post counter
   uint16_t sq_wqebb_counter = static_cast<uint16_t>(sq_post);
@@ -479,7 +479,7 @@ __device__ __forceinline__ void QueuePairMLX5::ring_doorbell(
              db_val.wqe_header.opmod_idx_opcode, db_val.wqe_header.qpn_ds);
 }
 
-__device__ __forceinline__ void QueuePairMLX5::acquire_lock(uint32_t* lock) {
+__device__ inline void QueuePairMLX5::acquire_lock(uint32_t* lock) {
   /* acquire lock when new value 1 (locked) is exchanged with prior value 0 (unlocked)
    *
    * the __ATOMIC_ACQUIRE load synchronizes with the __ATOMIC_RELEASE store in release_lock(),
@@ -495,7 +495,7 @@ __device__ __forceinline__ void QueuePairMLX5::acquire_lock(uint32_t* lock) {
   }
 }
 
-__device__ __forceinline__ void QueuePairMLX5::release_lock(uint32_t* lock) {
+__device__ inline void QueuePairMLX5::release_lock(uint32_t* lock) {
   // release lock by storing 0 (unlocked)
   __scoped_atomic_store_n(lock, 0, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 #if GDA_MLX5_LOCK_USE_S_WAKEUP

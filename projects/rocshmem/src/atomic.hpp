@@ -84,7 +84,7 @@ template <typename T>
 using atomic_storage_t = typename atomic_storage<T>::type;
 
 template <typename To, typename From>
-__host__ __device__ __forceinline__ To atomic_bit_cast(const From& from) {
+__host__ __device__ inline To atomic_bit_cast(const From& from) {
   if constexpr (std::is_same_v<To, From>) {
     return from;
   } else {
@@ -227,7 +227,7 @@ T fetch_min(T* obj, type_identity_t<T> arg) {
 
 template <memory_scope scope = memory_scope::system,
           memory_order order = memory_order::seq_cst>
-__device__ __forceinline__ void threadfence() {
+__device__ inline void threadfence() {
   __scoped_atomic_thread_fence(static_cast<int>(order),
                                static_cast<int>(scope));
 }

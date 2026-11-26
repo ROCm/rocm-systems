@@ -167,7 +167,7 @@ protected:
   friend Provider;
 
   template <AMOFetchType Fetch>
-  __device__ __forceinline__ constexpr uint64_t* get_atomic_addr() const {
+  __device__ inline constexpr uint64_t* get_atomic_addr() const {
     static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
     if constexpr (Fetch == AMOFetchType::Blocking) {
       return fetching_atomic;
@@ -177,7 +177,7 @@ protected:
   }
 
   template <AMOFetchType Fetch>
-  __device__ __forceinline__ constexpr uint32_t get_atomic_lkey() const {
+  __device__ inline constexpr uint32_t get_atomic_lkey() const {
     static_assert(Fetch != AMOFetchType::NonBlocking, "non-blocking AMOs not yet implemented");
     if constexpr (Fetch == AMOFetchType::Blocking) {
       return fetching_atomic_lkey;
@@ -273,7 +273,7 @@ public:
    * @return {laddr, lkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned LKey value is ProviderEndianness.
    */
-  __device__ __forceinline__
+  __device__ inline
   std::tuple<uintptr_t, uint32_t> get_laddr_info(const void *addr, bool inlined = false) const;
 
   /**
@@ -288,7 +288,7 @@ public:
    * @return {raddr, rkey} for addr or {0, std::numeric_limits<uint32_t>::max()} if not found.
    * Endianness of returned RKey value is ProviderEndianness.
    */
-  __device__ __forceinline__
+  __device__ inline
   std::tuple<uintptr_t, uint32_t> get_raddr_info(const void *addr) const;
 
   /*
@@ -300,7 +300,7 @@ public:
    * @return True if size bytes of data can be inlined into a WQE with OpCode Op, else false.
    */
   template <OpCode Op>
-  static __host__ __device__ __forceinline__ constexpr bool can_inline(size_t size) {
+  static __host__ __device__ inline constexpr bool can_inline(size_t size) {
     if constexpr (Op == OpCode::RDMA_WRITE) {
       return size <= Traits::InlineThreshold;
     } else {
@@ -330,7 +330,7 @@ public:
    * @return endian::from_native<ProviderEndianness, T>(val)
    */
   template <typename T>
-  static __host__ __device__ __forceinline__ constexpr T to_provider_endianness(T val) {
+  static __host__ __device__ inline constexpr T to_provider_endianness(T val) {
     return endian::from_native<ProviderEndianness, T>(val);
   }
 /**@}*/
@@ -367,7 +367,7 @@ QueuePairDevice<Provider>::copy_inline_payload(uint8_t* dst, uintptr_t laddr, si
 }
 
 template <typename Provider>
-__device__ __forceinline__ std::tuple<uintptr_t, uint32_t>
+__device__ inline std::tuple<uintptr_t, uint32_t>
 QueuePairDevice<Provider>::get_laddr_info(const void *addr, bool inlined) const {
   uintptr_t laddr = reinterpret_cast<uintptr_t>(addr);
   /* Check for inlined RDMA_WRITE */
@@ -401,7 +401,7 @@ QueuePairDevice<Provider>::get_laddr_info(const void *addr, bool inlined) const 
 }
 
 template <typename Provider>
-__device__ __forceinline__
+__device__ inline
 std::tuple<uintptr_t, uint32_t> QueuePairDevice<Provider>::get_raddr_info(const void *addr) const {
   uintptr_t laddr = reinterpret_cast<uintptr_t>(addr);
   /* Check symmetric heap */

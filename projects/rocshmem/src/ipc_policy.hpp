@@ -185,7 +185,7 @@ class IpcOnImpl {
    * @param[in] pe       Target PE id
    * @return Address of the corresponding data in PE 'pe'
    */
-  __device__ __forceinline__ char *ipcPeerPtr(const void *sym_addr, int pe) {
+  __device__ inline char *ipcPeerPtr(const void *sym_addr, int pe) {
     uintptr_t addr = reinterpret_cast<uintptr_t>(sym_addr);
     uintptr_t heap_base = constmem.heap_base;
 
@@ -280,13 +280,13 @@ class IpcOnImpl {
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
-  __device__ __forceinline__ void ipcFence() {
+  __device__ inline void ipcFence() {
     atomic::threadfence<scope, order>();
   }
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
-  __device__ __forceinline__ void ipcFence([[maybe_unused]] int local_pe) {
+  __device__ inline void ipcFence([[maybe_unused]] int local_pe) {
     atomic::threadfence<scope, order>();
   }
 
@@ -463,7 +463,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
-  __device__ __forceinline__ void ipcFence() {
+  __device__ inline void ipcFence() {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       if (atomic::load<atomic::memory_scope::device,
                        atomic::memory_order::relaxed>(&sdmaImpl_.sdmaDirty) != 0)
@@ -474,7 +474,7 @@ class IpcSdmaImpl : public IpcOnImpl {
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
-  __device__ __forceinline__ void ipcFence(int local_pe) {
+  __device__ inline void ipcFence(int local_pe) {
     if (constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED) {
       uint64_t pe_mask = sdmaImpl_.sdmaPeMask(local_pe);
       if (atomic::load<atomic::memory_scope::device,
@@ -541,7 +541,7 @@ class IpcOffImpl {
   int ipc_first_pe{0};
   int ipc_stride{0};
 
-  __device__ __forceinline__ char *ipcPeerPtr(
+  __device__ inline char *ipcPeerPtr(
       [[maybe_unused]] const void *sym_addr, [[maybe_unused]] int pe) {
     return nullptr;
   }
@@ -582,11 +582,11 @@ class IpcOffImpl {
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
-  __device__ __forceinline__ void ipcFence() {}
+  __device__ inline void ipcFence() {}
 
   template <atomic::memory_scope scope = atomic::memory_scope::system,
             atomic::memory_order order = atomic::memory_order::release>
-  __device__ __forceinline__ void ipcFence(int) {}
+  __device__ inline void ipcFence(int) {}
 
   template <typename T>
   __device__ T ipcAMOFetchAdd(T *val, T value) {

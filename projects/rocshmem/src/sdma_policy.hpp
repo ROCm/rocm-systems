@@ -121,7 +121,7 @@ class SdmaImpl {
   }
 
   // Dirty bits that copies to local_pe can have set.
-  __device__ __forceinline__ uint64_t sdmaPeMask(int local_pe) const {
+  __device__ inline uint64_t sdmaPeMask(int local_pe) const {
     uint64_t mask = 0;
     for (int ch = 0; ch < numChannels; ch++) mask |= 1ULL << ((local_pe * numChannels + ch) & 63);
     return mask;

@@ -19,7 +19,7 @@ using namespace rocshmem;
 
 // Per-iteration fill value — changes each iteration so stale data from
 // a previous iteration is distinguishable from fresh data.
-__device__ __forceinline__ char iter_fill(int iter, size_t idx) {
+__device__ inline char iter_fill(int iter, size_t idx) {
   return (char)('a' + ((iter + idx) % 26));
 }
 

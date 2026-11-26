@@ -91,7 +91,7 @@ __host__ __device__ constexpr size_t lds_bytes_for_tile(uint32_t tile_bytes) {
 
 // Bytes covered by whole tiles of tile_bytes_cap (or a partial single tile
 // if total_bytes is smaller than one).
-__device__ __forceinline__ size_t covered_bytes(size_t total_bytes, uint32_t tile_bytes_cap) {
+__device__ inline size_t covered_bytes(size_t total_bytes, uint32_t tile_bytes_cap) {
   if (total_bytes == 0) return 0;
   if (total_bytes < tile_bytes_cap) {
     constexpr size_t elem_bytes = size_t{1} << FlatCopyElementLog2;
@@ -162,7 +162,7 @@ struct Descriptor2D {
 
 // GROUP0 only (LDS address + 48-bit global VA), split out so callers can
 // cheaply rebuild just the addresses of an otherwise-invariant descriptor.
-__device__ __forceinline__ u32x4 make_group0(uintptr_t lds_addr, uintptr_t global_addr) {
+__device__ inline u32x4 make_group0(uintptr_t lds_addr, uintptr_t global_addr) {
   return u32x4{
       1u,  // m_count = 1
       static_cast<uint32_t>(lds_addr),
@@ -176,7 +176,7 @@ __device__ __forceinline__ u32x4 make_group0(uintptr_t lds_addr, uintptr_t globa
 
 // Element size, full-tensor/tile dims, and strides (in elements). Strides
 // are genuinely 48-bit.
-__device__ __forceinline__ i32x8 make_group1(DataSize data_size, uint32_t tensor_dim0,
+__device__ inline i32x8 make_group1(DataSize data_size, uint32_t tensor_dim0,
                                              uint32_t tensor_dim1, uint32_t tile_dim0,
                                              uint32_t tile_dim1, uint64_t tensor_dim0_stride,
                                              uint64_t tensor_dim1_stride,
@@ -197,7 +197,7 @@ __device__ __forceinline__ i32x8 make_group1(DataSize data_size, uint32_t tensor
   return g1;
 }
 
-__device__ __forceinline__ Descriptor2D make_descriptor_2d(
+__device__ inline Descriptor2D make_descriptor_2d(
     uintptr_t lds_addr, uintptr_t global_addr, DataSize data_size, uint32_t tensor_dim0,
     uint32_t tensor_dim1, uint32_t tile_dim0, uint32_t tile_dim1, uint64_t tensor_dim0_stride,
     uint64_t tensor_dim1_stride, uint32_t workgroup_mask = 1) {
@@ -210,12 +210,12 @@ __device__ __forceinline__ Descriptor2D make_descriptor_2d(
 
 // Cnt/CachePolicy are template params: the builtins require an immarg.
 template <uint16_t Cnt>
-__device__ __forceinline__ void tensor_wait() {
+__device__ inline void tensor_wait() {
   __builtin_amdgcn_s_wait_tensorcnt(Cnt);
 }
 
 template <int CachePolicy>
-__device__ __forceinline__ void load_to_lds(u32x4 group0, i32x8 group1,
+__device__ inline void load_to_lds(u32x4 group0, i32x8 group1,
                                             i32x4 group2 = i32x4{0, 0, 0, 0},
                                             i32x4 group3 = i32x4{0, 0, 0, 0}) {
   const i32x8 group4{0, 0, 0, 0, 0, 0, 0, 0};  // reserved; always zero
@@ -223,7 +223,7 @@ __device__ __forceinline__ void load_to_lds(u32x4 group0, i32x8 group1,
 }
 
 template <int CachePolicy>
-__device__ __forceinline__ void store_from_lds(u32x4 group0, i32x8 group1,
+__device__ inline void store_from_lds(u32x4 group0, i32x8 group1,
                                                i32x4 group2 = i32x4{0, 0, 0, 0},
                                                i32x4 group3 = i32x4{0, 0, 0, 0}) {
   const i32x8 group4{0, 0, 0, 0, 0, 0, 0, 0};  // reserved; always zero
@@ -231,12 +231,12 @@ __device__ __forceinline__ void store_from_lds(u32x4 group0, i32x8 group1,
 }
 
 template <int CachePolicy>
-__device__ __forceinline__ void load_to_lds(const Descriptor2D &d) {
+__device__ inline void load_to_lds(const Descriptor2D &d) {
   load_to_lds<CachePolicy>(d.group0, d.group1);
 }
 
 template <int CachePolicy>
-__device__ __forceinline__ void store_from_lds(const Descriptor2D &d) {
+__device__ inline void store_from_lds(const Descriptor2D &d) {
   store_from_lds<CachePolicy>(d.group0, d.group1);
 }
 
@@ -395,14 +395,14 @@ constexpr int DefaultLoadCachePolicy = 0;
 constexpr int DefaultStoreCachePolicy = 0;
 
 template <int CachePolicy = DefaultLoadCachePolicy>
-__device__ __forceinline__ void issue_load_chunk(void *lds_addr, const void *global_addr) {
+__device__ inline void issue_load_chunk(void *lds_addr, const void *global_addr) {
   __builtin_amdgcn_global_load_async_to_lds_b32(
       reinterpret_cast<int *>(const_cast<void *>(global_addr)),
       reinterpret_cast<int *>(lds_addr), 0, CachePolicy);
 }
 
 template <int CachePolicy = DefaultStoreCachePolicy>
-__device__ __forceinline__ void issue_store_chunk(void *global_addr, const void *lds_addr) {
+__device__ inline void issue_store_chunk(void *global_addr, const void *lds_addr) {
   __builtin_amdgcn_global_store_async_from_lds_b32(
       reinterpret_cast<int *>(global_addr),
       reinterpret_cast<int *>(const_cast<void *>(lds_addr)), 0, CachePolicy);
@@ -410,16 +410,16 @@ __device__ __forceinline__ void issue_store_chunk(void *global_addr, const void 
 
 // --- Wait primitives -------------------------------------------------------
 // Tile-granular: one mark per issued tile.
-__device__ __forceinline__ void mark() { __builtin_amdgcn_asyncmark(); }
+__device__ inline void mark() { __builtin_amdgcn_asyncmark(); }
 
 template <uint16_t Cnt>
-__device__ __forceinline__ void wait_mark() {
+__device__ inline void wait_mark() {
   __builtin_amdgcn_wait_asyncmark(Cnt);
 }
 
 // Op-granular: waits until at most Cnt async ops are in flight (Cnt immediate).
 template <uint16_t Cnt>
-[[maybe_unused]] __device__ __forceinline__ void wait_async_cnt() {
+[[maybe_unused]] __device__ inline void wait_async_cnt() {
   __builtin_amdgcn_s_wait_asynccnt(Cnt);
 }
 
@@ -667,14 +667,14 @@ struct LdsRegistration {
 
 inline __shared__ LdsRegistration lds_registration;
 
-__device__ __forceinline__ void set_lds(void* ptr, size_t bytes) {
+__device__ inline void set_lds(void* ptr, size_t bytes) {
   if (hipThreadIdx_x == 0 && hipThreadIdx_y == 0 && hipThreadIdx_z == 0) {
     lds_registration = LdsRegistration{ptr, bytes};
   }
   __builtin_amdgcn_s_barrier();  // publish to the rest of the block
 }
 
-__device__ __forceinline__ LdsRegistration get_lds() {
+__device__ inline LdsRegistration get_lds() {
   return lds_registration;
 }
 

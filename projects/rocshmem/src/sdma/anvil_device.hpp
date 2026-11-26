@@ -47,7 +47,7 @@ constexpr bool BREAK_ON_RETRIES = false;
 
 #if defined(__HIPCC__) || defined(__CUDACC__)
 
-__device__ __forceinline__ SDMA_PKT_COPY_LINEAR CreateCopyPacket(void* srcBuf, void* dstBuf,
+__device__ inline SDMA_PKT_COPY_LINEAR CreateCopyPacket(void* srcBuf, void* dstBuf,
                                                                  long long int packetSize) {
   SDMA_PKT_COPY_LINEAR copy_packet = {};
 
@@ -63,7 +63,7 @@ __device__ __forceinline__ SDMA_PKT_COPY_LINEAR CreateCopyPacket(void* srcBuf, v
   return copy_packet;
 }
 
-__device__ __forceinline__ SDMA_PKT_ATOMIC CreateAtomicIncPacket(uint64_t* addr) {
+__device__ inline SDMA_PKT_ATOMIC CreateAtomicIncPacket(uint64_t* addr) {
   SDMA_PKT_ATOMIC packet = {};
 
   packet.HEADER_UNION.op = SDMA_OP_ATOMIC;
@@ -78,7 +78,7 @@ __device__ __forceinline__ SDMA_PKT_ATOMIC CreateAtomicIncPacket(uint64_t* addr)
   return packet;
 }
 
-__device__ __forceinline__ SDMA_PKT_FENCE CreateFencePacket(uint64_t* address, uint32_t data = 1) {
+__device__ inline SDMA_PKT_FENCE CreateFencePacket(uint64_t* address, uint32_t data = 1) {
   SDMA_PKT_FENCE packet = {};
 
   packet.HEADER_UNION.op = SDMA_OP_FENCE;
@@ -96,7 +96,7 @@ __device__ __forceinline__ SDMA_PKT_FENCE CreateFencePacket(uint64_t* address, u
 // Build a fused copy + optional wait + optional signal packet (MI350X / CDNA4).
 // Replaces the two-packet COPY_LINEAR + ATOMIC chain from MI300X.
 // Pass nullptr for signalAddr to omit the signal; set enableWait=false to omit the wait.
-__device__ __forceinline__ SDMA_PKT_COPY_LINEAR_WAIT_SIGNAL_MI4
+__device__ inline SDMA_PKT_COPY_LINEAR_WAIT_SIGNAL_MI4
 CreateCopyWaitSignalPacketMI4(void* srcBuf, void* dstBuf, long long int packetSize,
                                uint64_t* signalAddr, uint64_t signalData, bool enableWait,
                                uint64_t* waitAddr, uint64_t waitRef, uint64_t waitMask) {
@@ -134,7 +134,7 @@ CreateCopyWaitSignalPacketMI4(void* srcBuf, void* dstBuf, long long int packetSi
   return pkt;
 }
 
-__device__ __forceinline__ SDMA_PKT_FENCE_MI4 CreateFencePacketMI4(uint64_t* address,
+__device__ inline SDMA_PKT_FENCE_MI4 CreateFencePacketMI4(uint64_t* address,
                                                                     uint32_t data = 1) {
   SDMA_PKT_FENCE_MI4 pkt = {};
   pkt.HEADER_UNION.op_code = SDMA_OP_FENCE;
@@ -145,7 +145,7 @@ __device__ __forceinline__ SDMA_PKT_FENCE_MI4 CreateFencePacketMI4(uint64_t* add
   return pkt;
 }
 
-__device__ __forceinline__ SDMA_PKT_FENCE_64B_MI4 CreateFence64BPacketMI4(uint64_t* address,
+__device__ inline SDMA_PKT_FENCE_64B_MI4 CreateFence64BPacketMI4(uint64_t* address,
                                                                             uint64_t data = 1) {
   SDMA_PKT_FENCE_64B_MI4 pkt = {};
   pkt.HEADER_UNION.op = SDMA_OP_FENCE;
@@ -161,7 +161,7 @@ __device__ __forceinline__ SDMA_PKT_FENCE_64B_MI4 CreateFence64BPacketMI4(uint64
 
 // Spin-poll until *addr >= expected (agent-scope relaxed load)
 template <int64_t MAX_SPIN_COUNT = -1>
-__device__ __forceinline__ void poll_until_ge(uint64_t* addr, uint64_t expected) {
+__device__ inline void poll_until_ge(uint64_t* addr, uint64_t expected) {
   [[maybe_unused]] int64_t spin_count = 0;
   while (__scoped_atomic_load_n(addr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) < expected) {
     spin_count++;
@@ -173,12 +173,12 @@ __device__ __forceinline__ void poll_until_ge(uint64_t* addr, uint64_t expected)
 
 struct SdmaQueueDeviceHandle {
 #if defined(__HIPCC__) || defined(__CUDACC__)
-  __device__ __forceinline__ uint64_t WrapIntoRing(uint64_t index) {
+  __device__ inline uint64_t WrapIntoRing(uint64_t index) {
     const uint64_t queue_size_in_bytes = SDMA_QUEUE_SIZE;
     return index % queue_size_in_bytes;
   }
 
-  __device__ __forceinline__ bool CanWriteUpto(uint64_t uptoIndex) {
+  __device__ inline bool CanWriteUpto(uint64_t uptoIndex) {
     const uint64_t queue_size_in_bytes = SDMA_QUEUE_SIZE;
     if ((uptoIndex - cachedHwReadIndex) < queue_size_in_bytes) {
       return true;
@@ -315,24 +315,24 @@ struct SdmaQueueDeviceHandle {
   }
 
   // True once HW has consumed packets up to upToIndex
-  __device__ __forceinline__ bool isFlushed(uint64_t upToIndex) {
+  __device__ inline bool isFlushed(uint64_t upToIndex) {
     return __scoped_atomic_load_n(rptr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) >= upToIndex;
   }
 
   // Spin-poll rptr until HW has consumed packets up to upToIndex
-  __device__ __forceinline__ void flushTo(uint64_t upToIndex) {
+  __device__ inline void flushTo(uint64_t upToIndex) {
     while (!isFlushed(upToIndex)) {
     }
   }
 
   // Write index covering every packet submitted so far. An agent-scope load, since a different CU
   // can set maxWritePtr.
-  __device__ __forceinline__ uint64_t quietTarget() {
+  __device__ inline uint64_t quietTarget() {
     return __scoped_atomic_load_n(&maxWritePtr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
   }
 
   // Spin-poll rptr until HW has consumed all submitted packets
-  __device__ __forceinline__ void quietAll() { flushTo(quietTarget()); }
+  __device__ inline void quietAll() { flushTo(quietTarget()); }
 
  private:
   __device__ __forceinline__ bool nontemporal_compare_exchange(uint64_t* vaddr, uint64_t expected,
@@ -507,72 +507,72 @@ __device__ __forceinline__ void put_signal_counter_impl(QueueHandle& handle, voi
 
 // --- Free functions (data transfer) ---
 
-__device__ __forceinline__ void put(SdmaQueueDeviceHandle& handle, void* dst, void* src,
+__device__ inline void put(SdmaQueueDeviceHandle& handle, void* dst, void* src,
                                     size_t size) {
   put_signal_counter_impl<true, false, false>(handle, dst, src, size, nullptr, nullptr);
 }
 
-__device__ __forceinline__ void put(SdmaQueueSingleProducerDeviceHandle& handle, void* dst,
+__device__ inline void put(SdmaQueueSingleProducerDeviceHandle& handle, void* dst,
                                     void* src, size_t size) {
   put_signal_counter_impl<true, false, false>(handle, dst, src, size, nullptr, nullptr);
 }
 
-__device__ __forceinline__ void putSignal(SdmaQueueDeviceHandle& handle, void* dst, void* src,
+__device__ inline void putSignal(SdmaQueueDeviceHandle& handle, void* dst, void* src,
                                           size_t size, uint64_t* signal) {
   put_signal_counter_impl<true, true, false>(handle, dst, src, size, signal, nullptr);
 }
 
-__device__ __forceinline__ void putSignal(SdmaQueueSingleProducerDeviceHandle& handle, void* dst,
+__device__ inline void putSignal(SdmaQueueSingleProducerDeviceHandle& handle, void* dst,
                                           void* src, size_t size, uint64_t* signal) {
   put_signal_counter_impl<true, true, false>(handle, dst, src, size, signal, nullptr);
 }
 
-__device__ __forceinline__ void putSignalCounter(SdmaQueueDeviceHandle& handle, void* dst,
+__device__ inline void putSignalCounter(SdmaQueueDeviceHandle& handle, void* dst,
                                                   void* src, size_t size, uint64_t* signal,
                                                   uint64_t* counter) {
   put_signal_counter_impl<true, true, true>(handle, dst, src, size, signal, counter);
 }
 
-__device__ __forceinline__ void putSignalCounter(SdmaQueueSingleProducerDeviceHandle& handle,
+__device__ inline void putSignalCounter(SdmaQueueSingleProducerDeviceHandle& handle,
                                                   void* dst, void* src, size_t size,
                                                   uint64_t* signal, uint64_t* counter) {
   put_signal_counter_impl<true, true, true>(handle, dst, src, size, signal, counter);
 }
 
-__device__ __forceinline__ void putCounter(SdmaQueueDeviceHandle& handle, void* dst, void* src,
+__device__ inline void putCounter(SdmaQueueDeviceHandle& handle, void* dst, void* src,
                                            size_t size, uint64_t* counter) {
   put_signal_counter_impl<true, false, true>(handle, dst, src, size, nullptr, counter);
 }
 
-__device__ __forceinline__ void putCounter(SdmaQueueSingleProducerDeviceHandle& handle, void* dst,
+__device__ inline void putCounter(SdmaQueueSingleProducerDeviceHandle& handle, void* dst,
                                            void* src, size_t size, uint64_t* counter) {
   put_signal_counter_impl<true, false, true>(handle, dst, src, size, nullptr, counter);
 }
 
 // Backward-compatible alias
-__device__ __forceinline__ void putWithSignal(SdmaQueueDeviceHandle& handle, void* dst, void* src,
+__device__ inline void putWithSignal(SdmaQueueDeviceHandle& handle, void* dst, void* src,
                                               size_t size, uint64_t* sig) {
   putSignal(handle, dst, src, size, sig);
 }
 
 // --- Free functions (signaling) ---
 
-__device__ __forceinline__ void signal(SdmaQueueDeviceHandle& handle, uint64_t* sig) {
+__device__ inline void signal(SdmaQueueDeviceHandle& handle, uint64_t* sig) {
   put_signal_counter_impl<false, true, false>(handle, nullptr, nullptr, 0, sig, nullptr);
 }
 
-__device__ __forceinline__ void signal(SdmaQueueSingleProducerDeviceHandle& handle, uint64_t* sig) {
+__device__ inline void signal(SdmaQueueSingleProducerDeviceHandle& handle, uint64_t* sig) {
   put_signal_counter_impl<false, true, false>(handle, nullptr, nullptr, 0, sig, nullptr);
 }
 
-__device__ __forceinline__ void signalCounter(SdmaQueueDeviceHandle& handle, uint64_t* sig,
+__device__ inline void signalCounter(SdmaQueueDeviceHandle& handle, uint64_t* sig,
                                               uint64_t* counter) {
   put_signal_counter_impl<false, true, true>(handle, nullptr, nullptr, 0, sig, counter);
 }
 
 // --- Free functions (completion tracking) ---
 
-__device__ __forceinline__ void waitSignal(uint64_t* addr, uint64_t expected) {
+__device__ inline void waitSignal(uint64_t* addr, uint64_t expected) {
   if constexpr (BREAK_ON_RETRIES) {
     poll_until_ge<MAX_RETRIES>(addr, expected);
   } else {
@@ -580,7 +580,7 @@ __device__ __forceinline__ void waitSignal(uint64_t* addr, uint64_t expected) {
   }
 }
 
-__device__ __forceinline__ void waitCounter(uint64_t* addr, uint64_t expected) {
+__device__ inline void waitCounter(uint64_t* addr, uint64_t expected) {
   if constexpr (BREAK_ON_RETRIES) {
     poll_until_ge<MAX_RETRIES>(addr, expected);
   } else {
@@ -589,31 +589,31 @@ __device__ __forceinline__ void waitCounter(uint64_t* addr, uint64_t expected) {
 }
 
 // Spin-poll rptr until HW has consumed up to upToIndex
-__device__ __forceinline__ void flush(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
+__device__ inline void flush(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
   handle.flushTo(upToIndex);
 }
 
 // Spin-poll rptr until all submitted packets have been consumed
-__device__ __forceinline__ void quiet(SdmaQueueDeviceHandle& handle) {
+__device__ inline void quiet(SdmaQueueDeviceHandle& handle) {
   handle.quietAll();
 }
 
-__device__ __forceinline__ void quiet(SdmaQueueSingleProducerDeviceHandle& handle) {
+__device__ inline void quiet(SdmaQueueSingleProducerDeviceHandle& handle) {
   handle.quietAll();
 }
 
 // Write index covering every packet submitted so far, the index quiet() waits for
-__device__ __forceinline__ uint64_t quietTarget(SdmaQueueDeviceHandle& handle) {
+__device__ inline uint64_t quietTarget(SdmaQueueDeviceHandle& handle) {
   return handle.quietTarget();
 }
 
 // Non-blocking flush: true once HW has consumed up to upToIndex
-__device__ __forceinline__ bool isFlushed(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
+__device__ inline bool isFlushed(SdmaQueueDeviceHandle& handle, uint64_t upToIndex) {
   return handle.isFlushed(upToIndex);
 }
 
 // Assumes signal is allocated in device memory (kept for backward compat)
-__device__ __forceinline__ bool waitForSignal(HSAuint64* addr, uint64_t expected) {
+__device__ inline bool waitForSignal(HSAuint64* addr, uint64_t expected) {
   int retries = 0;
   while (true) {
     uint64_t value = __scoped_atomic_load_n(addr, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);

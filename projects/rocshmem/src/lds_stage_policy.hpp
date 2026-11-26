@@ -38,7 +38,7 @@ namespace rocshmem {
 // Caps constmem.lds_stage_tile_bytes at half the available scratch capacity
 // (for double buffering) and rounds down to a whole element so tiles don't
 // leave gaps. Returns 0 if the capacity doesn't allow a nonzero tile.
-__device__ __forceinline__ uint32_t resolve_tile_bytes(size_t cap_bytes) {
+__device__ inline uint32_t resolve_tile_bytes(size_t cap_bytes) {
   constexpr uint32_t element_bytes = 1u << lds_stage::FlatCopyElementLog2;
   uint32_t tile_bytes = static_cast<uint32_t>(
       min(static_cast<size_t>(constmem.lds_stage_tile_bytes), cap_bytes / 2));

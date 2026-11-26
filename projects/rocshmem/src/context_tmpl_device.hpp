@@ -289,7 +289,7 @@ __device__ void Context::broadcast_wg(T *dest, const T *source, int nelems,
 }
 
 template <typename T>
-__device__ __forceinline__ int Context::test_value(T value, int cmp,
+__device__ inline int Context::test_value(T value, int cmp,
                                                    T cmp_value) {
   switch (cmp) {
     case ROCSHMEM_CMP_EQ:
@@ -310,13 +310,13 @@ __device__ __forceinline__ int Context::test_value(T value, int cmp,
 }
 
 template <typename T>
-__device__ __forceinline__ void Context::wait_until(T *ivars, int cmp,
+__device__ inline void Context::wait_until(T *ivars, int cmp,
                                                     T val) {
   while (!test(ivars, cmp, val)) {
   }
 }
 
-__device__ __forceinline__ size_t status_entry(size_t nelems,
+__device__ inline size_t status_entry(size_t nelems,
                                                const int *status) {
   size_t i{0};
   if (nullptr == status) return 0;
@@ -330,7 +330,7 @@ __device__ __forceinline__ size_t status_entry(size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
+__device__ inline
 size_t Context::wait_until_any(T *ivars, size_t nelems,
                                const int *status,
                                int cmp, T val) {
@@ -360,7 +360,7 @@ size_t Context::wait_until_any(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
+__device__ inline
 void Context::wait_until_all(T *ivars, size_t nelems,
                              const int *status,
                              int cmp, T val) {
@@ -386,7 +386,7 @@ void Context::wait_until_all(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
+__device__ inline
 size_t Context::wait_until_some(T *ivars, size_t nelems,
                               size_t* indices,
                               const int *status,
@@ -422,7 +422,7 @@ size_t Context::wait_until_some(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
+__device__ inline
 void Context::wait_until_all_vector(T *ivars, size_t nelems,
                                     const int *status,
                                     int cmp, T* vals) {
@@ -448,7 +448,7 @@ void Context::wait_until_all_vector(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
+__device__ inline
 size_t Context::wait_until_any_vector(T *ivars, size_t nelems,
                                       const int *status,
                                       int cmp, T* vals) {
@@ -478,7 +478,7 @@ size_t Context::wait_until_any_vector(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__
+__device__ inline
 size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
                                      size_t* indices,
                                      const int *status,
@@ -514,7 +514,7 @@ size_t Context::wait_until_some_vector(T *ivars, size_t nelems,
 }
 
 template <typename T>
-__device__ __forceinline__ int Context::test(T *ivars, int cmp,
+__device__ inline int Context::test(T *ivars, int cmp,
                                              T val) {
   return test_value(uncached_load(ivars), cmp, val);
 }
