@@ -11,10 +11,11 @@ namespace rocjitsu::test {
 inline std::string shell_quote(std::string_view text) {
   std::string quoted = "'";
   for (const char ch : text) {
-    if (ch == '\'')
+    if (ch == '\'') {
       quoted += "'\\''";
-    else
+    } else {
       quoted += ch;
+    }
   }
   quoted += "'";
   return quoted;

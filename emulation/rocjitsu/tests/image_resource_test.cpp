@@ -34,10 +34,12 @@ template <typename Fields> Fields query_fields() {
   f.vaddr = 8;
   f.vdata = 8;
   f.srsrc = 1;
-  if constexpr (requires { f.dim; })
+  if constexpr (requires { f.dim; }) {
     f.dim = 5;
-  if constexpr (requires { f.tfe; })
+  }
+  if constexpr (requires { f.tfe; }) {
     f.tfe = 1;
+  }
   return f;
 }
 
@@ -59,12 +61,13 @@ TEST(ImageResourceDecodeTest, Gfx12ArrayViewsIgnoreBitThirteenOfBothEndpoints) {
   descriptor[3] = amdgpu::kImage2dArray << 28;
   // Captured with IMAGE_GET_RESINFO and IMAGE_LOAD on R9700. Each high-bit
   // pair also fetched the same texel from the first layer of the view.
-  for (const uint32_t last : {0x1fffu, 0x3fffu})
+  for (const uint32_t last : {0x1fffu, 0x3fffu}) {
     for (const uint32_t first : {0u, 0x1fffu, 0x2000u, 0x3fffu}) {
       descriptor[4] = last | (first << 16);
       const auto info = amdgpu::image_resource_info(descriptor, rocjitsu::IsaFamily::Rdna4, 0);
       EXPECT_EQ(info[2], (first & 0x1fff) ? 1u : 8192u);
     }
+  }
 }
 
 TEST(ImageResourceDecodeTest, Gfx12SeparatesWarningThresholdAndLinkedScales) {
@@ -119,8 +122,9 @@ protected:
   std::array<uint32_t, 8> descriptor(uint32_t type, bool view, bool uav = false) {
     std::array<uint32_t, 8> r{};
     const auto set = [&](uint32_t bit, uint32_t width, uint32_t value) {
-      for (uint32_t i = 0; i < width; ++i)
+      for (uint32_t i = 0; i < width; ++i) {
         r[(bit + i) / 32] |= ((value >> i) & 1u) << ((bit + i) % 32);
+      }
     };
     const bool gfx9 = arch_is_cdna_4_or_lower(GetParam());
     const bool gfx12 = GetParam() == rocjitsu::IsaFamily::Rdna4;
@@ -137,8 +141,9 @@ protected:
       // both report 8191 layers from a descriptor with depth 8192.
       set(157, 1, 1);
     }
-    if (uav)
+    if (uav) {
       set(gfx12 ? 164 : 160, 1, 1);
+    }
     return r;
   }
 };
@@ -156,15 +161,19 @@ TEST_P(ImageResourceTest, DimensionsLayersMipViewsAndOutOfRangeLod) {
         std::array<uint32_t, 4> expected{0, 0, 0, levels};
         if (lod < levels) {
           expected[0] = std::max(1u, 128u >> (base + lod));
-          if (type != amdgpu::kImage1d && type != amdgpu::kImage1dArray)
+          if (type != amdgpu::kImage1d && type != amdgpu::kImage1dArray) {
             expected[1] = std::max(1u, 64u >> (base + lod));
-          if (type == amdgpu::kImage3d)
+          }
+          if (type == amdgpu::kImage3d) {
             expected[2] = std::max(1u, 18u >> (base + lod));
+          }
           if (type == amdgpu::kImageCube || type == amdgpu::kImage2dArray ||
-              type == amdgpu::kImage2dMsaaArray)
+              type == amdgpu::kImage2dMsaaArray) {
             expected[2] = view ? 15 : 18;
-          if (type == amdgpu::kImage1dArray)
+          }
+          if (type == amdgpu::kImage1dArray) {
             expected[1] = view ? 15 : 18;
+          }
         }
         EXPECT_EQ(amdgpu::image_resource_info(r, GetParam(), lod), expected);
       }
@@ -194,8 +203,9 @@ TEST_P(ImageResourceTest, DecodedQueryCompactsMaskAndPreservesInactiveLanesWithA
   const uint32_t last = wf->wf_size() - 1;
   wf->set_exec(1 | (uint64_t{1} << last));
   auto r = descriptor(amdgpu::kImage2dArray, true);
-  for (uint32_t i = 0; i < r.size(); ++i)
+  for (uint32_t i = 0; i < r.size(); ++i) {
     cu->write_sgpr(wf->sgpr_alloc().base + 4 + i, r[i]);
+  }
   const auto vb = wf->vgpr_alloc().base;
   for (uint32_t lane : {0u, 1u, last}) {
     cu->write_vgpr(vb + 8, lane, 0x10001); // A16 must ignore the high half.
@@ -264,13 +274,15 @@ TEST(Cdna2ImageResourceTest, AccumulatorDestinationKeepsLodInVgpr) {
   // GFX9 2D array: 128x64, 18 layers, seven mip levels.
   const std::array<uint32_t, 8> descriptor{0, 0, 127 | (63 << 14), (13u << 28) | (6 << 16), 17, 0,
                                            0, 0};
-  for (uint32_t i = 0; i < descriptor.size(); ++i)
+  for (uint32_t i = 0; i < descriptor.size(); ++i) {
     cu->write_sgpr(wf->sgpr_alloc().base + 4 + i, descriptor[i]);
+  }
   for (uint32_t lane : {0u, 1u, last}) {
     cu->write_vgpr(vb + 8, lane, 0x10001);
     cu->write_vgpr(vb + 9, lane, 0xdeadbeef);
-    for (uint32_t i = 0; i < 3; ++i)
+    for (uint32_t i = 0; i < 3; ++i) {
       cu->write_vgpr(vb + 256 + 8 + i, lane, 0xdeadbeef);
+    }
   }
   auto fields = query_fields<cdna2::MimgBuilderFields>();
   fields.acc = 1;

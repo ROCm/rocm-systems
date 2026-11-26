@@ -1,10 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// FP64 ADD/MUL/FMA using AVX-512 instruction-local guest rounding, without MXCSR changes.
+// FP64 arithmetic and unary operations with AVX-512 instruction-local guest rounding.
+// CDNA reciprocal/root cores use default host arithmetic and scale-then-flush OMOD.
+// No host FP controls are changed.
 // Operand preparation and masked stores preserve the public split-VGPR layout.
 #include "fp/fp64_impl.h"
 #include "fp/fp64_round.h"
+#include "fp/x86_64/fp64_output_x86_64_v4.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
@@ -32,86 +35,6 @@ __m512d input(const uint32_t *const *source, int lane, uint32_t instruction_flag
     bits = _mm512_mask_and_epi64(bits, tiny, bits, _mm512_set1_epi64(INT64_MIN));
   }
   return _mm512_castsi512_pd(bits);
-}
-
-// Flush tiny values while preserving sign, or canonicalizing to positive zero after fused OMOD.
-__m512d flush_denorm(__m512d value, bool positive_zero) {
-  auto bits = _mm512_castpd_si512(value);
-  auto tiny = _mm512_cmpeq_epi64_mask(
-      _mm512_and_si512(bits, _mm512_set1_epi64(0x7ff0000000000000LL)), _mm512_setzero_si512());
-  auto zero =
-      positive_zero ? _mm512_setzero_si512() : _mm512_and_si512(bits, _mm512_set1_epi64(INT64_MIN));
-  return _mm512_castsi512_pd(_mm512_mask_mov_epi64(bits, tiny, zero));
-}
-
-// Apply CDNA OMOD with instruction-local guest rounding, preserving selected NaN encodings.
-__m512d scale_cdna(__m512d value, unsigned omod, unsigned rounding) {
-  const double scales[] = {1, 2, 4, 0.5};
-  auto scale = _mm512_set1_pd(scales[omod]);
-  __m512d scaled;
-  switch (rounding) {
-  case 0:
-    scaled = _mm512_mul_round_pd(value, scale, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
-    break;
-  case 1:
-    scaled = _mm512_mul_round_pd(value, scale, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
-    break;
-  case 2:
-    scaled = _mm512_mul_round_pd(value, scale, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
-    break;
-  default:
-    scaled = _mm512_mul_round_pd(value, scale, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
-    break;
-  }
-  return _mm512_mask_mov_pd(scaled, _mm512_cmp_pd_mask(value, value, _CMP_UNORD_Q), value);
-}
-
-// Scale encoded normal values, selecting the guest-directed overflow encoding.
-// OMOD flushes input/output subnormals independently of the guest denormal mode.
-__m512d output(__m512d value, uint32_t instruction_flags, uint64_t flags, unsigned rounding) {
-  auto bits = _mm512_castpd_si512(value);
-  auto sign = _mm512_and_si512(bits, _mm512_set1_epi64(INT64_MIN));
-  auto exponent = _mm512_and_si512(_mm512_srli_epi64(bits, 52), _mm512_set1_epi64(2047));
-  unsigned omod = (instruction_flags >> 6) & 3;
-  if (omod) {
-    auto normal = _mm512_cmpneq_epi64_mask(exponent, _mm512_setzero_si512()) &
-                  _mm512_cmpneq_epi64_mask(exponent, _mm512_set1_epi64(2047));
-    auto adjusted = _mm512_add_epi64(exponent, _mm512_set1_epi64(omod == 3 ? -1 : int(omod)));
-    auto scaled =
-        _mm512_or_si512(_mm512_and_si512(bits, _mm512_set1_epi64(INT64_MIN | 0x000fffffffffffffLL)),
-                        _mm512_slli_epi64(adjusted, 52));
-    bits = _mm512_mask_mov_epi64(bits, normal, scaled);
-    bits = _mm512_mask_mov_epi64(bits, _mm512_cmpeq_epi64_mask(exponent, _mm512_setzero_si512()),
-                                 _mm512_setzero_si512());
-    bits = _mm512_mask_mov_epi64(
-        bits, normal & _mm512_cmp_epi64_mask(adjusted, _mm512_setzero_si512(), _MM_CMPINT_LE),
-        sign);
-    auto negative = _mm512_cmpneq_epi64_mask(sign, _mm512_setzero_si512());
-    __mmask8 infinity = rounding == 0   ? __mmask8(0xff)
-                        : rounding == 1 ? __mmask8(~negative)
-                        : rounding == 2 ? negative
-                                        : __mmask8(0);
-    auto overflow = _mm512_mask_blend_epi64(infinity, _mm512_set1_epi64(0x7fefffffffffffffLL),
-                                            _mm512_set1_epi64(0x7ff0000000000000LL));
-    bits = _mm512_mask_mov_epi64(
-        bits, normal & _mm512_cmp_epi64_mask(adjusted, _mm512_set1_epi64(2047), _MM_CMPINT_GE),
-        _mm512_or_si512(sign, overflow));
-  }
-  value = _mm512_castsi512_pd(bits);
-  if (instruction_flags & RJ_ARITH_ALU_CLAMP) {
-    auto clamped = _mm512_min_pd(_mm512_max_pd(value, _mm512_setzero_pd()), _mm512_set1_pd(1));
-    value = flags & RJ_ARITH_FP_DX10_CLAMP_OFF
-                ? _mm512_mask_mov_pd(clamped, _mm512_cmp_pd_mask(value, value, _CMP_UNORD_Q), value)
-                : clamped;
-  }
-  if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
-    bits = _mm512_castpd_si512(value);
-    auto tiny = _mm512_cmpeq_epi64_mask(
-        _mm512_and_si512(bits, _mm512_set1_epi64(0x7ff0000000000000LL)), _mm512_setzero_si512());
-    value =
-        _mm512_castsi512_pd(_mm512_mask_and_epi64(bits, tiny, bits, _mm512_set1_epi64(INT64_MIN)));
-  }
-  return value;
 }
 
 // Re-evaluate the selected lanes with the integer model. Kept out of line so that the
@@ -160,6 +83,38 @@ __m512d mantissa(__m512d x) {
 
 // Named integral operations have fixed rounding; FRACT's subtraction uses the guest mode.
 // ADD/MUL/FMA likewise use embedded rounding, with host exceptions suppressed.
+// Flush tiny values while preserving sign, or canonicalizing to positive zero after fused OMOD.
+__m512d flush_denorm(__m512d value, bool positive_zero) {
+  auto bits = _mm512_castpd_si512(value);
+  auto tiny = _mm512_cmpeq_epi64_mask(
+      _mm512_and_si512(bits, _mm512_set1_epi64(0x7ff0000000000000LL)), _mm512_setzero_si512());
+  auto zero =
+      positive_zero ? _mm512_setzero_si512() : _mm512_and_si512(bits, _mm512_set1_epi64(INT64_MIN));
+  return _mm512_castsi512_pd(_mm512_mask_mov_epi64(bits, tiny, zero));
+}
+
+// Apply CDNA OMOD with instruction-local guest rounding, preserving selected NaN encodings.
+__m512d scale_cdna(__m512d value, unsigned omod, unsigned rounding) {
+  const double scales[] = {1, 2, 4, 0.5};
+  auto scale = _mm512_set1_pd(scales[omod]);
+  __m512d scaled;
+  switch (rounding) {
+  case 0:
+    scaled = _mm512_mul_round_pd(value, scale, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+    break;
+  case 1:
+    scaled = _mm512_mul_round_pd(value, scale, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+    break;
+  case 2:
+    scaled = _mm512_mul_round_pd(value, scale, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+    break;
+  default:
+    scaled = _mm512_mul_round_pd(value, scale, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+    break;
+  }
+  return _mm512_mask_mov_pd(scaled, _mm512_cmp_pd_mask(value, value, _CMP_UNORD_Q), value);
+}
+
 template <int Rounding> __m512d arithmetic(Fp64 op, __m512d x, __m512d y, __m512d z) {
   if (op == Fp64::Add) {
     return _mm512_add_round_pd(x, y, Rounding | _MM_FROUND_NO_EXC);
@@ -171,6 +126,13 @@ template <int Rounding> __m512d arithmetic(Fp64 op, __m512d x, __m512d y, __m512
     return _mm512_fmadd_round_pd(x, y, z, Rounding | _MM_FROUND_NO_EXC);
   }
   switch (op) {
+  // These inherited host-double cores ignore the guest rounding field.
+  case Fp64::Rcp:
+    return _mm512_div_pd(_mm512_set1_pd(1), x);
+  case Fp64::Rsq:
+    return _mm512_div_pd(_mm512_set1_pd(1), _mm512_sqrt_pd(x));
+  case Fp64::Sqrt:
+    return _mm512_sqrt_pd(x);
   case Fp64::Trunc:
     return _mm512_roundscale_pd(x, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
   case Fp64::Ceil:
@@ -215,10 +177,10 @@ __m512d nan_priority(Fp64 op, __m512d value, __m512d x, __m512d y, __m512d z, bo
 
 // Evaluate all lanes into result. NanPriority applies nan_priority; otherwise host NaNs are kept,
 // and the return value tells whether any lane produced a NaN.
-template <bool NanPriority>
-bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_t *const *a,
+template <Fp64 op, bool NanPriority>
+bool evaluate(uint64_t flags, uint32_t instruction_flags, const uint32_t *const *a,
               const uint32_t *const *b, const uint32_t *const *c, uint32_t (&result)[2][32],
-              bool quiet_snan, bool cdna) {
+              bool quiet_snan, bool native_math, bool cdna) {
   const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   const bool flush = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
   __mmask8 nan = 0;
@@ -254,9 +216,18 @@ bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_
     } else {
       nan |= _mm512_cmp_pd_mask(value, value, _CMP_UNORD_Q);
     }
-    // Rounding and mantissa extraction preserve source sNaNs when gfx11 IEEE is clear.
-    if (!quiet_snan && op != Fp64::Add && op != Fp64::Mul && op != Fp64::Fma) {
-      value = _mm512_mask_mov_pd(value, _mm512_cmp_pd_mask(x, x, _CMP_UNORD_Q), x);
+    // Native math and rounding/extraction retain the generation's source-NaN policy.
+    if (native_math && (op == Fp64::Sqrt || op == Fp64::Rsq)) {
+      // Negative inputs produce the inherited positive default NaN.
+      value = _mm512_mask_mov_pd(value, _mm512_cmp_pd_mask(x, _mm512_setzero_pd(), _CMP_LT_OQ),
+                                 _mm512_castsi512_pd(_mm512_set1_epi64(0x7ff8000000000000ULL)));
+    }
+    if ((native_math || !quiet_snan) && op != Fp64::Add && op != Fp64::Mul && op != Fp64::Fma) {
+      auto selected =
+          quiet_snan
+              ? _mm512_or_pd(x, _mm512_castsi512_pd(_mm512_set1_epi64(0x0008000000000000ULL)))
+              : x;
+      value = _mm512_mask_mov_pd(value, _mm512_cmp_pd_mask(x, x, _CMP_UNORD_Q), selected);
     }
     uint32_t output_mode = instruction_flags;
     if (cdna && op == Fp64::Fma && (output_mode & RJ_ARITH_ALU_OMOD_MASK)) {
@@ -266,7 +237,8 @@ bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_
       value = flush_denorm(scale_cdna(value, (output_mode >> 6) & 3, rounding), true);
       output_mode &= ~RJ_ARITH_ALU_OMOD_MASK;
     }
-    auto bits = _mm512_castpd_si512(output(value, output_mode, flags, rounding));
+    auto bits = _mm512_castpd_si512(
+        fp64_output_x86_64_v4(value, output_mode, flags, rounding, native_math));
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[0] + lane), _mm512_cvtepi64_epi32(bits));
     _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[1] + lane),
                         _mm512_cvtepi64_epi32(_mm512_srli_epi64(bits, 32)));
@@ -274,16 +246,20 @@ bool evaluate(Fp64 op, uint64_t flags, uint32_t instruction_flags, const uint32_
   return nan != 0;
 }
 
-} // namespace
-
-void fp64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
-                    uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
-                    const uint32_t *const *c, bool quiet_snan, bool cdna) {
+template <Fp64 op>
+void run(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t *const *d,
+         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+         bool quiet_snan, bool native_math, bool cdna) {
   uint32_t result[2][32];
   // A NaN source or an invalid operation always yields a NaN. Such results are rare, so this
   // re-evaluates with NaN priority only when the host produced one.
-  if (evaluate<false>(op, flags, instruction_flags, a, b, c, result, quiet_snan, cdna)) {
-    evaluate<true>(op, flags, instruction_flags, a, b, c, result, quiet_snan, cdna);
+  if constexpr (op == Fp64::Add || op == Fp64::Mul || op == Fp64::Fma) {
+    if (evaluate<op, false>(flags, instruction_flags, a, b, c, result, quiet_snan, native_math,
+                            cdna)) {
+      evaluate<op, true>(flags, instruction_flags, a, b, c, result, quiet_snan, native_math, cdna);
+    }
+  } else {
+    evaluate<op, false>(flags, instruction_flags, a, b, c, result, quiet_snan, native_math, cdna);
   }
   // Delay writes until every input has been consumed, including cross-half aliases.
   for (int reg = 0; reg < 2; ++reg) {
@@ -292,6 +268,53 @@ void fp64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t instru
           d[reg] + lane, __mmask8(exec_mask >> lane),
           _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result[reg] + lane)));
     }
+  }
+}
+
+} // namespace
+
+void fp64_x86_64_v4(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
+                    uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                    const uint32_t *const *c, bool quiet_snan, bool native_math, bool cdna) {
+  switch (op) {
+  case Fp64::Rcp:
+    return run<Fp64::Rcp>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, native_math,
+                          cdna);
+  case Fp64::Rsq:
+    return run<Fp64::Rsq>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, native_math,
+                          cdna);
+  case Fp64::Sqrt:
+    return run<Fp64::Sqrt>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, native_math,
+                           cdna);
+  case Fp64::Add:
+    return run<Fp64::Add>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, native_math,
+                          cdna);
+  case Fp64::Mul:
+    return run<Fp64::Mul>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, native_math,
+                          cdna);
+  case Fp64::Fma:
+    return run<Fp64::Fma>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, native_math,
+                          cdna);
+  case Fp64::Trunc:
+    return run<Fp64::Trunc>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan,
+                            native_math, cdna);
+  case Fp64::Ceil:
+    return run<Fp64::Ceil>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan, native_math,
+                           cdna);
+  case Fp64::Rndne:
+    return run<Fp64::Rndne>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan,
+                            native_math, cdna);
+  case Fp64::Floor:
+    return run<Fp64::Floor>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan,
+                            native_math, cdna);
+  case Fp64::Fract:
+    return run<Fp64::Fract>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan,
+                            native_math, cdna);
+  case Fp64::FrexpMant:
+    return run<Fp64::FrexpMant>(flags, exec_mask, instruction_flags, d, a, b, c, quiet_snan,
+                                native_math, cdna);
+  default:
+    __builtin_unreachable();
   }
 }
 

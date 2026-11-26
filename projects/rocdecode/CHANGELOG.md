@@ -8,12 +8,18 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 
 * Reference MD5 digests of the planar YUV 4:2:0 decoded output for the AVC, HEVC, AV1 and VP9 test streams, installed to `share/rocdecode/md5`. The `video_decode-AVC`, `video_decode-HEVC`, `video_decode-AV1`, `video_decode-VP9` and `video_decodeMem-HEVC` CTests now pass them to the samples' `-md5_check` option, so a test fails when the decoded output doesn't match its reference.
 * A `--mem_type` option for the `run_rocDecode_Conformance.py` and `run_rocDecodeSamples.py` test scripts, which passes the output surface memory type to the samples as `-m` so conformance and performance runs can cover the copied modes as well as the default.
+* A `--mem-type` option for `validate.sh` and matching `m0`, `m1` and `m2` arguments for the `/validate` skill, which run the conformance phase once per listed output surface memory type, so a copied-mode failure that passes the default run is reported.
+* Support for gfx1251
 
 ### Resolved issues
 
 * The `videoDecodeRaw` and `videoDecode` samples now exit with code 77 instead of 1 when the GPU doesn't support the stream's codec, and the `video_decodeRaw-*` and `video_decode-*` CTests report it as skipped instead of failed.
 * The `videoDecodeBatch` sample now checks the GPU's decode capability for each input file first and decodes only the supported files rather than exiting when a file has an unsupported codec.
 * Fixed decoders that one process creates on different compute partitions of the same GPU (DPX, TPX, QPX, or CPX mode) all decoding on the first partition of that GPU that the process used.
+* Fixed corrupted output for the last frames decoded before an AV1 frame size change: they were displayed after the decoder reconfigure had replaced the surfaces holding them.
+* Fixed AV1 streams using super-resolution running the sequence callback on every frame, as if the frame size had changed.
+* Fixed `rocDecGetDecoderCaps` reporting every codec as unsupported when no VA decode profile could be probed. It now returns `ROCDEC_NOT_INITIALIZED` in that case, and the `videoDecodeCaps` sample exits with code 1. `RocVideoDecoder::CodecSupported()` now throws on a failed capability query instead of returning `false`.
+* Fixed the samples and the negative API tests building with no GPU targets when `AMDGPU_TARGETS` or `GPU_ARCHS` is set in the environment but empty. An empty value is now treated the same as an unset one and the default target list applies, so the `videoDecodeRGB` sample no longer fails with `hipErrorInvalidImage`.
 * Fixed the `RocVideoDecoder` utility returning skipped, repeated or corrupt frames after a decoder reconfigure in the `OUT_SURFACE_MEM_DEV_COPIED` and `OUT_SURFACE_MEM_HOST_COPIED` output modes, which affected HEVC streams with a repeated sequence header and VP9 streams with resolution changes.
 
 ## rocDecode 1.12.0 for ROCm 10.2.0

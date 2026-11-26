@@ -6,6 +6,7 @@
 // Rocjitsu model without claiming newly established hardware bit-exactness.
 
 #include "conversion/scaled_widen.h"
+#include "common/exec_mask.h"
 #include "common/float_encoding.h"
 #include "common/validation.h"
 #include "conversion/scaled_widen_impl.h"
@@ -19,13 +20,18 @@ using namespace rocjitsu::arith;
 using Source = ScaledSource;
 using Destination = ScaledDestination;
 
-// Decode one OCP narrow value, preserving its sign including on NaNs.
+// Decode one OCP narrow value, canonicalizing FP8/BF8 NaNs to -qNaN on gfx950.
 template <Source Format> float decode(uint32_t code) {
   if constexpr (Format == Source::Fp4) {
     constexpr float magnitude[] = {0, 0.5f, 1, 1.5f, 2, 3, 4, 6};
     return as_float(as_bits(magnitude[code & 7]) | ((code & 8) << 28));
   } else {
-    return fp8_to_float<Format == Source::Bf8>(uint8_t(code));
+    constexpr bool bf8 = Format == Source::Bf8;
+    uint32_t mag = code & 0x7fU;
+    if (bf8 ? mag > 0x7cU : mag == 0x7fU) {
+      return as_float(0xffc00000U);
+    }
+    return fp8_to_float<bf8>(uint8_t(code));
   }
 }
 
@@ -34,33 +40,34 @@ template <Source Format> float decode(uint32_t code) {
 template <int Lanes, Source Src, Destination Dst, bool Packed>
 int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b) {
-  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   constexpr uint64_t selectors =
       Packed && Src != Source::Fp4 ? RJ_ARITH_ALU_HIGH_A : RJ_ARITH_CVT_BYTE_3;
   constexpr uint64_t modifiers =
       selectors | (!Packed && Dst == Destination::F16 ? RJ_ARITH_ALU_HIGH_D : 0);
-  if (int error = validate(flags, mode & ~modifiers)) {
+  if (int error = validate(flags, mode & ~modifiers, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     return error;
-  }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  const bool flush_output = (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) != 0;
   int shift = Packed && Src != Source::Fp4 ? (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)
                                            : 8 * int((mode >> 16) & 3);
   [[maybe_unused]] const int destination_shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+  [[maybe_unused]] const bool use_simd = Dst == Destination::F16
+                                             ? (exec_mask & (exec_mask - 1)) != 0
+                                             : rocjitsu::arith::has_more_than_four_lanes(exec_mask);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    scaled_widen_x86_64_v4(Lanes, exec_mask, Src, Dst, Packed, flags & RJ_ARITH_FP16_OVFL, shift,
+  if (use_simd && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    scaled_widen_x86_64_v4(Lanes, exec_mask, Src, Dst, Packed, false, flush_output, shift,
                            destination_shift, d, a[0], b[0]);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    scaled_widen_x86_64_v3(Lanes, exec_mask, Src, Dst, Packed, flags & RJ_ARITH_FP16_OVFL, shift,
+  if (use_simd && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    scaled_widen_x86_64_v3(Lanes, exec_mask, Src, Dst, Packed, false, flush_output, shift,
                            destination_shift, d, a[0], b[0]);
     return RJ_ARITH_SUCCESS;
   }
@@ -69,10 +76,8 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   uint32_t result[words][Lanes];
   // Stage the entire result before stores so either input may overlap either
   // destination word, including when both destination pointers are identical.
-  for (int lane = 0; lane < Lanes; ++lane) {
-    if (!((exec_mask >> lane) & 1)) {
-      continue;
-    }
+  for (uint64_t active = exec_mask; active; active &= active - 1) {
+    int lane = __builtin_ctzll(active);
     uint32_t raw = a[0][lane] >> shift;
     uint32_t exponent = (b[0][lane] >> 23) & 255;
     // Exponent zero denotes 2^-127, not FP32 zero. Multiplication by the
@@ -81,13 +86,13 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
     uint32_t values[Packed ? 2 : 1];
     for (int element = 0; element < (Packed ? 2 : 1); ++element) {
       if (exponent == 255) {
-        values[element] = Dst == Destination::F32   ? 0x7fc00000U
-                          : Dst == Destination::F16 ? 0x7e00U
-                                                    : 0x7fc0U;
+        values[element] = Dst == Destination::F32   ? 0xffc00000U
+                          : Dst == Destination::F16 ? 0xfe00U
+                                                    : 0xffc0U;
       } else {
         values[element] = encode_scaled_widen<Dst>(
-            decode<Src>(raw >> (element * (Src == Source::Fp4 ? 4 : 8))) * scale,
-            flags & RJ_ARITH_FP16_OVFL);
+            decode<Src>(raw >> (element * (Src == Source::Fp4 ? 4 : 8))) * scale, false,
+            flush_output);
       }
     }
     result[0][lane] = values[0];
@@ -103,10 +108,9 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
     }
   }
   for (int word = 0; word < words; ++word) {
-    for (int lane = 0; lane < Lanes; ++lane) {
-      if ((exec_mask >> lane) & 1) {
-        d[word][lane] = result[word][lane];
-      }
+    for (uint64_t active = exec_mask; active; active &= active - 1) {
+      int lane = __builtin_ctzll(active);
+      d[word][lane] = result[word][lane];
     }
   }
   return RJ_ARITH_SUCCESS;

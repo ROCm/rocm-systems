@@ -27,7 +27,8 @@ template <int Width, bool Rdna3 = false>
 inline typename IeeeFormat<Width>::Bits
 fixup_value(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<Width>::Bits b,
             typename IeeeFormat<Width>::Bits c, uint32_t mode, bool saturate, unsigned rounding = 0,
-            bool flush_output = false, bool dx10_clamp_off = false, bool ieee = false) {
+            bool flush_output = false, bool dx10_clamp_off = false, bool ieee = false,
+            bool cdna = false) {
   using F = IeeeFormat<Width>;
   using T = typename F::Bits;
   T inputs[] = {p, b, c};
@@ -70,10 +71,28 @@ fixup_value(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<Width>::Bits
     // rocjitsu div_fixup_f16 selects infinity or max-half before OMOD. FP16_OVFL
     // saturates this provisional overflow on gfx1201 and gfx1100.
     T recovery = division_overflow<Width>(sign != 0, rounding);
-    if (Width == 16 && saturate) {
+    if (Width == 16 && saturate && !cdna) {
       recovery = F::infinity - 1;
     }
     result = sign | (pm >= F::infinity ? recovery : pm);
+  }
+  if constexpr (Width == 16) {
+    if (cdna) {
+      // CDNA retains promoted scaling, nearest narrowing, then positive-zero flushing.
+      // RDNA3/4 instead use the output stage below, including signed underflow.
+      unsigned omod = (mode >> 6) & 3;
+      if (omod) {
+        const bool finite = (result & (F::sign - 1)) < F::infinity;
+        result = division_scale_bits<16>(result, omod == 3 ? -1 : int(omod));
+        if (saturate && finite && (result & (F::sign - 1)) == F::infinity) {
+          result = (result & F::sign) | (F::infinity - 1);
+        }
+        if (!(result & F::infinity)) {
+          result = 0;
+        }
+      }
+      mode &= RJ_ARITH_ALU_CLAMP;
+    }
   }
   if (dx10_clamp_off && (result & (F::sign - 1)) > F::infinity) {
     mode &= ~RJ_ARITH_ALU_CLAMP;
@@ -81,16 +100,13 @@ fixup_value(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<Width>::Bits
   return float_output<Width>(result, mode, overflow);
 }
 
-// Preserve the pre-migration RDNA3 classifier (shared/alu_exceptions.h).
-// DX10_CLAMP disables this classifier. Operands here have input flushing applied.
+// Preserve the legacy classifier (shared/alu_exceptions.h), before CLAMP.
+// The caller supplies operand bits with its input-flushing and source-modifier policy.
 template <int Width>
 inline uint32_t
-fixup_rdna3_exceptions(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<Width>::Bits b,
-                       typename IeeeFormat<Width>::Bits c, uint32_t mode, uint64_t flags) {
+fixup_legacy_exceptions(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<Width>::Bits b,
+                        typename IeeeFormat<Width>::Bits c, uint32_t mode, uint64_t flags) {
   using F = IeeeFormat<Width>;
-  if (!(flags & RJ_ARITH_FP_DX10_CLAMP_OFF)) {
-    return 0;
-  }
   auto d = b & (F::sign - 1), n = c & (F::sign - 1);
   uint32_t causes = ((d && d < (typename F::Bits(1) << F::fraction)) ||
                      (n && n < (typename F::Bits(1) << F::fraction)))
@@ -124,6 +140,15 @@ fixup_rdna3_exceptions(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<W
     }
   }
   return causes;
+}
+
+// RDNA3 suppresses its inherited classifier when DX10_CLAMP is enabled.
+template <int Width>
+inline uint32_t
+fixup_rdna3_exceptions(typename IeeeFormat<Width>::Bits p, typename IeeeFormat<Width>::Bits b,
+                       typename IeeeFormat<Width>::Bits c, uint32_t mode, uint64_t flags) {
+  return flags & RJ_ARITH_FP_DX10_CLAMP_OFF ? fixup_legacy_exceptions<Width>(p, b, c, mode, flags)
+                                            : 0;
 }
 
 // Classify DIV_FIXUP's wave exception contribution from unmodified source bits.

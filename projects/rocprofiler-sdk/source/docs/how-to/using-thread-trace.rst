@@ -4,8 +4,6 @@
 
 .. _using-thread-trace:
 
-====================
-Using thread trace
 ********************************
 Using thread trace
 ********************************
@@ -107,7 +105,7 @@ The following table lists the parameters relevant to thread tracing:
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | kernel-exclude-regex        | String  | Any     |           | Doesn't profile kernel names matching the regex              |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-buffer-size             | Bytes   | 1MB-2GB | 96MB      | Specifies the trace buffer size. This is shared for all SEs. |
+| att-buffer-size             | Bytes   | >= 1MB  | 384MB     | Specifies the trace buffer size, split evenly among the SEs. |
 |                             |         |         |           | Increase this value if the buffer tends to get full.         |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-resource-mode           | String  |         |code-object| Selects when thread trace resources are allocated per GPU.   |
@@ -123,7 +121,7 @@ The following table lists the parameters relevant to thread tracing:
 |                             |         |         |           | "Data Lost" events and warnings.                             |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-perfcounters            | String  | SQ-only |           | Available only in gfx9. Specifies the list of SQ counters.   |
-|                             |         |         |           | To list all counters, use "rocprofv3 --list-avail``.         |
+|                             |         |         |           | To list all counters, use ``rocprofv3 --list-avail``.        |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 | att-activity                | Integer | 1 - 16  | 5~10      | Available only in gfx9.                                      |
 |                             |         |         |           | Shorthand for att-perfcounter-ctrl and the att-perfcounters  |
@@ -135,14 +133,18 @@ The following table lists the parameters relevant to thread tracing:
 | att-gpu-index               | Integer |         |           | Comma-separated list of integers. If enabled, only the GPU   |
 |                             | (List)  |         |           | indexes in the list will be profiled by thread trace.        |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
-| att-consecutive-kernels     | Integer | >=0     |           | Starting at the targeted kernel, enables thread trace for the|
-|                             |         |         |           | next N kernel dispatches, sharing a single ATT file,         |
-|                             |         |         |           | stats.csv and UI dir. See --kernel-include-regex and         |
+| att-consecutive-kernels     | Integer | >=0     |           | Starting at the targeted kernel, enables thread trace until  |
+|                             |         |         |           | at least N kernel dispatches are captured, sharing a single  |
+|                             |         |         |           | ATT file, stats.csv and UI dir. More dispatches may also be  |
+|                             |         |         |           | in the trace. See --kernel-include-regex and                 |
 |                             |         |         |           | --kernel-iteration-range. If multiple targeted kernels       |
 |                             |         |         |           | overlap, the count for N next dispatches starts again from 0.|
 |                             |         |         |           | Recommended use with --att-gpu-index due to thread trace     |
 |                             |         |         |           | being enabled for all GPUs. Incompatible with                |
 |                             |         |         |           | --selected-regions.                                          |
++-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-no-intercept            | Bool    |         | False     | Implies --att. Traces without intercepting kernel dispatches.|
+|                             |         |         |           | See "Thread tracing without dispatch interception" below.    |
 +-----------------------------+---------+---------+-----------+--------------------------------------------------------------+
 
 Use ``--att-resource-mode`` to choose when thread trace queues, signals, and memory are allocated for each GPU. It applies to both dispatch tracing and device-wide tracing, including ``--att-no-intercept``. Supported values are:
@@ -233,8 +235,34 @@ All the profiled kernels are then compiled into a single ATT file.
 If a new targeted kernel is encountered after the ``rocprofv3`` tool has finished profiling a batch of kernels,
 the profiler will restart profiling when encountering this new targeted kernel and create another ATT file with multiple kernels.
 
+Thread tracing without dispatch interception
+============================================
+
+``--att-no-intercept`` drops all queue interception and kernel dispatch tracing, which can give a lower kernel launch overhead while the trace is active compared to other methods, at the cost of some PCIe bandwidth.
+Use it when you need to measure the gaps between waves of different dispatches, where kernel tracing and queue interception could interfere with the timing.
+Thread trace runs continuously on each selected GPU, and the dispatches of targeted kernels are extracted from the trace on the host.
+Kernel filtering options such as ``--kernel-include-regex`` and ``--kernel-iteration-range`` work as with ``--att``. Because the trace is device-wide, each capture can also contain other dispatches that ran concurrently.
+
+.. code-block:: bash
+
+  rocprofv3 --att-no-intercept --kernel-include-regex <kernel_name> -d <output_dir> -- <application_path>
+
+Requirements and limitations:
+
+* Requires a host CPU with AVX-512 support (AVX512F, AVX512BW, and AVX512VBMI).
+* Supported on gfx942, gfx950, and gfx12xx.
+* Requires KFD SDMA queues.
+* Traces a single shader engine per device.
+* ``--selected-regions`` doesn't control ``--att-no-intercept`` captures.
+* Uses six host buffers of ``att-buffer-size`` bytes per traced GPU. Lower ``--att-buffer-size`` to reduce host memory usage.
+
+If any of these limitations isn't acceptable, use ``--att --selected-regions`` instead.
+It doesn't trace kernel dispatches either, so it also has a small per-launch overhead while the trace is active. See :ref:`thread-trace-marker-controlled`.
+
+.. _thread-trace-marker-controlled:
+
 Marker-controlled thread tracing
-=============================
+================================
 
 Using ``--att`` with ``--selected-regions`` enables application-controlled thread trace collection with the help of ``roctxProfilerResume(0)`` and ``roctxProfilerPause(0)`` APIs.
 Instead of targeting specific kernels by name or dispatch index, the application explicitly starts and stops thread trace collection at runtime.

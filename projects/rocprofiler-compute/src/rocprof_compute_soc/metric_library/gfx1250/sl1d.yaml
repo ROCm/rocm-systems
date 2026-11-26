@@ -2,7 +2,7 @@ sl1d.bw:
   name: sL1D Cache Bandwidth
   formula: 64 * SUM(SQC_DCACHE_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total Scalar Data Cache data bandwidth.
+  description: The number of bytes per second looked up in the sL1D cache.
   peak: $max_sclk / 1000 * 64 * $sqc_per_gpu
 sl1d.dcache_gl1_req_lat:
   name: Dcache-GL1 Request Latency
@@ -23,41 +23,50 @@ sl1d.dcache_util:
   name: Dcache Utilization
   formula: 100 * SUM(SQC_DCACHE_BUSY_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Percent
-  description: >-
-    Percentage of WGP cycles the Scalar Data Cache is serving requests.
+  description: Percentage of WGP cycles the Scalar Data Cache is serving requests.
 sl1d.gl1_rd_bw:
   name: sL1D-GL1 Read Bandwidth
   formula: 128 * SUM(SQC_TC_DATA_READ_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Scalar Data Cache miss fill bandwidth from GL1.
+  description: >-
+    The number of bytes per second the scalar data cache (sL1D) reads from the GL1
+    cache. Scalar operations load uniform data shared across all threads in a wavefront,
+    making efficient caching critical for performance.
 sl1d.hit_rate_excl_dup:
   name: sL1D Hit Rate (Excluding Duplicate Misses)
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_HITS_sum + SQC_DCACHE_MISSES_sum)
   unit: Percent
-  description: Scalar Data Cache hit rate.
+  description: >-
+    Percentage of sL1D requests that hit on a previously loaded line in the cache.
+    Calculated as the number of sL1D hits over the number of hits and misses, excluding
+    duplicate misses.
   peak: 100
 sl1d.hits_per_req:
-  name: sL1D Hits per Request
+  name: sL1D Hit Rate
   formula: 100 * SUM(SQC_DCACHE_HITS_sum) / SUM(SQC_DCACHE_REQ_sum)
   unit: Percent
-  description: Scalar Data Cache hit rate.
+  description: Percentage of Scalar Data Cache requests that hit in the cache.
 sl1d.interface_stall_rate:
   name: Dcache Interface Stall Rate
   formula: 100 * SUM(SQC_TC_STALL_sum) / SUM(SQ_BUSY_CYCLES_sum)
   unit: Percent
   description: Percentage of cycles the SQC-GL1 interface is stalled.
+sl1d.load_bw:
+  name: sL1D Load Bandwidth
+  formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    The number of bytes per second loaded by scalar memory instructions. The number of
+    bytes is the number of dwords each instruction loads multiplied by four;
+    bounds-check reductions are ignored.
+sl1d.load_bw_norm:
+  name: sL1D Load Bytes
+  formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM($denom)
+  unit: (Bytes + $normUnit)
+  description: >-
+    The number of bytes loaded through the Scalar Data Cache by scalar memory loads.
 sl1d.req:
   name: sL1D Requests
   formula: SUM(SQC_DCACHE_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: Total Scalar Data Cache requests.
-sl1d.req_bw:
-  name: Dcache Request Bandwidth
-  formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM(End_Timestamp - Start_Timestamp)
-  unit: GB/s
-  description: Total Scalar Data Cache request bandwidth.
-sl1d.req_bw_norm:
-  name: Dcache Request Bytes
-  formula: 4 * SUM(SQC_SMEM_LOAD_DWORDS_sum) / SUM($denom)
-  unit: (Bytes + $normUnit)
-  description: Total Scalar Data Cache bandwidth.

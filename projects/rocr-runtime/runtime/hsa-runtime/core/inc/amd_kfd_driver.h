@@ -134,6 +134,9 @@ public:
   hsa_status_t GetDeviceHandle(uint32_t node_id, void** device_handle) const override;
   hsa_status_t GetDeviceFd(uint32_t node_id, int *fd) const override;
   hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const override;
+  hsa_status_t GetTimestampEpochOffset(uint32_t node_id, uint64_t raw_tick,
+                                       const HsaClockCounters& t0, HsaClockCounters* t1,
+                                       int64_t* offset) const override;
   hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const override;
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const override;
   hsa_status_t AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const override;

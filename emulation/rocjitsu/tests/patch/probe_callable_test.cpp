@@ -134,8 +134,9 @@ std::vector<uint8_t> make_elf(const std::vector<uint32_t> &body,
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
   std::memcpy(image.data() + kTextOffset, body.data(), text_size);
-  if (has_rela)
+  if (has_rela) {
     std::memcpy(image.data() + rela_off, relas.data(), relas.size() * sizeof(Elf64_Rela));
+  }
   std::memcpy(image.data() + shstrtab_off, shstrtab.data(), shstrtab.size());
 
   std::vector<Elf64_Shdr> shdrs(section_count);

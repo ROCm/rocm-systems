@@ -10,7 +10,7 @@
 
 namespace rocjitsu::arith {
 // Consume all source elements before publishing each lane group's results.
-// Inactive lanes preserve D; gfx950 additionally preserves scale-exponent255 lanes.
+// Inactive lanes preserve D; on scale exponent 255, active gfx950 lanes write signed max.
 template <ScaledNarrowDestination Dst, bool Stochastic, bool Gfx1250>
 void wide_scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSource source,
                                   uint32_t *const *d, const uint32_t *const *a,
@@ -22,7 +22,13 @@ void wide_scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSou
                                                                                      : 8;
   constexpr int elements = Gfx1250 ? (bits == 6 ? 16 : 8) : 32;
   constexpr int words = elements * bits / 32;
+  auto sig_mask = _mm512_set1_epi32(int(scaled_sig_mask(source)));
+  auto sign_mask = _mm512_set1_epi32(int(0x80000000U));
+  auto qnan_mag = _mm512_set1_epi32(0x7fc00000);
   for (int lane = 0; lane < lanes; lane += 16) {
+    if (uint16_t(exec_mask >> lane) == 0) {
+      continue;
+    }
     auto raw_scale = _mm512_loadu_si512(scale + lane);
     auto exponent = _mm512_and_si512(_mm512_srli_epi32(raw_scale, 23), _mm512_set1_epi32(255));
     auto nan_scale = _mm512_cmpeq_epi32_mask(exponent, _mm512_set1_epi32(255));
@@ -62,8 +68,13 @@ void wide_scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSou
       auto scaled = _mm512_castps_si512(_mm512_mul_ps(decoded, inverse_scale));
       if constexpr (Gfx1250) {
         scaled = _mm512_mask_blend_epi32(nan_scale, scaled, _mm512_set1_epi32(kE8M0ScaleNaNBits));
+      } else {
+        scaled = _mm512_mask_blend_epi32(
+            nan_scale, scaled,
+            _mm512_or_si512(_mm512_and_si512(_mm512_castps_si512(decoded), sign_mask), qnan_mag));
       }
-      auto value = x86_64_v4::scaled_narrow_encode<Dst, Stochastic>(scaled, seed, saturate);
+      auto value = x86_64_v4::scaled_narrow_encode<Dst, Stochastic, !Gfx1250>(scaled, seed,
+                                                                              saturate, sig_mask);
       // Six-bit formats can straddle adjacent destination registers.
       int bit = element * bits, word = bit / 32, shift = bit % 32;
       result[word] =
@@ -79,9 +90,6 @@ void wide_scaled_narrow_x86_64_v4(int lanes, uint64_t exec_mask, ScaledNarrowSou
       }
     }
     auto active = __mmask16(exec_mask >> lane);
-    if constexpr (!Gfx1250) {
-      active &= ~nan_scale;
-    }
     for (int word = 0; word < words; ++word) {
       _mm512_mask_storeu_epi32(d[word] + lane, active, result[word]);
     }

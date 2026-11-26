@@ -84,8 +84,9 @@ max_smem_byte_offset(rocjitsu::IsaFamily arch, const util::DiagnosticEmitter *er
   case rocjitsu::IsaFamily::Rdna4:
     return kSmem24BitMaxByteOffset;
   default:
-    if (error != nullptr)
+    if (error != nullptr) {
       return error->emit() << "unsupported target architecture for the SMEM offset range";
+    }
     return util::Result::failure();
   }
 }
@@ -118,32 +119,40 @@ inline util::FailureOr<std::array<uint32_t, 2>>
 build_s_load_dwordx2(uint16_t sdst, uint16_t sbase, uint32_t byte_offset, rocjitsu::IsaFamily arch,
                      const util::DiagnosticEmitter *error = nullptr) {
   const auto fail = [error](const char *message) -> util::Result {
-    if (error != nullptr)
+    if (error != nullptr) {
       return error->emit() << message;
+    }
     return util::Result::failure();
   };
   // Both operands name a 64-bit pair, so both bases must be even. The encoded
   // fields are narrower than uint16_t and the generated set_field masks rather
   // than rejects, so an out-of-range index would silently become a different
   // register: SBASE is 6 bits holding the index halved, SDATA is 7 bits.
-  if ((sbase % 2) != 0)
+  if ((sbase % 2) != 0) {
     return fail("SMEM address SGPR pair base must be even");
-  if ((sdst % 2) != 0)
+  }
+  if ((sdst % 2) != 0) {
     return fail("SMEM destination SGPR pair base must be even");
-  if (sbase > kMaxSmemSbase)
+  }
+  if (sbase > kMaxSmemSbase) {
     return fail("SMEM address SGPR index exceeds the SBASE field");
-  if (sdst > kMaxSmemSdata)
+  }
+  if (sdst > kMaxSmemSdata) {
     return fail("SMEM destination SGPR index exceeds the SDATA field");
+  }
   const auto offset_max = max_smem_byte_offset(arch, error);
   // The delegated failure has already emitted its diagnostic; do not call fail again.
-  if (offset_max.failed())
+  if (offset_max.failed()) {
     return util::Result::failure();
-  if (byte_offset > offset_max.value())
+  }
+  if (byte_offset > offset_max.value()) {
     return fail("SMEM immediate byte offset out of range for target architecture");
+  }
   // Scalar loads ignore the low two address bits, so an unaligned offset would
   // silently load from the aligned-down address.
-  if ((byte_offset & 0x3u) != 0)
+  if ((byte_offset & 0x3u) != 0) {
     return fail("SMEM immediate byte offset must be a multiple of 4");
+  }
 
   const auto base = static_cast<uint8_t>(sbase / 2);
   const auto data = static_cast<uint8_t>(sdst);
@@ -246,8 +255,9 @@ build_wait_scalar_loads_complete(rocjitsu::IsaFamily arch,
   case rocjitsu::IsaFamily::Cdna5:
     return build_sopp_encoding(arch, cdna5::kSWaitKmcntSopp, 0, error);
   default:
-    if (error != nullptr)
+    if (error != nullptr) {
       return error->emit() << "unsupported target architecture for the scalar-load wait";
+    }
     return util::Result::failure();
   }
 }

@@ -29,9 +29,10 @@
 namespace rocjitsu::arith::test {
 
 // Check unary math results and semantics/status support across CPU levels for the supplied entry
-// point.
+// point. extra_modifiers lists controls exercised by separate focused tests.
 template <int Lanes, bool Half, bool Gfx12, typename Call>
-void check_unary(Call call, int op, bool iflag = false) {
+void check_unary(Call call, int op, bool iflag = false, uint64_t extra_modifiers = 0,
+                 bool accepts_exact = true) {
   if constexpr (Half) {
     if (op <= 6) {
       // Exhaust all half encodings against the inherited scalar implementation.
@@ -96,7 +97,10 @@ void check_unary(Call call, int op, bool iflag = false) {
       // independent captured values below, including exponent extremes and
       // NaN payloads. Use high RNG bits, with deterministic guest-policy cases.
       std::minstd_rand engine;
-      auto word = [&] { return uint32_t(engine() >> 7) ^ (uint32_t(engine() >> 7) << 16); };
+      auto word = [&] {
+        const uint32_t low = uint32_t(engine() >> 7);
+        return low ^ (uint32_t(engine() >> 7) << 16);
+      };
       auto cpus = supported_cpu_levels();
       for (int scenario = 0;
            scenario < ((op == 4 || op == 6) ? 196 : ((op == 5 || iflag) ? 192 : 128)); ++scenario) {
@@ -200,7 +204,9 @@ void check_unary(Call call, int op, bool iflag = false) {
       }
     }
   }
-  const bool exact = op != 9;
+  // FRACT accepts exact requests but has no goldens; its captured results are pinned by
+  // literal cases, so every mode is checked against the loose reference here.
+  const bool goldens = op != 9;
   const bool reporting = !Half && (op == 4 || iflag);
   Registers<2, Lanes> random_input;
   std::minstd_rand random;
@@ -219,7 +225,7 @@ void check_unary(Call call, int op, bool iflag = false) {
         for (int d : {0, 1}) {
           SCOPED_TRACE(::testing::Message()
                        << cpu << '/' << semantics << '/' << scenario << '/' << d);
-          bool precise = exact && semantics != RJ_ARITH_SEMANTICS_LOOSE;
+          bool precise = goldens && semantics != RJ_ARITH_SEMANTICS_LOOSE;
           auto input = random_input;
           uint64_t mode =
               (scenario & 1 ? RJ_ARITH_ALU_NEG_A : 0) | (scenario & 2 ? RJ_ARITH_ALU_ABS_A : 0) |
@@ -251,11 +257,12 @@ void check_unary(Call call, int op, bool iflag = false) {
           auto actual = input;
           auto exec_mask = exec_mask_for_case<Lanes>(scenario);
           uint32_t status = 0x80000040U;
-          int wanted = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL && !reporting
-                           ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
-                       : !exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
-                           ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
-                           : RJ_ARITH_SUCCESS;
+          int wanted =
+              semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL && !reporting
+                  ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
+              : !accepts_exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                  ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
+                  : RJ_ARITH_SUCCESS;
           ASSERT_EQ(call(cpu | semantics, exec_mask, mode, actual.v + d, actual.v, &status),
                     wanted);
           if (wanted) {
@@ -318,7 +325,8 @@ void check_unary(Call call, int op, bool iflag = false) {
   }
   auto unchanged = random_input;
   uint64_t known = RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_OMOD_HALF |
-                   RJ_ARITH_ALU_CLAMP | (Half ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D : 0);
+                   RJ_ARITH_ALU_CLAMP | (Half ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_D : 0) |
+                   extra_modifiers;
   expect_alu_invalid_flags<true>(
       [&](auto f, auto m) {
         uint32_t status = 0x80000040U;
@@ -420,7 +428,7 @@ template <int Lanes, bool Half, typename Call> void check_cdna_integral_unary(Ca
     }
     return call(flags, exec_mask, mode, d, a, status);
   };
-  check_unary<Lanes, Half, false>(numeric, op);
+  check_unary<Lanes, Half, false>(numeric, op, /*iflag=*/false, RJ_ARITH_ALU_SDWA);
   for (uint64_t cpu : supported_cpu_levels()) {
     for (uint64_t semantics : semantics_modes()) {
       if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {

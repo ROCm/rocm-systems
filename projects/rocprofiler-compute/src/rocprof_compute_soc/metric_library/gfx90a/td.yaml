@@ -3,5 +3,5 @@ td.spi_stall:
   formula: 100 * SUM(TD_SPI_STALL_sum) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
   unit: Percent
   description: >-
-    Percent of the total CU cycles the data-return unit was stalled by the workgroup
+    Percentage of the total CU cycles the data-return unit was stalled by the workgroup
     manager due to initialization of registers as a part of launching new workgroups.

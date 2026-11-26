@@ -6,7 +6,7 @@
 /// @file output_modifier.h
 /// @brief Apply OMOD, then CLAMP, to destination-format results.
 /// @details Disabled stages preserve the input. Callers resolve effective OMOD
-/// and MODE through output_modifier_policy in simd_glue.h.
+/// and MODE through an explicitly constructed policy.
 ///
 /// Scope:
 /// - Shared scalar/SIMD stage for migrated VOP3 results on every target, and
@@ -19,7 +19,7 @@
 /// Migrated callers reach the stage through one of these; prefer them over a new
 /// OMOD implementation:
 /// - Generated VOP3 scalar bodies: output_modifier::apply on the result, with the
-///   policy from output_modifier_policy in simd_glue.h.
+///   explicitly constructed policy.
 /// - fp_mode::apply_omod_f32 -> scale: the F32 scalar OMOD finalizer, also used by
 ///   the SDWA FLUSH_NEAREST path.
 /// - apply_vop3_dst_mod_f32 -> apply: every F32 SIMD destination helper, including
@@ -150,8 +150,9 @@ template <typename Fmt, typename V> constexpr V scale(V bits, const Policy &poli
   static_assert(fp_format::is_lane_v<Fmt, V>);
   using Lane = typename Fmt::Lane;
   using detail::choose;
-  if (policy.omod == 0)
+  if (policy.omod == 0) {
     return bits;
+  }
   const V magnitude = bits & Fmt::kMagnitude;
   const V exponent = magnitude >> Fmt::kMantissaBits;
   V scaled;
@@ -191,8 +192,9 @@ template <typename Fmt, typename V> constexpr V clamp(V bits, const Policy &poli
   static_assert(fp_format::is_lane_v<Fmt, V>);
   using Lane = typename Fmt::Lane;
   using detail::choose;
-  if (!policy.clamp)
+  if (!policy.clamp) {
     return bits;
+  }
   const V magnitude = bits & Fmt::kMagnitude;
   const auto negative = (bits & Fmt::kSign) != Lane{0};
   const auto is_nan = magnitude > Fmt::kInfinity;

@@ -13,6 +13,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
@@ -24,7 +25,6 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
-#include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -38,7 +38,6 @@
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
-#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -80,7 +79,6 @@ struct Case {
   const char *name;
   uint32_t opcode;
   Kind kind;
-  std::optional<amdgpu::SimdFastPath> expected_simd_path = std::nullopt;
 };
 
 const std::array<Case, 10> kCases = {{
@@ -172,8 +170,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_tern_fp", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -210,11 +209,12 @@ struct Fixture {
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      if (k == Kind::F64)
+      if (k == Kind::F64) {
         out[lane] = static_cast<uint64_t>(cu->read_vgpr(vb + kDstVgpr64 + 1, lane)) << 32 |
                     cu->read_vgpr(vb + kDstVgpr64, lane);
-      else
+      } else {
         out[lane] = cu->read_vgpr(vb + kDstVgpr32, lane);
+      }
     }
     return out;
   }
@@ -229,10 +229,12 @@ struct ForceScalarGuard {
 };
 
 bool result_is_nan(Kind k, uint64_t v) {
-  if (k == Kind::F32)
+  if (k == Kind::F32) {
     return is_f32_nan(static_cast<uint32_t>(v));
-  if (k == Kind::F16)
+  }
+  if (k == Kind::F16) {
     return is_f16_nan(static_cast<uint32_t>(v));
+  }
   return is_f64_nan(v);
 }
 
@@ -243,8 +245,9 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     const uint32_t vdst = (c.kind == Kind::F64) ? kDstVgpr64 : kDstVgpr32;
@@ -255,16 +258,9 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
                 neg, omod, clamp, words);
     Instruction *inst = decode_valid(*fx.decoder, words);
     EXPECT_NE(inst, nullptr) << c.name << " decode failed";
-    amdgpu::ScopedSimdFastPathTracker tracker;
+
     auto out = fx.run(inst, c.kind, rot, exec);
-    if (c.expected_simd_path.has_value()) {
-      if (force_scalar)
-        EXPECT_TRUE(tracker.no_tracked_path_executed())
-            << c.name << ": forced-scalar execution used SIMD";
-      else
-        EXPECT_TRUE(tracker.only_tracked_path_executed(*c.expected_simd_path))
-            << c.name << ": eligible execution did not use its expected SIMD path";
-    }
+
     delete inst;
     return out;
   };
@@ -279,8 +275,9 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       const bool active = (exec >> lane) & 1ULL;
       if (active &&
-          (result_is_nan(c.kind, scalar_out[lane]) || result_is_nan(c.kind, simd_out[lane])))
+          (result_is_nan(c.kind, scalar_out[lane]) || result_is_nan(c.kind, simd_out[lane]))) {
         continue;
+      }
       EXPECT_EQ(scalar_out[lane], simd_out[lane])
           << c.name << " a" << abs << "n" << neg << "o" << omod << "c" << clamp << "r" << rot
           << " lane " << lane << ": SIMD path diverged from scalar body";
@@ -304,8 +301,9 @@ void check_representative_mods(const Case &c, uint64_t exec) {
       {0, 1, 0, 0}, {0, 2, 0, 0}, {0, 4, 0, 0}, {0, 7, 0, 0}, {7, 7, 0, 0},
       {0, 0, 1, 0}, {0, 0, 2, 0}, {0, 0, 3, 0}, {0, 0, 0, 1}, {3, 5, 1, 1},
   };
-  for (const auto &m : kCombos)
+  for (const auto &m : kCombos) {
     check_case(c, m.abs, m.neg, m.omod, m.clamp, exec);
+  }
 }
 
 TEST(Vop3TernaryFpSimdCorrectness, FullExec) {
@@ -313,8 +311,9 @@ TEST(Vop3TernaryFpSimdCorrectness, FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_representative_mods(c, /*exec=*/~0ULL);
+  }
 }
 
 TEST(Vop3TernaryFpSimdCorrectness, PartialExec) {
@@ -322,8 +321,9 @@ TEST(Vop3TernaryFpSimdCorrectness, PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  }
 }
 
 TEST(Vop3TernaryFpSimdCorrectness, F16DestinationHalfPolicy) {
@@ -363,7 +363,7 @@ TEST(Vop3TernaryFpSimdCorrectness, F16DestinationHalfPolicy) {
     }
   };
   for (auto arch : {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
-                    rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4})
+                    rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4}) {
     check_arch(arch, cdna4::build_vop3, [](auto check) {
       check(cdna4::kVMadF16Vop3, 0x4a00);
       check(cdna4::kVFmaF16Vop3, 0x4a00);
@@ -372,17 +372,20 @@ TEST(Vop3TernaryFpSimdCorrectness, F16DestinationHalfPolicy) {
       check(cdna4::kVFmaLegacyF16Vop3, 0x4a00, true);
       check(cdna4::kVDivFixupLegacyF16Vop3, 0x4000, true);
     });
-  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2})
+  }
+  for (auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     check_arch(arch, rdna2::build_vop3, [](auto check) {
       check(rdna2::kVFmaF16Vop3, 0x4a00);
       check(rdna2::kVDivFixupF16Vop3, 0x4000);
     });
+  }
   for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
-                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5})
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     check_arch(arch, rdna3::build_vop3, [](auto check) {
       check(rdna3::kVFmaF16Vop3, 0x4a00);
       check(rdna3::kVDivFixupF16Vop3, 0x4000);
     });
+  }
 }
 
 struct F16OutputCase {
@@ -394,7 +397,6 @@ struct F16OutputCase {
   uint8_t omod;
   uint16_t expected;
   uint8_t clamp = 0;
-  amdgpu::SimdFastPath expected_simd_path = amdgpu::SimdFastPath::VOP3_TERNARY_FP16;
 };
 
 // These cases separate destination-format rounding from OMOD/CLAMP ordering.
@@ -465,7 +467,6 @@ std::vector<F16OutputCase> f16_output_cases() {
                      0x3c00});
   }
   const auto add_selections = [&](const char *target, rocjitsu::IsaFamily arch, auto operations) {
-    const auto first = cases.size();
     for (const auto &[name, opcode] : operations) {
       const auto prefix = std::string(target) + name;
       cases.push_back(
@@ -488,10 +489,6 @@ std::vector<F16OutputCase> f16_output_cases() {
                        3,
                        0x8400});
     }
-    for (auto i = first; i != cases.size(); ++i)
-      cases[i].expected_simd_path = arch == rocjitsu::IsaFamily::Rdna2
-                                        ? amdgpu::SimdFastPath::VOP3_TERNARY_RAW_FP
-                                        : amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16;
   };
   // MODE 0x80 cases exercise the emulator's old-target output-denormal gate.
   // The available gfx1030/gfx1100 captures keep output denormals disabled, so
@@ -510,10 +507,10 @@ std::vector<F16OutputCase> f16_output_cases() {
                             std::pair{"Med3", rdna3::kVMed3F16Vop3},
                             std::pair{"Minmax", rdna3::kVMinmaxF16Vop3},
                             std::pair{"Maxmin", rdna3::kVMaxminF16Vop3}});
-  // DIV_FIXUP still uses the pre-migration scalar ordering on CDNA4. gfx950 is
+  // DIV_FIXUP preserves the pre-migration output ordering on CDNA4. gfx950 is
   // unmeasured; gfx1201 captures on nearby boundary vectors instead round to
   // F16 before applying OMOD. These cases pin the current emulator behavior,
-  // not an architectural result, until the measured DIV_FIXUP fix is stacked.
+  // not an architectural result for gfx950.
   for (const auto &[name, opcode] : {std::pair{"DivFixup", cdna4::kVDivFixupF16Vop3},
                                      std::pair{"DivFixupLegacy", cdna4::kVDivFixupLegacyF16Vop3}}) {
     cases.push_back({std::string("Gfx950") + name + "PinsCurrentDiv2UnderflowOrdering",
@@ -565,11 +562,11 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
     return;
   }
   ForceScalarGuard guard;
-  amdgpu::fp_mode::ScopedEnvironment environment(0);
+  amdgpu::fp_mode::detail::ScopedFenv environment(0);
   const auto &test = GetParam();
   // The RDNA2 MIN3/MAX3/MED3 cases here use the generic low-half executor.
   const uint8_t selection_count = test.arch == rocjitsu::IsaFamily::Rdna2 ? 1 : 2;
-  for (uint8_t selection = 0; selection < selection_count; ++selection)
+  for (uint8_t selection = 0; selection < selection_count; ++selection) {
     for (const uint64_t exec : {~0ULL, 0xA5A5'F0F0'1234'8001ULL}) {
       const uint8_t opsel = selection ? 15 : 0;
       std::array<uint32_t, WF_SIZE> scalar_out{};
@@ -594,20 +591,8 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
         }
         fx.wf->set_exec(exec);
         fx.wf->set_mode_raw(test.mode);
-        amdgpu::ScopedSimdFastPathTracker tracker;
+
         ASSERT_TRUE(fx.cu->execute_instruction(inst.get(), *fx.wf).succeeded());
-        if (force_scalar) {
-          EXPECT_TRUE(tracker.no_tracked_path_executed())
-              << test.name << ": forced-scalar execution used SIMD";
-        } else if (test.arch != rocjitsu::IsaFamily::Rdna3 &&
-                   !(test.arch == rocjitsu::IsaFamily::Cdna4 &&
-                     (test.opcode == cdna4::kVMin3F16Vop3 || test.opcode == cdna4::kVMax3F16Vop3 ||
-                      test.opcode == cdna4::kVMed3F16Vop3 || test.opcode == cdna4::kVMadF16Vop3 ||
-                      test.opcode == cdna4::kVMadLegacyF16Vop3))) {
-          // Migrated operations use rj-arith, whose SIMD paths do not use this tracker.
-          EXPECT_TRUE(tracker.only_tracked_path_executed(test.expected_simd_path))
-              << test.name << ": eligible execution did not use the ternary F16 SIMD path";
-        }
         for (uint32_t lane = 0; lane < fx.wf->wf_size(); ++lane) {
           const uint32_t actual = fx.cu->read_vgpr(vb + kDstVgpr32, lane);
           if (!(exec & (1ULL << lane))) {
@@ -617,17 +602,23 @@ TEST_P(Vop3F16TernaryOutputOrderTest, MatchesScalarOutputContractWithSimdEnabled
                 << "active lane " << lane;
             if (high) {
               EXPECT_EQ(static_cast<uint16_t>(actual), static_cast<uint16_t>(DST_SENTINEL32));
-            } else if (test.arch == rocjitsu::IsaFamily::Rdna3) {
+            } else if (test.arch == rocjitsu::IsaFamily::Rdna3 ||
+                       (test.arch == rocjitsu::IsaFamily::Cdna4 &&
+                        (test.opcode == cdna4::kVMin3F16Vop3 ||
+                         test.opcode == cdna4::kVMax3F16Vop3 ||
+                         test.opcode == cdna4::kVMed3F16Vop3))) {
               EXPECT_EQ(actual >> 16, DST_SENTINEL32 >> 16);
             }
           }
-          if (force_scalar)
+          if (force_scalar) {
             scalar_out[lane] = actual;
-          else
+          } else {
             EXPECT_EQ(actual, scalar_out[lane]) << "path disagreement in lane " << lane;
+          }
         }
       }
     }
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(OutputOrderBoundaries, Vop3F16TernaryOutputOrderTest,

@@ -1,13 +1,11 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// gfx1250 pair-aware mixed-format layouts and staged dense WMMA reductions.
+// gfx1250 pair-aware mixed-format layouts and baseline scalar dense WMMA reductions.
+// x86-64 SIMD tiers (v3, v4, Zen4 BF16/VNNI) use gfx1250_mixed_fast.h and dedicated backends.
 #pragma once
 #include "mfma/mixed_formats.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
-#if defined(__AVX2__)
-#include "mfma/x86_64/reduction.h"
-#endif
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 // Read a logical element in the format-pair-dependent Wave32 layout.
 inline float gfx1250_mixed_input(const uint32_t *const *input, int row, int k, int format,
@@ -45,14 +43,16 @@ inline float gfx1250_decode_scale(uint32_t raw, int format) {
 inline float gfx1250_scale(const uint32_t *const *input, int lane, int block, int format) {
   return gfx1250_decode_scale((input[block / 4][lane] >> (8 * (block % 4))) & 255, format);
 }
-// Preserve legacy scalar unfused/SIMD fused accumulation, consuming inputs before stores.
+
+// Baseline scalar mixed/scaled WMMA kernel, consuming all inputs before destination stores.
 template <int M, int Block = 0>
 void gfx1250_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
                           const uint32_t *const *b, const uint32_t *const *c,
                           const uint32_t *const *scale_a = nullptr,
                           const uint32_t *const *scale_b = nullptr) {
   int fa = M == 32 ? 4 : int(controls & 7), fb = M == 32 ? 4 : int(controls >> 3 & 7);
-  alignas(64) float left[M][128], right[128][16], result[M][16];
+  alignas(64) float result[M][16];
+  alignas(64) float left[M][128], right[128][16];
   for (int row = 0; row < M; ++row) {
     for (int k = 0; k < 128; ++k) {
       left[row][k] = gfx1250_mixed_input(a, row, k, fa, fb, Block != 0);
@@ -78,21 +78,11 @@ void gfx1250_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t 
       int a_lane = M == 32 ? row : row + 16 * int((controls >> 12) & 1);
       for (int block = 0; block < 128 / Block; ++block) {
         alignas(64) float sums[16] = {};
-#if defined(__AVX2__)
-        for (int col = 0; col < 16; col += kMfmaWidth) {
-          auto sum = mfma_broadcast(0.0f);
-          for (int k = block * Block; k < (block + 1) * Block; ++k) {
-            sum = mfma_multiply_add(mfma_broadcast(left[row][k]), mfma_load(right[k] + col), sum);
-          }
-          mfma_store(sums + col, sum);
-        }
-#else
         for (int col = 0; col < 16; ++col) {
           for (int k = block * Block; k < (block + 1) * Block; ++k) {
             sums[col] = __builtin_fmaf(left[row][k], right[k][col], sums[col]);
           }
         }
-#endif
         float as = gfx1250_scale(scale_a, a_lane, block, int(controls >> 8 & 3));
         for (int col = 0; col < 16; ++col) {
           float bs = gfx1250_scale(scale_b, col + 16 * int(controls >> 13 & 1), block,
@@ -104,21 +94,11 @@ void gfx1250_mixed_kernel(uint64_t controls, uint32_t *const *d, const uint32_t 
         }
       }
     } else {
-#if defined(__AVX2__)
-      for (int col = 0; col < 16; col += kMfmaWidth) {
-        auto acc = mfma_load(result[row] + col);
-        for (int k = 0; k < 128; ++k) {
-          acc = mfma_multiply_add(mfma_broadcast(left[row][k]), mfma_load(right[k] + col), acc);
-        }
-        mfma_store(result[row] + col, acc);
-      }
-#else
       for (int col = 0; col < 16; ++col) {
         for (int k = 0; k < 128; ++k) {
           result[row][col] += left[row][k] * right[k][col];
         }
       }
-#endif
     }
   }
   for (int row = 0; row < M; ++row) {

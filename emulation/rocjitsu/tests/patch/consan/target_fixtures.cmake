@@ -176,10 +176,261 @@ foreach(
             )
             list(APPEND _target_fixtures ${_image})
         endforeach()
+        set(_flat_specs)
+        foreach(_direction IN ITEMS load store)
+            if(_direction STREQUAL "load")
+                set(_scenarios
+                    overlap
+                    adjacent
+                    empty
+                    ordered
+                    oob
+                    offset
+                    readread
+                    likely
+                    alternate
+                    unknown
+                    nongroup
+                )
+                if(_gfx12)
+                    list(APPEND _scenarios underflow overflow)
+                endif()
+            else()
+                set(_scenarios overlap adjacent ordered tail)
+            endif()
+            if(_gpu STREQUAL "gfx1250")
+                list(APPEND _scenarios scalar backward)
+            endif()
+            string(TOUPPER "${_direction}" _direction_define)
+            foreach(_scenario IN LISTS _scenarios)
+                set(_name flat-${_direction}-${_scenario})
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                set(_flat_options_${_name}
+                    -DFLAT_${_direction_define}=1
+                    -DFLAT_${_scenario_define}=1
+                )
+                if(NOT _scenario MATCHES "^(oob|underflow|overflow)$")
+                    list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+                endif()
+            endforeach()
+        endforeach()
+        list(
+            APPEND _flat_cases_${_gpu}_${_wave_size}
+            flat-load-strict
+            flat-load-provenstrict
+            flat-load-unknownstrict
+            flat-load-nongroupstrict
+        )
+        foreach(_scenario IN ITEMS values overlap adjacent)
+            set(_name flat-half-${_scenario})
+            string(TOUPPER "${_scenario}" _scenario_define)
+            list(APPEND _flat_specs "${_name}:16:0:0:0:0")
+            set(_flat_options_${_name} -DFLAT_${_scenario_define}=1)
+            list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+        endforeach()
+        foreach(_bits IN ITEMS 64 128)
+            foreach(_scenario IN ITEMS values overlap adjacent)
+                set(_name flat-b${_bits}-${_scenario})
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _flat_specs "${_name}:${_bits}:0:0:0:0")
+                set(_flat_options_${_name} -DFLAT_${_scenario_define}=1)
+                list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+            endforeach()
+        endforeach()
+        if(_gpu STREQUAL "gfx1250")
+            foreach(_form IN ITEMS half b64 b128)
+                foreach(_scenario IN ITEMS values overlap adjacent)
+                    set(_name flat-saddr${_form}-${_scenario})
+                    set(_source flat-${_form}-${_scenario})
+                    if(_form STREQUAL "half")
+                        set(_width 16)
+                    else()
+                        string(SUBSTRING "${_form}" 1 -1 _width)
+                    endif()
+                    list(APPEND _flat_specs "${_name}:${_width}:0:0:0:0")
+                    set(_flat_options_${_name}
+                        ${_flat_options_${_source}}
+                        -DFLAT_SCALAR_WIDTH=1
+                    )
+                    list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+                endforeach()
+            endforeach()
+        endif()
+        foreach(_direction IN ITEMS load store)
+            string(TOUPPER "${_direction}" _direction_define)
+            foreach(_scenario IN ITEMS helper helperordered)
+                set(_name flat-${_direction}-${_scenario})
+                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                set(_flat_options_${_name}
+                    -DFLAT_HELPER=1
+                    -DFLAT_${_direction_define}=1
+                    -DFLAT_UNKNOWN=1
+                )
+                if(_scenario STREQUAL "helperordered")
+                    list(APPEND _flat_options_${_name} -DFLAT_ORDERED=1)
+                endif()
+                list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+            endforeach()
+            list(
+                APPEND _flat_cases_${_gpu}_${_wave_size}
+                flat-${_direction}-helperstrict
+            )
+        endforeach()
+        if(_gpu STREQUAL "gfx950" OR _gpu STREQUAL "gfx1250")
+            list(
+                APPEND _flat_specs
+                "flat-load-helper-barrier-after-call:32:0:0:0:0"
+                "flat-store-helper-barrier-before-call:32:0:0:0:0"
+            )
+            set(_flat_options_flat-load-helper-barrier-after-call
+                ${_flat_options_flat-load-helper}
+                -DHELPER_BARRIER_AFTER_CALL=1
+            )
+            set(_flat_options_flat-store-helper-barrier-before-call
+                ${_flat_options_flat-store-helper}
+                -DHELPER_BARRIER_BEFORE_CALL=1
+            )
+        endif()
+        if(_gpu STREQUAL "gfx950")
+            list(APPEND _flat_specs "flat-store-helper-after-caller:32:0:0:0:0")
+            set(_flat_options_flat-store-helper-after-caller
+                ${_flat_options_flat-store-helper}
+                -DHELPER_AFTER_CALLER=1
+            )
+            foreach(
+                _control
+                IN
+                ITEMS
+                    lookalike
+                    other
+                    width
+                    earlier
+                    wrong
+                    private
+                    global
+                    alias
+                    badreturn
+                    clobber
+            )
+                string(TOUPPER "${_control}" _define)
+                set(_name flat-load-helper${_control})
+                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                set(_flat_options_${_name}
+                    -DFLAT_HELPER=1
+                    -DFLAT_LOAD=1
+                    -DHELPER_${_define}=1
+                )
+                if(_control STREQUAL "global")
+                    list(APPEND _flat_options_${_name} -DFLAT_NONGROUP=1)
+                elseif(NOT _control STREQUAL "private")
+                    list(APPEND _flat_options_${_name} -DFLAT_UNKNOWN=1)
+                endif()
+            endforeach()
+        endif()
+        set(_atomic_specs)
+        set(_atomic_forms u32 u64 f32 cas)
+        if(_legacy OR _gpu STREQUAL "gfx1250")
+            list(APPEND _atomic_forms f64)
+        endif()
+        foreach(_form IN LISTS _atomic_forms)
+            string(TOUPPER "${_form}" _form_define)
+            foreach(
+                _scenario
+                IN
+                ITEMS count read write atomic adjacent
+            )
+                set(_name atomic-${_form}-${_scenario})
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _atomic_specs "${_name}:32:0:0:0:0")
+                list(APPEND _atomic_cases_${_gpu}_${_wave_size} ${_name})
+                set(_atomic_options_${_name}
+                    -DCONSAN_ATOMIC=1
+                    -DATOMIC_${_form_define}=1
+                    -DATOMIC_${_scenario_define}=1
+                )
+            endforeach()
+        endforeach()
+        set(_dual_specs)
+        foreach(_bits IN ITEMS 32 64)
+            foreach(_spacing IN ITEMS normal stride64)
+                set(_suffix "")
+                if(_legacy)
+                    if(_spacing STREQUAL "stride64")
+                        set(_suffix st64)
+                    endif()
+                    set(_dual_read ds_read2${_suffix}_b${_bits})
+                    set(_dual_write ds_write2${_suffix}_b${_bits})
+                else()
+                    if(_spacing STREQUAL "stride64")
+                        set(_suffix _stride64)
+                    endif()
+                    set(_dual_read ds_load_2addr${_suffix}_b${_bits})
+                    set(_dual_write ds_store_2addr${_suffix}_b${_bits})
+                endif()
+                math(EXPR _scale "${_bits} / 8")
+                if(_spacing STREQUAL "stride64")
+                    math(EXPR _scale "${_scale} * 64")
+                endif()
+                set(_dual_cases values-high overlap gap)
+                if(_bits EQUAL 32 AND _spacing STREQUAL "normal")
+                    list(APPEND _dual_cases collision)
+                endif()
+                foreach(_case IN LISTS _dual_cases)
+                    set(_name dual-b${_bits}-${_spacing}-${_case})
+                    set(_high 0)
+                    set(_peer 0)
+                    set(_colliding 0)
+                    if(_case STREQUAL "values-high")
+                        set(_high 1)
+                    elseif(_case STREQUAL "collision")
+                        set(_colliding 1)
+                    elseif(_case STREQUAL "overlap")
+                        set(_peer 5)
+                    else()
+                        set(_peer 4)
+                    endif()
+                    list(
+                        APPEND _dual_specs
+                        ${_name}:${_bits}:0:${_high}:0:${_colliding}
+                    )
+                    set(_dual_options_${_name}
+                        -DCONSAN_DUAL_READ=${_dual_read}
+                        -DCONSAN_DUAL_WRITE=${_dual_write}
+                        -DCONSAN_DUAL_SCALE=${_scale}
+                        -DCONSAN_DUAL_PEER=${_peer}
+                    )
+                endforeach()
+            endforeach()
+        endforeach()
+        set(_transpose_specs)
+        if(_gpu STREQUAL "gfx950" OR _gpu STREQUAL "gfx1250")
+            foreach(_bits IN ITEMS 4 6 8 16)
+                set(_transpose_scenarios
+                    full
+                    partial
+                    empty
+                    overlap
+                    adjacent
+                )
+                if(_gpu STREQUAL "gfx1250")
+                    list(APPEND _transpose_scenarios short)
+                endif()
+                foreach(_scenario IN LISTS _transpose_scenarios)
+                    list(
+                        APPEND _transpose_specs
+                        "transpose-${_bits}-${_scenario}:0:0:0:0:0"
+                    )
+                endforeach()
+            endforeach()
+        endif()
         foreach(
             _spec
             IN
             ITEMS
+                ${_atomic_specs}
+                ${_flat_specs}
+                ${_transpose_specs}
                 u16:16:0:0:0:0
                 i16:16:1:0:0:0
                 b64:64:0:0:0:0
@@ -190,9 +441,22 @@ foreach(
                 b128-high:128:0:1:0:0
                 b128-alias:128:0:0:1:0
                 b64-collision:64:0:0:0:1
-                excluded-b8:8:0:0:0:0
-                excluded-b96:96:0:0:0:0
-                excluded-partial:17:0:0:0:0
+                ${_dual_specs}
+                u8:8:0:0:0:0
+                i8-alias-high:8:1:1:1:0
+                b8-overlap:8:0:0:0:0:0
+                b8-adjacent:8:0:0:0:0:1
+                b8-disjoint:8:0:0:0:0:2
+                b96:96:0:0:0:0
+                b96-alias-high:96:0:1:1:0
+                b96-overlap:96:0:0:0:0:4
+                b96-adjacent:96:0:0:0:0:8
+                b96-disjoint:96:0:0:0:0:12
+                d16-u8:17:0:0:0:0
+                d16-i8-high:17:1:1:0:0
+                d16-u16:17:0:0:0:0
+                d16-overlap:17:0:0:0:0:0
+                d16-adjacent:17:0:0:0:0:4
         )
             string(REPLACE ":" ";" _parts ${_spec})
             list(GET _parts 0 _name)
@@ -212,6 +476,51 @@ foreach(
             list(GET _parts 3 _high)
             list(GET _parts 4 _alias)
             list(GET _parts 5 _collision)
+            set(_peer_option)
+            list(LENGTH _parts _part_count)
+            if(_part_count EQUAL 7)
+                list(GET _parts 6 _peer_offset)
+                if(_width EQUAL 8)
+                    set(_peer_option -DCONSAN_B8_PEER_STRIDE=${_peer_offset})
+                elseif(_width EQUAL 17)
+                    set(_peer_option -DCONSAN_D16_PEER_OFFSET=${_peer_offset})
+                else()
+                    set(_peer_option -DCONSAN_B96_PEER_OFFSET=${_peer_offset})
+                endif()
+            endif()
+            if(_name STREQUAL "d16-u16")
+                set(_peer_option -DCONSAN_D16_HALF=1)
+            endif()
+            if(_name MATCHES "^transpose-([0-9]+)-(.*)$")
+                set(_form ${CMAKE_MATCH_1})
+                set(_scenario ${CMAKE_MATCH_2})
+                set(_peer_option -DCONSAN_TRANSPOSE_BITS=${_form})
+                if(
+                    _scenario STREQUAL "adjacent"
+                    OR _scenario STREQUAL "overlap"
+                )
+                    list(APPEND _peer_option -DTR_PEER=1)
+                endif()
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _peer_option -DTR_${_scenario_define}=1)
+            endif()
+            if(_name MATCHES "^flat-")
+                set(_fixture_source fixtures/group_flat.s)
+                set(_fixture_deps)
+                if(_width EQUAL 16)
+                    set(_fixture_source fixtures/group_flat_half.s)
+                elseif(_width EQUAL 64 OR _width EQUAL 128)
+                    set(_fixture_source fixtures/group_flat_wide.s)
+                endif()
+            else()
+                set(_fixture_source fixtures/native_widths.s)
+                set(_fixture_deps
+                    fixtures/native_atomic.inc
+                    fixtures/native_d16.inc
+                    fixtures/native_dual.inc
+                    fixtures/native_transpose.inc
+                )
+            endif()
             set(_object ${_directory}/width-${_name}.o)
             set(_image ${_directory}/width-${_name}.hsaco)
             add_custom_command(
@@ -224,10 +533,15 @@ foreach(
                     -DCONSAN_WAVE_SIZE=${_wave_size} -DCONSAN_LEGACY=${_legacy}
                     -DCONSAN_GFX12=${_gfx12} -DCONSAN_WIDTH=${_width}
                     -DCONSAN_SIGNED=${_signed} -DCONSAN_HIGH=${_high}
-                    -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision} -c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_widths.s -o
-                    ${_object}
-                DEPENDS fixtures/native_widths.s ${AMDCXX}
+                    -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision}
+                    ${_peer_option} ${_dual_options_${_name}}
+                    ${_atomic_options_${_name}} ${_flat_options_${_name}} -c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/${_fixture_source} -o ${_object}
+                DEPENDS
+                    ${_fixture_source}
+                    fixtures/lds_fixture_macros.s
+                    ${_fixture_deps}
+                    ${AMDCXX}
                 VERBATIM
             )
             add_custom_command(

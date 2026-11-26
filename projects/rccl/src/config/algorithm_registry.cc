@@ -11,7 +11,7 @@
 #include "os.h"          // strncasecmp (portable across Linux/Windows)
 #include <cstring>       // strlen
 
-#define ALGBIT(p) (1ull << (p))
+#define ALGBIT(p) rcclTuningMask::bit(p)
 #define F_AR (1u << ncclFuncAllReduce)
 #define F_AG (1u << ncclFuncAllGather)
 #define F_RS (1u << ncclFuncReduceScatter)
@@ -22,8 +22,9 @@
 // Each row's mask bit IS its cost-model tuning id, so the mask lines up 1:1 with
 // src/tuning/cost_model.cc modelMap[] (collMask mirrors modelMap[].enabled[func]):
 //   general    -> bit (algo*NCCL_NUM_PROTOCOLS + proto), the [0,21) space
-//   Symk       -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), [21,42)
-//   Genk       -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), [42,60)
+//   Symk       -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), [21,39)
+//   Genk       -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), [39,57)
+//   RCCL Symk  -> bit (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + symKernelId), after NCCL's ids
 // Commented rows are algo/proto combinations that do not exist today; they mark where a
 // future kernel would slot into the tuning-id space.
 // IMPORTANT: this table must be consistent with the modelMap in src/tuning/cost_model.cc
@@ -64,69 +65,86 @@ static constexpr struct ncclAlgRegEntry algRegistry[] = {
   {"SYMK_ST",                ALGBIT(29), F_AG, -1, -1, ncclSymkKernelId_AllGather_ST},
   {"SYMK_TmaSTMC",           ALGBIT(30), F_AG, -1, -1, ncclSymkKernelId_AllGather_TmaSTMC},
   {"SYMK_STMC",              ALGBIT(31), F_AG, -1, -1, ncclSymkKernelId_AllGather_STMC},
-  {"SYMK_RailRing_LsaST",    ALGBIT(32), F_AG, -1, -1, ncclSymkKernelId_AllGather_RailRing_LsaST},
-  {"SYMK_RailRing_LsaSTMC",  ALGBIT(33), F_AG, -1, -1, ncclSymkKernelId_AllGather_RailRing_LsaSTMC},
-  {"SYMK_HierLsaST",         ALGBIT(34), F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaST},
-  {"SYMK_HierLsaTmaST",      ALGBIT(35), F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaTmaST},
+  {"SYMK_RailRing_LsaSTMC",  ALGBIT(32), F_AG, -1, -1, ncclSymkKernelId_AllGather_RailRing_LsaSTMC},
   // Symmetric ReduceScatter kernels
-  {"SYMK_LL",                ALGBIT(36), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_LL},
-  {"SYMK_TmaLD",             ALGBIT(37), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_TmaLD},
-  {"SYMK_LD",                ALGBIT(38), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_LD},
-  {"SYMK_LDMC",              ALGBIT(39), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_LDMC},
-  {"SYMK_RailA2A_LsaLD",     ALGBIT(40), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD},
-  {"SYMK_RailA2A_LsaLDMC",   ALGBIT(41), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC},
+  {"SYMK_LL",                ALGBIT(33), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_LL},
+  {"SYMK_TmaLD",             ALGBIT(34), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_TmaLD},
+  {"SYMK_LD",                ALGBIT(35), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_LD},
+  {"SYMK_LDMC",              ALGBIT(36), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_LDMC},
+  {"SYMK_RailA2A_LsaLD",     ALGBIT(37), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD},
+  {"SYMK_RailA2A_LsaLDMC",   ALGBIT(38), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC},
   // Genk shares the tuning-ID space; collMask disambiguates repeated selection names.
-  {"GENK_RING_SIMPLE",       ALGBIT(42), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Ring_Simple},
-  {"GENK_TREE_SIMPLE",       ALGBIT(43), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Tree_Simple},
-  {"GENK_RING_SIMPLE",       ALGBIT(44), F_AG, -1, -1, ncclSymkKernelId_AllGather_Ring_Simple},
-  {"GENK_RING_SIMPLE",       ALGBIT(45), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_Simple},
-  {"GENK_RING_SIMPLE",       ALGBIT(46), F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_Simple},
-  {"GENK_RING_SIMPLE",       ALGBIT(47), F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_Simple},
-  {"GENK_RING_LL",           ALGBIT(48), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Ring_LL},
-  {"GENK_TREE_LL",           ALGBIT(49), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Tree_LL},
-  {"GENK_RING_LL",           ALGBIT(50), F_AG, -1, -1, ncclSymkKernelId_AllGather_Ring_LL},
-  {"GENK_RING_LL",           ALGBIT(51), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_LL},
-  {"GENK_RING_LL",           ALGBIT(52), F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_LL},
-  {"GENK_RING_LL",           ALGBIT(53), F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_LL},
-  {"GENK_RING_LL128",        ALGBIT(54), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Ring_LL128},
-  {"GENK_TREE_LL128",        ALGBIT(55), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Tree_LL128},
-  {"GENK_RING_LL128",        ALGBIT(56), F_AG, -1, -1, ncclSymkKernelId_AllGather_Ring_LL128},
-  {"GENK_RING_LL128",        ALGBIT(57), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_LL128},
-  {"GENK_RING_LL128",        ALGBIT(58), F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_LL128},
-  {"GENK_RING_LL128",        ALGBIT(59), F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_LL128},
+  {"GENK_RING_SIMPLE",       ALGBIT(39), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Ring_Simple},
+  {"GENK_TREE_SIMPLE",       ALGBIT(40), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Tree_Simple},
+  {"GENK_RING_SIMPLE",       ALGBIT(41), F_AG, -1, -1, ncclSymkKernelId_AllGather_Ring_Simple},
+  {"GENK_RING_SIMPLE",       ALGBIT(42), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_Simple},
+  {"GENK_RING_SIMPLE",       ALGBIT(43), F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_Simple},
+  {"GENK_RING_SIMPLE",       ALGBIT(44), F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_Simple},
+  {"GENK_RING_LL",           ALGBIT(45), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Ring_LL},
+  {"GENK_TREE_LL",           ALGBIT(46), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Tree_LL},
+  {"GENK_RING_LL",           ALGBIT(47), F_AG, -1, -1, ncclSymkKernelId_AllGather_Ring_LL},
+  {"GENK_RING_LL",           ALGBIT(48), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_LL},
+  {"GENK_RING_LL",           ALGBIT(49), F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_LL},
+  {"GENK_RING_LL",           ALGBIT(50), F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_LL},
+  {"GENK_RING_LL128",        ALGBIT(51), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Ring_LL128},
+  {"GENK_TREE_LL128",        ALGBIT(52), F_AR, -1, -1, ncclSymkKernelId_AllReduce_Tree_LL128},
+  {"GENK_RING_LL128",        ALGBIT(53), F_AG, -1, -1, ncclSymkKernelId_AllGather_Ring_LL128},
+  {"GENK_RING_LL128",        ALGBIT(54), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_Ring_LL128},
+  {"GENK_RING_LL128",        ALGBIT(55), F_BC, -1, -1, ncclSymkKernelId_Broadcast_Ring_LL128},
+  {"GENK_RING_LL128",        ALGBIT(56), F_RD, -1, -1, ncclSymkKernelId_Reduce_Ring_LL128},
+  // NCCL's kernels have the same ids as upstream NCCL, so their rows use upstream's bits. RCCL's kernels follow
+  // NCCL's, so their ids move whenever NCCL adds kernels: their bits come from the enum.
+#define SYMBIT(k) ALGBIT(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_##k)
+  {"SYMK_RailRing_LsaST",    SYMBIT(AllGather_RailRing_LsaST),  F_AG, -1, -1, ncclSymkKernelId_AllGather_RailRing_LsaST},
+  {"SYMK_HierLsaST",         SYMBIT(AllGather_HierLsaST),       F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaST},
+  {"SYMK_HierLsaTmaST",      SYMBIT(AllGather_HierLsaTmaST),    F_AG, -1, -1, ncclSymkKernelId_AllGather_HierLsaTmaST},
+  {"SYMK_HierLsaLDST",       SYMBIT(ReduceScatter_HierLsaLDST), F_RS, -1, -1, ncclSymkKernelId_ReduceScatter_HierLsaLDST},
+#undef SYMBIT
 };
 // clang-format on
 static constexpr int algRegistryCount = (int)(sizeof(algRegistry) / sizeof(algRegistry[0]));
 
+// [RCCL] A row's bit must be its tuning id, as modelMap[] and the tuner index by it.
+static constexpr bool rowBitsAreTuningIds() {
+  for (int i = 0; i < algRegistryCount; i++) {
+    const ncclAlgRegEntry& e = algRegistry[i];
+    int id =
+      e.symkKernelId >= 0 ? NCCL_TUNING_SYM_KERNEL_ID_OFFSET + e.symkKernelId : e.algo * NCCL_NUM_PROTOCOLS + e.proto;
+    if (e.mask != rcclTuningMask::bit(id)) return false;
+  }
+  return true;
+}
+static_assert(rowBitsAreTuningIds(), "An algorithm registry row's bit is not its tuning id");
+
 // OR of every selectable algorithm (the real rows) -- the base the parser negates ('^') against.
 // The registry is compile-time constant, so this reduces to a single constant (no runtime loop).
-static constexpr uint64_t computeAllAlgBits() {
-  uint64_t m = 0;
+static constexpr rcclTuningMask computeAllAlgBits() {
+  rcclTuningMask m{};
   for (int i = 0; i < algRegistryCount; i++) m |= algRegistry[i].mask;
   return m;
 }
-static constexpr uint64_t kAllAlgBits = computeAllAlgBits();
+static constexpr rcclTuningMask kAllAlgBits = computeAllAlgBits();
 
-uint64_t ncclAlgAllBits() {
+rcclTuningMask ncclAlgAllBits() {
   return kAllAlgBits;
 }
 
-uint64_t ncclAlgTagMask(const char* tag) {
-  if (tag == NULL || tag[0] == '\0') return 0;
+rcclTuningMask ncclAlgTagMask(const char* tag) {
+  if (tag == NULL || tag[0] == '\0') return rcclTuningMask();
   // A tag matches a registry name only from its start (case-insensitive), so "RING" selects
   // RING_LL/LL128/SIMPLE but not SYMK_RailRing_LsaSTMC, while "NVLS" still spans NVLS_SIMPLE and
   // NVLSTREE_SIMPLE. strncasecmp over the tag length is that prefix test: a shorter name hits its
   // '\0' before the tag ends and compares unequal.
   size_t tagLen = strlen(tag);
-  uint64_t m = 0;
+  rcclTuningMask m{};
   for (int i = 0; i < algRegistryCount; i++) {
     if (strncasecmp(algRegistry[i].name, tag, tagLen) == 0) m |= algRegistry[i].mask;
   }
   return m;
 }
 
-uint64_t ncclAlgValidForFuncMask(ncclFunc_t func) {
-  uint64_t m = 0;
+rcclTuningMask ncclAlgValidForFuncMask(ncclFunc_t func) {
+  rcclTuningMask m{};
   for (int i = 0; i < algRegistryCount; i++) {
     if (algRegistry[i].collMask & (1u << func)) m |= algRegistry[i].mask;
   }

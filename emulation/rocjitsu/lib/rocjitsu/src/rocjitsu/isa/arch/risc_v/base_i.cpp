@@ -12,23 +12,27 @@ namespace {
 
 int64_t arithmetic_right_shift(int64_t val, uint32_t shamt) {
   // Portable arithmetic right shift via unsigned shift + sign extension.
-  if (shamt >= 64)
+  if (shamt >= 64) {
     return (val < 0) ? -1 : 0;
+  }
   uint64_t uval = static_cast<uint64_t>(val);
   uint64_t shifted = uval >> shamt;
   // Sign-extend if negative
-  if (val < 0 && shamt > 0)
+  if (val < 0 && shamt > 0) {
     shifted |= ~uint64_t{0} << (64 - shamt);
+  }
   return static_cast<int64_t>(shifted);
 }
 
 int32_t arithmetic_right_shift_32(int32_t val, uint32_t shamt) {
-  if (shamt >= 32)
+  if (shamt >= 32) {
     return (val < 0) ? -1 : 0;
+  }
   uint32_t uval = static_cast<uint32_t>(val);
   uint32_t shifted = uval >> shamt;
-  if (val < 0 && shamt > 0)
+  if (val < 0 && shamt > 0) {
     shifted |= ~uint32_t{0} << (32 - shamt);
+  }
   return static_cast<int32_t>(shifted);
 }
 
@@ -114,8 +118,9 @@ BeqInst::BeqInst(uint32_t raw)
 
 void BeqInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
-  if (h->read_xreg(rs1_op.encoding_value_) == h->read_xreg(rs2_op.encoding_value_))
+  if (h->read_xreg(rs1_op.encoding_value_) == h->read_xreg(rs2_op.encoding_value_)) {
     h->next_pc = h->pc + static_cast<uint64_t>(imm());
+  }
 }
 
 BneInst::BneInst(uint32_t raw)
@@ -130,8 +135,9 @@ BneInst::BneInst(uint32_t raw)
 
 void BneInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
-  if (h->read_xreg(rs1_op.encoding_value_) != h->read_xreg(rs2_op.encoding_value_))
+  if (h->read_xreg(rs1_op.encoding_value_) != h->read_xreg(rs2_op.encoding_value_)) {
     h->next_pc = h->pc + static_cast<uint64_t>(imm());
+  }
 }
 
 BltInst::BltInst(uint32_t raw)
@@ -146,8 +152,9 @@ BltInst::BltInst(uint32_t raw)
 
 void BltInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
-  if (h->read_xreg(rs1_op.encoding_value_) < h->read_xreg(rs2_op.encoding_value_))
+  if (h->read_xreg(rs1_op.encoding_value_) < h->read_xreg(rs2_op.encoding_value_)) {
     h->next_pc = h->pc + static_cast<uint64_t>(imm());
+  }
 }
 
 BgeInst::BgeInst(uint32_t raw)
@@ -162,8 +169,9 @@ BgeInst::BgeInst(uint32_t raw)
 
 void BgeInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
-  if (h->read_xreg(rs1_op.encoding_value_) >= h->read_xreg(rs2_op.encoding_value_))
+  if (h->read_xreg(rs1_op.encoding_value_) >= h->read_xreg(rs2_op.encoding_value_)) {
     h->next_pc = h->pc + static_cast<uint64_t>(imm());
+  }
 }
 
 BltuInst::BltuInst(uint32_t raw)
@@ -179,8 +187,9 @@ BltuInst::BltuInst(uint32_t raw)
 void BltuInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   if (static_cast<uint64_t>(h->read_xreg(rs1_op.encoding_value_)) <
-      static_cast<uint64_t>(h->read_xreg(rs2_op.encoding_value_)))
+      static_cast<uint64_t>(h->read_xreg(rs2_op.encoding_value_))) {
     h->next_pc = h->pc + static_cast<uint64_t>(imm());
+  }
 }
 
 BgeuInst::BgeuInst(uint32_t raw)
@@ -196,8 +205,9 @@ BgeuInst::BgeuInst(uint32_t raw)
 void BgeuInst::execute_impl(HartState &ctx) {
   auto *h = as_hart(ctx);
   if (static_cast<uint64_t>(h->read_xreg(rs1_op.encoding_value_)) >=
-      static_cast<uint64_t>(h->read_xreg(rs2_op.encoding_value_)))
+      static_cast<uint64_t>(h->read_xreg(rs2_op.encoding_value_))) {
     h->next_pc = h->pc + static_cast<uint64_t>(imm());
+  }
 }
 
 // I-type load instructions

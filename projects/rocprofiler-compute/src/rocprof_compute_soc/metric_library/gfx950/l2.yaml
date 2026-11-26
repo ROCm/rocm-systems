@@ -5,16 +5,15 @@ l2.atomic_bw:
   formula: 32 * SUM(TCC_ATOMIC_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes looked up in the L2 cache for atomic requests, divided by
-    total duration.
+    The number of bytes per second looked up in the L2 cache for atomic requests.
 l2.bypass_req:
   name: L2 Bypass Requests
   formula: SUM(TCC_BYPASS_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
     Number of L2 cache bypass requests measured at the tag block. These requests skip
-    normal cache lookup and go directly to memory, typically for uncacheable or write-combined
-    memory accesses.
+    normal cache lookup and go directly to memory, typically for uncacheable or
+    write-combined memory accesses.
 l2.chan_fabric_rd_stall_hbm:
   name: L2-Fabric Read Stall (HBM) per Channel
   formula: SUM(TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1])) / SUM($denom)
@@ -50,10 +49,9 @@ l2.input_buffer_req:
   formula: SUM(TCC_IB_REQ_sum) / SUM($denom)
   unit: (Requests + $normUnit)
   description: >-
-    Number of raw memory requests received through the L2 cache Input Buffer (IB)
-    from compute units and other hardware clients. This counts all incoming requests
-    before cache lookup processing and represents the total incoming demand on the
-    L2 cache.
+    Number of raw memory requests received through the L2 cache Input Buffer (IB) from
+    compute units and other hardware clients. This counts all incoming requests before
+    cache lookup processing and represents the total incoming demand on the L2 cache.
 l2.input_buffer_stall_rate:
   name: L2 Input Buffer Stall Rate
   formula: 100 * SUM(TCC_IB_STALL_sum) / SUM(TCC_BUSY_sum)
@@ -79,8 +77,7 @@ l2.rd_bw:
   formula: 32 * SUM(TCC_READ_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes looked up in the L2 cache for read requests, divided by
-    total duration.
+    The number of bytes per second looked up in the L2 cache for read requests.
 l2.stalled_on_lat_fifo:
   name: L2 Stalled on Latency FIFO
   formula: SUM(TCC_LATENCY_FIFO_FULL_sum) / SUM($denom)
@@ -96,12 +93,11 @@ l2.wr_bw:
   formula: 32 * SUM(TCC_WRITE_SECTORS_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total number of bytes looked up in the L2 cache for write requests, divided by
-    total duration.
+    The number of bytes per second looked up in the L2 cache for write requests.
 l2.wr_data_fifo_full_rate:
   name: L2 Write Data FIFO Full Rate
   formula: 100 * SUM(TCC_SRC_FIFO_FULL_sum) / SUM(TCC_BUSY_sum)
   unit: Percent
   description: >-
-    Percentage of L2 busy time the source data FIFO was full. A rate >= 10% indicates L2
-    write data path bottleneck.
+    Percentage of L2 busy time the write data FIFO was full. A rate of 10% or more
+    points to a bottleneck in the L2 write data path.

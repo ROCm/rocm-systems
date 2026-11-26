@@ -2,12 +2,12 @@ wave.dispatched_threads:
   name: Dispatched Threads
   formula: AVG(SQ_ITEMS_sum)
   unit: Threads
-  description: ''
+  description: Total work-items dispatched.
 wave.dispatched_wavefronts:
   name: WGP Dispatched Wavefronts
   formula: AVG(SQ_WAVES_sum)
   unit: Wavefronts
-  description: ''
+  description: Total wavefronts dispatched.
 wave.issue_wait:
   name: Wave Issue Wait
   formula: 100 * SUM(SQ_WAIT_INST_ANY) / SUM(SQ_WAVE_CYCLES)
@@ -22,9 +22,9 @@ wave.life:
   formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_WAVES_sum)
   unit: Cycles
   description: >-
-    Average number of cycles from wavefront creation to completion. Longer wave life
-    indicates more execution time per wavefront, which may be due to complex kernels,
-    memory latency, or synchronization waits.
+    Average number of cycles from wavefront creation to completion. Longer wavefront
+    life indicates more execution time per wavefront, which may be due to complex
+    kernels, memory latency, or synchronization waits.
 wave.occupancy:
   name: Wavefront Occupancy
   formula: SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr)
@@ -32,25 +32,25 @@ wave.occupancy:
   description: >-
     Average number of wavefronts resident on the GPU during kernel execution. Higher
     occupancy provides more opportunities to hide memory latency through wavefront
-    switching. However, maximum occupancy is not always optimal. Excessive register
-    or LDS usage per wavefront may limit occupancy.
+    switching. However, maximum occupancy is not always optimal. Excessive register or
+    LDS usage per wavefront may limit occupancy.
   peak: $max_waves_per_cu * $cu_per_gpu
 wave.occupancy_pct:
   name: Wavefront Occupancy (Percent)
   formula: 100 * SUM(SQ_WAVE_CYCLES_sum) / SUM(SQ_BUSY_CYCLES_avr) / ($max_waves_per_cu * $cu_per_gpu)
   unit: Percent
   description: >-
-    The time-averaged number of wavefronts resident on the accelerator, as a percent
-    of the maximum number of wavefronts all of its CUs can hold.
+    Percentage of the maximum wavefronts on all WGPs that are resident, averaged over
+    GPU-active cycles.
 wave.wait_for_any:
   name: Wait for Any
   formula: 100 * SUM(SQ_WAIT_ANY) / SUM(SQ_WAVE_CYCLES)
   unit: Percent
   description: >-
     Percentage of wavefront execution time spent waiting for data dependencies to
-    resolve, such as pending memory operations or prior instruction results. High
-    values indicate latency-bound execution that could benefit from increased occupancy
-    or reduced dependency chains.
+    resolve, such as pending memory operations or prior instruction results. High values
+    indicate latency-bound execution that could benefit from increased occupancy or
+    reduced dependency chains.
   peak: 100
 wave.wait_for_barrier:
   name: Wait for Barrier
@@ -65,14 +65,14 @@ wave.wait_for_counter:
   formula: 100 * SUM(SQ_WAIT_CNT_ANY) / SUM(SQ_WAVE_CYCLES)
   unit: Percent
   description: >-
-    Percentage of wavefront lifetime spent waiting for memory operation counters.
-    High values indicate memory latency is impacting performance. Consider improving
-    memory access patterns or increasing occupancy to hide latency.
+    Percentage of wavefront lifetime spent waiting for memory operation counters. High
+    values indicate memory latency is impacting performance. Consider improving memory
+    access patterns or increasing occupancy to hide latency.
 wave.wait_for_inst_fetch:
   name: Wait for Instruction Fetch
   formula: 100 * SUM(SQ_WAIT_IFETCH) / SUM(SQ_WAVE_CYCLES)
   unit: Percent
   description: >-
     Percentage of wavefront lifetime spent waiting for instruction fetch. High values
-    may indicate instruction cache misses, large kernel code, or divergent control
-    flow impacting instruction locality.
+    may indicate instruction cache misses, large kernel code, or divergent control flow
+    impacting instruction locality.

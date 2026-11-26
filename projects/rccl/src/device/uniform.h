@@ -30,7 +30,8 @@ THE SOFTWARE.
 // Applying uniform() at entry restores the proof and keeps that work scalar.
 //
 // uniform() returns the first active lane's value, so it is only correct for values
-// that really are the same across the active lanes of the wave.
+// that really are the same across the active lanes of the wave. It also serves as a deliberate
+// first-lane broadcast, e.g. a wave base address that the caller then range-checks per lane.
 
 #ifndef RCCL_DEVICE_UNIFORM_H_
 #define RCCL_DEVICE_UNIFORM_H_

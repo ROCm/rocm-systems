@@ -53,7 +53,8 @@ void check_integer(Call call, IntegerConversion operation) {
 }
 
 // Check byte/halfword packing with modifiers and aliases for the supplied entry point.
-template <int Lanes, bool Gfx12, typename Call> void check_pack(Call call) {
+// Exact is false for entry points that stay loose-only until their captures are reviewed.
+template <int Lanes, bool Gfx12, bool Exact = true, typename Call> void check_pack(Call call) {
   check_conversion<Lanes, 2, 1, 1, true>(
       call, conversion_inputs<Lanes>(16),
       [](uint64_t a, uint32_t b, uint32_t, uint32_t d, uint64_t flags, uint32_t mode) {
@@ -75,7 +76,7 @@ template <int Lanes, bool Gfx12, typename Call> void check_pack(Call call) {
       conversion_bits,
       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B |
           RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B,
-      Gfx12,
+      Exact,
       RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
           RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
 }
@@ -160,4 +161,56 @@ TEST(ConversionSatPkU8I16W32Gfx942, Arithmetic) {
 TEST(ConversionSatPkU8I16W64Gfx942, Arithmetic) {
   check_integer<64, 1>(rj_arith_v_sat_pk_u8_i16_w64_gfx942,
                        IntegerConversion::SaturateBytesFullWord);
+}
+
+// gfx942 shares the RDNA3 packing model and matches MI300X captures.
+TEST(ConversionPackB32F16W32Gfx942, Arithmetic) {
+  check_pack<32, false, true>(rj_arith_v_pack_b32_f16_w32_gfx942);
+}
+
+TEST(ConversionPackB32F16W64Gfx942, Arithmetic) {
+  check_pack<64, false, true>(rj_arith_v_pack_b32_f16_w64_gfx942);
+}
+
+// gfx950 shares the RDNA3/gfx942 packing model and matches MI350X captures.
+TEST(ConversionPackB32F16W32Gfx950, Arithmetic) {
+  check_pack<32, false, true>(rj_arith_v_pack_b32_f16_w32_gfx950);
+}
+
+TEST(ConversionPackB32F16W64Gfx950, Arithmetic) {
+  check_pack<64, false, true>(rj_arith_v_pack_b32_f16_w64_gfx950);
+}
+
+// gfx10/gfx115x/gfx908/gfx90a share the RDNA3 packing model via loose-only _gfx10 wrappers.
+TEST(ConversionPackB32F16W32Gfx10, Arithmetic) {
+  check_pack<32, false, false>(rj_arith_v_pack_b32_f16_w32_gfx10);
+}
+
+TEST(ConversionPackB32F16W64Gfx10, Arithmetic) {
+  check_pack<64, false, false>(rj_arith_v_pack_b32_f16_w64_gfx10);
+}
+
+// gfx1250 inherits the gfx12 packing model, including its NaN quieting, but stays loose-only
+// until the gfx1250 captures are reviewed.
+TEST(ConversionPackB32F16W32Gfx1250, Arithmetic) {
+  check_pack<32, true, false>(rj_arith_v_pack_b32_f16_w32_gfx1250);
+}
+
+TEST(ConversionPackB32F16W64Gfx1250, Arithmetic) {
+  check_pack<64, true, false>(rj_arith_v_pack_b32_f16_w64_gfx1250);
+}
+
+// gfx1100 (W7900, mkm2) lanes: hw1100-noieee (2026-09-25, MODE.IEEE clear) keeps a signaling
+// NaN half; hw2-gfx1100 (2026-10-06, IEEE set) quiets it; a denormal half flushes with input
+// denormals flushed (0x100); NEG_B toggles the sign of a NaN half.
+TEST(ConversionPackB32F16Gfx11, ExactMatchesHardware) {
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<2, 1, 16>(
+      rj_arith_v_pack_b32_f16_w32, 0x1f0, 0, 0x31d27c01, 0x31a90000, 0, 0, 0x7c01U);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<2, 1, 16>(
+      rj_arith_v_pack_b32_f16_w32, 0x3f0, 0, 0x31d27c01, 0x31a90000, 0, 0, 0x7e01U);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<2, 1, 16>(
+      rj_arith_v_pack_b32_f16_w32, 0x100, 0, 0x84ac0001, 0x50870400, 0, 0, 0x4000000U);
+  rocjitsu::arith::test::expect_captured_conversion_gfx11<2, 1, 16>(
+      rj_arith_v_pack_b32_f16_w32, 0x1f0, RJ_ARITH_ALU_NEG_B, 0x5a140000, 0x7d077e00, 0, 0,
+      0xfe000000U);
 }

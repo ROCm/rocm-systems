@@ -4,24 +4,24 @@ cp.cpc_busy:
   unit: Percent
   description: >-
     Percentage of time the Command Processor Compute is actively processing commands.
-    High busy percentage indicates efficient command stream processing. Low values
-    may indicate gaps in workload submission or dispatch bottlenecks.
+    High busy percentage indicates efficient command stream processing. Low values may
+    indicate gaps in workload submission or dispatch bottlenecks.
 cp.cpc_idle:
   name: CPC Idle
   formula: 100 * SUM(CPC_STAT_IDLE) / SUM(CPC_ALWAYS_COUNT)
   unit: Percent
   description: >-
-    Percentage of time the Command Processor Compute has no work to process. High
-    idle time indicates underutilization, often due to gaps between kernel dispatches
-    or insufficient workload to keep the GPU busy.
+    Percentage of time the Command Processor Compute has no work to process. High idle
+    time indicates underutilization, often due to gaps between kernel dispatches or
+    insufficient workload to keep the GPU busy.
 cp.cpc_stalled:
   name: CPC Stalled
   formula: 100 * SUM(CPC_STAT_STALL) / SUM(CPC_ALWAYS_COUNT)
   unit: Percent
   description: >-
     Percentage of time the Command Processor Compute is stalled waiting for resources.
-    High stall rates may indicate memory bottlenecks, synchronization issues, or contention
-    for internal command processor resources.
+    High stall rates may indicate memory bottlenecks, synchronization issues, or
+    contention for internal command processor resources.
 cp.gcriu_busy:
   name: GCRIU Busy
   formula: 100 * SUM(CPC_GCRIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
@@ -49,9 +49,9 @@ cp.inst_cache_hit_rate:
   formula: 100 * SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM(CPC_MEC_INSTR_CACHE_HIT_sum + CPC_MEC_INSTR_CACHE_MISS_sum)
   unit: Percent
   description: >-
-    Percentage of Micro Engine instruction fetches that hit in cache. High hit rates
-    are essential for efficient command processing. Low rates may indicate complex
-    or large command processing routines.
+    Percentage of Micro Engine instruction fetches that hit in cache. High hit rates are
+    essential for efficient command processing. Low rates may indicate complex or large
+    command processing routines.
 cp.inst_cache_hits:
   name: Instruction Cache Hits
   formula: SUM(CPC_MEC_INSTR_CACHE_HIT_sum) / SUM($denom)
@@ -72,7 +72,8 @@ cp.me1_stall_on_memory_rd:
   unit: (Cycles + $normUnit)
   description: >-
     Cycles the Micro Engine is stalled waiting for memory read operations to complete.
-    High stall counts indicate memory latency is impacting command processing throughput.
+    High stall counts indicate memory latency is impacting command processing
+    throughput.
 cp.me1_stall_on_memory_wr:
   name: ME1 Stall on Memory Write
   formula: SUM(CPC_ME1_STALL_WAIT_ON_MEM_WRITE) / SUM($denom)
@@ -93,16 +94,16 @@ cp.me1_stall_on_roq_data:
   formula: SUM(CPC_ME1_STALL_ON_DATA_FROM_ROQ) / SUM($denom)
   unit: (Cycles + $normUnit)
   description: >-
-    Cycles the Micro Engine is stalled waiting for data from the Ring Output Queue.
-    High stall counts may indicate command stream processing bottlenecks.
+    Cycles the Micro Engine is stalled waiting for data from the Ring Output Queue. High
+    stall counts may indicate command stream processing bottlenecks.
 cp.tciu_busy:
   name: TCIU Busy
   formula: 100 * SUM(CPC_TCIU_BUSY) / SUM(CPC_ALWAYS_COUNT)
   unit: Percent
   description: >-
-    Percentage of time the Texture Cache Interface Unit is busy handling command processor
-    memory requests. High utilization indicates significant memory traffic from command
-    processing activities.
+    Percentage of time the Texture Cache Interface Unit is busy handling command
+    processor memory requests. High utilization indicates significant memory traffic
+    from command processing activities.
 cp.tciu_rd_req:
   name: TCIU Read Requests
   formula: SUM(CPC_TCIU_READ_REQUEST_SENT_sum) / SUM($denom)

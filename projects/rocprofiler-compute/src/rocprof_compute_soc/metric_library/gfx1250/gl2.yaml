@@ -42,47 +42,65 @@ gl2.ea_hbm_bw_atomic:
   name: GL2-EA HBM Bandwidth - Atomic
   formula: 32 * SUM(GL2C_EA_ATOMIC_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL2 to Efficiency Arbiter atomic bandwidth.
+  description: >-
+    The number of bytes per second of atomic requests from the GL2 cache to HBM through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_hbm_bw_rd:
   name: GL2-EA HBM Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL2 to Efficiency Arbiter read bandwidth.
+  description: >-
+    The number of bytes per second of read requests from the GL2 cache to HBM through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_hbm_bw_wr:
   name: GL2-EA HBM Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_DRAM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total GL2 to Efficiency Arbiter write bandwidth.
+  description: >-
+    The number of bytes per second of write requests from the GL2 cache to HBM through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_host_cpu_bw_atomic:
   name: GL2-EA Host CPU Bandwidth - Atomic
   formula: 32 * SUM(GL2C_EA_ATOMIC_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total host CPU atomic bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of atomic requests from the GL2 cache to host CPU
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_host_cpu_bw_rd:
   name: GL2-EA Host CPU Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total host CPU read bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of read requests from the GL2 cache to host CPU
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_host_cpu_bw_wr:
   name: GL2-EA Host CPU Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_CPU_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total host CPU write bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of write requests from the GL2 cache to host CPU
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_pcie_bw_atomic:
   name: GL2-EA PCIE Bandwidth - Atomic
   formula: 32 * SUM(GL2C_EA_ATOMIC_PCIE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total PCIe atomic bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of atomic requests from the GL2 cache to PCIe through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_pcie_bw_rd:
   name: GL2-EA PCIE Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_PCIE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total PCIe read bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of read requests from the GL2 cache to PCIe through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_pcie_bw_wr:
   name: GL2-EA PCIE Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_PCIE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total PCIe write bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of write requests from the GL2 cache to PCIe through
+    the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_rd_lat:
   name: GL2-EA Read Latency
   formula: SUM(GL2C_EA_RDREQ_LEVEL_sum) / SUM(GL2C_EA_RDREQ_sum)
@@ -93,32 +111,45 @@ gl2.ea_remote_memory_bw_atomic:
   formula: 32 * SUM(GL2C_EA_ATOMIC_RM_MEM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
   description: >-
-    Total same-node peer GPU atomic bandwidth between GL2 and EA.
+    The number of bytes per second of atomic requests from the GL2 cache to same-node
+    peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32
+    bytes.
 gl2.ea_remote_memory_bw_rd:
   name: GL2-EA Remote Memory Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_RM_MEM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total same-node peer GPU read bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of read requests from the GL2 cache to same-node peer
+    GPU memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_remote_memory_bw_wr:
   name: GL2-EA Remote Memory Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_RM_MEM_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total same-node peer GPU write bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of write requests from the GL2 cache to same-node
+    peer GPU memory through the Efficiency Arbiter (EA). Each request counts as 32
+    bytes.
 gl2.ea_remote_node_bw_atomic:
   name: GL2-EA Remote Node Bandwidth - Atomic
   formula: 32 * SUM(GL2C_EA_ATOMIC_RM_NODE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total remote node atomic bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of atomic requests from the GL2 cache to remote-node
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_remote_node_bw_rd:
   name: GL2-EA Remote Node Bandwidth - Read
   formula: 32 * SUM(GL2C_EA_RDREQ_RM_NODE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total remote node read bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of read requests from the GL2 cache to remote-node
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_remote_node_bw_wr:
   name: GL2-EA Remote Node Bandwidth - Write
   formula: 32 * SUM(GL2C_EA_WRREQ_RM_NODE_sum) / SUM(End_Timestamp - Start_Timestamp)
   unit: GB/s
-  description: Total remote node write bandwidth between GL2 and EA.
+  description: >-
+    The number of bytes per second of write requests from the GL2 cache to remote-node
+    memory through the Efficiency Arbiter (EA). Each request counts as 32 bytes.
 gl2.ea_req_stall_on_vc3:
   name: GL2-EA Request Stall on VC3
   formula: 100 * SUM(GL2C_EA_REQ_VC3_STALL_sum) / SUM(GL2C_BUSY_sum)
@@ -138,8 +169,8 @@ gl2.ea_req_stall_on_vc6:
   formula: 100 * SUM(GL2C_EA_REQ_VC6_STALL_sum) / SUM(GL2C_BUSY_sum)
   unit: Percent
   description: >-
-    Percentage of GL2 Cache busy cycles when it's stalled on the GL2 Cache to EA atomic/priority
-    read channel (VC6).
+    Percentage of GL2 Cache busy cycles when it's stalled on the GL2 Cache to EA
+    atomic/priority read channel (VC6).
 gl2.ea_req_stall_on_vc7:
   name: GL2-EA Request Stall on VC7
   formula: 100 * SUM(GL2C_EA_REQ_VC7_STALL_sum) / SUM(GL2C_BUSY_sum)
@@ -156,8 +187,7 @@ gl2.gl2a_gl2c0_req:
   name: GL2A-GL2C0 Request
   formula: SUM(GL2A_REQ_GL2C0_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 0.
+  description: Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 0.
 gl2.gl2a_gl2c0_req_stall_rate:
   name: GL2A-GL2C0 Request Stall Rate
   formula: 100 * SUM(GL2A_REQ_STALL_GL2C0_sum) / SUM(GL2A_BUSY_sum)
@@ -169,8 +199,7 @@ gl2.gl2a_gl2c1_req:
   name: GL2A-GL2C1 Request
   formula: SUM(GL2A_REQ_GL2C1_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 1.
+  description: Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 1.
 gl2.gl2a_gl2c1_req_stall_rate:
   name: GL2A-GL2C1 Request Stall Rate
   formula: 100 * SUM(GL2A_REQ_STALL_GL2C1_sum) / SUM(GL2A_BUSY_sum)
@@ -182,8 +211,7 @@ gl2.gl2a_gl2c2_req:
   name: GL2A-GL2C2 Request
   formula: SUM(GL2A_REQ_GL2C2_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 2.
+  description: Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 2.
 gl2.gl2a_gl2c2_req_stall_rate:
   name: GL2A-GL2C2 Request Stall Rate
   formula: 100 * SUM(GL2A_REQ_STALL_GL2C2_sum) / SUM(GL2A_BUSY_sum)
@@ -195,8 +223,7 @@ gl2.gl2a_gl2c3_req:
   name: GL2A-GL2C3 Request
   formula: SUM(GL2A_REQ_GL2C3_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 3.
+  description: Number of requests forwarded by GL2 Arbiter to GL2 Cache partition 3.
 gl2.gl2a_gl2c3_req_stall_rate:
   name: GL2A-GL2C3 Request Stall Rate
   formula: 100 * SUM(GL2A_REQ_STALL_GL2C3_sum) / SUM(GL2A_BUSY_sum)
@@ -239,20 +266,18 @@ gl2.hit_rate:
   name: GL2 Cache Hit Rate
   formula: 100 * SUM(GL2C_HIT_sum) / SUM(GL2C_HIT_sum + GL2C_MISS_sum)
   unit: Percent
-  description: GL2 cache hit rate.
+  description: Percentage of GL2 cache requests that hit in the cache.
   peak: 100
 gl2.lat_fifo_full_stall:
   name: GL2 Latency FIFO Full Stall
   formula: 100 * SUM(GL2C_LATENCY_FIFO_FULL_sum) / SUM(GL2C_BUSY_sum)
   unit: Percent
-  description: >-
-    Percentage of GL2 Cache busy cycles stalled due to a full latency FIFO.
+  description: Percentage of GL2 Cache busy cycles stalled due to a full latency FIFO.
 gl2.pipeline_stall:
   name: GL2 Pipeline Stall
   formula: 100 * SUM(GL2C_TAG_STALL_sum) / SUM(GL2C_BUSY_sum)
   unit: Percent
-  description: >-
-    Percentage of GL2 Cache busy cycles the tag pipeline is stalled.
+  description: Percentage of GL2 Cache busy cycles the tag pipeline is stalled.
 gl2.source_fifo_full_stall:
   name: GL2 Source FIFO Full Stall
   formula: 100 * SUM(GL2C_SRC_FIFO_FULL_sum) / SUM(GL2C_BUSY_sum)
@@ -264,8 +289,8 @@ gl2.tag_stall_cached_ea_fifo_full:
   formula: 100 * SUM(GL2C_TAG_CACHED_EA_FIFO_FULL_STALL_sum) / SUM(GL2C_BUSY_sum)
   unit: Percent
   description: >-
-    Percentage of GL2 Cache busy cycles the tag pipeline stalled due to a full cached
-    EA FIFO.
+    Percentage of GL2 Cache busy cycles the tag pipeline stalled due to a full cached EA
+    FIFO.
 gl2.tag_stall_set_full:
   name: GL2 Tag Stall - Set Full
   formula: 100 * SUM(GL2C_TAG_MISS_NOTHING_REPLACEABLE_STALL_sum) / SUM(GL2C_BUSY_sum)
@@ -284,4 +309,4 @@ gl2.util:
   name: GL2 Cache Utilization
   formula: 100 * SUM(GL2C_BUSY_sum) / SUM(GL2C_CYCLE_sum)
   unit: Percent
-  description: Percentage of GL2 Cache cycles when it's busy.
+  description: Percentage of cycles the GL2 cache is busy.

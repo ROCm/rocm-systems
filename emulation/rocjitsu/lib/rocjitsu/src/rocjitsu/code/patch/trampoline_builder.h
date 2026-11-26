@@ -6,7 +6,7 @@
 ///        words for DBI observation and instruction replacement.
 ///
 /// This is the byte emitter; it owns SOPP branch math and basic plan
-/// well-formedness checks (original_size 4/8/12 when splicing, 4/8 when replaying
+/// well-formedness checks (original_size 4/8/12 when splicing or replaying
 /// the original, original_words count matches, requested branch ranges fit). It does not
 /// touch the ELF, own layout assignment, or enforce milestone-scoped restrictions
 /// (e.g. "only emit s_nop placeholder bodies" — that lives in the orchestrator
@@ -88,7 +88,7 @@ struct TrampolinePlan {
   rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
 
   uint64_t anchor_offset = 0;
-  uint32_t original_size = 0; // 4/8/12 for a splice; replaying the original requires 4/8.
+  uint32_t original_size = 0; // 4, 8 or 12 bytes for replay or splice.
   uint64_t trampoline_offset = 0;
   uint64_t return_target = 0; // Typically anchor_offset + original_size.
 
@@ -234,8 +234,7 @@ public:
   /// @p error_out (if non-null) on:
   ///   - arch left at rocjitsu::IsaFamily::Invalid (caller forgot to set it)
   ///   - original_size zero or not dword aligned
-  ///   - original_size other than 4/8/12 when splicing the anchor
-  ///   - original_size other than 4/8 when relocating the original
+  ///   - original_size other than 4/8/12 when splicing or replaying the anchor
   ///   - original_words size mismatch with original_size
   ///   - A requested forward or return branch outside s_branch simm16 range
   ///

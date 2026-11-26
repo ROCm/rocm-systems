@@ -24,10 +24,8 @@
 ///
 /// CDNA5 VOPD3 V_DUAL_MIN_NUM_F64/V_DUAL_MAX_NUM_F64 still use host selection.
 /// Legacy forms share the encoding selector, with architecture-specific NaN
-/// priority and MODE.IEEE signaling-NaN handling. Packed F16 MIN/MAX and *_NUM
-/// use this selector through fp_mode::packed_minmax_f16. Packed F16 MINIMUM/MAXIMUM,
-/// BF16 and F64 retain separate helpers (packed_binary_f16, packed_select_bf16
-/// and binary_f64).
+/// priority and MODE.IEEE signaling-NaN handling. Packed F16/BF16 arithmetic
+/// is handled by rj-arith. Legacy F64 selection remains in fp_mode::binary_f64.
 ///
 /// Scalar and SIMD callers use the same implementation on raw encodings in
 /// unsigned lanes, so selection preserves signs and NaN payloads.
@@ -117,12 +115,13 @@ using lane::choose;
 /// @brief Whether an operation requires the target's explicit legacy policy.
 template <typename Op>
 inline constexpr bool is_legacy_v = [] {
-  if constexpr (requires { Op::kRule; })
+  if constexpr (requires { Op::kRule; }) {
     return Op::kRule == Nan::LEGACY;
-  else if constexpr (requires { typename Op::Inner; })
+  } else if constexpr (requires { typename Op::Inner; }) {
     return Op::Inner::kRule == Nan::LEGACY;
-  else
+  } else {
     return std::is_same_v<Op, LegacyMed3>;
+  }
 }();
 
 /// @brief Recover the source encoding from comparison::total_order_key.
@@ -193,8 +192,9 @@ template <typename Fmt, typename Op, typename V>
 constexpr V apply(V a, V b, V c, LegacyPolicy legacy) {
   if constexpr (std::is_same_v<Op, LegacyMed3>) {
     const auto equal = [legacy](V x, V y) {
-      if (legacy.ordered_zero_median)
+      if (legacy.ordered_zero_median) {
         return x == y;
+      }
       return (x == y) || (((x | y) & ~Fmt::kSign) == 0);
     };
     const V largest = pick<Fmt, LegacyMax>(pick<Fmt, LegacyMax>(a, b, legacy), c, legacy);

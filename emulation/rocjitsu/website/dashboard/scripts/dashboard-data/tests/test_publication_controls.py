@@ -204,6 +204,33 @@ def test_enrichment_preserves_raw_and_types_optional_metadata(
     }
 
 
+def test_workflow_revision_uses_jq_and_preserves_invalid_result(publication):
+    ctx = publication
+    steps = yaml.safe_load(WORKFLOW.read_text())['jobs']['benchmark']['steps']
+    record = next(s for s in steps if s['name'] == 'Record result workflow revision')
+    dependencies = next(s for s in steps if s['name'] == 'Install base dependencies')
+    assert 'jq' in dependencies['run'].split()
+    assert 'jq --arg' in record['run']
+    result_dir = Path(ctx.env['RESULTS_DOWNLOAD_DIR'])
+    result_file = result_dir / 'run.json'
+    original = b'{"publication":'
+    result_file.write_bytes(original)
+    result = subprocess.run(
+        ['bash', '-e', '-o', 'pipefail', '-c', record['run']],
+        env={
+            **ctx.env,
+            'ROCJITSU_RESULT_DIR': str(result_dir),
+            'GITHUB_SHA': ctx.env['WORKFLOW_COMMIT_SHA'],
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode != 0
+    assert result_file.read_bytes() == original
+    assert not list(result_dir.glob('run.json.*'))
+
+
 @pytest.mark.parametrize('status', ['completed', 'failed', 'missing'])
 def test_artifact_records_workflow_pin_without_publication(publication, status):
     ctx = publication

@@ -2,7 +2,7 @@ utcl1.lookup_hit_rate:
   name: UTCL1 Lookup Hit Rate
   formula: 100 * SUM(UTCL1_HITS_sum) / SUM(UTCL1_REQS_sum)
   unit: Percent
-  description: UTCL1 TLB hit rate.
+  description: Percentage of UTCL1 TLB requests that hit.
 utcl1.miss_handler_fifo_full_rate:
   name: UTCL1 Miss Handler FIFO Full Rate
   formula: 100 * SUM(UTCL1_STALL_MH_FULL_sum) / SUM(UTCL1_XLAT_REQ_BUSY_sum)
@@ -13,8 +13,7 @@ utcl1.total_req_from_utcl0:
   name: UTCL1 Total Requests from UTCL0
   formula: SUM(UTCL1_REQS_sum) / SUM($denom)
   unit: (Requests + $normUnit)
-  description: >-
-    Total address translation requests received by UTCL1 from UTCL0.
+  description: Total address translation requests received by UTCL1 from UTCL0.
 utcl1.total_returns_to_utcl0:
   name: UTCL1 Total Returns to UTCL0
   formula: SUM(UTCL1_RTNS_sum) / SUM($denom)

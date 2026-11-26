@@ -85,8 +85,9 @@ struct Fixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3p_pk_inline_const", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     decoder = Decoder::create(arch);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
@@ -105,13 +106,15 @@ struct Fixture {
     wf->set_exec(kExec);
     DecodeResult decoded = decoder->decode(words);
     EXPECT_TRUE(decoded.succeeded()) << "decode failed";
-    if (decoded.failed())
+    if (decoded.failed()) {
       return {};
+    }
     std::unique_ptr<Instruction> inst = std::move(decoded).value();
     EXPECT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
     std::array<uint32_t, WF_SIZE> out{};
-    for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
       out[lane] = cu->read_vgpr(vb + kDstVgpr, lane);
+    }
     return out;
   }
 };
@@ -126,10 +129,11 @@ struct ForceScalarGuard {
 void expect_all_active(const std::array<uint32_t, WF_SIZE> &out, uint32_t want, const char *label) {
   for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
     const bool active = (kExec >> lane) & 1u;
-    if (active)
+    if (active) {
       EXPECT_EQ(out[lane], want) << label << ": lane " << lane;
-    else
+    } else {
       EXPECT_EQ(out[lane], DST_SENTINEL) << label << ": clobbered inactive lane " << lane;
+    }
   }
 }
 
@@ -283,7 +287,7 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneOnSixteenBitSourceOperand)
 }
 
 // v_dot2_f16_f16 is VOP3, not VOP3P, but src0/src1 are still 32-bit operands
-// consumed as packed v2 halves -- only src2 goes through read_vop3_true16_src,
+// consumed as packed v2 halves -- only src2 goes through the selected source half,
 // which is already 16-bit -- so it needs the same narrowing.
 //
 // v_dot2_f16_f16 v4, v0, 1.0, 0 with v0 = {1.0h, 0} is 1.0*1.0 + 0*0 + 0 = 1.0h.
@@ -362,8 +366,9 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneDefaultPackingAgreesWithSc
   const auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(rocjitsu::IsaFamily::Cdna4);
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     return fx.run(words.data(), 0x3C003C00u);
@@ -375,11 +380,12 @@ TEST(Vop3pPkInlineConstantCorrectness, AddF16InlineOneDefaultPackingAgreesWithSc
     const bool active = (kExec >> lane) & 1u;
     EXPECT_EQ(scalar_out[lane], simd_out[lane])
         << "op_sel_hi:[1,1]: SIMD path diverged from scalar body at lane " << lane;
-    if (active)
+    if (active) {
       EXPECT_EQ(scalar_out[lane], 0x3C004000u)
           << "op_sel_hi:[1,1]: inline 1.0 did not land in the low half only, at lane " << lane;
-    else
+    } else {
       EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << "clobbered inactive lane " << lane;
+    }
   }
 }
 
@@ -447,8 +453,9 @@ TEST(Vop3pPkInlineConstantCorrectness, Dot2F32Bf16InlineOneNarrowsAndSimdAgrees)
   const auto run_mode = [&](bool force_scalar) -> std::array<uint32_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx(rocjitsu::IsaFamily::Rdna3);
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     EXPECT_EQ(fx.wf->wf_size(), WF_SIZE) << "fixture assumes wave32";
@@ -461,10 +468,11 @@ TEST(Vop3pPkInlineConstantCorrectness, Dot2F32Bf16InlineOneNarrowsAndSimdAgrees)
     EXPECT_EQ(scalar_out[lane], simd_out[lane])
         << "v_dot2_f32_bf16: SIMD path diverged from scalar body at lane " << lane;
     const bool active = (kExec >> lane) & 1u;
-    if (active)
+    if (active) {
       EXPECT_EQ(scalar_out[lane], 0x3F800000u) << "v_dot2_f32_bf16 v4, v0, 1.0, 0: lane " << lane;
-    else
+    } else {
       EXPECT_EQ(scalar_out[lane], DST_SENTINEL) << "clobbered inactive lane " << lane;
+    }
   }
 }
 

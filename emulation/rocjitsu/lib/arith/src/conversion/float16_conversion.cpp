@@ -3,6 +3,8 @@
 
 // Public FP16/BF16 conversion entry points, validation, Wave64 splitting and dispatch.
 #include "conversion/float16_conversion.h"
+#include "common/alu.h"
+#include "common/sdwa_output.h"
 #include "common/validation.h"
 #include "conversion/float16_conversion_impl.h"
 #include "register/dpp.h"
@@ -16,25 +18,46 @@ using rocjitsu::arith::Float16Conversion;
 using rocjitsu::arith::Float16Format;
 
 // Convert one wave half after validation, retaining aliased inputs until consumed.
-template <Float16Format Format, Float16Conversion Op>
+template <Float16Format Format, Float16Conversion Op, bool Gfx950 = false>
 int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  if ((mode >> 32) && (mode & RJ_ARITH_CVT_SDWA)) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
   if (mode >> 32) {
     return rocjitsu::arith::execute_dpp(
         flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
-          return convert<Format, Op>(flags, exec_mask, uint32_t(mode), d, source, b, c);
+          return convert<Format, Op, Gfx950>(flags, exec_mask, uint32_t(mode), d, source, b, c);
         });
   }
   constexpr uint32_t arithmetic_modifiers =
       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_ABS_C | RJ_ARITH_ALU_NEG_A |
       RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_NEG_C | RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_MASK;
   constexpr uint32_t known =
-      arithmetic_modifiers | (Op == Float16Conversion::Widen        ? RJ_ARITH_ALU_HIGH_A
-                              : Op == Float16Conversion::Stochastic ? RJ_ARITH_ALU_HIGH_D
-                                                                    : 0);
-  constexpr bool packed_f16 = Format == Float16Format::F16 && Op == Float16Conversion::Pack;
-  if (int error = rocjitsu::arith::validate(flags, mode & ~uint64_t(known),
-                                            packed_f16 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0)) {
+      arithmetic_modifiers |
+      (Op == Float16Conversion::Widen        ? RJ_ARITH_ALU_HIGH_A | RJ_ARITH_CVT_SDWA
+       : Op == Float16Conversion::Stochastic ? RJ_ARITH_ALU_HIGH_D
+                                             : 0);
+  uint64_t supported_fp_flags =
+      Gfx950 ? (Format == Float16Format::Bf16
+                    ? (Op == Float16Conversion::Widen
+                           ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                                 RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE |
+                                 RJ_ARITH_FP_DX10_CLAMP_OFF | RJ_ARITH_FP_ROUND_MASK
+                           : RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)
+                    : (Op == Float16Conversion::Pack
+                           ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_MASK
+                           : 0))
+             : (Format == Float16Format::F16 && Op == Float16Conversion::Pack
+                    ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS
+                    : 0);
+  if constexpr (Op == Float16Conversion::Widen) {
+    if (mode & RJ_ARITH_CVT_SDWA) {
+      supported_fp_flags |= RJ_ARITH_FP_ROUND_MASK | RJ_ARITH_FP_IEEE_MODE |
+                            RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_DX10_CLAMP_OFF;
+    }
+  }
+  if (int error = rocjitsu::arith::validate(flags, mode & ~uint64_t(known), supported_fp_flags)) {
     return error;
   }
   if (!exec_mask) {
@@ -43,14 +66,14 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     rocjitsu::arith::float16_conversion_x86_64_v4(Format, Op, flags, exec_mask, mode, d[0], a[0],
-                                                  b ? b[0] : nullptr, c ? c[0] : nullptr);
+                                                  b ? b[0] : nullptr, c ? c[0] : nullptr, Gfx950);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
     rocjitsu::arith::float16_conversion_x86_64_v3(Format, Op, flags, exec_mask, mode, d[0], a[0],
-                                                  b ? b[0] : nullptr, c ? c[0] : nullptr);
+                                                  b ? b[0] : nullptr, c ? c[0] : nullptr, Gfx950);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -67,12 +90,31 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
     return raw;
   };
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
+  bool flush_in = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  const auto output = rocjitsu::arith::sdwa_output_policy(
+      flags, uint32_t(rocjitsu::arith::rdna3_output_modifiers(flags, mode)));
   for (int lane = 0; lane < 32; ++lane) {
     if constexpr (Op == Float16Conversion::Widen) {
-      result[lane] = (a[0][lane] >> (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)) << 16;
+      if (mode & RJ_ARITH_CVT_SDWA) {
+        result[lane] = rocjitsu::arith::sdwa_output_f32(
+            (a[0][lane] >> (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)) << 16, output);
+      } else if constexpr (Gfx950) {
+        result[lane] = rocjitsu::arith::widen_bf16_gfx950(a[0][lane], flags, uint32_t(mode));
+      } else {
+        result[lane] = (a[0][lane] >> (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)) << 16;
+      }
     } else if constexpr (Op == Float16Conversion::Stochastic) {
-      uint32_t value = rocjitsu::arith::narrow_float16<Format>(source(a[0][lane], 0), b[0][lane],
-                                                               true, saturate);
+      uint32_t value;
+      if constexpr (Gfx950) {
+        value = Format == Float16Format::Bf16
+                    ? rocjitsu::arith::narrow_bf16_gfx950(source(a[0][lane], 0), b[0][lane], true,
+                                                          saturate, flush_in)
+                    : rocjitsu::arith::narrow_f16_sr_gfx950(source(a[0][lane], 0), b[0][lane],
+                                                            saturate);
+      } else {
+        value = rocjitsu::arith::narrow_float16<Format>(source(a[0][lane], 0), b[0][lane], true,
+                                                        saturate);
+      }
       int shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
       result[lane] = (d[0][lane] & ~(0xffffU << shift)) | (value << shift);
     } else if constexpr (Op == Float16Conversion::StochasticPack) {
@@ -82,6 +124,18 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
           rocjitsu::arith::narrow_float16<Format>(a[0][lane], seeds << 16, true, saturate) |
           (rocjitsu::arith::narrow_float16<Format>(b[0][lane], seeds & 0xffff0000u, true, saturate)
            << 16);
+    } else if constexpr (Gfx950) {
+      if constexpr (Format == Float16Format::Bf16) {
+        const uint32_t low = rocjitsu::arith::narrow_bf16_gfx950(source(a[0][lane], 0), 0U, false,
+                                                                 saturate, flush_in);
+        const uint32_t high = rocjitsu::arith::narrow_bf16_gfx950(source(b[0][lane], 1), 0U, false,
+                                                                  saturate, flush_in);
+        result[lane] = low | (high << 16);
+      } else {
+        const uint32_t low = rocjitsu::arith::narrow_f16_pk_gfx950(source(a[0][lane], 0), flags);
+        const uint32_t high = rocjitsu::arith::narrow_f16_pk_gfx950(source(b[0][lane], 1), flags);
+        result[lane] = low | (high << 16);
+      }
     } else {
       const uint32_t low =
           rocjitsu::arith::narrow_float16<Format>(source(a[0][lane], 0), 0, false, saturate);
@@ -100,19 +154,21 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
 }
 
 // Validate every control before splitting Wave64; pointers are one VGPR per operand.
-template <Float16Format Format, Float16Conversion Op, int Lanes>
+template <Float16Format Format, Float16Conversion Op, int Lanes, bool Gfx950 = false>
 int execute(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b = nullptr,
             const uint32_t *const *c = nullptr) {
   // The inherited gfx1250 packed FP16 model is not hardware-qualified for
-  // output-denormal and stochastic boundary behavior. Do not advertise exactness.
-  constexpr bool qualified =
-      Format != Float16Format::F16 ||
-      (Op != Float16Conversion::Pack && Op != Float16Conversion::StochasticPack);
+  // output-denormal and stochastic boundary behavior. Legacy SDWA output is also
+  // inherited without new hardware qualification; ordinary BF16 widening is unchanged.
+  const bool qualified =
+      (Gfx950 || Format != Float16Format::F16 ||
+       (Op != Float16Conversion::Pack && Op != Float16Conversion::StochasticPack)) &&
+      (Op != Float16Conversion::Widen || !(mode & RJ_ARITH_CVT_SDWA));
   flags = rocjitsu::arith::resolve_compatibility(
       flags,
       qualified ? RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS : RJ_ARITH_SEMANTICS_LOOSE);
-  if constexpr (!qualified) {
+  if (!qualified) {
     if (rocjitsu::arith::is_exact(flags) &&
         (flags & RJ_ARITH_SEMANTICS_MASK) != RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
       return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
@@ -121,7 +177,7 @@ int execute(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  if (int error = convert<Format, Op>(flags, 0, mode, nullptr, nullptr, nullptr, nullptr)) {
+  if (int error = convert<Format, Op, Gfx950>(flags, 0, mode, nullptr, nullptr, nullptr, nullptr)) {
     return error;
   }
   if (!exec_mask) {
@@ -131,10 +187,10 @@ int execute(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
     uint32_t *dest = d[0] + 32 * half;
     const uint32_t *av = a[0] + 32 * half, *bv = b ? b[0] + 32 * half : nullptr,
                    *cv = c ? c[0] + 32 * half : nullptr;
-    if (int error =
-            convert<Format, Op>(flags, uint32_t(exec_mask >> (32 * half)),
-                                rocjitsu::arith::dpp_half_wave_instruction_flags(mode, half), &dest,
-                                &av, b ? &bv : nullptr, c ? &cv : nullptr)) {
+    if (int error = convert<Format, Op, Gfx950>(
+            flags, uint32_t(exec_mask >> (32 * half)),
+            rocjitsu::arith::dpp_half_wave_instruction_flags(mode, half), &dest, &av,
+            b ? &bv : nullptr, c ? &cv : nullptr)) {
       return error;
     }
   }
@@ -245,4 +301,82 @@ int rj_arith_v_cvt_sr_pk_f16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_
                                      const uint32_t *const *b, const uint32_t *const *c) {
   return execute<Float16Format::F16, Float16Conversion::StochasticPack, 64>(flags, exec_mask, mode,
                                                                             d, a, b, c);
+}
+
+// Widen the selected BF16 half to FP32 with MI350X (gfx950) modifier, NaN, and denormal rules.
+int rj_arith_v_cvt_f32_bf16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a) {
+  return execute<Float16Format::Bf16, Float16Conversion::Widen, 32, true>(flags, exec_mask, mode, d,
+                                                                          a);
+}
+
+// Widen the selected BF16 half to FP32 with MI350X (gfx950) modifier, NaN, and denormal rules.
+int rj_arith_v_cvt_f32_bf16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a) {
+  return execute<Float16Format::Bf16, Float16Conversion::Widen, 64, true>(flags, exec_mask, mode, d,
+                                                                          a);
+}
+
+// Pack two FP32 operands into BF16 with MI350X (gfx950) NaN-quieting and input-denormal rules.
+int rj_arith_v_cvt_pk_bf16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b) {
+  return execute<Float16Format::Bf16, Float16Conversion::Pack, 32, true>(flags, exec_mask, mode, d,
+                                                                         a, b);
+}
+
+// Pack two FP32 operands into BF16 with MI350X (gfx950) NaN-quieting and input-denormal rules.
+int rj_arith_v_cvt_pk_bf16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b) {
+  return execute<Float16Format::Bf16, Float16Conversion::Pack, 64, true>(flags, exec_mask, mode, d,
+                                                                         a, b);
+}
+
+// Narrow FP32 to one BF16 half using a seed with MI350X (gfx950) NaN, overflow, and denormal rules.
+int rj_arith_v_cvt_sr_bf16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b) {
+  return execute<Float16Format::Bf16, Float16Conversion::Stochastic, 32, true>(flags, exec_mask,
+                                                                               mode, d, a, b);
+}
+
+// Narrow FP32 to one BF16 half using a seed with MI350X (gfx950) NaN, overflow, and denormal rules.
+int rj_arith_v_cvt_sr_bf16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b) {
+  return execute<Float16Format::Bf16, Float16Conversion::Stochastic, 64, true>(flags, exec_mask,
+                                                                               mode, d, a, b);
+}
+
+// Pack two FP32 operands into FP16 with MI350X (gfx950) guest rounding, denormal, and NaN rules.
+int rj_arith_v_cvt_pk_f16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b) {
+  return execute<Float16Format::F16, Float16Conversion::Pack, 32, true>(flags, exec_mask, mode, d,
+                                                                        a, b);
+}
+
+// Pack two FP32 operands into FP16 with MI350X (gfx950) guest rounding, denormal, and NaN rules.
+int rj_arith_v_cvt_pk_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b) {
+  return execute<Float16Format::F16, Float16Conversion::Pack, 64, true>(flags, exec_mask, mode, d,
+                                                                        a, b);
+}
+
+// Narrow FP32 to one FP16 half using a seed with MI350X (gfx950) NaN and overflow rules.
+int rj_arith_v_cvt_sr_f16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b) {
+  return execute<Float16Format::F16, Float16Conversion::Stochastic, 32, true>(flags, exec_mask,
+                                                                              mode, d, a, b);
+}
+
+// Narrow FP32 to one FP16 half using a seed with MI350X (gfx950) NaN and overflow rules.
+int rj_arith_v_cvt_sr_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b) {
+  return execute<Float16Format::F16, Float16Conversion::Stochastic, 64, true>(flags, exec_mask,
+                                                                              mode, d, a, b);
 }

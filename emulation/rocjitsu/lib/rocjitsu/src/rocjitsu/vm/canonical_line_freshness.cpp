@@ -11,7 +11,6 @@
 
 namespace rocjitsu {
 namespace {
-
 class LineKey {
 public:
   uint64_t backing_id;
@@ -30,8 +29,9 @@ struct LineKeyHash {
 
 bool bounded_lines(uint64_t backing_id, uint64_t offset, size_t size, uint64_t &first,
                    uint64_t &last) noexcept {
-  if (backing_id == 0 || size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - offset)
+  if (backing_id == 0 || size == 0 || size - 1 > std::numeric_limits<uint64_t>::max() - offset) {
     return false;
+  }
   first = offset & ~(CanonicalLineFreshness::kLineSize - 1);
   last = (offset + size - 1) & ~(CanonicalLineFreshness::kLineSize - 1);
   return true;
@@ -45,10 +45,11 @@ public:
 
   void invalidate_all_locked() noexcept {
     versions.clear();
-    if (epoch == std::numeric_limits<uint64_t>::max())
+    if (epoch == std::numeric_limits<uint64_t>::max()) {
       disabled = true;
-    else
+    } else {
       ++epoch;
+    }
   }
 
   std::shared_mutex mutex;
@@ -90,8 +91,10 @@ size_t CanonicalLineFreshness::ReadStamp::size() const noexcept {
 
 bool CanonicalLineFreshness::ReadStamp::covers(uint64_t backing_id, uint64_t offset,
                                                size_t size) const noexcept {
-  if (!snapshot_ || backing_id != snapshot_->backing_id || size == 0 || offset < snapshot_->offset)
+  if (!snapshot_ || backing_id != snapshot_->backing_id || size == 0 ||
+      offset < snapshot_->offset) {
     return false;
+  }
   const uint64_t relative = offset - snapshot_->offset;
   return relative < snapshot_->size && size <= snapshot_->size - relative;
 }
@@ -99,28 +102,29 @@ bool CanonicalLineFreshness::ReadStamp::covers(uint64_t backing_id, uint64_t off
 CanonicalLineFreshness::FillAuthority
 CanonicalLineFreshness::ReadStamp::try_acquire_fill(uint64_t backing_id, uint64_t offset,
                                                     size_t size) const noexcept {
-  if (!state_ || !covers(backing_id, offset, size))
-    return {};
-  try {
-    std::shared_lock lock(state_->mutex, std::try_to_lock);
-    if (!lock.owns_lock() || state_->disabled || state_->epoch != snapshot_->epoch)
-      return {};
-    const uint64_t first = offset & ~(kLineSize - 1);
-    const uint64_t last = (offset + size - 1) & ~(kLineSize - 1);
-    const size_t begin = static_cast<size_t>((first - snapshot_->first_line) / kLineSize);
-    const size_t end = static_cast<size_t>((last - snapshot_->first_line) / kLineSize);
-    if (end >= snapshot_->versions.size())
-      return {};
-    for (size_t i = begin; i <= end; ++i) {
-      const LineKey key{backing_id, snapshot_->first_line + i * kLineSize};
-      const auto found = state_->versions.find(key);
-      if (found == state_->versions.end() || found->second != snapshot_->versions[i])
-        return {};
-    }
-    return FillAuthority(state_, std::move(lock));
-  } catch (...) {
+  if (!state_ || !covers(backing_id, offset, size)) {
     return {};
   }
+
+  std::shared_lock lock(state_->mutex, std::try_to_lock);
+  if (!lock.owns_lock() || state_->disabled || state_->epoch != snapshot_->epoch) {
+    return {};
+  }
+  const uint64_t first = offset & ~(kLineSize - 1);
+  const uint64_t last = (offset + size - 1) & ~(kLineSize - 1);
+  const size_t begin = static_cast<size_t>((first - snapshot_->first_line) / kLineSize);
+  const size_t end = static_cast<size_t>((last - snapshot_->first_line) / kLineSize);
+  if (end >= snapshot_->versions.size()) {
+    return {};
+  }
+  for (size_t i = begin; i <= end; ++i) {
+    const LineKey key{backing_id, snapshot_->first_line + i * kLineSize};
+    const auto found = state_->versions.find(key);
+    if (found == state_->versions.end() || found->second != snapshot_->versions[i]) {
+      return {};
+    }
+  }
+  return FillAuthority(state_, std::move(lock));
 }
 
 CanonicalLineFreshness::WriterAuthority::WriterAuthority(
@@ -129,8 +133,9 @@ CanonicalLineFreshness::WriterAuthority::WriterAuthority(
 
 void CanonicalLineFreshness::WriterAuthority::advance(uint64_t backing_id, uint64_t offset,
                                                       size_t size) noexcept {
-  if (!lock_.owns_lock() || !state_ || state_->disabled)
+  if (!lock_.owns_lock() || !state_ || state_->disabled) {
     return;
+  }
   uint64_t first = 0;
   uint64_t last = 0;
   if (!bounded_lines(backing_id, offset, size, first, last)) {
@@ -143,14 +148,17 @@ void CanonicalLineFreshness::WriterAuthority::advance(uint64_t backing_id, uint6
     return;
   }
   const uint64_t version = state_->next_version++;
-  for (auto &[key, tracked_version] : state_->versions)
-    if (key.backing_id == backing_id && key.line_offset >= first && key.line_offset <= last)
+  for (auto &[key, tracked_version] : state_->versions) {
+    if (key.backing_id == backing_id && key.line_offset >= first && key.line_offset <= last) {
       tracked_version = version;
+    }
+  }
 }
 
 void CanonicalLineFreshness::WriterAuthority::invalidate_all() noexcept {
-  if (lock_.owns_lock() && state_)
+  if (lock_.owns_lock() && state_) {
     state_->invalidate_all_locked();
+  }
 }
 
 CanonicalLineFreshness::CanonicalLineFreshness(size_t capacity)
@@ -165,62 +173,61 @@ CanonicalLineFreshness::try_capture_read(uint64_t backing_id, uint64_t offset,
 
 std::optional<CanonicalLineFreshness::ReadStamp> CanonicalLineFreshness::capture_read_under_writer(
     const WriterAuthority &writer, uint64_t backing_id, uint64_t offset, size_t size) noexcept {
-  if (!writer || writer.state_.get() != state_.get() || state_->disabled)
-    return std::nullopt;
-  uint64_t first = 0;
-  uint64_t last = 0;
-  if (!bounded_lines(backing_id, offset, size, first, last))
-    return std::nullopt;
-  const uint64_t line_count = (last - first) / kLineSize + 1;
-  if (line_count > state_->capacity)
-    return std::nullopt;
-  try {
-    auto snapshot = std::make_shared<Snapshot>();
-    snapshot->backing_id = backing_id;
-    snapshot->offset = offset;
-    snapshot->size = size;
-    snapshot->first_line = first;
-    snapshot->epoch = state_->epoch;
-    snapshot->versions.reserve(static_cast<size_t>(line_count));
-    for (uint64_t i = 0; i < line_count; ++i) {
-      const LineKey key{backing_id, first + i * kLineSize};
-      auto found = state_->versions.find(key);
-      if (found == state_->versions.end()) {
-        if (state_->next_version == std::numeric_limits<uint64_t>::max()) {
-          state_->invalidate_all_locked();
-          state_->disabled = true;
-          return std::nullopt;
-        }
-        if (state_->versions.size() == state_->capacity) {
-          // Keep the current read's lines resident. An evicted older stamp
-          // simply fails its later freshness check.
-          auto victim = state_->versions.begin();
-          while (victim != state_->versions.end() && victim->first.backing_id == backing_id &&
-                 victim->first.line_offset >= first && victim->first.line_offset <= last)
-            ++victim;
-          if (victim == state_->versions.end())
-            return std::nullopt;
-          state_->versions.erase(victim);
-        }
-        found = state_->versions.emplace(key, state_->next_version++).first;
-      }
-      snapshot->versions.push_back(found->second);
-    }
-    return ReadStamp(state_, std::move(snapshot));
-  } catch (...) {
+  if (!writer || writer.state_.get() != state_.get() || state_->disabled) {
     return std::nullopt;
   }
+  uint64_t first = 0;
+  uint64_t last = 0;
+  if (!bounded_lines(backing_id, offset, size, first, last)) {
+    return std::nullopt;
+  }
+  const uint64_t line_count = (last - first) / kLineSize + 1;
+  if (line_count > state_->capacity) {
+    return std::nullopt;
+  }
+
+  auto snapshot = std::make_shared<Snapshot>();
+  snapshot->backing_id = backing_id;
+  snapshot->offset = offset;
+  snapshot->size = size;
+  snapshot->first_line = first;
+  snapshot->epoch = state_->epoch;
+  snapshot->versions.reserve(static_cast<size_t>(line_count));
+  for (uint64_t i = 0; i < line_count; ++i) {
+    const LineKey key{backing_id, first + i * kLineSize};
+    auto found = state_->versions.find(key);
+    if (found == state_->versions.end()) {
+      if (state_->next_version == std::numeric_limits<uint64_t>::max()) {
+        state_->invalidate_all_locked();
+        state_->disabled = true;
+        return std::nullopt;
+      }
+      if (state_->versions.size() == state_->capacity) {
+        // Keep the current read's lines resident. An evicted older stamp
+        // simply fails its later freshness check.
+        auto victim = state_->versions.begin();
+        while (victim != state_->versions.end() && victim->first.backing_id == backing_id &&
+               victim->first.line_offset >= first && victim->first.line_offset <= last) {
+          ++victim;
+        }
+        if (victim == state_->versions.end()) {
+          return std::nullopt;
+        }
+        state_->versions.erase(victim);
+      }
+      found = state_->versions.emplace(key, state_->next_version++).first;
+    }
+    snapshot->versions.push_back(found->second);
+  }
+  return ReadStamp(state_, std::move(snapshot));
 }
 
 CanonicalLineFreshness::WriterAuthority CanonicalLineFreshness::try_acquire_writer() noexcept {
-  try {
-    std::unique_lock lock(state_->mutex, std::try_to_lock);
-    if (!lock.owns_lock())
-      return {};
-    return WriterAuthority(state_, std::move(lock));
-  } catch (...) {
+  std::unique_lock lock(state_->mutex, std::try_to_lock);
+  if (!lock.owns_lock()) {
     return {};
   }
+  return WriterAuthority(state_, std::move(lock));
 }
 
 void CanonicalLineFreshness::invalidate_all() {
@@ -229,15 +236,12 @@ void CanonicalLineFreshness::invalidate_all() {
 }
 
 bool CanonicalLineFreshness::try_invalidate_all() noexcept {
-  try {
-    std::unique_lock lock(state_->mutex, std::try_to_lock);
-    if (!lock.owns_lock())
-      return false;
-    state_->invalidate_all_locked();
-    return true;
-  } catch (...) {
+  std::unique_lock lock(state_->mutex, std::try_to_lock);
+  if (!lock.owns_lock()) {
     return false;
   }
+  state_->invalidate_all_locked();
+  return true;
 }
 
 } // namespace rocjitsu

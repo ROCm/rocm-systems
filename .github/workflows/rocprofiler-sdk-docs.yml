@@ -138,17 +138,9 @@ jobs:
           apt-get install -y git
           echo "PATH=/usr/bin:$PATH" >> "$GITHUB_ENV"
 
-      - name: Clone ROCProfiler SDK & HIP/CLR & ROCR-Runtime
+      - name: Clone rocm-systems
         uses: actions/checkout@v6
         with:
-          sparse-checkout: |
-            .github/actions/rocprofiler-sdk-util
-            projects/rocprofiler-sdk
-            shared/sha256
-            projects/rocr-runtime
-            projects/clr
-            projects/hip
-            projects/hrr
           submodules: false
           set-safe-directory: true
 

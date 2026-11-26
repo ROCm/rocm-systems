@@ -9,10 +9,46 @@ import tempfile
 import unittest
 from unittest import mock
 
-from consan_runtime_e2e import Driver, HardwareUnavailable
+from consan_runtime_e2e import Driver, HardwareUnavailable, parse_target_arguments
 
 
 class RuntimeIntegration(unittest.TestCase):
+    def test_atomic_and_group_flat_geometry_uses_two_full_waves(self):
+        for wave in (32, 64):
+            for case in ('atomic_u32_count', 'atomic_u32_read', 'flat_load_overlap'):
+                with self.subTest(wave=wave, case=case):
+                    argv = ['--case', case, '--wave-size', str(wave)]
+                    for extra in ([], ['--threads', str(2 * wave)]):
+                        args = parse_target_arguments(
+                            argparse.ArgumentParser(), argv + extra
+                        )
+                        self.assertEqual((args.threads, args.workgroups), (2 * wave, 1))
+                    for extra in (
+                        ['--threads', str(wave)],
+                        ['--threads', str(2 * wave - 1)],
+                        ['--threads', str(2 * wave + 1)],
+                        ['--workgroups', '2'],
+                    ):
+                        parser = argparse.ArgumentParser()
+                        with mock.patch.object(
+                            parser, 'error', side_effect=ValueError
+                        ) as error:
+                            with self.assertRaises(ValueError):
+                                parse_target_arguments(parser, argv + extra)
+                        self.assertIn(
+                            f'--workgroups 1 --threads {2 * wave}',
+                            error.call_args.args[0],
+                        )
+
+    def test_ordinary_geometry_keeps_its_default_and_explicit_overrides(self):
+        argv = ['--case', 'grouped_disjoint', '--wave-size', '64']
+        args = parse_target_arguments(argparse.ArgumentParser(), argv)
+        self.assertEqual((args.threads, args.workgroups), (64, 1))
+        args = parse_target_arguments(
+            argparse.ArgumentParser(), argv + ['--threads', '129', '--workgroups', '4']
+        )
+        self.assertEqual((args.threads, args.workgroups), (129, 4))
+
     def test_preparation_failures_cannot_continue_the_pipeline(self):
         for status in (0, 2):
             with self.subTest(
