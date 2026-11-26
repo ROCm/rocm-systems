@@ -1,6 +1,6 @@
 .. meta::
    :description: Frameworks and applications that use hipFile for GPU-direct I/O
-   :keywords: hipFile, integrations, LMCache, fastsafetensors, rocAL, PyTorch, fio, IOR, GDS, ROCm, AMD
+   :keywords: hipFile, integrations, LMCache, NIXL, fastsafetensors, rocAL, PyTorch, fio, IOR, GDS, ROCm, AMD
 
 *******************************************
 Frameworks and applications using hipFile
@@ -13,7 +13,18 @@ LMCache
 
 `LMCache <https://docs.lmcache.ai/index.html>`_ is a KV cache layer for LLM serving. It offloads KV cache chunks to CPU memory, local disk, or remote storage. Its GDS storage backend reads and writes those chunks directly between GPU memory and storage.
 
-Set the ``gds_backend`` configuration key to ``hipfile`` or set the ``LMCACHE_GDS_BACKEND`` environment variable to ``hipfile``.  See the `LMCache GDS backend documentation <https://docs.lmcache.ai/kv_cache/storage_backends/gds.html>_` for more information.
+Set the ``gds_backend`` configuration key to ``hipfile`` or set the ``LMCACHE_GDS_BACKEND`` environment variable to ``hipfile``.  See the `LMCache GDS backend documentation <https://docs.lmcache.ai/kv_cache/storage_backends/gds.html>`_ for more information.
+
+NIXL
+====
+
+`NVIDIA Inference Xfer Library (NIXL <https://github.com/ai-dynamo/nixl>`_) transfers data such as key-value cache (KV cache) between memory and storage for distributed LLM inference. Its ``AIS`` storage backend is the ROCm counterpart to the ``GDS`` backend. AIS uses a pool of worker threads to run ``hipFileRead()`` and ``hipFileWrite()``, transferring data directly between GPU memory and files.
+
+To build the ``AIS`` backend, pass ``-Drocm_path=/opt/rocm`` (or your ROCm install path) to ``meson setup`` when configuring NIXL. To use it, request the ``AIS`` backend from your NIXL agent: 
+* C++: Call ``nixlAgent::createBackend()`` with ``AIS`` , or
+* Python: ``create_backend("AIS")`` or ``nixl_agent_config(backends=["UCX", "AIS"])``.
+
+The ``AIS`` backend supports only GPU memory buffers. For more information, see the `NIXL AIS plugin documentation <https://github.com/ai-dynamo/nixl/blob/main/src/plugins/rocm_ais/README.md>`_.
 
 fastsafetensors
 ===============
@@ -39,9 +50,9 @@ Build options in PyTorch's HIP port keep their original names. ``torch.cuda.gds.
 fio
 ===
 
-`fio <https://github.com/axboe/fio>`_ is a flexible I/O tester widely used for storage benchmarking. AMD maintains a fork at `ROCm/fio <https://github.com/ROCm/fio>`_ that adds a ``libhipfile`` I/O engine, so fio job files can drive hipFile reads and writes against GPU memory.
+`fio <https://github.com/axboe/fio>`_ is a flexible I/O tester commonly used for storage benchmarking. fio versions 3.43 and later include a ``libhipfile`` engine that lets you drive hipFile I/O workloads from fio job files.
 
-For build and run instructions, see :doc:`/how-to/use-with-fio`.
+For build instructions, see :doc:`/how-to/use-with-fio`.
 
 IOR
 ===

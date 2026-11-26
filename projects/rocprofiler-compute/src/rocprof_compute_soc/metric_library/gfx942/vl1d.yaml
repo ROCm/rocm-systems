@@ -1,0 +1,24 @@
+remove:
+  - vl1d.access_lat
+  - vl1d.l2_rd_lat
+  - vl1d.l2_wr_lat
+vl1d.ai:
+  formula: SUM($valu_f16_flops + $valu_f32_flops + $valu_f64_flops + $mfma_f16_flops + $mfma_bf16_flops + $mfma_f32_flops + $mfma_f64_flops + $mfma_f8_flops) / SUM($l1_bytes)
+vl1d.bw_util:
+  formula: 100 * 128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 128 * $cu_per_gpu)
+vl1d.cache_bw:
+  formula: 128 * SUM(TCP_TOTAL_CACHE_ACCESSES_sum) / SUM(End_Timestamp - Start_Timestamp)
+  peak: $max_sclk / 1000 * 128 * $cu_per_gpu
+vl1d.l2_bw:
+  formula: 128 * SUM(TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+vl1d.l2_bw_by_size:
+  name: vL1D-L2 Bandwidth (By Request Size)
+  formula: SUM(128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+  description: >-
+    The number of bytes transferred across the vL1D-L2 interface as a result of VMEM
+    instructions, divided by total duration. The number of bytes is calculated as
+    the number of cache lines requested multiplied by the cache line size. This value
+    does not consider partial requests, so for instance, if only a single value is
+    requested in a cache line, the data movement will still be counted as a full cache
+    line.

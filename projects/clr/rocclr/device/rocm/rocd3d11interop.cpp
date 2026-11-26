@@ -134,7 +134,7 @@ bool Export(const Memory* memory, D3D11Object* d3d11Obj,
             void* srd, UINT* srdSize, hsa_interop_map_flag_t* mapFlags,
             size_t* sizeHint) {
   auto d3d11Resource = d3d11Obj->getD3D11Resource();
-  bool isYUV = (d3d11Obj->getDxgiFormat() == DXGI_FORMAT_NV12 ||
+  bool isPlanarYuv = (d3d11Obj->getDxgiFormat() == DXGI_FORMAT_NV12 ||
                 d3d11Obj->getDxgiFormat() == DXGI_FORMAT_P010);
   if (!memory || !d3d11Resource || !handle || !offset || !mapFlags) {
     return false;
@@ -161,7 +161,7 @@ bool Export(const Memory* memory, D3D11Object* d3d11Obj,
     // Because Pal in D3D doesn't support querying SRD of the full resource of types
     // DXGI_FORMAT_NV12 and DXGI_FORMAT_P010.
     UINT planeIndex = 0;
-    if (isYUV) {
+    if (isPlanarYuv) {
       switch (d3d11Obj->getPlane()) {
         case -1:
         case 0:
@@ -218,7 +218,7 @@ bool Export(const Memory* memory, D3D11Object* d3d11Obj,
   *offset = 0;
   *mapFlags = HSA_INTEROP_MAP_FLAG_KMT_HANDLE;
 
-  if (isYUV && d3d11Obj->getPlane() == 1) {
+  if (isPlanarYuv && d3d11Obj->getPlane() == 1) {
     uint32_t w = d3d11Obj->getWidth() * 2u;
     uint32_t h = d3d11Obj->getHeight() * 2u;
     const uint32_t pitchAlign = memory->dev().info().imagePitchAlignment_;

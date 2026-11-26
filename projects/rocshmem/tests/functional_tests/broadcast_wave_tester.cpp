@@ -72,11 +72,11 @@ __global__ void BroadcastWaveTestKernel(int loop, int skip, long long int *start
     __syncthreads();
   }
 
-  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0. The TDM LDS
-  // region sits right after the per-wave ctx slots in the dynamic shared
-  // buffer; memcpy_wave_tdm splits it evenly across the block's waves.
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0. The
+  // staged LDS region sits right after the per-wave ctx slots in the dynamic
+  // shared buffer; memcpy_wave_lds_stage splits it evenly across the block's waves.
   uint8_t *tdm_lds = reinterpret_cast<uint8_t*>(&ctx_array[num_waves_per_wg]);
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   // Each wave uses its own buffer slice
   T1 *my_source = source_buf + flat_wf_id * size;
@@ -162,7 +162,7 @@ template <typename T1>
 void BroadcastWaveTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
                                            int loop, size_t size) {
   size_t shared_bytes = num_warps * sizeof(rocshmem_ctx_t) +
-                        rocshmem_query_tdm_lds_bytes();
+                        rocshmem_query_lds_stage_bytes();
 
   int num_elems = size / sizeof(T1);
 

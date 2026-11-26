@@ -10,6 +10,12 @@ import subprocess
 import tempfile
 import unittest
 
+WAIT_CHECKING_BIT = 0x10
+CACHE_MEMORY_BIT = 0x20
+TARGET_COUNT = 12
+TARGET_MASK = 0x0F
+CPU_MASK = 0xC0
+
 
 class ExecutionFuzzCliTest(unittest.TestCase):
     @classmethod
@@ -102,10 +108,43 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             self.assertEqual(
                 {path.stat().st_size for path in seeds}, {8, 32, 256, 1024}
             )
-            self.assertTrue(all(path.read_bytes()[0] == 10 for path in seeds))
+            headers = [path.read_bytes()[:2] for path in seeds]
+            self.assertTrue(all(target & TARGET_MASK == 10 for target, _ in headers))
             self.assertEqual(
-                {path.read_bytes()[1] for path in seeds}, {0, 1, 6, 7, 8, 9, 14, 15}
+                {(target >> 4, mode >> 6) for target, mode in headers},
+                {(semantics, cpu) for semantics in range(5) for cpu in range(4)},
             )
+            modes = {mode for _, mode in headers}
+            harness_modes = WAIT_CHECKING_BIT | CACHE_MEMORY_BIT | CPU_MASK
+            self.assertEqual(
+                {mode & ~harness_modes for mode in modes}, {0, 1, 6, 7, 8, 9, 14, 15}
+            )
+            self.assertTrue(any(mode & WAIT_CHECKING_BIT for mode in modes))
+            self.assertEqual(
+                {mode & CACHE_MEMORY_BIT for mode in modes}, {0, CACHE_MEMORY_BIT}
+            )
+
+    def test_emit_auto_seeds_includes_generated_kernel_for_every_target(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            seed_directory = Path(temporary) / "seeds"
+            result = self.run_execution_fuzz(
+                "--emit-seeds", seed_directory, "--seed", "253"
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            seeds = sorted(seed_directory.glob("*.bin"))
+            self.assertEqual(len(seeds), 128)
+            kernel_targets = set()
+            for path in seeds:
+                target, modes = path.read_bytes()[:2]
+                target &= TARGET_MASK
+                if target in kernel_targets or not modes & WAIT_CHECKING_BIT:
+                    continue
+                replay = self.run_execution_fuzz("--input", path, "--async", "off")
+                self.assertEqual(replay.returncode, 0, replay.stderr)
+                stats = json.loads(replay.stdout)
+                if stats["inputs_halted"] == 1 and stats["executed"] > 2:
+                    kernel_targets.add(target)
+            self.assertEqual(kernel_targets, set(range(TARGET_COUNT)))
 
     def test_interrupted_input_replacement_invalidates_previous_seed(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -143,6 +182,56 @@ class ExecutionFuzzCliTest(unittest.TestCase):
                     process.communicate(timeout=10)
             self.assertFalse(marker.exists())
 
+    def test_campaign_artifact_failure_is_reported_without_execution(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            # A nonempty directory makes removal of the previous marker fail.
+            marker = output / "current.seed"
+            marker.mkdir()
+            (marker / "keep").write_text("previous marker")
+            replay = output / "current.bin"
+            replay.write_bytes(b"previous input")
+            result = self.run_execution_fuzz(
+                "--random",
+                "1",
+                "--seed",
+                "42",
+                "--threads",
+                "1",
+                "--async",
+                "off",
+                "--output",
+                output,
+            )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("seed=42", result.stderr)
+            self.assertIn("cannot remove artifact", result.stderr)
+            self.assertEqual(replay.read_bytes(), b"previous input")
+            self.assertFalse((output / "failure.bin").exists())
+            self.assertFalse((output / "failure.seed").exists())
+            self.assertNotIn('"executed"', result.stdout)
+
+    def test_campaign_input_write_failure_does_not_publish_seed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary)
+            (output / "current.bin").mkdir()
+            marker = output / "current.seed"
+            marker.write_text("999\n")
+            result = self.run_execution_fuzz(
+                "--random",
+                "1",
+                "--threads",
+                "1",
+                "--async",
+                "off",
+                "--output",
+                output,
+            )
+            self.assertEqual(result.returncode, 1, result.stderr)
+            self.assertIn("cannot write input", result.stderr)
+            self.assertFalse(marker.exists())
+            self.assertFalse((output / "failure.seed").exists())
+
     def test_documented_bounded_random_smoke(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             result = self.run_execution_fuzz(
@@ -150,6 +239,22 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(json.loads(result.stdout)["inputs"], 4)
+
+    def test_seed_emission_rejects_invalid_destination_and_range(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            existing = directory / "existing.bin"
+            existing.write_bytes(b"keep")
+            result = self.run_execution_fuzz("--emit-seeds", directory)
+            self.assertEqual(result.returncode, 2, result.stderr)
+            self.assertIn("seed destination must be an empty directory", result.stderr)
+            self.assertEqual(existing.read_bytes(), b"keep")
+            overflow = self.run_execution_fuzz(
+                "--emit-seeds", directory / "seeds", "--seed", (1 << 64) - 1
+            )
+            self.assertEqual(overflow.returncode, 2, overflow.stderr)
+            self.assertIn("seed range exceeds uint64", overflow.stderr)
+            self.assertFalse(list((directory / "seeds").glob("*.bin")))
 
     def test_random_seed_range_cannot_wrap(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -164,7 +269,7 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("seed range exceeds uint64", result.stderr)
 
-    def test_unsupported_guest_input_is_a_normal_halt(self) -> None:
+    def test_unsupported_guest_input_stops_without_a_normal_halt(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             input_path = Path(temporary) / "input.bin"
             input_path.write_bytes(bytes([6, 0, 0, 0, 0x68, 0xD8]))
@@ -172,7 +277,9 @@ class ExecutionFuzzCliTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("could not execute ds_gws_sema_v", result.stderr)
             stats = json.loads(result.stdout)
-            self.assertEqual(stats["inputs_halted"], 1)
+            self.assertEqual(stats["waves_halted"], 0)
+            self.assertEqual(stats["inputs_halted"], 0)
+            self.assertEqual(stats["inputs_stopped"], 1)
             self.assertEqual(stats["budget_exhausted"], 0)
 
     def test_invalid_async_mode_is_rejected(self) -> None:
@@ -184,7 +291,7 @@ class ExecutionFuzzCliTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             input_path = Path(temporary) / "input.bin"
             input_path.write_bytes(b"\x00")
-            for target in ("gfx1100", "gfx1151", "gfx1251"):
+            for target in ("gfx1100", "gfx1150", "gfx1251"):
                 result = self.run_execution_fuzz(
                     "--input", input_path, "--target", target
                 )

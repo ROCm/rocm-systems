@@ -135,7 +135,7 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_LsaTeamSmallerThanCommRejected)
     if (!isCeRuntimeDriverSupported())
         GTEST_SKIP() << "CE driver not in supported range";
 
-    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks / 2;
+    mockComm_.comm.devrState.lsaTeamSize = mockComm_.comm.nRanks / 2;
     // Scratch rejects a registered recv even when the team covers the comm, so
     // the flip below uses a non-registered recv. Both gates must reject the
     // small team.
@@ -154,7 +154,7 @@ TEST_F(CeAlltoAllvEligibilityTest, CeAvailable_LsaTeamSmallerThanCommRejected)
 
     // Restoring only the team size flips both verdicts, so no other clause is
     // responsible for the rejection above.
-    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks;
+    mockComm_.comm.devrState.lsaTeamSize = mockComm_.comm.nRanks;
     EXPECT_TRUE(ncclCeScratchAvailable(mockComm_.get(),
                                        ncclFuncAlltoAllv,
                                        ncclDevSum,
@@ -379,14 +379,14 @@ TEST_F(CeAlltoAllEligibilityTest, LsaTeamSmallerThanCommRejected)
     if (!isCeRuntimeDriverSupported())
         GTEST_SKIP() << "CE driver not in supported range";
 
-    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks / 2;
+    mockComm_.comm.devrState.lsaTeamSize = mockComm_.comm.nRanks / 2;
     EXPECT_FALSE(ncclCeAlltoAllEligible(mockComm_.get(),
                                         ncclFloat32,
                                         ncclSymSendRegRecvReg,
                                         /*hasSysmemSegment=*/false,
                                         /*capturing=*/false));
 
-    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks;
+    mockComm_.comm.devrState.lsaTeamSize = mockComm_.comm.nRanks;
     EXPECT_TRUE(ncclCeAlltoAllEligible(mockComm_.get(),
                                        ncclFloat32,
                                        ncclSymSendRegRecvReg,
@@ -424,7 +424,7 @@ TEST_F(CeAlltoAllEligibilityTest, UnequalRanksPerNode_HierUnavailable)
         GTEST_SKIP() << "CE driver not in supported range";
 
     mockComm_.configureHierEligible(/*nNodes=*/2, /*localRanks=*/4);
-    mockComm_.comm.maxLocalRanks = mockComm_.comm.devrState.lsaSize + 1;
+    mockComm_.comm.maxLocalRanks = mockComm_.comm.devrState.lsaTeamSize + 1;
     EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
                                      ncclFuncAlltoAll,
                                      ncclDevSum,
@@ -556,7 +556,7 @@ TEST_F(CeHierAlltoAllvEligibilityTest, LsaSpansCommRejected)
     if (!isCeRuntimeDriverSupported())
         GTEST_SKIP() << "CE driver not in supported range";
 
-    mockComm_.comm.devrState.lsaSize = mockComm_.comm.nRanks;
+    mockComm_.comm.devrState.lsaTeamSize = mockComm_.comm.nRanks;
     EXPECT_FALSE(hierEligible());
 }
 
@@ -570,6 +570,33 @@ TEST_F(CeHierAlltoAllvEligibilityTest, RequiresZeroCtaPolicy)
 
     mockComm_.comm.config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
     EXPECT_TRUE(hierEligible());
+}
+
+// With NCCL_CROSS_NIC=0 init.cc sets rmaBaseStride to the ranks per host, so host
+// RMA reaches only same-rail peers. AlltoAll and AlltoAllv put to every remote rank
+// and must fall back; AllGather's rail puts stay eligible.
+TEST_F(CeHierAlltoAllvEligibilityTest, RailOnlyRmaRejectsAlltoAllvAndAlltoAll)
+{
+    if (!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    mockComm_.comm.rmaBaseStride = mockComm_.comm.localRanks;
+    EXPECT_FALSE(hierEligible());
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
+                                     ncclFuncAlltoAllv,
+                                     ncclDevSum,
+                                     ncclFloat32,
+                                     ncclSymSendRegRecvReg, nullptr, nullptr));
+    EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
+                                     ncclFuncAlltoAll,
+                                     ncclDevSum,
+                                     ncclFloat32,
+                                     ncclSymSendRegRecvReg, nullptr, nullptr));
+    EXPECT_TRUE(ncclHierCeAvailable(mockComm_.get(),
+                                    ncclFuncAllGather,
+                                    ncclDevSum,
+                                    ncclFloat32,
+                                    ncclSymSendRegRecvReg, nullptr, nullptr));
 }
 
 TEST_F(CeHierAlltoAllvEligibilityTest, RejectsSysmemSegmentOrCapture)
@@ -611,7 +638,7 @@ TEST_F(CeHierAlltoAllvEligibilityTest, UnequalRanksPerNode_HierUnavailable)
         GTEST_SKIP() << "CE driver not in supported range";
 
     mockComm_.configureHierEligible(/*nNodes=*/2, /*localRanks=*/4);
-    mockComm_.comm.maxLocalRanks = mockComm_.comm.devrState.lsaSize + 1;
+    mockComm_.comm.maxLocalRanks = mockComm_.comm.devrState.lsaTeamSize + 1;
     EXPECT_FALSE(ncclHierCeAvailable(mockComm_.get(),
                                      ncclFuncAlltoAllv,
                                      ncclDevSum,

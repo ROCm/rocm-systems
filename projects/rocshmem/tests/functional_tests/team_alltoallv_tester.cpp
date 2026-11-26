@@ -86,9 +86,9 @@ __global__ void TeamAlltoallvTest(int loop, int skip,
                                   [[maybe_unused]] ShmemContextType ctx_type,
                                   rocshmem_team_t *teams) {
 
-  // In no-TDM build, rocshmem_query_tdm_lds_bytes() returns 0.
+  // Without an LDS-staged build (USE_LDS_STAGE/USE_TDM) this returns 0.
   extern __shared__ uint8_t tdm_lds[];
-  rocshmem_set_tdm_lds(tdm_lds, rocshmem_query_tdm_lds_bytes());
+  rocshmem_set_lds_stage(tdm_lds, rocshmem_query_lds_stage_bytes());
 
   __syncthreads();
 
@@ -176,7 +176,7 @@ void TeamAlltoallvTester<T1>::preLaunchKernel() {
 template <typename T1>
 void TeamAlltoallvTester<T1>::launchKernel(dim3 gridSize, dim3 blockSize,
                                           int loop, size_t size) {
-  size_t shared_bytes = rocshmem_query_tdm_lds_bytes();
+  size_t shared_bytes = rocshmem_query_lds_stage_bytes();
   int num_elems = size / sizeof(T1);
   size_t disp = 0;
 

@@ -169,6 +169,14 @@ struct RingOptions {
   // adapter uses). The callback form is also the one ThreadSanitizer can follow,
   // because it lets the harness annotate the engine's ordering.
   bool use_queue_ops = false;
+  // Optional ring writer (abce_ring_config_t::write).
+  abce_ring_write_fn_t write = nullptr;
+  void* write_user_data = nullptr;
+  bool readback_before_doorbell = false;
+  uint32_t submission_tail_bytes = 0;
+  // Publish through abce_ring_config_t::publish with no doorbell word, as a
+  // queue whose doorbell is a runtime call does (mapped-word backend only).
+  bool publish_without_doorbell = false;
 };
 
 class FakeRing {
@@ -193,10 +201,19 @@ class FakeRing {
     } else {
       config.write_ptr = &write_index_;
       config.read_ptr = &read_index_;
-      config.doorbell = &doorbell_;
+      if (options.publish_without_doorbell) {
+        config.publish = &FakeRing::PublishAndRing;
+        config.publish_user_data = this;
+      } else {
+        config.doorbell = &doorbell_;
+      }
     }
     config.min_submission_size = options.min_submission_size;
     config.align64 = options.align64;
+    config.write = options.write;
+    config.write_user_data = options.write_user_data;
+    config.readback_before_doorbell = options.readback_before_doorbell;
+    config.submission_tail_bytes = options.submission_tail_bytes;
     abce_ring_initialize(&config, &FakeRing::OnDoorbell, this, &ring_);
   }
 
@@ -209,6 +226,10 @@ class FakeRing {
 
   uint64_t write_index() const { return __atomic_load_n(&write_index_, __ATOMIC_ACQUIRE); }
   uint64_t doorbell() const { return __atomic_load_n(&doorbell_, __ATOMIC_ACQUIRE); }
+  // Calls to the publish routine: the index it was given, and the doorbell word it got.
+  const std::vector<std::pair<uint64_t, const volatile uint64_t*>>& publish_calls() const {
+    return publish_calls_;
+  }
 
   // Every doorbell value rung, in ring order. A well-behaved ring only ever
   // rings strictly increasing values.
@@ -248,6 +269,15 @@ class FakeRing {
     __atomic_store_n(&self->doorbell_, new_write_index, __ATOMIC_RELEASE);
   }
 
+  // The client's routine: the write pointer, then a doorbell rung outside the ring
+  static void PublishAndRing(void* user_data, volatile uint64_t* write_ptr,
+                             volatile uint64_t* doorbell, uint64_t new_write_index) {
+    FakeRing* self = static_cast<FakeRing*>(user_data);
+    self->publish_calls_.emplace_back(new_write_index, doorbell);
+    __atomic_store_n(write_ptr, new_write_index, __ATOMIC_RELEASE);
+    __atomic_store_n(&self->doorbell_, new_write_index, __ATOMIC_RELEASE);
+  }
+
   static void OnDoorbell(void* user_data, uint64_t new_write_index) {
     static_cast<FakeRing*>(user_data)->Captured(new_write_index);
   }
@@ -275,6 +305,7 @@ class FakeRing {
   std::atomic<uint64_t> published_index_;
   uint64_t last_captured_index_;
   std::vector<uint64_t> doorbell_history_;
+  std::vector<std::pair<uint64_t, const volatile uint64_t*>> publish_calls_;
   std::vector<uint8_t> stream_;
   abce_ring_t ring_;
 };

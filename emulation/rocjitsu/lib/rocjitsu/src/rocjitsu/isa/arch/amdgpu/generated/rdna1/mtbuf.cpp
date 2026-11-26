@@ -5,6 +5,7 @@
 // See lib/python/amdisa/README.md for regeneration instructions.
 
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/mtbuf.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna1/decode_factories.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/execution_backend.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx10_cache_flags.h"
 #include <memory>
@@ -14,10 +15,12 @@ namespace rdna1 {
 
 namespace {
 template <typename BufferMachineInst> uint32_t buffer_vaddr_bits(const BufferMachineInst *inst) {
-  if (inst->idxen && inst->offen)
+  if (inst->idxen && inst->offen) {
     return 64;
-  if (inst->idxen || inst->offen)
+  }
+  if (inst->idxen || inst->offen) {
     return 32;
+  }
   return 0;
 }
 } // namespace
@@ -25,7 +28,8 @@ template <typename BufferMachineInst> uint32_t buffer_vaddr_bits(const BufferMac
 TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXMtbuf)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32 + 32u * inst_.tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG_NONULL,
@@ -42,9 +46,14 @@ TbufferLoadFormatXMtbuf::TbufferLoadFormatXMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (inst_.tfe) {
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF | PREDICATED_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -52,8 +61,9 @@ DecodeResult decodeTbufferLoadFormatXMtbuf(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Mtbuf::validate_encoding(
       "tbuffer_load_format_x", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatXMtbuf>(opcode);
 }
 } // namespace detail
@@ -61,7 +71,8 @@ DecodeResult decodeTbufferLoadFormatXMtbuf(const MachineInst *opcode,
 TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyMtbuf)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(64 + 32u * inst_.tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG_NONULL,
@@ -78,9 +89,14 @@ TbufferLoadFormatXyMtbuf::TbufferLoadFormatXyMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (inst_.tfe) {
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF | PREDICATED_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -88,8 +104,9 @@ DecodeResult decodeTbufferLoadFormatXyMtbuf(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Mtbuf::validate_encoding(
       "tbuffer_load_format_xy", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatXyMtbuf>(opcode);
 }
 } // namespace detail
@@ -97,7 +114,8 @@ DecodeResult decodeTbufferLoadFormatXyMtbuf(const MachineInst *opcode,
 TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyzMtbuf)),
-      vdata(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(96 + 32u * inst_.tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG_NONULL,
@@ -114,9 +132,14 @@ TbufferLoadFormatXyzMtbuf::TbufferLoadFormatXyzMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (inst_.tfe) {
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF | PREDICATED_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -124,8 +147,9 @@ DecodeResult decodeTbufferLoadFormatXyzMtbuf(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Mtbuf::validate_encoding(
       "tbuffer_load_format_xyz", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatXyzMtbuf>(opcode);
 }
 } // namespace detail
@@ -133,7 +157,8 @@ DecodeResult decodeTbufferLoadFormatXyzMtbuf(const MachineInst *opcode,
 TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatXyzwMtbuf)),
-      vdata(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(128 + 32u * inst_.tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG_NONULL,
@@ -150,9 +175,14 @@ TbufferLoadFormatXyzwMtbuf::TbufferLoadFormatXyzwMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (inst_.tfe) {
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF | PREDICATED_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
 }
 
 namespace detail {
@@ -160,8 +190,9 @@ DecodeResult decodeTbufferLoadFormatXyzwMtbuf(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Mtbuf::validate_encoding(
       "tbuffer_load_format_xyzw", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatXyzwMtbuf>(opcode);
 }
 } // namespace detail
@@ -189,6 +220,8 @@ TbufferStoreFormatXMtbuf::TbufferStoreFormatXMtbuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -196,8 +229,9 @@ DecodeResult decodeTbufferStoreFormatXMtbuf(const MachineInst *opcode,
                                             const DecodeErrorEmitter &emit_error) {
   Result validation = Mtbuf::validate_encoding(
       "tbuffer_store_format_x", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatXMtbuf>(opcode);
 }
 } // namespace detail
@@ -225,6 +259,8 @@ TbufferStoreFormatXyMtbuf::TbufferStoreFormatXyMtbuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -232,8 +268,9 @@ DecodeResult decodeTbufferStoreFormatXyMtbuf(const MachineInst *opcode,
                                              const DecodeErrorEmitter &emit_error) {
   Result validation = Mtbuf::validate_encoding(
       "tbuffer_store_format_xy", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatXyMtbuf>(opcode);
 }
 } // namespace detail
@@ -261,6 +298,8 @@ TbufferStoreFormatXyzMtbuf::TbufferStoreFormatXyzMtbuf(const MachineInst *inst)
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -268,8 +307,9 @@ DecodeResult decodeTbufferStoreFormatXyzMtbuf(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Mtbuf::validate_encoding(
       "tbuffer_store_format_xyz", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatXyzMtbuf>(opcode);
 }
 } // namespace detail
@@ -297,6 +337,8 @@ TbufferStoreFormatXyzwMtbuf::TbufferStoreFormatXyzwMtbuf(const MachineInst *inst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
 }
 
 namespace detail {
@@ -304,8 +346,9 @@ DecodeResult decodeTbufferStoreFormatXyzwMtbuf(const MachineInst *opcode,
                                                const DecodeErrorEmitter &emit_error) {
   Result validation = Mtbuf::validate_encoding(
       "tbuffer_store_format_xyzw", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatXyzwMtbuf>(opcode);
 }
 } // namespace detail
@@ -313,7 +356,8 @@ DecodeResult decodeTbufferStoreFormatXyzwMtbuf(const MachineInst *opcode,
 TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_x", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatD16XMtbuf)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32 + 32u * inst_.tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG_NONULL,
@@ -330,9 +374,15 @@ TbufferLoadFormatD16XMtbuf::TbufferLoadFormatD16XMtbuf(const MachineInst *inst)
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (inst_.tfe) {
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF | PREDICATED_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_D16_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -340,22 +390,25 @@ DecodeResult decodeTbufferLoadFormatD16XMtbuf(const MachineInst *opcode,
                                               const DecodeErrorEmitter &emit_error) {
   Result validation = Mtbuf::validate_encoding(
       "tbuffer_load_format_d16_x", reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatD16XMtbuf>(opcode);
 }
 } // namespace detail
 
 void TbufferLoadFormatD16XMtbuf::implicit_uses(RegisterSet &uses) const {
   Mtbuf::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_xy", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatD16XyMtbuf)),
-      vdata(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(32 + 32u * inst_.tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG_NONULL,
@@ -372,9 +425,15 @@ TbufferLoadFormatD16XyMtbuf::TbufferLoadFormatD16XyMtbuf(const MachineInst *inst
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (inst_.tfe) {
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF | PREDICATED_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_D16_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -383,8 +442,9 @@ DecodeResult decodeTbufferLoadFormatD16XyMtbuf(const MachineInst *opcode,
   Result validation =
       Mtbuf::validate_encoding("tbuffer_load_format_d16_xy",
                                reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatD16XyMtbuf>(opcode);
 }
 } // namespace detail
@@ -392,7 +452,8 @@ DecodeResult decodeTbufferLoadFormatD16XyMtbuf(const MachineInst *opcode,
 TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_xyz", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatD16XyzMtbuf)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(64 + 32u * inst_.tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG_NONULL,
@@ -409,9 +470,15 @@ TbufferLoadFormatD16XyzMtbuf::TbufferLoadFormatD16XyzMtbuf(const MachineInst *in
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (inst_.tfe) {
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF | PREDICATED_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_D16_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -420,22 +487,25 @@ DecodeResult decodeTbufferLoadFormatD16XyzMtbuf(const MachineInst *opcode,
   Result validation =
       Mtbuf::validate_encoding("tbuffer_load_format_d16_xyz",
                                reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatD16XyzMtbuf>(opcode);
 }
 } // namespace detail
 
 void TbufferLoadFormatD16XyzMtbuf::implicit_uses(RegisterSet &uses) const {
   Mtbuf::implicit_uses(uses);
-  if (auto r = vdata.to_register_ref())
+  if (auto r = vdata.to_register_ref()) {
     uses.expand(RegisterRef{r->cls, static_cast<uint16_t>(r->index + 1), 1});
+  }
 }
 
 TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *inst)
     : Mtbuf("tbuffer_load_format_d16_xyzw", reinterpret_cast<const OpEncoding *>(inst),
             selected_exec_fn(InstructionExecutionId::TbufferLoadFormatD16XyzwMtbuf)),
-      vdata(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdata),
+      vdata(64 + 32u * inst_.tfe, OperandType::OPR_VGPR,
+            reinterpret_cast<const OpEncoding *>(inst)->vdata),
       vaddr(buffer_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)), OperandType::OPR_VGPR,
             reinterpret_cast<const OpEncoding *>(inst)->vaddr),
       srsrc(128, OperandType::OPR_SREG_NONULL,
@@ -452,9 +522,15 @@ TbufferLoadFormatD16XyzwMtbuf::TbufferLoadFormatD16XyzwMtbuf(const MachineInst *
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  if (inst_.tfe) {
+    flags_ |= CONDITIONAL_LAST_VGPR_DEF | PREDICATED_DEF;
+  }
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::VMCNT,
                                                          amdgpu::MemoryCompletionClass::VMEM}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_LOAD_FORMAT_D16_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Load);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -463,8 +539,9 @@ DecodeResult decodeTbufferLoadFormatD16XyzwMtbuf(const MachineInst *opcode,
   Result validation =
       Mtbuf::validate_encoding("tbuffer_load_format_d16_xyzw",
                                reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferLoadFormatD16XyzwMtbuf>(opcode);
 }
 } // namespace detail
@@ -488,9 +565,13 @@ TbufferStoreFormatD16XMtbuf::TbufferStoreFormatD16XMtbuf(const MachineInst *inst
   num_src_ = 4;
   num_dst_ = 1;
   gpumem.apply_fieldless_caps(false, false, false);
+  vdata.set_register_byte_mask(0x3);
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_D16_X);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -499,8 +580,9 @@ DecodeResult decodeTbufferStoreFormatD16XMtbuf(const MachineInst *opcode,
   Result validation =
       Mtbuf::validate_encoding("tbuffer_store_format_d16_x",
                                reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatD16XMtbuf>(opcode);
 }
 } // namespace detail
@@ -527,6 +609,9 @@ TbufferStoreFormatD16XyMtbuf::TbufferStoreFormatD16XyMtbuf(const MachineInst *in
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_D16_XY);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -535,8 +620,9 @@ DecodeResult decodeTbufferStoreFormatD16XyMtbuf(const MachineInst *opcode,
   Result validation =
       Mtbuf::validate_encoding("tbuffer_store_format_d16_xy",
                                reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatD16XyMtbuf>(opcode);
 }
 } // namespace detail
@@ -563,6 +649,9 @@ TbufferStoreFormatD16XyzMtbuf::TbufferStoreFormatD16XyzMtbuf(const MachineInst *
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_D16_XYZ);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -571,8 +660,9 @@ DecodeResult decodeTbufferStoreFormatD16XyzMtbuf(const MachineInst *opcode,
   Result validation =
       Mtbuf::validate_encoding("tbuffer_store_format_d16_xyz",
                                reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatD16XyzMtbuf>(opcode);
 }
 } // namespace detail
@@ -599,6 +689,9 @@ TbufferStoreFormatD16XyzwMtbuf::TbufferStoreFormatD16XyzwMtbuf(const MachineInst
   set_memory_issue_info({amdgpu::MemoryCounterObligation{
       amdgpu::WaitCounterType::VSCNT, amdgpu::MemoryCompletionClass::UNORDERED}});
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::TBUFFER_STORE_FORMAT_D16_XYZW);
+  set_amdgpu_memory(amdgpu::MemoryAddressing::TypedBuffer, amdgpu::MemoryKind::Store);
+  flags_ |= D16_MEMORY_DATA;
 }
 
 namespace detail {
@@ -607,8 +700,9 @@ DecodeResult decodeTbufferStoreFormatD16XyzwMtbuf(const MachineInst *opcode,
   Result validation =
       Mtbuf::validate_encoding("tbuffer_store_format_d16_xyzw",
                                reinterpret_cast<const Mtbuf::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<TbufferStoreFormatD16XyzwMtbuf>(opcode);
 }
 } // namespace detail

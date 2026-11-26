@@ -13,6 +13,8 @@ add_library(
     test_pci_bdf.cpp
     test_regex_utility.cpp
     test_remove_env.cpp
+    test_result.cpp
+    test_spin_mutex.cpp
     test_static_object.cpp
     test_synchronized.cpp
     test_to_bool.cpp

@@ -8,10 +8,12 @@
 
 #include "util/unique_handle.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <dirent.h>
 #include <fcntl.h>
+#include <mutex>
 #include <poll.h>
 #include <sched.h>
 #include <sys/epoll.h>
@@ -106,6 +108,7 @@ public:
   decltype(&::epoll_wait) epoll_wait = nullptr;
   decltype(&::accept4) accept4 = nullptr;
   decltype(&::getsockopt) getsockopt = nullptr;
+  decltype(&::setsockopt) setsockopt = nullptr;
   decltype(&::socket) socket = nullptr;
   decltype(&::connect) connect = nullptr;
   decltype(&::listen) listen = nullptr;
@@ -120,17 +123,45 @@ public:
   ssize_t (*getdents64)(int, void *, size_t) = nullptr;
 
   /// @brief Return true after all required symbols have been resolved.
-  [[nodiscard]] bool ready() const { return initialized_; }
+  [[nodiscard]] bool ready() const { return initialized_.load(std::memory_order_acquire); }
 
   /// @brief Resolve the real libc functions from the next dynamic object.
   void resolve();
 
 private:
-  bool initialized_ = false;
+  void resolve_once();
+
+  // Every initializer waits for the complete process-wide function table.
+  std::once_flag initialization_once_;
+  // Publishes the resolved entries to interposer readiness checks.
+  std::atomic<bool> initialized_{false};
 };
+
+/// @brief Resolve the host realpath that supports caller-allocated and libc-allocated buffers.
+auto resolve_host_realpath() -> decltype(LibcPassthrough::realpath_fn);
 
 /// @brief Return the process-wide libc pass-through table.
 LibcPassthrough &libc_passthrough();
+
+/// @brief Call the resolved host function, falling back to libc before interposition is active.
+template <typename Function, typename Fallback, typename... Args>
+decltype(auto) host_call(Function resolved, Fallback fallback, Args... args) {
+  return (resolved ? resolved : fallback)(args...);
+}
+
+/// @brief Close an optional host descriptor, including before pass-through is resolved.
+inline void host_close_fd(int fd) {
+  if (fd >= 0) {
+    host_call(libc_passthrough().close, ::close, fd);
+  }
+}
+
+/// @brief Read a pinned proc stat file. Return 1 for an exited group, 0 for a live group, or
+/// a negative errno if its state cannot be determined.
+int proc_stat_is_exited(int stat_fd);
+
+/// @brief Create a private, close-on-exec scratch descriptor with no sealing requirements.
+int create_scratch_fd(const char *name);
 
 /// @brief Compatibility entry points for operations absent from older libc releases.
 /// @details Prefer the resolved libc wrapper. If unavailable, use the syscall
@@ -155,14 +186,7 @@ struct PassthroughFdTraits {
 
   static handle_type invalid() noexcept { return -1; }
   static bool is_valid(handle_type fd) noexcept { return fd >= 0; }
-  static void close(handle_type fd) noexcept {
-    // The table is unresolved until resolve() runs. These traits are reachable from
-    // any driver TU, so fall back to ::close rather than calling a null pointer;
-    // that path can only be taken before the interposer is live, so it cannot
-    // re-enter the hook this type exists to avoid.
-    auto *real_close = libc_passthrough().close;
-    static_cast<void>(real_close ? real_close(fd) : ::close(fd));
-  }
+  static void close(handle_type fd) noexcept { host_close_fd(fd); }
 };
 
 using UniqueDriverFd = util::BasicUniqueHandle<PassthroughFdTraits>;

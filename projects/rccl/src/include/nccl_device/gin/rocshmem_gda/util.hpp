@@ -6,7 +6,7 @@
 
 #include <hip/hip_runtime.h>
 
-#include "bit.hpp"
+#include "nccl_device/gin/rocshmem_gda/bit.hpp"
 
 namespace rocshmem {
 
@@ -29,7 +29,7 @@ do {                                                                            
     LOG_WARN("Failed to find function %s",  STRINGIFY(PPCAT(prefix, func_name)));           \
     dlclose(handle);                                                                        \
     handle = nullptr;                                                                       \
-    return ROCSHMEM_ERROR;                                                                  \
+    return -1;                                                                              \
   }                                                                                         \
 } while (0)
 
@@ -40,7 +40,7 @@ do {                                                                        \
     LOG_WARN("Failed to find function %s",  STRINGIFY(var_name));           \
     dlclose(handle);                                                        \
     handle = nullptr;                                                       \
-    return ROCSHMEM_ERROR;                                                  \
+    return -1;                                                              \
   }                                                                         \
 } while (0)
 

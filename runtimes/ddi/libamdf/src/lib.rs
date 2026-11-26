@@ -18,13 +18,13 @@ use std::ffi::c_void;
 mod generated;
 mod gpu_clock;
 mod gpu_event;
-mod instance;
 mod kernel_queue;
 mod memory;
 mod observation;
 mod platform;
 mod queue;
 mod reservation;
+mod session;
 mod support;
 
 use generated::amdf::*;
@@ -85,15 +85,15 @@ pub(crate) unsafe extern "C" fn query_extension(
 static API: amdf_api_t = amdf_api_t {
     structure_size: size_of::<amdf_api_t>() as u32,
     abi_version: AMDF_ABI_VERSION_12,
-    instance_create: Some(instance::create),
-    instance_destroy: Some(instance::destroy),
-    endpoint_enumerate: Some(instance::enumerate),
-    endpoint_open: Some(instance::open),
-    endpoint_query_info: Some(instance::endpoint_info),
-    endpoint_close: Some(instance::close),
+    instance_create: Some(session::create),
+    instance_destroy: Some(session::destroy),
+    endpoint_enumerate: Some(session::enumerate),
+    endpoint_open: Some(session::open),
+    endpoint_query_info: Some(session::endpoint_info),
+    endpoint_close: Some(session::close),
     query_extension: Some(query_extension),
-    endpoint_query_queue_family_info: Some(instance::queue_family_info),
-    device_destroy: Some(instance::device_destroy),
+    endpoint_query_queue_family_info: Some(session::queue_family_info),
+    device_destroy: Some(session::device_destroy),
     instance_enumerate_memory_scopes: Some(memory::instance_scopes),
     device_enumerate_memory_scopes: Some(memory::device_scopes),
     memory_scope_query_info: Some(memory::scope_info),
@@ -147,9 +147,9 @@ const fn gpu_table(version: u32) -> amdf_gpu_api_t {
             size_of::<amdf_gpu_api_t>() as u32
         },
         extension_version: version,
-        endpoint_query_info: Some(instance::gpu_endpoint_info),
-        device_create: Some(instance::device_create),
-        device_query_info: Some(instance::device_info),
+        endpoint_query_info: Some(session::gpu_endpoint_info),
+        device_create: Some(session::device_create),
+        device_query_info: Some(session::device_info),
         kernel_queue_create: Some(kernel_queue::create),
         kernel_queue_submit: Some(kernel_queue::submit),
         user_queue_create: Some(queue::create),

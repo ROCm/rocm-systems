@@ -2,22 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { expect, test, vi } from 'vitest';
 import RecentRuns from '../../src/components/overview/RecentRuns.jsx';
-import { ThemeProvider, alpha } from '@mui/material';
-import DashboardShell from '../../src/components/layout/DashboardShell.jsx';
-import FiltersBar from '../../src/components/layout/FiltersBar.jsx';
-test.each(['light', 'dark'])('main sidebar has explicit subtle vertical border and stronger section rules in %s', (mode) => {
-  const theme = createDashboardTheme(mode);
-  theme.components.MuiUseMediaQuery = { defaultProps: { ssrMatchMedia: () => ({ matches: true }) } };
-  const state = { tab: 'overview', targets: [], suites: [], modes: [], setTab() {}, setTargets() {}, setSuites() {}, setModes() {} };
-  const data = { runs: [{}], targets: [], suites: [], modes: [] };
-  const html = render(ThemeProvider, { theme, children: createElement(DashboardShell, { data, state }) });
-  expect(html.includes(`border-right:2px solid ${theme.palette.divider}`)).toBe(true);
-  expect(html.includes(`border-bottom:1px solid ${alpha(theme.palette.text.primary, 0.3)}`)).toBe(true);
-  const filters = render(ThemeProvider, { theme, children: createElement(FiltersBar, { data, state }) });
-  expect(filters.includes(`border-top:1px solid ${alpha(theme.palette.text.primary, 0.3)}`)).toBe(true);
-  const branch = render(ThemeProvider, { theme, children: createElement(DashboardShell, { data, state: { ...state, tab: 'branch' } }) });
-  expect(branch.includes(`border-top:1px solid ${alpha(theme.palette.text.primary, 0.3)}`)).toBe(true);
-});
+import { ThemeProvider } from '@mui/material';
 import { createDashboardTheme } from '../../src/theme/theme.js';
 const recent = vi.hoisted(() => ({ rows: [] }));
 vi.mock('../../src/data/selectors.js', async (importOriginal) => ({

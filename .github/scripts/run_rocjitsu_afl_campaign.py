@@ -283,6 +283,7 @@ def run_campaign(
     duration_seconds: int,
     workers: int,
     *,
+    input_timeout_ms: int | None = None,
     shutdown_grace_seconds: int = WORKER_SHUTDOWN_GRACE_SECONDS,
     worker_stop_timeout_seconds: float = WORKER_STOP_TIMEOUT_SECONDS,
 ) -> int:
@@ -329,10 +330,10 @@ def run_campaign(
                 instance,
                 "-m",
                 "none",
-                "--",
-                os.fspath(binary),
-                "--afl",
             ]
+            if input_timeout_ms is not None:
+                command.extend(["-t", str(input_timeout_ms)])
+            command.extend(["--", os.fspath(binary), "--afl"])
             processes.append(
                 subprocess.Popen(
                     command,
@@ -502,6 +503,9 @@ def parse_arguments(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("output_dir", type=Path)
     parser.add_argument("duration_seconds", type=positive_integer)
     parser.add_argument("workers", type=positive_integer)
+    parser.add_argument(
+        "--input-timeout-ms", type=positive_integer, help="AFL++ timeout per execution"
+    )
     arguments = parser.parse_args(argv)
     if not arguments.binary.is_file() or not os.access(arguments.binary, os.X_OK):
         parser.error(f"binary is not executable: {arguments.binary}")
@@ -518,6 +522,7 @@ def main(argv: list[str] | None = None) -> int:
         arguments.output_dir,
         arguments.duration_seconds,
         arguments.workers,
+        input_timeout_ms=arguments.input_timeout_ms,
     )
 
 

@@ -71,12 +71,14 @@ extra_javascript:
   - assets/repository-stats.js
 nav:
   - Overview: index.md
+  - Performance dashboard: performance-dashboard.md
   - User guide:
       - Build from source: building.md
       - Command-line interface: rocjitsu-cli.md
       - Python execution API: python-api.md
       - Configuration: configuration.md
       - Two-node RCCL NET smoke: rccl-scaleout.md
+      - Same-host pod RCCL gate: same-host-pod-rccl-gate.md
       - Race detection: race-detector.md
       - Native LDS ConSan: consan.md
       - GPU debugging: rocgdb-debugging.md
@@ -98,6 +100,7 @@ nav:
       - DBT guest mode: rocjitsu_dbt_guest.md
       - Binary instrumentation: dbi-design.md
       - Instrumentation overview: dbi-overview.md
+      - Fault injection: fault-injection.md
       - Execution plugins: plugins.md
       - ISA code generation: codegen.md
       - ISA target providers: isa-target-providers.md
@@ -109,12 +112,11 @@ nav:
       - Memory wait coverage: memory-wait-counter-coverage.md
   - Project:
       - Blog: blog/index.md
-      - Performance dashboard: performance-dashboard.md
 extra:
   social:
     - icon: fontawesome/brands/github
       link: https://github.com/ROCm/rocm-systems/tree/develop/emulation/rocjitsu
-      name: Rocjitsu on GitHub
+      name: rocjitsu on GitHub
     - icon: material/bug-outline
       link: https://github.com/ROCm/rocm-systems/issues
       name: Report an issue

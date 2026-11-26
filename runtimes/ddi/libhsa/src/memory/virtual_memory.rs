@@ -7,7 +7,7 @@ use super::*;
 
 /// Finds a reservation containing the complete virtual address range.
 pub(crate) fn vmem_reservation_base(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     address: usize,
     size: usize,
 ) -> Option<usize> {
@@ -21,7 +21,7 @@ pub(crate) fn vmem_reservation_base(
 
 /// Collects all mappings intersecting the requested virtual address range.
 pub(crate) fn vmem_mapping_bases(
-    runtime: &HsaState,
+    runtime: &HsaSession,
     address: usize,
     size: usize,
 ) -> Result<Vec<usize>, Status> {
@@ -47,12 +47,12 @@ pub(crate) fn vmem_mapping_bases(
 
 /// Replaces access permissions for the specified mappings and agents.
 pub(crate) fn replace_vmem_access(
-    runtime: &mut HsaState,
+    runtime: &mut HsaSession,
     mapping_base: usize,
     descriptor: HsaAmdMemoryAccessDesc,
 ) -> Status {
     let agent = descriptor.agent_handle.handle;
-    let agent_is_cpu = runtime.is_cpu_agent(descriptor.agent_handle);
+    let agent_is_cpu = runtime.agents.is_cpu_agent(descriptor.agent_handle);
     let existing_permission = runtime
         .memory_state
         .vmem_mappings
@@ -94,14 +94,15 @@ pub(crate) fn replace_vmem_access(
             }
         } else {
             let Some(gpu_index) = runtime
+                .agents
                 .gpus
                 .iter()
                 .position(|gpu| gpu.info().fabric_handles_supported)
-                .or_else(|| (!runtime.gpus.is_empty()).then_some(0))
+                .or_else(|| (!runtime.agents.gpus.is_empty()).then_some(0))
             else {
                 return NOT_SUPPORTED;
             };
-            let gpu = &runtime.gpus[gpu_index];
+            let gpu = &runtime.agents.gpus[gpu_index];
             let Some(handle) = runtime.memory_state.vmem_handles.get_mut(&mapping.handle) else {
                 return INVALID_ALLOCATION;
             };
@@ -171,12 +172,12 @@ pub(crate) fn replace_vmem_access(
         return INVALID_ALLOCATION;
     };
     let gpu_index = {
-        let Some(index) = runtime.gpu_index(descriptor.agent_handle) else {
+        let Some(index) = runtime.agents.gpu_index(descriptor.agent_handle) else {
             return INVALID_AGENT;
         };
         index
     };
-    let Some(gpu) = runtime.gpus.get(gpu_index) else {
+    let Some(gpu) = runtime.agents.gpus.get(gpu_index) else {
         return NOT_SUPPORTED;
     };
     let Some(handle) = runtime.memory_state.vmem_handles.get_mut(&mapping.handle) else {

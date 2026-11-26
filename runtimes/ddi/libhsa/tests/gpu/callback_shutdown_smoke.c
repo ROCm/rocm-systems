@@ -43,7 +43,12 @@ static int check(const char *operation, hsa_status_t status) {
 }
 
 int main(void) {
-  if (!check("hsa_init", hsa_init())) return 1;
+  hsa_status_t initialized = hsa_init();
+  if (initialized != HSA_STATUS_SUCCESS) {
+    fprintf(stderr, "CPU-only HSA initialization unavailable: %#x\n",
+            (unsigned)initialized);
+    return 77;
+  }
   for (unsigned cycle = 0; cycle < 10; ++cycle) {
     atomic_store_explicit(&callback_status, UINT_MAX, memory_order_relaxed);
     hsa_signal_t dormant = {0}, trigger = {0};

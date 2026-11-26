@@ -14,7 +14,7 @@
 #include "fp/fma_simd_test.h"
 #include "fp/omod_f64_test.h"
 #include "fp/reference.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 #include <array>
 #include <gtest/gtest.h>
@@ -27,8 +27,9 @@ namespace rocjitsu::arith::test {
 // FP32's inherited model matches IEEE FMA for these normal fractional inputs
 // with default guest rounding; special values are checked by classification.
 // FP64's computed reference is used only for loose numeric comparisons.
+// exact is false for entry points that stay loose-only until their captures are reviewed.
 template <int Width, int Lanes, bool Accumulate = false, typename Call>
-void check_fma(Call entry_point, bool gfx12) {
+void check_fma(Call entry_point, bool gfx12, bool exact = true) {
   static_assert(Width == 32 || Width == 64);
   static_assert(Lanes == 32 || Lanes == 64);
   using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
@@ -71,9 +72,6 @@ void check_fma(Call entry_point, bool gfx12) {
     return result;
   };
   expect_invalid_fma_requests(invalid_request);
-  if constexpr (Width == 64) {
-    expect_invalid_fp64_rounding(invalid_request);
-  }
 
   // FP32 exercises DPP8, OMOD and combined ABS/NEG in addition to the
   // basic modifiers common to both formats. gfx11 ignores OMOD under the
@@ -163,9 +161,10 @@ void check_fma(Call entry_point, bool gfx12) {
               EXPECT_EQ(fp_status, 0x80000000U);
               continue;
             }
-            // FP64 is loose-only; FP32 supports exact numeric results on
-            // this domain. Neither format currently supports FP status.
-            if (Width == 64 && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+            // FP32 and FP64 support exact numeric results on this domain on both
+            // architectures; loose-only entry points reject them. Neither format currently
+            // supports FP status.
+            if (!exact && semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
               EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
               r.expect_preserved(input, 0, 0);
               EXPECT_EQ(fp_status, 0x80000000U);

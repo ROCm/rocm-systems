@@ -1,0 +1,26 @@
+GRBM_COUNT_PER_XCD:
+  formula: GRBM_COUNT / $num_xcd
+GRBM_GUI_ACTIVE_PER_XCD:
+  formula: GRBM_GUI_ACTIVE_sum / $num_xcd
+GRBM_SPI_BUSY_PER_XCD:
+  formula: GRBM_SPI_BUSY / $num_xcd
+gl0_bytes:
+  formula: TX_VCA_CACHE_LOAD_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_STORE_BANDWIDTH_BYTES_sum + TX_VCA_CACHE_ATOMIC_BANDWIDTH_BYTES_sum
+gl2_bytes:
+  formula: 128 * (TX_VMW_GL1_REQ_READ_sum + TX_VMW_GL1_REQ_WRITE_sum + TX_VMW_GL1_REQ_ATOMIC_WITH_RET_sum + TX_VMW_GL1_REQ_ATOMIC_WITHOUT_RET_sum)
+hbmBandwidth:
+  formula: $max_mclk / 1000 * 32 * $num_memory_channels
+hbm_bytes:
+  formula: 32 * (GC_EA_SE_SARB_DRAM_RD_SIZE_REQ_sum + GC_EA_SE_SARB_DRAM_WR_SIZE_REQ_sum)
+kernelBusyCycles:
+  formula: ROUND(AVG((End_Timestamp - Start_Timestamp) / 1000 * $max_sclk), 0)
+numActiveCUs:
+  formula: TO_INT(MIN(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 + MIN(MOD(ROUND(4 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD), 0), $max_waves_per_cu), 8), $cu_per_gpu))
+sp_flop_rate:
+  formula: SUM($sp_flops) / SUM(End_Timestamp - Start_Timestamp)
+sp_flops:
+  formula: SP_VALU_FLOPS_FP16_sum + SP_VALU_FLOPS_FP32_sum + SP_VALU_FLOPS_FP64_sum + SP_VALU_FLOPS_FP16_TRANS_sum + SP_VALU_FLOPS_FP32_TRANS_sum + SP_VALU_FLOPS_FP64_TRANS_sum
+wmma_flop_rate:
+  formula: SUM($wmma_flops) / SUM(End_Timestamp - Start_Timestamp)
+wmma_flops:
+  formula: SQ_VALU_WMMA_FLOP_FP16_sum * 2048 + SQ_VALU_WMMA_FLOP_BF16_sum * 2048 + SQ_VALU_WMMA_FLOP_FP32_sum * 128 + SQ_VALU_WMMA_FLOP_FP64_sum * 64 + SQ_VALU_WMMA_FLOP_FP8_sum * 4096 + SQ_VALU_WMMA_FLOP_FP6_sum * 8192 + SQ_VALU_WMMA_FLOP_FP4_sum * 8192 + SQ_VALU_WMMA_FLOP_F6F4_sum * 8192

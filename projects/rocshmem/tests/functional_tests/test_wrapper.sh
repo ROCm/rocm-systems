@@ -226,16 +226,6 @@ if [[ "$BACKEND" == "ro" ]]; then
     esac
 fi
 
-# AIROCSHMEM-418: fence tests not supported on RO
-if [[ "$BACKEND" == "ro" ]]; then
-    case "$TEST_NAME" in
-        fence_*)
-            echo "Skip: $TEST_NAME (AIROCSHMEM-418: fence tests not supported on RO)"
-            exit $SKIP_CODE
-            ;;
-    esac
-fi
-
 # AIROCSHMEM-418: wave tests not supported on RO
 if [[ "$BACKEND" == "ro" ]]; then
     case "$TEST_NAME" in

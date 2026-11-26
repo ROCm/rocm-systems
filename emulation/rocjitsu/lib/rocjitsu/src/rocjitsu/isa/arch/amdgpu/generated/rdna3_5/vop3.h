@@ -1201,6 +1201,16 @@ class VSubrevNcU32Vop3 : public Vop3 {
 public:
   VSubrevNcU32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  bool tracks_explicit_source(uint8_t i) const override {
+    return src_operand(i) != &src1 || src1.decoded_vgpr() ||
+           (!has_encoded_dpp() && !has_encoded_dpp8());
+  }
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2834,6 +2844,13 @@ class VCmpFF16Vop3 : public Vop3 {
 public:
   VCmpFF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    modifiers.constant_float_compare = true;
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2846,6 +2863,12 @@ class VCmpLtF16Vop3 : public Vop3 {
 public:
   VCmpLtF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2858,6 +2881,12 @@ class VCmpEqF16Vop3 : public Vop3 {
 public:
   VCmpEqF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2870,6 +2899,12 @@ class VCmpLeF16Vop3 : public Vop3 {
 public:
   VCmpLeF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2882,6 +2917,12 @@ class VCmpGtF16Vop3 : public Vop3 {
 public:
   VCmpGtF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2894,6 +2935,12 @@ class VCmpLgF16Vop3 : public Vop3 {
 public:
   VCmpLgF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2906,6 +2953,12 @@ class VCmpGeF16Vop3 : public Vop3 {
 public:
   VCmpGeF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2918,6 +2971,12 @@ class VCmpOF16Vop3 : public Vop3 {
 public:
   VCmpOF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2930,6 +2989,12 @@ class VCmpUF16Vop3 : public Vop3 {
 public:
   VCmpUF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2942,6 +3007,12 @@ class VCmpNgeF16Vop3 : public Vop3 {
 public:
   VCmpNgeF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2954,6 +3025,12 @@ class VCmpNlgF16Vop3 : public Vop3 {
 public:
   VCmpNlgF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2966,6 +3043,12 @@ class VCmpNgtF16Vop3 : public Vop3 {
 public:
   VCmpNgtF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2978,6 +3061,12 @@ class VCmpNleF16Vop3 : public Vop3 {
 public:
   VCmpNleF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -2990,6 +3079,12 @@ class VCmpNeqF16Vop3 : public Vop3 {
 public:
   VCmpNeqF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3002,6 +3097,12 @@ class VCmpNltF16Vop3 : public Vop3 {
 public:
   VCmpNltF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3014,6 +3115,13 @@ class VCmpTF16Vop3 : public Vop3 {
 public:
   VCmpTF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    modifiers.constant_float_compare = true;
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3026,6 +3134,13 @@ class VCmpFF32Vop3 : public Vop3 {
 public:
   VCmpFF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    modifiers.constant_float_compare = true;
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3038,6 +3153,12 @@ class VCmpLtF32Vop3 : public Vop3 {
 public:
   VCmpLtF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3050,6 +3171,12 @@ class VCmpEqF32Vop3 : public Vop3 {
 public:
   VCmpEqF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3062,6 +3189,12 @@ class VCmpLeF32Vop3 : public Vop3 {
 public:
   VCmpLeF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3074,6 +3207,12 @@ class VCmpGtF32Vop3 : public Vop3 {
 public:
   VCmpGtF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3086,6 +3225,12 @@ class VCmpLgF32Vop3 : public Vop3 {
 public:
   VCmpLgF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3098,6 +3243,12 @@ class VCmpGeF32Vop3 : public Vop3 {
 public:
   VCmpGeF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3110,6 +3261,12 @@ class VCmpOF32Vop3 : public Vop3 {
 public:
   VCmpOF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3122,6 +3279,12 @@ class VCmpUF32Vop3 : public Vop3 {
 public:
   VCmpUF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3134,6 +3297,12 @@ class VCmpNgeF32Vop3 : public Vop3 {
 public:
   VCmpNgeF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3146,6 +3315,12 @@ class VCmpNlgF32Vop3 : public Vop3 {
 public:
   VCmpNlgF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3158,6 +3333,12 @@ class VCmpNgtF32Vop3 : public Vop3 {
 public:
   VCmpNgtF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3170,6 +3351,12 @@ class VCmpNleF32Vop3 : public Vop3 {
 public:
   VCmpNleF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3182,6 +3369,12 @@ class VCmpNeqF32Vop3 : public Vop3 {
 public:
   VCmpNeqF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3194,6 +3387,12 @@ class VCmpNltF32Vop3 : public Vop3 {
 public:
   VCmpNltF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3206,6 +3405,13 @@ class VCmpTF32Vop3 : public Vop3 {
 public:
   VCmpTF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    modifiers.constant_float_compare = true;
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3218,6 +3424,9 @@ class VCmpFF64Vop3 : public Vop3 {
 public:
   VCmpFF64Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.constant_float_compare = true;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3353,6 +3562,9 @@ class VCmpTF64Vop3 : public Vop3 {
 public:
   VCmpTF64Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.constant_float_compare = true;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3875,6 +4087,13 @@ class VCmpxFF16Vop3 : public Vop3 {
 public:
   VCmpxFF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    modifiers.constant_float_compare = true;
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3888,6 +4107,12 @@ class VCmpxLtF16Vop3 : public Vop3 {
 public:
   VCmpxLtF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3901,6 +4126,12 @@ class VCmpxEqF16Vop3 : public Vop3 {
 public:
   VCmpxEqF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3914,6 +4145,12 @@ class VCmpxLeF16Vop3 : public Vop3 {
 public:
   VCmpxLeF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3927,6 +4164,12 @@ class VCmpxGtF16Vop3 : public Vop3 {
 public:
   VCmpxGtF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3940,6 +4183,12 @@ class VCmpxLgF16Vop3 : public Vop3 {
 public:
   VCmpxLgF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3953,6 +4202,12 @@ class VCmpxGeF16Vop3 : public Vop3 {
 public:
   VCmpxGeF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3966,6 +4221,12 @@ class VCmpxOF16Vop3 : public Vop3 {
 public:
   VCmpxOF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3979,6 +4240,12 @@ class VCmpxUF16Vop3 : public Vop3 {
 public:
   VCmpxUF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -3992,6 +4259,12 @@ class VCmpxNgeF16Vop3 : public Vop3 {
 public:
   VCmpxNgeF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4005,6 +4278,12 @@ class VCmpxNlgF16Vop3 : public Vop3 {
 public:
   VCmpxNlgF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4018,6 +4297,12 @@ class VCmpxNgtF16Vop3 : public Vop3 {
 public:
   VCmpxNgtF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4031,6 +4316,12 @@ class VCmpxNleF16Vop3 : public Vop3 {
 public:
   VCmpxNleF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4044,6 +4335,12 @@ class VCmpxNeqF16Vop3 : public Vop3 {
 public:
   VCmpxNeqF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4057,6 +4354,12 @@ class VCmpxNltF16Vop3 : public Vop3 {
 public:
   VCmpxNltF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4070,6 +4373,13 @@ class VCmpxTF16Vop3 : public Vop3 {
 public:
   VCmpxTF16Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    modifiers.constant_float_compare = true;
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4083,6 +4393,13 @@ class VCmpxFF32Vop3 : public Vop3 {
 public:
   VCmpxFF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    modifiers.constant_float_compare = true;
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4096,6 +4413,12 @@ class VCmpxLtF32Vop3 : public Vop3 {
 public:
   VCmpxLtF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4109,6 +4432,12 @@ class VCmpxEqF32Vop3 : public Vop3 {
 public:
   VCmpxEqF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4122,6 +4451,12 @@ class VCmpxLeF32Vop3 : public Vop3 {
 public:
   VCmpxLeF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4135,6 +4470,12 @@ class VCmpxGtF32Vop3 : public Vop3 {
 public:
   VCmpxGtF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4148,6 +4489,12 @@ class VCmpxLgF32Vop3 : public Vop3 {
 public:
   VCmpxLgF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4161,6 +4508,12 @@ class VCmpxGeF32Vop3 : public Vop3 {
 public:
   VCmpxGeF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4174,6 +4527,12 @@ class VCmpxOF32Vop3 : public Vop3 {
 public:
   VCmpxOF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4187,6 +4546,12 @@ class VCmpxUF32Vop3 : public Vop3 {
 public:
   VCmpxUF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4200,6 +4565,12 @@ class VCmpxNgeF32Vop3 : public Vop3 {
 public:
   VCmpxNgeF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4213,6 +4584,12 @@ class VCmpxNlgF32Vop3 : public Vop3 {
 public:
   VCmpxNlgF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4226,6 +4603,12 @@ class VCmpxNgtF32Vop3 : public Vop3 {
 public:
   VCmpxNgtF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4239,6 +4622,12 @@ class VCmpxNleF32Vop3 : public Vop3 {
 public:
   VCmpxNleF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4252,6 +4641,12 @@ class VCmpxNeqF32Vop3 : public Vop3 {
 public:
   VCmpxNeqF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4265,6 +4660,12 @@ class VCmpxNltF32Vop3 : public Vop3 {
 public:
   VCmpxNltF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4278,6 +4679,13 @@ class VCmpxTF32Vop3 : public Vop3 {
 public:
   VCmpxTF32Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3::amdgpu_register_modifiers(modifiers);
+    modifiers.constant_float_compare = true;
+    if (modifiers.dpp) {
+      modifiers.dpp_masked_compare_rhs = &src1;
+    }
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4291,6 +4699,9 @@ class VCmpxFF64Vop3 : public Vop3 {
 public:
   VCmpxFF64Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.constant_float_compare = true;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -4441,6 +4852,9 @@ class VCmpxTF64Vop3 : public Vop3 {
 public:
   VCmpxTF64Vop3(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    modifiers.constant_float_compare = true;
+  }
   Operand vdst;
   Operand src0;
   Operand src1;
@@ -5015,7 +5429,6 @@ public:
     Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
     modifiers.src2_is_wave_mask = true;
   }
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -5034,7 +5447,6 @@ public:
     Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
     modifiers.src2_is_wave_mask = true;
   }
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -5049,11 +5461,17 @@ class VSubrevCoCiU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubrevCoCiU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
+  bool tracks_explicit_source(uint8_t i) const override {
+    return src_operand(i) != &src1 || src1.decoded_vgpr() ||
+           (!has_encoded_dpp() && !has_encoded_dpp8());
+  }
   void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
     Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &src1;
+    }
     modifiers.src2_is_wave_mask = true;
   }
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -5112,7 +5530,6 @@ class VAddCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VAddCoU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -5126,7 +5543,6 @@ class VSubCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubCoU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
   Operand vdst;
   Operand sdst;
   Operand src0;
@@ -5140,7 +5556,16 @@ class VSubrevCoU32Vop3SdstEnc : public Vop3SdstEnc {
 public:
   VSubrevCoU32Vop3SdstEnc(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
-  void implicit_uses(RegisterSet &uses) const override;
+  bool tracks_explicit_source(uint8_t i) const override {
+    return src_operand(i) != &src1 || src1.decoded_vgpr() ||
+           (!has_encoded_dpp() && !has_encoded_dpp8());
+  }
+  void amdgpu_register_modifiers(amdgpu::RegisterModifiers &modifiers) const override {
+    Vop3SdstEnc::amdgpu_register_modifiers(modifiers);
+    if (modifiers.dpp || modifiers.dpp8) {
+      modifiers.src0 = &src1;
+    }
+  }
   Operand vdst;
   Operand sdst;
   Operand src0;

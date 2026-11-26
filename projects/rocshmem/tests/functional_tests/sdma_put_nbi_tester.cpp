@@ -25,12 +25,17 @@
 #include "sdma_put_nbi_tester.hpp"
 
 #include <rocshmem/rocshmem.hpp>
+#include "backend_bc.hpp"
 #include "context.hpp"
 #include "ipc_policy.hpp"
 #include "sdma/anvil_device.hpp"
 #include "verify_results_kernels.hpp"
 
 using namespace rocshmem;
+
+namespace rocshmem {
+extern Backend *backend;
+}
 
 /******************************************************************************
  * DEVICE TEST KERNEL
@@ -77,10 +82,10 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
     int start_slot = (batch - (skip % batch)) % batch;
 
     // Drain all setup loads from HBM before entering the timed loop.
-#if defined(__GFX12__)
-    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
-#else
+#if defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__)
     __builtin_amdgcn_s_waitcnt(0);
+#else
+    asm volatile("s_wait_loadcnt 0x0\n s_wait_storecnt 0x0" ::: "memory");
 #endif
 
     for (int i = 0; i < loop + skip; i++) {
@@ -112,6 +117,13 @@ __global__ void SdmaPutNbiTest(int loop, int skip,
 SdmaPutNbiTester::SdmaPutNbiTester(TesterArguments args) : Tester(args) {
   s_buf = (char *)alloc_test_buffer(max_msg_size);
   r_buf = (char *)alloc_test_buffer(max_msg_size * batch_size);
+
+  // False if SDMA failed to connect (e.g. no xGMI) and fell back to IPC.
+  sdma_unavailable = !backend->ipcImpl.sdmaImpl_.sdmaEnabled;
+  if (sdma_unavailable && args.myid == 0) {
+    std::cout << "sdma_putnbi: SKIPPED (SDMA did not connect on this "
+                 "topology; fell back to IPC memcpy)\n";
+  }
 }
 
 SdmaPutNbiTester::~SdmaPutNbiTester() {
@@ -126,6 +138,8 @@ void SdmaPutNbiTester::resetBuffers(size_t size) {
 
 void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
                                     size_t size) {
+  if (sdma_unavailable) return;
+
   size_t shared_bytes = 0;
 
   hipLaunchKernelGGL(SdmaPutNbiTest, gridSize, blockSize, shared_bytes,
@@ -138,6 +152,11 @@ void SdmaPutNbiTester::launchKernel(dim3 gridSize, dim3 blockSize, int loop,
 }
 
 void SdmaPutNbiTester::verifyResults(size_t size) {
+  if (sdma_unavailable) {
+    _print_results = false;
+    return;
+  }
+
   if (args.myid != 1) return;
 
   size_t check_bytes = size * batch_size;

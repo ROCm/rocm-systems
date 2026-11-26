@@ -26,7 +26,12 @@
 // consequence is that this covers RCCL's own sources only: HIP's
 // atomicAdd()/atomicMax()/atomicExch() still reach the builtins through header
 // code that was already parsed, and RCCL device code still calls those.
-#if defined(__cplusplus) && (defined(__HIP__) || defined(__HIPCC__))
+//
+// A translation unit that never includes HIP (e.g. one defining its own HIP
+// API stubs) can define RCCL_POISON_HIP_ATOMICS_NO_HIP_INCLUDES to keep the
+// poison without having HIP's declarations forced into it.
+#if defined(__cplusplus) && (defined(__HIP__) || defined(__HIPCC__)) && \
+    !defined(RCCL_POISON_HIP_ATOMICS_NO_HIP_INCLUDES)
 #include <hip/hip_bf16.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_runtime.h>

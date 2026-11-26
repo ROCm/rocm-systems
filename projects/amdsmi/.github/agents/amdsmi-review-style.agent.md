@@ -4,6 +4,8 @@ description: "Style review subagent. Checks formatting, naming, pre-commit compl
 tools: execute/runInTerminal, read/readFile, search/textSearch, search/fileSearch, search/listDirectory
 model: "Claude Sonnet 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Style Review — amd-smi

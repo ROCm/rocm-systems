@@ -51,10 +51,12 @@ subtrees:
           title: XGMI, PCIe, and SDMA metrics monitoring
         - file: how-to/hipfile-telemetry.rst
           title: hipFile Infinity Storage I/O telemetry
+    - file: how-to/using-rocsys.rst
+      title: Using the rocsys command (experimental)
     - file: how-to/understanding-rocprof-sys-output.rst
-      title: Understanding the output
+      title: Understanding the profiling output
     - file: how-to/using-preset-profiles.rst
-      title: Use the preset profiles
+      title: Using the preset profiles
 
   - caption: Conceptual
     entries:

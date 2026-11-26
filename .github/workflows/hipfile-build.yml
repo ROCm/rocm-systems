@@ -96,9 +96,11 @@ jobs:
         # - ROCM_VERSION (set in DOCKERFILE)
         # See: https://github.com/ROCm/ROCm/blob/8aa43d132f0d541eb5303dc532f5931cb80ad87a/tools/rocm-build/envsetup.sh#L25-L42
         run: |
-          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
-          echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
+          {
+            echo "AIS_PR_NUMBER=${GITHUB_REF//[^0-9]/}"
+            echo "AIS_GHA_CMD_FILES_DIR=${GITHUB_ENV%/*}"
+            echo "AIS_SAFE_COMPILER_NAME=${AIS_INPUT_CXX_COMPILER//+/plus}"
+          } >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         # We should expect that there are multiple instances of this job with different cxx_compilers.
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
@@ -126,7 +128,7 @@ jobs:
             -dt \
             --rm \
             --pull always \
-            -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
+            -v "${GITHUB_WORKSPACE}:/mnt/ais:ro" \
             -v "${AIS_GHA_CMD_FILES_DIR}:${AIS_GHA_CMD_FILES_DOCKER_DIR}" \
             -v "${AIS_MOUNT_PATH}:/mnt/ais-fs" \
             --name "${AIS_CONTAINER_NAME}" \
@@ -246,7 +248,7 @@ jobs:
               printf "\`\`\`\n"
               cat coverage-report.txt
               printf "\`\`\`\n"
-            ' >> ${GITHUB_STEP_SUMMARY}
+            ' >> "${GITHUB_STEP_SUMMARY}"
       - name: Create hipFile package
         run: |
           docker exec \
@@ -335,15 +337,35 @@ jobs:
                 )
               }}
             '
+      # Build the examples the package installed, standalone, against the
+      # installed hipFile, the way a user would. The package installs into
+      # the build's CMAKE_INSTALL_PREFIX.
+      - name: Build the installed hipFile examples (${{ inputs.cxx_compiler }})
+        run: |
+          docker exec \
+            -e "_AIS_INPUT_CXX_COMPILER=${AIS_INPUT_CXX_COMPILER}" \
+            -t \
+            -w /ais/build/hipfile \
+            "${AIS_CONTAINER_NAME}" \
+            /bin/bash -c '
+              prefix="$(sed -n "s/^CMAKE_INSTALL_PREFIX:PATH=//p" CMakeCache.txt)"
+              ../../rocm-systems/projects/hipfile/util/ci-build-installed-examples.sh \
+                ../../rocm-systems/projects/hipfile/examples \
+                "${prefix}/share/doc/hipfile/examples" \
+                /ais/build/hipfile-installed-examples \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CXX_COMPILER="${_AIS_INPUT_CXX_COMPILER}" \
+                -DCMAKE_PREFIX_PATH="${prefix}"
+            '
       - name: Copy hipFile packages out of the container
         if: ${{ inputs.upload_artifacts }}
         run: |
           docker cp \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_DEV_FILENAME }}" \
-            ${GITHUB_WORKSPACE}
+            "${GITHUB_WORKSPACE}"
           docker cp \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile/${{ steps.pkg-metadata.outputs.AIS_HIPFILE_PKG_FILENAME }}" \
-            ${GITHUB_WORKSPACE}
+            "${GITHUB_WORKSPACE}"
       - name: Upload development hipFile Package as an Artifact
         if: ${{ inputs.upload_artifacts }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -371,7 +393,7 @@ jobs:
         run: |
           docker cp \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile" \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir
+            "${GITHUB_WORKSPACE}/hipfile-build-dir"
       # Trim build intermediates the self-hosted system-test job doesn't need
       # before uploading. ctest only needs the test executables, runtime *.so's
       # and the CTestTestfile.cmake chain -- not the *.o (CMakeFiles/), the
@@ -399,7 +421,7 @@ jobs:
             -w /ais/build \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              rm -rf hipfile hipfile-release
+              rm -rf hipfile hipfile-release hipfile-installed-examples
             '
       - name: Cleanup & Stop the Docker container
         if: ${{ always() }}

@@ -7,7 +7,9 @@
 #ifndef ROCJITSU_ISA_INSTRUCTION_H_
 #define ROCJITSU_ISA_INSTRUCTION_H_
 
+#include "rocjitsu/isa/arch/amdgpu/shared/execution_block.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/instruction_metadata.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_issue.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/result.h"
@@ -15,6 +17,7 @@
 
 #include <array>
 #include <cassert>
+#include <concepts>
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
@@ -22,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <typeinfo>
 #include <utility>
 #include <vector>
 
@@ -96,7 +100,82 @@ enum InstFlags : uint64_t {
   /// @brief IU DOT/WMMA has undefined NEG[2] or NEG_HI modifiers.
   INVALID_IU_MODIFIERS = (1ULL << 28),
   /// @brief A qualified scalar data tuple violates its ISA alignment requirement.
-  MISALIGNED_SCALAR_DATA = (1ULL << 29)
+  MISALIGNED_SCALAR_DATA = (1ULL << 29),
+  /// @brief Encoded for the scalar ALU (SOP1, SOP2, SOPC, SOPK, SOPP), including
+  /// waits, barriers, messages, no-ops and the PC writers.
+  /// @details SALU, VALU, SMEM, VMEM and LDS classify the encoding: the generator
+  /// sets at most one of them, from the encoding alone. amdgpu_execution_block()
+  /// applies policy on top of them; see amdgpu::ExecutionBlock.
+  SALU = (1ULL << 30),
+  /// @brief Encoded for the vector ALU (VOP*, VOPD, VINTERP), including matrix and
+  /// transcendental operations.
+  VALU = (1ULL << 31),
+  /// @brief Encoded for scalar memory (SMEM), including scalar cache maintenance
+  /// and the SMEM timestamp reads.
+  SMEM = (1ULL << 32),
+  /// @brief Encoded for vector memory: buffer, flat, global, scratch, image and
+  /// tensor.
+  VMEM = (1ULL << 33),
+  /// @brief Encoded for LDS (DS, LDS-direct), including GWS and the DS no-op.
+  LDS = (1ULL << 34),
+  /// @brief Evaluated by the VALU transcendental unit: rcp, rsq, sqrt, exp, log,
+  /// sin, cos and tanh, including their pseudo-scalar forms.
+  /// @details An operation (unit) classification, not the S_DELAY_ALU TRANS
+  /// dependency class. It covers every data width, so F64 forms such as
+  /// v_rcp_f64 are included although the ISA tracks them as ordinary VALU for
+  /// delay purposes, and matrix operations are excluded although CDNA5 tracks
+  /// small-data WMMA as TRANS. A consumer that needs the delay class must apply
+  /// those target-specific rules itself.
+  TRANSCENDENTAL = (1ULL << 35),
+  /// @brief May sleep or halt its wave (s_sleep, s_sleep_var, s_monitor_sleep,
+  /// s_sethalt, s_sendmsghalt).
+  /// @details Whether it does depends on operands and execution state; for
+  /// example, s_sethalt 0 clears the halt bit.
+  SUSPENDS_WAVE = (1ULL << 36),
+  /// @brief Marks architectural PC writers, including trap entry and return.
+  /// @details Direct conditional branches additionally carry COND_BRANCH and a
+  /// decoded displacement. Query writes_pc() for the combined classification.
+  WRITES_PC = (1ULL << 37),
+  /// @brief Software trap instruction (s_trap).
+  SOFTWARE_TRAP = (1ULL << 38),
+  /// @brief The trailing DWORD of the VGPR result can preserve the shader's incoming value,
+  /// even at full EXEC. Memory feedback writes only lanes with a fault or warning.
+  CONDITIONAL_LAST_VGPR_DEF = (1ULL << 44),
+  /// @brief The memory result requires one additional allocated VGPR which it never writes.
+  /// A dropped texture fetch with TFE and no LWE checks this slot at issue.
+  RESERVES_UNWRITTEN_VGPR = (1ULL << 39),
+  /// Ordinary indexed GFX11 GDS reads inputs and writes results in the first active lane.
+  FIRST_ACTIVE_MEMORY_LANE = (1ULL << 40),
+  /// Global transpose addresses come from lanes 0-31. Each wave64 lane gets half the encoded width.
+  COMPACT_WAVE64_MEMORY_RESULT = (1ULL << 41),
+  /// Global load-transpose instructions acquire no register operands when EXEC is zero.
+  GLOBAL_TRANSPOSE_LOAD = (1ULL << 43),
+  /// The decoded VDATA tuple includes a trailing allocation-only status word.
+  /// RESERVES_UNWRITTEN_VGPR instead extends the decoded tuple for allocation.
+  INCLUDES_UNWRITTEN_LAST_VGPR = (1ULL << 42),
+  /// CDNA5 packed widening disallows overlap after applying each operand's VGPR bank.
+  CHECK_CVT_SCALE_OVERLAP = (1ULL << 45),
+  /// CDNA5 Table 37 reserves FP8/BF8 scale selectors 12..15.
+  RESERVED_CVT_SCALE_SELECTOR = (1ULL << 46),
+  /// @brief Matrix arithmetic, including MFMA, WMMA and their sparse forms.
+  MATRIX_OP = (1ULL << 47),
+  /// @brief Reads the current PC as an input, including PC-relative calculations.
+  READS_PC = (1ULL << 48),
+  /// @brief Interpolation operation with interpolation-specific register rules.
+  INTERPOLATION = (1ULL << 49),
+  /// @brief M0-relative scalar source or destination register addressing.
+  RELATIVE_SGPR_SOURCE = (1ULL << 50),
+  RELATIVE_SGPR_DESTINATION = (1ULL << 51),
+  /// @brief M0-relative vector source or destination register addressing.
+  RELATIVE_VGPR_SOURCE = (1ULL << 52),
+  RELATIVE_VGPR_DESTINATION = (1ULL << 53),
+  /// @brief A transfer into or out of LDS using another memory address space.
+  MEMORY_TO_LDS = (1ULL << 54),
+  MEMORY_FROM_LDS = (1ULL << 55),
+  /// @brief Memory data uses D16 register packing, including whole packed tuples.
+  /// @details This describes register data layout, not whether a particular
+  /// destination preserves bytes. A packed pair can write a complete DWORD.
+  D16_MEMORY_DATA = (1ULL << 56)
 };
 
 class BasicBlock;
@@ -115,8 +194,18 @@ public:
   uint8_t tag() const { return tag_; }
   void set_tag(uint8_t t) { tag_ = t; }
 
+  /// @brief Release operation-scoped ownership after successful completion.
+  /// @details Return true only when this state supports reset_for_reuse() and
+  /// retains no external resources. Instruction hides retired storage until
+  /// the next execution explicitly acquires, resets, and publishes it.
+  virtual bool retire_for_reuse() noexcept { return false; }
+
 protected:
   uint8_t tag_ = 0;
+
+private:
+  friend class Instruction;
+  bool active_ = true;
 };
 
 /// @brief Abstract base class that defines the API for an instruction.
@@ -195,8 +284,9 @@ public:
       alloc_pool_ = nullptr;
     }
     for (auto *scope = ScopedHeapAllocation::active_scope_; scope; scope = scope->previous_scope_) {
-      if (scope->saved_alloc_pool_ != pool)
+      if (scope->saved_alloc_pool_ != pool) {
         continue;
+      }
       scope->saved_alloc_fn_ = nullptr;
       scope->saved_dealloc_fn_ = nullptr;
       scope->saved_alloc_pool_ = nullptr;
@@ -204,8 +294,9 @@ public:
   }
 
   static void *operator new(size_t size) {
-    if (alloc_fn_)
+    if (alloc_fn_) {
       return alloc_fn_(alloc_pool_, size);
+    }
     return ::operator new(size);
   }
 
@@ -229,41 +320,102 @@ public:
   /// and must not be called. No virtual dispatch.
   /// This is a low-level backend callback. AMDGPU callers should use the CU's
   /// execute_instruction() API to reset and check simulator execution failures.
-  /// @details Decoded non-memory instructions without DynamicInstState may be
-  /// reused across waves without a reset. Executors must read register values,
+  /// @details Decoded operands are immutable after construction, except for
+  /// temporary read delegation through ScopedOperandDelegate on the execution
+  /// thread. The decoded instruction must not execute concurrently while bound.
+  /// Decoded instructions without active DynamicInstState may be reused across
+  /// waves. Executors must read register values,
   /// EXEC and other execution state from the current context, and restore any
   /// temporary operand delegates before returning. Put persistent per-issue
-  /// state in DynamicInstState; its presence excludes decoded reuse. Any
+  /// state in DynamicInstState; retire_data() must hide completed state before
+  /// reuse, and acquire_data() must reset retained state before preparation. Any
   /// per-execution member flags must be assigned on every execution.
   const ExecuteFn execute;
 
-  /// @brief Access the attached dynamic state, or nullptr if none.
-  /// @returns Pointer to the dynamic state, or nullptr.
-  DynamicInstState *data() { return data_.get(); }
+  /// @brief Access the active dynamic state, or nullptr if none.
+  /// @returns Pointer to the active state; retired storage remains hidden.
+  DynamicInstState *data() { return data_ && data_->active_ ? data_.get() : nullptr; }
   /// @copydoc data()
-  const DynamicInstState *data() const { return data_.get(); }
+  const DynamicInstState *data() const { return data_ && data_->active_ ? data_.get() : nullptr; }
 
   /// @brief Typed convenience accessor (unchecked static_cast).
   /// @tparam T Concrete DynamicInstState subclass.
   /// @returns Pointer to the dynamic state cast to @p T.
   template <typename T> T *data_as() {
-    assert(dynamic_cast<T *>(data_.get()) != nullptr);
-    return static_cast<T *>(data_.get());
+    assert(dynamic_cast<T *>(data()) != nullptr);
+    return static_cast<T *>(data());
   }
   /// @copydoc data_as()
   template <typename T> const T *data_as() const {
-    assert(dynamic_cast<const T *>(data_.get()) != nullptr);
-    return static_cast<const T *>(data_.get());
+    assert(dynamic_cast<const T *>(data()) != nullptr);
+    return static_cast<const T *>(data());
   }
 
   /// @brief Attach dynamic state to this instruction (transfers ownership).
-  /// @details An instruction retaining this state cannot enter a decoded cache.
+  /// @details Published state excludes decoded caching until retire_data().
   /// @param[in] d Dynamic state (ownership transferred).
-  void set_data(std::unique_ptr<DynamicInstState> d) { data_ = std::move(d); }
+  void set_data(std::unique_ptr<DynamicInstState> d) {
+    if (d) {
+      d->active_ = true;
+    }
+    data_ = std::move(d);
+  }
 
-  /// @brief The instruction's canonical semantic mnemonic.
-  /// @returns Reference to the mnemonic used by analysis and execution consumers.
+  /// @brief Acquire exclusively owned state with fresh constructor semantics.
+  /// @details Reusable state types implement reset_for_reuse(args...) to restore
+  /// all defaults while preserving bounded buffers. Exact type matching keeps
+  /// this downcast safe even if callers change the requested state type.
+  /// Preparation can fail before set_data(): the local owner then destroys the
+  /// unpublished state, just as a freshly allocated state would be destroyed.
+  template <typename State, typename... Args>
+    requires std::derived_from<State, DynamicInstState>
+  std::unique_ptr<State> acquire_data(Args &&...args) {
+    DynamicInstState *retained = data_.get();
+    if (retained && !retained->active_ && typeid(*retained) == typeid(State)) {
+      auto state = std::unique_ptr<State>(static_cast<State *>(data_.release()));
+      state->reset_for_reuse(std::forward<Args>(args)...);
+      return state;
+    }
+    return std::make_unique<State>(std::forward<Args>(args)...);
+  }
+
+  /// @brief Hide completed state, retaining only storage that opts into reuse.
+  /// @details Call after successful synchronous writeback and counter release.
+  /// Deferred and retry owners destroy their instructions normally. Retiring
+  /// an already inactive state is harmless, including after an EXEC-zero issue.
+  void retire_data() {
+    if (data_ && data_->active_) {
+      if (data_->retire_for_reuse()) {
+        data_->active_ = false;
+      } else {
+        data_.reset();
+      }
+    }
+  }
+
+  /// @brief Human-readable instruction identity for textual interfaces and diagnostics.
+  /// @details Behavior is described by decoded metadata. The spelling can include
+  /// encoding decorations and is not a semantic classification interface.
   std::string_view mnemonic() const { return mnemonic_; }
+
+  /// @brief Canonical AMDGPU operation, independent of display encoding suffixes.
+  /// @details VOPD exposes the X operation here and the Y operation separately.
+  /// Unknown represents a synthetic or custom operation outside the generated
+  /// canonical catalog; it never implies that the instruction has no effects.
+  [[nodiscard]] amdgpu::Operation amdgpu_operation() const { return operation_; }
+  [[nodiscard]] amdgpu::Operation amdgpu_secondary_operation() const {
+    return secondary_operation_;
+  }
+  [[nodiscard]] amdgpu::MemoryAddressing amdgpu_memory_addressing() const {
+    return memory_addressing_;
+  }
+  [[nodiscard]] amdgpu::MemoryKind amdgpu_memory_kind() const { return memory_kind_; }
+  [[nodiscard]] bool is_matrix() const { return flags_ & MATRIX_OP; }
+  [[nodiscard]] bool reads_pc() const { return flags_ & READS_PC; }
+  [[nodiscard]] bool is_interpolation() const { return flags_ & INTERPOLATION; }
+  [[nodiscard]] bool transfers_to_lds() const { return flags_ & MEMORY_TO_LDS; }
+  [[nodiscard]] bool transfers_from_lds() const { return flags_ & MEMORY_FROM_LDS; }
+  [[nodiscard]] bool has_d16_memory_data() const { return flags_ & D16_MEMORY_DATA; }
 
   /// @brief The instruction's total number of operands.
   /// @returns Sum of source and destination operand counts.
@@ -298,16 +450,18 @@ public:
   /// @brief Previous decoded instruction in the same basic block.
   /// @returns The preceding instruction, or nullptr at the block boundary.
   [[nodiscard]] const Instruction *previous_instruction() const {
-    if (parent_ == nullptr || prev_ == nullptr || prev_->parent_ != parent_)
+    if (parent_ == nullptr || prev_ == nullptr || prev_->parent_ != parent_) {
       return nullptr;
+    }
     return static_cast<const Instruction *>(prev_);
   }
 
   /// @brief Next decoded instruction in the same basic block.
   /// @returns The following instruction, or nullptr at the block boundary.
   [[nodiscard]] const Instruction *next_instruction() const {
-    if (parent_ == nullptr || next_ == nullptr || next_->parent_ != parent_)
+    if (parent_ == nullptr || next_ == nullptr || next_->parent_ != parent_) {
       return nullptr;
+    }
     return static_cast<const Instruction *>(next_);
   }
 
@@ -330,6 +484,10 @@ public:
   bool is_memory_op() const { return flags_ & MEMORY_OP; }
   /// @brief Whether MODE.VSKIP prevents this instruction from being issued.
   bool is_vskip_affected() const { return flags_ & VSKIP_AFFECTED; }
+  /// An empty transpose suppresses register and memory accesses but can occupy LOADCNT.
+  bool is_empty_global_transpose(uint64_t exec) const {
+    return (flags_ & GLOBAL_TRANSPOSE_LOAD) && !exec;
+  }
   /// @brief Whether this instruction can increment a memory completion counter.
   bool is_memory_wait_producer() const { return flags_ & MEMORY_WAIT_PRODUCER; }
   /// @brief Whether the instruction includes a memory completion wait field.
@@ -344,6 +502,17 @@ public:
 
   uint64_t flags() const { return flags_; }
 
+  /// Size an explicit destination according to the issuing wave's width.
+  RegisterRef wave_sized_destination(const Operand &op, RegisterRef ref, uint8_t wave_size) const {
+    if (ref.cls == RegClass::VGPR && wave_size == 64 && (flags_ & COMPACT_WAVE64_MEMORY_RESULT)) {
+      ref.width /= 2;
+    }
+    if (ref.cls == RegClass::VGPR && (flags_ & INCLUDES_UNWRITTEN_LAST_VGPR)) {
+      --ref.width;
+    }
+    return wave_sized_register(op, ref, wave_size);
+  }
+
   bool is_waitcnt() const { return flags_ & WAITCNT; }
 
   bool is_barrier() const { return flags_ & BARRIER; }
@@ -351,6 +520,53 @@ public:
   bool is_mfma() const { return flags_ & MFMA; }
 
   bool is_accvgpr() const { return flags_ & ACCVGPR; }
+
+  /// @brief Whether this instruction ends the program (e.g. s_endpgm).
+  bool is_program_terminator() const { return flags_ & PROGRAM_TERMINATOR; }
+
+  /// @brief Whether this instruction may leave the PC somewhere other than the
+  /// next instruction.
+  /// @details The control-flow flags plus WRITES_PC. s_setpc, s_swappc and
+  /// s_call carry INDIRECT_BRANCH or INDIRECT_CALL.
+  bool writes_pc() const {
+    constexpr uint64_t pc_flags =
+        BRANCH | COND_BRANCH | INDIRECT_BRANCH | INDIRECT_CALL | PROGRAM_TERMINATOR | WRITES_PC;
+    return (flags_ & pc_flags) != 0;
+  }
+
+  /// @brief Whether this is an AMDGPU VALU transcendental. See TRANSCENDENTAL.
+  bool is_transcendental() const { return flags_ & TRANSCENDENTAL; }
+
+  /// @brief Whether this instruction may sleep or halt its wave. See SUSPENDS_WAVE.
+  bool suspends_wave() const { return flags_ & SUSPENDS_WAVE; }
+
+  /// @brief The AMDGPU block this instruction issues to.
+  /// @details The generated encoding sets exactly one of the block flags, or
+  /// none for exports. Every PC writer reports BRANCH, overriding its SALU
+  /// encoding; see amdgpu::ExecutionBlock for that contract and for when to use
+  /// plugins::classify_instruction() instead.
+  [[nodiscard]] amdgpu::ExecutionBlock amdgpu_execution_block() const {
+    using amdgpu::ExecutionBlock;
+    if (flags_ & LDS) {
+      return ExecutionBlock::LDS;
+    }
+    if (flags_ & VMEM) {
+      return ExecutionBlock::VMEM;
+    }
+    if (flags_ & SMEM) {
+      return ExecutionBlock::SMEM;
+    }
+    if (writes_pc()) {
+      return ExecutionBlock::BRANCH;
+    }
+    if (flags_ & SALU) {
+      return ExecutionBlock::SALU;
+    }
+    if (flags_ & VALU) {
+      return ExecutionBlock::VALU;
+    }
+    return ExecutionBlock::UNKNOWN;
+  }
 
   /// @brief Signed byte offset for a direct branch target.
   ///
@@ -362,6 +578,8 @@ public:
   /// @brief Whether an explicit source operand contributes its ordinary register dependency.
   /// @details Encodings with non-contiguous source tuples can suppress the
   /// placeholder tuple and report the actual registers through implicit_uses().
+  /// An instruction that ignores an encoded source (s_rfe_restore_b64's second
+  /// operand) suppresses it here too.
   [[nodiscard]] virtual bool tracks_explicit_source(uint8_t /*operand_index*/) const {
     return true;
   }
@@ -426,22 +644,26 @@ public:
     bool first = true;
     // TODO: Include explicit fieldless operands (and/or implicit ones too).
     for (uint8_t operand_index = 0; operand_index < num_dst_; ++operand_index) {
-      if (!should_print_dst_operand(operand_index))
+      if (!should_print_dst_operand(operand_index)) {
         continue;
+      }
       out += (first ? " " : ", ");
       append_dst_operand(out, operand_index);
       first = false;
     }
     for (uint8_t operand_index = 0; operand_index < num_src_; ++operand_index) {
-      if (!should_print_src_operand(operand_index))
+      if (!should_print_src_operand(operand_index)) {
         continue;
+      }
       if (omit_repeated_destination_sources_) {
         bool repeats_dst = false;
-        for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index)
+        for (uint8_t dst_index = 0; dst_index < num_dst_; ++dst_index) {
           repeats_dst |= should_print_dst_operand(dst_index) &&
                          src_operands_[operand_index] == dst_operands_[dst_index];
-        if (repeats_dst)
+        }
+        if (repeats_dst) {
           continue;
+        }
       }
       out += (first ? " " : ", ");
       append_src_operand(out, operand_index);
@@ -454,14 +676,29 @@ public:
 protected:
   friend class Decoder;
 
+  /// @brief Set immutable operation identity during instruction construction.
+  void set_amdgpu_operation(amdgpu::Operation operation,
+                            amdgpu::Operation secondary = amdgpu::Operation::Unknown) {
+    operation_ = operation;
+    secondary_operation_ = secondary;
+  }
+
+  /// @brief Set decoded memory facts without advertising an execution pipeline.
+  void set_amdgpu_memory(amdgpu::MemoryAddressing addressing, amdgpu::MemoryKind kind) {
+    memory_addressing_ = addressing;
+    memory_kind_ = kind;
+  }
+
   void
   set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
-                        bool exec_masked = true) {
+                        bool exec_masked = true, bool counts_with_empty_exec = false) {
     memory_issue_info_ = {};
     memory_issue_info_.exec_masked = exec_masked;
+    memory_issue_info_.counts_with_empty_exec = counts_with_empty_exec;
     for (const auto obligation : counter_obligations) {
-      if (!obligation.valid())
+      if (!obligation.valid()) {
         continue;
+      }
       if (memory_issue_info_.num_counter_obligations_ ==
           amdgpu::MemoryIssueInfo::MAX_COUNTER_OBLIGATIONS) {
         assert(false && "too many memory counter obligations");
@@ -481,6 +718,16 @@ protected:
   /// mirrors this size); resize both together.
   std::array<Operand *, 6> src_operands_{};
   uint8_t num_src_ = 0;
+  // These fixed-width facts occupy the existing padding before dst_operands_
+  // on supported 64-bit hosts. Keep their payload within this byte budget.
+  static_assert(2 * sizeof(amdgpu::Operation) + sizeof(amdgpu::MemoryAddressing) +
+                        sizeof(amdgpu::MemoryKind) <=
+                    6,
+                "decoded identity and memory facts must remain compact");
+  amdgpu::MemoryAddressing memory_addressing_ = amdgpu::MemoryAddressing::None;
+  amdgpu::MemoryKind memory_kind_ = amdgpu::MemoryKind::None;
+  amdgpu::Operation operation_ = amdgpu::Operation::Unknown;
+  amdgpu::Operation secondary_operation_ = amdgpu::Operation::Unknown;
   /// @brief Instruction's destination operands (max 3). KEEP IN SYNC with
   /// CodeGenerator._DST_OPERANDS_CAPACITY; resize both together.
   std::array<Operand *, 3> dst_operands_{};

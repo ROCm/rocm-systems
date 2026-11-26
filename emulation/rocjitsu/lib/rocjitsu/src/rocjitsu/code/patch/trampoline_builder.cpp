@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/code/patch/trampoline_builder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/analysis/free_registers.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -16,6 +17,7 @@
 #include <array>
 #include <cstring>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rocjitsu {
@@ -25,9 +27,10 @@ namespace {
 // A pair read by VALU remains subject to RDNA4's SGPR rule after later SALU
 // writes. Save destinations may have been read by earlier guest/probe code.
 // Guard the completed save batch before argument or EXEC-restore consumers.
-bool needs_rdna4_save_guard(rj_code_arch_t arch, std::span<const SpecialStateSlot> special_saves,
+bool needs_rdna4_save_guard(rocjitsu::IsaFamily arch,
+                            std::span<const SpecialStateSlot> special_saves,
                             std::span<const RegisterSave> register_saves) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+  return arch == rocjitsu::IsaFamily::Rdna4 &&
          (!special_saves.empty() ||
           std::ranges::any_of(register_saves,
                               [](const RegisterSave &save) { return save.cls == RegClass::SGPR; }));
@@ -71,15 +74,17 @@ bool plan_argument_moves(std::span<const ProbeArgValue> args, const ProbeAbi &ab
   RegisterSet unavailable = live | arg_registers(abi) | probe_argument_registers(args);
   for (size_t index = 0; index < args.size(); ++index) {
     const ProbeArgValue &arg = args[index];
-    if (arg.source != ProbeArgSource::AnchorVgpr)
+    if (arg.source != ProbeArgSource::AnchorVgpr) {
       continue;
+    }
     const uint16_t destination = abi.arg_vgpr_base + index;
     if (arg.register_index >= vgpr_bound || destination >= vgpr_bound) {
       report(error, "guest VGPR argument exceeds the kernel's ordinary VGPR allocation");
       return false;
     }
-    if (destination != arg.register_index)
+    if (destination != arg.register_index) {
       pending.push_back({destination, arg.register_index});
+    }
   }
   while (!pending.empty()) {
     const std::vector<ProbeArgumentMove>::iterator ready =
@@ -92,8 +97,9 @@ bool plan_argument_moves(std::span<const ProbeArgValue> args, const ProbeAbi &ab
       pending.erase(ready);
       continue;
     }
-    if (!temp)
+    if (!temp) {
       temp = find_free_run(unavailable, RegClass::VGPR, 1, 0, 1, vgpr_bound);
+    }
     if (!temp || *temp >= vgpr_bound ||
         unavailable.intersects(RegisterRef{RegClass::VGPR, *temp, 1})) {
       report(error, "guest VGPR argument copy cycle has no dead temporary VGPR");
@@ -101,22 +107,26 @@ bool plan_argument_moves(std::span<const ProbeArgValue> args, const ProbeAbi &ab
     }
     const uint16_t source = pending.front().source;
     moves.push_back({*temp, source});
-    for (ProbeArgumentMove &move : pending)
-      if (move.source == source)
+    for (ProbeArgumentMove &move : pending) {
+      if (move.source == source) {
         move.source = *temp;
+      }
+    }
   }
   return true;
 }
 
 [[nodiscard]] bool check_size_and_words(const TrampolinePlan &plan, std::string *err) {
-  if (plan.arch == ROCJITSU_CODE_ARCH_INVALID) {
+  if (plan.arch == rocjitsu::IsaFamily::Invalid) {
     report(err, "trampoline plan: arch was not set");
     return false;
   }
-  if (plan.original_size == 0 || plan.original_size % 4 != 0 ||
-      ((plan.emit_original || plan.patch_anchor) && plan.original_size != 4 &&
-       plan.original_size != 8)) {
-    report(err, "trampoline plan: original_size must be 4 or 8 when patching or relocating");
+  if (plan.original_size == 0 || plan.original_size % 4 != 0) {
+    report(err, "trampoline plan: original_size must be nonzero and dword aligned");
+    return false;
+  }
+  if ((plan.emit_original || plan.patch_anchor) && plan.original_size > 12) {
+    report(err, "trampoline plan: original_size must be 4, 8 or 12 for anchor replay or splice");
     return false;
   }
   const size_t expected_words = plan.original_size / sizeof(uint32_t);
@@ -141,7 +151,7 @@ void append_word(std::vector<uint8_t> &dst, uint32_t w) {
 // vector-memory read or lane select of it, nor a SALU write of M0 against a later
 // M0 reader; software spaces them with wait states (s_nop N supplies N+1, any other
 // instruction 1).
-[[nodiscard]] constexpr bool needs_restore_wait_states(rj_code_arch_t arch) {
+[[nodiscard]] constexpr bool needs_restore_wait_states(rocjitsu::IsaFamily arch) {
   return arch_is_cdna_4_or_lower(arch);
 }
 
@@ -170,7 +180,7 @@ struct SpillBracket {
 util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &vgpr_spills,
                                                   const std::vector<SpillSlot> &sgpr_spills,
                                                   const std::vector<SpillSlot> &acc_spills,
-                                                  uint16_t bridge_vgpr, rj_code_arch_t arch,
+                                                  uint16_t bridge_vgpr, rocjitsu::IsaFamily arch,
                                                   const util::DiagnosticEmitter *error) {
   constexpr uint16_t kUniformLane = 0; // An SGPR is uniform; one lane suffices.
   SpillBracket bracket;
@@ -188,8 +198,9 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   for (const SpillSlot &slot : vgpr_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_store =
         build_scratch_store_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/false);
-    if (maybe_store.failed())
+    if (maybe_store.failed()) {
       return util::Result::failure();
+    }
     const auto &store = maybe_store.value();
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
@@ -200,8 +211,9 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   for (const SpillSlot &slot : acc_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_store =
         build_scratch_store_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/true);
-    if (maybe_store.failed())
+    if (maybe_store.failed()) {
       return util::Result::failure();
+    }
     const auto &store = maybe_store.value();
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
@@ -210,8 +222,9 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   // the only time the bridge could be a just-stored VGPR (WAR, see above).
   if (has_vgpr && has_sgpr) {
     const util::FailureOr<uint32_t> wait = build_wait_stores_complete(arch, error);
-    if (wait.failed())
+    if (wait.failed()) {
       return util::Result::failure();
+    }
     bracket.prologue.push_back(wait.value());
   }
 
@@ -219,14 +232,16 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   for (const SpillSlot &slot : sgpr_spills) {
     const util::FailureOr<std::array<uint32_t, 2>> maybe_wl =
         build_v_writelane_b32(bridge_vgpr, slot.reg, kUniformLane, arch, error);
-    if (maybe_wl.failed())
+    if (maybe_wl.failed()) {
       return util::Result::failure();
+    }
     const auto &wl = maybe_wl.value();
     bracket.prologue.insert(bracket.prologue.end(), wl.begin(), wl.end());
     const util::FailureOr<std::vector<uint32_t>> maybe_store =
         build_scratch_store_dword(bridge_vgpr, slot.byte_offset, arch, error, /*acc=*/false);
-    if (maybe_store.failed())
+    if (maybe_store.failed()) {
       return util::Result::failure();
+    }
     const auto &store = maybe_store.value();
     bracket.prologue.insert(bracket.prologue.end(), store.begin(), store.end());
   }
@@ -241,26 +256,30 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   for (const SpillSlot &slot : sgpr_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_load =
         build_scratch_load_dword(bridge_vgpr, slot.byte_offset, arch, error, /*acc=*/false);
-    if (maybe_load.failed())
+    if (maybe_load.failed()) {
       return util::Result::failure();
+    }
     const auto &load = maybe_load.value();
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
     const util::FailureOr<uint32_t> wait = build_wait_loads_complete(arch, error);
-    if (wait.failed())
+    if (wait.failed()) {
       return util::Result::failure();
+    }
     bracket.epilogue.push_back(wait.value());
     const util::FailureOr<std::array<uint32_t, 2>> maybe_rl =
         build_v_readlane_b32(slot.reg, bridge_vgpr, kUniformLane, arch, error);
-    if (maybe_rl.failed())
+    if (maybe_rl.failed()) {
       return util::Result::failure();
+    }
     const auto &rl = maybe_rl.value();
     bracket.epilogue.insert(bracket.epilogue.end(), rl.begin(), rl.end());
   }
   for (const SpillSlot &slot : vgpr_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_load =
         build_scratch_load_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/false);
-    if (maybe_load.failed())
+    if (maybe_load.failed()) {
       return util::Result::failure();
+    }
     const auto &load = maybe_load.value();
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
     ++bracket.instructions_after_sgpr_restore;
@@ -268,16 +287,18 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   for (const SpillSlot &slot : acc_spills) {
     const util::FailureOr<std::vector<uint32_t>> maybe_load =
         build_scratch_load_dword(slot.reg, slot.byte_offset, arch, error, /*acc=*/true);
-    if (maybe_load.failed())
+    if (maybe_load.failed()) {
       return util::Result::failure();
+    }
     const auto &load = maybe_load.value();
     bracket.epilogue.insert(bracket.epilogue.end(), load.begin(), load.end());
     ++bracket.instructions_after_sgpr_restore;
   }
   if (has_vgpr || has_acc) {
     const util::FailureOr<uint32_t> wait = build_wait_loads_complete(arch, error);
-    if (wait.failed())
+    if (wait.failed()) {
       return util::Result::failure();
+    }
     bracket.epilogue.push_back(wait.value());
     ++bracket.instructions_after_sgpr_restore;
   }
@@ -287,8 +308,9 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
   // ahead of its reload. RDNA4 stores live on STORECNT, which s_wait_loadcnt misses.
   if (has_vgpr || has_sgpr || has_acc) {
     const util::FailureOr<uint32_t> wait = build_wait_stores_complete(arch, error);
-    if (wait.failed())
+    if (wait.failed()) {
       return util::Result::failure();
+    }
     bracket.prologue.push_back(wait.value());
   }
 
@@ -299,8 +321,12 @@ util::FailureOr<SpillBracket> build_spill_bracket(const std::vector<SpillSlot> &
 
 std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &plan,
                                                         std::string *error_out) {
-  if (!check_size_and_words(plan, error_out))
+  OptionalStringDiagnosticSink record_error(error_out);
+  const util::DiagnosticEmitter error(record_error);
+
+  if (!check_size_and_words(plan, error_out)) {
     return std::nullopt;
+  }
 
   // Forward branch: from the anchor to the trampoline.
   const auto fwd = plan.patch_anchor
@@ -316,13 +342,17 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   // hint because the per-item word counts aren't known up front and
   // vector::insert handles growth.
   std::vector<uint32_t> body;
-  for (const InlineAsmItem &item : plan.before_items)
+  for (const InlineAsmItem &item : plan.before_items) {
     body.insert(body.end(), item.words.begin(), item.words.end());
+  }
   const uint32_t original_offset = body.size() * sizeof(uint32_t);
-  if (plan.emit_original)
+  if (plan.emit_original) {
     body.insert(body.end(), plan.original_words.begin(), plan.original_words.end());
-  for (const InlineAsmItem &item : plan.after_items)
+  }
+  const uint32_t after_items_byte_offset = body.size() * sizeof(uint32_t);
+  for (const InlineAsmItem &item : plan.after_items) {
     body.insert(body.end(), item.words.begin(), item.words.end());
+  }
 
   const uint64_t return_branch_pc = plan.trampoline_offset + body.size() * sizeof(uint32_t);
   const auto ret = compute_sopp_branch_simm16(return_branch_pc, plan.return_target);
@@ -334,15 +364,36 @@ std::optional<TrampolineBytes> TrampolineBuilder::build(const TrampolinePlan &pl
   TrampolineBytes out;
   if (plan.patch_anchor) {
     out.patched_anchor_bytes.reserve(plan.original_size);
-    append_word(out.patched_anchor_bytes, build_s_branch(*fwd, plan.arch));
-    if (plan.original_size == 8)
-      append_word(out.patched_anchor_bytes, build_s_nop(0, plan.arch));
+    util::FailureOr<uint32_t> forward = build_s_branch(*fwd, plan.arch, &error);
+    if (forward.failed()) {
+      return std::nullopt;
+    }
+    append_word(out.patched_anchor_bytes, forward.value());
+    while (out.patched_anchor_bytes.size() < plan.original_size) {
+      util::FailureOr<uint32_t> nop = build_s_nop(0, plan.arch, &error);
+      if (nop.failed()) {
+        return std::nullopt;
+      }
+      append_word(out.patched_anchor_bytes, nop.value());
+    }
   }
 
   out.trampoline_words = std::move(body);
   out.original_byte_offset = original_offset;
-  if (plan.returns_to_kernel)
-    out.trampoline_words.push_back(build_s_branch(*ret, plan.arch));
+  if (plan.is_probe_call) {
+    const bool after_original = plan.probe_after_original && plan.emit_original;
+    out.call_envelope_byte_offset = after_original ? after_items_byte_offset : 0;
+    out.call_envelope_byte_size =
+        after_original ? out.trampoline_words.size() * sizeof(uint32_t) - after_items_byte_offset
+                       : original_offset;
+  }
+  if (plan.returns_to_kernel) {
+    util::FailureOr<uint32_t> backward = build_s_branch(*ret, plan.arch, &error);
+    if (backward.failed()) {
+      return std::nullopt;
+    }
+    out.trampoline_words.push_back(backward.value());
+  }
   return out;
 }
 
@@ -350,6 +401,9 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
                                         const RegisterSet &live_at_anchor,
                                         const RegisterSet &probe_body_clobbers,
                                         std::string *error_out) {
+  OptionalStringDiagnosticSink record_error(error_out, "probe-call resource planning: ");
+  const util::DiagnosticEmitter error(record_error);
+
   // The link pair is whatever the probe's calling convention returns through,
   // so the call site and the probe body agree on one pair. An ABI that could
   // not have come from derive_probe_abi() names no pair worth trusting.
@@ -385,14 +439,16 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   call_clobbers.expand(probe_link_pair(abi));
   RegisterSet save_destinations;
   if (!validate_register_saves(plan, live_at_anchor | observed, call_clobbers, save_destinations,
-                               error_out))
+                               error_out)) {
     return false;
+  }
   std::vector<ProbeArgumentMove> argument_moves;
   std::optional<uint16_t> argument_copy_temp;
   if (!plan_argument_moves(plan.probe_args, abi, plan.kernel_vgpr_count,
                            live_at_anchor | save_destinations, argument_moves, argument_copy_temp,
-                           error_out))
+                           error_out)) {
     return false;
+  }
 
   // Target/scc/special-state selection stays within the kernel's ordinary SGPRs,
   // so a temp never lands past the planned .sgpr_count or in a CDNA kernel's
@@ -400,6 +456,13 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // orchestrator sets plan.kernel_sgpr_count; it defaults to the conservative
   // cross-ISA allocatable limit.
   const uint32_t sgpr_bound = ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count);
+
+  for (const ProbeArgValue &arg : plan.probe_args) {
+    if (arg.source == ProbeArgSource::AnchorSgpr && arg.register_index >= sgpr_bound) {
+      report(error_out, "guest SGPR argument exceeds the kernel's ordinary SGPR allocation");
+      return false;
+    }
+  }
 
   // The entry-storage pair holds a value produced once at kernel entry and read
   // at arbitrary later sites, so both lanes must be inside the range the temps
@@ -416,27 +479,43 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
       return false;
     }
     entry_storage.expand(RegisterRef{RegClass::SGPR, *plan.entry_storage_base, 2});
-    RegisterSet captured_vgprs;
-    for (const EntryVgprCapture &capture : plan.entry_vgpr_captures) {
+    std::vector<std::pair<RegClass, uint16_t>> captured_registers;
+    for (const EntryRegisterCapture &capture : plan.entry_register_captures) {
+      if (capture.source_class == RegClass::TTMP && !supports_entry_ttmp_capture(plan.arch)) {
+        report(error_out, "entry TTMP capture requires unprivileged TTMP reads, which this "
+                          "target does not support");
+        return false;
+      }
       if (capture.sgpr < *plan.entry_storage_base + 2 ||
           capture.sgpr >= *plan.entry_storage_base + 4 || capture.sgpr >= sgpr_bound ||
-          capture.vgpr >= std::min(plan.kernel_vgpr_count, 256u) ||
+          (capture.source_class != RegClass::SGPR && capture.source_class != RegClass::VGPR &&
+           capture.source_class != RegClass::TTMP) ||
+          capture.source_index >= (capture.source_class == RegClass::SGPR ? sgpr_bound
+                                   : capture.source_class == RegClass::TTMP
+                                       ? REGISTER_SET_MAX_TTMPS
+                                       : std::min(plan.kernel_vgpr_count, 256u)) ||
           entry_storage.intersects({RegClass::SGPR, capture.sgpr, 1}) ||
-          captured_vgprs.intersects({RegClass::VGPR, capture.vgpr, 1})) {
-        report(error_out, "entry VGPR capture is outside the framework-owned register run");
+          std::ranges::find(captured_registers,
+                            std::pair{capture.source_class, capture.source_index}) !=
+              captured_registers.end()) {
+        report(error_out, "entry register capture is outside the framework-owned register run");
         return false;
       }
       entry_storage.expand(RegisterRef{RegClass::SGPR, capture.sgpr, 1});
-      captured_vgprs.expand(RegisterRef{RegClass::VGPR, capture.vgpr, 1});
+      captured_registers.emplace_back(capture.source_class, capture.source_index);
     }
-    for (const ProbeArgValue &arg : plan.probe_args)
-      if (arg.source == ProbeArgSource::EntryVgprLane0 &&
-          std::ranges::none_of(plan.entry_vgpr_captures, [&](const auto &capture) {
-            return capture.vgpr == arg.register_index;
-          })) {
-        report(error_out, "entry VGPR argument has no framework-owned entry capture");
+    for (const ProbeArgValue &arg : plan.probe_args) {
+      const std::optional<RegClass> source_class = entry_register_class(arg.source);
+      if (source_class && std::ranges::none_of(plan.entry_register_captures,
+                                               [&](const EntryRegisterCapture &capture) {
+                                                 return capture.source_index ==
+                                                            arg.register_index &&
+                                                        capture.source_class == *source_class;
+                                               })) {
+        report(error_out, "entry register argument has no framework-owned entry capture");
         return false;
       }
+    }
     // Excluding the pair from the envelope's temps is not enough on its own: the
     // probe body runs with the pair still holding the pointer, and a body that
     // writes it destroys the value for every site after this one. Nothing saves
@@ -458,8 +537,9 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
 
   // A live fixed link pair needs an explicit register backup before the call.
   RegisterSet saved_sources;
-  for (const RegisterSave &save : plan.register_saves)
+  for (const RegisterSave &save : plan.register_saves) {
     saved_sources.expand(RegisterRef{save.cls, save.source, 1});
+  }
   if ((live_at_anchor - saved_sources).intersects(probe_link_pair(abi))) {
     report(error_out, ("probe-call resource planning: return-link pair s[" +
                        std::to_string(kLinkPairBase) + ":" + std::to_string(kLinkPairBase + 1) +
@@ -474,11 +554,16 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // Target-address pair: dead, even-aligned, and not the link pair. It is
   // read by s_swappc before the probe body runs, so it may overlap
   // probe_body_clobbers.
+  if (entry_storage.intersects(observed)) {
+    report(error_out, "observed guest register overlaps persistent entry storage");
+    return false;
+  }
   if (entry_storage.intersects(save_destinations)) {
     report(error_out, "register preservation overlaps the framework's entry storage");
     return false;
   }
-  const RegisterSet target_unavail = live_at_anchor | link_pair | entry_storage | save_destinations;
+  const RegisterSet target_unavail =
+      live_at_anchor | observed | link_pair | entry_storage | save_destinations;
   const std::optional<uint16_t> target_pair = find_free_sgpr_pair(target_unavail, sgpr_bound);
   if (!target_pair) {
     report(error_out, "probe-call resource planning: no dead SGPR pair available for the probe "
@@ -513,10 +598,14 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // additionally requires EXEC. Shared reserve path so EXEC, VCC, and M0 differ
   // only by their row below, not by a branch each.
   std::vector<SpecialStateSlot> special_saves;
-  auto reserve_special = [&](bool requested, uint16_t operand, uint8_t width,
+  auto reserve_special = [&](bool requested, util::FailureOr<uint16_t> operand, uint8_t width,
                              const char *name) -> bool {
-    if (!requested)
+    if (!requested) {
       return true;
+    }
+    if (operand.failed()) {
+      return false;
+    }
     const std::optional<uint16_t> temp = width == 2 ? find_free_sgpr_pair(reserved, sgpr_bound)
                                                     : find_free_sgpr(reserved, sgpr_bound);
     if (!temp) {
@@ -527,7 +616,7 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
       return false;
     }
     reserved.expand(RegisterRef{RegClass::SGPR, *temp, width});
-    special_saves.push_back(SpecialStateSlot{operand, *temp, width});
+    special_saves.push_back(SpecialStateSlot{operand.value(), *temp, width});
     return true;
   };
   // A spilled register is live at the anchor and clobbered by the probe or by
@@ -557,88 +646,111 @@ bool TrampolineBuilder::plan_probe_call(TrampolinePlan &plan, const ProbeAbi &ab
   // on. EXEC also rides this path whenever that window is needed, since the
   // anchor mask has to be restored from somewhere.
   const bool save_exec = plan.preserve_exec || needs_full_mask;
-  if (!reserve_special(save_exec, save_exec ? scalar_operand_exec_lo(plan.arch) : 0, 2, "EXEC") ||
-      !reserve_special(plan.preserve_vcc, plan.preserve_vcc ? scalar_operand_vcc_lo(plan.arch) : 0,
+  if (!reserve_special(save_exec,
+                       save_exec ? scalar_operand_exec_lo(plan.arch, &error)
+                                 : util::FailureOr<uint16_t>(0),
+                       2, "EXEC") ||
+      !reserve_special(plan.preserve_vcc,
+                       plan.preserve_vcc ? scalar_operand_vcc_lo(plan.arch, &error)
+                                         : util::FailureOr<uint16_t>(0),
                        2, "VCC") ||
-      !reserve_special(plan.preserve_m0, plan.preserve_m0 ? scalar_operand_m0(plan.arch) : 0, 1,
-                       "M0"))
+      !reserve_special(plan.preserve_m0,
+                       plan.preserve_m0 ? scalar_operand_m0(plan.arch, &error)
+                                        : util::FailureOr<uint16_t>(0),
+                       1, "M0")) {
     return false;
+  }
 
   // Word count is derived from the resource decisions, not a fixed envelope size.
   // Each add/addc uses the 32-bit literal form (instruction + literal word) so the
   // count is independent of the (layout-dependent) addend values.
-  uint32_t before_words = 0;
-  before_words += 1;     // s_getpc_b64
-  before_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
-  before_words += 1;     // s_swappc_b64
+  uint32_t envelope_words = 0;
+  envelope_words += 1;     // s_getpc_b64
+  envelope_words += 2 + 2; // s_add_u32 + literal, s_addc_u32 + literal
+  envelope_words += 1;     // s_swappc_b64
   // Each argument is one v_mov_b32; an immediate adds the literal word its src0
   // field names, a register source does not.
   for (const ProbeArgValue &arg : plan.probe_args) {
     switch (arg.source) {
+    case ProbeArgSource::AnchorSgpr:
+      envelope_words += 1;
+      break;
     case ProbeArgSource::AnchorVgpr:
       break; // Parallel copies are counted together, including cycle breaks.
     case ProbeArgSource::Immediate:
-      before_words += 2;
+      envelope_words += 2;
       break;
     case ProbeArgSource::AnchorExecLo:
     case ProbeArgSource::AnchorExecHi:
     case ProbeArgSource::LogBufferPtrLo:
     case ProbeArgSource::LogBufferPtrHi:
+    case ProbeArgSource::EntrySgpr:
+    case ProbeArgSource::EntryTtmp:
     case ProbeArgSource::EntryVgprLane0:
-      before_words += 1;
+      envelope_words += 1;
       break;
     }
   }
-  before_words += argument_moves.size();
-  before_words += 2 * plan.register_saves.size();
-  if (plan.preserve_scc)
-    before_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
+  envelope_words += argument_moves.size();
+  envelope_words += 2 * plan.register_saves.size();
+  if (plan.preserve_scc) {
+    envelope_words += 2; // s_cselect_b32 (save) + s_cmp_lg_u32 (restore)
+  }
   // Each special-state register adds one s_mov save + one s_mov restore.
-  before_words += static_cast<uint32_t>(special_saves.size()) * 2;
+  envelope_words += static_cast<uint32_t>(special_saves.size()) * 2;
   // The full-mask window's EXEC toggles, counted one per s_mov so this mirrors
   // emit_probe_call's three conditionals in the same order. A count that does not
   // match what the emitter produces trips the drift guard there.
   if (needs_full_mask) {
-    before_words += 1; // Widen ahead of the spill stores and the argument writes.
-    // Restore the anchor mask so the probe runs under it. A force_full_exec site
+    envelope_words += 1; // Widen ahead of the spill stores and the argument writes.
+    // Restore the guest mask observed at envelope entry. A force_full_exec site
     // skips this; leaving the window open across the call is the whole policy.
-    if (!plan.force_full_exec)
-      before_words += 1;
+    if (!plan.force_full_exec) {
+      envelope_words += 1;
+    }
     // Re-widen for the spill loads. Emitted even when the epilogue is empty (an
     // argument site that spills nothing), and on a force_full_exec site too,
     // since the probe may have narrowed EXEC while it ran.
-    before_words += 1;
+    envelope_words += 1;
   }
 
-  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4) {
-    before_words += 2; // getpc -> add, and add/addc -> swappc.
-    if (needs_rdna4_save_guard(plan.arch, special_saves, plan.register_saves))
-      before_words += 1;
+  if (plan.arch == rocjitsu::IsaFamily::Rdna4) {
+    envelope_words += 2; // getpc -> add, and add/addc -> swappc.
+    if (needs_rdna4_save_guard(plan.arch, special_saves, plan.register_saves)) {
+      envelope_words += 1;
+    }
   }
 
   plan.is_probe_call = true;
   plan.link_pair_base = kLinkPairBase;
   plan.arg_vgpr_base = abi.arg_vgpr_base;
   plan.target_pair_base = *target_pair;
-  if (scc_temp)
+  if (scc_temp) {
     plan.scc_temp = *scc_temp;
+  }
   plan.special_state_saves = std::move(special_saves);
-  plan.before_word_count = before_words;
+  plan.planned_envelope_word_count = envelope_words;
   plan.argument_moves = std::move(argument_moves);
   plan.argument_copy_temp = argument_copy_temp;
 
   plan.builder_clobbers = link_pair | target_pair_set | arg_regs | save_destinations;
-  if (argument_copy_temp)
+  if (argument_copy_temp) {
     plan.builder_clobbers.expand(RegisterRef{RegClass::VGPR, *argument_copy_temp, 1});
-  if (scc_temp)
+  }
+  if (scc_temp) {
     plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, *scc_temp, 1});
-  for (const SpecialStateSlot &s : plan.special_state_saves)
+  }
+  for (const SpecialStateSlot &s : plan.special_state_saves) {
     plan.builder_clobbers.expand(RegisterRef{RegClass::SGPR, s.temp_base, s.width});
+  }
   return true;
 }
 
 std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const TrampolinePlan &plan,
                                                                   std::string *error_out) {
+  OptionalStringDiagnosticSink record_error(error_out, "probe-call emission: ");
+  const util::DiagnosticEmitter error(record_error);
+
   if (!plan.is_probe_call) {
     report(error_out, "emit_probe_call: plan is not a probe call (run plan_probe_call first)");
     return std::nullopt;
@@ -650,16 +762,15 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // Literal-constant scalar source code; the 32-bit literal follows the word.
   constexpr uint16_t kLiteralConstant = 0xFF;
 
-  auto report_spill_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      *error_out = "probe-call emission: spill bracket: " + std::string(message);
-  };
+  OptionalStringDiagnosticSink report_spill_error(error_out,
+                                                  "probe-call emission: spill bracket: ");
   const util::DiagnosticEmitter spill_error(report_spill_error);
   const util::FailureOr<SpillBracket> maybe_spill =
       build_spill_bracket(plan.vgpr_spills, plan.sgpr_spills, plan.acc_spills,
                           plan.spill_bridge_vgpr, plan.arch, &spill_error);
-  if (maybe_spill.failed())
+  if (maybe_spill.failed()) {
     return std::nullopt;
+  }
   const SpillBracket &spill = maybe_spill.value();
 
   // Architecture-complete load drain, emitted once at each probe-call boundary
@@ -669,26 +780,50 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // likewise return with an outstanding load that would escape the call boundary.
   // Emitted at the very top of the envelope (before any special-state/target/link
   // write) and again immediately after the call returns (before any restoration).
-  auto report_boundary_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      *error_out = "probe-call emission: boundary drain: " + std::string(message);
-  };
+  OptionalStringDiagnosticSink report_boundary_error(error_out,
+                                                     "probe-call emission: boundary drain: ");
   const util::DiagnosticEmitter boundary_error(report_boundary_error);
   util::FailureOr<std::vector<uint32_t>> maybe_boundary_drain =
       build_wait_all_loads_complete(plan.arch, &boundary_error);
-  if (maybe_boundary_drain.failed())
+  if (maybe_boundary_drain.failed()) {
     return std::nullopt;
+  }
   std::vector<uint32_t> boundary_drain = std::move(maybe_boundary_drain).value();
-  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
+  // gfx11.0 TRANS results need a VA_VDST wait before a VALU consumer. Neither
+  // s_waitcnt nor scalar envelope instructions discharge that dependency.
+  // Drain before guest saves/arguments and before restoring state on return.
+  if (plan.arch == rocjitsu::IsaFamily::Rdna3) {
+    boundary_drain.push_back(
+        build_sopp_encoding(plan.arch, rdna3::kSWaitcntDepctrSopp, 0x0fff).value());
+  }
+  if (plan.arch == rocjitsu::IsaFamily::Rdna4) {
     boundary_drain.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc).value());
+  }
+
+  util::FailureOr<uint16_t> maybe_exec_operand = scalar_operand_exec_lo(plan.arch, &error);
+  if (maybe_exec_operand.failed()) {
+    return std::nullopt;
+  }
+  const uint16_t exec_operand = maybe_exec_operand.value();
+  util::FailureOr<uint16_t> m0_operand = scalar_operand_m0(plan.arch, &error);
+  if (m0_operand.failed()) {
+    return std::nullopt;
+  }
+  util::FailureOr<uint16_t> maybe_minus_one = scalar_inline_neg_one(plan.arch, &error);
+  if (maybe_minus_one.failed()) {
+    return std::nullopt;
+  }
+  const uint16_t minus_one = maybe_minus_one.value();
 
   std::vector<uint32_t> env;
-  env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
-  auto record_move_error = [error_out](std::string_view message) {
-    if (error_out != nullptr)
-      error_out->assign(message);
+  auto append_scalar = [&](util::FailureOr<uint32_t> word) {
+    if (word.failed()) {
+      return false;
+    }
+    env.push_back(word.value());
+    return true;
   };
-  const util::DiagnosticEmitter move_error(record_move_error);
+  env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
   // The full-mask window: needed to spill, and to define the argument VGPRs in
   // every lane rather than only the ones active at the anchor. Mirrors
@@ -704,11 +839,12 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // full-mask window is open.
   uint16_t exec_temp = 0;
   bool exec_temp_found = false;
-  for (const SpecialStateSlot &s : plan.special_state_saves)
-    if (s.operand == scalar_operand_exec_lo(plan.arch)) {
+  for (const SpecialStateSlot &s : plan.special_state_saves) {
+    if (s.operand == exec_operand) {
       exec_temp = s.temp_base;
       exec_temp_found = true;
     }
+  }
   // full_mask_exec implies needs_full_mask implies save_exec, so plan_probe_call
   // must have reserved an EXEC temp for any such site. Verify rather than trust
   // the default. Fail closed instead.
@@ -731,15 +867,19 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
 
   // Special-state saves: copy each preserved EXEC/VCC/M0 into its dead temp. Before
   // the stores so EXEC is captured before we force it to -1. Plain s_mov, SCC-safe.
-  for (const SpecialStateSlot &s : plan.special_state_saves)
-    env.push_back(s.width == 2 ? build_s_mov_b64(s.temp_base, s.operand, plan.arch)
-                               : build_s_mov_b32(s.temp_base, s.operand, plan.arch));
+  for (const SpecialStateSlot &s : plan.special_state_saves) {
+    if (!append_scalar(s.width == 2 ? build_s_mov_b64(s.temp_base, s.operand, plan.arch, &error)
+                                    : build_s_mov_b32(s.temp_base, s.operand, plan.arch, &error))) {
+      return std::nullopt;
+    }
+  }
 
   // Full-mask the spill store so a probe that widens EXEC cannot leave inactive-
   // lane copies unsaved. EXEC was just saved and is restored after the loads.
-  if (full_mask_exec)
-    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch),
-                                  scalar_inline_neg_one(plan.arch), plan.arch));
+  if (full_mask_exec &&
+      !append_scalar(build_s_mov_b64(exec_operand, minus_one, plan.arch, &error))) {
+    return std::nullopt;
+  }
 
   // Spill saves: store each live+clobbered register before the call.
   env.insert(env.end(), spill.prologue.begin(), spill.prologue.end());
@@ -753,35 +893,48 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     report(error_out, "probe-call emission: argument block does not fit the call ABI");
     return std::nullopt;
   }
-  RegisterSet unavailable_backups = arg_registers(*argument_abi);
+  // These registers hold framework values before the envelope copies guest arguments.
+  RegisterSet overwritten_before_args;
+  for (const SpecialStateSlot &save : plan.special_state_saves) {
+    overwritten_before_args.expand({RegClass::SGPR, save.temp_base, save.width});
+  }
+  if (plan.entry_storage_base) {
+    overwritten_before_args.expand({RegClass::SGPR, *plan.entry_storage_base, 2});
+  }
+  for (const EntryRegisterCapture &capture : plan.entry_register_captures) {
+    overwritten_before_args.expand({RegClass::SGPR, capture.sgpr, 1});
+  }
+
+  RegisterSet unavailable_backups = arg_registers(*argument_abi) | overwritten_before_args;
   unavailable_backups.expand(probe_link_pair(*argument_abi));
   unavailable_backups.expand({RegClass::SGPR, target_lo, 2});
-  if (plan.preserve_scc)
+  if (plan.preserve_scc) {
     unavailable_backups.expand({RegClass::SGPR, plan.scc_temp, 1});
-  for (const SpecialStateSlot &save : plan.special_state_saves)
-    unavailable_backups.expand({RegClass::SGPR, save.temp_base, save.width});
-  if (plan.entry_storage_base)
-    unavailable_backups.expand({RegClass::SGPR, *plan.entry_storage_base, 2});
-  for (const EntryVgprCapture &capture : plan.entry_vgpr_captures)
-    unavailable_backups.expand({RegClass::SGPR, capture.sgpr, 1});
+  }
   RegisterSet register_save_destinations;
   if (!validate_register_saves(plan, {}, unavailable_backups, register_save_destinations,
-                               error_out))
+                               error_out)) {
     return std::nullopt;
+  }
+  overwritten_before_args |= register_save_destinations;
   for (const RegisterSave &save : plan.register_saves) {
     if (save.cls == RegClass::SGPR) {
-      env.push_back(build_s_mov_b32(save.destination, save.source, plan.arch));
+      if (!append_scalar(build_s_mov_b32(save.destination, save.source, plan.arch, &error))) {
+        return std::nullopt;
+      }
     } else {
       const util::FailureOr<uint32_t> word =
-          build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch, &move_error);
-      if (word.failed())
+          build_v_mov_b32_src(save.destination, 256 + save.source, plan.arch, &error);
+      if (word.failed()) {
         return std::nullopt;
+      }
       env.push_back(word.value());
     }
   }
 
-  if (needs_rdna4_save_guard(plan.arch, plan.special_state_saves, plan.register_saves))
+  if (needs_rdna4_save_guard(plan.arch, plan.special_state_saves, plan.register_saves)) {
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
+  }
 
   // Capture guest operands before constants or scalar-sourced arguments can
   // overwrite them. The order implements a parallel assignment, including cycles.
@@ -795,9 +948,10 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   }
   for (const ProbeArgumentMove &move : plan.argument_moves) {
     const util::FailureOr<uint32_t> word =
-        build_v_mov_b32_src(move.destination, 256 + move.source, plan.arch, &move_error);
-    if (word.failed())
+        build_v_mov_b32_src(move.destination, 256 + move.source, plan.arch, &error);
+    if (word.failed()) {
       return std::nullopt;
+    }
     env.push_back(word.value());
   }
 
@@ -814,12 +968,22 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     const uint16_t vdst = static_cast<uint16_t>(plan.arg_vgpr_base + i);
     // TODO: Accept a DiagnosticEmitter in emit_probe_call and remove this adapter.
     auto report_builder_error = [&](std::string_view message) {
-      if (error_out == nullptr)
+      if (error_out == nullptr) {
         return;
+      }
       std::string_view source;
       switch (arg.source) {
+      case ProbeArgSource::EntrySgpr:
+        source = "EntrySgpr";
+        break;
+      case ProbeArgSource::EntryTtmp:
+        source = "EntryTtmp";
+        break;
       case ProbeArgSource::EntryVgprLane0:
         source = "EntryVgprLane0";
+        break;
+      case ProbeArgSource::AnchorSgpr:
+        source = "AnchorSgpr";
         break;
       case ProbeArgSource::AnchorVgpr:
         source = "AnchorVgpr";
@@ -861,16 +1025,37 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     // that on its own: any argument at all opens the full-mask window, which
     // reserves the temp, and the guard above fails closed if it is somehow absent.
     switch (arg.source) {
+    case ProbeArgSource::EntrySgpr:
+    case ProbeArgSource::EntryTtmp:
     case ProbeArgSource::EntryVgprLane0: {
-      const std::vector<EntryVgprCapture>::const_iterator captured =
-          std::ranges::find_if(plan.entry_vgpr_captures,
-                               [&](const auto &value) { return value.vgpr == arg.register_index; });
-      if (captured == plan.entry_vgpr_captures.end()) {
-        report(error_out, "probe-call emission: missing entry VGPR capture");
+      const std::vector<EntryRegisterCapture>::const_iterator captured = std::ranges::find_if(
+          plan.entry_register_captures, [&](const EntryRegisterCapture &value) {
+            return value.source_index == arg.register_index &&
+                   value.source_class == entry_register_class(arg.source);
+          });
+      if (captured == plan.entry_register_captures.end()) {
+        report(error_out, "probe-call emission: missing entry register capture");
         return std::nullopt;
       }
       const util::FailureOr<uint32_t> word =
           build_v_mov_b32_src(vdst, captured->sgpr, plan.arch, &error);
+      if (word.failed()) {
+        return std::nullopt;
+      }
+      env.push_back(word.value());
+      break;
+    }
+    case ProbeArgSource::AnchorSgpr: {
+      if (arg.register_index >= ordinary_sgpr_bound(plan.arch, plan.kernel_sgpr_count)) {
+        report(error_out, "probe-call emission: invalid anchor SGPR");
+        return std::nullopt;
+      }
+      if (overwritten_before_args.intersects(
+              {.cls = RegClass::SGPR, .index = arg.register_index})) {
+        report(error_out, "probe-call emission: anchor SGPR overwritten before argument capture");
+        return std::nullopt;
+      }
+      const auto word = build_v_mov_b32_src(vdst, arg.register_index, plan.arch, &error);
       if (word.failed())
         return std::nullopt;
       env.push_back(word.value());
@@ -881,8 +1066,9 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     case ProbeArgSource::Immediate: {
       const util::FailureOr<std::array<uint32_t, 2>> maybe_words =
           build_v_mov_b32_imm(vdst, arg.immediate, plan.arch, &error);
-      if (maybe_words.failed())
+      if (maybe_words.failed()) {
         return std::nullopt;
+      }
       const auto &words = maybe_words.value();
       env.insert(env.end(), words.begin(), words.end());
       break;
@@ -890,16 +1076,18 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     case ProbeArgSource::AnchorExecLo: {
       const util::FailureOr<uint32_t> word =
           build_v_mov_b32_src(vdst, exec_temp, plan.arch, &error);
-      if (word.failed())
+      if (word.failed()) {
         return std::nullopt;
+      }
       env.push_back(word.value());
       break;
     }
     case ProbeArgSource::AnchorExecHi: {
       const util::FailureOr<uint32_t> word =
           build_v_mov_b32_src(vdst, static_cast<uint16_t>(exec_temp + 1), plan.arch, &error);
-      if (word.failed())
+      if (word.failed()) {
         return std::nullopt;
+      }
       env.push_back(word.value());
       break;
     }
@@ -909,35 +1097,39 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     case ProbeArgSource::LogBufferPtrLo: {
       const util::FailureOr<uint32_t> word =
           build_v_mov_b32_src(vdst, *plan.entry_storage_base, plan.arch, &error);
-      if (word.failed())
+      if (word.failed()) {
         return std::nullopt;
+      }
       env.push_back(word.value());
       break;
     }
     case ProbeArgSource::LogBufferPtrHi: {
       const util::FailureOr<uint32_t> word = build_v_mov_b32_src(
           vdst, static_cast<uint16_t>(*plan.entry_storage_base + 1), plan.arch, &error);
-      if (word.failed())
+      if (word.failed()) {
         return std::nullopt;
+      }
       env.push_back(word.value());
       break;
     }
     }
   }
 
-  // Restore the anchor EXEC before the call so the probe runs under the anchor mask,
-  // not the full mask used to bracket the stores and argument writes. The loads are
-  // re-widened after. Skipped under force_full_exec, which is what leaves the probe
+  // Restore the guest EXEC observed at envelope entry before the call. The loads
+  // are re-widened after. Skipped under force_full_exec, which leaves the probe
   // running with every lane enabled.
-  if (full_mask_exec && !plan.force_full_exec)
-    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch), exec_temp, plan.arch));
+  if (full_mask_exec && !plan.force_full_exec &&
+      !append_scalar(build_s_mov_b64(exec_operand, exec_temp, plan.arch, &error))) {
+    return std::nullopt;
+  }
 
-  // SCC save (prologue): capture SCC into the temp without disturbing it. The
-  // matching restore is emitted after the call but still before the relocated
-  // original.
-  if (plan.preserve_scc)
-    env.push_back(build_s_cselect_b32(plan.scc_temp, scalar_positive_inline_u32(1),
-                                      scalar_positive_inline_u32(0), plan.arch));
+  // Capture the SCC observed at envelope entry before the call-address adds
+  // overwrite it; restore that same value after the callback.
+  if (plan.preserve_scc &&
+      !append_scalar(build_s_cselect_b32(plan.scc_temp, scalar_positive_inline_u32(1),
+                                         scalar_positive_inline_u32(0), plan.arch, &error))) {
+    return std::nullopt;
+  }
 
   // Target-address materialization. s_getpc_b64 writes the runtime VA of the
   // *next* instruction (the RDNA4 guard or s_add_u32 below) into the target pair; the
@@ -945,71 +1137,92 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
   // chain (s_add_u32 sets carry -> SCC, s_addc_u32 consumes it). Both sides are
   // .text-relative and share the load base, so the delta is a pure layout
   // distance. The adds always use the literal form so the word count is
-  // independent of the (layout-dependent) delta value (see before_word_count).
+  // independent of the layout-dependent delta (see planned_envelope_word_count).
   const size_t getpc_index = env.size();
-  env.push_back(build_s_getpc_b64(target_lo, plan.arch));
+  if (!append_scalar(build_s_getpc_b64(target_lo, plan.arch, &error))) {
+    return std::nullopt;
+  }
   // The probe may have VALU-read this pair. Its new getpc value must be ready
   // before either scalar add reads it, independently of boundary waits.
-  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (plan.arch == rocjitsu::IsaFamily::Rdna4) {
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
-  const uint64_t va_after_getpc =
-      plan.trampoline_offset + static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
+  }
+  // getpc_index is relative to the envelope. Include the original's prefix only
+  // when it is emitted; dispatch-only plans can retain a snapshot without it.
+  const bool after_original = plan.probe_after_original && plan.emit_original;
+  const uint64_t va_after_getpc = plan.trampoline_offset +
+                                  (after_original ? plan.original_size : 0) +
+                                  static_cast<uint64_t>(getpc_index + 1) * sizeof(uint32_t);
   const uint64_t delta = static_cast<uint64_t>(static_cast<int64_t>(plan.probe_target_offset) -
                                                static_cast<int64_t>(va_after_getpc));
-  env.push_back(build_s_add_u32(target_lo, target_lo, kLiteralConstant, plan.arch));
+  if (!append_scalar(build_s_add_u32(target_lo, target_lo, kLiteralConstant, plan.arch, &error))) {
+    return std::nullopt;
+  }
   env.push_back(static_cast<uint32_t>(delta & 0xFFFFFFFFu));
-  env.push_back(build_s_addc_u32(target_hi, target_hi, kLiteralConstant, plan.arch));
+  if (!append_scalar(build_s_addc_u32(target_hi, target_hi, kLiteralConstant, plan.arch, &error))) {
+    return std::nullopt;
+  }
   env.push_back(static_cast<uint32_t>(delta >> 32));
   // Both halves are now written; complete them before the indirect call reads
   // the address. Neither add reads the other half's newly written value.
-  if (plan.arch == ROCJITSU_CODE_ARCH_RDNA4)
+  if (plan.arch == rocjitsu::IsaFamily::Rdna4) {
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xfffe).value());
+  }
 
   // The call: writes the return PC into the cc-derived link pair, jumps to the
   // materialized target. The probe returns here via s_setpc_b64 of the same pair.
-  env.push_back(build_s_swappc_b64(link, target_lo, plan.arch));
+  if (!append_scalar(build_s_swappc_b64(link, target_lo, plan.arch, &error))) {
+    return std::nullopt;
+  }
 
-  // Drain the probe's in-flight loads immediately on return, before any restoration
-  // (SCC/EXEC, spill fills, special-state) or the relocated host code -- a probe may
-  // return with an unwaited load still targeting a register we are about to restore
-  // or that the host reads. Mirrors the boundary drain at the envelope top.
+  // Drain the probe's pending loads and target-specific ALU results before
+  // restoration or resuming the guest. Mirrors the drain at envelope entry.
   env.insert(env.end(), boundary_drain.begin(), boundary_drain.end());
 
-  // SCC restore (epilogue): set SCC from the saved temp before the relocated
-  // original runs.
-  if (plan.preserve_scc)
-    env.push_back(build_s_cmp_lg_u32(plan.scc_temp, scalar_positive_inline_u32(0), plan.arch));
+  // Restore the observed SCC before resuming guest execution, whether the
+  // relocated anchor precedes or follows this envelope.
+  if (plan.preserve_scc && !append_scalar(build_s_cmp_lg_u32(
+                               plan.scc_temp, scalar_positive_inline_u32(0), plan.arch, &error))) {
+    return std::nullopt;
+  }
 
   // Full-mask the spill load to match the store (the probe may have changed EXEC).
   // Emitted on a force_full_exec site too: it entered the call at -1, but the probe
   // may have narrowed EXEC while running, which is the case this guards against.
-  if (full_mask_exec)
-    env.push_back(build_s_mov_b64(scalar_operand_exec_lo(plan.arch),
-                                  scalar_inline_neg_one(plan.arch), plan.arch));
+  if (full_mask_exec &&
+      !append_scalar(build_s_mov_b64(exec_operand, minus_one, plan.arch, &error))) {
+    return std::nullopt;
+  }
 
   // Spill fills: reload each saved register after the call and wait for the loads.
   env.insert(env.end(), spill.epilogue.begin(), spill.epilogue.end());
   for (const RegisterSave &save : plan.register_saves) {
     if (save.cls == RegClass::SGPR) {
-      env.push_back(build_s_mov_b32(save.source, save.destination, plan.arch));
+      if (!append_scalar(build_s_mov_b32(save.source, save.destination, plan.arch, &error))) {
+        return std::nullopt;
+      }
     } else {
       const util::FailureOr<uint32_t> word =
-          build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch, &move_error);
-      if (word.failed())
+          build_v_mov_b32_src(save.source, 256 + save.destination, plan.arch, &error);
+      if (word.failed()) {
         return std::nullopt;
+      }
       env.push_back(word.value());
     }
   }
 
   // Special-state restores: copy each temp back into its register. After the spill
-  // loads so EXEC is restored to its anchor mask only once the full-mask loads are
-  // done; all run before the relocated original.
-  for (const SpecialStateSlot &s : plan.special_state_saves)
-    env.push_back(s.width == 2 ? build_s_mov_b64(s.operand, s.temp_base, plan.arch)
-                               : build_s_mov_b32(s.operand, s.temp_base, plan.arch));
+  // loads so EXEC is restored to its observed mask only once the full-mask loads
+  // are done, before resuming guest execution.
+  for (const SpecialStateSlot &s : plan.special_state_saves) {
+    if (!append_scalar(s.width == 2 ? build_s_mov_b64(s.operand, s.temp_base, plan.arch, &error)
+                                    : build_s_mov_b32(s.operand, s.temp_base, plan.arch, &error))) {
+      return std::nullopt;
+    }
+  }
 
-  // GFX9 wait states the restores still owe the relocated original, topped up with
-  // one s_nop covering the larger shortfall. Counted rather than fixed, so a site
+  // GFX9 wait states the restores still owe guest resumption, topped up with one
+  // s_nop covering the larger shortfall. Counted rather than fixed, so a site
   // whose reloads and restores already fill the gap pays nothing. The guest code
   // the return branch reaches is further away still, so it is covered too.
   uint32_t owed_wait_states = 0;
@@ -1017,43 +1230,57 @@ std::optional<TrampolineBytes> TrampolineBuilder::emit_probe_call(const Trampoli
     if (!plan.sgpr_spills.empty()) {
       const uint32_t provided = spill.instructions_after_sgpr_restore +
                                 static_cast<uint32_t>(plan.special_state_saves.size());
-      if (provided < kSgprRestoreWaitStates)
+      if (provided < kSgprRestoreWaitStates) {
         owed_wait_states = kSgprRestoreWaitStates - provided;
+      }
     }
     // Nothing is counted after the M0 restore: plan_probe_call reserves M0 last,
     // so its restore is the final instruction above. A plan ordering it earlier
     // is only over-padded.
     const bool restores_m0 =
         std::ranges::any_of(plan.special_state_saves, [&](const SpecialStateSlot &s) {
-          return s.operand == scalar_operand_m0(plan.arch);
+          return s.operand == m0_operand.value();
         });
-    if (restores_m0)
+    if (restores_m0) {
       owed_wait_states = std::max(owed_wait_states, kM0RestoreWaitStates);
+    }
   }
   const size_t wait_state_pad_words = owed_wait_states > 0 ? 1 : 0;
-  if (owed_wait_states > 0)
-    env.push_back(build_s_nop(static_cast<uint16_t>(owed_wait_states - 1), plan.arch));
-  const size_t restore_drain_words = plan.arch == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 0;
-  if (restore_drain_words)
+  if (owed_wait_states > 0 &&
+      !append_scalar(build_s_nop(static_cast<uint16_t>(owed_wait_states - 1), plan.arch, &error))) {
+    return std::nullopt;
+  }
+  const size_t restore_drain_words = plan.arch == rocjitsu::IsaFamily::Rdna4 ? 1 : 0;
+  if (restore_drain_words) {
     env.push_back(build_sopp_encoding(plan.arch, rdna4::kSWaitAluSopp, 0xf1fc).value());
+  }
 
   // Plan/emit drift guard: the planner committed to this many envelope words and
   // the orchestrator sized the layout around it. A mismatch means the two
-  // disagree about the envelope shape. before_word_count includes internal
-  // RDNA4 guards; the spill bracket, the two boundary drains and the wait-state pad
-  // are accounted separately since their sizes are arch- and site-specific.
-  if (env.size() != plan.before_word_count + spill.prologue.size() + spill.epilogue.size() +
-                        2 * boundary_drain.size() + wait_state_pad_words + restore_drain_words) {
+  // disagree about the envelope shape. planned_envelope_word_count includes
+  // internal RDNA4 guards; the spill bracket, the two boundary drains and the
+  // wait-state pad are accounted separately since their sizes depend on the arch
+  // and site.
+  if (env.size() != plan.planned_envelope_word_count + spill.prologue.size() +
+                        spill.epilogue.size() + 2 * boundary_drain.size() + wait_state_pad_words +
+                        restore_drain_words) {
     report(error_out, "emit_probe_call: synthesized envelope word count does not match the planned "
-                      "before_word_count");
+                      "planned_envelope_word_count");
     return std::nullopt;
   }
 
   // Hand the synthesized envelope to build() for layout and branch math so the
   // SOPP range checks are shared with the inline path.
   TrampolinePlan emit_plan = plan;
-  emit_plan.before_items.assign(1, InlineAsmItem{std::move(env)});
-  emit_plan.after_items.clear();
+  emit_plan.before_items.clear();
+  // Replay plans retain the generated placement shape. Omitted-original plans
+  // keep their explicit replacement body after the restored envelope.
+  if (plan.emit_original) {
+    emit_plan.after_items.clear();
+  }
+  std::vector<InlineAsmItem> &items =
+      after_original ? emit_plan.after_items : emit_plan.before_items;
+  items.push_back(InlineAsmItem{.words = std::move(env)});
   return build(emit_plan, error_out);
 }
 

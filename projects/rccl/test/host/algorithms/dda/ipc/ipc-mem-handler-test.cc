@@ -21,7 +21,7 @@
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 
-#include IPC_MEM_HANDLER_CC_PATH
+#include DDA_IPC_MEM_HANDLER_CC_PATH
 
 namespace {
 

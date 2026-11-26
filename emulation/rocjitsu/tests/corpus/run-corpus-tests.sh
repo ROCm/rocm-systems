@@ -17,6 +17,7 @@
 #   --sanitizer MODE     Launcher instrumentation: none, clang-asan, or gcc-asan
 #   --ubsan              The launcher has UBSan; omit cases too slow to run with it
 #   --race-tests         Also run the RocJITsu race-detector HIP corpus
+#   --require-race-cases Fail a race target whose suite runs no cases
 #   --rerun-failed       Rerun only tests that failed the soft-timeout pass
 #   --warn-perf          Warn about passing tests close to the soft timeout
 #
@@ -50,6 +51,7 @@ warn_perf=false
 sanitizer_mode=none
 ubsan=false
 race_tests=false
+require_race_cases=false
 
 # These cases mainly test problem size, and UBSan instrumentation makes them
 # exceed the per-test timeout. UBSan lanes still run the smaller cases of the
@@ -60,13 +62,13 @@ ubsan_excluded_cases=(
 
 usage() {
   echo "Usage: $0 [--workers N] [--soft-timeout N] [--hard-timeout N] [--rerun-timeout N]" \
-    "[--sanitizer none|clang-asan|gcc-asan] [--ubsan] [--race-tests] [--rerun-failed]" \
-    "[--warn-perf]" >&2
+    "[--sanitizer none|clang-asan|gcc-asan] [--ubsan] [--race-tests]" \
+    "[--require-race-cases] [--rerun-failed] [--warn-perf]" >&2
 }
 
 targets=(
   "gfx942 gfx942_cdna3.json gfx942_skip_tests.json"
-  "gfx950 gfx950_mi355x.json gfx950_skip_tests.json"
+  "gfx950 gfx950_mi350x.json gfx950_skip_tests.json"
   "gfx1100 gfx1100_w7900.json gfx1100_skip_tests.json"
   "gfx1201 gfx1201_r9700.json gfx1201_skip_tests.json"
   "gfx1250 gfx1250_mi455x.json gfx1250_skip_tests.json"
@@ -138,6 +140,10 @@ while (( $# )); do
       race_tests=true
       shift
       ;;
+    --require-race-cases)
+      require_race_cases=true
+      shift
+      ;;
     --warn-perf)
       warn_perf=true
       shift
@@ -164,6 +170,11 @@ for numeric_option in "${numeric_options[@]}"; do
     exit 1
   fi
 done
+
+if [[ "${require_race_cases}" == true && "${race_tests}" == false ]]; then
+  echo "--require-race-cases requires --race-tests" >&2
+  exit 1
+fi
 
 corpus_test_status=0
 corpus_work_dir="$(pwd -P)"
@@ -234,6 +245,21 @@ if [[ "${sanitizer_mode}" == clang-asan ]]; then
     --cpu-thread-budget "${cpu_thread_budget}" -- \
     "${child_command_prefix[@]}" true
 fi
+
+# Print how many test cases in a JUnit report ran rather than being skipped.
+# A target with no corpus cases reports one skipped placeholder for the empty
+# parameter set, and pytest still exits 0.
+count_executed_cases() {
+  python3 - "$1" <<'EOF'
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+report = Path(sys.argv[1])
+cases = ET.parse(report).getroot().iter('testcase') if report.is_file() else []
+print(sum(1 for case in cases if case.find('skipped') is None))
+EOF
+}
 
 run_pytest() {
   local timeout_seconds="$1"
@@ -355,6 +381,7 @@ if [[ "${race_tests}" == true ]]; then
     "gfx942 ${ROCJITSU_SOURCE_DIR}/tests/race-detector/race_test_gfx942_config.json"
     "gfx950 ${ROCJITSU_SOURCE_DIR}/tests/race-detector/race_test_config.json"
     "gfx1151 ${ROCJITSU_SOURCE_DIR}/configs/gfx1151.json"
+    "gfx1250 ${ROCJITSU_SOURCE_DIR}/configs/gfx1250_mi455x.json"
   )
   export ROCJITSU_RACE_BUILD_ROOT="${corpus_work_dir}/.pytest-artifacts/race-build"
 
@@ -377,7 +404,14 @@ if [[ "${race_tests}" == true ]]; then
 
     if (( first_run_status == 0 )); then
       echo "::endgroup::"
-      echo "All race (${name}) tests passed."
+      if (( $(count_executed_cases "${junit_xml}") > 0 )); then
+        echo "All race (${name}) tests passed."
+      elif [[ "${require_race_cases}" == true ]]; then
+        corpus_test_status=1
+        echo "::error::No race (${name}) tests ran; the corpus has no cases for this target."
+      else
+        echo "::notice::No race (${name}) tests ran; the corpus has no cases for this target."
+      fi
       continue
     fi
 

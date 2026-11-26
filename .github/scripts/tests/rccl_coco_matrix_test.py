@@ -41,6 +41,7 @@ class ScheduledRunsTest(unittest.TestCase):
                 "oci-rccl-perf-weekly",
                 "tensorwave-rccl-perf-weekly",
                 "crusoe-rccl-perf-weekly",
+                "ruby64-rccl-tls-weekly",
             },
         )
 
@@ -81,6 +82,7 @@ class ScheduledRunnerPairingTest(unittest.TestCase):
     def test_every_catalogue_cluster_has_a_runner(self):
         for _mode, job, cluster, _kind, _timeout in matrix.SCHEDULED_CATALOGUE:
             self.assertIn(cluster, matrix.SCHEDULED_RUNNERS, job)
+            self.assertIn(cluster, matrix.SCHEDULED_SHARED_SCRATCH, job)
 
     def test_every_job_gets_the_runner_for_its_prefix(self):
         for mode in ("nightly", "weekly", "monthly"):
@@ -91,8 +93,13 @@ class ScheduledRunnerPairingTest(unittest.TestCase):
                 self.assertEqual(
                     entry["runner"], matrix.SCHEDULED_RUNNERS[cluster], entry["job"]
                 )
+                self.assertEqual(
+                    entry["shared_scratch"],
+                    matrix.SCHEDULED_SHARED_SCRATCH[cluster],
+                    entry["job"],
+                )
 
-    def test_tw_and_crusoe_legs_carry_group_and_timeout(self):
+    def test_tw_and_crusoe_legs_carry_group_timeout_and_shared_scratch(self):
         emitted = {
             mode: self._emitted(mode) for mode in ("nightly", "weekly", "monthly")
         }
@@ -104,6 +111,7 @@ class ScheduledRunnerPairingTest(unittest.TestCase):
             entry = next(e for e in emitted[mode] if e["job"] == job)
             self.assertEqual(entry["group"], f"rccl-coco-{mode}-{cluster}-{kind}")
             self.assertEqual(entry["timeout"], timeout)
+            self.assertTrue(entry["shared_scratch"].startswith("/"), entry["job"])
 
 
 class PrClustersTest(unittest.TestCase):

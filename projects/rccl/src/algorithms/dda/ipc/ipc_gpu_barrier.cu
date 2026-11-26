@@ -11,7 +11,9 @@
 
 #include "algorithms/dda/ipc/ipc_gpu_barrier.h"
 
+#include "bitops.h"
 #include "checks.h"
+#include "comm.h"
 #include "debug.h"
 
 #include <cuda_runtime.h>
@@ -29,9 +31,17 @@ __host__ DeviceMailbox::DeviceMailbox(int nRanks, int nBlocks, void* flagsBuf)
 /* static */ __host__ std::pair<std::unique_ptr<DeviceBuffer>, DeviceMailbox> DeviceMailbox::mallocAndInit(
   int nRanks, int nBlocks) {
   assert(nRanks <= NRANKS);
-  // Always allocate/stride for NRANKS so getFlagIdx(rank, block) stays valid
-  // regardless of the active participant count.
-  auto flagBuf = std::make_unique<DeviceBuffer>(NRANKS * nBlocks * sizeof(FlagType));
+  /* Always allocate/stride for NRANKS so getFlagIdx(rank, block) stays valid
+   * regardless of the active participant count (RCCL_DDA_NRANKS_RELAX).
+   *
+   * HIP pools fine-grained buffers under its fragment-pool cutoff into one
+   * exported chunk (ROCM-34219). After peers close one mailbox from that
+   * chunk, hipIpcOpenMemHandle of a later mailbox in it returns
+   * hipErrorInvalidDevicePointer. Pad to CUDA_IPC_MIN so each mailbox is its
+   * own allocation, and drop the pad once ROCM-34219 is fixed. */
+  size_t allocBytes = NRANKS * nBlocks * sizeof(FlagType);
+  ALIGN_SIZE(allocBytes, CUDA_IPC_MIN);
+  auto flagBuf = std::make_unique<DeviceBuffer>(allocBytes);
   if (flagBuf == nullptr) {
     ERROR("DeviceMailbox::mallocAndInit: allocation failed");
     return {nullptr, DeviceMailbox{}};

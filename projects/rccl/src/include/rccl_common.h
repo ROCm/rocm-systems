@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include "core.h"
 #include "rccl_decision.h"
 #include "sym_kernels.h"
+#include "archinfo.h"
 
 typedef enum RcclTunableColls {
   RCCL_UNSUPPORTED_TUNABLE = -1,
@@ -51,6 +52,10 @@ typedef enum RcclTunableColls {
 #define RCCL_SINGLE_NODE_MAX_NTHREADS 256
 #define RCCL_GFX950_MAX_NTHREADS 256  // for Simple and LL64/LL128 gfx950
 #define RCCL_DEFAULT_MAX_NTHREADS 256 // for Simple and LL64/LL128 other archs
+// gfx1250 DPX launch default. SPX stays at 256 until it is measured. A lower
+// NCCL_NTHREADS / NCCL_LL128_NTHREADS is not raised. The 256-thread cap stays
+// RCCL_DEFAULT_MAX_NTHREADS so RCCL_THREADS_PER_BLOCK can still select 256.
+#define RCCL_GFX1250_DEFAULT_NTHREADS 192
 #define RCCL_LL_MAX_NTHREADS 256
 #define RCCL_P2P_MAX_NTHREADS 256
 #define RCCL_MI3XX_MAX_MULTI_NODE_CHANNELS 64
@@ -92,6 +97,7 @@ typedef enum {
   // Reporting only (rcclGetCollImplInfo / rcclSymKGetInfo): a symmetric dispatch that
   // resolves to a Tensor Data Mover kernel. Live dispatch always tags RCCL_SYMMETRIC.
   RCCL_SYMMETRIC_TDM,
+  RCCL_AG_GIN_SDMA,     // AllGather via GIN LSA/SDMA
   RCCL_ALGO_COUNT
 } rcclAddonAlgos_t;
 
@@ -102,6 +108,7 @@ enum rcclSymkExtract : int8_t {
   RCCL_SYMK_EXTRACT_DENY  = -1,  // selector chose non-symk backend; do not extract
   RCCL_SYMK_EXTRACT_NONE  =  0,  // no opinion; extractor uses windows + ncclSymkAvailable
   RCCL_SYMK_EXTRACT_ALLOW =  1,  // rcclSelect* chose RCCL_SYMMETRIC; may extract
+  RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY = 2,  // admitted by the AllGather TDM window; offer only TDM kernels
 };
 
 #ifdef RCCL_EXPOSE_STATIC
@@ -228,6 +235,11 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
 ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                 ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                 struct rcclCollDecision* decision);
+// Broadcast selection: DDA LL -> LL128 (gfx1250; LL also on IPC with
+// RCCL_DDA_BC_ALLOW_IPC=1), else a native-algo placeholder (enqueue unchanged).
+// root is checked only when query=false.
+ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int root, bool query,
+                                 struct rcclCollDecision* decision);
 // Selection helpers shared between collectives.cc and the wrapped decision logic.
 // (rcclDdaEnabled is declared below, next to the DDA param decls.)
 bool isSymmetricKernelRequested(struct ncclComm* comm, ncclFunc_t coll, int symkOp, ncclDataType_t datatype,
@@ -378,12 +390,41 @@ size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
 // when set, else the AllReduce LL128 tier cap where the arch table has that tier,
 // else the env var's default.
 size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
+// Ceiling for the DDA LL128 one-shot AllReduce: RCCL_DDA_LL128_ONESHOT_THRESHOLD
+// when set; with the peer-parallel kernels and an arch table that sets
+// ddaArLL128OneShotRankBytes, min(the env var's default, that / nRanks); else the
+// env var's default.
+size_t rcclDdaLL128OneShotThreshold(const ncclComm* comm);
 // Ceiling for the DDA LL two-shot AllReduce: RCCL_DDA_LL_TWOSHOT_THRESHOLD when
 // set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
 size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
+// Ceiling for the DDA LL one-shot AllReduce tier: RCCL_DDA_LL_ONESHOT_THRESHOLD when
+// set, else the arch table's ddaLargeCommArLLOneShotMax where it applies, else the
+// env var's default.
+size_t rcclDdaLLOneShotThreshold(const ncclComm* comm);
+// Largest registered gfx1250 AllReduce that graph capture keeps on fabric DDA instead of Ring; 0 = no re-route.
+size_t rcclDdaArRegCaptureMaxBytes(const ncclComm* comm);
+// Whether an eager registered AllReduce of `bytes` has a shard the DDA LL128 two-shot takes over from CE-registered.
+bool rcclDdaArRegEagerShardFits(const ncclComm* comm, size_t bytes);
 // Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the init cap,
 // lowered on large comms per rcclArchThresholds::ddaVmmBlockBudget.
 int rcclDdaFabricVmmBlocks(const ncclComm* comm);
+// DDA LL128 AllGather block size for this total from the arch table, or 0 when it sets none.
+int rcclDdaFabricAgLL128Threads(const ncclComm* comm, size_t totalBytes);
+// Narrow DDA LL one-shot block width for this comm from the arch table (ddaNarrowThreads), or 0 when it sets none.
+int rcclDdaFabricNarrowThreads(const ncclComm* comm);
+// Blocks the DDA LL128 AllGather may launch for this total: the init cap, lowered by the arch table.
+int rcclDdaFabricAgLL128Blocks(const ncclComm* comm, size_t totalBytes);
+// DDA LL128 AllToAll block size for this total from the arch table, or 0 when it sets none.
+int rcclDdaFabricA2aLL128Threads(const ncclComm* comm, size_t totalBytes);
+// Blocks the DDA LL128 AllToAll may launch for this total: the init cap, lowered by the arch table.
+int rcclDdaFabricA2aLL128Blocks(const ncclComm* comm, size_t totalBytes);
+// DDA LL128 Broadcast thread count from the arch table, or 0 when it sets none.
+int rcclDdaFabricBcLL128Threads(const ncclComm* comm);
+// DDA LL128 ReduceScatter batched kernel block size from the arch table, or 0 when it sets none.
+int rcclDdaFabricRsLL128Threads(const ncclComm* comm);
+// Largest message the DDA LL128 ReduceScatter sends through its peer-parallel kernel, from the arch table, or 0.
+size_t rcclDdaFabricRsLL128PeerMaxBytes(const ncclComm* comm);
 
 // Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,
 // skipping tiers turned off by RCCL_DDA_LL / RCCL_DDA_LL128. Pass this to
@@ -433,6 +474,9 @@ bool rcclIsArchSupportedForFunc(struct ncclTaskColl* info, char const* archName)
 // Decide the host-side value of comm->cheapPostSendFenceOff.
 // Returns 1 if the cheap post-send fence must be OFF (kernel uses the full
 // __threadfence_system()), or 0 if the cheap post-send fence can be ON.
+// Simple honors the result on every arch. LL128 honors it only where FIFO
+// stores are system scope (RCCL_LL_FIFO_SYS_SCOPE, gfx1250) and otherwise
+// always uses the full fence.
 //   cudaArch             : numeric device arch (comm->cudaArch = 100*major +
 //                          10*minor, i.e. gfx942 = 940, gfx950 = 950,
 //                          gfx1250 = 1250).
@@ -512,7 +556,6 @@ ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGloba
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels);
-bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
                             struct ncclTaskColl* collHead, int nCollTasks);
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
@@ -522,4 +565,17 @@ int rcclWarpSpeedComputeNChannels(struct ncclComm* comm, int nc, int channelMult
                                   int adjustedMaxNchannels, bool userUpdatedMaxChannels);
 int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info, int nc);
 #endif
+
+// Ranks at or below this are not penalized. An FP8 ring above it gets 1024 unless exempted.
+constexpr int kFp8RingPenaltyRanks = 8;
+
+// 1024 for an FP8 ring above kFp8RingPenaltyRanks, except a single-node gfx1250 AllReduce
+// with DDA LL128 on (ddaLl128Ceiling, from rcclDdaLL128Threshold(), is nonzero).
+inline float rcclFp8RingCostFactor(ncclDataType_t dtype, ncclFunc_t func, int nRanks, int nNodes,
+                                   size_t ddaLl128Ceiling, const char* arch) {
+  if ((dtype != ncclFloat8e4m3 && dtype != ncclFloat8e5m2) || nRanks <= kFp8RingPenaltyRanks) return 1.0f;
+  const bool exempt = func == ncclFuncAllReduce && nNodes == 1 && ddaLl128Ceiling != 0 &&
+                      IsArchMatch(arch, "gfx1250");
+  return exempt ? 1.0f : 1024.0f;
+}
 #endif

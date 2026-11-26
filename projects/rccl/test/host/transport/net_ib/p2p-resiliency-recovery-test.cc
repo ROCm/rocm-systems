@@ -20,7 +20,6 @@
 #include "fakes/ibvwrap_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/param_redirect.h"
-#include "fakes/transport_net_ib_recovery_fakes.h"
 #include "fakes/transport_net_ib_resiliency_fakes.h"
 #include "transport/net_ib/NetIbGlobals.h"
 #include "transport/net_ib/NetIbQpSeams.h"
@@ -42,28 +41,6 @@ ncclResult_t TestRecoveryPostDataReceives(ncclIbRecvComm*, ncclIbQp* qp) {
 
 }  // namespace
 
-#define ncclParamIbResiliencyPortRecovery NetIbRecoveryParamEnable
-#define ncclParamIbResiliencyPortRecoveryStartDelay NetIbRecoveryParamStartDelay
-#define ncclParamIbResiliencyPortRecoveryAliveMsgBatchInterval NetIbRecoveryParamBatchInterval
-#define ncclParamIbResiliencyPortRecoveryAliveMsgBatchSize NetIbRecoveryParamBatchSize
-#define ncclParamIbResiliencyPortRecoveryAliveMsgSequenceSize NetIbRecoveryParamSequenceSize
-#define ncclParamIbResiliencyPortRecoveryAliveMsgTimeout NetIbRecoveryParamAliveTimeout
-#define ncclParamIbResiliencyPortRecoveryAckTimeout NetIbRecoveryParamAckTimeout
-#define ncclParamIbResiliencyPortRecoveryAttemptsMax NetIbRecoveryParamAttemptsMax
-#define ncclIbPortRecoveryThreadStart NetIbRecoveryThreadStart
-#define ncclIbPortRecoveryThreadStop NetIbRecoveryThreadStop
-#define ncclIbPortRecoveryInit NetIbRecoveryInit
-#define ncclIbPortRecoveryClose NetIbRecoveryClose
-#define ncclIbPortRecoveryDevInit NetIbRecoveryDevInit
-#define ncclIbPortRecoveryDevDestroy NetIbRecoveryDevDestroy
-#define ncclIbPortRecoverySenderQpsCreate NetIbRecoverySenderQpsCreate
-#define ncclIbPortRecoverySenderQpsToRts NetIbRecoverySenderQpsToRts
-#define ncclIbPortRecoveryReceiverQpsCreateToRts NetIbRecoveryReceiverQpsCreateToRts
-#define ncclIbPortRecoveryQpsDestroy NetIbRecoveryQpsDestroy
-#define ncclIbPortRecoveryQpsReconfigure NetIbRecoveryQpsReconfigure
-#define ncclIbPortRecoveryHandleFailure NetIbRecoveryHandleFailure
-#define ncclIbPortRecoveryAsyncThread NetIbRecoveryAsyncThread
-#define ncclIbPortRecoveryAsyncThreadMain NetIbRecoveryAsyncThreadMain
 #define clockNano NetIbTestClockNano
 #define ncclIbQpError TestRecoveryQpError
 #define ncclIbQpCreate NetIbTestQpCreate
@@ -79,29 +56,6 @@ ncclResult_t TestRecoveryPostDataReceives(ncclIbRecvComm*, ncclIbQp* qp) {
 #undef ncclIbQpCreate
 #undef ncclIbQpError
 #undef clockNano
-#undef ncclIbPortRecoveryAsyncThreadMain
-#undef ncclIbPortRecoveryAsyncThread
-#undef ncclIbPortRecoveryHandleFailure
-#undef ncclIbPortRecoveryQpsReconfigure
-#undef ncclIbPortRecoveryQpsDestroy
-#undef ncclIbPortRecoveryReceiverQpsCreateToRts
-#undef ncclIbPortRecoverySenderQpsToRts
-#undef ncclIbPortRecoverySenderQpsCreate
-#undef ncclIbPortRecoveryDevDestroy
-#undef ncclIbPortRecoveryDevInit
-#undef ncclIbPortRecoveryClose
-#undef ncclIbPortRecoveryInit
-#undef ncclIbPortRecoveryThreadStop
-#undef ncclIbPortRecoveryThreadStart
-#undef ncclParamIbResiliencyPortRecoveryAttemptsMax
-#undef ncclParamIbResiliencyPortRecoveryAckTimeout
-#undef ncclParamIbResiliencyPortRecoveryAliveMsgTimeout
-#undef ncclParamIbResiliencyPortRecoveryAliveMsgSequenceSize
-#undef ncclParamIbResiliencyPortRecoveryAliveMsgBatchSize
-#undef ncclParamIbResiliencyPortRecoveryAliveMsgBatchInterval
-#undef ncclParamIbResiliencyPortRecoveryStartDelay
-#undef ncclParamIbResiliencyPortRecovery
-
 namespace {
 
 class NetIbP2pResiliencyRecoveryMicrotest : public ::testing::Test {
@@ -119,7 +73,6 @@ class NetIbP2pResiliencyRecoveryMicrotest : public ::testing::Test {
     g_recoveryDataRecvQps.clear();
     ResetNetIbQpSeams();
     ResetTransportNetIbResiliencyFakes();
-    ResetTransportNetIbRecoveryFakes();
     ResetIbvwrapFakes();
     ResetNcclFakes();
   }
@@ -145,7 +98,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, QpsReconfigure_SenderPostsOneReceive
                          });
   bool success = false;
 
-  ASSERT_EQ(NetIbRecoveryQpsReconfigure(&scene.sendRes.base, 0, &success), ncclSuccess);
+  ASSERT_EQ(ncclIbPortRecoveryQpsReconfigure(&scene.sendRes.base, 0, &success), ncclSuccess);
   EXPECT_TRUE(success);
   EXPECT_EQ(reconfigure.calls, 1);
   ASSERT_EQ(scene.verbs[0].postRecvQps.size(), 1u);
@@ -163,7 +116,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, QpsReconfigure_ReceiverPostsTenRecei
                          });
   bool success = false;
 
-  ASSERT_EQ(NetIbRecoveryQpsReconfigure(&scene.recvRes, 1, &success), ncclSuccess);
+  ASSERT_EQ(ncclIbPortRecoveryQpsReconfigure(&scene.recvRes, 1, &success), ncclSuccess);
   EXPECT_TRUE(success);
   ASSERT_EQ(scene.verbs[1].postRecvQps.size(), NCCL_IB_RESILIENCY_PORT_RECOVERY_ALIVE_MSG_BATCH_SIZE_MAX);
   for (auto* qp : scene.verbs[1].postRecvQps) EXPECT_EQ(qp, scene.recvRes.portRecoveryQps[1].qp);
@@ -181,7 +134,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, QpsReconfigure_FailedQpOrReceivePost
                            });
     bool success = true;
 
-    ASSERT_EQ(NetIbRecoveryQpsReconfigure(&scene.sendRes.base, 0, &success), ncclSuccess) << qpFails;
+    ASSERT_EQ(ncclIbPortRecoveryQpsReconfigure(&scene.sendRes.base, 0, &success), ncclSuccess) << qpFails;
     EXPECT_FALSE(success) << qpFails;
     EXPECT_EQ(scene.verbs[0].postRecvQps.size(), qpFails ? 0u : 1u) << qpFails;
   }
@@ -283,9 +236,9 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, DevInitAndDestroyManageRecoveryCq) {
   });
   scene.sendRes.base.recoveryEnabled = true;
 
-  ASSERT_EQ(NetIbRecoveryDevInit(&scene.sendRes.base, 0, &dev), ncclSuccess);
+  ASSERT_EQ(ncclIbPortRecoveryDevInit(&scene.sendRes.base, 0, &dev), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.devs[0].portRecoveryCq, &cq);
-  EXPECT_EQ(NetIbRecoveryDevDestroy(&scene.sendRes.base, 0), ncclSuccess);
+  EXPECT_EQ(ncclIbPortRecoveryDevDestroy(&scene.sendRes.base, 0), ncclSuccess);
   EXPECT_EQ(create.calls, 1);
   EXPECT_EQ(destroy.calls, 1);
 }
@@ -298,7 +251,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, QpsDestroy_DestroysOnlyMaterializedQ
     return ncclSuccess;
   });
 
-  EXPECT_EQ(NetIbRecoveryQpsDestroy(&scene.sendRes.base, 2), ncclSuccess);
+  EXPECT_EQ(ncclIbPortRecoveryQpsDestroy(&scene.sendRes.base, 2), ncclSuccess);
   EXPECT_EQ(destroy.calls, 1);
 }
 
@@ -317,7 +270,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, SenderRecoveryQpsCreationPublishesSt
   };
   ncclIbQpInfo info[2] = {};
 
-  ASSERT_EQ(NetIbRecoverySenderQpsCreate(&scene.sendRes.base, info, 2), ncclSuccess);
+  ASSERT_EQ(ncclIbPortRecoverySenderQpsCreate(&scene.sendRes.base, info, 2), ncclSuccess);
   for (int d = 0; d < 2; ++d) {
     const ncclIbQp& qp = scene.sendRes.base.portRecoveryQps[d];
     EXPECT_EQ(qp.devIndex, d);
@@ -357,7 +310,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, SenderRecoveryQpsToRtsUsesRemoteMeta
     return ncclSuccess;
   };
 
-  ASSERT_EQ(NetIbRecoverySenderQpsToRts(&scene.sendRes.base, &remote, 1), ncclSuccess);
+  ASSERT_EQ(ncclIbPortRecoverySenderQpsToRts(&scene.sendRes.base, &remote, 1), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.portRecoveryQps[0].rtrAttr.remoteQpNum, 200u);
   EXPECT_EQ(scene.sendRes.base.portRecoveryQps[0].rtrAttr.mtu, IBV_MTU_2048);
   EXPECT_EQ(transitions, (std::vector<char>{'T', 'S'}));
@@ -379,7 +332,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, DISABLED_SenderRecoveryQpsToRtsUsesL
   g_netIbQpRtr = [](ncclIbQp*) { return ncclSuccess; };
   g_netIbQpRts = [](ncclIbQp*) { return ncclSuccess; };
 
-  ASSERT_EQ(NetIbRecoverySenderQpsToRts(&scene.sendRes.base, &remote, 1), ncclSuccess);
+  ASSERT_EQ(ncclIbPortRecoverySenderQpsToRts(&scene.sendRes.base, &remote, 1), ncclSuccess);
   EXPECT_EQ(scene.sendRes.base.portRecoveryQps[0].rtrAttr.localIbPort, 3);
 }
 
@@ -400,7 +353,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, DISABLED_ReceiverRecoveryQpsToRtsUse
   remote.devs[0].ib_port = 7;
   ncclIbQpInfo local[1] = {};
 
-  ASSERT_EQ(NetIbRecoveryReceiverQpsCreateToRts(&scene.recvRes, &remote, local, 1), ncclSuccess);
+  ASSERT_EQ(ncclIbPortRecoveryReceiverQpsCreateToRts(&scene.recvRes, &remote, local, 1), ncclSuccess);
   EXPECT_EQ(scene.recvRes.portRecoveryQps[0].rtrAttr.localIbPort, 3);
 }
 
@@ -432,7 +385,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, ReceiverRecoveryQpsCreationTransitio
   remote.devs[0].link_layer = IBV_LINK_LAYER_ETHERNET;
   ncclIbQpInfo local[1] = {};
 
-  ASSERT_EQ(NetIbRecoveryReceiverQpsCreateToRts(&scene.recvRes, &remote, local, 1), ncclSuccess);
+  ASSERT_EQ(ncclIbPortRecoveryReceiverQpsCreateToRts(&scene.recvRes, &remote, local, 1), ncclSuccess);
   const ncclIbQp& qp = scene.recvRes.portRecoveryQps[0];
   EXPECT_EQ(transitions, (std::vector<char>{'I', 'T', 'S'}));
   EXPECT_EQ(qp.qp->context, &scene.verbs[0].ctx);
@@ -985,7 +938,7 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, HandleFailure_QueuesInitializedRecov
   scene.sendRes.base.recoveryEnabled = true;
   scene.sendRes.base.devs[0].state.store(ncclIbResiliencyDevStateRecoveryInProgress, std::memory_order_release);
 
-  ASSERT_EQ(NetIbRecoveryHandleFailure(&scene.sendRes.base, 0), ncclSuccess);
+  ASSERT_EQ(ncclIbPortRecoveryHandleFailure(&scene.sendRes.base, 0), ncclSuccess);
   {
     std::lock_guard<std::mutex> lock(ncclIbPortRecoveryMutex);
     ASSERT_EQ(recoveryInbox.size(), 1u);
@@ -1086,17 +1039,17 @@ TEST_F(NetIbP2pResiliencyRecoveryMicrotest, Init_DisabledLeavesRecoveryOffWithou
   NetIbResiliencyScene scene;
   scene.sendRes.base.recoveryEnabled = true;
 
-  EXPECT_EQ(NetIbRecoveryInit(&scene.sendRes.base), ncclSuccess);
+  EXPECT_EQ(ncclIbPortRecoveryInit(&scene.sendRes.base), ncclSuccess);
   EXPECT_FALSE(scene.sendRes.base.recoveryEnabled);
   EXPECT_FALSE(ncclIbPortRecoveryThreadActive.load());
-  EXPECT_FALSE(NetIbRecoveryAsyncThread.joinable());
+  EXPECT_FALSE(ncclIbPortRecoveryAsyncThread.joinable());
 }
 
 TEST_F(NetIbP2pResiliencyRecoveryMicrotest, Init_ActiveRecoveryThreadEnablesRecovery) {
   NetIbResiliencyScene scene;
   ncclIbPortRecoveryThreadActive.store(true);
 
-  ncclResult_t result = NetIbRecoveryInit(&scene.recvRes);
+  ncclResult_t result = ncclIbPortRecoveryInit(&scene.recvRes);
   ncclIbPortRecoveryThreadActive.store(false);
 
   EXPECT_EQ(result, ncclSuccess);

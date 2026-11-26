@@ -38,12 +38,7 @@ the same cycle. The RDNA ISA refers to this encoding as Vector Operation - Dual 
 accepts the pairing only when register, opcode, and operand constraints are
 satisfied, and the compiler emits VOPD when those constraints hold.
 
-When dual-issue runs successfully, peak VALU throughput per compute unit (CU) per cycle
-doubles relative to single-issue: ``FP32`` from 128 to 256 FLOPs/CU/cycle, and
-packed ``FP16`` from 256 to 512 FLOPs/CU/cycle.
-
-The aggregate ``VALU FLOPs`` row in this panel uses the ``FP32`` single-issue Fused Multiply-Add (FMA)
-ceiling (128 FLOPs/CU/cycle) as the peak. A workload that issues VOPD heavily,
+The aggregate ``VALU FLOPs`` row in this panel uses the ``FP32`` single-issue Fused Multiply-Add (FMA) ceiling as the peak. A workload that leverages heavy VALU dual-issue,
 or that runs packed FP16, can therefore report a percentage of peak above
 100%. To gauge how much of the throughput is coming from VOPD, inspect the
 ``Instructions - Dual VALU (VOPD)`` row on the :doc:`wgp` panel, which counts

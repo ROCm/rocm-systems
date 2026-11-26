@@ -129,6 +129,8 @@ def test_archive_with_no_process_directories_is_empty(tmp_path):
     rendered = inspect_archive.render(report)
     assert "Verdict: nothing captured" in rendered
     assert "preflight" in rendered
+    # Without consent the runtime writes nothing while preflight passes.
+    assert "capture needs your consent" in rendered
 
 
 def test_process_directory_without_events_is_not_recorded(tmp_path):
@@ -148,7 +150,7 @@ def test_incomplete_process_is_reported_but_still_recorded(tmp_path):
     assert report.recorded_processes
     rendered = inspect_archive.render(report)
     assert "incomplete" in rendered
-    assert "still worth sending" in rendered
+    assert "still worth keeping" in rendered
     # A lossy capture has no trailer either, and only the always-on line of
     # capture's stderr tells it apart: the louder one needs AMD_LOG_LEVEL.
     assert "Archive marked INCOMPLETE" in rendered
@@ -537,6 +539,7 @@ def test_missing_archive_says_capture_never_started(tmp_path, capsys):
     assert "Verdict: no archive" in out
     assert "capture never started" in out
     assert "preflight" in out
+    assert "capture needs your consent" in out
 
 
 def test_exit_code_is_one_when_nothing_was_captured(tmp_path, capsys):

@@ -48,6 +48,8 @@ ncclResult_t ncclIbGidGetDevState(void* comm, int devIndex, int* state);
 ncclResult_t ncclIbGidGetRecoveryGidIndex(void* comm, int devIndex, int* gidIndex);
 ncclResult_t ncclIbGidGetProbingGidIndex(void* comm, int devIndex, int* gidIndex);
 ncclResult_t ncclIbGidDriveQpToError(void* comm, int qpIdx);
+/* net_ib only: *supported = 1 if ibDev can create the UC QPs net_ib port recovery uses. */
+ncclResult_t ncclIbGidUcSupported(int ibDev, int* supported);
 
 ncclResult_t ncclIbCastGidGetDev(int ibDev, struct ncclIbGidState* out);
 ncclResult_t ncclIbCastGidSetDev(int ibDev, const struct ncclIbGidState* in);

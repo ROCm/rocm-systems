@@ -22,7 +22,7 @@ for (const theme of ['light', 'dark']) for (const kind of ['benchmark', 'compari
       for (const last of [false, true]) {
         await readChart(chart, (instance, { kind, last }) => {
           const series = instance.getOption().series;
-          const valid = (point) => kind === 'comparison' ? Number.isFinite(point?.value) : point?.record && Number.isFinite(point?.value);
+          const valid = (point) => kind === 'comparison' ? Number.isFinite(point?.value) : point?.record && Number.isFinite(point?.value?.[1]);
           const seriesIndex = series.findIndex((row) => row.type === (kind === 'comparison' ? 'bar' : 'line') && row.data.some(valid));
           const dataIndex = last ? series[seriesIndex].data.findLastIndex(valid) : series[seriesIndex].data.findIndex(valid);
           instance.dispatchAction({ type: 'showTip', seriesIndex, dataIndex });

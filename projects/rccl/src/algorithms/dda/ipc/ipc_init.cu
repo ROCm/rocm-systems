@@ -64,6 +64,28 @@ bool ncclDdaNranksRelaxConsensusMatters(int nRanks) {
     } \
   } while (0)
 
+namespace {
+
+// The scratch comes from hipExtMallocWithFlags, so allocTracker is updated here, not by an allocator helper.
+void freeDdaIpcScratch(ncclComm* comm, void* scratch, size_t bytes) {
+  if (scratch == nullptr || comm == nullptr) return;
+  ncclAllocUntrack(comm->cudaDev, bytes, "ncclDdaIpcCommInit");
+  CUDACHECKIGNORE(cudaFree(scratch));
+}
+
+// Whether this communicator takes part in DDA IPC at all. The rank-count rule is
+// ncclDdaIpcNranksSupported(): kDdaNranks by default, any 2..kDdaNranks when
+// RCCL_DDA_NRANKS_RELAX=1.
+bool ddaIpcCommEligible(const ncclComm* comm) {
+  if (comm == nullptr) {
+    return false;
+  }
+  const bool ddaArchSupported =
+    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
+  return ncclDdaIpcNranksSupported(comm->nRanks) && comm->nNodes == 1 && comm->bootstrap != nullptr &&
+         !comm->directMode && !comm->MNNVL && ddaArchSupported;
+}
+
 // Setting DDA IPC up interleaves rank-local work (the P2P sweep, the scratch and
 // peer-table allocations) with bootstrap collectives (ncclIpcMemHandler::
 // exchangeMemPtrs, and the barrier's own internal exchange inside
@@ -73,42 +95,54 @@ bool ncclDdaNranksRelaxConsensusMatters(int nRanks) {
 // never coming. That is a hang, not the silent fall-back to the ring path the
 // early returns look like they provide.
 //
-// So each rank carries a running "am I still able to do this" verdict and, at
-// every point where the next step is collective, all ranks exchange that verdict
-// and act on it together: either everyone proceeds, or everyone tears down and
-// falls back. One byte per rank on the bootstrap channel, only on the DDA IPC
-// init path. Sets *allReady only when every rank reported ready.
+// So each rank carries a running "how much of this can I still do" level and, at
+// every point where the next step is collective, all ranks exchange that level
+// and act on it together: everyone proceeds at the lowest level any rank
+// reported, or (level 0) everyone tears down and falls back. One int per rank on
+// the bootstrap channel, only on the DDA IPC init path. Only the first
+// comm->nRanks slots are exchanged and reduced; the clique can be smaller than
+// kDdaNranks under RCCL_DDA_NRANKS_RELAX.
 //
-// A failed all-gather is returned as an error rather than folded into "not
-// ready": it is not an agreed verdict -- peers may have seen the exchange
-// succeed -- so communicator init must fail instead of claiming a clean
-// fall-back to the ring path.
-static ncclResult_t ddaIpcAllRanksReady(ncclComm* comm, bool localReady, bool* allReady) {
-  *allReady = false;
-  std::vector<uint8_t> ready(static_cast<size_t>(comm->nRanks), 0);
-  ready[static_cast<size_t>(comm->rank)] = localReady ? 1 : 0;
-  ncclResult_t res = bootstrapAllGather(comm->bootstrap, ready.data(), sizeof(uint8_t));
+// A failed all-gather is returned as an error rather than folded into level 0:
+// it is not an agreed verdict -- peers may have seen the exchange succeed -- so
+// communicator init must fail instead of claiming a clean fall-back to the ring
+// path.
+ncclResult_t ddaIpcAgreeLevel(ncclComm* comm, int localLevel, int* agreedLevel, int* lowestRank) {
+  *agreedLevel = 0;
+  *lowestRank = comm->rank;
+  std::vector<int> levels(static_cast<size_t>(comm->nRanks), 0);
+  levels[static_cast<size_t>(comm->rank)] = localLevel;
+  ncclResult_t res = bootstrapAllGather(comm->bootstrap, levels.data(), sizeof(int));
   if (res != ncclSuccess) {
     WARN("ncclDdaIpcCommInit: readiness all-gather failed (%d)", res);
     return res;
   }
-  for (int i = 0; i < comm->nRanks; ++i) {
-    if (ready[static_cast<size_t>(i)] == 0) {
-      INFO(NCCL_INIT,
-           "ncclDdaIpcCommInit: rank %d could not set up DDA IPC; disabling it on all %d ranks so none of them "
-           "diverge into the DDA path",
-           i, comm->nRanks);
-      return ncclSuccess;
-    }
+  const auto lowest = std::min_element(levels.begin(), levels.end());
+  *agreedLevel = *lowest;
+  *lowestRank = static_cast<int>(lowest - levels.begin());
+  return ncclSuccess;
+}
+
+// Binary form: sets *allReady only when every rank reported ready.
+ncclResult_t ddaIpcAllRanksReady(ncclComm* comm, bool localReady, bool* allReady) {
+  int level = 0;
+  int lowestRank = 0;
+  *allReady = false;
+  NCCLCHECK(ddaIpcAgreeLevel(comm, localReady ? 1 : 0, &level, &lowestRank));
+  if (level == 0) {
+    INFO(NCCL_INIT,
+         "ncclDdaIpcCommInit: rank %d could not set up DDA IPC; disabling it on all %d ranks so none of them "
+         "diverge into the DDA path",
+         lowestRank, comm->nRanks);
+    return ncclSuccess;
   }
   *allReady = true;
   return ncclSuccess;
 }
 
+} // namespace
+
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
-  if (comm == nullptr) {
-    return ncclSuccess;
-  }
   // Skip DDA if:
   // - nRanks is not a supported DDA IPC participant count (kDdaNranks by default;
   //   any 2..kDdaNranks when RCCL_DDA_NRANKS_RELAX=1)
@@ -121,10 +155,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //   scratch/barrier here is not necessary. On gfx12xx (RDNA4) the
   //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
   //   which aborts comm init entirely. Gate init to match dispatch.
-  const bool ddaArchSupported =
-    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
-  if (!ncclDdaIpcNranksSupported(comm->nRanks) || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
-      comm->MNNVL || !ddaArchSupported) {
+  if (!ddaIpcCommEligible(comm)) {
     return ncclSuccess;
   }
 
@@ -171,6 +202,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
       WARN("ncclDdaIpcCommInit: could not allocate the %zu-byte DDA IPC scratch buffer", bytes);
       localReady = false;
     } else {
+      ncclAllocTrack(comm->cudaDev, bytes, "ncclDdaIpcCommInit");
       // Zero the scratch once so the LL all-gather's first epoch (>= 1) never
       // false-matches leftover flag words (mirrors the fabric path). Harmless for
       // the copy-based DDA collectives, which overwrite their staging area per op.
@@ -197,7 +229,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   ncclResult_t readyRes = ddaIpcAllRanksReady(comm, localReady, &allReady);
   if (readyRes != ncclSuccess || !allReady) {
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     return readyRes;
   }
 
@@ -297,7 +329,7 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     }
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
     return readyRes;
   }
 
@@ -309,17 +341,36 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     localReady = false;
   }
 
+  // LL epoch cells (DDA broadcast LL); optional, a failure only disables that tier.
+  // Sized for the CU-derived cap so the Broadcast grid is not limited by the cells.
+  // Rank-local, so a failure is folded into the agreed level below rather than
+  // acted on here.
+  const size_t epochLen = nccl_dda_detail::ddaLLEpochCount(
+    kDdaNranks, nccl_dda_detail::ddaFabricMaxNBlocksForScratch(comm->cuCount, nullptr));
+  uint32_t* epochDev = nullptr;
+  if (localReady && (cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)) != cudaSuccess ||
+                     cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)) != cudaSuccess)) {
+    (void)cudaGetLastError(); // clear the sticky error
+    CUDACHECKIGNORE(cudaFree(epochDev));
+    epochDev = nullptr;
+  }
+
   // Nothing collective follows, so a rank bailing out here would not hang comm
   // init -- but it would leave this rank with DDA IPC off while its peers have
   // it on, and they would then diverge at the first collective instead. The
-  // enable/disable decision has to be unanimous, so agree one last time.
+  // enable/disable decision has to be unanimous, so agree one last time. The
+  // outcome must be rank-uniform, else ranks pick different backends and hang.
+  // Level 0: no DDA IPC, 1: no LL epoch cells, 2: all.
   //
   // A failure inside mallocAndInit cannot strand peers either: every rank
   // reaches its internal handle exchange, which reports a missing or
   // unexportable mailbox on any rank to all of them (ncclIpcMemHandler::
   // exchangeMemPtrs).
-  readyRes = ddaIpcAllRanksReady(comm, localReady, &allReady);
-  if (readyRes != ncclSuccess || !allReady) {
+  int level = 0;
+  int lowestRank = 0;
+  readyRes = ddaIpcAgreeLevel(comm, localReady ? (epochDev == nullptr ? 1 : 2) : 0, &level, &lowestRank);
+  if (readyRes != ncclSuccess || level == 0) {
+    CUDACHECKIGNORE(cudaFree(epochDev));
     barrierPair.first.reset();
     delete barrierState;
     if (comm->ddaPeerPtrsHost != nullptr) {
@@ -328,8 +379,16 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     }
     CUDACHECKIGNORE(cudaFree(peerDev));
     delete handler;
-    CUDACHECKIGNORE(cudaFree(scratch));
+    freeDdaIpcScratch(comm, scratch, bytes);
+    if (readyRes == ncclSuccess) {
+      ATTN("DDA IPC setup failed on rank %d; skipping the DDA IPC path on all %d ranks", lowestRank, comm->nRanks);
+    }
     return readyRes;
+  }
+  if (level < 2) {
+    CUDACHECKIGNORE(cudaFree(epochDev));
+    epochDev = nullptr;
+    ATTN("LL epoch cells unavailable on rank %d; DDA Broadcast disabled", lowestRank);
   }
 
   barrierState->resources = std::move(barrierPair.first);
@@ -340,8 +399,46 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   comm->ddaScratchBytes = bytes;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
+  comm->ddaLLEpochDev = epochDev;
+  comm->ddaLLEpochLen = epochDev != nullptr ? (int)epochLen : 0;
   INFO(NCCL_INIT, "ncclDdaIpcCommInit: scratch %zu bytes, IpcGpuBarrier nBlocks=%d, peer IPC table on device", bytes,
        nBlocksMax);
+  return ncclSuccess;
+}
+
+ncclResult_t ncclDdaIpcCommClosePeerMappings(ncclComm* comm) {
+  if (comm == nullptr) {
+    return ncclSuccess;
+  }
+
+  auto* barrierState = comm->ddaIpcBarrierState;
+  const bool hasBarrierMappings = barrierState != nullptr && barrierState->resources != nullptr &&
+                                  barrierState->resources->ipcMemHandler != nullptr;
+  if ((hasBarrierMappings || comm->ddaIpcMemHandler != nullptr) && comm->doneEvent != nullptr) {
+    // DDA kernels and CE-scratch copies run on the user stream, which the
+    // hostStream/deviceStream syncs in commDestroySync do not cover. doneEvent
+    // is recorded after every kernel and CE launch, so waiting on it keeps
+    // in-flight work off unmapped peers.
+    cudaError_t syncErr = cudaEventSynchronize(comm->doneEvent);
+    if (syncErr != cudaSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: doneEvent sync failed (%s); continuing cleanup",
+           cudaGetErrorString(syncErr));
+    }
+  }
+  if (hasBarrierMappings) {
+    ncclResult_t closeResult = barrierState->resources->ipcMemHandler->closePeerMappings();
+    if (closeResult != ncclSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: barrier peer mapping close failed (%d); continuing cleanup",
+           closeResult);
+    }
+  }
+  if (comm->ddaIpcMemHandler != nullptr) {
+    ncclResult_t closeResult = comm->ddaIpcMemHandler->closePeerMappings();
+    if (closeResult != ncclSuccess) {
+      WARN("ncclDdaIpcCommClosePeerMappings: scratch peer mapping close failed (%d); continuing cleanup",
+           closeResult);
+    }
+  }
   return ncclSuccess;
 }
 
@@ -349,19 +446,30 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
   }
+
+  // commFree must remain non-collective. Destroy and abort close mappings in
+  // commDestroySync and revoke closes them in commReclaim, before the serial
+  // commFree loop; this idempotent call is the local backstop for init-failure
+  // and other direct commFree paths.
+  ncclResult_t closeResult = ncclSuccess;
+  NCCLCHECKIGNORE(ncclDdaIpcCommClosePeerMappings(comm), closeResult);
+
   if (comm->ddaIpcBarrierState != nullptr) {
-    delete static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
+    delete comm->ddaIpcBarrierState;
     comm->ddaIpcBarrierState = nullptr;
   }
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
   comm->ddaPeerPtrsDev = nullptr;
   free(comm->ddaPeerPtrsHost);
   comm->ddaPeerPtrsHost = nullptr;
+  CUDACHECKIGNORE(cudaFree(comm->ddaLLEpochDev));
+  comm->ddaLLEpochDev = nullptr;
+  comm->ddaLLEpochLen = 0;
   if (comm->ddaIpcMemHandler != nullptr) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;
   }
-  CUDACHECKIGNORE(cudaFree(comm->ddaScratch));
+  freeDdaIpcScratch(comm, comm->ddaScratch, comm->ddaScratchBytes);
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
   return ncclSuccess;

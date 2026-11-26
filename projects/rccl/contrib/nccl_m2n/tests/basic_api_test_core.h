@@ -36,6 +36,7 @@
 #include <cctype>
 #include <ostream>
 #include <string>
+#include <strings.h>
 #include <vector>
 #include <algorithm>
 
@@ -43,7 +44,29 @@
 #include <nccl.h>
 
 #include "nccl_m2n.h"
+#ifdef NCCL_M2N_TESTING
+#include "reshard_internal.h"
+#endif
 #include "test_helpers.h"
+
+#ifndef GTEST_SKIP
+#error "nccl_m2n tests require GoogleTest >= 1.10.0 (GTEST_SKIP support)"
+#endif
+
+/* ======================================================================
+ * API path selector — both resharding APIs are exercised from the same
+ * test matrix.
+ *   ApiKind::Window -> env->buffer (ncclMemAlloc'd) + ncclCommWindowRegister
+ *                      + ncclReshardWithWindow.
+ *   ApiKind::Default -> env->copyBuffer (cudaMalloc'd) + ncclReshard
+ *                       (no symmetric-window contract — the staging path
+ *                       manages its own pool internally).
+ * ====================================================================*/
+
+enum class ApiKind {
+  Window = 0,
+  Default = 1
+};
 
 /* ======================================================================
  * Bootstrap-agnostic test environment.
@@ -55,8 +78,14 @@ struct TestEnv {
   int device;
   ncclComm_t comm;
   cudaStream_t stream;
+  cudaStream_t alternateStream;
+  ncclM2nHandle_t m2nHandle;
   void* buffer;
   size_t bufferBytes;
+  void* copyBuffer;
+  size_t copyBufferBytes;
+  ApiKind apiKind;
+  bool expectPack;
   bool verbose;
 
   void (*barrier)(TestEnv* env);
@@ -89,9 +118,17 @@ struct TestCase {
   size_t elementSize; /* 1, 2, 4 */
 
   int worldMin; /* skip if worldSize < this */
+  int worldMax; /* skip if worldSize > this; 0 = unbounded */
   int worldDivisor; /* skip if worldSize % this != 0 */
 
   int srcRatioNum, dstRatioNum; /* (0,0) ⇒ even split */
+  bool dstFirst; /* place destination mesh before source mesh in parent rank order */
+  bool bAsyncOrdering; /* keep source fill and destination validation on the caller stream */
+  bool bGraphCapture;
+  bool bGraphCapturePrewarmed;
+  bool bNullWindow; /* pass NULL to ncclReshardWithWindow */
+  int serialRepeats; /* reshard calls with a stream sync and validation after each call */
+  const char* requiredCopyAlgorithm; /* nullptr = any copy algorithm */
 };
 
 static inline void printTo(const TestCase& tc, std::ostream* os) {
@@ -104,9 +141,12 @@ struct BasicApiCliArgs {
   bool verbose = false;
   const char* filter = nullptr;
   const char* algorithm = "ring";
+  const char* copyAlgorithm = nullptr;
   const char* lbMode = "uniform";
+  const char* api = "window"; /* "window", "default", or "all" */
   int maxWorld = 0; /* 0 = unrestricted */
   int minWorld = 0; /* 0 = unrestricted */
+  int serialRepeats = 0; /* 0 = use the case default */
 };
 
 static void basicApiPrintUsage(const char* prog, const char* usageFmt, bool allowRankCount, bool allowAlgorithmAll) {
@@ -127,10 +167,18 @@ static void basicApiPrintUsage(const char* prog, const char* usageFmt, bool allo
   printf("  --min-world <N>              Skip cases whose minimum world < N\n");
   printf("                               (combine with --max-world to bin by "
          "rank tier)\n");
-  printf("  --algorithm ring|direct%s  Reshard algorithm (default: ring%s)\n", allowAlgorithmAll ? "|all" : "   ",
-         allowAlgorithmAll ? "; 'all' registers one gtest case per algorithm" : "");
+  printf("  --algorithm ring|direct%s  Legacy scenario label (default: ring%s)\n", allowAlgorithmAll ? "|all" : "   ",
+         allowAlgorithmAll ? "; 'all' registers one gtest case per label" : "");
+  printf("  --copy-algorithm direct|pack|pipe\n");
+  printf("                               Copy transport for every selected API\n");
+  printf("                               (default: PACK for ring, DIRECT for direct)\n");
+  printf("  --api  window|default|all    Reshard API surface (default: "
+         "window;\n");
+  printf("                               'all' runs both window and default)\n");
   printf("  --lb-mode  uniform|node      Load-balance mode (default: "
          "uniform)\n");
+  printf("  --serial-repeats <N>         Override serial reuse count for cases "
+         "that define it\n");
   printf("  --verbose                    Verbose / per-rank output\n");
   printf("  --help                       Print this help\n");
 }
@@ -177,10 +225,29 @@ static BasicApiCliArgs basicApiParseCli(int argc, char** argv, const char* usage
       a.maxWorld = basicApiParseIntArg(basicApiRequireValue(argc, argv, &i));
     } else if (strcmp(k, "--min-world") == 0) {
       a.minWorld = basicApiParseIntArg(basicApiRequireValue(argc, argv, &i));
+    } else if (strcmp(k, "--serial-repeats") == 0) {
+      a.serialRepeats = basicApiParseIntArg(basicApiRequireValue(argc, argv, &i));
+      if (a.serialRepeats <= 0) {
+        fprintf(stderr, "--serial-repeats must be positive\n");
+        _Exit(2);
+      }
     } else if (strcmp(k, "--algorithm") == 0) {
       a.algorithm = basicApiRequireValue(argc, argv, &i);
       if (!allowAlgorithmAll && strcmp(a.algorithm, "all") == 0) {
         fprintf(stderr, "--algorithm all is supported by MPI only\n");
+        _Exit(2);
+      }
+    } else if (strcmp(k, "--copy-algorithm") == 0) {
+      a.copyAlgorithm = basicApiRequireValue(argc, argv, &i);
+      if (strcmp(a.copyAlgorithm, "direct") != 0 && strcmp(a.copyAlgorithm, "pack") != 0 &&
+          strcmp(a.copyAlgorithm, "pipe") != 0) {
+        fprintf(stderr, "Unknown copy algorithm '%s'. Use 'direct', 'pack', or 'pipe'\n", a.copyAlgorithm);
+        _Exit(2);
+      }
+    } else if (strcmp(k, "--api") == 0) {
+      a.api = basicApiRequireValue(argc, argv, &i);
+      if (strcmp(a.api, "window") != 0 && strcmp(a.api, "default") != 0 && strcmp(a.api, "all") != 0) {
+        fprintf(stderr, "Unknown api '%s'. Use 'window', 'default', or 'all'\n", a.api);
         _Exit(2);
       }
     } else if (strcmp(k, "--lb-mode") == 0) {
@@ -239,7 +306,10 @@ static std::string buildCaseName(const TestCase& tc) {
              tc.srcDim0, tc.dstDim0, plName(tc.srcPl), plName(tc.dstPl), tc.srcShardDim, tc.dstShardDim, tc.elementSize,
              tc.srcRatioNum, tc.dstRatioNum);
   }
-  return buf;
+  std::string name(buf);
+  if (tc.dstFirst) name += "[dst-first]";
+  if (tc.bNullWindow) name += "[null-window]";
+  return name;
 }
 
 /* ======================================================================
@@ -449,6 +519,87 @@ static void emitNdTensors(std::vector<TestCase>& cases) {
   }
 }
 
+static void emitStagingSlotPressure(std::vector<TestCase>& cases) {
+  /* 2-node CI reproducer for the staging-buffer slot-sizing regression.
+   *
+   * Shape/placement mirrors the dsv3 expert transfer pattern at small scale:
+   * train-style Shard(0) to gen-style Shard(innermost). With the CI allocation
+   * of 2 nodes * 2 ranks/node, srcTotal=2 and dstTotal=2. Running this case
+   * with NCCL_RESHARD_STAGING_CHANNEL_SIZE=4 MiB leaves each peer slightly less than
+   * the old fixed 1 MiB chunk size after the staging-region split, reproducing
+   * the same prepare-time invalid-argument failure without a 256-rank tensor.
+   */
+  TestCase tc{};
+  tc.group = "staging_slot_pressure";
+  tc.ndims = 3;
+  tc.globalDims[0] = 64;
+  tc.globalDims[1] = 128;
+  tc.globalDims[2] = 128;
+  tc.srcDim0 = 0;
+  tc.dstDim0 = 0;
+  tc.srcShardDim = 0;
+  tc.dstShardDim = 2;
+  tc.srcPl = PL_RS;
+  tc.dstPl = PL_RS;
+  tc.elementSize = 2; /* bf16 */
+  tc.worldMin = 4;
+  tc.worldMax = 4;
+  tc.worldDivisor = 2;
+  tc.name = buildCaseName(tc);
+  cases.push_back(std::move(tc));
+}
+
+static void emitPipeLsaFanoutReuse(std::vector<TestCase>& cases) {
+  /* Four source shards feed four destination replicas on an eight-rank,
+   * two-node allocation. Each destination rank owns one RDMA source and
+   * receives the remaining three through LSA fan-out. Repeating with a
+   * stream sync after each call exercises the persistent flow-control state
+   * without relying on overlap between calls. */
+  TestCase tc{};
+  tc.group = "pipe_lsa_fanout_reuse";
+  tc.ndims = 3;
+  tc.globalDims[0] = 256;
+  tc.globalDims[1] = 128;
+  tc.globalDims[2] = 128;
+  tc.srcDim0 = 4;
+  tc.dstDim0 = 4;
+  tc.srcShardDim = 0;
+  tc.dstShardDim = 2;
+  tc.srcPl = PL_SR;
+  tc.dstPl = PL_RS;
+  tc.elementSize = 2;
+  tc.worldMin = 8;
+  tc.worldMax = 8;
+  tc.worldDivisor = 8;
+  tc.serialRepeats = 8;
+  tc.requiredCopyAlgorithm = "PIPE";
+  tc.name = buildCaseName(tc);
+  cases.push_back(std::move(tc));
+}
+
+static void emitGraphCapture(std::vector<TestCase>& cases) {
+  for (bool bPrewarmed : {false, true}) {
+    TestCase tc{};
+    tc.group = "graph_capture";
+    tc.ndims = 2;
+    tc.globalDims[0] = 64;
+    tc.globalDims[1] = 64;
+    tc.srcDim0 = 0;
+    tc.dstDim0 = 0;
+    tc.srcShardDim = 0;
+    tc.dstShardDim = 0;
+    tc.srcPl = PL_RS;
+    tc.dstPl = PL_RS;
+    tc.elementSize = 4;
+    tc.worldMin = 4;
+    tc.worldDivisor = 2;
+    tc.bGraphCapture = true;
+    tc.bGraphCapturePrewarmed = bPrewarmed;
+    tc.name = buildCaseName(tc) + (bPrewarmed ? "_prewarmed" : "_first_use");
+    cases.push_back(std::move(tc));
+  }
+}
+
 /* ======================================================================
  * 1D tensor variants — placement / sharding coverage with ndims=1 and
  * sharding_dim always 0 (only one tensor axis).
@@ -539,19 +690,172 @@ static void emit1dTensorSizeSensitivity(std::vector<TestCase>& cases) {
 /* ======================================================================
  * Cross-dim regression group — hand-picked shapes from historical bugs.
  *
- * Each case is a cross-dim layout that has previously broken either the
- * non-transpose RING / DIRECT path or the `shouldTransposeForCrossDim`-
- * gated transpose path.  Curated, intentionally small — meant to be
+ * Each case is a cross-dim layout that previously exposed a data-layout or
+ * transfer-path bug. Curated, intentionally small — meant to be
  * run quickly via `--filter cross_dim_regression` as a fast targeted
  * gate.  Not a substitute for the full 2d_placement / nd_tensors
  * matrices; complements them.
  *
  * Mapping:
- *   issue !4 — 3D, sd=0/1, dstShardDim != ndims-1 → transpose path
- *              skipped, non-transpose RING/DIRECT was broken.
- *   issue !5 — 2D, sd=0/1, mesh 2x4, rs/rs placement → 2D transpose
- *              path (enabled by bc0b99c) hangs.
+ *   issue !4 — 3D, sd=0/1, dstShardDim != ndims-1.
+ *   issue !5 — 2D, sd=0/1, mesh 2x4, rs/rs placement.
+ *   staging high-fanout — 3D, train-style Shard(0) to gen-style
+ *              Shard(innermost) with >INT32_MAX global elements.
  * ====================================================================*/
+
+static void emitTinyContribution(std::vector<TestCase>& cases) {
+  /* Every CTA must signal even when a transfer contribution is smaller than
+   * the configured CTA count. Full replication keeps each contribution at
+   * exactly four bytes regardless of the allocation size. */
+  TestCase tc{};
+  tc.group = "tiny_contribution";
+  tc.ndims = 1;
+  tc.globalDims[0] = 4;
+  tc.globalDims[1] = 1;
+  tc.globalDims[2] = 1;
+  tc.srcDim0 = 0;
+  tc.dstDim0 = 0;
+  tc.srcShardDim = -1;
+  tc.dstShardDim = -1;
+  tc.srcPl = PL_REPL;
+  tc.dstPl = PL_REPL;
+  tc.elementSize = 1;
+  tc.worldMin = 4;
+  tc.worldDivisor = 2;
+  tc.name = buildCaseName(tc);
+  cases.push_back(std::move(tc));
+}
+
+static void emitStreamChurn(std::vector<TestCase>& cases) {
+  TestCase tc{};
+  tc.group = "stream_churn";
+  tc.ndims = 2;
+  tc.globalDims[0] = 64;
+  tc.globalDims[1] = 64;
+  tc.srcDim0 = 0;
+  tc.dstDim0 = 0;
+  tc.srcShardDim = 0;
+  tc.dstShardDim = 0;
+  tc.srcPl = PL_RS;
+  tc.dstPl = PL_RS;
+  tc.elementSize = 4;
+  tc.worldMin = 4;
+  tc.worldDivisor = 2;
+  tc.name = buildCaseName(tc);
+  cases.push_back(std::move(tc));
+}
+
+static void emitStreamOrdering(std::vector<TestCase>& cases) {
+  TestCase tc{};
+  tc.group = "stream_ordering";
+  tc.ndims = 2;
+  tc.globalDims[0] = 64;
+  tc.globalDims[1] = 64;
+  tc.srcDim0 = 0;
+  tc.dstDim0 = 0;
+  tc.srcShardDim = 0;
+  tc.dstShardDim = 0;
+  tc.srcPl = PL_RS;
+  tc.dstPl = PL_RS;
+  tc.elementSize = 4;
+  tc.worldMin = 4;
+  tc.worldDivisor = 2;
+  tc.bAsyncOrdering = true;
+  tc.name = buildCaseName(tc);
+  cases.push_back(std::move(tc));
+}
+
+static void emitSplitRegressions(std::vector<TestCase>& cases) {
+  {
+    TestCase tc{};
+    tc.group = "split_tiny_contribution";
+    tc.ndims = 1;
+    tc.globalDims[0] = 4;
+    tc.globalDims[1] = 1;
+    tc.globalDims[2] = 1;
+    tc.srcDim0 = 0;
+    tc.dstDim0 = 0;
+    tc.srcShardDim = -1;
+    tc.dstShardDim = -1;
+    tc.srcPl = PL_REPL;
+    tc.dstPl = PL_REPL;
+    tc.elementSize = 1;
+    tc.worldMin = 4;
+    tc.worldDivisor = 2;
+    tc.name = buildCaseName(tc);
+    cases.push_back(std::move(tc));
+  }
+
+  {
+    TestCase tc{};
+    tc.group = "split_reverse_mesh";
+    tc.ndims = 1;
+    tc.globalDims[0] = 4096;
+    tc.globalDims[1] = 1;
+    tc.globalDims[2] = 1;
+    tc.srcDim0 = 0;
+    tc.dstDim0 = 0;
+    tc.srcShardDim = 0;
+    tc.dstShardDim = 0;
+    tc.srcPl = PL_RS;
+    tc.dstPl = PL_RS;
+    tc.elementSize = 1;
+    tc.worldMin = 4;
+    tc.worldDivisor = 2;
+    tc.dstFirst = true;
+    tc.name = buildCaseName(tc);
+    cases.push_back(std::move(tc));
+  }
+}
+
+static void emitPackRegressions(std::vector<TestCase>& cases) {
+  /* Minimal forward-order source/destination pair for the single-LSA host-RMA
+   * activation gate. Two element sizes make the focused local run reuse the
+   * same communicator and PACK staging state across consecutive tests. */
+  for (size_t elementSize : {2UL, 1UL}) {
+    TestCase tc{};
+    tc.group = "pack_lsa_hput";
+    tc.ndims = 1;
+    tc.globalDims[0] = 4096;
+    tc.globalDims[1] = 1;
+    tc.globalDims[2] = 1;
+    tc.srcDim0 = 0;
+    tc.dstDim0 = 0;
+    tc.srcShardDim = 0;
+    tc.dstShardDim = 0;
+    tc.srcPl = PL_RS;
+    tc.dstPl = PL_RS;
+    tc.elementSize = elementSize;
+    tc.worldMin = 2;
+    tc.worldMax = 2;
+    tc.worldDivisor = 2;
+    tc.name = buildCaseName(tc);
+    cases.push_back(std::move(tc));
+  }
+
+  /* The non-split PACK producer and consumer must use the same
+   * source-relative GIN signal bank. With two source shards, source rank 1
+   * uses the second bank instead of aliasing source rank 0. The tiny transfer
+   * also leaves trailing CTAs idle, which verifies that each still signals. */
+  TestCase tc{};
+  tc.group = "pack_signal_bank";
+  tc.ndims = 1;
+  tc.globalDims[0] = 4;
+  tc.globalDims[1] = 1;
+  tc.globalDims[2] = 1;
+  tc.srcDim0 = 0;
+  tc.dstDim0 = 0;
+  tc.srcShardDim = 0;
+  tc.dstShardDim = 0;
+  tc.srcPl = PL_RS;
+  tc.dstPl = PL_RS;
+  tc.elementSize = 2;
+  tc.worldMin = 4;
+  tc.worldMax = 4;
+  tc.worldDivisor = 2;
+  tc.name = buildCaseName(tc);
+  cases.push_back(std::move(tc));
+}
 
 static void emitCrossDimRegression(std::vector<TestCase>& cases) {
   /* issue !5: 2D mesh 2x4, sd=0/1, four placement permutations.
@@ -583,9 +887,9 @@ static void emitCrossDimRegression(std::vector<TestCase>& cases) {
     }
   }
 
-  /* issue !4: 3D, sd=0/1, dstShardDim is NOT innermost so the
-   * transpose gate stays off.  1D mesh per side (dim0=0) with rs/rs
-   * placement; each side 4 shards → worldMin = 8. */
+  /* issue !4: 3D, sd=0/1, dstShardDim is not innermost. 1D mesh per
+   * side (dim0=0) with rs/rs placement; each side has 4 shards, so
+   * worldMin = 8. */
   {
     TestCase tc{};
     tc.group = "cross_dim_regression";
@@ -605,6 +909,51 @@ static void emitCrossDimRegression(std::vector<TestCase>& cases) {
     tc.name = buildCaseName(tc);
     cases.push_back(std::move(tc));
   }
+
+  /* dsv3-style MoE expert transfer: train [DP8, EP16] Shard(0) to
+   * gen [DP4, TP32] Shard(2).  Global elements =
+   * 256 * 7168 * 2048 = 3,758,096,384, above INT32_MAX. */
+  {
+    TestCase tc{};
+    tc.group = "cross_dim_regression";
+    tc.ndims = 3;
+    tc.globalDims[0] = 256;
+    tc.globalDims[1] = 7168;
+    tc.globalDims[2] = 2048;
+    tc.srcDim0 = 8;
+    tc.dstDim0 = 4;
+    tc.srcShardDim = 0;
+    tc.dstShardDim = 2;
+    tc.srcPl = PL_RS;
+    tc.dstPl = PL_RS;
+    tc.elementSize = 2; /* bf16 */
+    tc.worldMin = 256;
+    tc.worldMax = 256;
+    tc.worldDivisor = 256;
+    tc.name = buildCaseName(tc);
+    cases.push_back(std::move(tc));
+  }
+}
+
+static void emitWindowNullCase(std::vector<TestCase>& cases) {
+  TestCase tc{};
+  tc.group = "window_null";
+  tc.ndims = 1;
+  tc.globalDims[0] = 4096;
+  tc.globalDims[1] = 1;
+  tc.globalDims[2] = 1;
+  tc.srcDim0 = 0;
+  tc.dstDim0 = 0;
+  tc.srcShardDim = 0;
+  tc.dstShardDim = 0;
+  tc.srcPl = PL_RS;
+  tc.dstPl = PL_RS;
+  tc.elementSize = 1;
+  tc.worldMin = 2;
+  tc.worldDivisor = 2;
+  tc.bNullWindow = true;
+  tc.name = buildCaseName(tc);
+  cases.push_back(std::move(tc));
 }
 
 static std::vector<TestCase> buildAllTestCases() {
@@ -615,6 +964,9 @@ static std::vector<TestCase> buildAllTestCases() {
   emitUnevenRatio(cases);
   emitTensorSizeSensitivity(cases);
   emitNdTensors(cases);
+  emitStagingSlotPressure(cases);
+  emitPipeLsaFanoutReuse(cases);
+  emitGraphCapture(cases);
   /* 1D tensor groups (extends pytest matrix). */
   emit1dFullSharding(cases);
   emit1d2dPlacement(cases);
@@ -622,6 +974,12 @@ static std::vector<TestCase> buildAllTestCases() {
   emit1dTensorSizeSensitivity(cases);
   /* Targeted regression coverage for historical cross-dim bugs. */
   emitCrossDimRegression(cases);
+  emitWindowNullCase(cases);
+  emitTinyContribution(cases);
+  emitStreamChurn(cases);
+  emitStreamOrdering(cases);
+  emitSplitRegressions(cases);
+  emitPackRegressions(cases);
   return cases;
 }
 
@@ -630,8 +988,8 @@ static std::vector<TestCase> buildAllTestCases() {
  * ====================================================================*/
 
 struct MeshLayout {
-  int dims[2];
-  int placement[2];
+  int dims[NCCL_RESHARD_MESH_NDIMS];
+  int placement[NCCL_RESHARD_MESH_NDIMS];
   int startRank;
   int shardCount; /* 1 if PL_REPL */
   int shardDim; /* -1 if PL_REPL */
@@ -717,33 +1075,6 @@ static inline CaseResult makePass() {
 }
 
 /* ======================================================================
- * Buffer-size estimator.
- * ====================================================================*/
-
-static size_t maxLocalBytes(const TestCase& tc, int worldSize) {
-  /* Conservative upper bound: assume the tensor is unsharded along all
-   * dims (i.e. local size == global size). Multiplied by elementSize.
-   * This dominates the actual per-case need and saves us the trouble
-   * of recomputing per (src/dst) and per shard split.
-   */
-  (void)worldSize;
-  size_t total = tc.globalDims[0];
-  for (int d = 1; d < tc.ndims; d++) total *= tc.globalDims[d];
-  return total * tc.elementSize;
-}
-
-static size_t computeMaxBufferBytes(const std::vector<TestCase>& cases, int worldSize) {
-  size_t mx = 4096; /* NCCL min alloc */
-  for (auto& tc : cases) {
-    size_t need = maxLocalBytes(tc, worldSize);
-    if (need > mx) mx = need;
-  }
-  /* Round up to 4 KiB. */
-  const size_t pg = 4096;
-  return ((mx + pg - 1) / pg) * pg;
-}
-
-/* ======================================================================
  * Feasibility helpers — shared between runOneCase() and
  * computeMinWorldForCase().
  * ====================================================================*/
@@ -770,6 +1101,9 @@ static bool caseFeasibleAt(const TestCase& tc, int w, CaseShape* shape = nullptr
   };
 
   if (w < tc.worldMin) return fail("worldSize below minimum");
+  if (tc.worldMax > 0 && w > tc.worldMax) {
+    return fail("worldSize above maximum");
+  }
   if (tc.worldDivisor != 0 && (w % tc.worldDivisor) != 0) return fail("worldSize not divisible by required factor");
 
   int srcTotal, dstTotal;
@@ -831,9 +1165,60 @@ static int computeMinWorldForCase(const TestCase& tc, int bound = 4096) {
   /* Round start up to the next multiple of divisor. */
   if (start % divisor != 0) start += divisor - (start % divisor);
   if (start < divisor) start = divisor;
-  for (int w = start; w <= bound; w += divisor)
+  int stop = (tc.worldMax > 0 && tc.worldMax < bound) ? tc.worldMax : bound;
+  for (int w = start; w <= stop; w += divisor) {
     if (caseFeasibleAt(tc, w)) return w;
+  }
   return -1;
+}
+
+/* ======================================================================
+ * Buffer-size estimator.
+ * ====================================================================*/
+
+static size_t localBytesForShard(const TestCase& tc, int shardDim, int shardCount) {
+  size_t localDims[3] = {tc.globalDims[0], tc.globalDims[1], tc.globalDims[2]};
+  if (shardDim >= 0) {
+    if (shardCount <= 0) {
+      return 0;
+    }
+    localDims[shardDim] /= (size_t)shardCount;
+  }
+
+  int innermost = tc.ndims - 1;
+  localDims[innermost] *= tc.elementSize;
+
+  size_t total = localDims[0];
+  for (int d = 1; d < tc.ndims; d++) {
+    total *= localDims[d];
+  }
+  return total;
+}
+
+static size_t maxLocalBytes(const TestCase& tc, int worldSize) {
+  CaseShape shape = {};
+  if (!caseFeasibleAt(tc, worldSize, &shape)) {
+    return 0;
+  }
+
+  size_t srcBytes = localBytesForShard(tc, tc.srcShardDim, shape.srcShardCount);
+  size_t dstBytes = localBytesForShard(tc, tc.dstShardDim, shape.dstShardCount);
+  return std::max(srcBytes, dstBytes);
+}
+
+static size_t computeMaxBufferBytes(const std::vector<TestCase>& cases, int worldSize) {
+  size_t mx = 4096; /* NCCL min alloc */
+  for (auto& tc : cases) {
+    size_t need = maxLocalBytes(tc, worldSize);
+    if (need > mx) mx = need;
+  }
+#ifdef NCCL_M2N_TESTING
+  /* Keep two disjoint tensor regions for the PACK fusion assertion. */
+  mx *= 2;
+#endif
+  /* Round up to 4 KiB. */
+  const size_t pg = 4096;
+  return ((mx + pg - 1) / pg) * pg;
 }
 
 static bool caseMatchesSelection(const TestCase& tc, const char* filter, int minWorld, int maxWorld) {
@@ -848,10 +1233,39 @@ static bool caseMatchesSelection(const TestCase& tc, const char* filter, int min
   return true;
 }
 
+static const char* basicApiSelectedCopyAlgorithm(const BasicApiCliArgs& cli) {
+  if (cli.copyAlgorithm != nullptr) {
+    if (strcmp(cli.copyAlgorithm, "direct") == 0) return "DIRECT";
+    if (strcmp(cli.copyAlgorithm, "pipe") == 0) return "PIPE";
+    return "PACK";
+  }
+
+  // NOLINTNEXTLINE(concurrency-mt-unsafe) — test selection runs before worker threads start
+  const char* copyAlgorithmEnv = getenv("NCCL_RESHARD_COPY_ALGORITHM");
+  if (copyAlgorithmEnv != nullptr) {
+    if (strcasecmp(copyAlgorithmEnv, "DIRECT") == 0) return "DIRECT";
+    if (strcasecmp(copyAlgorithmEnv, "PIPE") == 0) return "PIPE";
+    return "PACK";
+  }
+  return strcmp(cli.algorithm, "direct") == 0 ? "DIRECT" : "PACK";
+}
+
 static std::vector<TestCase> basicApiSelectCases(const std::vector<TestCase>& cases, const BasicApiCliArgs& cli) {
   std::vector<TestCase> selected;
-  for (const TestCase& tc : cases)
-    if (caseMatchesSelection(tc, cli.filter, cli.minWorld, cli.maxWorld)) selected.push_back(tc);
+  const char* copyAlgorithm = basicApiSelectedCopyAlgorithm(cli);
+  for (const TestCase& tc : cases) {
+    if (!caseMatchesSelection(tc, cli.filter, cli.minWorld, cli.maxWorld)) {
+      continue;
+    }
+    if (tc.requiredCopyAlgorithm != nullptr && strcasecmp(tc.requiredCopyAlgorithm, copyAlgorithm) != 0) {
+      continue;
+    }
+    TestCase selectedCase = tc;
+    if (cli.serialRepeats > 0 && selectedCase.serialRepeats > 1) {
+      selectedCase.serialRepeats = cli.serialRepeats;
+    }
+    selected.push_back(std::move(selectedCase));
+  }
   return selected;
 }
 
@@ -879,37 +1293,19 @@ static void basicApiPrintCaseList(const std::vector<TestCase>& cases, const Basi
   }
 }
 
-static std::string basicApiCurrentGtestName() {
-  const ::testing::TestInfo* info = ::testing::UnitTest::GetInstance()->current_test_info();
-  if (info == nullptr) return "<unknown>";
-
-  std::string name = info->test_case_name();
-  name += ".";
-  name += info->name();
-  return name;
-}
-
-static void basicApiRecordFallbackSkip(int* skippedCases, const char* reason, bool shouldPrint) {
-  if (!shouldPrint) return;
-
-  const char* message = (reason != nullptr) ? reason : "skipped";
-  ++(*skippedCases);
-  ::testing::Test::RecordProperty("skipReason", message);
-  printf("[  SKIPPED ] %s (%s)\n", basicApiCurrentGtestName().c_str(), message);
-  fflush(stdout);
-}
-
-static void basicApiPrintFallbackSkipSummary(int skippedCases, bool shouldPrint) {
-  if (!shouldPrint || skippedCases == 0) return;
-
-  printf("[  SKIPPED ] %d basic_api case%s (vendored gtest reports "
-         "skips as OK)\n",
-         skippedCases, skippedCases == 1 ? "" : "s");
-  fflush(stdout);
-}
-
 static bool basicApiRunAllAlgorithms(const BasicApiCliArgs& cli) {
   return strcmp(cli.algorithm, "all") == 0;
+}
+
+static bool basicApiRunAllApis(const BasicApiCliArgs& cli) {
+  return strcmp(cli.api, "all") == 0;
+}
+
+static ApiKind basicApiRequestedApi(const BasicApiCliArgs& cli) {
+  if (strcmp(cli.api, "default") == 0) {
+    return ApiKind::Default;
+  }
+  return ApiKind::Window;
 }
 
 static const char* basicApiRequestedAlgorithmEnv(const BasicApiCliArgs& cli, bool shouldPrintUnknown) {
@@ -920,18 +1316,54 @@ static const char* basicApiRequestedAlgorithmEnv(const BasicApiCliArgs& cli, boo
   return "RING";
 }
 
-static void basicApiConfigureReshardEnv(const BasicApiCliArgs& cli, const char* algorithmEnv) {
+static const char* basicApiConfigureReshardEnv(const BasicApiCliArgs& cli, const char* algorithmEnv) {
   testSetEnv("NCCL_RESHARD_ALGORITHM", algorithmEnv);
+  static bool inheritedCopyAlgorithmCaptured = false;
+  static const char* inheritedCopyAlgorithm = nullptr;
+  if (!inheritedCopyAlgorithmCaptured) {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe) — serialized test configuration
+    const char* copyAlgorithmEnv = getenv("NCCL_RESHARD_COPY_ALGORITHM");
+    if (copyAlgorithmEnv != nullptr) {
+      if (strcasecmp(copyAlgorithmEnv, "DIRECT") == 0) {
+        inheritedCopyAlgorithm = "DIRECT";
+      } else if (strcasecmp(copyAlgorithmEnv, "PIPE") == 0) {
+        inheritedCopyAlgorithm = "PIPE";
+      } else {
+        inheritedCopyAlgorithm = "PACK";
+      }
+    }
+    inheritedCopyAlgorithmCaptured = true;
+  }
+
+  const char* copyAlgorithm = nullptr;
+  if (cli.copyAlgorithm != nullptr) {
+    if (strcmp(cli.copyAlgorithm, "direct") == 0) {
+      copyAlgorithm = "DIRECT";
+    } else if (strcmp(cli.copyAlgorithm, "pipe") == 0) {
+      copyAlgorithm = "PIPE";
+    } else {
+      copyAlgorithm = "PACK";
+    }
+    testSetEnv("NCCL_RESHARD_COPY_ALGORITHM", copyAlgorithm);
+  } else if (inheritedCopyAlgorithm != nullptr) {
+    copyAlgorithm = inheritedCopyAlgorithm;
+  } else {
+    copyAlgorithm = strcmp(algorithmEnv, "DIRECT") == 0 ? "DIRECT" : "PACK";
+    testSetEnv("NCCL_RESHARD_COPY_ALGORITHM", copyAlgorithm);
+  }
   testSetEnv("NCCL_RESHARD_LB_MODE", strcmp(cli.lbMode, "node") == 0 ? "NODE_AWARE" : "UNIFORM");
   if (cli.verbose) testSetEnv("NCCL_RESHARD_LOG_LEVEL", "DEBUG");
+  return copyAlgorithm;
 }
 
-static void basicApiPrintRuntimeSummary(const char* title, int worldSize, int deviceCount, const BasicApiCliArgs& cli,
-                                        size_t bufferBytes, const char* countLabel, size_t count, bool shouldPrint) {
+static void basicApiPrintRuntimeSummary(const char* title, int worldSize, int deviceCount,
+                                        const BasicApiCliArgs& cli, const char* copyAlgorithm, size_t bufferBytes,
+                                        const char* countLabel, size_t count, bool shouldPrint) {
   if (!shouldPrint) return;
 
   printf("=== %s ===\n", title);
-  printf("worldSize=%d, devices=%d, algo=%s, lb=%s\n", worldSize, deviceCount, cli.algorithm, cli.lbMode);
+  printf("worldSize=%d, devices=%d, algo=%s, copy=%s, lb=%s, api=%s\n", worldSize, deviceCount, cli.algorithm,
+         copyAlgorithm, cli.lbMode, cli.api);
   printf("bufferBytes=%zu, %s=%zu\n", bufferBytes, countLabel, count);
   if (cli.filter != nullptr) printf("filter='%s'\n", cli.filter);
   if (cli.maxWorld > 0) printf("maxWorld=%d\n", cli.maxWorld);
@@ -946,7 +1378,36 @@ static void basicApiPrintRuntimeSummary(const char* title, int worldSize, int de
  * Returns CaseResult; rank-aggregation happens in the bootstrap loop.
  * ====================================================================*/
 
+static inline bool isPipeHostRmaAlgo() {
+  const char* copyAlgorithm = getenv("NCCL_RESHARD_COPY_ALGORITHM");
+  const char* pipeNetMode = getenv("NCCL_RESHARD_PIPE_NET_MODE");
+  return copyAlgorithm != nullptr && strcasecmp(copyAlgorithm, "PIPE") == 0 && pipeNetMode != nullptr &&
+         (strcasecmp(pipeNetMode, "HOST_RMA") == 0 || strcasecmp(pipeNetMode, "HOST-RMA") == 0 ||
+          strcasecmp(pipeNetMode, "HOSTRMA") == 0);
+}
+
+/* ncclReshard rejects PIPE host-RMA before NCCL 2.31.2; see #139. */
+static inline bool skipPipeHostRmaTest() {
+  int ncclVersion = 0;
+  return ncclGetVersion(&ncclVersion) != ncclSuccess || ncclVersion < NCCL_VERSION(2, 31, 2);
+}
+
+static inline CaseResult checkPipeHostRmaSupport(TestEnv* env) {
+  if (isPipeHostRmaAlgo()) {
+    int driverVersion = 0;
+    if (cudaDriverGetVersion(&driverVersion) != cudaSuccess) driverVersion = -1;
+    const int minDriverVersion = env->allreduceMinInt(env, driverVersion);
+    if (minDriverVersion < 0) return makeFail("failed to query the CUDA driver version");
+    if (minDriverVersion < 12050) return makeSkip("PIPE host-RMA requires CUDA driver API 12.5 or newer");
+    if (skipPipeHostRmaTest()) {
+      return makeSkip("PIPE host-RMA requires NCCL 2.31.2 or newer; older NCCL can hang on idle ranks");
+    }
+  }
+  return makePass();
+}
+
 static CaseResult runOneCase(const TestCase& tc, TestEnv* env) {
+  const bool asyncOrdering = tc.bAsyncOrdering && env->alternateStream != nullptr;
   /* ----- 1. feasibility check (single source of truth, see
    * caseFeasibleAt). On skip, also include the minimum world that
    * would let the case run so the user can plan a larger allocation.
@@ -964,7 +1425,11 @@ static CaseResult runOneCase(const TestCase& tc, TestEnv* env) {
     }
     return makeSkip(buf);
   }
+  const CaseResult support = checkPipeHostRmaSupport(env);
+  if (support.status != CASE_PASS) return support;
+
   int srcTotal = shape.srcTotal;
+  int dstTotal = shape.dstTotal;
   int srcDim0 = shape.srcDim0, srcDim1 = shape.srcDim1;
   int dstDim0 = shape.dstDim0, dstDim1 = shape.dstDim1;
   int srcShardCount = shape.srcShardCount;
@@ -972,14 +1437,16 @@ static CaseResult runOneCase(const TestCase& tc, TestEnv* env) {
 
   /* ----- 2. build mesh layouts ----- */
   MeshLayout srcLayout, dstLayout;
+  const int srcStart = tc.dstFirst ? dstTotal : 0;
+  const int dstStart = tc.dstFirst ? 0 : srcTotal;
   buildMesh(&srcLayout, tc.srcPl, tc.srcShardDim, srcDim0, srcDim1,
-            /*startRank=*/0);
+            /*startRank=*/srcStart);
   buildMesh(&dstLayout, tc.dstPl, tc.dstShardDim, dstDim0, dstDim1,
-            /*startRank=*/srcTotal);
+            /*startRank=*/dstStart);
 
   /* ----- 3. determine role and per-rank local dims (in elements) ----- */
-  bool isSrc = (env->rank < srcTotal);
-  bool isDst = !isSrc;
+  bool isSrc = (env->rank >= srcStart && env->rank < srcStart + srcTotal);
+  bool isDst = (env->rank >= dstStart && env->rank < dstStart + dstTotal);
 
   size_t srcLocalDimsElems[3] = {tc.globalDims[0], tc.globalDims[1], tc.globalDims[2]};
   size_t dstLocalDimsElems[3] = {tc.globalDims[0], tc.globalDims[1], tc.globalDims[2]};
@@ -997,37 +1464,71 @@ static CaseResult runOneCase(const TestCase& tc, TestEnv* env) {
 
   size_t myBytes = isSrc ? srcLocalBytesDims[0] * srcLocalBytesDims[1] * (tc.ndims == 3 ? srcLocalBytesDims[2] : 1) :
                            dstLocalBytesDims[0] * dstLocalBytesDims[1] * (tc.ndims == 3 ? dstLocalBytesDims[2] : 1);
-  if (myBytes > env->bufferBytes) return makeSkip("local buffer exceeds preallocated max");
 
-  /* ----- 6. window registration ----- */
+  /* ----- 5b. select active buffer ----- */
+  void* activeBuffer;
+  size_t activeBufferBytes;
+  if (env->apiKind == ApiKind::Default) {
+    activeBuffer = env->copyBuffer;
+    activeBufferBytes = env->copyBufferBytes;
+    if (activeBuffer == nullptr) {
+      return makeSkip("Default API selected but copyBuffer not allocated");
+    }
+  } else {
+    activeBuffer = env->buffer;
+    activeBufferBytes = env->bufferBytes;
+  }
+#ifdef NCCL_M2N_TESTING
+  /* Selects the grouped two-tensor fusion scenario, which halves the buffer and
+   * issues a grouped pair through the selected entry point. The window entry
+   * point is a compatibility alias for the default one, so it must fuse the
+   * same way -- that is what this MR claims, so both kinds run the scenario. */
+  const bool testPackFusion = env->expectPack && !asyncOrdering && tc.serialRepeats <= 1;
+#else
+  const bool testPackFusion = false;
+#endif
+  const size_t tensorRegionBytes = testPackFusion ? activeBufferBytes / 2 : activeBufferBytes;
+  if (myBytes > tensorRegionBytes) {
+    return makeSkip("local buffer exceeds preallocated max");
+  }
+
+  /* ----- 6. window registration (window path only) ----- */
   ncclWindow_t window = nullptr;
-  TEST_NCCLCHECK(ncclCommWindowRegister(env->comm, env->buffer, env->bufferBytes, &window, NCCL_WIN_COLL_SYMMETRIC));
-  TEST_CUDACHECK(cudaMemsetAsync(env->buffer, 0xDE, env->bufferBytes, env->stream));
+  if (env->apiKind == ApiKind::Window && !tc.bNullWindow) {
+    TEST_NCCL_COMM_CHECK(env->comm, ncclCommWindowRegister(env->comm, activeBuffer, activeBufferBytes, &window,
+                                                           NCCL_WIN_COLL_SYMMETRIC));
+  }
+  TEST_CUDACHECK(cudaMemsetAsync(activeBuffer, 0xDE, activeBufferBytes, env->stream));
 
   /* ----- 7. init source data ----- */
   if (isSrc) {
     int srcShardIdx = shardIdxForRank(srcLayout, tc.srcPl, env->rank);
     int sd = (tc.srcShardDim >= 0) ? tc.srcShardDim : -1;
     int sc = (tc.srcShardDim >= 0) ? srcShardCount : 1;
-    testInitSourceData((char*)env->buffer, srcLocalBytesDims, tc.ndims, sd, srcShardIdx, sc, env->stream);
+    testInitSourceData((char*)activeBuffer, srcLocalBytesDims, tc.ndims, sd, srcShardIdx, sc, env->stream);
+#ifdef NCCL_M2N_TESTING
+    if (testPackFusion) {
+      testInitSourceData((char*)activeBuffer + tensorRegionBytes, srcLocalBytesDims, tc.ndims, sd, srcShardIdx, sc,
+                         env->stream);
+    }
+#endif
   }
-  TEST_CUDACHECK(cudaStreamSynchronize(env->stream));
+  if (!asyncOrdering) {
+    TEST_CUDACHECK(cudaStreamSynchronize(env->stream));
+  }
   env->barrier(env);
 
   /* ----- 8. resharding call ----- */
-  ncclMesh_t srcMesh{};
-  ncclMesh_t dstMesh{};
-  srcMesh.dims[0] = srcLayout.dims[0];
-  srcMesh.dims[1] = srcLayout.dims[1];
+  int srcMeshDims[NCCL_RESHARD_MAX_MESH_DIMS] = {srcLayout.dims[0], srcLayout.dims[1]};
+  int dstMeshDims[NCCL_RESHARD_MAX_MESH_DIMS] = {dstLayout.dims[0], dstLayout.dims[1]};
+  ncclMesh_t srcMesh = NCCL_M2N_MESH_INITIALIZER;
+  ncclMesh_t dstMesh = NCCL_M2N_MESH_INITIALIZER;
+  srcMesh.ndims = NCCL_RESHARD_MAX_MESH_DIMS;
+  srcMesh.dims = srcMeshDims;
   srcMesh.startRank = srcLayout.startRank;
-  srcMesh.placement[0] = srcLayout.placement[0];
-  srcMesh.placement[1] = srcLayout.placement[1];
-
-  dstMesh.dims[0] = dstLayout.dims[0];
-  dstMesh.dims[1] = dstLayout.dims[1];
+  dstMesh.ndims = NCCL_RESHARD_MAX_MESH_DIMS;
+  dstMesh.dims = dstMeshDims;
   dstMesh.startRank = dstLayout.startRank;
-  dstMesh.placement[0] = dstLayout.placement[0];
-  dstMesh.placement[1] = dstLayout.placement[1];
 
   /* The harness works at byte granularity, so pass the dtype whose
    * size matches tc.elementSize (1 / 2 / 4 / 8). */
@@ -1042,45 +1543,184 @@ static CaseResult runOneCase(const TestCase& tc, TestEnv* env) {
   };
   ncclDataType_t dtype = (tc.elementSize <= 8) ? dtype_for_size[tc.elementSize] : ncclBfloat16;
 
-  ncclDistTensor_t srcT = {};
-  srcT.dataPtr = isSrc ? env->buffer : nullptr;
+  int srcPlacements[NCCL_RESHARD_MAX_MESH_DIMS] = {srcLayout.placement[0], srcLayout.placement[1]};
+  int dstPlacements[NCCL_RESHARD_MAX_MESH_DIMS] = {dstLayout.placement[0], dstLayout.placement[1]};
+  ncclDistTensor_t srcT = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  srcT.dataPtr = isSrc ? activeBuffer : nullptr;
+  srcT.localShape = srcLocalDimsElems;
   srcT.ndims = tc.ndims;
   srcT.dtype = dtype;
   srcT.mesh = &srcMesh;
-  if (isSrc)
-    for (int d = 0; d < tc.ndims; d++) srcT.localShape[d] = srcLocalDimsElems[d];
+  srcT.placements = srcPlacements;
 
-  ncclDistTensor_t dstT = {};
-  dstT.dataPtr = isDst ? env->buffer : nullptr;
+  ncclDistTensor_t dstT = NCCL_M2N_DIST_TENSOR_INITIALIZER;
+  dstT.dataPtr = isDst ? activeBuffer : nullptr;
+  dstT.localShape = dstLocalDimsElems;
   dstT.ndims = tc.ndims;
   dstT.dtype = dtype;
   dstT.mesh = &dstMesh;
-  if (isDst)
-    for (int d = 0; d < tc.ndims; d++) dstT.localShape[d] = dstLocalDimsElems[d];
+  dstT.placements = dstPlacements;
 
-  ncclResult_t r = ncclReshardWithWindow(env->comm, window, &srcT, &dstT, env->stream);
+  /* Every call below goes through this one helper, so a scenario that issues
+   * several calls stays on the selected entry point for all of them. */
+  auto reshardTensors = [&](ncclDistTensor_t* src, ncclDistTensor_t* dst, cudaStream_t callStream) {
+    if (env->apiKind == ApiKind::Default) {
+      return ncclReshard(env->m2nHandle, env->comm, src, dst, callStream);
+    }
+    return ncclReshardWithWindow(env->m2nHandle, env->comm, tc.bNullWindow ? nullptr : window, src, dst, callStream);
+  };
+  auto reshard = [&](cudaStream_t callStream) { return reshardTensors(&srcT, &dstT, callStream); };
 
-  if (r != ncclSuccess) {
-    TEST_NCCLCHECK(ncclCommWindowDeregister(env->comm, window));
-    return makeFail("ncclReshardWithWindow returned error");
+  auto validateDest = [&]() {
+    if (!isDst) {
+      return true;
+    }
+    int dstShardIdx = shardIdxForRank(dstLayout, tc.dstPl, env->rank);
+    int sd = (tc.dstShardDim >= 0) ? tc.dstShardDim : -1;
+    int sc = (tc.dstShardDim >= 0) ? dstShardCount : 1;
+    return testValidateDestData((const char*)activeBuffer, dstLocalBytesDims, tc.ndims, sd, dstShardIdx, sc,
+                                env->rank, env->stream, nullptr);
+  };
+
+  cudaGraph_t graph = nullptr;
+  ncclResult_t r = ncclSuccess;
+  bool serialValidationPassed = true;
+  if (tc.bGraphCapture) {
+    if (tc.bGraphCapturePrewarmed) {
+      r = reshard(env->stream);
+      if (r == ncclSuccess) {
+        if (testUsesNonBlockingComm()) {
+          TEST_NCCL_ASYNC_CHECK(env->comm, env->stream);
+        } else {
+          TEST_CUDACHECK(cudaStreamSynchronize(env->stream));
+        }
+        env->barrier(env);
+      }
+    }
+    if (r == ncclSuccess) {
+      TEST_CUDACHECK(cudaStreamBeginCapture(env->stream, cudaStreamCaptureModeGlobal));
+      r = reshard(env->stream);
+      TEST_CUDACHECK(cudaStreamEndCapture(env->stream, &graph));
+    }
+    if (graph != nullptr) {
+      TEST_CUDACHECK(cudaGraphDestroy(graph));
+    }
+    if (window != nullptr) {
+      TEST_NCCL_COMM_CHECK(env->comm, ncclCommWindowDeregister(env->comm, window));
+    }
+    const bool bActionableError = strstr(ncclM2nGetLastError(), "does not support CUDA graph capture") != nullptr;
+    return (r == ncclInvalidUsage && bActionableError) ? makePass() : makeFail("graph capture was not rejected");
+  } else if (asyncOrdering) {
+    for (int call = 0; call < 3; call++) {
+      cudaStream_t callStream = (call % 2 == 0) ? env->stream : env->alternateStream;
+      r = reshard(callStream);
+      if (call + 1 < 3) {
+        env->barrier(env);
+      }
+      if (r != ncclSuccess) {
+        break;
+      }
+    }
+  } else if (tc.serialRepeats > 1) {
+    for (int call = 0; call < tc.serialRepeats; call++) {
+      r = reshard(env->stream);
+      const int localCallOk = (r == ncclSuccess) ? 1 : 0;
+      if (env->allreduceMinInt(env, localCallOk) == 0) {
+        r = ncclSystemError;
+        break;
+      }
+      TEST_CUDACHECK(cudaStreamSynchronize(env->stream));
+      env->barrier(env);
+      const int localDataOk = validateDest() ? 1 : 0;
+      if (env->allreduceMinInt(env, localDataOk) == 0) {
+        serialValidationPassed = false;
+        break;
+      }
+      env->barrier(env);
+    }
+#ifdef NCCL_M2N_TESTING
+  } else if (testPackFusion) {
+    /* Both entries go through reshardTensors, so the window kind submits two
+     * grouped ncclReshardWithWindow calls and the assertion below observes the
+     * alias fusing rather than the default entry point standing in for it. */
+    ncclDistTensor_t srcT2 = srcT;
+    ncclDistTensor_t dstT2 = dstT;
+    if (srcT2.dataPtr != nullptr) srcT2.dataPtr = (char*)srcT2.dataPtr + tensorRegionBytes;
+    if (dstT2.dataPtr != nullptr) dstT2.dataPtr = (char*)dstT2.dataPtr + tensorRegionBytes;
+    r = ncclM2nGroupStart();
+    if (r == ncclSuccess) r = reshardTensors(&srcT, &dstT, env->stream);
+    if (r == ncclSuccess) r = reshardTensors(&srcT2, &dstT2, env->stream);
+    if (r == ncclSuccess) r = ncclM2nGroupEnd();
+    if (r != ncclSuccess) (void)ncclM2nGroupAbort();
+#endif
+  } else {
+    r = reshard(env->stream);
   }
 
-  TEST_CUDACHECK(cudaStreamSynchronize(env->stream));
+  if (r != ncclSuccess) {
+    if (window != nullptr) {
+      TEST_NCCL_COMM_CHECK(env->comm, ncclCommWindowDeregister(env->comm, window));
+    }
+    return makeFail("reshard call returned error");
+  }
+
+  if (testUsesNonBlockingComm()) {
+    TEST_NCCL_ASYNC_CHECK(env->comm, env->stream);
+  } else if (!asyncOrdering) {
+    TEST_CUDACHECK(cudaStreamSynchronize(env->stream));
+  }
+  /* These observations are rank-local, so a rank must not return on them before
+   * the barrier below -- its peers would still enter, and the harness would
+   * deadlock rather than report the failure. Record and report after. */
+  const char* instrumentationFailure = nullptr;
+#ifdef NCCL_M2N_TESTING
+  if (testPackFusion) {
+    if (reshardGetFusedSubmissionCountForTest() != 1) {
+      instrumentationFailure = "compatible grouped tensors did not produce exactly one fused PACK submission";
+    }
+  } else if (!asyncOrdering && env->expectPack &&
+             reshardGetLastCompletedCopyAlgorithmForTest() != RESHARD_COPY_ALGO_PACK) {
+    instrumentationFailure = "selected API did not execute the selected PACK path";
+  }
+#endif
   env->barrier(env);
 
   /* ----- 9. validate dest ----- */
   int localOk = 1;
   if (isDst) {
-    int dstShardIdx = shardIdxForRank(dstLayout, tc.dstPl, env->rank);
-    int sd = (tc.dstShardDim >= 0) ? tc.dstShardDim : -1;
-    int sc = (tc.dstShardDim >= 0) ? dstShardCount : 1;
-    bool ok = testValidateDestData((const char*)env->buffer, dstLocalBytesDims, tc.ndims, sd, dstShardIdx, sc,
-                                   env->rank, env->stream, nullptr);
+    bool ok = validateDest();
+#ifdef NCCL_M2N_TESTING
+    if (testPackFusion) {
+      int dstShardIdx = shardIdxForRank(dstLayout, tc.dstPl, env->rank);
+      int sd = (tc.dstShardDim >= 0) ? tc.dstShardDim : -1;
+      int sc = (tc.dstShardDim >= 0) ? dstShardCount : 1;
+      ok = ok && testValidateDestData((const char*)activeBuffer + tensorRegionBytes, dstLocalBytesDims, tc.ndims, sd,
+                                      dstShardIdx, sc, env->rank, env->stream, nullptr);
+    }
+#endif
     localOk = ok ? 1 : 0;
+  }
+  if (asyncOrdering) {
+    TEST_CUDACHECK(cudaStreamSynchronize(env->stream));
+  }
+  /* Fold the rank-local instrumentation result into the same reduction as data
+   * validation. Returning on it separately would leave a failing rank out of
+   * the allreduce its peers still enter. */
+  if (instrumentationFailure != nullptr) {
+    localOk = 0;
+  }
+  if (!serialValidationPassed) {
+    localOk = 0;
   }
   int globalOk = env->allreduceMinInt(env, localOk);
 
-  TEST_NCCLCHECK(ncclCommWindowDeregister(env->comm, window));
+  if (window != nullptr) {
+    TEST_NCCL_COMM_CHECK(env->comm, ncclCommWindowDeregister(env->comm, window));
+  }
+
+  if (instrumentationFailure != nullptr) {
+    return makeFail(instrumentationFailure);
+  }
 
   if (env->verbose && env->isRank0Printer(env))
     printf("    [rank %d] localOk=%d, globalOk=%d, myBytes=%zu\n", env->rank, localOk, globalOk, myBytes);

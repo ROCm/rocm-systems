@@ -190,6 +190,29 @@ def perfetto_buffer_size_kb(val):
     return value
 
 
+def get_mpi_env_int(var_name, label, minimum):
+    """Read an integer MPI environment variable, rejecting values that cannot be used.
+
+    Returns None when the variable is not set, which callers treat as "undetected".
+    """
+    if var_name not in os.environ:
+        return None
+
+    value = os.environ[var_name]
+    try:
+        result = int(value)
+    except ValueError:
+        fatal_error(f"MPI {label} variable {var_name}='{value}' is not an integer")
+
+    if result < minimum:
+        fatal_error(
+            f"MPI {label} variable {var_name}={result} is out of range "
+            f"(expected {minimum} or greater)"
+        )
+
+    return result
+
+
 def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     """Detect MPI rank and size from the same MPI implementation's environment variables.
 
@@ -207,8 +230,13 @@ def get_mpi_rank_and_size(custom_rank_env=None, custom_size_env=None):
     """
     # If custom environment variables are specified, use them exclusively
     if custom_rank_env is not None and custom_size_env is not None:
-        rank = int(os.environ[custom_rank_env]) if custom_rank_env in os.environ else None
-        size = int(os.environ[custom_size_env]) if custom_size_env in os.environ else None
+        rank = get_mpi_env_int(custom_rank_env, "rank", 0)
+        size = get_mpi_env_int(custom_size_env, "world size", 1)
+        if rank is not None and size is not None and rank >= size:
+            fatal_error(
+                f"MPI rank variable {custom_rank_env}={rank} is out of range for world "
+                f"size variable {custom_size_env}={size} (expected 0-{size - 1})"
+            )
         return (rank, size, custom_rank_env, custom_size_env)
 
     for rank_var, size_var in [
@@ -545,7 +573,7 @@ For attachment profiling of running processes:
         "-o",
         "--output-file",
         help="For the output file name. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_FILE_NAME", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -553,7 +581,7 @@ For attachment profiling of running processes:
         "-d",
         "--output-directory",
         help="For adding output path where the output files will be saved. If nothing specified default path is `%%hostname%%/%%pid%%`",
-        default=os.environ.get("ROCPROF_OUTPUT_PATH", None),
+        default=None,
         type=str,
         required=False,
     )
@@ -795,7 +823,8 @@ For attachment profiling of running processes:
         help=(
             "Acknowledge that kernel replay (--replay-mode kernel) is a beta feature and its "
             "behaviour may change in a future release. Required when --replay-mode kernel is "
-            "specified."
+            "specified. This does not select kernel replay on its own: pass --replay-mode kernel "
+            "as well, otherwise the acknowledgement is rejected rather than silently ignored."
         ),
     )
 
@@ -861,6 +890,21 @@ For attachment profiling of running processes:
         help="",
         default=None,
         type=int,
+    )
+
+    isa_decode_options = parser.add_argument_group("ISA decode options")
+
+    add_parser_bool_argument(
+        isa_decode_options,
+        "--complete-isa-decode",
+        help=(
+            "Persist the instruction text and comments resolved during PC sampling "
+            "ISA decode directly in ROCPD output. "
+            "Default: off (ROCPD post-processing lazily disassembles local code objects "
+            "whose bytes still match their recorded content hash when no text is "
+            "stored). For PC sampling this adds one row per distinct sampled program "
+            "counter to the database."
+        ),
     )
 
     post_processing_options = parser.add_argument_group("Post-processing tracing options")
@@ -953,14 +997,14 @@ For attachment profiling of running processes:
     )
     filter_options.add_argument(
         "--kernel-include-regex",
-        help="Include the kernels matching this filter from counter-collection and thread-trace data (non-matching kernels will be excluded)",
+        help="Include the kernels matching this filter from counter-collection, thread-trace data and kernel replay (non-matching kernels will be excluded)",
         default=None,
         type=str,
         metavar="REGULAR_EXPRESSION",
     )
     filter_options.add_argument(
         "--kernel-exclude-regex",
-        help="Exclude the kernels matching this filter from counter-collection and thread-trace data (applied after --kernel-include-regex option)",
+        help="Exclude the kernels matching this filter from counter-collection, thread-trace data and kernel replay (applied after --kernel-include-regex option)",
         default=None,
         type=str,
         metavar="REGULAR_EXPRESSION",
@@ -1481,6 +1525,44 @@ def services_conflicting_with_kernel_replay(args, environ=None):
     return conflicts
 
 
+def validate_kernel_replay_configuration(args):
+    """Reject an invalid effective run configuration before launching an application."""
+    pmc = getattr(args, "pmc", None)
+    pmc_groups = getattr(args, "pmc_groups", None)
+    if pmc and pmc_groups:
+        fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
+
+    kernel_replay_mode = getattr(args, "replay_mode", None) == "kernel"
+    beta_acknowledged = getattr(args, "kernel_replay_beta_enabled", None)
+
+    if kernel_replay_mode:
+        if not beta_acknowledged:
+            fatal_error(
+                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
+                "feature via --kernel-replay-beta-enabled"
+            )
+        if not pmc and not pmc_groups:
+            fatal_error(
+                "--replay-mode kernel requires counter collection "
+                "(--pmc or pmc_groups)"
+            )
+        replay_conflicts = services_conflicting_with_kernel_replay(args)
+        if replay_conflicts:
+            fatal_error(
+                "--replay-mode kernel cannot be combined with "
+                + " or ".join(replay_conflicts)
+                + ". Kernel replay only varies counter groups from one pass to the next; "
+                "every other service stays on for all of the passes and would report each "
+                "kernel once per pass. Collect them in a separate run."
+            )
+    elif beta_acknowledged:
+        fatal_error(
+            "--kernel-replay-beta-enabled acknowledges that kernel replay is a beta feature but "
+            "does not select it. Add --replay-mode kernel to use kernel replay, or drop the "
+            "acknowledgement to use application replay"
+        )
+
+
 def patch_args(data):
     """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
 
@@ -1625,6 +1707,7 @@ def run(app_args, args, **kwargs):
     app_env = dict(os.environ)
     use_execv = kwargs.get("use_execv", True)
     app_pass = kwargs.get("pass_id", None)
+    validate_kernel_replay_configuration(args)
 
     # Validate custom MPI environment variables
     # If one custom variable is specified, both must be provided
@@ -1805,9 +1888,18 @@ def run(app_args, args, **kwargs):
         append=True,
     )
 
-    _output_file = args.output_file
+    # -o/-d stay None so a typed option stays distinguishable from an inherited
+    # ROCPROF_OUTPUT_*, which the listing subprocess always inherits from below;
+    # this restores the effective values the argparse defaults used to supply
+    _output_file = (
+        args.output_file
+        if args.output_file is not None
+        else os.environ.get("ROCPROF_OUTPUT_FILE_NAME")
+    )
     _output_path = (
-        args.output_directory if args.output_directory is not None else os.getcwd()
+        args.output_directory
+        if args.output_directory is not None
+        else os.environ.get("ROCPROF_OUTPUT_PATH", os.getcwd())
     )
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
@@ -1818,11 +1910,6 @@ def run(app_args, args, **kwargs):
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
         )
-
-    if args.list_avail and (
-        args.output_file is not None or args.output_directory is not None
-    ):
-        update_env("ROCPROF_OUTPUT_LIST_AVAIL_FILE", True)
 
     if not args.output_format:
         args.output_format = ["rocpd"]
@@ -2014,6 +2101,11 @@ def run(app_args, args, **kwargs):
         _summary_output_fname = _summary_output_fname.lower()
 
     update_env("ROCPROF_STATS", args.stats, overwrite_if_true=True)
+    update_env(
+        "ROCPROF_COMPLETE_ISA_DECODE",
+        args.complete_isa_decode,
+        overwrite=True,
+    )
     update_env("ROCPROF_STATS_SUMMARY", args.summary, overwrite_if_true=True)
     update_env("ROCPROF_STATS_SUMMARY_UNITS", args.summary_units, overwrite=True)
     update_env("ROCPROF_STATS_SUMMARY_OUTPUT", _summary_output_fname, overwrite=True)
@@ -2158,38 +2250,42 @@ def run(app_args, args, **kwargs):
     if args.list_avail:
         update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "on")
         path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3-avail")
+
+        # rocprofv3-avail owns the library and the output file; pass it options
+        # and let it decide, so a direct invocation behaves the same way. Only a
+        # requested output location, -o/-d or an input file, diverts the listing
+        # from stdout. A placeholder in the name is expanded by rocprofv3-avail,
+        # so the listing shares the run's stem only when the name has none
+        avail_command = [sys.executable, path]
+        if args.output_file is not None or args.output_directory is not None:
+            avail_command += ["--output-directory", _output_path]
+            if _output_file is not None:
+                avail_command += ["--output-file", _output_file]
+        avail_command += ["info", "--pmc", "--pc-sampling", "--spm-config"]
+
         if app_args:
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pmc"],
-                env=app_env,
-            )
-            if exit_code != 0:
-                fatal_error("rocprofv3-avail exit with error")
-
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pc-sampling"],
-                env=app_env,
-            )
-
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--spm-config"],
-                env=app_env,
-            )
+            if args.echo:
+                # the listing runs as its own process, so report it alongside the
+                # application command echoed at the end of this function
+                sys.stderr.flush()
+                print(f"command: {avail_command}")
+                sys.stdout.flush()
+            else:
+                try:
+                    subprocess.check_call(avail_command, env=app_env)
+                except subprocess.CalledProcessError as error:
+                    fatal_error(
+                        "rocprofv3-avail exit with error", exit_code=error.returncode
+                    )
         else:
-            app_args = [sys.executable, path, "info", "--pmc"]
+            # with no application to profile the listing is what rocprofv3 runs,
+            # so --echo and the exit code flow through the common path below
+            app_args = avail_command
             for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
                 update_env(
                     f"{itr}_LOG_LEVEL",
                     "error",
                 )
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--pc-sampling"],
-                env=app_env,
-            )
-            exit_code = subprocess.check_call(
-                [sys.executable, path, "info", "--spm-config"],
-                env=app_env,
-            )
 
     elif args.pid:
         update_env("ROCPROF_ATTACH_PID", args.pid)
@@ -2239,32 +2335,9 @@ def run(app_args, args, **kwargs):
                 warning("Extra counter file '{}' was empty.", args.extra_counters)
             update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
 
-    if args.pmc and args.pmc_groups:
-        fatal_error("Cannot specify both --pmc and (input file) pmc_groups")
-
     kernel_replay_mode = getattr(args, "replay_mode", None) == "kernel"
 
     if kernel_replay_mode:
-        if not getattr(args, "kernel_replay_beta_enabled", None):
-            fatal_error(
-                "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
-                "feature via --kernel-replay-beta-enabled"
-            )
-        if not args.pmc and not args.pmc_groups:
-            fatal_error(
-                "--replay-mode kernel requires counter collection "
-                "(--pmc or pmc_groups)"
-            )
-        replay_conflicts = services_conflicting_with_kernel_replay(args)
-        if replay_conflicts:
-            fatal_error(
-                "--replay-mode kernel cannot be combined with "
-                + " or ".join(replay_conflicts)
-                + ". Kernel replay only varies counter groups from one pass to the next; "
-                "every other service stays on for all of the passes and would report each "
-                "kernel once per pass. Collect them in a separate run."
-            )
-
         # Route counter collection through the in-process kernel-replay service. The SDK derives
         # the pass count from the number of counter groups via the tool's pass-count callback, so
         # there is nothing else to communicate.
@@ -2677,23 +2750,8 @@ def main(argv=None):
     # 3. CLI has --pmc AND input file has pmc (combine them as separate passes)
     cli_has_pmc = hasattr(cmd_args, "pmc") and cmd_args.pmc is not None
     input_has_pmc = len(inp_args) > 0 and has_set_attr(inp_args[0], "pmc")
-    # pmc_groups only ever arrives from an input file, so look for it there rather than on
-    # cmd_args, where it is never set.
-    input_has_counters = any(
-        has_set_attr(inp, "pmc") or has_set_attr(inp, "pmc_groups") for inp in inp_args
-    )
 
     replay_enabled = getattr(cmd_args, "replay_mode", None) == "kernel"
-    if replay_enabled and not getattr(cmd_args, "kernel_replay_beta_enabled", None):
-        fatal_error(
-            "--replay-mode kernel requires acknowledgement that kernel replay is a beta "
-            "feature via --kernel-replay-beta-enabled"
-        )
-    if replay_enabled and not (cli_has_pmc or input_has_counters):
-        fatal_error(
-            "--replay-mode kernel requires counter collection "
-            "(--pmc, input-file pmc, or pmc_groups)"
-        )
 
     # Kernel replay replays each dispatch once per counter group within one application run, so
     # the groups given on the command line are passes of a single run rather than the per-group
@@ -2759,6 +2817,7 @@ def main(argv=None):
 
         args = get_args(cmd_args, inp_args[0])
         validate_selected_regions_conflicts(args)
+        validate_kernel_replay_configuration(args)
 
         if args.pid:
             # For reattachment support, args must be the same as previous rocprofv3 sessions
@@ -2867,7 +2926,8 @@ def main(argv=None):
         # Get base args from first input arg (for CLI-only passes)
         base_args = get_args(cmd_args, inp_args[0])
 
-        # Run each pass with its specific config
+        # Construct and validate every effective run before starting any application.
+        all_pass_args = []
         for idx, pass_config in enumerate(all_pass_configs):
             if pass_config["from_cli"]:
                 # CLI pass: use base_args and override PMC
@@ -2879,11 +2939,15 @@ def main(argv=None):
                 pass_args = get_args(cmd_args, pass_config["config"])
 
             validate_selected_regions_conflicts(pass_args)
+            validate_kernel_replay_configuration(pass_args)
+            all_pass_args.append((idx + 1, pass_args))
 
+        # Run each pass with its specific config only after all configurations are valid.
+        for pass_id, pass_args in all_pass_args:
             _ec = run(
                 app_args,
                 pass_args,
-                pass_id=(idx + 1),
+                pass_id=pass_id,
                 use_execv=False,
             )
             if _ec is not None and _ec != 0:

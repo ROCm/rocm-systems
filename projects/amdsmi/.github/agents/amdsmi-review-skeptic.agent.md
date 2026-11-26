@@ -4,6 +4,8 @@ description: "Skeptic review subagent. Questions necessity, challenges scope, fi
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory, search/usages
 model: "Claude Opus 5.5"
 user-invocable: false
+applyTo: "projects/amdsmi/**"
+excludeAgent: "cloud-agent"
 ---
 
 # Skeptic Review — amd-smi

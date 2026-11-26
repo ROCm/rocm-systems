@@ -10,7 +10,8 @@
 #include "common/floating_point.h"
 #include "common/registers.h"
 #include "common/semantics.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_wmma.h"
 
 #include <algorithm>
 #include <bit>
@@ -305,6 +306,33 @@ void expect_matrix_modifiers(Call call) {
   }
 }
 
+// Overlap the high half of D0 with the low half of D1. A row-major
+// scatter would write D0's high half after D1's low half.
+template <int RegistersCount, typename Call>
+void expect_sparse_destination_order(Call call, const Registers<RegistersCount, 32> &input, int b,
+                                     int index) {
+  static_assert(RegistersCount >= 56);
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics);
+      auto reference = input, actual = input;
+      uint32_t shared[48]{};
+      actual.v[48] = shared;
+      actual.v[49] = shared + 16;
+      std::fill_n(reference.v[48], 32, 0u);
+      std::fill_n(reference.v[49], 32, 0u);
+      ASSERT_EQ(call(cpu | semantics, 0, reference.v + 48, reference.v, reference.v + b,
+                     reference.v + index),
+                RJ_ARITH_SUCCESS);
+      ASSERT_EQ(call(cpu | semantics, 0, actual.v + 48, actual.v, actual.v + b, actual.v + index),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < 48; ++lane) {
+        EXPECT_EQ(shared[lane], lane < 16 ? reference.v[48][lane] : reference.v[49][lane - 16]);
+      }
+    }
+  }
+}
+
 // Check tied C/D aliases against a disjoint snapshot of the same effective inputs.
 // Scratch registers [48, 48+outputs) must be disjoint from the operand ranges.
 // Numerical correctness is checked separately by each instruction's fixture.
@@ -484,6 +512,29 @@ void expect_wmma_fp8_subnormals(Call call) {
                   std::bit_cast<uint32_t>(sign ? -expected : expected));
       }
     }
+    // The first product adds 2^-9 to 2^16 and rounds away. The second
+    // subtracts 2^16. Reversing this pair would leave 2^-9.
+    Registers<20, Lanes> order;
+    for (auto *v : order.v) {
+      std::fill_n(v, Lanes, 0);
+    }
+    set_wmma_gfx12_small<8, Lanes>(order.v, 0, 0, Bf8A ? 0x18 : 0x01);
+    set_wmma_gfx12_small<8, Lanes>(order.v + 2, 0, 0, Bf8B ? 0x3c : 0x38);
+    set_wmma_gfx12_small<8, Lanes>(order.v, 0, 1, Bf8A ? 0xdc : 0xf8);
+    set_wmma_gfx12_small<8, Lanes>(order.v + 2, 0, 1, Bf8B ? 0x5c : 0x78);
+    wmma_gfx12_acc<Lanes>(order.v + 4, 0, 0) = 0x47800000;
+    ASSERT_EQ(
+        call(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, order.v + 12, order.v, order.v + 2, order.v + 4),
+        RJ_ARITH_SUCCESS);
+    EXPECT_EQ(wmma_gfx12_acc<Lanes>(order.v + 12, 0, 0), 0U);
+
+    // A zero product must preserve the smallest negative subnormal C, even
+    // in the last lane and with C and D aliased.
+    wmma_gfx12_acc<Lanes>(order.v + 4, 15, 15) = 0x80000001U;
+    ASSERT_EQ(
+        call(cpu | RJ_ARITH_SEMANTICS_LOOSE, 0, order.v + 4, order.v, order.v + 2, order.v + 4),
+        RJ_ARITH_SUCCESS);
+    EXPECT_EQ(wmma_gfx12_acc<Lanes>(order.v + 4, 15, 15), 0x80000001U);
   }
 }
 

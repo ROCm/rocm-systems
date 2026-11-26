@@ -49,8 +49,8 @@ Detected 2 AMD GPU(s):
     family: gfx12 (RDNA4)
 
   Node 2: gfx1100  major=11 minor=0 stepping=0  PCI=0x7448
-    sub-family: gfx110x (RDNA3)
-    family: gfx11 (RDNA3)  generic: gfx11-generic
+    sub-family: gfx110x (RDNA3)  generic: gfx11-generic
+    family: gfx11 (RDNA3)
 ```
 
 ### Environment variables
@@ -101,7 +101,7 @@ t = lookup_target("gfx942")
 b = lookup_bundle("gfx115x")
 # TargetBundle(key='gfx115x', level=SUB_FAMILY, ...)
 # b.members -> (gfx1150, gfx1151, gfx1152, gfx1153)
-# b.llvm_generic -> None  (gfx11-generic is at family level)
+# b.llvm_generic -> "gfx11-generic"
 ```
 
 Enumerate all bundles:

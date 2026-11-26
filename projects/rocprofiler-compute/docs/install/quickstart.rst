@@ -98,7 +98,7 @@ Ensure ROCm is installed and follow the steps:
       pip install --extra-index-url https://<stable/nightly>.repo.amd.com/rocm/whl-next/ "rocm-profiler[compute-analyze]"
 
    To check that the environment has everything analyze mode needs, run
-   ``rocprof-compute analyze --verify-deps``.
+   ``rocprof-compute analyze --debug-verify-deps``.
 
    Profile your application with its own Python environment, then activate this
    environment to run analyze mode on the results. For the packaged ROCm
@@ -148,7 +148,7 @@ https://github.com/ROCm/rocm-systems/tree/develop/projects/rocprofiler-compute/s
 What happens during profiling?
 ------------------------------
 
-The application runs multiple times to collect all required performance counters; it executes multiple times during profiling. Roofline analysis runs automatically unless you disable it using ``--no-roof``.
+The application runs multiple times to collect all required performance counters; it executes multiple times during profiling. Roofline analysis runs automatically unless you select blocks with ``-b`` or ``--set`` that do not include the roofline block (block 4).
 
 After profiling, the generated files can be found inside:
 
@@ -182,7 +182,7 @@ generate interactive HTML roofline charts, run analyze mode on the output:
 
 .. code-block:: shell-session
 
-    $ rocprof-compute profile --name vcopy --roof-only -- ./vcopy -n 1048576 -b 256
+    $ rocprof-compute profile --name vcopy --roofline -- ./vcopy -n 1048576 -b 256
     $ rocprof-compute analyze -p workloads/vcopy/MI200/
 
 
@@ -190,16 +190,17 @@ Collect the counters to compute the metric for compute throughput utilization, s
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 .. code-block:: shell-session
 
-    $ rocprof-compute profile --name vcopy --set compute_thruput_util --no-roof -- ./vcopy -n 1048576 -b 256
+    $ rocprof-compute profile --name vcopy --set compute_thruput_util -- ./vcopy -n 1048576 -b 256
 
 List the available blocks/metrics for profiling
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-The blocks/metrics are listed by page, because the list is long. Note the index for each section.
+List the blocks of the current GPU, then add a block to list its metrics. Note the index for each section. See :ref:`list-metrics`.
 
 .. code-block:: shell-session
 
-    $ rocprof-compute profile --list-available-metrics | more
+    $ rocprof-compute --list-metrics
+    $ rocprof-compute --list-metrics sol
 
 Using block 2 for system speed-of-light profiling
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -216,7 +217,7 @@ Dynamic process attachment can be performed with specific block IDs, verbose out
 
 .. code-block:: shell-session
 
-    $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1 4.1.1 5.1.1 --no-roof -VVV --attach-pid <process id>
+    $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1 5.1.1 -VVV --attach-pid <process id>
 
 Use multiple blocks (5 and 7) for detailed metric collection
 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -280,7 +281,7 @@ Show a list of metrics supported for analysis
 
 .. code-block:: shell-session
 
-   rocprof-compute analyze -p workloads/vcopy/MI200/ --list-available-metrics | more
+   rocprof-compute analyze -p workloads/vcopy/MI200/ --list-metrics all | more
 
 
 Show or display System speed-of-light (2) and roofline (4) analysis

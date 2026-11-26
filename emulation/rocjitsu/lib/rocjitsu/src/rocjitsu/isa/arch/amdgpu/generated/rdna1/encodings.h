@@ -422,12 +422,15 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->soffset != 0x7f && inst->offset)
+    if (inst->soffset != OPR_SMEM_OFFSET_NULL && inst->soffset != 0x7f && inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
+    }
   }
   using OpEncoding = SmemMachineInst;
   const OpEncoding inst_;
@@ -487,16 +490,19 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 == amdgpu::SRC_SDWA)
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
       amdgpu::sdwa::append_destination_attributes(out, sdwa_clamp_, sdwa_omod_, sdwa_dst_sel_,
                                                   sdwa_dst_unused_, sdwa_src0_sel_,
                                                   sdwa_src1_operand_, sdwa_src1_sel_);
-    if (has_encoded_dpp())
+    }
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -560,9 +566,10 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 == amdgpu::SRC_SDWA)
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
       amdgpu::sdwa::append_source_attributes(out, sdwa_src0_sel_, sdwa_src1_operand_,
                                              sdwa_src1_sel_);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -646,16 +653,19 @@ public:
     Instruction::append_src_operand(out, operand_index);
   }
   void build_modifiers(std::string &out) const override {
-    if (inst_.src0 == amdgpu::SRC_SDWA)
+    if (inst_.src0 == amdgpu::SRC_SDWA) {
       amdgpu::sdwa::append_destination_attributes(out, sdwa_clamp_, sdwa_omod_, sdwa_dst_sel_,
                                                   sdwa_dst_unused_, sdwa_src0_sel_,
                                                   sdwa_src1_operand_, sdwa_src1_sel_);
-    if (has_encoded_dpp())
+    }
+    if (has_encoded_dpp()) {
       amdgpu::dpp::append_dpp16_disassembly(out, dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
                                             dpp_bound_ctrl_, dpp_fi_, true,
                                             amdgpu::dpp::DppCtrlDialect::Gfx10Plus);
-    if (has_encoded_dpp8())
+    }
+    if (has_encoded_dpp8()) {
       amdgpu::dpp::append_dpp8_disassembly(out, dpp8_lane_sel_, dpp_fi_);
+    }
   }
   bool default_encoding();
   bool has_lit();
@@ -694,6 +704,8 @@ public:
 
 class Vintrp : public IsaInstruction<Isa> {
 public:
+  void append_interp_operand(std::string &out, uint8_t index,
+                             const ::rocjitsu::Operand &attribute) const;
   Vintrp(std::string_view mnemonic, const VintrpMachineInst *inst, ExecuteFn exec_fn);
   bool default_encoding();
   using OpEncoding = VintrpMachineInst;
@@ -703,7 +715,10 @@ public:
 
 class Vop3 : public IsaInstruction<Isa> {
 public:
+  void append_interp_operand(std::string &out, uint8_t index, const ::rocjitsu::Operand &attribute,
+                             const ::rocjitsu::Operand *interpolant) const;
   Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exec_fn);
+  bool displays_vop3_op_sel() const;
   uint32_t vop3_encoded_source_count() const;
   int32_t vop3_encoded_source_index(uint8_t operand_index) const;
   bool has_encoded_literal32() const;
@@ -711,7 +726,7 @@ public:
     auto *inst = &inst_;
     (void)inst;
     amdgpu::vop::append_vop3_disassembly(out, inst->op_sel, inst->clamp, inst->omod,
-                                         vop3_encoded_source_count(), false);
+                                         vop3_encoded_source_count(), displays_vop3_op_sel());
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
@@ -779,17 +794,21 @@ public:
     auto *inst = &inst_;
     (void)inst;
     if (uses_split_ds_offsets()) {
-      if (inst->offset0)
+      if (inst->offset0) {
         out += " offset0:" + std::to_string(inst->offset0);
-      if (inst->offset1)
+      }
+      if (inst->offset1) {
         out += " offset1:" + std::to_string(inst->offset1);
+      }
     } else {
       const uint32_t offset = inst->offset0 | (inst->offset1 << 8);
-      if (offset)
+      if (offset) {
         out += " offset:" + std::to_string(offset);
+      }
     }
-    if (inst->gds)
+    if (inst->gds) {
       out += " gds";
+    }
   }
   using OpEncoding = DsMachineInst;
   const OpEncoding inst_;
@@ -798,23 +817,46 @@ public:
 class Mubuf : public IsaInstruction<Isa> {
 public:
   Mubuf(std::string_view mnemonic, const MubufMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const MubufMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    if (inst_.lds && !(!inst_.opm && (inst_.op == 0 || (inst_.op >= 8 && inst_.op <= 12))))
+        [[unlikely]] {
+      return emit_error.emit() << mnemonic << " does not support LDS";
+    }
+    if (inst_.lds && inst_.tfe) [[unlikely]] {
+      return emit_error.emit() << mnemonic << " cannot return TFE status to LDS";
+    }
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
+    if (inst->offen) {
       out += " offen";
-    if (inst->idxen)
+    }
+    if (inst->idxen) {
       out += " idxen";
-    if (inst->offset)
+    }
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
-    if (inst->slc)
+    }
+    if (inst->slc) {
       out += " slc";
-    if (inst->lds)
+    }
+    if (inst->lds) {
       out += " lds";
+    }
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF)) {
+      out += " tfe";
+    }
   }
   using OpEncoding = MubufMachineInst;
   const OpEncoding inst_;
@@ -826,16 +868,24 @@ public:
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offen)
+    if (inst->offen) {
       out += " offen";
-    if (inst->offset)
+    }
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
-    if (inst->slc)
+    }
+    if (inst->slc) {
       out += " slc";
+    }
+    if (inst->tfe && (flags_ & CONDITIONAL_LAST_VGPR_DEF)) {
+      out += " tfe";
+    }
   }
   using OpEncoding = MtbufMachineInst;
   const OpEncoding inst_;
@@ -844,14 +894,15 @@ public:
 class Mimg : public IsaInstruction<Isa> {
 public:
   Mimg(std::string_view mnemonic, const MimgMachineInst *inst, ExecuteFn exec_fn);
+  std::string full_image_resource_name() const;
   bool should_print_dst_operand(uint8_t operand_index) const override {
     // Image atomics have one encoded VDATA tuple, printed as a source.
-    return !mnemonic_.starts_with("image_atomic_") &&
+    return amdgpu_memory_kind() != amdgpu::MemoryKind::Atomic &&
            Instruction::should_print_dst_operand(operand_index);
   }
   void append_src_operand(std::string &out, uint8_t operand_index) const override {
     const ::rocjitsu::Operand *operand = src_operands_[operand_index];
-    if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {
+    if (operand_index == 0 && inst_.tfe && amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic) {
       // VDATA is the first source. Assembly includes the status slot;
       // the source dependency includes only the atomic payload.
       const auto first = operand->encoding_value();
@@ -860,13 +911,66 @@ public:
                            : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";
       return;
     }
+    // LLVM spells regular T# operands with eight SGPRs even in R128 mode.
+    if (inst_.r128 && operand_index && src_operands_[operand_index - 1] == nsa_vaddr_operand_) {
+      out += full_image_resource_name();
+      return;
+    }
     Instruction::append_src_operand(out, operand_index);
+  }
+  void capture_nsa_words(const MachineInst *inst, const Operand *vaddr);
+  void build_modifiers(std::string &out) const override {
+    auto *inst = &inst_;
+    (void)inst;
+    if (true) {
+      out += " dmask:0x";
+      out += "0123456789abcdef"[inst->dmask & 0xfu];
+    }
+    if (true) {
+      static constexpr std::string_view dims[] = {
+          "1D", "2D", "3D", "CUBE", "1D_ARRAY", "2D_ARRAY", "2D_MSAA", "2D_MSAA_ARRAY"};
+      out += " dim:SQ_RSRC_IMG_";
+      out += dims[inst->dim & 7u];
+    }
+    if (true) {
+      if (inst->unorm) {
+        out += " unorm";
+      }
+      if (inst->glc) {
+        out += " glc";
+      }
+      if (inst->slc) {
+        out += " slc";
+      }
+      if (inst->dlc) {
+        out += " dlc";
+      }
+      if (inst->r128) {
+        out += " r128";
+      }
+    }
+    if (inst->a16) {
+      out += " a16";
+    }
+    if (true) {
+      if (inst->tfe) {
+        out += " tfe";
+      }
+      if (inst->lwe) {
+        out += " lwe";
+      }
+      if (inst->d16) {
+        out += " d16";
+      }
+    }
   }
   bool has_nsa_1();
   bool has_nsa_2();
   bool has_nsa_3();
   using OpEncoding = MimgMachineInst;
   const OpEncoding inst_;
+  std::array<uint32_t, 5> raw_words_{};
+  const Operand *nsa_vaddr_operand_ = nullptr;
 };
 
 class Exp : public IsaInstruction<Isa> {
@@ -879,17 +983,36 @@ public:
 class Flat : public IsaInstruction<Isa> {
 public:
   Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exec_fn);
+  static Result validate_encoding([[maybe_unused]] std::string_view mnemonic,
+                                  const FlatMachineInst *inst,
+                                  const util::DiagnosticEmitter &emit_error) {
+    const auto &inst_ = *inst;
+    static constexpr uint8_t segment_masks[128] = {
+        0, 0, 0, 0, 0, 0, 0, 0, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 7, 7,
+        7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 5, 5, 5,
+        0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 5, 5, 5, 5, 0, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    if (!(segment_masks[inst_.op] & (1u << inst_.seg))) [[unlikely]] {
+      return emit_error.emit() << mnemonic << " has an invalid segment";
+    }
+    return Result::success();
+  }
   void build_modifiers(std::string &out) const override {
     auto *inst = &inst_;
     (void)inst;
-    if (inst->offset)
+    if (inst->offset) {
       out += " offset:" + std::to_string(inst->offset);
-    if (inst->glc)
+    }
+    if (inst->glc) {
       out += " glc";
-    if (inst->dlc)
+    }
+    if (inst->dlc) {
       out += " dlc";
-    if (inst->slc)
+    }
+    if (inst->slc) {
       out += " slc";
+    }
   }
   void implicit_uses(RegisterSet &uses) const override;
   using OpEncoding = FlatMachineInst;

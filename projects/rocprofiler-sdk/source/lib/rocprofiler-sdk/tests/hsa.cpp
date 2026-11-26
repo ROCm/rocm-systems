@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <gtest/gtest.h>
@@ -107,6 +108,60 @@ TEST(hsa, tables)
     EXPECT_EQ(table.amd_ext_, amd_ext);
     EXPECT_EQ(table.finalizer_ext_, fini_ext);
     EXPECT_EQ(table.image_ext_, img_ext);
+}
+
+TEST(hsa, async_copy_signal_lifecycle)
+{
+    namespace copy = ::rocprofiler::hsa::async_copy;
+    copy::clear_copy_time_cache();
+    auto signal = hsa_signal_t{1};
+    copy::create_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {90, 100});
+    copy::retain_copy_signal(signal);
+    copy::retain_copy_signal(signal);
+    copy::release_copy_signal(signal);
+    copy::release_copy_signal(signal);
+    auto value = copy::find_copy_time(signal);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->first, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(value->second.start, 90);
+    EXPECT_EQ(value->second.end, 100);
+
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {190, 200});
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {140, 150});
+    copy::record_copy_time(signal, HSA_STATUS_ERROR, {});
+    value = copy::find_copy_time(signal);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->second.end, 200);
+    copy::release_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+
+    copy::retain_copy_signal(signal);
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {290, 300});
+    copy::create_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {390, 400});
+    copy::record_copy_time({2}, HSA_STATUS_ERROR, {});
+    copy::clear_copy_time_cache();
+    EXPECT_FALSE(copy::find_copy_time(signal));
+    EXPECT_FALSE(copy::find_copy_time({2}));
+    copy::create_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+    copy::release_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
+
+    // IPC references can be retained before any copy records a timestamp.
+    copy::retain_copy_signal(signal);
+    copy::retain_copy_signal(signal);
+    copy::record_copy_time(signal, HSA_STATUS_SUCCESS, {490, 500});
+    copy::release_copy_signal(signal);
+    value = copy::find_copy_time(signal);
+    ASSERT_TRUE(value);
+    EXPECT_EQ(value->second.end, 500);
+    copy::release_copy_signal(signal);
+    EXPECT_FALSE(copy::find_copy_time(signal));
 }
 
 TEST(hsa, high_precision_timestamp_contexts)

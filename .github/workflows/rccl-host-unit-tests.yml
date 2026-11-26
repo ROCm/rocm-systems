@@ -36,15 +36,20 @@ jobs:
       - name: Checkout RCCL CI scripts and tests
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          sparse-checkout: projects/rccl
+          # The MADEngine script tests also read the workflows they drive.
+          sparse-checkout: |
+            projects/rccl
+            .github/workflows
       - name: Run CI planner and driver regression tests
         run: |
           python3 -m venv "$RUNNER_TEMP/rccl-ci-tests-venv"
           "$RUNNER_TEMP/rccl-ci-tests-venv/bin/python" -m pip install \
-            --disable-pip-version-check -r projects/rccl/test/kernel-count/requirements.txt
+            --disable-pip-version-check -r projects/rccl/test/kernel-count/requirements.txt \
+            pyyaml==6.0.3
           "$RUNNER_TEMP/rccl-ci-tests-venv/bin/python" -m pytest -q \
             projects/rccl/test/test_accl_profiler_ci.py \
-            projects/rccl/test/test_plan_rccl_ci.py
+            projects/rccl/test/test_plan_rccl_ci.py \
+            projects/rccl/ci/scripts/tests
 
   rccl-host-unit-tests:
     name: Host unit tests (CPU-only)

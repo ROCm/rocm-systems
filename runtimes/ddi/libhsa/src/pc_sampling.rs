@@ -14,8 +14,10 @@ use std::sync::atomic::Ordering;
 use rocddi::device::gpu::profiling::{PcSamplingIntervalUnit, PcSamplingMethod, PcSamplingRequest};
 
 use crate::callback_arg::CallbackArg;
+use crate::events::CallbackScope;
 use crate::ffi::*;
-use crate::runtime::{CallbackScope, lock, map_error};
+use crate::lifecycle::lock;
+use crate::status::map_error;
 use session::{Resources, RetiredAssets, SessionHandle};
 
 /// HSA handles and uncertain cleanup for PC sampling sessions.
@@ -25,14 +27,14 @@ pub(crate) struct PcSamplingState {
     /// Sessions undergoing a native transition.
     busy: HashSet<u64>,
     /// Prevents reuse after uncertain native cleanup.
-    quarantine: Arc<crate::runtime::GenerationHealth>,
+    quarantine: Arc<crate::session::SessionHealth>,
     /// Trap assets retained until native users have stopped.
     retired: Vec<RetiredAssets>,
 }
 
 impl PcSamplingState {
     /// Initializes an empty PC sampling session registry.
-    pub(crate) fn new(quarantine: Arc<crate::runtime::GenerationHealth>) -> Self {
+    pub(crate) fn new(quarantine: Arc<crate::session::SessionHealth>) -> Self {
         Self {
             sessions: HashMap::new(),
             busy: HashSet::new(),
@@ -122,7 +124,7 @@ pub(crate) fn with_session(
         else {
             return INVALID_ARGUMENT;
         };
-        let Some(token) = runtime.inflight.enter() else {
+        let Some(token) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         (owner, token)
@@ -182,7 +184,7 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
         unit,
         interval: args.interval as u64,
     };
-    let (handle, device, info, page_size, quarantine, _token) = {
+    let (handle, device, info, page_size, quarantine, restore, _token) = {
         let mut guard = match lock() {
             Ok(guard) => guard,
             Err(status) => return status,
@@ -190,20 +192,29 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
         let Some(runtime) = guard.as_mut() else {
             return NOT_INITIALIZED;
         };
-        if runtime.stop_workers.load(Ordering::Acquire) {
+        if runtime.control.stop_workers.load(Ordering::Acquire) {
             return INVALID_RUNTIME_STATE;
         }
-        let Some(index) = runtime.gpu_index(args.agent) else {
+        let Some(index) = runtime.agents.gpu_index(args.agent) else {
             return INVALID_AGENT;
         };
-        let info = runtime.gpus[index].info();
-        if !session::supported_gpu(info) {
+        let info = runtime.agents.gpus[index].info();
+        if !session::supported_gpu(&info) {
             return NOT_SUPPORTED;
         }
         if runtime.pc_sampling_state.agent_busy(args.agent) {
             return RESOURCE_BUSY;
         }
-        let Some(token) = runtime.inflight.enter() else {
+        let Some(restore) = runtime
+            .debugger
+            .as_ref()
+            .and_then(|debugger| debugger.restore_token(&runtime.agents.gpus[index].device))
+        else {
+            // A shared native context may belong to another adapter. Do not
+            // replace a trap binding whose restoration/lifetime we do not own.
+            return NOT_SUPPORTED;
+        };
+        let Some(token) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         let handle = match runtime.allocate_handle() {
@@ -213,10 +224,11 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
         runtime.pc_sampling_state.busy.insert(args.agent.handle);
         (
             handle,
-            runtime.gpus[index].device.clone(),
+            runtime.agents.gpus[index].device.clone(),
             info,
-            runtime.host_page_size,
+            runtime.agents.host_page_size,
             runtime.pc_sampling_state.quarantine.clone(),
+            restore,
             token,
         )
     };
@@ -225,13 +237,14 @@ pub(crate) fn create_session(args: &CreateArgs) -> Status {
     let callback_data = unsafe { CallbackArg::new(args.callback_data) };
     let result = Resources::prepare(
         device,
-        info,
+        &info,
         request,
         args.trace_id,
         args.buffer_size,
         page_size,
         args.callback,
         callback_data,
+        restore,
     )
     .and_then(|resources| SessionHandle::create(resources, args.agent, &quarantine));
     let mut guard = match lock() {
@@ -300,7 +313,7 @@ pub(crate) fn destroy_session(session: HsaPcSampling) -> Status {
         if runtime.pc_sampling_state.busy.contains(&owner.agent.handle) {
             return RESOURCE_BUSY;
         }
-        let Some(token) = runtime.inflight.enter() else {
+        let Some(token) = runtime.control.inflight.enter() else {
             return OUT_OF_RESOURCES;
         };
         runtime.pc_sampling_state.busy.insert(owner.agent.handle);

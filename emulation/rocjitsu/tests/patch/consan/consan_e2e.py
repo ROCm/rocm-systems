@@ -10,14 +10,27 @@ import subprocess
 import struct
 import sys
 
+from group_flat_width_oracle import (
+    FLAT_WIDTH_CASES,
+    assert_flat_width_findings,
+    flat_width_pairs,
+)
 from consan_runtime_e2e import (
-    CASES,
     Driver,
     HardwareUnavailable,
-    add_target_arguments,
     build_root,
     identity,
+    parse_target_arguments,
 )
+
+
+def clear_examples(result):
+    """Normalize a result for comparison with --examples 0."""
+    for execution in result['executions']:
+        execution['cross_wave_examples'] = []
+        execution['collision_examples'] = []
+        execution['ordered_examples'] = []
+        execution['unresolved_examples'] = []
 
 
 class AnalysisDriver(Driver):
@@ -57,15 +70,84 @@ class AnalysisDriver(Driver):
         assert not (self.directory / 'original.hsaco').exists()
         case = self.args.case
         pairs = (
-            1 if case in ('race', 'high_lane') else (2 if case == 'repeat_race' else 0)
+            self.args.workgroups
+            if case == 'grouped_race'
+            else (
+                1
+                if case
+                in (
+                    'race',
+                    'high_lane',
+                    'wide_b8_overlap',
+                    'wide_b96_overlap',
+                    'flat_load_helper',
+                    'flat_store_helper',
+                    'flat_load_overlap',
+                    'flat_load_likely',
+                    'flat_load_provenstrict',
+                    'flat_load_offset',
+                    'flat_store_overlap',
+                    'flat_store_tail',
+                    'flat_load_scalar',
+                    'flat_store_scalar',
+                    'flat_load_backward',
+                    'flat_store_backward',
+                    'mixed_overlap',
+                    'mixed_b16',
+                    'barrier_missing_second',
+                )
+                else (2 if case == 'repeat_race' else 0)
+            )
         )
-        collisions = 1 if case == 'collision' else 0
+        collisions = (
+            (self.args.threads // self.args.wave_size)
+            if case == 'wide_collision'
+            else (1 if case == 'collision' else 0)
+        )
+        if case.startswith('atomic_') and case.endswith(('_read', '_write')):
+            pairs = 1
+        transpose = case.startswith('transpose_')
+        transpose_overlap = transpose and case.endswith('_overlap')
+        rejected = int(
+            transpose and self.args.target == 'gfx950' and case.endswith('_partial')
+        )
+        transpose_loss = 0
+        if transpose and case.endswith(('_full', '_empty', '_partial')):
+            transpose_loss = (
+                1 if self.args.target == 'gfx950' and not case.endswith('_full') else 2
+            )
+        if transpose_overlap:
+            pairs = 1
+        if case == 'wide_d16_overlap':
+            pairs = 8
+        if case in FLAT_WIDTH_CASES:
+            pairs = flat_width_pairs(case)
+        dual = case.startswith('wide_dual_')
+        if dual:
+            pairs = 2 if case.endswith('_overlap') else 0
+        if case.startswith('loop_'):
+            pairs = 2 * {
+                'loop_no_b0': 3,
+                'loop_no_b1': 2,
+                'loop_no_b0_full_journal': 4,
+                'loop_no_b0_sync_loss': 4,
+            }.get(case, 0)
+        raw = json.loads((self.directory / 'inspect.stdout').read_text())
+        if case == 'flat_load_alternate':
+            low = raw['executions'][0]['rows'][1]['records'][0]['offset']
+            rejected = int(low + 4 > 1024 or low % 4 != 0)
+            pairs = int(not rejected and low == 1020)
         status = 1 if pairs or collisions else 0
         # The dynamic loader's own trace records the analyzer's actual modules
         # without linking a runtime or adding a live-registry input to the tool.
         environment = self.environment | {'LD_DEBUG': 'files'}
-        first = self.run('analyze', [self.args.analyze, capture], status, environment)
-        replay = self.run('analyze-replay', [self.args.analyze, capture], status)
+        analysis_command = [self.args.analyze, capture]
+        if case in FLAT_WIDTH_CASES and pairs:
+            analysis_command += ['--examples', pairs]
+        if case.startswith('grouped_'):
+            analysis_command += ['--examples', 64]
+        first = self.run('analyze', analysis_command, status, environment)
+        replay = self.run('analyze-replay', analysis_command, status)
         assert first == replay, 'semantic replay changed'
         dependencies = (self.directory / 'analyze.stderr').read_text()
         for forbidden in (
@@ -80,25 +162,324 @@ class AnalysisDriver(Driver):
         assert result['target'] == int(self.args.target[3:])
         assert result['wave_size'] == self.args.wave_size
         assert result['entry'] == self.entry, (result['entry'], self.entry)
+        if transpose:
+            assert 'transpose_' in result['scope']
         assert result['cross_wave_pairs'] == pairs
+        assert result['ordered_pairs'] == sum(
+            execution['ordered_pairs'] for execution in result['executions']
+        )
+        if case == 'loop_three':
+            assert result['ordered_pairs'] == 9 * len(result['executions']), (
+                'loop_three total ordered pairs',
+                result['ordered_pairs'],
+            )
         assert result['collision_groups'] == collisions
-        assert result['coverage_complete'] == (case != 'exhausted')
+        assert result['coverage_complete'] == (
+            not transpose_loss
+            and not rejected
+            and case
+            not in (
+                'flat_load_strict',
+                'flat_load_helperstrict',
+                'flat_store_helperstrict',
+                'flat_load_unknown',
+                'flat_load_unknownstrict',
+                'exhausted',
+                'loop_access_loss',
+                'loop_sync_loss',
+                'loop_late',
+                'loop_no_b0_full_journal',
+                'loop_no_b0_sync_loss',
+            )
+        )
         assert result['verdict'] == ('findings' if status else 'no_observed_findings')
-        raw = json.loads((self.directory / 'inspect.stdout').read_text())
         assert result['execution_conditions'] == raw['execution_conditions'] == 15
         assert len(raw['executions']) == len(result['executions'])
         for observed, analyzed in zip(raw['executions'], result['executions']):
             assert analyzed['serial'] == observed['serial']
-            assert analyzed['valid_observations'] == sum(
-                len(row['records']) for row in observed['rows']
+            assert analyzed['valid_observations'] + rejected == sum(
+                len(raw['sites'][record['site']].get('range_offsets', [0]))
+                for row in observed['rows']
+                for record in row['records']
             )
-            assert analyzed['rejected_records'] == 0
-            assert analyzed['lost_occurrences'] == (1 if case == 'exhausted' else 0)
-            assert analyzed['ordering_uncertain'] == (case == 'exhausted')
-            assert analyzed['cross_wave_pairs'] == (
-                1 if case in ('race', 'repeat_race', 'high_lane') else 0
+            assert analyzed['rejected_records'] == rejected
+            if rejected:
+                assert any(
+                    issue['reason']
+                    == (
+                        'invalid_or_out_of_bounds_effective_range'
+                        if case == 'flat_load_alternate'
+                        else 'partial_exec_lds_transpose'
+                    )
+                    and issue['site'] == 1
+                    for issue in analyzed['issues']
+                )
+            assert analyzed['lost_occurrences'] == (
+                {
+                    'exhausted': 1,
+                    'loop_access_loss': 4,
+                    'loop_sync_loss': 32,
+                    'loop_no_b0_full_journal': 24,
+                    'loop_no_b0_sync_loss': 32,
+                }.get(case, transpose_loss)
             )
+            assert analyzed['ordering_uncertain'] == (
+                bool(transpose_loss)
+                or bool(rejected)
+                or case
+                in (
+                    'exhausted',
+                    'loop_access_loss',
+                    'loop_sync_loss',
+                    'loop_late',
+                    'loop_no_b0_full_journal',
+                    'loop_no_b0_sync_loss',
+                )
+            )
+            # Each repeat-race or loop fixture replays two identical launches.
+            per_launch_pairs = (
+                pairs // 2
+                if case == 'repeat_race' or case.startswith('loop_')
+                else pairs
+            )
+            assert analyzed['cross_wave_pairs'] == per_launch_pairs
             assert analyzed['collision_groups'] == collisions
+            if case in FLAT_WIDTH_CASES:
+                assert (
+                    result['scope']
+                    == 'native_and_group_flat_lds_single_range_no_sync_bounded_1d'
+                )
+                assert_flat_width_findings(
+                    raw['sites'], analyzed, case, self.args.wave_size
+                )
+            elif case.startswith('flat_'):
+                ordered = case.endswith('ordered')
+                suffix = 'epoch_workgroup_barriers' if ordered else 'no_sync_bounded_1d'
+                excludes = {
+                    'flat_load_helperstrict': 'strict_excludes_likely',
+                    'flat_store_helperstrict': 'strict_excludes_likely',
+                    'flat_load_strict': 'strict_excludes_likely',
+                    'flat_load_unknown': 'unresolved',
+                    'flat_load_unknownstrict': 'unresolved',
+                    'flat_load_nongroup': 'non_group',
+                    'flat_load_nongroupstrict': 'non_group',
+                }
+                assert result['flat_policy'] == (
+                    'strict' if case.endswith('strict') else 'likely'
+                )
+                method = (
+                    'lds_store_at' if case.startswith('flat_store_') else 'lds_load_at'
+                )
+                if case in excludes:
+                    (omission,) = result['flat_exclusions']
+                    assert (omission['site'], omission['reason']) == (1, excludes[case])
+                    if case.endswith('helperstrict'):
+                        assert omission['confidence'] == 'conservative'
+                        assert (
+                            f'hip_moi::context::{method}<unsigned>'
+                            in omission['assumption']
+                        )
+                    elif case == 'flat_load_strict':
+                        assert omission['confidence'] == 'conservative'
+                        assert (
+                            omission['assumption']
+                            == "the selected pointer high word belongs to this workgroup's shared aperture"
+                        )
+                    assert (
+                        omission['original_offset'] > raw['sites'][0]['original_offset']
+                    ) == (not case.startswith('flat_store_'))
+                    assert omission['original_size'] == (
+                        12 if self.args.target in ('gfx1201', 'gfx1250') else 8
+                    )
+                else:
+                    assert (
+                        result['scope']
+                        == 'native_and_group_flat_lds_single_range_' + suffix
+                    )
+                    (site,) = result['flat_sites']
+                    if '_helper' in case:
+                        assert site['confidence'] == 'conservative'
+                        assert (
+                            f'hip_moi::context::{method}<unsigned>'
+                            in site['assumption']
+                        )
+                    elif case in ('flat_load_likely', 'flat_load_alternate'):
+                        assert site['confidence'] == 'conservative'
+                        assert (
+                            site['assumption']
+                            == "the selected pointer high word belongs to this workgroup's shared aperture"
+                        )
+                    else:
+                        assert site['confidence'] == 'exact'
+                assert analyzed['ordered_pairs'] == int(ordered)
+                assert analyzed['ordering_unresolved_pairs'] == 0
+                assert (
+                    analyzed['required_barrier_waves']
+                    == analyzed['completed_barrier_waves']
+                    == (2 if ordered else 0)
+                )
+                if pairs or ordered:
+                    (finding,) = analyzed[
+                        'ordered_examples' if ordered else 'cross_wave_examples'
+                    ]
+                    assert finding['ordering'] == (
+                        'ordered' if ordered else 'unordered'
+                    )
+                    assert finding['lane_pairs'] == 1
+                    first, second = sorted(
+                        (finding['first'], finding['second']),
+                        key=lambda endpoint: endpoint['wave'],
+                    )
+                    flat = first if case.startswith('flat_store_') else second
+                    assert (
+                        first['site'],
+                        first['access'],
+                        second['site'],
+                        second['access'],
+                    ) == (0, 'write', 1, 'read')
+                    assert flat['origin'] == 'group_flat'
+                    if '_helper' in case:
+                        assert flat['confidence'] == 'conservative'
+                        method = (
+                            'lds_store_at'
+                            if case.startswith('flat_store_')
+                            else 'lds_load_at'
+                        )
+                        assert (
+                            f'hip_moi::context::{method}<unsigned>'
+                            in flat['assumption']
+                        )
+                    elif case in ('flat_load_likely', 'flat_load_alternate'):
+                        assert flat['confidence'] == 'conservative'
+                        assert (
+                            flat['assumption']
+                            == "the selected pointer high word belongs to this workgroup's shared aperture"
+                        )
+                    else:
+                        assert (
+                            flat['confidence'] == 'exact' and 'assumption' not in flat
+                        )
+                    for endpoint in (first, second):
+                        tail = endpoint['wave'] == 1 and case.endswith('_tail')
+                        assert (endpoint['offset'], endpoint['width']) == (
+                            (1016, 8) if tail else (1020, 4)
+                        )
+                        assert endpoint['mask'] == 1 << (self.args.wave_size - 1)
+                        assert (
+                            endpoint['original_offset']
+                            == raw['sites'][endpoint['site']]['original_offset']
+                        )
+            if case.startswith('atomic_'):
+                assert (
+                    analyzed['ordered_pairs']
+                    == analyzed['ordering_unresolved_pairs']
+                    == 0
+                )
+                assert (
+                    analyzed['completed_barrier_waves']
+                    == analyzed['required_barrier_waves']
+                    == 0
+                )
+                if pairs:
+                    (finding,) = analyzed['cross_wave_examples']
+                    assert (
+                        finding['ordering'] == 'unordered'
+                        and finding['lane_pairs'] == 1
+                    )
+                    endpoints = sorted(
+                        (finding['first'], finding['second']), key=lambda e: e['wave']
+                    )
+                    _, form, peer = case.split('_')
+                    width = 8 if form in ('u64', 'f64') else 4
+                    for wave, (endpoint, role) in enumerate(
+                        zip(endpoints, ('atomic', peer))
+                    ):
+                        assert endpoint['site'] == endpoint['wave'] == wave
+                        assert endpoint['access'] == role
+                        assert endpoint['mask'] == 1 << (self.args.wave_size - 1)
+                        assert (
+                            endpoint['offset'] == 1024 - 2 * width + (width - 4) * wave
+                        )
+                        assert endpoint['width'] == (4 if wave else width)
+            if case == 'wide_d16_overlap':
+                endpoints = set()
+                for finding in analyzed['cross_wave_examples']:
+                    a, b = sorted(
+                        (finding['first'], finding['second']),
+                        key=lambda endpoint: endpoint['wave'],
+                    )
+                    assert finding['ordering'] == 'unordered'
+                    assert (a['wave'], b['wave'], b['site'], b['offset']) == (
+                        0,
+                        1,
+                        8,
+                        0,
+                    )
+                    assert a['mask'] == b['mask'] == 1
+                    endpoints.add(a['site'])
+                assert endpoints == set(range(8))
+            if transpose_overlap:
+                width = raw['sites'][0]['width']
+                (finding,) = analyzed['cross_wave_examples']
+                a, b = sorted(
+                    (finding['first'], finding['second']),
+                    key=lambda endpoint: endpoint['wave'],
+                )
+                assert finding['ordering'] == 'unordered'
+                assert (a['wave'], a['site'], a['access'], a['offset'], a['width']) == (
+                    0,
+                    0,
+                    'read',
+                    2112,
+                    width,
+                )
+                assert (
+                    b['wave'],
+                    b['site'],
+                    b['access'],
+                    b['offset'],
+                    b['width'],
+                    b['mask'],
+                ) == (1, 1, 'write', 2112 + width - 4, 4, 1)
+                assert (
+                    a['mask_role'] == 'transpose_source_lanes'
+                    and a['anchor_exec'] == (1 << self.args.wave_size) - 1
+                )
+                assert a['mask'] == sum(
+                    1 << lane for lane in range(2, self.args.wave_size, 4)
+                )
+                assert (
+                    analyzed['cross_wave_lane_pairs']
+                    == finding['lane_pairs']
+                    == self.args.wave_size // 4
+                )
+            if dual and pairs:
+                width = 4 if '_b32_' in case else 8
+                second_offset = 8 + 5 * width * (64 if '_stride64_' in case else 1)
+                examples = analyzed['cross_wave_examples']
+                assert len(examples) == 2
+                dual_accesses = set()
+                for finding in examples:
+                    first, second = sorted(
+                        (finding['first'], finding['second']),
+                        key=lambda item: item['wave'],
+                    )
+                    assert finding['ordering'] == 'unordered'
+                    assert (first['wave'], first['range_id'], first['width']) == (
+                        0,
+                        1,
+                        width,
+                    )
+                    assert (
+                        second['wave'],
+                        second['site'],
+                        second['range_id'],
+                        second['width'],
+                    ) == (1, 2, 0, 4)
+                    assert first['offset'] == second['offset'] == second_offset
+                    assert first['mask'] == second['mask'] == 1
+                    dual_accesses.add((first['site'], first['access']))
+                assert dual_accesses == {(0, 'write'), (1, 'read')}
             if case in ('race', 'repeat_race', 'high_lane'):
                 finding = analyzed['cross_wave_examples'][0]
                 assert finding['ordering'] == 'unordered'
@@ -115,6 +496,148 @@ class AnalysisDriver(Driver):
                 for participant in (finding['first'], finding['second']):
                     site = raw['sites'][participant['site']]
                     assert participant['original_offset'] == site['original_offset']
+            if case.startswith('grouped_'):
+                groups = self.args.workgroups
+                waves = (
+                    self.args.threads + self.args.wave_size - 1
+                ) // self.args.wave_size
+                assert (
+                    analyzed['workgroup_count'] == groups
+                    and analyzed['waves_per_workgroup'] == waves
+                )
+                if case == 'grouped_race':
+                    examples = analyzed['cross_wave_examples']
+                    assert {
+                        finding['first']['workgroup_x'] for finding in examples
+                    } == set(range(groups))
+                    for finding in examples:
+                        assert (
+                            finding['first']['workgroup_x']
+                            == finding['second']['workgroup_x']
+                        )
+                        assert (
+                            finding['first']['wave'] == 0
+                            and finding['second']['wave'] == 1
+                        )
+                        assert finding['ordering'] == 'unordered'
+                if case in ('grouped_barrier', 'grouped_empty', 'grouped_repeat'):
+                    assert analyzed['ordered_pairs'] == groups * (waves - 1)
+                    assert (
+                        analyzed['required_barrier_waves']
+                        == analyzed['completed_barrier_waves']
+                        == groups * waves
+                    )
+                    examples = analyzed['ordered_examples']
+                    assert {
+                        finding['first']['workgroup_x'] for finding in examples
+                    } == set(range(groups))
+                    for finding in examples:
+                        assert (
+                            finding['first']['workgroup_x']
+                            == finding['second']['workgroup_x']
+                        )
+                        assert (
+                            finding['first']['wave'] == 0
+                            and finding['second']['wave'] > 0
+                        )
+                        assert finding['ordering'] == 'ordered'
+                else:
+                    assert analyzed['ordered_pairs'] == 0
+                    assert analyzed['required_barrier_waves'] == 0
+                    assert analyzed['completed_barrier_waves'] == 0
+                    assert (
+                        result['scope'] == 'native_lds_single_range_no_sync_bounded_1d'
+                    )
+            if case.startswith('loop_'):
+                assert analyzed['integrity_events'] == 0
+                if case == 'loop_three':
+                    assert analyzed['ordered_pairs'] == 9, (
+                        'loop_three dispatch ordered pairs',
+                        analyzed['serial'],
+                        analyzed['ordered_pairs'],
+                    )
+                if case.startswith('loop_no_b0_'):
+                    # The same first four endpoints remain confirmed on either
+                    # side of the journal limit, despite later access/sync loss.
+                    examples = analyzed['cross_wave_examples']
+                    assert len(examples) == 4
+                    assert {finding['first']['phase'] for finding in examples} == set(
+                        range(4)
+                    )
+                    for finding in examples:
+                        assert finding['ordering'] == 'unordered'
+                        assert finding['first']['phase'] == finding['second']['phase']
+                        assert (
+                            finding['first']['sequence']
+                            == finding['second']['sequence']
+                            == finding['first']['phase'] + 1
+                        )
+                assert analyzed['ordering_unresolved_pairs'] == (
+                    1 if case == 'loop_late' else 0
+                )
+                assert analyzed['synchronization_loss'] == {
+                    'loop_sync_loss': 48,
+                    'loop_no_b0_sync_loss': 8,
+                    'loop_late': 8,
+                }.get(case, 0)
+            if case == 'mixed_barrier':
+                assert analyzed['ordered_pairs'] == 1
+                assert (
+                    analyzed['required_barrier_waves']
+                    == analyzed['completed_barrier_waves']
+                    == len(observed['rows'])
+                )
+                finding = analyzed['ordered_examples'][0]
+                assert finding['ordering'] == 'ordered'
+                assert (finding['first']['offset'], finding['first']['width']) == (0, 8)
+                assert (finding['second']['offset'], finding['second']['width']) == (
+                    4,
+                    4,
+                )
+            if case.startswith('barrier'):
+                assert (
+                    result['scope']
+                    == 'native_lds_single_range_epoch_workgroup_barriers'
+                )
+                assert analyzed['ordered_pairs'] == (
+                    2 if case == 'barrier_multiple' else 1
+                )
+                assert analyzed['ordering_unresolved_pairs'] == 0
+                assert analyzed['required_barrier_waves'] == len(observed['rows'])
+                assert analyzed['completed_barrier_waves'] == len(observed['rows'])
+                certificate = analyzed['ordered_examples'][0]
+                assert certificate['ordering'] == 'ordered'
+                assert certificate['first']['wave'] == 0
+                assert certificate['second']['wave'] == 1
+                mask = (1 << (self.args.wave_size - 1)) if case == 'barrier_high' else 1
+                assert (
+                    certificate['first']['mask']
+                    == certificate['second']['mask']
+                    == mask
+                )
+                assert (
+                    certificate['first']['offset']
+                    == certificate['second']['offset']
+                    == 0
+                )
+            if case in ('barrier_multiple', 'barrier_missing_second'):
+                assert [
+                    (finding['first']['site'], finding['second']['site'])
+                    for finding in analyzed['ordered_examples']
+                ] == ([(0, 1), (2, 1)] if case == 'barrier_multiple' else [(0, 1)])
+                assert [
+                    (finding['first']['site'], finding['second']['site'])
+                    for finding in analyzed['cross_wave_examples']
+                ] == ([(2, 1)] if case == 'barrier_missing_second' else [])
+                if case == 'barrier_missing_second':
+                    reuse = analyzed['cross_wave_examples'][0]
+                    assert reuse['ordering'] == 'unordered'
+                    assert reuse['first']['access'] == 'write'
+                    assert reuse['first']['wave'] == 0 and reuse['first']['phase'] == 1
+                    assert reuse['second']['access'] == 'read'
+                    assert (
+                        reuse['second']['wave'] == 1 and reuse['second']['phase'] == 1
+                    )
             if case == 'collision':
                 finding = analyzed['collision_examples'][0]
                 assert finding['first']['mask'] == 3 and finding['lane_pairs'] == 1
@@ -126,9 +649,7 @@ class AnalysisDriver(Driver):
                 status,
             )
         )
-        for execution in result['executions']:
-            execution['cross_wave_examples'] = []
-            execution['collision_examples'] = []
+        clear_examples(result)
         assert (
             result == hidden
         ), 'example limit changed full semantic counts or coverage'
@@ -186,10 +707,8 @@ def main():
         parser.add_argument(
             f'--{name}', type=lambda value: Path(value).resolve(), required=True
         )
-    parser.add_argument('--case', choices=CASES, required=True)
     parser.add_argument('--utf8-entry', action='store_true')
-    add_target_arguments(parser)
-    driver = AnalysisDriver(parser.parse_args())
+    driver = AnalysisDriver(parse_target_arguments(parser))
     status = 1
     try:
         driver.execute()

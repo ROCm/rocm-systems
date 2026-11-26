@@ -3,6 +3,7 @@
 
 #include "rocjitsu/code/analysis/waitcheck/state.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <algorithm>
 #include <array>
@@ -40,9 +41,32 @@ TEST(WaitcheckState, PartialWaitRetiresOnlySufficientlyOldEvents) {
   EXPECT_TRUE(state.ready_regs.contains({RegClass::VGPR, 1, 1}));
 }
 
+TEST(WaitcheckState, Gfx1150ExportFifoProgressAtJoinRequiresBothPaths) {
+  constexpr auto arch = rocjitsu::IsaFamily::Rdna3_5;
+  const auto exp = Ops::counter_index(WaitCounterKind::Exp);
+  PendingEvent position;
+  position.counter = WaitCounterKind::Exp;
+  position.kind = WaitEventKind::ExportPosition;
+  position.regs.expand({RegClass::VGPR, 4, 1});
+  position.min_younger = 3;
+  position.min_younger_in_fifo = 2;
+  PendingState left, right;
+  left.pending[exp] = {position};
+  position.min_younger_in_fifo = 1;
+  right.pending[exp] = {position};
+  Ops::merge_into(left, right);
+  const auto required = Ops::dependency_required_count(left, left.pending[exp].front(), arch);
+  ASSERT_TRUE(required.succeeded());
+  EXPECT_EQ(required.value(), 1u);
+  ASSERT_TRUE(Ops::apply_counter_wait(left, WaitCounterKind::Exp, 2, arch).succeeded());
+  ASSERT_EQ(left.pending[exp].size(), 1u);
+  ASSERT_TRUE(Ops::apply_counter_wait(left, WaitCounterKind::Exp, 1, arch).succeeded());
+  EXPECT_TRUE(left.pending[exp].empty());
+}
+
 TEST(WaitcheckState, StoreCounterOrderingControlsPartialRetirement) {
   struct Case {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     WaitCounterKind counter;
     WaitEventKind older;
     WaitEventKind younger;
@@ -50,37 +74,37 @@ TEST(WaitcheckState, StoreCounterOrderingControlsPartialRetirement) {
   };
   const Case cases[] = {
       // Before VScnt, ordinary loads and stores are ordered on the shared counter.
-      {ROCJITSU_CODE_ARCH_CDNA3, WaitCounterKind::Load, WaitEventKind::VmemStore,
+      {rocjitsu::IsaFamily::Cdna3, WaitCounterKind::Load, WaitEventKind::VmemStore,
        WaitEventKind::VmemNoSamplerLoad, false},
-      {ROCJITSU_CODE_ARCH_CDNA4, WaitCounterKind::Load, WaitEventKind::VmemStore,
+      {rocjitsu::IsaFamily::Cdna4, WaitCounterKind::Load, WaitEventKind::VmemStore,
        WaitEventKind::VmemNoSamplerLoad, false},
       // Stores and writebacks share the same hardware event.
-      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Store, WaitEventKind::VmemStore,
+      {rocjitsu::IsaFamily::Rdna3, WaitCounterKind::Store, WaitEventKind::VmemStore,
        WaitEventKind::GlobalWb, false},
-      {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::VmemStore,
+      {rocjitsu::IsaFamily::Rdna4, WaitCounterKind::Store, WaitEventKind::VmemStore,
        WaitEventKind::GlobalWb, false},
       // Static FLAT may use only LDS, so it cannot prove partial Store progress.
-      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Store, WaitEventKind::FlatStore,
+      {rocjitsu::IsaFamily::Rdna3, WaitCounterKind::Store, WaitEventKind::FlatStore,
        WaitEventKind::VmemStore, true},
-      {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::FlatStore,
+      {rocjitsu::IsaFamily::Rdna4, WaitCounterKind::Store, WaitEventKind::FlatStore,
        WaitEventKind::VmemStore, true},
-      {ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::Store, WaitEventKind::FlatStore,
+      {rocjitsu::IsaFamily::Cdna5, WaitCounterKind::Store, WaitEventKind::FlatStore,
        WaitEventKind::VmemStore, true},
-      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Store, WaitEventKind::VmemStore,
+      {rocjitsu::IsaFamily::Rdna3, WaitCounterKind::Store, WaitEventKind::VmemStore,
        WaitEventKind::FlatStore, true},
-      {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Store, WaitEventKind::VmemStore,
+      {rocjitsu::IsaFamily::Rdna4, WaitCounterKind::Store, WaitEventKind::VmemStore,
        WaitEventKind::FlatStore, true},
-      {ROCJITSU_CODE_ARCH_CDNA5, WaitCounterKind::Store, WaitEventKind::VmemStore,
+      {rocjitsu::IsaFamily::Cdna5, WaitCounterKind::Store, WaitEventKind::VmemStore,
        WaitEventKind::FlatStore, true},
       // Generic FLAT stores prevent partial DS retirement on CDNA3/4, but
       // normalize to the same event as native DS accesses on RDNA.
-      {ROCJITSU_CODE_ARCH_CDNA3, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
+      {rocjitsu::IsaFamily::Cdna3, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
        true},
-      {ROCJITSU_CODE_ARCH_CDNA4, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
+      {rocjitsu::IsaFamily::Cdna4, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
        true},
-      {ROCJITSU_CODE_ARCH_RDNA3, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
+      {rocjitsu::IsaFamily::Rdna3, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
        false},
-      {ROCJITSU_CODE_ARCH_RDNA4, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
+      {rocjitsu::IsaFamily::Rdna4, WaitCounterKind::Ds, WaitEventKind::FlatStore, WaitEventKind::Ds,
        false},
   };
   for (const auto &test : cases) {
@@ -154,7 +178,7 @@ TEST(WaitcheckState, OlderCommittedGenerationRemainsAvailableWithANewerProducer)
   PendingState state;
   const RegisterRef reg{RegClass::VGPR, 0, 1};
   state.pending[kLoad] = {load(0, 1), load(0, 0, 4)};
-  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   ASSERT_EQ(state.pending[kLoad].size(), 1u);
   EXPECT_TRUE(state.ready_regs.contains(reg));
@@ -173,7 +197,7 @@ TEST(WaitcheckState, JoinedDifferentCountersCannotInventACommittedGeneration) {
 
   auto joined = left;
   Ops::merge_into(joined, right);
-  ASSERT_TRUE(Ops::apply_memory_wait(joined, WaitCounterKind::Load, 0, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_memory_wait(joined, WaitCounterKind::Load, 0, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   EXPECT_TRUE(joined.pending[kLoad].empty());
   ASSERT_EQ(joined.pending[ds].size(), 1u);
@@ -181,9 +205,9 @@ TEST(WaitcheckState, JoinedDifferentCountersCannotInventACommittedGeneration) {
   EXPECT_FALSE(joined.pending[ds][0].old_value_regs.contains(reg));
 
   // Waiting before joining must not establish readiness on the DS-only path.
-  ASSERT_TRUE(
-      Ops::apply_memory_wait(left, WaitCounterKind::Load, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
-  ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Load, 0, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_memory_wait(left, WaitCounterKind::Load, 0, rocjitsu::IsaFamily::Rdna4)
+                  .succeeded());
+  ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Load, 0, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   Ops::merge_into(left, right);
   EXPECT_EQ(joined.ready_regs, left.ready_regs);
@@ -198,16 +222,17 @@ TEST(WaitcheckState, JoinedPartialLoadWaitCannotInventACommittedGeneration) {
 
   auto joined = left;
   Ops::merge_into(joined, right);
-  ASSERT_TRUE(Ops::apply_memory_wait(joined, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_memory_wait(joined, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   ASSERT_EQ(joined.pending[kLoad].size(), 2u);
   EXPECT_FALSE(joined.ready_regs.contains(reg));
-  for (const auto &event : joined.pending[kLoad])
+  for (const auto &event : joined.pending[kLoad]) {
     EXPECT_FALSE(event.old_value_regs.contains(reg));
+  }
 
-  ASSERT_TRUE(
-      Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
-  ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
+                  .succeeded());
+  ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   Ops::merge_into(left, right);
   EXPECT_EQ(joined.ready_regs, left.ready_regs);
@@ -221,12 +246,13 @@ TEST(WaitcheckState, JoinedCommonProducerEstablishesACommittedGeneration) {
   left.pending[kLoad] = {load(0, 1), load(0, 0, 4)};
   right.pending[kLoad] = {load(0, 1), load(0, 0, 8)};
   Ops::merge_into(left, right);
-  ASSERT_TRUE(
-      Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
+                  .succeeded());
   ASSERT_EQ(left.pending[kLoad].size(), 2u);
   EXPECT_TRUE(left.ready_regs.contains(reg));
-  for (const auto &event : left.pending[kLoad])
+  for (const auto &event : left.pending[kLoad]) {
     EXPECT_TRUE(event.old_value_regs.contains(reg));
+  }
 }
 
 TEST(WaitcheckState, PendingAndCompletedProducerBecomesReadyAfterJoinedWait) {
@@ -325,10 +351,10 @@ TEST(WaitcheckState, MixedHardwareEventKindsPreventPartialCounterRetirement) {
   ages[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)] = 1;
   ages[static_cast<size_t>(WaitEventKind::Ds)] = 0;
   const auto before = state;
-  ASSERT_TRUE(Ops::apply_counter_wait(state, WaitCounterKind::VmVsrc, 1, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_counter_wait(state, WaitCounterKind::VmVsrc, 1, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   EXPECT_EQ(state, before);
-  ASSERT_TRUE(Ops::apply_counter_wait(state, WaitCounterKind::VmVsrc, 0, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_counter_wait(state, WaitCounterKind::VmVsrc, 0, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   EXPECT_TRUE(state.pending[vm].empty());
   EXPECT_EQ(ages[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)], kNoPendingEventAge);
@@ -355,12 +381,12 @@ TEST(WaitcheckState, PartialWaitCannotRetireAnOutOfOrderScalarCounter) {
   event.kind = WaitEventKind::Ds;
   state.pending[ds].push_back(event);
   state.pending_smem[ds] = true;
-  ASSERT_TRUE(
-      Ops::apply_memory_wait(state, WaitCounterKind::Ds, 1, ROCJITSU_CODE_ARCH_CDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Ds, 1, rocjitsu::IsaFamily::Cdna4)
+                  .succeeded());
   EXPECT_EQ(state.pending[ds].size(), 1u);
-  EXPECT_EQ(Ops::dependency_required_count(state, event, ROCJITSU_CODE_ARCH_CDNA4).value(), 0u);
-  ASSERT_TRUE(
-      Ops::apply_memory_wait(state, WaitCounterKind::Ds, 0, ROCJITSU_CODE_ARCH_CDNA4).succeeded());
+  EXPECT_EQ(Ops::dependency_required_count(state, event, rocjitsu::IsaFamily::Cdna4).value(), 0u);
+  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Ds, 0, rocjitsu::IsaFamily::Cdna4)
+                  .succeeded());
   EXPECT_TRUE(state.pending[ds].empty());
 }
 
@@ -421,7 +447,7 @@ TEST(WaitcheckState, DisagreeingModesBecomeUnknownAtAJoin) {
   EXPECT_TRUE(merged.expert_scheduling.enabled);
 }
 
-std::unique_ptr<Instruction> decode_wait(uint32_t word, rj_code_arch_t arch) {
+std::unique_ptr<Instruction> decode_wait(uint32_t word, rocjitsu::IsaFamily arch) {
   std::unique_ptr<Decoder> decoder = Decoder::create(arch);
   util::StringDiagnostic error;
   DecodeResult result = decoder->decode_window(std::span(&word, 1), 0, error.emitter());
@@ -444,8 +470,8 @@ TEST(WaitcheckState, DependencyWaitsRetireOnlySelectedScalarHazards) {
   const Case cases[] = {{0xffff, false, false, false}, {0xfffe, true, false, false},
                         {0xfffd, false, false, true},  {0xf1ff, false, true, false},
                         {0xf3ff, false, false, false}, {0xf1fc, true, true, true}};
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                   rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     for (const auto &test : cases) {
       SCOPED_TRACE(test.immediate);
@@ -495,24 +521,24 @@ TEST(WaitcheckState, InstructionWaitsRespectSentinelsAndArchitecture) {
   PendingState state;
   state.pending[kLoad] = {load(0, 63)};
   const PendingState before = state;
-  std::unique_ptr<Instruction> sentinel = decode_wait(0xbfc0003fu, ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Instruction> sentinel = decode_wait(0xbfc0003fu, rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(sentinel, nullptr);
-  ASSERT_TRUE(Ops::apply_waitcnt(state, *sentinel, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_waitcnt(state, *sentinel, rocjitsu::IsaFamily::Rdna4).succeeded());
   EXPECT_EQ(state, before);
-  std::unique_ptr<Instruction> wait = decode_wait(0xbfc00000u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Instruction> wait = decode_wait(0xbfc00000u, rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(wait, nullptr);
-  ASSERT_TRUE(Ops::apply_waitcnt(state, *wait, ROCJITSU_CODE_ARCH_CDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_waitcnt(state, *wait, rocjitsu::IsaFamily::Cdna4).succeeded());
   EXPECT_EQ(state, before);
   Instruction missing_operand("s_wait_loadcnt", nullptr);
-  ASSERT_TRUE(Ops::apply_waitcnt(state, missing_operand, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_waitcnt(state, missing_operand, rocjitsu::IsaFamily::Rdna4).succeeded());
   EXPECT_EQ(state, before);
-  ASSERT_TRUE(Ops::apply_waitcnt(state, *wait, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_waitcnt(state, *wait, rocjitsu::IsaFamily::Rdna4).succeeded());
   EXPECT_TRUE(state.pending[kLoad].empty());
 }
 
 TEST(WaitcheckState, UnsupportedArchitectureFailsWithoutChangingState) {
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_RV32I, ROCJITSU_CODE_ARCH_RV64I, ROCJITSU_CODE_ARCH_INVALID}) {
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Rv32i, rocjitsu::IsaFamily::Rv64i, rocjitsu::IsaFamily::Invalid}) {
     PendingState state;
     state.pending[kLoad] = {load(0, 3)};
     state.va_vdst_hazards.hazards[0] = {2, false, {}};
@@ -548,9 +574,9 @@ TEST(WaitcheckState, LegacyPackedWaitRetiresOnlyActiveFields) {
   const size_t exp = Ops::counter_index(WaitCounterKind::Exp);
   state.pending[ds] = {load(2, 0)};
   state.pending[exp] = {load(3, 7)};
-  std::unique_ptr<Instruction> wait = decode_wait(0xbf8c0072u, ROCJITSU_CODE_ARCH_CDNA4);
+  std::unique_ptr<Instruction> wait = decode_wait(0xbf8c0072u, rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(wait, nullptr);
-  ASSERT_TRUE(Ops::apply_waitcnt(state, *wait, ROCJITSU_CODE_ARCH_CDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_waitcnt(state, *wait, rocjitsu::IsaFamily::Cdna4).succeeded());
   ASSERT_EQ(state.pending[kLoad].size(), 1u);
   EXPECT_TRUE(state.pending[kLoad][0].regs.contains({RegClass::VGPR, 1, 1}));
   EXPECT_TRUE(state.pending[ds].empty());
@@ -602,11 +628,11 @@ TEST(WaitcheckState, CrossedIssueOrderRetainsEveryPossiblyPendingEvent) {
   left.pending[kLoad] = {load(0, 1, 0), load(1, 0, 4)};
   right.pending[kLoad] = {load(0, 0, 0), load(1, 1, 4)};
   Ops::merge_into(left, right);
-  ASSERT_TRUE(
-      Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
+                  .succeeded());
   EXPECT_EQ(left.pending[kLoad].size(), 2u);
-  ASSERT_TRUE(
-      Ops::apply_memory_wait(left, WaitCounterKind::Load, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_memory_wait(left, WaitCounterKind::Load, 0, rocjitsu::IsaFamily::Rdna4)
+                  .succeeded());
   EXPECT_TRUE(left.pending[kLoad].empty());
 }
 
@@ -615,8 +641,8 @@ TEST(WaitcheckState, JoinedAgeRemainsALowerBoundForEachEvent) {
   left.pending[kLoad] = {load(0, 2, 0), load(1, 1, 4), load(2, 0, 8)};
   right.pending[kLoad] = {load(0, 1, 0), load(1, 2, 4), load(2, 0, 8)};
   Ops::merge_into(left, right);
-  ASSERT_TRUE(
-      Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_memory_wait(left, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
+                  .succeeded());
   ASSERT_EQ(left.pending[kLoad].size(), 1u);
   EXPECT_TRUE(left.pending[kLoad][0].regs.contains({RegClass::VGPR, 2, 1}));
 }
@@ -670,7 +696,7 @@ PendingState load_before_global_inv() {
 TEST(WaitcheckState, LoadCompletionRetiresSourceFacetDespiteYoungerCounterOnlyRequest) {
   auto state = load_before_global_inv();
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
-  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   EXPECT_TRUE(state.pending[kLoad].empty());
   EXPECT_TRUE(state.pending[vm].empty());
@@ -684,7 +710,7 @@ TEST(WaitcheckState, PrimaryKindCompletionDoesNotRequireMaterializedEvents) {
   state.pending[kLoad].clear();
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
   state.pending[vm].clear();
-  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   EXPECT_EQ(state.pending_event_ages[vm], PendingEventAges{});
   EXPECT_EQ(state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::GlobalInv)],
@@ -692,9 +718,9 @@ TEST(WaitcheckState, PrimaryKindCompletionDoesNotRequireMaterializedEvents) {
 }
 
 TEST(WaitcheckState, FlatSourceRetirementRequiresBothCounterOnlyFacets) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
-                    ROCJITSU_CODE_ARCH_CDNA5})
-    for (bool store : {false, true})
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                    rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    for (bool store : {false, true}) {
       for (bool ds_first : {false, true}) {
         SCOPED_TRACE(arch);
         SCOPED_TRACE(store);
@@ -724,6 +750,8 @@ TEST(WaitcheckState, FlatSourceRetirementRequiresBothCounterOnlyFacets) {
         EXPECT_TRUE(state.pending[vm].empty());
         EXPECT_EQ(state.pending_event_ages[vm], PendingEventAges{});
       }
+    }
+  }
 }
 
 TEST(WaitcheckState, JoinedFlatSourceNeedsCompletionOnEveryPath) {
@@ -738,18 +766,19 @@ TEST(WaitcheckState, JoinedFlatSourceNeedsCompletionOnEveryPath) {
     source.kind = kind;
     source.produces_regs = false;
     left.pending[vm] = {source};
-    for (auto counter : {vmem, WaitCounterKind::Ds, WaitCounterKind::VmVsrc})
+    for (auto counter : {vmem, WaitCounterKind::Ds, WaitCounterKind::VmVsrc}) {
       left.pending_event_ages[Ops::counter_index(counter)].values[static_cast<size_t>(kind)] = 0;
+    }
     auto right = left;
-    ASSERT_TRUE(Ops::apply_memory_wait(left, vmem, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
-    ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Ds, 0, ROCJITSU_CODE_ARCH_RDNA4)
+    ASSERT_TRUE(Ops::apply_memory_wait(left, vmem, 0, rocjitsu::IsaFamily::Rdna4).succeeded());
+    ASSERT_TRUE(Ops::apply_memory_wait(right, WaitCounterKind::Ds, 0, rocjitsu::IsaFamily::Rdna4)
                     .succeeded());
     Ops::merge_into(left, right);
     EXPECT_EQ(left.pending[vm], (std::vector<PendingEvent>{source}));
-    ASSERT_TRUE(Ops::apply_memory_wait(left, vmem, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+    ASSERT_TRUE(Ops::apply_memory_wait(left, vmem, 0, rocjitsu::IsaFamily::Rdna4).succeeded());
     EXPECT_EQ(left.pending[vm], (std::vector<PendingEvent>{source}));
-    ASSERT_TRUE(
-        Ops::apply_memory_wait(left, WaitCounterKind::Ds, 0, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+    ASSERT_TRUE(Ops::apply_memory_wait(left, WaitCounterKind::Ds, 0, rocjitsu::IsaFamily::Rdna4)
+                    .succeeded());
     EXPECT_TRUE(left.pending[vm].empty());
   }
 }
@@ -761,7 +790,7 @@ TEST(WaitcheckState, IndividualOperationCompletionDoesNotClearTheKindsSummary) {
   // summary pending even after the older materialized operation completes.
   state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)] = 0;
   state.pending[vm][0].min_younger = 1;
-  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   EXPECT_TRUE(state.pending[vm].empty());
   EXPECT_EQ(
@@ -796,7 +825,7 @@ TEST(WaitcheckState, PrimaryWaitDoesNotRetireAnUnrelatedSourceFacet) {
       break;
     }
     const auto expected = source;
-    ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
+    ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
                     .succeeded());
     EXPECT_TRUE(state.pending[kLoad].empty());
     EXPECT_EQ(state.pending[vm], (std::vector<PendingEvent>{expected}));
@@ -811,7 +840,7 @@ TEST(WaitcheckState, PrimaryWaitNeedsCompletionOfEveryMatchingOperationVariant) 
   state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)] = 0;
   const size_t vm = Ops::counter_index(WaitCounterKind::VmVsrc);
   const auto source = state.pending[vm];
-  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_RDNA4)
+  ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Rdna4)
                   .succeeded());
   ASSERT_EQ(state.pending[kLoad].size(), 1u);
   EXPECT_EQ(state.pending[vm], source);
@@ -834,7 +863,7 @@ TEST(WaitcheckState, PrimaryWaitRequiresCoverageAndOrderedCompletion) {
     state.pending_event_ages[kLoad].values[static_cast<size_t>(WaitEventKind::VmemNoSamplerLoad)] =
         0;
     const auto sources = state.pending[vm];
-    ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, ROCJITSU_CODE_ARCH_CDNA4)
+    ASSERT_TRUE(Ops::apply_memory_wait(state, WaitCounterKind::Load, 1, rocjitsu::IsaFamily::Cdna4)
                     .succeeded());
     EXPECT_EQ(state.pending[vm], sources);
     EXPECT_EQ(state.pending[kLoad].empty(), !out_of_order);
@@ -919,8 +948,8 @@ TEST(WaitcheckState, CounterOnlySmemRequiresZeroXcntEvenWithoutAnAge) {
   state.pending[x].push_back(event);
   state.pending_smem[x] = true;
   EXPECT_TRUE(
-      Ops::counter_out_of_order(state, WaitCounterKind::X, ROCJITSU_CODE_ARCH_CDNA5).value());
-  EXPECT_EQ(Ops::dependency_required_count(state, event, ROCJITSU_CODE_ARCH_CDNA5).value(), 0u);
+      Ops::counter_out_of_order(state, WaitCounterKind::X, rocjitsu::IsaFamily::Cdna5).value());
+  EXPECT_EQ(Ops::dependency_required_count(state, event, rocjitsu::IsaFamily::Cdna5).value(), 0u);
   Ops::apply_xcnt_wait(state, 1);
   EXPECT_EQ(state.pending[x].size(), 1u);
   Ops::apply_xcnt_wait(state, 0);
@@ -935,21 +964,21 @@ TEST(WaitcheckState, ExplicitAndEmbeddedWaitsRetireVectorHazards) {
   event.counter = WaitCounterKind::VmVsrc;
   state.pending[vm].push_back(event);
   state.va_vdst_hazards.hazards[0] = {.age = 0, .trans_since = true, .producer = {}};
-  std::unique_ptr<Instruction> alu = decode_wait(0xbf880fffu, ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Instruction> alu = decode_wait(0xbf880fffu, rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(alu, nullptr);
-  ASSERT_TRUE(Ops::apply_waitcnt(state, *alu, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_waitcnt(state, *alu, rocjitsu::IsaFamily::Rdna4).succeeded());
   EXPECT_TRUE(state.va_vdst_hazards.hazards.empty());
   EXPECT_EQ(state.pending[vm].size(), 1u);
   state.va_vdst_hazards.hazards[0] = {.age = 0, .trans_since = true, .producer = {}};
-  std::unique_ptr<Instruction> dsdir = decode_wait(0xce100000u, ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<Instruction> dsdir = decode_wait(0xce100000u, rocjitsu::IsaFamily::Rdna4);
   ASSERT_NE(dsdir, nullptr);
-  ASSERT_TRUE(Ops::apply_embedded_waitcnt(state, *dsdir, ROCJITSU_CODE_ARCH_RDNA4).succeeded());
+  ASSERT_TRUE(Ops::apply_embedded_waitcnt(state, *dsdir, rocjitsu::IsaFamily::Rdna4).succeeded());
   EXPECT_TRUE(state.va_vdst_hazards.hazards.empty());
   EXPECT_TRUE(state.pending[vm].empty());
 }
 
 TEST(WaitcheckState, Rdna3EmbeddedWaitRetiresOnlyProvenValuHazards) {
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5}) {
     PendingState state;
     auto &hazards = state.va_vdst_hazards.hazards;
     hazards[0] = {.age = 2, .trans_since = false, .producer = {}};

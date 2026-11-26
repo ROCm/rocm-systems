@@ -79,6 +79,8 @@ struct RocrEntryPoints {
   decltype(hsa_amd_profiling_set_profiler_enabled)* hsa_amd_profiling_set_profiler_enabled_;
   decltype(hsa_amd_profiling_async_copy_enable)* hsa_amd_profiling_async_copy_enable_;
   decltype(hsa_amd_profiling_get_dispatch_time)* hsa_amd_profiling_get_dispatch_time_;
+  decltype(hsa_amd_profiling_convert_tick_to_system_domain)*
+      hsa_amd_profiling_convert_tick_to_system_domain_;
   decltype(hsa_amd_profiling_get_async_copy_time)* hsa_amd_profiling_get_async_copy_time_;
   decltype(hsa_amd_signal_async_handler)* hsa_amd_signal_async_handler_;
   decltype(hsa_amd_queue_cu_set_mask)* hsa_amd_queue_cu_set_mask_;
@@ -146,7 +148,7 @@ struct RocrEntryPoints {
   decltype(hsa_ext_image_import)* hsa_ext_image_import_;
   decltype(hsa_ext_image_export)* hsa_ext_image_export_;
   decltype(hsa_ext_image_destroy_v2)* hsa_ext_image_destroy_v2_;
-  decltype(hsa_ext_sampler_create_v2)* hsa_ext_sampler_create_v2_;
+  decltype(hsa_ext_sampler_create_v3)* hsa_ext_sampler_create_v3_;
   decltype(hsa_ext_sampler_destroy)* hsa_ext_sampler_destroy_;
   decltype(hsa_ext_image_create_with_layout)* hsa_ext_image_create_with_layout_;
   decltype(hsa_ext_image_mipmap_array_get_level)* hsa_ext_image_mipmap_array_get_level_;
@@ -335,6 +337,12 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t profiling_get_dispatch_time(hsa_agent_t agent, hsa_signal_t signal,
                                                   hsa_amd_profiling_dispatch_time_t* time) {
     return ROCR_DYN(hsa_amd_profiling_get_dispatch_time)(agent, signal, time);
+  }
+  static hsa_status_t profiling_convert_tick_to_system_domain(hsa_agent_t agent,
+                                                              uint64_t agent_tick,
+                                                              uint64_t* system_tick) {
+    return ROCR_DYN(hsa_amd_profiling_convert_tick_to_system_domain)(agent, agent_tick,
+                                                                     system_tick);
   }
   static hsa_status_t profiling_get_async_copy_time(hsa_signal_t signal,
                                                     hsa_amd_profiling_async_copy_time_t* time) {
@@ -682,8 +690,8 @@ class Hsa : public amd::AllStatic {
     return ROCR_DYN(hsa_ext_image_destroy_v2)(agent, image);
   }
   static hsa_status_t sampler_create(hsa_agent_t agent,
-    const hsa_ext_sampler_descriptor_v2_t* sampler_descriptor, hsa_ext_sampler_t* sampler) {
-    return ROCR_DYN(hsa_ext_sampler_create_v2)(agent, sampler_descriptor, sampler);
+    const hsa_ext_sampler_descriptor_v3_t* sampler_descriptor, hsa_ext_sampler_t* sampler) {
+    return ROCR_DYN(hsa_ext_sampler_create_v3)(agent, sampler_descriptor, sampler);
   }
   static hsa_status_t sampler_destroy(hsa_agent_t agent, hsa_ext_sampler_t sampler) {
     return ROCR_DYN(hsa_ext_sampler_destroy)(agent, sampler);

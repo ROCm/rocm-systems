@@ -111,6 +111,22 @@ ROCSHMEM_SIGNAL_ADD
 This function atomically adds ``signal`` to the signal data object at ``sig_addr``
 on PE ``pe``.
 
+ROCSHMEM_SIGNAL_ADD_ON_STREAM
+-----------------------------
+
+.. cpp:function:: __host__ void rocshmem_signal_add_on_stream(uint64_t *sig_addr, uint64_t signal, int pe, hipStream_t stream)
+
+  :param sig_addr: Symmetric address of the signal data object on the remote PE.
+  :param signal:   Value to add to the signal data object.
+  :param pe:       PE containing the signal data object.
+  :param stream:   HIP stream on which to enqueue the operation.
+  :returns:        None.
+
+**Description:**
+This routine enqueues a signal add operation on a HIP stream. After all previously enqueued work
+on ``stream`` completes, it atomically adds ``signal`` to the signal data object at ``sig_addr``
+on PE ``pe``. Use ``rocshmem_quiet_on_stream`` to ensure completion of the update.
+
 ROCSHMEM_SIGNAL_FETCH
 ---------------------
 
@@ -143,6 +159,22 @@ ROCSHMEM_SIGNAL_SET
 **Description:**
 This function atomically stores ``signal`` in the signal data object at
 ``sig_addr`` on PE ``pe``.
+
+ROCSHMEM_SIGNAL_SET_ON_STREAM
+-----------------------------
+
+.. cpp:function:: __host__ void rocshmem_signal_set_on_stream(uint64_t *sig_addr, uint64_t signal, int pe, hipStream_t stream)
+
+  :param sig_addr: Symmetric address of the signal data object on the remote PE.
+  :param signal:   Value to store in the signal data object.
+  :param pe:       PE containing the signal data object.
+  :param stream:   HIP stream on which to enqueue the operation.
+  :returns:        None.
+
+**Description:**
+This routine enqueues a signal set operation on a HIP stream. After all previously enqueued work
+on ``stream`` completes, it atomically stores ``signal`` in the signal data object at ``sig_addr``
+on PE ``pe``. Use ``rocshmem_quiet_on_stream`` to ensure completion of the update.
 
 ROCSHMEM_SIGNAL_WAIT_UNTIL
 --------------------------

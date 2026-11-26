@@ -451,7 +451,19 @@ class ThunkLoader {
     bool CreateThunkInstance();
     bool DestroyThunkInstance();
     bool CheckThunkAbi();
+    // True whenever a DXG driver was detected, on either native Windows or
+    // WSL2. Use it only for behaviour that is correct on both. Behaviour that
+    // depends on WDDM semantics must use IsWinDxg(), and behaviour specific to
+    // the WSL2 emulation must use IsWslDxg().
     bool IsDXG() const { return is_dxg_; }
+    // True only for the native Windows DXG driver.
+    bool IsWinDxg() const {
+#if defined(_WIN32)
+      return is_dxg_;
+#else
+      return false;
+#endif
+    }
     // On Linux, DXG is only present under WSL2.
     // On Windows, DXG is the native driver (not WSL).
 #if defined(__linux__)

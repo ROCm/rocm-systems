@@ -69,8 +69,6 @@ def generate_put_api_x():
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */\n"""
     for type_, tname_ in types:
         expanded_code += put_api_x("wave", type_, tname_)
@@ -92,8 +90,6 @@ def generate_put_api_x():
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */\n"""
     for type_, tname_ in types:
         expanded_code += put_api_x("wg", type_, tname_)
@@ -108,14 +104,17 @@ def generate_put_api_x():
  * granularity. However, all threads in a wave must participate in the
  * call using the same parameters.
  *
+ * Built with USE_LDS_STAGE (or USE_TDM), uses the LDS-staged copy
+ * path if the workgroup registered an LDS buffer via
+ * rocshmem_set_lds_stage(), split per wave; else falls back to the
+ * plain copy path.
+ *
  * @param[in] ctx    Context with which to perform this operation.
  * @param[in] dest   Destination address. Must be an address on the symmetric
  *                   heap.
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_wave(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -134,14 +133,16 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_wave(void *dest,
  * (WG) granularity. However, all threads in the workgroup must participate in
  * the call using the same parameters.
  *
+ * Built with USE_LDS_STAGE (or USE_TDM), uses the LDS-staged copy
+ * path if this workgroup registered an LDS buffer via
+ * rocshmem_set_lds_stage(); else falls back to the plain copy path.
+ *
  * @param[in] ctx    Context with which to perform this operation.
  * @param[in] dest   Destination address. Must be an address on the symmetric
  *                   heap.
  * @param[in] source Source address. Must be an address on the symmetric heap.
  * @param[in] nelems Size of the transfer in number of elements.
  * @param[in] pe     PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_wg(rocshmem_ctx_t ctx,
                                                        void *dest,
@@ -185,8 +186,6 @@ def generate_get_api_x():
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */\n"""
     for type_, tname_ in types:
         expanded_code += get_api_x("wave", type_, tname_)
@@ -207,8 +206,6 @@ def generate_get_api_x():
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */\n"""
     for type_, tname_ in types:
         expanded_code += get_api_x("wg", type_, tname_)
@@ -223,14 +220,17 @@ def generate_get_api_x():
  * granularity. However, all threads in a the wave must participate in the
  * call using the same parameters
  *
+ * Built with USE_LDS_STAGE (or USE_TDM), uses the LDS-staged copy
+ * path if the workgroup registered an LDS buffer via
+ * rocshmem_set_lds_stage(), split per wave; else falls back to the
+ * plain copy path.
+ *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
  *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_wave(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -248,14 +248,16 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem_wave(void *dest,
  * (WG) granularity. However, all threads in the workgroup must participate
  * in the call using the same parameters
  *
+ * Built with USE_LDS_STAGE (or USE_TDM), uses the LDS-staged copy
+ * path if this workgroup registered an LDS buffer via
+ * rocshmem_set_lds_stage(); else falls back to the plain copy path.
+ *
  * @param[in] ctx     Context with which to perform this operation.
  * @param[in] dest    Destination address. Must be an address on the symmetric
  *                    heap.
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_wg(rocshmem_ctx_t ctx,
                                                        void *dest,
@@ -299,8 +301,6 @@ def generate_put_nbi_api_x():
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */\n"""
     for type_, tname_ in types:
         expanded_code += put_nbi_api_x("wave", type_, tname_)
@@ -323,8 +323,6 @@ def generate_put_nbi_api_x():
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */\n"""
     for type_, tname_ in types:
         expanded_code += put_nbi_api_x("wg", type_, tname_)
@@ -347,8 +345,6 @@ def generate_put_nbi_api_x():
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi_wave(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -375,8 +371,6 @@ __device__ ATTR_NO_INLINE void rocshmem_putmem_nbi_wave(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_nbi_wg(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -419,8 +413,6 @@ def generate_get_nbi_api_x():
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */\n"""
     for type_, tname_ in types:
         expanded_code += get_nbi_api_x("wave", type_, tname_)
@@ -443,8 +435,6 @@ def generate_get_nbi_api_x():
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */\n"""
     for type_, tname_ in types:
         expanded_code += get_nbi_api_x("wg", type_, tname_)
@@ -467,8 +457,6 @@ def generate_get_nbi_api_x():
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_nbi_wave(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);
@@ -495,8 +483,6 @@ __device__ ATTR_NO_INLINE void rocshmem_getmem_nbi_wave(void *dest,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_getmem_nbi_wg(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems, int pe);

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { createElement, isValidElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { expect, test } from 'vitest';
 import BranchList from '../../src/components/branch/BranchList.jsx';
 import BranchPicker from '../../src/components/branch/BranchPicker.jsx';
@@ -19,7 +20,7 @@ test('Branches heading has no numeric status badge', () => {
 });
 
 test('desktop picker has a named leftward collapse control without changing the route snapshot', () => {
-  const html = render(createElement(BranchRunsView, { data: fixtures.benchmarkData, state: { branchSelection: {}, setBranchSelection() { throw new Error('UI collapse must not write selection'); } } }));
+  const html = render(themed(BranchRunsView, { data: fixtures.benchmarkData, state: { branchSelection: {}, setBranchSelection() { throw new Error('UI collapse must not write selection'); } } }));
   expect(html).toContain('aria-label="Collapse branches"');
   expect(html).toContain('aria-expanded="true"');
   expect(html).toContain('aria-controls="branch-picker"');
@@ -39,7 +40,7 @@ test('desktop picker has a named leftward collapse control without changing the 
 });
 
 test('branch search stays centered with a normal floating label and visible search prompt', () => {
-  const html = render(createElement(BranchRunsView, { data: fixtures.benchmarkData, state: { branchSelection: {} } }));
+  const html = render(themed(BranchRunsView, { data: fixtures.benchmarkData, state: { branchSelection: {} } }));
   const toolbarClass = html.match(/class="branch-toolbar MuiBox-root (css-[^"]+)"/)[1];
   const rules = html.match(new RegExp(`\\.${toolbarClass}\\{([^}]+)\\}`))[1];
   expect(rules.includes('align-items:center')).toBe(true);
@@ -105,7 +106,7 @@ test('separate sortable change headers expose active aria-sort and emit both dir
       header.props.onClick();
       expect(calls.at(-1)).toEqual({ key, direction: sort.key === key && sort.direction === 'desc' ? 'asc' : 'desc' });
     }
-    const html = render(tree);
+    const html = render(themed(() => tree));
     expect(html.includes('Sort by magnitude')).toBe(false);
     expect(html.includes('Abs change')).toBe(true);
     expect(html.includes('Pct change')).toBe(true);

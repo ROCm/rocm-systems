@@ -11,6 +11,7 @@
 /// that IP discovery publishes the configured GC, SDMA, and NBIF versions.
 
 #include "config_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
 #include "scoped_temp.h"
 #include "util/diagnostic.h"
@@ -20,6 +21,9 @@
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"
 #include "rocjitsu/kmd/linux/cwsr.h"
 #include "rocjitsu/kmd/linux/kfd_topology.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/memory_backing.h"
+#include "rocjitsu/kmd/linux/memory_keeper.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
@@ -47,6 +51,7 @@ RJ_DIAGNOSTIC_POP
 #include <limits>
 #include <sstream>
 #include <string>
+#include <unistd.h>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -65,8 +70,9 @@ std::unordered_map<std::string, uint64_t> read_properties(const std::string &pat
   std::ifstream f(path);
   std::string key;
   uint64_t value = 0;
-  while (f >> key >> value)
+  while (f >> key >> value) {
     props[key] = value;
+  }
   return props;
 }
 
@@ -159,7 +165,7 @@ TEST(SysfsTopologyTest, VisibleVramMatchesPciBarAndKfdBanks) {
 
 TEST(SysfsTopologyTest, ShippedCdnaKfdDefaultsAreFullyCpuVisible) {
   for (const char *config_name :
-       {"gfx942_cdna3_kmd.json", "gfx950_mi355x_kmd.json", "gfx1250_mi455x.json"}) {
+       {"gfx942_cdna3_kmd.json", "gfx950_mi350x_kmd.json", "gfx1250_mi455x.json"}) {
     SCOPED_TRACE(config_name);
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config(std::string(CONFIG_DIR) + "/" + config_name, loaded));
@@ -181,13 +187,13 @@ TEST(SysfsTopologyTest, ShippedCdnaKfdDefaultsAreFullyCpuVisible) {
 TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
   struct Case {
     const char *config_name;
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t max_vgprs;
   };
   for (const auto &[config_name, arch, max_vgprs] :
-       {Case{"gfx942_cdna3_kmd.json", ROCJITSU_CODE_ARCH_CDNA3, 256},
-        Case{"gfx950_mi355x_kmd.json", ROCJITSU_CODE_ARCH_CDNA4, 256},
-        Case{"gfx1250_mi455x.json", ROCJITSU_CODE_ARCH_CDNA5, 1024}}) {
+       {Case{"gfx942_cdna3_kmd.json", rocjitsu::IsaFamily::Cdna3, 256},
+        Case{"gfx950_mi350x_kmd.json", rocjitsu::IsaFamily::Cdna4, 256},
+        Case{"gfx1250_mi455x.json", rocjitsu::IsaFamily::Cdna5, 1024}}) {
     SCOPED_TRACE(config_name);
     config::LoadedConfig loaded;
     ASSERT_TRUE(test::load_valid_config(std::string(CONFIG_DIR) + "/" + config_name, loaded));
@@ -204,8 +210,9 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     // Use the CUs and wave slots from the CWSR producer's XCC, including
     // simulated slots beyond the enabled SIMD count advertised by KFD.
     uint64_t resident_waves = 0;
-    for (auto *cu : loaded.soc()->xcd(0)->command_processor()->compute_units())
+    for (auto *cu : loaded.soc()->xcd(0)->command_processor()->compute_units()) {
       resident_waves += cu->num_wf_slots();
+    }
     EXPECT_EQ(control % 4096, 0u);
     EXPECT_EQ(context % 4096, 0u);
     ASSERT_GT(control, 0u);
@@ -215,8 +222,9 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     // Verify the advertised area with the serializer itself, rather than a
     // second size formula that could diverge from compute_geometry.
     std::vector<kmd::CwsrWaveState> waves(resident_waves);
-    for (auto &wave : waves)
+    for (auto &wave : waves) {
       wave.num_vgprs = 8;
+    }
     waves.front().num_vgprs = max_vgprs;
     uint64_t writes = 0;
     const auto layout = kmd::serialize_queue_cwsr(
@@ -227,10 +235,12 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     // libhsakmt stores the total queue save allocation in uint32_t. One
     // maximal LDS group per CU can coexist with the other resident waves.
     const auto &cus = loaded.soc()->xcd(0)->command_processor()->compute_units();
-    for (auto &wave : waves)
+    for (auto &wave : waves) {
       wave.is_first_in_group = true;
-    for (uint64_t i = 0; i < cus.size(); ++i)
+    }
+    for (uint64_t i = 0; i < cus.size(); ++i) {
       waves[i].lds.resize(cus[i]->config().lds_size_kb * 1024);
+    }
     writes = 0;
     const auto mixed = kmd::serialize_queue_cwsr(
         0x100000, info.context_save_size, waves, [&](uint64_t, uint32_t) { ++writes; }, arch);
@@ -240,7 +250,7 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
     EXPECT_LE((uint64_t{info.context_save_size} + debugger_reserve) * xcc_count,
               std::numeric_limits<uint32_t>::max());
 
-    if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+    if (arch == rocjitsu::IsaFamily::Cdna4) {
       // A large LDS group alongside many empty groups must fit while
       // preserving the independent record size of each group.
       std::vector<kmd::CwsrWaveState> mixed_lds(512);
@@ -270,7 +280,7 @@ TEST(SysfsTopologyTest, ContextSaveSizesCoverResidentCdnaWaves) {
   uint32_t writes = 0;
   EXPECT_FALSE(kmd::serialize_queue_cwsr(
                    0x100000, info.context_save_size, wave, [&](uint64_t, uint32_t) { ++writes; },
-                   ROCJITSU_CODE_ARCH_RDNA3)
+                   rocjitsu::IsaFamily::Rdna3)
                    .ok);
   EXPECT_EQ(writes, 0u);
 }
@@ -289,8 +299,9 @@ TEST(SysfsTopologyTest, RejectsCuLdsCapacityBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU LDS capacity exceeds advertised device LDS capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -314,8 +325,9 @@ TEST(SysfsTopologyTest, RejectsCuWaveSlotsBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU wave slots exceed advertised device wave capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -342,8 +354,9 @@ TEST(SysfsTopologyTest, RejectsCuCountBeyondAdvertisedCwsrBound) {
   EXPECT_TRUE(loaded.failed());
   EXPECT_EQ(diagnostic.message(), "CWSR CU count exceeds advertised device CU capacity");
 
-  test::ScopedTempFile file("rocjitsu-cwsr-config-");
-  file.write(config);
+  test::ScopedTempFile file;
+  ASSERT_TRUE(file.initialize("rocjitsu-cwsr-config-"));
+  ASSERT_TRUE(file.write(config));
   util::StringDiagnostic validate_diagnostic;
   EXPECT_TRUE(config::validate_config(file.path(), kEmbeddedSchema, validate_diagnostic.emitter())
                   .failed());
@@ -384,6 +397,57 @@ TEST(SysfsTopologyTest, LegacyMultiGpuTopologyKeepsPeerLinks) {
     EXPECT_TRUE(std::filesystem::exists(path / "io_links" / "1" / "properties"));
     EXPECT_TRUE(std::filesystem::exists(path / "p2p_links" / "0" / "properties"));
   }
+}
+
+void check_topology_batching() {
+  ASSERT_EQ(prepare_memory_keeper(), 0);
+  static unsigned connections = 0;
+  static size_t inline_files = 0;
+  static std::vector<size_t> flush_sizes;
+  LibcPassthrough &libc = libc_passthrough();
+  libc.connect = [](int socket, const sockaddr *address, socklen_t length) {
+    ++connections;
+    return ::connect(socket, address, length);
+  };
+  libc.sendmsg = [](int socket, const msghdr *message, int flags) {
+    const ssize_t sent = ::sendmsg(socket, message, flags);
+    if (sent >= 0 && message->msg_iovlen &&
+        message->msg_iov[0].iov_len == sizeof(kmd::KeeperRequest)) {
+      const auto &request = *static_cast<const kmd::KeeperRequest *>(message->msg_iov[0].iov_base);
+      if (request.operation == kmd::KeeperOperation::BatchFile &&
+          request.size <= kmd::kKeeperInlineFileSize) {
+        ++inline_files;
+      } else if (request.operation == kmd::KeeperOperation::FlushFiles) {
+        flush_sizes.push_back(request.size);
+      }
+    }
+    return sent;
+  };
+
+  const Sysfs::GpuInfo first = make_gpu_info(120500);
+  Sysfs::GpuInfo second = first;
+  second.gpu_id = 2;
+  second.drm_render_minor = 129;
+  Sysfs sysfs;
+  ASSERT_FALSE(sysfs.generate({first, second}).empty());
+  EXPECT_EQ(connections, 1u);
+  ASSERT_GT(inline_files, kmd::kKeeperMaxBatchFiles);
+  for (size_t count : flush_sizes) {
+    const size_t expected = std::min(inline_files, kmd::kKeeperMaxBatchFiles);
+    ASSERT_GT(expected, 0u);
+    EXPECT_EQ(count, expected);
+    inline_files -= expected;
+  }
+  EXPECT_EQ(inline_files, 0u);
+}
+
+TEST(SysfsTopologyDeathTest, MultiGpuTopologyBatchesNonemptyFilesOnOneConnection) {
+  ASSERT_EXIT(
+      {
+        check_topology_batching();
+        _exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
 }
 
 TEST(SysfsTopologyTest, W7900PublishesComputeIpDiscoveryVersions) {
@@ -446,7 +510,7 @@ TEST(SysfsTopologyTest, CdnaAndRdna35PublishComputeIpDiscoveryVersions) {
   };
   const Profile profiles[] = {
       {"gfx942_cdna3_kmd.json", 8, {{{11, 9, 4, 3}, {42, 4, 4, 2}, {108, 7, 9, 0}}}},
-      {"gfx950_mi355x_kmd.json", 8, {{{11, 9, 5, 0}, {42, 4, 4, 5}, {108, 7, 9, 0}}}},
+      {"gfx950_mi350x_kmd.json", 8, {{{11, 9, 5, 0}, {42, 4, 4, 5}, {108, 7, 9, 0}}}},
       {"gfx1151.json", 1, {{{11, 11, 5, 1}, {42, 6, 1, 1}, {108, 7, 11, 1}}}},
   };
   for (const auto &profile : profiles) {
@@ -589,9 +653,11 @@ constexpr DebugCapExpectation kDebugCapExpectations[] = {
 
 // Finds the golden expectation row for a gfx_target_version, or nullptr.
 const DebugCapExpectation *find_expectation(uint32_t gfx_target_version) {
-  for (const auto &e : kDebugCapExpectations)
-    if (e.gfx_target_version == gfx_target_version)
+  for (const auto &e : kDebugCapExpectations) {
+    if (e.gfx_target_version == gfx_target_version) {
       return &e;
+    }
+  }
   return nullptr;
 }
 
@@ -702,8 +768,9 @@ TEST(SysfsTopologyDebugCapabilityTest, ExplicitCapabilityAndDebugPropArePreserve
 // debug_prop exactly for every GFXIP we have a reference for.
 TEST(SysfsTopologyDebugCapabilityTest, DefaultDebugPropMatchesHardware) {
   for (const auto &e : kDebugCapExpectations) {
-    if (e.capability == 0)
+    if (e.capability == 0) {
       continue; // no captured real-hardware reference for this GFXIP
+    }
     SCOPED_TRACE(e.name);
 
     Sysfs sysfs;
@@ -742,8 +809,9 @@ TEST(SysfsTopologyDebugCapabilityTest, Mi455xConfigPublishesB0AsicRevision) {
 // registers the simulated ASIC does not have.
 TEST(SysfsTopologyDebugCapabilityTest, DefaultWatchPointCountMatchesHardware) {
   for (const auto &e : kDebugCapExpectations) {
-    if (e.capability == 0)
+    if (e.capability == 0) {
       continue; // no captured real-hardware reference for this GFXIP
+    }
     SCOPED_TRACE(e.name);
 
     Sysfs sysfs;
@@ -825,12 +893,13 @@ TEST(SysfsTopologyGeometryTest, ArrayCountIsScaledByNumXcc) {
 
 // MI350X is harvested too: its captured KFD topology has 32 shader arrays of
 // 9 CUs (288 physical CUs), while simd_count exposes 1024 SIMDs, or 256 active
-// CUs at four SIMDs per CU. Keep every full-device gfx950 config pinned to that
-// same capture so local, KMD, and multi-GPU launch paths cannot drift apart.
+// CUs at four SIMDs per CU. Keep the canonical full-device MI350X configs
+// pinned to that capture so local, KMD, and multi-GPU launch paths cannot drift
+// apart. DeprecatedGfx950Mi355xConfigsMatchMi350x covers the legacy aliases.
 TEST(SysfsTopologyGeometryTest, Mi350xMatchesCapturedPhysicalAndActiveCuCounts) {
   const std::string config_dir = CONFIG_DIR;
-  constexpr const char *kMi350xConfigs[] = {"gfx950_mi355x.json", "gfx950_mi355x_kmd.json",
-                                            "gfx950_mi355x_kmd_2gpu.json"};
+  constexpr const char *kMi350xConfigs[] = {"gfx950_mi350x.json", "gfx950_mi350x_kmd.json",
+                                            "gfx950_mi350x_kmd_2gpu.json"};
 
   for (const char *cfg : kMi350xConfigs) {
     SCOPED_TRACE(cfg);
@@ -932,23 +1001,27 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
   std::unordered_map<std::string, PartGeometry> parts;
 
   for (const auto &entry : std::filesystem::directory_iterator(config_dir)) {
-    if (entry.path().extension() != ".json")
+    if (entry.path().extension() != ".json") {
       continue;
+    }
     const std::string name = entry.path().filename().string();
     // DBT guest configs describe a synthetic node with no SoC behind it; their
     // geometry is validated by validate_guest_device_geometry() at load time.
-    if (name.rfind("guest_", 0) == 0)
+    if (name.rfind("guest_", 0) == 0) {
       continue;
+    }
     SCOPED_TRACE(name);
 
     config::LoadedConfig loaded;
-    if (name == "gfx1250_mi455x_kmd_2node_net.json") {
+    if (name == "gfx1250_mi455x_kmd_2node_net.json" ||
+        name == "gfx1250_mi455x_kmd_4node_2gpu_if.json") {
       ASSERT_TRUE(test::load_valid_config_for_node(entry.path().string(), loaded, "node0"));
     } else {
       ASSERT_TRUE(test::load_valid_config(entry.path().string(), loaded));
     }
-    if (!loaded.device.present || loaded.soc() == nullptr)
+    if (!loaded.device.present || loaded.soc() == nullptr) {
       continue;
+    }
     ++checked;
 
     const uint32_t num_xcc = loaded.soc()->num_xcds();
@@ -973,8 +1046,9 @@ TEST(SysfsTopologyGeometryTest, ShippedConfigsMatchTheSimulatedSoC) {
     for (uint32_t xcd_index = 0; xcd_index < num_xcc; ++xcd_index) {
       const auto *xcd = loaded.soc()->xcd(xcd_index);
       ASSERT_NE(xcd, nullptr);
-      for (uint32_t se_index = 0; se_index < xcd->num_shader_engines(); ++se_index)
+      for (uint32_t se_index = 0; se_index < xcd->num_shader_engines(); ++se_index) {
         soc_cus += xcd->shader_engine(se_index)->num_compute_units();
+      }
     }
     EXPECT_EQ(cus, soc_cus) << "the advertised CU geometry is not the machine the simulator runs: "
                             << cus << " advertised vs " << soc_cus << " instantiated";
@@ -1031,7 +1105,7 @@ TEST(SysfsTopologyDebugCapabilityTest, ConfigTopologyMatchesRealHardware) {
   // Configs whose device matches a captured real-hardware topology dump.
   constexpr const char *kConfigs[] = {
       "gfx942_cdna3.json",  // MI300X
-      "gfx950_mi355x.json", // MI350X
+      "gfx950_mi350x.json", // MI350X
       "gfx1201_r9700.json", // R9700
   };
 

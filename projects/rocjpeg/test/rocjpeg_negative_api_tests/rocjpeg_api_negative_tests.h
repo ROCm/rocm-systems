@@ -43,6 +43,17 @@ THE SOFTWARE.
  * a sanitizer build), and a stream the parser accepts must actually describe a
  * decodable image. The second property is what catches over-acceptance, which
  * a corpus of valid images alone can never detect.
+ *
+ * The class also hosts a two-GPU regression test (TestCrossDeviceDecode). It
+ * checks that a decode is finished on the handle's device whatever the calling
+ * thread's current device is, and that the thread's current device is left
+ * unchanged. It is skipped unless at least two GPUs are visible. A handle on
+ * the last device is used from threads left on device 0, and a handle on
+ * device 0 from threads on the last device. Both directions run because rocJPEG
+ * cannot decode on every GPU that HIP lists: with a discrete GPU and an
+ * integrated GPU that rocJPEG has no kernels for, only the direction with the
+ * handle on the discrete GPU tests anything, and that GPU may be the first or
+ * the last device. A direction whose handle device cannot decode is skipped.
  */
 class RocJpegApiNegativeTests {
     public:
@@ -61,6 +72,7 @@ class RocJpegApiNegativeTests {
         int TestInvalidGetErrorName();
         int TestInvalidGetDecoderCaps();
         int TestStreamParseFuzz();
+        int TestCrossDeviceDecode();
 
         /**
          * @brief Parses a stream out of an exactly sized heap allocation.
@@ -88,6 +100,29 @@ class RocJpegApiNegativeTests {
          * @return EXIT_SUCCESS when every postcondition holds, EXIT_FAILURE otherwise.
          */
         int CheckParseInvariants(const std::vector<uint8_t> &data, const std::string &case_name);
+
+        /**
+         * @brief Decodes with handles on one GPU from threads on another.
+         *
+         * A 64x64 JPEG is first decoded to RGB with handle_device current, as the
+         * reference. It is then decoded with rocJpegDecode and with
+         * rocJpegDecodeBatched, each from a new thread whose current device is
+         * caller_device, and with rocJpegDecodeAsync and rocJpegDecodeBatchedAsync
+         * submitted from this thread and synchronized by rocJpegDecodeSync and
+         * rocJpegDecodeBatchedSync on such a thread. Every decode uses a handle of
+         * its own, created on handle_device, and every output is compared with the
+         * reference. If rocJPEG cannot decode on handle_device at all (creating
+         * the handles, allocating the outputs or the reference decode fails, or
+         * the reference is blank), the comparisons would test nothing, so this
+         * direction is skipped instead.
+         *
+         * @param handle_device The device the decoder handles are created on.
+         * @param caller_device The current device of the threads that decode.
+         * @return EXIT_SUCCESS when every decode succeeds, matches the reference and
+         *         leaves its thread on caller_device, or when the direction is
+         *         skipped; EXIT_FAILURE otherwise.
+         */
+        int CheckCrossDeviceDecode(int handle_device, int caller_device);
 
         /**
          * @brief Destroys the decoder handle and clears the member.

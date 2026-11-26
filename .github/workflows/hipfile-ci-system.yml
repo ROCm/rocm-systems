@@ -77,8 +77,10 @@ jobs:
     steps:
       - name: Set early AIS CI environment variables
         run: |
-          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
-          echo "AIS_SAFE_COMPILER_NAME=$(echo "${AIS_INPUT_CXX_COMPILER}" | sed 's|[\+]|plus|g')" >> "${GITHUB_ENV}"
+          {
+            echo "AIS_PR_NUMBER=${GITHUB_REF//[^0-9]/}"
+            echo "AIS_SAFE_COMPILER_NAME=${AIS_INPUT_CXX_COMPILER//+/plus}"
+          } >> "${GITHUB_ENV}"
       - name: Set AIS CI container name
         run: |
           echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER}_${GITHUB_JOB}_${AIS_INPUT_MOUNT_LABEL}_${AIS_INPUT_PLATFORM}_${AIS_INPUT_ROCM_VERSION}_${AIS_SAFE_COMPILER_NAME}_${AIS_INPUT_CXX_STANDARD}" >> "${GITHUB_ENV}"
@@ -120,7 +122,7 @@ jobs:
             --device=/dev/dri \
             --security-opt seccomp=unconfined \
             --pull always \
-            -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
+            -v "${GITHUB_WORKSPACE}:/mnt/ais:ro" \
             -v "${AIS_MOUNT_PATH}:/mnt/ais-fs" \
             --name "${AIS_CONTAINER_NAME}" \
             "${AIS_INPUT_CI_IMAGE}"
@@ -166,27 +168,30 @@ jobs:
       - name: Fix file permissions on GTest executables
         run: |
           chmod a+x \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/test/hipfile_system_tests \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/batch_mt \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/state_mt \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/aiscp/aiscp \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/bufregister-write \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/no-bufregister-write \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/no-odirect-write \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/iterative-read \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/iterative-devmem-offset-read \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/various-mem-rw \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/subregion-write \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/roundtrip-verify \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/batch/batch-roundtrip \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-nonblocking-stream \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-multi-stream \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-multi-stream-registered
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/test/hipfile_system_tests" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/async_mt" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/batch_mt" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/hipfile-fastpath-gate" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/hipfileread-cpu-visibility" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/test/amd_detail/state_mt" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/aiscp/aiscp" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/bufregister-write" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/no-bufregister-write" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/no-odirect-write" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/iterative-read" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/iterative-devmem-offset-read" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/various-mem-rw" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/subregion-write" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/basics/roundtrip-verify" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/batch/batch-roundtrip" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-nonblocking-stream" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-multi-stream" \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/examples/async/roundtrip-async-multi-stream-registered"
       - name: Copy the hipFile build directory into the container
         run: |
           docker cp \
-            ${GITHUB_WORKSPACE}/hipfile-build-dir/. \
+            "${GITHUB_WORKSPACE}/hipfile-build-dir/." \
             "${AIS_CONTAINER_NAME}:/ais/build/hipfile"
       - name: Run hipFile system tests for the AMD platform
         run: |
@@ -213,7 +218,7 @@ jobs:
             -w "/mnt/ais-fs/${AIS_CONTAINER_NAME}" \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              HIPFILE_FORCE_COMPAT_MODE=true
+              HIPFILE_FORCE_COMPAT_MODE=true \
                 /ais/rocm-systems/projects/hipfile/util/ci-aiscp-test.sh \
                 /ais/build/hipfile/examples/aiscp/aiscp
             '
@@ -224,7 +229,7 @@ jobs:
             -w "/mnt/ais-fs/${AIS_CONTAINER_NAME}" \
             "${AIS_CONTAINER_NAME}" \
             /bin/bash -c '
-              HIPFILE_ALLOW_COMPAT_MODE=false
+              HIPFILE_ALLOW_COMPAT_MODE=false \
                 /ais/rocm-systems/projects/hipfile/util/ci-aiscp-test.sh \
                 /ais/build/hipfile/examples/aiscp/aiscp
             '

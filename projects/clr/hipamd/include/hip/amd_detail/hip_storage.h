@@ -33,6 +33,8 @@ typedef struct hipAmdFileHandle_t {
  * @param[IN] file_offset: Offset in bytes into the file where data will be read from.
  * @param[IN/OUT] size_copied: Actual number of bytes copied.
  * @param[IN/OUT] status: Additional status if any.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorUnknown
  */
 hipError_t hipAmdFileRead(hipAmdFileHandle_t handle, void* devicePtr, uint64_t size, int64_t file_offset,
                        uint64_t* size_copied, int32_t* status);
@@ -50,6 +52,8 @@ hipError_t hipAmdFileRead(hipAmdFileHandle_t handle, void* devicePtr, uint64_t s
  * @param[IN] file_offset: Offset in bytes into the file where data will be written.
  * @param[IN/OUT] size_copied: Actual number of bytes written.
  * @param[IN/OUT] status: Additional status if any.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidDevice, #hipErrorUnknown
  */
 hipError_t hipAmdFileWrite(hipAmdFileHandle_t handle, void* devicePtr, uint64_t size, int64_t file_offset,
                         uint64_t* size_copied, int32_t* status);

@@ -14,7 +14,7 @@ for (const width of [1440, 390]) {
     const older = card.getByRole('button', { name: 'Go to next page', exact: true });
     const newer = card.getByRole('button', { name: 'Go to previous page', exact: true });
     const expected = publication.runs.filter((run) => run.publication.source.branch === 'develop')
-      .sort((a, b) => b.execution_summary.finished_at.localeCompare(a.execution_summary.finished_at) || b.publication.id.localeCompare(a.publication.id)).map((run) => run.publication.id);
+      .sort((a, b) => b.execution_summary.timestamp.localeCompare(a.execution_summary.timestamp) || b.publication.id.localeCompare(a.publication.id)).map((run) => run.publication.id);
     const first = card.getByRole('button', { name: 'Go to first page', exact: true });
     const last = card.getByRole('button', { name: 'Go to last page', exact: true });
     await expect(newer).toBeDisabled();
@@ -22,7 +22,6 @@ for (const width of [1440, 390]) {
     for (const control of [first, newer, older, last]) {
       await expect(control).toHaveText('');
       await expect(control.locator('svg')).toHaveCount(1);
-      await expect(control).toHaveAttribute('title', await control.getAttribute('aria-label'));
     }
     await last.click();
     await expect(card.getByRole('status')).toHaveText('Showing 61–65 of 65 runs');

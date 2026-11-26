@@ -23,6 +23,10 @@ contribution process described in [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Current contributions
 
+> **RCCL:** these contributions are vendored unchanged from NCCL and are not built,
+> tested or supported on ROCm. Several are CUDA-only (for example `tide/`, which
+> needs sm_90 or later).
+
 | Directory | Description |
 |-----------|-------------|
 | [`custom_algos/`](custom_algos/) | Reference custom collective kernels built on the NCCL Device API |
@@ -33,6 +37,7 @@ contribution process described in [CONTRIBUTING.md](../CONTRIBUTING.md).
 | [`nccl_ubx/`](nccl_ubx/) | UB-X (Ultra Bandwidth — eXperimental): low-latency NVLink collectives with compute fusion (residual + RMSNorm, mxfp8 dispatch) on a symmetric allocator |
 | [`nccl_m2n/`](nccl_m2n/) | NCCL Cross-group Transfer (M2N) API for RL communication (reshard primitives) — **moved to [NVIDIA/nccl-extensions](https://github.com/NVIDIA/nccl-extensions)** |
 | [`niin/`](niin/) | NIIN (NVSHMEM Implemented In NCCL) header-only NVSHMEM compatibility layer built on NCCL public host and device APIs |
+| [`tide/`](tide/) | TIDE: layout-aware FSDP2 all-gather and reduce-scatter on copy engines, RDMA and NVSwitch, built on NCCL public host and device APIs |
 
 ## Upstreaming to contrib/
 

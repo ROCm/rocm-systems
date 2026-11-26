@@ -12,6 +12,7 @@
 #include "rocjitsu/config/kfd_device_config.h"
 #include "rocjitsu/config/pci_device_config.h"
 #include "rocjitsu/config/system_graph.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
@@ -92,7 +93,7 @@ struct ExecutionThreadSettings {
   std::vector<uint32_t> dispatch_capacities;
   bool async_supported = false;
   bool clocked = false;
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
 
   util::FailureOr<ExecutionThreadAllocation> resolve(uint32_t host_threads,
                                                      util::DiagnosticEmitter emit_error) const {
@@ -141,7 +142,7 @@ util::FailureOr<ExecutionThreadSettings> load_execution_thread_settings_from_str
     util::DiagnosticEmitter emit_error);
 
 /// @brief Check whether the ISA supports asynchronous MMA execution.
-bool configured_async_mma_supported(rj_code_arch_t arch);
+bool configured_async_mma_supported(rocjitsu::IsaFamily arch);
 /// @brief Create lazy VM-owned resources for the requested helper count.
 std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
 make_async_execution_resources(uint32_t helpers);
@@ -212,15 +213,17 @@ struct TopologyBuildResult {
 ///
 ///   simdojo::SimulationEngine engine(loaded.engine_config);
 ///   engine.topology().set_root(loaded.take_root());
-///   loaded.wire_links(engine.topology());
+///   if (loaded.wire_links(engine.topology(), diagnostic.emitter()).failed())
+///     return; // report diagnostic.message()
 ///
 ///   // A multi-partition engine must have a partition policy installed before
-///   // create(), which otherwise throws.
+///   // create(), which otherwise returns failure.
 ///   if (loaded.engine_config.num_threads > 1 &&
 ///       !rocjitsu::amdgpu::partition_topology_by_xcds(
 ///           engine.topology(), soc, loaded.engine_config.num_threads))
 ///     return; // Report that multi-threaded topology requires an XCD.
-///   engine.create();
+///   if (engine.create(diagnostic.emitter()).failed())
+///     return; // report diagnostic.message()
 /// @endcode
 struct LoadedConfig {
   simdojo::SimulationEngine::Config engine_config;
@@ -277,7 +280,11 @@ struct LoadedConfig {
   std::unique_ptr<simdojo::CompositeComponent> take_root() { return std::move(build_result.root); }
 
   /// @brief Wire deferred link specs into a topology. Call after set_root().
-  void wire_links(simdojo::Topology &topo) { topo.wire_links(build_result.link_specs, exec_mode); }
+  /// @param topo Topology that owns the loaded root.
+  /// @param emit_error Destination for failure diagnostics. Omitting it discards the message.
+  util::Result wire_links(simdojo::Topology &topo, util::DiagnosticEmitter emit_error = {}) {
+    return topo.wire_links(build_result.link_specs, exec_mode, emit_error);
+  }
 };
 
 /// @brief The identity and bus shape of the GPU a config describes.
@@ -285,6 +292,24 @@ struct DeviceIdentityConfig {
   KfdDeviceConfig device; ///< GPU identity, as KFD also reports it.
   PciDeviceConfig pci;    ///< Bus shape for PCI-attached front ends.
 };
+
+/// @brief Owned metadata for one selected system node, without its components.
+struct NodeDeviceIdentityConfig {
+  std::string local_node_id; ///< Resolved node selection retained independently of the parser.
+  std::vector<KfdDeviceConfig> devices; ///< Device identities in stable node-local ordinal order.
+  PciDeviceConfig pci;                  ///< Bus shape of the node's GPU profile.
+  uint32_t num_xcc = 0;                 ///< XCD count per GPU from the declarative topology.
+  bool publish_peer_links = true; ///< Whether active KFD metadata advertises legacy peer links.
+};
+
+/// @brief Read selected-node GPU metadata without constructing the simulator.
+/// @details Uses the same identity expansion and node selection as VM creation.
+/// Parsing, selection, and topology-count failures emit a diagnostic and return
+/// failure. Allocation exceptions propagate to the caller. A missing device
+/// identity remains marked absent; this does not validate execution resources.
+util::FailureOr<NodeDeviceIdentityConfig>
+load_node_device_identity_from_string(const std::string &json, const std::string &schema_text,
+                                      std::string_view node_id, util::DiagnosticEmitter emit_error);
 
 /// @brief Read only a config's device identity and bus shape.
 /// @details Building the topology allocates the whole simulated machine, which
@@ -302,11 +327,11 @@ util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &js
                                                            const std::string &schema_text,
                                                            util::DiagnosticEmitter emit_error);
 
-/// @brief Parse an architecture name string to an rj_code_arch_t enum value.
-rj_code_arch_t parse_arch(const std::string &arch_str);
+/// @brief Parse an architecture name string to an rocjitsu::IsaFamily enum value.
+rocjitsu::IsaFamily parse_arch(const std::string &arch_str);
 
-/// @brief Convert an rj_code_arch_t enum to its string name.
-const char *arch_to_string(rj_code_arch_t arch);
+/// @brief Convert an rocjitsu::IsaFamily enum to its string name.
+const char *arch_to_string(rocjitsu::IsaFamily arch);
 
 /// @brief Parse an execution mode name, defaulting to FUNCTIONAL.
 simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
@@ -319,15 +344,15 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 /// @param schema_text FlatBuffers schema text.
 /// @param emit_error Destination for failure diagnostics.
 /// @returns Success, or failure with a diagnostic for file-reading, parsing,
-/// KFD/DBT device conversion, architecture/target validation, system-graph validation,
-/// node selection, component-range, link-expression, or execution-thread allocation
+/// KFD/DBT device conversion, architecture/target validation, CU resource limits, system-graph
+/// validation, node selection, component-range, link-expression, or execution-thread allocation
 /// errors. Other validation and allocation exceptions propagate.
 util::Result validate_config(const std::string &json_path, const std::string &schema_text,
                              util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON file.
 /// @details File-reading, parsing, KFD/DBT device conversion, architecture/target
-/// validation, system-graph validation, node selection, component-range,
+/// validation, CU resource limits, system-graph validation, node selection, component-range,
 /// link-expression, and execution-thread allocation failures emit a diagnostic and
 /// return failure. Other validation and allocation exceptions propagate.
 /// @param json_path Path to the JSON config file.
@@ -356,9 +381,9 @@ util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
 
 /// @brief Load simulation config from a JSON string.
 /// @details Parsing, KFD/DBT device conversion, architecture/target validation,
-/// system-graph validation, node selection, component-range, link-expression, and
-/// execution-thread allocation failures emit a diagnostic and return failure.
-/// Other validation and allocation exceptions propagate.
+/// CU resource limits, system-graph validation, node selection, component-range, link-expression,
+/// and execution-thread allocation failures emit a diagnostic and return failure. Other validation
+/// and allocation exceptions propagate.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
 /// @param emit_error Destination for failure diagnostics.

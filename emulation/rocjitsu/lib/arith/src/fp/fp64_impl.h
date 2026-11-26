@@ -4,14 +4,40 @@
 // ISA-local FP64 register decoding, rounding, and output modifier helpers.
 #pragma once
 
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/fp64.h"
-#include "rj_arith/rj_arith.h"
+#include "fp/fp64_round.h"
+#include "rj_arith/detail/rj_arith_common.h"
 
 namespace rocjitsu::arith::RJ_ARITH_IMPL_NAMESPACE {
 
+// Identify FP64 selections, which preserve selected subnormal outputs.
+constexpr bool is_selection(Fp64 op) {
+  return op == Fp64::MinLegacyCdna || op == Fp64::MaxLegacyCdna || op == Fp64::MinLegacy ||
+         op == Fp64::MaxLegacy || op == Fp64::MinNum || op == Fp64::MaxNum || op == Fp64::Minimum ||
+         op == Fp64::Maximum;
+}
+
 // Return the number of source operands required by the selected FP64 operation.
-constexpr int fp64_sources(Fp64 op) { return op == Fp64::Fma ? 3 : 1; }
+constexpr int fp64_sources(Fp64 op) {
+  switch (op) {
+  case Fp64::Add:
+  case Fp64::Mul:
+  case Fp64::MinLegacyCdna:
+  case Fp64::MaxLegacyCdna:
+  case Fp64::MinLegacy:
+  case Fp64::MaxLegacy:
+  case Fp64::MinNum:
+  case Fp64::MaxNum:
+  case Fp64::Minimum:
+  case Fp64::Maximum:
+    return 2;
+  case Fp64::Fma:
+    return 3;
+  default:
+    return 1;
+  }
+}
 
 // Flush FP64 subnormals to zero of the same sign without touching host FP state.
 inline double fp64_flush_denorm(double value) {
@@ -19,6 +45,37 @@ inline double fp64_flush_denorm(double value) {
   return (raw & 0x7fffffffffffffffULL) < 0x0010000000000000ULL
              ? as_double(raw & 0x8000000000000000ULL)
              : value;
+}
+
+// FP64 ADD/MUL/FMA return the first NaN source in operand order, quieted unless quiet_snan is
+// clear. Invalid operations (+Inf + -Inf, 0 * +-Inf) return the architectural default NaN
+// (0xfff8000000000000) even when the FMA addend is a NaN or host arithmetic produces +qNaN.
+// Host arithmetic may commute its operands, so its NaN choice is replaced; other results are kept.
+template <bool Fma>
+inline double fp64_nan_priority(double value, double x, double y, double z = 0,
+                                bool quiet_snan = true) {
+  const uint64_t xb = double_bits(x), yb = double_bits(y), zb = double_bits(z);
+  const uint64_t xm = xb & 0x7fffffffffffffffULL, ym = yb & 0x7fffffffffffffffULL;
+  constexpr uint64_t infinity = 0x7ff0000000000000ULL;
+  const uint64_t quiet = quiet_snan ? 0x0008000000000000ULL : 0;
+  if (xm > infinity) {
+    return as_double(xb | quiet);
+  }
+  if (ym > infinity) {
+    return as_double(yb | quiet);
+  }
+  if constexpr (Fma) {
+    if ((xm == 0 && ym == infinity) || (xm == infinity && ym == 0)) {
+      return as_double(0xfff8000000000000ULL);
+    }
+    if ((zb & 0x7fffffffffffffffULL) > infinity) {
+      return as_double(zb | quiet);
+    }
+  }
+  if ((double_bits(value) & 0x7fffffffffffffffULL) > infinity) {
+    return as_double(0xfff8000000000000ULL);
+  }
+  return value;
 }
 
 // Round to an integral FP64 value, ties to even, preserving signed zero and
@@ -56,29 +113,56 @@ inline double fp64_input(const uint32_t *const *v, int lane, uint32_t mode) {
   return as_double(bits);
 }
 
-// Apply FP64 output modifiers, including OMOD zero/denormal rules.
-inline double fp64_output(double value, uint32_t mode) {
-  unsigned omod = (mode >> 6) & 3;
+// Preserve the legacy CDNA native-math stages: scale in the default host mode,
+// then flush a subnormal OMOD result and canonicalize either signed zero.
+inline double fp64_native_math_output(double value, uint32_t mode) {
+  const unsigned omod = (mode >> 6) & 3;
   if (omod) {
-    uint64_t raw = double_bits(value), magnitude = raw & 0x7fffffffffffffffULL;
-    if (magnitude < 0x0010000000000000ULL) {
+    const double scales[] = {1, 2, 4, 0.5};
+    value *= scales[omod];
+    if ((double_bits(value) & 0x7ff0000000000000ULL) == 0) {
       value = 0;
-    } else if (omod == 3 && magnitude < 0x0020000000000000ULL) {
-      value = as_double(raw & 0x8000000000000000ULL);
     }
   }
-  switch ((mode >> 6) & 3) {
-  case 1:
-    value *= 2;
-    break;
-  case 2:
-    value *= 4;
-    break;
-  case 3:
-    value *= 0.5;
-    break;
-  }
   if (mode & RJ_ARITH_ALU_CLAMP) {
+    value = !(value > 0) ? 0 : value > 1 ? 1 : value;
+  }
+  return value;
+}
+
+// Apply FP64 output modifiers by encoding arithmetic, including guest overflow rounding.
+inline double fp64_output(double value, uint32_t instruction_flags, unsigned rounding = 0,
+                          bool cdna_fma = false) {
+  uint64_t raw = double_bits(value), magnitude = raw & 0x7fffffffffffffffULL;
+  const uint64_t sign = raw & 0x8000000000000000ULL;
+  unsigned omod = (instruction_flags >> 6) & 3;
+  // CDNA fused arithmetic rounds during scaling; ADD/MUL keep exponent-step scaling.
+  if (cdna_fma && omod && magnitude < (omod == 3 ? 0x0020000000000000ULL : 0x0010000000000000ULL)) {
+    const uint64_t scales[] = {0x3ff0000000000000ULL, 0x4000000000000000ULL, 0x4010000000000000ULL,
+                               0x3fe0000000000000ULL};
+    raw = fma_finite_f64(raw, scales[omod], sign, rounding);
+  } else if (omod && magnitude < 0x7ff0000000000000ULL) {
+    int exponent = int(magnitude >> 52);
+    if (!exponent) {
+      raw = 0;
+    } else {
+      exponent += omod == 3 ? -1 : int(omod);
+      if (exponent <= 0) {
+        raw = sign;
+      } else if (exponent >= 2047) {
+        const bool infinity = rounding == 0 || rounding == (sign ? 2u : 1u);
+        raw = sign | (infinity ? 0x7ff0000000000000ULL : 0x7fefffffffffffffULL);
+      } else {
+        raw = sign | (uint64_t(exponent) << 52) | (raw & 0x000fffffffffffffULL);
+      }
+    }
+  }
+  // The inherited fused OMOD stage canonicalizes both zero and subnormal results.
+  if (cdna_fma && omod && (raw & 0x7ff0000000000000ULL) == 0) {
+    raw = 0;
+  }
+  value = as_double(raw);
+  if (instruction_flags & RJ_ARITH_ALU_CLAMP) {
     value = !(value > 0) ? 0 : value > 1 ? 1 : value;
   }
   return value;

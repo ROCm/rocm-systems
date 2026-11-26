@@ -1,5 +1,5 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { afterEach, expect, test, vi } from 'vitest';
 import * as selectors from '../../src/data/selectors.js';
 import BenchmarksView from '../../src/components/views/BenchmarksView.jsx';
@@ -14,13 +14,13 @@ test.each([
   { initialBenchmarkIds: [] },
 ])('explicit benchmark choices do not calculate unused default selections: %j', (selection) => {
   const defaults = vi.spyOn(selectors, 'selectDefaultBenchmarks');
-  renderToStaticMarkup(createElement(BenchmarksView, { data: benchmarkData, filters, ...selection }));
+  renderToStaticMarkup(themed(BenchmarksView, { data: benchmarkData, filters, ...selection }));
   expect(defaults).not.toHaveBeenCalled();
 });
 
 test.each([{}, { selectedBenchmarks: null }])('unchosen benchmark selections still calculate measured defaults: %j', (selection) => {
   const defaults = vi.spyOn(selectors, 'selectDefaultBenchmarks');
-  const html = renderToStaticMarkup(createElement(BenchmarksView, { data: benchmarkData, filters, ...selection }));
+  const html = renderToStaticMarkup(themed(BenchmarksView, { data: benchmarkData, filters, ...selection }));
   expect(defaults).toHaveBeenCalledTimes(1);
   expect(html.match(/data-testid="benchmark-grid-card"/g)).toHaveLength(3);
 });

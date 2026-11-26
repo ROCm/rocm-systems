@@ -52,15 +52,6 @@ hsa_status_t InitAndSetupHSA(RdcRocrBase* test);
 /// gpu agent meets test requirements (e.g., FULL profile vs. BASE profile).
 hsa_status_t SetDefaultAgents(RdcRocrBase* test);
 
-/// For the provided device agent, create an AQL queue
-/// \param[in] device Device for which a queue is to be created
-/// \param[out] queue Address to which created queue pointer will be written
-/// \param[in] num_pkts Size of the queue to create
-/// \param[in] do_profile [Optional] Specify whether profiled queue should
-///  be created
-/// \returns  HSA_STATUS_SUCCESS if no errors encountered
-hsa_status_t CreateQueue(hsa_agent_t device, hsa_queue_t** queue, uint32_t num_pkts = 0);
-
 /// This function sets some reasonable default values for an AQL packet.
 /// Override any field as necessary after calling this function.
 /// \param[in] test Test from which information to populate aql packet can

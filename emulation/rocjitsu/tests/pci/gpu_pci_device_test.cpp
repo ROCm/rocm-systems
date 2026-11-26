@@ -1,9 +1,16 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "embedded_schema.h"
+#include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_resolve.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
+#include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/pci/bar_access_trace.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device.h"
 #include "rocjitsu/vm/amdgpu/pci/gpu_pci_device_spec.h"
@@ -12,7 +19,13 @@
 #include "rocjitsu/vm/amdgpu/pci/register_symbols.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
 #include "rocjitsu/vm/soc.h"
+#include "rocjitsu/vm/topology_assembly.h"
+#include "rocjitsu/vm/virtual_machine.h"
+#include "util/diagnostic.h"
 #include "util/distributed_shared_mutex.h"
+
+#include "simdojo/sim/simulation.h"
+#include "simdojo/sim/topology.h"
 
 #include <gtest/gtest.h>
 
@@ -24,11 +37,13 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <future>
 #include <limits>
 #include <map>
 #include <mutex>
 #include <optional>
+#include <string>
 #include <thread>
 
 namespace {
@@ -64,7 +79,7 @@ class GpuDevice : public ::testing::Test {
 protected:
   GpuDevice() {
     xcd_.set_command_processor(&command_processor_);
-    soc_.add_xcd(&xcd_);
+    EXPECT_TRUE(soc_.add_xcd(&xcd_).succeeded());
     command_processor_.set_gpu_vm(&soc_.gpu_vm());
   }
 
@@ -75,7 +90,7 @@ protected:
   rocjitsu::amdgpu::Xcd xcd_{"xcd"};
   rocjitsu::amdgpu::CommandProcessor hidden_command_processor_{"hidden-cp"};
   rocjitsu::amdgpu::Xcd hidden_xcd_{"hidden-xcd"};
-  rocjitsu::SoC soc_{"soc", &memory_, ROCJITSU_CODE_ARCH_CDNA5};
+  rocjitsu::SoC soc_{"soc", &memory_, rocjitsu::IsaFamily::Cdna5};
   rocjitsu::GpuPciDevice device_{"gpu", configured_spec(), &trace_, &soc_};
 
   [[nodiscard]] uint32_t read_register(rocjitsu::MmioRegister reg) {
@@ -118,7 +133,7 @@ protected:
   void add_hidden_xcd() {
     ASSERT_EQ(soc_.num_xcds(), 1u);
     hidden_xcd_.set_command_processor(&hidden_command_processor_);
-    soc_.add_xcd(&hidden_xcd_);
+    ASSERT_TRUE(soc_.add_xcd(&hidden_xcd_).succeeded());
     command_processor_.set_xcd_topology(0, {&command_processor_, &hidden_command_processor_});
     hidden_command_processor_.set_xcd_topology(1,
                                                {&command_processor_, &hidden_command_processor_});
@@ -356,7 +371,7 @@ TEST_F(GpuDevice, ReportsAPartiallyProgrammedInterruptRingAsProgrammed) {
        {Case{"a size alone", 0x4480, 16u << 1}, Case{"an address space alone", 0x4480, 2u << 28},
         Case{"a request for messages alone", 0x4480, 1u << 17},
         Case{"a write-pointer address alone", 0x4498, 0xabcd1000u}}) {
-    device_.reset(simdojo::ResetKind::FunctionLevel);
+    EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
     ASSERT_FALSE(device_.interrupt_ring().programmed()) << "reset did not clear the ring";
 
     write_register_at(partial.reg, partial.value);
@@ -368,7 +383,7 @@ TEST_F(GpuDevice, ReportsAPartiallyProgrammedInterruptRingAsProgrammed) {
 
   // And back to nothing, so the diagnostic does not keep reporting a ring the
   // guest has already taken away.
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_FALSE(device_.interrupt_ring().programmed());
 }
 
@@ -443,6 +458,14 @@ public:
   }
 
   [[nodiscard]] bool write(uint64_t guest_phys, std::span<const std::byte> src) override {
+    std::function<void(uint64_t)> before_write;
+    {
+      const std::lock_guard lock(memory_mutex_);
+      before_write = before_write_;
+    }
+    if (before_write) {
+      before_write(guest_phys);
+    }
     const std::lock_guard lock(memory_mutex_);
     if (refuse_writes_ || writes_before_refusing_ == 0) {
       return false;
@@ -473,21 +496,24 @@ public:
 
   simdojo::DmaAtomicLoadResult atomic_load(uint64_t guest_phys, uint32_t width) override {
     if ((width != sizeof(uint16_t) && width != sizeof(uint32_t) && width != sizeof(uint64_t)) ||
-        guest_phys % width != 0)
+        guest_phys % width != 0) {
       return {.outcome = simdojo::DmaAccessOutcome::Malformed};
+    }
     std::array<std::byte, sizeof(uint64_t)> bytes{};
     const simdojo::DmaAccessOutcome outcome =
         read_outcome(guest_phys, std::span(bytes).first(width));
     uint64_t value = 0;
-    if (outcome == simdojo::DmaAccessOutcome::Complete)
+    if (outcome == simdojo::DmaAccessOutcome::Complete) {
       std::memcpy(&value, bytes.data(), width);
+    }
     return {.outcome = outcome, .value = value};
   }
 
   simdojo::DmaAccessOutcome atomic_store(uint64_t guest_phys, uint32_t width,
                                          uint64_t value) override {
-    if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || guest_phys % width != 0)
+    if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || guest_phys % width != 0) {
       return simdojo::DmaAccessOutcome::Malformed;
+    }
     const auto bytes = std::bit_cast<std::array<std::byte, sizeof(uint64_t)>>(value);
     return write_outcome(guest_phys, std::span(bytes).first(width));
   }
@@ -507,8 +533,9 @@ public:
   template <typename T> void store_value(uint64_t guest_phys, T value) {
     const auto raw = std::bit_cast<std::array<std::byte, sizeof(T)>>(value);
     const std::lock_guard lock(memory_mutex_);
-    for (std::size_t i = 0; i < raw.size(); ++i)
+    for (std::size_t i = 0; i < raw.size(); ++i) {
       memory_[guest_phys + i] = raw[i];
+    }
   }
 
   void clear_memory() {
@@ -524,6 +551,11 @@ public:
   void clear_writes() {
     const std::lock_guard lock(memory_mutex_);
     writes_.clear();
+  }
+
+  void set_before_write(std::function<void(uint64_t)> observer) {
+    const std::lock_guard lock(memory_mutex_);
+    before_write_ = std::move(observer);
   }
 
   [[nodiscard]] std::vector<std::pair<uint64_t, std::size_t>> writes() const {
@@ -590,6 +622,7 @@ private:
   /// @brief Every write, as address and length, so a transfer that overran can
   /// be told apart from a legitimate one to the address it overran into.
   std::vector<std::pair<uint64_t, std::size_t>> writes_;
+  std::function<void(uint64_t)> before_write_;
   std::vector<uint32_t> triggered_;
   bool refuse_writes_ = false;
   bool refuse_trigger_ = false;
@@ -654,14 +687,17 @@ public:
     return session_;
   }
   bool read_vram(uint64_t offset, std::span<std::byte> bytes) override {
-    if (offset > vram.size() || bytes.size() > vram.size() - offset)
+    ++vram_reads;
+    if (offset > vram.size() || bytes.size() > vram.size() - offset) {
       return false;
+    }
     std::ranges::copy(std::span(vram).subspan(offset, bytes.size()), bytes.begin());
     return true;
   }
   bool write_vram(uint64_t offset, std::span<const std::byte> bytes) override {
-    if (offset > vram.size() || bytes.size() > vram.size() - offset)
+    if (offset > vram.size() || bytes.size() > vram.size() - offset) {
       return false;
+    }
     std::ranges::copy(bytes, vram.begin() + static_cast<std::ptrdiff_t>(offset));
     return true;
   }
@@ -694,8 +730,9 @@ public:
     uint64_t observed = 0;
     std::memcpy(&observed, vram.data() + offset, width);
     const uint64_t mask = width == sizeof(uint64_t) ? UINT64_MAX : UINT32_MAX;
-    if ((observed & mask) == (expected & mask))
+    if ((observed & mask) == (expected & mask)) {
       std::memcpy(vram.data() + offset, &desired, width);
+    }
     return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete,
             .observed = observed,
             .exchanged = (observed & mask) == (expected & mask)};
@@ -704,7 +741,8 @@ public:
   bool write_register(uint64_t, uint32_t) override { return false; }
   bool deliver_interrupt(const rocjitsu::InterruptEntry &) override { return false; }
 
-  std::array<std::byte, 16> vram{};
+  std::array<std::byte, 0x4000> vram{};
+  uint32_t vram_reads = 0;
 
 private:
   std::shared_ptr<simdojo::PciTransportSession> session_;
@@ -729,14 +767,16 @@ public:
     return transport_session();
   }
   bool read_vram(uint64_t offset, std::span<std::byte> bytes) override {
-    if (offset > vram_.size() || bytes.size() > vram_.size() - offset)
+    if (offset > vram_.size() || bytes.size() > vram_.size() - offset) {
       return false;
+    }
     std::ranges::copy(std::span(vram_).subspan(offset, bytes.size()), bytes.begin());
     return true;
   }
   bool write_vram(uint64_t offset, std::span<const std::byte> bytes) override {
-    if (offset > vram_.size() || bytes.size() > vram_.size() - offset)
+    if (offset > vram_.size() || bytes.size() > vram_.size() - offset) {
       return false;
+    }
     std::ranges::copy(bytes, vram_.begin() + static_cast<std::ptrdiff_t>(offset));
     return true;
   }
@@ -946,6 +986,37 @@ TEST(PciPhysicalMemoryAccess, DeviceDestructionRevokesRetainedBackingBeforeOwner
             rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
 }
 
+TEST(PciPhysicalMemoryAccess, RewalksRemainBoundToTheirTransportSession) {
+  SessionTestDevice device;
+  OutcomeTransport transport;
+  simdojo::PciDevice::Transport endpoints{.irq = &transport, .dma = &transport};
+  ASSERT_TRUE(device.attach_transport(&endpoints));
+  SessionBackedMemory first_memory(device.capture_session());
+  rocjitsu::PciPhysicalMemoryAccess first(first_memory);
+
+  auto admitted = first.admit_pt_rewalk();
+  ASSERT_EQ(admitted.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_TRUE(admitted.permit.pt_epoch());
+  const auto old_epoch = admitted.permit.pt_epoch();
+  admitted.permit.reset();
+  auto matched = first.admit_pt_rewalk(old_epoch);
+  EXPECT_EQ(matched.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  matched.permit.reset();
+
+  ASSERT_TRUE(device.detach_transport(&endpoints));
+  ASSERT_TRUE(device.attach_transport(&endpoints));
+  EXPECT_EQ(first.admit_pt_rewalk().outcome, rocjitsu::amdgpu::VmAccessOutcome::Unavailable);
+  SessionBackedMemory current_memory(device.capture_session());
+  rocjitsu::PciPhysicalMemoryAccess current(current_memory);
+  EXPECT_EQ(current.admit_pt_rewalk(old_epoch).outcome, rocjitsu::amdgpu::VmAccessOutcome::Revoked);
+  auto fresh = current.admit_pt_rewalk();
+  ASSERT_EQ(fresh.outcome, rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  ASSERT_TRUE(fresh.permit.pt_epoch());
+  EXPECT_NE(fresh.permit.pt_epoch().session_identity, old_epoch.session_identity);
+  fresh.permit.reset();
+  EXPECT_TRUE(device.detach_transport(&endpoints));
+}
+
 TEST(VramStoreAtomics, PerformsStrongAlignedOperationsWithoutReadWriteSynthesis) {
   rocjitsu::VramStore vram("atomic-vram", 0x2000, 0x1000);
   ASSERT_TRUE(vram.usable());
@@ -985,14 +1056,40 @@ TEST(VramStoreAtomics, PerformsStrongAlignedOperationsWithoutReadWriteSynthesis)
 TEST(VramStore, RejectsInvalidApertureSizesBeforeMapping) {
   const rocjitsu::VramStore zero_aperture("zero-aperture", 0x2000, 0);
   EXPECT_FALSE(zero_aperture.usable());
+  EXPECT_EQ(zero_aperture.backing_id(), 0u);
   EXPECT_TRUE(zero_aperture.aperture().empty());
 
   const rocjitsu::VramStore oversized_aperture("oversized-aperture", 0x1000, 0x2000);
   EXPECT_FALSE(oversized_aperture.usable());
+  EXPECT_EQ(oversized_aperture.backing_id(), 0u);
   EXPECT_TRUE(oversized_aperture.aperture().empty());
 
   const rocjitsu::VramStore zero_backing("zero-backing", 0, 0);
   EXPECT_FALSE(zero_backing.usable());
+  EXPECT_EQ(zero_backing.backing_id(), 0u);
+}
+
+TEST(VramStore, KeepsOneCanonicalIdentityForItsSealedLifetime) {
+  const rocjitsu::VramStore first("first", 0x2000, 0x1000);
+  const rocjitsu::VramStore second("second", 0x2000, 0x1000);
+  ASSERT_TRUE(first.usable());
+  ASSERT_TRUE(second.usable());
+  ASSERT_NE(first.backing_id(), 0u);
+  EXPECT_NE(first.backing_id(), second.backing_id());
+}
+
+TEST_F(GpuDevice, PublishesStableVramBackingIdentityAcrossReset) {
+  ASSERT_TRUE(device_.usable());
+  const auto initial = device_.bars();
+  ASSERT_FALSE(initial.empty());
+  const uint64_t backing_id = initial.front().backing_id;
+  ASSERT_NE(backing_id, 0u);
+  ASSERT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
+  EXPECT_EQ(device_.bars().front().backing_id, backing_id);
+
+  rocjitsu::GpuPciDevice other("other", configured_spec(), nullptr);
+  ASSERT_TRUE(other.usable());
+  EXPECT_NE(other.bars().front().backing_id, backing_id);
 }
 
 class AlwaysAvailableAddressSpace final : public rocjitsu::amdgpu::AddressSpaceTranslator,
@@ -1012,19 +1109,190 @@ public:
 
   rocjitsu::amdgpu::VmAccessOutcome read(rocjitsu::amdgpu::VmMemoryDomain domain, uint64_t,
                                          std::span<std::byte> bytes) override {
-    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System)
+    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System) {
       return rocjitsu::amdgpu::VmAccessOutcome::Malformed;
+    }
     std::ranges::fill(bytes, std::byte{0});
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }
 
   rocjitsu::amdgpu::VmAccessOutcome write(rocjitsu::amdgpu::VmMemoryDomain domain, uint64_t,
                                           std::span<const std::byte>) override {
-    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System)
+    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System) {
       return rocjitsu::amdgpu::VmAccessOutcome::Malformed;
+    }
     return rocjitsu::amdgpu::VmAccessOutcome::Complete;
   }
 };
+
+class PciReadProbeAddressSpace final : public rocjitsu::amdgpu::AddressSpaceTranslator,
+                                       public rocjitsu::amdgpu::PhysicalMemoryAccess {
+public:
+  static constexpr uint64_t kCode = 0x100;
+  static constexpr uint64_t kScalarData = 0x200;
+  static constexpr uint64_t kVectorData = 0x220;
+
+  rocjitsu::amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                                  rocjitsu::amdgpu::VmAccessKind) const override {
+    if (address == kScalarData) {
+      ++scalar_translations;
+    }
+    if (address == kVectorData) {
+      ++vector_translations;
+    }
+    if (address > bytes_.size() || size > bytes_.size() - address) {
+      return {.outcome = rocjitsu::amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
+    return {
+        .outcome = rocjitsu::amdgpu::VmAccessOutcome::Complete,
+        .translation = {.domain = rocjitsu::amdgpu::VmMemoryDomain::System,
+                        .address = address,
+                        .contiguous_bytes = bytes_.size() - address,
+                        .mtype = rocjitsu::amdgpu::Mtype::RW,
+                        .permissions = {.readable = true, .writable = true, .executable = true}}};
+  }
+
+  rocjitsu::amdgpu::VmAccessOutcome read(rocjitsu::amdgpu::VmMemoryDomain domain, uint64_t address,
+                                         std::span<std::byte> bytes) override {
+    if (domain != rocjitsu::amdgpu::VmMemoryDomain::System || address > bytes_.size() ||
+        bytes.size() > bytes_.size() - address) {
+      return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+    }
+    if (address == kScalarData) {
+      ++scalar_reads;
+    }
+    if (address == kVectorData) {
+      ++vector_reads;
+    }
+    std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
+                        bytes.begin());
+    return rocjitsu::amdgpu::VmAccessOutcome::Complete;
+  }
+
+  rocjitsu::amdgpu::VmAccessOutcome write(rocjitsu::amdgpu::VmMemoryDomain, uint64_t,
+                                          std::span<const std::byte>) override {
+    return rocjitsu::amdgpu::VmAccessOutcome::Faulted;
+  }
+
+  template <typename T> void store(uint64_t address, const T &value) {
+    ASSERT_LE(address + sizeof(value), bytes_.size());
+    std::memcpy(bytes_.data() + address, &value, sizeof(value));
+  }
+
+  uint32_t scalar_reads = 0;
+  uint32_t vector_reads = 0;
+  mutable uint32_t scalar_translations = 0;
+  mutable uint32_t vector_translations = 0;
+
+private:
+  std::array<std::byte, 0x1000> bytes_{};
+};
+
+TEST(GpuDevicePeerReadProbe, ConstructorReplacesPreexistingCuHandlersAndPreservesBacking) {
+  using namespace rocjitsu;
+  using namespace rocjitsu::amdgpu;
+
+  GpuMemory memory("pci-peer-probe-memory");
+  L2Cache l2("pci-peer-probe-l2");
+  CommandProcessor cp("pci-peer-probe-cp");
+  Xcd xcd("pci-peer-probe-xcd");
+  std::unique_ptr<ComputeUnitCore> cu;
+  SoC soc("pci-peer-probe-soc", &memory, rocjitsu::IsaFamily::Cdna5);
+  xcd.set_command_processor(&cp);
+  ASSERT_TRUE(soc.add_xcd(&xcd).succeeded());
+  cp.set_gpu_vm(&soc.gpu_vm());
+
+  ComputeUnitCore::Config config{};
+  config.arch = rocjitsu::IsaFamily::Cdna5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 128;
+  config.vgprs_per_wf = 32;
+  config.lds_size_kb = 320;
+  cu = ComputeUnitCore::create("pci-peer-probe-cu", config, &memory, &l2);
+  ASSERT_NE(cu, nullptr);
+  cp.add_compute_unit(cu.get());
+
+  auto external = std::make_shared<PciReadProbeAddressSpace>();
+  const AddressSpaceHandle address_space =
+      soc.gpu_vm().register_address_space(77, external, external);
+  ASSERT_TRUE(address_space);
+  constexpr uint32_t kScalarValue = 0x12345678u;
+  constexpr uint32_t kVectorValue = 0x87654321u;
+  external->store(PciReadProbeAddressSpace::kScalarData, kScalarValue);
+  external->store(PciReadProbeAddressSpace::kVectorData, kVectorValue);
+
+  // s_load_b32 s8, s[0:1], 0; global_load_dword v8, v0, s[0:1].
+  constexpr std::array<uint32_t, 2> scalar_load{0xf4000200u, 0xf9000000u};
+  constexpr auto vector_load =
+      cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal, {.saddr = 0, .vdst = 8, .vaddr = 0});
+  const std::array<uint32_t, 5> code{scalar_load[0], scalar_load[1], vector_load[0], vector_load[1],
+                                     vector_load[2]};
+  external->store(PciReadProbeAddressSpace::kCode, code);
+
+  Wavefront *wf = cu->dispatch_wf(0, PciReadProbeAddressSpace::kCode, 128, 32);
+  ASSERT_NE(wf, nullptr);
+  wf->set_process_id(77);
+  wf->set_address_space(address_space);
+  wf->set_exec(1);
+  cu->write_sgpr(wf->sgpr_alloc().base,
+                 static_cast<uint32_t>(PciReadProbeAddressSpace::kScalarData));
+  cu->write_sgpr(wf->sgpr_alloc().base + 1, 0);
+  cu->write_vgpr(wf->vgpr_alloc().base, 0,
+                 PciReadProbeAddressSpace::kVectorData - PciReadProbeAddressSpace::kScalarData);
+
+  uint32_t old_scalar_calls = 0;
+  uint32_t old_vector_calls = 0;
+  const auto old_handler = [](uint64_t expected, std::byte value, uint32_t &calls) {
+    return [expected, value, &calls](uint32_t process_id, const GpuVmAccess &, uint64_t address,
+                                     std::span<std::byte> bytes, const VmCompletedRead *completed) {
+      EXPECT_EQ(process_id, 77u);
+      EXPECT_EQ(address, expected);
+      EXPECT_EQ(completed, nullptr);
+      ++calls;
+      std::ranges::fill(bytes, value);
+      return true;
+    };
+  };
+  cu->set_peer_cache_read_handlers(
+      old_handler(PciReadProbeAddressSpace::kScalarData, std::byte{0xa5}, old_scalar_calls),
+      old_handler(PciReadProbeAddressSpace::kVectorData, std::byte{0x5a}, old_vector_calls));
+
+  const auto issue_both_loads = [&] {
+    constexpr uint64_t kEnd = PciReadProbeAddressSpace::kCode + sizeof(code);
+    for (unsigned step = 0; step < 8 && wf->pc < kEnd; ++step) {
+      (void)cu->step();
+    }
+    ASSERT_EQ(wf->pc, kEnd);
+  };
+  issue_both_loads();
+  EXPECT_EQ(cu->read_sgpr_storage(wf->sgpr_alloc().base + 8), 0xa5a5a5a5u);
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 8, 0), 0x5a5a5a5au);
+  EXPECT_EQ(old_scalar_calls, 1u);
+  EXPECT_EQ(old_vector_calls, 1u);
+  EXPECT_EQ(external->scalar_reads, 0u);
+  EXPECT_EQ(external->vector_reads, 0u);
+  const uint32_t sentinel_scalar_translations = external->scalar_translations;
+  const uint32_t sentinel_vector_translations = external->vector_translations;
+  ASSERT_GT(sentinel_scalar_translations, 0u);
+  ASSERT_GT(sentinel_vector_translations, 0u);
+
+  GpuPciDevice device("pci-peer-probe", configured_spec(), nullptr, &soc);
+  ASSERT_TRUE(device.usable());
+  const uint32_t before_scalar_translations = external->scalar_translations;
+  const uint32_t before_vector_translations = external->vector_translations;
+  wf->pc = PciReadProbeAddressSpace::kCode;
+  issue_both_loads();
+  EXPECT_EQ(cu->read_sgpr_storage(wf->sgpr_alloc().base + 8), kScalarValue);
+  EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 8, 0), kVectorValue);
+  EXPECT_EQ(old_scalar_calls, 1u);
+  EXPECT_EQ(old_vector_calls, 1u);
+  EXPECT_EQ(external->scalar_reads, 1u);
+  EXPECT_EQ(external->vector_reads, 1u);
+  // The PCI constructor removes the earlier peer-cache shortcuts. Each load
+  // now translates once and reaches backing without observation overhead.
+  EXPECT_EQ(external->scalar_translations - before_scalar_translations, 1u);
+  EXPECT_EQ(external->vector_translations - before_vector_translations, 1u);
+}
 
 // MES submits fixed 64-dword API frames through a VMID-0 ring in GART. The
 // device has to walk the GART PTEs, execute both the requested operation and
@@ -1176,8 +1444,9 @@ protected:
         (second ? kSecondComputeSecondPagePhysical : kDefaultComputeSecondPagePhysical) |
             kGfx12SystemLeafPteFlags);
 
-    if (!second)
+    if (!second) {
       store_qword(kReadPointerPhysical, 0);
+    }
     store_dword(kApiStatusPhysical, 0);
     store_dword(frame, 0x00040021);
     store_dword(frame + 1 * sizeof(uint32_t), 3);
@@ -1212,10 +1481,11 @@ protected:
     ASSERT_EQ(transport_.dword_at(kApiStatusPhysical), 1u);
     ASSERT_EQ(soc_.mes_engine().active_queues(), second ? 2u : 1u);
     ASSERT_EQ(soc_.queue_registry().active_queues(), second ? 2u : 1u);
-    if (aql)
+    if (aql) {
       ASSERT_EQ(command_processor_.registered_queue_count_for_test(), second ? 2u : 1u);
-    else
+    } else {
       ASSERT_EQ(command_processor_.registered_pm4_queue_count_for_test(), second ? 2u : 1u);
+    }
   }
 
   [[nodiscard]] std::optional<rocjitsu::amdgpu::AddressSpaceHandle>
@@ -1335,6 +1605,48 @@ TEST_F(GpuDeviceMes, DropsADoorbellQueuedByARevokedTransportGeneration) {
       << "work captured for the old peer generation reached its replacement";
 }
 
+TEST_F(GpuDeviceMes, ResetReturnsFailureWhileGartBindingIsRetained) {
+  constexpr uint64_t kScratchRegister = (0xa000 + 0x2040) * sizeof(uint32_t);
+  write_register_at(kScratchRegister, 0x12345678);
+  const rocjitsu::amdgpu::AddressSpaceHandle gart = soc_.gpu_vm().gart_address_space();
+  std::optional<rocjitsu::amdgpu::GpuVmBindingLease> binding = soc_.gpu_vm().retain_binding(gart);
+  ASSERT_TRUE(binding);
+  const uint64_t generation = device_.transport_session_generation();
+  const uint64_t translation_epoch = soc_.gpu_vm().lookup(gart)->translation_epoch;
+  util::StringDiagnostic diagnostic;
+  util::Result result;
+  EXPECT_NO_THROW(result = device_.reset(simdojo::ResetKind::FunctionLevel, diagnostic.emitter()));
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(diagnostic.message(), "VMID-0 GART binding could not be cleared");
+  EXPECT_EQ(soc_.gpu_vm().lookup(gart)->translation_epoch, translation_epoch);
+  EXPECT_EQ(read_register_at(kScratchRegister), 0x12345678u);
+  EXPECT_NE(device_.transport_session_generation(), generation);
+  EXPECT_NE(device_.transport_session_generation(), 0u);
+  binding.reset();
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
+  EXPECT_EQ(read_register_at(kScratchRegister), 0u);
+}
+
+TEST_F(GpuDeviceMes, ResetReturnsFailureAfterPartialQueueTeardown) {
+  constexpr uint64_t kScratchRegister = (0xa000 + 0x2040) * sizeof(uint32_t);
+  write_register_at(kScratchRegister, 0x12345678);
+  const std::optional<rocjitsu::amdgpu::AddressSpaceHandle> address_space =
+      submit_sdma_queue(3, 0x4808, 0x20000, 0x21000, 0x22000, 0x30000);
+  ASSERT_TRUE(address_space);
+  ASSERT_TRUE(soc_.gpu_vm().retain_queue(*address_space));
+  const uint64_t generation = device_.transport_session_generation();
+  util::StringDiagnostic diagnostic;
+  util::Result result;
+  EXPECT_NO_THROW(result = device_.reset(simdojo::ResetKind::FunctionLevel, diagnostic.emitter()));
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(diagnostic.message(), "PCI queue state could not be cleared");
+  EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
+  EXPECT_EQ(read_register_at(kScratchRegister), 0x12345678u);
+  EXPECT_NE(device_.transport_session_generation(), generation);
+  EXPECT_NE(device_.transport_session_generation(), 0u);
+  EXPECT_TRUE(soc_.gpu_vm().release_queue(*address_space));
+}
+
 TEST_F(GpuDeviceMes, ResetDropsDoorbellsQueuedInTheSameTransportGeneration) {
   store_dword(kRingPhysical, 0x00040001);
   store_qword(kRingPhysical + 50 * 4, kApiStatusGpu);
@@ -1346,13 +1658,22 @@ TEST_F(GpuDeviceMes, ResetDropsDoorbellsQueuedInTheSameTransportGeneration) {
                                /*write=*/true),
             8);
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   ASSERT_NE(device_.transport_session_generation(), generation);
   device_.drain_doorbell_inbox_for_test();
 
   EXPECT_EQ(transport_.dword_at(kApiStatusPhysical), 0u);
   EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 0u)
       << "pre-reset semantic work crossed the reset epoch";
+}
+
+TEST_F(GpuDeviceMes, MesInitializationRewalksAfterReset) {
+  const uint64_t before = device_.transport_session_generation();
+  ASSERT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
+  EXPECT_NE(device_.transport_session_generation(), before);
+
+  configure_gart();
+  submit_default_compute_queue();
 }
 
 TEST_F(GpuDeviceMes, RetainsADoorbellQueuedWhileAnEarlierNotificationIsDraining) {
@@ -1374,8 +1695,9 @@ TEST_F(GpuDeviceMes, RetainsADoorbellQueuedWhileAnEarlierNotificationIsDraining)
   auto draining =
       std::async(std::launch::async, [this]() { device_.drain_doorbell_inbox_for_test(); });
   const bool blocked = transport_.wait_for_blocked_read(std::chrono::seconds(1));
-  if (!blocked)
+  if (!blocked) {
     transport_.release_read();
+  }
   ASSERT_TRUE(blocked);
 
   doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
@@ -1410,11 +1732,13 @@ TEST_F(GpuDeviceMes, ResetWaitsForAnAdmittedDoorbellObserver) {
   auto draining =
       std::async(std::launch::async, [this]() { device_.drain_doorbell_inbox_for_test(); });
   const bool blocked = transport_.wait_for_blocked_read(std::chrono::seconds(1));
-  if (!blocked)
+  if (!blocked) {
     transport_.release_read();
+  }
   ASSERT_TRUE(blocked);
-  auto resetting = std::async(std::launch::async,
-                              [this]() { device_.reset(simdojo::ResetKind::FunctionLevel); });
+  auto resetting = std::async(std::launch::async, [this]() {
+    EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
+  });
 
   EXPECT_EQ(resetting.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout)
       << "reset did not wait for the admitted observer";
@@ -1423,6 +1747,36 @@ TEST_F(GpuDeviceMes, ResetWaitsForAnAdmittedDoorbellObserver) {
   EXPECT_EQ(resetting.wait_for(std::chrono::seconds(1)), std::future_status::ready);
   draining.get();
   resetting.get();
+}
+
+TEST_F(GpuDeviceMes, ShutdownWaitsForAdmittedDoorbellObserver) {
+  store_dword(kRingPhysical, 0x00040001);
+  store_qword(kRingPhysical + 50 * 4, kApiStatusGpu);
+  store_qword(kRingPhysical + 52 * 4, 1);
+
+  transport_.block_next_read_at(kRingPhysical);
+  auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, doorbell, 0x60,
+                               /*write=*/true),
+            8);
+
+  auto draining =
+      std::async(std::launch::async, [this]() { device_.drain_doorbell_inbox_for_test(); });
+  const bool blocked = transport_.wait_for_blocked_read(std::chrono::seconds(1));
+  if (!blocked) {
+    transport_.release_read();
+  }
+  ASSERT_TRUE(blocked);
+  auto shutting_down =
+      std::async(std::launch::async, [this]() { return device_.shutdown_frontend(); });
+
+  EXPECT_EQ(shutting_down.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout)
+      << "shutdown did not wait for the admitted observer";
+  transport_.release_read();
+  EXPECT_EQ(draining.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  EXPECT_EQ(shutting_down.wait_for(std::chrono::seconds(1)), std::future_status::ready);
+  draining.get();
+  EXPECT_TRUE(shutting_down.get());
 }
 
 TEST_F(GpuDeviceMes, HonorsTheAlignedStatusInSetHardwareResourcesOne) {
@@ -1827,7 +2181,7 @@ TEST_F(GpuDeviceMes, ResetInvalidatesScheduledRemoveQueueRetry) {
   ASSERT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
   ASSERT_EQ(transport_.dword_at(kReadPointerPhysical), 64u);
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   device_.drain_doorbell_inbox_for_test();
   EXPECT_EQ(transport_.dword_at(kRingFencePhysical), 0u);
   EXPECT_EQ(transport_.dword_at(kReadPointerPhysical), 64u)
@@ -2008,8 +2362,9 @@ TEST_F(GpuDeviceMes, RetriesComputeRingFetchWithoutReplayingCompletedPackets) {
   store_dword(kComputeRingPhysical, 0xc0017900);
   store_dword(kComputeRingPhysical + 4, 0x40);
   store_dword(kComputeRingPhysical + 8, 0xdeadbeef);
-  for (uint32_t dword = 3; dword < 256; ++dword)
+  for (uint32_t dword = 3; dword < 256; ++dword) {
     store_dword(kComputeRingPhysical + dword * sizeof(uint32_t), 0xffff1000);
+  }
 
   // Let SET_UCONFIG_REG commit, then make the following NOP fetch unavailable.
   // The retry must resume at dword 3 instead of applying the register write twice.
@@ -2073,8 +2428,9 @@ TEST_F(GpuDeviceMes, RetriesComputeReadPointerWithoutReplayingRegisterWrites) {
   store_dword(kComputeRingPhysical, 0xc0017900);
   store_dword(kComputeRingPhysical + 4, 0x40);
   store_dword(kComputeRingPhysical + 8, 0xdeadbeef);
-  for (uint32_t dword = 3; dword < 256; ++dword)
+  for (uint32_t dword = 3; dword < 256; ++dword) {
     store_dword(kComputeRingPhysical + dword * sizeof(uint32_t), 0xffff1000);
+  }
 
   transport_.fail_next_write(kComputeSecondPagePhysical + 0xff0,
                              simdojo::DmaAccessOutcome::Unavailable);
@@ -2210,7 +2566,7 @@ TEST_F(GpuDeviceMes, PermanentPm4CursorFaultMakesRemoveQueueTerminalUntilReset) 
   EXPECT_EQ(read_register_at(kScratchRegister), kAfterExecutionSentinel)
       << "failed graceful removal replayed the committed PM4 packet";
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
   EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
   EXPECT_EQ(command_processor_.registered_pm4_queue_count_for_test(), 0u);
@@ -2233,7 +2589,7 @@ TEST_F(GpuDeviceMes, ResetForceCancelsPm4QueueWithPendingCursorPublication) {
   ASSERT_EQ(read_register_at(kScratchRegister), 0xdeadbeefu);
   ASSERT_EQ(transport_.dword_at(kDefaultComputeReadPointerPhysical), 0u);
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   EXPECT_EQ(soc_.mes_engine().active_queues(), 0u);
   EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
   EXPECT_EQ(command_processor_.registered_pm4_queue_count_for_test(), 0u);
@@ -2441,8 +2797,9 @@ TEST_F(GpuDeviceMes, SdmaToComputeSameDoorbellReplacesThePriorBinding) {
   store_dword(kComputeRingPhysical, 0xc0017900);
   store_dword(kComputeRingPhysical + 4, 0x40);
   store_dword(kComputeRingPhysical + 8, 0xfeedface);
-  for (uint32_t dword = 3; dword < 60; ++dword)
+  for (uint32_t dword = 3; dword < 60; ++dword) {
     store_dword(kComputeRingPhysical + dword * sizeof(uint32_t), 0xffff1000);
+  }
   store_dword(kSdmaRingPhysical + 4 * 4, 0x12345678);
   sdma_doorbell = std::bit_cast<std::array<std::byte, 4>>(uint32_t{60});
   ring_doorbell(kSdmaDoorbell, sdma_doorbell);
@@ -2489,7 +2846,7 @@ TEST_F(GpuDeviceMes, LostConnectionReleasesOnlyPciQueuesAndAllowsPasidReuse) {
   ASSERT_TRUE(gart);
   ASSERT_TRUE(soc_.gpu_vm().lookup(gart)->ready);
 
-  device_.reset(simdojo::ResetKind::LostConnection);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::LostConnection).succeeded());
 
   EXPECT_TRUE(soc_.queue_registry().contains(legacy_queue));
   EXPECT_EQ(soc_.queue_registry().active_queues(), 1u);
@@ -2509,7 +2866,7 @@ TEST_F(GpuDeviceMes, LostConnectionReleasesOnlyPciQueuesAndAllowsPasidReuse) {
   EXPECT_NE(replacement_address_space->generation, first_address_space->generation);
   EXPECT_EQ(soc_.queue_registry().active_queues(), 2u);
 
-  device_.reset(simdojo::ResetKind::LostConnection);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::LostConnection).succeeded());
   EXPECT_TRUE(soc_.queue_registry().unregister_queue(legacy_queue));
   EXPECT_TRUE(legacy_vm.unregister_address_space(legacy_address_space));
 }
@@ -2618,8 +2975,9 @@ TEST(GpuDeviceLifetime, ReplacementFrontendReusesPasidAndDoorbellAfterDestructio
          {std::pair{0u, kMesRingPhysical}, std::pair{1u, kMesReadPointerPhysical},
           std::pair{2u, kApiStatusPhysical}, std::pair{4u, kSdmaMqdPhysical}}) {
       if (!write_vram_qword(device, kPageTable + page * sizeof(uint64_t),
-                            physical | kGfx12SystemLeafPteFlags))
+                            physical | kGfx12SystemLeafPteFlags)) {
         return std::optional<rocjitsu::amdgpu::AddressSpaceHandle>{};
+      }
     }
     if (!write_register(device, absolute(0x1657 + 17), 1) ||
         !write_register(device, absolute(0x1fb1), static_cast<uint32_t>(kMesRingGpu >> 8)) ||
@@ -2708,6 +3066,115 @@ TEST(GpuDeviceLifetime, ExplicitShutdownSurvivesCoreOwnerDestruction) {
 
 class GpuDeviceSdma : public GpuDeviceMes {};
 
+class GpuDeviceSdmaWithL2 : public GpuDeviceSdma {
+protected:
+  void SetUp() override {
+    GpuDeviceSdma::SetUp();
+    l2_.set_backing_memory(&memory_);
+    l2_.set_legacy_maintenance_memory(&memory_);
+    l2_.set_legacy_maintenance_vm(&soc_.gpu_vm());
+    l2_.set_gpu_vm(&soc_.gpu_vm());
+    xcd_.set_l2_cache(&l2_);
+  }
+
+  void TearDown() override {
+    GpuDeviceSdma::TearDown();
+    EXPECT_TRUE(device_.shutdown_frontend());
+    xcd_.set_l2_cache(nullptr);
+  }
+
+  rocjitsu::amdgpu::L2Cache l2_{"pci-sdma-l2", soc_.cache_coherence()};
+};
+
+TEST_F(GpuDeviceSdmaWithL2, RegisterQueueKeepsLegacyWritebackAndGcrDiscardSemantics) {
+  using rocjitsu::amdgpu::L2Cache;
+  using rocjitsu::amdgpu::Mtype;
+  using rocjitsu::amdgpu::VmAccessOutcome;
+  constexpr uint64_t kSdmaBase = 0x1260;
+  constexpr uint64_t kFenceDirtyLine = 0x50000;
+  constexpr uint64_t kTimestampDirtyLine = 0x50100;
+  constexpr uint64_t kGcrDirtyLine = 0x50200;
+  constexpr uint64_t kDiscardDirtyLine = 0x50300;
+  constexpr uint32_t kDiscardBacking = 0x11223344;
+  const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * sizeof(uint32_t); };
+
+  write_register_at(absolute(0x0200), (10u << 1) | 0x1001u);
+  write_register_at(absolute(0x0201), static_cast<uint32_t>(kSchedulerRingGpu >> 8));
+  write_register_at(absolute(0x0202), static_cast<uint32_t>(kSchedulerRingGpu >> 40));
+  write_register_at(absolute(0x0207), static_cast<uint32_t>(kSchedulerReadPointerGpu));
+  write_register_at(absolute(0x0208), static_cast<uint32_t>(kSchedulerReadPointerGpu >> 32));
+  write_register_at(absolute(0x020f), 0x10000000);
+  write_register_at(absolute(0x0211), 0x800);
+
+  const auto submit = [&](uint64_t bytes) {
+    auto doorbell = std::bit_cast<std::array<std::byte, sizeof(uint64_t)>>(bytes);
+    ring_doorbell(0x800, doorbell);
+    EXPECT_EQ(transport_.dword_at(kSchedulerReadPointerPhysical), bytes);
+  };
+  std::array<uint8_t, L2Cache::LINE_SIZE> dirty{};
+  std::atomic<uint32_t> backing_at_fence{0};
+  std::atomic<uint32_t> backing_at_timestamp{0};
+  transport_.set_before_write([&](uint64_t address) {
+    if (address == kSchedulerApiStatusPhysical) {
+      backing_at_fence.store(memory_.read32(kFenceDirtyLine));
+    }
+    if (address == kSchedulerRingFencePhysical) {
+      backing_at_timestamp.store(memory_.read32(kTimestampDirtyLine));
+    }
+  });
+  struct ClearObserver {
+    RecordingTransport &transport;
+    ~ClearObserver() { transport.set_before_write({}); }
+  } clear_observer{transport_};
+
+  // The VMID-0 PCI queue uses the factory's default lease-only callback.
+  // Its legacy L2 backing is the SoC memory, distinct from the PCI VRAM BAR.
+  // Observe that backing in the DMA write itself, before the fence takes effect.
+  dirty.fill(0xa1);
+  ASSERT_EQ(l2_.writeback_line(kFenceDirtyLine, dirty.data(), Mtype::RW, 0),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(memory_.read32(kFenceDirtyLine), 0u);
+  store_dword(kSchedulerRingPhysical, 5);
+  store_qword(kSchedulerRingPhysical + 4, kSchedulerApiStatusGpu);
+  store_dword(kSchedulerRingPhysical + 12, 0xdeadbeef);
+  submit(4 * sizeof(uint32_t));
+  EXPECT_EQ(backing_at_fence.load(), 0xa1a1a1a1u);
+  EXPECT_EQ(transport_.dword_at(kSchedulerApiStatusPhysical), 0xdeadbeefu);
+
+  dirty.fill(0xb2);
+  ASSERT_EQ(l2_.writeback_line(kTimestampDirtyLine, dirty.data(), Mtype::RW, 0),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(memory_.read32(kTimestampDirtyLine), 0u);
+  store_dword(kSchedulerRingPhysical + 16, 13);
+  store_qword(kSchedulerRingPhysical + 20, kSchedulerRingFenceGpu);
+  submit(7 * sizeof(uint32_t));
+  EXPECT_EQ(backing_at_timestamp.load(), 0xb2b2b2b2u);
+  EXPECT_NE(transport_.dword_at(kSchedulerRingFencePhysical), 0u);
+
+  dirty.fill(0xc3);
+  ASSERT_EQ(l2_.writeback_line(kGcrDirtyLine, dirty.data(), Mtype::RW, 0),
+            VmAccessOutcome::Complete);
+  ASSERT_EQ(memory_.read32(kGcrDirtyLine), 0u);
+  store_dword(kSchedulerRingPhysical + 28, 17);
+  store_dword(kSchedulerRingPhysical + 40, 1u << 15); // gfx1250 GL2 writeback
+  submit(13 * sizeof(uint32_t));
+  EXPECT_EQ(memory_.read32(kGcrDirtyLine), 0xc3c3c3c3u);
+
+  memory_.write32(kDiscardDirtyLine, kDiscardBacking);
+  dirty.fill(0xd4);
+  ASSERT_EQ(l2_.writeback_line(kDiscardDirtyLine, dirty.data(), Mtype::RW, 0),
+            VmAccessOutcome::Complete);
+  store_dword(kSchedulerRingPhysical + 52, 17);
+  store_dword(kSchedulerRingPhysical + 64, 1u << 14); // gfx1250 GL2 invalidate
+  submit(19 * sizeof(uint32_t));
+  EXPECT_EQ(memory_.read32(kDiscardDirtyLine), kDiscardBacking);
+  uint32_t refetched = 0;
+  ASSERT_EQ(l2_.read(kDiscardDirtyLine, reinterpret_cast<uint8_t *>(&refetched), sizeof(refetched),
+                     Mtype::RW, 0),
+            VmAccessOutcome::Complete);
+  EXPECT_EQ(refetched, kDiscardBacking);
+}
+
 TEST_F(GpuDeviceSdma, ExecutesTheFirmwareFreeSdmaRingAfterA32BitDoorbell) {
   constexpr uint64_t kSdmaBase = 0x1260;
   const auto absolute = [](uint64_t reg) { return (kSdmaBase + reg) * 4; };
@@ -2785,7 +3252,7 @@ TEST_F(GpuDeviceSdma, ConcurrentResetCancelsQueuedPciEffectsWithoutDeadlock) {
             static_cast<int64_t>(doorbell.size()));
 
   std::jthread drain([this]() { device_.drain_doorbell_inbox_for_test(); });
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   drain.join();
 
   EXPECT_EQ(soc_.queue_registry().active_queues(), 0u);
@@ -2840,8 +3307,9 @@ TEST_F(GpuDeviceSdma, ResetWaitsForAdmittedPciEffectBeforeResettingRegisters) {
         release = true;
       }
       changed.notify_all();
-      if (drain.joinable())
+      if (drain.joinable()) {
         drain.join();
+      }
       device.set_sdma_pci_effect_admitted_hook_for_test({});
     }
   } cleanup{device_, drain, gate_mutex, gate_changed, release};
@@ -2850,8 +3318,9 @@ TEST_F(GpuDeviceSdma, ResetWaitsForAdmittedPciEffectBeforeResettingRegisters) {
     ASSERT_TRUE(gate_changed.wait_for(lock, std::chrono::seconds(1), [&] { return admitted; }));
   }
 
-  reset = std::async(std::launch::async,
-                     [this]() { device_.reset(simdojo::ResetKind::FunctionLevel); });
+  reset = std::async(std::launch::async, [this]() {
+    EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
+  });
   EXPECT_EQ(reset.wait_for(std::chrono::milliseconds(20)), std::future_status::timeout)
       << "reset crossed an admitted PCI effect";
 
@@ -2970,11 +3439,16 @@ TEST_F(GpuDeviceSdma, RegisterBackedQueueRoutesAddressesOutsideTheGartApertureTo
   store_vram_dword(kLocalRing + 12, 0);
   store_vram_dword(kLocalRing + 16, 0xdeadbeef);
 
+  const auto coherence = soc_.cache_coherence();
+  coherence->mark_translated_local_cache_used();
+  const uint64_t before_write = coherence->current_local_line_epoch(kLocalDestination);
   auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{64});
   ring_doorbell(0x800, doorbell);
 
   EXPECT_EQ(vram_dword_at(kLocalDestination), 0xdeadbeefu);
   EXPECT_EQ(vram_dword_at(kLocalReadPointer), 64u);
+  EXPECT_GT(coherence->current_local_line_epoch(kLocalDestination), before_write)
+      << "SDMA local writes must retire owner cache tags while maintenance is held";
   EXPECT_EQ(transport_.dword_at(kLocalDestination), 0u);
   EXPECT_EQ(transport_.dword_at(kLocalReadPointer), 0u);
 }
@@ -3121,6 +3595,7 @@ TEST_F(GpuDeviceSdma, ExecutesAnIndirectBufferAndSignalsItsFence) {
   auto doorbell = std::bit_cast<std::array<std::byte, 8>>(uint64_t{128});
   ring_doorbell(0x800, doorbell);
   // The inbox drain can return between asynchronous SDMA service turns.
+  // The trap can also reach the owner before the final alignment NOP retires.
   // Wait for the submitted work before checking fences and the trap.
   ASSERT_TRUE(device_.synchronize_sdma_queue_for_test(/*engine=*/0));
 
@@ -3366,6 +3841,26 @@ TEST_F(GpuDeviceDelivery, MarshalsCommandProcessorInterruptsOntoThePciOwnerThrea
   EXPECT_EQ(transport_.dword_at(kRingBase + 4 * sizeof(uint32_t)), 0xfeedfaceu);
 }
 
+TEST_F(GpuDeviceDelivery, MarshalsVmFaultInterruptWithProcessAndPage) {
+  constexpr uint64_t kFaultAddress = 0x123456789abcdeu;
+  std::jthread producer([&] {
+    device_.report_vm_fault_for_test(7, kFaultAddress, rocjitsu::amdgpu::VmAccessKind::Write);
+  });
+  producer.join();
+
+  EXPECT_TRUE(transport_.triggered().empty());
+  device_.drain_doorbell_inbox_for_test();
+
+  ASSERT_EQ(transport_.triggered().size(), 1u);
+  EXPECT_EQ(transport_.dword_at(kRingBase) & 0x0fffu, 0x001bu);
+  EXPECT_EQ((transport_.dword_at(kRingBase) >> 24) & 0xfu, 3u);
+  EXPECT_EQ(transport_.dword_at(kRingBase + 12), (2u << 16) | 7u);
+  EXPECT_EQ(transport_.dword_at(kRingBase + 16), static_cast<uint32_t>(kFaultAddress >> 12));
+  EXPECT_EQ(transport_.dword_at(kRingBase + 20),
+            static_cast<uint32_t>((kFaultAddress >> 44) & 0xf));
+  EXPECT_EQ(transport_.dword_at(kWptrAddress), kInterruptEntryBytes);
+}
+
 TEST_F(GpuDeviceDelivery, SerializesDiagnosticAndCompletionInterruptsOnThePciOwnerThread) {
   std::atomic<bool> diagnostic_accepted = false;
   std::jthread diagnostic([&] {
@@ -3604,11 +4099,22 @@ TEST_F(GpuDeviceDelivery, RefusesASecondTransportAndKeepsServingTheFirst) {
 TEST_F(GpuDevice, AcceptsTheHdpFlushTheDriverIssues) {
   ASSERT_TRUE(device_.usable());
   constexpr uint64_t kFlushHole = 0x44000;
+  const auto coherence = soc_.cache_coherence();
+  coherence->mark_translated_local_cache_used();
+  const uint64_t before_flush = coherence->current_local_backing_epoch();
 
   write_register_at(kFlushHole, 0xdeadbeef);
 
   EXPECT_EQ(read_register_at(kFlushHole), 0xdeadbeefu)
       << "the flush hole is not modelled, so the write was dropped";
+  EXPECT_GT(coherence->current_local_backing_epoch(), before_flush)
+      << "the stock HDP handshake must retire cached local data";
+
+  const uint64_t before_vram_write = coherence->current_local_line_epoch(0x1000);
+  auto data = std::bit_cast<std::array<std::byte, 4>>(uint32_t{0x12345678});
+  ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kVramBar, data, 0x1000, true), 4);
+  EXPECT_GT(coherence->current_local_line_epoch(0x1000), before_vram_write)
+      << "a trapped local-memory write must also retire cached local data";
 }
 
 // The pinned driver binds every NBIF revision from 7.11.0 through 7.11.3 to
@@ -3729,8 +4235,20 @@ TEST_F(GpuDevice, RemembersWhatTheGuestWritesIntoTheMessageTable) {
   EXPECT_EQ(std::bit_cast<uint32_t>(read_back), 0xfeedfaceu);
 }
 
-// The driver's PCI table wildcards the device ID and matches on the class, so
-// this is the field that decides whether amdgpu attaches at all.
+TEST_F(GpuDevice, ExposesNoPrivatePageTableMailboxInBar4) {
+  ASSERT_TRUE(device_.usable());
+  const simdojo::BarSpec *table = bar(rocjitsu::GpuPciDevice::kMsixBar);
+  ASSERT_NE(table, nullptr);
+  EXPECT_EQ(table->size, rocjitsu::GpuPciDevice::kMsixBarBytes);
+  std::array<std::byte, 4> bytes{};
+  EXPECT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kMsixBar, bytes, 0x2000,
+                               /*write=*/false),
+            -1);
+  EXPECT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kMsixBar, bytes, 0x2000,
+                               /*write=*/true),
+            -1);
+}
+
 TEST_F(GpuDevice, PresentsTheClassAmdgpuBindsOn) {
   const simdojo::PciId id = device_.pci_id();
 
@@ -3828,6 +4346,146 @@ TEST_F(GpuDevice, KeepsDoorbellWritesForTheCommandProcessorToFind) {
   std::array<std::byte, 8> read{};
   ASSERT_EQ(device_.bar_access(rocjitsu::GpuPciDevice::kDoorbellBar, read, kDoorbell, false), 8);
   EXPECT_EQ(std::bit_cast<uint64_t>(read), 0x1234u);
+}
+
+// Build the small guest-shaped topology in the default test target.
+std::string shader_aperture_test_config() {
+  return R"({"num_threads":1,"cpu_dispatch_threads":1,"async_helper_threads":0,
+    "exec_mode":"functional",
+    "vm":{"arch":"cdna5","target":"gfx1250","gpu":{"num_gpus":1,"device":{
+      "gpu_id":1250,"gfx_target_version":120500,"vendor_id":4098,
+      "device_id":30145,"unique_id":1250,"local_mem_size":67108864,
+      "simd_count":4,"num_shader_engines":1,"num_shader_arrays_per_engine":1,
+      "num_cu_per_sh":1,"simd_per_cu":4,"max_waves_per_simd":16,
+      "wave_front_size":32,"max_slots_scratch_cu":32,"lds_size_kb":320,
+      "num_sdma_engines":1,"num_sdma_queues_per_engine":2
+    },"pci":{"vram_aperture_bytes":16777216}}},
+    "topology":{"root":{"name":"soc","type":"soc","children":[
+      {"name":"vram","type":"gpu_memory"},
+      {"name":"xcd0","type":"xcd","children":[
+        {"name":"l2","type":"l2_cache"},
+        {"name":"cp","type":"command_processor"},
+        {"name":"se0","type":"shader_engine","children":[
+          {"name":"cu0","type":"compute_unit","config":[
+            {"key":"num_wf_slots","value":"64"},
+            {"key":"sgprs_per_wf","value":"128"},
+            {"key":"vgprs_per_wf","value":"1024"},
+            {"key":"lds_size_kb","value":"320"}]}]}]}]},
+      "links":[
+        {"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},
+        {"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10}
+      ]}}
+  )";
+}
+
+TEST(GpuDeviceShaderApertures, ProgramsGfx1250GuestRegistersByVmid) {
+  util::StringDiagnostic diagnostic;
+  auto loaded_result = rocjitsu::config::load_config_from_string(
+      shader_aperture_test_config(), rocjitsu::kEmbeddedSchema, diagnostic.emitter());
+  ASSERT_TRUE(loaded_result.succeeded()) << diagnostic.message();
+  auto loaded = std::move(loaded_result.value());
+  ASSERT_EQ(loaded.device.gfx_target_version, 120500u);
+  simdojo::SimulationEngine engine(loaded.engine_config);
+  auto machine_result = rocjitsu::assemble_virtual_machine_topology(
+      loaded, engine.topology(), /*daemon_mode=*/false, diagnostic.emitter());
+  ASSERT_TRUE(machine_result.succeeded()) << diagnostic.message();
+  auto *machine = machine_result.value();
+  ASSERT_NE(machine, nullptr);
+  auto *soc = machine->soc(0);
+  ASSERT_NE(soc, nullptr);
+  auto *cu = soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+
+  rocjitsu::GpuPciDevice device(
+      "pci", rocjitsu::gpu_pci_spec_from_config(loaded.device, loaded.pci), nullptr, soc);
+  ASSERT_TRUE(device.usable());
+  ASSERT_TRUE(engine.create().succeeded());
+  constexpr uint64_t kGcControlBase = 0xA000;
+  const auto register_offset = [](uint64_t dword) { return (kGcControlBase + dword) * 4; };
+  const auto write_register = [&](uint64_t dword, uint32_t value) {
+    auto raw = std::bit_cast<std::array<std::byte, 4>>(value);
+    EXPECT_EQ(device.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, raw, register_offset(dword),
+                                /*write=*/true),
+              4);
+  };
+  const auto read_register = [&](uint64_t dword) {
+    std::array<std::byte, 4> raw{};
+    EXPECT_EQ(device.bar_access(rocjitsu::GpuPciDevice::kRegisterBar, raw, register_offset(dword),
+                                /*write=*/false),
+              4);
+    return std::bit_cast<uint32_t>(raw);
+  };
+  constexpr uint32_t kVmid3Bases = 0x20001000;
+  constexpr uint32_t kVmid4Bases = 0x30001400;
+  write_register(0x0900, 3u << 4); // GRBM_GFX_CNTL.VMID
+  write_register(0x09e4, 0);       // SH_MEM_CONFIG: 64-bit address mode
+  write_register(0x09e3, kVmid3Bases);
+  write_register(0x0900, 4u << 4);
+  write_register(0x09e4, 0);
+  write_register(0x09e3, kVmid4Bases);
+  EXPECT_EQ(read_register(0x09e3), kVmid4Bases);
+  write_register(0x0900, 3u << 4);
+  EXPECT_EQ(read_register(0x09e3), kVmid3Bases);
+
+  auto *wave = cu->dispatch_wf_at(/*wf_id=*/0, /*wg_id=*/0, /*pc=*/0,
+                                  /*num_sgprs=*/104, /*num_vgprs=*/32);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(3, rocjitsu::amdgpu::ProcessIdentityKind::Vmid);
+  constexpr uint64_t kSharedBase = 0x2000'0000'0000'0000ULL;
+  constexpr uint64_t kSharedLimit = 0x2000'0000'ffff'ffffULL;
+  constexpr uint64_t kPrivateBase = 0x1000'0000'0000'0000ULL;
+  constexpr uint64_t kPrivateLimit = 0x11ff'ffff'ffff'ffffULL;
+  EXPECT_EQ(wave->shared_aperture_base(), kSharedBase);
+  EXPECT_EQ(wave->shared_aperture_limit(), kSharedLimit);
+  EXPECT_EQ(wave->private_aperture_base(), kPrivateBase);
+  EXPECT_EQ(wave->private_aperture_limit(), kPrivateLimit);
+  EXPECT_EQ(rocjitsu::amdgpu::resolve_src_scalar64(*wave, /*selector=*/235, /*m0_ev=*/125),
+            kSharedBase)
+      << "src_shared_base must form the high half of RCCL's flat LDS pointer";
+  EXPECT_EQ(rocjitsu::amdgpu::resolve_src_scalar(*wave, /*selector=*/235, /*m0_ev=*/125),
+            0x2000'0000u);
+  wave->halt();
+
+  auto *other_wave = cu->dispatch_wf_at(/*wf_id=*/0, /*wg_id=*/0, /*pc=*/0,
+                                        /*num_sgprs=*/104, /*num_vgprs=*/32);
+  ASSERT_NE(other_wave, nullptr);
+  other_wave->set_process_id(4, rocjitsu::amdgpu::ProcessIdentityKind::Vmid);
+  EXPECT_EQ(other_wave->shared_aperture_base(), 0x3000'0000'0000'0000ULL);
+  EXPECT_EQ(other_wave->private_aperture_base(), 0x1400'0000'0000'0000ULL);
+  other_wave->halt();
+
+  // A MES PASID can be a small integer that matches a programmed VMID. The
+  // divergent banks provide no safe choice, so retain the CU's base apertures.
+  constexpr uint64_t kFallbackShared = 0x5000'0000'0000'0000ULL;
+  cu->set_apertures(kFallbackShared, kFallbackShared + 0xffff, 0, 0);
+  auto *ambiguous_wave = cu->dispatch_wf_at(/*wf_id=*/0, /*wg_id=*/0, /*pc=*/0,
+                                            /*num_sgprs=*/104, /*num_vgprs=*/32);
+  ASSERT_NE(ambiguous_wave, nullptr);
+  testing::internal::CaptureStderr();
+  ambiguous_wave->set_process_id(3, rocjitsu::amdgpu::ProcessIdentityKind::Pasid);
+  const std::string aperture_warning = testing::internal::GetCapturedStderr();
+  EXPECT_NE(aperture_warning.find("no unambiguous guest shader aperture for PASID 3"),
+            std::string::npos);
+  EXPECT_EQ(ambiguous_wave->shared_aperture_base(), kFallbackShared);
+  ambiguous_wave->halt();
+
+  // MES exposes the PASID before firmware assigns a hardware VMID. When all
+  // programmed KFD banks agree, the chosen VMID does not change this value.
+  write_register(0x0900, 4u << 4);
+  write_register(0x09e3, kVmid3Bases);
+  auto *mes_wave = cu->dispatch_wf_at(/*wf_id=*/0, /*wg_id=*/0, /*pc=*/0,
+                                      /*num_sgprs=*/104, /*num_vgprs=*/32);
+  ASSERT_NE(mes_wave, nullptr);
+  mes_wave->set_process_id(3, rocjitsu::amdgpu::ProcessIdentityKind::Pasid);
+  EXPECT_EQ(mes_wave->shared_aperture_base(), kSharedBase);
+  EXPECT_EQ(mes_wave->private_aperture_base(), kPrivateBase);
+  mes_wave->halt();
+
+  ASSERT_TRUE(device.reset(simdojo::ResetKind::FunctionLevel).succeeded());
+  EXPECT_FALSE(
+      cu->resolve_shader_apertures(3, rocjitsu::amdgpu::ProcessIdentityKind::Vmid).has_value());
+  EXPECT_FALSE(
+      cu->resolve_shader_apertures(4, rocjitsu::amdgpu::ProcessIdentityKind::Vmid).has_value());
 }
 
 // Which GPU is presented comes from the config, so a different part is a
@@ -4085,7 +4743,7 @@ TEST_F(GpuDeviceWindow, RestoresTheDiscoveryTableOnReset) {
   ASSERT_EQ(read_register(rocjitsu::MmioRegister::MmData), 0xdeadbeefu)
       << "the signature was not actually overwritten, so this proves nothing";
 
-  gpu_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(gpu_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
 
   select(table_at);
   EXPECT_EQ(read_register(rocjitsu::MmioRegister::MmData), 0x28211407u)
@@ -4346,7 +5004,7 @@ TEST_F(GpuDevice, RestoresPowerOnRegisterStateOnReset) {
                                /*write=*/true),
             4);
 
-  device_.reset(simdojo::ResetKind::LostConnection);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::LostConnection).succeeded());
 
   EXPECT_EQ(read_register(rocjitsu::MmioRegister::DriverScratch1), 0u);
   EXPECT_NE(read_register(rocjitsu::MmioRegister::Mp0SmnC2pmsg33) & rocjitsu::kFirmwareInitDoneBit,
@@ -4519,7 +5177,7 @@ TEST_F(GpuDeviceDelivery, ResetClearsAnUnacknowledgedOverflow) {
   ASSERT_EQ(transport_.dword_at(kWptrAddress) & 1u, 1u)
       << "the test did not establish a latched overflow before reset";
 
-  device_.reset(simdojo::ResetKind::FunctionLevel);
+  EXPECT_TRUE(device_.reset(simdojo::ResetKind::FunctionLevel).succeeded());
   program_ring();
   ASSERT_TRUE(device_.deliver_interrupt({.client_id = 0x12, .source_id = 0x34}));
   EXPECT_EQ(transport_.dword_at(kWptrAddress) & 1u, 0u)

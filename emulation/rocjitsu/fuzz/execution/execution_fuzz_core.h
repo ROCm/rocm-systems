@@ -3,6 +3,10 @@
 
 #pragma once
 
+#include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
+#include "util/diagnostic.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -19,9 +23,16 @@ namespace rocjitsu::execution_fuzz {
 
 inline constexpr size_t kHeaderSize = 2;
 inline constexpr size_t kMaxInputSize = 1024;
+inline constexpr size_t kGeneratedKernelSeedSize = 256;
+inline constexpr uint8_t kTargetMask = 0x0f;
+inline constexpr unsigned kArithmeticSemanticsShift = 4;
+inline constexpr uint8_t kArithmeticCpuMask = 0xc0;
+inline constexpr unsigned kArithmeticCpuShift = 6;
 inline constexpr uint8_t kAsyncSelectBit = 0x1;
 inline constexpr uint8_t kConcurrentIssuerMask = 0x6;
 inline constexpr uint8_t kFullExecMaskBit = 0x8;
+inline constexpr uint8_t kWaitCheckingBit = 0x10;
+inline constexpr uint8_t kCacheMemoryBit = 0x20;
 
 enum class FuzzTarget : uint8_t {
   Gfx908,
@@ -31,7 +42,7 @@ enum class FuzzTarget : uint8_t {
   Gfx1010,
   Gfx1030,
   Gfx1100,
-  Gfx1151,
+  Gfx1150,
   Gfx1200,
   Gfx1201,
   Gfx1250,
@@ -59,27 +70,66 @@ struct RunStats {
   uint64_t inputs_executed = 0;
   uint64_t inputs_halted = 0;
   uint64_t inputs_stopped = 0;
+  /// @brief L2 backing reads observed for the cache-backed data route.
+  /// @details Used by the routing test and omitted from the CLI summary.
+  uint64_t l2_backing_reads = 0;
+  /// @brief Resolved arithmetic flags for a single input, including any host fallback.
+  uint64_t arithmetic_flags = 0;
+  bool force_scalar = false;
 };
 
 std::optional<FuzzTarget> parse_target(std::string_view name);
+/// @brief Query metadata for a valid FuzzTarget (excluding Count).
 std::string_view target_name(FuzzTarget target);
+
+/// @brief Return the ISA architecture for an execution fuzz target.
+rocjitsu::IsaFamily target_arch(FuzzTarget target);
+
+/// @brief Return the canonical registry ID for an execution fuzz target.
+rj_code_target_id_t target_id(FuzzTarget target);
+
+/// @brief Return the target-specific encoding of `s_endpgm`.
+uint32_t terminating_instruction(FuzzTarget target);
+
+/// @brief Align a raw program and append terminators plus decoder and CU fetch padding.
+util::FailureOr<std::vector<uint8_t>> terminated_program(std::span<const uint8_t> instructions,
+                                                         FuzzTarget target,
+                                                         util::DiagnosticEmitter diagnostic = {});
 bool targets_cover_amdgpu_execution_registry();
 std::optional<FuzzTarget> indexed_target(uint8_t index);
 
 /// @brief Execute an arbitrary instruction stream.
-/// @details Byte zero selects a target, byte one selects execution modes, and
-/// the remaining bytes are instructions. Unassigned targets, decode rejection,
-/// unsupported execution, and the instruction budget are normal outcomes;
+/// @details Byte zero selects a target and arithmetic semantics. Byte one selects
+/// execution modes and the host CPU backend. The remaining bytes are instructions.
+/// Backend, wait-checking, and cache selectors can change independently of
+/// the initial register and memory contents.
+/// Unassigned targets, decode rejection, unsupported execution, and the
+/// instruction budget are normal outcomes.
+/// Invalid harness arguments and setup failures return failure and emit a diagnostic;
 /// host failures remain visible to the fuzzing runtime. All process-scoped GWS
 /// resources start armed with a zero count so a barrier without a guest INIT is
 /// a defined guest outcome.
-RunStats
+util::FailureOr<RunStats>
 run_input(std::span<const uint8_t> input, std::optional<FuzzTarget> target = std::nullopt,
           std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources> async_resources = nullptr,
-          AsyncMode async_mode = AsyncMode::Auto, std::optional<unsigned> issuers = std::nullopt);
-std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>
-make_async_execution_resources(unsigned helpers);
-std::vector<uint8_t> random_input(uint64_t seed, size_t size = kMaxInputSize,
-                                  std::optional<FuzzTarget> target = std::nullopt);
+          AsyncMode async_mode = AsyncMode::Auto, std::optional<unsigned> issuers = std::nullopt,
+          util::DiagnosticEmitter diagnostic = {});
+/// @brief Create helper resources, or fail with a diagnostic for a count outside 1..128.
+util::FailureOr<std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>>
+make_async_execution_resources(unsigned helpers, util::DiagnosticEmitter diagnostic = {});
+
+/// @brief Generate a deterministic input for a random execution campaign.
+/// @details Mixes arbitrary bytes, target encodings, and generated kernels.
+/// Invalid sizes or targets and unavailable decoders fail with a diagnostic.
+util::FailureOr<std::vector<uint8_t>> random_input(uint64_t seed, size_t size = kMaxInputSize,
+                                                   std::optional<FuzzTarget> target = std::nullopt,
+                                                   util::DiagnosticEmitter diagnostic = {});
+
+/// @brief Generate a bounded program as a replay input.
+/// @details Used by the random mix and seed corpora. Invalid sizes or targets
+/// fail with a diagnostic.
+util::FailureOr<std::vector<uint8_t>>
+generated_kernel_input(uint64_t seed, size_t size, FuzzTarget target,
+                       util::DiagnosticEmitter diagnostic = {});
 
 } // namespace rocjitsu::execution_fuzz

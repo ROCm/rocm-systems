@@ -14,6 +14,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -123,6 +125,117 @@ TEST(GoldenFrames, Gfx1250MulticastIsOneFusedPacket) {
   EXPECT_EQ(mapped.plan.frames[0].bytes, 96u);
   EXPECT_EQ(mapper.WalkFrame(mapped.plan, 0).Names(),
             (Names{"HDP_FLUSH", "COPY_LINEAR_MULTICAST_WAITSIGNAL"}));
+}
+
+// HIP leaves the HDP flush out, so a dependent copy's prologue holds only the
+// dependency's wait, which the fused packet can carry itself.
+abce_copy_metadata_t DependentMetadata(Mapper& mapper, const std::vector<abce_dep_signal_t>& deps,
+                                       bool emit_hdp_flush) {
+  abce_copy_metadata_t metadata = mapper.NewMetadata();
+  metadata.coherency.flags.emit_hdp_flush = emit_hdp_flush;
+  metadata.deps = deps.data();
+  metadata.num_deps = static_cast<uint32_t>(deps.size());
+  return metadata;
+}
+
+std::vector<uint32_t> FrameWords(const abce_plan_t& plan, uint32_t frame_idx) {
+  const std::vector<uint8_t> bytes = Mapper::FrameBytes(plan, frame_idx);
+  std::vector<uint32_t> words(bytes.size() / sizeof(uint32_t));
+  std::memcpy(words.data(), bytes.data(), words.size() * sizeof(uint32_t));
+  return words;
+}
+
+constexpr uint32_t kWaitSignalHeaderWait = 1u << 30;
+constexpr uint32_t kWaitSignalHeaderSignal = 1u << 31;
+
+TEST(GoldenFrames, Gfx1250DependentCopyWaitsInsideTheCopyPacket) {
+  Mapper mapper(IsaByName("gfx1250"));
+  alignas(8) uint64_t dep_value = 1;
+  const std::vector<abce_dep_signal_t> deps = {abce_dep_signal_make(&dep_value, 1, 0)};
+  abce_plan_t plan;
+  ASSERT_EQ(mapper.Map({MakeHostToDevice(0x1000, 0x8000, 4 * kKiB)},
+                       DependentMetadata(mapper, deps, /*emit_hdp_flush=*/false), &plan),
+            ABCE_STATUS_OK);
+  ASSERT_EQ(plan.num_frames, 1u);
+  EXPECT_EQ(plan.frames[0].bytes, 76u) << "header + 7 wait + 6 body + 5 signal";
+  const auto walk = mapper.WalkFrame(plan, 0);
+  EXPECT_TRUE(walk.clean);
+  EXPECT_EQ(walk.Names(), (Names{"COPY_LINEAR_WAITSIGNAL"}));
+
+  const std::vector<uint32_t> words = FrameWords(plan, 0);
+  const uint64_t dep_address = reinterpret_cast<uintptr_t>(&dep_value);
+  EXPECT_EQ(words[0] & (kWaitSignalHeaderWait | kWaitSignalHeaderSignal),
+            kWaitSignalHeaderWait | kWaitSignalHeaderSignal);
+  EXPECT_EQ(words[2], static_cast<uint32_t>(dep_address)) << "WAIT address, low";
+  EXPECT_EQ(words[3], static_cast<uint32_t>(dep_address >> 32)) << "WAIT address, high";
+  EXPECT_EQ(words[4], 0u) << "WAIT reference, low";
+  EXPECT_EQ(words[5], 0u) << "WAIT reference, high";
+  EXPECT_EQ(words[6], 0xffffffffu) << "WAIT mask, low";
+  EXPECT_EQ(words[7], 0xffffffffu) << "WAIT mask, high";
+}
+
+TEST(GoldenFrames, Gfx1250SecondDependencyStaysAPollAheadOfTheCopy) {
+  Mapper mapper(IsaByName("gfx1250"));
+  alignas(8) uint64_t first_dep_value = 1;
+  alignas(8) uint64_t second_dep_value = 1;
+  const std::vector<abce_dep_signal_t> deps = {abce_dep_signal_make(&first_dep_value, 1, 0),
+                                               abce_dep_signal_make(&second_dep_value, 1, 0)};
+  abce_plan_t plan;
+  ASSERT_EQ(mapper.Map({MakeHostToDevice(0x1000, 0x8000, 4 * kKiB)},
+                       DependentMetadata(mapper, deps, /*emit_hdp_flush=*/false), &plan),
+            ABCE_STATUS_OK);
+  ASSERT_EQ(plan.num_frames, 1u);
+  const auto walk = mapper.WalkFrame(plan, 0);
+  EXPECT_TRUE(walk.clean);
+  ASSERT_EQ(walk.Names(), (Names{"POLL_MEM_64", "COPY_LINEAR_WAITSIGNAL"}));
+
+  const std::vector<uint32_t> words = FrameWords(plan, 0);
+  const uint64_t first_address = reinterpret_cast<uintptr_t>(&first_dep_value);
+  const uint64_t second_address = reinterpret_cast<uintptr_t>(&second_dep_value);
+  EXPECT_EQ(words[1], static_cast<uint32_t>(second_address))
+      << "the poll takes the second dependency";
+  const uint32_t copy_dword = static_cast<uint32_t>(walk.packets[1].byte_offset / sizeof(uint32_t));
+  EXPECT_NE(words[copy_dword] & kWaitSignalHeaderWait, 0u);
+  EXPECT_EQ(words[copy_dword + 2], static_cast<uint32_t>(first_address))
+      << "the copy waits on the first dependency";
+}
+
+// The flush must follow the dependency, so the dependency stays a poll ahead of it.
+TEST(GoldenFrames, Gfx1250DependencyAheadOfAFlushStaysAPoll) {
+  Mapper mapper(IsaByName("gfx1250"));
+  alignas(8) uint64_t dep_value = 1;
+  const std::vector<abce_dep_signal_t> deps = {abce_dep_signal_make(&dep_value, 1, 0)};
+  abce_plan_t plan;
+  ASSERT_EQ(mapper.Map({MakeHostToDevice(0x1000, 0x8000, 4 * kKiB)},
+                       DependentMetadata(mapper, deps, /*emit_hdp_flush=*/true), &plan),
+            ABCE_STATUS_OK);
+  const auto walk = mapper.WalkFrame(plan, 0);
+  EXPECT_TRUE(walk.clean);
+  ASSERT_EQ(walk.Names(), (Names{"POLL_MEM_64", "HDP_FLUSH", "COPY_LINEAR_WAITSIGNAL"}));
+  const std::vector<uint32_t> words = FrameWords(plan, 0);
+  const uint32_t copy_dword = static_cast<uint32_t>(walk.packets[2].byte_offset / sizeof(uint32_t));
+  EXPECT_EQ(words[copy_dword] & kWaitSignalHeaderWait, 0u);
+}
+
+// The coordinator releases the start gate only once the dependency is met, so a
+// fan-out keeps the dependency as a poll ahead of the release.
+TEST(GoldenFrames, Gfx1250FanOutCoordinatorPollsTheDependencyBeforeTheGate) {
+  MapperOptions options;
+  options.num_engines = 4;
+  Mapper mapper(IsaByName("gfx1250"), options);
+  alignas(8) uint64_t dep_value = 1;
+  const std::vector<abce_dep_signal_t> deps = {abce_dep_signal_make(&dep_value, 1, 0)};
+  abce_plan_t plan;
+  ASSERT_EQ(mapper.Map(MakeLinearBatch(4, 1 * kMiB),
+                       DependentMetadata(mapper, deps, /*emit_hdp_flush=*/false), &plan),
+            ABCE_STATUS_OK);
+  ASSERT_EQ(plan.num_frames, 4u);
+  ASSERT_TRUE(plan.start_gate_required);
+  const auto walk = mapper.WalkFrame(plan, 0);
+  EXPECT_TRUE(walk.clean);
+  ASSERT_GE(walk.Names().size(), 2u);
+  EXPECT_EQ(walk.Names()[0], "POLL_MEM_64");
+  EXPECT_EQ(walk.Names()[1], "ATOMIC") << "the start gate is released after the dependency";
 }
 
 TEST(GoldenFrames, Gfx942GatedFanOutHasACoordinatorAndFollowers) {
@@ -327,6 +440,27 @@ TEST(Gfx125PlusSignals, TheArmedCountMatchesEverySignalUpdateTheFramesMake) {
   }
 }
 
+// A signal in device memory needs its coordination store read back before the
+// doorbell; the flag rides from the signal reference into the plan, and submit
+// still arms the word for the fan-out.
+TEST(Gfx125PlusSignals, ADeviceMemorySignalIsReadBackAfterArming) {
+  MapperOptions options;
+  options.num_engines = 4;
+  abce_platform_caps_t caps = abce_detect_default_platform_caps(IsaByName("gfx1250").isa);
+  caps.emit_hdp_flush = false;
+  options.caps = caps;
+  Mapper mapper(IsaByName("gfx1250"), options);
+  abce_copy_metadata_t metadata = mapper.NewMetadata();
+  metadata.out.host_store_readback = true;
+  abce_plan_t plan;
+  ASSERT_EQ(mapper.Map(MakeLinearBatch(4, 1 * kMiB), metadata, &plan), ABCE_STATUS_OK);
+  ASSERT_EQ(plan.num_frames, 4u);
+  ASSERT_TRUE(plan.multi);
+  EXPECT_TRUE(plan.coordination_readback);
+  ASSERT_EQ(mapper.Submit(&plan), ABCE_STATUS_OK);
+  EXPECT_EQ(mapper.signal().value, plan.fan_in_count);
+}
+
 TEST(Gfx125PlusSignals, ABackToBackBatchSignalsOnEveryCopy) {
   MapperOptions options;
   options.num_engines = 4;
@@ -382,6 +516,25 @@ TEST(Placement, ExplicitModesOverrideTheSizeRule) {
   EXPECT_EQ(FramesFor(mapper, MakeLinearBatch(64, 64 * kKiB), ABCE_LINEAR_BATCH_MODE_FORCE_BACK_TO_BACK),
             1u);
   EXPECT_GT(FramesFor(mapper, MakeLinearBatch(8, 4 * kKiB), ABCE_LINEAR_BATCH_MODE_FORCE_FAN_OUT), 1u);
+}
+
+// gfx125+ fused copies signal one by one, so sharing a ring serializes them: an
+// automatic batch fans out at any total and copy count, two copies included, and
+// only an explicit mode keeps it on one.
+TEST(Placement, Gfx1250FansOutSmallBatchesUnlessForced) {
+  MapperOptions options;
+  options.num_engines = 4;
+  Mapper mapper(IsaByName("gfx1250"), options);
+  EXPECT_EQ(FramesFor(mapper, MakeLinearBatch(2, 4 * kKiB)), 2u);
+  EXPECT_EQ(FramesFor(mapper, MakeLinearBatch(3, 16 * kKiB)), 3u);
+  EXPECT_EQ(FramesFor(mapper, MakeLinearBatch(4, 4 * kKiB)), 4u);
+  EXPECT_EQ(FramesFor(mapper, MakeLinearBatch(4, 64 * kKiB)), 4u);
+  EXPECT_EQ(FramesFor(mapper, MakeLinearBatch(4, 4 * kKiB), ABCE_LINEAR_BATCH_MODE_FORCE_BACK_TO_BACK),
+            1u);
+
+  Mapper gfx942_mapper(IsaByName("gfx942"), options);
+  EXPECT_EQ(FramesFor(gfx942_mapper, MakeLinearBatch(2, 4 * kKiB)), 1u)
+      << "before gfx125 the same two copies stay back-to-back";
 }
 
 TEST(Placement, ALoneCopyIsNeverTreatedAsABatch) {
@@ -581,5 +734,56 @@ INSTANTIATE_TEST_SUITE_P(AllIsas, SubmitMatchesMap,
                          ::testing::Values("gfx90a", "gfx942", "gfx950", "gfx1030", "gfx1100",
                                            "gfx1201", "gfx1250"),
                          [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
+
+//===----------------------------------------------------------------------===//
+// Submission tail (Windows native SDMA queue)
+//===----------------------------------------------------------------------===//
+
+// Maps |ops| on |num_engines| gfx1201 rings set up as a Windows native SDMA queue
+// (align64, 32-byte tail), submits, and checks every span each ring published
+// starts with its frame where it has one and ends in 32 zero bytes, the room the
+// thunk writes its fence into.
+void ExpectEverySpanEndsInTheTail(uint32_t num_engines, const std::vector<abce_copy_op_t>& ops,
+                                  uint32_t min_frames) {
+  constexpr uint32_t kTail = 32;
+  MapperOptions options;
+  options.num_engines = num_engines;
+  options.ring_options.align64 = true;
+  options.ring_options.submission_tail_bytes = kTail;
+  Mapper mapper(IsaByName("gfx1201"), options);
+  abce_plan_t plan;
+  const abce_copy_metadata_t metadata = mapper.NewMetadata();
+  ASSERT_EQ(mapper.Map(ops, metadata, &plan), ABCE_STATUS_OK);
+  ASSERT_GE(plan.num_frames, min_frames);
+  std::vector<std::vector<uint8_t>> frames;
+  std::vector<uint32_t> engines;
+  for (uint32_t frame_idx = 0; frame_idx < plan.num_frames; ++frame_idx) {
+    frames.push_back(Mapper::FrameBytes(plan, frame_idx));
+    engines.push_back(plan.frames[frame_idx].engine);
+  }
+  ASSERT_EQ(mapper.Submit(&plan), ABCE_STATUS_OK);
+
+  for (uint32_t frame_idx = 0; frame_idx < frames.size(); ++frame_idx) {
+    SCOPED_TRACE(frame_idx);
+    abce_test::FakeRing& ring = mapper.ring(engines[frame_idx]);
+    const std::vector<uint8_t>& stream = ring.stream();
+    ASSERT_EQ(ring.doorbell_history().size(), 1u) << "one frame, one span on its ring";
+    const uint64_t end = ring.doorbell_history()[0];
+    ASSERT_EQ(stream.size(), end);
+    ASSERT_GE(end, frames[frame_idx].size() + kTail);
+    EXPECT_EQ(end % 64, 0u) << "align64 keeps every span whole lines";
+    EXPECT_TRUE(std::equal(frames[frame_idx].begin(), frames[frame_idx].end(), stream.begin()));
+    for (uint64_t byte_idx = end - kTail; byte_idx < end; ++byte_idx)
+      ASSERT_EQ(stream[byte_idx], 0) << "the fence's 32 bytes must be free";
+  }
+}
+
+TEST(SubmissionTail, ASingleFrameEndsInTheTail) {
+  ExpectEverySpanEndsInTheTail(1, {MakeHostToDevice(0x1000, 0x8000, 4 * kKiB)}, 1);
+}
+
+TEST(SubmissionTail, EveryFrameOfAFanOutEndsInTheTail) {
+  ExpectEverySpanEndsInTheTail(4, MakeLinearBatch(4, 1 * kMiB), 2);
+}
 
 }  // namespace

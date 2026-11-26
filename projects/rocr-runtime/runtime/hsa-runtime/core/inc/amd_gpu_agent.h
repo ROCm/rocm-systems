@@ -325,10 +325,13 @@ class GpuAgent : public GpuAgentInt {
                             std::vector<core::Signal*>& dep_signals) override;
 
   // @brief Override from core::Agent.
+  // @p peer_agent, if not null, is the GPU every rect is copied to; a copy with a peer in the
+  // same hive runs on the SDMA engine recommended for that peer, as DmaCopy does.
   hsa_status_t DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
                            const hsa_amd_memory_copy_rect_ptr_t* dsts, const hsa_dim3_t* ranges,
                            uint16_t num_rects, hsa_amd_copy_direction_t dir,
-                           std::vector<core::Signal*>& dep_signals, core::Signal& out_signal);
+                           std::vector<core::Signal*>& dep_signals, core::Signal& out_signal,
+                           core::Agent* peer_agent = nullptr);
 
   // @brief Override from core::Agent.
   hsa_status_t DmaFill(void* ptr, uint32_t value, size_t count) override;
@@ -472,6 +475,9 @@ class GpuAgent : public GpuAgentInt {
   __forceinline bool HostAtomicsSupported() const { return xgmi_cpu_gpu_; }
   /// @brief The CP firmware consumes completion signal handle hints.
   bool SignalHintsSupported() const;
+  /// @brief The agent executes hsa_amd_ext_kernel_dispatch_packet_t: natively (gfx12.5), or
+  /// with CP firmware that reports AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH.
+  bool ExtendedAqlDispatchSupported() const;
   /// @brief Is large BAR support enabled for this GPU.
   __forceinline bool LargeBarEnabled() const { return large_bar_enabled_; }
 
@@ -523,9 +529,11 @@ class GpuAgent : public GpuAgentInt {
       case 9:
         switch (supported_isas()[0]->GetMinorVersion()) {
           case 4:
-            return (properties_.EngineId.ui32.uCode >= GFX94X_MIN_CP_FW_VERSION_REQUIRED);
+            return (properties_.uCodeEngineVersions.uCodeCompute >=
+                    GFX94X_MIN_CP_FW_VERSION_REQUIRED);
           case 5:
-            return (properties_.EngineId.ui32.uCode >= GFX95X_MIN_CP_FW_VERSION_REQUIRED);
+            return (properties_.uCodeEngineVersions.uCodeCompute >=
+                    GFX95X_MIN_CP_FW_VERSION_REQUIRED);
           default:
             break;
         }
@@ -589,6 +597,10 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Remove a destroyed AQL queue from agent-owned tracking.
   void UnregisterAqlQueue(core::Queue* queue);
 
+  /// @brief Warn once per agent that no second-level trap handler is bound.
+  /// Called from queue creation, not from agent init.
+  void WarnIfNoSecondLevelTrapHandler();
+
   /// @brief Check if the accelerator is ready to be used.
   /// @return HSA_STATUS_SUCCESS if the accelerator is ready, HSA_STATUS_ERROR_RESOURCE_NOT_READY otherwise.
   hsa_status_t CheckAcceleratorReadiness();
@@ -633,6 +645,19 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Update ::t1_ tick count.
   void SyncClocks();
+
+  // @brief True if a packet's raw start/end ticks are set and do not predate t0_,
+  // after removing any packet-clock epoch offset.
+  bool RawTsValid(uint64_t start, uint64_t end);
+
+  // @brief Return the packet-clock epoch offset, asking the driver to establish it
+  // from @p raw_tick if not yet latched.  Acquires t1_lock_.
+  int64_t ClockEpochOffset(uint64_t raw_tick);
+
+  // @brief Body of ClockEpochOffset; the caller must already hold t1_lock_.  Also
+  // called from the scalar TranslateTime path (which holds the lock) so scalar
+  // conversions establish the offset too.
+  int64_t ClockEpochOffsetLocked(uint64_t raw_tick);
 
   // @brief Binds the second-level trap handler to this node.
   void BindTrapHandler();
@@ -712,9 +737,11 @@ class GpuAgent : public GpuAgentInt {
 
   lazy_ptr<core::Queue> queues_[QueueCount];
 
-  // @brief Hint support is read from the utility queue's caps once, on first query.
-  mutable std::once_flag signal_hints_once_;
-  mutable bool signal_hints_supported_ = false;
+  // @brief The CP firmware's capabilities, read from the utility queue's caps once, on first
+  // query.
+  uint32_t CpFirmwareCaps() const;
+  mutable std::once_flag cp_caps_once_;
+  mutable uint32_t cp_caps_ = 0;
 
   // @brief Mutex to protect the update to coherency type.
   std::mutex coherency_lock_;
@@ -731,17 +758,22 @@ class GpuAgent : public GpuAgentInt {
   // @brief Mutex to protect sdma gang submissions.
   std::mutex sdma_gang_lock_;
 
-  // @brief GPU tick on initialization.
+  // @brief GPU tick on initialization.  Set once at construction and never
+  // modified afterwards, so lock-free reads (e.g. in RawTsValid) are safe.
   HsaClockCounters t0_;
 
   HsaClockCounters t1_;
 
   double historical_clock_ratio_;
 
-  // @brief Offset (in GPU ticks) between AQL dispatch timestamp clock and
-  // D3DKMTQueryClockCalibration GPU clock.  Non-zero on Windows where the two
-  // GPU clock domains share frequency but differ in epoch.  Computed on first
-  // TranslateTime call; zero on Linux (clocks match).
+  // @brief Offset (in GPU ticks) between the packet timestamp clock and the
+  // GPUClockCounter from GetClockCounters.  Non-zero on Windows and WSL (DXG),
+  // where the two GPU clock domains share frequency but differ in epoch (AQL
+  // ahead of the calibration on Windows, behind it on WSL).  Detected from the
+  // first translated timestamp that proves a mismatch (on Linux builds, by
+  // Driver::GetTimestampEpochOffset); zero on native Linux / KFD (clocks match).
+  // Sign follows the mismatch direction: positive on Windows (AQL leads the
+  // calibration), negative on WSL/DXG (AQL lags it).
   int64_t gpu_clock_offset_;
 
   // @brief s_memrealtime nominal clock frequency
@@ -768,6 +800,13 @@ class GpuAgent : public GpuAgentInt {
   void* trap_code_buf_;
 
   size_t trap_code_buf_size_;
+
+  // @brief Set by BindTrapHandler when no trap handler could be bound because the
+  // driver does not report support for exception debugging.
+  bool trap_handler_unavailable_ = false;
+
+  // @brief Limits WarnIfNoSecondLevelTrapHandler to one message per agent.
+  std::atomic<bool> queue_exception_warned_{false};
 
   // @brief Mappings from doorbell index to queue, for trap handler.
   // Correlates with output of s_sendmsg(MSG_GET_DOORBELL) for queue identification.
@@ -1128,6 +1167,8 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Is PCIe large BAR enabled.
   bool large_bar_enabled_;
 
+  // Native support (gfx12.5), set at construction and never written later. CP firmware support
+  // comes from CpFirmwareCaps(); ExtendedAqlDispatchSupported() combines the two.
   bool extended_aql_dispatch_supported_;
 
   /* Workgroup Cluster Parameters */

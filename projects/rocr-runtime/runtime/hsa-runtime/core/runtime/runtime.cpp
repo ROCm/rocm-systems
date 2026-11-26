@@ -123,6 +123,8 @@ extern void _loader_debug_state();
 namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
+bool g_use_yielding_poll;
+bool g_use_clflushopt;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
@@ -1090,6 +1092,25 @@ hsa_status_t Runtime::InteropUnmap(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
+void Runtime::MarkReservedAddressSvm(const void* ptr, size_t size) {
+  if (ptr == nullptr || size == 0) return;
+
+  const uint8_t* start = reinterpret_cast<const uint8_t*>(ptr);
+  const uint8_t* end = start + size;
+
+  std::lock_guard<std::shared_mutex> lock(memory_lock_);
+  auto it = reserved_address_map_.upper_bound(ptr);
+  if (it != reserved_address_map_.begin()) --it;
+
+  for (; it != reserved_address_map_.end(); ++it) {
+    const uint8_t* range_start = reinterpret_cast<const uint8_t*>(it->first);
+    const uint8_t* range_end = range_start + it->second.size;
+    if (range_end <= start) continue;
+    if (range_start >= end) break;
+    it->second.svm_attrib = true;
+  }
+}
+
 /* This should be called memory_lock_ held */
 Runtime::AddressHandle* Runtime::VMemoryFindReservedAddressHandle(const void* va) {
   auto reservedAddressIt = reserved_address_map_.upper_bound(va);
@@ -1118,8 +1139,10 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
         ptr) {
       /* Allocation found */
       info->type = HSA_EXT_POINTER_TYPE_HSA_VMEM;
-      info->agentBaseAddress = const_cast<void*>(ptr);
-      info->hostBaseAddress = const_cast<void*>(ptr);
+      // Report the mapping the pointer lies in, as for other allocations: callers pair the base
+      // with sizeInBytes, so an interior pointer must not be reported as the base.
+      info->agentBaseAddress = const_cast<void*>(mappedHandleIt->first);
+      info->hostBaseAddress = const_cast<void*>(mappedHandleIt->first);
       info->sizeInBytes = mappedHandleIt->second.size;
       info->registered = true;
 
@@ -1197,9 +1220,17 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
   /* This is not a mapped address. Check if it is a reserved address range */
   auto addressHandle = VMemoryFindReservedAddressHandle(ptr);
   if (addressHandle) {
-    info->type = HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
-    info->agentBaseAddress = NULL;
+    /*
+     * Reservations that have had hsa_amd_svm_attributes_set applied are backed
+     * by SVM system memory. Bare reservations have no backing.
+     */
+    info->type = addressHandle->svm_attrib ? HSA_EXT_POINTER_TYPE_SVM
+                                           : HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
     info->hostBaseAddress = addressHandle->os_addr;
+    // The driver query supplies an agent address when it recognizes the
+    // reservation. Until then the agent base stays null. Fill and copy treat a
+    // non-null agent base as a mapped allocation and require an owner.
+    info->agentBaseAddress = nullptr;
     info->sizeInBytes = addressHandle->size;
     info->registered = addressHandle->registered;
     info->agentOwner = {};
@@ -1270,12 +1301,15 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
         HSA_STATUS_SUCCESS) {
       /*
-       * For SVM allocations, the VA is reserved using hsa_amd_vmem_address_reserve with
-       * HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag. So for SVM allocations, we do not return
-       * yet as we can check whether this address was registered via hsa_amd_svm_attributes_set
-       * and provide additional information from hsaKmtQueryPointerInfo.
+       * An unregistered reservation falls through to the driver query, including
+       * after hsa_amd_svm_attributes_set has changed its type to SVM. That is the
+       * query these NO_REGISTER addresses went through before. A registered
+       * reservation, bare or SVM, is fully described here.
        */
-      if (!(retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR && !retInfo.registered)) {
+      const bool query_driver = !retInfo.registered &&
+          (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+           retInfo.type == HSA_EXT_POINTER_TYPE_SVM);
+      if (!query_driver) {
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
       }
@@ -1310,11 +1344,11 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
       if (described) ptr_driver = driver;
     }
     if (ptr_driver == nullptr) {
-      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR) {
-        /* This is an address that was reserved using hsa_amd_vmem_address_reserve with
-         * the HSA_AMD_VMEM_ADDRESS_NO_REGISTER flag, but the address was not registered
-         * with hsa_amd_svm_attributes_set. So we return the contents of retInfo that
-         * were previously filled with VMemoryPtrInfo.
+      if (retInfo.type == HSA_EXT_POINTER_TYPE_RESERVED_ADDR ||
+          retInfo.type == HSA_EXT_POINTER_TYPE_SVM) {
+        /* NO_REGISTER reservation. The driver has no object for it, whether or
+         * not hsa_amd_svm_attributes_set has run. Keep the reservation record:
+         * RESERVED_ADDR until attributes are set, SVM afterwards.
          */
         memcpy(info, &retInfo, retInfo.size);
         return HSA_STATUS_SUCCESS;
@@ -2787,6 +2821,8 @@ Runtime::Runtime()
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
+  g_use_yielding_poll = false;
+  g_use_clflushopt = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
   log_file = stderr;
@@ -2806,6 +2842,16 @@ hsa_status_t Runtime::Load() {
 
   flag_.Refresh();
 
+  if (flag_.device_mem_no_host_access()) {
+    log_warning_n(1,
+                  "HSA_DEVICE_MEM_NO_HOST_ACCESS is set: CPU access to GPU device memory will "
+                  "fault\n");
+    if (rocr::Flag::IsEnvVarTruthy("HSA_USE_UDMABUF"))
+      log_warning_n(1,
+                    "HSA_USE_UDMABUF is ignored for device-local memory when "
+                    "HSA_DEVICE_MEM_NO_HOST_ACCESS is set\n");
+  }
+
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
 
@@ -2821,6 +2867,8 @@ hsa_status_t Runtime::Load() {
 
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
+  g_use_yielding_poll = flag_.enable_yielding_poll();
+  g_use_clflushopt = cpuinfo.clflushopt;
 
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -3649,6 +3697,8 @@ hsa_status_t Runtime::SetSvmAttrib(void* ptr, size_t size,
   if (error != HSAKMT_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "hsaKmtSVMSetAttr failed.");
 
+  MarkReservedAddressSvm(base, len);
+
   return HSA_STATUS_SUCCESS;
 }
 
@@ -4030,9 +4080,12 @@ hsa_status_t Runtime::SvmBatchDiscard(void** ptrs, size_t* sizes, uint32_t count
       return status;
     }
 
-    // Only SVM allocations that were reserved using hsa_amd_vmem_address_reserve are valid for
-    // discard
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered) {
+    // Managed SVM is reserved with HSA_AMD_VMEM_ADDRESS_NO_REGISTER (registered == false).
+    // After hsa_amd_svm_attributes_set the same reservation is reported as
+    // HSA_EXT_POINTER_TYPE_SVM. Registered VMM reservations stay ineligible.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM)) {
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
   }
@@ -4193,7 +4246,11 @@ hsa_status_t Runtime::SvmDiscardAndPrefetchBatch(void** ptrs, size_t* sizes, uin
       debug_warning(false && "Retrieving SVM pointer information failed");
       return status;
     }
-    if (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR || ptr_info.registered)
+    // Same eligibility as SvmBatchDiscard: unregistered reservations, including those
+    // reported as HSA_EXT_POINTER_TYPE_SVM after hsa_amd_svm_attributes_set.
+    if (ptr_info.registered ||
+        (ptr_info.type != HSA_EXT_POINTER_TYPE_RESERVED_ADDR &&
+         ptr_info.type != HSA_EXT_POINTER_TYPE_SVM))
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
@@ -4741,8 +4798,7 @@ Runtime::MemoryHandle::MemoryHandle(const MemoryRegion* region, uint64_t flags_u
       imported(false),
       is_fabric_handle(false),
       alloc_flag(alloc_flag),
-      drm_owner(nullptr),
-      import_info_queried(false) {
+      drm_owner(nullptr) {
   assert(driver_handle.handle != 0);
 }
 
@@ -4754,8 +4810,23 @@ Runtime::MemoryHandle::MemoryHandle(int dmabuf_fd)
       imported(true),
       is_fabric_handle(false),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr),
-      import_info_queried(false) {}
+      drm_owner(nullptr) {
+  /* Caller holds memory_lock_. Ask each agent driver in turn and take the first
+   * that recognizes the fd. AgentDriver(KFD) is not used because it throws when
+   * no KFD driver is present. alloc_flag stays AllocateNoFlags: the dmabuf carries
+   * no memory-type metadata. */
+  if (driver_handle.dmabuf_fd < 0) return;
+
+  core::Runtime* runtime = core::Runtime::runtime_singleton_;
+  core::DmaBufInfo info = {};
+  for (auto& driver : runtime->AgentDrivers()) {
+    if (driver->QueryDmaBufInfo(driver_handle.dmabuf_fd, &info) == HSA_STATUS_SUCCESS) {
+      region = runtime->ResolveImportedRegion(info);
+      driver_handle.size = info.size;
+      return;
+    }
+  }
+}
 
 Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
     : region(nullptr),
@@ -4765,8 +4836,7 @@ Runtime::MemoryHandle::MemoryHandle(hsa_fabric_handle_t fabric_handle)
       imported(true),
       is_fabric_handle(true),
       alloc_flag(MemoryRegion::AllocateNoFlags),
-      drm_owner(nullptr),
-      import_info_queried(false) {}
+      drm_owner(nullptr) {}
 
 Runtime::MemoryHandle::~MemoryHandle() {
   if (driver_handle.handle != 0) {
@@ -5030,30 +5100,6 @@ const core::MemoryRegion* Runtime::ResolveImportedRegion(const core::DmaBufInfo&
   return system_regions_fine_[0].get();
 }
 
-/* Recover an imported handle's placement and size from its dmabuf and cache it in
- * the handle's own fields. Ask each agent driver in turn and take the first that
- * recognizes the fd; AgentDriver(KFD) is not used because it throws when no KFD
- * driver is present. A buffer the driver cannot describe is marked queried so the
- * ioctl is not repeated. Caller must hold memory_lock_. */
-void Runtime::EnsureImportInfo(MemoryHandle* memoryHandle) {
-  if (!memoryHandle->imported || memoryHandle->import_info_queried) return;
-  memoryHandle->import_info_queried = true;
-
-  if (memoryHandle->driver_handle.dmabuf_fd < 0) return;
-
-  core::DmaBufInfo info = {};
-  for (auto& driver : AgentDrivers()) {
-    if (driver->QueryDmaBufInfo(memoryHandle->driver_handle.dmabuf_fd, &info) ==
-        HSA_STATUS_SUCCESS) {
-      memoryHandle->region = ResolveImportedRegion(info);
-      memoryHandle->driver_handle.size = info.size;
-      /* alloc_flag stays AllocateNoFlags: the dmabuf carries no memory-type
-       * metadata, and the exporter may legitimately have used MEMORY_TYPE_NONE. */
-      return;
-    }
-  }
-}
-
 hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t* memoryOnlyHandle) {
   /* The per-GPU import of this dmabuf is deferred until hsa_amd_vmem_set_access is called, but the
@@ -5063,8 +5109,8 @@ hsa_status_t Runtime::VMemoryImportShareableHandle(int dmabuf_fd,
   int owned_fd = os::DmaBufDup(dmabuf_fd);
   if (owned_fd < 0) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  /* Placement is not recovered here: importers that never query it should not pay
-   * for an ioctl. EnsureImportInfo does it on the first query that needs it. */
+  /* memory_lock_ is held across construction. The dmabuf constructor queries the
+   * fd for its owning region, which requires that lock. */
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   auto memoryHandle = std::make_unique<MemoryHandle>(owned_fd);
   *memoryOnlyHandle = MemoryHandle::Convert(memoryHandle.get());
@@ -5113,8 +5159,14 @@ hsa_status_t Runtime::VMemoryImportFabricHandle(hsa_fabric_handle_t fabric_handl
 hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapped_handle,
                                                void* va) {
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
-  auto mappedHandleIt = mapped_handle_map_.find(va);
-  if (mappedHandleIt == mapped_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  // Look-up any mapped handle that contains this address.
+  auto mappedHandleIt = mapped_handle_map_.upper_bound(va);
+  if (mappedHandleIt == mapped_handle_map_.begin()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  mappedHandleIt--;
+  if (reinterpret_cast<const uint8_t*>(va) >=
+      reinterpret_cast<const uint8_t*>(mappedHandleIt->first) + mappedHandleIt->second.size) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
 
   MemoryHandle* memoryHandle = mappedHandleIt->second.mem_handle;
   memoryHandle->ref_count++;
@@ -5128,8 +5180,6 @@ hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_han
   std::lock_guard<std::shared_mutex> lock(memory_lock_);
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
-
-  EnsureImportInfo(memoryHandle);
 
   const MemoryRegion* region = memoryHandle->region;
   *mem_region = region;
@@ -5160,7 +5210,6 @@ hsa_status_t Runtime::VMemoryGetHandleInfo(hsa_amd_vmem_alloc_handle_t allocHand
   MemoryHandle* memoryHandle = FindMemoryHandle(MemoryHandle::Convert(allocHandle));
   if (memoryHandle == nullptr) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  EnsureImportInfo(memoryHandle);
   const MemoryRegion* region = memoryHandle->region;
 
   /* An unresolved import has no agent to report, and succeeding would hand back a

@@ -60,8 +60,6 @@ public:
         return devices;
     }
 
-    [[nodiscard]] size_t get_cpu_count() const noexcept { return m_cpu_count; }
-
     void init() {}
     void shutdown() {}
 

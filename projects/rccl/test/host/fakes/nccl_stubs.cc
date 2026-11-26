@@ -71,6 +71,12 @@ void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 // ncclCudaContextTrack lives in strongstream_stubs.cc (v2.31 three-argument ABI).
 ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
+static ncclResult_t DefaultNcclDdaIpcCommClosePeerMappings(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommClosePeerMappings =
+    DefaultNcclDdaIpcCommClosePeerMappings;
+ncclResult_t ncclDdaIpcCommClosePeerMappings(struct ncclComm* comm) {
+  return g_ncclDdaIpcCommClosePeerMappings(comm);
+}
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
 // Controllable (was hardcoded false). The real function takes no arguments, so this
@@ -86,6 +92,7 @@ bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
 ncclResult_t ncclDevrFinalize(struct ncclComm* comm) { return ncclSuccess; }
 bool g_devrIsOneLsaTeamValue = true;
 bool ncclDevrIsOneLsaTeam(struct ncclComm*) { return g_devrIsOneLsaTeamValue; }
+ncclResult_t ncclGinAllGatherFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinA2AFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclGinAllReduceFinalize(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t g_ncclGinFinalizeResult = ncclSuccess;
@@ -253,6 +260,8 @@ const char* rcclGitHash = "microtest";
 int ncclCudaDriverVersionCache = kDefaultCudaDriverVersion;  // src/misc/cudawrap.cc
 bool ncclCudaLaunchBlocking = false;          // src/misc/cudawrap.cc
 int ncclProfilerEventMask = 0;                // src/profiler.cc
+// src/plugin/profiler.cc (NCCL 2.32.6): with no profiler plugin loaded it is a load of the mask above.
+int ncclProfilerCurrentEventMask(void) { return ncclProfilerEventMask; }
 std::unordered_map<uint64_t, int> ncclDevFuncNameToId;  // generated device table
 
 // Default 1 (!= VerSuccess) means "version unknown", so showVersion()'s runtime-ROCm block is skipped.
@@ -290,6 +299,7 @@ void ResetNcclStubs() {
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_ncclCommSplit = DefaultNcclCommSplit;
   g_collTraceDestroy = DefaultCollTraceDestroy;
+  g_ncclDdaIpcCommClosePeerMappings = DefaultNcclDdaIpcCommClosePeerMappings;
   g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
   g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;

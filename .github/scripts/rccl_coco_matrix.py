@@ -47,6 +47,7 @@ SCHEDULED_CATALOGUE = [
     ("weekly", "oci-rccl-perf-weekly", "oci", "perf", 2880),
     ("weekly", "tensorwave-rccl-perf-weekly", "tw", "perf", 2880),
     ("weekly", "crusoe-rccl-perf-weekly", "crusoe", "perf", 2880),
+    ("weekly", "ruby64-rccl-tls-weekly", "ruby", "unit", 360),
     ("monthly", "ruby64-rccl-perf-monthly", "ruby", "perf", 2880),
     ("monthly", "oci-rccl-perf-monthly", "oci", "perf", 2880),
     ("monthly", "tensorwave-rccl-perf-monthly", "tw", "perf", 2880),
@@ -60,6 +61,14 @@ SCHEDULED_RUNNERS = {
     "crusoe": "crusoe-linux-slurm-scale-runner",
 }
 
+# Clusters whose runner workspace is not mounted on the compute nodes.
+SCHEDULED_SHARED_SCRATCH = {
+    "ruby": "",
+    "oci": "",
+    "tw": "/share_nfs/coco/ci-scratch",
+    "crusoe": "/shared_nfs/coco/ci-scratch",
+}
+
 
 def pr_clusters() -> None:
     set_github_output({"matrix": json.dumps({"include": PR_CLUSTERS})})
@@ -70,6 +79,7 @@ def scheduled_runs(mode: str) -> None:
         {
             "job": job,
             "runner": SCHEDULED_RUNNERS[cluster],
+            "shared_scratch": SCHEDULED_SHARED_SCRATCH[cluster],
             "timeout": timeout,
             "group": f"rccl-coco-{entry_mode}-{cluster}-{kind}",
         }

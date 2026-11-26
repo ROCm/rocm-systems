@@ -11,14 +11,25 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <map>
+#include <optional>
 #include <string>
 #include <utility>
 
 #include "amd_smi/amdsmi.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 
 namespace amd::smi {
 class AMDSmiProcessor;
 }  // namespace amd::smi
+
+// Setters for the hooks in amd_smi_test_overrides.h, declared here and not there so product code
+// cannot call them. Change a hook only through ScopedOverride<T>, never bare from a test body.
+namespace amd::smi::test_hooks {
+void SetSysfsDrmRoot(const std::string& root);
+void SetKfdNodesPathRoot(const std::string& root);
+void SetAppTmpDir(const std::string& dir);
+}  // namespace amd::smi::test_hooks
 
 // Generic (not RAS-specific) fake-sysfs fixture tree, reusable by any unit
 // test that needs a real, temporary, hardware-inert file tree -- e.g. for
@@ -47,6 +58,10 @@ class FakeSysfsTree {
   // creates the real file at root() + "/card0/device/ras/features"
   // (e.g. "/tmp/amdsmi_fake_sysfs_Ab3xYz/card0/device/ras/features").
   void WriteFile(const std::string& relative_path, const std::string& content);
+
+  // First line of a previously written file, or "" if it does not exist: reads back what
+  // production code wrote.
+  std::string ReadFile(const std::string& relative_path) const;
 
   // Deletes a previously-written file, for simulating one that existed and
   // then disappeared mid-scenario. Distinct from "never existed," which is
@@ -89,6 +104,22 @@ class ScopedOverride {
  private:
   std::function<void(const T&)> setter_;
   T old_value_;
+};
+
+// RAII: sets an environment variable for the life of one test body and restores the previous
+// state on exit -- the old value, or unset if there was none -- so the change cannot reach other
+// tests. Not thread-safe; use it only in single-threaded tests.
+class ScopedEnvVar {
+ public:
+  ScopedEnvVar(const char* name, const char* value);
+  ~ScopedEnvVar();
+
+  ScopedEnvVar(const ScopedEnvVar&) = delete;
+  ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+ private:
+  std::string name_;
+  std::optional<std::string> old_value_;
 };
 
 // RAII: registers/unregisters a synthetic processor with AMDSmiSystem so
@@ -157,6 +188,11 @@ class ScopedFileWatch {
   std::array<uint32_t, kBitsPerMask> event_tally_{};  // indexed by bit position of each IN_* flag
 };
 
+// Runs `fn` as an unprivileged user and returns its status, so a test sees real file-permission
+// failures whoever runs the suite. Not root: calls `fn` directly. Root bypasses file modes, so
+// `fn` runs in a forked child that drops to "nobody"; the child only reports the status back.
+amdsmi_status_t RunAsUnprivilegedUser(const std::function<amdsmi_status_t()>& fn);
+
 }  // namespace amd::smi::testing
 
 // RAII: pushes a real, hardware-inert rocm_smi::Device onto RocmSMI's device
@@ -164,6 +200,9 @@ class ScopedFileWatch {
 // docs/design/faking-external-interfaces.md). Restores the vector to its
 // prior size on destruction so index assignment stays predictable across
 // tests run in the same process. Reusable by any GPU unit test, not just RAS.
+//
+// Also gives the device a render node, as real GPUs have: renderD<128 + index> is a symlink next
+// to `path` pointing at it, so files written under the card directory resolve through either name.
 class ScopedRocmSmiDevice {
  public:
   explicit ScopedRocmSmiDevice(const std::string& path);
@@ -173,9 +212,15 @@ class ScopedRocmSmiDevice {
   ScopedRocmSmiDevice& operator=(const ScopedRocmSmiDevice&) = delete;
 
   uint32_t index() const { return index_; }
+  uint32_t render_minor() const;
 
  private:
+  std::string RenderLink(const std::string& dir) const {
+    return dir + "/renderD" + std::to_string(render_minor());
+  }
+
   uint32_t index_;
+  std::string link_dir_;  // Directory holding the renderD link; empty if none was created.
 };
 
 // RAII: calls the real amdsmi_init()/amdsmi_shut_down() around a test case.
@@ -197,4 +242,42 @@ class ScopedAmdsmiInit {
 
   ScopedAmdsmiInit(const ScopedAmdsmiInit&) = delete;
   ScopedAmdsmiInit& operator=(const ScopedAmdsmiInit&) = delete;
+};
+
+// KFD topology nodes for real GPU discovery, written into a FakeSysfsTree. A GPU's KFD node index
+// and DRM card index are unrelated numbers; its DRM entries are card<C> and renderD<128 + C>.
+//
+// WriteGpuNode() writes what discovery needs: the properties Initialize() reads, a distinct
+// nonzero location_id per node (a bdfid of 0 counts as unset), its render node, and an io_links
+// directory, which discovery requires even when the node has no links. As in sysfs, card<C> links
+// to the render node's directory, so a file written under either name is one file, and amd-smi
+// reads it through renderD<128 + C>. Call it before writing files under card<C>.
+void WriteGpuNode(FakeSysfsTree& tree, uint32_t node_idx, uint32_t card_idx, uint64_t gpu_id);
+
+// A CPU node: discovery reads its links like any other node's, so it needs an io_links directory.
+void WriteCpuNode(FakeSysfsTree& tree, uint32_t node_idx);
+
+// /sys/class/kfd/kfd/topology/nodes/<node_idx>/io_links/<link_idx>/properties
+void WriteIoLink(FakeSysfsTree& tree, uint32_t node_idx, uint32_t link_idx, uint32_t node_to,
+                 amd::smi::IO_LINK_TYPE type, uint64_t weight);
+
+// Runs the real amdsmi_init() GPU discovery over `tree`, which holds both the KFD topology and the
+// DRM entries, and hands out the handles it found by KFD node index. ROCm SMI's boot-state files
+// go into the tree too, so nothing is left in /tmp. amdsmi_shut_down() cleans up. Write every
+// node and the files under it before constructing this. Throws if init fails.
+class FakeKfdTopology {
+ public:
+  explicit FakeKfdTopology(FakeSysfsTree& tree);
+  ~FakeKfdTopology();
+
+  FakeKfdTopology(const FakeKfdTopology&) = delete;
+  FakeKfdTopology& operator=(const FakeKfdTopology&) = delete;
+
+  amdsmi_processor_handle handle(uint32_t node_index) const { return handles_.at(node_index); }
+
+ private:
+  amd::smi::testing::ScopedOverride<std::string> kfd_root_guard_;
+  amd::smi::testing::ScopedOverride<std::string> drm_root_guard_;
+  amd::smi::testing::ScopedOverride<std::string> tmp_dir_guard_;
+  std::map<uint32_t, amdsmi_processor_handle> handles_;
 };

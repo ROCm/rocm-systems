@@ -28,14 +28,14 @@ on:
         default: "ROCm/rocjitsu-test-corpus"
         required: true
       corpus_ref:
-        description: "Branch, tag, or SHA used by HIP, race, and DBT corpus tests"
-        # Last updated on 2026/10/21.
-        default: "8172b0ad3099e1836923a62d51abe65e106b5382"
+        description: "Branch, tag, or SHA used by HIP, race, file-limit, and DBT corpus tests. A missing file-limit matrix is skipped only for a SHA in ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS that differs from the shared pin."
+        # Last updated on 2026/11/19.
+        default: "a1ad167bc0fb9ec7206e4074bcd27b76d42bce26"
         required: true
       vulkan_corpus_ref:
         description: "Branch, tag, or SHA used by the Vulkan compute/buffer CTS tests"
-        # Last updated on 2026/09/25.
-        default: "4c7fdd08d55bc1801cf1525732d6cabad06e05de"
+        # Last updated on 2026/11/20.
+        default: "66c893a57a39ffb8e914cc173dc534f1430939de"
         required: true
 
 concurrency:
@@ -53,11 +53,14 @@ env:
   ROCJITSU_BUILD_DIR: ${{ github.workspace }}/build
   ROCJITSU_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   ROCJITSU_VULKAN_CORPUS_DIR: ${{ github.workspace }}/rocjitsu-vulkan-corpus
-  ROCJITSU_VULKAN_CORPUS_REF: 4c7fdd08d55bc1801cf1525732d6cabad06e05de
+  ROCJITSU_VULKAN_CORPUS_REF: 66c893a57a39ffb8e914cc173dc534f1430939de
   ROCJITSU_DBT_VENV: ${{ github.workspace }}/gfx1250-dbt-venv-${{ github.run_id }}-${{ github.run_attempt }}
   ROCJITSU_HSACO_CORPUS: ${{ github.workspace }}/gfx1250-packaged-hsacos-${{ github.run_id }}-${{ github.run_attempt }}
-  # Pins HIP, race, and DBT together; keep this equal to the corpus_ref default.
-  ROCJITSU_DBT_CORPUS_REF: 8172b0ad3099e1836923a62d51abe65e106b5382
+  # Pins HIP, race, file-limit, and DBT tests; keep equal to the corpus_ref default.
+  ROCJITSU_DBT_CORPUS_REF: a1ad167bc0fb9ec7206e4074bcd27b76d42bce26
+  # Earlier corpus pins that predate corpus/runtime/file-limits. Only manual
+  # comparisons against these SHAs, different from the shared pin, may skip.
+  ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS: 8172b0ad3099e1836923a62d51abe65e106b5382
   ROCJITSU_DBT_SHA_FRAGMENTS: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/fragments
   ROCJITSU_DBT_SHA_MANIFEST: ${{ github.workspace }}/gfx1250-dbt-sha-pairs-${{ github.run_id }}-${{ github.run_attempt }}/gfx1250-b0-a0-sha-pairs.json
   ROCM_SDK_VERSION: 10.1.0a20260812
@@ -70,7 +73,7 @@ env:
 
 jobs:
   test:
-    runs-on: aws-linux-scale-rocm-prod
+    runs-on: az-linux-scale-rocm-default-prod
     name: test (${{ matrix.name }})
     env:
       ROCJITSU_HOST_CPU_BASELINE: ${{ matrix.host_cpu_baseline }}
@@ -103,7 +106,9 @@ jobs:
             sanitizer_runtime: STATIC
             run_simulator_corpus: true
             run_race_corpus: true
-            corpus_soft_timeout: 360
+            # The gfx1201 large SGEMM took 358s with four simulator threads;
+            # leave shared runners room before the 600s diagnostic rerun.
+            corpus_soft_timeout: 480
             corpus_hard_timeout: 600
             corpus_rerun_timeout: 600
             corpus_sanitizer: none
@@ -203,14 +208,17 @@ jobs:
             runtimes/api-headers
             .github
             shared/machine-readable-isa/isa
+          persist-credentials: false
 
       - name: Checkout corpus
-        if: matrix.run_simulator_corpus
+        # Every lane needs the corpus for the file-limit matrix, including
+        # TSan, which skips the simulator corpus.
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           ref: ${{ github.event.inputs.corpus_ref || env.ROCJITSU_DBT_CORPUS_REF }}
           path: rocjitsu-test-corpus
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -422,6 +430,14 @@ jobs:
               -DRJ_BUILD_CONSAN_ANALYZER=ON
             )
           fi
+          if [[ "${{ matrix.name }}" == release ]]; then
+            # Exercise stock-driver peer grants in the required Linux lane.
+            CMAKE_CONFIG_FLAGS+=(-DROCJITSU_ENABLE_VFIO=ON)
+          fi
+
+          if [[ "${{ matrix.name }}" == release ]]; then
+            CMAKE_CONFIG_FLAGS+=(-DRJ_INSTALL_TESTS=ON)
+          fi
 
           CXXFLAGS=""
           if [[ -z "${{ matrix.cxx_compiler }}" || "${{ matrix.cxx_compiler }}" == *clang* ]]; then
@@ -438,11 +454,22 @@ jobs:
             -DRJ_ENABLE_UBSAN=${{ matrix.enable_ubsan }} \
             -DRJ_ENABLE_TSAN=${{ matrix.enable_tsan }} \
             -DRJ_ENABLE_EXPENSIVE_CHECKS=${{ matrix.enable_expensive_checks }} \
+            -DROCJITSU_ENABLE_INTERPOSER=ON -DRJ_ENABLE_HOST_FAULT_RECOVERY=ON \
             -DROCJITSU_ENABLE_PERFSIM_PLUGIN=ON \
             -DRJ_SANITIZER_RUNTIME=${{ matrix.sanitizer_runtime }}
 
           # Let Ninja and CTest choose their default CPU parallelism.
           cmake --build "${ROCJITSU_BUILD_DIR}" -j
+          echo "built=true" >> "${GITHUB_OUTPUT}"
+
+          if [[ "${{ matrix.name }}" == release ]]; then
+            VFIO_DISCOVERY="$(ctest --test-dir "${ROCJITSU_BUILD_DIR}" -N -R '^Vfio(TargetGrants|DeviceHost)')"
+            echo "${VFIO_DISCOVERY}"
+            if ! [[ "${VFIO_DISCOVERY}" =~ Total[[:space:]]Tests:[[:space:]][1-9][0-9]* ]]; then
+              echo "VFIO peer tests were not registered" >&2
+              exit 1
+            fi
+          fi
 
           CTEST_SELECTION=()
           if [[ -n "${TEST_REGEX}" ]]; then
@@ -455,8 +482,42 @@ jobs:
             --output-on-failure \
             -j
 
+          # Keep both mutation suites present in every lane, including
+          # asan-ubsan and tsan, where all three ConSan components remain OFF.
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R 'FaultDropBarrier' --no-tests=error --output-on-failure -j
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R 'FaultMutationCli|FaultLdsCli|CdnaLdsCli' --no-tests=error --output-on-failure -j
+
           echo "${ROCJITSU_BUILD_DIR}/tools/rocjitsu" >> "${GITHUB_PATH}"
           echo "CXXFLAGS=" >> "${GITHUB_ENV}"
+
+      - name: Test installed fault-injection CLI
+        if: matrix.name == 'release'
+        shell: bash
+        run: |
+          FI_INSTALL_PREFIX="$(mktemp -d "${RUNNER_TEMP}/rocjitsu-fi-installed.XXXXXX")"
+          cmake --install "${ROCJITSU_BUILD_DIR}" --prefix "${FI_INSTALL_PREFIX}"
+          ctest --test-dir "${FI_INSTALL_PREFIX}/share/rocjitsu/tests" \
+            -R 'FaultMutationCli|LdsCli' --no-tests=error --output-on-failure
+
+      # Debug retains callable inline definitions that optimized builds can hide.
+      # Check both compilers without building the simulator or enabling sanitizers.
+      - name: Check Debug arithmetic symbol isolation
+        if: matrix.name == 'release' || matrix.name == 'ubsan-gcc'
+        env:
+          ARITH_DEBUG_CC: ${{ matrix.name == 'ubsan-gcc' && 'gcc' || 'clang' }}
+          ARITH_DEBUG_CXX: ${{ matrix.name == 'ubsan-gcc' && 'g++' || 'clang++' }}
+        run: |
+          cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${RUNNER_TEMP}/arith-debug" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER="${ARITH_DEBUG_CC}" \
+            -DCMAKE_CXX_COMPILER="${ARITH_DEBUG_CXX}" \
+            -DBUILD_TESTING=ON -DROCM_PATH= \
+            -DFETCHCONTENT_BASE_DIR="${RUNNER_TEMP}/arith-deps"
+          cmake --build "${RUNNER_TEMP}/arith-debug" --target rj_arith
+          ctest --test-dir "${RUNNER_TEMP}/arith-debug/lib/arith/tests" \
+            -R '^rj_arith\.baseline_linkage$' --no-tests=error --output-on-failure
 
       - name: Require ConSan unit, integration, and simulated end-to-end coverage
         if: matrix.name == 'release' || matrix.name == 'ubsan-gcc'
@@ -568,12 +629,14 @@ jobs:
 
       - name: Install corpus test dependencies
         id: install_corpus_dependencies
-        if: matrix.run_simulator_corpus
+        if: ${{ !cancelled() && matrix.run_simulator_corpus && steps.build_rocjitsu.outcome == 'success' }}
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
         run: |
-          # Keep the pinned corpus on the compatible pytest/xdist pair.
-          # pytest 9.2 node IDs break loadgroup in pytest-xdist 3.8.
+          # pytest 9.2 node IDs break loadgroup in pytest-xdist 3.8. The
+          # corpus requirements carry these bounds from 8618174; keep them here
+          # for manual corpus_ref overrides that predate it. The DBT venv
+          # below needs the same pair.
           uv pip install -r requirements.txt \
             "pytest>=5.4.1,<9.2" \
             "pytest-xdist>=1.32.0,<3.9"
@@ -592,7 +655,7 @@ jobs:
         if: matrix.name == 'release'
         working-directory: ${{ env.ROCJITSU_SOURCE_DIR }}
         run: |
-          uv pip install -e lib/python
+          uv pip install -e "lib/python[test]"
           python -m pytest lib/python/amdisa/tests
 
       - name: Run corpus tests
@@ -615,9 +678,15 @@ jobs:
           export ROCJITSU_SOURCE_DIR
 
           corpus_test_status=0
+          corpus_workers="${ROCJITSU_CORPUS_WORKERS}"
+          # Leave CPU headroom for the long gfx1201 GEMM on shared runners.
+          # The 24-worker Release run exceeded both its 480s and 600s limits.
+          if [[ "${{ matrix.name }}" == "release" && "${corpus_workers}" -gt 8 ]]; then
+            corpus_workers=8
+          fi
 
           corpus_test_flags=(
-            --workers "${ROCJITSU_CORPUS_WORKERS}"
+            --workers "${corpus_workers}"
             --soft-timeout ${{ matrix.corpus_soft_timeout }}
             --hard-timeout ${{ matrix.corpus_hard_timeout }}
             --rerun-timeout ${{ matrix.corpus_rerun_timeout }}
@@ -627,6 +696,12 @@ jobs:
           )
           if [[ "${{ matrix.run_race_corpus }}" == "true" ]]; then
             corpus_test_flags+=(--race-tests)
+            # The shared pin has cases for every race target, so an empty
+            # suite there means the corpus lost them. Other refs may predate a
+            # target's cases and only report the empty suite.
+            if [[ "$(git rev-parse HEAD)" == "${ROCJITSU_DBT_CORPUS_REF}" ]]; then
+              corpus_test_flags+=(--require-race-cases)
+            fi
           fi
           if [[ "${{ matrix.enable_ubsan }}" == "1" ]]; then
             corpus_test_flags+=(--ubsan)
@@ -645,7 +720,7 @@ jobs:
           retention-days: 7
 
       - name: Compare plain and translated gfx1250 simulator runs
-        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.install_corpus_dependencies.outcome == 'success' }}
         timeout-minutes: 45
         working-directory: ${{ env.ROCJITSU_CORPUS_DIR }}
         shell: bash
@@ -712,6 +787,9 @@ jobs:
         shell: bash
         run: |
           uv venv --python 3.12 "${ROCJITSU_DBT_VENV}"
+          # This venv skips the corpus requirements, but its -n run still uses
+          # the corpus's loadgroup scheduling. Keep these bounds equal to the
+          # corpus install above.
           uv pip install \
             --python "${ROCJITSU_DBT_VENV}/bin/python" \
             "pytest>=5.4.1,<9.2" \
@@ -848,7 +926,31 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      # Finish existing HIP/DBT coverage before starting Vulkan-only setup.
+      - name: Test HIP file limits from the corpus
+        # Requires the combined build and CTest step to pass, so ConSan test
+        # failures inside that step still skip this. Failures in the
+        # independent test steps between the build and here do not.
+        if: ${{ !cancelled() && steps.build_rocjitsu.outcome == 'success' }}
+        shell: bash
+        run: |
+          suite=corpus/runtime/file-limits/CMakeLists.txt
+          corpus_sha="$(git -C "${ROCJITSU_CORPUS_DIR}" rev-parse HEAD)"
+          if [[ ! -f "${ROCJITSU_CORPUS_DIR}/${suite}" ]]; then
+            if [[ "${GITHUB_EVENT_NAME}" == workflow_dispatch &&
+                  "${corpus_sha}" != "${ROCJITSU_DBT_CORPUS_REF}" &&
+                  " ${ROCJITSU_FILE_LIMIT_LEGACY_CORPUS_SHAS} " == *" ${corpus_sha} "* ]]; then
+              echo "::notice title=File-limit matrix skipped::Legacy corpus ${corpus_sha} has no ${suite}."
+              exit 0
+            fi
+            echo "::error title=File-limit matrix missing::Corpus ${corpus_sha} has no ${suite}; only manual comparisons against listed legacy SHAs different from the shared pin (${ROCJITSU_DBT_CORPUS_REF}) may skip."
+            exit 1
+          fi
+          ROCM_PATH="$(rocm-sdk path --root)" \
+            bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-file-limit-tests.sh"
+
+      # Finish HIP, DBT, and file-limit coverage before starting Vulkan-only
+      # setup. Vulkan steps check their own prerequisites, so a failure in any
+      # of those suites still lets Vulkan run.
       - name: Install Mesa RADV for Vulkan compute CTS
         id: install_vulkan_dependencies
         if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' }}
@@ -875,22 +977,30 @@ jobs:
           repository: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
           ref: ${{ github.event.inputs.vulkan_corpus_ref || env.ROCJITSU_VULKAN_CORPUS_REF }}
           path: rocjitsu-vulkan-corpus
+          persist-credentials: false
 
-      - name: Build pinned Vulkan CTS
-        id: build_vulkan_cts
+      - name: Prepare pinned Vulkan CTS
+        id: prepare_vulkan_cts
         if: ${{ !cancelled() && matrix.name == 'release' && steps.install_vulkan_dependencies.outcome == 'success' && steps.checkout_vulkan_corpus.outcome == 'success' }}
-        # Includes dependency downloads and a fresh Release build.
         timeout-minutes: 30
         working-directory: ${{ env.ROCJITSU_VULKAN_CORPUS_DIR }}
         shell: bash
+        env:
+          CORPUS_REPOSITORY: ${{ github.event.inputs.corpus_repository || 'ROCm/rocjitsu-test-corpus' }}
+          CORPUS_COMMIT: ${{ steps.checkout_vulkan_corpus.outputs.commit }}
         run: |
           uv pip install -r corpus/vulkan/requirements.txt
           python3 -m pytest tests/test_vulkan_suite.py -q
-          bash scripts/build_vulkan_cts.sh
+          release_url="${GITHUB_SERVER_URL}/${CORPUS_REPOSITORY}/releases/download/prebuilt-${CORPUS_COMMIT}"
+          for asset in vulkan-cts-linux-x64.tar.gz SHA256SUMS; do
+            curl --fail --location --retry 3 --output "${asset}" "${release_url}/${asset}"
+          done
+          sha256sum --check --ignore-missing SHA256SUMS
+          tar -xzf vulkan-cts-linux-x64.tar.gz
 
       # Allow runner headroom for the full compute/buffer selection.
       - name: Run Vulkan compute and buffer CTS on RDNA3
-        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_vulkan_cts.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.prepare_vulkan_cts.outcome == 'success' }}
         timeout-minutes: 30
         shell: bash
         env:
@@ -898,7 +1008,7 @@ jobs:
         run: bash "${ROCJITSU_SOURCE_DIR}/tests/corpus/run-vulkan-cts.sh" gfx1100 --case ci
 
       - name: Run Vulkan compute and buffer CTS on RDNA4
-        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.build_vulkan_cts.outcome == 'success' }}
+        if: ${{ !cancelled() && matrix.name == 'release' && steps.build_rocjitsu.outcome == 'success' && steps.prepare_vulkan_cts.outcome == 'success' }}
         timeout-minutes: 30
         shell: bash
         env:
@@ -914,3 +1024,22 @@ jobs:
           include-hidden-files: true
           if-no-files-found: warn
           retention-days: 7
+
+      # All consumers of the interposed build finish before its mode changes.
+      # The explicit build can reuse the tree even if a default test failed.
+      - name: Test explicit library embedding
+        if: ${{ !cancelled() && steps.build_rocjitsu.outputs.built == 'true' }}
+        shell: bash
+        run: |
+          ROCM_PATH="$(rocm-sdk path --root)" \
+            cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_BUILD_DIR}" \
+            -DROCJITSU_ENABLE_INTERPOSER=OFF -DRJ_ENABLE_HOST_FAULT_RECOVERY=OFF
+          cmake --build "${ROCJITSU_BUILD_DIR}" \
+            --target vm_embedding_api_test libc_passthrough_test host_access_guard_test -j
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R '^VmEmbeddingApi(DeathTest)?\.' --no-tests=error --output-on-failure --timeout 60 -j4
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R '^LibcPassthrough\.' --no-tests=error --output-on-failure --timeout 60 -j4
+          ctest --test-dir "${ROCJITSU_BUILD_DIR}" \
+            -R '^HostAccessGuardDeathTest\.DisabledRecoveryDeliversRealFaultsToTheHost$' \
+            --no-tests=error --output-on-failure --timeout 60 -j4

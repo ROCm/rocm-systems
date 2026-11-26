@@ -83,7 +83,7 @@ constexpr int8_t ncclIbCastUDMANone = (int8_t)-1;
 
 static ncclIbCastUDMAPolicy ncclIbCastGetUDMAPolicy() {
   int64_t policy = rcclParamIbCastUDMAPolicy();
-  if (policy < (int64_t)ncclIbCastUDMAPolicy::First || policy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+  if (!ncclIbCastUDMAPolicyIsValid(policy)) {
     return ncclIbCastUDMAPolicy::ChannelAffinity;
   }
   return (ncclIbCastUDMAPolicy)policy;
@@ -98,6 +98,8 @@ static int8_t ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* createQpAttr
   uint8_t udmaCount = IbCastAinicRoce ? IbCastDevs[createQpAttrs->ibDevN].capsProvider.ionic.udmaCount : 2;
 
   if (policy == ncclIbCastUDMAPolicy::SplitConnection) {
+    // qpIdx only advances with >= 2 QPs per device per connection; otherwise
+    // it is always 0 and only the channel-id parity varies.
     uint8_t udmaEngine = (__builtin_parity(static_cast<unsigned>(createQpAttrs->channelId))
                          + createQpAttrs->qpIdx) % udmaCount;
     return (int8_t)(1u << udmaEngine);
@@ -601,7 +603,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   out->isP2p = base->isP2p;
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
-    out->maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
+    out->maxSendWorkRequest = IbCastDataSendQueueDepth(IbCastMaxPostSendBytes);
   } else {
     IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
     out->maxSendWorkRequest = NET_IB_MAX_REQUESTS;
@@ -1012,9 +1014,11 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Send requests are sent using at most 2 messages (RDMA Write and RDMA Write with Immediate)
-  qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
   qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
+  // Ionic multiplies this value by depthMult for a shared QP. Amortize the
+  // single split-chain allowance so that it is not multiplied once per comm.
+  qpCreateAttrs.maxSendWorkRequest =
+      IbCastDataSendQueueDepth(IbCastMaxPostSendBytes, qpCreateAttrs.isQpSharingEnabled ? depthMult : 1);
   qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
   qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
@@ -1287,6 +1291,7 @@ static ncclResult_t IbCastQpSharingSenderSetup(
       // with QP sharing; the non-offload signaling path uses devIndex instead.
       comm->base.qps[q].qp = slot->qp;
       comm->base.qps[q].devIndex = slot->devIndex;
+      comm->base.qps[q].isDataQp = true;
       comm->base.activeQps[q] = &comm->base.qps[q];
 
       // Populate metadata with shared QP info
@@ -1364,6 +1369,29 @@ static ncclResult_t IbCastQpSharingSenderRegisterPrimary(
   }
 
   return ncclSuccess;
+}
+
+// Telemetry slots for every QP of a comm, one per ibv_qp: a QP-sharing
+// secondary can map several qps[] entries to one shared QP. Untracked QPs keep
+// telQpStats NULL (IbCastQpCreate() or the zeroed comm).
+static void IbCastTelSetupQps(struct ncclIbNetCommBase* base, int channelId, bool channelIdKnown,
+                              const int* isDataQp) {
+  for (int i = 0; i < base->vProps.ndevs; i++) {
+    int ibDevN = base->vProps.devs[i];
+    const void* keys[NCCL_IB_MAX_QPS];
+    int roles[NCCL_IB_MAX_QPS], idx[NCCL_IB_MAX_QPS];
+    RcclQpStats* handles[NCCL_IB_MAX_QPS];
+    int n = 0;
+    for (int q = 0; q < base->nqps; q++) {
+      if (base->qps[q].devIndex != i) continue;
+      keys[n] = base->qps[q].qp;
+      roles[n] = isDataQp[q];
+      idx[n++] = q;
+    }
+    rcclTelemetrySetupQps(ibDevN, channelId, keys, roles, n, handles);
+    if (!channelIdKnown) rcclTelemetryMarkChannelsUnknown(ibDevN);
+    for (int k = 0; k < n; k++) base->qps[idx[k]].telQpStats = handles[k];
+  }
 }
 
 ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
@@ -1541,36 +1569,21 @@ ib_recv_dev_list:
 
   if (sharingRole != QP_SHARING_SECONDARY) {
     NCCLCHECKGOTO(IbCastSenderQpsCreate(comm, &meta, channelId, depthMult), ret, fail);
-    comm->telChId = channelId;
-    comm->telChStats = NULL;
+  }
+  comm->telChId = channelId;
+  comm->telChStats = NULL;
 
-    // Telemetry-only: skip when off. IbCastQpCreate() left every telQpStats NULL,
-    // the untracked value the hooks expect.
-    if (rcclTelemetryOn()) {
-      for (int i = 0; i < comm->base.vProps.ndevs; i++) {
-        int ibDevN = comm->base.vProps.devs[i];
-        int numQpsForDev = 0;
-        for (int q = 0; q < comm->base.nqps; q++)
-          if (comm->base.qps[q].devIndex == i) numQpsForDev++;
-        int numSlots = 0;
-        int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, &numSlots);
-        if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(ibDevN);
-        int slotOffset = 0;
-        for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
-          if (comm->base.qps[q].devIndex != i) continue;
-          // QPs past the granted slots keep telQpStats == NULL (untracked).
-          int telSlot = startSlot + slotOffset++;
-          rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
-          comm->base.qps[q].telQpStats = rcclTelemetryResolveQp(ibDevN, channelId, telSlot);
-        }
-      }
-      // Request completions are charged to the comm's first device.
-      comm->telChStats = rcclTelemetryResolveChannel(comm->base.vProps.devs[0], channelId);
-    }
+  // Telemetry-only: skip when off.
+  if (rcclTelemetryOn()) {
+    int isDataQp[NCCL_IB_MAX_QPS];
+    for (int q = 0; q < comm->base.nqps; q++) isDataQp[q] = comm->base.qps[q].isDataQp;
+    IbCastTelSetupQps(&comm->base, channelId, telChannelIdKnown, isDataQp);
+    // Request completions are charged to the comm's first device.
+    comm->telChStats = rcclTelemetryResolveChannel(comm->base.vProps.devs[0], channelId);
+  }
 
-    if (sharingRole == QP_SHARING_PRIMARY) {
-      NCCLCHECKGOTO(IbCastQpSharingSenderRegisterPrimary(comm, handle, &remoteVProps), ret, fail);
-    }
+  if (sharingRole == QP_SHARING_PRIMARY) {
+    NCCLCHECKGOTO(IbCastQpSharingSenderRegisterPrimary(comm, handle, &remoteVProps), ret, fail);
   }
 
   // Populate remaining QP sharing metadata
@@ -2039,6 +2052,7 @@ ncclResult_t IbCastPostReceiveWorkRequestsOnQp(struct ncclIbRecvComm* recvComm, 
        dataQp->qp->qp_num, recvComm);
   for (int j = 0; j < nRecvWorkRequestsPerQp; j++) {
     NCCLCHECK(IbCastPostRecvWorkRequest(dataQp->qp, &recvComm->ibRecvWorkRequest));
+    rcclTelemetryQpRecvPosted(dataQp->telQpStats);
   }
   return ncclSuccess;
 }
@@ -2311,11 +2325,11 @@ ncclResult_t IbCastAccept(void* listenComm, void** recvComm, ncclNetDeviceHandle
   }
 
   NCCLCHECK(ncclIbMalloc((void**)&rComm, sizeof(struct ncclIbRecvComm)));
+  NCCLCHECKGOTO(ncclSocketInit(&rComm->base.sock), ret, fail);
   NCCLCHECKGOTO(IbCastRecvCommInit(rComm), ret, fail);
   NCCLCHECKGOTO(IbCastStatsInit(&rComm->base.stats), ret, fail);
   stage->comm = rComm;
   stage->state = ncclIbCommStateAccept;
-  NCCLCHECKGOTO(ncclSocketInit(&rComm->base.sock), ret, fail);
   NCCLCHECKGOTO(ncclSocketAccept(&rComm->base.sock, &lComm->sock), ret, fail);
 
   // Alloc stage->buffer here to be used for all following steps
@@ -2523,34 +2537,21 @@ ib_recv:
   meta.sharedGroupIdx = rComm->base.qpSharing.groupIdx;
   meta.commId = rComm->base.qpSharing.netIbCommId;
 
-  if (rComm->prepostReceiveWorkRequests) {
-    NCCLCHECKGOTO(IbCastReceiverPrePostReceiveWorkRequests(rComm), ret, fail);
-  }
-
   rComm->telChId = channelId;
   rComm->telChStats = NULL;
 
   // See IbCastConnect(): telemetry-only work, skipped when telemetry is off.
   if (rcclTelemetryOn()) {
-    for (int i = 0; i < rComm->base.vProps.ndevs; i++) {
-      int telIbDevN = rComm->base.vProps.devs[i];
-      int numQpsForDev = 0;
-      for (int q = 0; q < rComm->base.nqps; q++)
-        if (rComm->base.qps[q].devIndex == i) numQpsForDev++;
-      int numSlots = 0;
-      int startSlot = rcclTelemetrySetupChannel(telIbDevN, channelId, numQpsForDev, &numSlots);
-      if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(telIbDevN);
-      int slotOffset = 0;
-      for (int q = 0; q < rComm->base.nqps && slotOffset < numSlots; q++) {
-        if (rComm->base.qps[q].devIndex != i) continue;
-        // QPs past the granted slots keep telQpStats == NULL (untracked).
-        int telSlot = startSlot + slotOffset++;
-        // isDataQp is always false on receiver QPs; classify by CTS role.
-        rcclTelemetrySetQpRole(telIbDevN, channelId, telSlot, !IbCastRecvCommIsCtsQp(rComm, q));
-        rComm->base.qps[q].telQpStats = rcclTelemetryResolveQp(telIbDevN, channelId, telSlot);
-      }
-    }
+    // isDataQp is always false on receiver QPs; classify by CTS role.
+    int isDataQp[NCCL_IB_MAX_QPS];
+    for (int q = 0; q < rComm->base.nqps; q++) isDataQp[q] = !IbCastRecvCommIsCtsQp(rComm, q);
+    IbCastTelSetupQps(&rComm->base, channelId, telChannelIdKnown, isDataQp);
     rComm->telChStats = rcclTelemetryResolveChannel(rComm->base.vProps.devs[0], channelId);
+  }
+
+  // After telemetry setup so the pre-posted WQEs are counted.
+  if (rComm->prepostReceiveWorkRequests) {
+    NCCLCHECKGOTO(IbCastReceiverPrePostReceiveWorkRequests(rComm), ret, fail);
   }
 
   // Store the remote CTS FIFO info provided by the remote peer
@@ -2633,7 +2634,15 @@ ib_recv:
           hsa_status_t exportStatus =
             pfn_hsa_amd_portable_export_dmabuf(aligned_ptr, alignedSize, &rCommDev->gpuFlush.dmabufFd, &exportOffset);
           if (rCommDev->gpuFlush.dmabufFd < 0 || exportStatus != HSA_STATUS_SUCCESS) {
-            WARN("Failed to export DMA BUF");
+            const char* errStr = nullptr;
+            if (exportStatus != HSA_STATUS_SUCCESS &&
+                hsa_status_string(exportStatus, &errStr) == HSA_STATUS_SUCCESS && errStr != nullptr) {
+              WARN("Failed to export DMA BUF: %s", errStr);
+            } else {
+              WARN("Failed to export DMA BUF");
+            }
+            // Success with a null recv comm means "not connected yet".
+            ret = ncclSystemError;
             goto fail;
           }
           NCCLCHECKGOTO(
@@ -2712,6 +2721,7 @@ exit:
   lComm->stage = NULL;
   return ret;
 fail:
+  (void)ncclSocketClose(&rComm->base.sock);
   free(rComm);
   goto exit;
 }

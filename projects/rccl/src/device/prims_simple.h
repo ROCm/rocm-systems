@@ -8,6 +8,7 @@
 
 #include "rccl_metadata.h"
 #include "network/unpack/unpack.h"
+#include "coll_sizes.h"
 #include <cassert>
 
 enum primsMode {
@@ -48,7 +49,9 @@ class Primitives<T, RedOp, Fan, Direct,
   uint64_t connStepCache; // Cache last seen value of (*connStepPtr)
   uint64_t* gdrFlushFlag = nullptr;
   uint64_t* gdrFlushSeq;
-  int connStepSize; // Connection step size
+  // [RCCL] int, where NCCL 2.32.6 uses uint32_t: ncclConnInfo::stepSize is buffSize / NCCL_STEPS, far below 2^31 on
+  // AMD, and the 2 GiB FIFO slot strides upstream widened it for are NVLS-only, which RCCL does not build.
+  int connStepSize; // Connection step size in elements
   void* netDeviceHandle;
   uint64_t accSize;
   uint32_t* next_hdp_reg;
@@ -58,6 +61,9 @@ class Primitives<T, RedOp, Fan, Direct,
   uint64_t barrier_next_pat = 0;
   int repeat;
   bool skip_fence = false;
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+  bool stepStoreFree = false;  // stepStartBarrier() may order LDS only: no connFifo on any send or receive peer
+#endif
 
   // Don't use barrier 0 as it's used by the final sync
   inline __device__ void barrier() {
@@ -75,6 +81,19 @@ class Primitives<T, RedOp, Fan, Direct,
   inline __device__ void subBarrier() {
     if (nworkers == WARP_SIZE) __syncwarp();
     else barrier();
+  }
+
+  // Orders LDS only: the last step drained at its end barrier and post-send fence, and the post threads' tail or head
+  // only has to reach the peer. Slot loads issue after the wait thread's system-scope acquire. connFifo comms keep
+  // subBarrier().
+  inline __device__ void stepStartBarrier() {
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+    if (stepStoreFree && nworkers != WARP_SIZE) {
+      ldsOrderedBarrier(nworkers, threadsPerBlock, barrier_next, barriers);
+      return;
+    }
+#endif
+    subBarrier();
   }
 
   // Multi-RPN (hierarchical) PAT runs NCCL_PAT_MULTI_RPN_NWORKERS workers.
@@ -258,8 +277,7 @@ class Primitives<T, RedOp, Fan, Direct,
     constexpr int Dst = DstBuf != -1;
 
     nelem = nelem < 0 ? 0 : nelem;
-    int sliceSize = stepSize * StepPerSlice;
-    sliceSize = max(divUp(nelem, 16 * SlicePerChunk) * 16, sliceSize / 32);
+    int sliceSize = ncclSimpleSliceSize(nelem, SlicePerChunk, stepSize * StepPerSlice);
     int slice = 0;
     int offset = 0;
 
@@ -299,7 +317,7 @@ class Primitives<T, RedOp, Fan, Direct,
           ncclShmem.groups[group].acc = (Dst && userAcc != nullptr) ? userAcc + dstIx + offset : nullptr;
         }
         waitPeer<DirectRecv, DirectSend, Recv, Send, Src, Dst>(srcIx, dstIx, offset, sliceSize);
-        subBarrier();
+        stepStartBarrier();
         /* if user abort the kernel, we don't need to actually perform copy/reduce; just set size
          * to 0 to avoid unnecessary workload. */
         int workSize = ncclShmem.aborted ? 0 : sliceSize;
@@ -492,14 +510,14 @@ private:
   // Scatter/Gather generic op
   // skip: my own rank order in the buffer chunks
   // shift: peer offset to avoid all ranks sending to or receiving from same peer
-  template <int DirectRecv1, int DirectSend1, int Recv, int Send>
+  template <int DirectRecv1, int DirectSend1, int Recv, int Send, bool Remap = false>
   __device__ __forceinline__ void ScatterGatherOp(intptr_t inpIx, intptr_t outIx, ssize_t totalElem, int peerElem,
-                                                  ssize_t peerOffset, int skip, int shift, bool postOp) {
+                                                  ssize_t peerOffset, int skip, int shift, bool postOp,
+                                                  const int* remap = nullptr) {
     constexpr int DirectRecv = /*1 &&*/ Direct && DirectRecv1;
     constexpr int DirectSend = /*1 &&*/ Direct && DirectSend1;
     int offset = 0; // slice offset
-    int sliceSize = stepSize * StepPerSlice;
-    int dataSize = max(DIVUP(peerElem, 16 * SlicePerChunk) * 16, sliceSize / 32); // per-peer slice size
+    int dataSize = ncclSimpleSliceSize(peerElem, SlicePerChunk, stepSize * StepPerSlice); // per-peer slice size
 
 #pragma unroll 1
     for (int slice = 0; slice < SlicePerChunk; ++slice) {
@@ -511,13 +529,16 @@ private:
           constexpr int PreOpSrcs = DirectSend ? 0 : 1;
           if (tid == 0) ncclShmem.groups[group].srcs[0] = (T*)ncclShmem.groups[group].userInput + inpIx + offset;
           // realSize is not accurate here; but intra-node does not rely on sizes FIFO
-          waitPeer<0, DirectSend, 0, 1, 1, 0>(0, inpIx, offset, realSize);
+          waitPeer<0, DirectSend, 0, 1, 1, 0>(0, DirectSend ? inpIx : 0, offset, realSize);
           subBarrier();
 #pragma unroll 1
           // Loop over peers
           for (int j = 0; j < fan.nsend(); j++) {
             int i = (j + shift) % fan.nsend();
-            ssize_t pOffset = i * peerOffset;
+            // Optionally remap the per-peer offset (e.g. the NVLS dense-head index ->
+            // user rank). remap wrappers pass skip<0, so the skip test below stays on i.
+            int slot = Remap ? remap[i] : i;
+            ssize_t pOffset = slot * peerOffset;
             // Skip the data I am responsible of reducing myself
             if (skip >= 0 && i >= skip) pOffset += peerOffset;
             void* src0 = (T*)ncclShmem.groups[group].srcs[0] + pOffset;
@@ -532,15 +553,20 @@ private:
           }
         } else if (Recv) {
           if (tid == 0) ncclShmem.groups[group].dsts[0] = (T*)ncclShmem.groups[group].userOutput + outIx + offset;
-          ssize_t pOffset = index * peerOffset;
-          if (skip >= 0 && index >= skip) pOffset += peerOffset;
-          // Adjust remote index with peer offset in case we are directly pulling from peer's output buffer
-          waitPeer<DirectRecv, 0, 1, 0, 0, 1>(outIx + pOffset, outIx + pOffset, offset, realSize);
+          intptr_t directIx = 0;
+          if (DirectRecv && (flags & RoleWaitRecv)) {
+            int slot = Remap ? remap[index] : index;
+            ssize_t pOffset = slot * peerOffset;
+            if (skip >= 0 && index >= skip) pOffset += peerOffset;
+            directIx = outIx + pOffset;
+          }
+          waitPeer<DirectRecv, 0, 1, 0, 0, 1>(directIx, directIx, offset, realSize);
           subBarrier();
 #pragma unroll 1
           for (int j = 0; j < fan.nrecv(); j++) {
             int i = (j + shift) % fan.nrecv();
-            pOffset = i * peerOffset;
+            int slot = Remap ? remap[i] : i;
+            ssize_t pOffset = slot * peerOffset;
             if (skip >= 0 && i >= skip) pOffset += peerOffset;
             void* dst0 = (T*)ncclShmem.groups[group].dsts[0] + pOffset;
             ssize_t realPeerSize = min(realSize, totalElem - pOffset);
@@ -802,6 +828,11 @@ public:
     // coverity[overrun-call] => Coverity think prims.index can be greater than 1
     if (flags & (RoleWaitSend | RolePostSend))
       loadSendConn(channel->peers[peer], connIndexSend, collWork ? collWork->direct : 0, sendIpcReg, sendNetReg);
+#if RCCL_SIMPLE_STORE_FREE_STEP_START
+    // Every thread scans the same peers, so the whole block takes the same barrier.
+    stepStoreFree = !anySendConnFifo(channel, sendPeers, nsend, connIndexSend) &&
+                    !anyRecvConnFifo(channel, recvPeers, nrecv, connIndexRecv);
+#endif
 
     // if (barrierAny(flags & NetDeviceUnpack)) {
     //   flags |= AnyNetDeviceUnpack;
@@ -889,13 +920,9 @@ public:
       patBarrier</*isHierarchical=*/false>();
     }
   }
-#if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
-  skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
-#else
-    // The cheap post-peer fence is only safe with global DWORDX4 builtins
-    // (system-scope cache-bypassing stores); otherwise always use the full fence.
-    skip_fence = false;
-#endif
+  // No DWORDX4 builtins: only unregistered collectives (stores to the uncached FIFO) take the cheap fence.
+  skip_fence = RCCL_USE_CHEAP_POST_SEND_FENCE(
+    ncclShmem.comm.cheapPostSendFenceOff, rcclSimplePostSendRegisteredOrP2p(collWork));
 }
 
 __forceinline__ __device__ ~Primitives() {
@@ -1150,6 +1177,13 @@ __device__ __forceinline__ void scatter(intptr_t inpIx, ssize_t totalElem, int p
                                         int shift) {
   ScatterGatherOp<0, 0, 0, 1>(inpIx, -1, totalElem, peerElem, peerOffset, skip, shift, /*postOp=*/false);
 }
+// Like scatter(), but remaps each peer's source offset through `remap` (e.g. the NVLS
+// dense-head-index -> user-rank table). Assumes skip < 0.
+__device__ __forceinline__ void scatterRemap(intptr_t inpIx, ssize_t totalElem, int peerElem, ssize_t peerOffset,
+                                             int skip, int shift, const int* remap) {
+  ScatterGatherOp<0, 0, 0, 1, /*Remap=*/true>(inpIx, -1, totalElem, peerElem, peerOffset, skip, shift,
+                                              /*postOp=*/false, remap);
+}
 __device__ __forceinline__ void directScatter(intptr_t inpIx, ssize_t totalElem, int peerElem, ssize_t peerOffset,
                                               int skip, int shift) {
   ScatterGatherOp<0, 1, 0, 1>(inpIx, -1, totalElem, peerElem, peerOffset, skip, shift, /*postOp=*/false);
@@ -1158,6 +1192,12 @@ __device__ __forceinline__ void directScatter(intptr_t inpIx, ssize_t totalElem,
 __device__ __forceinline__ void gather(intptr_t outIx, ssize_t totalElem, int peerElem, ssize_t peerOffset, int skip,
                                        int shift, bool postOp = false) {
   ScatterGatherOp<0, 0, 1, 0>(-1, outIx, totalElem, peerElem, peerOffset, skip, shift, postOp);
+}
+// Like gather(), but remaps each peer's destination offset through `remap` (e.g. the NVLS
+// dense-head-index -> user-rank table). Assumes skip < 0.
+__device__ __forceinline__ void gatherRemap(intptr_t outIx, ssize_t totalElem, int peerElem, ssize_t peerOffset,
+                                            int skip, int shift, const int* remap, bool postOp = false) {
+  ScatterGatherOp<0, 0, 1, 0, /*Remap=*/true>(-1, outIx, totalElem, peerElem, peerOffset, skip, shift, postOp, remap);
 }
 __device__ __forceinline__ void directGather(intptr_t outIx, ssize_t totalElem, int peerElem, ssize_t peerOffset,
                                              int skip, int shift) {

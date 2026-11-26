@@ -15,8 +15,8 @@
 
 #include "transport/net_ib/connect.h"
 
-// This binary also compiles the real connect.cc, so a unit that only calls these
-// helpers has its calls renamed onto the trampolines below before it is included.
+// A unit that only calls these connect.cc helpers has its calls renamed onto the
+// trampolines below before it is included, so its tests drive them directly.
 inline constexpr uint64_t kNetIbSeamStartNs = 1000;
 
 inline ncclResult_t NetIbQpStepFails(ncclIbQp*) { return ncclSystemError; }

@@ -90,10 +90,17 @@
 //
 
 #include <sys/mman.h>
+#include <sys/wait.h>
 
 #include <algorithm>
-#include <vector>
 #include <atomic>
+#include <cerrno>
+#include <chrono>
+#include <csignal>
+#include <cstring>
+#include <sstream>
+#include <string>
+#include <vector>
 
 #include "suites/functional/ipc.h"
 #include "common/base_rocr_utils.h"
@@ -105,6 +112,43 @@
 #include "hsa/hsa.h"
 
 static const uint32_t kNumBufferElements = 256;
+
+// Upper bound on waiting for the peer to advance the handshake. A healthy run
+// takes ~0.5 s, so 10 s is ~20x headroom for a loaded CI machine.
+static const int kPeerWaitTimeoutMs = 10000;
+
+// How often the parent re-checks a pending condition while waiting.
+static const int kPollMs = 10;
+
+// Exit code the child uses to tell the parent that it failed.
+static const int kChildExitFail = 1;
+
+static bool SignalConditionMet(hsa_signal_condition_t cond, hsa_signal_value_t value,
+                               hsa_signal_value_t target) {
+  switch (cond) {
+    case HSA_SIGNAL_CONDITION_EQ:  return value == target;
+    case HSA_SIGNAL_CONDITION_NE:  return value != target;
+    case HSA_SIGNAL_CONDITION_LT:  return value < target;
+    case HSA_SIGNAL_CONDITION_GTE: return value >= target;
+    default:                       return false;
+  }
+}
+
+// Render a waitpid() status so a crashing child names its own signal.
+static std::string DescribeWaitStatus(int status) {
+  std::ostringstream os;
+
+  if (WIFEXITED(status)) {
+    os << "child exited with status " << WEXITSTATUS(status);
+  } else if (WIFSIGNALED(status)) {
+    os << "child was terminated by signal " << WTERMSIG(status)
+       << " (" << strsignal(WTERMSIG(status)) << ")";
+  } else {
+    os << "child is in an unexpected wait state (raw status " << status << ")";
+  }
+
+  return os.str();
+}
 
 struct callback_args {
   hsa_agent_t host;
@@ -239,6 +283,8 @@ void IPCTest::SetUp(void) {
 
   } else {
     parentProcess_ = false;
+    // Remember who forked us so the wait loops can detect the parent dying.
+    parent_pid_ = getppid();
     set_verbosity(0);
     PROCESS_LOG("Second process running.\n");
 
@@ -318,13 +364,170 @@ bool SignalCallbackHandler(hsa_signal_value_t value, void* arg) {
   return false;
 }
 
+bool IPCTest::ChildHasExited(int* status) {
+  if (child_reaped_) {
+    *status = child_wait_status_;
+    return true;
+  }
+
+  int st = 0;
+  pid_t ret = waitpid(child_, &st, WNOHANG);
+  if (ret == child_) {
+    child_reaped_ = true;
+    child_wait_status_ = st;
+    *status = st;
+    return true;
+  }
+
+  // ret == 0 (still running) or ret < 0 with EINTR: the caller retries on its
+  // next pass, bounded by its own deadline.
+  return false;
+}
+
+void IPCTest::TerminateChild(void) {
+  // child_ is 0 in the child and when SetUp() never forked; kill(0) would
+  // signal the whole process group.
+  if (child_ <= 0 || child_reaped_) {
+    return;
+  }
+
+  kill(child_, SIGKILL);
+  waitpid(child_, &child_wait_status_, 0);
+  child_reaped_ = true;
+}
+
+void IPCTest::ReapChildOrFail(void) {
+  int status = 0;
+  int elapsed_ms = 0;
+
+  while (!ChildHasExited(&status) && elapsed_ms < kPeerWaitTimeoutMs) {
+    usleep(kPollMs * 1000);
+    elapsed_ms += kPollMs;
+  }
+
+  if (!ChildHasExited(&status)) {
+    ADD_FAILURE() << "Parent: child (pid " << child_ << ") did not exit within "
+                  << kPeerWaitTimeoutMs << " ms.";
+    TerminateChild();
+    return;
+  }
+
+  // The old code discarded this status, so a child that failed after the
+  // handshake went unnoticed.
+  if (!WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+    ADD_FAILURE() << "Parent: " << DescribeWaitStatus(status) << ".";
+  }
+}
+
+bool IPCTest::WaitForChildSignal(hsa_signal_t sig, hsa_signal_condition_t cond,
+                                 hsa_signal_value_t target, const char* phase,
+                                 hsa_signal_value_t* observed) {
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(kPeerWaitTimeoutMs);
+
+  while (true) {
+    hsa_signal_value_t ret =
+        hsa_signal_wait_acquire(sig, cond, target, timeout_, HSA_WAIT_STATE_BLOCKED);
+    *observed = ret;
+
+    // Check the handshake first: a child that satisfies the condition and then
+    // exits has succeeded, and must not be failed as a dead peer below.
+    if (SignalConditionMet(cond, ret, target)) {
+      return true;
+    }
+
+    // The child hit a FORK_ASSERT_EQ, which records the failure here.
+    if (shared_->child_status == -1) {
+      ADD_FAILURE() << "Parent: child reported a failure while " << phase
+                    << "; see the child's output above for details.";
+      TerminateChild();
+      return false;
+    }
+
+    // A child that dies abruptly (SIGSEGV, SIGKILL, ...) advances neither the
+    // signal nor child_status, so without this check the loop spins forever at
+    // ~100% CPU and hangs the job instead of failing it (ROCM-32557).
+    int status = 0;
+    if (ChildHasExited(&status)) {
+      ADD_FAILURE() << "Parent: " << DescribeWaitStatus(status) << " while " << phase
+                    << "; the IPC signal never reached " << target
+                    << " (last observed value " << ret << ").";
+      return false;
+    }
+
+    // Backstop for a child that is alive but wedged, e.g. stuck in the runtime.
+    if (std::chrono::steady_clock::now() >= deadline) {
+      ADD_FAILURE() << "Parent: timed out after " << kPeerWaitTimeoutMs << " ms while "
+                    << phase << "; the IPC signal is stuck at " << ret << " and the child (pid "
+                    << child_ << ") is still running.";
+      TerminateChild();
+      return false;
+    }
+  }
+}
+
+bool IPCTest::WaitForParentSignal(hsa_signal_t sig, hsa_signal_condition_t cond,
+                                  hsa_signal_value_t target, const char* phase,
+                                  hsa_signal_value_t* observed) {
+  const std::chrono::steady_clock::time_point deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(kPeerWaitTimeoutMs);
+
+  while (true) {
+    hsa_signal_value_t ret =
+        hsa_signal_wait_acquire(sig, cond, target, timeout_, HSA_WAIT_STATE_BLOCKED);
+    *observed = ret;
+
+    if (SignalConditionMet(cond, ret, target)) {
+      return true;
+    }
+
+    // This check used to read child_status, which only the child writes, so it
+    // could never fire. The parent records its failures in parent_status.
+    if (shared_->parent_status == -1) {
+      PROCESS_LOG("Child: Parent reported a failure while %s; exiting\n", phase);
+      return false;
+    }
+
+    // A parent that died outright never wrote parent_status either; being
+    // reparented is how the child notices, instead of outliving the test as an
+    // orphan spinning at ~100% CPU.
+    if (getppid() != parent_pid_) {
+      PROCESS_LOG("Child: Parent (pid %d) is gone while %s; exiting\n",
+                  static_cast<int>(parent_pid_), phase);
+      return false;
+    }
+
+    if (std::chrono::steady_clock::now() >= deadline) {
+      PROCESS_LOG("Child: Timed out after %d ms while %s; signal stuck at %ld\n",
+                  kPeerWaitTimeoutMs, phase, static_cast<int64_t>(ret));
+      return false;
+    }
+  }
+}
+
 void IPCTest::ChildProcessImpl() {
 
   // Yield until shared token value changes i.e. is updated by parent.
   // Validate parent's update is per expectation
   PROCESS_LOG("Child: Waiting for parent process to signal\n");
-  while (shared_->token == 0) {
-    sched_yield();
+  {
+    const auto token_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(kPeerWaitTimeoutMs);
+    while (shared_->token == 0) {
+      if (getppid() != parent_pid_) {
+        PROCESS_LOG("Child: Parent (pid %d) is gone while waiting for initial token; exiting\n",
+                    static_cast<int>(parent_pid_));
+        shared_->child_status = -1;
+        return;
+      }
+      if (std::chrono::steady_clock::now() >= token_deadline) {
+        PROCESS_LOG("Child: Timed out after %d ms waiting for initial token\n",
+                    kPeerWaitTimeoutMs);
+        shared_->child_status = -1;
+        return;
+      }
+      sched_yield();
+    }
   }
   if (shared_->token != 1) {
     shared_->token = -1;
@@ -384,8 +587,25 @@ void IPCTest::ChildProcessImpl() {
   hsa_signal_store_release(ipc_signal, 2);
 
   // Wait for SignalCallbackHandler to be called
-  while (child_cb_data.token <= 0)
-    sched_yield();
+  {
+    const auto cb_deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(kPeerWaitTimeoutMs);
+    while (child_cb_data.token <= 0) {
+      if (getppid() != parent_pid_) {
+        PROCESS_LOG("Child: Parent (pid %d) is gone while waiting for async callback; exiting\n",
+                    static_cast<int>(parent_pid_));
+        shared_->child_status = -1;
+        return;
+      }
+      if (std::chrono::steady_clock::now() >= cb_deadline) {
+        PROCESS_LOG("Child: Timed out after %d ms waiting for async callback\n",
+                    kPeerWaitTimeoutMs);
+        shared_->child_status = -1;
+        return;
+      }
+      sched_yield();
+    }
+  }
 
   PROCESS_LOG("Child: Confirmed DWord's of IPC buffer has: %d\n", third_val_);
   PROCESS_LOG("Child: Updated DWord's of IPC buffer to: %d\n", fourth_val_);
@@ -394,14 +614,10 @@ void IPCTest::ChildProcessImpl() {
   hsa_signal_store_release(ipc_signal, 4);
 
   hsa_signal_value_t ret = 1;
-  while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_LT, 0, timeout_, HSA_WAIT_STATE_BLOCKED);
-    if (shared_->child_status == -1) {
-      exit(0);
-    }
-    if (ret < 0) {
-      break;
-    }
+  if (!WaitForParentSignal(ipc_signal, HSA_SIGNAL_CONDITION_LT, 0,
+                           "waiting for the parent to release the IPC signal", &ret)) {
+    shared_->child_status = -1;
+    return;
   }
   USR_TRIGGERED_FAILURE(ret, HSA_STATUS_ERROR, 203);
   FORK_ASSERT_EQ(-1, ret, "Child: Expected signal value of 0, but got " << ret << "\n");
@@ -491,14 +707,10 @@ void IPCTest::ParentProcessImpl() {
   // Wait for child processs to signal. Child will update signal object
   // value to TWO (2). Check signal value is per expectation
   hsa_signal_value_t ret = 1;
-  while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 2, timeout_, HSA_WAIT_STATE_BLOCKED);
-    if (shared_->child_status == -1) {
-      exit(0);
-    }
-    if (ret >= 2) {
-      break;
-    }
+  if (!WaitForChildSignal(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 2,
+                          "waiting for the child to attach to the IPC buffer and signal",
+                          &ret)) {
+    return;
   }
   USR_TRIGGERED_FAILURE(ret, HSA_STATUS_ERROR, 107);
   FORK_ASSERT_EQ(2, ret, "Parent: Expected signal value of 2, but got " << ret << "\n");
@@ -511,14 +723,9 @@ void IPCTest::ParentProcessImpl() {
 
   hsa_signal_store_relaxed(ipc_signal, 3);
 
-  while(true) {
-    ret = hsa_signal_wait_acquire(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 4, timeout_, HSA_WAIT_STATE_BLOCKED);
-    if (shared_->child_status == -1) {
-      exit(0);
-    }
-    if (ret >= 4) {
-      break;
-    }
+  if (!WaitForChildSignal(ipc_signal, HSA_SIGNAL_CONDITION_GTE, 4,
+                          "waiting for the child's async handler to complete", &ret)) {
+    return;
   }
 
   CheckAndFillBuffer(gpuBuf, fourth_val_, 0);
@@ -537,10 +744,10 @@ void IPCTest::ParentProcessImpl() {
   FORK_ASSERT_EQ(HSA_STATUS_SUCCESS, err, "Parent: Failed to free gpu memory\n");
   PROCESS_LOG("Parent: IPC test PASSED\n");
 
-  // Wait for child process to terminate before exiting
-  int exit_status = 0;
-  waitpid(child_, &exit_status, 0);
-  munmap(shared_, sizeof(Shared));
+  // Wait for the child to terminate, and hold it to the same standard as the
+  // parent: a non-zero exit or a fatal signal fails the test. The shared block
+  // is unmapped in Close(), which is reached on every path.
+  ReapChildOrFail();
 }
 
 void IPCTest::PrintVerboseMesg(void) {
@@ -639,7 +846,9 @@ void IPCTest::Run(void) {
   } else {
     ChildProcessImpl();
     hsa_shut_down();
-    exit(0);
+    // Report the child's verdict in its exit code; it used to exit 0 whatever
+    // the outcome, so a child failure was indistinguishable from a pass.
+    exit(shared_->child_status == -1 ? kChildExitFail : 0);
   }
 
   return;
@@ -655,6 +864,18 @@ void IPCTest::DisplayResults(void) const {
 }
 
 void IPCTest::Close() {
+  // A failed assertion returns out of ParentProcessImpl() before its teardown,
+  // so clean up here instead: the test epilog runs on every path. Otherwise a
+  // parent-side failure leaves the child orphaned and spinning at ~100% CPU.
+  if (parentProcess_) {
+    TerminateChild();
+
+    if (shared_ != nullptr && shared_ != MAP_FAILED) {
+      munmap(shared_, sizeof(Shared));
+      shared_ = nullptr;
+    }
+  }
+
   // This will close handles opened within rocrtst utility calls and call
   // hsa_shut_down(), so it should be done after other hsa cleanup
   TestBase::Close();

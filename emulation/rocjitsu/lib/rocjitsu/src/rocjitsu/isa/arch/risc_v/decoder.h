@@ -21,11 +21,13 @@ public:
   static constexpr std::size_t kMaxInstructionWords = 1;
   static std::unique_ptr<Instruction> decode(uint32_t instr);
   static DecodeResult decode(const uint32_t *instr, const DecodeErrorEmitter &emit_error) {
-    if (instr == nullptr)
+    if (instr == nullptr) {
       return emit_error.emit() << "Null instruction encoding";
+    }
     auto decoded = decode(*instr);
-    if (!decoded)
+    if (!decoded) {
       return emit_error.emit() << "Invalid instruction opcode";
+    }
     return decoded;
   }
 

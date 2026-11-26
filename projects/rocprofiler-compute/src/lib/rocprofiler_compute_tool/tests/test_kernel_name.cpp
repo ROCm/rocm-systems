@@ -32,3 +32,13 @@ TEST(TestKernelName, DemangledName_IsTruncatedToTheKernel)
     EXPECT_EQ(truncate_name("vecCopy(double*, double*, double*, int)"), "vecCopy");
     EXPECT_EQ(truncate_name("Foo<int, float>::foo(a[], int (int))"), "foo");
 }
+
+TEST(TestKernelName, KernelDescriptorSuffix_IsStrippedFromNonemptyName)
+{
+    EXPECT_EQ(strip_kernel_descriptor_suffix("_Z3fooi.kd"), "_Z3fooi");
+    EXPECT_EQ(strip_kernel_descriptor_suffix("_Z3fooi"), "_Z3fooi");
+    EXPECT_EQ(strip_kernel_descriptor_suffix(".kd"), ".kd");
+    EXPECT_EQ(strip_kernel_descriptor_suffix(""), "");
+    EXPECT_EQ(strip_kernel_descriptor_suffix("foo.kd.kd"), "foo.kd");
+    EXPECT_EQ(format_kernel_name(".kd"), ".kd");
+}

@@ -30,6 +30,7 @@ def resolve(
     event='workflow_dispatch',
     workflow_ref=None,
     ref_type='branch',
+    event_payload=None,
 ):
     workflow = yaml.safe_load(WORKFLOW.read_text())
     step = next(
@@ -37,6 +38,7 @@ def resolve(
         for s in workflow['jobs']['source-metadata']['steps']
         if s.get('id') == 'resolve'
     )
+    minimum_source = workflow['env']['MIN_BENCHMARK_SOURCE_COMMIT']
     # gh is the network boundary only; run the real resolver, git validation and jq.
     gh = tmp_path / 'gh'
     gh.write_text(
@@ -52,6 +54,8 @@ def resolve(
         'print(data)\n'
     )
     gh.chmod(0o755)
+    event_file = tmp_path / 'event.json'
+    event_file.write_text(json.dumps(event_payload or {}))
     output = tmp_path / 'output'
     calls = tmp_path / 'calls'
     api = {
@@ -60,6 +64,16 @@ def resolve(
         },
         f'repos/{REPO}/compare/{SOURCE}...{TIP}': {
             'merge_base_commit': {'sha': SOURCE}
+        },
+        **{
+            f'repos/{REPO}/compare/{minimum_source}...{source}': {
+                'merge_base_commit': {'sha': minimum_source}
+            }
+            for source in (SOURCE, TIP, WORKFLOW_SHA)
+        },
+        **{
+            f'repos/{REPO}/commits/{source}': {'parents': [{'sha': 'd' * 40}]}
+            for source in (SOURCE, TIP, WORKFLOW_SHA)
         },
         **(responses or {}),
     }
@@ -70,11 +84,13 @@ def resolve(
             'PATH': str(tmp_path) + os.pathsep + os.environ['PATH'],
             'GITHUB_REPOSITORY': REPO,
             'GITHUB_EVENT_NAME': event,
+            'GITHUB_EVENT_PATH': str(event_file),
             'GITHUB_REF': (
                 workflow_ref if workflow_ref is not None else f'refs/heads/{branch}'
             ),
             'GITHUB_REF_TYPE': ref_type,
             'GITHUB_SHA': WORKFLOW_SHA,
+            'MIN_BENCHMARK_SOURCE_COMMIT': minimum_source,
             'REQUESTED_SOURCE_COMMIT': commit,
             'REQUESTED_PULL_REQUEST': pr,
             'GITHUB_OUTPUT': str(output),
@@ -98,16 +114,41 @@ def test_manual_source_is_independent_of_workflow_revision(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert values['source_branch'] == 'develop'
     assert values['source_sha'] == SOURCE != WORKFLOW_SHA
-    assert calls == [
+    assert calls[:-2] == [
         f'repos/{REPO}/git/ref/heads/develop',
         f'repos/{REPO}/compare/{SOURCE}...{TIP}',
     ]
+    minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
+        'MIN_BENCHMARK_SOURCE_COMMIT'
+    ]
+    assert calls[-2:] == [
+        f'repos/{REPO}/compare/{minimum_source}...{SOURCE}',
+        f'repos/{REPO}/commits/{SOURCE}',
+    ]
+    assert values['base_branch'] == 'develop'
+    assert values['base_sha'] == 'd' * 40
+
+
+def test_manual_source_below_compatibility_floor_rejects(tmp_path):
+    minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
+        'MIN_BENCHMARK_SOURCE_COMMIT'
+    ]
+    result, _, _ = resolve(
+        tmp_path,
+        responses={
+            f'repos/{REPO}/compare/{minimum_source}...{SOURCE}': {
+                'merge_base_commit': {'sha': SOURCE}
+            },
+        },
+    )
+    assert result.returncode != 0
+    assert '--cpu-thread-budget' in result.stderr
 
 
 def side_responses(**pr_changes):
     pr = {
         'state': 'open',
-        'base': {'ref': 'develop'},
+        'base': {'ref': 'develop', 'repo': {'full_name': REPO}},
         'head': {'repo': {'full_name': REPO}, 'ref': 'feature/source', 'sha': 'e' * 40},
         'html_url': f'https://github.com/{REPO}/pull/42',
         **pr_changes,
@@ -124,9 +165,44 @@ def side_responses(**pr_changes):
     }
 
 
-def test_side_source_old_commit_is_valid_pr_metadata(tmp_path):
+@pytest.mark.parametrize('base_branch', ['develop', 'feature/parent'])
+def test_pr_event_measures_frozen_head_not_synthetic_merge_or_later_tip(
+    tmp_path, base_branch
+):
     result, values, calls = resolve(
-        tmp_path, branch='feature/source', pr='42', responses=side_responses()
+        tmp_path,
+        event='pull_request',
+        workflow_ref='refs/pull/42/merge',
+        commit='',
+        event_payload={
+            'number': 42,
+            'pull_request': {'head': {'ref': 'feature/source', 'sha': SOURCE}},
+        },
+        responses=side_responses(
+            base={'ref': base_branch, 'repo': {'full_name': REPO}}
+        ),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert values == {
+        'source_branch': 'feature/source',
+        'source_sha': SOURCE,
+        'base_branch': 'develop',
+        'base_sha': 'f' * 40,
+        'pull_request_number': '42',
+        'pull_request_url': f'https://github.com/{REPO}/pull/42',
+    }
+    assert not any('/git/ref/heads/feature' in call for call in calls)
+
+
+@pytest.mark.parametrize('base_branch', ['develop', 'feature/parent'])
+def test_side_source_old_commit_is_valid_pr_metadata(tmp_path, base_branch):
+    result, values, calls = resolve(
+        tmp_path,
+        branch='feature/source',
+        pr='42',
+        responses=side_responses(
+            base={'ref': base_branch, 'repo': {'full_name': REPO}}
+        ),
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert values == {
@@ -138,13 +214,17 @@ def test_side_source_old_commit_is_valid_pr_metadata(tmp_path):
         'pull_request_url': f'https://github.com/{REPO}/pull/42',
     }
     assert f'repos/{REPO}/compare/{SOURCE}...{"e" * 40}' in calls
+    assert not any('feature%2Fparent' in call for call in calls)
 
 
 @pytest.mark.parametrize(
     'changes',
     [
         {'state': 'closed'},
-        {'base': {'ref': 'release'}},
+        {'base': {'ref': 'develop', 'repo': {'full_name': 'fork/repo'}}},
+        {'base': {'ref': 'develop'}},
+        {'base': {'ref': '', 'repo': {'full_name': REPO}}},
+        {'base': {'ref': 'bad..branch', 'repo': {'full_name': REPO}}},
         {
             'head': {
                 'repo': {'full_name': 'fork/repo'},
@@ -162,6 +242,11 @@ def test_invalid_pr_rejects_early(tmp_path, changes):
     )
     assert result.returncode != 0
     assert 'pull_request_number' not in values
+    if 'base' in changes:
+        if changes['base'].get('repo', {}).get('full_name') != REPO:
+            assert 'base repository' in result.stderr
+        else:
+            assert 'valid branch name' in result.stderr
 
 
 def test_selected_commit_must_also_belong_to_pr_head_history(tmp_path):
@@ -219,8 +304,19 @@ def test_push_uses_event_sha_without_resolving_a_later_branch_tip(tmp_path):
         tmp_path, event='push', commit='invalid-unused-manual-input'
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert values == {'source_branch': 'develop', 'source_sha': WORKFLOW_SHA}
-    assert calls == []
+    assert values == {
+        'source_branch': 'develop',
+        'source_sha': WORKFLOW_SHA,
+        'base_branch': 'develop',
+        'base_sha': 'd' * 40,
+    }
+    minimum_source = yaml.safe_load(WORKFLOW.read_text())['env'][
+        'MIN_BENCHMARK_SOURCE_COMMIT'
+    ]
+    assert calls == [
+        f'repos/{REPO}/compare/{minimum_source}...{WORKFLOW_SHA}',
+        f'repos/{REPO}/commits/{WORKFLOW_SHA}',
+    ]
 
 
 def test_blank_commit_freezes_selected_tip_once(tmp_path):
@@ -386,3 +482,12 @@ def test_tag_workflow_rejects_before_api(tmp_path):
     )
     assert result.returncode != 0
     assert values == {} and calls == []
+
+
+@pytest.mark.parametrize('parents', [[], [{'sha': 'bad'}]])
+def test_develop_source_requires_valid_first_parent(tmp_path, parents):
+    result, _, _ = resolve(
+        tmp_path, responses={f'repos/{REPO}/commits/{SOURCE}': {'parents': parents}}
+    )
+    assert result.returncode != 0
+    assert 'first parent' in result.stderr

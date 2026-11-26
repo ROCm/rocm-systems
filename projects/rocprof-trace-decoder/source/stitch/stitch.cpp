@@ -316,6 +316,7 @@ void insert_gfx12_barrier_wait(WaveDataInternal& wave, const barrier_list_t& bar
 
     std::vector<Instruction> insts{};
     std::vector<att_wave_state_t> wstates{};
+    std::vector<size_t> exec_insertions{};
 
     insts.reserve(barriers.size() + wave.instructions.size());
     wstates.reserve(barriers.size() + wave.timeline.size());
@@ -363,6 +364,7 @@ void insert_gfx12_barrier_wait(WaveDataInternal& wave, const barrier_list_t& bar
         }
 
         insts.push_back(std::move(inst));
+        exec_insertions.push_back(index);
         prev_index = index;
     }
 
@@ -372,6 +374,11 @@ void insert_gfx12_barrier_wait(WaveDataInternal& wave, const barrier_list_t& bar
         wstates.push_back(wave.timeline[timeline_index]);
         timeline_index++;
     }
+
+    // Keep execmask entries attached to their original writing instructions after inserting barriers.
+    for (auto& event : wave.popcnt)
+        event.index +=
+            std::upper_bound(exec_insertions.begin(), exec_insertions.end(), event.index) - exec_insertions.begin();
 
     wave.instructions = std::move(insts);
     wave.timeline = std::move(wstates);
@@ -394,7 +401,7 @@ void Stitcher::stitch(WaveDataInternal& wave)
     if (wave.callbackComplete) return;
     wave.callbackComplete = true;
 
-    if (!pctranslator) pctranslator = std::make_unique<PCTranslator>(raw_code, codeobj_service, gfxip);
+    if (!pctranslator) pctranslator = std::make_unique<PCTranslator>(raw_code, codeobj_service, static_cast<int>(gfxip));
 
     auto stitch_rate = stitchWave(wave);
     if (!wave.bIsComplete && !wave.isTrapping)
@@ -413,6 +420,8 @@ void Stitcher::stitch(WaveDataInternal& wave)
     wave.instructions_array = wave.instructions.data();
     wave.timeline_size = wave.timeline.size();
     wave.timeline_array = wave.timeline.data();
+    wave.execmask = wave.popcnt.size() ? wave.popcnt.data() : nullptr;
+    wave.execmask_size = wave.popcnt.size();
 
     if (!wave.bIsComplete)
         for (auto& inst : wave.instructions) wave.end_time = std::max(wave.end_time, inst.time + inst.duration + 4);

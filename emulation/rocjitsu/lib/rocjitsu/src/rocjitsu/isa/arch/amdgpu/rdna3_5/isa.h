@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/decoder.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "util/bitfield.h"
 
@@ -83,7 +84,7 @@ struct Isa : amdgpu::RdnaIsaBase {
 
 } // namespace rdna3_5
 
-template <> struct IsaTrait<ROCJITSU_CODE_ARCH_RDNA3_5> {
+template <> struct IsaTrait<rocjitsu::IsaFamily::Rdna3_5> {
   using type = rdna3_5::Isa;
 };
 

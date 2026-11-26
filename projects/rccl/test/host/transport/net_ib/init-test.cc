@@ -241,11 +241,17 @@ TEST_F(NetIbInitMicrotest, CompareVDevsByPlane_PlaneThenPciPathDefinesOrder) {
   EXPECT_LT(ncclIbCompareVDevsByPlane(&first, &second), 0);
 }
 
-TEST_F(NetIbInitMicrotest, IsCx9_RequiresMellanoxVendorAndCx9FirmwarePrefix) {
+TEST_F(NetIbInitMicrotest, IsCx9_RequiresMellanoxVendorCx9PartAndCx9FirmwarePrefix) {
   ncclIbDev dev{};
   dev.vendorId = NCCL_IB_MLX_VENDOR_ID;
+  dev.vendorPartId = NCCL_IB_CX9_PART_ID;
   std::strcpy(dev.fwVer, "82.12.3456");
   EXPECT_TRUE(ncclIbIsCx9(&dev));
+  dev.vendorPartId = NCCL_IB_VF_PART_ID;
+  EXPECT_TRUE(ncclIbIsCx9(&dev));
+  dev.vendorPartId = 0;
+  EXPECT_FALSE(ncclIbIsCx9(&dev));
+  dev.vendorPartId = NCCL_IB_CX9_PART_ID;
   dev.vendorId = 0;
   EXPECT_FALSE(ncclIbIsCx9(&dev));
   dev.vendorId = NCCL_IB_MLX_VENDOR_ID;

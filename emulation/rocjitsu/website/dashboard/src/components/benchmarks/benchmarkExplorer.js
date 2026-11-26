@@ -1,6 +1,7 @@
 import { formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { commitTimestampFor, hasCommitTimestamp } from '../../data/runOrdering';
 import { resolveHistoryRange } from '../../config/historyRanges';
+import { selectDaySlots } from '../../data/overviewProjection';
 import { MAX_BENCHMARK_CHARTS } from '../../config/benchmarkGrid';
 
 export function benchmarkResultChoices(viewModel) {
@@ -12,6 +13,15 @@ export function benchmarkResultChoices(viewModel) {
       label: `${series.name} · ${shortSha(run)} · ${status}${status === 'completed' ? ` · ${formatDuration(record.test.durationSeconds)}` : ''} · ${formatFullDate(run.timestamp)} · ${run.runId}`,
     };
   })).reverse();
+}
+
+// The runs the history charts actually plot for a range: benchmarkRangeData narrowed by the same
+// day-slot policy as the chart (the last run per commit day, except 1W). The chart, Inspect results
+// and default workload selection all read this one run set, so every offered result can be highlighted.
+export function benchmarkPlottedData(data, range = 'ALL') {
+  const ranged = benchmarkRangeData(data, range);
+  const { slots } = selectDaySlots(ranged.runs, data.generatedAt, range);
+  return { ...ranged, runs: slots.flatMap(({ run }) => run ? [run] : []) };
 }
 
 // Local presentation helpers for Benchmark Explorer.

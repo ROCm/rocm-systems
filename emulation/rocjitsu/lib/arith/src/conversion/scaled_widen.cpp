@@ -1,0 +1,344 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// gfx950 single/pair scaled widening from FP4/FP8/BF8. Shares scale decoding,
+// destination packing and validation across formats; preserves the inherited
+// Rocjitsu model without claiming newly established hardware bit-exactness.
+
+#include "conversion/scaled_widen.h"
+#include "common/exec_mask.h"
+#include "common/float_encoding.h"
+#include "common/validation.h"
+#include "conversion/scaled_widen_impl.h"
+#include "rj_arith/detail/rj_arith_common.h"
+#include "rj_arith/detail/rj_arith_conversion.h"
+
+#include <stdint.h>
+
+namespace {
+using namespace rocjitsu::arith;
+using Source = ScaledSource;
+using Destination = ScaledDestination;
+
+// Decode one OCP narrow value, canonicalizing FP8/BF8 NaNs to -qNaN on gfx950.
+template <Source Format> float decode(uint32_t code) {
+  if constexpr (Format == Source::Fp4) {
+    constexpr float magnitude[] = {0, 0.5f, 1, 1.5f, 2, 3, 4, 6};
+    return as_float(as_bits(magnitude[code & 7]) | ((code & 8) << 28));
+  } else {
+    constexpr bool bf8 = Format == Source::Bf8;
+    uint32_t mag = code & 0x7fU;
+    if (bf8 ? mag > 0x7cU : mag == 0x7fU) {
+      return as_float(0xffc00000U);
+    }
+    return fp8_to_float<bf8>(uint8_t(code));
+  }
+}
+
+// Widen the active lanes, retaining unselected destination bits. Validate all
+// controls before touching operands, including for an empty EXEC mask.
+template <int Lanes, Source Src, Destination Dst, bool Packed>
+int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+            const uint32_t *const *a, const uint32_t *const *b) {
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  constexpr uint64_t selectors =
+      Packed && Src != Source::Fp4 ? RJ_ARITH_ALU_HIGH_A : RJ_ARITH_CVT_BYTE_3;
+  constexpr uint64_t modifiers =
+      selectors | (!Packed && Dst == Destination::F16 ? RJ_ARITH_ALU_HIGH_D : 0);
+  if (int error = validate(flags, mode & ~modifiers, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  const bool flush_output = (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) != 0;
+  int shift = Packed && Src != Source::Fp4 ? (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0)
+                                           : 8 * int((mode >> 16) & 3);
+  [[maybe_unused]] const int destination_shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+  [[maybe_unused]] const bool use_simd = Dst == Destination::F16
+                                             ? (exec_mask & (exec_mask - 1)) != 0
+                                             : rocjitsu::arith::has_more_than_four_lanes(exec_mask);
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (use_simd && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    scaled_widen_x86_64_v4(Lanes, exec_mask, Src, Dst, Packed, false, flush_output, shift,
+                           destination_shift, d, a[0], b[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (use_simd && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    scaled_widen_x86_64_v3(Lanes, exec_mask, Src, Dst, Packed, false, flush_output, shift,
+                           destination_shift, d, a[0], b[0]);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  constexpr int words = Packed && Dst == Destination::F32 ? 2 : 1;
+  uint32_t result[words][Lanes];
+  // Stage the entire result before stores so either input may overlap either
+  // destination word, including when both destination pointers are identical.
+  for (uint64_t active = exec_mask; active; active &= active - 1) {
+    int lane = __builtin_ctzll(active);
+    uint32_t raw = a[0][lane] >> shift;
+    uint32_t exponent = (b[0][lane] >> 23) & 255;
+    // Exponent zero denotes 2^-127, not FP32 zero. Multiplication by the
+    // exact power of two has the inherited double-then-FP32 model's one rounding.
+    float scale = as_float(exponent ? exponent << 23 : 0x00400000U);
+    uint32_t values[Packed ? 2 : 1];
+    for (int element = 0; element < (Packed ? 2 : 1); ++element) {
+      if (exponent == 255) {
+        values[element] = Dst == Destination::F32   ? 0xffc00000U
+                          : Dst == Destination::F16 ? 0xfe00U
+                                                    : 0xffc0U;
+      } else {
+        values[element] = encode_scaled_widen<Dst>(
+            decode<Src>(raw >> (element * (Src == Source::Fp4 ? 4 : 8))) * scale, false,
+            flush_output);
+      }
+    }
+    result[0][lane] = values[0];
+    if constexpr (Packed) {
+      if constexpr (Dst == Destination::F32) {
+        result[1][lane] = values[1];
+      } else {
+        result[0][lane] |= values[1] << 16;
+      }
+    } else if constexpr (Dst == Destination::F16) {
+      result[0][lane] =
+          (d[0][lane] & ~(0xffffU << destination_shift)) | (values[0] << destination_shift);
+    }
+  }
+  for (int word = 0; word < words; ++word) {
+    for (uint64_t active = exec_mask; active; active &= active - 1) {
+      int lane = __builtin_ctzll(active);
+      d[word][lane] = result[word][lane];
+    }
+  }
+  return RJ_ARITH_SUCCESS;
+}
+} // namespace
+
+// Scale and widen FP8 to F32, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f32_fp8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<32, Source::Fp8, Destination::F32, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen FP8 to F32, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f32_fp8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<64, Source::Fp8, Destination::F32, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen FP8 to F32, one element per active lane.
+int rj_arith_v_cvt_scalef32_f32_fp8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b) {
+  return convert<32, Source::Fp8, Destination::F32, false>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen FP8 to F32, one element per active lane.
+int rj_arith_v_cvt_scalef32_f32_fp8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b) {
+  return convert<64, Source::Fp8, Destination::F32, false>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen BF8 to F32, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f32_bf8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<32, Source::Bf8, Destination::F32, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen BF8 to F32, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f32_bf8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<64, Source::Bf8, Destination::F32, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen BF8 to F32, one element per active lane.
+int rj_arith_v_cvt_scalef32_f32_bf8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b) {
+  return convert<32, Source::Bf8, Destination::F32, false>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen BF8 to F32, one element per active lane.
+int rj_arith_v_cvt_scalef32_f32_bf8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b) {
+  return convert<64, Source::Bf8, Destination::F32, false>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen FP4 to F32, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f32_fp4_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<32, Source::Fp4, Destination::F32, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen FP4 to F32, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f32_fp4_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<64, Source::Fp4, Destination::F32, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen FP8 to F16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f16_fp8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<32, Source::Fp8, Destination::F16, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen FP8 to F16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f16_fp8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<64, Source::Fp8, Destination::F16, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen FP8 to F16, one element per active lane.
+int rj_arith_v_cvt_scalef32_f16_fp8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b) {
+  return convert<32, Source::Fp8, Destination::F16, false>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen FP8 to F16, one element per active lane.
+int rj_arith_v_cvt_scalef32_f16_fp8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b) {
+  return convert<64, Source::Fp8, Destination::F16, false>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen BF8 to F16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f16_bf8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<32, Source::Bf8, Destination::F16, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen BF8 to F16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f16_bf8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<64, Source::Bf8, Destination::F16, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen BF8 to F16, one element per active lane.
+int rj_arith_v_cvt_scalef32_f16_bf8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b) {
+  return convert<32, Source::Bf8, Destination::F16, false>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen BF8 to F16, one element per active lane.
+int rj_arith_v_cvt_scalef32_f16_bf8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b) {
+  return convert<64, Source::Bf8, Destination::F16, false>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen FP4 to F16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f16_fp4_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<32, Source::Fp4, Destination::F16, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen FP4 to F16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_f16_fp4_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                                  uint64_t instruction_flags, uint32_t *const *d,
+                                                  const uint32_t *const *a,
+                                                  const uint32_t *const *b) {
+  return convert<64, Source::Fp4, Destination::F16, true>(flags, exec_mask, instruction_flags, d, a,
+                                                          b);
+}
+
+// Scale and widen FP8 to BF16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_bf16_fp8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                                   uint64_t instruction_flags, uint32_t *const *d,
+                                                   const uint32_t *const *a,
+                                                   const uint32_t *const *b) {
+  return convert<32, Source::Fp8, Destination::Bf16, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen FP8 to BF16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_bf16_fp8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                                   uint64_t instruction_flags, uint32_t *const *d,
+                                                   const uint32_t *const *a,
+                                                   const uint32_t *const *b) {
+  return convert<64, Source::Fp8, Destination::Bf16, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen BF8 to BF16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_bf16_bf8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                                   uint64_t instruction_flags, uint32_t *const *d,
+                                                   const uint32_t *const *a,
+                                                   const uint32_t *const *b) {
+  return convert<32, Source::Bf8, Destination::Bf16, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen BF8 to BF16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_bf16_bf8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                                   uint64_t instruction_flags, uint32_t *const *d,
+                                                   const uint32_t *const *a,
+                                                   const uint32_t *const *b) {
+  return convert<64, Source::Bf8, Destination::Bf16, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen FP4 to BF16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_bf16_fp4_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                                   uint64_t instruction_flags, uint32_t *const *d,
+                                                   const uint32_t *const *a,
+                                                   const uint32_t *const *b) {
+  return convert<32, Source::Fp4, Destination::Bf16, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}
+
+// Scale and widen FP4 to BF16, two elements per active lane.
+int rj_arith_v_cvt_scalef32_pk_bf16_fp4_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                                   uint64_t instruction_flags, uint32_t *const *d,
+                                                   const uint32_t *const *a,
+                                                   const uint32_t *const *b) {
+  return convert<64, Source::Fp4, Destination::Bf16, true>(flags, exec_mask, instruction_flags, d,
+                                                           a, b);
+}

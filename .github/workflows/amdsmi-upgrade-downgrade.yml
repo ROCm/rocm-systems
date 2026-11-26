@@ -60,12 +60,12 @@ jobs:
       matrix:
         include:
           - name: Debian (Ubuntu 22.04)
-            container: ubuntu:22.04
+            container: ubuntu:22.04@sha256:076e7bf82319619f28dd0aa9c02ab34b055ad37100395b4f49a2ffba04fb5e11
             generator: DEB
             manager: apt
             ext: deb
           - name: RPM (AlmaLinux 9)
-            container: almalinux:9
+            container: almalinux:9@sha256:245f8aab832fe800aa42bdab5fad75ebbd8e0b4c9f24820a83c638b177857ae2
             generator: RPM
             manager: dnf
             ext: rpm

@@ -23,7 +23,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 namespace hip {
 class PlatformState {
  public:
-  void Init();
+  hipError_t Init();
 
   // Dynamic Code Objects functions
   hipError_t LoadModule(hipModule_t* module, const char* fname, const void* image = nullptr);

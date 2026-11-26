@@ -8,10 +8,6 @@ on:
         description: "Full CI image name & tag"
         required: true
         type: string
-      ci_image_nvidia:
-        description: "Full CI image name & nvidia tag"
-        required: true
-        type: string
       cxx_compiler:
         description: "C++ compiler to use"
         required: true
@@ -57,75 +53,40 @@ jobs:
       rocm_version: ${{ inputs.rocm_version }}
       # python/tests/main.py is an end-to-end hardware exercise of the bindings, and
       # is platform/compiler/standard independent, so run it once on an AIS
-      # runner for a single representative leg rather than fanning it out. This
-      # is the same ubuntu-7.14.0 leg codeql/sanitizers/clang_tidy target.
-      run_hardware_test: ${{ inputs.platform == 'ubuntu' && inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 && inputs.rocm_version == '7.14.0' }}
+      # runner for a single representative leg rather than fanning it out.
+      run_hardware_test: ${{ inputs.platform == 'ubuntu' && inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 && inputs.rocm_version == 'nightly' }}
 
+  # The system tests run on the self-hosted AIS runners, so they only run on
+  # the production amdclang++ C++20 legs. The clang++, g++, and C++23 legs
+  # exist to check that hipFile builds and passes its unit tests with other
+  # compilers and standards; re-running the storage suites on them would
+  # mostly repeat the same kernel, driver, and filesystem coverage.
   AIS_system_tests:
+    if: ${{ inputs.cxx_compiler == 'amdclang++' && inputs.cxx_standard == 20 }}
     needs: [build_and_test]
+    strategy:
+      # Each storage type is an independent suite; one failing shouldn't
+      # cancel the others.
+      fail-fast: false
+      matrix:
+        # Each entry is a filesystem/storage setup mounted at /mnt/ais/<storage>
+        # on the AIS runners.
+        storage:
+          - ext4
+          - xfs
+          - lvm16
+          - lvm_mirror
+          - mdraid0
+          - nfs
+          - nvmeof_ext4
     uses: ./.github/workflows/hipfile-ci-system.yml
     with:
       ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
       ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
-      ais_mount_path: /mnt/ais/ext4
+      ais_mount_path: /mnt/ais/${{ matrix.storage }}
       ci_image: ${{ needs.build_and_test.outputs.ci_image }}
       cxx_compiler: ${{ inputs.cxx_compiler }}
       cxx_standard: ${{ inputs.cxx_standard }}
-      mount_label: system_ext4
-      platform: ${{ inputs.platform }}
-      rocm_version: ${{ inputs.rocm_version }}
-
-  AIS_system_lvm16_tests:
-    needs: [build_and_test]
-    uses: ./.github/workflows/hipfile-ci-system.yml
-    with:
-      ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
-      ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
-      ais_mount_path: /mnt/ais/lvm16
-      ci_image: ${{ needs.build_and_test.outputs.ci_image }}
-      cxx_compiler: ${{ inputs.cxx_compiler }}
-      cxx_standard: ${{ inputs.cxx_standard }}
-      mount_label: system_lvm16
-      platform: ${{ inputs.platform }}
-      rocm_version: ${{ inputs.rocm_version }}
-
-  AIS_system_lvm_mirror_tests:
-    needs: [build_and_test]
-    uses: ./.github/workflows/hipfile-ci-system.yml
-    with:
-      ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
-      ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
-      ais_mount_path: /mnt/ais/lvm_mirror
-      ci_image: ${{ needs.build_and_test.outputs.ci_image }}
-      cxx_compiler: ${{ inputs.cxx_compiler }}
-      cxx_standard: ${{ inputs.cxx_standard }}
-      mount_label: system_lvm_mirror
-      platform: ${{ inputs.platform }}
-      rocm_version: ${{ inputs.rocm_version }}
-
-  AIS_system_mdraid0_tests:
-    needs: [build_and_test]
-    uses: ./.github/workflows/hipfile-ci-system.yml
-    with:
-      ais_hipfile_pkg_dev_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_dev_filename }}
-      ais_hipfile_pkg_filename: ${{ needs.build_and_test.outputs.ais_hipfile_pkg_filename }}
-      ais_mount_path: /mnt/ais/mdraid0
-      ci_image: ${{ needs.build_and_test.outputs.ci_image }}
-      cxx_compiler: ${{ inputs.cxx_compiler }}
-      cxx_standard: ${{ inputs.cxx_standard }}
-      mount_label: system_mdraid0
-      platform: ${{ inputs.platform }}
-      rocm_version: ${{ inputs.rocm_version }}
-
-  build_and_test_NVIDIA:
-    # NVIDIA can't build with amdclang++; its meaningful compilers (clang++, g++)
-    # arrive via the cxx_compiler axis, so skip the amdclang++ legs here. Only
-    # run on the default C++20 standard. Only legacy ROCm supports building hipFile
-    # targeted to NVIDIA.
-    if: ${{ startsWith(inputs.rocm_version, '7.2.') && inputs.cxx_compiler != 'amdclang++' && inputs.cxx_standard == 20 }}
-    uses: ./.github/workflows/hipfile-build-nvidia.yml
-    with:
-      ci_image: ${{ inputs.ci_image_nvidia }}
-      cxx_compiler: ${{ inputs.cxx_compiler }}
+      mount_label: system_${{ matrix.storage }}
       platform: ${{ inputs.platform }}
       rocm_version: ${{ inputs.rocm_version }}

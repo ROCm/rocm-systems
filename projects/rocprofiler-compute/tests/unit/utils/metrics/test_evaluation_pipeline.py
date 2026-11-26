@@ -12,13 +12,10 @@ import pytest
 from utils.metrics.evaluation_pipeline import (
     calc_builtin_vars,
     compute_pct_of_peak,
+    create_empirical_peaks_dict,
     create_sys_vars,
     eval_metric,
     validate_dual_issue_metrics,
-)
-from utils.metrics.noise_clamper import (
-    clear_noise_clamp_warnings,
-    get_noise_clamp_warnings,
 )
 
 # =============================================================================
@@ -90,6 +87,13 @@ class TestEvaluationPipeline:
         })
         return metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df
 
+    def test_empirical_peaks_without_roofline_csv_are_nan(self):
+        peaks = create_empirical_peaks_dict(pd.DataFrame())
+        # Ceilings only the gfx9 and only the gfx11 benchmarks measure.
+        for name in ("MFMAF8Flops", "BF16Flops"):
+            assert np.isnan(peaks[f"ammolite__{name}_empirical_peak"])
+        assert all(np.isnan(value) for value in peaks.values())
+
     def test_eval_metric_in_debug_mode(self):
         """eval_metric with debug=True invokes debug_row_tracker and writes back."""
         fixture = self._build_eval_metric_inputs(
@@ -99,7 +103,7 @@ class TestEvaluationPipeline:
         )
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars",
+            "utils.utils_counter_defs.Collectables.of_arch",
             return_value={},
         ), patch(
             "utils.metrics.evaluation_pipeline.debug_row_tracker"
@@ -120,6 +124,86 @@ class TestEvaluationPipeline:
         assert call_args.kwargs["show_inputs"] is True
         assert metric_df.loc["1.1.0", "Value"] == 450
 
+    @pytest.mark.parametrize(
+        ("pass_counters", "expected"),
+        [
+            ([["SQ_WAVES"], ["SQ_WAVES", "GRBM_GUI_ACTIVE"]], 0.4),
+            ([["SQ_WAVES"], ["GRBM_GUI_ACTIVE"]], 0.1),
+        ],
+        ids=["pass_holds_all", "no_pass_holds_all"],
+    )
+    def test_eval_metric_reads_metric_from_first_pass_holding_it(
+        self, pass_counters, expected
+    ):
+        """A metric reads the first pass that has all its counters, and the
+        merged frame when no pass has them all."""
+        fixture = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": "to_sum(raw_pmc_df['SQ_WAVES']) / "
+                "to_sum(raw_pmc_df['GRBM_GUI_ACTIVE'])",
+            }
+        )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
+        pass_values = {"SQ_WAVES": [10, 20, 30], "GRBM_GUI_ACTIVE": [50, 50, 50]}
+        pass_tables = [
+            pd.DataFrame({name: pass_values[name] for name in counters})
+            for counters in pass_counters
+        ]
+        with patch(
+            "utils.utils_counter_defs.Collectables.of_arch",
+            return_value={},
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                dfs_expressions,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=False,
+                pass_tables=pass_tables,
+            )
+
+        assert metric_df.loc["1.1.0", "Value"] == pytest.approx(expected)
+
+    def test_eval_metric_reads_each_collectable_from_its_own_pass(self):
+        """A metric that reads only collectables takes each one from the pass
+        that holds its counters, not from the merged frame."""
+        fixture = self._build_eval_metric_inputs(
+            metric_fields={
+                "Value": "ammolite__a + ammolite__b",
+                "Min": "to_min(ammolite__a_per_dispatch + ammolite__b_per_dispatch)",
+            }
+        )
+        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
+        pass_tables = [
+            pd.DataFrame({"SQ_WAVES": [1, 2, 3]}),
+            pd.DataFrame({"GRBM_GUI_ACTIVE": [10, 20, 30]}),
+        ]
+        collectables = {
+            "a": "SUM(SQ_WAVES)",
+            "b": "SUM(GRBM_GUI_ACTIVE)",
+            "a_per_dispatch": "SQ_WAVES",
+            "b_per_dispatch": "GRBM_GUI_ACTIVE",
+        }
+        with patch(
+            "utils.utils_counter_defs.Collectables.of_arch",
+            return_value=collectables,
+        ):
+            eval_metric(
+                dfs,
+                dfs_type,
+                dfs_expressions,
+                sys_info,
+                pd.DataFrame(),
+                raw_pmc_df,
+                debug=False,
+                pass_tables=pass_tables,
+            )
+
+        assert metric_df.loc["1.1.0", "Value"] == 6 + 60
+        assert metric_df.loc["1.1.0", "Min"] == 1 + 10
+
     def test_eval_metric_computes_value_from_expression(self):
         """eval_metric writes the computed Value back to the metric DataFrame."""
         fixture = self._build_eval_metric_inputs(
@@ -128,9 +212,7 @@ class TestEvaluationPipeline:
             }
         )
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
-        with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
-        ):
+        with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
             eval_metric(
                 dfs,
                 dfs_type,
@@ -158,9 +240,7 @@ class TestEvaluationPipeline:
             "SQ_INSTS_VMEM": [10.0, 20.0, 30.0],
             "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
         })
-        with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
-        ):
+        with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
             eval_metric(
                 dfs,
                 dfs_type,
@@ -178,9 +258,7 @@ class TestEvaluationPipeline:
         metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
         assert metric_df.loc["1.1.0", "Average"] is None
 
-        with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
-        ):
+        with patch("utils.utils_counter_defs.Collectables.of_arch", return_value={}):
             eval_metric(
                 dfs,
                 dfs_type,
@@ -191,54 +269,6 @@ class TestEvaluationPipeline:
                 debug=False,
             )
         assert metric_df.loc["1.1.0", "Average"] == ""
-
-    def test_eval_metric_noise_clamp(self):
-        """eval_metric emits per-metric variance warning + summary on clamp."""
-        # Negative DIFF over a positive REF crosses the 1% threshold and bumps
-        # the noise-clamp counter when to_noise_clamp evaluates the expression.
-        fixture = self._build_eval_metric_inputs(
-            metric_fields={
-                "Value": (
-                    "to_noise_clamp("
-                    "to_min(raw_pmc_df['DIFF']), "
-                    "to_max(raw_pmc_df['REF']))"
-                ),
-            }
-        )
-        metric_df, dfs, dfs_type, dfs_expressions, sys_info, raw_pmc_df = fixture
-        raw_pmc_df = pd.DataFrame({
-            "GRBM_GUI_ACTIVE": [1000],
-            "DIFF": [-100.0],
-            "REF": [1000.0],
-        })
-
-        clear_noise_clamp_warnings()
-        with patch(
-            "utils.metrics.evaluation_pipeline.get_build_in_vars", return_value={}
-        ), patch(
-            "utils.metrics.evaluation_pipeline.console_warning"
-        ) as mock_console_warning, patch(
-            "utils.metrics.evaluation_pipeline.print_noise_clamp_summary"
-        ) as mock_print_summary:
-            eval_metric(
-                dfs,
-                dfs_type,
-                dfs_expressions,
-                sys_info,
-                pd.DataFrame(),
-                raw_pmc_df,
-                debug=False,
-            )
-
-        assert get_noise_clamp_warnings()["count"] >= 1
-        variance_calls = [
-            call_args
-            for call_args in mock_console_warning.call_args_list
-            if "Variance corrected for metric:" in call_args.args[0]
-        ]
-        assert len(variance_calls) == 1
-        assert "Test Metric" in variance_calls[0].args[0]
-        mock_print_summary.assert_called_once()
 
     @pytest.mark.parametrize(
         "gui_active_counter",
@@ -279,7 +309,7 @@ class TestEvaluationPipeline:
             raw_pmc_df,
             sys_vars,
             "gfx1250",
-            ["$GRBM_GUI_ACTIVE_PER_XCD"],
+            {"GRBM_GUI_ACTIVE_PER_XCD"},
         )
 
         pd.testing.assert_series_equal(

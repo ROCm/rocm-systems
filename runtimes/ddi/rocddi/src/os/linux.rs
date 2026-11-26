@@ -10,11 +10,14 @@
 
 pub(crate) mod file;
 pub(crate) mod memory;
+pub(crate) mod module;
 pub(crate) mod process_identity;
 
 pub(crate) use clock::host_clock;
 pub(crate) use libc as errno;
-pub(crate) use memory::{HostAllocation, HostReservation, host_page_size};
+pub(crate) use memory::{
+    HostAllocation, HostReservation, host_memory_capabilities, host_page_size,
+};
 
 mod clock;
 
@@ -58,6 +61,11 @@ mod error_tests {
     fn vanished_native_object_has_a_portable_not_found_kind() {
         let error = native_error("open endpoint", io::Error::from_raw_os_error(errno::ENOENT));
         assert_eq!(error.kind(), ErrorKind::NotFound);
-        assert_eq!(error.native_error_code(), Some(errno::ENOENT));
+        assert_eq!(
+            error
+                .native_status()
+                .and_then(crate::NativeStatus::errno_code),
+            Some(errno::ENOENT)
+        );
     }
 }

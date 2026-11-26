@@ -6,6 +6,7 @@
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 
 #include <memory>
+#include <utility>
 namespace rocjitsu::amdgpu {
 namespace {
 
@@ -17,23 +18,39 @@ public:
         ring_base_(ring_base), ring_size_(ring_size) {}
 
   ~ComputeQueueBinding() override {
-    if (registration_id_)
+    if (registration_id_) {
       (void)command_processor_.unregister_queue_registration(registration_id_);
+    }
   }
 
   QueuePrepareCloseStatus prepare_close() noexcept override {
-    if (registration_id_ == 0)
+    if (registration_id_ == 0) {
       return QueuePrepareCloseStatus::Ready;
+    }
     const QueuePrepareCloseStatus status =
         command_processor_.prepare_unregister_queue_registration(registration_id_);
-    if (status == QueuePrepareCloseStatus::Ready)
+    if (status == QueuePrepareCloseStatus::Ready) {
       registration_id_ = 0;
+    }
+    return status;
+  }
+
+  QueuePrepareCloseStatus prepare_preempt_close() noexcept override {
+    if (registration_id_ == 0) {
+      return QueuePrepareCloseStatus::Ready;
+    }
+    const QueuePrepareCloseStatus status =
+        command_processor_.prepare_preempt_queue_registration(registration_id_);
+    if (status == QueuePrepareCloseStatus::Ready) {
+      registration_id_ = 0;
+    }
     return status;
   }
 
   QueueReconfigureStatus reconfigure(const QueueReconfigureRequest &request) override {
-    if (format_ == QueuePacketFormat::Pm4)
+    if (format_ == QueuePacketFormat::Pm4) {
       return command_processor_.update_pm4_queue_registration(registration_id_, request);
+    }
     QueueReconfigureRequest effective = request;
     if (!request.scheduling_percentage) {
       effective.ring_base_address = ring_base_;
@@ -49,10 +66,12 @@ public:
   }
 
   QueueSubmissionStatus submit_producer(uint64_t producer_cursor) override {
-    if (!registration_id_)
+    if (!registration_id_) {
       return QueueSubmissionStatus::Faulted;
-    if (format_ == QueuePacketFormat::Pm4)
+    }
+    if (format_ == QueuePacketFormat::Pm4) {
       return command_processor_.notify_pm4_queue_doorbell(registration_id_, producer_cursor);
+    }
     command_processor_.notify_queue_doorbell(registration_id_, producer_cursor);
     return QueueSubmissionStatus::Accepted;
   }
@@ -73,12 +92,14 @@ public:
 
   QueueBindingCreateResult create_binding(const QueueRegistrationRequest &request) override {
     if (request.type != QueueType::Compute || (request.packet_format != QueuePacketFormat::Aql &&
-                                               request.packet_format != QueuePacketFormat::Pm4))
+                                               request.packet_format != QueuePacketFormat::Pm4)) {
       return {};
+    }
     const uint64_t registration_id = command_processor_.register_queue({
         .address_space = request.identity.address_space,
         .interrupt_sink = request.identity.interrupt_sink,
         .process_id = request.identity.process_id,
+        .process_identity_kind = request.identity.process_identity_kind,
         .queue_id = request.identity.queue_id,
         .ring_base_va = request.ring.base_address,
         .ring_size = request.ring.size_bytes,
@@ -93,23 +114,24 @@ public:
         .queue_desc_va = request.queue_descriptor_address,
         .exception_status_va = request.exception_status_address,
         .exception_event_id = request.exception_event_id,
+        .exception_event_sink = request.exception_event_sink,
         .xcd_fanout = request.xcd_fanout,
         .packet_format = request.packet_format,
         .initial_consumer_cursor = request.initial_consumer_cursor,
         .packet_callbacks = callbacks_,
         .scheduling_percentage = request.scheduling_percentage,
     });
-    if (registration_id == 0)
+    if (registration_id == 0) {
       return {};
-    try {
+    }
+    // The processor attachment is live. A failed ownership allocation must not
+    // reach a recovering frontend without a binding that owns that attachment.
+    return [&]() noexcept -> QueueBindingCreateResult {
       return {.status = QueueBindingCreateStatus::Bound,
               .binding = std::make_unique<ComputeQueueBinding>(
                   command_processor_, registration_id, request.packet_format,
                   request.ring.base_address, request.ring.size_bytes)};
-    } catch (...) {
-      (void)command_processor_.unregister_queue_registration(registration_id);
-      throw;
-    }
+    }();
   }
 
 private:

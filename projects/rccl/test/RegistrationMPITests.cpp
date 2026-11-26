@@ -458,7 +458,33 @@ TEST_F(UBR_AllGather, OutOfPlace_MultiNode)
 // ("invalid request local work queue error") and the collective hangs. The fix
 // removes the WRITE and keeps the RO=0 READ fence, so it completes cleanly.
 // Requires NCCL_CUMEM_ENABLE=1 cross-node; if GDR is absent the flush is a no-op.
-class GdrFlush_CuMem : public RegistrationTestBase {};
+//
+// coco UnitTestsMPI defaults NCCL_CUMEM_ENABLE=0 and splits this suite with
+// --gtest_filter=GdrFlush_CuMem.* without the gdr_flush_cumem_multinode env.
+// Opt the suite in itself so the regression guard actually runs. NCCL_PARAM
+// caches per process on first read, so this only reaches the library when no
+// earlier suite has already latched CUMEM=0. MpiEnvGuard restores getenv; it
+// cannot un-latch the library, so a filter that runs this suite first leaves
+// cuMem on for later suites in the same process.
+class GdrFlush_CuMem : public RegistrationTestBase {
+protected:
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> cuMemGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> dmaBufGuard_;
+
+    void SetUp() override
+    {
+        cuMemGuard_  = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_CUMEM_ENABLE", "1");
+        dmaBufGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DMABUF_ENABLE", "1");
+        RegistrationTestBase::SetUp();
+    }
+
+    void TearDown() override
+    {
+        RegistrationTestBase::TearDown();
+        dmaBufGuard_.reset();
+        cuMemGuard_.reset();
+    }
+};
 
 TEST_F(GdrFlush_CuMem, AllGatherUnregistered_MultiNode)
 {
@@ -466,8 +492,23 @@ TEST_F(GdrFlush_CuMem, AllGatherUnregistered_MultiNode)
         GTEST_SKIP() << "Requires 2+ nodes (cross-node NET/IB GDR path)";
     }
 
-    ASSERT_TRUE(isCuMemEnabled())
-        << "NCCL_CUMEM_ENABLE must be set to 1 (exercises the cuMem GDR flush path)";
+    // Gate on the library, not getenv: SetUp always writes NCCL_CUMEM_ENABLE=1,
+    // and ncclCuMemEnable() is already 0 when the param was latched off or the
+    // runtime has no dma-buf cuMem. Coordinate so one rank skipping cannot leave
+    // the others blocked in ncclAllGather.
+    const bool cuMemEnabled = ncclCuMemEnable();
+    const char* cuMemSkipWhy =
+        cuMemEnabled ? nullptr
+                     : (ncclCuMemRuntimeSupported()
+                            ? "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
+                              "communicator in this process; run with "
+                              "--gtest_filter=GdrFlush_CuMem.* or launch with "
+                              "NCCL_CUMEM_ENABLE=1"
+                            : "Requires a kernel/runtime that can enable cuMem "
+                              "(dma-buf, kernel >= 6.8)");
+    if (auto reason = mpiCoordinatedSkipReason(!cuMemEnabled, cuMemSkipWhy); !reason.empty()) {
+        GTEST_SKIP() << reason;
+    }
 
     using T = RegTestConfig::DefaultType;
 
@@ -517,7 +558,7 @@ class UBR_DirectAllGather : public RegistrationTestBase
 protected:
     using T = RegTestConfig::DefaultType;
 
-    // Direct AllGather is pinned only when the launcher/config sets NCCL_LAUNCH_ORDER_IMPLICIT=1
+    // Direct AllGather is pinned only when the launcher/config sets RCCL_DDA_ENABLE=0
     // and RCCL_DIRECT_ALLGATHER_THRESHOLD past every swept size; verified below (GTEST_SKIP if not).
     static constexpr unsigned long long kMinDirectAllGatherThreshold = 2147483648ULL;
 
@@ -528,9 +569,9 @@ protected:
             return;
         }
 
-        const char* launchOrder = getenv("NCCL_LAUNCH_ORDER_IMPLICIT");
-        if (!launchOrder || std::string(launchOrder) != "1") {
-            GTEST_SKIP() << "Requires NCCL_LAUNCH_ORDER_IMPLICIT=1 so the DDA "
+        const char* ddaEnable = getenv("RCCL_DDA_ENABLE");
+        if (!ddaEnable || std::string(ddaEnable) != "0") {
+            GTEST_SKIP() << "Requires RCCL_DDA_ENABLE=0 so the DDA "
                             "fast-path is disabled and rcclSelectAllGatherAlgo() "
                             "can select the Direct AllGather path under test. Set "
                             "it in the test config env_variables.";
@@ -2952,10 +2993,18 @@ TEST_F(GraphCapture_AllReduce, MultiNode)
  * legacy-fallback scheduler path.
  *
  * Requires NCCL_CUMEM_ENABLE=1 and NCCL_WIN_ENABLE!=0.
+ *
+ * coco UnitTestsMPI defaults NCCL_CUMEM_ENABLE=0 and splits this suite without
+ * a per-filter env. Opt in here the same way as GdrFlush_CuMem. NCCL_PARAM
+ * caches per process on first read; MpiEnvGuard restores getenv but cannot
+ * un-latch the library.
  */
 class GraphCapture_WindowRegister : public RegistrationTestBase
 {
 protected:
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> cuMemGuard_;
+    std::unique_ptr<MPIHelpers::MpiEnvGuard> dmaBufGuard_;
+
     enum class Collective
     {
         AllReduce,
@@ -2974,6 +3023,20 @@ protected:
         return "Unknown";
     }
 
+    void SetUp() override
+    {
+        cuMemGuard_  = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_CUMEM_ENABLE", "1");
+        dmaBufGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DMABUF_ENABLE", "1");
+        RegistrationTestBase::SetUp();
+    }
+
+    void TearDown() override
+    {
+        RegistrationTestBase::TearDown();
+        dmaBufGuard_.reset();
+        cuMemGuard_.reset();
+    }
+
     void runSymmetricCollective(Collective collective)
     {
         if(!validateTestPrerequisites(RegTestConfig::MIN_RANKS_DEFAULT))
@@ -2986,7 +3049,21 @@ protected:
 
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-        ASSERT_MPI_TRUE(isCuMemEnabled());
+        // Gate on the library, not getenv: SetUp always writes NCCL_CUMEM_ENABLE=1.
+        const bool cuMemEnabled = ncclCuMemEnable();
+        const char* cuMemSkipWhy =
+            cuMemEnabled ? nullptr
+                         : (ncclCuMemRuntimeSupported()
+                                ? "NCCL_CUMEM_ENABLE was already cached as 0 by an earlier "
+                                  "communicator in this process; run with "
+                                  "--gtest_filter=GraphCapture_WindowRegister.* or launch with "
+                                  "NCCL_CUMEM_ENABLE=1"
+                                : "Requires a kernel/runtime that can enable cuMem "
+                                  "(dma-buf, kernel >= 6.8)");
+        if (auto reason = mpiCoordinatedSkipReason(!cuMemEnabled, cuMemSkipWhy); !reason.empty()) {
+            GTEST_SKIP() << reason;
+        }
+
         ASSERT_MPI_TRUE(isWinEnabled());
 
         using T = RegTestConfig::DefaultType;
@@ -3120,7 +3197,7 @@ protected:
             comm->symmetricSupport && comm->isAllDirectNvlink;
 
         bool expectSymmetric = symmetricRuntimeAvailable;
-        if(comm->devrState.lsaSize < comm->nRanks)
+        if(comm->devrState.lsaTeamSize < comm->nRanks)
         {
             switch(collective)
             {
@@ -3145,7 +3222,7 @@ protected:
         const bool sawLegacy = checker.usedLegacyCollective(collectiveName(collective));
         TEST_INFO("%s path: nNodes=%d lsaSize=%d nRanks=%d symmetricSupport=%d isAllDirectNvlink=%d "
                   "hasLsaMultimem=%d expected=%s observedSymmetric=%d observedLegacy=%d",
-                  collectiveName(collective), comm->nNodes, comm->devrState.lsaSize, comm->nRanks,
+                  collectiveName(collective), comm->nNodes, comm->devrState.lsaTeamSize, comm->nRanks,
                   comm->symmetricSupport, static_cast<int>(comm->isAllDirectNvlink),
                   static_cast<int>(comm->symkState.hasLsaMultimem),
                   expectSymmetric ? "symmetric" : "legacy", static_cast<int>(sawSymmetric),

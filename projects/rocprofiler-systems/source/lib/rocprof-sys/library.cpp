@@ -7,10 +7,13 @@
 #include <fmt/ranges.h>
 #include <timemory/log/color.hpp>
 #include <timemory/tpls/cereal/cereal/cereal.hpp>
+#include <vector>
 //
 //  above should always be included first
 //
 #include "api.hpp"
+#include "backends/rocprofiler_sdk/backend.hpp"
+#include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "common/clocks.hpp"
 #include "common/defines.h"
 #include "common/delimit.hpp"
@@ -31,7 +34,7 @@
 #include "core/control/waitable_clocks/steady.hpp"
 #include "core/cpu.hpp"
 #include "core/gpu.hpp"
-#include "core/locking.hpp"
+#include "core/library_checker.hpp"
 #include "core/node_info.hpp"
 #include "core/output/output_summary.hpp"
 #include "core/process_environment_info.hpp"
@@ -201,7 +204,7 @@ ensure_finalization(bool _static_init = false)
         auto const _idx = threading::add_callback(&ensure_initialization);
         if(_idx < 0)
         {
-            throw exception<std::runtime_error>("failure adding threading callback");
+            throw std::runtime_error("failure adding threading callback");
         }
     }
 
@@ -327,6 +330,24 @@ struct fini_bundle<tim::lightweight_tuple<Tp...>>
 };
 
 using fini_bundle_t = fini_bundle<main_bundle_t>::base_type;
+
+// The wall_clock report is generated from the trace cache, so timemory must not record
+// the same data again. A requested wall_clock component is still honoured by that report.
+void
+drop_wall_clock_from_timemory_components()
+{
+    auto       kept    = rocprofsys::delimit(tim::settings::global_components());
+    auto const removed = std::erase_if(kept, [](const std::string& name) {
+        return tim::runtime::enumerate(name) == TIMEMORY_WALL_CLOCK;
+    });
+    if(removed == 0)
+    {
+        return;
+    }
+    auto const remaining               = fmt::format("{}", fmt::join(kept, ","));
+    tim::settings::global_components() = remaining;
+    config::set_setting_value(std::string{ env_vars::TIMEMORY_COMPONENTS }, remaining);
+}
 }  // namespace
 
 //======================================================================================//
@@ -416,12 +437,6 @@ rocprofsys_preinit_cache()
           .extdata     = _extdata_stream.str(),
           .start       = 0,
           .end         = 0 });
-}
-
-void
-rocprofsys_preinit_cpu_agents()
-{
-    cpu::query_cpu_agents();
 }
 
 void
@@ -590,6 +605,10 @@ rocprofsys_init_library_hidden()
                      "or configure permissive mode with 'sudo setenforce 0'. Aborting.");
         std::exit(EXIT_FAILURE);
     }
+
+    library_checker::check_profiler_hub_version_mismatch();
+    library_checker::check_rocprofiler_sdk_version_mismatch<
+        backends::rocprofiler_sdk::backend<rocprofiler_sdk::wrapper>>();
 
     if(_debug_init)
     {
@@ -870,6 +889,14 @@ rocprofsys_init_tooling_hidden(void)
             rocprofiler_sdk::create_roctx_trigger();
         }
 
+        // For a host-only workload the OpenMP runtime discovers tools after this
+        // returns, so the SDK must come up now. Re-entry here is expected and stops
+        // at the rocprofsys_init_tooling_done guard above.
+        if(get_use_ompt())
+        {
+            rocprofiler_sdk::setup();
+        }
+
         state::process::set(
             state::process::Active);  // set to active as very last operation
 
@@ -928,32 +955,15 @@ rocprofsys_init_tooling_hidden(void)
 
     if(get_use_timemory())
     {
+        drop_wall_clock_from_timemory_components();
         comp::user_global_bundle::global_init();
-        std::set<int> _comps{};
-        // convert string into set of enumerations
-        for(auto&& itr : rocprofsys::delimit(tim::settings::global_components()))
+        if(!rocprofsys::delimit(tim::settings::global_components()).empty())
         {
-            _comps.emplace(tim::runtime::enumerate(itr));
-        }
-        if(_comps.size() == 1 && _comps.contains(TIMEMORY_WALL_CLOCK))
-        {
-            // using wall_clock directly is lower overhead than using it via user_bundle
-            instrumentation_bundle_t::get_initializer() =
-                [](instrumentation_bundle_t& _bundle) {
-                    _bundle.initialize<comp::wall_clock>();
-                };
-        }
-        else if(!_comps.empty())
-        {
-            // use user_bundle for other than wall-clock
             instrumentation_bundle_t::get_initializer() =
                 [](instrumentation_bundle_t& _bundle) {
                     _bundle.initialize<comp::user_global_bundle>();
                 };
-        }
-        else
-        {
-            tim::trait::runtime_enabled<project::rocprofsys>::set(false);
+            tracing::enable_timemory_components();
         }
     }
 
@@ -1084,8 +1094,10 @@ rocprofsys_reset_preload_hidden(void)
 
 //======================================================================================//
 
-extern "C" void
-rocprofsys_finalize_hidden(void)
+namespace
+{
+void
+finalize_session(rocprofiler_sdk::client_registration registration)
 {
     // Prevent multiple finalization calls (e.g., from atexit handlers after reset_state)
     if(rocprofsys_finalization_done.exchange(true))
@@ -1122,7 +1134,7 @@ rocprofsys_finalize_hidden(void)
         get_control_session()->shutdown();
 
         LOG_DEBUG("Shutting down ROCm...");
-        rocprofiler_sdk::shutdown();
+        rocprofiler_sdk::shutdown(registration);
 
         auto&      _manager = rocprofsys::trace_cache::cache_manager::get_instance();
         const auto _agents  = get_agent_manager_instance().get_agents();
@@ -1277,7 +1289,7 @@ rocprofsys_finalize_hidden(void)
     }
 
     LOG_DEBUG("Shutting down ROCm...");
-    rocprofiler_sdk::shutdown();
+    rocprofiler_sdk::shutdown(registration);
 
     LOG_DEBUG("Stopping and destroying instrumentation bundles...");
     auto* _bundles = instrumentation_bundles::get();
@@ -1480,7 +1492,7 @@ rocprofsys_finalize_hidden(void)
         {
             auto const _components = config::get_setting_value<std::string>(
                                          std::string{ env_vars::TIMEMORY_COMPONENTS })
-                                         .value_or("wall_clock");
+                                         .value_or("");
 
             for(auto&& _comp_name : rocprofsys::delimit(_components, ",; "))
             {
@@ -1534,6 +1546,19 @@ rocprofsys_finalize_hidden(void)
     // explicitly preparing for a new session. Resetting them during normal exit
     // can cause crashes if cleanup code triggers reinitialization.
 }
+}  // namespace
+
+extern "C" void
+rocprofsys_finalize_hidden(void)
+{
+    finalize_session(rocprofiler_sdk::client_registration::release);
+}
+
+extern "C" void
+rocprofsys_finalize_attach_session_hidden(void)
+{
+    finalize_session(rocprofiler_sdk::client_registration::keep);
+}
 
 extern "C" void
 rocprofsys_set_finalization_done_hidden(void)
@@ -1548,6 +1573,7 @@ rocprofsys_reset_for_reattach_hidden(void)
     rocprofsys_init_library_done.store(false);
     rocprofsys_init_tooling_done.store(0);
     ::rocprofsys::reset_database_path_memo();
+    ::rocprofsys::refresh_output_format_settings();
     ::rocprofsys::state::process::reset();
 }
 

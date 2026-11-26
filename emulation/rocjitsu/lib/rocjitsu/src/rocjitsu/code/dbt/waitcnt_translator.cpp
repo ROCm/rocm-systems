@@ -41,8 +41,9 @@ std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
   const bool need_dscnt = (vals.lgkmcnt != 0x0F);
   const bool need_expcnt = (vals.expcnt != 0x07);
 
-  if (need_loadcnt)
+  if (need_loadcnt) {
     words.push_back(make_gfx12_sopp(rdna4::kSWaitLoadcnt, std::min<uint16_t>(vals.vmcnt, 63)));
+  }
 
   if (need_storecnt || need_dscnt) {
     const uint8_t sc = need_storecnt ? std::min<uint8_t>(vals.vmcnt, 15) : 15;
@@ -50,14 +51,19 @@ std::vector<uint32_t> encode_waitcnt_gfx12(const WaitcntValues &vals) {
     words.push_back(make_gfx12_sopp(rdna4::kSWaitStorecntDscnt, (sc << 4) | dc));
   }
 
-  if (need_kmcnt)
+  if (need_kmcnt) {
     words.push_back(make_gfx12_sopp(rdna4::kSWaitKmcnt, std::min<uint16_t>(vals.lgkmcnt, 15)));
+  }
 
-  if (need_expcnt)
+  if (need_expcnt) {
     words.push_back(make_gfx12_sopp(rdna4::kSWaitExpcnt, vals.expcnt));
+  }
 
-  if (words.empty())
-    words.push_back(build_s_nop());
+  if (words.empty()) {
+    constexpr util::FailureOr<uint32_t> nop = build_s_nop();
+    static_assert(nop.succeeded());
+    words.push_back(nop.value());
+  }
 
   return words;
 }

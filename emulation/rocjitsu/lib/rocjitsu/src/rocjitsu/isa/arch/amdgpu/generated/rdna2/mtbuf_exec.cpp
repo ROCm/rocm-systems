@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/mtbuf.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx10_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/gfx10_memory_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
@@ -26,79 +27,120 @@ namespace rocjitsu {
 namespace rdna2 {
 
 void TbufferLoadFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 1);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
+  if (inst_.tfe) {
+    amdgpu::prepare_buffer_tfe(wf, *d);
+  }
   set_data(std::move(d));
 }
 
 void TbufferLoadFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 2);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
+  if (inst_.tfe) {
+    amdgpu::prepare_buffer_tfe(wf, *d);
+  }
   set_data(std::move(d));
 }
 
 void TbufferLoadFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 3);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
+  if (inst_.tfe) {
+    amdgpu::prepare_buffer_tfe(wf, *d);
+  }
   set_data(std::move(d));
 }
 
 void TbufferLoadFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 4);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
+  if (inst_.tfe) {
+    amdgpu::prepare_buffer_tfe(wf, *d);
+  }
   set_data(std::move(d));
 }
 
 void TbufferStoreFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -109,14 +151,16 @@ void TbufferStoreFormatXMtbuf::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
   amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void TbufferStoreFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -127,14 +171,16 @@ void TbufferStoreFormatXyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
   amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void TbufferStoreFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -145,14 +191,16 @@ void TbufferStoreFormatXyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
   amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void TbufferStoreFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -163,14 +211,16 @@ void TbufferStoreFormatXyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
   amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -178,19 +228,29 @@ void TbufferLoadFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 1);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
+  if (inst_.tfe) {
+    amdgpu::prepare_buffer_tfe(wf, *d);
+  }
   set_data(std::move(d));
 }
 
 void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -198,19 +258,29 @@ void TbufferLoadFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 2);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
+  if (inst_.tfe) {
+    amdgpu::prepare_buffer_tfe(wf, *d);
+  }
   set_data(std::move(d));
 }
 
 void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -218,19 +288,29 @@ void TbufferLoadFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 3);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
+  if (inst_.tfe) {
+    amdgpu::prepare_buffer_tfe(wf, *d);
+  }
   set_data(std::move(d));
 }
 
 void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -238,19 +318,29 @@ void TbufferLoadFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
   d->buffer_d16 = true;
   d->d16_hi = false;
   d->dst_reg_base = wf.vgpr_alloc().base + 0u + inst_.vdata;
+  if (!d->lds_dst && !wf.vgpr_alloc().contains(d->dst_reg_base, (vdata.size_bits() + 31) / 32)) {
+    d->wf_size = wf.wf_size();
+    set_data(std::move(d));
+    return;
+  }
   const auto prepared = amdgpu::prepare_buffer_format(wf, *d, inst_.srsrc * 4, inst_.format, 4);
   if (prepared.failed()) {
     wf.report_instruction_execution_error(
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
+  if (inst_.tfe) {
+    amdgpu::prepare_buffer_tfe(wf, *d);
+  }
   set_data(std::move(d));
 }
 
 void TbufferStoreFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -263,14 +353,16 @@ void TbufferStoreFormatD16XMtbuf::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
   amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void TbufferStoreFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -283,14 +375,16 @@ void TbufferStoreFormatD16XyMtbuf::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
   amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void TbufferStoreFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -303,14 +397,16 @@ void TbufferStoreFormatD16XyzMtbuf::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
   amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }
 
 void TbufferStoreFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx10(inst_.glc, inst_.dlc, inst_.slc);
   d->non_temporal = 0;
@@ -323,8 +419,9 @@ void TbufferStoreFormatD16XyzwMtbuf::execute_impl(amdgpu::Wavefront &wf) {
         amdgpu::InstructionExecutionError::UnsupportedOperandValue);
     return;
   }
-  if (prepared.value())
+  if (prepared.value()) {
     mtbuf_calculate_addresses(inst_, wf, *d);
+  }
   amdgpu::capture_buffer_format_store(wf, *d, wf.vgpr_alloc().base + 0u + inst_.vdata);
   set_data(std::move(d));
 }

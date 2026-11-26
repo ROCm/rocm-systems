@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "mma_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/test_encodings.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/test_encodings.h"
@@ -8,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/test_encodings.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -40,7 +42,7 @@ public:
   std::vector<std::string> issued;
 };
 
-class VskipTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class VskipTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override {
     ComputeUnitCore::Config config{};
@@ -51,9 +53,9 @@ protected:
     config.lds_size_kb = 64;
     config.functional_quantum = 1;
     config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
-    cu = ComputeUnitCore::create("vskip_cu", config, &memory, &l2);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "vskip_cu", config, &memory, &l2));
     decoder = Decoder::create(GetParam());
-    ASSERT_NE(cu, nullptr);
     ASSERT_NE(decoder, nullptr);
     wf = cu->dispatch_wf(0, kProgram, 104, 256);
     ASSERT_NE(wf, nullptr);
@@ -61,16 +63,19 @@ protected:
   }
 
   void TearDown() override {
-    if (wf && !wf->is_halted())
+    if (wf && !wf->is_halted()) {
       wf->halt();
+    }
   }
 
   void program(std::span<const uint32_t> words) {
-    for (size_t i = 0; i < words.size(); ++i)
+    for (size_t i = 0; i < words.size(); ++i) {
       memory.write32(kProgram + i * 4, words[i]);
+    }
     // Supply the complete instruction fetch window at the end of the program.
-    for (size_t i = 0; i < 4; ++i)
+    for (size_t i = 0; i < 4; ++i) {
       memory.write32(kProgram + (words.size() + i) * 4, 0xBF800000u);
+    }
   }
 
   void step(unsigned bytes = 4) {
@@ -176,8 +181,9 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
       std::string_view name = entry.mnemonic;
       if (!(name.starts_with("v_") || name.starts_with("buffer_") || name.starts_with("tbuffer_") ||
             name.starts_with("image_") || name.starts_with("ds_") || name.starts_with("flat_") ||
-            name.starts_with("global_") || name.starts_with("scratch_") || name == "exp"))
+            name.starts_with("global_") || name.starts_with("scratch_") || name == "exp")) {
         continue;
+      }
       // The generated sample table has at most two words; wider MFMA extension
       // encodings have separate coverage in the async test below.
       const std::array<uint32_t, 4> padded{entry.words[0], entry.words[1], 0, 0};
@@ -185,8 +191,9 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
       // Generated samples can violate operand constraints (for example, the
       // v_readfirstlane sample selects an SGPR source). Dedicated cases use
       // valid encodings and require successful decoding.
-      if (inst.failed() || inst.value()->size() > 8)
+      if (inst.failed() || inst.value()->size() > 8) {
         continue;
+      }
       ASSERT_TRUE(inst.value()->is_vskip_affected()) << name;
       words.insert(words.end(), padded.begin(), padded.begin() + inst.value()->size() / 4);
       ++skipped;
@@ -201,8 +208,9 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
     wf->wait_counters().vmcnt = 3;
     wf->wait_counters().lgkmcnt = 2;
     wf->wait_counters().expcnt = 1;
-    for (unsigned i = 0; i < skipped + 2; ++i)
+    for (unsigned i = 0; i < skipped + 2; ++i) {
       (void)cu->step();
+    }
     EXPECT_FALSE(wf->is_halted());
     EXPECT_EQ(wf->pc, kProgram + words.size() * 4);
     EXPECT_EQ(record->issued, (std::vector<std::string>{"s_setvskip", "s_setvskip"}));
@@ -212,16 +220,16 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
     wf->wait_counters() = {};
   };
   switch (GetParam()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     check(cdna1::test_data::ENCODINGS);
     break;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     check(cdna2::test_data::ENCODINGS);
     break;
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna3:
     check(cdna3::test_data::ENCODINGS);
     break;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     check(cdna4::test_data::ENCODINGS);
     break;
   default:
@@ -232,7 +240,7 @@ TEST_P(VskipTest, VectorEncodingFamiliesSkipWithoutIssueOrWaitCounterEffects) {
 TEST_P(VskipTest, Vop3SubencodingsSkipWithoutIssue) {
   // These XML encoding names omit ENC_: VOP3_SDST_ENC and VOP3P_MFMA.
   // Neither form is sampled by the generated mnemonic-only encoding table.
-  const uint32_t matrix = GetParam() == ROCJITSU_CODE_ARCH_CDNA1 ? 0xD3C50000u : 0xD3C58000u;
+  const uint32_t matrix = GetParam() == rocjitsu::IsaFamily::Cdna1 ? 0xD3C50000u : 0xD3C58000u;
   const std::array<std::array<uint32_t, 4>, 2> encodings{{
       {0xD1E00806u, 0x040A0300u, 0, 0}, // v_div_scale_f32 v6, s[8:9], v0, v1, v2
       {matrix, 0x04020300u, 0, 0},      // v_mfma_f32_16x16x4_f32 a[0:3], v0, v1, a[0:3]
@@ -254,8 +262,9 @@ TEST_P(VskipTest, Vop3SubencodingsSkipWithoutIssue) {
   auto *record = recorder.get();
   ASSERT_TRUE(plugins->add(std::move(recorder)));
   cu->set_plugin_group(plugins);
-  for (unsigned bytes : {4, 8, 8, 4, 4})
+  for (unsigned bytes : {4, 8, 8, 4, 4}) {
     step(bytes);
+  }
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base + 6, 0), 0x12345678u);
   EXPECT_EQ(cu->read_sgpr(wf->sgpr_alloc().base + 8), 0xA5A5A5A5u);
   EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, 0), 1u);
@@ -264,30 +273,34 @@ TEST_P(VskipTest, Vop3SubencodingsSkipWithoutIssue) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, VskipTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                           ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         ::testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                           rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4));
 
 TEST(VskipAsyncTest, ExtendedMfmaSkipsBeforeAsyncSubmission) {
   GpuMemory memory{"vskip_async_memory"};
   L2Cache l2{"vskip_async_l2"};
   ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.arch = rocjitsu::IsaFamily::Cdna4;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 104;
   config.vgprs_per_wf = 512;
   config.async_resources = std::make_shared<matrix_coexecution::ExecutionResources>(1);
-  auto cu = ComputeUnitCore::create("vskip_async_cu", config, &memory, &l2);
+  std::unique_ptr<ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "vskip_async_cu", config, &memory, &l2));
   auto *wf = cu->dispatch_wf(0, kProgram, 104, 256);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(~uint64_t{0});
   const auto matrix = mma_test::make_cdna4_mfma_scale_words(45, 1, 448, 449);
   memory.write32(kProgram, kEnable);
-  for (size_t i = 0; i < matrix.size(); ++i)
+  for (size_t i = 0; i < matrix.size(); ++i) {
     memory.write32(kProgram + 4 + i * 4, matrix[i]);
+  }
   memory.write32(kProgram + 20, kDisable);
   memory.write32(kProgram + 24, kMoveVector);
-  for (unsigned i = 28; i < 48; i += 4)
+  for (unsigned i = 28; i < 48; i += 4) {
     memory.write32(kProgram + i, 0xBF800000u);
+  }
   cu->write_vgpr(wf->vgpr_alloc().base + 64, 0, 0x3F800000);
   (void)cu->step();
   (void)cu->step();
@@ -302,8 +315,9 @@ TEST(VskipAsyncTest, ExtendedMfmaSkipsBeforeAsyncSubmission) {
 }
 
 TEST(VskipTargetTest, ModeBitDoesNotSuppressRdnaOrCdna5) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-                    ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch :
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     GpuMemory memory{"vskip_other_memory"};
     L2Cache l2{"vskip_other_l2"};
@@ -312,14 +326,17 @@ TEST(VskipTargetTest, ModeBitDoesNotSuppressRdnaOrCdna5) {
     config.num_wf_slots = 1;
     config.sgprs_per_wf = 106;
     config.vgprs_per_wf = 256;
-    auto cu = ComputeUnitCore::create("vskip_other_cu", config, &memory, &l2);
+    std::unique_ptr<ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "vskip_other_cu", config, &memory, &l2));
     auto *wf = cu->dispatch_wf(0, kProgram, 106, 256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});
     wf->set_mode_raw(Wavefront::VSKIP_BIT);
     memory.write32(kProgram, kMoveVector);
-    for (unsigned i = 4; i < 16; i += 4)
+    for (unsigned i = 4; i < 16; i += 4) {
       memory.write32(kProgram + i, 0xBF800000u);
+    }
     (void)cu->step();
     EXPECT_EQ(wf->pc, kProgram + 4);
     EXPECT_EQ(cu->read_vgpr(wf->vgpr_alloc().base, 0), 1u);

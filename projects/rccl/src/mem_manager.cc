@@ -1005,25 +1005,25 @@ ncclResult_t ncclCommMemResume(struct ncclComm* comm) {
     if (barrierRet != ncclSuccess) {
       if (ret == ncclSuccess) ret = barrierRet;
       // Cleanup
-      if (allCounts) free(allCounts);
-      if (localInfos) free(localInfos);
-      if (allInfos) free(allInfos);
+      free(allCounts);
+      free(localInfos);
+      free(allInfos);
       WARN("MemManager: Final barrier failed during resume");
       return ret;
     }
   }
 
   // Cleanup
-  if (allCounts) free(allCounts);
-  if (localInfos) free(localInfos);
-  if (allInfos) free(allInfos);
+  free(allCounts);
+  free(localInfos);
+  free(allInfos);
 
   return ret;
 
 fail:
-  if (allCounts) free(allCounts);
-  if (localInfos) free(localInfos);
-  if (allInfos) free(allInfos);
+  free(allCounts);
+  free(localInfos);
+  free(allInfos);
   return ret;
 }
 
@@ -1125,9 +1125,10 @@ ncclResult_t ncclCommSuspend_impl(ncclComm_t comm, int flags) {
     if (ncclParamEnqueueRearchEnable()) {
       NEW_NOTHROW_GOTO(suspendJob, ncclMemManagerSuspendAsyncJob, ret, fail);
       suspendJob->comm = comm;
-      NCCLCHECKGOTO(ncclMgmtTaskEnqueue((struct ncclAsyncJob*)suspendJob, ncclCommMemSuspendJob,
-                                        ncclMemManagerSuspendAsyncJobFree, comm),
-                    ret, fail);
+      ret = ncclMgmtTaskEnqueue((struct ncclAsyncJob*)suspendJob, ncclCommMemSuspendJob,
+                                ncclMemManagerSuspendAsyncJobFree, comm);
+      suspendJob = nullptr; // enqueue owns and destroys the job on both success and failure
+      NCCLCHECKGOTO(ret, ret, fail);
     } else {
       NCCLCHECKGOTO(ncclCalloc(&task, 1), ret, fail);
       task->comm = comm;

@@ -30,8 +30,9 @@ __global__ void ds_transpose_acc_kernel(uint32_t *out) {
   int tid = threadIdx.x;
 
   lds[tid] = 0xCAFE0000u | tid;
-  if (tid + 64 < 128)
+  if (tid + 64 < 128) {
     lds[tid + 64] = 0xBEEF0000u | (tid + 64);
+  }
   __syncthreads();
 
   int lds_addr = static_cast<int>(reinterpret_cast<uintptr_t>(lds) & 0xFFFF);
@@ -72,17 +73,21 @@ TEST(DsTransposeAccTest, AccBitWritesToAccVGPR) {
   // v2 should be 0xC0DE for all lanes — the ds_read with acc=1 should not
   // have touched VGPR v2.
   int v2_ok = 0;
-  for (int i = 0; i < 64; ++i)
-    if (h[i] == 0xC0DEu)
+  for (int i = 0; i < 64; ++i) {
+    if (h[i] == 0xC0DEu) {
       v2_ok++;
+    }
+  }
   EXPECT_EQ(v2_ok, 64) << "VGPR v2 was clobbered by ds_read — acc bit not respected";
 
   // a2 should have changed from the initial 0xF00D for at least some lanes
   // (the transpose shuffle may produce 0xF00D for a few lanes by coincidence,
   // but not for all 64).
   int a2_unchanged = 0;
-  for (int i = 0; i < 64; ++i)
-    if (h[64 + i] == 0xF00Du)
+  for (int i = 0; i < 64; ++i) {
+    if (h[64 + i] == 0xF00Du) {
       a2_unchanged++;
+    }
+  }
   EXPECT_LT(a2_unchanged, 64) << "AccVGPR a2 was never written by ds_read";
 }

@@ -139,7 +139,7 @@ class ImageRuntime {
   /// @brief Create device sampler object and return its handle.
   hsa_status_t CreateSamplerHandle(
       hsa_agent_t component,
-      const hsa_ext_sampler_descriptor_v2_t& sampler_descriptor,
+      const hsa_ext_sampler_descriptor_v3_t& sampler_descriptor,
       hsa_ext_sampler_t& sampler);
 
   /// @brief Destroy the device sampler object referenced by the handle.

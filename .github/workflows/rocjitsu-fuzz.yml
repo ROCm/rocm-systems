@@ -73,7 +73,7 @@ jobs:
       AFL_NO_UI: "1"
       AFL_SKIP_CPUFREQ: "1"
       AFL_SYNC_TIME: "1"
-    runs-on: aws-linux-scale-rocm-medium
+    runs-on: az-linux-scale-rocm-medium-prod
     timeout-minutes: 60
     outputs:
       artifact-url: ${{ steps.upload.outputs.artifact-url }}
@@ -112,7 +112,8 @@ jobs:
             libdrm-dev \
             ninja-build \
             nodejs \
-            python3-pytest
+            python3-pytest \
+            util-linux
 
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -132,7 +133,8 @@ jobs:
           node --test rocm-systems/.github/scripts/tests/test_rocjitsu_fuzz_report.js
 
       - name: Build the instrumented multiplexers
-        shell: bash
+        # Clang 17 TSan also runs in the build-time FlatBuffers compiler.
+        shell: setarch x86_64 -R bash --noprofile --norc -e -o pipefail {0}
         run: |
           export AFL_LLVM_THREADSAFE_INST=1
           cmake -S "${ROCJITSU_SOURCE_DIR}" -B "${ROCJITSU_ASAN_UBSAN_BUILD_DIR}" -GNinja \
@@ -184,16 +186,19 @@ jobs:
         id: tsan_campaign
         continue-on-error: true
         timeout-minutes: 15
-        shell: bash
+        shell: setarch x86_64 -R bash --noprofile --norc -e -o pipefail {0}
         env:
           TSAN_OPTIONS: exitcode=1:halt_on_error=1
         run: |
+          # The concurrent-dispatch seed runs four scheduling modes. Under TSan,
+          # 32 workers calibrating it together can exceed AFL++'s default 1s limit.
           python3 rocm-systems/.github/scripts/run_rocjitsu_afl_campaign.py \
             "${ROCJITSU_TSAN_BUILD_DIR}/fuzz/multiplexer/rj_fuzz" \
             "${ROCJITSU_SEED_DIR}" \
             "${ROCJITSU_TSAN_FINDINGS_DIR}" \
             "${ROCJITSU_FUZZ_CAMPAIGN_SECONDS}" \
-            "${ROCJITSU_FUZZ_WORKERS}"
+            "${ROCJITSU_FUZZ_WORKERS}" \
+            --input-timeout-ms 5000
 
       - name: Collect crashes and hangs
         id: findings

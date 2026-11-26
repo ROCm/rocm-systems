@@ -241,7 +241,9 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
         "amdgcn-amd-amdhsa--" + isa->GetProcessorName() + "-strict";
     const core::Isa* strict_isa = core::IsaRegistry::GetIsa(strict_name);
     // gfx1250 (12.5.0) A0 must have a registered strict variant.
-    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5)
+    // Later 12.5 steppings (e.g. gfx1251) have no -strict target.
+    if (isa->GetMajorVersion() == 12 && isa->GetMinorVersion() == 5 &&
+        isa->GetStepping() == 0)
       assert(strict_isa != nullptr && "A0 strict ISA variant is not registered.");
     if (strict_isa != nullptr) isa = strict_isa;
   }
@@ -257,8 +259,23 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
   }
 
   if (workgroup_clusters_supported_) {
-    const uint64_t num_cu_per_se = properties_.NumArrays * properties_.NumCUPerArray;
-    cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
+    // A cluster places each workgroup on its own CU and must fit in one shader
+    // engine. NumShaderBanks counts the shader engines on the whole agent,
+    // including every XCC, so it is not divided by NumXcc again. Harvesting is
+    // within one shader engine (8/8 or 9/7), so every engine has the same
+    // active CU count. NumArrays * NumCUPerArray is the pre-harvest CU count
+    // of one shader engine and overstates that count.
+    uint64_t num_cu_per_se = 0;
+    if (properties_.NumShaderBanks != 0 && properties_.NumSIMDPerCU != 0) {
+      const uint64_t num_cus =
+          static_cast<uint64_t>(properties_.NumFComputeCores) / properties_.NumSIMDPerCU;
+      num_cu_per_se = num_cus / properties_.NumShaderBanks;
+    }
+    // Topology that cannot describe a cluster leaves the max size at {1, 1, 1}.
+    if (num_cu_per_se == 0)
+      workgroup_clusters_supported_ = false;
+    else
+      cluster_max_dim_ = { num_cu_per_se, num_cu_per_se, num_cu_per_se };
   }
 
   max_wave_scratch_ = (supported_isas_[0]->GetMajorVersion() >= 12) ? MAX_WAVE_SCRATCH_GFX12 : MAX_WAVE_SCRATCH;
@@ -304,11 +321,21 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
     }
   }
 
-  auto& first_cpu = core::Runtime::runtime_singleton_->cpu_agents()[0];
-  auto link_info = core::Runtime::runtime_singleton_->GetLinkInfo(first_cpu->node_id(), node_id());
-  xgmi_cpu_gpu_ = (link_info.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
+  // Nearest CPU, not the first: with several CPU nodes the first may reach this GPU only over
+  // the fabric. The xGMI host check reads the link from the GPU side: the thunk keeps at most
+  // one link per remote node, so the CPU node can report a fabric link to this GPU while the GPU
+  // reports its xGMI link to the CPU.
+  const core::Agent* nearest_cpu = GetNearestCpuAgent();
+  const auto host_link =
+      core::Runtime::runtime_singleton_->GetLinkInfo(node_id(), nearest_cpu->node_id());
+  xgmi_cpu_gpu_ = (host_link.info.link_type == HSA_AMD_LINK_INFO_TYPE_XGMI);
+  const auto link_info =
+      core::Runtime::runtime_singleton_->GetLinkInfo(nearest_cpu->node_id(), node_id());
 
-  if (link_info.num_hop >= 1 && !properties_.Integrated) {
+  // With HSA_DEVICE_MEM_NO_HOST_ACCESS the CPU cannot access device memory, so treat the
+  // device as small-BAR.
+  if (link_info.num_hop >= 1 && !properties_.Integrated &&
+      !core::Runtime::runtime_singleton_->flag().device_mem_no_host_access()) {
     large_bar_enabled_ = true;
   }
 
@@ -460,11 +487,14 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       break;
     case 12:
         if (supported_isas()[0]->GetMinorVersion() == 5 &&
+            supported_isas()[0]->GetStepping() == 0 &&
             properties_.Capability.ui32.ASICRevision == 0) {
           // The trap-during-VOP3PX PC fixup in the second-level trap handler
-          // applies to minor version 5 revision 0 only.  Every later revision,
-          // and every later minor version, uses the blob assembled without it.
-          // Shaders that do not vary by revision leave this slot zeroed.
+          // applies to gfx1250 (12.5.0) revision 0 only.  Later 12.5 steppings
+          // such as gfx1251 always use compute_1250, even when KFD reports
+          // ASICRevision 0.  Every later gfx1250 revision uses the blob
+          // assembled without the fixup.  Shaders that do not vary by
+          // revision leave this slot zeroed.
           ASICShader& rev0 = compiled_shader_it->second.compute_1250_rev0;
           // An entry that supplies the later-revision blob must supply the
           // revision 0 blob too.  Falling back would hand a revision 0 part
@@ -690,16 +720,29 @@ void GpuAgent::ReserveScratch()
   assert(mem_err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
   std::lock_guard<std::mutex> lock(scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
+    // The reservation is an optimization: it pre-binds a block that
+    // AcquireQueueMainScratch can fall back on as one of its retry tiers. Queue
+    // creation does not depend on it, so a failure here continues without one.
     HSAuint64 alt_va;
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
-    if (reserved_base == nullptr)
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+    if (reserved_base == nullptr) {
+      if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
+        fprintf(stderr,
+                "Scratch reserve of %zu bytes failed, continuing without a reserved block.\n",
+                reserved_sz);
+      return;
+    }
 
     if (driver().MakeMemoryResident(reserved_base, reserved_sz, &alt_va) == HSA_STATUS_SUCCESS)
       scratch_cache_.reserve(reserved_sz, reserved_base);
     else {
       scratch_pool_.free(reserved_base);
-      throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
+      if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
+        fprintf(stderr,
+                "Scratch reserve of %zu bytes could not be mapped, continuing without a "
+                "reserved block.\n",
+                reserved_sz);
+      return;
     }
   }
 }
@@ -1457,7 +1500,7 @@ hsa_status_t GpuAgent::DmaCopyOnEngine(void* dst, core::Agent& dst_agent,
   }
 
   // gfx125+ fast path: WaitSignal packets in one doorbell submission.
-  // Each chunk carries wait+copy+signal inline; no prologue signal needed.
+  // Profiled copies defer completion until after the end timestamp.
   if (blit->isSDMA()) {
     BlitSdmaBase* sdma_blit = static_cast<BlitSdmaBase*>((*blit).get());
     if (sdma_blit->IsGfx125Plus()) {
@@ -2206,7 +2249,16 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     // that SDMA is enabled/disabled globally (the HSA_ENABLE_SDMA=0 case this
     // fallback targets). If per-direction SDMA availability ever diverges this
     // probe would need to move per-entry, but today all blits share one state.
-    if (!GetBlitObject(BlitHostToDev)->isSDMA()) {
+    //
+    // RECT ops read the flag instead: the probe creates an H2D SDMA queue on the copy agent, and
+    // those queues are few and shared by every process (8 per host-facing engine). A process
+    // that finds none would get a shader blit and have every RECT op rejected, though the op
+    // would not use that queue. DmaCopyRect checks the engine it does use.
+    const bool sdma_off =
+        (op.type == HSA_AMD_MEMORY_COPY_OP_RECT)
+            ? core::Runtime::runtime_singleton_->flag().enable_sdma() == Flag::SDMA_DISABLE
+            : !GetBlitObject(BlitHostToDev)->isSDMA();
+    if (sdma_off) {
       status = DmaCopyBatchFallback(op, dep_signals);
       if (status != HSA_STATUS_SUCCESS)
         return status;
@@ -2272,9 +2324,21 @@ hsa_status_t GpuAgent::DmaCopyBatch(const hsa_amd_memory_copy_op_t* ops,
     case HSA_AMD_MEMORY_COPY_OP_RECT: {
       const bool from_host =
           core::Agent::Convert(op.src_agent)->device_type() == core::Agent::kAmdCpuDevice;
-      status =
-          DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
-                      from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals, out_signal);
+      // The op completes as one, on one engine: only an op whose rects all go to one GPU can
+      // take the engine of the link to it.
+      core::Agent* peer = nullptr;
+      if (!from_host) {
+        peer = core::Agent::Convert(op.dst_agent_list[0]);
+        for (uint16_t e = 1; e < op.num_entries; ++e) {
+          if (op.dst_agent_list[e].handle != op.dst_agent_list[0].handle) {
+            peer = nullptr;
+            break;
+          }
+        }
+      }
+      status = DmaCopyRect(op.rect_src, op.rect_dst, op.range_list, op.num_entries,
+                           from_host ? hsaHostToDevice : hsaDeviceToDevice, dep_signals,
+                           out_signal, peer);
       break;
     }
     default:
@@ -2293,15 +2357,37 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
                                    const hsa_dim3_t* ranges, uint16_t num_rects,
                                    hsa_amd_copy_direction_t dir,
                                    std::vector<core::Signal*>& dep_signals,
-                                   core::Signal& out_signal) {
+                                   core::Signal& out_signal, core::Agent* peer_agent) {
   if (supported_isas()[0]->GetMajorVersion() < 9) return HSA_STATUS_ERROR_INVALID_AGENT;
 
   SetCopyRequestRefCount(true);
   MAKE_SCOPE_GUARD([&]() { SetCopyRequestRefCount(false); });
-  lazy_ptr<core::Blit>& blit = GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev :
-                                                                        BlitDevToHost);
 
-  if (!blit->isSDMA()) {
+  // On platforms with dedicated xGMI engines, rects to another GPU of the hive go on
+  // that link's engine, as DmaCopy does for linear copies; the blit queues are shared by every
+  // peer and copy direction, and a host-facing engine cannot drive the xGMI link. Elsewhere
+  // (PCIe peers, gfx125+ where every engine is equivalent) rects keep the blit queues.
+  const bool use_peer_engine =
+      dir != hsaHostToDevice && peer_agent != nullptr &&
+      peer_agent->device_type() == core::Agent::kAmdGpuDevice &&
+      peer_agent->public_handle().handle != public_handle_.handle && peer_agent->HiveId() &&
+      peer_agent->HiveId() == HiveId() && properties_.NumSdmaXgmiEngines &&
+      core::Runtime::runtime_singleton_->flag().enable_peer_sdma() != Flag::SDMA_DISABLE;
+  lazy_ptr<core::Blit>* blit = nullptr;
+  if (use_peer_engine) {
+    uint32_t rec_mask = 0;
+    DmaPreferredEngine(*peer_agent, *this, &rec_mask);
+    const uint32_t rec_sdma_eng = NthSdmaEngine(rec_mask, 0);
+    blit = (rec_sdma_eng >= DefaultBlitCount && rec_sdma_eng < blits_.size())
+               ? &GetBlitObject(rec_sdma_eng)
+               : &GetXgmiBlit(*peer_agent);
+    if (!(*blit)->isSDMA()) blit = nullptr;
+  }
+  if (blit == nullptr) {
+    blit = &GetBlitObject((dir == hsaHostToDevice) ? BlitHostToDev : BlitDevToHost);
+  }
+
+  if (!(*blit)->isSDMA()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -2311,7 +2397,7 @@ hsa_status_t GpuAgent::DmaCopyRect(const hsa_amd_memory_copy_rect_ptr_t* srcs,
     out_signal.async_copy_agent(core::Agent::Convert(this->public_handle()));
   }
 
-  BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((*blit).get());
+  BlitSdmaBase* sdmaBlit = static_cast<BlitSdmaBase*>((**blit).get());
   hsa_status_t stat =
       sdmaBlit->SubmitCopyRectCommand(srcs, dsts, ranges, num_rects, dep_signals, out_signal);
 
@@ -2361,8 +2447,12 @@ void GpuAgent::GetAqlInfoProperties(uint8_t value[8]) const {
   };
 
   // Fill the HSA_AMD_AQL_PROPERTY_EXT_DISPATCH
-  if (extended_aql_dispatch_supported_)
+  if (ExtendedAqlDispatchSupported())
       setFlag(HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
+
+  // Fill the HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS
+  if (SignalHintsSupported())
+      setFlag(HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS);
 }
 
 
@@ -2686,7 +2776,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint32_t*)value) = static_cast<uint32_t>(properties_.FamilyID);
       break;
     case HSA_AMD_AGENT_INFO_UCODE_VERSION:
-      *((uint32_t*)value) = static_cast<uint32_t>(properties_.EngineId.ui32.uCode);
+      *((uint32_t*)value) = static_cast<uint32_t>(properties_.uCodeEngineVersions.uCodeCompute);
       break;
     case HSA_AMD_AGENT_INFO_SDMA_UCODE_VERSION:
       *((uint32_t*)value) = static_cast<uint32_t>(properties_.uCodeEngineVersions.uCodeSDMA);
@@ -2800,9 +2890,6 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED:
       *static_cast<bool*>(value) = HostAtomicsSupported();
       break;
-    case HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED:
-      *static_cast<bool*>(value) = SignalHintsSupported();
-      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
@@ -2811,9 +2898,9 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
 }
 
 // CP FW writes amd_queue_t::caps only once it has processed a packet on the queue, so the first
-// query runs an empty barrier-AND on the utility queue and reads the bit there.
-bool GpuAgent::SignalHintsSupported() const {
-  std::call_once(signal_hints_once_, [this]() {
+// query runs an empty barrier-AND on the utility queue and reads the bits there.
+uint32_t GpuAgent::CpFirmwareCaps() const {
+  std::call_once(cp_caps_once_, [this]() {
     core::unique_signal_ptr completion(new core::DefaultSignal(1));
     if (!completion->IsValid()) return;
     core::Queue* queue = (*queues_[QueueUtility]).get();
@@ -2832,9 +2919,20 @@ bool GpuAgent::SignalHintsSupported() const {
                   std::memory_order_release);
     core::Signal::Convert(hsa_queue.doorbell_signal)->StoreRelease(index);
     completion->WaitAcquire(HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
-    signal_hints_supported_ = (queue->amd_queue_.caps & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+    cp_caps_ = queue->amd_queue_.caps;
   });
-  return signal_hints_supported_;
+  return cp_caps_;
+}
+
+bool GpuAgent::SignalHintsSupported() const {
+  return (CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+}
+
+// gfx12.5 supports the packet natively, without asking the firmware. The firmware's packet has
+// clusters of 1: cluster_max_dim_ stays {1, 1, 1}.
+bool GpuAgent::ExtendedAqlDispatchSupported() const {
+  return extended_aql_dispatch_supported_ ||
+         ((CpFirmwareCaps() & AMD_QUEUE_CAPS_CP_EXT_KERNEL_DISPATCH) != 0);
 }
 
 hsa_status_t GpuAgent::SetAgentAttribute(hsa_agent_info_t attribute, void* value) {
@@ -3092,7 +3190,9 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       else
         scratch.main_queue_base = scratch_pool_.alloc(scratch.main_size);
 
-      scratch.large = large | (scratch.main_queue_base > scratch_pool_.high_split());
+      scratch.large = large |
+          (scratch.main_queue_base != nullptr &&
+           (scratch.main_queue_base > scratch_pool_.high_split()));
       assert(((!scratch.large) | use_reclaim) && "Large scratch used with reclaim disabled.");
 
       if (scratch.main_queue_base != nullptr) {
@@ -3322,7 +3422,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3340,7 +3440,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_
   uint64_t start, end;
   signal->GetRawTs(start, end);
 
-  if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
+  if (!RawTsValid(start, end)) {
     debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
                 &signal->signal_, start, end, t0_.GPUClockCounter);
     time.start = 0;
@@ -3369,12 +3469,21 @@ uint64_t GpuAgent::TranslateTime(uint64_t tick) {
 
   std::lock_guard<std::mutex> lock(t1_lock_);
 
-#ifdef _WIN32
-  // On Windows, AQL dispatch timestamps may have a fixed epoch offset from
-  // D3DKMTQueryClockCalibration's GPUClockCounter (same clock domain, different
-  // base).  Subtract the offset before interpolation (0 until first detection).
+  // Packet timestamps may have a fixed epoch offset from GetClockCounters'
+  // GPUClockCounter (same clock domain, different base), e.g. on Windows and WSL
+  // (DXG).  Subtract the offset before interpolation (0 until first detection).
   // gpu_clock_offset_ is read and written under t1_lock_ to avoid data races.
+#ifdef _WIN32
   tick -= gpu_clock_offset_;
+#else
+  // Detect the offset here as well as in RawTsValid, so scalar conversions through
+  // hsa_amd_profiling_convert_tick_to_system_domain (e.g. CLR's batched
+  // CacheTimingFromTicks, which reads raw start_ts/end_ts and converts them
+  // directly) latch it without depending on an earlier signal-based profiling
+  // query.  t1_lock_ is already held, so call the locked helper directly; it is a
+  // no-op once latched.  Detecting before the tick < t0_ branch below also keeps
+  // an epoch-offset tick from seeding historical_clock_ratio_.
+  tick -= ClockEpochOffsetLocked(tick);
 #endif
   // Limit errors due to correlated pair certainty to ~0.5us.
   // extrapolated time < (0.5us / half clock read certainty) * delay between clock measures
@@ -3441,7 +3550,7 @@ bool GpuAgent::current_coherency_type(hsa_amd_coherency_type_t type) {
 }
 
 uint16_t GpuAgent::GetMicrocodeVersion() const {
-  return (properties_.EngineId.ui32.uCode);
+  return (properties_.uCodeEngineVersions.uCodeCompute);
 }
 
 uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
@@ -3451,6 +3560,40 @@ uint16_t GpuAgent::GetSdmaMicrocodeVersion() const {
 void GpuAgent::SyncClocks() {
   [[maybe_unused]] hsa_status_t sync_err = driver().GetClockCounters(node_id(), &t1_);
   assert(sync_err == HSA_STATUS_SUCCESS && "hsaGetClockCounters error");
+}
+
+bool GpuAgent::RawTsValid(uint64_t start, uint64_t end) {
+  if ((start == 0) || (end == 0)) return false;
+  // The upstream check, lock-free: ticks that do not predate t0_ are valid.  This
+  // is the common case on every platform and keeps t1_lock_ off the native path.
+  if ((start >= t0_.GPUClockCounter) && (end >= t0_.GPUClockCounter)) return true;
+  // A tick predates t0_: valid only if the packet clock lags the calibration clock
+  // by an epoch offset (WSL/DXG, negative offset) that explains it.  A zero or
+  // positive offset (KFD, native Windows) leaves these ticks invalid, as upstream.
+  const int64_t off = ClockEpochOffset(end);
+  if (off >= 0) return false;
+  const uint64_t lag = uint64_t(-off);
+  return (start + lag >= t0_.GPUClockCounter) && (end + lag >= t0_.GPUClockCounter);
+}
+
+int64_t GpuAgent::ClockEpochOffset(uint64_t raw_tick) {
+  std::lock_guard<std::mutex> lock(t1_lock_);
+  return ClockEpochOffsetLocked(raw_tick);
+}
+
+// The caller must hold t1_lock_.  Only a tick that predates t0_ can reveal an
+// offset, so ticks at or after t0_ (every valid tick on KFD) return without asking
+// the driver.  The driver decides whether such a tick is an epoch offset; see
+// KfdDriver::GetTimestampEpochOffset for the WSL heuristic and its limits.
+int64_t GpuAgent::ClockEpochOffsetLocked(uint64_t raw_tick) {
+  if (gpu_clock_offset_ != 0 || raw_tick == 0 || raw_tick >= t0_.GPUClockCounter)
+    return gpu_clock_offset_;
+  int64_t offset = 0;
+  if (driver().GetTimestampEpochOffset(node_id(), raw_tick, t0_, &t1_, &offset) ==
+          HSA_STATUS_SUCCESS &&
+      offset != 0)
+    gpu_clock_offset_ = offset;
+  return gpu_clock_offset_;
 }
 
 hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttrap_buffers,
@@ -3512,6 +3655,22 @@ hsa_status_t GpuAgent::UpdateTrapHandlerWithPCS(pcs_sampling_data_t* pcs_hosttra
                                  tma_size);
 }
 
+void GpuAgent::WarnIfNoSecondLevelTrapHandler() {
+  if (!trap_handler_unavailable_) return;
+
+  // One message per agent, however many queues it ends up with.
+  if (queue_exception_warned_.exchange(true)) return;
+
+  // Cap 0 is deliberate: the per-agent latch above bounds this, and a shared
+  // call-site cap would hide the second affected agent.
+  log_warning_n(0,
+                "No second-level trap handler bound for GPU node %u (%s): exception "
+                "debugging is not available to the runtime. A device-side abort will not "
+                "be reported, and on gfx11 the dispatch never retires, so the host may "
+                "wait indefinitely. PC sampling is unavailable.\n",
+                node_id(), supported_isas()[0]->GetIsaName().c_str());
+}
+
 void GpuAgent::BindTrapHandler() {
   if (supported_isas()[0]->GetMajorVersion() == 7) {
     // No trap handler support on Gfx7, soft error.
@@ -3531,8 +3690,9 @@ void GpuAgent::BindTrapHandler() {
         (supported_isas()[0]->GetMinorVersion() == 4 || supported_isas()[0]->GetMinorVersion() == 5)) ||
        (supported_isas()[0]->GetMajorVersion() == 10 && supported_isas()[0]->GetMinorVersion() == 3 &&
         supported_isas()[0]->GetStepping() == 6)) {
-      // No trap handler support without exception handling, soft error.
-      // gfx1036 (Granite Ridge iGPU): KMD does not support the trap handler escape.
+      // No second-level trap handler on this path, soft error. Record it so the
+      // first queue created on this agent can report it.
+      trap_handler_unavailable_ = true;
       return;
     }
 
@@ -3563,12 +3723,12 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
   // Check for microcode cache invalidation support.
   // This is deprecated in later microcode builds.
   if (supported_isas()[0]->GetMajorVersion() == 7) {
-    if (properties_.EngineId.ui32.uCode < 420) {
+    if (properties_.uCodeEngineVersions.uCodeCompute < 420) {
       // Microcode is handling code cache invalidation.
       return;
     }
   } else if (supported_isas()[0]->GetMajorVersion() == 8 && supported_isas()[0]->GetMinorVersion() == 0) {
-    if (properties_.EngineId.ui32.uCode < 685) {
+    if (properties_.uCodeEngineVersions.uCodeCompute < 685) {
       // Microcode is handling code cache invalidation.
       return;
     }
@@ -3593,9 +3753,26 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
           PM4_ACQUIRE_MEM_COHER_CNTL_TC_WB_ACTION_ENA);
 
       cache_inv_size_dw = 7;
+  } else if (supported_isas()[0]->GetMajorVersion() == 12 &&
+             supported_isas()[0]->GetMinorVersion() == 5) {
+      // K$/V$ are maintained by dispatch; GCR_CNTL[9] is reserved.
+      // Select only I$/GL2 maintenance, using the common base/size encoding.
+      cache_inv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
+          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(
+              ptr ? PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_RANGE
+                  : PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_ALL) |
+          PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE(
+              ptr ? PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_RANGE
+                  : PM4_ACQUIRE_MEM_GCR_CNTL_GL2_RANGE_ALL) |
+          PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV |
+          PM4_ACQUIRE_MEM_GCR_CNTL_SEQ(
+              PM4_ACQUIRE_MEM_GCR_CNTL_SEQ_REVERSE));
+
+      cache_inv_size_dw = 8;
   } else {
       cache_inv[7] = PM4_ACQUIRE_MEM_DW7_GCR_CNTL(
-          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(1) |
+          PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV(
+              PM4_ACQUIRE_MEM_GCR_CNTL_GLI_INV_ALL) |
           PM4_ACQUIRE_MEM_GCR_CNTL_GLK_INV |
           PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV |
           PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV |

@@ -88,25 +88,30 @@ build_vop3p(uint16_t op, uint8_t vdst, uint16_t src0, uint16_t src1, uint16_t sr
 /// unified register, a NOP preserves the source instruction slot.
 ExpandResult lower_accvgpr_read(const Instruction &inst) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || inst.size() < 8)
+  if (!raw || inst.size() < 8) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " cannot lower AccVGPR read without a complete 64-bit raw "
                                 "encoding");
+  }
 
   cdna4::Vop3pMachineInst src{};
   std::memcpy(&src, raw, sizeof(src));
 
   const uint16_t dst_vgpr = src.vdst;
   const uint16_t src_acc = src.src0;
-  if (src_acc < 768 || src_acc > 1023)
+  if (src_acc < 768 || src_acc > 1023) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " AccVGPR read lowering expected src0 in the AccVGPR operand "
                                 "range 768..1023, got " +
                                 std::to_string(src_acc));
+  }
   const uint16_t src_unified = src_acc - 512;
 
-  if (dst_vgpr == src_unified)
-    return ExpandResult::success({build_s_nop()});
+  if (dst_vgpr == src_unified) {
+    constexpr util::FailureOr<uint32_t> nop = build_s_nop();
+    static_assert(nop.succeeded());
+    return ExpandResult::success({nop.value()});
+  }
 
   return ExpandResult::success(
       {build_v_mov_b32(static_cast<uint8_t>(dst_vgpr), static_cast<uint16_t>(256 + src_unified))});
@@ -124,9 +129,10 @@ constexpr uint16_t kInlineConstNeg1 = 193;
 ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const LivenessAnalysis &liveness,
                                          TranslationContext &context) {
   const auto *raw = inst.raw_encoding();
-  if (!raw || inst.size() < 8)
+  if (!raw || inst.size() < 8) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " cannot lower MFMA without a complete 64-bit raw encoding");
+  }
 
   cdna4::Vop3pMfmaMachineInst mfma{};
   std::memcpy(&mfma, raw, sizeof(mfma));
@@ -136,52 +142,60 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
   const uint16_t src1 = mfma.src1;
   const uint16_t src2 = mfma.src2;
 
-  if (src2 >= 256)
+  if (src2 >= 256) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
             " MFMA lowering only supports a VGPR accumulator source; got src2 operand " +
             std::to_string(src2),
         {"Add an MFMA lowering path for non-VGPR accumulator operands."});
+  }
 
-  if (src0 < 256 || src1 < 256)
+  if (src0 < 256 || src1 < 256) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                     " MFMA lowering expected VGPR matrix sources, got src0=" +
                                     std::to_string(src0) + " src1=" + std::to_string(src1),
                                 {"Add an MFMA lowering path for scalar or inline-constant "
                                  "matrix operands."});
+  }
   auto maybe_exec_save_opt = liveness.find_free_sgpr_pair(&inst);
-  if (maybe_exec_save_opt.failed())
+  if (maybe_exec_save_opt.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const auto exec_save_opt = maybe_exec_save_opt.value();
-  if (!exec_save_opt)
+  if (!exec_save_opt) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
             " MFMA lowering could not find a free SGPR pair to save EXEC",
         {"Reduce SGPR pressure, improve liveness, or add scalar spill support for semantic "
          "lowerings."});
+  }
   const uint8_t kExecSave = static_cast<uint8_t>(*exec_save_opt);
   auto maybe_tmp_sgpr_opt = liveness.find_free_sgpr(&inst, kExecSave + 2);
-  if (maybe_tmp_sgpr_opt.failed())
+  if (maybe_tmp_sgpr_opt.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const auto tmp_sgpr_opt = maybe_tmp_sgpr_opt.value();
-  if (!tmp_sgpr_opt)
+  if (!tmp_sgpr_opt) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
             " MFMA lowering could not find a temporary SGPR after the EXEC save pair",
         {"Reduce SGPR pressure, improve liveness, or add scalar spill support for semantic "
          "lowerings."});
+  }
   const uint8_t kTmpSgpr = static_cast<uint8_t>(*tmp_sgpr_opt);
   auto maybe_free_reg = liveness.find_free_run(&inst, 1, vdst + 4);
-  if (maybe_free_reg.failed())
+  if (maybe_free_reg.failed()) {
     return ExpandResult::liveness_unavailable();
+  }
   const auto free_reg = maybe_free_reg.value();
-  if (!free_reg)
+  if (!free_reg) {
     return ExpandResult::failed(
         std::string(inst.mnemonic()) +
             " MFMA lowering could not find a free VGPR for ds_bpermute addresses at or above v" +
             std::to_string(vdst + 4),
         {"Reduce VGPR pressure, improve liveness, or add VGPR spill support for semantic "
          "lowerings."});
+  }
   const uint8_t vaddr = static_cast<uint8_t>(*free_reg);
 
   // Record feedback only after the full scratch allocation succeeds. A failed
@@ -213,7 +227,7 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
 
   LanePermutation perm{};
   for (size_t i = 0; i < rocjitsu::kMatrixConversionCount; ++i) {
-    if (std::string_view(rocjitsu::kMatrixConversions[i].src_mnemonic) == inst.mnemonic()) {
+    if (rocjitsu::kMatrixConversions[i].src_operation == inst.amdgpu_operation()) {
       perm = {rocjitsu::kMatrixConversions[i].xor_byte_mask,
               rocjitsu::kMatrixConversions[i].range_start,
               rocjitsu::kMatrixConversions[i].range_end};
@@ -224,8 +238,9 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
     auto [sw0, sw1] = build_s_mov_b32_lit(kTmpSgpr, perm.xor_byte_mask);
     hz.emit2(words, sw0, sw1, P::SALU);
     uint64_t exec_mask = 0;
-    for (uint8_t lane = perm.range_start; lane < perm.range_end; ++lane)
+    for (uint8_t lane = perm.range_start; lane < perm.range_end; ++lane) {
       exec_mask |= (1ULL << lane);
+    }
     auto [el, lit] = build_s_mov_b32_lit(kExecLo, static_cast<uint32_t>(exec_mask));
     hz.emit2(words, el, lit, P::None); // EXEC writes are outside HazardTracker's model.
     auto [eh, lith] = build_s_mov_b32_lit(kExecLo + 1, static_cast<uint32_t>(exec_mask >> 32));
@@ -261,13 +276,15 @@ ExpandResult lower_mfma_f32_16x16x16_f16(const Instruction &inst, const Liveness
 ExpandResult expand_waitcnt(const Instruction &inst, uint32_t, uint64_t, std::span<const uint8_t>,
                             const LivenessAnalysis &, TranslationContext &, const LaneLayout *,
                             const LaneLayout *) {
-  if (!inst.raw_encoding())
+  if (!inst.raw_encoding()) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " matched the waitcnt expansion rule without raw encoding");
-  if (static_cast<size_t>(inst.size()) < sizeof(cdna4::SoppMachineInst))
+  }
+  if (static_cast<size_t>(inst.size()) < sizeof(cdna4::SoppMachineInst)) {
     return ExpandResult::failed(std::string(inst.mnemonic()) +
                                 " matched the waitcnt expansion rule with a truncated SOPP "
                                 "encoding");
+  }
   const auto &sopp = *reinterpret_cast<const cdna4::SoppMachineInst *>(inst.raw_encoding());
   return ExpandResult::success(encode_waitcnt_gfx12(decode_waitcnt_gfx9(sopp.simm16)));
 }
@@ -283,7 +300,11 @@ ExpandResult expand_accvgpr_write(const Instruction &, uint32_t, uint64_t, std::
                                   const LaneLayout *, const LaneLayout *) {
   // AccVGPR writes are already represented by the unified VGPR mapping that
   // descriptor translation reserves for RDNA targets.
-  return ExpandResult::success({build_s_nop()});
+  {
+    constexpr util::FailureOr<uint32_t> nop = build_s_nop();
+    static_assert(nop.succeeded());
+    return ExpandResult::success({nop.value()});
+  }
 }
 
 ExpandResult expand_mfma_f32_16x16x16_f16(const Instruction &inst, uint32_t, uint64_t,

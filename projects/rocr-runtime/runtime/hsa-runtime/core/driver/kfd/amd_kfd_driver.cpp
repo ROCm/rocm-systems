@@ -348,18 +348,31 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     bool useSubAlloc = subAllocEnabled;
     useSubAlloc &=
         ((alloc_flags & (~core::MemoryRegion::AllocateRestrict)) == 0);
+    // A system request larger than a fragment block is never recycled: it gets
+    // a block of its own, rounded up to a block multiple, that is discarded on
+    // free. Give it a dedicated allocation of the requested size instead, as
+    // with the fragment allocator disabled. That allocation takes the caller's
+    // flags: a restricted request is CPU-only until
+    // hsa_amd_agents_allow_access, where a fragment block is mapped to all
+    // GPUs when the block is created. Local memory keeps its block-multiple
+    // sizing.
+    useSubAlloc &= !(m_region.IsSystem() && size > m_region.fragment_block_size());
 
     if (useSubAlloc) {
-      mem = m_region.fragment_alloc(size);
+      // recycled is true when mem may hold data from a previously freed
+      // fragment or a cached block. A new block is a dedicated allocation, and
+      // like every dedicated system allocation its pages come zeroed from the
+      // OS (an anonymous mapping or a new kernel BO); clearing it would only
+      // fault those pages in.
+      bool recycled = false;
+      mem = m_region.fragment_alloc(size, &recycled);
 
-      // Suballocated fragments may hold stale data from previously freed
-      // fragments, unlike dedicated BOs which are backed by fresh (zeroed)
-      // kernel pages. Zero system-memory fragments so callers that rely on a
-      // freshly allocated buffer being zero-initialized (e.g. an hipHostMalloc
-      // buffer used as an atomic accumulator) behave as they do with a
-      // dedicated BO. Local (device) memory is not host-writable here and is
-      // left untouched (matching pre-existing VRAM suballocation behavior).
-      if (m_region.IsSystem()) {
+      // Zero recycled system fragments so callers that rely on a freshly
+      // allocated buffer being zero-initialized (e.g. an hipHostMalloc buffer
+      // used as an atomic accumulator) behave as they do with a dedicated BO.
+      // Local (device) memory is not host-writable here and is left untouched
+      // (matching pre-existing VRAM suballocation behavior).
+      if (m_region.IsSystem() && recycled) {
         memset(mem, 0, size);
       }
 
@@ -444,7 +457,7 @@ hsa_status_t KfdDriver::AllocateMemory(const core::MemoryRegion& mem_region,
     // On Windows/DXG, allow allocations to succeed even if MakeResident
     // is best-effort; WDDM will demand-page on GPU access.
     const bool is_windxg =
-        core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
+        core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
     const bool require_pinning =
         !is_windxg &&
         (!m_region.full_profile() || m_region.IsLocalMemory() ||
@@ -1029,6 +1042,50 @@ hsa_status_t KfdDriver::GetClockCounters(uint32_t node_id, HsaClockCounters* clo
       : HSAKMT_CALL(hsaKmtGetClockCounters(node_id, clock_counter));
   if (err != HSAKMT_STATUS_SUCCESS)
     return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+// Native Linux (KFD): packet timestamps and GetClockCounters share an epoch, so
+// there is no offset.
+//
+// WSL (DXG): the AQL timestamp clock can lag D3DKMT's GPUClockCounter by hours, so
+// every completed packet looks older than t0 and was reported as invalid (zero
+// duration).  A tick that predates t0 by more than the time elapsed since t0 is an
+// epoch offset, not an early timestamp; take the just-completed tick as "now".
+//
+// With lag L, a packet completing at Tc (since t0) and first translated at Tq has
+// t0 - raw_tick = L - Tc and t1 - t0 = Tq, so detection needs Tc + Tq < L:
+//  - Tc + Tq < L: offset found.  Durations are exact (start and end shift
+//    together); absolute times are biased late by Tq - Tc, microseconds for an
+//    immediate read, up to seconds for a deferred batch.
+//  - Tc + Tq >= L but Tc < L (e.g. L/2 <= Tc < L when read promptly): not found;
+//    the packet still predates t0, so it keeps reporting zero.
+//  - Tc >= L: raw_tick >= t0, indistinguishable from a native tick, so the caller
+//    never asks; absolute times run ~L early (durations exact).
+// Profiling normally starts within seconds of agent creation, far inside the first
+// case.  A contemporaneous pair would remove all three limits, but the CP clock
+// cannot be read from the host on WSL: HsaClockCounters carries only the D3DKMT
+// calibration clock, and sampling the CP clock would need a GPU timestamp packet
+// plus a blocking wait at profiling-enable on the DXG path.  The robust fix -
+// reporting a GPUClockCounter in the CP epoch (as PAL does on native Windows) -
+// belongs in librocdxg/KMD, where the epoch is known.
+hsa_status_t KfdDriver::GetTimestampEpochOffset(uint32_t node_id, uint64_t raw_tick,
+                                                const HsaClockCounters& t0,
+                                                HsaClockCounters* t1,
+                                                int64_t* offset) const {
+  assert(t1 && offset);
+  *offset = 0;
+  if (!core::Runtime::runtime_singleton_->thunkLoader()->IsWslDxg() || raw_tick == 0 ||
+      raw_tick >= t0.GPUClockCounter)
+    return HSA_STATUS_SUCCESS;
+  // t1 only advances, so if the check below already fails against the current t1, a
+  // fresh sample (a D3DKMT round trip) cannot make it pass.  Skip it so callers that
+  // keep asking in the not-found window do not pay a calibration per timestamp.
+  if (t0.GPUClockCounter - raw_tick <= t1->GPUClockCounter - t0.GPUClockCounter)
+    return HSA_STATUS_SUCCESS;
+  if (GetClockCounters(node_id, t1) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (t0.GPUClockCounter - raw_tick > t1->GPUClockCounter - t0.GPUClockCounter)
+    *offset = int64_t(raw_tick) - int64_t(t1->GPUClockCounter);
   return HSA_STATUS_SUCCESS;
 }
 

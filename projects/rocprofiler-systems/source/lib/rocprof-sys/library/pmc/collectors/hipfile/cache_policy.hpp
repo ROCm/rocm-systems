@@ -67,7 +67,7 @@ struct cache_policy
                 { agent_type::gpu, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
                   pmc_name(metric.suffix), metric.suffix,
                   trait::name<category::hipfile>::description, LONG_DESCRIPTION,
-                  COMPONENT, metric.unit, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+                  COMPONENT, metric.unit, rocprofsys::trace_cache::k_absolute, BLOCK,
                   EXPRESSION, 0, 0, "{}" });
         }
     }

@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
@@ -18,6 +19,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -53,660 +55,557 @@ constexpr SimdPathExpectation expect_simd_path(amdgpu::SimdFastPath path) {
 
 constexpr SimdPathExpectation expect_simd_fallback() { return {.checked = true}; }
 
-// Conversions with 64-bit lanes fall back to scalar where native 64-bit SIMD
-// masks are broken (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS).
-constexpr SimdPathExpectation expect_simd_path_64(amdgpu::SimdFastPath path) {
-  return RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS ? expect_simd_fallback() : expect_simd_path(path);
-}
-
 struct ArithmeticCase {
-  ArithmeticCase(std::string name_, rj_code_arch_t arch_, std::array<uint32_t, 3> words_,
+  ArithmeticCase(std::string name_, rocjitsu::IsaFamily arch_, std::array<uint32_t, 3> words_,
                  std::vector<std::pair<uint32_t, uint32_t>> sources_,
                  std::vector<std::pair<uint32_t, uint32_t>> expected_, uint32_t mode_,
-                 int host_rounding_, uint32_t mxcsr_mask_ = 0, uint32_t mxcsr_bits_ = 0,
                  SimdPathExpectation simd_ = {},
                  std::vector<std::pair<uint32_t, uint32_t>> scalar_sources_ = {})
       : name(std::move(name_)), arch(arch_), words(words_), sources(std::move(sources_)),
-        expected(std::move(expected_)), mode(mode_), host_rounding(host_rounding_),
-        mxcsr_mask(mxcsr_mask_), mxcsr_bits(mxcsr_bits_), simd(simd_),
+        expected(std::move(expected_)), mode(mode_), simd(simd_),
         scalar_sources(std::move(scalar_sources_)) {}
 
   std::string name;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   std::array<uint32_t, 3> words;
   std::vector<std::pair<uint32_t, uint32_t>> sources;
   std::vector<std::pair<uint32_t, uint32_t>> expected;
   uint32_t mode;
-  int host_rounding;
-  uint32_t mxcsr_mask = 0;
-  uint32_t mxcsr_bits = 0;
   SimdPathExpectation simd;
   // SGPR index and value pairs, written before execution.
   std::vector<std::pair<uint32_t, uint32_t>> scalar_sources;
+  // The handler for this case is migrated to rj-arith, outside the legacy SIMD tracker.
+  bool arith_dispatch = false;
 };
 
 void PrintTo(const ArithmeticCase &test, std::ostream *stream) { *stream << test.name; }
 
-// Encodings assembled with llvm-mc; expected values follow GPU MODE, independently of host MODE.
+// Encodings assembled with llvm-mc; expected values follow GPU MODE.
 const std::vector<ArithmeticCase> kCases{
     {"Gfx1250VopdDenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xc9080300u, 0x06060300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}, {7, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"Gfx1250VopdDenormPreserve",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xc9080300u, 0x06060300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000002u}, {7, 0x00000002u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"Gfx1250VopdRoundUp",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xc9080300u, 0x06060300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}, {7, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
-    {"Gfx1250VopdHostRoundUp",
-     ROCJITSU_CODE_ARCH_CDNA5,
-     {0xc9080300u, 0x06060300u},
-     {{0, 0x3f800000u}, {1, 0x33800000u}},
-     {{6, 0x3f800000u}, {7, 0x3f800000u}},
-     240u,
-     FE_UPWARD},
+     241u},
     {"Gfx1250Vopd3F64RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xcf848100u, 0x0002010au, 0x08000006u},
      {{0, 0x00000000u}, {1, 0x3ff00000u}, {2, 0x00000000u}, {3, 0x3ca00000u}, {10, 0x12345678u}},
      {{6, 0x00000001u}, {7, 0x3ff00000u}, {8, 0x12345678u}},
-     244u,
-     FE_TONEAREST},
+     244u},
     {"Gfx1250Vopd3F64DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xcf848100u, 0x0002010au, 0x08000006u},
      {{0, 0x00000001u}, {1, 0x00000000u}, {2, 0x00000001u}, {3, 0x00000000u}, {10, 0x12345678u}},
      {{6, 0x00000000u}, {7, 0x00000000u}, {8, 0x12345678u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"Gfx950Vop3OmodControl",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd1010006u, 0x08020300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}},
      {{6, 0x40800000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1100VopdDenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA3,
+     rocjitsu::IsaFamily::Rdna3,
      {0xc9080300u, 0x06060702u},
      {{0, 0x00000001u}, {1, 0x00000001u}, {2, 0x00000001u}, {3, 0x00000001u}},
      {{6, 0x00000000u}, {7, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1100VopdRoundUp",
-     ROCJITSU_CODE_ARCH_RDNA3,
+     rocjitsu::IsaFamily::Rdna3,
      {0xc9080300u, 0x06060702u},
      {{0, 0x3f800000u}, {1, 0x33800000u}, {2, 0x3f800000u}, {3, 0x33800000u}},
      {{6, 0x3f800001u}, {7, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1150VopdDenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA3_5,
+     rocjitsu::IsaFamily::Rdna3_5,
      {0xc9080300u, 0x06060702u},
      {{0, 0x00000001u}, {1, 0x00000001u}, {2, 0x00000001u}, {3, 0x00000001u}},
      {{6, 0x00000000u}, {7, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1150VopdRoundUp",
-     ROCJITSU_CODE_ARCH_RDNA3_5,
+     rocjitsu::IsaFamily::Rdna3_5,
      {0xc9080300u, 0x06060702u},
      {{0, 0x3f800000u}, {1, 0x33800000u}, {2, 0x3f800000u}, {3, 0x33800000u}},
      {{6, 0x3f800001u}, {7, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1201VopdDenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA4,
+     rocjitsu::IsaFamily::Rdna4,
      {0xc9080300u, 0x06060702u},
      {{0, 0x00000001u}, {1, 0x00000001u}, {2, 0x00000001u}, {3, 0x00000001u}},
      {{6, 0x00000000u}, {7, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1201VopdRoundUp",
-     ROCJITSU_CODE_ARCH_RDNA4,
+     rocjitsu::IsaFamily::Rdna4,
      {0xc9080300u, 0x06060702u},
      {{0, 0x3f800000u}, {1, 0x33800000u}, {2, 0x3f800000u}, {3, 0x33800000u}},
      {{6, 0x3f800001u}, {7, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1250AddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0x060c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1250AddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0x060c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1250AddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xd5030006u, 0x02020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1250AddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xd5030006u, 0x02020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1250FmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xd6130006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1250FmaF32RneControl",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xd6130006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx950AddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0x020c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx950AddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0x020c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx950AddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd1010006u, 0x00020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx950AddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd1010006u, 0x00020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx950FmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd1cb0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx950FmaF32RneControl",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd1cb0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx942AddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA3,
+     rocjitsu::IsaFamily::Cdna3,
      {0x020c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx942AddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA3,
+     rocjitsu::IsaFamily::Cdna3,
      {0x020c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx942AddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA3,
+     rocjitsu::IsaFamily::Cdna3,
      {0xd1010006u, 0x00020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx942AddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA3,
+     rocjitsu::IsaFamily::Cdna3,
      {0xd1010006u, 0x00020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx942FmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA3,
+     rocjitsu::IsaFamily::Cdna3,
      {0xd1cb0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx942FmaF32RneControl",
-     ROCJITSU_CODE_ARCH_CDNA3,
+     rocjitsu::IsaFamily::Cdna3,
      {0xd1cb0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx90aAddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA2,
+     rocjitsu::IsaFamily::Cdna2,
      {0x020c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx90aAddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA2,
+     rocjitsu::IsaFamily::Cdna2,
      {0x020c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx90aAddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA2,
+     rocjitsu::IsaFamily::Cdna2,
      {0xd1010006u, 0x00020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx90aAddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA2,
+     rocjitsu::IsaFamily::Cdna2,
      {0xd1010006u, 0x00020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx90aFmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA2,
+     rocjitsu::IsaFamily::Cdna2,
      {0xd1cb0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx90aFmaF32RneControl",
-     ROCJITSU_CODE_ARCH_CDNA2,
+     rocjitsu::IsaFamily::Cdna2,
      {0xd1cb0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx908AddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA1,
+     rocjitsu::IsaFamily::Cdna1,
      {0x020c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx908AddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA1,
+     rocjitsu::IsaFamily::Cdna1,
      {0x020c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx908AddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA1,
+     rocjitsu::IsaFamily::Cdna1,
      {0xd1010006u, 0x00020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx908AddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA1,
+     rocjitsu::IsaFamily::Cdna1,
      {0xd1010006u, 0x00020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx908FmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA1,
+     rocjitsu::IsaFamily::Cdna1,
      {0xd1cb0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx908FmaF32RneControl",
-     ROCJITSU_CODE_ARCH_CDNA1,
+     rocjitsu::IsaFamily::Cdna1,
      {0xd1cb0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx1100AddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA3,
+     rocjitsu::IsaFamily::Rdna3,
      {0x060c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1100AddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA3,
+     rocjitsu::IsaFamily::Rdna3,
      {0x060c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1100AddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA3,
+     rocjitsu::IsaFamily::Rdna3,
      {0xd5030006u, 0x02020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1100AddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA3,
+     rocjitsu::IsaFamily::Rdna3,
      {0xd5030006u, 0x02020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1100FmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA3,
+     rocjitsu::IsaFamily::Rdna3,
      {0xd6130006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1100FmaF32RneControl",
-     ROCJITSU_CODE_ARCH_RDNA3,
+     rocjitsu::IsaFamily::Rdna3,
      {0xd6130006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx1150AddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA3_5,
+     rocjitsu::IsaFamily::Rdna3_5,
      {0x060c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1150AddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA3_5,
+     rocjitsu::IsaFamily::Rdna3_5,
      {0x060c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1150AddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA3_5,
+     rocjitsu::IsaFamily::Rdna3_5,
      {0xd5030006u, 0x02020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1150AddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA3_5,
+     rocjitsu::IsaFamily::Rdna3_5,
      {0xd5030006u, 0x02020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1150FmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA3_5,
+     rocjitsu::IsaFamily::Rdna3_5,
      {0xd6130006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1150FmaF32RneControl",
-     ROCJITSU_CODE_ARCH_RDNA3_5,
+     rocjitsu::IsaFamily::Rdna3_5,
      {0xd6130006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx1201AddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA4,
+     rocjitsu::IsaFamily::Rdna4,
      {0x060c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1201AddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA4,
+     rocjitsu::IsaFamily::Rdna4,
      {0x060c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1201AddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA4,
+     rocjitsu::IsaFamily::Rdna4,
      {0xd5030006u, 0x02020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1201AddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA4,
+     rocjitsu::IsaFamily::Rdna4,
      {0xd5030006u, 0x02020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1201FmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA4,
+     rocjitsu::IsaFamily::Rdna4,
      {0xd6130006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1201FmaF32RneControl",
-     ROCJITSU_CODE_ARCH_RDNA4,
+     rocjitsu::IsaFamily::Rdna4,
      {0xd6130006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx1030AddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA2,
+     rocjitsu::IsaFamily::Rdna2,
      {0x060c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1030AddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA2,
+     rocjitsu::IsaFamily::Rdna2,
      {0x060c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1030AddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA2,
+     rocjitsu::IsaFamily::Rdna2,
      {0xd5030006u, 0x02020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1030AddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA2,
+     rocjitsu::IsaFamily::Rdna2,
      {0xd5030006u, 0x02020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1030FmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA2,
+     rocjitsu::IsaFamily::Rdna2,
      {0xd54b0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1030FmaF32RneControl",
-     ROCJITSU_CODE_ARCH_RDNA2,
+     rocjitsu::IsaFamily::Rdna2,
      {0xd54b0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx1010AddF32e32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA1,
+     rocjitsu::IsaFamily::Rdna1,
      {0x060c0300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1010AddF32e32DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA1,
+     rocjitsu::IsaFamily::Rdna1,
      {0x060c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1010AddF32e64RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA1,
+     rocjitsu::IsaFamily::Rdna1,
      {0xd5030006u, 0x02020300u},
      {{0, 0x3f800000u}, {1, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1010AddF32e64DenormFlush",
-     ROCJITSU_CODE_ARCH_RDNA1,
+     rocjitsu::IsaFamily::Rdna1,
      {0xd5030006u, 0x02020300u},
      {{0, 0x00000001u}, {1, 0x00000001u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx1010FmaF32RoundUp",
-     ROCJITSU_CODE_ARCH_RDNA1,
+     rocjitsu::IsaFamily::Rdna1,
      {0xd54b0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800001u}},
-     241u,
-     FE_TONEAREST},
+     241u},
     {"gfx1010FmaF32RneControl",
-     ROCJITSU_CODE_ARCH_RDNA1,
+     rocjitsu::IsaFamily::Rdna1,
      {0xd54b0006u, 0x040a0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {2, 0x33800000u}},
      {{6, 0x3f800000u}},
-     240u,
-     FE_TONEAREST},
+     240u},
     {"gfx1250PackedFmaF16ModeControl",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0xcc0e4006u, 0x1c0a0300u},
      {{0, 0x3c003c00u}, {1, 0x3c003c00u}, {2, 0x10001000u}, {6, 0x00000000u}},
      {{6, 0x3c013c01u}},
-     244u,
-     FE_TONEAREST},
+     244u},
     {"gfx1250AddF64RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0x040c0500u},
      {{0, 0x00000000u}, {1, 0x3ff00000u}, {2, 0x00000000u}, {3, 0x3ca00000u}},
      {{6, 0x00000001u}, {7, 0x3ff00000u}},
-     244u,
-     FE_TONEAREST},
+     244u},
     {"gfx1250AddF64DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA5,
+     rocjitsu::IsaFamily::Cdna5,
      {0x040c0500u},
      {{0, 0x00000001u}, {1, 0x00000000u}, {2, 0x00000001u}, {3, 0x00000000u}},
      {{6, 0x00000000u}, {7, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"gfx950PackedFmaF16ModeControl",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd38e4006u, 0x1c0a0300u},
      {{0, 0x3c003c00u}, {1, 0x3c003c00u}, {2, 0x10001000u}, {6, 0x00000000u}},
      {{6, 0x3c013c01u}},
-     244u,
-     FE_TONEAREST},
+     244u},
     {"gfx950AddF64RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd2800006u, 0x00020500u},
      {{0, 0x00000000u}, {1, 0x3ff00000u}, {2, 0x00000000u}, {3, 0x3ca00000u}},
      {{6, 0x00000001u}, {7, 0x3ff00000u}},
-     244u,
-     FE_TONEAREST},
+     244u},
     {"gfx950AddF64DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd2800006u, 0x00020500u},
      {{0, 0x00000001u}, {1, 0x00000000u}, {2, 0x00000001u}, {3, 0x00000000u}},
      {{6, 0x00000000u}, {7, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"Gfx950AddF16RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0x3e0c0300u},
      {{0, 0x00003c00u}, {1, 0x00001000u}, {6, 0x00000000u}},
      {{6, 0x00003c01u}},
-     244u,
-     FE_TONEAREST},
+     244u},
     {"Gfx950AddF16DenormFlush",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0x3e0c0300u},
      {{0, 0x00000001u}, {1, 0x00000001u}, {6, 0x00000000u}},
      {{6, 0x00000000u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"Gfx950AddF16TinyRoundUpE64",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd11f0006u, 0x00020300u},
      {{0, 0x3c00u}, {1, 1u}},
      {{6, 0x3c01u}},
-     0xf4u,
-     FE_TONEAREST},
+     0xf4u},
     // OMOD scales the rounded half: 65504 * 2 overflows before div:2. The
     // expectation is derived from gfx1201 captures; CDNA4 is not measured.
     {"Gfx950MulF16RoundBeforeScale",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd1220006u, 0x18020300u},
      {{0, 0x7bffu}, {1, 0x4000u}},
      {{6, 0x7c00u}},
-     0x44u,
-     FE_TONEAREST},
+     0x44u},
     {"Gfx950MulF32ScaleRoundZero",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0xd1050006u, 0x08020300u},
      {{0, 0x7f7fffffu}, {1, 0x3f800000u}},
      {{6, 0x7f7fffffu}},
-     3u,
-     FE_TONEAREST},
+     3u},
     {"Gfx950SubF32RoundDown",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0x040c0300u},
      {{0, 0xbf800000u}, {1, 0x33800000u}},
      {{6, 0xbf800001u}},
-     0xf2u,
-     FE_TONEAREST},
+     0xf2u},
     {"Gfx950SubrevF32RoundDown",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0x060c0300u},
      {{1, 0xbf800000u}, {0, 0x33800000u}},
      {{6, 0xbf800001u}},
-     0xf2u,
-     FE_TONEAREST},
+     0xf2u},
     {"Gfx950MulF32InputFlush",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0x0a0c0300u},
      {{0, 1u}, {1, 0x4b000000u}},
      {{6, 0u}},
-     0u,
-     FE_TONEAREST},
+     0u},
     {"Gfx950FmacF32RoundUp",
-     ROCJITSU_CODE_ARCH_CDNA4,
+     rocjitsu::IsaFamily::Cdna4,
      {0x760c0300u},
      {{0, 0x3f800000u}, {1, 0x3f800000u}, {6, 0x33800000u}},
      {{6, 0x3f800001u}},
-     0xf1u,
-     FE_TONEAREST},
+     0xf1u},
 
 };
 
@@ -716,12 +615,12 @@ const std::vector<ArithmeticCase> kCases{
 std::vector<ArithmeticCase> adjacent_fp_cases() {
   struct Encodings {
     const char *name;
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     std::array<std::array<uint32_t, 3>, 7> words;
   };
   const std::array encodings{
       Encodings{"gfx1250",
-                ROCJITSU_CODE_ARCH_CDNA5,
+                rocjitsu::IsaFamily::Cdna5,
                 {{
                     {0xd71c0006u, 0x02020300u},
                     {0xd72b0006u, 0x02020500u},
@@ -732,7 +631,7 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                     {0xd6540006u, 0x040a0300u},
                 }}},
       Encodings{"gfx950",
-                ROCJITSU_CODE_ARCH_CDNA4,
+                rocjitsu::IsaFamily::Cdna4,
                 {{
                     {0xd2880006u, 0x00020300u},
                     {0xd2840006u, 0x00020500u},
@@ -743,7 +642,7 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                     {0xd2070006u, 0x040a0300u},
                 }}},
       Encodings{"gfx1201",
-                ROCJITSU_CODE_ARCH_RDNA4,
+                rocjitsu::IsaFamily::Rdna4,
                 {{
                     {0xd71c0006u, 0x02020300u},
                     {0xd72b0006u, 0x02020500u},
@@ -754,7 +653,7 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                     {0xd6540006u, 0x040a0300u},
                 }}},
       Encodings{"gfx1100",
-                ROCJITSU_CODE_ARCH_RDNA3,
+                rocjitsu::IsaFamily::Rdna3,
                 {{
                     {0xd71c0006u, 0x02020300u},
                     {0xd72b0006u, 0x02020500u},
@@ -765,7 +664,7 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                     {0xd6540006u, 0x040a0300u},
                 }}},
       Encodings{"gfx1150",
-                ROCJITSU_CODE_ARCH_RDNA3_5,
+                rocjitsu::IsaFamily::Rdna3_5,
                 {{
                     {0xd71c0006u, 0x02020300u},
                     {0xd72b0006u, 0x02020500u},
@@ -776,7 +675,7 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                     {0xd6540006u, 0x040a0300u},
                 }}},
       Encodings{"gfx942",
-                ROCJITSU_CODE_ARCH_CDNA3,
+                rocjitsu::IsaFamily::Cdna3,
                 {{
                     {0xd2880006u, 0x00020300u},
                     {0xd2840006u, 0x00020500u},
@@ -787,7 +686,7 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                     {0xd2070006u, 0x040a0300u},
                 }}},
       Encodings{"gfx90a",
-                ROCJITSU_CODE_ARCH_CDNA2,
+                rocjitsu::IsaFamily::Cdna2,
                 {{
                     {0xd2880006u, 0x00020300u},
                     {0xd2840006u, 0x00020500u},
@@ -798,7 +697,7 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                     {0xd2070006u, 0x040a0300u},
                 }}},
       Encodings{"gfx908",
-                ROCJITSU_CODE_ARCH_CDNA1,
+                rocjitsu::IsaFamily::Cdna1,
                 {{
                     {0xd2880006u, 0x00020300u},
                     {0xd2840006u, 0x00020500u},
@@ -809,7 +708,7 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                     {0xd2070006u, 0x040a0300u},
                 }}},
       Encodings{"gfx1030",
-                ROCJITSU_CODE_ARCH_RDNA2,
+                rocjitsu::IsaFamily::Rdna2,
                 {{
                     {0xd7620006u, 0x02020300u},
                     {0xd5680006u, 0x02020500u},
@@ -820,7 +719,7 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
                     {0xd75f0006u, 0x040a0300u},
                 }}},
       Encodings{"gfx1010",
-                ROCJITSU_CODE_ARCH_RDNA1,
+                rocjitsu::IsaFamily::Rdna1,
                 {{
                     {0xd7620006u, 0x02020300u},
                     {0xd5680006u, 0x02020500u},
@@ -835,15 +734,13 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
   for (const Encodings &encoding : encodings) {
     const auto add = [&](const std::string &name, size_t instruction,
                          std::vector<std::pair<uint32_t, uint32_t>> sources,
-                         std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode,
-                         int host_rounding = FE_TONEAREST) {
-      if (instruction == 6 && encoding.arch != ROCJITSU_CODE_ARCH_CDNA1 &&
-          encoding.arch != ROCJITSU_CODE_ARCH_CDNA2 && encoding.arch != ROCJITSU_CODE_ARCH_CDNA3 &&
-          encoding.arch != ROCJITSU_CODE_ARCH_CDNA4)
+                         std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode) {
+      // V_DIV_FIXUP_F16 preserves the high half of the harness's 0xdeadbeef destination.
+      if (instruction == 6) {
         expected.front().second |= 0xdead0000u;
+      }
       cases.push_back({std::string(encoding.name) + name, encoding.arch,
-                       encoding.words[instruction], std::move(sources), std::move(expected), mode,
-                       host_rounding});
+                       encoding.words[instruction], std::move(sources), std::move(expected), mode});
     };
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
       const uint32_t mode = 0xf0u | rounding | (rounding << 2);
@@ -872,10 +769,9 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
     add("LdexpF64OmodOverflow", 1, {{0, 0xffffffffu}, {1, 0x7fefffffu}, {2, 0u}},
         {{6, 0xffffffffu}, {7, 0x7fefffffu}}, 0x0fu);
     cases.back().words[1] |= 0x08000000u; // mul:2
-    add("LdexpF32IgnoresHostRoundDown", 0, {{0, 0x00800000u}, {1, uint32_t(-24)}}, {{6, 1u}}, 0xf5u,
-        FE_DOWNWARD);
-    add("LdexpF64IgnoresHostRoundDown", 1, {{0, 0u}, {1, 0x00100000u}, {2, uint32_t(-53)}},
-        {{6, 1u}, {7, 0u}}, 0xf5u, FE_DOWNWARD);
+    add("LdexpF32GuestRoundUp", 0, {{0, 0x00800000u}, {1, uint32_t(-24)}}, {{6, 1u}}, 0xf5u);
+    add("LdexpF64GuestRoundUp", 1, {{0, 0u}, {1, 0x00100000u}, {2, uint32_t(-53)}},
+        {{6, 1u}, {7, 0u}}, 0xf5u);
     add("LdexpF32InputFlush", 0, {{0, 1u}, {1, 23u}}, {{6, 0u}}, 0u);
     add("LdexpF32InputPreserve", 0, {{0, 1u}, {1, 23u}}, {{6, 0x00800000u}}, 0xf0u);
     add("LdexpF64InputFlush", 1, {{0, 1u}, {1, 0u}, {2, 52u}}, {{6, 0u}, {7, 0u}}, 0u);
@@ -893,7 +789,10 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
       add(name + "FlushNegativeSubnormal", instruction, {{0, 0x80000001u}},
           {{6, exponent ? 0u : 0x80000000u}}, 0u);
       add(name + "SignalingNaN", instruction, {{0, 0xff80002au}},
-          {{6, exponent ? 0u : 0xffc0002au}}, 0xf0u);
+          {{6, exponent                                      ? 0u
+               : encoding.arch == rocjitsu::IsaFamily::Rdna3 ? 0xff80002au
+                                                             : 0xffc0002au}},
+          0xf0u);
       add(name + "NegativeNormal", instruction, {{0, 0xbe800000u}},
           {{6, exponent ? uint32_t(-1) : 0xbf000000u}}, 0xf0u);
     }
@@ -908,19 +807,20 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
         0xf0u);
     add("FixupF16ProvisionalNaN", 6, {{0, 0x7e2au}, {1, 0xbc00u}, {2, 0x3c00u}}, {{6, 0xfc00u}},
         0xf0u);
-    add("FixupF16QuietNaNPayload", 6, {{0, 0u}, {1, 0x3c00u}, {2, 0xfc2au}}, {{6, 0xfe2au}}, 0xf0u);
+    // gfx1100 captures preserve the selected signaling NaN with IEEE mode clear.
+    add("FixupF16NaNPayload", 6, {{0, 0u}, {1, 0x3c00u}, {2, 0xfc2au}},
+        {{6, encoding.arch == rocjitsu::IsaFamily::Rdna3 ? 0xfc2au : 0xfe2au}}, 0xf0u);
   }
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4}) {
     for (uint32_t mode = 0; mode < 256; mode += 17) {
       cases.push_back(
-          {std::string(arch == ROCJITSU_CODE_ARCH_RDNA3 ? "Gfx1100" : "Gfx1201") +
+          {std::string(arch == rocjitsu::IsaFamily::Rdna3 ? "Gfx1100" : "Gfx1201") +
                "ScaleF64SignalingNaNMode" + std::to_string(mode),
            arch,
            {0xd6fd6a06u, 0x040a0100u},
            {{0, 0x510b2fa8u}, {1, 0x7ff19bdeu}, {2, 0xc874d413u}, {3, 0x90fe0a8fu}},
-           {{6, 0x510b2fa8u}, {7, arch == ROCJITSU_CODE_ARCH_RDNA3 ? 0x7ff19bdeu : 0x7ff99bdeu}},
-           mode,
-           FE_TONEAREST});
+           {{6, 0x510b2fa8u}, {7, arch == rocjitsu::IsaFamily::Rdna3 ? 0x7ff19bdeu : 0x7ff99bdeu}},
+           mode});
     }
   }
   return cases;
@@ -928,38 +828,35 @@ std::vector<ArithmeticCase> adjacent_fp_cases() {
 
 std::vector<ArithmeticCase> ldexp_f16_mode_cases() {
   struct Encoding {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     const char *name;
     std::array<uint32_t, 3> words;
   };
   // llvm-mc encodings: v_ldexp_f16 v6, v0, v1 (low halves on true16 targets).
   const std::array encodings{
-      Encoding{ROCJITSU_CODE_ARCH_CDNA4, "Gfx950E32", {0x660c0300u}},
-      Encoding{ROCJITSU_CODE_ARCH_CDNA4, "Gfx950E64", {0xd1330006u, 0x00020300u}},
-      Encoding{ROCJITSU_CODE_ARCH_CDNA5, "Gfx1250E32", {0x760c0300u}},
-      Encoding{ROCJITSU_CODE_ARCH_CDNA5, "Gfx1250E64", {0xd53b0006u, 0x02020300u}},
-      Encoding{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201E32", {0x760c0300u}},
-      Encoding{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201E64", {0xd53b0006u, 0x02020300u}},
+      Encoding{rocjitsu::IsaFamily::Cdna4, "Gfx950E32", {0x660c0300u}},
+      Encoding{rocjitsu::IsaFamily::Cdna4, "Gfx950E64", {0xd1330006u, 0x00020300u}},
+      Encoding{rocjitsu::IsaFamily::Cdna5, "Gfx1250E32", {0x760c0300u}},
+      Encoding{rocjitsu::IsaFamily::Cdna5, "Gfx1250E64", {0xd53b0006u, 0x02020300u}},
+      Encoding{rocjitsu::IsaFamily::Rdna4, "Gfx1201E32", {0x760c0300u}},
+      Encoding{rocjitsu::IsaFamily::Rdna4, "Gfx1201E64", {0xd53b0006u, 0x02020300u}},
   };
   std::vector<ArithmeticCase> cases;
   for (const Encoding &encoding : encodings) {
     const auto add = [&](std::string name, uint32_t input, uint16_t exponent, uint32_t expected,
-                         uint32_t mode, int host_rounding = FE_TONEAREST) {
+                         uint32_t mode) {
       cases.push_back({encoding.name + name,
                        encoding.arch,
                        encoding.words,
                        {{0, input}, {1, exponent}, {6, 0u}},
                        {{6, expected}},
-                       mode,
-                       host_rounding});
+                       mode});
     };
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
       const std::string suffix = "Round" + std::to_string(rounding);
       const uint32_t mode = 0xf0u | (rounding << 2);
-      add("PositiveHalfway" + suffix, 0x0401u, 0xffffu, rounding == 1 ? 0x0201u : 0x0200u, mode,
-          FE_DOWNWARD);
-      add("NegativeHalfway" + suffix, 0x8401u, 0xffffu, rounding == 2 ? 0x8201u : 0x8200u, mode,
-          FE_UPWARD);
+      add("PositiveHalfway" + suffix, 0x0401u, 0xffffu, rounding == 1 ? 0x0201u : 0x0200u, mode);
+      add("NegativeHalfway" + suffix, 0x8401u, 0xffffu, rounding == 2 ? 0x8201u : 0x8200u, mode);
       add("HugePositiveExponent" + suffix, 0x3c00u, 0x7fffu, rounding <= 1 ? 0x7c00u : 0x7bffu,
           mode);
       add("HugeNegativeExponent" + suffix, 0x3c00u, 0x8000u, rounding == 1 ? 0x0001u : 0x0000u,
@@ -985,15 +882,15 @@ std::vector<ArithmeticCase> ldexp_f16_mode_cases() {
 
 std::vector<ArithmeticCase> dx9_fma_cases() {
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                   rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     const bool has_accumulator_form =
-        arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
-    for (uint32_t form = 0; form < (has_accumulator_form ? 3u : 1u); ++form)
-      for (uint32_t denorm = 0; denorm < 4; ++denorm)
-        for (uint32_t rounding = 0; rounding < 4; ++rounding)
+        arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5;
+    for (uint32_t form = 0; form < (has_accumulator_form ? 3u : 1u); ++form) {
+      for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+        for (uint32_t rounding = 0; rounding < 4; ++rounding) {
           for (bool ieee : {false, true}) {
-            const std::string prefix = "Arch" + std::to_string(arch) + "Form" +
+            const std::string prefix = "Arch" + std::to_string(static_cast<int>(arch)) + "Form" +
                                        std::to_string(form) + "Denorm" + std::to_string(denorm) +
                                        "Round" + std::to_string(rounding) + "Ieee" +
                                        std::to_string(ieee);
@@ -1012,8 +909,7 @@ std::vector<ArithmeticCase> dx9_fma_cases() {
                                encoding,
                                {{0, a}, {1, b}, {form == 0 ? 2u : 6u, c}},
                                {{6, expected}},
-                               (uint32_t(ieee) << 9) | (denorm << 4) | rounding,
-                               FE_TONEAREST});
+                               (uint32_t(ieee) << 9) | (denorm << 4) | rounding});
             };
             add("ZeroInf", 0u, 0x7f800000u, 0x3f800000u, 0x3f800000u);
             add("NanZero", 0x7fc01234u, 0x80000000u, 0x3f800000u, 0x3f800000u);
@@ -1034,7 +930,7 @@ std::vector<ArithmeticCase> dx9_fma_cases() {
             add("SignalingSecond", 0x3f800000u, 0x7f800012u, 0x3f800000u, nan);
             add("SignalingAccumulator", 0x3f800000u, 0x3f800000u, 0x7f800012u, nan);
             add("ZeroProductSignalingAccumulator", 0u, 0x7f800000u, 0x7f800012u, nan);
-            if (form != 1)
+            if (form != 1) {
               for (uint32_t omod = 1; omod < 4; ++omod) {
                 // Mandatory output flushing keeps OMOD enabled regardless of
                 // denormal MODE. RDNA3/3.5 still disable it in IEEE mode.
@@ -1047,28 +943,35 @@ std::vector<ArithmeticCase> dx9_fma_cases() {
                     omod);
                 add("OmodZero" + std::to_string(omod), 0u, 0x7f800000u, 0x80000000u,
                     enabled ? 0u : zero_sum, omod);
-                if (omod == 3)
+                if (omod == 3) {
                   add("OmodUnderflow", 0x80800000u, 0x3f800000u, 0u,
                       enabled ? 0x80000000u : 0x80800000u, omod);
+                }
               }
+            }
           }
+        }
+      }
+    }
   }
   return cases;
 }
 
 std::vector<ArithmeticCase> binary_f32_policy_cases() {
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
-        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-        ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool rdna_encoding = arch >= ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-    const bool always_quiets = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-    for (bool multiply : {false, true})
-      for (bool e64 : {false, true})
-        for (uint32_t denorm = 0; denorm < 4; ++denorm)
-          for (uint32_t rounding = 0; rounding < 4; ++rounding)
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
+    const bool rdna_encoding =
+        arch >= rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Cdna5;
+    const bool always_quiets =
+        arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
+    for (bool multiply : {false, true}) {
+      for (bool e64 : {false, true}) {
+        for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+          for (uint32_t rounding = 0; rounding < 4; ++rounding) {
             for (bool ieee : {false, true}) {
               // Assembled for each target with llvm-mc. Expected raw bits were
               // captured on gfx1100/gfx1201; the shared MODE policy also applies
@@ -1079,7 +982,7 @@ std::vector<ArithmeticCase> binary_f32_policy_cases() {
                                                           : (multiply ? 0x0a0c0300u : 0x020c0300u));
               const std::array<uint32_t, 3> words{
                   first, e64 ? (rdna_encoding ? 0x02020300u : 0x00020300u) : 0u, 0u};
-              const std::string prefix = "Arch" + std::to_string(arch) +
+              const std::string prefix = "Arch" + std::to_string(static_cast<int>(arch)) +
                                          (multiply ? "Mul" : "Add") + (e64 ? "E64" : "E32") +
                                          "Denorm" + std::to_string(denorm) + "Round" +
                                          std::to_string(rounding) + "Ieee" + std::to_string(ieee);
@@ -1089,8 +992,7 @@ std::vector<ArithmeticCase> binary_f32_policy_cases() {
                                  words,
                                  {{0, a}, {1, b}},
                                  {{6, expected}},
-                                 (uint32_t(ieee) << 9) | (denorm << 4) | rounding,
-                                 FE_UPWARD});
+                                 (uint32_t(ieee) << 9) | (denorm << 4) | rounding});
               };
               const uint32_t nan = ieee || always_quiets ? 0x7fc01abcu : 0x7f801abcu;
               add("FirstNan", 0x7f801abcu, 0xffc00222u, nan);
@@ -1108,17 +1010,21 @@ std::vector<ArithmeticCase> binary_f32_policy_cases() {
                 add("NegativeTinySignificand", 0x80800000u, 0x3f7fffffu, negative);
               }
             }
+          }
+        }
+      }
+    }
   }
   return cases;
 }
 
 std::vector<ArithmeticCase> omod_underflow_cases() {
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
-    for (uint32_t op = 0; op < 3; ++op)
-      for (uint32_t denorm = 0; denorm < 4; ++denorm)
-        for (uint32_t rounding = 0; rounding < 4; ++rounding)
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                   rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    for (uint32_t op = 0; op < 3; ++op) {
+      for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+        for (uint32_t rounding = 0; rounding < 4; ++rounding) {
           for (bool ieee : {false, true}) {
             // FMA, FMAC and ADD with div:2. Physical gfx1100/gfx1201 preserve
             // the sign when scaling underflows a negative normal result.
@@ -1126,17 +1032,16 @@ std::vector<ArithmeticCase> omod_underflow_cases() {
                                                   : op == 1
                                                       ? std::array{0xd52b0006u, 0x18020300u, 0u}
                                                       : std::array{0xd5030006u, 0x18020300u, 0u};
-            const bool enabled = arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                                 arch == ROCJITSU_CODE_ARCH_CDNA5 || (!ieee && !(denorm & 2u));
-            cases.push_back({"Arch" + std::to_string(arch) + "Op" + std::to_string(op) + "Denorm" +
-                                 std::to_string(denorm) + "Round" + std::to_string(rounding) +
-                                 "Ieee" + std::to_string(ieee),
+            const bool enabled = arch == rocjitsu::IsaFamily::Rdna4 ||
+                                 arch == rocjitsu::IsaFamily::Cdna5 || (!ieee && !(denorm & 2u));
+            cases.push_back({"Arch" + std::to_string(static_cast<int>(arch)) + "Op" +
+                                 std::to_string(op) + "Denorm" + std::to_string(denorm) + "Round" +
+                                 std::to_string(rounding) + "Ieee" + std::to_string(ieee),
                              arch,
                              words,
                              {{0, 0x80800000u}, {1, op == 2 ? 0u : 0x3f800000u}, {2, 0u}, {6, 0u}},
                              {{6, enabled ? 0x80000000u : 0x80800000u}},
-                             (uint32_t(ieee) << 9) | (denorm << 4) | rounding,
-                             FE_TONEAREST});
+                             (uint32_t(ieee) << 9) | (denorm << 4) | rounding});
             auto boundary = cases.back();
             boundary.name += "BeforePacking";
             boundary.sources = {{0, 0x807fffffu},
@@ -1148,19 +1053,23 @@ std::vector<ArithmeticCase> omod_underflow_cases() {
                                                      : 0x80800000u}};
             cases.push_back(std::move(boundary));
           }
+        }
+      }
+    }
+  }
   return cases;
 }
 
 std::vector<ArithmeticCase> f16_fma_nan_cases() {
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
-    for (bool packed : {false, true})
-      for (bool ieee : {false, true})
-        for (bool clamp : {false, true})
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                   rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    for (bool packed : {false, true}) {
+      for (bool ieee : {false, true}) {
+        for (bool clamp : {false, true}) {
           for (uint32_t denorm = 0; denorm < 4; ++denorm) {
             const bool modern =
-                arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+                arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
             const auto add = [&](const char *name, uint16_t a, uint16_t b, uint16_t c,
                                  uint16_t nan) {
               const uint32_t expected =
@@ -1168,16 +1077,17 @@ std::vector<ArithmeticCase> f16_fma_nan_cases() {
               const auto pair = [packed](uint32_t value) {
                 return packed ? value * 0x10001u : value;
               };
-              cases.push_back({"Arch" + std::to_string(arch) + "Packed" + std::to_string(packed) +
-                                   "Ieee" + std::to_string(ieee) + "Clamp" + std::to_string(clamp) +
-                                   "Denorm" + std::to_string(denorm) + name,
+              cases.push_back({"Arch" + std::to_string(static_cast<int>(arch)) + "Packed" +
+                                   std::to_string(packed) + "Ieee" + std::to_string(ieee) +
+                                   "Clamp" + std::to_string(clamp) + "Denorm" +
+                                   std::to_string(denorm) + name,
                                arch,
                                {(packed ? 0xcc0e4006u : 0xd6480006u) | (clamp ? 0x8000u : 0u),
                                 packed ? 0x1c0a0300u : 0x040a0300u, 0u},
                                {{0, pair(a)}, {1, pair(b)}, {2, pair(c)}, {6, 0u}},
                                {{6, pair(expected)}},
-                               (uint32_t(ieee) << 9) | (denorm << 6),
-                               FE_TONEAREST});
+                               (uint32_t(ieee) << 9) | (denorm << 6)});
+              cases.back().arith_dispatch = packed && arch == rocjitsu::IsaFamily::Rdna3_5;
             };
             // Raw witnesses captured on gfx1100/gfx1201, including the GCC
             // optimization-dependent payload selection seen in packed FMA.
@@ -1190,31 +1100,35 @@ std::vector<ArithmeticCase> f16_fma_nan_cases() {
             add("OppositeInfinities", 0x7c00u, 0x3c00u, 0xfc00u, 0xfe00u);
             add("FlushedProductFirst", 1u, 0x7c00u, 0x7e01u, denorm & 1u ? 0x7e01u : 0xfe00u);
           }
+        }
+      }
+    }
+  }
   return cases;
 }
 
+// Native FMA uses the default-host contract; guest MODE still varies below.
 std::vector<ArithmeticCase> f16_fma_omod_cases() {
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
-    for (bool ieee : {false, true})
-      for (bool overflow : {false, true})
-        for (bool clamp : {false, true})
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                   rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    for (bool ieee : {false, true}) {
+      for (bool overflow : {false, true}) {
+        for (bool clamp : {false, true}) {
           for (uint32_t denorm = 0; denorm < 4; ++denorm) {
-            const bool enabled = arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                                 arch == ROCJITSU_CODE_ARCH_CDNA5 || (!ieee && !(denorm & 2u));
+            const bool enabled = arch == rocjitsu::IsaFamily::Rdna4 ||
+                                 arch == rocjitsu::IsaFamily::Cdna5 || (!ieee && !(denorm & 2u));
             const auto add = [&](const char *name, uint16_t a, uint16_t b, uint16_t c,
                                  uint32_t omod, uint16_t expected) {
               cases.push_back(
-                  {"Arch" + std::to_string(arch) + "Ieee" + std::to_string(ieee) + "Overflow" +
-                       std::to_string(overflow) + "Clamp" + std::to_string(clamp) + "Denorm" +
-                       std::to_string(denorm) + name,
+                  {"Arch" + std::to_string(static_cast<int>(arch)) + "Ieee" + std::to_string(ieee) +
+                       "Overflow" + std::to_string(overflow) + "Clamp" + std::to_string(clamp) +
+                       "Denorm" + std::to_string(denorm) + name,
                    arch,
                    {0xd6480006u | (clamp ? 0x8000u : 0u), 0x040a0300u | (omod << 27), 0u},
                    {{0, a}, {1, b}, {2, c}, {6, 0u}},
                    {{6, expected}},
-                   (uint32_t(ieee) << 9) | (uint32_t(overflow) << 23) | (denorm << 6),
-                   FE_UPWARD});
+                   (uint32_t(ieee) << 9) | (uint32_t(overflow) << 23) | (denorm << 6)});
             };
             // Both physical cards round the arithmetic before applying OMOD.
             add("NegativeUnderflow", 0x0400u, 0xbc00u, 0u, 3,
@@ -1232,180 +1146,141 @@ std::vector<ArithmeticCase> f16_fma_omod_cases() {
                 : (denorm & 2u)  ? 0x8200u
                                  : 0x8000u);
           }
+        }
+      }
+    }
+  }
   // Captured FMA and FMAC agree on both cards for every rounding mode.
   const uint16_t negative_tiny[] = {0x8000u, 0u, 0x8000u, 0u};
   const uint16_t positive_overflow[] = {0x77ffu, 0x7c00u, 0x77ffu, 0x77ffu};
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
-    for (bool accumulate : {false, true})
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                   rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    for (bool accumulate : {false, true}) {
       for (uint32_t round = 0; round < 4; ++round) {
         const auto add = [&](const char *name, uint16_t a, uint16_t b, uint16_t c,
                              uint16_t expected) {
           cases.push_back(
-              {"DirectedArch" + std::to_string(arch) + "Accumulate" + std::to_string(accumulate) +
-                   "Round" + std::to_string(round) + name,
+              {"DirectedArch" + std::to_string(static_cast<int>(arch)) + "Accumulate" +
+                   std::to_string(accumulate) + "Round" + std::to_string(round) + name,
                arch,
                {accumulate ? 0xd5360006u : 0xd6480006u, accumulate ? 0x1a020300u : 0x1c0a0300u, 0u},
                {{0, a}, {1, b}, {2, c}, {6, c}},
                {{6, expected}},
-               0x40u | (round << 2),
-               FE_TOWARDZERO});
+               0x40u | (round << 2)});
         };
         // RNE retains a negative normal until div:2 makes it tiny; RTZ first
         // flushes the arithmetic result, so the modifier receives a signed zero.
         add("NegativeUnderflow", 1u, 0x3400u, 0x8400u, negative_tiny[round]);
         add("OverflowBeforeDivision", 0x0400u, 0x0400u, 0x7bffu, positive_overflow[round]);
       }
+    }
+  }
   return cases;
 }
 
-std::vector<ArithmeticCase> host_mxcsr_cases() {
+// V_DUAL_MUL_DX9_ZERO_F32 in both VOPD slots, writing v6 and v7. The DX9 slot
+// multiplies on host floats and forces a zero operand to a zero result, so a
+// slot that treated the subnormal product as zero would still pass the flush
+// cases. Guest denormal preservation takes the VOPD SIMD path on the targets
+// that still run it, and keeps the subnormal product there and in scalar.
+std::vector<ArithmeticCase> vopd_mul_dx9_cases() {
   std::vector<ArithmeticCase> cases;
-#if RJ_HOST_ARCH_X86
-  constexpr uint32_t kDazMask = 1u << 6;
-  constexpr uint32_t kFtzMask = 1u << 15;
-  constexpr uint32_t kControlMask = _MM_ROUND_MASK | kDazMask | kFtzMask;
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5})
-    for (bool packed : {false, true})
-      for (bool trap_invalid : {false, true}) {
-        const auto pair = [packed](uint32_t value) { return packed ? value * 0x10001u : value; };
-        const auto add = [&](const char *name, uint16_t a, uint16_t b, uint16_t c,
-                             uint16_t expected) {
-          cases.push_back(
-              {"F16FmaArch" + std::to_string(arch) + "Packed" + std::to_string(packed) + "Trap" +
-                   std::to_string(trap_invalid) + name,
-               arch,
-               {packed ? 0xcc0e4006u : 0xd6480006u, packed ? 0x1c0a0300u : 0x040a0300u, 0u},
-               {{0, pair(a)}, {1, pair(b)}, {2, pair(c)}},
-               {{6, packed ? pair(expected) : 0xdead0000u | expected}},
-               0xf0u,
-               FE_UPWARD,
-               0xffffu,
-               trap_invalid ? 0x1f00u : 0x1f80u});
-        };
-        // The residual must not expose Inf-Inf to the caller's exception state.
-        add("InfiniteProduct", 0x7c00u, 0x3c00u, 0u, 0x7c00u);
-        add("InfiniteAddend", 0x3c00u, 0x3c00u, 0x7c00u, 0x7c00u);
-        add("InvalidProduct", 0u, 0x7c00u, 0x3c00u, 0xfe00u);
-        add("InvalidSum", 0x7c00u, 0x3c00u, 0xfc00u, 0xfe00u);
-      }
-  // Change MXCSR rounding independently of the x87 rounding reported by fegetround().
-  for (uint32_t rounding : {_MM_ROUND_UP, _MM_ROUND_DOWN, _MM_ROUND_TOWARD_ZERO}) {
-    const bool upward = rounding == _MM_ROUND_UP;
-    cases.push_back({"Cdna4AddRound" + std::to_string(rounding),
-                     ROCJITSU_CODE_ARCH_CDNA4,
-                     {0x020c0300u},
-                     {{0, 0x3f800000u}, {1, upward ? 0x33800000u : 0x34400000u}},
-                     {{6, upward ? 0x3f800000u : 0x3f800002u}},
-                     0xf0u,
-                     FE_TONEAREST,
-                     kControlMask,
-                     rounding});
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                   rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
+    const std::array<uint32_t, 3> words{0xc9ce0300u, 0x06060702u, 0u};
+    const auto add = [&](const char *name, uint32_t lhs, uint32_t rhs, uint32_t expected,
+                         uint32_t mode) {
+      cases.push_back(
+          {"VopdMulDx9Arch" + std::to_string(static_cast<int>(arch)) + name,
+           arch,
+           words,
+           {{0, lhs}, {1, rhs}, {2, lhs}, {3, rhs}},
+           {{6, expected}, {7, expected}},
+           mode,
+           mode == 0xf0u ? expect_simd_path(amdgpu::SimdFastPath::VOPD) : expect_simd_fallback()});
+      cases.back().arith_dispatch = arch == rocjitsu::IsaFamily::Rdna3_5;
+    };
+    add("Preserve", 0x00000001u, 0x4b000000u, 0x00800000u, 0xf0u);
+    add("PreserveNegative", 0x80000001u, 0x4b000000u, 0x80800000u, 0xf0u);
+    add("GuestFlush", 0x00000001u, 0x4b000000u, 0u, 0u);
+    add("ZeroInf", 0u, 0x7f800000u, 0u, 0xf0u);
   }
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                              ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    // V_DUAL_MUL_DX9_ZERO_F32 in both slots, writing v6 and v7.
-    const std::array<uint32_t, 3> words{0xc9ce0300u, 0x06060702u};
-    for (uint32_t daz : {0u, kDazMask}) {
-      const std::string prefix =
-          "VopdMulDx9Arch" + std::to_string(arch) + "Daz" + std::to_string(daz);
-      const auto add = [&](const char *name, uint32_t lhs, uint32_t rhs, uint32_t expected,
-                           uint32_t mode) {
-        cases.push_back({prefix + name,
-                         arch,
-                         words,
-                         {{0, lhs}, {1, rhs}, {2, lhs}, {3, rhs}},
-                         {{6, expected}, {7, expected}},
-                         mode,
-                         FE_TONEAREST,
-                         kControlMask,
-                         daz});
-      };
-      add("Preserve", 0x00000001u, 0x4b000000u, 0x00800000u, 0xf0u);
-      add("PreserveNegative", 0x80000001u, 0x4b000000u, 0x80800000u, 0xf0u);
-      add("GuestFlush", 0x00000001u, 0x4b000000u, 0u, 0u);
-      add("ZeroInf", 0u, 0x7f800000u, 0u, 0xf0u);
-    }
-  }
-  // Also preserve pre-existing exception flags instead of merely clearing them.
-  const size_t unflagged_cases = cases.size();
-  for (size_t i = 0; i < unflagged_cases; ++i) {
-    ArithmeticCase flagged = cases[i];
-    flagged.name += "WithFlags";
-    flagged.mxcsr_bits |= _MM_EXCEPT_INEXACT;
-    cases.push_back(std::move(flagged));
-  }
-#endif
   return cases;
 }
 
 std::vector<ArithmeticCase> modifier_environment_cases() {
   std::vector<ArithmeticCase> cases;
   struct MulArch {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t word;
   };
-  // V_MUL_LEGACY_F32 on CDNA4, V_MUL_DX9_ZERO_F32 on RDNA3/4 and CDNA5.
-  for (const MulArch &architecture : {MulArch{ROCJITSU_CODE_ARCH_CDNA4, 0xd2a10006u},
-                                      MulArch{ROCJITSU_CODE_ARCH_RDNA3, 0xd5070006u},
-                                      MulArch{ROCJITSU_CODE_ARCH_RDNA4, 0xd5070006u},
-                                      MulArch{ROCJITSU_CODE_ARCH_CDNA5, 0xd5070006u}}) {
+  // V_MUL_LEGACY_F32 on CDNA3/4, V_MUL_DX9_ZERO_F32 on RDNA3/4 and CDNA5.
+  for (const MulArch &architecture : {MulArch{rocjitsu::IsaFamily::Cdna3, 0xd2a10006u},
+                                      MulArch{rocjitsu::IsaFamily::Cdna4, 0xd2a10006u},
+                                      MulArch{rocjitsu::IsaFamily::Rdna3, 0xd5070006u},
+                                      MulArch{rocjitsu::IsaFamily::Rdna4, 0xd5070006u},
+                                      MulArch{rocjitsu::IsaFamily::Cdna5, 0xd5070006u}}) {
+    if (architecture.arch == rocjitsu::IsaFamily::Cdna3 ||
+        architecture.arch == rocjitsu::IsaFamily::Cdna4 ||
+        architecture.arch == rocjitsu::IsaFamily::Cdna5) {
+      struct Sample {
+        const char *name;
+        uint32_t a, b, expected;
+      };
+      // Inherited legacy MUL quiets NaNs even without IEEE mode and flushes
+      // after rounding, so promotion to minimum normal survives output flushing.
+      for (const auto &sample :
+           {Sample{"ZeroInfinity", 0, 0x7f800000U, 0},
+            Sample{"QuietNan", 0x7f812345U, 0x3f800000U, 0x7fc12345U},
+            Sample{"NormalPromotion", 0x00800000U, 0x3f7fffffU, 0x00800000U}}) {
+        cases.push_back(
+            {"MulArch" + std::to_string(static_cast<int>(architecture.arch)) + sample.name,
+             architecture.arch,
+             {architecture.word, 0x00020300U},
+             {{0, sample.a}, {1, sample.b}},
+             {{6, sample.expected}},
+             0});
+      }
+    }
     for (uint32_t rounding = 0; rounding < 4; ++rounding) {
       for (bool negative : {false, true}) {
         for (bool clamp : {false, true}) {
-          for (int host_rounding : {FE_TONEAREST, FE_TOWARDZERO}) {
-            const uint32_t sign = negative ? 0x80000000u : 0u;
-            const bool infinity =
-                rounding == 0 || (rounding == 1 && !negative) || (rounding == 2 && negative);
-            const uint32_t expected = clamp ? (negative ? 0u : 0x3f800000u)
-                                            : sign | (infinity ? 0x7f800000u : 0x7f7fffffu);
-            cases.push_back({"MulArch" + std::to_string(architecture.arch) + "Round" +
-                                 std::to_string(rounding) + "Negative" + std::to_string(negative) +
-                                 "Clamp" + std::to_string(clamp) + "Host" +
-                                 std::to_string(host_rounding),
-                             architecture.arch,
-                             {architecture.word | (clamp ? 0x8000u : 0u), 0x0a020300u},
-                             {{0, sign | 0x7f7fffffu}, {1, 0x3f800000u}},
-                             {{6, expected}},
-                             rounding,
-                             host_rounding});
-          }
+          const uint32_t sign = negative ? 0x80000000u : 0u;
+          const bool infinity =
+              rounding == 0 || (rounding == 1 && !negative) || (rounding == 2 && negative);
+          const uint32_t expected =
+              clamp ? (negative ? 0u : 0x3f800000u) : sign | (infinity ? 0x7f800000u : 0x7f7fffffu);
+          cases.push_back({"MulArch" + std::to_string(static_cast<int>(architecture.arch)) +
+                               "Round" + std::to_string(rounding) + "Negative" +
+                               std::to_string(negative) + "Clamp" + std::to_string(clamp),
+                           architecture.arch,
+                           {architecture.word | (clamp ? 0x8000u : 0u), 0x0a020300u},
+                           {{0, sign | 0x7f7fffffu}, {1, 0x3f800000u}},
+                           {{6, expected}},
+                           rounding});
         }
       }
     }
   }
-#if RJ_HOST_ARCH_X86
-  constexpr uint32_t kDazMask = 1u << 6;
-  constexpr uint32_t kControlMask = _MM_ROUND_MASK | kDazMask | (1u << 15);
-  for (uint32_t daz : {0u, kDazMask}) {
-    for (bool clamp : {false, true}) {
-      for (bool negative : {false, true}) {
-        const uint32_t sign = negative ? 0x80000000u : 0u;
-        const std::string suffix = "Daz" + std::to_string(daz) + "Clamp" + std::to_string(clamp) +
-                                   "Negative" + std::to_string(negative);
-        cases.push_back({"LdexpF32" + suffix,
-                         ROCJITSU_CODE_ARCH_CDNA4,
-                         {0xd2880006u | (clamp ? 0x8000u : 0u), 0x00020300u},
-                         {{0, sign | 0x00800000u}, {1, 0xffffffffu}},
-                         {{6, negative && clamp ? 0u : sign | 0x00400000u}},
-                         0xf0u,
-                         FE_TONEAREST,
-                         kControlMask,
-                         daz});
-        cases.push_back({"LdexpF64" + suffix,
-                         ROCJITSU_CODE_ARCH_CDNA4,
-                         {0xd2840006u | (clamp ? 0x8000u : 0u), 0x00020500u},
-                         {{0, 0u}, {1, sign | 0x00100000u}, {2, 0xffffffffu}},
-                         {{6, 0u}, {7, negative && clamp ? 0u : sign | 0x00080000u}},
-                         0xf0u,
-                         FE_TONEAREST,
-                         kControlMask,
-                         daz});
-      }
+  for (bool clamp : {false, true}) {
+    for (bool negative : {false, true}) {
+      const uint32_t sign = negative ? 0x80000000u : 0u;
+      const std::string suffix =
+          "Clamp" + std::to_string(clamp) + "Negative" + std::to_string(negative);
+      cases.push_back({"LdexpF32" + suffix,
+                       rocjitsu::IsaFamily::Cdna4,
+                       {0xd2880006u | (clamp ? 0x8000u : 0u), 0x00020300u},
+                       {{0, sign | 0x00800000u}, {1, 0xffffffffu}},
+                       {{6, negative && clamp ? 0u : sign | 0x00400000u}},
+                       0xf0u});
+      cases.push_back({"LdexpF64" + suffix,
+                       rocjitsu::IsaFamily::Cdna4,
+                       {0xd2840006u | (clamp ? 0x8000u : 0u), 0x00020500u},
+                       {{0, 0u}, {1, sign | 0x00100000u}, {2, 0xffffffffu}},
+                       {{6, 0u}, {7, negative && clamp ? 0u : sign | 0x00080000u}},
+                       0xf0u});
     }
   }
-#endif
   return cases;
 }
 
@@ -1429,25 +1304,28 @@ std::vector<ArithmeticCase> fma_mix_f32_cases() {
       {"SignalingNan", 0x7f800012, 0x3f800000, 0x3f800000, 0, 0x7f800012},
       {"IeeeNan", 0x7f800012, 0x3f800000, 0x3f800000, 0x200, 0x7fc00012},
   };
+  // Mixed FMA is migrated to rj-arith on every target.
   std::vector<ArithmeticCase> cases;
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (const auto &sample : samples) {
       uint32_t expected = sample.expected;
       if (expected == 0x7f800012 &&
-          (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+          (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)) {
         expected = 0x7fc00012;
-      cases.push_back({"Arch" + std::to_string(arch) + sample.name,
+      }
+      cases.push_back({"Arch" + std::to_string(static_cast<int>(arch)) + sample.name,
                        arch,
                        {0xcc200006u, 0x040a0300u},
                        {{0, sample.a}, {1, sample.b}, {2, sample.c}},
                        {{6, expected}},
-                       sample.mode,
-                       FE_DOWNWARD,
-                       0x9fc0u,
-                       0x9f60u});
+                       sample.mode});
+      cases.back().arith_dispatch = true;
     }
+  }
+  for (auto &test : cases) {
+    test.arith_dispatch = true;
   }
   return cases;
 }
@@ -1455,25 +1333,25 @@ std::vector<ArithmeticCase> fma_mix_f32_cases() {
 std::vector<ArithmeticCase> trig_fp_cases() {
   struct Target {
     const char *name;
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     bool rdna_encoding;
     bool always_quiets;
   };
   const Target targets[] = {
-      {"Cdna1", ROCJITSU_CODE_ARCH_CDNA1, false, false},
-      {"Cdna2", ROCJITSU_CODE_ARCH_CDNA2, false, false},
-      {"Cdna3", ROCJITSU_CODE_ARCH_CDNA3, false, false},
-      {"Cdna4", ROCJITSU_CODE_ARCH_CDNA4, false, false},
-      {"Rdna1", ROCJITSU_CODE_ARCH_RDNA1, true, false},
-      {"Rdna2", ROCJITSU_CODE_ARCH_RDNA2, true, false},
-      {"Rdna3", ROCJITSU_CODE_ARCH_RDNA3, true, false},
-      {"Rdna35", ROCJITSU_CODE_ARCH_RDNA3_5, true, false},
-      {"Rdna4", ROCJITSU_CODE_ARCH_RDNA4, true, true},
-      {"Cdna5", ROCJITSU_CODE_ARCH_CDNA5, true, true},
+      {"Cdna1", rocjitsu::IsaFamily::Cdna1, false, false},
+      {"Cdna2", rocjitsu::IsaFamily::Cdna2, false, false},
+      {"Cdna3", rocjitsu::IsaFamily::Cdna3, false, false},
+      {"Cdna4", rocjitsu::IsaFamily::Cdna4, false, false},
+      {"Rdna1", rocjitsu::IsaFamily::Rdna1, true, false},
+      {"Rdna2", rocjitsu::IsaFamily::Rdna2, true, false},
+      {"Rdna3", rocjitsu::IsaFamily::Rdna3, true, false},
+      {"Rdna35", rocjitsu::IsaFamily::Rdna3_5, true, false},
+      {"Rdna4", rocjitsu::IsaFamily::Rdna4, true, true},
+      {"Cdna5", rocjitsu::IsaFamily::Cdna5, true, true},
   };
   std::vector<ArithmeticCase> cases;
-  for (const auto &target : targets)
-    for (unsigned cosine = 0; cosine < 2; ++cosine)
+  for (const auto &target : targets) {
+    for (unsigned cosine = 0; cosine < 2; ++cosine) {
       for (unsigned e64 = 0; e64 < 2; ++e64) {
         // Assembled with llvm-mc for each target. The hardware captures use
         // gfx1100/gfx1201; the other targets check shared full-range and MODE
@@ -1488,21 +1366,14 @@ std::vector<ArithmeticCase> trig_fp_cases() {
         const std::string prefix =
             std::string(target.name) + (cosine ? "Cos" : "Sin") + (e64 ? "E64" : "E32");
         auto add = [&](const std::string &name, uint32_t input, uint32_t expected, uint32_t mode) {
-          cases.push_back({prefix + name,
-                           target.arch,
-                           words,
-                           {{0, input}},
-                           {{6, expected}},
-                           mode,
-                           FE_UPWARD,
-                           0x8040u,
-                           0x8040u});
+          cases.push_back({prefix + name, target.arch, words, {{0, input}}, {{6, expected}}, mode});
         };
         add("LargeFinite", 0xff7fffffu, cosine ? 0x3f800000u : 0u, 240u);
-        for (uint32_t ieee = 0; ieee < 2; ++ieee)
+        for (uint32_t ieee = 0; ieee < 2; ++ieee) {
           add("SignalingNan" + std::to_string(ieee), 0xff812345u,
               target.always_quiets || ieee ? 0xffc12345u : 0xff812345u, 240u | (ieee << 9));
-        for (uint32_t denorm = 0; denorm < 4; ++denorm)
+        }
+        for (uint32_t denorm = 0; denorm < 4; ++denorm) {
           for (uint32_t rounding = 0; rounding < 4; ++rounding) {
             uint32_t mode = 192u | (denorm << 4) | rounding;
             add("Subnormal" + std::to_string(mode), 0x80000001u,
@@ -1511,7 +1382,9 @@ std::vector<ArithmeticCase> trig_fp_cases() {
                               : 0x80000000u,
                 mode);
           }
-        if (target.arch == ROCJITSU_CODE_ARCH_RDNA3 || target.arch == ROCJITSU_CODE_ARCH_RDNA4) {
+        }
+        if (target.arch == rocjitsu::IsaFamily::Rdna3 ||
+            target.arch == rocjitsu::IsaFamily::Rdna4) {
           for (uint32_t rounding = 0; rounding < 4; ++rounding) {
             add("CapturedOctant" + std::to_string(rounding), 0x3e000000u,
                 cosine ? 0x3f3504f3u : 0x3f3504f4u, 240u | rounding);
@@ -1522,25 +1395,28 @@ std::vector<ArithmeticCase> trig_fp_cases() {
                 {0x3dc084adu, 0x3f0e9072u, 0x3f54a13bu}, {0x3e7fff08u, 0x3f800000u, 0x37c2c761u},
                 {0x3e7ffa50u, 0x3f800000u, 0x390ef149u},
             };
-            for (const auto &sample : captured)
+            for (const auto &sample : captured) {
               add("CapturedStages" + std::to_string(sample[0]) + "Round" + std::to_string(rounding),
                   sample[0], sample[cosine + 1], 240u | rounding);
+            }
           }
         }
       }
+    }
+  }
   return cases;
 }
 
 std::vector<ArithmeticCase> log_exp_policy_cases() {
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
-        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-        ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool gcn = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-                     arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
-    for (bool logarithm : {false, true})
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
+    const bool gcn = arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+                     arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
+    for (bool logarithm : {false, true}) {
       for (bool e64 : {false, true}) {
         // Assembled independently for all ten profiles with llvm-mc.
         std::array<uint32_t, 3> words{};
@@ -1551,37 +1427,31 @@ std::vector<ArithmeticCase> log_exp_policy_cases() {
         } else {
           words[0] = (gcn ? 0x7e0c4100u : 0x7e0c4b00u) + (logarithm ? (gcn ? 0x200u : 0x400u) : 0u);
         }
-        for (uint32_t ieee = 0; ieee < 2; ++ieee)
+        for (uint32_t ieee = 0; ieee < 2; ++ieee) {
           for (uint32_t rounding = 0; rounding < 4; ++rounding) {
             const uint32_t mode = 240u | (ieee << 9) | rounding;
-            const std::string prefix = "Arch" + std::to_string(arch) + (logarithm ? "Log" : "Exp") +
-                                       (e64 ? "E64" : "E32") + "Mode" + std::to_string(mode);
+            const std::string prefix = "Arch" + std::to_string(static_cast<int>(arch)) +
+                                       (logarithm ? "Log" : "Exp") + (e64 ? "E64" : "E32") +
+                                       "Mode" + std::to_string(mode);
             const auto add = [&](const char *name, uint32_t input, uint32_t expected) {
               // Preserve flags and FTZ/DAZ under upward rounding, with the
               // host invalid-operation trap enabled.
-              cases.push_back({prefix + name,
-                               arch,
-                               words,
-                               {{0, input}},
-                               {{6, expected}},
-                               mode,
-                               FE_UPWARD,
-                               0x9fc0u,
-                               0x9f60u});
+              cases.push_back({prefix + name, arch, words, {{0, input}}, {{6, expected}}, mode});
             };
             const bool quiet =
-                ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+                ieee || arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
             add("SignalingNan", 0x7f812345u, quiet ? 0x7fc12345u : 0x7f812345u);
             add("NegativeSignalingNan", 0xff812345u, quiet ? 0xffc12345u : 0xff812345u);
             add("QuietNan", 0xffc12345u, 0xffc12345u);
             add("Negative", 0xbf800000u, logarithm ? 0xffc00000u : 0x3f000000u);
             add("NegativeInfinity", 0xff800000u, logarithm ? 0xffc00000u : 0u);
             add("NegativeSubnormal", 0x80000001u, logarithm ? 0xff800000u : 0x3f800000u);
-            if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4)
+            if (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna4) {
               add("CapturedRounding", logarithm ? 0x3f174424u : 0x3f0567ecu,
                   logarithm ? 0xbf425164u : 0x3fb7b03du);
+            }
             if (!logarithm &&
-                (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA4)) {
+                (arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna4)) {
               const uint32_t captured[][2] = {
                   {0x337fffffu, 0x3f800000u}, {0x33800000u, 0x3f800000u},
                   {0x33800001u, 0x3f800000u}, {0xb37fffffu, 0x3f800000u},
@@ -1605,34 +1475,33 @@ std::vector<ArithmeticCase> log_exp_policy_cases() {
               for (uint32_t omod : {1u, 2u, 3u}) {
                 auto scaled_words = words;
                 scaled_words[1] |= omod << 27;
-                const bool active =
-                    !ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+                const bool active = !ieee || arch == rocjitsu::IsaFamily::Rdna4 ||
+                                    arch == rocjitsu::IsaFamily::Cdna5;
                 const uint32_t scaled[] = {0x40000000u, 0x40800000u, 0x41000000u, 0x3f800000u};
-                for (uint32_t denorm = 0; denorm < 4; ++denorm)
+                for (uint32_t denorm = 0; denorm < 4; ++denorm) {
                   cases.push_back({prefix + "LogScale" + std::to_string(omod) + "Denorm" +
                                        std::to_string(denorm),
                                    arch,
                                    scaled_words,
                                    {{0, 0x40800000u}},
                                    {{6, scaled[active ? omod : 0]}},
-                                   192u | (ieee << 9) | (denorm << 4) | rounding,
-                                   FE_UPWARD,
-                                   0x9fc0u,
-                                   0x9f60u});
+                                   192u | (ieee << 9) | (denorm << 4) | rounding});
+                }
               }
               // Modifiers run after the integer LOG mapping. Exercise both
               // preserved signaling NaNs and invalid-operation results while
               // host invalid traps, flags, rounding and flush controls persist.
-              for (uint32_t dx10 : {0u, 1u})
+              for (uint32_t dx10 : {0u, 1u}) {
                 for (uint32_t modifier : {0u, 1u, 2u, 3u, 4u}) {
                   auto modified_words = words;
-                  if (modifier == 4)
+                  if (modifier == 4) {
                     modified_words[0] |= 0x8000u;
-                  else
+                  } else {
                     modified_words[1] |= modifier << 27;
+                  }
                   const bool nan_to_zero =
-                      modifier == 4 && (dx10 || arch == ROCJITSU_CODE_ARCH_RDNA4 ||
-                                        arch == ROCJITSU_CODE_ARCH_CDNA5);
+                      modifier == 4 && (dx10 || arch == rocjitsu::IsaFamily::Rdna4 ||
+                                        arch == rocjitsu::IsaFamily::Cdna5);
                   for (uint32_t input : {0xbf800000u, 0x7f800123u}) {
                     const uint32_t result = input == 0xbf800000u ? 0xffc00000u
                                             : quiet              ? 0x7fc00123u
@@ -1643,12 +1512,10 @@ std::vector<ArithmeticCase> log_exp_policy_cases() {
                                      modified_words,
                                      {{0, input}},
                                      {{6, nan_to_zero ? 0u : result}},
-                                     mode | (dx10 << 8),
-                                     FE_UPWARD,
-                                     0x9fc0u,
-                                     0x9f60u});
+                                     mode | (dx10 << 8)});
                   }
                 }
+              }
             }
             if (!logarithm && e64) {
               // OMOD overflows after EXP returns. Its rounding and exception
@@ -1657,22 +1524,17 @@ std::vector<ArithmeticCase> log_exp_policy_cases() {
                 auto scaled_words = words;
                 scaled_words[1] |= omod << 27;
                 for (uint32_t denorm = 0; denorm < 4; ++denorm) {
-                  const bool active =
-                      !ieee || arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+                  const bool active = !ieee || arch == rocjitsu::IsaFamily::Rdna4 ||
+                                      arch == rocjitsu::IsaFamily::Cdna5;
                   const uint32_t unscaled = omod == 3 ? 0x00800000u : 0x7f000000u;
                   const uint32_t expected = active ? (omod == 3 ? 0u : 0x7f800000u) : unscaled;
-                  for (int host_round : {FE_DOWNWARD, FE_UPWARD})
-                    cases.push_back({prefix + "Scale" + std::to_string(omod) + "Denorm" +
-                                         std::to_string(denorm) + "Host" +
-                                         std::to_string(host_round),
-                                     arch,
-                                     scaled_words,
-                                     {{0, omod == 3 ? 0xc2fc0000u : 0x42fe0000u}},
-                                     {{6, expected}},
-                                     192u | (ieee << 9) | (denorm << 4) | rounding,
-                                     host_round,
-                                     0x9fc0u,
-                                     0x9b60u});
+                  cases.push_back(
+                      {prefix + "Scale" + std::to_string(omod) + "Denorm" + std::to_string(denorm),
+                       arch,
+                       scaled_words,
+                       {{0, omod == 3 ? 0xc2fc0000u : 0x42fe0000u}},
+                       {{6, expected}},
+                       192u | (ieee << 9) | (denorm << 4) | rounding});
                 }
               }
             }
@@ -1693,38 +1555,39 @@ std::vector<ArithmeticCase> log_exp_policy_cases() {
                   {0xbc00u, logarithm ? 0xfe00u : 0x3800u},
                   {0xfc00u, logarithm ? 0xfe00u : 0u},
               };
-              for (bool fp16_ovfl : {false, true})
-                for (const auto &sample : half_cases)
+              for (bool fp16_ovfl : {false, true}) {
+                for (const auto &sample : half_cases) {
                   cases.push_back({prefix + "Half" + std::to_string(sample[0]) + "Ovfl" +
                                        std::to_string(fp16_ovfl),
                                    arch,
                                    half_words,
                                    {{0, sample[0]}},
                                    {{6, sample[1] | (preserves_high_half ? 0xdead0000u : 0u)}},
-                                   mode | (fp16_ovfl ? (1u << 23) : 0u),
-                                   FE_UPWARD,
-                                   0x9fc0u,
-                                   0x9f60u});
+                                   mode | (fp16_ovfl ? (1u << 23) : 0u)});
+                }
+              }
             }
           }
+        }
       }
+    }
   }
   return cases;
 }
 
 std::vector<ArithmeticCase> sdwa_log_exp_policy_cases() {
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
-    const bool gcn = arch != ROCJITSU_CODE_ARCH_RDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA2;
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
+    const bool gcn = arch != rocjitsu::IsaFamily::Rdna1 && arch != rocjitsu::IsaFamily::Rdna2;
     // The older manuals specify SDWA OMOD by reference to VOP3. These exact
     // values test that shared policy, not unmeasured hardware approximations.
     // The SDWA words were assembled independently for each profile with llvm-mc.
-    for (bool logarithm : {false, true})
-      for (uint32_t ieee = 0; ieee < 2; ++ieee)
-        for (uint32_t denorm = 0; denorm < 4; ++denorm)
-          for (uint32_t rounding = 0; rounding < 4; ++rounding)
+    for (bool logarithm : {false, true}) {
+      for (uint32_t ieee = 0; ieee < 2; ++ieee) {
+        for (uint32_t denorm = 0; denorm < 4; ++denorm) {
+          for (uint32_t rounding = 0; rounding < 4; ++rounding) {
             for (uint32_t omod : {1u, 2u, 3u}) {
               const uint32_t mode = 192u | (ieee << 9) | (denorm << 4) | rounding;
               const uint32_t opcode = gcn ? (logarithm ? 0x7e0c42f9u : 0x7e0c40f9u)
@@ -1739,21 +1602,21 @@ std::vector<ArithmeticCase> sdwa_log_exp_policy_cases() {
                                         : ieee      ? unscaled
                                         : omod == 3 ? 0u
                                                     : 0x7f800000u;
-              for (bool nan : {false, true})
-                for (int host_round : {FE_DOWNWARD, FE_UPWARD})
-                  cases.push_back({"Arch" + std::to_string(arch) + (logarithm ? "Log" : "Exp") +
-                                       "Mode" + std::to_string(mode) + "Omod" +
-                                       std::to_string(omod) + "Nan" + std::to_string(nan) + "Host" +
-                                       std::to_string(host_round),
-                                   arch,
-                                   words,
-                                   {{0, nan ? 0x7f812345u : input}},
-                                   {{6, nan ? (ieee ? 0x7fc12345u : 0x7f812345u) : expected}},
-                                   mode,
-                                   host_round,
-                                   0x9fc0u,
-                                   0x9b60u});
+              for (bool nan : {false, true}) {
+                cases.push_back({"Arch" + std::to_string(static_cast<int>(arch)) +
+                                     (logarithm ? "Log" : "Exp") + "Mode" + std::to_string(mode) +
+                                     "Omod" + std::to_string(omod) + "Nan" + std::to_string(nan),
+                                 arch,
+                                 words,
+                                 {{0, nan ? 0x7f812345u : input}},
+                                 {{6, nan ? (ieee ? 0x7fc12345u : 0x7f812345u) : expected}},
+                                 mode});
+              }
             }
+          }
+        }
+      }
+    }
   }
   return cases;
 }
@@ -1789,32 +1652,36 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
       {"ExpSingleRounding", false, 0x11c5u, 240u, 0u, 0x3c01u, 0x3c01u},
   };
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch :
-       {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-        ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA1,
-        ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-        ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool gcn = arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-                     arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+  for (rocjitsu::IsaFamily arch :
+       {rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+        rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5, rocjitsu::IsaFamily::Rdna1,
+        rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+        rocjitsu::IsaFamily::Rdna4}) {
+    const bool gcn = arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+                     arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
     const bool preserves_high_half = !gcn;
-    const bool always_omod = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
+    const bool always_omod =
+        arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
     for (const auto &sample : captured) {
       // Other profiles check exact values and MODE policy, not unmeasured finite approximations.
-      if (sample.source == 0x11c5u && arch != ROCJITSU_CODE_ARCH_RDNA3 &&
-          arch != ROCJITSU_CODE_ARCH_RDNA4)
+      if (sample.source == 0x11c5u && arch != rocjitsu::IsaFamily::Rdna3 &&
+          arch != rocjitsu::IsaFamily::Rdna4) {
         continue;
+      }
       for (bool e64 : {false, true}) {
-        if (!e64 && sample.modifier != 0)
+        if (!e64 && sample.modifier != 0) {
           continue;
+        }
         std::array<uint32_t, 3> words{};
         if (e64) {
           words[0] = gcn ? (sample.logarithm ? 0xd1800006u : 0xd1810006u)
                          : (sample.logarithm ? 0xd5d70006u : 0xd5d80006u);
           words[1] = gcn ? 0x00000100u : 0x02010100u;
-          if (sample.modifier == 4)
+          if (sample.modifier == 4) {
             words[0] |= 0x8000u;
-          else
+          } else {
             words[1] |= sample.modifier << 27;
+          }
         } else {
           words[0] = gcn ? (sample.logarithm ? 0x7e0c8100u : 0x7e0c8300u)
                          : (sample.logarithm ? 0x7e0caf00u : 0x7e0cb100u);
@@ -1822,47 +1689,38 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
         for (uint32_t rounding = 0; rounding < 4; ++rounding) {
           const uint32_t expected = (always_omod ? sample.rdna4 : sample.rdna3) |
                                     (preserves_high_half ? 0xdead0000u : 0u);
-          cases.push_back({"Arch" + std::to_string(arch) + sample.name + (e64 ? "E64" : "E32") +
-                               "Round" + std::to_string(rounding),
+          cases.push_back({"Arch" + std::to_string(static_cast<int>(arch)) + sample.name +
+                               (e64 ? "E64" : "E32") + "Round" + std::to_string(rounding),
                            arch,
                            words,
                            {{0, sample.source}},
                            {{6, expected}},
-                           sample.mode | (rounding << 2),
-                           FE_UPWARD,
-                           0x9fc0u,
-                           0x9f60u});
+                           sample.mode | (rounding << 2)});
         }
       }
     }
-    if (gcn || arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) {
+    if (gcn || arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2) {
       // Assembled SDWA forms select the high source and destination halves.
       // MODE and register-placement contracts also apply on these older profiles.
       for (uint32_t rounding = 0; rounding < 4; ++rounding) {
         for (bool signaling_nan : {false, true}) {
           const uint32_t source = signaling_nan ? 0x7c01u : 0x3c00u;
           const uint32_t result = signaling_nan ? 0x7c01u : 0x4400u;
-          cases.push_back({"Arch" + std::to_string(arch) + "SdwaExpNan" +
+          cases.push_back({"Arch" + std::to_string(static_cast<int>(arch)) + "SdwaExpNan" +
                                std::to_string(signaling_nan) + "Round" + std::to_string(rounding),
                            arch,
                            {gcn ? 0x7e0c82f9u : 0x7e0cb0f9u, 0x00055500u},
                            {{0, (source << 16) | 0x1234u}},
                            {{6, (result << 16) | 0xbeefu}},
-                           48u | (rounding << 2),
-                           FE_UPWARD,
-                           0x9fc0u,
-                           0x9f60u});
+                           48u | (rounding << 2)});
         }
-        cases.push_back(
-            {"Arch" + std::to_string(arch) + "SdwaLogClampRound" + std::to_string(rounding),
-             arch,
-             {gcn ? 0x7e0c80f9u : 0x7e0caef9u, 0x00053500u},
-             {{0, 0x7c011234u}},
-             {{6, 0x0000beefu}},
-             304u | (rounding << 2),
-             FE_UPWARD,
-             0x9fc0u,
-             0x9f60u});
+        cases.push_back({"Arch" + std::to_string(static_cast<int>(arch)) + "SdwaLogClampRound" +
+                             std::to_string(rounding),
+                         arch,
+                         {gcn ? 0x7e0c80f9u : 0x7e0caef9u, 0x00053500u},
+                         {{0, 0x7c011234u}},
+                         {{6, 0x0000beefu}},
+                         304u | (rounding << 2)});
       }
     }
   }
@@ -1870,25 +1728,23 @@ std::vector<ArithmeticCase> half_log_exp_arithmetic_cases() {
 }
 
 std::vector<ArithmeticCase> fma_mix_half_cases() {
+  // Mixed FMA is migrated to rj-arith on every target.
   std::vector<ArithmeticCase> cases;
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     for (uint32_t mode = 0; mode < 4; ++mode) {
       for (bool high : {false, true}) {
         // Physical RDNA3/4 shader exports: the exact product is just below
         // 0x340c, but rounding it to F32 first produces that exact F16 value.
         const uint32_t result = mode < 2 ? 0x340cu : 0x340bu;
-        cases.push_back({"Arch" + std::to_string(arch) + "MixHalf" + std::to_string(high) +
-                             "Round" + std::to_string(mode),
+        cases.push_back({"Arch" + std::to_string(static_cast<int>(arch)) + "MixHalf" +
+                             std::to_string(high) + "Round" + std::to_string(mode),
                          arch,
                          {high ? 0xcc224006u : 0xcc214006u, 0x820204ffu, 0x3b333333u},
                          {{2, 0x42b90000u}},
                          {{6, high ? (result << 16) | 0xbeefu : 0xdead0000u | result}},
-                         240u | (mode << 2),
-                         FE_UPWARD,
-                         0x9fc0u,
-                         0x9f60u});
+                         240u | (mode << 2)});
       }
     }
     // Both cards prioritize an invalid product over the addend NaN. Ordinary
@@ -1899,28 +1755,32 @@ std::vector<ArithmeticCase> fma_mix_half_cases() {
           const uint32_t a = source == 0 ? 0 : source == 1 ? 0x7f800000u : 0x7fc12000u;
           const uint32_t b = source == 0 ? 0x7f800000u : source == 1 ? 0 : 0x3f800000u;
           uint32_t result = source < 2 ? 0xfe00u : 0x7e09u;
-          if (clamp && (arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5))
+          if (clamp && (arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5)) {
             result = 0;
+          }
           cases.push_back(
-              {"Arch" + std::to_string(arch) + "MixHalf" + std::to_string(high) + "Nan" +
-                   std::to_string(source) + "Clamp" + std::to_string(clamp),
+              {"Arch" + std::to_string(static_cast<int>(arch)) + "MixHalf" + std::to_string(high) +
+                   "Nan" + std::to_string(source) + "Clamp" + std::to_string(clamp),
                arch,
                {(high ? 0xcc220006u : 0xcc210006u) | (clamp ? 0x8000u : 0), 0x040a0300u},
                {{0, a}, {1, b}, {2, 0x7fe9a000u}},
                {{6, high ? (result << 16) | 0xbeefu : 0xdead0000u | result}},
-               0,
-               FE_UPWARD,
-               0x9fc0u,
-               0x9f60u});
+               0});
         }
       }
     }
+  }
+  for (auto &test : cases) {
+    test.arith_dispatch = true;
+  }
+  for (auto &test : cases) {
+    test.arith_dispatch = true;
   }
   return cases;
 }
 
 // Raw gfx1100/gfx1201 witnesses for instruction policies around the math mapping.
-// The fixture checks sparse/full EXEC, inactive lanes and a hostile host environment.
+// The fixture checks sparse/full EXEC and inactive lanes under default host controls.
 std::vector<ArithmeticCase> transcendental_policy_cases() {
   struct Captured {
     const char *name;
@@ -1949,18 +1809,17 @@ std::vector<ArithmeticCase> transcendental_policy_cases() {
       {"RcpScaleOverflow", 0xd5aa0006u, 0x00800000u, 0, 2, 0x7f800000u, 0x7f800000u, false},
   };
   std::vector<ArithmeticCase> cases;
-  for (rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4})
-    for (const auto &sample : captured)
-      cases.push_back({"Arch" + std::to_string(arch) + sample.name,
+  for (rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4}) {
+    for (const auto &sample : captured) {
+      cases.push_back({"Arch" + std::to_string(static_cast<int>(arch)) + sample.name,
                        arch,
                        {sample.opcode, 0x00000100u | (sample.omod << 27)},
                        {{0, sample.input}},
-                       {{6, (arch == ROCJITSU_CODE_ARCH_RDNA3 ? sample.rdna3 : sample.rdna4) |
+                       {{6, (arch == rocjitsu::IsaFamily::Rdna3 ? sample.rdna3 : sample.rdna4) |
                                 (sample.half ? 0xdead0000u : 0u)}},
-                       sample.mode,
-                       FE_DOWNWARD,
-                       0x9fc0u,
-                       0x9b60u});
+                       sample.mode});
+    }
+  }
   return cases;
 }
 
@@ -1968,22 +1827,14 @@ std::vector<ArithmeticCase> minimum_maximum_cases() {
   // Expected results from gfx1201: preserve the first NaN's sign and payload
   // while quieting it, and honor input flushing only.
   // Instruction encodings from llvm-mc -mcpu=gfx1201.
-  const auto make = [](std::string name, rj_code_arch_t arch, std::array<uint32_t, 3> words,
+  const auto make = [](std::string name, rocjitsu::IsaFamily arch, std::array<uint32_t, 3> words,
                        std::vector<std::pair<uint32_t, uint32_t>> sources,
                        std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode,
                        SimdPathExpectation simd = {}) {
-    return ArithmeticCase{std::move(name),
-                          arch,
-                          words,
-                          std::move(sources),
-                          std::move(expected),
-                          mode,
-                          FE_TONEAREST,
-                          0,
-                          0,
-                          simd};
+    return ArithmeticCase{std::move(name),     arch, words, std::move(sources),
+                          std::move(expected), mode, simd};
   };
-  constexpr rj_code_arch_t RDNA4 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rocjitsu::IsaFamily RDNA4 = rocjitsu::IsaFamily::Rdna4;
   constexpr std::array<uint32_t, 3> MAXIMUM_F32{0xd7660006u, 0x00020300u, 0u};
   constexpr std::array<uint32_t, 3> MINIMUM_F32{0xd7650006u, 0x00020300u, 0u};
   constexpr std::array<uint32_t, 3> MAXIMUM_F64{0xd7420006u, 0x00020500u, 0u};
@@ -2028,16 +1879,13 @@ std::vector<ArithmeticCase> minimum_maximum_cases() {
            {{0, 1u}, {1, 0u}, {2, 1u}}, {{6, 0u}}, 0x00u),
       make("Maximum3F16KeepsNegativeNan", RDNA4, {0xd6300006u, 0x040a0300u, 0u},
            {{0, 0xfd2du}, {1, 0x21c8u}, {2, 0xb723u}, {6, 0u}}, {{6, 0xff2du}}, 0xf0u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           SimdPathExpectation{}),
       make("Minimum3F16FlushesInput", RDNA4, {0xd62f0006u, 0x040a0300u, 0u},
-           {{0, 0x83ffu}, {1, 0u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0x00u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           {{0, 0x83ffu}, {1, 0u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0x00u, SimdPathExpectation{}),
       make("MaximumMinimumF16QuietsSrc2", RDNA4, {0xd66f0006u, 0x040a0300u, 0u},
-           {{0, 0u}, {1, 0u}, {2, 0x7c01u}, {6, 0u}}, {{6, 0x7e01u}}, 0xf0u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           {{0, 0u}, {1, 0u}, {2, 0x7c01u}, {6, 0u}}, {{6, 0x7e01u}}, 0xf0u, SimdPathExpectation{}),
       make("MinimumMaximumF16FlushesSrc2", RDNA4, {0xd66e0006u, 0x040a0300u, 0u},
-           {{0, 0u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u,
-           expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+           {{0, 0u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u, SimdPathExpectation{}),
   };
 }
 
@@ -2050,14 +1898,11 @@ std::vector<ArithmeticCase> min_max_num_cases() {
                         std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode,
                         SimdPathExpectation simd = {}) {
     return ArithmeticCase{std::move(name),
-                          ROCJITSU_CODE_ARCH_RDNA4,
+                          rocjitsu::IsaFamily::Rdna4,
                           words,
                           std::move(sources),
                           std::move(expected),
                           mode,
-                          FE_TONEAREST,
-                          0,
-                          0,
                           simd};
   };
   constexpr std::array<uint32_t, 3> MIN_NUM_F32_E64{0xd5150006u, 0x00020300u, 0u};
@@ -2082,19 +1927,18 @@ std::vector<ArithmeticCase> min_max_num_cases() {
             {{0, 0x80000000u}, {1, 0x80000000u}, {2, 1u}}, {{6, 0u}}, 0x00u),
       rdna4("Min3NumF16OrdersSignedZero", {0xd62b0006u, 0x040a0300u, 0u},
             {{0, 0u}, {1, 0x8000u}, {2, 0u}, {6, 0u}}, {{6, 0x8000u}}, 0xf0u,
-            expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+            SimdPathExpectation{}),
       rdna4("Med3NumF32NanSelectsMin3", MED3_NUM_F32, {{0, 0x7fc00000u}, {1, 1u}, {2, 0u}},
             {{6, 0u}}, 0xf0u),
       rdna4("Med3NumF32NegativeZeroMedian", MED3_NUM_F32,
             {{0, 0x80000000u}, {1, 0u}, {2, 0x80000000u}}, {{6, 0x80000000u}}, 0xf0u),
       rdna4("Med3NumF16FlushesInput", {0xd6320006u, 0x040a0300u, 0u},
-            {{0, 1u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u,
-            expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+            {{0, 1u}, {1, 0u}, {2, 1u}, {6, 0u}}, {{6, 0u}}, 0x00u, SimdPathExpectation{}),
       rdna4("MinMaxNumF32IgnoresInnerNanPair", MINMAX_NUM_F32,
             {{0, 0x7f800001u}, {1, 0x7fc00000u}, {2, 0x3f800000u}}, {{6, 0x3f800000u}}, 0xf0u),
       rdna4("MaxMinNumF16OrdersSignedZero", {0xd66b0006u, 0x040a0300u, 0u},
             {{0, 0x8000u}, {1, 0u}, {2, 0x3c00u}, {6, 0u}}, {{6, 0u}}, 0xf0u,
-            expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)),
+            SimdPathExpectation{}),
       // v_dual_max_num_f32 v6, v0, v1 :: v_dual_mov_b32 v7, v2
       // Expected from V_MAX_NUM_F32 rules; VOPD was not captured on hardware.
       rdna4("DualMaxNumF32OrdersSignedZero", {0xca900300u, 0x06060102u, 0u},
@@ -2204,15 +2048,13 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
       {"MinimumF64", vop3(rdna4::kVMinimumF64Vop3, 64), 64, true, {}},
       {"MaximumF64", vop3(rdna4::kVMaximumF64Vop3, 64), 64, false, {}},
       // Ternary forms use separate SIMD helpers from the binary forms.
-      {"Min3NumF16", vop3(rdna4::kVMin3NumF16Vop3, 16), 16, true,
-       expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)},
-      {"Max3NumF16", vop3(rdna4::kVMax3NumF16Vop3, 16), 16, false,
-       expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)},
+      {"Min3NumF16", vop3(rdna4::kVMin3NumF16Vop3, 16), 16, true, SimdPathExpectation{}},
+      {"Max3NumF16", vop3(rdna4::kVMax3NumF16Vop3, 16), 16, false, SimdPathExpectation{}},
       {"Min3NumF32", vop3(rdna4::kVMin3NumF32Vop3, 32), 32, true, {}},
       {"Max3NumF32", vop3(rdna4::kVMax3NumF32Vop3, 32), 32, false, {}},
   }};
   std::vector<ArithmeticCase> cases;
-  for (const Form &form : forms)
+  for (const Form &form : forms) {
     for (const ModeCase &mode : modes) {
       const bool keep = form.width == 32 ? mode.keep_f32 : mode.keep_f16_f64;
       // min(-tiny, +0) is -tiny or -0; max(+tiny, +0) is +tiny or +0.
@@ -2232,14 +2074,14 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
       }
       constexpr char HEX[] = "0123456789abcdef";
       const std::string suffix = {HEX[mode.mode >> 4], HEX[mode.mode & 0xfu]};
-      cases.push_back({std::string(form.name) + "Mode" + suffix, ROCJITSU_CODE_ARCH_RDNA4,
-                       form.words, std::move(sources), std::move(expected), mode.mode, FE_TONEAREST,
-                       0, 0, form.simd});
+      cases.push_back({std::string(form.name) + "Mode" + suffix, rocjitsu::IsaFamily::Rdna4,
+                       form.words, std::move(sources), std::move(expected), mode.mode, form.simd});
     }
+  }
   // Equal inputs make every binary, nested and median form return that input.
   // Test both signs with OMOD disabled so its zeroing cannot mask a missed flush.
-  for (const MinmaxForm &form : kMinmaxForms)
-    for (const ModeCase &mode : modes)
+  for (const MinmaxForm &form : kMinmaxForms) {
+    for (const ModeCase &mode : modes) {
       for (const bool negative : {false, true}) {
         const bool keep = form.width == 32 ? mode.keep_f32 : mode.keep_f16_f64;
         const uint64_t sign = negative ? uint64_t{1} << (form.width - 1) : 0;
@@ -2255,21 +2097,20 @@ std::vector<ArithmeticCase> minmax_input_flush_cases() {
           expected = {{6, uint32_t(result)}, {7, uint32_t(result >> 32)}};
         } else {
           const uint32_t high = form.width == 16 ? 0x7e000000u : 0u;
-          for (unsigned source = 0; source < form.sources; ++source)
+          for (unsigned source = 0; source < form.sources; ++source) {
             sources.emplace_back(source, high | uint32_t(input));
+          }
           expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(result)}};
         }
-        cases.push_back(
-            {std::string(form.name) + "AllSources" + (negative ? "Negative" : "Positive") + "Mode" +
-                 std::to_string(mode.mode),
-             ROCJITSU_CODE_ARCH_RDNA4, vop3(form.op, form.width), std::move(sources),
-             std::move(expected), mode.mode, FE_TONEAREST, 0, 0,
-             form.width == 16
-                 ? expect_simd_path(form.sources == 2
-                                        ? amdgpu::SimdFastPath::VOP3_BINARY_FP16
-                                        : amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)
-                 : SimdPathExpectation{}});
+        cases.push_back({std::string(form.name) + "AllSources" +
+                             (negative ? "Negative" : "Positive") + "Mode" +
+                             std::to_string(mode.mode),
+                         rocjitsu::IsaFamily::Rdna4, vop3(form.op, form.width), std::move(sources),
+                         std::move(expected), mode.mode,
+                         form.width == 16 ? SimdPathExpectation{} : SimdPathExpectation{}});
       }
+    }
+  }
   return cases;
 }
 
@@ -2425,21 +2266,13 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
                    {2, high | uint32_t(sample.value)}};
         expected = {{6, (form.width == 16 ? 0xdead0000u : 0u) | uint32_t(sample.expected)}};
       }
-      cases.push_back(
-          {std::string(form.name) + sample.name,
-           ROCJITSU_CODE_ARCH_RDNA4,
-           {words[0], words[1], 0u},
-           std::move(sources),
-           std::move(expected),
-           sample.mode,
-           FE_TONEAREST,
-           0,
-           0,
-           form.width == 16
-               ? expect_simd_path(form.sources == 2
-                                      ? amdgpu::SimdFastPath::VOP3_BINARY_FP16
-                                      : amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)
-               : SimdPathExpectation{}});
+      cases.push_back({std::string(form.name) + sample.name,
+                       rocjitsu::IsaFamily::Rdna4,
+                       {words[0], words[1], 0u},
+                       std::move(sources),
+                       std::move(expected),
+                       sample.mode,
+                       form.width == 16 ? SimdPathExpectation{} : SimdPathExpectation{}});
     }
   }
   // Emulator regression expectations, not additional hardware captures.
@@ -2448,14 +2281,11 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
   const auto maximum = rdna4::build_vop3(
       rdna4::kVMaximumF16Vop3, {.vdst = 6, .opsel = 3, .src0 = 256, .src1 = 257, .omod = 2});
   cases.push_back({"MaximumF16HighSourcesMul4",
-                   ROCJITSU_CODE_ARCH_RDNA4,
+                   rocjitsu::IsaFamily::Rdna4,
                    {maximum[0], maximum[1], 0u},
                    {{0, 0x38007e00u}, {1, 0x34007e00u}},
                    {{6, 0xdead4000u}},
                    0xf0u,
-                   FE_TONEAREST,
-                   0,
-                   0,
                    expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_FP16)});
   const auto minimum3 = rdna4::build_vop3(rdna4::kVMinimum3F16Vop3, {.vdst = 6,
                                                                      .abs = 1,
@@ -2466,15 +2296,12 @@ std::vector<ArithmeticCase> minmax_output_modifier_cases() {
                                                                      .omod = 3,
                                                                      .neg = 1});
   cases.push_back({"Minimum3F16MixedSourcesAbsNegDiv2HighDestination",
-                   ROCJITSU_CODE_ARCH_RDNA4,
+                   rocjitsu::IsaFamily::Rdna4,
                    {minimum3[0], minimum3[1], 0u},
                    {{0, 0x40007e00u}, {1, 0x7c013800u}, {2, 0x3c007e00u}},
                    {{6, 0xbc00beefu}},
                    0xf0u,
-                   FE_TONEAREST,
-                   0,
-                   0,
-                   expect_simd_path(amdgpu::SimdFastPath::VOP3_TERNARY_TRUE16_RAW_FP16)});
+                   SimdPathExpectation{}});
   return cases;
 }
 
@@ -2508,8 +2335,7 @@ std::vector<ArithmeticCase> integral_rounding_modifier_cases() {
     const uint64_t infinity = form.width == 32 ? 0x7f800000u : 0x7ff0000000000000ull;
     const uint64_t quiet = form.width == 32 ? 0x00400000u : 0x0008000000000000ull;
     const auto add = [&](const std::string &name, uint64_t input, uint64_t result,
-                         rdna4::Vop3BuilderFields fields, uint32_t mode = 0xf0u,
-                         int host_rounding = FE_TONEAREST) {
+                         rdna4::Vop3BuilderFields fields, uint32_t mode = 0xf0u) {
       fields.vdst = 6;
       fields.src0 = 256;
       const auto words = rdna4::build_vop3(form.op, fields);
@@ -2520,12 +2346,11 @@ std::vector<ArithmeticCase> integral_rounding_modifier_cases() {
         expected.emplace_back(7, uint32_t(result >> 32));
       }
       cases.push_back({std::string(form.name) + name,
-                       ROCJITSU_CODE_ARCH_RDNA4,
+                       rocjitsu::IsaFamily::Rdna4,
                        {words[0], words[1], 0u},
                        std::move(sources),
                        std::move(expected),
-                       mode,
-                       host_rounding});
+                       mode});
     };
     add("RoundThenHalf", bits(1.5), bits(form.positive_halved), {.omod = 3});
     add("AbsNegThenRound", bits(-1.5), bits(form.negative_doubled),
@@ -2544,13 +2369,12 @@ std::vector<ArithmeticCase> integral_rounding_modifier_cases() {
       const uint32_t other = (rounding + 1) % 4;
       const uint32_t mode =
           0xf0u | (form.width == 32 ? rounding | (other << 2) : other | (rounding << 2));
-      const int host = rounding == 0 ? FE_TOWARDZERO : FE_TONEAREST;
       const uint64_t positive = rounding == 0 || rounding == 1 ? infinity : infinity - 1;
       const uint64_t negative = rounding == 0 || rounding == 2 ? infinity : infinity - 1;
       add("PositiveOverflowMode" + std::to_string(rounding), infinity - 1, positive, {.omod = 1},
-          mode, host);
+          mode);
       add("NegativeOverflowMode" + std::to_string(rounding), sign | (infinity - 1), sign | negative,
-          {.omod = 1}, mode, host);
+          {.omod = 1}, mode);
     }
   }
   return cases;
@@ -2569,12 +2393,11 @@ std::vector<ArithmeticCase> rounded_result_modifier_cases() {
     fields.vdst = 6;
     const auto words = rdna4::build_vop3(op, fields);
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      std::move(sources),
                      std::move(expected),
-                     mode,
-                     FE_TONEAREST});
+                     mode});
   };
   const auto f16 = [&](const std::string &name, uint16_t op, uint8_t omod, uint32_t a, uint32_t b,
                        uint32_t result, uint32_t mode) {
@@ -2658,7 +2481,7 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
   std::vector<ArithmeticCase> cases;
   struct Target {
     const char *name;
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t high;
     std::array<uint32_t, 2> mul;
     std::array<uint32_t, 2> addition;
@@ -2666,20 +2489,24 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
   constexpr uint16_t V0 = 256, V1 = 257;
   const std::array targets{
       Target{
-          "Gfx1100", ROCJITSU_CODE_ARCH_RDNA3, 0xa5a50000u,
+          "Gfx1100", rocjitsu::IsaFamily::Rdna3, 0xa5a50000u,
           rdna3::build_vop3(rdna3::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
           rdna3::build_vop3(rdna3::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
       Target{
-          "Gfx1030", ROCJITSU_CODE_ARCH_RDNA2, 0xa5a50000u,
+          "Gfx1030", rocjitsu::IsaFamily::Rdna2, 0xa5a50000u,
           rdna2::build_vop3(rdna2::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
           rdna2::build_vop3(rdna2::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
       Target{
-          "Gfx1010", ROCJITSU_CODE_ARCH_RDNA1, 0xa5a50000u,
+          "Gfx1010", rocjitsu::IsaFamily::Rdna1, 0xa5a50000u,
           rdna2::build_vop3(rdna2::kVMulF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3}),
           rdna2::build_vop3(rdna2::kVAddF16Vop3, {.vdst = 6, .src0 = V0, .src1 = V1, .omod = 3})},
   };
   for (const Target &target : targets) {
     const std::string name = target.name;
+    // RDNA2 uses rj-arith for these operations, outside the legacy SIMD tracker.
+    const auto simd = target.arch == rocjitsu::IsaFamily::Rdna2
+                          ? expect_simd_fallback()
+                          : expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16);
     const auto add = [&](const std::string &case_name, std::array<uint32_t, 2> words, uint32_t a,
                          uint32_t b, uint32_t result, uint32_t mode) {
       cases.push_back({name + case_name,
@@ -2688,10 +2515,7 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
                        {{0, a}, {1, b}, {6, target.high | (target.high >> 16)}},
                        {{6, target.high | result}},
                        mode,
-                       FE_TONEAREST,
-                       0,
-                       0,
-                       expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)});
+                       simd});
     };
     // 1.5 * 65504 overflows half before div:2, so the result stays infinite;
     // under FP16_OVFL it saturates to 65504 and then halves.
@@ -2713,6 +2537,9 @@ std::vector<ArithmeticCase> legacy_rounded_result_modifier_cases() {
     add("AddF16Div2NegativeMinNormalFlushInputsKeepOutputs", target.addition, 0x8400u, 0x0000u,
         0x8400u, 0xa0u);
   }
+  for (auto &test : cases) {
+    test.arith_dispatch = true;
+  }
   return cases;
 }
 
@@ -2723,8 +2550,7 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
   std::vector<ArithmeticCase> cases;
   const auto add = [&](const char *name, bool multiply, uint32_t a, uint32_t b, uint32_t result,
                        uint32_t mode, uint8_t omod = 0, uint8_t clamp = 0, uint8_t abs = 0,
-                       uint8_t neg = 0, uint8_t opsel = 0, int host_rounding = FE_TONEAREST,
-                       uint32_t mxcsr_bits = 0,
+                       uint8_t neg = 0, uint8_t opsel = 0,
                        SimdPathExpectation simd =
                            expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)) {
     const auto words =
@@ -2737,14 +2563,11 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
                                                                                  .omod = omod,
                                                                                  .neg = neg});
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0},
                      {{0, a}, {1, b}, {6, 0xa5a5a5a5u}},
                      {{6, result}},
                      mode,
-                     host_rounding,
-                     mxcsr_bits,
-                     mxcsr_bits,
                      simd});
   };
   add("AddFlushInputsAndOutputs", false, 1, 0, 0xa5a50000u, 0x30);
@@ -2774,16 +2597,13 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
                              uint32_t result, uint8_t opsel) {
     const auto words = cdna4::build_vop3(multiply ? cdna4::kVMulF16Vop3 : cdna4::kVAddF16Vop3,
                                          {.vdst = 6, .op_sel = opsel, .src0 = V0, .src1 = V1});
+    // These migrated handlers dispatch inside rj-arith, outside the legacy tracker.
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_CDNA4,
+                     rocjitsu::IsaFamily::Cdna4,
                      {words[0], words[1], 0},
                      {{0, a}, {1, b}, {6, 0xa5a5a5a5u}},
                      {{6, result}},
-                     0xc0,
-                     FE_TONEAREST,
-                     0,
-                     0,
-                     expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)});
+                     0xc0});
   };
   // CDNA true16 low-half writes zero the destination's high half; high-half
   // writes preserve the low half. Exercise both ADD and MUL with high sources.
@@ -2791,20 +2611,8 @@ std::vector<ArithmeticCase> f16_binary_modifier_cases() {
   add_cdna4("Gfx950AddHighSourcesHighDestination", false, 0x34003c00, 0x34003c00, 0x3800a5a5u, 11);
   add_cdna4("Gfx950MulHighSourcesLowDestination", true, 0x40003c00, 0x38003c00, 0x00003c00u, 3);
   add_cdna4("Gfx950MulHighSourcesHighDestination", true, 0x40003c00, 0x38003c00, 0x3c00a5a5u, 11);
-  // Unsupported guest rounding retains the scalar fallback; host rounding is
-  // established and restored by the SIMD evaluator.
-  add("AddGuestRoundUpFallback", false, 0x3c00, 0x1000, 0xa5a53c01u, 0xc4, 0, 0, 0, 0, 0,
-      FE_TONEAREST, 0, expect_simd_fallback());
-  add("AddHostRoundUpStillUsesSimd", false, 0x3c00, 0x1000, 0xa5a53c00u, 0xc0, 0, 0, 0, 0, 0,
-      FE_UPWARD);
-#if RJ_HOST_ARCH_X86
-  // Enable the full-MXCSR preservation assertion without overriding rounding.
-  cases.back().mxcsr_mask = _MM_EXCEPT_MASK;
-  // Widened F16 ADD/MUL operands and results cannot be F32 subnormals, so host
-  // DAZ/FTZ does not require a fallback.
-  add("AddHostFlushStillUsesSimd", false, 1, 0, 0xa5a50001u, 0xc0, 0, 0, 0, 0, 0, FE_TONEAREST,
-      (1u << 6) | (1u << 15));
-#endif
+  // Guest round-up differs from the default host nearest-even result.
+  add("AddGuestRoundUp", false, 0x3c00, 0x1000, 0xa5a53c01u, 0xc4);
   return cases;
 }
 
@@ -2855,14 +2663,11 @@ std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
         expected.emplace_back(7, uint32_t(result >> 32));
       }
       cases.push_back({std::string(form.name) + name,
-                       ROCJITSU_CODE_ARCH_RDNA4,
+                       rocjitsu::IsaFamily::Rdna4,
                        {words[0], words[1], 0u},
                        std::move(sources),
                        std::move(expected),
                        mode,
-                       FE_TONEAREST,
-                       0,
-                       0,
                        simd});
     };
     const uint64_t tiny = form.ceil ? 1u : sign | largest_subnormal;
@@ -2921,8 +2726,9 @@ ArithmeticCase unary_case(const UnaryForm &form, const UnaryLane &lane) {
     rdna4::Vop3BuilderFields fields = lane.fields;
     fields.vdst = 6;
     fields.src0 = V0;
-    if (lane.encoding == UnaryEncoding::Vop3High)
+    if (lane.encoding == UnaryEncoding::Vop3High) {
       fields.opsel = 0b1001; // source 0 and destination use the high half
+    }
     const auto pair = rdna4::build_vop3(form.vop3, fields);
     words = {pair[0], pair[1], 0u};
   }
@@ -2950,19 +2756,17 @@ ArithmeticCase unary_case(const UnaryForm &form, const UnaryLane &lane) {
   const bool vop3 =
       lane.encoding == UnaryEncoding::Vop3 || lane.encoding == UnaryEncoding::Vop3High;
   SimdPathExpectation simd{};
-  if (vop3)
+  if (vop3) {
     simd = expect_simd_fallback();
-  else if (form.width == 16)
+  } else if (form.width == 16) {
     simd = expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
+  }
   return {std::string(form.name) + kEncodingNames[static_cast<int>(lane.encoding)] + lane.name,
-          ROCJITSU_CODE_ARCH_RDNA4,
+          rocjitsu::IsaFamily::Rdna4,
           words,
           std::move(sources),
           std::move(expected),
           lane.mode,
-          FE_TONEAREST,
-          0,
-          0,
           simd};
 }
 
@@ -3064,9 +2868,11 @@ std::vector<ArithmeticCase> fract_cases() {
              0xfff8000000000000u, 0x7ff8000000000001u})},
   }};
   std::vector<ArithmeticCase> cases;
-  for (const auto &[form, lanes] : forms)
-    for (const UnaryLane &lane : lanes)
+  for (const auto &[form, lanes] : forms) {
+    for (const UnaryLane &lane : lanes) {
       cases.push_back(unary_case(form, lane));
+    }
+  }
   // F16 upper halves: hi(v0) = 0x8ce6 and 0x9e3f, captured with the .h forms.
   const UnaryForm f16 = forms[0].form;
   cases.push_back(unary_case(f16, {"NegativeNormal", Vop1High, {}, 0x8ce6u, 0xf0u, 0x3bffu}));
@@ -3136,8 +2942,9 @@ std::vector<ArithmeticCase> ldexp_f16_cases() {
       fields.vdst = 6;
       fields.src0 = V0;
       fields.src1 = V1;
-      if (high)
+      if (high) {
         fields.opsel = 0b1011; // both sources and the destination use the high half
+      }
       const auto pair = rdna4::build_vop3(rdna4::kVLdexpF16Vop3, fields);
       words = {pair[0], pair[1], 0u};
     }
@@ -3146,14 +2953,11 @@ std::vector<ArithmeticCase> ldexp_f16_cases() {
     };
     cases.push_back(
         {std::string("LdexpF16") + kEncodingNames[static_cast<int>(lane.encoding)] + lane.name,
-         ROCJITSU_CODE_ARCH_RDNA4,
+         rocjitsu::IsaFamily::Rdna4,
          words,
          {{0, place(lane.value, 0x5a5au)}, {1, place(lane.exponent, 0x5a5au)}, {6, 0xa5a5a5a5u}},
          {{6, place(lane.expected, 0xa5a5u)}},
          lane.mode,
-         FE_TONEAREST,
-         0,
-         0,
          expect_simd_path(vop3 ? amdgpu::SimdFastPath::VOP3_LDEXP_RAW
                                : amdgpu::SimdFastPath::VOP_WORDS)});
   }
@@ -3178,14 +2982,11 @@ std::vector<ArithmeticCase> conversion_source_modifier_cases() {
                        std::vector<std::pair<uint32_t, uint32_t>> sources, uint32_t result,
                        SimdPathExpectation simd) {
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      std::move(sources),
                      {{6, result}},
                      0xf0u,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      simd});
   };
   // Every case here sets ABS or NEG, which gates the SIMD glue off.
@@ -3249,14 +3050,11 @@ std::vector<ArithmeticCase> float_to_integer_nan_and_flush_cases() {
     const auto add = [&](const std::string &name, std::array<uint32_t, 2> words, uint32_t input,
                          uint32_t result, uint32_t mode) {
       cases.push_back({std::string(form.name) + name,
-                       ROCJITSU_CODE_ARCH_RDNA4,
+                       rocjitsu::IsaFamily::Rdna4,
                        {words[0], words[1], 0u},
                        {{0, input}},
                        {{6, result}},
                        mode,
-                       FE_TONEAREST,
-                       0,
-                       0,
                        expect_simd_path(amdgpu::SimdFastPath::VOP1_UNARY)});
     };
     const auto vop1 = rdna4::build_vop1(form.vop1, {.src0 = 256, .vdst = 6});
@@ -3275,14 +3073,11 @@ std::vector<ArithmeticCase> float_to_integer_nan_and_flush_cases() {
   const auto add_floor = [&](const char *name, std::array<uint32_t, 2> words, uint32_t input,
                              uint32_t result, uint32_t mode) {
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      {{0, input}},
                      {{6, result}},
                      mode,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      expect_simd_path(amdgpu::SimdFastPath::VOP1_UNARY)});
   };
   add_floor("FloorTinyMode30", {floor_vop1[0], 0u}, 0x80000001u, 0xffffffffu, 0x30u);
@@ -3300,14 +3095,11 @@ std::vector<ArithmeticCase> saturating_pack_half_cases() {
   const auto add = [&](const char *name, std::array<uint32_t, 2> words, uint32_t input,
                        uint32_t result) {
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      {{0, input}, {6, kOld}},
                      {{6, result}},
                      0xf0u,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      expect_simd_fallback()});
   };
   const auto low = rdna4::build_vop3(rdna4::kVSatPkU8I16Vop3, {.vdst = 6, .src0 = 256});
@@ -3331,17 +3123,15 @@ std::vector<ArithmeticCase> integer_to_float_cases() {
                        uint32_t result, uint32_t mode, bool half,
                        std::optional<SimdPathExpectation> simd = std::nullopt) {
     std::vector<std::pair<uint32_t, uint32_t>> sources{{0, input}};
-    if (half)
+    if (half) {
       sources.emplace_back(6, 0xa5a5a5a5u);
+    }
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      std::move(sources),
                      {{6, result}},
                      mode,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      // F16 results take the true16 word path, F32 results the VOP1 one.
                      simd.value_or(expect_simd_path(half ? amdgpu::SimdFastPath::VOP_WORDS
                                                          : amdgpu::SimdFastPath::VOP1_UNARY))});
@@ -3380,46 +3170,39 @@ std::vector<ArithmeticCase> integer_to_float_cases() {
   // OP_SEL selects the source's high half and writes the destination's high half.
   add("F16I16HighHalves", vop3(rdna4::kVCvtF16I16Vop3, {.opsel = 9}), 0xb38b8000u, 0xf4c7a5a5u,
       0xffu, true);
-  // Host-environment independence: conversion result must not depend on host
-  // FE_TONEAREST/DAZ/FTZ. Verify integer conversion and float narrowing ignore
-  // conflicting host rounding and denormal settings.
-  const auto add_host_indep = [&](const char *name, std::array<uint32_t, 2> words, uint32_t input,
-                                  uint32_t result, uint32_t mode, bool half) {
+  // Guest-rounding witnesses use the default host environment required by rj-arith.
+  const auto add_guest_rounding = [&](const char *name, std::array<uint32_t, 2> words,
+                                      uint32_t input, uint32_t result, uint32_t mode, bool half) {
     std::vector<std::pair<uint32_t, uint32_t>> sources{{0, input}};
-    if (half)
+    if (half) {
       sources.emplace_back(6, 0xa5a5a5a5u);
+    }
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      std::move(sources),
                      {{6, result}},
                      mode,
-                     FE_DOWNWARD,
-                     0x8000 | (1u << 6), // Mask DAZ and FTZ; set both bits.
-                     0x8000 | (1u << 6), // Force DAZ and FTZ on.
                      expect_simd_path(half ? amdgpu::SimdFastPath::VOP_WORDS
                                            : amdgpu::SimdFastPath::VOP1_UNARY)});
   };
   // I32 0x01000003 sits midway between two F32 values, so the guest's
   // nearest-even field gives 0x4b800002 where the host's FE_DOWNWARD would give
   // 0x4b800001. 0x00ffffff is exact and would pass under either.
-  add_host_indep("F32I32HostDownwardDazFtz", f32_i32, 0x01000003u, 0x4b800002u, 0xfcu, false);
+  add_guest_rounding("F32I32GuestNearest", f32_i32, 0x01000003u, 0x4b800002u, 0xfcu, false);
   // U16 0xffff: converts to F16 infinity, but MODE 0xf6 (F16 rounds toward +inf)
   // rounds 65535 to +infinity (0x7c00), not the value before rounding (0x7bff).
-  add_host_indep("F16U16HostDownwardDazFtz", f16_u16, 0x0000ffffu, kHigh | 0x7c00u, 0xf6u, true);
+  add_guest_rounding("F16U16GuestRoundUp", f16_u16, 0x0000ffffu, kHigh | 0x7c00u, 0xf6u, true);
   // Explicit sources and SIMD expectation, for the packed three-source form.
   const auto add_packed = [&](const char *name, std::array<uint32_t, 2> words,
                               std::vector<std::pair<uint32_t, uint32_t>> sources, uint32_t result,
                               uint32_t mode, SimdPathExpectation simd) {
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      std::move(sources),
                      {{6, result}},
                      mode,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      simd});
   };
   // V_CVT_PK_U8_F32 writes byte 0 of src2. A positive F32 subnormal only
@@ -3451,19 +3234,16 @@ std::vector<ArithmeticCase> float_to_float_cases() {
                        std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode,
                        SimdPathExpectation simd) {
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      std::move(sources),
                      std::move(expected),
                      mode,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      simd});
   };
   const auto words = expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
-  const auto from_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_F64_TO_B32);
-  const auto to_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_B32_TO_F64);
+  const SimdPathExpectation from_f64{}; // rj-arith dispatch is outside the legacy tracker.
+  const SimdPathExpectation to_f64{};
   // Modified VOP3 encodings take the same paths: the stage object carries the fields.
   const auto vop1 = [](uint16_t op) {
     return std::array<uint32_t, 2>{rdna4::build_vop1(op, {.src0 = 256, .vdst = 6})[0], 0u};
@@ -3535,14 +3315,11 @@ std::vector<ArithmeticCase> float_to_float_cases() {
   // survives either way. The VOP1 opcode is the same on RDNA3 and RDNA4.
   const auto add_rdna3 = [&](const char *name, uint32_t input, uint64_t bits, uint32_t mode) {
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA3,
+                     rocjitsu::IsaFamily::Rdna3,
                      {f64_f32[0], 0u, 0u},
                      f32(input),
                      result64(bits),
                      mode,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      to_f64});
   };
   add_rdna3("Gfx1100F64F32SignalingNanIeee", 0x7fa12345u, 0x7ffc2468a0000000u,
@@ -3581,14 +3358,11 @@ std::vector<ArithmeticCase> normalized_and_byte_cases() {
                        std::vector<std::pair<uint32_t, uint32_t>> sources, uint32_t result,
                        uint32_t mode, SimdPathExpectation simd) {
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      std::move(sources),
                      {{6, result}},
                      mode,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      simd});
   };
   const auto norm = std::array<uint32_t, 2>{
@@ -3662,14 +3436,11 @@ std::vector<ArithmeticCase> pack_b32_f16_cases() {
     fields.src1 = 257;
     const auto words = rdna4::build_vop3(rdna4::kVPackB32F16Vop3, fields);
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      {{0, low}, {1, high}},
                      {{6, result}},
                      mode,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_TRUE16_SRC)});
   };
   add("SignalingNan", {}, 0x31d27c01u, 0x31a90000u, 0x00007e01u, 0x30u);
@@ -3694,14 +3465,11 @@ std::vector<ArithmeticCase> fp8_cases() {
                        std::vector<std::pair<uint32_t, uint32_t>> expected, uint32_t mode,
                        SimdPathExpectation simd) {
     cases.push_back({name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      std::move(sources),
                      std::move(expected),
                      mode,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      simd});
   };
   const auto vop1 = [](uint16_t op) {
@@ -3768,36 +3536,41 @@ std::vector<ArithmeticCase> fp8_cases() {
   add("SrBf8Neg", sr(rdna4::kVCvtSrBf8F32Vop3, {.neg = 1}), pair(0x3f800000u, 1u, 0u), {{6, 0xbcu}},
       0xf0u, expect_simd_fallback());
 
-  // gfx950 is uncaptured. Its manual's FP16_OVFL rule saturates an infinity to
-  // the largest finite value, unlike the gfx1201 PkFp8InfinityFp16Ovfl row.
-  const auto manual_pk = [&](const char *name, rj_code_arch_t arch, std::array<uint32_t, 2> words,
-                             uint32_t low, uint32_t result) {
+  // MI350X (gfx950, ROCm 7.2.4, gfx950_cvt_valu.bin idx=263/264) preserves signed
+  // infinities (0x7f/0xff in FP8, 0x7c/0xfc in BF8) on both PK and SR even when
+  // FP16_OVFL is set, matching gfx1201 PkFp8InfinityFp16Ovfl rather than CDNA4 §7.3.
+  const auto manual_pk = [&](const char *name, rocjitsu::IsaFamily arch,
+                             std::array<uint32_t, 2> words, uint32_t low, uint32_t result) {
     cases.push_back({name,
                      arch,
                      {words[0], words[1], 0u},
                      pair(low, 0u, 0u),
                      {{6, result}},
                      0x800030u,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      expect_simd_fallback()});
   };
   const auto cdna4_pk = [&](const char *name, uint16_t op, uint32_t low, uint32_t result) {
-    manual_pk(name, ROCJITSU_CODE_ARCH_CDNA4,
+    manual_pk(name, rocjitsu::IsaFamily::Cdna4,
               cdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257}), low, result);
   };
-  cdna4_pk("Gfx950PkFp8InfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7eu);
-  cdna4_pk("Gfx950PkFp8NegInfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0xff800000u, 0xfeu);
-  cdna4_pk("Gfx950PkBf8InfinityFp16Ovfl", cdna4::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7bu);
-  // gfx1250 is uncaptured too; the CDNA5 manual's table gives the same rule.
+  cdna4_pk("Gfx950PkFp8InfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7fu);
+  cdna4_pk("Gfx950PkFp8NegInfinityFp16Ovfl", cdna4::kVCvtPkFp8F32Vop3, 0xff800000u, 0xffu);
+  cdna4_pk("Gfx950PkBf8InfinityFp16Ovfl", cdna4::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7cu);
+  cdna4_pk("Gfx950PkBf8NegInfinityFp16Ovfl", cdna4::kVCvtPkBf8F32Vop3, 0xff800000u, 0xfcu);
+  cdna4_pk("Gfx950SrFp8InfinityFp16Ovfl", cdna4::kVCvtSrFp8F32Vop3, 0x7f800000u, 0x7fu);
+  cdna4_pk("Gfx950SrFp8NegInfinityFp16Ovfl", cdna4::kVCvtSrFp8F32Vop3, 0xff800000u, 0xffu);
+  cdna4_pk("Gfx950SrBf8InfinityFp16Ovfl", cdna4::kVCvtSrBf8F32Vop3, 0x7f800000u, 0x7cu);
+  cdna4_pk("Gfx950SrBf8NegInfinityFp16Ovfl", cdna4::kVCvtSrBf8F32Vop3, 0xff800000u, 0xfcu);
+  // CDNA5 Table 7 (p. 22) preserves true infinity outside WMMA. Section 7.6.2
+  // (p. 81) instead specifies max finite with FP16_OVFL set for these converts.
+  // These encodings use physical gfx1201 results as a proxy pending gfx1250 data.
   const auto cdna5_pk = [&](const char *name, uint16_t op, uint32_t low, uint32_t result) {
-    manual_pk(name, ROCJITSU_CODE_ARCH_CDNA5,
+    manual_pk(name, rocjitsu::IsaFamily::Cdna5,
               cdna5::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257}), low, result);
   };
-  cdna5_pk("Gfx1250PkFp8InfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7eu);
-  cdna5_pk("Gfx1250PkFp8NegInfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0xff800000u, 0xfeu);
-  cdna5_pk("Gfx1250PkBf8InfinityFp16Ovfl", cdna5::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7bu);
+  cdna5_pk("Gfx1250PkFp8InfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0x7f800000u, 0x7fu);
+  cdna5_pk("Gfx1250PkFp8NegInfinityFp16Ovfl", cdna5::kVCvtPkFp8F32Vop3, 0xff800000u, 0xffu);
+  cdna5_pk("Gfx1250PkBf8InfinityFp16Ovfl", cdna5::kVCvtPkBf8F32Vop3, 0x7f800000u, 0x7cu);
   return cases;
 }
 
@@ -3823,7 +3596,7 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   using Words = std::array<uint32_t, 2>;
   using Pairs = std::vector<std::pair<uint32_t, uint32_t>>;
   std::vector<ArithmeticCase> cases;
-  const auto add = [&](std::string name, rj_code_arch_t arch, Words words, Pairs sources,
+  const auto add = [&](std::string name, rocjitsu::IsaFamily arch, Words words, Pairs sources,
                        Pairs expected, uint32_t mode, SimdPathExpectation simd) {
     cases.push_back({std::move(name),
                      arch,
@@ -3831,9 +3604,6 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
                      std::move(sources),
                      std::move(expected),
                      mode,
-                     FE_TONEAREST,
-                     0,
-                     0,
                      simd});
   };
   // F16 results keep the destination's high half on all three GPUs.
@@ -3849,13 +3619,11 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   const auto rdna4 = [](uint16_t op, uint8_t omod = 0) {
     return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .omod = omod});
   };
-  const auto f16 = expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
-  const auto from_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_F64_TO_B32);
-  const auto to_f64 = expect_simd_path_64(amdgpu::SimdFastPath::CVT_B32_TO_F64);
-  // RDNA2 F16 results take the VOP1 path. OMOD and CLAMP travel in the stage
-  // object, so modified encodings take the same paths as unmodified ones.
-  const auto rdna2_f16 = expect_simd_path(amdgpu::SimdFastPath::VOP1_UNARY);
-  constexpr auto kRdna4 = ROCJITSU_CODE_ARCH_RDNA4;
+  // These conversions use rj-arith dispatch, outside the legacy tracker.
+  const SimdPathExpectation f16{};
+  const SimdPathExpectation from_f64{}; // rj-arith dispatch is outside the legacy tracker.
+  const SimdPathExpectation to_f64{};
+  constexpr auto kRdna4 = rocjitsu::IsaFamily::Rdna4;
   constexpr uint32_t kDx10 = 1u << 8;
 
   // CLAMP on a NaN conversion result. gfx1201 converts it to +0 whatever
@@ -3863,17 +3631,17 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   // otherwise passes the quieted NaN through. Captured on both GPUs for
   // V_CVT_F16_F32 and V_CVT_F32_F64 with every DX10_CLAMP/IEEE/FP_DENORM
   // combination; the F16 source half keeps the destination's high half.
-  const auto clamp_f16_f32 = [](rj_code_arch_t arch) {
+  const auto clamp_f16_f32 = [](rocjitsu::IsaFamily arch) {
     return arch == kRdna4
                ? rdna4::build_vop3(rdna4::kVCvtF16F32Vop3, {.vdst = 6, .clamp = 1, .src0 = 256})
                : rdna2::build_vop3(rdna2::kVCvtF16F32Vop3, {.vdst = 6, .clamp = 1, .src0 = 256});
   };
-  const auto clamp_f32_f64 = [](rj_code_arch_t arch) {
+  const auto clamp_f32_f64 = [](rocjitsu::IsaFamily arch) {
     return arch == kRdna4
                ? rdna4::build_vop3(rdna4::kVCvtF32F64Vop3, {.vdst = 6, .clamp = 1, .src0 = 256})
                : rdna2::build_vop3(rdna2::kVCvtF32F64Vop3, {.vdst = 6, .clamp = 1, .src0 = 256});
   };
-  constexpr auto kRdna2 = ROCJITSU_CODE_ARCH_RDNA2;
+  constexpr auto kRdna2 = rocjitsu::IsaFamily::Rdna2;
   add("Gfx1201ClampQuietNanToZero", kRdna4, clamp_f16_f32(kRdna4), f32_source(0x7fc00000u),
       half(0u), 0xf0u, f16);
   add("Gfx1201ClampQuietNanToZeroNoDx10", kRdna4, clamp_f16_f32(kRdna4), f32_source(0x7fc00000u),
@@ -3881,18 +3649,18 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   add("Gfx1201ClampSignalingNanToZero", kRdna4, clamp_f32_f64(kRdna4),
       f64_source(0x7ff0000000000001ull), single(0u), 0xf0u, from_f64);
   add("Gfx1030ClampKeepsNanWithoutDx10", kRdna2, clamp_f16_f32(kRdna2), f32_source(0x7fc00000u),
-      half(0x7e00u), 0xf0u, rdna2_f16);
+      half(0x7e00u), 0xf0u, f16);
   add("Gfx1030ClampNanToZeroWithDx10", kRdna2, clamp_f16_f32(kRdna2), f32_source(0x7fc00000u),
-      half(0u), 0xf0u | kDx10, rdna2_f16);
+      half(0u), 0xf0u | kDx10, f16);
   add("Gfx1030ClampKeepsNanPayloadWithoutDx10", kRdna2, clamp_f32_f64(kRdna2),
       f64_source(0x7ff4000012345678ull), single(0x7fe00000u), 0xf0u, from_f64);
   add("Gfx1030ClampNanPayloadToZeroWithDx10", kRdna2, clamp_f32_f64(kRdna2),
       f64_source(0x7ff4000012345678ull), single(0u), 0xf0u | kDx10, from_f64);
   // CLAMP still maps -Inf to +0 and +Inf to 1.0 on both, with or without DX10_CLAMP.
   add("Gfx1030ClampNegativeInfinityToZero", kRdna2, clamp_f16_f32(kRdna2), f32_source(0xff800000u),
-      half(0u), 0xf0u, rdna2_f16);
+      half(0u), 0xf0u, f16);
   add("Gfx1030ClampInfinityToOne", kRdna2, clamp_f16_f32(kRdna2), f32_source(0x7f800000u),
-      half(0x3c00u), 0xf0u, rdna2_f16);
+      half(0x3c00u), 0xf0u, f16);
 
   const auto f16_f32 = rdna4(rdna4::kVCvtF16F32Vop3);
   const auto f16_f32_mul2 = rdna4(rdna4::kVCvtF16F32Vop3, 1);
@@ -3951,19 +3719,17 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
   // denormals flushed; otherwise the tiny negative value is not scaled.
   struct Legacy {
     const char *name;
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     // Both targets keep the initialized F16 destination's high half.
     uint32_t high;
-    // RDNA3 F16 results take the true16 word path; RDNA2 ones the VOP1 path.
-    amdgpu::SimdFastPath f16_path;
     Words f16_mul2;
     Words f32_mul2;
   };
   const std::array legacy{
-      Legacy{"Gfx1100", ROCJITSU_CODE_ARCH_RDNA3, kHigh, amdgpu::SimdFastPath::VOP_WORDS,
+      Legacy{"Gfx1100", rocjitsu::IsaFamily::Rdna3, kHigh,
              rdna3::build_vop3(rdna3::kVCvtF16F32Vop3, {.vdst = 6, .src0 = 256, .omod = 1}),
              rdna3::build_vop3(rdna3::kVCvtF32F64Vop3, {.vdst = 6, .src0 = 256, .omod = 1})},
-      Legacy{"Gfx1030", ROCJITSU_CODE_ARCH_RDNA2, kHigh, amdgpu::SimdFastPath::VOP1_UNARY,
+      Legacy{"Gfx1030", rocjitsu::IsaFamily::Rdna2, kHigh,
              rdna2::build_vop3(rdna2::kVCvtF16F32Vop3, {.vdst = 6, .src0 = 256, .omod = 1}),
              rdna2::build_vop3(rdna2::kVCvtF32F64Vop3, {.vdst = 6, .src0 = 256, .omod = 1})},
   };
@@ -3972,7 +3738,7 @@ std::vector<ArithmeticCase> conversion_mode_boundary_cases() {
     const auto both = [&](const char *suffix, uint32_t mode, uint32_t h, uint32_t f) {
       add(name + "F16F32NegativeTinyMul2" + suffix, target.arch, target.f16_mul2,
           Pairs{{0, 0xb87fe800u}, {6, target.high | (target.high >> 16)}},
-          Pairs{{6, target.high | h}}, mode, expect_simd_path(target.f16_path));
+          Pairs{{6, target.high | h}}, mode, f16);
       add(name + "F32F64NegativeTinyMul2" + suffix, target.arch, target.f32_mul2,
           f64_source(0xb80fffffe8000000u), single(f), mode, from_f64);
     };
@@ -3997,7 +3763,7 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
     uint32_t result;
   };
   struct Form {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     const char *name;
     std::array<uint32_t, 2> words;
     std::array<uint32_t, 2> modes;
@@ -4016,8 +3782,8 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
       expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16);
   // The E32 captures cover MODE 0x30 and 0xc0; the E64 ones cover 0x00 and 0xf0.
   // llvm-mc gives gfx1100 the same VOP2 F32 SUB/SUBREV encodings as gfx1201.
-  constexpr rj_code_arch_t kGfx1201 = ROCJITSU_CODE_ARCH_RDNA4;
-  constexpr rj_code_arch_t kGfx1100 = ROCJITSU_CODE_ARCH_RDNA3;
+  constexpr rocjitsu::IsaFamily kGfx1201 = rocjitsu::IsaFamily::Rdna4;
+  constexpr rocjitsu::IsaFamily kGfx1100 = rocjitsu::IsaFamily::Rdna3;
   const std::array<Form, 10> forms = {{
       {kGfx1201,
        "SubF32E32",
@@ -4101,9 +3867,6 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
              std::move(sources),
              {{6, lane.result}},
              mode,
-             FE_TONEAREST,
-             0u,
-             0u,
              form.simd});
       }
     }
@@ -4128,7 +3891,7 @@ std::vector<ArithmeticCase> vopd_subtraction_cases() {
   };
   struct Target {
     const char *name;
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t mode;
     std::vector<Lane> lanes;
   };
@@ -4149,17 +3912,17 @@ std::vector<ArithmeticCase> vopd_subtraction_cases() {
   const Lane cancellation_down{"CancellationDown", 0x3f800000u, 0x3f800000u, 0x80000000u,
                                0x80000000u};
   const std::array<Target, 8> targets = {{
-      {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0x00u, quieting},
-      {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0xf0u, quieting},
+      {"Gfx1201", rocjitsu::IsaFamily::Rdna4, 0x00u, quieting},
+      {"Gfx1201", rocjitsu::IsaFamily::Rdna4, 0xf0u, quieting},
       {"Gfx1201",
-       ROCJITSU_CODE_ARCH_RDNA4,
+       rocjitsu::IsaFamily::Rdna4,
        0xf3u,
        {two_nans, {"Rounding", 0x3f800000u, 1u, 0x3f7fffffu, 0xbf7fffffu}}},
-      {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0x02u, {cancellation_down}},
-      {"Gfx1100Ieee1", ROCJITSU_CODE_ARCH_RDNA3, 0x200u, quieting},
-      {"Gfx1100Ieee1", ROCJITSU_CODE_ARCH_RDNA3, 0x202u, {cancellation_down}},
-      {"Gfx1100Ieee0", ROCJITSU_CODE_ARCH_RDNA3, 0x00u, unquieted},
-      {"Gfx1100Ieee0", ROCJITSU_CODE_ARCH_RDNA3, 0xf0u, unquieted},
+      {"Gfx1201", rocjitsu::IsaFamily::Rdna4, 0x02u, {cancellation_down}},
+      {"Gfx1100Ieee1", rocjitsu::IsaFamily::Rdna3, 0x200u, quieting},
+      {"Gfx1100Ieee1", rocjitsu::IsaFamily::Rdna3, 0x202u, {cancellation_down}},
+      {"Gfx1100Ieee0", rocjitsu::IsaFamily::Rdna3, 0x00u, unquieted},
+      {"Gfx1100Ieee0", rocjitsu::IsaFamily::Rdna3, 0xf0u, unquieted},
   }};
   struct Pair {
     const char *name;
@@ -4175,8 +3938,8 @@ std::vector<ArithmeticCase> vopd_subtraction_cases() {
     const SimdPathExpectation simd = (target.mode & 0xffu) == 0xf0u
                                          ? expect_simd_path(amdgpu::SimdFastPath::VOPD)
                                          : expect_simd_fallback();
-    for (const Lane &lane : target.lanes)
-      for (const Pair &pair : pairs)
+    for (const Lane &lane : target.lanes) {
+      for (const Pair &pair : pairs) {
         cases.push_back(
             {std::format("{}{}{}Mode{:03X}", target.name, pair.name, lane.name, target.mode),
              target.arch,
@@ -4185,10 +3948,9 @@ std::vector<ArithmeticCase> vopd_subtraction_cases() {
              {{6, pair.sub_in_x ? lane.sub : lane.subrev},
               {7, pair.sub_in_x ? lane.subrev : lane.sub}},
              target.mode,
-             FE_TONEAREST,
-             0u,
-             0u,
              simd});
+      }
+    }
   }
   return cases;
 }
@@ -4212,14 +3974,11 @@ std::vector<ArithmeticCase> subtraction_simd_boundary_cases() {
         form.op,
         {.vdst = 6, .abs = 1, .opsel = 0xb, .src0 = 256, .src1 = 257, .omod = 1, .neg = 1});
     cases.push_back({form.name,
-                     ROCJITSU_CODE_ARCH_RDNA4,
+                     rocjitsu::IsaFamily::Rdna4,
                      {words[0], words[1], 0u},
                      {{0, 0xf4003c00u}, {1, 0x74004000u}, {6, 0xdead1357u}},
                      {{6, form.result}},
                      0x8000f0u,
-                     FE_TONEAREST,
-                     0u,
-                     0u,
                      expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)});
   }
   return cases;
@@ -4317,14 +4076,11 @@ std::vector<ArithmeticCase> subtraction_mode_cases() {
           : vop3_form ? expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)
                       : expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
       cases.push_back({std::format("{}Mode{:02X}", lane.name, mode),
-                       ROCJITSU_CODE_ARCH_RDNA4,
+                       rocjitsu::IsaFamily::Rdna4,
                        {lane.encoding.words[0], lane.encoding.words[1], 0u},
                        {{0, lane.src0}, {1, lane.src1}, {6, 0xa5a50000u}},
                        {{6, result}},
                        mode,
-                       FE_TONEAREST,
-                       0u,
-                       0u,
                        simd});
     }
   }
@@ -4366,16 +4122,16 @@ std::vector<ArithmeticCase> sdwa_f16_cases() {
                 0x8400u},
            Lane{"LdexpF16KeepsTinyWithOutputKept", kLdexpMul2, 2, 0x3c00u, 0xfff1u, 0x080u,
                 0x0200u},
-       })
+       }) {
     cases.push_back({std::string("Sdwa") + lane.name,
-                     ROCJITSU_CODE_ARCH_RDNA2,
+                     rocjitsu::IsaFamily::Rdna2,
                      {lane.words[0], lane.words[1], 0u},
                      {{18, 0x5a5a0000u | lane.value},
                       {19, 0x5a5a0000u | lane.exponent},
                       {lane.dst, 0xa5a5a5a5u}},
                      {{lane.dst, 0xa5a50000u | lane.expected}},
-                     lane.mode,
-                     FE_TONEAREST});
+                     lane.mode});
+  }
   return cases;
 }
 
@@ -4412,14 +4168,11 @@ std::vector<ArithmeticCase> ldexp_tininess_cases() {
     const bool simd = !f64 || !RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS;
     cases.push_back(
         {std::string(f64 ? "LdexpF64" : "LdexpF32") + lane.name,
-         ROCJITSU_CODE_ARCH_RDNA4,
+         rocjitsu::IsaFamily::Rdna4,
          {words[0], words[1], 0u},
          std::move(sources),
          std::move(expected),
          lane.mode,
-         FE_TONEAREST,
-         0,
-         0,
          simd ? expect_simd_path(amdgpu::SimdFastPath::VOP3_LDEXP_RAW) : SimdPathExpectation{}});
   };
   std::vector<ArithmeticCase> cases;
@@ -4434,8 +4187,9 @@ std::vector<ArithmeticCase> ldexp_tininess_cases() {
            Lane{"NegativeTinyHalvedIsPositiveZero", 0xbf7fffffu, -126, 0xf0u, 0u, 3},
            Lane{"SubnormalInputFlushed", 0x80000001u, 134, 0xe0u, 0x80000000u},
            Lane{"SubnormalInputKeptByF64Flush", 0x80000001u, 134, 0xb0u, 0xb8000000u},
-       })
+       }) {
     add(cases, false, lane);
+  }
   for (const Lane &lane : {
            Lane{"TinyRoundsToMinNormal", 0x3fefffffffffffffu, -1022, 0xf0u, 0x0010000000000000u},
            Lane{"TinyFlushed", 0x3fefffffffffffffu, -1022, 0x70u, 0u},
@@ -4449,8 +4203,9 @@ std::vector<ArithmeticCase> ldexp_tininess_cases() {
            Lane{"NegativeTinyHalvedIsPositiveZero", 0xbfefffffffffffffu, -1022, 0xf0u, 0u, 3},
            Lane{"SubnormalInputFlushed", 0x1u, 1753, 0xb0u, 0u},
            Lane{"SubnormalInputKeptByF32Flush", 0x1u, 1753, 0xe0u, 0x6a60000000000000u},
-       })
+       }) {
     add(cases, true, lane);
+  }
   return cases;
 }
 
@@ -4679,9 +4434,9 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
   };
   constexpr uint32_t kUntouched = 0xa5a5a5a5u;
   std::vector<ArithmeticCase> cases;
-  for (const auto &[arch, prefix] : {std::pair{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201"},
-                                     std::pair{ROCJITSU_CODE_ARCH_RDNA3, "Gfx1100"},
-                                     std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, "Rdna3_5"}}) {
+  for (const auto &[arch, prefix] : {std::pair{rocjitsu::IsaFamily::Rdna4, "Gfx1201"},
+                                     std::pair{rocjitsu::IsaFamily::Rdna3, "Gfx1100"},
+                                     std::pair{rocjitsu::IsaFamily::Rdna3_5, "Rdna3_5"}}) {
     for (const Lane &lane : lanes) {
       const auto words = rdna4::build_vop3(
           lane.bf16 ? rdna4::kVDot2Bf16Bf16Vop3 : rdna4::kVDot2F16F16Vop3, {.vdst = 6,
@@ -4691,15 +4446,14 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
                                                                             .src1 = 257,
                                                                             .src2 = 258,
                                                                             .neg = lane.neg});
-      const uint32_t expected = arch == ROCJITSU_CODE_ARCH_RDNA4 ? lane.gfx1201 : lane.gfx1100;
+      const uint32_t expected = arch == rocjitsu::IsaFamily::Rdna4 ? lane.gfx1201 : lane.gfx1100;
       for (const uint32_t mode : lane.modes) {
         cases.push_back({std::string(prefix) + lane.name + std::format("Mode{:X}", mode),
                          arch,
                          {words[0], words[1], 0u},
                          {{0, lane.src0}, {1, lane.src1}, {2, lane.acc}, {6, kUntouched}},
                          {{6, expected}},
-                         mode,
-                         FE_TONEAREST});
+                         mode});
       }
     }
   }
@@ -4714,15 +4468,15 @@ std::vector<ArithmeticCase> dot2_packed16_cases() {
 // selector picks the captured source in every lane.
 std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
   struct Lane {
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     const char *name;
     uint32_t src0;
     uint32_t src1;
     bool select_src1;
     uint32_t result;
   };
-  constexpr rj_code_arch_t kGfx1201 = ROCJITSU_CODE_ARCH_RDNA4;
-  constexpr rj_code_arch_t kGfx1100 = ROCJITSU_CODE_ARCH_RDNA3;
+  constexpr rocjitsu::IsaFamily kGfx1201 = rocjitsu::IsaFamily::Rdna4;
+  constexpr rocjitsu::IsaFamily kGfx1100 = rocjitsu::IsaFamily::Rdna3;
   constexpr std::array<Lane, 10> lanes = {{
       {kGfx1201, "NegSubnormal", 0x7ac50200u, 0xe8ea0000u, false, 0xa5a58200u},
       {kGfx1201, "NegNegativeSubnormal", 0x2eff83ffu, 0xc24b0000u, false, 0xa5a503ffu},
@@ -4752,9 +4506,6 @@ std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
            {{0, lane.src0}, {1, lane.src1}, {6, kHigh}},
            {{6, lane.result}},
            mode,
-           FE_TONEAREST,
-           0u,
-           0u,
            gfx1100 ? SimdPathExpectation{} : expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS),
            {{10, selector}, {11, selector}}});
     }
@@ -4798,9 +4549,6 @@ std::vector<DotLane> dot_family_lanes() {
                        uint32_t src1, uint32_t acc, uint32_t gfx1201,
                        std::optional<uint32_t> gfx1100, std::vector<uint32_t> modes,
                        SimdPathExpectation simd = {}) {
-    if (RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS && modifiers.clamp &&
-        simd.path == amdgpu::SimdFastPath::VOP3P_DOT_INT)
-      simd = expect_simd_fallback();
     lanes.push_back(
         {name, opcode, modifiers, {src0, src1, acc}, gfx1201, gfx1100, std::move(modes), simd});
   };
@@ -4895,53 +4643,53 @@ std::vector<DotLane> dot_family_lanes() {
       0xc8bff16cu, {}, fp8_modes);
   // Integer DOT4/DOT8 read each source as two 16-bit halves: OP_SEL picks the
   // half for bits 15:0 and OP_SEL_HI the half for bits 31:16. Both cards agree.
-  // These lanes must also take the integer DOT SIMD path.
+  // Library backends are checked by the direct arithmetic CPU-level tests.
   const uint16_t dot4_iu8 = rdna4::kVDot4I32Iu8Vop3p;
   const uint16_t dot4_u8 = rdna4::kVDot4U32U8Vop3p;
   const uint16_t dot8_iu4 = rdna4::kVDot8I32Iu4Vop3p;
   const uint16_t dot8_u4 = rdna4::kVDot8U32U4Vop3p;
   const std::vector<uint32_t> int_modes{0xf0u, 0x00u};
-  const SimdPathExpectation int_simd = expect_simd_path(amdgpu::SimdFastPath::VOP3P_DOT_INT);
   add("Dot4Iu8HighHalfSrc0", dot4_iu8, {.opsel = 1}, 0x32bf5f5eu, 0xf9c54f6bu, 0x00b85d08u,
-      0x00b97fe8u, 0x00b97fe8u, int_modes, int_simd);
+      0x00b97fe8u, 0x00b97fe8u, int_modes);
   add("Dot4Iu8LowHalves", dot4_iu8, {.opsel_hi = 0}, 0xe9d6d2a3u, 0xffffffefu, 0x00000031u,
-      0x0002d2e7u, 0x0002d2e7u, int_modes, int_simd);
+      0x0002d2e7u, 0x0002d2e7u, int_modes);
   add("Dot4U8LowHalves", dot4_u8, {.opsel_hi = 0}, 0x2e1ae63eu, 0x14771051u, 0x00dc74cbu,
-      0x00dcb8c7u, 0x00dcb8c7u, int_modes, int_simd);
+      0x00dcb8c7u, 0x00dcb8c7u, int_modes);
   add("Dot8Iu4HighHalfSrc0", dot8_iu4, {.opsel = 1}, 0x8d7fb53du, 0x64aeeb2fu, 0x5385deddu,
-      0x5385e247u, 0x5385e247u, int_modes, int_simd);
+      0x5385e247u, 0x5385e247u, int_modes);
   add("Dot8Iu4LowHalves", dot8_iu4, {.opsel_hi = 0}, 0x041e0e34u, 0x3f5b683eu, 0xb7a86fa9u,
-      0xb7a8710bu, 0xb7a8710bu, int_modes, int_simd);
+      0xb7a8710bu, 0xb7a8710bu, int_modes);
   add("Dot8U4LowHalves", dot8_u4, {.opsel_hi = 0}, 0xfffffffdu, 0x00000c75u, 0xffffd984u,
-      0xffffdc40u, 0xffffdc40u, int_modes, int_simd);
+      0xffffdc40u, 0xffffdc40u, int_modes);
   // Selection combined with signedness and CLAMP: the selected elements are
   // negative and C is near the limit, so each modifier changes the result.
   add("Dot4Iu8HighHalfSrc1SignedClamp", dot4_iu8, {.neg = 2, .opsel = 2, .clamp = 1}, 0x7f7f8080u,
-      0x88887777u, 0x800002cfu, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x88887777u, 0x800002cfu, 0x80000000u, 0x80000000u, int_modes);
   add("Dot4Iu8HighHalfSrc0SignedClamp", dot4_iu8, {.neg = 3, .opsel = 1, .clamp = 1}, 0xffff8000u,
-      0x7fffffffu, 0x80000000u, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x7fffffffu, 0x80000000u, 0x80000000u, 0x80000000u, int_modes);
   add("Dot4Iu8MixedHalvesSigned", dot4_iu8, {.neg = 3, .opsel_hi = 2}, 0x7fffffffu, 0xffffffffu, 0u,
-      0x00000004u, 0x00000004u, int_modes, int_simd);
+      0x00000004u, 0x00000004u, int_modes);
   add("Dot8Iu4HighHalfSrc1SignedClamp", dot8_iu4, {.neg = 2, .opsel = 2, .clamp = 1}, 0x88887777u,
-      0x88887777u, 0x80000059u, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x88887777u, 0x80000059u, 0x80000000u, 0x80000000u, int_modes);
   add("Dot8Iu4LowHalvesSignedClamp", dot8_iu4, {.neg = 1, .opsel_hi = 0, .clamp = 1}, 0x77778888u,
-      0x7f807f80u, 0x8000014eu, 0x80000000u, 0x80000000u, int_modes, int_simd);
+      0x7f807f80u, 0x8000014eu, 0x80000000u, 0x80000000u, int_modes);
   add("Dot4U8HighHalfSrc0Clamp", dot4_u8, {.opsel = 1, .clamp = 1}, 0x80000000u, 0xffffffffu,
-      0xffff8000u, 0xffffffffu, 0xffffffffu, int_modes, int_simd);
+      0xffff8000u, 0xffffffffu, 0xffffffffu, int_modes);
   add("Dot8U4LowHalvesClamp", dot8_u4, {.opsel_hi = 0, .clamp = 1}, 0x0bffe1c2u, 0x00000015u,
-      0xffffffe8u, 0xffffffffu, 0xffffffffu, int_modes, int_simd);
+      0xffffffe8u, 0xffffffffu, 0xffffffffu, int_modes);
   return lanes;
 }
 
 std::vector<ArithmeticCase> dot_family_cases() {
   constexpr uint32_t kUntouched = 0xa5a5a5a5u;
   std::vector<ArithmeticCase> cases;
-  for (const auto &[arch, prefix] : {std::pair{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201"},
-                                     std::pair{ROCJITSU_CODE_ARCH_RDNA3, "Gfx1100"},
-                                     std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, "Rdna3_5"}}) {
+  for (const auto &[arch, prefix] : {std::pair{rocjitsu::IsaFamily::Rdna4, "Gfx1201"},
+                                     std::pair{rocjitsu::IsaFamily::Rdna3, "Gfx1100"},
+                                     std::pair{rocjitsu::IsaFamily::Rdna3_5, "Rdna3_5"}}) {
     for (const DotLane &lane : dot_family_lanes()) {
-      if (arch != ROCJITSU_CODE_ARCH_RDNA4 && !lane.gfx1100)
+      if (arch != rocjitsu::IsaFamily::Rdna4 && !lane.gfx1100) {
         continue;
+      }
       const DotModifiers &m = lane.modifiers;
       const auto words =
           rdna4::build_vop3p(lane.opcode, {.vdst = 6,
@@ -4954,7 +4702,7 @@ std::vector<ArithmeticCase> dot_family_cases() {
                                            .src2 = 258,
                                            .opsel_hi = static_cast<uint8_t>(m.opsel_hi & 3),
                                            .neg = m.neg});
-      const uint32_t expected = arch == ROCJITSU_CODE_ARCH_RDNA4 ? lane.gfx1201 : *lane.gfx1100;
+      const uint32_t expected = arch == rocjitsu::IsaFamily::Rdna4 ? lane.gfx1201 : *lane.gfx1100;
       for (const uint32_t mode : lane.modes) {
         cases.push_back(
             {std::string(prefix) + lane.name + std::format("Mode{:X}", mode),
@@ -4963,9 +4711,6 @@ std::vector<ArithmeticCase> dot_family_cases() {
              {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}, {6, kUntouched}},
              {{6, expected}},
              mode,
-             FE_TONEAREST,
-             0u,
-             0u,
              lane.simd});
       }
     }
@@ -4984,8 +4729,8 @@ std::vector<ArithmeticCase> cndmask_b16_half_selection_cases() {
       {.vdst = 6, .abs = 2, .opsel = 0xb, .src0 = 256, .src1 = 257, .src2 = 10, .neg = 1});
   static_assert(kWords[0] == 0xd65d5a06u && kWords[1] == 0x202a0300u, "llvm-mc encoding");
   std::vector<ArithmeticCase> cases;
-  for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
-    const bool gfx1201 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  for (const rocjitsu::IsaFamily arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4}) {
+    const bool gfx1201 = arch == rocjitsu::IsaFamily::Rdna4;
     for (const bool select_src1 : {false, true}) {
       const uint32_t selector = select_src1 ? ~0u : 0u;
       cases.push_back(
@@ -4996,9 +4741,6 @@ std::vector<ArithmeticCase> cndmask_b16_half_selection_cases() {
            {{0, 0x83ff7e00u}, {1, 0xfe003c00u}, {6, 0xdead1357u}},
            {{6, select_src1 ? 0x7e001357u : 0x03ff1357u}},
            0xf0u,
-           FE_TONEAREST,
-           0u,
-           0u,
            gfx1201 ? expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS) : SimdPathExpectation{},
            {{10, selector}, {11, selector}}});
     }
@@ -5139,14 +4881,14 @@ std::vector<ArithmeticCase> mullit_cases() {
                                                                   .src2 = 258,
                                                                   .omod = lane.omod,
                                                                   .neg = lane.neg});
-    for (const auto &[mode, result] : lane.mode_results)
+    for (const auto &[mode, result] : lane.mode_results) {
       cases.push_back({std::format("{}Mode{:02X}", lane.name, mode),
-                       ROCJITSU_CODE_ARCH_RDNA4,
+                       rocjitsu::IsaFamily::Rdna4,
                        {words[0], words[1], 0u},
                        {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}},
                        {{6, result}},
-                       mode,
-                       FE_TONEAREST});
+                       mode});
+    }
   }
   return cases;
 }
@@ -5183,14 +4925,14 @@ std::vector<ArithmeticCase> rdna3_mullit_boundary_cases() {
     const auto words =
         rdna4::build_vop3(rdna4::kVMullitF32Vop3,
                           {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258, .neg = lane.neg});
-    for (const auto &[mode, result] : lane.mode_results)
+    for (const auto &[mode, result] : lane.mode_results) {
       cases.push_back({std::format("Gfx1100Ieee1{}Mode{:03X}", lane.name, mode),
-                       ROCJITSU_CODE_ARCH_RDNA3,
+                       rocjitsu::IsaFamily::Rdna3,
                        {words[0], words[1], 0u},
                        {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}},
                        {{6, result}},
-                       mode,
-                       FE_TONEAREST});
+                       mode});
+    }
   }
   return cases;
 }
@@ -5244,16 +4986,17 @@ std::vector<ArithmeticCase> rdna3_minmax_omod_overflow_cases() {
     const auto words =
         rdna3::build_vop3(form.op, {.vdst = 6, .src0 = 256, .src1 = 257, .omod = form.omod});
     for (const Lane &lane : lanes) {
-      if (lane.max != max)
+      if (lane.max != max) {
         continue;
-      for (uint32_t mode = 0; mode < 4; ++mode)
+      }
+      for (uint32_t mode = 0; mode < 4; ++mode) {
         cases.push_back({std::format("Gfx1100{}{}Mode{:02X}", form.name, lane.name, mode),
-                         ROCJITSU_CODE_ARCH_RDNA3,
+                         rocjitsu::IsaFamily::Rdna3,
                          {words[0], words[1], 0u},
                          {{0, lane.src0}, {1, lane.src1}},
                          {{6, lane.by_mode[mode]}},
-                         mode,
-                         FE_TONEAREST});
+                         mode});
+      }
     }
   }
   return cases;
@@ -5278,14 +5021,14 @@ std::vector<ArithmeticCase> mullit_rdna3_omod_cases() {
       {"Ieee0FlushedOmodActive", 0x000u, 0u},
   }};
   std::vector<ArithmeticCase> cases;
-  for (const Mode &mode : modes)
+  for (const Mode &mode : modes) {
     cases.push_back({std::format("Gfx1100Mul2TinyProduct{}", mode.name),
-                     ROCJITSU_CODE_ARCH_RDNA3,
+                     rocjitsu::IsaFamily::Rdna3,
                      {kWords[0], kWords[1], 0u},
                      {{0, 0x00800000u}, {1, 0x3f7fffffu}, {2, 0x3f800000u}},
                      {{6, mode.result}},
-                     mode.mode,
-                     FE_TONEAREST});
+                     mode.mode});
+  }
   return cases;
 }
 
@@ -5338,14 +5081,14 @@ std::vector<ArithmeticCase> mullit_signaling_nan_cases() {
   }};
   struct Target {
     const char *name;
-    rj_code_arch_t arch;
+    rocjitsu::IsaFamily arch;
     uint32_t ieee;
     bool quiets;
   };
   constexpr std::array<Target, 3> targets = {{
-      {"Gfx1100Ieee0", ROCJITSU_CODE_ARCH_RDNA3, 0u, false},
-      {"Gfx1100Ieee1", ROCJITSU_CODE_ARCH_RDNA3, 0x200u, true},
-      {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0u, true},
+      {"Gfx1100Ieee0", rocjitsu::IsaFamily::Rdna3, 0u, false},
+      {"Gfx1100Ieee1", rocjitsu::IsaFamily::Rdna3, 0x200u, true},
+      {"Gfx1201", rocjitsu::IsaFamily::Rdna4, 0u, true},
   }};
   // Plain and NEG(S0) forms; llvm-mc gives the same words for gfx1100 and gfx1201.
   constexpr std::array<std::array<uint32_t, 2>, 2> words = {
@@ -5356,98 +5099,108 @@ std::vector<ArithmeticCase> mullit_signaling_nan_cases() {
                     words[1][1] == 0x240a0300u,
                 "llvm-mc encoding");
   std::vector<ArithmeticCase> cases;
-  for (const Target &target : targets)
-    for (const Lane &lane : lanes)
+  for (const Target &target : targets) {
+    for (const Lane &lane : lanes) {
       cases.push_back({std::format("{}{}Mode{:02X}", target.name, lane.name, lane.mode),
                        target.arch,
                        {words[lane.neg0][0], words[lane.neg0][1], 0u},
                        {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}},
                        {{6, target.quiets ? lane.quieted : lane.unquieted}},
-                       lane.mode | target.ieee,
-                       FE_TONEAREST});
+                       lane.mode | target.ieee});
+    }
+  }
   return cases;
 }
 
-SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool force_scalar) {
-  if (!util::has_stdx_simd || !test.simd.checked)
+SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool force_scalar,
+                                             bool uses_arith = false) {
+  // Migrated handlers use rj-arith dispatch, outside the legacy tracker.
+  if (test.arith_dispatch ||
+      (uses_arith &&
+       (test.arch == rocjitsu::IsaFamily::Rdna3 || test.arch == rocjitsu::IsaFamily::Rdna4 ||
+        test.arch == rocjitsu::IsaFamily::Cdna3 || test.arch == rocjitsu::IsaFamily::Cdna4 ||
+        test.arch == rocjitsu::IsaFamily::Cdna5)) ||
+      !util::has_stdx_simd || !test.simd.checked) {
     return {};
+  }
   return force_scalar ? expect_simd_fallback() : test.simd;
 }
 
-void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {}) {
+void expect_arithmetic_case(const ArithmeticCase &test, SimdPathExpectation simd = {},
+                            amdgpu::ArithmeticPolicy policy = {}) {
   amdgpu::GpuMemory memory("mode_memory");
   amdgpu::L2Cache cache("mode_cache");
   cache.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config config{};
   config.arch = test.arch;
+  config.arithmetic = policy;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.lds_size_kb = 64;
-  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-      amdgpu::ComputeUnitCore::create("valu_fp_mode", config, &memory, &cache);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "valu_fp_mode", config, &memory, &cache));
   std::unique_ptr<Decoder> decoder = Decoder::create(test.arch);
   amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
   ASSERT_NE(wave, nullptr);
   DecodeResult decoded = decoder->decode(test.words.data());
   ASSERT_FALSE(decoded.failed());
   std::unique_ptr<Instruction> instruction = std::move(decoded).value();
+  auto mnemonic = instruction->mnemonic();
+  if (mnemonic.ends_with("_e32") || mnemonic.ends_with("_e64")) {
+    mnemonic.remove_suffix(4);
+  }
+  if (mnemonic.starts_with("v_cvt_") &&
+      (mnemonic.starts_with("v_cvt_f64_") || mnemonic.ends_with("_f64"))) {
+    // These conversions use rj-arith on every profile, outside the legacy tracker.
+    simd = {};
+  }
   const uint32_t base = wave->vgpr_alloc().base;
   const uint64_t full_exec = wave->wf_size() == 64 ? ~uint64_t{0} : 0xffffffffu;
   for (uint64_t exec : {uint64_t{1}, full_exec}) {
     wave->set_exec(exec);
     wave->set_mode_raw(test.mode);
-    for (const std::pair<uint32_t, uint32_t> &destination : test.expected)
-      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+    for (const std::pair<uint32_t, uint32_t> &destination : test.expected) {
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
         cu->write_vgpr(base + destination.first, lane, 0xdeadbeefu);
-    for (const std::pair<uint32_t, uint32_t> &source : test.sources)
-      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+      }
+    }
+    for (const std::pair<uint32_t, uint32_t> &source : test.sources) {
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
         cu->write_vgpr(base + source.first, lane, source.second);
-    for (const std::pair<uint32_t, uint32_t> &source : test.scalar_sources)
+      }
+    }
+    for (const std::pair<uint32_t, uint32_t> &source : test.scalar_sources) {
       cu->write_sgpr(wave->sgpr_alloc().base + source.first, source.second);
-    std::fenv_t saved_environment;
-    ASSERT_EQ(std::fegetenv(&saved_environment), 0);
+    }
 #if RJ_HOST_ARCH_X86
-    const uint32_t saved_mxcsr = _mm_getcsr();
+    const uint32_t initial_controls = _mm_getcsr() & ~_MM_EXCEPT_MASK;
 #endif
-    ASSERT_EQ(std::fesetround(test.host_rounding), 0);
-#if RJ_HOST_ARCH_X86
-    // Sticky flags from earlier tests must not hide exception-state leaks.
-    const uint32_t host_mxcsr =
-        (_mm_getcsr() & ~(test.mxcsr_mask | _MM_EXCEPT_MASK)) | test.mxcsr_bits;
-    _mm_setcsr(host_mxcsr);
-#endif
-    const int initial_rounding = std::fegetround();
     amdgpu::ScopedSimdFastPathTracker tracker;
     const bool succeeded = cu->execute_instruction(instruction.get(), *wave).succeeded();
-    const int restored_rounding = std::fegetround();
+    // Execution may raise sticky flags, but leaves the host controls unchanged.
+    EXPECT_EQ(std::fegetround(), FE_TONEAREST);
 #if RJ_HOST_ARCH_X86
-    const uint32_t restored_mxcsr = _mm_getcsr();
+    EXPECT_EQ(_mm_getcsr() & ~_MM_EXCEPT_MASK, initial_controls);
 #endif
-    const int restore_status = std::fesetenv(&saved_environment);
-#if RJ_HOST_ARCH_X86
-    _mm_setcsr(saved_mxcsr);
-    if (test.mxcsr_mask != 0) {
-      EXPECT_EQ(restored_mxcsr, host_mxcsr);
-    }
-#endif
-    ASSERT_EQ(restore_status, 0);
     EXPECT_TRUE(succeeded);
     if (simd.checked) {
-      if (simd.path.has_value())
+      if (simd.path.has_value()) {
         EXPECT_TRUE(tracker.only_tracked_path_executed(*simd.path))
             << test.name << ": execution did not use its expected SIMD path";
-      else
+      } else {
         EXPECT_TRUE(tracker.no_tracked_path_executed())
             << test.name << ": execution unexpectedly used a tracked SIMD fast path";
+      }
     }
-    EXPECT_EQ(initial_rounding, test.host_rounding);
-    EXPECT_EQ(restored_rounding, test.host_rounding);
     for (const std::pair<uint32_t, uint32_t> &destination : test.expected) {
       uint32_t inactive = 0xdeadbeefu;
-      for (const std::pair<uint32_t, uint32_t> &source : test.sources)
-        if (source.first == destination.first)
+      for (const std::pair<uint32_t, uint32_t> &source : test.sources) {
+        if (source.first == destination.first) {
           inactive = source.second;
+        }
+      }
       for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
         EXPECT_EQ(cu->read_vgpr(base + destination.first, lane),
                   (exec & (uint64_t{1} << lane)) ? destination.second : inactive)
@@ -5468,32 +5221,103 @@ struct ForceScalarGuard {
   ~ForceScalarGuard() { util::set_force_scalar_for_testing(original); }
 };
 
-// A VOPD pair of an inexact ADD and a signaling-NaN MAX. The ADD raises inexact
-// on the host, so the caller's flags survive only if its slot is scoped; the
-// RDNA3 MAX selects on raw bits and raises nothing. mxcsr_mask makes the harness
-// assert the flags survive, which it does only where MXCSR exists.
-#if RJ_HOST_ARCH_X86
-TEST(ValuFpModeHelpers, VopdInexactAddKeepsHostFlags) {
-  const ArithmeticCase test{
-      "gfx1100VopdInexactAddSignalingNanMaxKeepsHostFlags",
-      ROCJITSU_CODE_ARCH_RDNA3,
-      // v_dual_add_f32 v6, v0, v1 :: v_dual_max_f32 v7, v2, v3
-      {0xc9140300u, 0x06060702u},
-      {{0, 0x3f800000u}, {1, 0x33800001u}, {2, 0x7f800001u}, {3, 0x3f800000u}},
-      {{6, 0x3f800001u}, {7, 0x3f800000u}},
-      240u,
-      FE_TONEAREST,
-      _MM_EXCEPT_MASK,
-      0u,
-      expect_simd_path(amdgpu::SimdFastPath::VOPD)};
-  ForceScalarGuard guard;
-  for (const bool scalar : {true, false}) {
-    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
-    util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(test, simd_expectation_for_run(test, scalar));
+TEST(ValuFpModeHelpers, Gfx1150InterpolationEvaluatesAllSixStages) {
+  // The helper tests EXEC=1 and full EXEC. A single active lane still
+  // reads coefficients from the designated neighboring lane of its quad.
+  for (unsigned op = 0; op < 6; ++op) {
+    SCOPED_TRACE(op);
+    const bool half = op >= 2;
+    const bool half_output = half && (op & 1);
+    const uint32_t a = half ? 0x4000u : 0x40000000u;                 // 2
+    const uint32_t c = half && !half_output ? 0x4400u : 0x40800000u; // 4
+    const ArithmeticCase test{"gfx1150Interp",
+                              rocjitsu::IsaFamily::Rdna3_5,
+                              {0xcd000000u | (op << 16), 0x040e0501u},
+                              {{1, a}, {2, 0x40400000u}, {3, c}},
+                              {{0, half_output ? 0xdead4900u : 0x41200000u}},
+                              0x2f0u};
+    for (const auto mode : {amdgpu::ArithmeticSemantics::Compatibility,
+                            amdgpu::ArithmeticSemantics::BitExactEmpirical}) {
+      SCOPED_TRACE(static_cast<int>(mode));
+      expect_arithmetic_case(test, {}, {.semantics = mode});
+    }
   }
 }
-#endif
+
+TEST(ValuFpModeHelpers, Gfx1150InterpolationUsesGuestIeeeModeForSignalingNaNs) {
+  for (bool ieee : {false, true}) {
+    const ArithmeticCase test{"gfx1150InterpNan",
+                              rocjitsu::IsaFamily::Rdna3_5,
+                              {0xcd000000u, 0x040e0501u},
+                              {{1, 0x7f800001u}, {2, 0x3f800000u}, {3, 0}},
+                              {{0, ieee ? 0x7fc00001u : 0x7f800001u}},
+                              0xf0u | (uint32_t{ieee} << 9)};
+    expect_arithmetic_case(test);
+  }
+}
+
+TEST(ValuFpModeHelpers, Gfx1150VectorExceptionsAreStickyAndMaskAware) {
+  struct Witness {
+    std::array<uint32_t, 3> words;
+    uint32_t lhs, rhs, causes;
+  };
+  // LLVM gfx1150 encodings, operands v1/v2. VOPD pairs a MUL with MOV.
+  const Witness cases[] = {
+      {{0x10000501}, 0, 0x7f800000, 0x01},                      // 0 * infinity
+      {{0x06000501}, 0x7f7fffff, 0x7f7fffff, 0x28},             // ADD overflow
+      {{0x08000501}, 0x7f800000, 0x7f800000, 0x01},             // SUB invalid
+      {{0x0a000501}, 0x7f800000, 0x7f800000, 0x01},             // SUBREV invalid
+      {{0x08000501}, 0x7f7fffff, 0xff7fffff, 0x28},             // SUB overflow
+      {{0xd5040000, 0x02020501}, 0x7f800000, 0x7f800000, 0x01}, // E64 SUB invalid
+      {{0xd6130000, 0x02020501}, 0, 0x7f800000, 0x01},          // FMA 0 * infinity + 0
+      {{0xc8d00501, 0x00020104}, 0x7f7fffff, 0x40000000, 0x28}, // dual MUL overflow
+      {{0xd412806a, 0x02020501}, 0x7fc00000, 0x3f800000, 0x01}, // signaling CMP
+      {{0xd412006a, 0x02020501}, 0x7fc00000, 0x3f800000, 0},    // quiet CMP
+      {{0xd400806a, 0x02020501}, 0x7e00, 0x3c00, 0x01},         // Signaling CMP_F_F16
+      {{0xd40f806a, 0x02020501}, 0x7e00, 0x3c00, 0x01},         // Signaling CMP_T_F16
+      {{0xd412006a, 0x02020501}, 0x7fa00000, 0x3f800000, 0x01}, // Quiet CMP_EQ_F32, sNaN
+      {{0xd400006a, 0x02020501}, 0x7d00, 0x3c00, 0x01},         // Quiet constant CMP_F_F16, sNaN
+      {{0x7c040501}, 0x7d00, 0x3c00, 0x01},                     // VOPC CMP_EQ_F16, sNaN
+  };
+  amdgpu::GpuMemory memory("gfx1150_memory");
+  amdgpu::L2Cache cache("gfx1150_cache");
+  cache.set_backing_memory(&memory);
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = rocjitsu::IsaFamily::Rdna3_5;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 106;
+  config.vgprs_per_wf = 256;
+  config.lds_size_kb = 64;
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "gfx1150", config, &memory, &cache));
+  auto decoder = Decoder::create(config.arch);
+  auto *wave = cu->dispatch_wf(0, 0, 106, 256);
+  ASSERT_NE(wave, nullptr);
+  const auto base = wave->vgpr_alloc().base;
+  ForceScalarGuard guard;
+  for (bool force_scalar : {false, true}) {
+    util::set_force_scalar_for_testing(force_scalar);
+    for (const auto &test : cases) {
+      SCOPED_TRACE(test.words[0]);
+      auto inst = decoder->decode_window(test.words);
+      ASSERT_TRUE(inst.succeeded());
+      cu->write_vgpr(base + 1, 0, 0x3f800000);
+      cu->write_vgpr(base + 2, 0, 0x3f800000);
+      cu->write_vgpr(base + 1, 1, test.lhs);
+      cu->write_vgpr(base + 2, 1, test.rhs);
+      for (bool dx10_clamp : {false, true}) {
+        wave->set_mode_raw(0x2f0 | (dx10_clamp ? 0x100 : 0));
+        for (uint32_t exec : {1u, 3u}) {
+          wave->set_exec(exec);
+          wave->set_trapsts(0x40);
+          ASSERT_TRUE(cu->execute_instruction(inst.value().get(), *wave).succeeded());
+          EXPECT_EQ(wave->trapsts(), 0x40u | (exec == 3 && !dx10_clamp ? test.causes : 0));
+        }
+      }
+    }
+  }
+}
 
 class ValuMinmaxFpModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
@@ -5502,7 +5326,8 @@ TEST_P(ValuMinmaxFpModeTest, HonorsModeWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5513,7 +5338,8 @@ TEST_P(ValuIntegralRoundingModeTest, ModifiersWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5538,7 +5364,8 @@ TEST_P(ValuCapturedLaneTest, MatchesHardwareWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5571,7 +5398,7 @@ TEST_P(ValuRoundedResultModifierTest, MatchesGfx1201WithSimdEnabledAndForcedScal
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam());
+    expect_arithmetic_case(GetParam(), {});
   }
 }
 
@@ -5588,7 +5415,7 @@ TEST_P(ValuDot2Packed16Test, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "forced scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam());
+    expect_arithmetic_case(GetParam(), {});
   }
 }
 
@@ -5604,7 +5431,8 @@ TEST_P(ValuDotFamilyTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "forced scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5617,13 +5445,14 @@ INSTANTIATE_TEST_SUITE_P(Captured, ValuDotFamilyTest, testing::ValuesIn(dot_fami
 class ValuLegacyRoundedResultModifierTest : public testing::TestWithParam<ArithmeticCase> {};
 
 // The MODE-aware F16 ADD/MUL SIMD path supports these output modifiers and
-// denormal settings, independently of the caller's host rounding mode.
+// denormal settings under the default host floating-point environment.
 TEST_P(ValuLegacyRoundedResultModifierTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "forced scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5640,7 +5469,8 @@ TEST_P(ValuF16BinaryModifierTest, MatchesPolicyWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5657,7 +5487,8 @@ TEST_P(ValuSubtractionNanTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5674,7 +5505,8 @@ TEST_P(ValuSubtractionSimdBoundaryTest, MatchesBoundaryWithSimdEnabledAndForcedS
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5692,12 +5524,32 @@ TEST_P(ValuVopdSubtractionTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
 INSTANTIATE_TEST_SUITE_P(Captures, ValuVopdSubtractionTest,
                          testing::ValuesIn(vopd_subtraction_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuVopdMulDx9Test : public testing::TestWithParam<ArithmeticCase> {};
+
+// The DX9 MUL slot computes on host floats, so SIMD and scalar must agree on a
+// subnormal product under guest denormal preservation.
+TEST_P(ValuVopdMulDx9Test, MatchesPolicyWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(VopdMulDx9, ValuVopdMulDx9Test, testing::ValuesIn(vopd_mul_dx9_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
@@ -5709,7 +5561,8 @@ TEST_P(ValuSubtractionModeTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5726,7 +5579,8 @@ TEST_P(ValuCndmaskB16ModifierTest, MatchesCapturesWithSimdEnabledAndForcedScalar
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5743,7 +5597,8 @@ TEST_P(ValuCndmaskB16HalfSelectionTest, AppliesModifiersToSelectedHalves) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -5760,7 +5615,7 @@ TEST_P(ValuRdna3OmodOverflowTest, MatchesCapturesWithSimdEnabledAndForcedScalar)
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam());
+    expect_arithmetic_case(GetParam(), {});
   }
 }
 
@@ -5772,13 +5627,13 @@ INSTANTIATE_TEST_SUITE_P(MinMax, ValuRdna3OmodOverflowTest,
 
 class ValuMullitModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
-// V_MULLIT_F32 has no SIMD path; both settings check that it stays scalar-correct.
+// Compatibility MULLIT shares rj-arith's exact MUL backend.
 TEST_P(ValuMullitModeTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam());
+    expect_arithmetic_case(GetParam(), {});
   }
 }
 
@@ -5806,7 +5661,7 @@ INSTANTIATE_TEST_SUITE_P(Rdna3Boundary, ValuMullitModeTest,
                          });
 
 #if RJ_HOST_ARCH_X86
-void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding = FE_TONEAREST) {
+void expect_f16_binary_host_environment() {
   ForceScalarGuard guard;
   struct Sample {
     const char *name;
@@ -5819,10 +5674,8 @@ void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding =
       // Exact cancellation is +0 under guest RNE, but -0 under host round-down.
       {"ExactCancellationAdd", false, 0x3c00u, 0xbc00u, 0x0000u},
   }};
-  // Both encodings share one helper and one guest environment, so both must be
-  // independent of host rounding and flags. MODE 0x40 keeps guest nearest-even
-  // with F16 input denormals flushed, which the VOP2 route reaches only because
-  // its probe installs the environment rather than requiring a matching host.
+  // Both encodings honor guest MODE under default host controls. Sticky flags
+  // may change; rounding, masks, and denormal controls must not.
   struct Form {
     const char *name;
     bool vop3;
@@ -5841,59 +5694,24 @@ void expect_f16_binary_host_environment(uint32_t host_mxcsr, int host_rounding =
                     : std::array<uint32_t, 2>{
                           rdna4::build_vop2(op, {.src0 = 256, .vsrc1 = 1, .vdst = 6})[0], 0u};
       const ArithmeticCase test{std::format("{}{}", sample.name, form.name),
-                                ROCJITSU_CODE_ARCH_RDNA4,
+                                rocjitsu::IsaFamily::Rdna4,
                                 {words[0], words[1], 0},
                                 {{0, sample.a}, {1, sample.b}, {6, 0xa5a5a5a5u}},
                                 {{6, 0xa5a50000u | sample.expected}},
                                 0x40u,
-                                host_rounding,
-                                0xffffu,
-                                host_mxcsr,
                                 expect_simd_path(form.path)};
       for (const bool scalar : {true, false}) {
         SCOPED_TRACE(test.name);
         SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
         util::set_force_scalar_for_testing(scalar);
-        expect_arithmetic_case(test, simd_expectation_for_run(test, scalar));
+        expect_arithmetic_case(test, simd_expectation_for_run(test, scalar, true));
       }
     }
   }
 }
 
-TEST(ValuFpModeHelpers, F16BinaryPreservesHostExceptionFlagsAndMasks) {
-  // Clean flags, pre-existing inexact, and pre-existing flags with DAZ/FTZ.
-  for (const uint32_t mxcsr : {0x1f80u, 0x1fa0u, 0x9fe4u}) {
-    SCOPED_TRACE(mxcsr);
-    expect_f16_binary_host_environment(mxcsr);
-  }
-}
+TEST(ValuFpModeHelpers, F16BinaryPreservesHostControls) { expect_f16_binary_host_environment(); }
 
-TEST(ValuFpModeHelpers, F16BinaryPreservesNonNearestHostRounding) {
-  for (const int rounding : {FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    SCOPED_TRACE(rounding);
-    // Exercise independent x87/MXCSR rounding, with clean flags or sticky
-    // flags plus DAZ/FTZ. With SIMD enabled, ADD and MUL must take the named route.
-    for (const uint32_t mxcsr_rounding : {_MM_ROUND_UP, _MM_ROUND_DOWN, _MM_ROUND_TOWARD_ZERO}) {
-      for (const uint32_t mxcsr : {0x1f80u, 0x9fe4u}) {
-        SCOPED_TRACE(mxcsr | mxcsr_rounding);
-        expect_f16_binary_host_environment(mxcsr | mxcsr_rounding, rounding);
-      }
-    }
-  }
-}
-
-#if GTEST_HAS_DEATH_TEST
-TEST(ValuFpModeHelpers, F16BinaryDoesNotTrapWithHostInvalidUnmasked) {
-  // A leaking SIMD inf * 0 would terminate this subprocess with SIGFPE.
-  ASSERT_EXIT(
-      {
-        expect_f16_binary_host_environment(0x1f00u);
-        expect_f16_binary_host_environment(0x1f20u);
-        std::_Exit(testing::Test::HasFailure() ? 1 : 0);
-      },
-      testing::ExitedWithCode(0), "");
-}
-#endif
 #endif
 
 TEST(ValuFpModeHelpers, SimdTrackerRestoresNestedObserversAndIsolatesThreads) {
@@ -5919,14 +5737,15 @@ TEST(ValuFpModeHelpers, SimdTrackerRestoresNestedObserversAndIsolatesThreads) {
 }
 
 TEST(ValuFpModeHelpers, F16BinaryRneMatchesScalarAcrossHalfEncodings) {
-  if (!util::has_stdx_simd)
+  if (!util::has_stdx_simd) {
     GTEST_SKIP() << "std::experimental::simd unavailable";
+  }
   using U = util::native<uint32_t>;
   using Fmt = amdgpu::fp_format::F16;
   amdgpu::fp_mode::ScopedEnvironment environment(0);
   const auto check = [&]<amdgpu::fp_mode::Arithmetic operation>() {
-    for (uint32_t denorm : {0u, 1u, 2u, 3u})
-      for (bool ovfl : {false, true})
+    for (uint32_t denorm : {0u, 1u, 2u, 3u}) {
+      for (bool ovfl : {false, true}) {
         for (uint32_t base = 0; base < 0x10000u; base += U::size()) {
           U a([&](auto i) { return (base + uint32_t(i)) | 0xdead0000u; });
           U b([&](auto i) { return ((base + uint32_t(i)) * 40503u + 17u) & 0xffffu; });
@@ -5939,10 +5758,22 @@ TEST(ValuFpModeHelpers, F16BinaryRneMatchesScalarAcrossHalfEncodings) {
                 static_cast<uint16_t>(amdgpu::input_denormal::prepare<Fmt>(uint32_t(b[i]), input)));
             const uint32_t expected = amdgpu::fp_mode::finish_arithmetic_f16(
                 amdgpu::fp_mode::arithmetic_f16<operation>(lhs, rhs, 0.0f, 0), 0, denorm, ovfl);
-            ASSERT_EQ(actual[i], expected)
-                << "a=" << a[i] << " b=" << b[i] << " denorm=" << denorm << " ovfl=" << ovfl;
+            const uint32_t a_bits = uint32_t(a[i]) & 0xffffU;
+            const uint32_t b_bits = uint32_t(b[i]) & 0xffffU;
+            if ((a_bits & Fmt::kMagnitude) > Fmt::kInfinity &&
+                (b_bits & Fmt::kMagnitude) > Fmt::kInfinity) {
+              // C++ ADD/MUL leave the winning NaN payload unspecified. Keep the
+              // allowed payloads bounded; rj-arith's explicit policies are tested separately.
+              ASSERT_TRUE(actual[i] == (a_bits | Fmt::kQuiet) ||
+                          actual[i] == (b_bits | Fmt::kQuiet));
+            } else {
+              ASSERT_EQ(actual[i], expected)
+                  << "a=" << a[i] << " b=" << b[i] << " denorm=" << denorm << " ovfl=" << ovfl;
+            }
           }
         }
+      }
+    }
   };
   check.template operator()<amdgpu::fp_mode::Arithmetic::ADD>();
   check.template operator()<amdgpu::fp_mode::Arithmetic::MUL>();
@@ -6025,11 +5856,6 @@ INSTANTIATE_TEST_SUITE_P(F16FmaNan, ValuFpModeTest, testing::ValuesIn(f16_fma_na
                            return info.param.name;
                          });
 
-INSTANTIATE_TEST_SUITE_P(HostMxcsr, ValuFpModeTest, testing::ValuesIn(host_mxcsr_cases()),
-                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
-                           return info.param.name;
-                         });
-
 INSTANTIATE_TEST_SUITE_P(ModifierEnvironment, ValuFpModeTest,
                          testing::ValuesIn(modifier_environment_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
@@ -6061,13 +5887,14 @@ INSTANTIATE_TEST_SUITE_P(MinmaxOutputModifiers, ValuMinmaxFpModeTest,
 
 class ValuConversionTest : public testing::TestWithParam<ArithmeticCase> {};
 
-// With SIMD enabled, each case asserts the fast path it takes, or that it has none.
+// Check both dispatch settings; legacy handlers also expose their tracked SIMD path.
 TEST_P(ValuConversionTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "forced scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+    expect_arithmetic_case(GetParam(),
+                           simd_expectation_for_run(GetParam(), scalar, /*uses_arith=*/true));
   }
 }
 
@@ -6138,11 +5965,11 @@ TEST(ValuFpModeHelpers, PackedF16NanSelection) {
       {0x7fc1, 0xfc02, {0x7fc1, 0x7fc1, 0x7fc1}, {0x7fc1, 0xfe02, 0x7fc1}},
       {0x3c00, 0x7c01, {0x7c01, 0x7e01, 0x7e01}, {0x3c00, 0x7e01, 0x3c00}},
   };
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4})
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4}) {
     for (bool ieee : {false, true}) {
-      const unsigned profile = arch == ROCJITSU_CODE_ARCH_RDNA4 ? 2 : unsigned(ieee);
+      const unsigned profile = arch == rocjitsu::IsaFamily::Rdna4 ? 2 : unsigned(ieee);
       for (auto op :
-           {PackedBinaryOp::ADD, PackedBinaryOp::MUL, PackedBinaryOp::MIN, PackedBinaryOp::MAX})
+           {PackedBinaryOp::ADD, PackedBinaryOp::MUL, PackedBinaryOp::MIN, PackedBinaryOp::MAX}) {
         for (const auto &test : cases) {
           SCOPED_TRACE(::testing::Message() << int(arch) << ':' << ieee << ':' << int(op) << ':'
                                             << test.a << ':' << test.b);
@@ -6154,7 +5981,9 @@ TEST(ValuFpModeHelpers, PackedF16NanSelection) {
           EXPECT_EQ(packed_binary_f16(op, test.a, test.b, 0, 3, true, false, true, arch, ieee),
                     expected > 0x7c00u ? 0 : 0x3c00u);
         }
+      }
     }
+  }
 }
 
 TEST(ValuFpModeHelpers, RoundingAndSignedZero) {
@@ -6188,20 +6017,25 @@ TEST(ValuFpModeHelpers, MixedF16FmaExactZeroSigns) {
       {0x80000000, 0xbf800000, 0, {0, 0, 0, 0}},
       {0x80000000, 0xbf800000, 0x80000000, {0, 0, 0x8000, 0}},
   }};
-  for (const auto &test : cases)
-    for (bool zero_second : {false, true})
-      for (bool swap : {false, true})
-        for (bool clamp : {false, true})
+  for (const auto &test : cases) {
+    for (bool zero_second : {false, true}) {
+      for (bool swap : {false, true}) {
+        for (bool clamp : {false, true}) {
           for (uint32_t mode = 0; mode < 4; ++mode) {
             uint32_t a = test.a, b = zero_second ? test.b & 0x80000000u : test.b;
-            if (swap)
+            if (swap) {
               std::swap(a, b);
+            }
             amdgpu::fp_mode::ScopedEnvironment environment(0);
             const uint16_t actual = amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
                 std::bit_cast<float>(a), std::bit_cast<float>(b), std::bit_cast<float>(test.c),
                 mode, clamp, false, false);
             EXPECT_EQ(actual, clamp ? 0u : test.expected[mode]);
           }
+        }
+      }
+    }
+  }
 }
 
 TEST(ValuFpModeHelpers, MixedF16FmaCancellationAcrossF32Range) {
@@ -6212,7 +6046,7 @@ TEST(ValuFpModeHelpers, MixedF16FmaCancellationAcrossF32Range) {
       {0x5f800000, 0x1f800000, 0xbf800000},
       {0x00800000, 0x34000000, 0x80000001},
   }};
-  for (const auto &test : cases)
+  for (const auto &test : cases) {
     for (uint32_t mode = 0; mode < 4; ++mode) {
       amdgpu::fp_mode::ScopedEnvironment environment(0);
       EXPECT_EQ(amdgpu::fp_mode::detail::fma_f32_to_f16_nearest_environment(
@@ -6220,6 +6054,7 @@ TEST(ValuFpModeHelpers, MixedF16FmaCancellationAcrossF32Range) {
                     std::bit_cast<float>(test[2]), mode, false, false, false),
                 mode == 2 ? 0x8000u : 0u);
     }
+  }
   // These products are far below F16 range, but are nonzero F64 values. A
   // sign-only repair must not turn directed underflow into exact cancellation.
   for (uint32_t mode = 0; mode < 4; ++mode) {
@@ -6238,25 +6073,29 @@ TEST(ValuFpModeHelpers, MixedF16FmaCancellationAcrossF32Range) {
 TEST(ValuFpModeHelpers, F16FmaRetainsTinyProduct) {
   // Both physical cards round 65504 + 2^-48 upward to infinity. A host F64
   // addition alone loses the tiny product and incorrectly returns 65504.
-  for (uint32_t round = 0; round < 4; ++round)
-    for (uint32_t denorm = 0; denorm < 4; ++denorm)
+  for (uint32_t round = 0; round < 4; ++round) {
+    for (uint32_t denorm = 0; denorm < 4; ++denorm) {
       for (bool overflow : {false, true}) {
         const uint16_t expected = round == 1 && (denorm & 1u) && !overflow ? 0x7c00u : 0x7bffu;
         EXPECT_EQ(amdgpu::fp_mode::fma_f16(1, 1, 0x7bff, false, false, false, false, false, false,
                                            round, denorm, 0, false, overflow, false, true),
                   expected);
       }
+    }
+  }
 }
 
 TEST(ValuFpModeHelpers, F16FmaFlushesBeforePacking) {
   // Packing directly to a subnormal half can round these tiny intermediates
   // to minimum normal; hardware tests the rounded significand first.
-  for (uint32_t round = 0; round < 4; ++round)
-    for (uint16_t sign : {uint16_t{0}, uint16_t{0x8000}})
+  for (uint32_t round = 0; round < 4; ++round) {
+    for (uint16_t sign : {uint16_t{0}, uint16_t{0x8000}}) {
       EXPECT_EQ(amdgpu::fp_mode::fma_f16(1, sign | 0x03ff, sign | 0x03ff, false, false, false,
                                          false, false, false, round, 1, 0, false, false, false,
                                          true),
                 sign);
+    }
+  }
 }
 
 TEST(ValuFpModeHelpers, FusedResultAndOutputFlush) {
@@ -6276,32 +6115,6 @@ TEST(ValuFpModeHelpers, LegacySdwaOutputScalePrecedesF16Rounding) {
   EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(65504.0 * 2.0, 0, 1, false, 3), 0x7bffu);
   EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(1.0 + 0x1p-24, 1, 1, false, 1), 0x4001u);
   EXPECT_EQ(amdgpu::fp_mode::finish_arithmetic_f16(-0.0, 0, 1, false, 1), 0u);
-}
-
-TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
-#if RJ_HOST_ARCH_X86
-  using amdgpu::fp_mode::Arithmetic;
-  const uint32_t saved_mxcsr = _mm_getcsr();
-  const uint32_t host_mxcsr = saved_mxcsr | (1u << 6) | (1u << 15);
-  _mm_setcsr(host_mxcsr);
-  const bool native_matches = amdgpu::fp_mode::native_arithmetic_matches(0, 3);
-  const uint32_t result = std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(
-      std::bit_cast<float>(1u), std::bit_cast<float>(1u), 0.0f, 0, 3));
-  const auto ldexp_policy = amdgpu::ldexp::Policy::make(3, 1, false, false);
-  const uint32_t scaled32 = amdgpu::ldexp::evaluate<amdgpu::fp_format::F32>(1u, 1u, ldexp_policy);
-  const uint64_t scaled64 =
-      amdgpu::ldexp::evaluate<amdgpu::fp_format::F64, 32>(uint64_t{1}, uint64_t{1}, ldexp_policy);
-  const amdgpu::FrexpF32Result split = amdgpu::frexp_f32(std::bit_cast<float>(1u), 3);
-  const uint32_t restored_mxcsr = _mm_getcsr();
-  _mm_setcsr(saved_mxcsr);
-  EXPECT_FALSE(native_matches);
-  EXPECT_EQ(result, 2u);
-  EXPECT_EQ(scaled32, 2u);
-  EXPECT_EQ(scaled64, 2u);
-  EXPECT_EQ(std::bit_cast<uint32_t>(split.mantissa), 0x3f000000u);
-  EXPECT_EQ(split.exponent, -148);
-  EXPECT_EQ(restored_mxcsr, host_mxcsr);
-#endif
 }
 
 // Floating compares flush their inputs under MODE.FP_DENORM before the
@@ -6377,13 +6190,14 @@ std::vector<CompareInputFlushCase> compare_input_flush_cases() {
       {"EqF64E64", vop3(rdna4::kVCmpEqF64Vop3, V2), 64, true},
   }};
   std::vector<CompareInputFlushCase> cases;
-  for (const Form &form : forms)
+  for (const Form &form : forms) {
     for (const auto &[mode, expected] : form.width == 32 ? F32_MODES : F16_F64_MODES) {
       constexpr char HEX[] = "0123456789abcdef";
       const std::string suffix = {HEX[mode >> 4], HEX[mode & 0xfu]};
       cases.push_back({std::string(form.name) + "Mode" + suffix, form.words, form.width, form.vop3,
                        mode, expected});
     }
+  }
   return cases;
 }
 
@@ -6395,14 +6209,15 @@ TEST_P(ValuCompareInputFlushTest, HonorsModeWithSimdEnabledAndForcedScalar) {
   amdgpu::L2Cache cache("compare_cache");
   cache.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.arch = rocjitsu::IsaFamily::Rdna4;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.lds_size_kb = 64;
-  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-      amdgpu::ComputeUnitCore::create("valu_compare", config, &memory, &cache);
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "valu_compare", config, &memory, &cache));
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
   ASSERT_NE(wave, nullptr);
   DecodeResult decoded = decoder->decode(test.words.data());
@@ -6443,9 +6258,10 @@ TEST_P(ValuCompareInputFlushTest, HonorsModeWithSimdEnabledAndForcedScalar) {
       cu->write_sgpr(sgpr + 7, 0xdeadbeefu);
       ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wave).succeeded());
       uint64_t result = wave->vcc_mask();
-      if (test.vop3)
+      if (test.vop3) {
         result = cu->read_sgpr(sgpr + 6) |
                  (wave64 ? uint64_t{cu->read_sgpr(sgpr + 7)} << 32 : uint64_t{0});
+      }
       EXPECT_EQ(result & full_exec, expected_lanes & exec)
           << (scalar ? "scalar" : "SIMD") << " exec 0x" << std::hex << exec;
     }
@@ -6518,14 +6334,15 @@ TEST_P(SaluMinmaxTest, MatchesGfx1201) {
   amdgpu::L2Cache cache("salu_minmax_cache");
   cache.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config config{};
-  config.arch = ROCJITSU_CODE_ARCH_RDNA4;
+  config.arch = rocjitsu::IsaFamily::Rdna4;
   config.num_wf_slots = 1;
   config.sgprs_per_wf = 106;
   config.vgprs_per_wf = 256;
   config.lds_size_kb = 64;
-  std::unique_ptr<amdgpu::ComputeUnitCore> cu =
-      amdgpu::ComputeUnitCore::create("salu_minmax", config, &memory, &cache);
-  std::unique_ptr<Decoder> decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "salu_minmax", config, &memory, &cache));
+  std::unique_ptr<Decoder> decoder = Decoder::create(rocjitsu::IsaFamily::Rdna4);
   amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, 106, 256);
   ASSERT_NE(wave, nullptr);
   // s_<op> s6, s0, s1

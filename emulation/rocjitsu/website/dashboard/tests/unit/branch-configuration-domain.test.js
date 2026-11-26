@@ -1,5 +1,5 @@
-import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { themed } from '../helpers/themed.js';
 import { expect, test } from 'vitest';
 import BranchRunsView from '../../src/components/views/BranchRunsView.jsx';
 import { readDashboardRoute, buildDashboardUrl } from '../../src/hooks/useDashboardState.js';
@@ -17,7 +17,7 @@ function publication({ onlyOther = false } = {}) {
 
 function render(data, href = 'https://example.test/?view=branch') {
   const route = readDashboardRoute(href);
-  return renderToStaticMarkup(createElement(BranchRunsView, {
+  return renderToStaticMarkup(themed(BranchRunsView, {
     data, state: { ...route, setBranchSelection() { throw new Error('Rendering must not write route defaults'); } },
     onOpenComparison() {},
   }));

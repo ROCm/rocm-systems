@@ -168,11 +168,16 @@ def test_publication_only_rerun_keeps_benchmark_artifact_and_identity(
     )
 
 
-def test_enrichment_preserves_raw_and_types_optional_metadata(publication):
+@pytest.mark.parametrize(
+    'event,trigger', [('workflow_dispatch', 'manual'), ('pull_request', 'auto')]
+)
+def test_enrichment_preserves_raw_and_types_optional_metadata(
+    publication, event, trigger
+):
     ctx = publication
     ctx.env.update(
         BENCHMARK_BRANCH='feature/quoted',
-        GITHUB_EVENT_NAME='workflow_dispatch',
+        GITHUB_EVENT_NAME=event,
         SOURCE_BASE_BRANCH='develop',
         SOURCE_BASE_SHA='b' * 40,
         SOURCE_PULL_REQUEST_NUMBER='42',
@@ -187,7 +192,7 @@ def test_enrichment_preserves_raw_and_types_optional_metadata(publication):
     assert candidate['publication'] == {
         'id': 'github-123-attempt-1',
         'machine_label': 'fictional-machine',
-        'trigger': 'manual',
+        'trigger': trigger,
         'workflow_commit_sha': ctx.env['WORKFLOW_COMMIT_SHA'],
         'tensile_commit_sha': 'd' * 40,
         'source': {
@@ -197,6 +202,33 @@ def test_enrichment_preserves_raw_and_types_optional_metadata(publication):
             'pull_request': {'number': 42, 'url': 'https://example.invalid/pull/42'},
         },
     }
+
+
+def test_workflow_revision_uses_jq_and_preserves_invalid_result(publication):
+    ctx = publication
+    steps = yaml.safe_load(WORKFLOW.read_text())['jobs']['benchmark']['steps']
+    record = next(s for s in steps if s['name'] == 'Record result workflow revision')
+    dependencies = next(s for s in steps if s['name'] == 'Install base dependencies')
+    assert 'jq' in dependencies['run'].split()
+    assert 'jq --arg' in record['run']
+    result_dir = Path(ctx.env['RESULTS_DOWNLOAD_DIR'])
+    result_file = result_dir / 'run.json'
+    original = b'{"publication":'
+    result_file.write_bytes(original)
+    result = subprocess.run(
+        ['bash', '-e', '-o', 'pipefail', '-c', record['run']],
+        env={
+            **ctx.env,
+            'ROCJITSU_RESULT_DIR': str(result_dir),
+            'GITHUB_SHA': ctx.env['WORKFLOW_COMMIT_SHA'],
+        },
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode != 0
+    assert result_file.read_bytes() == original
+    assert not list(result_dir.glob('run.json.*'))
 
 
 @pytest.mark.parametrize('status', ['completed', 'failed', 'missing'])

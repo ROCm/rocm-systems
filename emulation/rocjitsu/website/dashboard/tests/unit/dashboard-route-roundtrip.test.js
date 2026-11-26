@@ -1,6 +1,7 @@
 import { fixtureRunPath } from '../fixtures/runPath.js';
 import { describe, expect, it } from 'vitest';
 import * as dashboardState from '../../src/hooks/useDashboardState.js';
+import { DEFAULT_BENCHMARK_RANGE, DEFAULT_OVERVIEW_RANGE, historyRanges } from '../../src/config/historyRanges.js';
 import { adaptPublishedDashboardData } from '../../src/data/dashboardDataAdapter.js';
 import { createMaintainedPublication } from '../fixtures/maintainedDataset.js';
 
@@ -111,4 +112,11 @@ describe('static-hosted dashboard routes', () => {
     expect(route.tab).toBe('overview');
     expect(route.routeError).toContain('URL');
   });
+});
+
+it('each page default range is one of the public range choices', () => {
+  const ids = historyRanges.map(({ id }) => id);
+  expect(ids).toContain(DEFAULT_OVERVIEW_RANGE);
+  expect(ids).toContain(DEFAULT_BENCHMARK_RANGE);
+  expect([DEFAULT_OVERVIEW_RANGE, DEFAULT_BENCHMARK_RANGE]).toEqual(['ALL', '1W']);
 });

@@ -1,14 +1,21 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+/// @file memory_backing.cpp
+/// @brief Client for shared memory backing, exported tokens, and metadata files.
+
 #include "rocjitsu/kmd/linux/memory_backing.h"
 
 #include "rocjitsu/kmd/linux/libc_passthrough.h"
+#include "rocjitsu/kmd/linux/memory_keeper.h"
+#include "util/host_path.h"
 #include "util/log.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <climits>
 #include <csignal>
 #include <cstdio>
@@ -21,18 +28,15 @@
 #include <mutex>
 #include <new>
 #include <poll.h>
-#include <pthread.h>
 #include <sched.h>
 #include <string>
-#include <sys/epoll.h>
-#include <sys/eventfd.h>
 #include <sys/mman.h>
 #include <sys/prctl.h>
-#include <sys/resource.h>
 #include <sys/shm.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/wait.h>
+#include <sys/xattr.h>
 #include <unistd.h>
 
 #if defined(__SANITIZE_ADDRESS__)
@@ -50,38 +54,7 @@
 namespace rocjitsu {
 namespace {
 
-// The standalone CLI/tests may call these before the interposer resolves its
-// table. Prefer its resolved entry point when present, otherwise use libc.
-template <typename Function, typename Fallback, typename... Args>
-decltype(auto) host_call(Function resolved, Fallback fallback, Args... args) {
-  return (resolved ? resolved : fallback)(args...);
-}
-
-void close_fd(int fd) {
-  if (fd >= 0)
-    host_call(libc_passthrough().close, ::close, fd);
-}
-
-constexpr uint64_t kMagic = 0x314d41525553544a;
-struct Identity {
-  uint64_t magic = kMagic;
-  uint64_t size = 0;
-  uint64_t object = 0;
-  uint64_t token = 0;
-  uint64_t ipc_namespace = 0;
-  int32_t shmid = -1;
-  int32_t mode = O_RDWR;
-  bool device_backing = false;
-};
-
-uint64_t ipc_namespace() {
-  struct stat info {};
-  if (host_call(libc_passthrough().stat, ::stat, "/proc/self/ns/ipc", &info) != 0)
-    return 0;
-  return info.st_ino;
-}
-
-bool identify(int fd, Identity &identity) {
+bool identify(int fd, kmd::KeeperTokenIdentity &identity) {
   const int saved_errno = errno;
   sockaddr_un address{};
   socklen_t length = sizeof(address);
@@ -91,7 +64,7 @@ bool identify(int fd, Identity &identity) {
                address.sun_family == AF_UNIX && address.sun_path[0] == 0;
   if (found) {
     std::memcpy(&identity, address.sun_path + 1, sizeof(identity));
-    found = identity.magic == kMagic && identity.size > 0 && identity.shmid >= 0 &&
+    found = identity.magic == kmd::kKeeperTokenMagic && identity.size > 0 && identity.shmid >= -1 &&
             (identity.mode == O_RDONLY || identity.mode == O_RDWR);
   }
   errno = saved_errno;
@@ -106,8 +79,9 @@ int check_token_liveness(int fd) {
   do {
     result = host_call(libc_passthrough().poll, ::poll, &peer, 1, 0);
   } while (result < 0 && errno == EINTR);
-  if (result < 0)
+  if (result < 0) {
     return -1;
+  }
   if (peer.revents & POLLNVAL) {
     errno = EBADF;
     return -1;
@@ -119,514 +93,114 @@ int check_token_liveness(int fd) {
   return 0;
 }
 
-enum class Operation : uint32_t { Backing, SizeFile, PreallocatedBacking, TokenBacking };
-
-struct Request {
-  uint64_t size;
-  int32_t mode;
-  Operation operation;
-  char name[64];
-};
-
-int send_descriptor(int socket, const void *data, size_t size, int fd) {
-  iovec buffer{const_cast<void *>(data), size};
-  alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int))]{};
-  msghdr message{};
-  message.msg_iov = &buffer;
-  message.msg_iovlen = 1;
-  if (fd >= 0) {
-    message.msg_control = control;
-    message.msg_controllen = sizeof(control);
-    auto *header = CMSG_FIRSTHDR(&message);
-    header->cmsg_level = SOL_SOCKET;
-    header->cmsg_type = SCM_RIGHTS;
-    header->cmsg_len = CMSG_LEN(sizeof(fd));
-    std::memcpy(CMSG_DATA(header), &fd, sizeof(fd));
+int receive_result(int socket, bool expect_descriptor, bool *disconnected) {
+  int descriptor = -1;
+  int response = EIO;
+  const long received =
+      kmd::receive_keeper_descriptor(socket, &response, sizeof(response), descriptor);
+  if (disconnected &&
+      (received == 0 || (received < 0 && (errno == EPIPE || errno == ECONNRESET)))) {
+    *disconnected = true;
   }
-  long sent;
-  do {
-    sent = host_call(libc_passthrough().sendmsg, ::sendmsg, socket, &message,
-                     MSG_NOSIGNAL | MSG_DONTWAIT);
-  } while (sent < 0 && errno == EINTR);
-  if (sent == static_cast<long>(size))
-    return 0;
-  if (sent >= 0)
-    errno = EIO;
-  return -1;
-}
-
-long receive_descriptor(int socket, void *data, size_t size, int &fd, int flags = 0) {
-  iovec buffer{data, size};
-  alignas(cmsghdr) char control[CMSG_SPACE(4 * sizeof(int))]{};
-  msghdr message{};
-  message.msg_iov = &buffer;
-  message.msg_iovlen = 1;
-  message.msg_control = control;
-  message.msg_controllen = sizeof(control);
-  long received;
-  do {
-    received = host_call(libc_passthrough().recvmsg, ::recvmsg, socket, &message,
-                         flags | MSG_CMSG_CLOEXEC);
-  } while (received < 0 && errno == EINTR);
-  fd = -1;
-  unsigned descriptors = 0;
-  if (received <= 0)
-    return received;
-  for (auto *header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
-    if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS)
-      continue;
-    const auto count = (header->cmsg_len - CMSG_LEN(0)) / sizeof(int);
-    for (size_t index = 0; index < count; ++index) {
-      int incoming;
-      std::memcpy(&incoming, CMSG_DATA(header) + index * sizeof(int), sizeof(incoming));
-      if (++descriptors == 1)
-        fd = incoming;
-      else
-        close_fd(incoming);
-    }
-  }
-  if (descriptors > 1 || (message.msg_flags & (MSG_TRUNC | MSG_CTRUNC))) {
-    close_fd(fd);
-    fd = -1;
-    errno = EPROTO;
+  const int error = received < 0 ? errno : (received == sizeof(response) ? response : EIO);
+  if (error || (descriptor >= 0) != expect_descriptor) {
+    host_close_fd(descriptor);
+    errno = error ? error : EIO;
     return -1;
   }
-  return received;
+  return expect_descriptor ? descriptor : 0;
 }
 
-struct Region {
-  Identity identity;
-  void *mapping;
-  size_t tokens;
-};
-
-struct Token {
-  Region *region;
-  int socket;
-};
-
-template <typename T> T *allocate_record() {
-  auto result = host_call(libc_passthrough().mmap, ::mmap, nullptr, sizeof(T),
-                          PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  if (result == MAP_FAILED)
-    return nullptr;
-  return new (reinterpret_cast<void *>(result)) T{};
-}
-
-template <typename T> void free_record(T *record) {
-  host_call(libc_passthrough().munmap, ::munmap, record, sizeof(T));
-}
-
-void release_region(Region *region) {
-  host_call(libc_passthrough().shmdt, ::shmdt, region->mapping);
-  free_record(region);
-}
-
-Region *create_region(size_t size, bool device_backing) {
-  auto *region = allocate_record<Region>();
-  if (!region)
-    return nullptr;
-  int shmid = -1;
-  for (uint32_t slot = 0; slot < kmd::kDeviceTokenSlotCount; ++slot) {
-    const key_t key =
-        device_backing ? static_cast<key_t>(kmd::kDeviceTokenKeyPrefix | slot) : IPC_PRIVATE;
-    shmid = host_call(libc_passthrough().shmget, ::shmget, key, size,
-                      IPC_CREAT | IPC_EXCL | SHM_NORESERVE | 0600);
-    if (shmid >= 0 || errno != EEXIST || !device_backing)
-      break;
-  }
-  // The marker is best effort; namespace-wide key contention must not reject
-  // an allocation when anonymous shared-memory capacity is still available.
-  if (device_backing && shmid < 0 && errno == EEXIST)
-    shmid = host_call(libc_passthrough().shmget, ::shmget, IPC_PRIVATE, size,
-                      IPC_CREAT | IPC_EXCL | SHM_NORESERVE | 0600);
-  if (shmid < 0) {
-    const int error = errno;
-    free_record(region);
-    errno = error;
-    return nullptr;
-  }
-  region->identity.size = size;
-  region->identity.device_backing = device_backing;
-  region->identity.ipc_namespace = ipc_namespace();
-  region->identity.shmid = shmid;
-  region->mapping =
-      reinterpret_cast<void *>(host_call(libc_passthrough().shmat, ::shmat, shmid, nullptr, 0));
-  const int attach_error = errno;
-  // After IPC_RMID the keeper attachment and client mappings own the segment.
-  // A keeper killed between shmget and IPC_RMID can still leave a named segment.
-  const int removed = host_call(libc_passthrough().shmctl, ::shmctl, shmid, IPC_RMID, nullptr);
-  if (removed != 0 && region->mapping != reinterpret_cast<void *>(-1)) {
-    const int error = errno;
-    release_region(region);
-    errno = error;
-    return nullptr;
-  }
-  if (region->mapping == reinterpret_cast<void *>(-1)) {
-    free_record(region);
-    errno = attach_error;
-    return nullptr;
-  }
-  long random_bytes;
-  do {
-    random_bytes = host_call(libc_passthrough().getrandom, ::getrandom, &region->identity.object,
-                             sizeof(uint64_t), 0);
-  } while (random_bytes < 0 && errno == EINTR);
-  if (random_bytes != sizeof(uint64_t)) {
-    const int error = random_bytes < 0 ? errno : EIO;
-    release_region(region);
-    errno = error;
-    return nullptr;
-  }
-  return region;
-}
-
-// The keeper has its own file limit. Prefer ordinary exportable files when
-// that limit permits; unlike the application, it never runs application code
-// that can lower the limit concurrently with sizing a file. An inherited hard
-// limit is handled by shared RAM below, without changing application limits.
-int create_file(size_t size, bool preallocate, const char *name) {
-  rlimit limit{};
-  if (host_call(libc_passthrough().prlimit, ::prlimit, 0, RLIMIT_FSIZE, nullptr, &limit) != 0)
-    return -1;
-  if (size > limit.rlim_cur) {
-    errno = EFBIG;
-    return -1;
-  }
-  const int fd = host_call(libc_passthrough().memfd_create, ::memfd_create, name,
-                           MFD_CLOEXEC | MFD_ALLOW_SEALING);
-  if (fd < 0)
-    return -1;
-  if (host_call(libc_passthrough().ftruncate, ::ftruncate, fd, size) != 0 ||
-      host_call(libc_passthrough().fcntl, ::fcntl, fd, F_ADD_SEALS,
-                F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL) != 0) {
-    const int error = errno;
-    close_fd(fd);
-    errno = error;
-    return -1;
-  }
-  if (preallocate)
-    host_call(libc_passthrough().fallocate, ::fallocate, fd, 0, 0, size);
-  return fd;
-}
-
-int create_token(int epoll, Region *region, int mode, uint64_t serial) {
-  auto *token = allocate_record<Token>();
-  if (!token)
-    return -1;
-  int sockets[2];
-  if (host_call(libc_passthrough().socketpair, ::socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC,
-                0, sockets) != 0) {
-    const int error = errno;
-    free_record(token);
-    errno = error;
-    return -1;
-  }
-  Identity identity = region->identity;
-  identity.mode = mode;
-  identity.token = serial;
-  sockaddr_un address{};
-  address.sun_family = AF_UNIX;
-  std::memcpy(address.sun_path + 1, &identity, sizeof(identity));
-  token->socket = sockets[0];
-  token->region = region;
-  epoll_event event{};
-  event.events = EPOLLIN | EPOLLRDHUP;
-  event.data.ptr = token;
-  if (host_call(libc_passthrough().bind, ::bind, sockets[1],
-                reinterpret_cast<const sockaddr *>(&address),
-                offsetof(sockaddr_un, sun_path) + 1 + sizeof(identity)) != 0 ||
-      host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_ADD, sockets[0],
-                &event) != 0) {
-    const int error = errno;
-    close_fd(sockets[0]);
-    close_fd(sockets[1]);
-    free_record(token);
-    errno = error;
-    return -1;
-  }
-  ++region->tokens;
-  return sockets[1];
-}
-
-struct LeaseWatch {
-  int file;
-  int event;
-};
-
-void *watch_lease(void *argument) {
-  const auto watch = *static_cast<const LeaseWatch *>(argument);
-  struct flock lock {};
-  lock.l_type = F_WRLCK;
-  lock.l_whence = SEEK_SET;
-  // The owner's non-inherited mapping retains a different open-file description.
-  // Unmapping it, including on exec or exit, releases its lock.
-  while (host_call(libc_passthrough().fcntl, ::fcntl, watch.file, F_OFD_SETLKW, &lock) < 0 &&
-         errno == EINTR) {
-  }
-  const uint64_t ready = 1;
-  host_call(libc_passthrough().write, ::write, watch.event, &ready, sizeof(ready));
-  return nullptr;
-}
-
-// Runs in a fresh executable, with no inherited application mappings or locks.
-[[noreturn]] void keep_regions(int listener, int lease, int startup, pid_t owner) {
-  host_call(libc_passthrough().prctl, ::prctl, PR_SET_NAME, "rj-memory", 0L, 0L, 0L);
-  // Avoid invoking application handlers in the keeper. The kernel closes its
-  // sockets and drops its marked-for-removal attachments on termination.
-  struct sigaction action {};
-  action.sa_handler = SIG_DFL;
-  sigemptyset(&action.sa_mask);
-  for (int signal = 1; signal < NSIG; ++signal)
-    if (signal != SIGKILL && signal != SIGSTOP)
-      sigaction(signal, &action, nullptr);
-  // This process only sizes internal backing files. Ignore its own size-limit
-  // signal so even an external prlimit racing create_file falls back to RAM.
-  action.sa_handler = SIG_IGN;
-  sigaction(SIGXFSZ, &action, nullptr);
-  sigset_t mask;
-  sigemptyset(&mask);
-  sigprocmask(SIG_SETMASK, &mask, nullptr);
-
-  // Only the helper changes its limits. A low application soft limit need not
-  // constrain metadata files or the number of simultaneously retained tokens.
-  for (const auto resource : {RLIMIT_FSIZE, RLIMIT_NOFILE}) {
-    rlimit limit{};
-    if (host_call(libc_passthrough().prlimit, ::prlimit, 0, resource, nullptr, &limit) != 0)
-      host_call(libc_passthrough().exit_immediately, ::_exit, 1);
-    limit.rlim_cur = limit.rlim_max;
-    if (host_call(libc_passthrough().prlimit, ::prlimit, 0, resource, &limit, nullptr) != 0)
-      host_call(libc_passthrough().exit_immediately, ::_exit, 1);
-  }
-
-  const int parent = host_pidfd_open(owner, 0);
-  const int epoll = host_call(libc_passthrough().epoll_create1, ::epoll_create1, EPOLL_CLOEXEC);
-  const int lease_eventfd = host_call(libc_passthrough().eventfd, ::eventfd, 0, EFD_CLOEXEC);
-  Token listener_event{}, parent_event{}, lease_event{};
-  epoll_event event{};
-  event.events = EPOLLIN;
-  event.data.ptr = &listener_event;
-  if (parent < 0 || epoll < 0 || lease_eventfd < 0 ||
-      host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_ADD, listener,
-                &event) != 0)
-    host_call(libc_passthrough().exit_immediately, ::_exit, 1);
-  event.data.ptr = &parent_event;
-  if (host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_ADD, parent, &event) !=
-      0)
-    host_call(libc_passthrough().exit_immediately, ::_exit, 1);
-  event.data.ptr = &lease_event;
-  if (host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_ADD, lease_eventfd,
-                &event) != 0)
-    host_call(libc_passthrough().exit_immediately, ::_exit, 1);
-  LeaseWatch watch{lease, lease_eventfd};
-  pthread_t watcher;
-  const int started = pthread_create(&watcher, nullptr, watch_lease, &watch);
-  if (started != 0) {
-    const int error = -started;
-    send_descriptor(startup, &error, sizeof(error), -1);
-    host_call(libc_passthrough().exit_immediately, ::_exit, 1);
-  }
-  pthread_detach(watcher);
-  const int ready = getpid();
-  if (send_descriptor(startup, &ready, sizeof(ready), -1) != 0)
-    host_call(libc_passthrough().exit_immediately, ::_exit, 1);
-  close_fd(startup);
-  size_t tokens = 0;
-  uint64_t serial = 0;
-  auto retire = [&](Token *token) {
-    host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_DEL, token->socket,
-              nullptr);
-    close_fd(token->socket);
-    if (token->region) {
-      if (--token->region->tokens == 0)
-        release_region(token->region);
-      --tokens;
-    }
-    free_record(token);
-  };
-  bool owner_alive = true;
-  while (owner_alive || tokens != 0) {
-    epoll_event events[32];
-    const int count = host_call(libc_passthrough().epoll_wait, ::epoll_wait, epoll, events, 32, -1);
-    if (count < 0) {
-      if (errno == EINTR)
-        continue;
-      break;
-    }
-    for (int index = 0; index < count; ++index) {
-      auto *token = static_cast<Token *>(events[index].data.ptr);
-      if (token == &parent_event || token == &lease_event) {
-        if (!owner_alive)
-          continue;
-        owner_alive = false;
-        host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_DEL, parent, nullptr);
-        host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_DEL, listener,
-                  nullptr);
-        host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_DEL, lease_eventfd,
-                  nullptr);
-        close_fd(parent);
-        close_fd(listener);
-        continue;
-      }
-      if (token == &listener_event) {
-        if (!owner_alive)
-          continue;
-        const int socket = host_call(libc_passthrough().accept4, ::accept4, listener, nullptr,
-                                     nullptr, SOCK_CLOEXEC);
-        if (socket < 0)
-          continue;
-        ucred peer{};
-        socklen_t peer_size = sizeof(peer);
-        if (host_call(libc_passthrough().getsockopt, ::getsockopt, socket, SOL_SOCKET, SO_PEERCRED,
-                      &peer, &peer_size) != 0 ||
-            peer.pid != owner || peer.uid != geteuid() || peer.gid != getegid()) {
-          close_fd(socket);
-          continue;
-        }
-        auto *connection = allocate_record<Token>();
-        if (!connection) {
-          close_fd(socket);
-          continue;
-        }
-        connection->socket = socket;
-        event.events = EPOLLIN | EPOLLRDHUP;
-        event.data.ptr = connection;
-        if (host_call(libc_passthrough().epoll_ctl, ::epoll_ctl, epoll, EPOLL_CTL_ADD, socket,
-                      &event) != 0) {
-          close_fd(socket);
-          free_record(connection);
-        }
-        continue;
-      }
-      const int socket = token->socket;
-      Request request{};
-      int reply = -1;
-      const long received =
-          receive_descriptor(socket, &request, sizeof(request), reply, MSG_DONTWAIT);
-      if (received == 0 || (received < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
-        retire(token);
-        continue;
-      }
-      if (received != sizeof(request) || reply < 0) {
-        close_fd(reply);
-        continue;
-      }
-      int result = EINVAL;
-      int descriptor = -1;
-      if (!token->region && request.operation == Operation::SizeFile) {
-        char byte = 0;
-        if (receive_descriptor(reply, &byte, 1, descriptor, MSG_DONTWAIT) == 1 && descriptor >= 0)
-          result =
-              host_call(libc_passthrough().ftruncate, ::ftruncate, descriptor, request.size) == 0
-                  ? 0
-                  : errno;
-      } else if ((request.operation == Operation::Backing ||
-                  request.operation == Operation::PreallocatedBacking ||
-                  request.operation == Operation::TokenBacking) &&
-                 (request.mode == O_RDONLY || request.mode == O_RDWR) &&
-                 (token->region || (request.size && request.size <= SIZE_MAX))) {
-        if (!token->region) {
-          if (request.operation == Operation::TokenBacking) {
-            result = EFBIG;
-          } else {
-            descriptor = create_file(
-                request.size, request.operation == Operation::PreallocatedBacking, request.name);
-            result = descriptor >= 0 ? 0 : errno;
-          }
-        }
-        if (token->region || result == EFBIG) {
-          Region *region =
-              token->region
-                  ? token->region
-                  : create_region(
-                        request.size,
-                        std::string_view(request.name).starts_with(kmd::kDeviceBackingNamePrefix));
-          if (region) {
-            descriptor = create_token(epoll, region, request.mode, ++serial);
-            result = descriptor >= 0 ? 0 : errno;
-            if (descriptor >= 0)
-              ++tokens;
-            else if (!token->region)
-              release_region(region);
-          } else {
-            result = errno;
-          }
-        }
-      }
-      send_descriptor(reply, &result, sizeof(result), descriptor);
-      close_fd(descriptor);
-      close_fd(reply);
-      if (!token->region)
-        retire(token);
-    }
-  }
-  host_call(libc_passthrough().exit_immediately, ::_exit, 0);
-  __builtin_unreachable();
-}
-
-int request_backing(int socket, size_t size, int mode, int sized_file = -1,
-                    bool *disconnected = nullptr, Operation operation = Operation::Backing,
-                    const char *name = kMemoryBackingDefaultName) {
+int request_reopen(int socket, int mode,
+                   kmd::KeeperOperation operation = kmd::KeeperOperation::Backing) {
   int reply[2];
   if (host_call(libc_passthrough().socketpair, ::socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC,
-                0, reply) != 0)
+                0, reply) != 0) {
     return -1;
-  Request request{size, mode, sized_file >= 0 ? Operation::SizeFile : operation, {}};
-  std::snprintf(request.name, sizeof(request.name), "%s", name);
-  int result = 0;
-  if (sized_file >= 0) {
-    const char byte = 0;
-    result = send_descriptor(reply[0], &byte, 1, sized_file);
   }
-  if (result == 0)
-    result = send_descriptor(socket, &request, sizeof(request), reply[1]);
+  kmd::KeeperRequest request{0, mode, operation, {}};
+  const int result = kmd::send_keeper_descriptor(socket, &request, sizeof(request), reply[1]);
   int error = result == 0 ? 0 : errno;
-  if (disconnected && (error == EPIPE || error == ECONNRESET))
-    *disconnected = true;
-  close_fd(reply[1]);
+  host_close_fd(reply[1]);
   int descriptor = -1;
   if (result == 0) {
-    int response = EIO;
-    const long received = receive_descriptor(reply[0], &response, sizeof(response), descriptor);
-    if (disconnected &&
-        (received == 0 || (received < 0 && (errno == EPIPE || errno == ECONNRESET))))
-      *disconnected = true;
-    error = received < 0 ? errno : (received == sizeof(response) ? response : EIO);
-    if (error == 0 && descriptor < 0)
-      error = EIO;
+    descriptor = receive_result(reply[0], true, nullptr);
+    error = descriptor < 0 ? errno : 0;
   }
-  close_fd(reply[0]);
+  host_close_fd(reply[0]);
   if (error) {
-    close_fd(descriptor);
+    host_close_fd(descriptor);
     errno = error;
     return -1;
   }
   return descriptor;
 }
 
+int request_allocation_flags(int socket, kmd::KeeperOperation operation, uint32_t *flags,
+                             bool *present) {
+  int reply[2];
+  if (host_call(libc_passthrough().socketpair, ::socketpair, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC,
+                0, reply) != 0) {
+    return -1;
+  }
+  kmd::KeeperRequest request{};
+  request.operation = operation;
+  request.size = operation == kmd::KeeperOperation::SetAllocationFlags ? *flags : 0;
+  const int sent = kmd::send_keeper_descriptor(socket, &request, sizeof(request), reply[1]);
+  const int send_error = errno;
+  host_close_fd(reply[1]);
+  if (sent != 0) {
+    host_close_fd(reply[0]);
+    errno = send_error;
+    return -1;
+  }
+  kmd::KeeperAllocationFlagsReply response{};
+  int unexpected_fd = -1;
+  const long received =
+      kmd::receive_keeper_descriptor(reply[0], &response, sizeof(response), unexpected_fd);
+  const int receive_error = errno;
+  host_close_fd(unexpected_fd);
+  host_close_fd(reply[0]);
+  if (received != sizeof(response) || unexpected_fd >= 0 || response.error != 0) {
+    errno = received < 0 ? receive_error : response.error ? response.error : EPROTO;
+    return -1;
+  }
+  if (response.present > 1) {
+    errno = EPROTO;
+    return -1;
+  }
+  *flags = response.flags;
+  *present = response.present != 0;
+  return 0;
+}
+
+struct AllocationFlagsXattr {
+  uint32_t version = 1;
+  uint32_t flags = 0;
+};
+
 std::string keeper_path() {
   Dl_info info{};
   if (dladdr(reinterpret_cast<void *>(&create_memory_backing), &info) && info.dli_fname) {
-    std::error_code error;
-    const auto library = std::filesystem::canonical(info.dli_fname, error);
-    if (!error) {
+    const std::filesystem::path library = util::canonical_host_path(info.dli_fname);
+    if (!library.empty()) {
+      const std::filesystem::path library_dir = library.parent_path();
       // The same object is linked into the interposer, CLI, and unit tests.
       // Resolve each supported installed layout relative to that object.
       for (const char *relative : {RJ_MEMORY_KEEPER_INSTALL_PATH, RJ_MEMORY_KEEPER_BIN_INSTALL_PATH,
                                    RJ_MEMORY_KEEPER_TEST_INSTALL_PATH}) {
-        const auto installed = library.parent_path() / relative;
-        if (host_call(libc_passthrough().access, ::access, installed.c_str(), X_OK) == 0)
+        const auto installed = library_dir / relative;
+        if (host_call(libc_passthrough().access, ::access, installed.c_str(), X_OK) == 0) {
           return installed.string();
+        }
       }
       // Match actual build output directories, not arbitrary descendants: an
       // install staging prefix may itself live beneath the build directory.
       for (const char *directory : {RJ_MEMORY_KEEPER_BUILD_LIBDIR, RJ_MEMORY_KEEPER_BUILD_BINDIR,
                                     RJ_MEMORY_KEEPER_BUILD_TESTDIR}) {
-        if (!*directory)
-          continue;
-        const auto build = std::filesystem::canonical(directory, error);
-        if (!error && library.parent_path() == build)
+        if (*directory && library_dir == util::canonical_host_path(directory)) {
           return RJ_MEMORY_KEEPER_BUILD_PATH;
+        }
       }
     }
   }
@@ -637,8 +211,7 @@ std::string keeper_path() {
 // The bootstrap and its child use only async-signal-safe libc operations. They
 // must not enter the C++ allocator, application atfork hooks, or stdio locks.
 [[noreturn]] void startup_failed(int channel, int error) {
-  const int result = -error;
-  send_descriptor(channel, &result, sizeof(result), -1);
+  kmd::send_keeper_startup_reply(channel, error);
   host_call(libc_passthrough().exit_immediately, ::_exit, 1);
   __builtin_unreachable();
 }
@@ -646,12 +219,14 @@ std::string keeper_path() {
 // NOFILE may have been lowered below descriptors inherited from the application.
 // Enumerate the actual table without libc directory streams after the raw clone.
 bool close_inherited_fds() {
-  if (host_close_range(static_cast<unsigned>(kMemoryKeeperFirstUnreservedFd), UINT_MAX, 0u) == 0)
+  if (host_close_range(static_cast<unsigned>(kmd::kKeeperFirstUnreservedFd), UINT_MAX, 0u) == 0) {
     return true;
+  }
   const int directory = host_call(libc_passthrough().openat, ::openat, AT_FDCWD, "/proc/self/fd",
                                   O_RDONLY | O_DIRECTORY | O_CLOEXEC, 0);
-  if (directory < 0)
+  if (directory < 0) {
     return false;
+  }
   struct DirectoryEntry {
     uint64_t inode;
     int64_t offset;
@@ -663,8 +238,9 @@ bool close_inherited_fds() {
   int error = 0;
   while (!error) {
     const long bytes = host_getdents64(directory, buffer, sizeof(buffer));
-    if (bytes < 0 && errno == EINTR)
+    if (bytes < 0 && errno == EINTR) {
       continue;
+    }
     if (bytes <= 0) {
       error = bytes < 0 ? errno : 0;
       break;
@@ -686,44 +262,48 @@ bool close_inherited_fds() {
       for (; index < entry->record_size - name_offset && name[index] >= '0' && name[index] <= '9';
            ++index) {
         const unsigned digit = name[index] - '0';
-        if (number > (INT_MAX - digit) / 10)
+        if (number > (INT_MAX - digit) / 10) {
           break;
+        }
         number = number * 10 + digit;
       }
       if (index && index < entry->record_size - name_offset && name[index] == '\0' &&
-          number >= kMemoryKeeperFirstUnreservedFd && number != static_cast<unsigned>(directory))
-        close_fd(static_cast<int>(number));
+          number >= kmd::kKeeperFirstUnreservedFd && number != static_cast<unsigned>(directory)) {
+        host_close_fd(static_cast<int>(number));
+      }
       position += entry->record_size;
     }
   }
-  close_fd(directory);
+  host_close_fd(directory);
   errno = error;
   return error == 0;
 }
 
-[[noreturn]] void exec_keeper(int control, int lease, int startup, const char *path,
+[[noreturn]] void exec_keeper(const char *listener_name, int lease, int startup, const char *path,
                               const char *owner) {
   // Preserve the incoming descriptors before moving them into fixed slots.
   const int saved_lease = host_call(libc_passthrough().fcntl, ::fcntl, lease, F_DUPFD_CLOEXEC,
-                                    kMemoryKeeperFirstUnreservedFd);
-  const int saved_startup = host_call(libc_passthrough().fcntl, ::fcntl, startup, F_DUPFD_CLOEXEC,
-                                      kMemoryKeeperFirstUnreservedFd);
-  if (saved_lease < 0 || saved_startup < 0)
+                                    kmd::kKeeperFirstUnreservedFd);
+  if (saved_lease < 0) {
     startup_failed(startup, errno);
-  if (control != kMemoryKeeperListenerFd) {
-    if (host_call(libc_passthrough().dup3, ::dup3, control, kMemoryKeeperListenerFd, 0) < 0)
-      startup_failed(saved_startup, errno);
-  } else {
-    host_call(libc_passthrough().fcntl, ::fcntl, kMemoryKeeperListenerFd, F_SETFD, 0);
   }
-  if (host_call(libc_passthrough().dup3, ::dup3, saved_lease, kMemoryKeeperLeaseFd, 0) < 0 ||
-      host_call(libc_passthrough().dup3, ::dup3, saved_startup, kMemoryKeeperStartupFd, 0) < 0)
+  const int saved_startup = host_call(libc_passthrough().fcntl, ::fcntl, startup, F_DUPFD_CLOEXEC,
+                                      kmd::kKeeperFirstUnreservedFd);
+  if (saved_startup < 0) {
+    startup_failed(startup, errno);
+  }
+  if (host_call(libc_passthrough().dup3, ::dup3, saved_lease, kmd::kKeeperLeaseFd, 0) < 0 ||
+      host_call(libc_passthrough().dup3, ::dup3, saved_startup, kmd::kKeeperStartupFd, 0) < 0) {
     startup_failed(saved_startup, errno);
-  for (int fd = 0; fd < kMemoryKeeperListenerFd; ++fd)
-    close_fd(fd);
-  if (!close_inherited_fds())
-    startup_failed(kMemoryKeeperStartupFd, errno);
-  char *arguments[] = {const_cast<char *>(path), const_cast<char *>(owner), nullptr};
+  }
+  for (int fd = 0; fd < kmd::kKeeperLeaseFd; ++fd) {
+    host_close_fd(fd);
+  }
+  if (!close_inherited_fds()) {
+    startup_failed(kmd::kKeeperStartupFd, errno);
+  }
+  char *arguments[] = {const_cast<char *>(path), const_cast<char *>(owner),
+                       const_cast<char *>(listener_name), nullptr};
   // The helper links its C++ runtime statically. Application preload and loader
   // configuration must not initialize a simulator inside the helper.
   // TSan's optional read-only shadow optimization writes a temporary file
@@ -732,7 +312,7 @@ bool close_inherited_fds() {
   char no_temporary_files[] = "TMPDIR=/dev/null";
   char *environment[] = {no_temporary_files, nullptr};
   host_call(libc_passthrough().execve, ::execve, path, arguments, environment);
-  startup_failed(kMemoryKeeperStartupFd, errno);
+  startup_failed(kmd::kKeeperStartupFd, errno);
 }
 
 constexpr size_t kBootstrapStackSize = 256 * 1024;
@@ -759,7 +339,7 @@ int clone_keeper(int (*entry)(void *), void *stack, int flags, void *argument) {
 }
 
 struct KeeperBootstrap {
-  int listener;
+  const char *listener_name;
   int lease;
   int startup;
   int owner_startup;
@@ -773,7 +353,7 @@ int enter_keeper(void *argument) {
   __sanitizer_finish_switch_fiber(nullptr, nullptr, nullptr);
 #endif
   const auto &bootstrap = *static_cast<KeeperBootstrap *>(argument);
-  exec_keeper(bootstrap.listener, bootstrap.lease, bootstrap.startup, bootstrap.path,
+  exec_keeper(bootstrap.listener_name, bootstrap.lease, bootstrap.startup, bootstrap.path,
               bootstrap.owner);
 }
 
@@ -782,15 +362,25 @@ int detach_keeper(void *argument) {
   __sanitizer_finish_switch_fiber(nullptr, nullptr, nullptr);
 #endif
   const auto &bootstrap = *static_cast<KeeperBootstrap *>(argument);
-  close_fd(bootstrap.owner_startup);
-  if (host_call(libc_passthrough().setsid, ::setsid) < 0)
+  host_close_fd(bootstrap.owner_startup);
+  if (host_call(libc_passthrough().setsid, ::setsid) < 0) {
     startup_failed(bootstrap.startup, errno);
-  if (clone_keeper(enter_keeper, bootstrap.child_stack, CLONE_UNTRACED | SIGCHLD, argument) < 0)
+  }
+  if (clone_keeper(enter_keeper, bootstrap.child_stack, CLONE_UNTRACED | SIGCHLD, argument) < 0) {
     startup_failed(bootstrap.startup, errno);
+  }
   return 0;
 }
 
 std::atomic<pid_t> warned_subreaper{};
+
+void finish_private_request(int socket) {
+  // A forked child can retain this socket. Signal EOF to the keeper even if
+  // that child keeps its descriptor open.
+  const int error = errno;
+  ::shutdown(socket, SHUT_WR);
+  errno = error;
+}
 
 class Keeper {
 public:
@@ -798,59 +388,236 @@ public:
     return owner_ == getpid() && user_ == geteuid() && group_ == getegid();
   }
 
-  int allocate(size_t size, int sized_file, bool &retry, Operation operation, const char *name) {
+  template <typename Function> int visit_locked(bool &retry, Function &&function) {
     std::lock_guard lock(mutex_);
     // A caller may have obtained this pointer just before a credential change
     // replaced it. Never restart an unreachable helper after retirement.
     retry = retired_;
-    if (retry)
+    if (retry) {
       return -1;
-    for (unsigned attempt = 0; attempt < 2; ++attempt) {
-      if (!has_lease()) {
-        release_lease();
-        if (start() != 0)
-          return -1;
+    }
+    return function(*this);
+  }
+
+  int prepare() {
+    if (has_lease()) {
+      if (probe_listener() == 0) {
+        return 0;
       }
-      const int socket =
-          host_call(libc_passthrough().socket, ::socket, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
-      if (socket < 0)
+      if (errno != ECONNREFUSED) {
         return -1;
-      int descriptor = -1;
-      bool disconnected = false;
-      if (host_call(libc_passthrough().connect, ::connect, socket,
-                    reinterpret_cast<const sockaddr *>(&address_), length_) == 0)
-        descriptor =
-            request_backing(socket, size, O_RDWR, sized_file, &disconnected, operation, name);
-      else
-        disconnected = errno == ECONNREFUSED;
-      const int error = errno;
-      close_fd(socket);
-      if (descriptor >= 0 || !disconnected || attempt != 0) {
-        errno = error;
-        return descriptor;
       }
-      // Retry only when the helper transport was lost. Resource errors such as
-      // EMFILE must not forget a live helper and leak its process.
+      release_lease();
+    }
+    return start();
+  }
+
+  template <typename Function> int request(Function &&function) {
+    for (unsigned attempt = 0; attempt < 2; ++attempt) {
+      if (!has_lease() && start() != 0) {
+        return -1;
+      }
+      const int socket = connect_socket();
+      int result = -1;
+      bool disconnected = false;
+      if (socket >= 0 && host_call(libc_passthrough().fcntl, ::fcntl, socket, F_SETFL, 0) == 0) {
+        result = function(socket, disconnected);
+      }
+      const int error = errno;
+      host_close_fd(socket);
+      if (attempt != 0 ||
+          (socket < 0 ? error != ECONNREFUSED : !disconnected || !helper_disconnected())) {
+        errno = error;
+        return result;
+      }
       release_lease();
     }
     __builtin_unreachable();
   }
 
-  void retire() {
+  bool retire() {
     if (owner_ != getpid()) {
       // The lease mapping is MADV_DONTFORK. Neither its address nor the mutex
       // inherited from a vanished parent thread belongs to this child.
-      return;
+      return false;
     }
     std::lock_guard lock(mutex_);
     retired_ = true;
     release_lease();
+    return true;
   }
 
 private:
+  static uint64_t process_inode(int fd) {
+    struct stat info {};
+    return host_call(libc_passthrough().fstat_fn, ::fstat, fd, &info) == 0 ? info.st_ino : 0;
+  }
+
+  bool helper_has_exited() const {
+    const int process = host_pidfd_open(helper_pid_, 0);
+    if (process < 0) {
+      return errno == ESRCH;
+    }
+    pollfd exited{process, POLLIN, 0};
+    const bool dead = host_call(libc_passthrough().poll, ::poll, &exited, 1, 0) > 0 &&
+                      (exited.revents & (POLLIN | POLLHUP));
+    const uint64_t inode = helper_inode_ ? process_inode(process) : 0;
+    host_close_fd(process);
+    return dead || (inode && inode != helper_inode_);
+  }
+
+  int connect_socket() const {
+    const int socket = host_call(libc_passthrough().socket, ::socket, AF_UNIX,
+                                 SOCK_SEQPACKET | SOCK_CLOEXEC | SOCK_NONBLOCK, 0);
+    if (socket < 0) {
+      return -1;
+    }
+    if (host_call(libc_passthrough().connect, ::connect, socket,
+                  reinterpret_cast<const sockaddr *>(&address_), length_) == 0) {
+      // Anyone in this network namespace can bind the name after the keeper exits.
+      // Authenticate the listener before sending it any backing descriptors.
+      ucred peer{};
+      socklen_t size = sizeof(peer);
+      if (host_call(libc_passthrough().getsockopt, ::getsockopt, socket, SOL_SOCKET, SO_PEERCRED,
+                    &peer, &size) == 0) {
+        if (size == sizeof(peer) && peer.pid == helper_pid_ && peer.uid == user_ &&
+            peer.gid == group_) {
+          if (authenticate_peer(socket)) {
+            return socket;
+          }
+        } else {
+          errno = ECONNREFUSED;
+        }
+      }
+      finish_private_request(socket);
+    }
+    const int error = errno;
+    host_close_fd(socket);
+    // A full queue or an interrupted identity check can mean either a busy
+    // keeper or a new listener at the old name. Retain a live helper's lease.
+    const bool check_lifetime = error == EAGAIN || error == EPIPE || error == ECONNRESET;
+    errno = check_lifetime && helper_has_exited() ? ECONNREFUSED : error;
+    return -1;
+  }
+
+  bool authenticate_peer(int socket) const {
+    // A recycled PID can have the same numeric credentials. A 64-bit pidfs
+    // inode identifies the process that sent the trusted startup reply.
+    if (helper_inode_) {
+      const int process = host_pidfd_open(helper_pid_, 0);
+      if (process >= 0) {
+        const uint64_t inode = process_inode(process);
+        host_close_fd(process);
+        if (inode) {
+          if (inode == helper_inode_) {
+            return true;
+          }
+          errno = ECONNREFUSED;
+          return false;
+        }
+      }
+    }
+
+    // Older kernels lack unique pidfd inodes, and the caller can run out of
+    // descriptors. Ask for the launch cookie before sending any backing files.
+    const kmd::KeeperRequest identify{0, O_RDWR, kmd::KeeperOperation::Identify, {}};
+    if (kmd::send_keeper_descriptor(socket, &identify, sizeof(identify), -1) != 0) {
+      return false;
+    }
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    if (!poll_until(socket, POLLIN, deadline)) {
+      errno = EAGAIN;
+      return false;
+    }
+    kmd::KeeperCookie proof{};
+    int descriptor = -1;
+    const long bytes =
+        kmd::receive_keeper_descriptor(socket, &proof, sizeof(proof), descriptor, MSG_DONTWAIT);
+    host_close_fd(descriptor);
+    if (bytes <= 0) {
+      if (bytes == 0) {
+        errno = EPIPE;
+      } else if (errno == EPROTO) {
+        errno = ECONNREFUSED;
+      }
+      return false;
+    }
+    if (bytes == sizeof(proof) && descriptor < 0 && proof == cookie_) {
+      return true;
+    }
+    errno = ECONNREFUSED;
+    return false;
+  }
+
+  int probe_listener() const {
+    const int socket = connect_socket();
+    if (socket < 0) {
+      return -1;
+    }
+    finish_private_request(socket);
+    host_close_fd(socket);
+    return 0;
+  }
+
+  static short poll_until(int fd, short events, std::chrono::steady_clock::time_point deadline) {
+    pollfd state{fd, events, 0};
+    for (;;) {
+      const auto remaining =
+          std::chrono::ceil<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+      if (remaining.count() <= 0) {
+        return 0;
+      }
+      const int ready = host_call(libc_passthrough().poll, ::poll, &state, 1,
+                                  static_cast<int>(remaining.count()));
+      if (ready >= 0 || errno != EINTR) {
+        return ready > 0 ? state.revents : 0;
+      }
+    }
+  }
+
+  bool helper_disconnected() const {
+    const int socket = connect_socket();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    if (socket < 0) {
+      if (errno == ECONNREFUSED) {
+        return true;
+      }
+      // The cookie exchange can lose its connection before pidfd reports exit.
+      if (errno != EPIPE && errno != ECONNRESET) {
+        return false;
+      }
+    } else {
+      // A live keeper replies to an empty batch. A stopped keeper can keep its
+      // lease even when it cannot reply within the deadline.
+      kmd::KeeperRequest request{0, O_RDWR, kmd::KeeperOperation::FlushFiles, {}};
+      bool closed;
+      if (kmd::send_keeper_descriptor(socket, &request, sizeof(request), -1) != 0) {
+        closed = errno == EPIPE || errno == ECONNRESET;
+      } else {
+        closed = poll_until(socket, POLLIN | POLLRDHUP, deadline) & (POLLHUP | POLLRDHUP | POLLERR);
+      }
+      finish_private_request(socket);
+      host_close_fd(socket);
+      if (!closed) {
+        return false;
+      }
+    }
+
+    // The helper can reject a private channel under memory pressure. During
+    // exit it can close the channel before releasing the listener. Give it the
+    // remainder of the probe budget to exit, then check the listener itself.
+    const int process = host_pidfd_open(helper_pid_, 0);
+    if (process >= 0) {
+      poll_until(process, POLLIN, deadline);
+      host_close_fd(process);
+    }
+    return probe_listener() < 0 && errno == ECONNREFUSED;
+  }
+
   void release_lease() {
-    if (lease_mapping_ != MAP_FAILED)
+    if (lease_mapping_ != MAP_FAILED) {
       host_call(libc_passthrough().munmap, ::munmap, lease_mapping_, lease_mapping_size_);
+    }
     lease_mapping_ = MAP_FAILED;
   }
 
@@ -872,48 +639,51 @@ private:
   }
 
   int launch(const char *path) {
-    if (host_call(libc_passthrough().access, ::access, path, X_OK) != 0)
+    if (host_call(libc_passthrough().access, ::access, path, X_OK) != 0) {
       return -1;
+    }
     int subreaper = 0;
     host_call(libc_passthrough().prctl, ::prctl, PR_GET_CHILD_SUBREAPER, &subreaper, 0L, 0L, 0L);
     if ((subreaper || owner_ == 1 || getppid() == 1) &&
-        warned_subreaper.exchange(owner_, std::memory_order_relaxed) != owner_)
+        warned_subreaper.exchange(owner_, std::memory_order_relaxed) != owner_) {
       util::Logger::warn("Memory keeper child-wait isolation is unsupported for child "
                          "subreapers and PID-1 owners. PID 1 or the adopting subreaper must "
                          "reap exited keepers with waitpid(..., WNOHANG), including after "
                          "application children exit; use a reaping init such as tini in "
                          "containers. Do not block waiting for live keepers");
+    }
     uint64_t nonce = 0;
     long random_bytes;
     do {
       random_bytes = host_call(libc_passthrough().getrandom, ::getrandom, &nonce, sizeof(nonce), 0);
     } while (random_bytes < 0 && errno == EINTR);
     if (random_bytes != sizeof(nonce)) {
-      if (random_bytes >= 0)
+      if (random_bytes >= 0) {
         errno = EIO;
+      }
       return -1;
     }
     address_.sun_family = AF_UNIX;
     const int name_length = std::snprintf(address_.sun_path + 1, sizeof(address_.sun_path) - 1,
                                           "rocjitsu-memory-%d-%016lx", owner_, nonce);
     length_ = offsetof(sockaddr_un, sun_path) + 1 + name_length;
-    const int listener =
-        host_call(libc_passthrough().socket, ::socket, AF_UNIX, SOCK_SEQPACKET | SOCK_CLOEXEC, 0);
-    if (listener < 0)
-      return -1;
-    int leases[2] = {-1, -1};
-    if (host_call(libc_passthrough().bind, ::bind, listener,
-                  reinterpret_cast<const sockaddr *>(&address_), length_) != 0 ||
-        host_call(libc_passthrough().listen, ::listen, listener, SOMAXCONN) != 0 ||
-        host_call(libc_passthrough().socketpair, ::socketpair, AF_UNIX,
+    int leases[2];
+    if (host_call(libc_passthrough().socketpair, ::socketpair, AF_UNIX,
                   SOCK_SEQPACKET | SOCK_CLOEXEC, 0, leases) != 0) {
+      return -1;
+    }
+    // SCM_CREDENTIALS on the inherited startup channel identifies the ready helper
+    // in the owner's PID namespace, even after the bootstrap has detached it.
+    const int pass_credentials = 1;
+    if (host_call(libc_passthrough().setsockopt, ::setsockopt, leases[0], SOL_SOCKET, SO_PASSCRED,
+                  &pass_credentials, sizeof(pass_credentials)) != 0) {
       const int error = errno;
-      close_fd(listener);
+      host_close_fd(leases[0]);
+      host_close_fd(leases[1]);
       errno = error;
       return -1;
     }
-    const int lease_fd =
-        host_call(libc_passthrough().memfd_create, ::memfd_create, "rocjitsu-owner", MFD_CLOEXEC);
+    const int lease_fd = create_scratch_fd("rocjitsu-owner");
     struct flock lock {};
     lock.l_type = F_WRLCK;
     lock.l_whence = SEEK_SET;
@@ -922,7 +692,7 @@ private:
         host_call(libc_passthrough().fcntl, ::fcntl, lease_fd, F_OFD_SETLK, &lock) == 0) {
       lease_mapping_size_ = static_cast<size_t>(sysconf(_SC_PAGESIZE));
       // A PROT_NONE mapping pins the locked open-file description without sizing
-      // or accessing the empty memfd. No long-lived fd number can be replaced by
+      // or accessing the empty lease file. No long-lived fd number can be replaced by
       // application close_range/dup2 while retirement is releasing the lease.
       lease_mapping_ = host_call(libc_passthrough().mmap, ::mmap, nullptr, lease_mapping_size_,
                                  PROT_NONE, MAP_SHARED, lease_fd, 0);
@@ -937,11 +707,10 @@ private:
       }
     }
     const int lease_error = errno;
-    close_fd(lease_fd);
+    host_close_fd(lease_fd);
     if (keeper_lease_fd < 0) {
-      close_fd(leases[0]);
-      close_fd(leases[1]);
-      close_fd(listener);
+      host_close_fd(leases[0]);
+      host_close_fd(leases[1]);
       errno = lease_error;
       return -1;
     }
@@ -956,14 +725,13 @@ private:
                   PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK, -1, 0);
     if (stacks == MAP_FAILED) {
       const int error = errno;
-      close_fd(keeper_lease_fd);
-      close_fd(listener);
-      close_fd(leases[0]);
-      close_fd(leases[1]);
+      host_close_fd(keeper_lease_fd);
+      host_close_fd(leases[0]);
+      host_close_fd(leases[1]);
       errno = error;
       return -1;
     }
-    KeeperBootstrap arguments{listener,
+    KeeperBootstrap arguments{address_.sun_path + 1,
                               keeper_lease_fd,
                               leases[1],
                               leases[0],
@@ -973,39 +741,75 @@ private:
     const pid_t bootstrap = clone_keeper(detach_keeper, stacks, CLONE_UNTRACED, &arguments);
     const int error = errno;
     host_call(libc_passthrough().munmap, ::munmap, stacks, 2 * kBootstrapStackSize);
-    close_fd(keeper_lease_fd);
-    close_fd(listener);
-    close_fd(leases[1]);
+    host_close_fd(keeper_lease_fd);
+    host_close_fd(leases[1]);
     if (bootstrap < 0) {
-      close_fd(leases[0]);
+      host_close_fd(leases[0]);
       errno = error;
       return -1;
     }
     while (host_call(libc_passthrough().waitpid, ::waitpid, bootstrap, nullptr, __WCLONE) < 0 &&
            errno == EINTR) {
     }
-    pollfd startup{leases[0], POLLIN, 0};
-    long ready;
-    do {
-      ready = host_call(libc_passthrough().poll, ::poll, &startup, 1, 10000);
-    } while (ready < 0 && errno == EINTR);
-    if (ready <= 0) {
-      close_fd(leases[0]);
-      if (ready == 0)
-        errno = ETIMEDOUT;
-      return -1;
+    UniqueDriverFd startup(leases[0]);
+    kmd::KeeperStartupReply reply{};
+    pid_t sender_pid = -1;
+    pid_t requesting_helper = -1;
+    for (;;) {
+      pollfd state{startup.get(), POLLIN, 0};
+      int ready;
+      do {
+        ready = host_call(libc_passthrough().poll, ::poll, &state, 1, 10000);
+      } while (ready < 0 && errno == EINTR);
+      if (ready <= 0) {
+        if (ready == 0) {
+          errno = ETIMEDOUT;
+        }
+        return -1;
+      }
+      int descriptor = -1;
+      const long received = kmd::receive_keeper_descriptor(
+          startup.get(), &reply, sizeof(reply), descriptor, MSG_DONTWAIT, nullptr, &sender_pid);
+      if (received < 0) {
+        return -1;
+      }
+      if (descriptor >= 0 || sender_pid <= 0 ||
+          (requesting_helper > 0 && sender_pid != requesting_helper)) {
+        host_close_fd(descriptor);
+        errno = received ? EPROTO : EIO;
+        return -1;
+      }
+      if (requesting_helper < 0 && received == sizeof(kmd::kKeeperRequestOwnerStat) &&
+          reply.version == kmd::kKeeperRequestOwnerStat) {
+        UniqueDriverFd stat(host_call(libc_passthrough().openat, ::openat, AT_FDCWD,
+                                      "/proc/self/stat", O_RDONLY | O_CLOEXEC, 0));
+        if (!stat ||
+            kmd::send_keeper_descriptor(startup.get(), &kmd::kKeeperRequestOwnerStat,
+                                        sizeof(kmd::kKeeperRequestOwnerStat), stat.get()) < 0) {
+          return -1;
+        }
+        requesting_helper = sender_pid;
+        continue;
+      }
+      if (received != sizeof(reply) || reply.version != kmd::kKeeperProtocolVersion) {
+        errno = EPROTO;
+        return -1;
+      }
+      if (reply.error) {
+        errno = reply.error;
+        return -1;
+      }
+      break;
     }
-    int response = 0, descriptor = -1;
-    const long received = receive_descriptor(leases[0], &response, sizeof(response), descriptor);
-    close_fd(leases[0]);
-    close_fd(descriptor);
-    if (received != sizeof(response) || response <= 0) {
-      errno = response < 0 ? -response : EIO;
-      return -1;
-    }
+    helper_pid_ = sender_pid;
+    helper_inode_ = reply.process_inode;
+    cookie_ = reply.cookie;
     return 0;
   }
 
+  kmd::KeeperCookie cookie_{};
+  uint64_t helper_inode_ = 0;
+  pid_t helper_pid_ = -1;
   const pid_t owner_ = getpid();
   const uid_t user_ = geteuid();
   const gid_t group_ = getegid();
@@ -1018,10 +822,22 @@ private:
   bool retired_ = false;
 };
 
-// Intentionally process-lifetime: the keeper watches its owner pidfd and an
-// exec-sensitive lease, then exits once externally held tokens are gone.
+// Interposer builds retain the manager for the process lifetime; explicit hosts
+// release it when unloading. The keeper watches its owner pidfd and lease, then
+// exits once externally held tokens are gone.
 // A forked child never locks a mutex inherited from the parent's threads.
 std::atomic<Keeper *> keeper{};
+
+#if defined(RJ_DISABLE_INTERPOSER)
+__attribute__((destructor)) void release_keeper() {
+  // Explicit hosts retire all callers before unloading. A forked child must
+  // not destroy a mutex inherited from a vanished parent thread.
+  auto *current = keeper.exchange(nullptr, std::memory_order_relaxed);
+  if (current && current->retire()) {
+    delete current;
+  }
+}
+#endif
 
 Keeper *get_keeper() {
   auto *current = keeper.load(std::memory_order_acquire);
@@ -1037,30 +853,185 @@ Keeper *get_keeper() {
         return current;
       }
     }
-    if (current)
+    if (current) {
       current->retire();
+    }
     current = candidate;
   }
   return current;
 }
 
-int allocate_backing(size_t size, int sized_file = -1, Operation operation = Operation::Backing,
-                     const char *name = kMemoryBackingDefaultName) {
+template <typename Function> int with_keeper(Function &&function) {
   for (;;) {
     auto *current = get_keeper();
-    if (!current)
+    if (!current) {
       return -1;
+    }
     bool retry = false;
-    const int result = current->allocate(size, sized_file, retry, operation, name);
-    if (!retry)
+    const int result = current->visit_locked(retry, function);
+    if (!retry) {
       return result;
+    }
   }
+}
+
+template <typename Function> int with_keeper_connection(Function &&function) {
+  return with_keeper([&](Keeper &current) { return current.request(function); });
+}
+
+int allocate_backing(size_t size, int sized_file = -1,
+                     kmd::KeeperOperation operation = kmd::KeeperOperation::Backing,
+                     const char *name = kMemoryBackingDefaultName) {
+  kmd::KeeperRequest request{size, O_RDWR, operation, {}};
+  std::snprintf(request.name, sizeof(request.name), "%s", name);
+  return with_keeper_connection([&](int socket, bool &disconnected) {
+    if (kmd::send_keeper_descriptor(socket, &request, sizeof(request), sized_file) != 0) {
+      disconnected = errno == EPIPE || errno == ECONNRESET;
+      finish_private_request(socket);
+      return -1;
+    }
+    return receive_result(socket, sized_file < 0, &disconnected);
+  });
+}
+
+int populate_mapping(int fd, const void *data, size_t size) {
+  // Even overwriting an already sized file with write() checks RLIMIT_FSIZE.
+  // These private setup mappings have never been published to a simulated GPU.
+  void *view = host_call(libc_passthrough().mmap, ::mmap, nullptr, size, PROT_READ | PROT_WRITE,
+                         MAP_SHARED, fd, 0);
+  if (view == MAP_FAILED) {
+    return -1;
+  }
+  std::memcpy(reinterpret_cast<void *>(view), data, size);
+  host_call(libc_passthrough().munmap, ::munmap, view, size);
+  return 0;
+}
+
+int open_backing_file(const BackingFile &file, int flags = O_TRUNC) {
+  return host_call(libc_passthrough().openat, ::openat, AT_FDCWD, file.path.c_str(),
+                   O_RDWR | O_CREAT | O_CLOEXEC | flags, 0666);
+}
+
+// Unfinished entries use this sentinel; completed entries hold zero or an errno.
+constexpr int kPendingFile = -1;
+
+int send_backing_files(int socket, bool &disconnected, std::span<BackingFile> files,
+                       size_t &attempted_files) {
+  std::array<BackingFile *, kmd::kKeeperMaxBatchFiles> pending{};
+  size_t count = 0;
+  auto flush = [&] {
+    if (!count) {
+      return 0;
+    }
+    kmd::KeeperRequest request{count, O_RDWR, kmd::KeeperOperation::FlushFiles, {}};
+    // Inline writes produce no replies until this flush. Blocking sends
+    // therefore cannot deadlock on a full reply queue, even with small socket
+    // buffers. The helper never blocks on an application reply socket.
+    if (kmd::send_keeper_descriptor(socket, &request, sizeof(request), -1, nullptr, 0, 0) != 0) {
+      disconnected = errno == EPIPE || errno == ECONNRESET;
+      return -1;
+    }
+    kmd::KeeperFileResults results;
+    int descriptor = -1;
+    const long received =
+        kmd::receive_keeper_descriptor(socket, &results, sizeof(results), descriptor);
+    disconnected = received == 0 || (received < 0 && (errno == EPIPE || errno == ECONNRESET));
+    if (received != sizeof(results) || descriptor >= 0 || results.count != count) {
+      const int error = received < 0 ? errno : EPROTO;
+      host_close_fd(descriptor);
+      errno = error;
+      return -1;
+    }
+    for (size_t file_index = 0; file_index < count; ++file_index) {
+      pending[file_index]->error = results.errors[file_index];
+    }
+    count = 0;
+    return 0;
+  };
+  for (size_t file_index = 0; file_index < files.size(); ++file_index) {
+    BackingFile &file = files[file_index];
+    // A replacement helper can inherit lower limits. Keep acknowledged
+    // files intact and retry only requests without a result.
+    if (file.error != kPendingFile) {
+      continue;
+    }
+    const size_t size = file.contents.size();
+    const bool inline_file = size <= kmd::kKeeperInlineFileSize;
+    if (!inline_file && flush() != 0) {
+      return -1;
+    }
+    // A new inode cannot alias pending writes. Complete those writes before
+    // truncating an existing path, including its symlink or hard-link aliases.
+    int fd = open_backing_file(file, count ? O_EXCL : O_TRUNC);
+    if (fd < 0 && errno == EEXIST && count) {
+      if (flush() != 0) {
+        return -1;
+      }
+      fd = open_backing_file(file);
+    }
+    if (fd < 0 && errno == EMFILE) {
+      // The batch socket may occupy the last descriptor. Finish earlier writes
+      // before releasing it so the caller can open the remaining paths in order.
+      if (flush() == 0) {
+        errno = EMFILE;
+      }
+      return -1;
+    }
+    attempted_files = std::max(attempted_files, file_index + 1);
+    if (fd < 0) {
+      file.error = errno;
+      continue;
+    }
+    if (size > static_cast<size_t>(std::numeric_limits<off_t>::max())) {
+      file.error = EFBIG;
+      host_close_fd(fd);
+      continue;
+    }
+    kmd::KeeperRequest request{size, O_RDWR, kmd::KeeperOperation::BatchFile, {}};
+    auto send_file = [&] {
+      return kmd::send_keeper_descriptor(socket, &request, sizeof(request), fd,
+                                         file.contents.data(), inline_file ? size : 0, 0);
+    };
+    int sent = send_file();
+    // Descriptors queued on a Unix socket still count against RLIMIT_NOFILE.
+    // Finish the outstanding writes before retrying with an empty queue.
+    if (sent < 0 && errno == ETOOMANYREFS && count) {
+      if (flush() != 0) {
+        const int error = errno;
+        host_close_fd(fd);
+        errno = error;
+        return -1;
+      }
+      sent = send_file();
+    }
+    int error = sent < 0 ? errno : 0;
+    if (sent < 0) {
+      disconnected = error == EPIPE || error == ECONNRESET;
+    } else if (!inline_file && (receive_result(socket, false, &disconnected) < 0 ||
+                                populate_mapping(fd, file.contents.data(), size) < 0)) {
+      error = errno;
+    }
+    host_close_fd(fd);
+    if (disconnected) {
+      errno = error;
+      return -1;
+    }
+    if (error || !inline_file) {
+      file.error = error;
+      continue;
+    }
+    pending[count++] = &file;
+    if (count == pending.size() && flush() != 0) {
+      return -1;
+    }
+  }
+  return flush();
 }
 
 } // namespace
 
-[[noreturn]] void run_memory_keeper(int listener, int lease, int startup, pid_t owner) {
-  keep_regions(listener, lease, startup, owner);
+int prepare_memory_keeper() {
+  return with_keeper([](Keeper &current) { return current.prepare(); });
 }
 
 int create_memory_backing(size_t size, bool preallocate, const char *name) {
@@ -1069,44 +1040,88 @@ int create_memory_backing(size_t size, bool preallocate, const char *name) {
     return -1;
   }
   const char *force_token = std::getenv("RJ_TEST_FORCE_TOKEN_BACKING");
-  const auto operation = force_token && std::strcmp(force_token, "1") == 0 ? Operation::TokenBacking
-                         : preallocate ? Operation::PreallocatedBacking
-                                       : Operation::Backing;
+  const auto operation = force_token && std::strcmp(force_token, "1") == 0
+                             ? kmd::KeeperOperation::TokenBacking
+                         : preallocate ? kmd::KeeperOperation::PreallocatedBacking
+                                       : kmd::KeeperOperation::Backing;
   return allocate_backing(size, -1, operation, name);
 }
 
-int populate_backing_file(int fd, const void *data, size_t size) {
-  if (!size)
+int populate_backing_file(int fd, const void *data, size_t size, bool reserve_space) {
+  if (!size) {
     return 0;
+  }
   if (size > static_cast<size_t>(std::numeric_limits<off_t>::max())) {
     errno = EFBIG;
     return -1;
   }
-  const int resized = allocate_backing(size, fd);
-  if (resized < 0)
+  // The caller owns the descriptor and may have opened it with O_APPEND.
+  // Linux pwrite would append even with offset zero; a mapping ignores that flag.
+  const auto operation =
+      reserve_space ? kmd::KeeperOperation::ReserveFile : kmd::KeeperOperation::SizeFile;
+  if (allocate_backing(size, fd, operation) < 0) {
     return -1;
-  close_fd(resized);
-  // Even overwriting an already sized file with write() checks RLIMIT_FSIZE.
-  // Populate through its shared mapping instead; these are private setup
-  // mappings that have never been published to a simulated GPU.
-  void *view = host_call(libc_passthrough().mmap, ::mmap, nullptr, size, PROT_READ | PROT_WRITE,
-                         MAP_SHARED, fd, 0);
-  if (view == MAP_FAILED)
-    return -1;
-  std::memcpy(reinterpret_cast<void *>(view), data, size);
-  host_call(libc_passthrough().munmap, ::munmap, view, size);
-  return 0;
+  }
+  return populate_mapping(fd, data, size);
+}
+
+void create_backing_files(std::span<BackingFile> files) {
+  while (!files.empty()) {
+    BackingFile &first = files.front();
+    if (first.contents.empty()) {
+      // A local truncate needs only one descriptor. Complete preceding writes
+      // first in case another path in this batch names the same inode.
+      const int fd = open_backing_file(first);
+      first.error = fd < 0 ? errno : 0;
+      host_close_fd(fd);
+      files = files.subspan(1);
+      continue;
+    }
+    const auto empty = std::find_if(files.begin(), files.end(),
+                                    [](const BackingFile &file) { return file.contents.empty(); });
+    const std::span<BackingFile> batch = files.first(empty - files.begin());
+    for (BackingFile &file : batch) {
+      file.error = kPendingFile;
+    }
+    size_t attempted_files = 0;
+    const int result = with_keeper_connection([&](int socket, bool &disconnected) {
+      const int status = send_backing_files(socket, disconnected, batch, attempted_files);
+      finish_private_request(socket);
+      return status;
+    });
+    if (result < 0) {
+      const int error = errno;
+      for (BackingFile &file : batch.first(attempted_files)) {
+        if (file.error == kPendingFile) {
+          file.error = error;
+        }
+      }
+      // Paths normally open before population. Preserve their creation, truncation
+      // and individual open errors even when the keeper connection fails first.
+      for (BackingFile &file : batch.subspan(attempted_files)) {
+        const int fd = open_backing_file(file);
+        file.error = fd < 0 ? errno : error;
+        if (fd >= 0 && error == EMFILE) {
+          file.error =
+              populate_backing_file(fd, file.contents.data(), file.contents.size()) < 0 ? errno : 0;
+        }
+        host_close_fd(fd);
+      }
+    }
+    files = files.subspan(batch.size());
+  }
 }
 
 bool is_memory_backing_token(int fd) {
-  Identity identity;
+  kmd::KeeperTokenIdentity identity;
   return identify(fd, identity);
 }
 
 bool kmd::is_device_memory_backing(int fd) {
-  Identity identity;
-  if (identify(fd, identity))
+  kmd::KeeperTokenIdentity identity;
+  if (identify(fd, identity)) {
     return identity.device_backing;
+  }
   const int saved_errno = errno;
   std::array<char, 64> path{};
   std::array<char, 256> target{};
@@ -1114,8 +1129,9 @@ bool kmd::is_device_memory_backing(int fd) {
   const ssize_t length = host_call(libc_passthrough().readlink_fn, ::readlink, path.data(),
                                    target.data(), target.size());
   errno = saved_errno;
-  if (length <= 0)
+  if (length <= 0) {
     return false;
+  }
   const std::string_view name(target.data(), static_cast<size_t>(length));
   constexpr std::string_view kMemfdPrefix = "/memfd:";
   return name.starts_with(kMemfdPrefix) &&
@@ -1123,18 +1139,21 @@ bool kmd::is_device_memory_backing(int fd) {
 }
 
 int stat_memory_backing(int fd, struct stat *result) {
-  if (host_call(libc_passthrough().fstat_fn, ::fstat, fd, result) != 0)
+  if (host_call(libc_passthrough().fstat_fn, ::fstat, fd, result) != 0) {
     return -1;
-  if (S_ISSOCK(result->st_mode))
+  }
+  if (S_ISSOCK(result->st_mode)) {
     stat_memory_backing_token(fd, result);
+  }
   return 0;
 }
 
 bool stat_memory_backing_token(int fd, struct stat *result) {
-  Identity identity;
-  if (!identify(fd, identity))
+  kmd::KeeperTokenIdentity identity;
+  if (!identify(fd, identity)) {
     return false;
-  result->st_dev = 0;
+  }
+  result->st_dev = identity.shmid < 0 ? identity.ipc_namespace : 0;
   result->st_ino = identity.object;
   result->st_mode = S_IFREG | 0600;
   result->st_size = identity.size;
@@ -1142,47 +1161,96 @@ bool stat_memory_backing_token(int fd, struct stat *result) {
 }
 
 bool seek_memory_backing_token(int fd, off_t offset, int whence, off_t &result) {
-  Identity identity;
-  if (!identify(fd, identity))
+  kmd::KeeperTokenIdentity identity;
+  if (!identify(fd, identity)) {
     return false;
+  }
   result = -1;
-  if (offset != 0 || (whence != SEEK_SET && whence != SEEK_END))
+  if (offset != 0 || (whence != SEEK_SET && whence != SEEK_END)) {
     errno = EINVAL;
-  else
+  } else {
     result = whence == SEEK_END ? static_cast<off_t>(identity.size) : 0;
+  }
   return true;
 }
 
 int fcntl_memory_backing(int fd, int command, uintptr_t argument) {
-  Identity identity;
+  kmd::KeeperTokenIdentity identity;
   if (identify(fd, identity)) {
     switch (command) {
     case F_GETFL:
       return identity.mode;
     case F_GET_SEALS:
+      if (identity.shmid < 0) {
+        break;
+      }
       return F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_SEAL;
     case F_ADD_SEALS:
+      if (identity.shmid < 0) {
+        break;
+      }
       errno = EPERM;
       return -1;
+    }
+    if (identity.shmid < 0 && (command == F_GET_SEALS || command == F_ADD_SEALS)) {
+      if (check_token_liveness(fd) != 0) {
+        return -1;
+      }
+      const int file = request_reopen(fd, identity.mode, kmd::KeeperOperation::OpenFile);
+      if (file < 0) {
+        return -1;
+      }
+      const int result = host_call(libc_passthrough().fcntl, ::fcntl, file, command, argument);
+      const int error = errno;
+      host_close_fd(file);
+      errno = error;
+      return result;
     }
   }
   return host_call(libc_passthrough().fcntl, ::fcntl, fd, command, argument);
 }
 
 int reopen_memory_backing(int fd, int access_mode) {
-  Identity identity;
+  kmd::KeeperTokenIdentity identity;
   if (identify(fd, identity)) {
-    if (check_token_liveness(fd) != 0)
-      return -1;
-    const int reopened = request_backing(fd, 0, access_mode & O_ACCMODE);
-    if (reopened < 0) {
-      const int error = errno;
-      if (check_token_liveness(fd) == 0)
-        errno = error;
+    if (check_token_liveness(fd) != 0) {
       return -1;
     }
-    if (reopened >= 0 && !(access_mode & O_CLOEXEC))
+    if (identity.shmid < 0 && (access_mode & O_ACCMODE) != identity.mode) {
+      const int source = request_reopen(fd, identity.mode, kmd::KeeperOperation::OpenFile);
+      if (source < 0) {
+        return -1;
+      }
+      char path[64];
+      std::snprintf(path, sizeof(path), "/proc/self/fd/%d", source);
+      int reopened = host_call(libc_passthrough().openat, ::openat, AT_FDCWD, path, access_mode, 0);
+      const int open_error = errno;
+      host_close_fd(source);
+      if (reopened < 0) {
+        errno = open_error;
+        return -1;
+      }
+      uint32_t policy = 0;
+      if (get_memory_backing_alloc_flags(fd, &policy) != 1 ||
+          retain_memory_backing_export_policy(reopened, policy) != 0) {
+        const int error = errno;
+        host_close_fd(reopened);
+        errno = error ? error : EPROTO;
+        return -1;
+      }
+      return reopened;
+    }
+    const int reopened = request_reopen(fd, access_mode & O_ACCMODE);
+    if (reopened < 0) {
+      const int error = errno;
+      if (check_token_liveness(fd) == 0) {
+        errno = error;
+      }
+      return -1;
+    }
+    if (reopened >= 0 && !(access_mode & O_CLOEXEC)) {
       host_call(libc_passthrough().fcntl, ::fcntl, reopened, F_SETFD, 0);
+    }
     return reopened;
   }
   char path[64];
@@ -1190,28 +1258,133 @@ int reopen_memory_backing(int fd, int access_mode) {
   return host_call(libc_passthrough().openat, ::openat, AT_FDCWD, path, access_mode, 0);
 }
 
+int get_memory_backing_alloc_flags(int fd, uint32_t *flags) {
+  if (!flags) {
+    errno = EINVAL;
+    return -1;
+  }
+  kmd::KeeperTokenIdentity identity;
+  if (identify(fd, identity)) {
+    if (check_token_liveness(fd) != 0) {
+      return -1;
+    }
+    bool present = false;
+    return request_allocation_flags(fd, kmd::KeeperOperation::GetAllocationFlags, flags,
+                                    &present) == 0
+               ? static_cast<int>(present)
+               : -1;
+  }
+  AllocationFlagsXattr policy{};
+  const ssize_t size = ::fgetxattr(fd, kmd::kAllocationFlagsXattr, &policy, sizeof(policy));
+  if (size < 0 && (errno == ENODATA || errno == EOPNOTSUPP)) {
+    return 0;
+  }
+  if (size < 0) {
+    return -1;
+  }
+  if (size != sizeof(policy) || policy.version != 1) {
+    errno = EPROTO;
+    return -1;
+  }
+  *flags = policy.flags;
+  return 1;
+}
+
+int set_memory_backing_alloc_flags(int fd, uint32_t flags) {
+  kmd::KeeperTokenIdentity identity;
+  if (identify(fd, identity)) {
+    if (check_token_liveness(fd) != 0) {
+      return -1;
+    }
+    bool present = false;
+    return request_allocation_flags(fd, kmd::KeeperOperation::SetAllocationFlags, &flags, &present);
+  }
+  const AllocationFlagsXattr policy{1, flags};
+  if (::fsetxattr(fd, kmd::kAllocationFlagsXattr, &policy, sizeof(policy), XATTR_CREATE) == 0) {
+    return 0;
+  }
+  if (errno != EEXIST) {
+    return -1;
+  }
+  uint32_t existing = 0;
+  const int status = get_memory_backing_alloc_flags(fd, &existing);
+  if (status == 1 && existing == flags) {
+    return 0;
+  }
+  if (status >= 0) {
+    errno = EEXIST;
+  }
+  return -1;
+}
+
+int retain_memory_backing_export_policy(int &fd, uint32_t flags) {
+  if (set_memory_backing_alloc_flags(fd, flags) == 0) {
+    return 0;
+  }
+  if (errno != EOPNOTSUPP || is_memory_backing_token(fd)) {
+    return -1;
+  }
+  const int file_flags = host_call(libc_passthrough().fcntl, ::fcntl, fd, F_GETFL);
+  const int descriptor_flags = host_call(libc_passthrough().fcntl, ::fcntl, fd, F_GETFD);
+  if (file_flags < 0 || descriptor_flags < 0) {
+    return -1;
+  }
+  const int mode = file_flags & O_ACCMODE;
+  if (mode != O_RDONLY && mode != O_RDWR) {
+    errno = EINVAL;
+    return -1;
+  }
+  kmd::KeeperRequest request{flags, mode, kmd::KeeperOperation::WrapFile, {}};
+  request.name[0] = kmd::is_device_memory_backing(fd) ? 1 : 0;
+  const int replacement = with_keeper_connection([&](int socket, bool &disconnected) {
+    if (kmd::send_keeper_descriptor(socket, &request, sizeof(request), fd) != 0) {
+      disconnected = errno == EPIPE || errno == ECONNRESET;
+      finish_private_request(socket);
+      return -1;
+    }
+    return receive_result(socket, true, &disconnected);
+  });
+  if (replacement < 0) {
+    return -1;
+  }
+  if (!(descriptor_flags & FD_CLOEXEC) &&
+      host_call(libc_passthrough().fcntl, ::fcntl, replacement, F_SETFD, 0) != 0) {
+    const int error = errno;
+    host_close_fd(replacement);
+    errno = error;
+    return -1;
+  }
+  host_close_fd(fd);
+  fd = replacement;
+  return 0;
+}
+
 int check_memory_backing_size(int fd, size_t size) {
   struct stat info {};
-  if (stat_memory_backing(fd, &info) != 0)
+  if (stat_memory_backing(fd, &info) != 0) {
     return -1;
-  if (info.st_size >= 0 && size <= static_cast<uint64_t>(info.st_size))
+  }
+  if (info.st_size >= 0 && size <= static_cast<uint64_t>(info.st_size)) {
     return 0;
+  }
   errno = EINVAL;
   return -1;
 }
 
 void *map_memory_backing(void *addr, size_t length, int prot, int flags, int fd, off_t offset) {
-  Identity identity;
+  kmd::KeeperTokenIdentity identity;
   if (fd < 0 || (flags & MAP_ANONYMOUS) || !identify(fd, identity)) {
     auto mmap_fn = libc_passthrough().mmap;
     return mmap_fn ? mmap_fn(addr, length, prot, flags, fd, offset)
                    : ::mmap(addr, length, prot, flags, fd, offset);
   }
-  if (check_token_liveness(fd) != 0)
+  if (check_token_liveness(fd) != 0) {
     return MAP_FAILED;
+  }
   // A shmid can name unrelated memory in another IPC namespace. Reject that
   // transfer explicitly instead of attaching an accidentally matching id.
-  if (!identity.ipc_namespace || identity.ipc_namespace != ipc_namespace()) {
+  if (identity.shmid >= 0 &&
+      (!identity.ipc_namespace || identity.ipc_namespace != kmd::keeper_ipc_namespace())) {
     errno = EXDEV;
     return MAP_FAILED;
   }
@@ -1238,17 +1411,31 @@ void *map_memory_backing(void *addr, size_t length, int prot, int flags, int fd,
     errno = EINVAL;
     return MAP_FAILED;
   }
+  if (identity.shmid < 0) {
+    const int file = request_reopen(fd, identity.mode, kmd::KeeperOperation::OpenFile);
+    if (file < 0) {
+      return MAP_FAILED;
+    }
+    void *mapped =
+        host_call(libc_passthrough().mmap, ::mmap, addr, length, prot, flags, file, offset);
+    const int error = errno;
+    host_close_fd(file);
+    errno = error;
+    return mapped;
+  }
   int placement_flags = flags & MAP_FIXED_NOREPLACE;
 #ifdef MAP_32BIT
-  if (!(flags & MAP_FIXED))
+  if (!(flags & MAP_FIXED)) {
     placement_flags |= flags & MAP_32BIT;
+  }
 #endif
   const bool reserve_target = placement_flags != 0;
   if (reserve_target) {
     void *reservation = host_call(libc_passthrough().mmap, ::mmap, addr, mapped_size, PROT_NONE,
                                   MAP_PRIVATE | MAP_ANONYMOUS | placement_flags, -1, 0);
-    if (reservation == MAP_FAILED)
+    if (reservation == MAP_FAILED) {
       return MAP_FAILED;
+    }
     addr = reinterpret_cast<void *>(reservation);
     flags |= MAP_FIXED;
   }
@@ -1264,33 +1451,40 @@ void *map_memory_backing(void *addr, size_t length, int prot, int flags, int fd,
                                            nullptr, identity.mode == O_RDONLY ? SHM_RDONLY : 0));
     if (source == reinterpret_cast<void *>(-1)) {
       const int error = errno;
-      for (unsigned index = 0; index < count; ++index)
+      for (unsigned index = 0; index < count; ++index) {
         host_call(libc_passthrough().shmdt, ::shmdt, attachments[index]);
-      if (reserve_target)
+      }
+      if (reserve_target) {
         host_call(libc_passthrough().munmap, ::munmap, addr, mapped_size);
-      if (check_token_liveness(fd) == 0)
+      }
+      if (check_token_liveness(fd) == 0) {
         errno = error;
+      }
       return MAP_FAILED;
     }
     attachments[count++] = source;
     const auto target = reinterpret_cast<uintptr_t>(addr);
     const auto start = reinterpret_cast<uintptr_t>(source);
-    if (!(flags & MAP_FIXED) || target >= start + region_size || start >= target + mapped_size)
+    if (!(flags & MAP_FIXED) || target >= start + region_size || start >= target + mapped_size) {
       break;
+    }
   } while (count < 3);
   // Drop overlapping attachments before replacing the target. Detaching their
   // old addresses afterwards could detach the newly installed alias instead.
-  for (unsigned index = 0; index + 1 < count; ++index)
+  for (unsigned index = 0; index + 1 < count; ++index) {
     host_call(libc_passthrough().shmdt, ::shmdt, attachments[index]);
+  }
   void *view = static_cast<char *>(source) + offset;
   void *mapped = MAP_FAILED;
-  if (host_call(libc_passthrough().mprotect, ::mprotect, view, mapped_size, prot) == 0)
+  if (host_call(libc_passthrough().mprotect, ::mprotect, view, mapped_size, prot) == 0) {
     mapped = host_call(libc_passthrough().mremap, ::mremap, view, 0, mapped_size,
                        MREMAP_MAYMOVE | ((flags & MAP_FIXED) ? MREMAP_FIXED : 0), addr);
+  }
   const int error = errno;
   host_call(libc_passthrough().shmdt, ::shmdt, source);
-  if (mapped == MAP_FAILED && reserve_target)
+  if (mapped == MAP_FAILED && reserve_target) {
     host_call(libc_passthrough().munmap, ::munmap, addr, mapped_size);
+  }
   errno = error;
   return mapped;
 }

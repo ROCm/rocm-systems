@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -23,7 +25,7 @@ namespace {
 using namespace rocjitsu;
 
 struct PcArchitecture {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   const char *name;
 };
 
@@ -82,9 +84,9 @@ protected:
     config.sgprs_per_wf = 102;
     config.vgprs_per_wf = 16;
     config.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("pc_extension", config, &memory, &cache);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "pc_extension", config, &memory, &cache));
     decoder = Decoder::create(GetParam().arch);
-    ASSERT_NE(cu, nullptr);
     ASSERT_NE(decoder, nullptr);
     wave = cu->dispatch_wf(0, 0, config.sgprs_per_wf, config.vgprs_per_wf);
     ASSERT_NE(wave, nullptr);
@@ -93,8 +95,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wave)
+    if (wave) {
       wave->halt();
+    }
   }
 
   void execute(uint32_t word) {
@@ -109,13 +112,14 @@ protected:
   }
 
   uint64_t expected_export(const PcExportCase &test) const {
-    if (GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5)
+    if (GetParam().arch == rocjitsu::IsaFamily::Cdna5) {
       return test.signed57;
-    return GetParam().arch == ROCJITSU_CODE_ARCH_RDNA4 ? test.zero48 : test.signed48;
+    }
+    return GetParam().arch == rocjitsu::IsaFamily::Rdna4 ? test.zero48 : test.signed48;
   }
 
   uint64_t expected_target(const PcTargetCase &test) const {
-    return GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5 ? test.target57 : test.target48;
+    return GetParam().arch == rocjitsu::IsaFamily::Cdna5 ? test.target57 : test.target48;
   }
 
   void write_pair(uint32_t reg, uint64_t value) {
@@ -137,10 +141,13 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(Architectures, PcExtensionTest,
-                         ::testing::Values(PcArchitecture{ROCJITSU_CODE_ARCH_RDNA3, "Gfx1100"},
-                                           PcArchitecture{ROCJITSU_CODE_ARCH_RDNA4, "Gfx1201"},
-                                           PcArchitecture{ROCJITSU_CODE_ARCH_CDNA4, "Gfx950"},
-                                           PcArchitecture{ROCJITSU_CODE_ARCH_CDNA5, "Gfx1250"}),
+                         ::testing::Values(PcArchitecture{rocjitsu::IsaFamily::Rdna1, "Gfx1010"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Rdna2, "Gfx1030"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Rdna3, "Gfx1100"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Rdna4, "Gfx1201"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Cdna3, "Gfx942"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Cdna4, "Gfx950"},
+                                           PcArchitecture{rocjitsu::IsaFamily::Cdna5, "Gfx1250"}),
                          [](const ::testing::TestParamInfo<PcArchitecture> &info) {
                            return std::string(info.param.name);
                          });
@@ -150,7 +157,9 @@ TEST_P(PcExtensionTest, GetpcExportsTheTargetAddressWidth) {
     SCOPED_TRACE(::testing::Message() << "pc=" << std::hex << test.pc);
     wave->pc = test.pc;
     write_pair(4, 0xDEADBEEFDEADBEEFULL);
-    ASSERT_NO_FATAL_FAILURE(execute(build_s_getpc_b64(4, GetParam().arch)));
+    util::FailureOr<uint32_t> maybe_s_getpc_b64_10 = build_s_getpc_b64(4, GetParam().arch);
+    ASSERT_TRUE(maybe_s_getpc_b64_10.succeeded());
+    ASSERT_NO_FATAL_FAILURE(execute(maybe_s_getpc_b64_10.value()));
     EXPECT_EQ(read_pair(4), expected_export(test));
     EXPECT_EQ(wave->pc, test.pc + 4);
   }
@@ -159,7 +168,9 @@ TEST_P(PcExtensionTest, GetpcExportsTheTargetAddressWidth) {
 TEST_P(PcExtensionTest, CallExportsTheTargetAddressWidth) {
   // s_call_b64 / s_call_i64 s[4:5], 1: export the return address while
   // branching one DWORD past the next instruction.
-  const uint32_t word = build_s_call_b64(4, 1, GetParam().arch);
+  util::FailureOr<uint32_t> maybe_s_call_b64 = build_s_call_b64(4, 1, GetParam().arch);
+  ASSERT_TRUE(maybe_s_call_b64.succeeded());
+  const uint32_t word = maybe_s_call_b64.value();
   for (const PcExportCase &test : kExportCases) {
     SCOPED_TRACE(::testing::Message() << "pc=" << std::hex << test.pc);
     wave->pc = test.pc;
@@ -175,7 +186,9 @@ TEST_P(PcExtensionTest, SetpcPreservesTheTargetAddressWidth) {
     SCOPED_TRACE(::testing::Message() << "target=" << std::hex << test.encoded);
     wave->pc = 0x1000;
     write_pair(4, test.encoded);
-    ASSERT_NO_FATAL_FAILURE(execute(build_s_setpc_b64(4, GetParam().arch)));
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_9 = build_s_setpc_b64(4, GetParam().arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_9.succeeded());
+    ASSERT_NO_FATAL_FAILURE(execute(maybe_s_setpc_b64_9.value()));
     EXPECT_EQ(wave->pc, expected_target(test));
     EXPECT_EQ(read_pair(4), test.encoded);
   }
@@ -192,7 +205,10 @@ TEST_P(PcExtensionTest, SwappcPreservesTheTargetAndExportsTheReturnAddress) {
         wave->pc = start.pc;
         write_pair(4, 0xDEADBEEFDEADBEEFULL);
         write_pair(source, test.encoded);
-        ASSERT_NO_FATAL_FAILURE(execute(build_s_swappc_b64(4, source, GetParam().arch)));
+        util::FailureOr<uint32_t> maybe_s_swappc_b64_8 =
+            build_s_swappc_b64(4, source, GetParam().arch);
+        ASSERT_TRUE(maybe_s_swappc_b64_8.succeeded());
+        ASSERT_NO_FATAL_FAILURE(execute(maybe_s_swappc_b64_8.value()));
         EXPECT_EQ(wave->pc, expected_target(test));
         EXPECT_EQ(read_pair(4), expected_export(start));
       }
@@ -210,25 +226,34 @@ TEST_P(PcExtensionTest, GetpcRoundTripsThroughIndirectBranchesWithLoadBias) {
   };
   wave->set_code_load_bias(kLoadBias);
   for (const PcExportCase &start : starts) {
-    if (start.pc > 0x0000FFFFFFFFFFFFULL && GetParam().arch != ROCJITSU_CODE_ARCH_CDNA5)
+    if (start.pc > 0x0000FFFFFFFFFFFFULL && GetParam().arch != rocjitsu::IsaFamily::Cdna5) {
       continue;
+    }
     SCOPED_TRACE(::testing::Message() << "pc=" << std::hex << start.pc);
     for (bool swap : {false, true}) {
       SCOPED_TRACE(swap);
       for (bool alias : {false, true}) {
-        if (!swap && alias)
+        if (!swap && alias) {
           continue;
+        }
         SCOPED_TRACE(alias);
         wave->pc = start.pc;
         write_pair(4, 0xDEADBEEFDEADBEEFULL);
         write_pair(6, 0xDEADBEEFDEADBEEFULL);
-        ASSERT_NO_FATAL_FAILURE(execute(build_s_getpc_b64(4, GetParam().arch)));
+        util::FailureOr<uint32_t> maybe_s_getpc_b64_7 = build_s_getpc_b64(4, GetParam().arch);
+        ASSERT_TRUE(maybe_s_getpc_b64_7.succeeded());
+        ASSERT_NO_FATAL_FAILURE(execute(maybe_s_getpc_b64_7.value()));
         ASSERT_EQ(read_pair(4), expected_export(start));
         ASSERT_EQ(wave->pc, start.pc + 4);
 
         const uint32_t destination = alias ? 4 : 6;
-        ASSERT_NO_FATAL_FAILURE(execute(swap ? build_s_swappc_b64(destination, 4, GetParam().arch)
-                                             : build_s_setpc_b64(4, GetParam().arch)));
+        util::FailureOr<uint32_t> maybe_s_setpc_b64_5 = build_s_setpc_b64(4, GetParam().arch);
+        ASSERT_TRUE(maybe_s_setpc_b64_5.succeeded());
+        util::FailureOr<uint32_t> maybe_s_swappc_b64_6 =
+            build_s_swappc_b64(destination, 4, GetParam().arch);
+        ASSERT_TRUE(maybe_s_swappc_b64_6.succeeded());
+        ASSERT_NO_FATAL_FAILURE(
+            execute(swap ? maybe_s_swappc_b64_6.value() : maybe_s_setpc_b64_5.value()));
         EXPECT_EQ(wave->pc, start.pc + 4);
         if (swap) {
           EXPECT_EQ(read_pair(destination), expected_export(start) + 4);
@@ -250,19 +275,27 @@ TEST_P(PcExtensionTest, LoadBiasPreservesAbsoluteTargetsAndLinkedRel32) {
     SCOPED_TRACE(swap);
     wave->pc = 0x2000;
     write_pair(0, kPositiveTag);
-    ASSERT_NO_FATAL_FAILURE(execute(swap ? build_s_swappc_b64(4, 0, GetParam().arch)
-                                         : build_s_setpc_b64(0, GetParam().arch)));
-    const uint64_t expected = GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5 ? kPositiveTag
-                              : swap                                      ? 0x2FF0ULL
-                                                                          : kLoadBias + 0x1000;
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_3 = build_s_setpc_b64(0, GetParam().arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_3.succeeded());
+    util::FailureOr<uint32_t> maybe_s_swappc_b64_4 = build_s_swappc_b64(4, 0, GetParam().arch);
+    ASSERT_TRUE(maybe_s_swappc_b64_4.succeeded());
+    ASSERT_NO_FATAL_FAILURE(
+        execute(swap ? maybe_s_swappc_b64_4.value() : maybe_s_setpc_b64_3.value()));
+    const uint64_t expected = GetParam().arch == rocjitsu::IsaFamily::Cdna5 ? kPositiveTag
+                              : swap                                        ? 0x2FF0ULL
+                                                                            : kLoadBias + 0x1000;
     EXPECT_EQ(wave->pc, expected);
 
     wave->pc = 0x2000;
     write_pair(0, kNegativeTag);
-    ASSERT_NO_FATAL_FAILURE(execute(swap ? build_s_swappc_b64(4, 0, GetParam().arch)
-                                         : build_s_setpc_b64(0, GetParam().arch)));
-    EXPECT_EQ(wave->pc, GetParam().arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0x01FFFFFFFFFFF000ULL
-                                                                    : 0x0000FFFFFFFFF000ULL);
+    util::FailureOr<uint32_t> maybe_s_setpc_b64_1 = build_s_setpc_b64(0, GetParam().arch);
+    ASSERT_TRUE(maybe_s_setpc_b64_1.succeeded());
+    util::FailureOr<uint32_t> maybe_s_swappc_b64_2 = build_s_swappc_b64(4, 0, GetParam().arch);
+    ASSERT_TRUE(maybe_s_swappc_b64_2.succeeded());
+    ASSERT_NO_FATAL_FAILURE(
+        execute(swap ? maybe_s_swappc_b64_2.value() : maybe_s_setpc_b64_1.value()));
+    EXPECT_EQ(wave->pc, GetParam().arch == rocjitsu::IsaFamily::Cdna5 ? 0x01FFFFFFFFFFF000ULL
+                                                                      : 0x0000FFFFFFFFF000ULL);
   }
 }
 

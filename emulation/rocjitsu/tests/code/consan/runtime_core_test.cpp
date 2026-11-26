@@ -19,7 +19,7 @@ class ConSanRuntimeCore : public ::testing::Test {
 protected:
   void SetUp() override {
     header_ = test::capture_header();
-    facts_ = std::make_shared<const Manifest>(header_.manifest);
+    facts_ = std::make_shared<const Manifest>(test::manifest(header_));
     raw_ = test::execution(*facts_, 1).report;
   }
 
@@ -174,7 +174,7 @@ TEST_F(ConSanRuntimeCore, IndependentSnapshotSurvivesSourcePoisonAndFactsUnloadi
   OwnedSnapshot snapshot = copied_snapshot();
   std::ranges::fill(raw_, 0xcd);
   facts_.reset();
-  header_.manifest.entry.name = "replaced_registry_entry";
+  test::manifest(header_).entry.name = "replaced_registry_entry";
   EXPECT_EQ(snapshot.execution.report, original);
   ASSERT_NE(snapshot.facts, nullptr);
   EXPECT_EQ(snapshot.facts->entry.name, "synthetic_codec_fixture");
@@ -226,6 +226,107 @@ TEST_F(ConSanRuntimeCore, SlowCollectorDoesNotHoldUpTheObserverOrAnotherCompleti
   EXPECT_EQ(collector.get(), RuntimeStatus::Success);
   EXPECT_EQ(snapshot.facts, facts_);
   EXPECT_EQ(snapshot.execution.report, raw_);
+}
+
+TEST_F(ConSanRuntimeCore, MultiWorkgroupSlowSnapshotAndWriterKeepOwningBytesAcrossReuse) {
+  test::manifest(header_).target = 1250;
+  test::manifest(header_).entry.workgroup_id_scalar = 117;
+  test::refresh_image(header_);
+  const std::shared_ptr<const Manifest> facts =
+      std::make_shared<const Manifest>(test::manifest(header_));
+  const LaunchDimensions dimensions{{260, 1, 1}, {65, 1, 1}};
+  CapturedExecution first_envelope = test::execution(*facts, 1, 1, dimensions);
+  CapturedExecution second_envelope = test::execution(*facts, 2, 2, dimensions);
+  std::vector<uint8_t> source = first_envelope.report;
+  const std::vector<uint8_t> original = source;
+  const std::vector<uint8_t> next = second_envelope.report;
+  ASSERT_EQ(source.size(), 64u + 12u * 576u);
+  first_envelope.report.clear();
+  second_envelope.report.clear();
+  first_envelope.completion = 0;
+  second_envelope.completion = 0;
+  DispatchLifecycle first(facts, std::move(first_envelope));
+  DispatchLifecycle second(facts, std::move(second_envelope));
+  ASSERT_EQ(first.submitted(), RuntimeStatus::Success);
+  ASSERT_EQ(second.submitted(), RuntimeStatus::Success);
+  uint32_t forwarded = 0;
+  const auto forward = [&] {
+    ++forwarded;
+    return true;
+  };
+  ASSERT_EQ(first.observe(true, true, forward), RuntimeStatus::Success);
+  std::promise<void> copying, permit_copy;
+  std::future<void> entered = copying.get_future(), proceed = permit_copy.get_future();
+  OwnedSnapshot first_snapshot, second_snapshot;
+  std::future<RuntimeStatus> collector = std::async(std::launch::async, [&] {
+    return first.snapshot(
+        [&](std::span<uint8_t> bytes) {
+          copying.set_value();
+          proceed.wait();
+          std::copy(source.begin(), source.end(), bytes.begin());
+          return CopyResult{RuntimeStatus::Success, bytes.size()};
+        },
+        first_snapshot);
+  });
+  if (entered.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    permit_copy.set_value();
+    (void)collector.get();
+    FAIL() << "snapshot callback did not start";
+  }
+  EXPECT_TRUE(first_snapshot.execution.report.empty());
+  EXPECT_EQ(second.observe(true, true, forward), RuntimeStatus::Success);
+  EXPECT_EQ(forwarded, 2u);
+  permit_copy.set_value();
+  ASSERT_EQ(collector.get(), RuntimeStatus::Success);
+  std::fill(source.begin(), source.end(), 0xee);
+  ASSERT_EQ(second.snapshot(
+                [&](std::span<uint8_t> bytes) {
+                  std::copy(next.begin(), next.end(), bytes.begin());
+                  return CopyResult{RuntimeStatus::Success, bytes.size()};
+                },
+                second_snapshot),
+            RuntimeStatus::Success);
+  EXPECT_EQ(first_snapshot.execution.report, original);
+
+  std::promise<void> writing, permit_write;
+  std::future<void> writer_entered = writing.get_future(),
+                    writer_proceed = permit_write.get_future();
+  bool block = false;
+  CaptureSink callbacks = sink();
+  const std::function<int64_t(std::span<const uint8_t>)> normal_write = callbacks.write;
+  callbacks.write = [&](std::span<const uint8_t> bytes) {
+    if (block) {
+      writing.set_value();
+      writer_proceed.wait();
+      block = false;
+    }
+    return normal_write(bytes);
+  };
+  SnapshotWriter writer;
+  ASSERT_EQ(writer.start(header_, callbacks), RuntimeStatus::Success);
+  block = true;
+  std::future<RuntimeStatus> pending =
+      std::async(std::launch::async, [&] { return writer.append(first_snapshot); });
+  if (writer_entered.wait_for(std::chrono::seconds(5)) != std::future_status::ready) {
+    permit_write.set_value();
+    (void)pending.get();
+    FAIL() << "writer callback did not start";
+  }
+  EXPECT_EQ(publishes_, 0u);
+  EXPECT_EQ(first_snapshot.execution.report, original);
+  EXPECT_EQ(second_snapshot.execution.report, next);
+  permit_write.set_value();
+  ASSERT_EQ(pending.get(), RuntimeStatus::Success);
+  ASSERT_EQ(writer.append(second_snapshot), RuntimeStatus::Success);
+  EXPECT_EQ(writer.finish(), RuntimeStatus::Success);
+  EXPECT_EQ(closes_, 1u);
+  EXPECT_EQ(publishes_, 1u);
+  const FailureOr<Capture> decoded = decode_capture(output_);
+  ASSERT_TRUE(decoded.succeeded());
+  ASSERT_EQ(decoded.value().executions.size(), 2u);
+  EXPECT_EQ(decoded.value().executions[0].report, original);
+  EXPECT_EQ(decoded.value().executions[1].report, next);
+  EXPECT_EQ(decoded.value().executions[1].storage_generation, 2u);
 }
 
 TEST_F(ConSanRuntimeCore, ShortWritesAreRetriedAndMalformedRawRowsAreSavedUnchanged) {
@@ -316,6 +417,134 @@ TEST_F(ConSanRuntimeCore, WriterRequiresTheOriginalExecutionsOwningFacts) {
   EXPECT_EQ(writer.finish(), RuntimeStatus::InvalidFacts);
   EXPECT_EQ(publishes_, 0u);
   EXPECT_TRUE(decode_capture(output_).failed());
+}
+
+TEST_F(ConSanRuntimeCore, WriterKeepsEntryFactsAcrossSharedReportReuseAndModuleRelease) {
+  header_ = test::multi_entry_header();
+  SnapshotWriter writer;
+  ASSERT_EQ(writer.start(header_, sink(7)), RuntimeStatus::Success);
+  const std::array<EntryKey, 3> keys = {128, 192, 128};
+  std::vector<OwnedSnapshot> snapshots;
+  for (uint32_t index = 0; index < keys.size(); ++index) {
+    const Manifest *entry = selected_manifest(header_.image, keys[index]);
+    ASSERT_NE(entry, nullptr);
+    std::shared_ptr<const Manifest> facts = std::make_shared<const Manifest>(*entry);
+    CapturedExecution execution = test::execution(*facts, index + 1, index + 1);
+    const std::vector<uint8_t> report = execution.report;
+    execution.report.clear();
+    DispatchLifecycle lifecycle(facts, execution);
+    ASSERT_EQ(lifecycle.submitted(), RuntimeStatus::Success);
+    ASSERT_EQ(lifecycle.observe(true, true, [] { return true; }), RuntimeStatus::Success);
+    OwnedSnapshot snapshot;
+    ASSERT_EQ(lifecycle.snapshot(
+                  [&report](std::span<uint8_t> bytes) {
+                    std::copy(report.begin(), report.end(), bytes.begin());
+                    return CopyResult{RuntimeStatus::Success, report.size()};
+                  },
+                  snapshot),
+              RuntimeStatus::Success);
+    snapshots.push_back(std::move(snapshot));
+  }
+  header_.image.entries.clear();
+  for (const OwnedSnapshot &snapshot : snapshots) {
+    EXPECT_EQ(writer.append(snapshot), RuntimeStatus::Success);
+  }
+  EXPECT_EQ(writer.finish(), RuntimeStatus::Success);
+  const FailureOr<Capture> capture = decode_capture(output_);
+  ASSERT_TRUE(capture.succeeded());
+  EXPECT_EQ(capture.value().executions.size(), 3u);
+  EXPECT_EQ(capture.value().executions[1].entry_key, 192u);
+  EXPECT_EQ(capture.value().executions[2].arguments.size(), 16u);
+}
+
+TEST_F(ConSanRuntimeCore, WrongEntryFactsPoisonWriterAndCannotPublishCapture) {
+  header_ = test::multi_entry_header();
+  OwnedSnapshot snapshot = copied_snapshot();
+  snapshot.execution.entry_key = 192;
+  SnapshotWriter writer;
+  ASSERT_EQ(writer.start(header_, sink()), RuntimeStatus::Success);
+  EXPECT_EQ(writer.append(snapshot), RuntimeStatus::InvalidFacts);
+  EXPECT_EQ(writer.finish(), RuntimeStatus::InvalidFacts);
+  EXPECT_EQ(publishes_, 0u);
+}
+
+TEST_F(ConSanRuntimeCore, BarrierScopesKeepPerEntryMultiWorkgroupSnapshotsAndFacts) {
+  for (const ScopeKind scope :
+       {ScopeKind::NativeLdsWorkgroupBarrier, ScopeKind::NativeLdsWorkgroupBarrierLoop}) {
+    SCOPED_TRACE(static_cast<uint32_t>(scope));
+    header_ = test::multi_entry_header();
+    header_.image.target = 1250;
+    std::vector<EntryKey> keys;
+    for (size_t index = 0; index < header_.image.entries.size(); ++index) {
+      ImageEntryFacts &entry = header_.image.entries[index];
+      ASSERT_TRUE(entry.selected.has_value());
+      Manifest &facts = *entry.selected;
+      facts.target = 1250;
+      facts.scope = scope;
+      facts.entry.workgroup_id_scalar = kWorkgroupIdTtmp9Selector;
+      const uint64_t original = facts.entry.original_entry_offset;
+      const uint64_t prepared = 544 + index * 160;
+      facts.barriers = {{.original_drain = original + 16,
+                         .original_signal = original + 20,
+                         .original_wait = original + 24,
+                         .prepared_signal = prepared,
+                         .prepared_wait = prepared + 4,
+                         .completion_probe = prepared + 8,
+                         .probe_size = 16}};
+      entry.binding = facts.entry;
+      keys.push_back(entry.key);
+    }
+    header_.image.selection_profile = selection_profile_digest(keys, scope);
+    util::StringDiagnostic error;
+    ASSERT_TRUE(validate_image_facts(header_.image, error.emitter()).succeeded())
+        << error.message();
+    const LaunchDimensions dimensions = {.grid = {128, 1, 1}, .workgroup = {64, 1, 1}};
+    output_.clear();
+    SnapshotWriter writer;
+    ASSERT_EQ(writer.start(header_, sink()), RuntimeStatus::Success);
+    for (size_t index = 0; index < keys.size(); ++index) {
+      const Manifest *entry = selected_manifest(header_.image, keys[index]);
+      ASSERT_NE(entry, nullptr);
+      const std::shared_ptr<const Manifest> facts = std::make_shared<const Manifest>(*entry);
+      const FailureOr<LaunchLayout> layout =
+          plan_launch(*facts, dimensions, facts->entry.prepared_group_bytes, 0);
+      ASSERT_TRUE(layout.succeeded());
+      EXPECT_EQ(layout.value().workgroup_count, 2u);
+      EXPECT_EQ(layout.value().wave_count, 4u);
+      EXPECT_EQ(layout.value().row_stride, report_row_bytes(facts->sites.size(), true));
+      CapturedExecution execution = test::execution(*facts, index + 1, index + 1, dimensions);
+      std::vector<uint8_t> report = execution.report;
+      ASSERT_EQ(report.size(), kReportHeaderBytes + 4u * layout.value().row_stride);
+      execution.report.clear();
+      DispatchLifecycle lifecycle(facts, std::move(execution));
+      ASSERT_EQ(lifecycle.submitted(), RuntimeStatus::Success);
+      ASSERT_EQ(lifecycle.observe(true, true, [] { return true; }), RuntimeStatus::Success);
+      OwnedSnapshot snapshot;
+      ASSERT_EQ(lifecycle.snapshot(
+                    [&report](std::span<uint8_t> bytes) {
+                      std::copy(report.begin(), report.end(), bytes.begin());
+                      return CopyResult{RuntimeStatus::Success, report.size()};
+                    },
+                    snapshot),
+                RuntimeStatus::Success);
+      EXPECT_EQ(snapshot.execution.completion, kCompletionVisibleForwarded);
+      EXPECT_EQ(snapshot.execution.report, report);
+      std::fill(report.begin(), report.end(), 0xee);
+      EXPECT_EQ(writer.append(snapshot), RuntimeStatus::Success);
+    }
+    EXPECT_EQ(writer.finish(), RuntimeStatus::Success);
+    const FailureOr<Capture> decoded = decode_capture(output_);
+    ASSERT_TRUE(decoded.succeeded());
+    ASSERT_EQ(decoded.value().executions.size(), keys.size());
+    for (size_t index = 0; index < keys.size(); ++index) {
+      const Manifest *facts = selected_manifest(decoded.value().header.image, keys[index]);
+      ASSERT_NE(facts, nullptr);
+      EXPECT_EQ(facts->scope, scope);
+      EXPECT_EQ(facts->entry.workgroup_id_scalar, kWorkgroupIdTtmp9Selector);
+      ASSERT_EQ(facts->barriers.size(), 1u);
+      EXPECT_EQ(decoded.value().executions[index].entry_key, keys[index]);
+    }
+  }
 }
 
 } // namespace

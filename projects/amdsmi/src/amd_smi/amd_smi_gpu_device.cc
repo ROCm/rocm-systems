@@ -30,6 +30,7 @@ extern "C" {
 #include <vector>
 
 #include "amd_smi/impl/amd_smi_common.h"
+#include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "amd_smi/impl/fdinfo.h"
 #include "rocm_smi/rocm_smi_kfd.h"
@@ -524,7 +525,8 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_local_cpulist(uint32_t d
     return bitmask;
   }
 
-  std::string path = "/sys/class/drm/card" + std::to_string(drm_card) + "/device/local_cpulist";
+  std::string path = amd::smi::test_hooks::SysfsDrmRoot() + "/card" + std::to_string(drm_card) +
+                     "/device/local_cpulist";
   std::ifstream file(path);
 
   if (file.is_open()) {
@@ -1017,8 +1019,8 @@ bool AMDSmiGPUDevice::device_has_ualink() const {
   }
 
   // Use the same ualink path logic as get_fabric_info_from_ualoe()
-  const auto ualink_directory =
-      (std::string(kUALOE_BASE_PATH) + get_gpu_path() + std::string(kUALOE_UALINK_DIRECTORY));
+  const auto ualink_directory = (amd::smi::test_hooks::SysfsDrmRoot() + "/" + get_gpu_path() +
+                                 std::string(kUALOE_UALINK_DIRECTORY));
   const auto ualink_directory_path = std::filesystem::path(ualink_directory);
 
   return std::filesystem::is_directory(ualink_directory_path);
@@ -1106,8 +1108,8 @@ auto AMDSmiGPUDevice::get_fabric_info_from_ualoe(amdsmi_fabric_info_t& fabric_in
    * is the AMDSMI processor index and is not guaranteed to equal the DRM card index when devices
    * are gapped or filtered.
    */
-  const auto ualink_directory =
-      (std::string(kUALOE_BASE_PATH) + get_gpu_path() + std::string(kUALOE_UALINK_DIRECTORY));
+  const auto ualink_directory = (amd::smi::test_hooks::SysfsDrmRoot() + "/" + get_gpu_path() +
+                                 std::string(kUALOE_UALINK_DIRECTORY));
   const auto ualink_directory_path = std::filesystem::path(ualink_directory);
 
   outstream << __PRETTY_FUNCTION__ << " | gpu_path: " << get_gpu_path()

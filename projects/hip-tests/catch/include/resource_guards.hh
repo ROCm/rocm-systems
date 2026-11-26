@@ -10,6 +10,10 @@
 #include <hip_test_common.hh>
 #include <hip/hip_runtime_api.h>
 
+#if !defined(_WIN32)
+#include <dlfcn.h>
+#endif  // !defined(_WIN32)
+
 enum class LinearAllocs {
   malloc,
   mallocAndRegister,
@@ -397,10 +401,11 @@ class StreamsGuard {
 extern "C" hipError_t hipExtGetLastError(void);
 #endif
 
-// A failing hipMemPoolSetAttribute during cleanup still records the thread-local
-// last error; consume it so the last-error-reset listener does not blame the
-// test for a cleanup failure.
-inline void consumeMemPoolRestoreError() {
+// Consumes the thread-local last error and, on AMD, the command last error. Call it after an
+// error that is expected (a negative call, an unsupported feature) or that comes from cleanup
+// (a failing hipMemPoolSetAttribute while restoring a pool), so the last-error-reset listener
+// does not blame the test for it. It does not check that an error was set.
+inline void consumeLastError() {
   static_cast<void>(hipGetLastError());
 #if HT_AMD
   static_cast<void>(hipExtGetLastError());
@@ -465,7 +470,7 @@ class MemPoolGuard {
       // Only consume on failure: a successful restore leaves any error the test
       // itself left untouched, so the listener can still report a real leak.
       if (failed) {
-        consumeMemPoolRestoreError();
+        consumeLastError();
       }
     }
   }
@@ -492,9 +497,42 @@ struct MemPoolAttrRestorer {
   T value;
   ~MemPoolAttrRestorer() {
     if (hipMemPoolSetAttribute(pool, attr, &value) != hipSuccess) {
-      consumeMemPoolRestoreError();
+      consumeLastError();
     }
   }
 };
 template <typename T>
 MemPoolAttrRestorer(hipMemPool_t, hipMemPoolAttr, T) -> MemPoolAttrRestorer<T>;
+
+#if !defined(_WIN32)
+class DlopenGuard {
+ public:
+  explicit DlopenGuard(const char* path) : handle_{dlopen(path, RTLD_NOW)} {
+    const char* load_error = dlerror();
+    INFO("dlopen " << path << " failed: " << (load_error == nullptr ? "" : load_error));
+    REQUIRE(handle_ != nullptr);
+  }
+
+  DlopenGuard(const DlopenGuard&) = delete;
+  DlopenGuard(DlopenGuard&&) = delete;
+  DlopenGuard& operator=(const DlopenGuard&) = delete;
+
+  ~DlopenGuard() {
+    if (handle_ != nullptr) {
+      static_cast<void>(dlclose(handle_));
+    }
+  }
+
+  void* symbol(const char* name) const {
+    void* resolved = dlsym(handle_, name);
+    const char* symbol_error = dlerror();
+    INFO("dlsym " << name << " failed: " << (symbol_error == nullptr ? "" : symbol_error));
+    REQUIRE(symbol_error == nullptr);
+    REQUIRE(resolved != nullptr);
+    return resolved;
+  }
+
+ private:
+  void* handle_;
+};
+#endif  // !defined(_WIN32)

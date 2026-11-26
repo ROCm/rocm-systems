@@ -1,7 +1,7 @@
 ---
 clock:
   Unit_hipClock64_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     disabled:
       targets: [amd_windows]
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
@@ -13,5 +13,5 @@ clock:
       reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [deviceLib, timing]
   Unit_hipWallClock64_Positive_Basic:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [deviceLib, timing]

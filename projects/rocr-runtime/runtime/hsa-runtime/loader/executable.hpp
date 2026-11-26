@@ -468,6 +468,11 @@ class AieLoadedCodeObjectImpl : public LoadedCodeObject, public ExecutableObject
   std::vector<std::unique_ptr<AMD::AieKernelDescriptor>> descriptors;
   /// @brief Device buffers backing the blobs: (host ptr from SegmentAlloc, size).
   std::vector<std::pair<void*, size_t>> device_buffers;
+  /// @brief Buffers allocated through the agent's system allocator rather than SegmentAlloc (aie4
+  /// has no CODE_AGENT segment region to allocate from, having no device heap at all), freed via
+  /// the agent's system deallocator. Currently just each FullElf kernel's static control code; see
+  /// AieKernelDescriptor::static_ctrl_code_dev_addr.
+  std::vector<void*> system_buffers;
 
   /// @brief Reports the original hsaco ELF image and its size; all other
   /// attributes are unsupported for AIE code objects.

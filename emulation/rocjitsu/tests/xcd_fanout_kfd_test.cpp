@@ -63,7 +63,7 @@ namespace {
 
 using namespace rocjitsu;
 
-const std::string CONFIG_PATH = test::config_path("gfx950_mi355x.json");
+const std::string CONFIG_PATH = test::config_path("gfx950_mi350x.json");
 using test::kernel_path;
 
 constexpr uint32_t kGpuId = 38144;
@@ -85,6 +85,7 @@ struct KfdFanoutFixture {
   std::thread sim_thread;
 
   void initialize() {
+    util::StringDiagnostic admission_diagnostic;
     ASSERT_TRUE(test::load_valid_config(CONFIG_PATH, loaded));
     // Both taken before take_root(): the loader owns the tree until then, and
     // its accessors stop resolving once ownership has moved out.
@@ -104,9 +105,11 @@ struct KfdFanoutFixture {
     auto vm = std::make_unique<VirtualMachine>(std::move(soc_root));
     driver = vm->driver();
     engine->topology().set_root(std::move(vm));
-    loaded.wire_links(engine->topology());
+    ASSERT_TRUE(loaded.wire_links(engine->topology(), admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     soc->wire_backing(engine->topology());
-    engine->create();
+    ASSERT_TRUE(engine->create(admission_diagnostic.emitter()).succeeded())
+        << admission_diagnostic.message();
     engine->register_as_primary();
   }
 
@@ -119,8 +122,9 @@ struct KfdFanoutFixture {
       engine->request_exit("test finished");
       sim_thread.join();
     }
-    if (driver)
+    if (driver) {
       driver->close();
+    }
   }
 };
 
@@ -191,7 +195,16 @@ bool map_userptr(SimulatedKfd *driver, uint32_t pid, void *host, size_t size) {
   alloc.size = size;
   alloc.gpu_id = kGpuId;
   alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_USERPTR | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
-  return driver->ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc) == 0;
+  if (driver->ioctl(pid, AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc) != 0) {
+    return false;
+  }
+
+  uint32_t gpu_id = kGpuId;
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.n_devices = 1;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+  return driver->ioctl(pid, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map) == 0 && map.n_success == 1;
 }
 
 // A fanned-out dispatch of a kernel that spills to private memory, submitted
@@ -308,8 +321,9 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
   // A compute queue created this way is replicated onto every XCD; without that
   // the dispatch would never fan out and there would be no race for the pool.
   size_t registered = 0;
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     registered += fx.soc->xcd(xi)->command_processor()->registered_queue_count_for_test();
+  }
   ASSERT_EQ(registered, kTotalXcds) << "the compute queue did not fan out across the XCDs";
 
   fx.start();
@@ -343,8 +357,9 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
   while (std::atomic_ref<uint64_t>(signal[kSignalValueIndex]).load(std::memory_order_acquire) !=
              kInitialSignal - 1 &&
-         std::chrono::steady_clock::now() < deadline)
+         std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
   ASSERT_EQ(std::atomic_ref<uint64_t>(signal[kSignalValueIndex]).load(std::memory_order_acquire),
             kInitialSignal - 1)
       << "the fanned-out dispatch never completed";
@@ -353,8 +368,9 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
   auto counts = fx.soc->dispatched_workgroups_per_xcd();
   ASSERT_EQ(counts.size(), kTotalXcds);
   EXPECT_EQ(std::accumulate(counts.begin(), counts.end(), uint64_t{0}), kGridWgs);
-  for (uint32_t xi = 0; xi < kTotalXcds; ++xi)
+  for (uint32_t xi = 0; xi < kTotalXcds; ++xi) {
     EXPECT_EQ(counts[xi], kGridWgs / kTotalXcds) << "xcd" << xi;
+  }
 
   // Each work item sums its own 64 private slots, so the expected value depends
   // only on its global id -- and is wrong for any item whose slots were not
@@ -364,11 +380,13 @@ TEST(XcdFanoutKfdTest, FanoutRunsAPrivateMemoryKernelAcrossEveryXcd) {
   for (uint32_t gid = 0; gid < kGridItems; ++gid) {
     constexpr uint32_t kSlots = 64;
     uint32_t expected = 0;
-    for (uint32_t i = 0; i < kSlots; ++i)
+    for (uint32_t i = 0; i < kSlots; ++i) {
       expected += gid * kSlots + ((gid + i) % kSlots);
+    }
     if (out[gid] != expected) {
-      if (mismatches == 0)
+      if (mismatches == 0) {
         first_bad = gid;
+      }
       ++mismatches;
     }
   }

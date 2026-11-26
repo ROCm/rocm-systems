@@ -39,9 +39,14 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdlib>
+#include <limits>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -180,15 +185,96 @@ get_device_name_kernel_symbols_mapping(const amd_comgr_metadata_node_t key,
     return AMD_COMGR_STATUS_SUCCESS;
 }
 
-kernel_symbol_hip_device_map_t
-get_kernel_symbol_device_name_map_from_metadata(amd_comgr_metadata_node_t kernels_metadata)
+namespace
 {
-    auto   kernel_sym_device_func_map = kernel_symbol_hip_device_map_t{};
-    size_t num_kernels                = 0;
+constexpr auto kernel_args_metadata_lookup           = ".args";
+constexpr auto kernel_arg_offset_metadata_lookup     = ".offset";
+constexpr auto kernel_arg_size_metadata_lookup       = ".size";
+constexpr auto kernel_arg_value_kind_metadata_lookup = ".value_kind";
+constexpr auto kernel_arg_segment_metadata_lookup    = ".kernarg_segment_size";
+
+// The value of a metadata key. COMGR renders numeric metadata as text, so this reads strings and
+// numbers alike; nullopt when the key is absent or does not hold text.
+std::optional<std::string>
+metadata_string(amd_comgr_metadata_node_t node, const char* key)
+{
+    auto value = amd_comgr_metadata_node_t{};
+    if(amd_comgr_metadata_lookup(node, key, &value) != AMD_COMGR_STATUS_SUCCESS)
+        return std::nullopt;
+    auto value_fini = common::scope_destructor{[value]() { destroy_metadata(value); }};
+
+    auto out = std::string{};
+    if(get_node_string(value, &out) != AMD_COMGR_STATUS_SUCCESS) return std::nullopt;
+    return out;
+}
+
+std::optional<uint64_t>
+metadata_uint64(amd_comgr_metadata_node_t node, const char* key)
+{
+    const auto text = metadata_string(node, key);
+    if(!text || text->empty()) return std::nullopt;
+
+    char*      end   = nullptr;
+    const auto value = static_cast<uint64_t>(std::strtoull(text->c_str(), &end, 10));
+    if(end == text->c_str() || *end != '\0') return std::nullopt;
+    return value;
+}
+
+// The ranges of one kernel's kernarg segment that can hold a pointer the kernel writes through:
+// its global_buffer arguments and the by-value arguments large enough to be a struct. When an
+// argument is not described well enough to tell, every byte the kernel declares itself (everything
+// before the hidden arguments the runtime appends) is a candidate. nullopt when the kernel has no
+// argument list to read.
+std::optional<std::vector<kernarg_region_t>>
+get_kernel_pointer_regions(amd_comgr_metadata_node_t kernel_node)
+{
+    const auto segment_size = metadata_uint64(kernel_node, kernel_arg_segment_metadata_lookup);
+    if(!segment_size) return std::nullopt;
+
+    auto args = amd_comgr_metadata_node_t{};
+    if(amd_comgr_metadata_lookup(kernel_node, kernel_args_metadata_lookup, &args) !=
+       AMD_COMGR_STATUS_SUCCESS)
+        return std::nullopt;
+    auto args_fini = common::scope_destructor{[args]() { destroy_metadata(args); }};
+
+    auto num_args = size_t{0};
+    if(amd_comgr_get_metadata_list_size(args, &num_args) != AMD_COMGR_STATUS_SUCCESS)
+        return std::nullopt;
+
+    auto parsed_args = std::vector<detail::kernarg_arg_metadata_t>{};
+    parsed_args.reserve(num_args);
+    for(size_t i = 0; i < num_args; i++)
+    {
+        auto arg = amd_comgr_metadata_node_t{};
+        if(amd_comgr_index_list_metadata(args, i, &arg) != AMD_COMGR_STATUS_SUCCESS)
+        {
+            parsed_args.emplace_back();
+            continue;
+        }
+        auto arg_fini = common::scope_destructor{[arg]() { destroy_metadata(arg); }};
+
+        parsed_args.emplace_back(detail::kernarg_arg_metadata_t{
+            metadata_string(arg, kernel_arg_value_kind_metadata_lookup),
+            metadata_uint64(arg, kernel_arg_offset_metadata_lookup),
+            metadata_uint64(arg, kernel_arg_size_metadata_lookup)});
+    }
+
+    return detail::parse_kernel_pointer_regions(*segment_size, parsed_args);
+}
+}  // namespace
+
+// Everything this library derives from the amdhsa.kernels list of one code object, read in a
+// single pass: the kernel-symbol-to-device-function map, and which kernarg bytes of each kernel can
+// hold a pointer.
+code_object_metadata_t
+get_metadata_from_kernels_node(amd_comgr_metadata_node_t kernels_metadata)
+{
+    auto   metadata    = code_object_metadata_t{};
+    size_t num_kernels = 0;
 
     if(!comgr_success(amd_comgr_get_metadata_list_size(kernels_metadata, &num_kernels),
                       "amd_comgr_get_metadata_list_size"))
-        return kernel_sym_device_func_map;
+        return metadata;
 
     for(size_t i = 0; i < num_kernels; i++)
     {
@@ -221,11 +307,21 @@ get_kernel_symbol_device_name_map_from_metadata(amd_comgr_metadata_node_t kernel
         {
             ROCP_INFO << "found kernel symbol mapping: " << kernel_symbol << " -> "
                       << kernel_meta_name;
-            kernel_sym_device_func_map.emplace(kernel_symbol, kernel_meta_name);
+            metadata.kernel_symbol_device_map.emplace(kernel_symbol, kernel_meta_name);
+        }
+
+        // Recorded under every name the entry is known by: the loader reports the kernel
+        // descriptor ("<symbol>.kd") for newer code objects and the function itself for older
+        // ones, and the metadata carries both spellings.
+        if(auto regions = get_kernel_pointer_regions(kernel_node))
+        {
+            if(!kernel_symbol.empty())
+                metadata.kernarg_pointer_regions.emplace(kernel_symbol, *regions);
+            metadata.kernarg_pointer_regions.emplace(kernel_meta_name, std::move(*regions));
         }
     }
 
-    return kernel_sym_device_func_map;
+    return metadata;
 }
 
 amd_comgr_status_t
@@ -250,6 +346,72 @@ get_kernels_meta_node(const amd_comgr_code_object_info_t& isa_offset,
     return AMD_COMGR_STATUS_SUCCESS;
 }
 }  // namespace
+
+namespace detail
+{
+namespace
+{
+constexpr auto hidden_arg_value_kind_prefix        = "hidden";
+constexpr auto global_buffer_arg_value_kind        = "global_buffer";
+constexpr auto global_buffer_static_arg_value_kind = "global_buffer_static";
+constexpr auto by_value_arg_value_kind             = "by_value";
+constexpr auto hidden_pointer_value_kinds =
+    std::array<std::string_view, 3>{"hidden_printf_buffer",
+                                    "hidden_hostcall_buffer",
+                                    "hidden_heap_v1"};
+
+// A by-value argument this small cannot be told apart from an integer or floating-point scalar, and
+// a scalar whose bits happen to look like an address must not be mistaken for one.
+constexpr uint64_t by_value_struct_min_size = 16;
+
+// The size of an argument holding an address.
+constexpr uint64_t pointer_arg_size = 8;
+}  // namespace
+
+std::optional<std::vector<kernarg_region_t>>
+parse_kernel_pointer_regions(uint64_t segment_size, const std::vector<kernarg_arg_metadata_t>& args)
+{
+    if(segment_size > std::numeric_limits<uint32_t>::max()) return std::nullopt;
+
+    auto regions      = std::vector<kernarg_region_t>{};
+    auto hidden_start = segment_size;
+    auto described    = true;
+    for(const auto& arg : args)
+    {
+        if(!arg.value_kind || !arg.offset || !arg.size || *arg.offset > segment_size ||
+           *arg.size > segment_size - *arg.offset)
+        {
+            described = false;
+            continue;
+        }
+
+        if(arg.value_kind->rfind(hidden_arg_value_kind_prefix, 0) == 0)
+        {
+            hidden_start = std::min(hidden_start, *arg.offset);
+            if(std::find(hidden_pointer_value_kinds.begin(),
+                         hidden_pointer_value_kinds.end(),
+                         *arg.value_kind) != hidden_pointer_value_kinds.end())
+                regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
+                                                   static_cast<uint32_t>(pointer_arg_size)});
+        }
+        else if(*arg.value_kind == global_buffer_arg_value_kind ||
+                *arg.value_kind == global_buffer_static_arg_value_kind)
+            regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
+                                               static_cast<uint32_t>(pointer_arg_size)});
+        else if(*arg.value_kind == by_value_arg_value_kind)
+        {
+            if(*arg.size >= by_value_struct_min_size)
+                regions.push_back(kernarg_region_t{static_cast<uint32_t>(*arg.offset),
+                                                   static_cast<uint32_t>(*arg.size)});
+        }
+        else
+            described = false;
+    }
+
+    if(!described) regions.push_back(kernarg_region_t{0u, static_cast<uint32_t>(hidden_start)});
+    return regions;
+}
+}  // namespace detail
 
 comgr_code_object_vec_t
 get_isa_offsets(hsa_agent_t hsa_agent, const void* fat_bin)
@@ -306,31 +468,31 @@ get_kernel_symbol_device_name_map(const amd_comgr_code_object_info_t& isa_offset
     auto kernels_metadata_fini =
         common::scope_destructor{[kernels_metadata]() { destroy_metadata(kernels_metadata); }};
 
-    return get_kernel_symbol_device_name_map_from_metadata(kernels_metadata);
+    return get_metadata_from_kernels_node(kernels_metadata).kernel_symbol_device_map;
 }
 
-kernel_symbol_hip_device_map_t
-get_kernel_symbol_device_name_map_from_executable(const void* executable, size_t executable_size)
+code_object_metadata_t
+get_metadata_from_executable(const void* executable, size_t executable_size)
 {
-    auto kernel_sym_device_func_map = kernel_symbol_hip_device_map_t{};
-    if(executable == nullptr || executable_size == 0) return kernel_sym_device_func_map;
+    auto metadata = code_object_metadata_t{};
+    if(executable == nullptr || executable_size == 0) return metadata;
 
     auto binary_data = amd_comgr_data_t{};
     if(!comgr_success(amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &binary_data),
                       "amd_comgr_create_data"))
-        return kernel_sym_device_func_map;
+        return metadata;
     auto binary_data_fini =
         common::scope_destructor{[binary_data]() { release_data(binary_data); }};
 
     if(!comgr_success(
            amd_comgr_set_data(binary_data, executable_size, static_cast<const char*>(executable)),
            "amd_comgr_set_data"))
-        return kernel_sym_device_func_map;
+        return metadata;
 
     auto binary_metadata = amd_comgr_metadata_node_t{};
     if(!comgr_success(amd_comgr_get_data_metadata(binary_data, &binary_metadata),
                       "amd_comgr_get_data_metadata"))
-        return kernel_sym_device_func_map;
+        return metadata;
     auto binary_metadata_fini =
         common::scope_destructor{[binary_metadata]() { destroy_metadata(binary_metadata); }};
 
@@ -338,11 +500,17 @@ get_kernel_symbol_device_name_map_from_executable(const void* executable, size_t
     if(!comgr_success(
            amd_comgr_metadata_lookup(binary_metadata, kernels_metadata_lookup, &kernels_metadata),
            "amd_comgr_metadata_lookup"))
-        return kernel_sym_device_func_map;
+        return metadata;
     auto kernels_metadata_fini =
         common::scope_destructor{[kernels_metadata]() { destroy_metadata(kernels_metadata); }};
 
-    return get_kernel_symbol_device_name_map_from_metadata(kernels_metadata);
+    return get_metadata_from_kernels_node(kernels_metadata);
+}
+
+kernel_symbol_hip_device_map_t
+get_kernel_symbol_device_name_map_from_executable(const void* executable, size_t executable_size)
+{
+    return get_metadata_from_executable(executable, executable_size).kernel_symbol_device_map;
 }
 }  // namespace hip
 }  // namespace code_object

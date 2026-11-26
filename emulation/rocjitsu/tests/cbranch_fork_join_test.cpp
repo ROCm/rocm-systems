@@ -1,10 +1,12 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/branch_stack.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -75,7 +77,7 @@ Program if_else_program(uint32_t fork) {
   };
 }
 
-class CbranchForkJoinTest : public ::testing::TestWithParam<rj_code_arch_t> {
+class CbranchForkJoinTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override {
     ComputeUnitCore::Config config{};
@@ -85,22 +87,24 @@ protected:
     config.sgprs_per_wf = 104;
     config.vgprs_per_wf = 256;
     config.functional_quantum = 1;
-    cu = ComputeUnitCore::create("cbranch_fork_join_cu", config, &memory, &l2);
-    ASSERT_NE(cu, nullptr);
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "cbranch_fork_join_cu", config, &memory, &l2));
     wf = cu->dispatch_wf(0, kCodeBase, 104, 256);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(~uint64_t{0});
   }
 
   void TearDown() override {
-    if (wf && !wf->is_halted())
+    if (wf && !wf->is_halted()) {
       wf->halt();
+    }
   }
 
   void write_program(Program program) {
     program.insert(program.end(), 4, kSNop); // pad to instruction fetch window
-    for (size_t i = 0; i < program.size(); ++i)
+    for (size_t i = 0; i < program.size(); ++i) {
       memory.write32(kCodeBase + i * sizeof(uint32_t), program[i]);
+    }
   }
 
   /// Execute one instruction that falls through to the next one.
@@ -139,8 +143,9 @@ protected:
     return cu->read_vgpr(wf->vgpr_alloc().base + index, lane);
   }
   void fill_vgpr(uint32_t index, uint32_t value) {
-    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+    for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
       cu->write_vgpr(wf->vgpr_alloc().base + index, lane, value);
+    }
   }
 
   /// Run until the PC reaches @p end_offset; returns the offset of each executed instruction.
@@ -149,8 +154,9 @@ protected:
     while (wf->pc != kCodeBase + end_offset && trace.size() < max_steps) {
       trace.push_back(wf->pc - kCodeBase);
       (void)cu->step();
-      if (wf->is_halted())
+      if (wf->is_halted()) {
         break;
+      }
     }
     EXPECT_FALSE(wf->is_halted());
     EXPECT_EQ(wf->pc, kCodeBase + end_offset);
@@ -257,20 +263,23 @@ TEST_P(CbranchForkJoinTest, ReusedSlotStartsWithEmptyForkStack) {
 }
 
 TEST_P(CbranchForkJoinTest, BranchStackEntriesStartAtTheWavesFirstSgpr) {
-  for (uint32_t n = 0; n <= 7; ++n)
+  for (uint32_t n = 0; n <= 7; ++n) {
     EXPECT_EQ(branch_stack_entry_physical_sgpr(*wf, n), wf->sgpr_alloc().base + 4 * n);
+  }
 }
 
 TEST_P(CbranchForkJoinTest, ForkAndJoinUseTheSecondWavesPhysicalStack) {
   Wavefront *first_wave = wf;
-  for (uint32_t index = 0; index < 32; ++index)
+  for (uint32_t index = 0; index < 32; ++index) {
     set_sgpr(index, 0x12340000u + index);
+  }
 
   wf = cu->dispatch_wf(1, kCodeBase, 104, 256);
   ASSERT_NE(wf, nullptr);
   ASSERT_NE(wf->sgpr_alloc().base, 0u);
-  for (uint32_t index = 0; index < 32; ++index)
+  for (uint32_t index = 0; index < 32; ++index) {
     set_sgpr(index, 0x56780000u + index);
+  }
   wf->set_cond_stack_ptr(3);
 
   const auto push = fork_stack_access(*wf, 0x15);
@@ -481,8 +490,9 @@ TEST_P(CbranchForkJoinTest, UniformIForkSkipsTheStackAndTheElseSide) {
 
   EXPECT_EQ(run_until(kEndOffset),
             (std::vector<uint64_t>{0x00, 0x04, kForkOffset, kThenOffset, kJoinOffset, 0x1C, 0x20}));
-  for (uint32_t lane = 0; lane < 64; ++lane)
+  for (uint32_t lane = 0; lane < 64; ++lane) {
     EXPECT_EQ(vgpr(0, lane), kThenValue) << "lane " << lane;
+  }
   EXPECT_EQ(sgpr64(0), kStackSentinel);
   EXPECT_EQ(wf->cond_stack_ptr(), 0u);
 }
@@ -510,6 +520,8 @@ TEST_P(CbranchForkJoinTest, GetpcRoundTripsThroughGForkWithLoadBias) {
   constexpr uint64_t kExport = 0xFFFFFFFF12345004ULL;
   constexpr uint64_t kForkPc = 0x2000;
   constexpr uint64_t kFewLanes = 0x15;
+  util::FailureOr<uint32_t> getpc = build_s_getpc_b64(36, GetParam());
+  ASSERT_TRUE(getpc.succeeded());
   for (uint64_t bias : {uint64_t{0}, uint64_t{0x00007FFF00000000ULL}}) {
     SCOPED_TRACE(::testing::Message() << "bias=" << std::hex << bias);
     wf->set_code_load_bias(bias);
@@ -520,7 +532,7 @@ TEST_P(CbranchForkJoinTest, GetpcRoundTripsThroughGForkWithLoadBias) {
       set_sgpr64(0, kStackSentinel);
       set_sgpr64(2, kStackSentinel);
       wf->pc = kHighPc;
-      ASSERT_NO_FATAL_FAILURE(execute(build_s_getpc_b64(36, GetParam())));
+      ASSERT_NO_FATAL_FAILURE(execute(getpc.value()));
       ASSERT_EQ(sgpr64(36), kExport);
 
       wf->pc = kForkPc;
@@ -829,7 +841,7 @@ TEST_P(CbranchForkJoinTest, WaitScoreboardSeesNoStackAccessForAFallthroughJoin) 
 
 // MODE.CSP and the fork/join instructions exist only on CDNA1-4.
 INSTANTIATE_TEST_SUITE_P(Cdna, CbranchForkJoinTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                           ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         ::testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                           rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4));
 
 } // namespace

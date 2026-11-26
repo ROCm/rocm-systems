@@ -1,10 +1,13 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "counting_gpu_memory.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna1/isa.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna2/addr_calc.h"
@@ -17,6 +20,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
@@ -38,24 +42,102 @@ namespace {
 
 using namespace rocjitsu;
 
-class ScalarBufferInstructionTest : public ::testing::TestWithParam<rj_code_arch_t> {
-protected:
-  bool gfx9() const {
-    const auto arch = GetParam();
-    return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-           arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+bool is_gfx9(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+         arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
+}
+
+// Identity translation with nothing mapped at or above @p unmapped_base.
+class UnmappedAboveTranslator final : public amdgpu::AddressSpaceTranslator {
+public:
+  explicit UnmappedAboveTranslator(uint64_t unmapped_base) : unmapped_base_(unmapped_base) {}
+
+  [[nodiscard]] amdgpu::VmTranslationResult translate(uint64_t address, std::size_t size,
+                                                      amdgpu::VmAccessKind access) const override {
+    if (address >= unmapped_base_) {
+      return {.outcome = amdgpu::VmAccessOutcome::Faulted, .translation = {}};
+    }
+    return identity_.translate(address, size, access);
   }
+
+private:
+  amdgpu::IdentityAddressSpaceTranslator identity_;
+  uint64_t unmapped_base_;
+};
+
+// One wave executing scalar buffer instructions through the scalar pipeline, on
+// physical memory or through a translated address space (identity by default).
+class ScalarBufferHarness {
+public:
+  ~ScalarBufferHarness() {
+    if (wf) {
+      wf->halt();
+    }
+  }
+
+  void init(rocjitsu::IsaFamily arch, bool translated,
+            std::shared_ptr<amdgpu::AddressSpaceTranslator> translator = nullptr) {
+    l2.set_backing_memory(&mem);
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = is_gfx9(arch) ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_buffer", cfg, &mem, &l2));
+    decoder = Decoder::create(arch);
+    wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    if (translated) {
+      if (!translator) {
+        translator = std::make_shared<amdgpu::IdentityAddressSpaceTranslator>();
+      }
+      const auto address_space = vm.register_address_space(
+          0, std::move(translator), std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(mem));
+      ASSERT_TRUE(address_space);
+      cu->set_gpu_vm(&vm);
+      wf->set_address_space(address_space);
+    }
+  }
+
+  void write_sgpr(unsigned reg, uint32_t value) {
+    cu->write_sgpr(wf->sgpr_alloc().base + reg, value);
+  }
+  uint32_t read_sgpr(unsigned reg) { return cu->read_sgpr(wf->sgpr_alloc().base + reg); }
+
+  void execute(const std::array<uint32_t, 2> &words) {
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+    ASSERT_NE(inst->data(), nullptr);
+    ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+  }
+
+  amdgpu::GpuMemory mem{"scalar_buffer_mem"};
+  amdgpu::L2Cache l2{"scalar_buffer_l2"};
+  amdgpu::L1ScalarCache l1{&l2};
+  amdgpu::ScalarMemPipeline pipeline{&l1};
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  std::unique_ptr<Decoder> decoder;
+  amdgpu::Wavefront *wf = nullptr;
+  amdgpu::GpuVm vm;
+};
+
+class ScalarBufferInstructionTest : public ::testing::TestWithParam<rocjitsu::IsaFamily> {
+protected:
+  bool gfx9() const { return is_gfx9(GetParam()); }
 };
 
 INSTANTIATE_TEST_SUITE_P(AllArchitectures, ScalarBufferInstructionTest,
-                         ::testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                           ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                           ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA1,
-                                           ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
-                                           ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5));
+                         ::testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                           rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                           rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna1,
+                                           rocjitsu::IsaFamily::Cdna2, rocjitsu::IsaFamily::Cdna3,
+                                           rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5));
 
 TEST(ScalarBufferTest, TranslatedNarrowLoadsSuppressMaskedReadsAndZeroDestinations) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     amdgpu::GpuMemory memory("narrow_scalar_memory");
     amdgpu::L2Cache l2("narrow_scalar_l2");
     l2.set_backing_memory(&memory);
@@ -72,7 +154,9 @@ TEST(ScalarBufferTest, TranslatedNarrowLoadsSuppressMaskedReadsAndZeroDestinatio
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("narrow_scalar", cfg, &memory, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "narrow_scalar", cfg, &memory, &l2));
     cu->set_gpu_vm(&vm);
     auto *wf = cu->dispatch_wf(0, 0, 106, 16);
     ASSERT_NE(wf, nullptr);
@@ -86,8 +170,8 @@ TEST(ScalarBufferTest, TranslatedNarrowLoadsSuppressMaskedReadsAndZeroDestinatio
       for (bool masked : {true, false}) {
         const uint32_t records = masked ? 0 : 4;
         cu->write_sgpr(sb, base);
-        cu->write_sgpr(sb + 1, arch == ROCJITSU_CODE_ARCH_CDNA5 ? records << 25 : 0);
-        cu->write_sgpr(sb + 2, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : records);
+        cu->write_sgpr(sb + 1, arch == rocjitsu::IsaFamily::Cdna5 ? records << 25 : 0);
+        cu->write_sgpr(sb + 2, arch == rocjitsu::IsaFamily::Cdna5 ? 0 : records);
         cu->write_sgpr(sb + 3, 0);
         for (uint32_t op : {24u, 25u, 26u, 27u}) {
           SCOPED_TRACE(testing::Message() << "arch=" << arch << " op=" << op << " masked=" << masked
@@ -119,94 +203,144 @@ TEST_P(ScalarBufferInstructionTest, ScalarBufferLoadsZeroOnlyOutOfRangeDwords) {
   for (bool translated : {false, true}) {
     SCOPED_TRACE(translated);
     const auto arch = GetParam();
-    const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
-    amdgpu::GpuMemory mem("scalar_buffer_mem");
-    amdgpu::L2Cache l2("scalar_buffer_l2");
-    l2.set_backing_memory(&mem);
-    amdgpu::L1ScalarCache l1(&l2);
-    amdgpu::ScalarMemPipeline pipeline(&l1);
-    amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = arch;
-    cfg.num_wf_slots = 1;
-    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
-    cfg.vgprs_per_wf = 16;
-    cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("scalar_buffer", cfg, &mem, &l2);
-    auto decoder = Decoder::create(arch);
-    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
-    ASSERT_NE(wf, nullptr);
-    amdgpu::GpuVm vm;
-    if (translated) {
-      const auto address_space =
-          vm.register_address_space(0, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(),
-                                    std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(mem));
-      ASSERT_TRUE(address_space);
-      cu->set_gpu_vm(&vm);
-      wf->set_address_space(address_space);
-    }
-    const auto sb = wf->sgpr_alloc().base;
+    const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4 || arch == rocjitsu::IsaFamily::Cdna5;
+    ScalarBufferHarness harness;
+    ASSERT_NO_FATAL_FAILURE(harness.init(arch, translated));
     constexpr uint64_t base = 0x1000;
-    for (uint32_t i = 0; i < 32; ++i)
-      mem.write32(base + 4 * i, 100 + i);
+    for (uint32_t i = 0; i < 32; ++i) {
+      harness.mem.write32(base + 4 * i, 100 + i);
+    }
     for (uint32_t stride : {0u, 4u}) {
       const uint32_t records = stride ? 3 : 12;
-      cu->write_sgpr(sb, base);
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
-        cu->write_sgpr(sb + 1, records << 25);
-        cu->write_sgpr(sb + 2, 0);
+      harness.write_sgpr(0, base);
+      if (arch == rocjitsu::IsaFamily::Cdna5) {
+        harness.write_sgpr(1, records << 25);
+        harness.write_sgpr(2, 0);
         // STRIDE_SCALE must be ignored by scalar loads.
-        cu->write_sgpr(sb + 3, (stride << 12) | (3u << 26));
+        harness.write_sgpr(3, (stride << 12) | (3u << 26));
       } else {
-        cu->write_sgpr(sb + 1, stride << 16);
-        cu->write_sgpr(sb + 2, records);
-        cu->write_sgpr(sb + 3, 0);
+        harness.write_sgpr(1, stride << 16);
+        harness.write_sgpr(2, records);
+        harness.write_sgpr(3, 0);
       }
       for (uint32_t offset : {0u, 4u, 12u, 16u}) {
-        for (uint32_t i = 0; i < 4; ++i)
-          cu->write_sgpr(sb + 8 + i, 0xdeadbeef);
+        for (uint32_t i = 0; i < 4; ++i) {
+          harness.write_sgpr(8 + i, 0xdeadbeef);
+        }
         // s_buffer_load_{dwordx4,b128} s[8:11], s[0:3], offset.
         const uint32_t null_offset =
-            (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) ? 0xfa000000u
-                                                                                   : 0xf8000000u;
+            (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2)
+                ? 0xfa000000u
+                : 0xf8000000u;
         const std::array<uint32_t, 2> words{gfx9()  ? 0xc02a0200u
                                             : gfx12 ? 0xf4024200u
                                                     : 0xf4280200u,
                                             offset | (gfx9() ? 0u : null_offset)};
-        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-        ASSERT_NE(inst, nullptr);
-        ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-        ASSERT_NE(inst->data(), nullptr);
-        pipeline.issue(inst.release(), *wf);
-        for (uint32_t i = 0; i < 4; ++i)
-          EXPECT_EQ(cu->read_sgpr(sb + 8 + i), offset + i * 4 < 12 ? 100 + offset / 4 + i : 0)
+        ASSERT_NO_FATAL_FAILURE(harness.execute(words));
+        for (uint32_t i = 0; i < 4; ++i) {
+          EXPECT_EQ(harness.read_sgpr(8 + i), offset + i * 4 < 12 ? 100 + offset / 4 + i : 0)
               << "offset=" << offset << " stride=" << stride << " dword=" << i;
+        }
       }
     }
     // Fully out-of-bounds loads must not touch even an unmapped base address.
-    cu->write_sgpr(sb, 0);
-    cu->write_sgpr(sb + 1, 0);
-    cu->write_sgpr(sb + 2, 0);
-    cu->write_sgpr(sb + 3, 0);
+    for (uint32_t i = 0; i < 4; ++i) {
+      harness.write_sgpr(i, 0);
+    }
     const uint32_t null_offset =
-        (arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2) ? 0xfa000000u
-                                                                               : 0xf8000000u;
+        (arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2) ? 0xfa000000u
+                                                                                   : 0xf8000000u;
     const std::array<uint32_t, 2> words{gfx9()  ? 0xc02a0200u
                                         : gfx12 ? 0xf4024200u
                                                 : 0xf4280200u,
                                         gfx9() ? 0u : null_offset};
-    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
-    ASSERT_NE(inst, nullptr);
-    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
-    ASSERT_NE(inst->data(), nullptr);
-    pipeline.issue(inst.release(), *wf);
-    for (uint32_t i = 0; i < 4; ++i)
-      EXPECT_EQ(cu->read_sgpr(sb + 8 + i), 0u);
-    wf->halt();
+    ASSERT_NO_FATAL_FAILURE(harness.execute(words));
+    for (uint32_t i = 0; i < 4; ++i) {
+      EXPECT_EQ(harness.read_sgpr(8 + i), 0u);
+    }
   }
 }
 
+// Every case is a gfx90a hardware result: a DWORD only partly inside the buffer
+// reads zero.
+TEST_P(ScalarBufferInstructionTest, Gfx9LoadsZeroDwordsThatEndPastTheBuffer) {
+  if (!gfx9()) {
+    GTEST_SKIP() << "GFX9 scalar buffer bounds";
+  }
+  struct Case {
+    uint16_t opcode;
+    uint32_t offset;
+    uint32_t stride;
+    uint32_t records;
+    std::array<uint32_t, 2> expected;
+  };
+  constexpr std::array cases{
+      Case{cdna3::kSBufferLoadDwordSmem, 12, 0, 12, {0, 0}},
+      Case{cdna3::kSBufferLoadDwordSmem, 12, 0, 13, {0, 0}},
+      Case{cdna3::kSBufferLoadDwordSmem, 12, 0, 15, {0, 0}},
+      Case{cdna3::kSBufferLoadDwordSmem, 12, 0, 16, {103, 0}},
+      // Stride 5 with 3 records gives a 15-byte bound: the DWORD at offset 4 fits,
+      // and the one at offset 12 extends past the end.
+      Case{cdna3::kSBufferLoadDwordSmem, 4, 5, 3, {101, 0}},
+      Case{cdna3::kSBufferLoadDwordSmem, 12, 5, 3, {0, 0}},
+      Case{cdna3::kSBufferLoadDwordx2Smem, 16, 0, 17, {0, 0}},
+      Case{cdna3::kSBufferLoadDwordx2Smem, 16, 0, 20, {104, 0}},
+      Case{cdna3::kSBufferLoadDwordx2Smem, 16, 0, 23, {104, 0}},
+      Case{cdna3::kSBufferLoadDwordx2Smem, 16, 0, 24, {104, 105}},
+  };
+  for (bool translated : {false, true}) {
+    SCOPED_TRACE(translated);
+    ScalarBufferHarness harness;
+    ASSERT_NO_FATAL_FAILURE(harness.init(GetParam(), translated));
+    constexpr uint64_t base = 0x1000;
+    for (uint32_t i = 0; i < 8; ++i) {
+      harness.mem.write32(base + 4 * i, 100 + i);
+    }
+    harness.write_sgpr(0, base);
+    harness.write_sgpr(3, 0);
+    for (const auto &test_case : cases) {
+      SCOPED_TRACE(testing::Message()
+                   << "op=" << test_case.opcode << " offset=" << test_case.offset
+                   << " stride=" << test_case.stride << " records=" << test_case.records);
+      harness.write_sgpr(1, test_case.stride << 16);
+      harness.write_sgpr(2, test_case.records);
+      harness.write_sgpr(8, 0xdeadbeef);
+      harness.write_sgpr(9, 0xdeadbeef);
+      ASSERT_NO_FATAL_FAILURE(harness.execute(
+          cdna3::build_smem(test_case.opcode, {.sdata = 8, .imm = 1, .offset = test_case.offset})));
+      const bool two_dwords = test_case.opcode == cdna3::kSBufferLoadDwordx2Smem;
+      EXPECT_EQ(harness.read_sgpr(8), test_case.expected[0]);
+      EXPECT_EQ(harness.read_sgpr(9), two_dwords ? test_case.expected[1] : 0xdeadbeefu);
+    }
+  }
+}
+
+// A DWORD outside the buffer is not read, so it cannot fault on an unmapped page.
+TEST_P(ScalarBufferInstructionTest, Gfx9LoadSkipsOutOfRangeDwordOnUnmappedPage) {
+  if (!gfx9()) {
+    GTEST_SKIP() << "GFX9 scalar buffer bounds";
+  }
+  constexpr uint64_t kUnmappedBase = 0x2000;
+  ScalarBufferHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.init(GetParam(), /*translated=*/true,
+                                       std::make_shared<UnmappedAboveTranslator>(kUnmappedBase)));
+  constexpr uint64_t base = kUnmappedBase - 4;
+  harness.mem.write32(base, 100);
+  harness.write_sgpr(0, base);
+  harness.write_sgpr(1, 0);
+  // Seven bytes cover only the DWORD below the unmapped page.
+  harness.write_sgpr(2, 7);
+  harness.write_sgpr(3, 0);
+  harness.write_sgpr(8, 0xdeadbeef);
+  harness.write_sgpr(9, 0xdeadbeef);
+  ASSERT_NO_FATAL_FAILURE(
+      harness.execute(cdna3::build_smem(cdna3::kSBufferLoadDwordx2Smem, {.sdata = 8, .imm = 1})));
+  EXPECT_EQ(harness.read_sgpr(8), 100u);
+  EXPECT_EQ(harness.read_sgpr(9), 0u);
+}
+
 TEST(RdnaAddrCalcTest, ScalarAndVectorBuffersUseCanonicalHighAddresses) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4}) {
     SCOPED_TRACE(static_cast<int>(arch));
     amdgpu::GpuMemory mem("high_buffer_mem");
     amdgpu::L2Cache l2("high_buffer_l2");
@@ -216,7 +350,9 @@ TEST(RdnaAddrCalcTest, ScalarAndVectorBuffersUseCanonicalHighAddresses) {
     cfg.sgprs_per_wf = 128;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("high_buffer_cu", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "high_buffer_cu", cfg, &mem, &l2));
     auto *wf = cu->dispatch_wf(0, 0, 128, 16);
     ASSERT_NE(wf, nullptr);
     wf->set_exec(1);
@@ -230,7 +366,7 @@ TEST(RdnaAddrCalcTest, ScalarAndVectorBuffersUseCanonicalHighAddresses) {
     cu->write_vgpr(wf->vgpr_alloc().base, 0, 12);
     amdgpu::VectorMemState vector(amdgpu::GLOBAL_MEM);
     std::optional<uint64_t> scalar;
-    if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    if (arch == rocjitsu::IsaFamily::Rdna3) {
       rdna3::MubufMachineInst inst{};
       inst.srsrc = 1;
       inst.soffset = 0x80;
@@ -276,7 +412,7 @@ TEST(RdnaAddrCalcTest, ScalarAndVectorBuffersUseCanonicalHighAddresses) {
 }
 
 TEST(RdnaAddrCalcTest, ScalarBufferLoadsMaskEachDwordAndHonorStride) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna4}) {
     amdgpu::GpuMemory mem("scalar_bounds_mem");
     amdgpu::L2Cache l2("scalar_bounds_l2");
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -285,7 +421,9 @@ TEST(RdnaAddrCalcTest, ScalarBufferLoadsMaskEachDwordAndHonorStride) {
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("scalar_bounds", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_bounds", cfg, &mem, &l2));
     auto *wf = cu->dispatch_wf(0, 0, 106, 16);
     ASSERT_NE(wf, nullptr);
     const uint32_t sb = wf->sgpr_alloc().base;
@@ -300,7 +438,7 @@ TEST(RdnaAddrCalcTest, ScalarBufferLoadsMaskEachDwordAndHonorStride) {
         amdgpu::ScalarMemState state;
         state.num_dwords = 4;
         std::optional<uint64_t> address;
-        if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+        if (arch == rocjitsu::IsaFamily::Rdna3) {
           rdna3::SmemMachineInst inst{};
           inst.op = 10;
           inst.offset = offset;
@@ -318,7 +456,7 @@ TEST(RdnaAddrCalcTest, ScalarBufferLoadsMaskEachDwordAndHonorStride) {
         EXPECT_EQ(state.load_dword_mask, offset == 0 ? 7u : offset == 4 ? 3u : 0u);
       }
     }
-    if (arch == ROCJITSU_CODE_ARCH_RDNA4) {
+    if (arch == rocjitsu::IsaFamily::Rdna4) {
       cu->write_sgpr(sb + 1, uint32_t(base >> 32) & 0xffff);
       cu->write_sgpr(sb + 2, 12);
       for (uint32_t size : {1u, 2u}) {
@@ -345,12 +483,14 @@ TEST(Gfx1250AddrCalcTest, ScalarBufferUsesWideDescriptorAndUnscaledStride) {
   amdgpu::GpuMemory mem("wide_scalar_buffer_mem");
   amdgpu::L2Cache l2("wide_scalar_buffer_l2");
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+  cfg.arch = rocjitsu::IsaFamily::Cdna5;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 16;
   cfg.lds_size_kb = 64;
-  auto cu = amdgpu::ComputeUnitCore::create("wide_scalar_buffer", cfg, &mem, &l2);
+  std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+  ASSERT_NO_FATAL_FAILURE(
+      rocjitsu::test::initialize_compute_unit(cu, "wide_scalar_buffer", cfg, &mem, &l2));
   auto *wf = cu->dispatch_wf(0, 0, 106, 16);
   ASSERT_NE(wf, nullptr);
   const auto sb = wf->sgpr_alloc().base;
@@ -398,7 +538,7 @@ TEST(Gfx1250AddrCalcTest, ScalarBufferUsesWideDescriptorAndUnscaledStride) {
 }
 
 TEST(Gfx12AddrCalcTest, ScalarLoadsAlignEachComponentAndBufferSize) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     amdgpu::GpuMemory mem("scalar_component_mem");
     amdgpu::L2Cache l2("scalar_component_l2");
@@ -408,7 +548,9 @@ TEST(Gfx12AddrCalcTest, ScalarLoadsAlignEachComponentAndBufferSize) {
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("scalar_component", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "scalar_component", cfg, &mem, &l2));
     auto *wf = cu->dispatch_wf(0, 0, 106, 16);
     ASSERT_NE(wf, nullptr);
     const auto sb = wf->sgpr_alloc().base;
@@ -417,12 +559,12 @@ TEST(Gfx12AddrCalcTest, ScalarLoadsAlignEachComponentAndBufferSize) {
         const auto address = [&](uint32_t base, uint32_t immediate, uint32_t reg, uint32_t records,
                                  amdgpu::ScalarMemState &state) {
           cu->write_sgpr(sb, base);
-          cu->write_sgpr(sb + 1, buffer && arch == ROCJITSU_CODE_ARCH_CDNA5 ? records << 25 : 0);
-          cu->write_sgpr(sb + 2, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : records);
+          cu->write_sgpr(sb + 1, buffer && arch == rocjitsu::IsaFamily::Cdna5 ? records << 25 : 0);
+          cu->write_sgpr(sb + 2, arch == rocjitsu::IsaFamily::Cdna5 ? 0 : records);
           cu->write_sgpr(sb + 3, 0);
           cu->write_sgpr(sb + 4, reg);
           const uint32_t opcode = (size == 1 ? 9 : size == 2 ? 11 : 0) + (buffer ? 16 : 0);
-          if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          if (arch == rocjitsu::IsaFamily::Cdna5) {
             cdna5::SmemMachineInst inst{};
             inst.op = opcode;
             inst.ioffset = immediate;

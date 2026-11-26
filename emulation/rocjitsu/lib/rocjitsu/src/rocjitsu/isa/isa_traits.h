@@ -8,6 +8,7 @@
 #define ROCJITSU_ISA_ISA_TRAITS_H_
 
 #include "rocjitsu/base/api.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <concepts>
 #include <cstdint>
@@ -22,13 +23,13 @@ namespace rocjitsu {
 /// the register rather than fully redefining it.
 inline constexpr int REGISTER_GRANULARITY = 32;
 
-/// @brief Compile-time mapping from rj_code_arch_t enum values to Isa trait types.
+/// @brief Compile-time mapping from rocjitsu::IsaFamily enum values to Isa trait types.
 ///
 /// @details Specialize this template in each architecture's isa.h to bind its
 /// namespace::Isa type. Unspecialized archs will cause a compile error if
 /// used, catching unsupported archs early.
 /// @tparam Arch Architecture enum value to map.
-template <rj_code_arch_t Arch> struct IsaTrait;
+template <rocjitsu::IsaFamily Arch> struct IsaTrait;
 
 /// @brief Concept for ISAs that define GPU wavefront properties.
 ///
@@ -96,16 +97,42 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 /// properties. Adding CDNA5 here would silently change those decisions in
 /// callers. Keep this policy near the ISA trait declarations so DBT call sites
 /// do not grow their own partial architecture switch statements.
-[[nodiscard]] inline constexpr bool arch_is_cdna_4_or_lower(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA3 || arch == ROCJITSU_CODE_ARCH_CDNA4;
+[[nodiscard]] inline constexpr bool arch_is_cdna_4_or_lower(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+         arch == rocjitsu::IsaFamily::Cdna3 || arch == rocjitsu::IsaFamily::Cdna4;
 }
 
 /// @brief Return true when @p arch belongs to the RDNA ISA family.
-[[nodiscard]] inline constexpr bool arch_is_rdna(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4;
+[[nodiscard]] inline constexpr bool arch_is_rdna(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5 ||
+         arch == rocjitsu::IsaFamily::Rdna4;
+}
+
+/// @brief Return true when the architecture exposes image memory instructions.
+/// @details CDNA3 and later omit these instructions even where their descriptor
+/// layouts share fields with image-capable architectures.
+[[nodiscard]] inline constexpr bool arch_has_image_memory_instructions(rocjitsu::IsaFamily arch) {
+  switch (arch) {
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// @brief Non-architected flat scratch appends a private-segment wavefront byte offset SGPR.
+/// @details The kernel also uses this offset to rebase its private buffer descriptor.
+[[nodiscard]] inline constexpr bool
+arch_appends_private_segment_wave_offset_sgpr(rocjitsu::IsaFamily arch) {
+  return arch == rocjitsu::IsaFamily::Cdna1 || arch == rocjitsu::IsaFamily::Cdna2 ||
+         arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
 }
 
 /// @brief Return true when scalar selectors 102 and 103 name FLAT_SCRATCH.
@@ -113,19 +140,19 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 /// @details GFX10+ makes those selectors ordinary SGPRs. Keep both the legacy
 /// and modern architecture sets explicit so an unclassified future target does
 /// not silently inherit the legacy register alias.
-[[nodiscard]] inline constexpr bool arch_uses_legacy_flat_scratch_sgprs(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr bool arch_uses_legacy_flat_scratch_sgprs(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
+  case rocjitsu::IsaFamily::Cdna4:
     return true;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
+  case rocjitsu::IsaFamily::Cdna5:
   default:
     return false;
   }
@@ -146,20 +173,24 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 /// every wave the architectural SGPR file, so a count decoded from that field is an artifact of
 /// the granule-0 encoding rather than a budget any caller depends on. Only where the field is
 /// live can an SGPR requirement above the decoded count under-provision anyone.
-[[nodiscard]] inline constexpr bool arch_descriptor_encodes_sgpr_allocation(rj_code_arch_t arch) {
-  return !(arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5);
+[[nodiscard]] inline constexpr bool
+arch_descriptor_encodes_sgpr_allocation(rocjitsu::IsaFamily arch) {
+  return !(arch_is_rdna(arch) || arch == rocjitsu::IsaFamily::Cdna5);
 }
 
-[[nodiscard]] inline constexpr uint32_t arch_descriptor_sgpr_allocation_limit(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr uint32_t
+arch_descriptor_sgpr_allocation_limit(rocjitsu::IsaFamily arch) {
   // Architectural descriptor SGPR-allocation ceilings. CDNA descriptors may name
   // up to 112 SGPRs; RDNA up to 106. These are fixed ISA facts (not the smaller
   // scratch range in CdnaIsaBase), so they are named here rather than derived.
   constexpr uint32_t kCdnaDescriptorSgprLimit = 112;
   constexpr uint32_t kRdnaDescriptorSgprLimit = 106;
-  if (arch_is_cdna_4_or_lower(arch))
+  if (arch_is_cdna_4_or_lower(arch)) {
     return kCdnaDescriptorSgprLimit;
-  if (arch_is_rdna(arch) || arch == ROCJITSU_CODE_ARCH_CDNA5)
+  }
+  if (arch_is_rdna(arch) || arch == rocjitsu::IsaFamily::Cdna5) {
     return kRdnaDescriptorSgprLimit;
+  }
   return 0;
 }
 
@@ -168,24 +199,24 @@ template <GpuIsa Isa> inline constexpr bool supports_wave_size(uint32_t wf) {
 /// @details Zero means the limit is not modeled yet. Callers use that
 /// conservative value to avoid inventing compatibility policy for architectures
 /// whose LDS allocation limit has not been wired into rocjitsu.
-[[nodiscard]] inline constexpr uint32_t arch_lds_bytes(rj_code_arch_t arch) {
+[[nodiscard]] inline constexpr uint32_t arch_lds_bytes(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
-  case ROCJITSU_CODE_ARCH_CDNA2:
-  case ROCJITSU_CODE_ARCH_CDNA3:
+  case rocjitsu::IsaFamily::Cdna1:
+  case rocjitsu::IsaFamily::Cdna2:
+  case rocjitsu::IsaFamily::Cdna3:
     return 64u * 1024u;
-  case ROCJITSU_CODE_ARCH_CDNA4:
+  case rocjitsu::IsaFamily::Cdna4:
     return 160u * 1024u;
-  case ROCJITSU_CODE_ARCH_CDNA5:
+  case rocjitsu::IsaFamily::Cdna5:
     // gfx1250 can allocate up to 320 KiB to one workgroup. This is distinct
     // from the configurable LDS/vector-cache partition sizes reported for a
     // TCP, which must not be used as the descriptor allocation ceiling.
     return 320u * 1024u;
-  case ROCJITSU_CODE_ARCH_RDNA1:
-  case ROCJITSU_CODE_ARCH_RDNA2:
-  case ROCJITSU_CODE_ARCH_RDNA3:
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna1:
+  case rocjitsu::IsaFamily::Rdna2:
+  case rocjitsu::IsaFamily::Rdna3:
+  case rocjitsu::IsaFamily::Rdna3_5:
+  case rocjitsu::IsaFamily::Rdna4:
     return 64u * 1024u;
   default:
     return 0;

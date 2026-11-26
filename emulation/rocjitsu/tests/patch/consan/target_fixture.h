@@ -50,19 +50,20 @@ inline std::vector<uint8_t> read_fixture(const std::filesystem::path &path) {
 inline std::optional<DbiEntryProloguePlan> bootstrap_plan(const InputProgram &input) {
   AmdGpuCodeObject object(input.image.data(), input.image.size());
   std::unique_ptr<Decoder> decoder =
-      input.target->public_id == ROCJITSU_CODE_TARGET_INVALID
-          ? Decoder::create(input.target->arch)
-          : Decoder::create(default_isa_target_registry(), input.target->public_id);
-  if (!decoder)
+      Decoder::create(default_isa_target_registry(), input.target->public_id);
+  if (!decoder) {
     return std::nullopt;
+  }
   const std::array entries{input.kernel.entry_text_offset};
   FailureOr<std::vector<std::unique_ptr<BasicBlock>>> blocks =
       BasicBlock::build_reachable(object, *decoder, input.target->arch, entries);
-  if (blocks.failed())
+  if (blocks.failed()) {
     return std::nullopt;
+  }
   std::vector<BasicBlock *> scope;
-  for (const std::unique_ptr<BasicBlock> &block : blocks.value())
+  for (const std::unique_ptr<BasicBlock> &block : blocks.value()) {
     scope.push_back(block.get());
+  }
   RegisterSet reserved;
   reserved.expand({RegClass::SGPR, 0, static_cast<uint8_t>(input.original_sgprs)});
   return plan_dbi_entry_prologue(scope, input.kernel.descriptor, input.target->arch, 106, reserved);

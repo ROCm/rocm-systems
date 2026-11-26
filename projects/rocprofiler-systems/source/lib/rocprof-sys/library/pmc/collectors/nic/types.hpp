@@ -51,6 +51,12 @@ union enabled_metrics
         std::uint32_t req_rx_impl_nak_seq_err : 1;
     } bits;
     std::uint32_t value = 0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(value);
+    }
 };
 
 // Bit-mask for all NIC RDMA metrics enabled
@@ -74,6 +80,15 @@ struct metrics
     std::uint64_t resp_tx_pkt_seq_err     = 0;
     std::uint64_t req_rx_pkt_seq_err      = 0;
     std::uint64_t req_rx_impl_nak_seq_err = 0;
+
+    template <typename Archive>
+    void serialize(Archive& archive)
+    {
+        archive(rx_rdma_ucast_bytes, tx_rdma_ucast_bytes, rx_rdma_ucast_pkts,
+                tx_rdma_ucast_pkts, rx_rdma_cnp_pkts, tx_rdma_cnp_pkts,
+                tx_rdma_ack_timeout, resp_tx_pkt_seq_err, req_rx_pkt_seq_err,
+                req_rx_impl_nak_seq_err);
+    }
 };
 
 }  // namespace rocprofsys::pmc::collectors::nic

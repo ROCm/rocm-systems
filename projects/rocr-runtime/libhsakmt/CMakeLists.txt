@@ -124,12 +124,23 @@ else()
     else()
       set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -static-libsan" )
     endif()
+  ## Thread Sanitize Flag
+  elseif ( THREAD_SANITIZER OR THEROCK_SANITIZER STREQUAL "TSAN" OR DEFINED ENV{THREAD_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "TSAN" )
+    set ( HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -fsanitize=thread -g -O1 )
+    set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -fsanitize=thread" )
+    message(STATUS "libhsakmt: ThreadSanitizer (TSAN) enabled")
   else()
     if ( CMAKE_COMPILER_IS_GNUCC )
       set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,-no-undefined" )
     else()
       set ( HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -Wl,-undefined,error" )
     endif()
+  endif()
+  ## Code coverage flag
+  if(ENABLE_CODE_COVERAGE)
+    set(HSAKMT_C_FLAGS "${HSAKMT_C_FLAGS}" -O0 -g -fprofile-instr-generate -fcoverage-mapping)
+    set(HSAKMT_LINK_FLAGS "${HSAKMT_LINK_FLAGS} -fprofile-instr-generate")
+    message(STATUS "Code coverage enabled")
   endif()
 
   if (WIN32)
@@ -358,6 +369,10 @@ else()
     target_compile_definitions(${HSAKMT_TARGET} PRIVATE
       "HSAKMT_INSTALL_LIBDIR=\"${HSAKMT_INSTALL_LIBDIR}\"")
   else()
+    # WaitOnAddress/WakeByAddressAll live in API-MS-Win-Core-Synch-l1-2-0.dll,
+    # not kernel32. Used by dxg/wddm/event.cpp.
+    target_link_libraries(${HSAKMT_TARGET} PUBLIC Synchronization)
+
     ## Link Windows Kernel Mode Interface
     if (LIB_SRC_BUILD)
       set(WKMI_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../wkmi" CACHE PATH "Path to wkmi source directory for direct build")
@@ -517,6 +532,7 @@ else()
         INTERFACE -Wl,-Bstatic ${AMDGPU_STATIC_LIB_PATHS} ${DRM_AMDGPU_LDFLAGS} ${DRM_LDFLAGS} -Wl,-Bdynamic
       )
     else()
+      target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC Synchronization)
       if(WKMI_SRC_BUILD)
         target_link_libraries(${HSAKMT_STATIC_DRM_TARGET} PUBLIC wkmi)
         target_include_directories(${HSAKMT_STATIC_DRM_TARGET} PUBLIC ${WKMI_SRC_DIR}/lib/inc)

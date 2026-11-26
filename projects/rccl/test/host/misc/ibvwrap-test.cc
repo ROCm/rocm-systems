@@ -1203,7 +1203,7 @@ TEST(IbvwrapGidStrMicrotest, BufferTooSmall_ReturnsNullWithEnospc) {
   EXPECT_EQ(errno, ENOSPC);
 }
 
-// Builds once per process, so runs isolated. Relies on ibvsymbols-test.cc's dl_seam.h build.
+// Builds once per process, so runs isolated. Relies on the dl_seam.h-built ibvsymbols.cc it links.
 TEST(IbvwrapSymbolsMicrotestIsolated, LibraryMissing_FailsAndDoesNotRetry) {
   RUN_ISOLATED_TEST("IbvwrapSymbolsMicrotestIsolated_LibraryMissing_FailsAndDoesNotRetry", []() {
     SetMicroEnvAbsent("NCCL_IBVERBS_LIB");

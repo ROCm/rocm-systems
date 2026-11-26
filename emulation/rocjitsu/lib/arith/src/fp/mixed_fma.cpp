@@ -6,11 +6,11 @@
 
 #include "fp/mixed_fma.h"
 #include "common/alu.h"
-#include "common/internal.h"
+#include "common/validation.h"
 #include "fp/fma_scalar.h"
 #include "fp/mixed_fma_scalar.h"
 #include "register/dpp.h"
-#include "rj_arith/rj_arith.h"
+#include "rj_arith/detail/rj_arith_fp.h"
 
 #include <stdint.h>
 
@@ -61,7 +61,7 @@ int mixed_fma(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags, ui
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (exact && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3) &&
-      !(flags & RJ_ARITH_FP_ROUND_MASK)) {
+      (Dst != rocjitsu::arith::MixedFma::Float || !(flags & RJ_ARITH_FP_ROUND_MASK))) {
     if constexpr (Dst == rocjitsu::arith::MixedFma::Float) {
       rocjitsu::arith::mixed_fma_float_exact_x86_64_v3(
           Rdna3, flags, exec_mask, uint32_t(instruction_flags), d[0], a[0], b[0], c[0]);

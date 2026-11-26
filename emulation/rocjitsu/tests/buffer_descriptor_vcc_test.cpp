@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "compute_unit_test_util.h"
 #include "decode_test_util.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/cdna5/isa.h"
@@ -16,6 +17,7 @@
 #include "rocjitsu/isa/arch/amdgpu/rdna4/isa.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -34,11 +36,12 @@
 namespace {
 
 using namespace rocjitsu;
+constexpr uint32_t kRdnaFormat32 = 20u << 12; // V# word3 FORMAT = BUF_FMT_32_UINT
 
 TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentWave) {
   for (auto arch :
-       {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
-        ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+       {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2, rocjitsu::IsaFamily::Rdna3,
+        rocjitsu::IsaFamily::Rdna3_5, rocjitsu::IsaFamily::Rdna4, rocjitsu::IsaFamily::Cdna5}) {
     SCOPED_TRACE(arch);
     amdgpu::GpuMemory mem("descriptor_vcc_mem");
     amdgpu::L2Cache l2("descriptor_vcc_l2");
@@ -48,7 +51,9 @@ TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentW
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 16;
     cfg.lds_size_kb = 64;
-    auto cu = amdgpu::ComputeUnitCore::create("descriptor_vcc", cfg, &mem, &l2);
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    ASSERT_NO_FATAL_FAILURE(
+        rocjitsu::test::initialize_compute_unit(cu, "descriptor_vcc", cfg, &mem, &l2));
     auto *wf = cu->dispatch_wf(0, 0, 106, 16);
     auto *next = cu->dispatch_wf(1, 0, 106, 16);
     ASSERT_NE(wf, nullptr);
@@ -56,35 +61,36 @@ TEST(RdnaAddrCalcTest, BufferDescriptorCanSpanSgprsAndVccWithoutReadingAdjacentW
     wf->set_exec(1);
     const uint32_t sb = wf->sgpr_alloc().base;
     cu->write_sgpr(sb + 104, 0x1000);
-    cu->write_sgpr(sb + 105, arch == ROCJITSU_CODE_ARCH_CDNA5 ? 16u << 25 : 0);
+    cu->write_sgpr(sb + 105, arch == rocjitsu::IsaFamily::Cdna5 ? 16u << 25 : 0);
     // Adjacent storage has zero NUM_RECORDS; the real bound lives in VCC_LO.
     cu->write_sgpr(next->sgpr_alloc().base, 0);
     cu->write_sgpr(next->sgpr_alloc().base + 1, 0);
-    wf->set_vcc_raw(arch == ROCJITSU_CODE_ARCH_CDNA5 ? 0 : (uint64_t{3u << 28} << 32) | 16);
+    wf->set_vcc_raw(
+        arch == rocjitsu::IsaFamily::Cdna5 ? 0 : (uint64_t{(3u << 28) | kRdnaFormat32} << 32) | 16);
     amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
     state.elem_size = 4;
     state.num_elems = 1;
-    if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+    if (arch == rocjitsu::IsaFamily::Cdna5) {
       cdna5::VbufferMachineInst inst{};
       inst.rsrc = 104;
       inst.soffset = cdna5::OPR_SREG_M0_NULL;
       cdna5::mubuf_calculate_addresses(inst, *wf, state);
-    } else if (arch == ROCJITSU_CODE_ARCH_RDNA1) {
+    } else if (arch == rocjitsu::IsaFamily::Rdna1) {
       rdna1::MubufMachineInst inst{};
       inst.srsrc = 26;
       inst.soffset = 128;
       rdna1::mubuf_calculate_addresses(inst, *wf, state);
-    } else if (arch == ROCJITSU_CODE_ARCH_RDNA2) {
+    } else if (arch == rocjitsu::IsaFamily::Rdna2) {
       rdna2::MubufMachineInst inst{};
       inst.srsrc = 26;
       inst.soffset = 128;
       rdna2::mubuf_calculate_addresses(inst, *wf, state);
-    } else if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    } else if (arch == rocjitsu::IsaFamily::Rdna3_5) {
       rdna3_5::MubufMachineInst inst{};
       inst.srsrc = 26;
       inst.soffset = 128;
       rdna3_5::mubuf_calculate_addresses(inst, *wf, state);
-    } else if (arch == ROCJITSU_CODE_ARCH_RDNA3) {
+    } else if (arch == rocjitsu::IsaFamily::Rdna3) {
       rdna3::MubufMachineInst inst{};
       inst.srsrc = 26;
       inst.soffset = 128;

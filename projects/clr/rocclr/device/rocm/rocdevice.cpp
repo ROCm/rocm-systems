@@ -20,6 +20,7 @@
 #include "device/comgrctx.hpp"
 #include "device/devhostcall.hpp"
 #include "device/rocm/rocdevice.hpp"
+#include "device/rocm/rocabce.hpp"
 #include "device/rocm/rocblit.hpp"
 #include "device/rocm/rocvirtual.hpp"
 #include "device/rocm/rocprogram.hpp"
@@ -30,8 +31,10 @@
 #include "platform/sampler.hpp"
 
 #ifdef _WIN32
+#include "device/rocm/rocd3d9interop.hpp"
 #include "device/rocm/rocd3d10interop.hpp"
 #include "device/rocm/rocd3d11interop.hpp"
+#include "platform/interop_d3d9.hpp"
 #include "platform/interop_d3d10.hpp"
 #include "platform/interop_d3d11.hpp"
 #endif
@@ -80,8 +83,11 @@ extern const char* HipExtraSourceCodeNoGWS;
 namespace amd::roc {
 bool roc::Device::isHsaInitialized_ = false;
 bool roc::Device::hostVmemSupported_ = false;
+
 std::vector<hsa_agent_t> roc::Device::gpu_agents_ ROCCLR_INIT_PRIORITY(101);
 std::vector<AgentInfo> roc::Device::cpu_agents_ ROCCLR_INIT_PRIORITY(101);
+std::unordered_map<uint64_t, uint32_t> roc::Device::agent_driver_node_ids_
+    ROCCLR_INIT_PRIORITY(101);
 
 address Device::mg_sync_ = nullptr;
 
@@ -131,20 +137,21 @@ bool NullDevice::create(const amd::Isa& isa) {
 Device::Device(hsa_agent_t bkendDevice)
     : mapCacheOps_(nullptr),
       mapCache_(nullptr),
+      preferred_numa_node_(0),
       bkendDevice_(bkendDevice),
       pciDeviceId_(0),
+      cpu_agent_info_(nullptr),
       gpuvm_segment_max_alloc_(0),
       alloc_granularity_(0),
       xferQueue_(nullptr),
+      coopQueue_(nullptr),
       freeMem_(0),
       hsa_exclusive_gpu_access_(false),
-      numOfVgpus_(0),
-      preferred_numa_node_(0),
       maxSdmaReadMask_(0),
       maxSdmaWriteMask_(0),
+      numHwPipes_(4),
       sdma_engine_allocator_(*this),
-      cpu_agent_info_(nullptr),
-      numHwPipes_(4) {
+      numOfVgpus_(0) {
   for (uint i = 0; i < QueuePriority::Total; ++i) {
     queuePool_.emplace_back();
   }
@@ -154,22 +161,12 @@ Device::Device(hsa_agent_t bkendDevice)
   gpu_fine_grained_segment_.handle = 0;
   gpu_ext_fine_grained_segment_.handle = 0;
   prefetch_signal_.handle = 0;
-  isXgmi_ = false;
   cache_state_ = Device::CacheState::kCacheStateInvalid;
 }
 
-int Device::agentGlobalIndex(hsa_agent_t agent) {
-  for (size_t gpu_idx = 0; gpu_idx < gpu_agents_.size(); ++gpu_idx) {
-    if (gpu_agents_[gpu_idx].handle == agent.handle) {
-      return static_cast<int>(gpu_idx);
-    }
-  }
-  for (size_t cpu_idx = 0; cpu_idx < cpu_agents_.size(); ++cpu_idx) {
-    if (cpu_agents_[cpu_idx].agent.handle == agent.handle) {
-      return static_cast<int>(gpu_agents_.size() + cpu_idx);
-    }
-  }
-  return -1;
+uint32_t Device::agentDriverNodeId(hsa_agent_t agent) {
+  const auto driver_node = agent_driver_node_ids_.find(agent.handle);
+  return driver_node != agent_driver_node_ids_.end() ? driver_node->second : UINT32_MAX;
 }
 
 // Query HSA_AMD_MEMORY_PROPERTY_AGENT_IS_APU (MI300A reports true despite BASE profile).
@@ -200,8 +197,7 @@ void Device::setupCpuAgent() {
   }
   std::vector<amd::Device::LinkAttrType> link_attrs;
   link_attrs.push_back(std::make_pair(LinkAttribute::kLinkLinkType, 0));
-  if (findLinkInfo(cpu_agents_[0].fine_grain_pool, &link_attrs)) {
-    isXgmi_ = (link_attrs[0].second == HSA_AMD_LINK_INFO_TYPE_XGMI);
+  if (findLinkInfo(cpu_agents_[index].fine_grain_pool, &link_attrs)) {
     // findLinkInfo stores -1 when there are zero hops. kLinkHopCount is a
     // NUMA-distance estimate and is 0 when that distance is below one hop.
     const bool cpu_link = link_attrs[0].second >= 0;
@@ -217,7 +213,7 @@ void Device::setupCpuAgent() {
           "Numa selects cpu agent[%zu]=0x%zx(fine=0x%zx,"
           "coarse=0x%zx) for gpu agent=0x%zx CPU<->GPU XGMI=%d",
           index, cpu_agent_info_->agent.handle, cpu_agent_info_->fine_grain_pool.handle,
-          cpu_agent_info_->coarse_grain_pool.handle, bkendDevice_.handle, isXgmi_);
+          cpu_agent_info_->coarse_grain_pool.handle, bkendDevice_.handle, !pcie_stores_need_flush_);
 }
 
 void Device::checkAtomicSupport() {
@@ -235,6 +231,12 @@ Device::~Device() {
   // This guards OCL teardown; for HIP the drain already ran via RuntimeTearDown,
   // so this is a safe no-op in that path.
   WaitForHsaAsyncHandlersIdle();
+
+  QuiesceHwEvents(graph_hw_events_);
+  for (void* hw_event : graph_hw_events_) {
+    DestroyHwEvent(hw_event);
+  }
+  graph_hw_events_.clear();
 
   // Release cached map targets
   for (uint i = 0; mapCache_ != nullptr && i < mapCache_->size(); ++i) {
@@ -258,10 +260,16 @@ Device::~Device() {
     glb_ctx_ = nullptr;
   }
 
-  // Destroy transfer queue FIRST (before destroying queues in pool)
-  // because its destructor will call releaseQueue()
+  // Destroy internal queues FIRST (before destroying queues in pool)
+  // because their destructors will call releaseQueue()
+  delete coopQueue_;
+  coopQueue_ = nullptr;
   delete xferQueue_;
   xferQueue_ = nullptr;
+
+  // The transfer queue can submit through ABCE, so destroy it before draining
+  // and releasing the copy-engine rings.
+  abce_engine_set_.reset();
 
   // Final drain of deferred destroys on the main thread before hsa_shut_down.
   DrainDeferredQueueDestroys();
@@ -269,7 +277,6 @@ Device::~Device() {
   for (auto& it : queuePool_) {
     for (auto qIter = it.begin(); qIter != it.end();) {
       hsa_queue_t* queue = qIter->first;
-      auto& qInfo = qIter->second;
       ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_QUEUE, "Deleting hardware queue %p with refCount 0",
               queue->base_address);
       qIter = it.erase(qIter);
@@ -370,6 +377,17 @@ hsa_status_t Device::iterateAgentCallback(hsa_agent_t agent, void* data) {
     return stat;
   }
 
+  // Only ABCE copy routing needs the KFD node id; an agent without one keeps
+  // enumerating and its copies stay on the ROCr path.
+  uint32_t driver_node_id = UINT32_MAX;
+  if (Hsa::agent_get_info(agent,
+                          static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+                          &driver_node_id) == HSA_STATUS_SUCCESS) {
+    agent_driver_node_ids_[agent.handle] = driver_node_id;
+  } else {
+    ClPrint(amd::LOG_WARNING, amd::LOG_INIT, "HSA_AMD_AGENT_INFO_DRIVER_NODE_ID unavailable");
+  }
+
   if (dev_type == HSA_DEVICE_TYPE_CPU) {
     AgentInfo info = {agent, {0}, {0}, {0}};
     stat = Hsa::agent_iterate_memory_pools(agent, Device::iterateCpuMemoryPoolCallback,
@@ -446,7 +464,7 @@ bool Device::init() {
       // Uuid is an Ascii string with a maximum of 21 chars including NULL
       // The string value is in the format GPU-<body>, <body> encodes UUID as a 16 chars hex
       if (str_id.find("GPU-") != std::string::npos) {
-        for (int i = 0; i < gpu_agents_.size(); i++) {
+        for (size_t i = 0; i < gpu_agents_.size(); i++) {
           auto agent = gpu_agents_[i];
           char unique_id[32] = {0};
           if (HSA_STATUS_SUCCESS ==
@@ -664,6 +682,11 @@ bool Device::create() {
   // Query before Settings::create() since the threshold selection depends on it,
   // and before setupCpuAgent() so large BAR can exclude APUs.
   isAPU_ = agentIsAPU(bkendDevice_);
+  // Left true by a runtime without the query, since flushing is always correct. ROCr reads it
+  // for the link from this GPU to its nearest CPU node. Settings choose the kernarg mode from it.
+  Hsa::agent_get_info(bkendDevice_,
+                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
+                      &pcie_stores_need_flush_);
 
   setupCpuAgent();
 
@@ -685,7 +708,7 @@ bool Device::create() {
   settings_ = hsaSettings;
   if (!hsaSettings || !hsaSettings->create((agent_profile_ == HSA_PROFILE_FULL), *isa,
                                            isa->xnack() == amd::Isa::Feature::Enabled, coop_groups,
-                                           isXgmi_, isAPU_)) {
+                                           pcie_stores_need_flush_, isAPU_)) {
     LogPrintfError("Unable to create settings for HSA device %s (PCI ID %x)", agent_name,
                    pciDeviceId_);
     return false;
@@ -993,8 +1016,9 @@ bool Device::createSampler(const amd::Sampler& owner, device::Sampler** sampler)
   return true;
 }
 
-void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescriptor,
+void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v3_t& samplerDescriptor,
                                    const amd::Sampler& sampler) const {
+  samplerDescriptor.max_anisotropy = sampler.maxAnisotropy();
   samplerDescriptor.filter_mode = sampler.filterMode() == CL_FILTER_NEAREST
                                       ? HSA_EXT_SAMPLER_FILTER_MODE_NEAREST
                                       : HSA_EXT_SAMPLER_FILTER_MODE_LINEAR;
@@ -1035,7 +1059,7 @@ void Sampler::fillSampleDescriptor(hsa_ext_sampler_descriptor_v2_t& samplerDescr
 }
 
 bool Sampler::create(const amd::Sampler& owner) {
-  hsa_ext_sampler_descriptor_v2_t samplerDescriptor;
+  hsa_ext_sampler_descriptor_v3_t samplerDescriptor;
   fillSampleDescriptor(samplerDescriptor, owner);
 
   hsa_status_t status =
@@ -1181,6 +1205,7 @@ bool Device::populateOCLDeviceConstants() {
 
   assert(cachesize[0] > 0);
   info_.globalMemCacheSize_ = cachesize[0];
+  info_.l3CacheSize_ = cachesize[2];
 
   info_.globalMemCacheType_ = CL_READ_WRITE_CACHE;
 
@@ -1281,12 +1306,8 @@ bool Device::populateOCLDeviceConstants() {
   ClPrint(amd::LOG_INFO, amd::LOG_INIT,
           "Signal pool: %s. Device memory: graph signals %d, queue signals %d, "
           "AQL rings %d (profiler tool: %d)",
-          signal_pool_name, graph_device_signals_, queue_device_signals_,
-          AqlRingsInDeviceMemory(), tool_attached);
-  // Left true by a runtime without the query, since flushing is always correct
-  Hsa::agent_get_info(bkendDevice_,
-                      static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
-                      &pcie_stores_need_flush_);
+          signal_pool_name, graph_device_signals_, queue_device_signals_, AqlRingsInDeviceMemory(),
+          tool_attached);
 
   for (auto agent : gpu_agents_) {
     if (agent.handle != bkendDevice_.handle) {
@@ -1442,6 +1463,14 @@ bool Device::populateOCLDeviceConstants() {
   info_.maxGridDim_[0] = std::min(grid_max_dim.x, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
   info_.maxGridDim_[1] = std::min(grid_max_dim.y, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
   info_.maxGridDim_[2] = std::min(grid_max_dim.z, static_cast<uint32_t>(std::numeric_limits<int32_t>::max()));
+
+  // gfx12+ packs workgroup IDs Y and Z into 16-bit halves of an architected SGPR,
+  // so a kernel can't address more than 2^16 work-groups in those dimensions.
+  if (isa().versionMajor() >= 12) {
+    constexpr uint32_t kMaxWorkGroupCountYZ = std::numeric_limits<uint16_t>::max() + 1;
+    info_.maxWorkGroupCount_[1] = kMaxWorkGroupCountYZ;
+    info_.maxWorkGroupCount_[2] = kMaxWorkGroupCountYZ;
+  }
 
   info_.nativeVectorWidthChar_ = info_.preferredVectorWidthChar_ = 4;
   info_.nativeVectorWidthShort_ = info_.preferredVectorWidthShort_ = 2;
@@ -1643,7 +1672,7 @@ bool Device::populateOCLDeviceConstants() {
   // extension.  They must be set unconditionally so that hipMallocPitch /
   // hipMalloc3D produce correct pitch alignment even when IMAGE_SUPPORT is
   // off.  The PAL backend already sets them unconditionally.
-  info_.imagePitchAlignment_ = 256;
+  info_.imagePitchAlignment_ = (isa().versionMajor() >= 12) ? 128 : 256;
   info_.imageBaseAddressAlignment_ = 256;
   info_.bufferFromImageSupport_ = false;
 
@@ -1888,16 +1917,17 @@ bool Device::populateOCLDeviceConstants() {
       &info_.clusterMaxSize_);
 
 
-  // this is required for clustered kernel launches; but it might not be supported in older rocr,
-  // so invalid argument might no be necessarily an error
+  // Older ROCr does not implement this query. Invalid argument is not an error.
   if (HSA_STATUS_SUCCESS != hsaStatus && HSA_STATUS_ERROR_INVALID_ARGUMENT != hsaStatus) {
     LogError("HSA_AMD_AGENT_INFO_CLUSTER_MAX_SIZE query failed");
-  } else {
-    // this is a temporary override of the ROCr result (when there is cluster support). This line
-    // will be removed as soon as ROCr provides the correct result
-    info_.clusterMaxSize_ = info_.clusterMaxSize_ > 1?
-                            info_.maxComputeUnits_ / info_.numberOfShaderEngines_ :
-                            1;
+  }
+
+  // The limit comes from ROCr. gfx12.5 cluster sizes are correct only with a
+  // ROCr that derives them from the active CUs per shader engine. HIP does not
+  // recompute the limit. Devices without clustered launch support, and a query
+  // this ROCr does not implement, report a max cluster size of 1.
+  if (hsaStatus != HSA_STATUS_SUCCESS || info_.clusterMaxSize_ <= 1) {
+    info_.clusterMaxSize_ = 1;
   }
 
   info_.gpuDirectRdmaWithHipVmmSupported_ =
@@ -1925,18 +1955,59 @@ bool Device::populateOCLDeviceConstants() {
 }
 
 // ================================================================================================
-device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
+void Device::ResolveCpFirmwareCaps() {
+  std::call_once(cpCapsOnce_, [this]() {
+    // ROCr learns what the CP firmware supports by running a packet on the agent's utility queue,
+    // so this query creates a queue. Asked at device init, every process would hold a queue and
+    // doorbells on every GPU it never uses, which runs out of doorbells with many processes on
+    // a partitioned system.
+    uint8_t aql_extensions[8] = {};
+    if (Hsa::agent_get_info(bkendDevice_,
+                            static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_AQL_EXTENSIONS),
+                            aql_extensions) == HSA_STATUS_SUCCESS) {
+      // The only write to settings after init. Its readers are VirtualGPUs, which call_once orders
+      // after it.
+      static_cast<Settings*>(settings_)->ext_dispatch_packet_ =
+          hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_EXT_DISPATCH);
+      // CP firmware without hint support takes a hinted handle as the signal address. Left false
+      // by a runtime that does not report the AQL extension. A profiler tool hands packet
+      // completion signals to ROCr, which rejects a hinted handle.
+      signal_hints_.store(
+          hsa_flag_isset64(aql_extensions, HSA_AMD_AQL_PROPERTY_SIGNAL_HINTS) &&
+              !amd::activity_prof::tool_attached.load(std::memory_order_relaxed),
+          std::memory_order_relaxed);
+    }
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Ext kernel dispatch packet: %d, signal hints: %d",
+            settings().ext_dispatch_packet_, SignalHints());
+  });
+}
+
+// ================================================================================================
+AbceEngineSet* Device::getOrCreateAbceEngineSet() {
+  // Device discovery creates every Device in every process. Delay the per-engine
+  // SDMA queues until this process actually reaches ABCE on this device,
+  // avoiding KFD's queue limit in multi-process workloads.
+  if (!DEBUG_CLR_ENABLE_ABCE) {
+    return nullptr;
+  }
+  std::call_once(abce_engine_set_once_,
+                 [this]() { abce_engine_set_ = AbceEngineSet::Create(*this); });
+  return abce_engine_set_.get();
+}
+
+// ================================================================================================
+device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue, bool cooperative) {
   std::scoped_lock lock(vgpusAccess());
+  ResolveCpFirmwareCaps();
+
+  getOrCreateAbceEngineSet();
 
   bool profiling = (queue != nullptr) && queue->properties().test(CL_QUEUE_PROFILING_ENABLE);
-  bool cooperative = false;
   bool dedicated_queue = (queue != nullptr) && queue->isDedicatedQueue() &&
                          (settings().dynamic_queues_ >= 2);
 
   // If amd command queue is null, then it's an internal device queue
   if (queue == nullptr) {
-    // In HIP mode the device queue will be allocated for the cooperative launches only
-    cooperative = amd::IS_HIP && settings().enableCoopGroups_;
     profiling = amd::IS_HIP;
   }
   // Initialization of heap and other resources occur during the command
@@ -1947,6 +2018,10 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
       new VirtualGPU(*this, profiling, cooperative, q ? queue->cuMask() : defaultCuMask,
                      q ? queue->priority() : amd::CommandQueue::Priority::Normal,
                      dedicated_queue);
+
+  if (!q && !cooperative) {
+    virtualDevice->PinQueue();
+  }
 
   if (!virtualDevice->create()) {
     delete virtualDevice;
@@ -2049,6 +2124,34 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
       success = false;
     }
   }
+
+  // Handle D3D9 adapter binding. The three cl_dx9_media_adapter_type_khr values occupy
+  // separate context slots and carry unrelated object types, so each is bound on its own.
+  constexpr struct {
+    amd::Context::Flags flag;
+    amd::Context::DeviceFlagIdx idx;
+    D3D9Interop::AdapterKind kind;
+  } kD3D9Slots[] = {
+      {amd::Context::Flags::D3D9DeviceKhr, amd::Context::DeviceFlagIdx::D3D9DeviceKhrIdx,
+       D3D9Interop::AdapterKind::D3D9},
+      {amd::Context::Flags::D3D9DeviceEXKhr, amd::Context::DeviceFlagIdx::D3D9DeviceEXKhrIdx,
+       D3D9Interop::AdapterKind::D3D9Ex},
+      {amd::Context::Flags::D3D9DeviceVAKhr, amd::Context::DeviceFlagIdx::D3D9DeviceVAKhrIdx,
+       D3D9Interop::AdapterKind::DXVA},
+  };
+
+  for (const auto& slot : kD3D9Slots) {
+    if (!(flags & slot.flag)) {
+      continue;
+    }
+    if (!D3D9Interop::associateD3D9Device(this, gfxDevice[slot.idx], slot.kind, gfxContext,
+                                          validateOnly)) {
+      if (!validateOnly) {
+        LogError("Failed D3D9Interop::associateD3D9Device()");
+      }
+      success = false;
+    }
+  }
 #endif  // _WIN32
 
   // Handle GL device binding (existing code)
@@ -2079,6 +2182,13 @@ bool Device::unbindExternalDevice(uint flags, void* const gfxDevice[], void* gfx
   // Handle D3D11 device cleanup
   if (flags & amd::Context::Flags::D3D11DeviceKhr) {
     D3D11Interop::dissociateD3D11Device(this, gfxDevice, gfxContext);
+  }
+
+  // Handle D3D9 cleanup. The cache is keyed by the surfaces' owning devices rather than
+  // by context slot, so one drain covers all three adapter types.
+  if (flags & (amd::Context::Flags::D3D9DeviceKhr | amd::Context::Flags::D3D9DeviceEXKhr |
+               amd::Context::Flags::D3D9DeviceVAKhr)) {
+    D3D9Interop::dissociateD3D9Device(this, gfxDevice, gfxContext);
   }
 #endif  // _WIN32
 
@@ -2259,7 +2369,7 @@ device::Memory* Device::createMemory(
       // Pin memory for the parent object only
       (owner.parent() == nullptr) && (owner.getHostMem() != nullptr) &&
       (owner.getSvmPtr() == nullptr)) {
-    memory->pinSystemMemory(owner.getHostMem(), owner.getSize());
+    (void)memory->pinSystemMemory(owner.getHostMem(), owner.getSize());
   }
 
   if (!result) {
@@ -2389,7 +2499,8 @@ void* Device::hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg
   return ptr;
 }
 
-void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment) const {
+void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegment,
+                        bool mapAllAgents) const {
   hsa_amd_memory_pool_t pool = getHostMemoryPool(memSegment);
   void* deviceMemory = nullptr;
   uint32_t memFlags = 0;
@@ -2397,8 +2508,16 @@ void* Device::hostLock(void* hostMem, size_t size, const MemorySegment memSegmen
     memFlags |= HSA_AMD_MEMORY_POOL_UNCACHED_FLAG;
   }
 
+  // gpu_agents_ is every GPU visible to this process.
+  hsa_agent_t* agents = const_cast<hsa_agent_t*>(&bkendDevice_);
+  int numAgents = 1;
+  if (mapAllAgents && !gpu_agents_.empty()) {
+    agents = gpu_agents_.data();
+    numAgents = static_cast<int>(gpu_agents_.size());
+  }
+
   hsa_status_t status = Hsa::memory_lock_to_pool(
-      hostMem, size, const_cast<hsa_agent_t*>(&bkendDevice_), 1, pool, memFlags, &deviceMemory);
+      hostMem, size, agents, numAgents, pool, memFlags, &deviceMemory);
   ClPrint(amd::LOG_DEBUG, amd::LOG_MEM,
           "Locking to pool %p, size 0x%zx, hostMem = %p,"
           " deviceMemory = %p, memSegment = %d",
@@ -2676,6 +2795,24 @@ void Device::updateFreeMemory(size_t size, bool free) {
 }
 
 // ================================================================================================
+[[nodiscard]] bool Device::writeDeviceGlobal(amd::Memory& dst, size_t offset, size_t size,
+                                             const void* src) const {
+  address target = reinterpret_cast<address>(dst.getSvmPtr());
+  if (target == nullptr || src == nullptr) {
+    return false;
+  }
+  // ROCr runs this as a blit on its own utility queue and blocks until it completes.
+  hsa_status_t status = Hsa::memory_copy(target + offset, src, size);
+  if (status != HSA_STATUS_SUCCESS) {
+    ClPrint(amd::LOG_ERROR, amd::LOG_MEM,
+            "hsa_memory_copy into device global %p failed with hsa_status: %d", target + offset,
+            status);
+    return false;
+  }
+  return true;
+}
+
+// ================================================================================================
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
                        void* svmPtr) const {
   amd::Memory* mem = nullptr;
@@ -2761,60 +2898,76 @@ bool Device::virtualFree(void* addr) {
 }
 
 // ================================================================================================
-// Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
-// non-async hipMemMap/hipMemUnmap entry points (wired up in subsequent
-// commits). No execution() lock and no barrier packet: the HIP layer is
-// responsible for draining access-device queues from the CPU side before
-// calling, and hsa_amd_vmem_{map,unmap} are synchronous w.r.t. the CPU.
-cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
-  if (phys == nullptr) {
-    LogError("virtualMap: phys is nullptr");
-    return CL_INVALID_VALUE;
+// Single map implementation shared by the synchronous hipMemMap path (Device::virtualMap) and
+// the command path (VirtualGPU::submitVirtualMap). track_mapping is false for the mempool /
+// graph callers that manage the VA bookkeeping themselves.
+cl_int Device::MapPhysicalToVirtual(void* va, size_t size, amd::Memory* phys,
+                                    bool track_mapping) const {
+  assert(phys != nullptr && "MapPhysicalToVirtual requires a physical memory object!");
+
+  amd::Memory* vaddr_sub_obj = nullptr;
+  if (track_mapping) {
+    vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
+    if (vaddr_sub_obj == nullptr) {
+      LogError("MapPhysicalToVirtual: MapMemObjBookkeeping failed");
+      return CL_INVALID_VALUE;
+    }
   }
 
-  amd::Memory* vaddr_sub_obj = MapMemObjBookkeeping(phys, va, size);
-  if (vaddr_sub_obj == nullptr) {
-    LogError("virtualMap: MapMemObjBookkeeping failed");
-    return CL_INVALID_VALUE;
-  }
-
-  hsa_amd_vmem_alloc_handle_t opaque_hsa_handle;
-  opaque_hsa_handle.handle = phys->getUserData().hsa_handle;
-  hsa_status_t hsa_status = Hsa::vmem_map(vaddr_sub_obj->getSvmPtr(), size,
-                                          vaddr_sub_obj->getOffset(), opaque_hsa_handle, 0);
+  hsa_amd_vmem_alloc_handle_t phys_handle{phys->getUserData().hsa_handle};
+  const size_t phys_offset = (vaddr_sub_obj != nullptr) ? vaddr_sub_obj->getOffset() : 0;
+  hsa_status_t hsa_status = Hsa::vmem_map(va, size, phys_offset, phys_handle, 0);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("virtualMap: hsa_amd_vmem_map failed with status: %d", hsa_status);
-    // Roll back the bookkeeping so the sub_obj/MemObjMap doesn't leak.
-    // FinalizeMapMemObjBookkeeping was never called, so MemObjMap doesn't
-    // contain va and the cross-links are not wired. Just tear down the
-    // sub-buffer view directly.
-    vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
-    vaddr_sub_obj->release();
+    LogPrintfError("MapPhysicalToVirtual: hsa_amd_vmem_map failed with status: %d", hsa_status);
+    if (vaddr_sub_obj != nullptr) {
+      // Roll back the bookkeeping so the sub_obj doesn't leak. FinalizeMapMemObjBookkeeping was
+      // never called, so MemObjMap doesn't contain va and the cross-links are not wired. Just
+      // tear down the sub-buffer view directly.
+      vaddr_sub_obj->getContext().devices()[0]->DestroyVirtualBuffer(vaddr_sub_obj);
+      vaddr_sub_obj->release();
+    }
     return CL_OUT_OF_HOST_MEMORY;
   }
 
-  constexpr bool kImportVmmForInterprocess = true;
-  FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
-  // Resolve owningAgent now that the handle is reachable, refresh every device view.
-  for (auto* device : vaddr_sub_obj->getContext().devices()) {
-    if (auto* devMem = static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*device))) {
-      devMem->refreshOwningAgentFromPointerInfo();
+  if (vaddr_sub_obj != nullptr) {
+    constexpr bool kImportVmmForInterprocess = true;
+    FinalizeMapMemObjBookkeeping(vaddr_sub_obj, phys, va, kImportVmmForInterprocess);
+
+    // Views created before the map inherited the VA reservation's owner. Views created later
+    // resolve it in computeAndSetOwningAgent().
+    constexpr bool kNoAlloc = false;
+    for (const auto* ctx_device : vaddr_sub_obj->getContext().devices()) {
+      if (auto* dev_mem =
+              static_cast<Memory*>(vaddr_sub_obj->getDeviceMemory(*ctx_device, kNoAlloc))) {
+        dev_mem->refreshOwningAgent();
+      }
     }
   }
   return CL_SUCCESS;
 }
 
 // ================================================================================================
-cl_int Device::virtualUnmap(void* va, size_t size) {
+// Single unmap implementation shared by Device::virtualUnmap and VirtualGPU::submitVirtualMap.
+cl_int Device::UnmapVirtual(void* va, size_t size, bool track_mapping) const {
+  if (!track_mapping) {
+    hsa_status_t hsa_status = Hsa::vmem_unmap(va, size);
+    if (hsa_status != HSA_STATUS_SUCCESS) {
+      LogPrintfError("UnmapVirtual: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
+      return CL_INVALID_VALUE;
+    }
+    return CL_SUCCESS;
+  }
+
   amd::Memory* vaddr_sub_obj = amd::MemObjMap::FindMemObj(va);
+  assert(vaddr_sub_obj != nullptr && "Tracked VA has no sub_obj in MemObjMap!");
   if (vaddr_sub_obj == nullptr) {
-    LogPrintfError("virtualUnmap: no sub_obj for va: %p", va);
+    LogPrintfError("UnmapVirtual: no sub_obj for va: %p", va);
     return CL_INVALID_VALUE;
   }
 
   hsa_status_t hsa_status = Hsa::vmem_unmap(vaddr_sub_obj->getSvmPtr(), size);
   if (hsa_status != HSA_STATUS_SUCCESS) {
-    LogPrintfError("virtualUnmap: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
+    LogPrintfError("UnmapVirtual: hsa_amd_vmem_unmap failed with status: %d", hsa_status);
     return CL_INVALID_VALUE;
   }
 
@@ -2822,6 +2975,28 @@ cl_int Device::virtualUnmap(void* va, size_t size) {
   constexpr bool kReleaseSubObj = true;
   UnmapMemObjBookkeeping(vaddr_sub_obj, va, kDestroyVirtualBuffer, kReleaseSubObj);
   return CL_SUCCESS;
+}
+
+// ================================================================================================
+// Direct synchronous map/unmap path bypassing VirtualMapCommand. Used by the
+// non-async hipMemMap/hipMemUnmap entry points. No execution() lock and no
+// barrier packet: the HIP layer is responsible for draining access-device
+// queues from the CPU side before calling, and hsa_amd_vmem_{map,unmap} are
+// synchronous w.r.t. the CPU.
+cl_int Device::virtualMap(void* va, size_t size, amd::Memory* phys) {
+  if (phys == nullptr) {
+    LogError("virtualMap: phys is nullptr");
+    return CL_INVALID_VALUE;
+  }
+
+  constexpr bool kTrackMapping = true;
+  return MapPhysicalToVirtual(va, size, phys, kTrackMapping);
+}
+
+// ================================================================================================
+cl_int Device::virtualUnmap(void* va, size_t size) {
+  constexpr bool kTrackMapping = true;
+  return UnmapVirtual(va, size, kTrackMapping);
 }
 
 // ================================================================================================
@@ -3377,9 +3552,9 @@ VirtualGPU* Device::xferQueue() const {
   Device* thisDevice = const_cast<Device*>(this);
   std::call_once(xferQueueOnce_, [thisDevice]() {
     // Create virtual device for internal memory transfer
-    thisDevice->xferQueue_ = reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice());
+    thisDevice->xferQueue_ =
+        reinterpret_cast<VirtualGPU*>(thisDevice->createVirtualDevice(nullptr, /*cooperative=*/false));
     if (!thisDevice->xferQueue_) {
-      LogError("Couldn't create the device transfer manager!");
       return;
     }
     if (thisDevice->xferQueue_->gpu_queue() == nullptr) {
@@ -3396,6 +3571,29 @@ VirtualGPU* Device::xferQueue() const {
 }
 
 // ================================================================================================
+VirtualGPU* Device::coopQueue() const {
+  Device* thisDevice = const_cast<Device*>(this);
+  std::call_once(coopQueueOnce_, [thisDevice]() {
+    // Create virtual device for cooperative launches
+    thisDevice->coopQueue_ = reinterpret_cast<VirtualGPU*>(
+        thisDevice->createVirtualDevice(nullptr, amd::IS_HIP && thisDevice->settings().enableCoopGroups_));
+    if (!thisDevice->coopQueue_) {
+      return;
+    }
+    if (thisDevice->coopQueue_->gpu_queue() == nullptr) {
+      thisDevice->coopQueue_->SetGpuQueue(
+          thisDevice->AcquireActiveQueue(amd::CommandQueue::Priority::Normal));
+    }
+  });
+  if (!coopQueue_) {
+    LogError("Couldn't create the cooperative queue!");
+    return nullptr;
+  }
+  coopQueue_->enableSyncBlit();
+  return coopQueue_;
+}
+
+// ================================================================================================
 bool Device::SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeInput,
                           cl_set_device_clock_mode_output_amd* pSetClockModeOutput) {
   bool result = true;
@@ -3409,7 +3607,15 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
   if (hw_event == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_SIG, "No HW event");
     return false;
-  } else if (wait) {
+  }
+  auto* signal = reinterpret_cast<ProfilingSignal*>(hw_event);
+  // A signal in device memory loads across the bus, and callers such as WaitActiveStreams check
+  // the same finished command on every launch
+  const uint64_t completion = signal->use_completion_.load(std::memory_order_acquire);
+  if ((completion & ProfilingSignal::kUseCompleteBit) != 0) {
+    return true;
+  }
+  if (wait) {
     // hipEventBlockingSync
     // when set the CPU gives up host thread for other work
     // when not set the CPU enters a busy-wait on the event to occur
@@ -3417,14 +3623,22 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
     bool active_wait =
         !((policy == amd::SyncPolicy::Blocking) & kHipEventBlockingSync) && ActiveWait();
     bool yield = (policy == amd::SyncPolicy::Yield);
-    const auto* signal = reinterpret_cast<const ProfilingSignal*>(hw_event);
-    return WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
+    const bool waited =
+        WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
+    // After a GPU error, with HIP_SKIP_ABORT_ON_GPU_ERROR, the wait gives up and returns true
+    // with the use unfinished
+    if (waited && !(HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError())) {
+      signal->MarkUseComplete(completion);
+    }
+    return waited;
   }
 
-  auto signal = reinterpret_cast<ProfilingSignal*>(hw_event)->signal_;
-  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", signal.handle);
-
-  return (Hsa::signal_load_relaxed(signal) == 0);
+  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", signal->signal_.handle);
+  if (Hsa::signal_load_relaxed(signal->signal_) != 0) {
+    return false;
+  }
+  signal->MarkUseComplete(completion);
+  return true;
 }
 
 // ================================================================================================
@@ -3434,10 +3648,13 @@ void Device::getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* 
   if (hw_event == nullptr) {
     ClPrint(amd::LOG_INFO, amd::LOG_SIG, "No HW event to read time");
     *start = *end = 0;
-  } else {
-    fetchSignalTime(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, getBackendDevice(),
-                    start, end);
+    return;
   }
+  // The caller waited for the event. Cached, the timing is not read across the bus again when
+  // the signal's Timestamp is processed.
+  auto* signal = reinterpret_cast<ProfilingSignal*>(hw_event);
+  signal->CacheTimingData(getBackendDevice(), /*completed=*/true);
+  signal->GetCachedTiming(*start, *end);
 }
 
 // ================================================================================================
@@ -3678,7 +3895,7 @@ hsa_queue_t* Device::acquireQueue(uint32_t queue_size_hint, bool coop_queue,
 
   // Build the queue creation descriptor with priority, CU mask, and flags.
   // settings().aql_device_ring_buf_ controls queue ring buffer placement (enabled
-  // by default on gfx94x/gfx125x, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
+  // by default on gfx94x and gfx12+, overridable via DEBUG_CLR_AQL_DEV_QUEUE):
   //   false - system memory
   //   true  - ring buffer in device memory if Large BAR is available.
   const bool device_mem_ring_buf = AqlRingsInDeviceMemory();
@@ -4210,9 +4427,10 @@ bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_even
   }
   hw_events.resize(count);
   for (int event_idx = 0; event_idx < count; ++event_idx) {
-    ProfilingSignal* profiling_signal = new ProfilingSignal();
+    ProfilingSignal* profiling_signal = new ProfilingSignal(SignalHints());
     profiling_signal->signal_ = signals[event_idx];
     profiling_signal->in_device_memory_ = in_device_memory;
+    profiling_signal->event_id_ = amd_signal_from_handle(signals[event_idx].handle)->event_id;
     hw_events[event_idx] = profiling_signal;
   }
   return true;
@@ -4259,6 +4477,38 @@ void Device::DestroyHwEvent(void* hw_event) const {
 }
 
 // ================================================================================================
+bool Device::AcquireHwEvents(int count, std::vector<void*>& hw_events) const {
+  // A batch is one allocation, which the last of its signals frees with an unmap from the GPU, so
+  // batches cover many sets rather than one each
+  constexpr int kHwEventBatch = 256;
+  std::unique_lock lock(graph_hw_events_lock_);
+  // Creation allocates device memory, so other graphs must not wait on the lock meanwhile, and
+  // another thread may take the new signals before this one relocks
+  while (static_cast<int>(graph_hw_events_.size()) < count) {
+    const int num_missing = count - static_cast<int>(graph_hw_events_.size());
+    lock.unlock();
+    std::vector<void*> batch;
+    if (!CreateHwEvents(std::max(num_missing, kHwEventBatch), /*batched=*/true, batch)) {
+      return false;
+    }
+    lock.lock();
+    graph_hw_events_.insert(graph_hw_events_.end(), batch.begin(), batch.end());
+  }
+  hw_events.assign(graph_hw_events_.end() - count, graph_hw_events_.end());
+  graph_hw_events_.resize(graph_hw_events_.size() - count);
+  return true;
+}
+
+// ================================================================================================
+void Device::ReturnHwEvents(std::vector<void*>& hw_events) const {
+  // Kept rather than destroyed: a queue that waited on a signal may hold the last other reference
+  // and release it inside a later launch
+  std::scoped_lock lock(graph_hw_events_lock_);
+  graph_hw_events_.insert(graph_hw_events_.end(), hw_events.begin(), hw_events.end());
+  hw_events.clear();
+}
+
+// ================================================================================================
 void Device::FlushSignalStores(hsa_signal_t last_stored, hsa_signal_value_t value) const {
   if (!pcie_stores_need_flush_) {
     return;
@@ -4286,21 +4536,29 @@ void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
     if (hw_event != nullptr) {
       auto* ps = reinterpret_cast<ProfilingSignal*>(hw_event);
       if (ps->in_device_memory_) {
-        reinterpret_cast<amd_signal_t*>(ps->signal_.handle)->value = kInitSignalValueOne;
+        // A plain store would leave the line in the CPU cache of a host that maps device memory
+        // write-back, and the GPU's first access to the signal would have to probe it
+        amd::nontemporalStore64(&reinterpret_cast<amd_signal_t*>(ps->signal_.handle)->value,
+                                kInitSignalValueOne);
         last_stored = ps->signal_;
       } else {
         Hsa::signal_silent_store_relaxed(ps->signal_, 1);
       }
-      ps->flags_.done_ = true;
+      ps->flags_.timing_processed_ = true;
+      ps->StartUse();
       ps->ResetCachedTiming();
     }
   }
-  // Bulk flush of HDP. The packets that wait on these signals go to rings of this device, and a
-  // device-memory ring receives them through the same BAR after these stores, in order. Every
-  // ring here comes from acquireQueue, which requests the placement AqlRingsInDeviceMemory()
-  // reports; ROCr fails that request rather than fall back to a system-memory ring.
-  if (last_stored.handle != 0 && !AqlRingsInDeviceMemory()) {
-    FlushSignalStores(last_stored, kInitSignalValueOne);
+  if (last_stored.handle != 0) {
+    // The set goes to another thread, which submits the packets that wait on these signals
+    amd::nontemporalStoreFence();
+    // Bulk flush of HDP. The packets go to rings of this device, and a device-memory ring
+    // receives them after these stores, over the same link. Every ring here comes from
+    // acquireQueue, which requests the placement AqlRingsInDeviceMemory() reports; ROCr fails
+    // that request rather than fall back to a system-memory ring.
+    if (!AqlRingsInDeviceMemory()) {
+      FlushSignalStores(last_stored, kInitSignalValueOne);
+    }
   }
 }
 
@@ -4354,9 +4612,13 @@ uint8_t* Device::CreateBarrierPacket(int num_deps) const {
 
 // ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                 const std::vector<void*>& hw_events) const {
+                                 const std::vector<void*>& hw_events, bool profiled,
+                                 void* external_hw_event) const {
+  // Starts no use: the set comes new from CreateHwEvents or re-armed by ResetHwEvents, which did
   for (const auto& patch : patches) {
-    auto* ps = reinterpret_cast<ProfilingSignal*>(hw_events[patch.hw_event_index]);
+    const bool external = (patch.hw_event_index == HwEventPatch::kExternalHwEvent);
+    auto* ps = reinterpret_cast<ProfilingSignal*>(external ? external_hw_event
+                                                           : hw_events[patch.hw_event_index]);
     hsa_signal_t sig = ps->signal_;
 
     // Patch the flat buffer copy (dispatched to GPU) directly.
@@ -4369,12 +4631,14 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
           offsetof(hsa_amd_ext_kernel_dispatch_packet_t, dep_signal);
       memcpy(raw + kExtDepSignalOffset, &sig, sizeof(sig));
     } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
+      // Pooled signals rest armed at 1, and only this packet completes them
+      ps->binary_use_ = true;
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
-      pkt->completion_signal = sig;
+      pkt->completion_signal = ps->PacketHandle(profiled);
 
       // Prepare this signal for profiling. The dispatch path assigns this
       // launch's slot only when the actual carrier is a kernel dispatch.
-      ps->flags_.done_ = false;
+      ps->flags_.timing_processed_ = false;
       ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait).
@@ -4387,11 +4651,12 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
 
 // ================================================================================================
 bool Device::CreateUserEvent(amd::UserEvent* event) const {
-  std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
+  std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal(SignalHints()));
   if ((signal == nullptr) ||
       (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 0, nullptr, &signal->signal_))) {
     return false;
   }
+  signal->event_id_ = amd_signal_from_handle(signal->signal_.handle)->event_id;
   Hsa::signal_silent_store_relaxed(signal->signal_, kInitSignalValueOne);
   event->SetHwEvent(signal.release());
   return true;
@@ -4425,8 +4690,9 @@ bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer
   }
 
   if (ptr_info->type != HSA_EXT_POINTER_TYPE_UNKNOWN) {
-    if ((size != 0) && ((reinterpret_cast<const_address>(dev_ptr) -
-                         reinterpret_cast<const_address>(ptr_info->agentBaseAddress)) > size)) {
+    if ((size != 0) &&
+        (static_cast<size_t>(reinterpret_cast<const_address>(dev_ptr) -
+                             reinterpret_cast<const_address>(ptr_info->agentBaseAddress)) > size)) {
       return false;
     }
     return true;
@@ -4436,7 +4702,7 @@ bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer
 
 // ================================================================================================
 void Device::HiddenHeapAlloc(const VirtualGPU& gpu) {
-  auto HeapAllocOnly = [this, &gpu]() -> bool {
+  auto HeapAllocOnly = [this]() -> bool {
     // Allocate initial heap for device memory allocator
     static constexpr size_t HeapBufferSize = 128 * Ki;
     heap_buffer_ = createMemory(HeapBufferSize);
@@ -4651,7 +4917,7 @@ ProfilingSignal::~ProfilingSignal() {
 // ================================================================================================
 cl_int ConvertHSAErrorIntoCLError(hsa_status_t hsa_status) {
   cl_int cl_error = CL_SUCCESS;
-  switch (hsa_status) {
+  switch (static_cast<int>(hsa_status)) {
     case HSA_STATUS_ERROR_OUT_OF_RESOURCES:
       cl_error = CL_OUT_OF_RESOURCES;
       break;

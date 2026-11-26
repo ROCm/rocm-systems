@@ -41,7 +41,7 @@ extern "C" {
 #define ROCSHMEM_API_TRACE_VERSION_MAJOR 0
 
 // should be increased every time new members are added to existing dispatch tables
-#define ROCSHMEM_API_TRACE_VERSION_PATCH 7
+#define ROCSHMEM_API_TRACE_VERSION_PATCH 8
 
 // =============================================================================
 // HOST STREAM OPERATIONS (HOST_DISPATCH)
@@ -75,12 +75,18 @@ typedef void (*signal_wait_until_on_stream_fn_t)(uint64_t *sig_addr, int cmp,
                                                  uint64_t cmp_value,
                                                  hipStream_t stream);
 
+typedef void (*signal_add_on_stream_fn_t)(uint64_t *sig_addr, uint64_t signal,
+                                          int pe, hipStream_t stream);
+
+typedef void (*signal_set_on_stream_fn_t)(uint64_t *sig_addr, uint64_t signal,
+                                          int pe, hipStream_t stream);
+
 typedef struct rocshmemApiFuncTable
 {
     // DO NOT REORDER - ADD NEW FUNCTIONS AT BOTTOM ONLY
     uint64_t                                  size;
 
-    // Host Stream Operations (9 functions)
+    // Host Stream Operations (11 functions)
     barrier_all_on_stream_fn_t                barrier_all_on_stream_fn;
     quiet_on_stream_fn_t                      quiet_on_stream_fn;
     sync_all_on_stream_fn_t                   sync_all_on_stream_fn;
@@ -90,6 +96,8 @@ typedef struct rocshmemApiFuncTable
     putmem_on_stream_fn_t                     putmem_on_stream_fn;
     putmem_signal_on_stream_fn_t              putmem_signal_on_stream_fn;
     signal_wait_until_on_stream_fn_t          signal_wait_until_on_stream_fn;
+    signal_add_on_stream_fn_t                 signal_add_on_stream_fn;
+    signal_set_on_stream_fn_t                 signal_set_on_stream_fn;
 
 } rocshmemApiFuncTable;
 

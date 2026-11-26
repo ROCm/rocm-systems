@@ -1,6 +1,8 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "async_vm_test_support.h"
+#include "rocjitsu/kmd/linux/gpu_alias_ingress.h"
 #include "rocjitsu/vm/amdgpu/sdma_packet_processor.h"
 
 #include <gtest/gtest.h>
@@ -8,14 +10,18 @@
 #include <algorithm>
 #include <array>
 #include <concepts>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -34,8 +40,9 @@ public:
       : bytes_(size), segment_size_(segment_size) {}
 
   VmTranslationResult translate(uint64_t address, std::size_t size, VmAccessKind) const override {
-    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address)
+    if (size == 0 || address > bytes_.size() || size > bytes_.size() - address) {
       return {.outcome = VmAccessOutcome::Faulted, .translation = {}};
+    }
     return {
         .outcome = VmAccessOutcome::Complete,
         .translation = {.domain = VmMemoryDomain::System,
@@ -50,8 +57,12 @@ public:
       unavailable_read_returned_ = true;
       return VmAccessOutcome::Unavailable;
     }
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    if (read_probe_) {
+      read_probe_();
+    }
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy_n(bytes_.begin() + static_cast<std::ptrdiff_t>(address), bytes.size(),
                         bytes.begin());
     return VmAccessOutcome::Complete;
@@ -59,20 +70,25 @@ public:
 
   VmAccessOutcome write(VmMemoryDomain, uint64_t address,
                         std::span<const std::byte> bytes) override {
+    if (write_probe_) {
+      write_probe_();
+    }
     ++write_calls_[address];
     if (address == unavailable_write_address_ && !unavailable_write_returned_) {
       unavailable_write_returned_ = true;
       return VmAccessOutcome::Unavailable;
     }
-    if (address > bytes_.size() || bytes.size() > bytes_.size() - address)
+    if (address > bytes_.size() || bytes.size() > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::ranges::copy(bytes, bytes_.begin() + static_cast<std::ptrdiff_t>(address));
     return VmAccessOutcome::Complete;
   }
 
   AtomicLoadResult atomic_load(VmMemoryDomain, uint64_t address, uint32_t width) override {
-    if (width != 4 && width != 8)
+    if (width != 4 && width != 8) {
       return {.outcome = VmAccessOutcome::Malformed};
+    }
     uint64_t value = 0;
     std::memcpy(&value, bytes_.data() + address, width);
     return {.outcome = VmAccessOutcome::Complete, .value = value};
@@ -84,8 +100,9 @@ public:
       unavailable_atomic_store_returned_ = true;
       return VmAccessOutcome::Unavailable;
     }
-    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address)
+    if ((width != 4 && width != 8) || address > bytes_.size() || width > bytes_.size() - address) {
       return VmAccessOutcome::Faulted;
+    }
     std::memcpy(bytes_.data() + address, &value, width);
     return VmAccessOutcome::Complete;
   }
@@ -97,11 +114,13 @@ public:
       unavailable_compare_exchange_returned_ = true;
       return {.outcome = VmAccessOutcome::Unavailable};
     }
-    if (width != 8)
+    if (width != 8) {
       return {.outcome = VmAccessOutcome::Malformed};
+    }
     const uint64_t observed = load<uint64_t>(address);
-    if (observed != expected)
+    if (observed != expected) {
       return {.outcome = VmAccessOutcome::Complete, .observed = observed, .exchanged = false};
+    }
     store(address, desired);
     ++successful_compare_exchanges_;
     return {.outcome = VmAccessOutcome::Complete, .observed = observed, .exchanged = true};
@@ -122,6 +141,8 @@ public:
   void set_unavailable_compare_exchange(uint64_t address) {
     unavailable_compare_exchange_address_ = address;
   }
+  void set_read_probe(std::function<void()> probe) { read_probe_ = std::move(probe); }
+  void set_write_probe(std::function<void()> probe) { write_probe_ = std::move(probe); }
   void set_unavailable_atomic_store(uint64_t address) {
     unavailable_atomic_store_address_ = address;
   }
@@ -135,6 +156,8 @@ private:
   std::vector<std::byte> bytes_;
   uint64_t segment_size_;
   std::map<uint64_t, uint32_t> write_calls_;
+  std::function<void()> read_probe_;
+  std::function<void()> write_probe_;
   uint64_t unavailable_write_address_ = UINT64_MAX;
   uint64_t unavailable_read_address_ = UINT64_MAX;
   uint64_t unavailable_compare_exchange_address_ = UINT64_MAX;
@@ -173,16 +196,18 @@ std::array<uint32_t, 7> copy_packet(uint64_t source, uint64_t destination, uint3
 std::vector<uint32_t> swap_packet(SdmaPacketDialect dialect, uint64_t address_a, uint64_t address_b,
                                   uint32_t bytes, bool wait = false, bool signal = false) {
   std::vector<uint32_t> words{0x901u | (wait ? 1u << 30 : 0) | (signal ? 1u << 31 : 0)};
-  if (wait)
+  if (wait) {
     words.insert(words.end(), {3u | (3u << 18), 0x3000, 0, 0, 0, UINT32_MAX, UINT32_MAX});
+  }
   // GFX12 operands use system scope, as emitted by ROCr.
   const uint32_t parameter = dialect == SdmaPacketDialect::Gfx1250 ? (3u << 18) | (3u << 26) : 0;
   words.insert(words.end(),
                {bytes - 1, parameter, static_cast<uint32_t>(address_a),
                 static_cast<uint32_t>(address_a >> 32), static_cast<uint32_t>(address_b),
                 static_cast<uint32_t>(address_b >> 32)});
-  if (signal)
+  if (signal) {
     words.insert(words.end(), {0x70u | (3u << 18), 0x3100, 0, 1, 0});
+  }
   return words;
 }
 
@@ -215,6 +240,65 @@ TEST(SdmaPacketProcessorTest, SwapHandlesBothLayoutsAndMultipleChunks) {
                   static_cast<uint8_t>((index * 3 + 1) ^ (index >> 8)));
       }
     }
+  }
+}
+
+TEST(SdmaPacketProcessorTest, SwapAdmitsAndMaintainsEachMemoryEffect) {
+  PacketProcessorFixture fixture;
+  fixture.memory->store<uint64_t>(0x1000, 0x1122334455667788);
+  fixture.memory->store<uint64_t>(0x2000, 0xaabbccddeeff0011);
+
+  bool lease_active = false;
+  uint32_t maintenance_acquires = 0;
+  uint32_t maintenance_releases = 0;
+  std::vector<MemoryIngressSpan> admitted;
+  fixture.memory->set_read_probe([&] { EXPECT_TRUE(lease_active); });
+  fixture.memory->set_write_probe([&] { EXPECT_TRUE(lease_active); });
+  SdmaPacketCallbacks callbacks;
+  callbacks.admit_memory_ingress = [&](const GpuVmAccess &access,
+                                       std::span<const MemoryIngressSpan> spans) {
+    EXPECT_EQ(&access, &*fixture.access);
+    EXPECT_FALSE(lease_active);
+    EXPECT_EQ(spans.size(), 1u);
+    if (spans.size() == 1) {
+      admitted.push_back(spans.front());
+    }
+    return MemoryIngressAdmission{};
+  };
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    EXPECT_FALSE(lease_active);
+    lease_active = true;
+    ++maintenance_acquires;
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+  const std::vector<uint32_t> packet = swap_packet(SdmaPacketDialect::Gfx1250, 0x1000, 0x2000, 8);
+  const SdmaPacketProcessResult result = processor.process({.available_dwords = packet,
+                                                            .access = *fixture.access,
+                                                            .continuation = fixture.continuation});
+
+  ASSERT_EQ(result.packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(0x1000), 0xaabbccddeeff0011);
+  EXPECT_EQ(fixture.memory->load<uint64_t>(0x2000), 0x1122334455667788);
+  EXPECT_FALSE(lease_active);
+  EXPECT_EQ(maintenance_acquires, 4u);
+  EXPECT_EQ(maintenance_releases, 4u);
+  ASSERT_EQ(admitted.size(), 4u);
+  EXPECT_EQ(admitted[0].address, 0x1000u);
+  EXPECT_EQ(admitted[0].access, VmAccessKind::Read);
+  EXPECT_EQ(admitted[1].address, 0x2000u);
+  EXPECT_EQ(admitted[1].access, VmAccessKind::Read);
+  EXPECT_EQ(admitted[2].address, 0x1000u);
+  EXPECT_EQ(admitted[2].access, VmAccessKind::Write);
+  EXPECT_EQ(admitted[3].address, 0x2000u);
+  EXPECT_EQ(admitted[3].access, VmAccessKind::Write);
+  for (const MemoryIngressSpan &span : admitted) {
+    EXPECT_EQ(span.size, 8u);
   }
 }
 
@@ -300,10 +384,11 @@ TEST(SdmaPacketProcessorTest, SwapResumesReadsAndSignalWithoutReplayingTheExchan
     fixture.memory->store<uint64_t>(0x1000, 0x1122334455667788);
     fixture.memory->store<uint64_t>(0x2000, 0xaabbccddeeff0011);
     fixture.memory->store<uint64_t>(0x3100, 1);
-    if (blocked_address == 0x3100)
+    if (blocked_address == 0x3100) {
       fixture.memory->set_unavailable_compare_exchange(blocked_address);
-    else
+    } else {
       fixture.memory->set_unavailable_read(blocked_address);
+    }
     SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
     const std::vector<uint32_t> packet =
         swap_packet(SdmaPacketDialect::Gfx1250, 0x1000, 0x2000, 64, false, true);
@@ -466,10 +551,11 @@ TEST(SdmaPacketProcessorTest, SwapRejectsPartialOverlapAndAcceptsIdenticalAndAdj
         }
         for (uint32_t index = 0; index < original.size(); ++index) {
           uint8_t expected = original[index];
-          if (!partial_overlap && index < kBytes)
+          if (!partial_overlap && index < kBytes) {
             expected = original[index + offset];
-          else if (!partial_overlap && index >= offset && index < offset + kBytes)
+          } else if (!partial_overlap && index >= offset && index < offset + kBytes) {
             expected = original[index - offset];
+          }
           EXPECT_EQ(fixture.memory->load<uint8_t>(kStart + index), expected) << index;
         }
       }
@@ -495,8 +581,9 @@ TEST(SdmaPacketProcessorTest, FusedCopyKeepsTheSameReservedAddressPolicyForLinea
     std::vector<uint32_t> packet =
         swap_packet(SdmaPacketDialect::Gfx1250, kAddressA, kAddressB, 64, true, true);
     // Compare the same fused envelope with only the COPY sub-opcode changed.
-    if (!swapping)
+    if (!swapping) {
       packet[0] &= ~kSubopcodeMask;
+    }
     packet[kWaitAddressLowDword] = static_cast<uint32_t>(kWaitAddress);
     packet[kSignalAddressLowDword] = static_cast<uint32_t>(kSignalAddress);
     SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
@@ -638,8 +725,9 @@ TEST(SdmaPacketProcessorTest, CopyResumesAtFirstUncommittedPhysicalSpan) {
   ASSERT_TRUE(fixture.access);
   constexpr uint64_t kSource = 0x100;
   constexpr uint64_t kDestination = 0x200;
-  for (uint32_t index = 0; index < 32; ++index)
+  for (uint32_t index = 0; index < 32; ++index) {
     fixture.memory->store<uint8_t>(kSource + index, static_cast<uint8_t>(index + 1));
+  }
   fixture.memory->set_unavailable_write(kDestination + 16);
 
   SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250);
@@ -664,8 +752,9 @@ TEST(SdmaPacketProcessorTest, CopyResumesAtFirstUncommittedPhysicalSpan) {
   EXPECT_TRUE(resumed.completion_published);
   EXPECT_FALSE(fixture.continuation.pending());
   EXPECT_EQ(fixture.memory->write_calls(kDestination), 1u);
-  for (uint32_t index = 0; index < 32; ++index)
+  for (uint32_t index = 0; index < 32; ++index) {
     EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index), static_cast<uint8_t>(index + 1));
+  }
 }
 
 TEST(SdmaPacketProcessorTest, SignalPublicationRetryDoesNotReplayCommittedAtomic) {
@@ -678,16 +767,19 @@ TEST(SdmaPacketProcessorTest, SignalPublicationRetryDoesNotReplayCommittedAtomic
   fixture.memory->store<uint32_t>(kSignalValue + 16, 37);
   fixture.memory->set_unavailable_atomic_store(kMailbox);
   uint32_t interrupts = 0;
-  SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, {.read_register = {},
-                                                             .write_register = {},
-                                                             .deliver_interrupt =
-                                                                 [&](uint32_t event) {
-                                                                   EXPECT_EQ(event, 37u);
-                                                                   ++interrupts;
-                                                                   return VmAccessOutcome::Complete;
-                                                                 },
-                                                             .acquire_cache_maintenance = {},
-                                                             .timestamp = {}});
+  SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250,
+                                {.read_register = {},
+                                 .write_register = {},
+                                 .deliver_interrupt =
+                                     [&](uint32_t event) {
+                                       EXPECT_EQ(event, 37u);
+                                       ++interrupts;
+                                       return VmAccessOutcome::Complete;
+                                     },
+                                 .acquire_cache_maintenance = {},
+                                 .timestamp = {},
+                                 .admit_memory_ingress = {},
+                                 .admit_private_uc_gtt_copy_source = {}});
   const std::array<uint32_t, 8> packet = {
       10u | (47u << 25), static_cast<uint32_t>(kSignalValue), 0, UINT32_MAX, UINT32_MAX, 0, 0, 0};
 
@@ -710,6 +802,82 @@ TEST(SdmaPacketProcessorTest, SignalPublicationRetryDoesNotReplayCommittedAtomic
   EXPECT_EQ(interrupts, 1u);
 }
 
+TEST(SdmaPacketProcessorTest, FailedCacheMaintenanceStopsEffectsAndRetirement) {
+  constexpr uint64_t kSource = 0x1800;
+  constexpr uint64_t kDestination = 0x2800;
+  const auto copy = copy_packet(kSource, kDestination, 4);
+  const std::vector<std::vector<uint32_t>> packets = {
+      {copy.begin(), copy.end()},
+      {5, static_cast<uint32_t>(kDestination), 0, 0x11223344},
+      {17, 0, 0, 1u << 15, 0, 0},
+      {17, 0, 0, 1u << 14, 0, 0},
+  };
+  for (const auto &packet : packets) {
+    SCOPED_TRACE(packet[0]);
+    PacketProcessorFixture fixture;
+    ASSERT_TRUE(fixture.access);
+    uint32_t maintenance_calls = 0;
+    SdmaPacketCallbacks callbacks;
+    callbacks.acquire_cache_maintenance =
+        [&](SdmaCacheOperation) -> util::FailureOr<CacheMaintenanceResult> {
+      ++maintenance_calls;
+      return util::Result::failure();
+    };
+    SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+    const SdmaPacketProcessResult result =
+        processor.process({.available_dwords = packet,
+                           .access = *fixture.access,
+                           .continuation = fixture.continuation});
+    EXPECT_EQ(maintenance_calls, 1u);
+    EXPECT_EQ(result.packet.status, PacketProcessStatus::Faulted);
+    EXPECT_EQ(result.packet.retirement, PacketRetirement::Hold);
+    EXPECT_FALSE(result.operation_committed);
+    EXPECT_FALSE(result.completion_published);
+    EXPECT_EQ(fixture.memory->write_calls(kDestination), 0u);
+    EXPECT_FALSE(fixture.continuation.pending());
+  }
+}
+
+TEST(SdmaPacketProcessorTest, FailedCacheReacquisitionRetiresCommittedCopyPrefix) {
+  PacketProcessorFixture fixture;
+  ASSERT_TRUE(fixture.access);
+  constexpr uint64_t kSource = 0x100;
+  constexpr uint64_t kDestination = 0x200;
+  for (uint32_t index = 0; index < 32; ++index) {
+    fixture.memory->store<uint8_t>(kSource + index, static_cast<uint8_t>(index + 1));
+  }
+  fixture.memory->set_unavailable_write(kDestination + 16);
+  uint32_t maintenance_calls = 0;
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance =
+      [&](SdmaCacheOperation) -> util::FailureOr<CacheMaintenanceResult> {
+    ++maintenance_calls;
+    if (fixture.memory->write_calls(kDestination + 16) != 0) {
+      return util::Result::failure();
+    }
+    return CacheMaintenanceResult{};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+  const auto packet = copy_packet(kSource, kDestination, 32);
+  const SdmaPacketProcessResult first = processor.process({.available_dwords = packet,
+                                                           .access = *fixture.access,
+                                                           .continuation = fixture.continuation});
+  ASSERT_EQ(first.packet.status, PacketProcessStatus::Blocked);
+  ASSERT_TRUE(first.operation_committed);
+  const SdmaPacketProcessResult failed = processor.process(
+      {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+  EXPECT_EQ(failed.packet.status, PacketProcessStatus::Faulted);
+  EXPECT_EQ(failed.packet.retirement, PacketRetirement::Retire);
+  EXPECT_TRUE(failed.operation_committed);
+  EXPECT_FALSE(failed.completion_published);
+  EXPECT_FALSE(fixture.continuation.pending());
+  EXPECT_EQ(fixture.memory->write_calls(kDestination), 1u);
+  for (uint32_t index = 0; index < 32; ++index) {
+    EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index),
+              index < 16 ? static_cast<uint8_t>(index + 1) : 0);
+  }
+}
+
 TEST(SdmaPacketProcessorTest, CacheLeaseIsReleasedOnUnavailableAndReacquiredOnResume) {
   PacketProcessorFixture fixture;
   ASSERT_TRUE(fixture.access);
@@ -725,11 +893,11 @@ TEST(SdmaPacketProcessorTest, CacheLeaseIsReleasedOnUnavailableAndReacquiredOnRe
     EXPECT_FALSE(lease_active);
     lease_active = true;
     ++acquired;
-    return SdmaCacheLease([&] {
-      EXPECT_TRUE(lease_active);
-      lease_active = false;
-      ++released;
-    });
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++released;
+                                  })};
   };
   const std::array<uint32_t, 5> packet = {11, static_cast<uint32_t>(kDestination), 0, 0x11223344,
                                           3};
@@ -752,6 +920,167 @@ TEST(SdmaPacketProcessorTest, CacheLeaseIsReleasedOnUnavailableAndReacquiredOnRe
   EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x11223344u);
 }
 
+TEST(SdmaPacketProcessorTest, PreEffectMaintenanceRefusalRetainsFenceForRetry) {
+  PacketProcessorFixture fixture;
+  ASSERT_TRUE(fixture.access);
+  constexpr uint64_t kDestination = 0x280;
+  uint32_t attempts = 0;
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    if (++attempts == 1) {
+      return CacheMaintenanceResult{.outcome = CacheMaintenanceOutcome::Retry};
+    }
+    return CacheMaintenanceResult{};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+  const std::array<uint32_t, 4> packet = {5, static_cast<uint32_t>(kDestination), 0, 0x11223344};
+
+  const SdmaPacketProcessResult first = processor.process({.available_dwords = packet,
+                                                           .access = *fixture.access,
+                                                           .continuation = fixture.continuation});
+  EXPECT_EQ(first.packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(first.packet.retirement, PacketRetirement::Hold);
+  EXPECT_EQ(first.packet.retirement_bytes, packet.size() * sizeof(uint32_t));
+  EXPECT_FALSE(first.operation_committed);
+  EXPECT_FALSE(first.completion_published);
+  EXPECT_TRUE(fixture.continuation.pending());
+  EXPECT_EQ(fixture.memory->write_calls(kDestination), 0u);
+
+  const SdmaPacketProcessResult resumed = processor.process(
+      {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+  EXPECT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(resumed.packet.retirement, PacketRetirement::Retire);
+  EXPECT_TRUE(resumed.operation_committed);
+  EXPECT_TRUE(resumed.completion_published);
+  EXPECT_FALSE(fixture.continuation.pending());
+  EXPECT_EQ(attempts, 2u);
+  EXPECT_EQ(fixture.memory->write_calls(kDestination), 1u);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x11223344u);
+}
+
+TEST(SdmaPacketProcessorTest, MaintenanceRetryRetainsGcrWithoutCommitting) {
+  for (uint32_t flags : {1u << 15, 1u << 14}) {
+    SCOPED_TRACE(flags);
+    PacketProcessorFixture fixture;
+    ASSERT_TRUE(fixture.access);
+    uint32_t attempts = 0;
+    SdmaPacketCallbacks callbacks;
+    callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+      EXPECT_EQ(operation, flags == (1u << 15) ? SdmaCacheOperation::WritebackInvalidate
+                                               : SdmaCacheOperation::Invalidate);
+      if (++attempts == 1) {
+        return CacheMaintenanceResult{.outcome = CacheMaintenanceOutcome::Retry};
+      }
+      return CacheMaintenanceResult{};
+    };
+    SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+    const std::array<uint32_t, 6> packet = {17, 0, 0, flags, 0, 0};
+    const SdmaPacketProcessResult first = processor.process({.available_dwords = packet,
+                                                             .access = *fixture.access,
+                                                             .continuation = fixture.continuation});
+    EXPECT_EQ(first.packet.status, PacketProcessStatus::Blocked);
+    EXPECT_EQ(first.packet.retirement, PacketRetirement::Hold);
+    EXPECT_FALSE(first.operation_committed);
+    EXPECT_TRUE(fixture.continuation.pending());
+    const SdmaPacketProcessResult resumed = processor.process(
+        {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+    EXPECT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+    EXPECT_TRUE(resumed.operation_committed);
+    EXPECT_FALSE(fixture.continuation.pending());
+    EXPECT_EQ(attempts, 2u);
+  }
+}
+
+TEST(SdmaPacketProcessorTest, MaintenanceRefusalKeepsTokenizedWriteProgress) {
+  PacketProcessorFixture fixture(0x10000, 16);
+  ASSERT_TRUE(fixture.access);
+  constexpr uint64_t kDestination = 0x280;
+  uint32_t attempts = 0;
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    if (++attempts == 2) {
+      return CacheMaintenanceResult{.outcome = CacheMaintenanceOutcome::Retry};
+    }
+    return CacheMaintenanceResult{};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+  const std::array<uint32_t, 12> packet = {
+      2,          static_cast<uint32_t>(kDestination),
+      0,          7,
+      0x04030201, 0x08070605,
+      0x0c0b0a09, 0x100f0e0d,
+      0x14131211, 0x18171615,
+      0x1c1b1a19, 0x201f1e1d,
+  };
+
+  const SdmaPacketProcessResult first = processor.process({.available_dwords = packet,
+                                                           .access = *fixture.access,
+                                                           .continuation = fixture.continuation});
+  EXPECT_EQ(first.packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(first.packet.retirement, PacketRetirement::Hold);
+  EXPECT_TRUE(first.operation_committed);
+  EXPECT_FALSE(first.completion_published);
+  EXPECT_TRUE(fixture.continuation.pending());
+  EXPECT_EQ(fixture.memory->write_calls(kDestination), 1u);
+  EXPECT_EQ(fixture.memory->write_calls(kDestination + 16), 0u);
+
+  const SdmaPacketProcessResult resumed = processor.process(
+      {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+  EXPECT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(resumed.packet.retirement, PacketRetirement::Retire);
+  EXPECT_TRUE(resumed.operation_committed);
+  EXPECT_TRUE(resumed.completion_published);
+  EXPECT_FALSE(fixture.continuation.pending());
+  EXPECT_EQ(attempts, 3u);
+  EXPECT_EQ(fixture.memory->write_calls(kDestination), 1u);
+  EXPECT_EQ(fixture.memory->write_calls(kDestination + 16), 1u);
+  for (uint32_t index = 0; index < 32; ++index) {
+    EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index), index + 1);
+  }
+}
+
+TEST(SdmaPacketProcessorTest, CacheMaintenanceCoversEachLocalBackingSpan) {
+  PacketProcessorFixture fixture(0x10000, 16);
+  ASSERT_TRUE(fixture.access);
+  constexpr uint64_t kDestination = 0x280;
+  bool lease_active = false;
+  uint32_t acquired = 0;
+  uint32_t released = 0;
+  uint32_t writes = 0;
+  fixture.memory->set_write_probe([&] {
+    EXPECT_TRUE(lease_active);
+    ++writes;
+  });
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    EXPECT_FALSE(lease_active);
+    lease_active = true;
+    ++acquired;
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++released;
+                                  })};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
+  const std::array<uint32_t, 12> packet = {
+      2, static_cast<uint32_t>(kDestination), 0, 7, 1, 2, 3, 4, 5, 6, 7, 8};
+
+  const auto result = processor.process({.available_dwords = packet,
+                                         .access = *fixture.access,
+                                         .continuation = fixture.continuation});
+  EXPECT_EQ(result.packet.status, PacketProcessStatus::Complete);
+  EXPECT_FALSE(lease_active);
+  EXPECT_EQ(writes, 2u);
+  EXPECT_EQ(acquired, 2u);
+  EXPECT_EQ(released, 2u);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 1u);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + 28), 8u);
+}
+
 TEST(SdmaPacketProcessorTest, IndirectBufferRetainsNestedWriteProgress) {
   PacketProcessorFixture fixture;
   ASSERT_TRUE(fixture.access);
@@ -765,8 +1094,9 @@ TEST(SdmaPacketProcessorTest, IndirectBufferRetainsNestedWriteProgress) {
       0x14131211, 0x18171615,
       0x1c1b1a19, 0x201f1e1d,
   };
-  for (std::size_t index = 0; index < indirect.size(); ++index)
+  for (std::size_t index = 0; index < indirect.size(); ++index) {
     fixture.memory->store<uint32_t>(kIndirect + index * 4, indirect[index]);
+  }
   fixture.memory->set_unavailable_write(kDestination + 16);
   const std::array<uint32_t, 6> packet = {
       4, static_cast<uint32_t>(kIndirect), 0, static_cast<uint32_t>(indirect.size()), 0, 0};
@@ -783,8 +1113,9 @@ TEST(SdmaPacketProcessorTest, IndirectBufferRetainsNestedWriteProgress) {
   EXPECT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
   EXPECT_EQ(resumed.packet.retirement_bytes, packet.size() * sizeof(uint32_t));
   EXPECT_EQ(fixture.memory->write_calls(kDestination), 1u);
-  for (uint32_t index = 0; index < 32; ++index)
+  for (uint32_t index = 0; index < 32; ++index) {
     EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + index), static_cast<uint8_t>(index + 1));
+  }
 }
 
 TEST(SdmaPacketProcessorTest, MemoryPollRefreshesValueAfterUnsatisfiedPredicate) {
@@ -916,8 +1247,9 @@ TEST(SdmaPacketProcessorTest, LinearRectCopiesPitchedRowsAndSkipsTheGap) {
     constexpr uint64_t kDestination = 0x1800;
     fixture.memory->store<uint64_t>(kSource, 0x1122334455667788ull);
     fixture.memory->store<uint64_t>(kSource + 8, 0xaabbccddeeff0011ull);
-    for (uint32_t i = 0; i < 32; ++i)
+    for (uint32_t i = 0; i < 32; ++i) {
       fixture.memory->store<uint8_t>(kDestination + i, 0x5a);
+    }
 
     const std::array<uint32_t, 13> packet = linear_rect_packet(
         test_case.gfx12_rect, kSource, kDestination,
@@ -946,8 +1278,9 @@ TEST(SdmaPacketProcessorTest, LinearRectHonorsElementSizeAndSlicePitch) {
     constexpr uint64_t kSource = 0x2000;
     constexpr uint64_t kDestination = 0x3000;
     constexpr uint32_t kBytes = 128;
-    for (uint32_t i = 0; i < kBytes; ++i)
+    for (uint32_t i = 0; i < kBytes; ++i) {
       fixture.memory->store<uint8_t>(kSource + i, static_cast<uint8_t>(i + 1));
+    }
 
     // 16-byte elements, two rows, then a second slice. Matches the dword-aligned
     // rectangle hipMemcpy2D submits, plus a slice so the Z stride is exercised.
@@ -969,9 +1302,10 @@ TEST(SdmaPacketProcessorTest, LinearRectHonorsElementSizeAndSlicePitch) {
 
     EXPECT_EQ(result.packet.status, PacketProcessStatus::Complete);
     EXPECT_EQ(result.packet.retirement_bytes, 13u * sizeof(uint32_t));
-    for (uint32_t i = 0; i < kBytes; ++i)
+    for (uint32_t i = 0; i < kBytes; ++i) {
       EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + i), static_cast<uint8_t>(i + 1))
           << "byte " << i;
+    }
   }
 }
 
@@ -994,10 +1328,12 @@ TEST(SdmaPacketProcessorTest, LinearRectKeepsDistinctPaddedSliceStrides) {
     SCOPED_TRACE(static_cast<int>(test_case.dialect));
     PacketProcessorFixture fixture;
     ASSERT_TRUE(fixture.access);
-    for (uint32_t i = 0; i < kSrcSlice * kSlices; ++i)
+    for (uint32_t i = 0; i < kSrcSlice * kSlices; ++i) {
       fixture.memory->store<uint8_t>(kSource + i, static_cast<uint8_t>(i + 1));
-    for (uint32_t i = 0; i < kDstSlice * kSlices; ++i)
+    }
+    for (uint32_t i = 0; i < kDstSlice * kSlices; ++i) {
       fixture.memory->store<uint8_t>(kDestination + i, kGap);
+    }
 
     const std::array<uint32_t, 13> packet =
         linear_rect_packet(test_case.gfx12_rect, kSource, kDestination,
@@ -1077,10 +1413,12 @@ TEST(SdmaPacketProcessorTest, LinearRectScalesXOriginsByTheElementSize) {
     constexpr uint32_t kRowBytes = 4;
     constexpr uint32_t kRows = 2;
     constexpr uint8_t kGap = 0x5a;
-    for (uint32_t i = 0; i < kSrcPitch * kRows; ++i)
+    for (uint32_t i = 0; i < kSrcPitch * kRows; ++i) {
       fixture.memory->store<uint8_t>(kSource + i, static_cast<uint8_t>(i + 1));
-    for (uint32_t i = 0; i < kDstPitch * kRows; ++i)
+    }
+    for (uint32_t i = 0; i < kDstPitch * kRows; ++i) {
       fixture.memory->store<uint8_t>(kDestination + i, kGap);
+    }
 
     // 2-byte elements: X origins of 1 and 3 elements are byte offsets 2 and 6.
     const std::array<uint32_t, 13> packet =
@@ -1122,10 +1460,12 @@ TEST(SdmaPacketProcessorTest, LinearRectAppliesSourceAndDestinationYOrigins) {
     constexpr uint64_t kDestination = 0x1800;
     // Source rows are 8 bytes apart and hold their row number, so a copy that
     // starts at the wrong row shows up in the destination bytes.
-    for (uint32_t i = 0; i < 32; ++i)
+    for (uint32_t i = 0; i < 32; ++i) {
       fixture.memory->store<uint8_t>(kSource + i, static_cast<uint8_t>(0x10 * (i / 8) + (i % 8)));
-    for (uint32_t i = 0; i < 64; ++i)
+    }
+    for (uint32_t i = 0; i < 64; ++i) {
       fixture.memory->store<uint8_t>(kDestination + i, 0x5a);
+    }
 
     // Copy 4x2 bytes from source row 1 to destination row 2 (16-byte pitch).
     const std::array<uint32_t, 13> packet =
@@ -1146,10 +1486,11 @@ TEST(SdmaPacketProcessorTest, LinearRectAppliesSourceAndDestinationYOrigins) {
     ASSERT_EQ(result.packet.status, PacketProcessStatus::Complete);
     for (uint32_t i = 0; i < 64; ++i) {
       uint8_t expected = 0x5a;
-      if (i >= 32 && i < 36)
+      if (i >= 32 && i < 36) {
         expected = static_cast<uint8_t>(0x10 + (i - 32));
-      else if (i >= 48 && i < 52)
+      } else if (i >= 48 && i < 52) {
         expected = static_cast<uint8_t>(0x20 + (i - 48));
+      }
       EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + i), expected) << "byte " << i;
     }
   }
@@ -1162,8 +1503,9 @@ TEST(SdmaPacketProcessorTest, LinearRectAcceptsTheGfx1250RuntimeFields) {
   constexpr uint64_t kDestination = 0x1800;
   fixture.memory->store<uint64_t>(kSource, 0x1122334455667788ull);
   fixture.memory->store<uint64_t>(kSource + 8, 0xaabbccddeeff0011ull);
-  for (uint32_t i = 0; i < 16; ++i)
+  for (uint32_t i = 0; i < 16; ++i) {
     fixture.memory->store<uint8_t>(kDestination + i, 0x5a);
+  }
 
   std::array<uint32_t, 13> packet = linear_rect_packet(true, kSource, kDestination,
                                                        {.rect_x = 4,
@@ -1204,10 +1546,12 @@ TEST(SdmaPacketProcessorTest, LinearRectResumesWithinTheSecondChunk) {
     PacketProcessorFixture fixture(0x10000, 256);
     ASSERT_TRUE(fixture.access);
     const auto pattern = [](uint32_t i) { return static_cast<uint8_t>((i * 17 + i / 251) % 251); };
-    for (uint32_t i = 0; i < kSrcPitch * kRows; ++i)
+    for (uint32_t i = 0; i < kSrcPitch * kRows; ++i) {
       fixture.memory->store<uint8_t>(kSource + i, pattern(i));
-    for (uint32_t i = 0; i < kDstPitch * kRows; ++i)
+    }
+    for (uint32_t i = 0; i < kDstPitch * kRows; ++i) {
       fixture.memory->store<uint8_t>(kDestination + i, kGap);
+    }
     // Stop after the first physical span in chunk two has committed.
     constexpr uint64_t kBlocked = kDestination + 4096 + 256;
     fixture.memory->set_unavailable_write(kBlocked);
@@ -1273,6 +1617,715 @@ TEST(SdmaPacketProcessorTest, ReportsMalformedPacketWithoutCollapsingItIntoFault
   EXPECT_EQ(result.packet.status, PacketProcessStatus::Malformed);
   EXPECT_EQ(result.packet.retirement, PacketRetirement::Hold);
   EXPECT_FALSE(fixture.continuation.pending());
+}
+
+TEST(SdmaPacketProcessorTest, DeferredCopyRetiresAfterOneOwnerWriteEffect) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  const std::array<std::byte, 4> source{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  memory->store(0x80, source);
+  SdmaPacketProcessor processor(SdmaPacketDialect::Legacy);
+  SdmaPacketContinuation continuation;
+  const auto packet = copy_packet(0x80, 0x100, source.size());
+  auto process = [&] {
+    return processor.process(
+        {.available_dwords = packet, .access = *access, .continuation = continuation});
+  };
+
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_TRUE(continuation.pending());
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  (void)sim.engine.step();
+  const auto retired = process();
+  EXPECT_EQ(retired.packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(retired.packet.retirement, PacketRetirement::Retire);
+  EXPECT_FALSE(continuation.pending());
+  EXPECT_EQ(memory->backing->write_effects, 1u);
+  EXPECT_EQ(memory->load(0x100, source.size()),
+            std::vector<std::byte>(source.begin(), source.end()));
+}
+
+TEST(SdmaPacketProcessorTest, DeferredCopyResetCancelsLateOwnerEvent) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  const std::array<std::byte, 4> source{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  memory->store(0x80, source);
+  SdmaPacketProcessor processor(SdmaPacketDialect::Legacy);
+  SdmaPacketContinuation continuation;
+  const auto packet = copy_packet(0x80, 0x100, source.size());
+  EXPECT_EQ(
+      processor
+          .process({.available_dwords = packet, .access = *access, .continuation = continuation})
+          .packet.status,
+      PacketProcessStatus::Blocked);
+  processor.reset(continuation);
+  EXPECT_FALSE(continuation.pending());
+  (void)sim.engine.step();
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_GE(memory->backing->cancellations, 1u);
+}
+
+TEST(SdmaPacketProcessorTest, CacheMaintenanceAllowsDeferredCopyAfterLeaseRelease) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  const std::array<std::byte, 4> source{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  memory->store(0x80, source);
+  uint32_t maintenance_acquires = 0;
+  uint32_t maintenance_releases = 0;
+  bool lease_active = false;
+  memory->backing->submit_probe = [&] {
+    EXPECT_FALSE(lease_active);
+    EXPECT_EQ(maintenance_acquires, 2u); // Local source read, then deferred write.
+    EXPECT_EQ(maintenance_releases, 2u);
+  };
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    EXPECT_FALSE(lease_active);
+    lease_active = true;
+    ++maintenance_acquires;
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
+  SdmaPacketContinuation continuation;
+  const auto packet = copy_packet(0x80, 0x100, source.size());
+  auto process = [&] {
+    return processor.process(
+        {.available_dwords = packet, .access = *access, .continuation = continuation});
+  };
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_EQ(memory->load(0x100, source.size()), std::vector<std::byte>(source.size()));
+  EXPECT_FALSE(lease_active);
+  EXPECT_EQ(maintenance_acquires, 2u);
+  EXPECT_EQ(maintenance_releases, 2u);
+
+  // A pending token only polls; it neither reacquires maintenance nor reposts.
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(maintenance_acquires, 2u);
+  (void)sim.engine.step();
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(memory->backing->write_effects, 1u);
+  EXPECT_EQ(memory->load(0x100, source.size()),
+            std::vector<std::byte>(source.begin(), source.end()));
+  EXPECT_EQ(maintenance_acquires, 2u);
+  EXPECT_EQ(maintenance_releases, 2u);
+}
+
+TEST(SdmaPacketProcessorTest, IngressPermitCoversLocalStepAndLeavesBeforeDeferredSubmit) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x104, 0x108);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  bool gate_open = false;
+  bool permit_active = false;
+  bool cache_lease_active = false;
+  uint32_t admissions = 0;
+  uint32_t maintenance_acquires = 0;
+  memory->backing->submit_probe = [&] {
+    EXPECT_FALSE(permit_active);
+    EXPECT_FALSE(cache_lease_active);
+    EXPECT_EQ(admissions, 2u); // Closed attempt and the admitted local step.
+  };
+  SdmaPacketCallbacks callbacks;
+  callbacks.admit_memory_ingress = [&](const GpuVmAccess &expected,
+                                       std::span<const MemoryIngressSpan> spans) {
+    EXPECT_EQ(&expected, &*access);
+    EXPECT_EQ(spans.size(), 1u);
+    EXPECT_EQ(spans[0].address, 0x100u);
+    EXPECT_EQ(spans[0].size, 8u);
+    EXPECT_EQ(spans[0].access, VmAccessKind::Write);
+    EXPECT_FALSE(cache_lease_active);
+    ++admissions;
+    if (!gate_open) {
+      return MemoryIngressAdmission{.outcome = VmAccessOutcome::Unavailable, .permit = {}};
+    }
+    EXPECT_FALSE(permit_active);
+    permit_active = true;
+    return MemoryIngressAdmission{.outcome = VmAccessOutcome::Complete,
+                                  .permit = MemoryIngressPermit([&] { permit_active = false; })};
+  };
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    EXPECT_FALSE(cache_lease_active);
+    if (maintenance_acquires == 0) {
+      EXPECT_TRUE(permit_active);
+    } else {
+      EXPECT_FALSE(permit_active);
+    }
+    cache_lease_active = true;
+    ++maintenance_acquires;
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] { cache_lease_active = false; })};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
+  SdmaPacketContinuation continuation;
+  const std::array<uint32_t, 6> packet{2, 0x100, 0, 1, 0x12345678, 0xabcdef01};
+  const auto process = [&] {
+    return processor.process(
+        {.available_dwords = packet, .access = *access, .continuation = continuation});
+  };
+
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(maintenance_acquires, 0u);
+  EXPECT_EQ(memory->backing->posts, 0u);
+  EXPECT_EQ(memory->load(0x100, 8), std::vector<std::byte>(8));
+  gate_open = true;
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_EQ(maintenance_acquires, 2u);
+  EXPECT_FALSE(permit_active);
+  EXPECT_FALSE(cache_lease_active);
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(admissions, 2u);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  (void)sim.engine.step();
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(memory->backing->write_effects, 1u);
+  EXPECT_EQ(
+      memory->load(0x100, 8),
+      (std::vector<std::byte>{std::byte{0x78}, std::byte{0x56}, std::byte{0x34}, std::byte{0x12},
+                              std::byte{0x01}, std::byte{0xef}, std::byte{0xcd}, std::byte{0xab}}));
+  EXPECT_EQ(admissions, 2u);
+}
+
+TEST(SdmaPacketProcessorTest, PrivateUcGttCopySourcePermitScopesOnlyTheSourceRead) {
+  constexpr uint64_t kSource = 0x100;
+  constexpr uint64_t kDestination = 0x200;
+  constexpr uint32_t kValue = 0x12345678;
+  for (const bool source_eligible : {false, true}) {
+    SCOPED_TRACE(source_eligible);
+    PacketProcessorFixture fixture;
+    ASSERT_TRUE(fixture.access);
+    fixture.memory->store<uint32_t>(kSource, kValue);
+    bool source_permit_active = false;
+    uint32_t source_admissions = 0;
+    uint32_t source_releases = 0;
+    uint32_t maintenance_acquires = 0;
+    fixture.memory->set_read_probe([&] { EXPECT_EQ(source_permit_active, source_eligible); });
+    fixture.memory->set_write_probe([&] { EXPECT_FALSE(source_permit_active); });
+
+    SdmaPacketCallbacks callbacks;
+    callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+      EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+      EXPECT_FALSE(source_permit_active);
+      ++maintenance_acquires;
+      return CacheMaintenanceResult{};
+    };
+    callbacks.admit_private_uc_gtt_copy_source = [&](const GpuVmAccess &expected, uint64_t address,
+                                                     std::size_t size) {
+      EXPECT_EQ(&expected, &*fixture.access);
+      EXPECT_EQ(address, kSource);
+      EXPECT_EQ(size, sizeof(kValue));
+      ++source_admissions;
+      if (!source_eligible) {
+        return VmPrivateUcGttCopySourceAdmission{};
+      }
+      source_permit_active = true;
+      return VmPrivateUcGttCopySourceAdmission{.outcome = VmAccessOutcome::Complete,
+                                               .permit = MemoryIngressPermit([&] {
+                                                 source_permit_active = false;
+                                                 ++source_releases;
+                                               })};
+    };
+    SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
+    const auto packet = copy_packet(kSource, kDestination, sizeof(kValue));
+    const auto result = processor.process({.available_dwords = packet,
+                                           .access = *fixture.access,
+                                           .continuation = fixture.continuation});
+    EXPECT_EQ(result.packet.status, PacketProcessStatus::Complete);
+    EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), kValue);
+    EXPECT_EQ(source_admissions, 1u);
+    EXPECT_EQ(source_releases, source_eligible ? 1u : 0u);
+    EXPECT_EQ(maintenance_acquires, source_eligible ? 1u : 2u);
+    EXPECT_FALSE(source_permit_active);
+  }
+}
+
+TEST(SdmaPacketProcessorTest, ClosingPrivateUcGttCopySourceRetriesBeforeReading) {
+  PacketProcessorFixture fixture;
+  ASSERT_TRUE(fixture.access);
+  constexpr uint64_t kSource = 0x100;
+  constexpr uint64_t kDestination = 0x200;
+  constexpr uint32_t kValue = 0xabcdef01;
+  fixture.memory->store<uint32_t>(kSource, kValue);
+  bool closing = true;
+  bool source_permit_active = false;
+  uint32_t reads = 0;
+  uint32_t maintenance_acquires = 0;
+  fixture.memory->set_read_probe([&] {
+    ++reads;
+    EXPECT_TRUE(source_permit_active);
+  });
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation) {
+    ++maintenance_acquires;
+    return CacheMaintenanceResult{};
+  };
+  callbacks.admit_private_uc_gtt_copy_source =
+      [&](const GpuVmAccess &, uint64_t, std::size_t) -> VmPrivateUcGttCopySourceAdmission {
+    if (closing) {
+      return {.outcome = VmAccessOutcome::Unavailable, .permit = {}};
+    }
+    source_permit_active = true;
+    return {.outcome = VmAccessOutcome::Complete,
+            .permit = MemoryIngressPermit([&] { source_permit_active = false; })};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
+  const auto packet = copy_packet(kSource, kDestination, sizeof(kValue));
+  const auto process = [&] {
+    return processor.process({.available_dwords = packet,
+                              .access = *fixture.access,
+                              .continuation = fixture.continuation});
+  };
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(reads, 0u);
+  EXPECT_EQ(maintenance_acquires, 0u);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0u);
+  closing = false;
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(reads, 1u);
+  EXPECT_EQ(maintenance_acquires, 1u);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), kValue);
+  EXPECT_FALSE(source_permit_active);
+}
+
+TEST(SdmaPacketProcessorTest, ClosingAnAdmittedLocalStepDrainsBeforeARejectedPacketRetries) {
+  PacketProcessorFixture fixture;
+  ASSERT_TRUE(fixture.access);
+  constexpr uint64_t kDestination = 0x180;
+  const GpuAliasIngressGate::Key alias{1, 7, kDestination, 11, 13};
+  const std::array aliases{alias};
+  auto gate = std::make_shared<GpuAliasIngressGate>();
+  std::mutex effect_mutex;
+  std::condition_variable effect_condition;
+  bool effect_entered = false;
+  bool release_effect = false;
+  fixture.memory->set_write_probe([&] {
+    std::unique_lock lock(effect_mutex);
+    if (effect_entered) {
+      return;
+    }
+    effect_entered = true;
+    effect_condition.notify_all();
+    effect_condition.wait(lock, [&] { return release_effect; });
+  });
+  SdmaPacketCallbacks callbacks;
+  callbacks.admit_memory_ingress = [gate, &aliases](const GpuVmAccess &,
+                                                    std::span<const MemoryIngressSpan> spans) {
+    EXPECT_EQ(spans.size(), 1u);
+    auto permit = gate->try_acquire(aliases);
+    if (!permit) {
+      return MemoryIngressAdmission{.outcome = VmAccessOutcome::Unavailable, .permit = {}};
+    }
+    return MemoryIngressAdmission{.outcome = VmAccessOutcome::Complete,
+                                  .permit = std::move(*permit)};
+  };
+  SdmaPacketProcessor first_processor(SdmaPacketDialect::Gfx1250, callbacks);
+  SdmaPacketProcessor second_processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+  SdmaPacketContinuation first_continuation;
+  SdmaPacketContinuation second_continuation;
+  const std::array<uint32_t, 5> first_packet{2, kDestination, 0, 0, 0x11223344};
+  const std::array<uint32_t, 5> second_packet{2, kDestination, 0, 0, 0xaabbccdd};
+  SdmaPacketProcessResult first_result;
+  std::thread worker([&] {
+    first_result = first_processor.process({.available_dwords = first_packet,
+                                            .access = *fixture.access,
+                                            .continuation = first_continuation});
+  });
+  {
+    std::unique_lock lock(effect_mutex);
+    if (!effect_condition.wait_for(lock, std::chrono::seconds(1), [&] { return effect_entered; })) {
+      release_effect = true;
+      effect_condition.notify_all();
+      lock.unlock();
+      worker.join();
+      FAIL() << "SDMA local backing effect did not begin";
+    }
+  }
+
+  std::mutex owner_mutex;
+  std::vector<std::function<int()>> owner_queue;
+  bool drained = false;
+  const auto post = [&](std::function<int()> continuation) {
+    std::lock_guard lock(owner_mutex);
+    owner_queue.push_back(std::move(continuation));
+    return true;
+  };
+  ASSERT_TRUE(gate->close(alias, post, [&] {
+    drained = true;
+    return 0;
+  }));
+  {
+    std::lock_guard lock(owner_mutex);
+    EXPECT_TRUE(owner_queue.empty());
+  }
+  const SdmaPacketProcessResult rejected =
+      second_processor.process({.available_dwords = second_packet,
+                                .access = *fixture.access,
+                                .continuation = second_continuation});
+  EXPECT_EQ(rejected.packet.status, PacketProcessStatus::Blocked);
+  EXPECT_FALSE(rejected.operation_committed);
+  {
+    std::lock_guard lock(effect_mutex);
+    release_effect = true;
+  }
+  effect_condition.notify_all();
+  worker.join();
+  EXPECT_EQ(first_result.packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x11223344u);
+  EXPECT_FALSE(drained);
+  std::function<int()> continuation;
+  {
+    std::lock_guard lock(owner_mutex);
+    ASSERT_EQ(owner_queue.size(), 1u);
+    continuation = std::move(owner_queue.back());
+  }
+  continuation();
+  EXPECT_TRUE(drained);
+  ASSERT_TRUE(gate->reopen(alias));
+  const SdmaPacketProcessResult resumed = second_processor.process(
+      {.available_dwords = {}, .access = *fixture.access, .continuation = second_continuation});
+  EXPECT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0xaabbccddu);
+}
+
+TEST(SdmaPacketProcessorTest, BroadcastCopyResumesAfterDeferredDestinationWithCacheMaintenance) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x108);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  const std::array<std::byte, 8> source{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4},
+                                        std::byte{5}, std::byte{6}, std::byte{7}, std::byte{8}};
+  const std::vector<std::byte> expected(source.begin(), source.end());
+  memory->store(0x80, source);
+
+  bool lease_active = false;
+  uint32_t maintenance_acquires = 0;
+  uint32_t maintenance_releases = 0;
+  memory->backing->submit_probe = [&] {
+    EXPECT_FALSE(lease_active);
+    EXPECT_EQ(maintenance_acquires, memory->backing->posts + 1u);
+    EXPECT_EQ(maintenance_releases, maintenance_acquires);
+  };
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    EXPECT_FALSE(lease_active);
+    lease_active = true;
+    ++maintenance_acquires;
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+  SdmaPacketContinuation continuation;
+  const std::array<uint32_t, 9> packet = {1u | (1u << 27), 7, 0, 0x80, 0, 0x100, 0, 0x200, 0};
+  auto process = [&] {
+    EXPECT_FALSE(lease_active);
+    auto result = processor.process(
+        {.available_dwords = packet, .access = *access, .continuation = continuation});
+    EXPECT_FALSE(lease_active);
+    return result;
+  };
+
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_TRUE(continuation.pending());
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_EQ(maintenance_acquires, 2u); // Local source read, then first deferred write.
+  EXPECT_EQ(maintenance_releases, 2u);
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(maintenance_acquires, 2u); // Polling does not reacquire maintenance.
+
+  (void)sim.engine.step();
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->write_effects, 1u);
+  EXPECT_EQ(memory->load(0x100, source.size()),
+            (std::vector<std::byte>{source[0], source[1], source[2], source[3], {}, {}, {}, {}}));
+  EXPECT_EQ(memory->load(0x200, source.size()), std::vector<std::byte>(source.size()));
+  EXPECT_EQ(maintenance_acquires, 2u);
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 2u);
+  EXPECT_EQ(maintenance_acquires, 3u);
+  EXPECT_EQ(maintenance_releases, 3u);
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 2u);
+  EXPECT_EQ(maintenance_acquires, 3u);
+
+  (void)sim.engine.step();
+  const auto retired = process();
+  EXPECT_EQ(retired.packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(retired.packet.retirement, PacketRetirement::Retire);
+  EXPECT_FALSE(continuation.pending());
+  EXPECT_EQ(memory->backing->posts, 2u);
+  EXPECT_EQ(memory->backing->write_effects, 2u);
+  EXPECT_EQ(memory->backing->read_effects, 0u);
+  EXPECT_EQ(memory->load(0x100, source.size()), expected);
+  EXPECT_EQ(memory->load(0x200, source.size()), expected);
+  EXPECT_EQ(maintenance_acquires, 4u); // Local second destination after deferred completion.
+  EXPECT_EQ(maintenance_releases, 4u);
+}
+
+TEST(SdmaPacketProcessorTest, ResetCancelsPostedDeferredCopyWithCacheMaintenance) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  const std::array<std::byte, 4> source{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  memory->store(0x80, source);
+
+  bool lease_active = false;
+  uint32_t maintenance_acquires = 0;
+  uint32_t maintenance_releases = 0;
+  memory->backing->submit_probe = [&] {
+    EXPECT_FALSE(lease_active);
+    EXPECT_EQ(maintenance_acquires, 2u);
+    EXPECT_EQ(maintenance_releases, 2u);
+  };
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    EXPECT_FALSE(lease_active);
+    lease_active = true;
+    ++maintenance_acquires;
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
+  SdmaPacketContinuation continuation;
+  const auto packet = copy_packet(0x80, 0x100, source.size());
+  auto process = [&] {
+    EXPECT_FALSE(lease_active);
+    auto result = processor.process(
+        {.available_dwords = packet, .access = *access, .continuation = continuation});
+    EXPECT_FALSE(lease_active);
+    return result;
+  };
+
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(maintenance_acquires, 2u);
+  EXPECT_EQ(maintenance_releases, 2u);
+
+  processor.reset(continuation);
+  EXPECT_FALSE(lease_active);
+  EXPECT_FALSE(continuation.pending());
+  EXPECT_EQ(memory->backing->cancellations, 1u);
+  (void)sim.engine.step();
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(memory->backing->write_effects, 0u);
+  EXPECT_EQ(memory->load(0x100, source.size()), std::vector<std::byte>(source.size()));
+  EXPECT_EQ(maintenance_acquires, 2u);
+  EXPECT_EQ(maintenance_releases, 2u);
+}
+
+TEST(SdmaPacketProcessorTest, CacheMaintenanceAllowsDeferredCopySource) {
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+  ASSERT_TRUE(access);
+  const std::array<std::byte, 4> source{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+  memory->store(0x100, source);
+  bool lease_active = false;
+  uint32_t maintenance_acquires = 0;
+  uint32_t maintenance_releases = 0;
+  memory->backing->submit_probe = [&] {
+    EXPECT_FALSE(lease_active);
+    EXPECT_EQ(maintenance_acquires, 1u);
+    EXPECT_EQ(maintenance_releases, 1u);
+  };
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    EXPECT_FALSE(lease_active);
+    lease_active = true;
+    ++maintenance_acquires;
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                    EXPECT_TRUE(lease_active);
+                                    lease_active = false;
+                                    ++maintenance_releases;
+                                  })};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
+  SdmaPacketContinuation continuation;
+  const auto packet = copy_packet(0x100, 0x200, source.size());
+  auto process = [&] {
+    return processor.process(
+        {.available_dwords = packet, .access = *access, .continuation = continuation});
+  };
+
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_EQ(maintenance_acquires, 1u);
+  (void)sim.engine.step();
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(memory->backing->read_effects, 1u);
+  EXPECT_EQ(memory->load(0x200, source.size()),
+            std::vector<std::byte>(source.begin(), source.end()));
+  EXPECT_EQ(maintenance_acquires, 2u); // Deferred read, then local destination write.
+  EXPECT_EQ(maintenance_releases, 2u);
+}
+
+TEST(SdmaPacketProcessorTest, CacheMaintenanceAllowsPeerOnlyFillAndWrite) {
+  for (const std::array<uint32_t, 5> packet : {
+           std::array<uint32_t, 5>{11, 0x100, 0, 0x11223344, 3},
+           std::array<uint32_t, 5>{2, 0x100, 0, 0, 0x11223344},
+       }) {
+    SCOPED_TRACE(packet[0]);
+    ::rocjitsu::test::AsyncVmHarness sim;
+    auto memory =
+        std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+    GpuVm vm;
+    const auto access = vm.snapshot(vm.register_translated(7, memory, memory));
+    ASSERT_TRUE(access);
+    bool lease_active = false;
+    uint32_t maintenance_acquires = 0;
+    uint32_t maintenance_releases = 0;
+    memory->backing->submit_probe = [&] {
+      EXPECT_FALSE(lease_active);
+      EXPECT_EQ(maintenance_acquires, 1u);
+      EXPECT_EQ(maintenance_releases, 1u);
+    };
+    SdmaPacketCallbacks callbacks;
+    callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+      EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+      EXPECT_FALSE(lease_active);
+      lease_active = true;
+      ++maintenance_acquires;
+      return CacheMaintenanceResult{.lease = SdmaCacheLease([&] {
+                                      EXPECT_TRUE(lease_active);
+                                      lease_active = false;
+                                      ++maintenance_releases;
+                                    })};
+    };
+    SdmaPacketProcessor processor(SdmaPacketDialect::Gfx1250, std::move(callbacks));
+    SdmaPacketContinuation continuation;
+    auto process = [&] {
+      return processor.process(
+          {.available_dwords = packet, .access = *access, .continuation = continuation});
+    };
+
+    EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+    EXPECT_EQ(memory->backing->posts, 1u);
+    EXPECT_FALSE(lease_active);
+    EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+    EXPECT_EQ(maintenance_acquires, 1u);
+    (void)sim.engine.step();
+    EXPECT_EQ(process().packet.status, PacketProcessStatus::Complete);
+    EXPECT_EQ(memory->backing->write_effects, 1u);
+    const std::array<std::byte, 4> expected{std::byte{0x44}, std::byte{0x33}, std::byte{0x22},
+                                            std::byte{0x11}};
+    EXPECT_EQ(memory->load(0x100, expected.size()),
+              std::vector<std::byte>(expected.begin(), expected.end()));
+    EXPECT_EQ(maintenance_acquires, 1u);
+    EXPECT_EQ(maintenance_releases, 1u);
+  }
+}
+
+TEST(SdmaPacketProcessorTest, CacheMaintenanceRechecksRouteAfterAcquiringLocalLease) {
+  class ChangingRoute final : public AddressSpaceTranslator {
+  public:
+    explicit ChangingRoute(std::shared_ptr<::rocjitsu::test::AsyncVmMemory> memory)
+        : memory_(std::move(memory)) {}
+
+    VmTranslationResult translate(uint64_t address, std::size_t size,
+                                  VmAccessKind access) const override {
+      return memory_->translate(address, size, access);
+    }
+
+    std::optional<VmTransferToken>
+    prepare_deferred_write(PhysicalMemoryAccess &memory, uint64_t address,
+                           std::span<const std::byte> bytes,
+                           const std::shared_ptr<VmTransferEffectGate> &gate) const override {
+      ++prepare_calls;
+      return peer_enabled ? memory_->prepare_deferred_write(memory, address, bytes, gate)
+                          : std::nullopt;
+    }
+
+    VmTransferStep write_step(PhysicalMemoryAccess &memory, uint64_t address,
+                              std::span<const std::byte> bytes) const override {
+      ++local_write_attempts;
+      return AddressSpaceTranslator::write_step(memory, address, bytes);
+    }
+
+    bool peer_enabled = false;
+    mutable uint32_t prepare_calls = 0;
+    mutable uint32_t local_write_attempts = 0;
+
+  private:
+    std::shared_ptr<::rocjitsu::test::AsyncVmMemory> memory_;
+  };
+
+  ::rocjitsu::test::AsyncVmHarness sim;
+  auto memory = std::make_shared<::rocjitsu::test::AsyncVmMemory>(*sim.owner, 0x400, 0x100, 0x104);
+  auto translator = std::make_shared<ChangingRoute>(memory);
+  GpuVm vm;
+  const auto access = vm.snapshot(vm.register_translated(7, translator, memory));
+  ASSERT_TRUE(access);
+  bool lease_active = false;
+  memory->backing->submit_probe = [&] {
+    EXPECT_FALSE(lease_active);
+    EXPECT_EQ(translator->prepare_calls, 2u);
+  };
+  SdmaPacketCallbacks callbacks;
+  callbacks.acquire_cache_maintenance = [&](SdmaCacheOperation operation) {
+    EXPECT_EQ(operation, SdmaCacheOperation::WritebackInvalidate);
+    EXPECT_FALSE(lease_active);
+    EXPECT_EQ(translator->prepare_calls, 1u);
+    translator->peer_enabled = true;
+    lease_active = true;
+    return CacheMaintenanceResult{.lease = SdmaCacheLease([&] { lease_active = false; })};
+  };
+  SdmaPacketProcessor processor(SdmaPacketDialect::Legacy, std::move(callbacks));
+  SdmaPacketContinuation continuation;
+  const std::array<uint32_t, 5> packet = {2, 0x100, 0, 0, 0x11223344};
+  auto process = [&] {
+    return processor.process(
+        {.available_dwords = packet, .access = *access, .continuation = continuation});
+  };
+
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Blocked);
+  EXPECT_FALSE(lease_active);
+  EXPECT_EQ(translator->prepare_calls, 2u);
+  EXPECT_EQ(translator->local_write_attempts, 0u);
+  EXPECT_EQ(memory->backing->posts, 1u);
+  (void)sim.engine.step();
+  EXPECT_EQ(process().packet.status, PacketProcessStatus::Complete);
+  EXPECT_EQ(memory->backing->write_effects, 1u);
 }
 
 } // namespace

@@ -17,7 +17,8 @@
 
 // Default: host calloc as the device buffer, its address in a zeroed *ipcDesc; the caller owns and frees it.
 extern std::function<ncclResult_t(size_t /*size*/, int /*directMap*/, ncclIpcDesc* /*ipcDesc*/, void** /*ptr*/,
-                                  int /*peerRank*/, struct ncclMemManager* /*manager*/, ncclMemType_t /*memtype*/)>
+                                  int /*peerRank*/, struct ncclMemManager* /*manager*/, ncclMemType_t /*memtype*/,
+                                  bool /*skipLegacyIpcExport*/)>
     g_ncclP2pAllocateShareableBuffer;
 
 // Default: one host address space, so the import maps ownerPtr, and only if *ipcDesc starts with that address.

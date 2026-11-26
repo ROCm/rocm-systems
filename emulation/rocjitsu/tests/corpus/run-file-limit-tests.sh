@@ -3,7 +3,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-# Run the standalone corpus HIP file-limit matrix.
+# Run the corpus HIP file-limit matrix with the same configuration as CI.
 # Required: ROCM_PATH, ROCJITSU_BUILD_DIR, ROCJITSU_CORPUS_DIR.
 # Optional: ROCJITSU_SOURCE_DIR (defaults to this script's source tree).
 # Additional arguments are passed to CTest, e.g. -R local.early -V.
@@ -43,7 +43,7 @@ if ! command -v tini >/dev/null; then
   exit 1
 fi
 
-# Match the rocjitsu build's instrumentation. UBSan-only builds use an
+# Match CI's client instrumentation. UBSan-only rocjitsu builds use an
 # uninstrumented HIP client; ASan and TSan builds need matching host runtimes.
 client_sanitizer=""
 if grep -Eq '^RJ_ENABLE_TSAN:BOOL=(1|ON|TRUE|YES)$' "${cache}"; then
@@ -103,6 +103,19 @@ configure=(
   -DROCJITSU="${launcher}"
   -DROCJITSU_CONFIG="${config}"
 )
+# The suite tries an installed GoogleTest first. Supply matching sources for
+# its FetchContent fallback to avoid fetching them again.
+gtest_source="$(sed -n 's/^googletest-distribution_SOURCE_DIR:[^=]*=//p' "${cache}")"
+gtest_tag="$(sed -n 's/^[[:space:]]*GIT_TAG v\([0-9.]*\).*/\1/p' \
+  "${file_limit_source_dir}/CMakeLists.txt" | head -n 1)"
+if [[ -n "${gtest_source}" && -n "${gtest_tag}" ]] &&
+   grep -qxF "set(GOOGLETEST_VERSION ${gtest_tag})" \
+     "${gtest_source}/CMakeLists.txt" 2>/dev/null; then
+  echo "Providing rocjitsu's GoogleTest ${gtest_tag} sources for the FetchContent fallback: ${gtest_source}"
+  configure+=(-DFETCHCONTENT_SOURCE_DIR_GOOGLETEST="${gtest_source}")
+else
+  configure+=(-UFETCHCONTENT_SOURCE_DIR_GOOGLETEST)
+fi
 if [[ "${refresh_cache}" == true ]]; then
   # CMake rejects source changes and clears settings when switching compilers.
   # Start fresh so the requested source, launcher, and instrumentation take effect.

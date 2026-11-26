@@ -36,8 +36,9 @@
 #endif
 #include <vector>
 
-// Cluster launch requires HIP 7.2+ (hipLaunchKernelEx + clusterDim attribute).
-#if defined(HIP_VERSION) && (HIP_VERSION >= 70200000)
+// Opt-in (the Makefile sets it for gfx1250): some HIP 7.2 installs lack
+// hipLaunchAttributeClusterDimension.
+#if defined(MEGA_KERNEL_ENABLE_CLUSTER_LAUNCH)
 #    define MEGA_KERNEL_HAS_CLUSTER_LAUNCH 1
 #endif
 
@@ -249,6 +250,7 @@ static int g_arch_type = 0;
 
 namespace {
 
+#if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
 constexpr unsigned kClusterDimX = 2;
 constexpr unsigned kClusterDimY = 1;
 constexpr unsigned kClusterDimZ = 1;
@@ -263,6 +265,7 @@ round_up_grid_x_for_cluster(int num_blocks)
     }
     return grid_x;
 }
+#endif
 
 void
 launch_mega_kernel(dim3                          grid,
@@ -393,9 +396,13 @@ main(int argc, char** argv)
     const int BUFFER_SIZE = config.batch_size;
     const int BLOCK_SIZE  = config.block_size;
     const int NUM_BLOCKS  = (BUFFER_SIZE + BLOCK_SIZE - 1) / BLOCK_SIZE;
+#if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
     const unsigned GRID_X =
         (g_arch_type == 7) ? round_up_grid_x_for_cluster(NUM_BLOCKS)
                            : static_cast<unsigned>(NUM_BLOCKS > 0 ? NUM_BLOCKS : 1);
+#else
+    const unsigned GRID_X = static_cast<unsigned>(NUM_BLOCKS > 0 ? NUM_BLOCKS : 1);
+#endif
 
     // Global atomic scratch: sizes and index layout — see atomic_global_buffers.h
     const int GLOBAL_INT_SIZE    = MEGA_KERNEL_GLOBAL_INT_ELEMENTS;
@@ -406,10 +413,12 @@ main(int argc, char** argv)
     printf("  Batch/Buffer Size:     %d elements\n", BUFFER_SIZE);
     printf("  Block Size:            %d threads\n", BLOCK_SIZE);
     printf("  Number of Blocks:      %d", NUM_BLOCKS);
+#if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
     if(g_arch_type == 7 && GRID_X != static_cast<unsigned>(NUM_BLOCKS))
     {
         printf(" (grid x padded to %u for cluster launch)", GRID_X);
     }
+#endif
     printf("\n");
     printf("  Total Threads:         %u\n", GRID_X * static_cast<unsigned>(BLOCK_SIZE));
 #if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
@@ -493,9 +502,9 @@ main(int argc, char** argv)
 
     // Create texture and surface objects for gfx115x to exercise
     // INSTS_TEX_LOAD (tex1Dfetch) and INSTS_TEX_STORE (surf1Dwrite).
-    hipTextureObject_t tex_obj       = 0;
-    hipSurfaceObject_t surf_obj      = 0;
-    float*             d_surf_buffer = nullptr;
+    hipTextureObject_t tex_obj    = 0;
+    hipSurfaceObject_t surf_obj   = 0;
+    hipArray_t         surf_array = nullptr;
     if(g_arch_type == 6)
     {
         hipResourceDesc resDesc;
@@ -513,10 +522,15 @@ main(int argc, char** argv)
         texDesc.addressMode[0]   = hipAddressModeClamp;
         HIP_CHECK(hipCreateTextureObject(&tex_obj, &resDesc, &texDesc, nullptr));
 
-        HIP_CHECK(hipMalloc(&d_surf_buffer, BUFFER_SIZE * sizeof(float)));
-        HIP_CHECK(hipMemset(d_surf_buffer, 0, BUFFER_SIZE * sizeof(float)));
-        resDesc.res.linear.devPtr = d_surf_buffer;
-        HIP_CHECK(hipCreateSurfaceObject(&surf_obj, &resDesc));
+        // HIP creates surface objects only on arrays, not on linear memory.
+        HIP_CHECK(hipMallocArray(&surf_array, &resDesc.res.linear.desc,
+                                 static_cast<size_t>(BUFFER_SIZE), 0,
+                                 hipArraySurfaceLoadStore));
+        hipResourceDesc surfDesc;
+        memset(&surfDesc, 0, sizeof(surfDesc));
+        surfDesc.resType         = hipResourceTypeArray;
+        surfDesc.res.array.array = surf_array;
+        HIP_CHECK(hipCreateSurfaceObject(&surf_obj, &surfDesc));
     }
 
     printf("Running GPU Mega Kernel for %s...\n",
@@ -551,7 +565,7 @@ main(int argc, char** argv)
     for(int iter = 0; iter < config.num_iterations; iter++)
     {
         // Reset device memory for each iteration (except first)
-        // NOTE: d_input must also be reset because test_vmem_operations modifies it
+        // NOTE: d_input must also be reset because the gfx1250 buffer test writes it
         if(iter > 0)
         {
             HIP_CHECK(hipMemset(d_results, 0, sizeof(TestResults)));
@@ -608,9 +622,9 @@ main(int argc, char** argv)
     {
         HIP_CHECK(hipDestroySurfaceObject(surf_obj));
     }
-    if(d_surf_buffer != nullptr)
+    if(surf_array != nullptr)
     {
-        HIP_CHECK(hipFree(d_surf_buffer));
+        HIP_CHECK(hipFreeArray(surf_array));
     }
 
     // Copy results back

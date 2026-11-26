@@ -114,11 +114,6 @@ public:
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_DROPPED_CNTR);
     static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR =
         REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_WPTR);
-    static constexpr Register SQ_THREAD_TRACE_STATUS_OFFSET = []() {
-        Register reg = REG_32B_ADDR(GC, 0, regSQ_THREAD_TRACE_STATUS);
-        reg.offset -= UCONFIG_SPACE_START;
-        return reg;
-    }();
     static const uint32_t TT_BUFF_ALIGN_SHIFT = 12;
 
     static const uint32_t SDMA_COUNTER_BLOCK_NUM_INSTANCES = SdmaCounterBlockMaxInstances;
@@ -595,11 +590,12 @@ public:
 
     // Indicate the different TT messages/tokens that should be enabled/logged
     // Indicate the different TT tokens that specify register operations to be logged
-    static uint32_t sqtt_token_mask_on_value(bool exclude_wait)
+    static uint32_t sqtt_token_mask_on_value(bool exclude_wait, bool trace_exec)
     {
         uint32_t sq_thread_trace_token_mask{0};
         sq_thread_trace_token_mask =
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_DETAIL_ALL, 1) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, TTRACE_EXEC, trace_exec ? 1 : 0) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK, REG_EXCLUDE, 0x3) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_TOKEN_MASK,
                                REG_INCLUDE,
@@ -734,6 +730,7 @@ public:
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, LOWATER_OFFSET, 3) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, GL1X_PREFETCH_PAGE, 13) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, AUTO_FLUSH_MODE, 0) |
+            SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, WAVESTART_MODE, 3) |
             SET_REG_FIELD_BITS(SQ_THREAD_TRACE_CTRL, DOUBLE_BUFFER, double_buffer ? 1 : 0);
         return sq_thread_trace_ctrl;
     }

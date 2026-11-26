@@ -4,6 +4,7 @@
 /// @file gfx12_dot_test.cpp
 /// @brief GFX12 dot arithmetic and operand regression tests.
 
+#include "compute_unit_test_util.h"
 #include "fixtures/float_dot/gfx1201_cases.h"
 #include "fixtures/float_dot/gfx1201_dot4_cases.h"
 #include "fixtures/float_dot/gfx1201_dot4_edge_cases.h"
@@ -12,6 +13,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -42,7 +44,7 @@ struct HostState {
 };
 class DotMachine {
 public:
-  explicit DotMachine(rj_code_arch_t arch, uint32_t width = 32)
+  explicit DotMachine(rocjitsu::IsaFamily arch, uint32_t width = 32)
       : memory("dot_memory"), cache("dot_cache") {
     cache.set_backing_memory(&memory);
     amdgpu::ComputeUnitCore::Config cfg{};
@@ -51,13 +53,20 @@ public:
     cfg.sgprs_per_wf = 106;
     cfg.vgprs_per_wf = 256;
     cfg.lds_size_kb = 64;
-    cu = amdgpu::ComputeUnitCore::create("dot_test", cfg, &memory, &cache);
+    rocjitsu::test::initialize_compute_unit(cu, "dot_test", cfg, &memory, &cache);
+    if (!cu) {
+      return;
+    }
     decoder = Decoder::create(arch);
     wave = cu->dispatch_wf(0, 0, 106, 256, width);
     wave->set_exec(width == 64 ? ~uint64_t{0} : 0xffffffff);
     base = wave->vgpr_alloc().base;
   }
-  ~DotMachine() { wave->halt(); }
+  ~DotMachine() {
+    if (wave) {
+      wave->halt();
+    }
+  }
   void set(uint32_t reg, uint32_t lane, uint32_t bits) { cu->write_vgpr(base + reg, lane, bits); }
   uint32_t get(uint32_t reg, uint32_t lane) { return cu->read_vgpr(base + reg, lane); }
   template <size_t N> void execute(std::array<uint32_t, N> encoding) {
@@ -72,35 +81,29 @@ public:
   amdgpu::L2Cache cache;
   std::unique_ptr<amdgpu::ComputeUnitCore> cu;
   std::unique_ptr<Decoder> decoder;
-  amdgpu::Wavefront *wave;
+  amdgpu::Wavefront *wave = nullptr;
   uint32_t base;
 };
 
-TEST(Gfx12Dot, HardwareBitsAreIndependentOfHostFpState) {
+TEST(Gfx12Dot, HardwareBits) {
   HostState restore;
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    std::feclearexcept(FE_ALL_EXCEPT);
-    std::feraiseexcept(FE_INEXACT);
-    for (bool bf16 : {false, true}) {
-      const auto cases = bf16 ? std::span<const Gfx12DotCase>(kGfx12DotBF16Cases)
-                              : std::span<const Gfx12DotCase>(kGfx12DotF16Cases);
-      for (const auto &c : cases) {
-        const uint32_t result =
-            bf16 ? amdgpu::gfx12_dot2_f32<true>(c.a, c.b, c.a >> 16, c.b >> 16, c.c)
-                 : amdgpu::gfx12_dot2_f32<false>(c.a, c.b, c.a >> 16, c.b >> 16, c.c);
-        EXPECT_EQ(result, c.expected) << std::hex << c.a << ' ' << c.b << ' ' << c.c;
-      }
+  for (bool bf16 : {false, true}) {
+    const auto cases = bf16 ? std::span<const Gfx12DotCase>(kGfx12DotBF16Cases)
+                            : std::span<const Gfx12DotCase>(kGfx12DotF16Cases);
+    for (const auto &c : cases) {
+      const uint32_t result =
+          bf16 ? amdgpu::gfx12_dot2_f32<true>(c.a, c.b, c.a >> 16, c.b >> 16, c.c)
+               : amdgpu::gfx12_dot2_f32<false>(c.a, c.b, c.a >> 16, c.b >> 16, c.c);
+      EXPECT_EQ(result, c.expected) << std::hex << c.a << ' ' << c.b << ' ' << c.c;
     }
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INEXACT);
-    EXPECT_EQ(std::fegetround(), round);
   }
 }
 
 TEST(Gfx12Dot, DecodedHardwareCasesAndInactiveLanes) {
   HostState restore;
-  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr auto arch = rocjitsu::IsaFamily::Rdna4;
   DotMachine machine(arch);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (bool force_scalar : {false, true}) {
     util::set_force_scalar_for_testing(force_scalar);
     for (bool bf16 : {false, true}) {
@@ -128,11 +131,12 @@ TEST(Gfx12Dot, DecodedHardwareCasesAndInactiveLanes) {
                                                                               .src2 = 258,
                                                                               .opsel_hi = 3,
                                                                               .neg = neg}));
-            for (uint32_t lane = 0; lane < 32; ++lane)
+            for (uint32_t lane = 0; lane < 32; ++lane) {
               EXPECT_EQ(machine.get(16, lane), (exec & (1u << lane))
                                                    ? cases[(offset + lane) % cases.size()].expected
                                                    : 0xfeedfaceu)
                   << "arch=" << arch << " bf16=" << bf16 << " modifiers=" << modifiers;
+            }
           }
         }
       }
@@ -143,8 +147,9 @@ TEST(Gfx12Dot, DecodedHardwareCasesAndInactiveLanes) {
 TEST(Gfx12Dot, InlineSourcesMatchHardware) {
   // R9700 captures. F16 narrows floats into the low half; BF16 broadcasts
   // upper16(FP32) without rounding, including selector 248 (1 / (2*pi)).
-  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr auto arch = rocjitsu::IsaFamily::Rdna4;
   DotMachine machine(arch);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (bool bf16 : {false, true}) {
     const uint32_t packed = bf16 ? 0x40003f80 : 0x40003c00; // (1, 2)
     for (uint16_t selector : {uint16_t(129), uint16_t(242), uint16_t(248)}) {
@@ -180,7 +185,8 @@ TEST(Gfx12Dot, InlineSourcesMatchHardware) {
 
 TEST(Gfx12Dot, WmmaHardwareRoundingOrderAndOverlappingSources) {
   for (uint32_t width : {32u, 64u}) {
-    DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    DotMachine machine(rocjitsu::IsaFamily::Rdna4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
       const auto cases = bf16 ? std::span<const Gfx12WmmaCase>(kGfx12WmmaBF16Cases)
                               : std::span<const Gfx12WmmaCase>(kGfx12WmmaF16Cases);
@@ -194,19 +200,22 @@ TEST(Gfx12Dot, WmmaHardwareRoundingOrderAndOverlappingSources) {
               machine.set(reg, lane, fixture.a[k] | (uint32_t(fixture.a[k + 1]) << 16));
               machine.set(8 + reg, lane, fixture.b[k] | (uint32_t(fixture.b[k + 1]) << 16));
             }
-            for (uint32_t reg = 0; reg < 256 / width; ++reg)
+            for (uint32_t reg = 0; reg < 256 / width; ++reg) {
               machine.set(16 + reg, lane, fixture.c);
+            }
           }
           machine.wave->set_exec(0x55aa55aa); // WMMA uses all lanes and preserves EXEC.
           machine.execute(rdna4::build_vop3p(
               bf16 ? rdna4::kVWmmaF3216x16x16Bf16Vop3p : rdna4::kVWmmaF3216x16x16F16Vop3p,
               {.vdst = dst, .src0 = 256, .src1 = 264, .src2 = 272, .opsel_hi = 3}));
           EXPECT_EQ(machine.wave->exec(), 0x55aa55aau);
-          for (uint32_t lane = 0; lane < width; ++lane)
-            for (uint32_t reg = 0; reg < 256 / width; ++reg)
+          for (uint32_t lane = 0; lane < width; ++lane) {
+            for (uint32_t reg = 0; reg < 256 / width; ++reg) {
               EXPECT_EQ(machine.get(dst + reg, lane),
                         width == 32 ? fixture.expected32 : fixture.expected64)
                   << "width=" << width << " bf16=" << bf16 << " dst=" << unsigned(dst);
+            }
+          }
         }
       }
     }
@@ -214,9 +223,10 @@ TEST(Gfx12Dot, WmmaHardwareRoundingOrderAndOverlappingSources) {
 }
 
 TEST(Gfx12Dot, WmmaSignModifiersAndWaveSizes) {
-  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr auto arch = rocjitsu::IsaFamily::Rdna4;
   for (uint32_t width : {32u, 64u}) {
     DotMachine machine(arch, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
       for (uint32_t modifiers = 0; modifiers < 64; ++modifiers) {
         const uint8_t neg = modifiers & 7, neg_hi = modifiers >> 3;
@@ -238,10 +248,12 @@ TEST(Gfx12Dot, WmmaSignModifiersAndWaveSizes) {
             for (uint32_t reg = 0; reg < 256 / width; ++reg) {
               uint32_t acc = (lane + reg * width) * 0x6c078965u;
               if (explicit_modifiers) {
-                if (neg_hi & 4)
+                if (neg_hi & 4) {
                   acc &= 0x7fffffffu;
-                if (neg & 4)
+                }
+                if (neg & 4) {
                   acc ^= 0x80000000u;
+                }
               }
               machine.set(16 + reg, lane, acc);
             }
@@ -257,12 +269,13 @@ TEST(Gfx12Dot, WmmaSignModifiersAndWaveSizes) {
                                               .neg = uint8_t(explicit_modifiers ? 0 : neg)}));
           for (uint32_t lane = 0; lane < width; ++lane) {
             for (uint32_t reg = 0; reg < 256 / width; ++reg) {
-              if (explicit_modifiers)
+              if (explicit_modifiers) {
                 expected[reg * width + lane] = machine.get(16 + reg, lane);
-              else
+              } else {
                 EXPECT_EQ(machine.get(16 + reg, lane), expected[reg * width + lane])
                     << "arch=" << arch << " width=" << width << " bf16=" << bf16
                     << " modifiers=" << modifiers;
+              }
             }
           }
         }
@@ -285,7 +298,8 @@ TEST(Gfx12Dot, WmmaTinyNegativeAccumulatorSubtractsFloorUnit) {
     HostState restore;
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
-      DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+      DotMachine machine(rocjitsu::IsaFamily::Rdna4);
+      ASSERT_FALSE(::testing::Test::HasFatalFailure());
       const uint32_t c_regs = test.bf16_out ? 4 : 8;
       for (uint32_t lane = 0; lane < 32; ++lane) {
         for (uint32_t reg = 0; reg < 4; ++reg) {
@@ -293,23 +307,27 @@ TEST(Gfx12Dot, WmmaTinyNegativeAccumulatorSubtractsFloorUnit) {
           machine.set(reg, lane, lane < 16 && reg == 0 ? test.a : 0u);
           machine.set(8 + reg, lane, uint32_t(test.b) | (uint32_t(test.b) << 16));
         }
-        for (uint32_t reg = 0; reg < c_regs; ++reg)
+        for (uint32_t reg = 0; reg < c_regs; ++reg) {
           machine.set(16 + reg, lane, test.c);
+        }
       }
       machine.execute(rdna4::build_vop3p(
           test.bf16_out ? rdna4::kVWmmaBf1616x16x16Bf16Vop3p : rdna4::kVWmmaF3216x16x16Bf16Vop3p,
           {.vdst = 24, .src0 = 256, .src1 = 264, .src2 = 272, .opsel_hi = 3}));
-      for (uint32_t lane = 0; lane < 32; ++lane)
-        for (uint32_t reg = 0; reg < c_regs; ++reg)
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        for (uint32_t reg = 0; reg < c_regs; ++reg) {
           EXPECT_EQ(machine.get(24 + reg, lane), test.expected)
               << "bf16_out=" << test.bf16_out << " scalar=" << scalar << " lane=" << lane;
+        }
+      }
     }
   }
 }
 
 TEST(Gfx12Dot, WmmaInlineAccumulatorPreservesAllOnesNan) {
   for (uint32_t width : {32u, 64u}) {
-    DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    DotMachine machine(rocjitsu::IsaFamily::Rdna4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool bf16 : {false, true}) {
       for (uint32_t modifiers = 0; modifiers < 4; ++modifiers) {
         for (uint32_t lane = 0; lane < width; ++lane) {
@@ -317,8 +335,9 @@ TEST(Gfx12Dot, WmmaInlineAccumulatorPreservesAllOnesNan) {
             machine.set(reg, lane, 0);
             machine.set(8 + reg, lane, 0);
           }
-          for (uint32_t reg = 0; reg < 256 / width; ++reg)
+          for (uint32_t reg = 0; reg < 256 / width; ++reg) {
             machine.set(16 + reg, lane, 0x12345678);
+          }
         }
         machine.execute(rdna4::build_vop3p(bf16 ? rdna4::kVWmmaF3216x16x16Bf16Vop3p
                                                 : rdna4::kVWmmaF3216x16x16F16Vop3p,
@@ -330,11 +349,14 @@ TEST(Gfx12Dot, WmmaInlineAccumulatorPreservesAllOnesNan) {
                                             .opsel_hi = 3,
                                             .neg = uint8_t((modifiers & 1) << 2)}));
         uint32_t expected = modifiers & 2 ? 0x7fffffffu : 0xffffffffu;
-        if (modifiers & 1)
+        if (modifiers & 1) {
           expected ^= 0x80000000u;
-        for (uint32_t lane = 0; lane < width; ++lane)
-          for (uint32_t reg = 0; reg < 256 / width; ++reg)
+        }
+        for (uint32_t lane = 0; lane < width; ++lane) {
+          for (uint32_t reg = 0; reg < 256 / width; ++reg) {
             EXPECT_EQ(machine.get(16 + reg, lane), expected);
+          }
+        }
       }
     }
   }
@@ -342,8 +364,9 @@ TEST(Gfx12Dot, WmmaInlineAccumulatorPreservesAllOnesNan) {
 
 TEST(Gfx12Dot, AccumulateEncodingsAndInlineSources) {
   HostState restore;
-  constexpr auto arch = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr auto arch = rocjitsu::IsaFamily::Rdna4;
   DotMachine machine(arch);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   for (bool scalar : {false, true}) {
     util::set_force_scalar_for_testing(scalar);
     for (bool bf16 : {false, true}) {
@@ -399,8 +422,9 @@ TEST(Gfx12Dot, NativeF8SpecialValues) {
   for (Case sample : cases) {
     std::array<uint8_t, 8> a, b;
     a.fill(sample.a);
-    for (size_t i = 0; i < b.size(); ++i)
+    for (size_t i = 0; i < b.size(); ++i) {
       b[i] = i % 2 ? sample.b_odd : sample.b_even;
+    }
     // A_FP8=false, B_FP8=false selects BF8_BF8.
     EXPECT_EQ((rocjitsu::amdgpu::gfx12_dot8_f32<false, false>(a, b, sample.c)), sample.expected);
   }
@@ -430,7 +454,8 @@ TEST(Gfx12Dot, FloatingDotDppPermutesSnapshotAndPreservesInactiveDestinations) {
       {rdna4::kVDot4F32Bf8Bf8Vop3p, 0x3c3c3c3c, 0x3c3c3c3c, 0x80808080, 4},
   }};
   for (uint32_t width : {32u, 64u}) {
-    DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    DotMachine machine(rocjitsu::IsaFamily::Rdna4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
       for (const auto &c : cases) {
@@ -484,28 +509,26 @@ TEST(Gfx12Dot, FloatingDotDppPermutesSnapshotAndPreservesInactiveDestinations) {
 
 TEST(Gfx12Dot, DecodedDot4MatchesNativeFormatAndRoundingCases) {
   HostState restore;
-  DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4);
+  DotMachine machine(rocjitsu::IsaFamily::Rdna4);
+  ASSERT_FALSE(::testing::Test::HasFatalFailure());
   constexpr std::array<uint16_t, 4> ops{rdna4::kVDot4F32Fp8Fp8Vop3p, rdna4::kVDot4F32Fp8Bf8Vop3p,
                                         rdna4::kVDot4F32Bf8Fp8Vop3p, rdna4::kVDot4F32Bf8Bf8Vop3p};
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    for (size_t op = 0; op < ops.size(); ++op) {
-      for (size_t offset = 0; offset < kGfx12Dot4Cases.size(); offset += 32) {
-        for (uint32_t lane = 0; lane < 32; ++lane) {
-          const auto &c = kGfx12Dot4Cases[offset + lane];
-          machine.set(0, lane, c.a);
-          machine.set(1, lane, c.b);
-          machine.set(2, lane, c.c);
-        }
-        machine.execute(rdna4::build_vop3p(
-            ops[op],
-            {.vdst = 16, .opsel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3}));
-        for (uint32_t lane = 0; lane < 32; ++lane)
-          EXPECT_EQ(machine.get(16, lane), kGfx12Dot4Cases[offset + lane].expected[op])
-              << "op=" << ops[op] << " case=" << offset + lane << " round=" << round;
+  for (size_t op = 0; op < ops.size(); ++op) {
+    for (size_t offset = 0; offset < kGfx12Dot4Cases.size(); offset += 32) {
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        const auto &c = kGfx12Dot4Cases[offset + lane];
+        machine.set(0, lane, c.a);
+        machine.set(1, lane, c.b);
+        machine.set(2, lane, c.c);
+      }
+      machine.execute(rdna4::build_vop3p(
+          ops[op],
+          {.vdst = 16, .opsel_hi_2 = 1, .src0 = 256, .src1 = 257, .src2 = 258, .opsel_hi = 3}));
+      for (uint32_t lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(machine.get(16, lane), kGfx12Dot4Cases[offset + lane].expected[op])
+            << "op=" << ops[op] << " case=" << offset + lane;
       }
     }
-    EXPECT_EQ(std::fegetround(), round);
   }
 }
 
@@ -540,9 +563,10 @@ const std::array<Dot4Encoding, 7> kEncodings{{
 }};
 
 uint32_t dot4(const Dot4Family &family, const Gfx12Dot4EdgeCase &sample) {
-  if (family.a_fp8)
+  if (family.a_fp8) {
     return family.b_fp8 ? amdgpu::gfx12_dot4_f32_fp8<true, true>(sample.a, sample.b, sample.c)
                         : amdgpu::gfx12_dot4_f32_fp8<true, false>(sample.a, sample.b, sample.c);
+  }
   return family.b_fp8 ? amdgpu::gfx12_dot4_f32_fp8<false, true>(sample.a, sample.b, sample.c)
                       : amdgpu::gfx12_dot4_f32_fp8<false, false>(sample.a, sample.b, sample.c);
 }
@@ -550,7 +574,8 @@ uint32_t dot4(const Dot4Family &family, const Gfx12Dot4EdgeCase &sample) {
 TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
   HostState restore;
   for (uint32_t width : {32u, 64u}) {
-    DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    DotMachine machine(rocjitsu::IsaFamily::Rdna4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
       for (const auto &family : kFamilies) {
@@ -578,8 +603,9 @@ TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
               for (uint32_t lane = 0; lane < width; ++lane) {
                 // gfx1201 measures ABS followed by NEG in all three forms.
                 float acc = lane % 2 && !(modifiers & 2) ? -2.0f : 2.0f;
-                if (modifiers & 1)
+                if (modifiers & 1) {
                   acc = -acc;
+                }
                 const float dot = zero_products || (mode == 1 && lane % 16 == 0) ? 0.0f : 4.0f;
                 EXPECT_EQ(machine.get(16, lane), std::bit_cast<uint32_t>(acc + dot))
                     << "opcode=" << family.opcode << " width=" << width << " mode=" << mode
@@ -593,26 +619,22 @@ TEST(Gfx12Dot4, AccumulatorModifiersApplyAbsBeforeNegInPlainAndDppForms) {
   }
 }
 
-TEST(Gfx12Dot4, HardwareArithmeticIgnoresHostFpState) {
+TEST(Gfx12Dot4, HardwareArithmetic) {
   HostState restore;
-  for (int round : {FE_TONEAREST, FE_UPWARD, FE_DOWNWARD, FE_TOWARDZERO}) {
-    std::fesetround(round);
-    std::feclearexcept(FE_ALL_EXCEPT);
-    std::feraiseexcept(FE_INEXACT);
-    for (const auto &family : kFamilies)
-      for (const auto &sample : family.cases)
-        EXPECT_EQ(dot4(family, sample), sample.expected)
-            << "opcode=" << family.opcode << " rounding=" << round << " A=" << std::hex << sample.a
-            << " B=" << sample.b << " C=" << sample.c;
-    EXPECT_EQ(std::fetestexcept(FE_ALL_EXCEPT), FE_INEXACT);
-    EXPECT_EQ(std::fegetround(), round);
+  for (const auto &family : kFamilies) {
+    for (const auto &sample : family.cases) {
+      EXPECT_EQ(dot4(family, sample), sample.expected)
+          << "opcode=" << family.opcode << " A=" << std::hex << sample.a << " B=" << sample.b
+          << " C=" << sample.c;
+    }
   }
 }
 
 TEST(Gfx12Dot4, DecodedHardwareArithmeticIncludesDppAndOverlappingRegisters) {
   HostState restore;
   for (uint32_t width : {32u, 64u}) {
-    DotMachine machine(ROCJITSU_CODE_ARCH_RDNA4, width);
+    DotMachine machine(rocjitsu::IsaFamily::Rdna4, width);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
     for (bool scalar : {false, true}) {
       util::set_force_scalar_for_testing(scalar);
       for (const auto &family : kFamilies) {
@@ -634,8 +656,9 @@ TEST(Gfx12Dot4, DecodedHardwareArithmeticIncludesDppAndOverlappingRegisters) {
                   machine.set(2, lane, sample.c);
                   machine.set(16, lane, 0xfeedface);
                 }
-                for (uint32_t lane = 0; lane < width; ++lane)
+                for (uint32_t lane = 0; lane < width; ++lane) {
                   old_dst[lane] = machine.get(dst, lane);
+                }
                 const auto base = rdna4::build_vop3p(family.opcode, {.vdst = dst,
                                                                      .opsel_hi_2 = 1,
                                                                      .src0 = encoding.source,

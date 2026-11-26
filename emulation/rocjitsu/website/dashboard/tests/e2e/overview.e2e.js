@@ -47,14 +47,14 @@ test('Overview shares endpoints with cards and keeps hover/catalog/range/filter 
     await expect(page.getByTestId('metric-card-latest-duration').locator(`[data-configuration="${row.key}"]`)).toContainText(formatDuration(row.latest.durationSeconds));
     await expect(page.getByTestId('metric-card-relative-speedup').locator(`[data-configuration="${row.key}"]`)).toContainText(`${row.latest.speedup.toFixed(2)}×`);
     await expect(page.getByTestId('metric-card-latest-results').locator(`[data-configuration="${row.key}"]`)).toContainText(`${row.latest.completed}/${row.latest.required}`);
-    await expect(page.getByTestId('metric-card-valid-data-points').locator(`[data-configuration="${row.key}"]`).locator('p').last()).toHaveText(String(row.points.filter((point) => Number.isFinite(point.speedup)).length));
+    await expect(page.getByTestId('metric-card-valid-data-points').locator(`[data-configuration="${row.key}"]`).locator('> :last-child')).toHaveText(String(row.points.filter((point) => Number.isFinite(point.speedup)).length));
   }
   await page.screenshot({ path: `${process.env.TMPDIR}/top-cards-populated.png`, fullPage: false });
   const trend = page.getByTestId('performance-trend');
   const chart = trend.getByRole('img');
   const plotted = await readChart(chart, (instance) => instance.getOption().series.map((s) => ({ name: s.name, connectNulls: s.connectNulls, showSymbol: s.showSymbol, area: s.areaStyle })));
   expect(plotted.map((s) => s.name)).toEqual(model.rows.map((r) => `${r.target} ${r.mode}`));
-  expect(plotted.every((s) => s.connectNulls === false && s.showSymbol === false && !s.area)).toBe(true);
+  expect(plotted.every((s) => s.connectNulls === true && !s.area)).toBe(true);
   const before = await cards.innerText();
   const group = trend.getByRole('group', { name: 'Inspect performance trend', exact: true });
   await group.press('End');
@@ -92,8 +92,8 @@ test('Overview shares endpoints with cards and keeps hover/catalog/range/filter 
   await page.getByRole('checkbox', { name: 'Llama', exact: true }).uncheck();
   const filtered = selectOverviewProjection(data, { targets: data.targets, modes: ['single'], suites: ['Triton'] }, { range: '1M', catalogId });
   for (const row of filtered.rows) {
-    await expect(page.getByTestId('metric-card-latest-results').locator(`[data-configuration="${row.key}"]`).locator('p').last()).toHaveText(`${row.latest.completed}/${row.latest.required}`);
-    await expect(page.getByTestId('metric-card-valid-data-points').locator(`[data-configuration="${row.key}"]`).locator('p').last()).toHaveText(String(row.points.filter((point) => Number.isFinite(point.speedup)).length));
+    await expect(page.getByTestId('metric-card-latest-results').locator(`[data-configuration="${row.key}"]`).locator('> :last-child')).toHaveText(`${row.latest.completed}/${row.latest.required}`);
+    await expect(page.getByTestId('metric-card-valid-data-points').locator(`[data-configuration="${row.key}"]`).locator('> :last-child')).toHaveText(String(row.points.filter((point) => Number.isFinite(point.speedup)).length));
   }
   await assertFlatChanges(filtered);
   await page.getByRole('checkbox', { name: 'gfx950', exact: true }).uncheck();

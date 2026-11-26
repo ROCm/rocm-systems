@@ -3,11 +3,11 @@
 
 /// @file trampoline_builder.h
 /// @brief Lowers a TrampolinePlan into patched-anchor bytes and trampoline
-///        words for the DBI relocation-only path.
+///        words for DBI observation and instruction replacement.
 ///
 /// This is the byte emitter; it owns SOPP branch math and basic plan
-/// well-formedness checks (original_size 4 or 8 when splicing or relocating,
-/// original_words count matches, requested branch ranges fit). It does not
+/// well-formedness checks (original_size 4/8/12 when splicing or replaying
+/// the original, original_words count matches, requested branch ranges fit). It does not
 /// touch the ELF, own layout assignment, or enforce milestone-scoped restrictions
 /// (e.g. "only emit s_nop placeholder bodies" — that lives in the orchestrator
 /// as `validate_inline_nop_plan` in instrumentor.h).
@@ -17,6 +17,7 @@
 
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
 
 #include <cstdint>
@@ -26,7 +27,7 @@
 
 namespace rocjitsu {
 
-/// @brief Concrete instruction words placed before or after the relocated
+/// @brief Concrete instruction words placed before or after the optional
 ///        original in the trampoline. Declared clobbers are intentionally
 ///        deferred to a later milestone.
 struct InlineAsmItem {
@@ -65,10 +66,11 @@ struct ProbeArgumentMove {
   constexpr bool operator==(const ProbeArgumentMove &) const = default;
 };
 
-/// @brief Framework-owned scalar snapshot of a VGPR's lane zero at kernel entry.
-struct EntryVgprCapture {
-  uint16_t vgpr = 0;
+/// @brief Framework-owned snapshot of an SGPR, TTMP or VGPR's lane zero at guest entry.
+struct EntryRegisterCapture {
+  uint16_t source_index = 0;
   uint16_t sgpr = 0;
+  RegClass source_class = RegClass::VGPR;
 };
 
 /// @brief Preserve an ordinary guest register in an additional allocated register.
@@ -83,18 +85,30 @@ struct RegisterSave {
 /// Coordinates are .text-relative byte offsets. The orchestrator fills this
 /// after validation and layout, then hands it to TrampolineBuilder.
 struct TrampolinePlan {
-  rj_code_arch_t arch = ROCJITSU_CODE_ARCH_INVALID;
+  rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Invalid;
 
   uint64_t anchor_offset = 0;
-  uint32_t original_size = 0; // 4 or 8 for the inline-nop smoke build.
+  uint32_t original_size = 0; // 4, 8 or 12 bytes for replay or splice.
   uint64_t trampoline_offset = 0;
   uint64_t return_target = 0; // Typically anchor_offset + original_size.
 
   std::vector<uint32_t> original_words; // Exact bytes pulled from .text.
 
   std::vector<InlineAsmItem> before_items;
+  /// Explicit trailing items for inline plans. Callable plans retain these as
+  /// the replacement body only with emit_original=false, after the restored
+  /// envelope; replay plans generate their item lists from probe placement.
   std::vector<InlineAsmItem> after_items;
   bool emit_original = true;
+  /// Execute the relocated anchor before the callable envelope.
+  /// The caller must ensure an emitted anchor falls through into the envelope
+  /// and resolve its software-managed register hazards before the envelope
+  /// reads results or overwrites registers with pending source reads. Live-after
+  /// preservation alone is insufficient; the builder neither checks these
+  /// obligations nor inserts anchor-specific hazard spacing.
+  /// With emit_original=false, both placements emit the envelope followed by
+  /// after_items and keep the same original_byte_offset and call-envelope range.
+  bool probe_after_original = false;
   /// A dispatch-only callback returns to an untouched original entry; it has
   /// no anchor splice and imposes no relocation-size constraint on that entry.
   bool patch_anchor = true;
@@ -106,8 +120,8 @@ struct TrampolinePlan {
   //
   // These are the call-envelope resource decisions made BEFORE layout is known:
   // which registers the envelope uses and how many words it spans. Emission
-  // materializes `before_items` from these decisions plus the assigned layout,
-  // so it must not re-pick registers or recount words. Folded into
+  // materializes `before_items` or `after_items` according to probe_after_original
+  // and emit_original, so it must not re-pick registers or recount words. Folded into
   // TrampolinePlan for now since this is the builder's one input;
   // lift back out into a dedicated resource-plan type if it grows unwieldy.
   //----------------------------------------------------------------------------
@@ -141,7 +155,7 @@ struct TrampolinePlan {
   /// site, so the envelope's own temp selection avoids it either way. Unset when
   /// the kernel has no prologue, which makes a LogBufferPtr* argument fail closed.
   std::optional<uint16_t> entry_storage_base;
-  std::vector<EntryVgprCapture> entry_vgpr_captures;
+  std::vector<EntryRegisterCapture> entry_register_captures;
   std::vector<RegisterSave> register_saves;
 
   /// Run the probe body under EXEC = -1 instead of the anchor mask. The envelope
@@ -175,10 +189,10 @@ struct TrampolinePlan {
   /// The ABI fixes the link and argument registers; live values in them require
   /// preservation. The other destinations are chosen outside the live set.
   RegisterSet builder_clobbers;
-  /// Planned envelope words, including internal RDNA4 guards. The spill
-  /// bracket, the boundary drains and the GFX9 wait-state pad are accounted by
-  /// emit_probe_call, not here.
-  uint32_t before_word_count = 0;
+  /// Planned envelope words, including internal RDNA4 guards, independent of
+  /// placement. This is not the final emitted size: emit_probe_call additionally
+  /// accounts for the spill bracket, boundary drains and restore hazard spacing.
+  uint32_t planned_envelope_word_count = 0;
   uint64_t probe_target_offset = 0; ///< .text-relative byte offset of the copied probe body.
 
   /// VGPRs to save/restore around the call; emit_probe_call brackets each with a
@@ -201,7 +215,15 @@ struct TrampolineBytes {
   /// Empty without an anchor splice; otherwise original_size bytes.
   std::vector<uint8_t> patched_anchor_bytes;
   std::vector<uint32_t> trampoline_words;
+  /// Original's byte offset from trampoline start, or its insertion boundary
+  /// between before_items and after_items when emit_original=false. Callable
+  /// plans without an original place this after the envelope, at the replacement
+  /// body, return branch or end of the trampoline as applicable.
   uint32_t original_byte_offset = 0;
+  /// Call envelope relative to trampoline start, excluding the effective guest
+  /// sequence and resume branch. Both fields are zero for inline plans.
+  uint32_t call_envelope_byte_offset = 0;
+  uint32_t call_envelope_byte_size = 0;
 };
 
 class TrampolineBuilder {
@@ -210,9 +232,9 @@ public:
   ///
   /// Returns std::nullopt and writes a human-readable explanation to
   /// @p error_out (if non-null) on:
-  ///   - arch left at ROCJITSU_CODE_ARCH_INVALID (caller forgot to set it)
+  ///   - arch left at rocjitsu::IsaFamily::Invalid (caller forgot to set it)
   ///   - original_size zero or not dword aligned
-  ///   - original_size other than 4 or 8 when splicing or relocating the original
+  ///   - original_size other than 4/8/12 when splicing or replaying the anchor
   ///   - original_words size mismatch with original_size
   ///   - A requested forward or return branch outside s_branch simm16 range
   ///
@@ -227,8 +249,8 @@ public:
   /// Picks the call-envelope registers and computes the envelope word count
   /// without choosing layout or emitting bytes. On success, fills
   /// `plan.is_probe_call`, `link_pair_base`, `target_pair_base`, `scc_temp`,
-  /// `special_state_saves`, `builder_clobbers`, and `before_word_count`, then
-  /// returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
+  /// `special_state_saves`, `builder_clobbers`, and `planned_envelope_word_count`,
+  /// then returns true. (`preserve_scc`/`preserve_*` are inputs, read but not written.)
   ///
   /// Resource constraints:
   ///   - Link pair is read off @p abi; one that fails is_valid_probe_abi()
@@ -240,7 +262,7 @@ public:
   ///   - When plan.preserve_scc is set, SCC gets one dead SGPR temp across the call
   ///     (saved before materialization, restored after), so it must avoid both
   ///     the live set and @p probe_body_clobbers. Extending this is deferred.
-  ///   - `plan.entry_storage_base` and `plan.entry_vgpr_captures`, when set, are
+  ///   - `plan.entry_storage_base` and `plan.entry_register_captures`, when set, are
   ///     excluded from every dead-register choice below. The prologue defines
   ///     this persistent storage in the cave, outside the guest's liveness.
   ///   - EXEC/VCC/M0 are preserved when the corresponding plan.preserve_* input
@@ -257,29 +279,35 @@ public:
   ///
   /// @param plan                Trampoline plan whose resource fields are filled.
   /// @param abi                 Probe ABI; supplies the link pair.
-  /// @param live_at_anchor      Registers live immediately before the anchor.
+  /// @param live_at_anchor      Registers live at the selected observation point.
+  ///                           For post-instruction placement, the caller must
+  ///                           supply the live-after state, including anchor
+  ///                           definitions that the callback must preserve.
+  ///                           The builder does not compute liveness.
   /// @param probe_body_clobbers Ordinary registers the copied probe body writes.
   [[nodiscard]] static bool plan_probe_call(TrampolinePlan &plan, const ProbeAbi &abi,
                                             const RegisterSet &live_at_anchor,
                                             const RegisterSet &probe_body_clobbers,
                                             std::string *error_out = nullptr);
 
-  /// @brief Emit a planned probe call: envelope, relocated original, return
-  ///        branch.
+  /// @brief Emit a planned probe envelope before or after original replay, or
+  ///        before an explicit replacement body, with an optional return branch.
   ///
   /// Requires @p plan.is_probe_call (i.e. plan_probe_call() succeeded). Builds
   /// the call envelope from the planned resources and @p plan.probe_target_offset
-  /// then delegates to build() for layout and branch math.
+  /// according to probe_after_original when replaying the original. Without
+  /// original replay, replaces before_items with the envelope and retains
+  /// after_items for the replacement. Delegates layout and branch math to build().
   ///
   /// On GFX9 (CDNA1-4), which does not interlock them, a restored SGPR or M0 is
-  /// spaced from the relocated original by the wait states its readers need: one
+  /// spaced from guest resumption by the wait states its readers need: one
   /// s_nop tops up what the instructions after the restore already supply. That
-  /// word is not part of before_word_count, since it depends on the spill sets,
-  /// which are filled after planning.
+  /// word is not part of planned_envelope_word_count, since it depends on the
+  /// spill sets, which are filled after planning.
   ///
   /// Returns std::nullopt and writes a diagnostic to @p error_out (if non-null)
   /// when the plan is not a probe call, the synthesized envelope size disagrees
-  /// with the planned before_word_count (plan/emit drift), a spill or boundary-wait
+  /// with planned_envelope_word_count (plan/emit drift), a spill or boundary-wait
   /// builder rejects the architecture or register class, build() reports a
   /// branch-range failure, or a delegated vector builder rejects an argument operand.
   [[nodiscard]] static std::optional<TrampolineBytes>

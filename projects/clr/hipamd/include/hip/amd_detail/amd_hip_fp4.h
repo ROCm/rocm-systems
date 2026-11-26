@@ -190,13 +190,14 @@ __hip_cvt_float2_to_fp4x2(const float2 x, const __hip_fp4_interpretation_t /* fp
 
 __FP4_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp4_to_halfraw(
     const __hip_fp4_storage_t x, const __hip_fp4_interpretation_t /* fp4_interpretation */) {
-  __half2_raw ret;
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
+  __half2_raw ret;
   ret.data =
       __amd_fp16x2_storage_t{__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_f16_fp4)
-                                 ? __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(x, 0, 0)
+                                 ? __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(x, 1.0f /* scale */, 0)
                                  : __amd_fp16x2_storage_t{}};
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
+  __half2_raw ret;
   static_assert(sizeof(__amd_fp16x2_storage_t[4]) == sizeof(__amd_fp16x8_storage_t));
   static_assert(sizeof(__amd_fp4x2_storage_t[4]) == sizeof(unsigned int));
   union {
@@ -214,11 +215,11 @@ __FP4_HOST_DEVICE_STATIC__ __half_raw __hip_cvt_fp4_to_halfraw(
   ret.data = uhalf.fp16x2[0];
 #else
   using namespace fcbx;
-  ret.data =
-      __amd_fp16x2_storage_t{to_float<__amd_fp16_storage_t, Encoding::E2M1, true>(x & 0xFu, 0),
-                             to_float<__amd_fp16_storage_t, Encoding::E2M1, true>(x >> 4, 0)};
+  return internal::f16_to_halfraw(to_float<__amd_fp16_storage_t, Encoding::E2M1, true>(x & 0xFu, 0));
 #endif
+#if HIP_ENABLE_GFX950_OCP_BUILTINS || HIP_ENABLE_GFX1250_OCP_BUILTINS
   return ret.x;
+#endif
 }
 
 __FP4_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp4x2_to_halfraw2(
@@ -227,7 +228,7 @@ __FP4_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp4x2_to_halfraw2(
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
   ret.data =
       __amd_fp16x2_storage_t{__builtin_amdgcn_is_invocable(__builtin_amdgcn_cvt_scalef32_pk_f16_fp4)
-                                 ? __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(x, 0, 0)
+                                 ? __builtin_amdgcn_cvt_scalef32_pk_f16_fp4(x, 1.0f /* scale */, 0)
                                  : __amd_fp16x2_storage_t{}};
 #elif HIP_ENABLE_GFX1250_OCP_BUILTINS
   static_assert(sizeof(__amd_fp16x2_storage_t[4]) == sizeof(__amd_fp16x8_storage_t));
@@ -246,9 +247,9 @@ __FP4_HOST_DEVICE_STATIC__ __half2_raw __hip_cvt_fp4x2_to_halfraw2(
   ret.data = uhalf.fp16x2[0];
 #else
   using namespace fcbx;
-  ret.data =
+  ret = internal::f16x2_to_halfraw2(
       __amd_fp16x2_storage_t{to_float<__amd_fp16_storage_t, Encoding::E2M1, true>(x & 0xFu, 0),
-                             to_float<__amd_fp16_storage_t, Encoding::E2M1, true>(x >> 4, 0)};
+                             to_float<__amd_fp16_storage_t, Encoding::E2M1, true>(x >> 4, 0)});
 #endif
   return ret;
 }

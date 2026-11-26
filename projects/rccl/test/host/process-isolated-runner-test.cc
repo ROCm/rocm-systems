@@ -14,16 +14,40 @@
 
 #include <gtest/gtest.h>
 
+#include "../common/GpuCountProbe.hpp"
 #include "../common/ProcessIsolatedTestRunner.hpp"
 #include "../common/ScopedEnv.hpp"
+#include "ScopedHook.h"
+#include "fakes/hip_fakes.h"
 
 namespace {
 
 constexpr const char* kMarkerEnvVar = "RCCL_PIT_TEST_MARKER";
 
 using RcclUnitTesting::ScopedEnv;
+using RcclUnitTesting::gpuCountViaFreshImage;
+using RcclUnitTesting::kGpuCountProbeFailed;
+
+// hip_fakes.cc compiles in g_deviceCount = 8.
+constexpr int kFakeDeviceCount = 8;
 
 }  // namespace
+
+// The pool clamp silently keeps the unclamped pool on kGpuCountProbeFailed, so a probe that
+// always failed would not show up in any other test.
+TEST(ProcessIsolatedRunnerMicrotest, GpuCountProbe_ReportsTheCountHipReports) {
+  EXPECT_EQ(kFakeDeviceCount, gpuCountViaFreshImage());
+}
+
+// The probe re-execs, so it reads the fresh image's own fake and not this process's seam.
+TEST(ProcessIsolatedRunnerMicrotest, GpuCountProbe_IgnoresTheCallersHipSeam) {
+  ScopedHook count(g_hipGetDeviceCount, [](int* c) {
+    if (c) *c = 1;
+    return hipSuccess;
+  });
+  EXPECT_EQ(kFakeDeviceCount, gpuCountViaFreshImage());
+  EXPECT_EQ(count.calls, 0) << "the probe called HIP in this process instead of a fresh image";
+}
 
 // gtest assigns the child's single filtered test to shard 0, so a non-zero shard index must not reach the child.
 TEST(ProcessIsolatedRunnerMicrotest, NonZeroShard_ChildStillRunsBody) {
