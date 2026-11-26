@@ -7,6 +7,8 @@
 #include "ordinary_fixture.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 
 #include <algorithm>
 #include <array>
@@ -23,6 +25,48 @@ namespace rocjitsu::test {
 
 inline constexpr std::array<OrdinaryTargetCase, 2> kCdna5OrdinaryAddressCases = {
     kOrdinaryTargetCases[0], kOrdinaryTargetCases[1]};
+inline constexpr std::array<OrdinaryTargetCase, 4> kRdna4OrdinaryAddressCases = {
+    kOrdinaryTargetCases[2], kOrdinaryTargetCases[3], kOrdinaryTargetCases[4],
+    kOrdinaryTargetCases[5]};
+
+struct OrdinaryAddressParityCase {
+  std::vector<uint8_t> image;
+  const char *kernel;
+  uint64_t offset;
+  const char *name;
+};
+
+inline std::vector<OrdinaryAddressParityCase>
+rdna4_ordinary_address_parity_cases(const OrdinaryTargetCase &fixture) {
+  std::vector<OrdinaryAddressParityCase> cases = {
+      {.image = make_ordinary_elf(fixture, 2, 0, false, true),
+       .kernel = "test_kernel",
+       .offset = 0,
+       .name = "LaterCache"},
+      {.image = make_ordinary_poll_elf(fixture, 32),
+       .kernel = "test_kernel",
+       .offset = 128,
+       .name = "MaximumBoundedLoopPrefix"},
+  };
+  std::vector<uint32_t> alu_wait = ordinary_acquire_words();
+  alu_wait[3] = 0xbf88ff9eu;
+  cases.push_back({.image = make_ordinary_words_elf(fixture, std::move(alu_wait)),
+                   .kernel = "test_kernel",
+                   .offset = 0,
+                   .name = "OriginalAnyWaitWitness"});
+  for (bool shared : {false, true}) {
+    const uint64_t offset = shared ? 512 : 0;
+    std::vector<uint8_t> image =
+        shared ? make_shared_ordinary_elf(fixture) : make_ordinary_elf(fixture);
+    if (!zero_ordinary_function_size(image, offset))
+      image.clear();
+    cases.push_back({.image = std::move(image),
+                     .kernel = shared ? "test_kernel0" : "test_kernel",
+                     .offset = offset,
+                     .name = shared ? "ZeroSizedHelper" : "ZeroSizedKernel"});
+  }
+  return cases;
+}
 
 inline std::array<uint32_t, 3> cdna5_ordinary_address_words(uint32_t scope = 2, int32_t offset = 0,
                                                             bool modifiers = false) {
@@ -44,6 +88,34 @@ inline std::vector<uint8_t> make_cdna5_ordinary_address_elf(const OrdinaryTarget
                                                             uint32_t scope = 2, int32_t offset = 0,
                                                             bool modifiers = false) {
   const std::array<uint32_t, 3> load = cdna5_ordinary_address_words(scope, offset, modifiers);
+  std::vector<uint32_t> words = ordinary_acquire_words(scope, offset, true);
+  std::copy(load.begin(), load.end(), words.begin());
+  return make_ordinary_words_elf(fixture, std::move(words));
+}
+
+inline std::array<uint32_t, 3> modern_ordinary_address_words(const OrdinaryTargetCase &fixture,
+                                                             uint32_t scope = 2, int32_t offset = 0,
+                                                             bool modifiers = false) {
+  if (fixture.arch == IsaFamily::Cdna5)
+    return cdna5_ordinary_address_words(scope, offset, modifiers);
+  const uint8_t flag = static_cast<uint8_t>(modifiers);
+  return rdna4::build_vglobal(rdna4::kGlobalLoadB32Vglobal,
+                              {.saddr = 4,
+                               .nv = flag,
+                               .vdst = 7,
+                               .sve = flag,
+                               .scope = static_cast<uint8_t>(scope),
+                               .th = modifiers ? uint8_t{6} : uint8_t{0},
+                               .vsrc = modifiers ? uint8_t{6} : uint8_t{0},
+                               .vaddr = 10,
+                               .ioffset = static_cast<uint32_t>(offset) & 0xffffffu});
+}
+
+inline std::vector<uint8_t> make_modern_ordinary_address_elf(const OrdinaryTargetCase &fixture,
+                                                             uint32_t scope = 2, int32_t offset = 0,
+                                                             bool modifiers = false) {
+  const std::array<uint32_t, 3> load =
+      modern_ordinary_address_words(fixture, scope, offset, modifiers);
   std::vector<uint32_t> words = ordinary_acquire_words(scope, offset, true);
   std::copy(load.begin(), load.end(), words.begin());
   return make_ordinary_words_elf(fixture, std::move(words));

@@ -133,11 +133,12 @@ TEST_P(FaultOrdinaryWrongAddressCli,
          {OrdinaryAcquirePath::SameBlock, OrdinaryAcquirePath::ExactFallthroughJoin,
           OrdinaryAcquirePath::ExactSelfLoopExit}) {
       SCOPED_TRACE(static_cast<int>(path));
-      std::vector<uint8_t> image = path == OrdinaryAcquirePath::SameBlock
-                                       ? test::make_cdna5_ordinary_address_elf(fixture, 3, -4, true)
-                                   : path == OrdinaryAcquirePath::ExactFallthroughJoin
-                                       ? test::make_ordinary_fallthrough_elf(fixture)
-                                       : test::make_ordinary_poll_elf(fixture);
+      std::vector<uint8_t> image =
+          path == OrdinaryAcquirePath::SameBlock
+              ? test::make_modern_ordinary_address_elf(fixture, 3, -4, true)
+          : path == OrdinaryAcquirePath::ExactFallthroughJoin
+              ? test::make_ordinary_fallthrough_elf(fixture)
+              : test::make_ordinary_poll_elf(fixture);
       if (zero_sized) {
         ASSERT_TRUE(test::zero_ordinary_function_size(image, 0));
       }
@@ -364,7 +365,8 @@ TEST_P(FaultOrdinaryWrongAddressCli, EmissionFailureDoesNotPublishPartialOutput)
   EXPECT_EQ(read(input_), image);
 }
 
-TEST_F(FaultOrdinaryCliSupport, Rdna4AcquireQueryStaysPositiveBeforeAddressRecipeIsEnabled) {
+TEST_F(FaultOrdinaryCliSupport,
+       Rdna4AcquireMutationRetainsQualifiedProofAndRefusesMalformedShapes) {
   for (const test::OrdinaryTargetCase &fixture : test::kOrdinaryTargetCases) {
     if (fixture.arch != IsaFamily::Rdna4)
       continue;
@@ -380,17 +382,46 @@ TEST_F(FaultOrdinaryCliSupport, Rdna4AcquireQueryStaysPositiveBeforeAddressRecip
     const FailureOr<OrdinaryAcquireSelection> selected =
         select_ordinary_acquire(inventory.value(), {}, error);
     ASSERT_TRUE(selected.succeeded()) << error.message;
-    EXPECT_TRUE(apply_ordinary_wrong_address(source, selected.value(), 8, error).failed());
-    EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
+    const FailureOr<OrdinaryWrongAddressResult> expected =
+        apply_ordinary_wrong_address(source, selected.value(), 8, error);
+    ASSERT_TRUE(expected.succeeded()) << error.message;
     std::vector<std::string> list = args();
     list.push_back("--list");
     ASSERT_EQ(run(list), 0) << stderr_;
     EXPECT_NE(stdout_.find("ordinal=0 exact=0"), std::string::npos);
     EXPECT_NE(stdout_.find("form=global_load_b32"), std::string::npos);
-    EXPECT_NE(run(mutation_args({"--exact", "0", "--ordinal", "999"})), 0);
-    EXPECT_NE(stderr_.find("UnsupportedForm"), std::string::npos);
-    ASSERT_NO_FATAL_FAILURE(expect_no_partial_output());
+    ASSERT_EQ(run(mutation_args({"--exact", "0", "--ordinal", "999"})), 0) << stderr_;
+    const std::vector<uint8_t> actual = read(output_);
+    EXPECT_EQ(actual, expected.value().image);
+    EXPECT_TRUE(test::ordinary_wrong_address_output_matches(source, 0, 8, actual));
+    ASSERT_TRUE(std::filesystem::remove(output_));
     EXPECT_EQ(read(input_), image);
+    std::vector<std::vector<uint32_t>> malformed = {test::ordinary_acquire_words(1)};
+    std::vector<uint32_t> missing_wait = test::ordinary_acquire_words();
+    missing_wait.erase(missing_wait.begin() + 3);
+    malformed.push_back(std::move(missing_wait));
+    std::vector<uint32_t> padding = test::ordinary_acquire_words();
+    padding[0] |= 1u << 8;
+    malformed.push_back(std::move(padding));
+    std::vector<uint32_t> store = test::ordinary_acquire_words();
+    store.insert(store.begin() + 4, {0xee068004u, (2u << 18) | (7u << 23), 10u});
+    malformed.push_back(std::move(store));
+    std::vector<uint32_t> barrier = test::ordinary_acquire_words();
+    barrier.insert(barrier.begin() + 4, 0xbf940000u);
+    malformed.push_back(std::move(barrier));
+    for (const std::vector<uint32_t> &words : malformed) {
+      const std::vector<uint8_t> invalid = test::make_ordinary_words_elf(fixture, words);
+      ASSERT_NO_FATAL_FAILURE(write(input_, invalid));
+      const FaultMutationContext invalid_source(invalid);
+      const FailureOr<OrdinaryAcquireInventory> rejected =
+          discover_ordinary_acquires(invalid_source, "test_kernel", error);
+      if (rejected.succeeded()) {
+        EXPECT_TRUE(rejected.value().sites().empty());
+      }
+      EXPECT_NE(run(mutation_args({"--exact", "0", "--ordinal", "0"})), 0);
+      ASSERT_NO_FATAL_FAILURE(expect_no_partial_output());
+      EXPECT_EQ(read(input_), invalid);
+    }
   }
 }
 
@@ -404,18 +435,66 @@ TEST_F(FaultOrdinaryCliSupport, HelpAndCapabilitiesMatchEnabledOrdinaryProfiles)
        (position = stdout_.find("kind=OrdinaryWrongAddress ", position)) != std::string::npos;
        ++position)
     ++lines;
-  EXPECT_EQ(lines, 2u);
-  for (const test::OrdinaryTargetCase &fixture : test::kCdna5OrdinaryAddressCases) {
+  EXPECT_EQ(lines, 6u);
+  for (const test::OrdinaryTargetCase &fixture : test::kOrdinaryTargetCases) {
     const IsaTargetBinding *description = default_isa_target_registry().find_target(fixture.target);
     ASSERT_NE(description, nullptr);
-    const std::string row = "kind=OrdinaryWrongAddress target=" + std::string(description->id) +
-                            " wave=" + std::to_string(fixture.wave) + " profile=Cdna5GlobalB32";
+    const std::string row =
+        "kind=OrdinaryWrongAddress target=" + std::string(description->id) +
+        " wave=" + std::to_string(fixture.wave) +
+        " profile=" + (fixture.arch == IsaFamily::Cdna5 ? "Cdna5GlobalB32" : "Rdna4GlobalB32");
     EXPECT_NE(stdout_.find(row), std::string::npos);
   }
 }
 
+class FaultRdna4OrdinaryParityCli : public FaultOrdinaryCliSupport,
+                                    public ::testing::WithParamInterface<test::OrdinaryTargetCase> {
+};
+
+TEST_P(FaultRdna4OrdinaryParityCli, OriginalQualifiedVariantsAgreeWithLibraryAndIndependentOracle) {
+  const test::OrdinaryTargetCase &fixture = GetParam();
+  for (const test::OrdinaryAddressParityCase &parity :
+       test::rdna4_ordinary_address_parity_cases(fixture)) {
+    SCOPED_TRACE(parity.name);
+    ASSERT_FALSE(parity.image.empty());
+    ASSERT_NO_FATAL_FAILURE(write(input_, parity.image));
+    const FaultMutationContext source(parity.image);
+    FaultMutationError error;
+    const FailureOr<OrdinaryAcquireInventory> inventory =
+        discover_ordinary_acquires(source, parity.kernel, error);
+    ASSERT_TRUE(inventory.succeeded()) << error.message;
+    ASSERT_EQ(inventory.value().sites().size(), 1u);
+    const FailureOr<OrdinaryAcquireSelection> selected =
+        select_ordinary_acquire(inventory.value(), {}, error);
+    ASSERT_TRUE(selected.succeeded()) << error.message;
+    const FailureOr<OrdinaryWrongAddressResult> expected =
+        apply_ordinary_wrong_address(source, selected.value(), 8, error);
+    ASSERT_TRUE(expected.succeeded()) << error.message;
+    std::vector<std::string> list = args(parity.kernel);
+    list.push_back("--list");
+    ASSERT_EQ(run(list), 0) << stderr_;
+    EXPECT_NE(stdout_.find("ordinal=0 exact=" + std::to_string(parity.offset)), std::string::npos);
+    for (const std::vector<std::string> &selector :
+         {std::vector<std::string>{"--ordinal", "0"},
+          std::vector<std::string>{"--exact", std::to_string(parity.offset), "--ordinal", "999"}}) {
+      ASSERT_EQ(run(mutation_args(selector, parity.kernel)), 0) << stderr_;
+      const std::vector<uint8_t> actual = read(output_);
+      EXPECT_EQ(actual, expected.value().image);
+      EXPECT_TRUE(test::ordinary_wrong_address_output_matches(source, parity.offset, 8, actual));
+      EXPECT_EQ(read(input_), parity.image);
+      ASSERT_TRUE(std::filesystem::remove(output_));
+    }
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Targets, FaultOrdinaryWrongAddressCli,
-                         ::testing::ValuesIn(test::kCdna5OrdinaryAddressCases),
+                         ::testing::ValuesIn(test::kOrdinaryTargetCases),
+                         [](const ::testing::TestParamInfo<test::OrdinaryTargetCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Targets, FaultRdna4OrdinaryParityCli,
+                         ::testing::ValuesIn(test::kRdna4OrdinaryAddressCases),
                          [](const ::testing::TestParamInfo<test::OrdinaryTargetCase> &info) {
                            return info.param.name;
                          });
