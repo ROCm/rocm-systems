@@ -18,6 +18,7 @@ class Instruction;
 } // namespace rocjitsu
 
 namespace rocjitsu::consan {
+struct LocalHelper;
 struct InputError;
 struct InputProgram;
 
@@ -27,6 +28,8 @@ struct NativeLdsAccess {
   uint64_t original_offset = 0;
   AccessKind kind = AccessKind::Read;
   uint16_t address_vgpr = 0;
+  std::optional<uint16_t> scalar_base = std::nullopt;
+  bool scaled_vector_offset = false;
   int32_t immediate_bytes = 0;
   uint32_t guest_size = 8;
   // Byte count set by decoding; zero is unspecified and cannot qualify a site.
@@ -42,6 +45,7 @@ struct FlatSitePolicy {
   const RegisterSet &selected_shared_high;
   FlatPolicy mode;
   std::vector<FlatExclusion> &exclusions;
+  std::optional<AccessKind> helper_api = {};
 };
 
 /// @brief Qualify LDS scope and select sites without owning binary/CFG machinery.
@@ -61,11 +65,13 @@ struct FlatSitePolicy {
 /// increasing native LDS access PCs along paths with backward trampoline edges.
 /// A deferred self-edge is admitted only if qualify_lds_race_barrier() later succeeds.
 [[nodiscard]] FailureOr<std::vector<const BasicBlock *>>
-qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputError &error);
+qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, const LocalHelper &call,
+                     InputError &error);
 [[nodiscard]] Result
 classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                               uint32_t allocated_vgprs, std::vector<NativeLdsAccess> &accesses,
-                              InputError &error, const FlatSitePolicy *flat_policy = nullptr);
+                              InputError &error, const FlatSitePolicy *flat_policy = nullptr,
+                              uint32_t allocated_sgprs = 0);
 [[nodiscard]] FailureOr<uint32_t> lds_race_row_stride(size_t sites, InputError &error,
                                                       bool has_barriers);
 

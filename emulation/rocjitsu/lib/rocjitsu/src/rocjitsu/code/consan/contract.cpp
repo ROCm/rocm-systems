@@ -317,7 +317,11 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
         site.analysis != AnalysisKind::LdsRaceDetection || site.record != RecordKind::Access ||
         !valid_ranges || !valid_access || !valid_origin ||
         (site.assumption != FlatAssumption::None &&
-         !(site.assumption == FlatAssumption::SelectedSharedHigh &&
+         !((site.assumption == FlatAssumption::SelectedSharedHigh ||
+            (site.assumption == FlatAssumption::HelperLoadAt && site.width == 4 &&
+             site.access == AccessKind::Read) ||
+            (site.assumption == FlatAssumption::HelperStoreAt && site.width == 4 &&
+             site.access == AccessKind::Write)) &&
            site.origin == AccessOrigin::GroupFlat && policy == FlatPolicy::Likely)) ||
         (site.width != 2 && site.width != 4 && site.width != 8 && site.width != 16 &&
          (!admits_b96 || site.width != 12) && (!admits_bytes || site.width != 1)) ||
@@ -347,9 +351,9 @@ Result validate_manifest(const Manifest &manifest, util::DiagnosticEmitter diagn
             (manifest.target == 1201 || manifest.target == 1250 ? 12u : 8u) ||
         pc < previous_excluded_end ||
         !util::is_range_in_bounds(pc, exclusion.original_size, manifest.original_text_bytes) ||
-        (exclusion.assumption != (exclusion.reason == FlatExclusionReason::Strict
-                                      ? FlatAssumption::SelectedSharedHigh
-                                      : FlatAssumption::None)) ||
+        (exclusion.reason == FlatExclusionReason::Strict
+             ? flat_assumption_text(exclusion.assumption).empty()
+             : exclusion.assumption != FlatAssumption::None) ||
         (exclusion.reason != FlatExclusionReason::NonGroup &&
          exclusion.reason != FlatExclusionReason::Unresolved &&
          !(exclusion.reason == FlatExclusionReason::Strict && policy == FlatPolicy::Strict)))

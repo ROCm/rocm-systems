@@ -521,6 +521,29 @@ TEST_P(ConSanTargetStatic, LoopLaneSelectorsAvoidScalarReadModifyReadHazards) {
   }
 }
 
+TEST(ConSanInputImage, SingleKernelLocalCallsUseTheQualifiedManifestUnderBothPolicies) {
+  constexpr std::array<std::string_view, 1> selected = {"lds_producer_consumer"};
+  const TargetProfile &target = *target_profile("gfx950");
+  for (const char *name : {"width-flat-load-helper", "width-flat-load-helperlookalike"}) {
+    SCOPED_TRACE(name);
+    const std::vector<uint8_t> original =
+        test::read_fixture(test::target_fixture_path({"gfx950", 64}, name));
+    ASSERT_FALSE(original.empty());
+    for (FlatPolicy policy : {FlatPolicy::Likely, FlatPolicy::Strict}) {
+      SCOPED_TRACE(static_cast<unsigned>(policy));
+      InputError error;
+      const FailureOr<PreparedArtifact> single =
+          prepare(original, target, selected[0], error, policy);
+      ASSERT_TRUE(single.succeeded()) << error.message;
+      const FailureOr<PreparedImageArtifact> image =
+          prepare_image(original, target, selected, error, policy);
+      ASSERT_TRUE(image.succeeded()) << error.message;
+      EXPECT_EQ(image.value().image, single.value().image);
+      EXPECT_EQ(image.value().facts, single_entry_image_facts(single.value().manifest, 16, 16));
+    }
+  }
+}
+
 TEST(ConSanInput, GroupFlatRechecksTheApertureOnABarrierLoopBackedge) {
   std::vector<uint8_t> image =
       test::read_fixture(test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap"));

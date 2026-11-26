@@ -79,6 +79,11 @@ def is_gfx115x(gpu_arch: Optional[str]) -> bool:
     return bool(gpu_arch and gpu_arch.startswith("gfx115"))
 
 
+def is_gfx120x(gpu_arch: Optional[str]) -> bool:
+    """Return True if gpu_arch is a gfx120x (RDNA 4) architecture."""
+    return bool(gpu_arch and gpu_arch.startswith("gfx120"))
+
+
 def is_gfx1250(gpu_arch: Optional[str]) -> bool:
     """Return True if gpu_arch is a gfx1250 architecture."""
     return gpu_arch == "gfx1250"
@@ -90,6 +95,8 @@ def canonical_config_arch(gpu_arch: Optional[str]) -> Optional[str]:
         return None
     if is_gfx115x(gpu_arch):
         return "gfx115x"
+    if is_gfx120x(gpu_arch):
+        return "gfx120x"
     return gpu_arch
 
 
@@ -1003,15 +1010,39 @@ def print_status(msg: str) -> None:
     console_log("")
 
 
+def select_arch_counter_definitions(
+    sdk_config: Dict[str, Any], arch: str
+) -> Dict[str, Any]:
+    """Return sdk_config with only the counter definitions for arch.
+
+    rocprofiler-sdk reads the definitions of every architecture. An older
+    rocprofiler-sdk can fail on a newer definition for another GPU.
+    """
+    counters = []
+    for counter in sdk_config["rocprofiler-sdk"]["counters"]:
+        definitions = [
+            {**definition, "architectures": [arch]}
+            for definition in counter["definitions"]
+            if arch in definition["architectures"]
+        ]
+        if definitions:
+            counters.append({**counter, "definitions": definitions})
+    return {
+        **sdk_config,
+        "rocprofiler-sdk": {**sdk_config["rocprofiler-sdk"], "counters": counters},
+    }
+
+
 def create_temp_rocprofiler_metrics_path(
-    sdk_config: Dict[str, Any], parent_dir: Path = Path("/tmp")
+    sdk_config: Dict[str, Any], arch: str, parent_dir: Path = Path("/tmp")
 ) -> str:
     """Create a temporary directory with the rocprofiler-sdk counter definitions.
 
-    The directory is created in parent_dir. It holds config.yaml with the full
-    config, and counter_defs.yaml without firmware restrictions for older
-    rocprofiler-sdk versions. Return the path of the directory.
+    The directory is created in parent_dir. It holds config.yaml with the
+    definitions for arch, and counter_defs.yaml without firmware restrictions for
+    older rocprofiler-sdk versions. Return the path of the directory.
     """
+    sdk_config = select_arch_counter_definitions(sdk_config, arch)
     tmpfile_parent = Path(
         tempfile.mkdtemp(prefix="rocprof_compute_sdk_config_", dir=parent_dir)
     )

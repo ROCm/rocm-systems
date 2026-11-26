@@ -13,6 +13,7 @@
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "common/wave.h"
+#include "math/older_half_unary_test.h"
 #include "math/trig_golden.h"
 #include "rj_arith/detail/rj_arith_math.h"
 #include <bit>
@@ -34,21 +35,25 @@ template <int Lanes, bool Half, bool Gfx12, typename Call> void check_trig(Call 
   std::vector<uint16_t> half_table;
   if constexpr (Half) {
     half_table.resize(65536);
-    uint64_t hash = capture_hash_seed;
-    Registers<2, Lanes> r;
-    for (int base = 0; base < 65536; base += Lanes) {
-      for (int lane = 0; lane < Lanes; ++lane) {
-        r.v[0][lane] = base + lane;
+    for (auto cpu : supported_cpu_levels()) {
+      SCOPED_TRACE(cpu);
+      uint64_t hash = capture_hash_seed;
+      Registers<2, Lanes> r;
+      for (int base = 0; base < 65536; base += Lanes) {
+        for (int lane = 0; lane < Lanes; ++lane) {
+          r.v[0][lane] = base + lane;
+        }
+        ASSERT_EQ(
+            call(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS | RJ_ARITH_FP_IEEE_MODE,
+                 WaveMask<Lanes>(~WaveMask<Lanes>(0)), 0, r.v + 1, r.v, nullptr),
+            RJ_ARITH_SUCCESS);
+        for (int lane = 0; lane < Lanes; ++lane) {
+          half_table[base + lane] = uint16_t(r.v[1][lane]);
+          hash = capture_hash_word(hash, half_table[base + lane]);
+        }
       }
-      ASSERT_EQ(call(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS | RJ_ARITH_FP_IEEE_MODE,
-                     WaveMask<Lanes>(~WaveMask<Lanes>(0)), 0, r.v + 1, r.v, nullptr),
-                RJ_ARITH_SUCCESS);
-      for (int lane = 0; lane < Lanes; ++lane) {
-        half_table[base + lane] = uint16_t(r.v[1][lane]);
-        hash = capture_hash_word(hash, half_table[base + lane]);
-      }
+      ASSERT_EQ(hash, cosine ? 0xc6c3112c531e4391ULL : 0xb6245e65a23f99f9ULL);
     }
-    ASSERT_EQ(hash, cosine ? 0xc6c3112c531e4391ULL : 0xb6245e65a23f99f9ULL);
   }
   Registers<2, Lanes> random_input;
   std::minstd_rand random;
@@ -299,6 +304,31 @@ TEST(MathSinF32W32Gfx12, OutputDenormalSigns) {
         ASSERT_EQ(rj_arith_v_sin_f32_w32_gfx12(flags, 3, mode, r.v + 1, r.v, &status),
                   RJ_ARITH_SUCCESS);
         EXPECT_EQ(r.v[1][1], 0U);
+      }
+    }
+  }
+}
+
+// Selected half operands, aliases and qualification follow the inherited trig mapping.
+TEST(MathOlderHalfTrig, Arithmetic) {
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_sin_f16_w32_gfx908, 10);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_sin_f16_w64_gfx908, 10);
+  rocjitsu::arith::test::check_older_half_unary<32>(rj_arith_v_cos_f16_w32_gfx908, 11);
+  rocjitsu::arith::test::check_older_half_unary<64>(rj_arith_v_cos_f16_w64_gfx908, 11);
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (bool cosine : {false, true}) {
+      uint32_t data[32];
+      for (int lane = 0; lane < 32; ++lane) {
+        data[lane] = uint32_t(cosine ? 0x3251 : 0x2abc) | (lane & 1 ? 0x8000 : 0);
+      }
+      const uint32_t *a = data;
+      uint32_t *d = data;
+      uint32_t status = 0;
+      auto call = cosine ? rj_arith_v_cos_f16_w32_gfx908 : rj_arith_v_sin_f16_w32_gfx908;
+      ASSERT_EQ(call(cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY, UINT32_MAX, 0, &d, &a, &status),
+                RJ_ARITH_SUCCESS);
+      for (int lane = 0; lane < 32; ++lane) {
+        EXPECT_EQ(data[lane], 0x3531U | (!cosine && (lane & 1) ? 0x8000U : 0U));
       }
     }
   }

@@ -6,7 +6,7 @@
 /// @file output_modifier.h
 /// @brief Apply OMOD, then CLAMP, to destination-format results.
 /// @details Disabled stages preserve the input. Callers resolve effective OMOD
-/// and MODE through output_modifier_policy in simd_glue.h.
+/// and MODE through an explicitly constructed policy.
 ///
 /// Scope:
 /// - Shared scalar/SIMD stage for migrated VOP3 results on every target, and
@@ -19,7 +19,7 @@
 /// Migrated callers reach the stage through one of these; prefer them over a new
 /// OMOD implementation:
 /// - Generated VOP3 scalar bodies: output_modifier::apply on the result, with the
-///   policy from output_modifier_policy in simd_glue.h.
+///   explicitly constructed policy.
 /// - fp_mode::apply_omod_f32 -> scale: the F32 scalar OMOD finalizer, also used by
 ///   the SDWA FLUSH_NEAREST path.
 /// - apply_vop3_dst_mod_f32 -> apply: every F32 SIMD destination helper, including

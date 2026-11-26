@@ -1266,15 +1266,20 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
   const uint64_t high = uint64_t{1} << (target.wave_size - 1);
   const bool cdna =
       std::string_view(target.target) == "gfx942" || std::string_view(target.target) == "gfx950";
-  for (std::string_view form :
-       {"load-overlap", "load-adjacent", "load-ordered", "load-empty", "load-oob", "load-offset",
-        "load-readread", "store-overlap", "store-adjacent", "store-ordered", "store-tail"}) {
+  std::vector<std::string_view> forms{"load-overlap",       "load-adjacent", "load-ordered",
+                                      "load-empty",         "load-oob",      "load-offset",
+                                      "load-readread",      "store-overlap", "store-adjacent",
+                                      "store-ordered",      "store-tail",    "load-helper",
+                                      "load-helperordered", "store-helper",  "store-helperordered"};
+  if (std::string_view(target.target) == "gfx1250")
+    forms.insert(forms.end(), {"load-scalar", "store-scalar", "load-backward", "store-backward"});
+  for (const std::string_view form : forms) {
     const bool store = form.starts_with("store-");
     const std::string_view scenario = form.substr(form.find('-') + 1);
     const std::string_view mnemonic = store ? (cdna ? "flat_store_dword" : "flat_store_b32")
                                             : (cdna ? "flat_load_dword" : "flat_load_b32");
     SCOPED_TRACE(form);
-    const bool ordered = scenario == "ordered";
+    const bool ordered = scenario.ends_with("ordered");
     const bool empty = scenario == "empty";
     const bool oob = scenario == "oob";
     const std::string fixture = "width-flat-" + std::string(form);
@@ -1297,6 +1302,11 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
     EXPECT_EQ(after.manifest.sites[1].access, AccessKind::Read);
     const SiteFacts &flat = after.manifest.sites[store ? 0 : 1];
     EXPECT_EQ(flat.origin, AccessOrigin::GroupFlat);
+    EXPECT_EQ(flat.owner_entry, after.manifest.entry.id);
+    EXPECT_EQ(flat.assumption,
+              scenario.starts_with("helper")
+                  ? (store ? FlatAssumption::HelperStoreAt : FlatAssumption::HelperLoadAt)
+                  : FlatAssumption::None);
     const bool wide = std::string_view(target.target) == "gfx1201" ||
                       std::string_view(target.target) == "gfx1250";
     EXPECT_EQ(flat.original_size, wide ? 12u : 8u);
@@ -1322,8 +1332,11 @@ TEST_P(ConSanGroupFlatSim, GroupFlatUsesTheOriginalPointerAndGuestBarrier) {
     EXPECT_EQ(analysis.coverage_complete, !oob);
     EXPECT_EQ(analysis.rejected_records, oob ? 1u : 0u);
     EXPECT_EQ(analysis.valid_observations, records.size() - (oob ? 1u : 0u));
-    EXPECT_EQ(analysis.cross_wave_pairs,
-              scenario == "overlap" || scenario == "offset" || scenario == "tail" ? 1u : 0u);
+    EXPECT_EQ(analysis.cross_wave_pairs, scenario == "overlap" || scenario == "offset" ||
+                                                 scenario == "tail" || scenario == "scalar" ||
+                                                 scenario == "backward" || scenario == "helper"
+                                             ? 1u
+                                             : 0u);
     EXPECT_EQ(analysis.ordered_pairs, ordered ? 1u : 0u);
     EXPECT_EQ(analysis.ordering_unresolved_pairs, 0u);
 #endif

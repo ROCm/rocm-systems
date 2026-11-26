@@ -27,8 +27,6 @@
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "util/simd_test_hooks.h"
 
-#include "util/simd.h"
-
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -85,7 +83,8 @@ uint32_t reference(Packing operation, uint32_t a, uint32_t b, uint32_t c, const 
   double value = input != input ? 0 : std::clamp(double(input), 0.0, 255.0);
   switch (operation == Packing::Accumulate ? 3 : wave.fp_round_mode_f32()) {
   case 0:
-    value = util::rndne_scalar(value);
+    // The default host rounding mode supplies guest RNE for this reference.
+    value = std::nearbyint(value);
     break;
   case 1:
     value = std::ceil(value);
