@@ -55,6 +55,7 @@ hipEventElapsedTime
 hipEventQuery
 hipEventRecord
 hipEventSynchronize
+hipExtCopyEngineGetDeviceHandles
 hipExtGetLinkTypeAndHopCount
 hipExtLaunchMultiKernelMultiDevice
 hipExtMallocWithFlags

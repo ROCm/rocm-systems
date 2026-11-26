@@ -141,6 +141,8 @@ release(uint, GPU_MAX_HW_QUEUES, 4,                                           \
          "The maximum number of HW queues allocated per device")              \
 release(uint, GPU_MAX_SDMA_QUEUES, 16,                                        \
          "The maximum number of ABCE host SDMA queues per device")            \
+release(uint, GPU_MAX_SDMA_DEVICE_QUEUES, 0,                                  \
+         "The maximum number of ABCE kernel SDMA queues per device, 0 = off") \
 release(bool, DEBUG_CLR_AQL_BARRIER_OPT, true,                                \
         "Enable per-stream AQL barrier-bit optimization on shared HW queues") \
 release(bool, GPU_IMAGE_BUFFER_WAR, true,                                     \

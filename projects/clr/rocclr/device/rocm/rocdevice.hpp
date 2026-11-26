@@ -823,8 +823,9 @@ class Device : public NullDevice {
   }
   //! Lazily created device-owned ABCE engine set, or nullptr when disabled/unsupported.
   AbceEngineSet* abceEngineSet() const { return abce_engine_set_.get(); }
-  //! As above, but brings the engine set up if this is the first caller, as the
-  //! first stream on the device is.
+  //! As above, but brings the engine set up if this is the first caller. Needed
+  //! by clients that reach ABCE without going through a stream, which is what
+  //! otherwise triggers creation.
   AbceEngineSet* getOrCreateAbceEngineSet();
   //! Returns the map of code objects to kernels
   const auto& KernelMap() const { return kernel_map_; }
