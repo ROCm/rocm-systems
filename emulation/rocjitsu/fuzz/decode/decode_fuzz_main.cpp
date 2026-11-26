@@ -53,8 +53,9 @@ void usage(std::ostream &out, const rocjitsu::cli::Command &command) {
 
 util::FailureOr<Window> words_to_window(std::span<const uint32_t> words,
                                         util::DiagnosticEmitter diagnostic) {
-  if (words.size() > Window{}.size() / sizeof(uint32_t))
+  if (words.size() > Window{}.size() / sizeof(uint32_t)) {
     return diagnostic.emit() << "seed encoding exceeds the 16-byte decoder window";
+  }
   Window result{};
   for (size_t word = 0; word < words.size(); ++word) {
     for (size_t byte = 0; byte < sizeof(uint32_t); ++byte) {
@@ -68,25 +69,30 @@ util::FailureOr<Window> words_to_window(std::span<const uint32_t> words,
 util::FailureOr<Window> read_window(const std::filesystem::path &path,
                                     util::DiagnosticEmitter diagnostic) {
   std::ifstream input(path, std::ios::binary | std::ios::ate);
-  if (!input)
+  if (!input) {
     return diagnostic.emit() << "cannot open input: " << path.string();
+  }
   const std::streamsize size = input.tellg();
-  if (size < 0)
+  if (size < 0) {
     return diagnostic.emit() << "cannot read input: " << path.string();
-  if (size != static_cast<std::streamsize>(Window{}.size()))
+  }
+  if (size != static_cast<std::streamsize>(Window{}.size())) {
     return diagnostic.emit() << "input must be exactly 16 bytes: " << path.string();
+  }
   input.seekg(0);
   Window window{};
-  if (!input.read(reinterpret_cast<char *>(window.data()), size))
+  if (!input.read(reinterpret_cast<char *>(window.data()), size)) {
     return diagnostic.emit() << "cannot read input: " << path.string();
+  }
   return window;
 }
 
 std::string safe_name(std::string_view mnemonic) {
   std::string result;
   result.reserve(mnemonic.size());
-  for (const unsigned char c : mnemonic)
+  for (const unsigned char c : mnemonic) {
     result += std::isalnum(c) || c == '_' ? static_cast<char>(c) : '_';
+  }
   return result;
 }
 
@@ -94,36 +100,44 @@ util::FailureOr<size_t> emit_seeds(const std::filesystem::path &directory, std::
                                    util::DiagnosticEmitter diagnostic) {
   std::error_code error;
   const bool exists = std::filesystem::exists(directory, error);
-  if (error)
+  if (error) {
     return diagnostic.emit() << "cannot inspect seed destination: " << directory.string() << ": "
                              << error.message();
+  }
   if (exists) {
     const bool is_directory = std::filesystem::is_directory(directory, error);
-    if (error)
+    if (error) {
       return diagnostic.emit() << "cannot inspect seed destination: " << directory.string() << ": "
                                << error.message();
-    if (!is_directory)
+    }
+    if (!is_directory) {
       return diagnostic.emit() << "seed destination is not a directory: " << directory.string();
+    }
     const std::filesystem::directory_iterator entry(directory, error);
-    if (error)
+    if (error) {
       return diagnostic.emit() << "cannot inspect seed destination: " << directory.string() << ": "
                                << error.message();
-    if (entry != std::filesystem::directory_iterator())
+    }
+    if (entry != std::filesystem::directory_iterator()) {
       return diagnostic.emit() << "seed destination is not empty: " << directory.string();
+    }
   }
   std::filesystem::create_directories(directory, error);
-  if (error)
+  if (error) {
     return diagnostic.emit() << "cannot create seed destination: " << directory.string() << ": "
                              << error.message();
+  }
   std::set<Window> seen;
   size_t index = 0;
   const auto write = [&](std::string_view name, std::span<const uint32_t> words) -> util::Result {
     const util::FailureOr<Window> converted = words_to_window(words, diagnostic);
-    if (converted.failed())
+    if (converted.failed()) {
       return util::Result::failure();
+    }
     const Window &window = converted.value();
-    if (!seen.insert(window).second)
+    if (!seen.insert(window).second) {
       return util::Result::success();
+    }
     std::string filename = std::to_string(index++);
     filename += '_';
     filename += safe_name(name);
@@ -131,44 +145,48 @@ util::FailureOr<size_t> emit_seeds(const std::filesystem::path &directory, std::
     std::ofstream output(directory / filename, std::ios::binary);
     output.write(reinterpret_cast<const char *>(window.data()), window.size());
     output.close();
-    if (!output)
+    if (!output) {
       return diagnostic.emit() << "cannot write seed: " << (directory / filename).string();
+    }
     return util::Result::success();
   };
 
   const auto write_encodings = [&](const auto &encodings) -> util::Result {
     for (const auto &encoding : encodings) {
-      if (write(encoding.mnemonic, encoding.words).failed())
+      if (write(encoding.mnemonic, encoding.words).failed()) {
         return util::Result::failure();
+      }
     }
     return util::Result::success();
   };
   util::Result written;
-  if (target == "cdna1")
+  if (target == "cdna1") {
     written = write_encodings(rocjitsu::cdna1::test_data::ENCODINGS);
-  else if (target == "cdna2")
+  } else if (target == "cdna2") {
     written = write_encodings(rocjitsu::cdna2::test_data::ENCODINGS);
-  else if (target == "cdna3")
+  } else if (target == "cdna3") {
     written = write_encodings(rocjitsu::cdna3::test_data::ENCODINGS);
-  else if (target == "cdna4")
+  } else if (target == "cdna4") {
     written = write_encodings(rocjitsu::cdna4::test_data::ENCODINGS);
-  else if (target == "rdna1")
+  } else if (target == "rdna1") {
     written = write_encodings(rocjitsu::rdna1::test_data::ENCODINGS);
-  else if (target == "rdna2")
+  } else if (target == "rdna2") {
     written = write_encodings(rocjitsu::rdna2::test_data::ENCODINGS);
-  else if (target == "rdna3")
+  } else if (target == "rdna3") {
     written = write_encodings(rocjitsu::rdna3::test_data::ENCODINGS);
-  else if (target == "rdna3_5")
+  } else if (target == "rdna3_5") {
     written = write_encodings(rocjitsu::rdna3_5::test_data::ENCODINGS);
-  else if (target == "rdna4")
+  } else if (target == "rdna4") {
     written = write_encodings(rocjitsu::rdna4::test_data::ENCODINGS);
-  else if (target == "cdna5")
+  } else if (target == "cdna5") {
     written = write_encodings(rocjitsu::cdna5::test_data::ENCODINGS);
-  else
+  } else {
     return diagnostic.emit() << "unsupported decoder target: " << target;
+  }
 
-  if (written.failed())
+  if (written.failed()) {
     return util::Result::failure();
+  }
 
   if (target == "cdna5") {
     // Generated test encodings currently hold two words. Keep representative
@@ -178,14 +196,18 @@ util::FailureOr<size_t> emit_seeds(const std::filesystem::path &directory, std::
     constexpr std::array<uint32_t, 3> kTrue16Literal = {0xD7620086u, 0x02030CFFu, 0x000000FFu};
     constexpr std::array<uint32_t, 4> kWmmaScale = {0xCC350000u, 0x04020900u, 0xCC330006u,
                                                     0x02026912u};
-    if (write("v_fmamk_f64_literal", kFmamkF64).failed())
+    if (write("v_fmamk_f64_literal", kFmamkF64).failed()) {
       return util::Result::failure();
-    if (write("v_fmaak_f64_literal", kFmaakF64).failed())
+    }
+    if (write("v_fmaak_f64_literal", kFmaakF64).failed()) {
       return util::Result::failure();
-    if (write("v_and_b16_true16_literal", kTrue16Literal).failed())
+    }
+    if (write("v_and_b16_true16_literal", kTrue16Literal).failed()) {
       return util::Result::failure();
-    if (write("v_wmma_scale_f32", kWmmaScale).failed())
+    }
+    if (write("v_wmma_scale_f32", kWmmaScale).failed()) {
       return util::Result::failure();
+    }
   }
   return index;
 }
@@ -193,17 +215,20 @@ util::FailureOr<size_t> emit_seeds(const std::filesystem::path &directory, std::
 util::Result run_replay(const std::filesystem::path &path, std::string_view target,
                         util::DiagnosticEmitter diagnostic) {
   const util::FailureOr<Window> input = read_window(path, diagnostic);
-  if (input.failed())
+  if (input.failed()) {
     return util::Result::failure();
+  }
   const util::FailureOr<std::unique_ptr<rocjitsu::Decoder>> decoder =
       rocjitsu::decode_fuzz::create_decoder(target, diagnostic);
-  if (decoder.failed())
+  if (decoder.failed()) {
     return util::Result::failure();
+  }
   const Window &window = input.value();
   const util::FailureOr<rocjitsu::decode_fuzz::DecodeRecord> record =
       rocjitsu::decode_fuzz::decode_window(*decoder.value(), window, diagnostic);
-  if (record.failed())
+  if (record.failed()) {
     return util::Result::failure();
+  }
   std::cout << rocjitsu::decode_fuzz::record_json(record.value(), window, path.string()) << '\n';
   return util::Result::success();
 }
@@ -214,8 +239,9 @@ int run_afl(std::string_view target, util::DiagnosticEmitter diagnostic) {
 #ifdef __AFL_HAVE_MANUAL_CONTROL
   const util::FailureOr<std::unique_ptr<rocjitsu::Decoder>> decoder =
       rocjitsu::decode_fuzz::create_decoder(target, diagnostic);
-  if (decoder.failed())
+  if (decoder.failed()) {
     return 2;
+  }
 
   __AFL_INIT();
   unsigned char *buffer = __AFL_FUZZ_TESTCASE_BUF;
@@ -225,11 +251,13 @@ int run_afl(std::string_view target, util::DiagnosticEmitter diagnostic) {
 #endif
   while (__AFL_LOOP(10000)) {
     const int size = __AFL_FUZZ_TESTCASE_LEN;
-    if (size != static_cast<int>(rocjitsu::decode_fuzz::kWindowSize))
+    if (size != static_cast<int>(rocjitsu::decode_fuzz::kWindowSize)) {
       continue;
+    }
     const auto bytes = std::span<const uint8_t>(buffer, static_cast<size_t>(size));
-    if (rocjitsu::decode_fuzz::decode_window(*decoder.value(), bytes, diagnostic).failed())
+    if (rocjitsu::decode_fuzz::decode_window(*decoder.value(), bytes, diagnostic).failed()) {
       std::abort();
+    }
   }
 #ifdef __clang__
 #pragma clang diagnostic pop
@@ -265,12 +293,14 @@ int main(int argc, char **argv) {
           .add_flags("Decoder fuzzing", {afl_flag, json_flag, input_flag, seeds_flag, target_flag},
                      diagnostic)
           .failed() ||
-      command.add_flag(help, diagnostic).failed())
+      command.add_flag(help, diagnostic).failed()) {
     return 2;
+  }
   std::vector<std::string_view> arguments(argv + 1, argv + argc);
   auto parsed = parse(command, arguments, diagnostic);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return 2;
+  }
   if (help->value()) {
     usage(std::cout, command);
     return 0;
@@ -306,13 +336,15 @@ int main(int argc, char **argv) {
     std::cerr << "rj_decode_fuzz: " << message << '\n';
   };
   const util::DiagnosticEmitter emit_error(report_error);
-  if (afl)
+  if (afl) {
     return run_afl(decoder_target, emit_error);
+  }
 
   if (!seed_directory.empty()) {
     const util::FailureOr<size_t> written = emit_seeds(seed_directory, descriptor->id, emit_error);
-    if (written.failed())
+    if (written.failed()) {
       return 2;
+    }
     std::cout << "wrote " << written.value() << ' ' << decoder_target << " seeds\n";
     return 0;
   }

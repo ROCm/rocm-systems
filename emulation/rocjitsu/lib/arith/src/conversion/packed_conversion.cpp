@@ -5,6 +5,8 @@
 // Owns public entry points and their validation/dispatch policy.
 
 #include "conversion/packed_conversion.h"
+#include "common/alu.h"
+#include "common/sdwa_output.h"
 #include "common/validation.h"
 #include "conversion/float_conversion.h"
 #include "register/dpp.h"
@@ -42,24 +44,34 @@ uint16_t narrow(uint32_t raw, uint32_t mode, uint64_t flags) {
 
 // Pack two FP32 conversions into one word for the selected lanes. Reject invalid controls
 // before changing outputs.
-template <rocjitsu::arith::PackedConversion Op, bool AcceptExact = false>
+template <rocjitsu::arith::PackedConversion Op, bool AcceptExact = false, bool AllowSdwa = false>
 int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b) {
+  if ((mode >> 32) && (mode & RJ_ARITH_CVT_SDWA)) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
   if (mode >> 32) {
-    return rocjitsu::arith::execute_dpp(
-        flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
-          return convert<Op, AcceptExact>(flags, exec_mask, uint32_t(mode), d, source, b);
-        });
+    return rocjitsu::arith::execute_dpp(flags, exec_mask, mode, a,
+                                        [&](uint32_t exec_mask, const uint32_t *const *source) {
+                                          return convert<Op, AcceptExact, AllowSdwa>(
+                                              flags, exec_mask, uint32_t(mode), d, source, b);
+                                        });
   }
   const uint32_t known =
       RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B |
       RJ_ARITH_ALU_CLAMP |
-      (Op == rocjitsu::arith::PackedConversion::HalfRtz ? RJ_ARITH_ALU_OMOD_MASK : 0);
-  if (int error =
-          rocjitsu::arith::validate(flags, mode & ~known,
-                                    RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
-                                        RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
+      (Op == rocjitsu::arith::PackedConversion::HalfRtz ? RJ_ARITH_ALU_OMOD_MASK : 0) |
+      (AllowSdwa ? RJ_ARITH_CVT_SDWA : 0);
+  if (int error = rocjitsu::arith::validate(
+          flags, mode & ~known,
+          RJ_ARITH_FP_IEEE_MODE | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+              RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS |
+              (AllowSdwa && (mode & RJ_ARITH_CVT_SDWA) ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0))) {
     return error;
+  }
+  if ((mode & RJ_ARITH_CVT_SDWA) &&
+      (flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   // Each conversion has one model. Entry points accept exact requests once their results have
   // been checked against hardware captures; none reports FP status.
@@ -69,6 +81,10 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode & RJ_ARITH_CVT_SDWA) {
+    // This encoding finalizes rounded halves; it does not multiply RTZ inputs/results.
+    mode = rocjitsu::arith::rdna3_output_modifiers(flags, mode);
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
@@ -85,10 +101,14 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
     return RJ_ARITH_SUCCESS;
   }
 #endif
+  const auto output = rocjitsu::arith::sdwa_output_policy(flags, uint32_t(mode));
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
     result[lane] = narrow<Op>(a[0][lane], mode, flags) |
                    (uint32_t(narrow<Op>(b[0][lane], mode >> 1, flags)) << 16);
+    if (mode & RJ_ARITH_CVT_SDWA) {
+      result[lane] = rocjitsu::arith::sdwa_finalize_packed_f16(result[lane], output);
+    }
   }
   for (int lane = 0; lane < 32; ++lane) {
     if ((exec_mask >> lane) & 1) {
@@ -100,11 +120,11 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
 
 // Pack two FP32 conversions into one word for Wave64. Reject invalid controls before changing
 // outputs.
-template <rocjitsu::arith::PackedConversion Op, bool AcceptExact = false>
+template <rocjitsu::arith::PackedConversion Op, bool AcceptExact = false, bool AllowSdwa = false>
 int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                    const uint32_t *const *a, const uint32_t *const *b) {
   // Validate before either Wave64 half can modify outputs, even when EXEC is empty.
-  if (int error = convert<Op, AcceptExact>(flags, 0, mode, nullptr, nullptr, nullptr)) {
+  if (int error = convert<Op, AcceptExact, AllowSdwa>(flags, 0, mode, nullptr, nullptr, nullptr)) {
     return error;
   }
   if (!exec_mask) {
@@ -114,8 +134,9 @@ int convert_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *
     uint64_t half_instruction_flags = rocjitsu::arith::dpp_half_wave_instruction_flags(mode, half);
     uint32_t *dest = d[0] + half * 32;
     const uint32_t *source_a = a[0] + half * 32, *source_b = b[0] + half * 32;
-    if (int error = convert<Op, AcceptExact>(flags, uint32_t(exec_mask >> (half * 32)),
-                                             half_instruction_flags, &dest, &source_a, &source_b)) {
+    if (int error = convert<Op, AcceptExact, AllowSdwa>(flags, uint32_t(exec_mask >> (half * 32)),
+                                                        half_instruction_flags, &dest, &source_a,
+                                                        &source_b)) {
       return error;
     }
   }
@@ -249,14 +270,16 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64
                                       const uint32_t *const *b,
                                       [[maybe_unused]] uint32_t *trapsts) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, (mode & RJ_ARITH_CVT_SDWA) ? RJ_ARITH_SEMANTICS_LOOSE
+                                        : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx12(flags, exec_mask, mode, d, a, b, nullptr);
+  return convert<rocjitsu::arith::PackedConversion::HalfRtz, true, true>(flags, exec_mask, mode, d,
+                                                                         a, b);
 }
 
 // Convert F32 to F16 and pack results with packed elements, round-to-zero conversion for
@@ -268,14 +291,16 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64
                                       const uint32_t *const *b,
                                       [[maybe_unused]] uint32_t *trapsts) {
   flags = rocjitsu::arith::resolve_compatibility(
-      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+      flags, (mode & RJ_ARITH_CVT_SDWA) ? RJ_ARITH_SEMANTICS_LOOSE
+                                        : RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx12(flags, exec_mask, mode, d, a, b, nullptr);
+  return convert_wave64<rocjitsu::arith::PackedConversion::HalfRtz, true, true>(flags, exec_mask,
+                                                                                mode, d, a, b);
 }
 
 // Convert F32 to I16 and pack results with packed elements for selected lanes.
@@ -418,26 +443,64 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask
                                                  excp_flag_user);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
+// gfx942 shares the RDNA3 numeric model; empirically exact on MI300X.
 int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
                                              uint32_t *trapsts) {
-  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
-    return error;
+  if (instruction_flags & RJ_ARITH_CVT_SDWA) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
   return rj_arith_v_cvt_pk_rtz_f16_f32_w32(flags, exec_mask, instruction_flags, d, a, b, trapsts);
 }
 
-// gfx942/gfx950 inherit the RDNA3 numeric model; strict exact stays unsupported until the CDNA
-// captures are reviewed per entry point.
 int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
                                              uint32_t *trapsts) {
+  if (instruction_flags & RJ_ARITH_CVT_SDWA) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return rj_arith_v_cvt_pk_rtz_f16_f32_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+}
+
+// gfx950 shares the gfx942 numeric model; empirically exact on MI350X.
+int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts) {
+  return rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                  trapsts);
+}
+
+int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts) {
+  return rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                  trapsts);
+}
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 numeric model; strict exact
+// stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *trapsts) {
   if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
     return error;
   }
-  return rj_arith_v_cvt_pk_rtz_f16_f32_w64(flags, exec_mask, instruction_flags, d, a, b, trapsts);
+  return rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                  trapsts);
+}
+
+int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *trapsts) {
+  if (int error = rocjitsu::arith::loose_only(flags, /*status_operand=*/true)) {
+    return error;
+  }
+  return rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b,
+                                                  trapsts);
 }

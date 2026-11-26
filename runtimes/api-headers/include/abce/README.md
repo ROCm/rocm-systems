@@ -700,6 +700,19 @@ that reaches the GPU's memory over xGMI needs neither.
 A read cannot pass earlier stores to the same device, so one covers every ring of the device; the
 signal can be in another GPU's memory, so it is read back on its own.
 
+A Windows native SDMA user queue (WDDM hardware queue, gfx12+ with HWS) writes a progress-fence
+packet into the last 32 bytes of every span it submits, as ROCr's `BlitSdma` reserves them
+(`HsaNodeProperties::NativeSDMAEpilogueBytes`). `abce_ring_config_t::submission_tail_bytes`
+(`abce_hsa_ring_options_t::submission_tail_bytes` for the HSA adapter) leaves that many zeroed bytes
+after the padded payload of every reservation and rounds each reservation to a multiple of it (and
+of 64 with `align64`, keeping a ring writer's lines whole), so a wrap pad, published as a span of
+its own, is never shorter. Without it the fence lands on the frame's last packet, normally its
+completion, and the copy never completes. It is 0 everywhere else.
+
+A Windows SDMA queue has no doorbell word: submission goes through the driver. Such a client keeps
+the mapped write and read pointers, leaves `abce_ring_config_t::doorbell` null and sets `publish`,
+which stores the write index and rings the queue its own way.
+
 A payload that would straddle the physical ring end is handled by reserving and publishing the
 wrap tail as a *separate* NOP region, then retrying the payload at offset zero. Keeping the
 padding separate means any payload smaller than the ring can still make progress once the ring

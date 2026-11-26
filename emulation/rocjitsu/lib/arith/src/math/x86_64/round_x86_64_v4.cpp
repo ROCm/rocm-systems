@@ -35,7 +35,22 @@ void round(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a, ui
       // Integral results cannot be subnormal. OMOD maps either zero sign to +0.
       auto zero = _mm512_cmp_ps_mask(value, _mm512_setzero_ps(), _CMP_EQ_OQ);
       value = _mm512_mask_mov_ps(value, zero, _mm512_setzero_ps());
-      value = _mm512_mul_ps(value, _mm512_set1_ps(scales[(mode >> 6) & 3]));
+      const auto scale = _mm512_set1_ps(scales[(mode >> 6) & 3]);
+      // Keep the fixed integral rounding separate from guest OMOD rounding.
+      // Embedded rounding handles overflow without changing the host environment.
+      switch ((flags & RJ_ARITH_FP_ROUND_MASK) >> 24) {
+      case 1:
+        value = _mm512_mul_round_ps(value, scale, _MM_FROUND_TO_POS_INF | _MM_FROUND_NO_EXC);
+        break;
+      case 2:
+        value = _mm512_mul_round_ps(value, scale, _MM_FROUND_TO_NEG_INF | _MM_FROUND_NO_EXC);
+        break;
+      case 3:
+        value = _mm512_mul_round_ps(value, scale, _MM_FROUND_TO_ZERO | _MM_FROUND_NO_EXC);
+        break;
+      default:
+        value = _mm512_mul_round_ps(value, scale, _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC);
+      }
     }
     if (mode & RJ_ARITH_ALU_CLAMP) {
       if (flags & RJ_ARITH_FP_DX10_CLAMP_OFF) {

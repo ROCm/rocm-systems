@@ -6,6 +6,20 @@
 from . import ExecuteContext
 from .rj_arith_names import wave_api
 
+LANE_ARCHITECTURES = (
+    'cdna1',
+    'cdna2',
+    'cdna3',
+    'cdna4',
+    'cdna5',
+    'rdna1',
+    'rdna2',
+    'rdna3',
+    'rdna3_5',
+    'rdna4',
+)
+
+
 RELATIVE_NAMES = {
     'V_MOVRELS_B32',
     'V_MOVRELD_B32',
@@ -46,10 +60,7 @@ LANE_HEADER_NAMES = LANE_NAMES | RELATIVE_NAMES
 def gen_lane(ctx: ExecuteContext) -> str | None:
     arch, mnemonic = ctx.arch_name, ctx.inst.name
     dst, src = ctx.dst_ops, ctx.src_ops
-    if (
-        arch not in ('rdna3', 'rdna4', 'cdna3', 'cdna4', 'cdna5')
-        or mnemonic not in LANE_NAMES
-    ):
+    if arch not in LANE_ARCHITECTURES or mnemonic not in LANE_NAMES:
         return None
     flags = 'wf.cu().arithmetic_flags()'
     if mnemonic in ('V_PERMLANE16_SWAP_B32', 'V_PERMLANE32_SWAP_B32'):

@@ -17,8 +17,9 @@ std::unique_ptr<ShaderEngine> ShaderEngine::create(std::string name, const Confi
                                                    L2Cache *l2, simdojo::ExecMode exec_mode,
                                                    util::DiagnosticEmitter emit_error) {
   auto shader_engine = std::make_unique<ShaderEngine>(std::move(name));
-  if (shader_engine->configure(config, arch, memory, l2, exec_mode, emit_error).failed())
+  if (shader_engine->configure(config, arch, memory, l2, exec_mode, emit_error).failed()) {
     return nullptr;
+  }
   return shader_engine;
 }
 
@@ -36,8 +37,9 @@ util::Result ShaderEngine::configure(const Config &config, rocjitsu::IsaFamily a
   for (uint32_t i = 0; i < config.num_compute_units; ++i) {
     auto cu = ComputeUnitCore::create(se_name + ".cu" + std::to_string(i), cu_config, memory, l2,
                                       exec_mode, emit_error);
-    if (!cu)
+    if (!cu) {
       return util::Result::failure();
+    }
     cus_.push_back(static_cast<ComputeUnitCore *>(cu.get()));
     add_child(std::move(cu));
   }

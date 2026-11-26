@@ -177,8 +177,9 @@ protected:
     }
     const auto *state = inst->data();
     if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
-        inst->data_as<VectorMemState>()->address_range_violation_lanes)
+        inst->data_as<VectorMemState>()->address_range_violation_lanes) {
       wf.record_rdna2_memory_violation();
+    }
     release_wait_counters(wf, counters);
     // Releasing the final counter can retire an ENDING wave. A replacement
     // dispatch must not receive the completed instruction's ownership.
@@ -187,10 +188,12 @@ protected:
       return;
     }
     if (state && (state->tag() == GLOBAL_MEM || state->tag() == LOCAL_MEM) &&
-        inst->data_as<VectorMemState>()->flat_memory_violation)
+        inst->data_as<VectorMemState>()->flat_memory_violation) {
       wf.complete_flat_memory_violation();
-    if (wf.state() == WfState::VM_RETRY)
+    }
+    if (wf.state() == WfState::VM_RETRY) {
       wf.set_state(WfState::RUNNING);
+    }
   }
 
   [[nodiscard]] MemoryIngressAdmission
@@ -246,7 +249,7 @@ public:
     local_range_handler_ = std::move(handler);
   }
   using PreparedAtomicBoundaryHandler =
-      std::function<std::optional<DeviceCacheMaintenanceLease>(uint32_t vmid)>;
+      std::function<util::FailureOr<std::optional<CacheMaintenanceResult>>(uint32_t vmid)>;
 
   GlobalMemPipeline(L1VectorCache *l1, L2Cache *l2)
       : MemoryPipeline(WaitCounterType::VMCNT), l1_(l1), l2_(l2) {}

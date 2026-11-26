@@ -6,6 +6,11 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "mfma_f32_test_dispatch.h"
+#include "mfma_f64_test_dispatch.h"
+#include "mfma_f8_test_dispatch.h"
+#include "mfma_half_test_dispatch.h"
+#include "mfma_integer_test_dispatch.h"
 #include "mma_test_util.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
@@ -69,11 +74,13 @@ struct BenchFixture {
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_mfma_simd", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
+    }
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
-    if (wf)
+    if (wf) {
       vbase = wf->vgpr_alloc().base;
+    }
   }
 
   // Pack `n` small floats produced by `gen` into the source VGPR range
@@ -92,8 +99,9 @@ struct BenchFixture {
           uint16_t hi = util::f32_to_f16(gen());
           word = lo | (static_cast<uint32_t>(hi) << 16);
         } else { // 8-bit fp8 e4m3
-          for (uint32_t byte = 0; byte < 4; ++byte)
+          for (uint32_t byte = 0; byte < 4; ++byte) {
             word |= static_cast<uint32_t>(util::f32_to_fp8_e4m3(gen())) << (byte * 8);
+          }
         }
         cu->write_vgpr(vbase + off + reg, lane, word);
       }
@@ -102,40 +110,46 @@ struct BenchFixture {
 
   // Pack `regs` words of small bf16 values into the source VGPR range.
   template <typename Gen> void seed_bf16(uint32_t off, uint32_t regs, Gen gen) {
-    for (uint32_t reg = 0; reg < regs; ++reg)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint16_t lo = util::f32_to_bf16(gen());
         uint16_t hi = util::f32_to_bf16(gen());
         cu->write_vgpr(vbase + off + reg, lane, lo | (static_cast<uint32_t>(hi) << 16));
       }
+    }
   }
 
   // Pack `regs` words of small int8 values into the source VGPR range.
   template <typename Gen> void seed_i8(uint32_t off, uint32_t regs, Gen gen) {
-    for (uint32_t reg = 0; reg < regs; ++reg)
+    for (uint32_t reg = 0; reg < regs; ++reg) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint32_t word = 0;
-        for (uint32_t byte = 0; byte < 4; ++byte)
+        for (uint32_t byte = 0; byte < 4; ++byte) {
           word |= (static_cast<uint32_t>(static_cast<uint8_t>(gen())) << (byte * 8));
+        }
         cu->write_vgpr(vbase + off + reg, lane, word);
       }
+    }
   }
 
   // Pack `regs` pairs (lo,hi) of small f64 values into the source range.
   template <typename Gen> void seed_f64(uint32_t off, uint32_t reg_pairs, Gen gen) {
-    for (uint32_t p = 0; p < reg_pairs; ++p)
+    for (uint32_t p = 0; p < reg_pairs; ++p) {
       for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         uint64_t bits = std::bit_cast<uint64_t>(static_cast<double>(gen()));
         cu->write_vgpr(vbase + off + 2 * p, lane, static_cast<uint32_t>(bits));
         cu->write_vgpr(vbase + off + 2 * p + 1, lane, static_cast<uint32_t>(bits >> 32));
       }
+    }
   }
 
   std::vector<uint32_t> snapshot_out() const {
     std::vector<uint32_t> out(OUT_REGS * WF_SIZE);
-    for (uint32_t reg = 0; reg < OUT_REGS; ++reg)
-      for (uint32_t lane = 0; lane < WF_SIZE; ++lane)
+    for (uint32_t reg = 0; reg < OUT_REGS; ++reg) {
+      for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
         out[reg * WF_SIZE + lane] = cu->read_vgpr(vbase + DST_OFF + reg, lane);
+      }
+    }
     return out;
   }
 };
@@ -148,11 +162,13 @@ struct ModeStats {
 
 ModeStats time_mode(const std::function<void()> &run, bool force_scalar, double macs_per_call) {
   util::set_force_scalar_for_testing(force_scalar);
-  for (int i = 0; i < 50; ++i) // warmup
+  for (int i = 0; i < 50; ++i) { // warmup
     run();
+  }
   auto t0 = Clock::now();
-  for (int i = 0; i < ITERATIONS; ++i)
+  for (int i = 0; i < ITERATIONS; ++i) {
     run();
+  }
   auto t1 = Clock::now();
   util::set_force_scalar_for_testing(false);
   ModeStats s;
@@ -177,15 +193,17 @@ void bench(const char *label, BenchFixture &fx, const std::function<void()> &run
   auto result_simd = fx.snapshot_out();
 
   if (is_int) {
-    for (size_t i = 0; i < result_scalar.size(); ++i)
+    for (size_t i = 0; i < result_scalar.size(); ++i) {
       EXPECT_EQ(result_scalar[i], result_simd[i]) << label << ": int divergence at index " << i;
+    }
   } else {
     double max_rel = 0.0;
     for (size_t i = 0; i < result_scalar.size(); ++i) {
       float a = std::bit_cast<float>(result_scalar[i]);
       float b = std::bit_cast<float>(result_simd[i]);
-      if (!std::isfinite(a) || !std::isfinite(b))
+      if (!std::isfinite(a) || !std::isfinite(b)) {
         continue;
+      }
       double denom = std::abs(a) + 1e-6;
       max_rel = std::max(max_rel, std::abs(static_cast<double>(a) - b) / denom);
     }

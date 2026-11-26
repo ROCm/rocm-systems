@@ -887,6 +887,9 @@ typedef enum hsa_amd_agent_info_s {
   HSA_AMD_AGENT_INFO_ASIC_FAMILY_ID = 0xA107,
   /**
    * Queries for the Packet Processor(CP Firmware) ucode version of an agent.
+   * The value is the full 16-bit microcode version reported by the driver. It
+   * can exceed 10 bits on some targets (for example gfx9 parts that set bit 15),
+   * so do not mask it to 10 bits.
    * The type of this attribute is uint32_t.
    */
   HSA_AMD_AGENT_INFO_UCODE_VERSION = 0xA108,
@@ -5336,6 +5339,13 @@ typedef enum {
    * this queue. Unsupported queue types return HSA_STATUS_ERROR_INVALID_ARGUMENT.
    */
   HSA_AMD_QUEUE_INFO_WRITE_POINTER,
+  /*
+   * Bytes the KMD writes into the end of every submitted span on a Windows
+   * native SDMA user queue (gfx12+ with HWS). A producer that does not leave
+   * them free has its own last packet overwritten. Unsupported queue types
+   * return HSA_STATUS_ERROR_INVALID_ARGUMENT. The type is uint32_t.
+   */
+  HSA_AMD_QUEUE_INFO_SUBMISSION_TAIL_BYTES,
 } hsa_queue_info_attribute_t;
 
 hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute_t attribute,

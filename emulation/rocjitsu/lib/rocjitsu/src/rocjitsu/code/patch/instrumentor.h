@@ -305,7 +305,7 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///
 /// Rules enforced (last two will eventually be relaxed):
 ///   - @p anchor_offset is dword aligned.
-///   - anchor.size() is 4 or 8 and fits inside @p text_bytes.
+///   - anchor.size() is 4, 8 or 12 and fits inside @p text_bytes.
 ///   - anchor.raw_encoding() is non-null.
 ///   - anchor is not a branch/cond branch/indirect branch/indirect call/
 ///     program terminator, and branch_offset_bytes() is nullopt.

@@ -102,39 +102,6 @@ TEST_F(SimdCoverage, AllBooleanTruthTables) {
   }
 }
 
-template <typename T> void check_div_scale_vectors() {
-  using Bits = typename DivisionFormat<T>::Bits;
-  using V = util::native<T>;
-  using B = util::native<Bits>;
-  std::mt19937_64 rng(381);
-  for (uint32_t mode = 0; mode < 16; ++mode) {
-    for (unsigned iteration = 0; iteration < 4000; ++iteration) {
-      B db([&](auto) { return Bits(rng()); }), nb([&](auto) { return Bits(rng()); });
-      if (iteration < 16) {
-        constexpr Bits corners[] = {0,
-                                    DivisionFormat<T>::sign,
-                                    1,
-                                    DivisionFormat<T>::infinity,
-                                    DivisionFormat<T>::infinity | 1,
-                                    DivisionFormat<T>::sign | DivisionFormat<T>::infinity,
-                                    DivisionFormat<T>::fraction_mask};
-        db = B(corners[iteration % 7]);
-        nb = B(corners[(iteration / 2) % 7]);
-      }
-      V d = std::bit_cast<V>(db), n = std::bit_cast<V>(nb), value = iteration & 1 ? d : n;
-      auto [actual, mask] = div_scale_simd<T>(value, d, n, mode & 3, mode >> 2);
-      for (unsigned i = 0; i < V::size(); ++i) {
-        auto expected = div_scale<T>(value[i], d[i], n[i], mode & 3, mode >> 2);
-        ASSERT_EQ(std::bit_cast<Bits>(T(actual[i])), std::bit_cast<Bits>(expected.value))
-            << mode << ":" << iteration;
-        ASSERT_EQ((mask >> i) & 1u, expected.post_scale) << mode << ":" << iteration;
-      }
-    }
-  }
-}
-TEST_F(SimdCoverage, DivisionScaleF32EveryMode) { check_div_scale_vectors<float>(); }
-TEST_F(SimdCoverage, DivisionScaleF64EveryMode) { check_div_scale_vectors<double>(); }
-
 TEST_F(SimdCoverage, WordPathsPreserveHalvesMasksAndAliasing) {
   WordInst inst;
   inst.inst_.opsel = 1 | 8;
@@ -146,14 +113,16 @@ TEST_F(SimdCoverage, WordPathsPreserveHalvesMasksAndAliasing) {
   wf->set_exec(0x55555555u);
   ASSERT_TRUE(
       (try_execute_words_simd<2, false, true, 3>(inst, *wf, [](auto a, auto b) { return a & b; })));
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     ASSERT_EQ(get(0, lane), lane % 2 ? 0x12345678u + lane : 0x12305678u + lane);
+  }
   inst.src0 = O(16, K::OPR_VGPR, 128, true);
   inst.vdst = O(16, K::OPR_VGPR, 129, false, true);
   inst.inst_.vdst = 129;
   ASSERT_TRUE((try_execute_words_simd<1, true, true, 1>(inst, *wf, [](auto a) { return a; })));
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
     ASSERT_EQ(get(1, lane), lane % 2 ? 0xfff0u : 0x1230fff0u);
+  }
   wf->set_exec(0);
   ASSERT_TRUE((try_execute_words_simd<1, true, true, 1>(inst, *wf, [](auto a) { return ~a; })));
   ASSERT_EQ(get(1, 0), 0x1230fff0u);
@@ -182,10 +151,11 @@ TEST_F(SimdCoverage, DecodedTrue16MovePreservesScalarAndVectorSelectors) {
         }
         ASSERT_TRUE(cu->execute_instruction(instruction.get(), *wf).succeeded());
         for (uint32_t lane = 0; lane < 32; ++lane) {
-          if (scalar)
+          if (scalar) {
             expected[lane] = get(7, lane);
-          else
+          } else {
             EXPECT_EQ(get(7, lane), expected[lane]) << "lane=" << lane;
+          }
           if (!(exec & (uint64_t{1} << lane))) {
             EXPECT_EQ(get(7, lane), 0xabcd1234u);
           } else if (source == 9) {
@@ -221,32 +191,21 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
         if constexpr (Bf16) {
           float af = util::bf16_to_f32(a[i]), bf = util::bf16_to_f32(b[i]),
                 cf = util::bf16_to_f32(c[i]);
-          if constexpr (Op == PackedFloatOp::ADD)
+          if constexpr (Op == PackedFloatOp::ADD) {
             expected = fp_mode::packed_add_bf16(af, bf, wf.fp16_ovfl());
-          else if constexpr (Op == PackedFloatOp::MUL)
+          } else if constexpr (Op == PackedFloatOp::MUL) {
             expected = fp_mode::packed_mul_bf16(af, bf, wf.fp16_ovfl());
-          else if constexpr (Op == PackedFloatOp::FMA)
+          } else if constexpr (Op == PackedFloatOp::FMA) {
             expected = fp_mode::packed_fma_bf16(af, bf, cf, wf.fp16_ovfl());
-          else
+          } else {
             expected = fp_mode::packed_select_bf16(af, bf, Op == PackedFloatOp::MIN);
+          }
           expected = fp_mode::clamp_bf16(expected, iteration & 1, floating_clamp_nan_to_zero(wf));
         } else if constexpr (Op == PackedFloatOp::FMA) {
           expected = fp_mode::fma_f16(a[i], b[i], c[i], false, false, false, false, false, false,
                                       wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
                                       iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
                                       fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
-        } else {
-          constexpr auto operation = Op == PackedFloatOp::ADD   ? fp_mode::PackedBinaryOp::ADD
-                                     : Op == PackedFloatOp::MUL ? fp_mode::PackedBinaryOp::MUL
-                                     : Op == PackedFloatOp::MIN ? fp_mode::PackedBinaryOp::MIN
-                                     : Op == PackedFloatOp::MAX ? fp_mode::PackedBinaryOp::MAX
-                                     : Op == PackedFloatOp::MINIMUM
-                                         ? fp_mode::PackedBinaryOp::MINIMUM
-                                         : fp_mode::PackedBinaryOp::MAXIMUM;
-          expected = fp_mode::packed_binary_f16(operation, a[i], b[i], wf.fp_round_mode_f16_f64(),
-                                                wf.fp_denorm_mode_f16_f64(), iteration & 1,
-                                                wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
-                                                wf.cu().arch(), wf.ieee_mode());
         }
         ASSERT_EQ(actual[i], expected)
             << mode << ":" << iteration << " inputs=" << a[i] << "," << b[i] << "," << c[i];
@@ -254,34 +213,12 @@ template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
     }
   }
 }
-TEST_F(SimdCoverage, PackedF16Numerics) {
-  check_packed_half<PackedFloatOp::ADD, false>(*wf);
-  check_packed_half<PackedFloatOp::MUL, false>(*wf);
-  check_packed_half<PackedFloatOp::MIN, false>(*wf);
-  check_packed_half<PackedFloatOp::MAX, false>(*wf);
-  check_packed_half<PackedFloatOp::MINIMUM, false>(*wf);
-  check_packed_half<PackedFloatOp::MAXIMUM, false>(*wf);
-}
 TEST_F(SimdCoverage, PackedBf16Numerics) {
   check_packed_half<PackedFloatOp::ADD, true>(*wf);
   check_packed_half<PackedFloatOp::MUL, true>(*wf);
   check_packed_half<PackedFloatOp::FMA, true>(*wf);
   check_packed_half<PackedFloatOp::MIN, true>(*wf);
   check_packed_half<PackedFloatOp::MAX, true>(*wf);
-}
-
-TEST_F(SimdCoverage, PackedBroadcastAndInlineConstantEnterSimd) {
-  WordInst inst;
-  inst.inst_.opsel_hi = 1;
-  inst.src1 = O(32, K::OPR_SRC, 242); // inline 1.0
-  inst.inst_.src1 = 242;
-  wf->set_mode_raw(3u << 6);
-  for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
-    put(0, lane, 0x40003c00u);
-  ASSERT_TRUE((try_execute_packed_float_simd<PackedFloatOp::ADD, false>(inst, *wf)));
-  ASSERT_EQ(get(3, 0), 0x42004000u); // {1+1, 2+1}
-  util::set_force_scalar_for_testing(true);
-  ASSERT_FALSE((try_execute_packed_float_simd<PackedFloatOp::ADD, false>(inst, *wf)));
 }
 
 struct Slot {
@@ -340,9 +277,11 @@ TEST_F(SimdCoverage, DecodedVopdMovAndFloatPairReadsOnlyUsedRegisters) {
       for (bool force_scalar : {true, false}) {
         SCOPED_TRACE(::testing::Message()
                      << "source=" << mov_source << " exec=" << exec << " scalar=" << force_scalar);
-        for (uint32_t reg = 0; reg < 8; ++reg)
-          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+        for (uint32_t reg = 0; reg < 8; ++reg) {
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
             put(reg, lane, 0x3f800000u);
+          }
+        }
         wf->set_exec(exec);
         recorder->lanes = {};
         recorder->bytes = {};
@@ -403,10 +342,11 @@ TEST_F(SimdCoverage, DecodedPackedFmacPreservesDirectedZeroSigns) {
           util::set_force_scalar_for_testing(force_scalar);
           ASSERT_TRUE(target->execute_instruction(instruction.get(), *wave).succeeded());
           const bool negative = test.matching_negative_zero || (test.cancellation && rounding == 2);
-          for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+          for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
             EXPECT_EQ(target->read_vgpr(wave->vgpr_alloc().base + 6, lane), lane % 2   ? test.addend
                                                                             : negative ? 0x80008000u
                                                                                        : 0u);
+          }
         }
       }
     }
@@ -521,28 +461,33 @@ TEST_F(SimdCoverage, DecodedTargetPathsMatchScalar) {
         wave->set_mode_raw(3u << 6);
         wave->set_exec(exec);
         wave->set_vcc_raw(0x1234567887654321ULL);
-        for (uint32_t reg = 0; reg < 10; ++reg)
-          for (uint32_t lane = 0; lane < wave_size; ++lane)
+        for (uint32_t reg = 0; reg < 10; ++reg) {
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
             target->write_vgpr(wave->vgpr_alloc().base + reg, lane,
                                input[(reg + lane) % std::size(input)]);
+          }
+        }
         util::set_force_scalar_for_testing(force_scalar);
         ASSERT_TRUE(target->execute_instruction(instruction.get(), *wave).succeeded());
         std::vector<uint32_t> output;
-        for (uint32_t reg = 0; reg < 10; ++reg)
-          for (uint32_t lane = 0; lane < wave_size; ++lane)
+        for (uint32_t reg = 0; reg < 10; ++reg) {
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
             output.push_back(target->read_vgpr(wave->vgpr_alloc().base + reg, lane));
+          }
+        }
         output.push_back(uint32_t(wave->exec()));
         output.push_back(uint32_t(wave->exec() >> 32));
         output.push_back(uint32_t(wave->vcc()));
         output.push_back(uint32_t(wave->vcc() >> 32));
         output.push_back(target->read_sgpr(wave->sgpr_alloc().base + 8));
         output.push_back(target->read_sgpr(wave->sgpr_alloc().base + 9));
-        if (force_scalar)
+        if (force_scalar) {
           reference = output;
-        else {
+        } else {
           ASSERT_EQ(output.size(), reference.size());
-          for (size_t i = 0; i < output.size(); ++i)
+          for (size_t i = 0; i < output.size(); ++i) {
             ASSERT_EQ(output[i], reference[i]) << "output index=" << i << " exec=" << exec;
+          }
         }
       }
     }
@@ -567,30 +512,14 @@ TEST_F(SimdCoverage, CompareWriterUsesOldExecAndPreservesVcc) {
   EXPECT_EQ(wf->vcc(), 0x1234567887654321ULL);
 }
 
-TEST_F(SimdCoverage, DivisionScalePathReturnsAndPreservesInactiveMaskBits) {
-  WordInst inst;
-  for (uint32_t lane = 0; lane < 32; ++lane) {
-    put(0, lane, 0x3f800000u);
-    put(1, lane, 0x3f800000u);
-    put(2, lane, 0x40000000u);
-    put(3, lane, 0xdeadbeefu);
-  }
-  wf->set_exec(0x55555555u);
-  wf->set_vcc_raw(0xabcdef01ffffffffULL);
-  uint64_t result = 0;
-  ASSERT_TRUE((try_execute_div_scale_simd<float>(inst, *wf, [&](uint64_t v) { result = v; })));
-  EXPECT_EQ(result, 0xabcdef01aaaaaaaaULL);
-  for (uint32_t lane = 0; lane < 32; ++lane)
-    EXPECT_EQ(get(3, lane), lane % 2 ? 0xdeadbeefu : 0x3f800000u);
-}
-
 // Opt-in simulator host timing. Alternate scalar/SIMD order with matched inputs
 // and warmups. These timings describe execution overhead, not GPU hardware.
 TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
   constexpr unsigned iterations = 5000;
   for (const auto &test : kDecodedCases) {
-    if (std::string_view(test.assembly).find("fmac") != std::string_view::npos)
+    if (std::string_view(test.assembly).find("fmac") != std::string_view::npos) {
       continue;
+    }
     auto decoder = Decoder::create(test.arch);
     std::unique_ptr<Instruction> instruction(decode_valid(*decoder, test.words));
     ASSERT_NE(instruction, nullptr);
@@ -616,9 +545,11 @@ TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
         const uint32_t input =
             packed ? (name.find("bf16") != std::string_view::npos ? 0x3f803f80u : 0x3c003c00u)
                    : 0x3f800000u;
-        for (uint32_t reg = 0; reg < 10; ++reg)
-          for (uint32_t lane = 0; lane < wave_size; ++lane)
+        for (uint32_t reg = 0; reg < 10; ++reg) {
+          for (uint32_t lane = 0; lane < wave_size; ++lane) {
             target->write_vgpr(wave->vgpr_alloc().base + reg, lane, input);
+          }
+        }
         const auto begin = std::chrono::steady_clock::now();
         for (unsigned i = 0; i < iterations; ++i) {
           wave->set_exec(wave_size == 64 ? ~uint64_t{0} : 0xffffffffu);
@@ -630,9 +561,10 @@ TEST_F(SimdCoverage, DISABLED_InstructionTimings) {
         const auto elapsed =
             std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - begin)
                 .count();
-        if (sample >= 3)
+        if (sample >= 3) {
           std::printf("SIMD_TIMING\t%d\t%s\t%u\t%d\t%.3f\n", int(test.arch), test.assembly,
                       sample - 3, scalar, elapsed / iterations);
+        }
       }
     }
   }

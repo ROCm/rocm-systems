@@ -10,7 +10,10 @@
 #include "rocjitsu/vm/rj_vm.h"
 
 #ifdef __cplusplus
+#define RJ_VM_CONFIG_NOEXCEPT noexcept
 extern "C" {
+#else
+#define RJ_VM_CONFIG_NOEXCEPT
 #endif
 
 /// @brief Immutable JSON, node selection, and GPU metadata without a simulated machine.
@@ -24,16 +27,15 @@ typedef struct rj_vm_config_t rj_vm_config_t;
 /// Parses metadata without constructing simulator components, creating workers,
 /// opening a simulated process, or generating sysfs files. Full VM construction
 /// may still reject unsupported execution configuration. Failure leaves @p config
-/// unchanged and creates no cleanup obligation.
+/// unchanged and creates no cleanup obligation. Allocation failure is fatal.
 /// @param[in] json Null-terminated JSON, borrowed only during this call.
 /// @param[out] config Newly owned passive configuration handle.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT A required argument is NULL, or parsing
 /// or node selection failed.
 /// @retval ROCJITSU_STATUS_UNSUPPORTED The node has no discoverable KFD GPU identity
 /// or XCD topology.
-/// @retval ROCJITSU_STATUS_OUT_OF_RESOURCES Configuration allocation failed.
-RJ_API_EXPORT rj_status_t rj_vm_config_create_from_string(const char *json,
-                                                          rj_vm_config_t **config);
+RJ_API_EXPORT rj_status_t rj_vm_config_create_from_string(const char *json, rj_vm_config_t **config)
+    RJ_VM_CONFIG_NOEXCEPT;
 
 /// @brief Copy JSON and discover the GPUs in one named system node.
 /// @details Node selection follows rj_vm_create_from_string_for_node. The node
@@ -41,9 +43,8 @@ RJ_API_EXPORT rj_status_t rj_vm_config_create_from_string(const char *json,
 /// local_node; absent both selectors, the graph must contain exactly one node.
 /// Both input strings are borrowed only during this call. Failure semantics
 /// match rj_vm_config_create_from_string.
-RJ_API_EXPORT rj_status_t rj_vm_config_create_from_string_for_node(const char *json,
-                                                                   const char *node_id,
-                                                                   rj_vm_config_t **config);
+RJ_API_EXPORT rj_status_t rj_vm_config_create_from_string_for_node(
+    const char *json, const char *node_id, rj_vm_config_t **config) RJ_VM_CONFIG_NOEXCEPT;
 
 /// @brief Destroy a passive configuration; NULL is a no-op.
 RJ_API_EXPORT void rj_vm_config_destroy(rj_vm_config_t *config);
@@ -68,5 +69,7 @@ RJ_API_EXPORT rj_status_t rj_vm_create_from_config(const rj_vm_config_t *config,
 #ifdef __cplusplus
 } // extern "C"
 #endif
+
+#undef RJ_VM_CONFIG_NOEXCEPT
 
 #endif // ROCJITSU_VM_RJ_VM_CONFIG_H_

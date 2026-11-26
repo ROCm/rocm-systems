@@ -92,7 +92,9 @@ rj_code_target_id_t target_id(FuzzTarget target);
 uint32_t terminating_instruction(FuzzTarget target);
 
 /// @brief Align a raw program and append terminators plus decoder and CU fetch padding.
-std::vector<uint8_t> terminated_program(std::span<const uint8_t> instructions, FuzzTarget target);
+util::FailureOr<std::vector<uint8_t>> terminated_program(std::span<const uint8_t> instructions,
+                                                         FuzzTarget target,
+                                                         util::DiagnosticEmitter diagnostic = {});
 bool targets_cover_amdgpu_execution_registry();
 std::optional<FuzzTarget> indexed_target(uint8_t index);
 

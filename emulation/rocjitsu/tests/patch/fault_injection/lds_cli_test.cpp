@@ -3,16 +3,21 @@
 
 #include "cli_test_support.h"
 #include "lds_fixture.h"
+#include "remaining_subword_fixture.h"
 #include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
 #include "scoped_temp.h"
+#include "subword_fixture.h"
+#include "two_address_fixture.h"
 
 #include <gtest/gtest.h>
 
 #include <array>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
+#include <span>
 #include <string>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -44,19 +49,22 @@ protected:
   int run(std::vector<std::string> args) {
     args.insert(args.begin(), cli_);
     std::vector<char *> argv;
-    for (std::string &arg : args)
+    for (std::string &arg : args) {
       argv.push_back(arg.data());
+    }
     argv.push_back(nullptr);
     const pid_t pid = fork();
     if (pid == 0) {
       execv(argv[0], argv.data());
       _exit(127);
     }
-    if (pid < 0)
+    if (pid < 0) {
       return -1;
+    }
     int status = 0;
-    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status))
+    if (waitpid(pid, &status, 0) != pid || !WIFEXITED(status)) {
       return -1;
+    }
     return WEXITSTATUS(status);
   }
   std::vector<std::string> args() const {
@@ -312,6 +320,163 @@ TEST_F(FaultLdsCli, Gfx1200InvalidRequestsDoNotPublishOutput) {
     EXPECT_FALSE(std::filesystem::exists(output_));
   }
 }
+
+TEST_F(FaultLdsCli, TwoAddressExactOrdinalAndLibraryAgree) {
+  for (const test::TwoAddressTarget &target : test::kTwoAddressTargets) {
+    for (bool wave32 : {false, true}) {
+      if (target.cdna && wave32) {
+        continue;
+      }
+      SCOPED_TRACE(static_cast<int>(target.target));
+      SCOPED_TRACE(wave32);
+      const uint32_t allocation = wave32 ? 32 : 16;
+      const std::vector<uint8_t> image = test::make_two_address_elf(target, wave32);
+      write_source(image);
+      const FaultMutationContext context(image);
+      FaultMutationError error;
+      const FailureOr<LdsInventory> inventory =
+          discover_lds_wrong_address(context, "test_kernel", error);
+      ASSERT_TRUE(inventory.succeeded()) << error.message;
+      ASSERT_EQ(inventory.value().sites().size(), 2u);
+      std::vector<std::string> command = args();
+      command.push_back("--list");
+      ASSERT_EQ(run(command), 0);
+      for (size_t ordinal = 0; ordinal < 2; ++ordinal) {
+        SCOPED_TRACE(ordinal);
+        const FailureOr<LdsSelection> selection = select_lds_wrong_address(
+            inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
+        ASSERT_TRUE(selection.succeeded());
+        EXPECT_EQ(selection.value().site().offset, ordinal * 8);
+        for (uint32_t replacement : {6u, allocation - 1}) {
+          const FailureOr<LdsResult> result =
+              apply_lds_wrong_address(context, selection.value(), replacement, error);
+          ASSERT_TRUE(result.succeeded()) << error.message;
+          for (const std::vector<std::string> &selector :
+               {std::vector<std::string>{"--ordinal", std::to_string(ordinal)},
+                std::vector<std::string>{"--exact", std::to_string(ordinal * 8), "--ordinal",
+                                         "999"}}) {
+            command = args();
+            command.insert(command.end(), {"--output", output_.string(), "--address-vgpr",
+                                           std::to_string(replacement)});
+            command.insert(command.end(), selector.begin(), selector.end());
+            ASSERT_EQ(run(command), 0);
+            const std::vector<uint8_t> emitted = read();
+            EXPECT_EQ(emitted, result.value().image);
+            EXPECT_TRUE(test::two_address_output_matches(context, target, ordinal * 8, replacement,
+                                                         emitted));
+            ASSERT_TRUE(std::filesystem::remove(output_));
+          }
+        }
+      }
+      for (const std::vector<std::string> &extra :
+           {std::vector<std::string>{"--exact", "4", "--ordinal", "0", "--address-vgpr", "6"},
+            std::vector<std::string>{}, std::vector<std::string>{"--address-vgpr", "2"},
+            std::vector<std::string>{"--address-vgpr", std::to_string(allocation)},
+            std::vector<std::string>{"--address-vgpr", "256"}}) {
+        command = args();
+        command.insert(command.end(), {"--output", output_.string()});
+        command.insert(command.end(), extra.begin(), extra.end());
+        EXPECT_NE(run(command), 0);
+        EXPECT_FALSE(std::filesystem::exists(output_));
+      }
+    }
+  }
+}
+
+struct SubwordCliCase {
+  test::LdsFormCase fixture;
+  bool wave32;
+};
+
+std::vector<SubwordCliCase> subword_cli_cases() {
+  std::vector<SubwordCliCase> cases;
+  for (std::span<const test::LdsFormCase> fixtures :
+       {std::span<const test::LdsFormCase>(test::kSubwordCases),
+        std::span<const test::LdsFormCase>(test::kRemainingSubwordCases)}) {
+    for (const test::LdsFormCase &fixture : fixtures) {
+      cases.push_back({.fixture = fixture, .wave32 = false});
+      if (fixture.arch == IsaFamily::Rdna4) {
+        cases.push_back({.fixture = fixture, .wave32 = true});
+      }
+    }
+  }
+  return cases;
+}
+
+class FaultLdsCliSubword : public FaultLdsCli,
+                           public ::testing::WithParamInterface<SubwordCliCase> {};
+
+TEST_P(FaultLdsCliSubword, ExactOrdinalAndLibraryAgree) {
+  const test::LdsFormCase &fixture = GetParam().fixture;
+  const bool wave32 = GetParam().wave32;
+  SCOPED_TRACE(fixture.form);
+  SCOPED_TRACE(static_cast<int>(fixture.target));
+  SCOPED_TRACE(wave32);
+  const uint32_t boundary =
+      fixture.target == ROCJITSU_CODE_TARGET_GFX1250 ? 64u : (wave32 ? 32u : 16u);
+  const std::vector<uint8_t> image = test::make_lds_form_elf(fixture, false, wave32);
+  write_source(image);
+  const FaultMutationContext context(image);
+  FaultMutationError error;
+  const FailureOr<LdsInventory> inventory =
+      discover_lds_wrong_address(context, "test_kernel", error);
+  ASSERT_TRUE(inventory.succeeded()) << error.message;
+  ASSERT_EQ(inventory.value().sites().size(), 1u);
+  EXPECT_EQ(inventory.value().sites()[0].form, fixture.form);
+  const FailureOr<LdsSelection> selection =
+      select_lds_wrong_address(inventory.value(), {.exact = std::nullopt, .ordinal = 0}, error);
+  ASSERT_TRUE(selection.succeeded()) << error.message;
+  const FailureOr<LdsSelection> exact = select_lds_wrong_address(
+      inventory.value(),
+      {.exact = selection.value(), .ordinal = std::numeric_limits<size_t>::max()}, error);
+  ASSERT_TRUE(exact.succeeded()) << error.message;
+  for (uint32_t replacement : {6u, boundary - 1}) {
+    const FailureOr<LdsResult> result =
+        apply_lds_wrong_address(context, exact.value(), replacement, error);
+    ASSERT_TRUE(result.succeeded()) << error.message;
+    const FailureOr<LdsResult> by_ordinal =
+        apply_lds_wrong_address(context, selection.value(), replacement, error);
+    ASSERT_TRUE(by_ordinal.succeeded()) << error.message;
+    EXPECT_EQ(result.value().image, by_ordinal.value().image);
+    for (const std::vector<std::string> &selector :
+         {std::vector<std::string>{"--ordinal", "0"},
+          std::vector<std::string>{"--exact", "0", "--ordinal", "999"}}) {
+      std::vector<std::string> command = args();
+      command.insert(command.end(),
+                     {"--output", output_.string(), "--address-vgpr", std::to_string(replacement)});
+      command.insert(command.end(), selector.begin(), selector.end());
+      ASSERT_EQ(run(command), 0);
+      const std::vector<uint8_t> emitted = read();
+      EXPECT_EQ(emitted, result.value().image);
+      EXPECT_TRUE(test::lds_form_output_matches(context, fixture, 0, replacement, emitted));
+      ASSERT_TRUE(std::filesystem::remove(output_));
+    }
+  }
+  for (const std::vector<std::string> &extra :
+       {std::vector<std::string>{"--exact", "4", "--ordinal", "0", "--address-vgpr", "6"},
+        std::vector<std::string>{}, std::vector<std::string>{"--address-vgpr", "2"},
+        std::vector<std::string>{"--address-vgpr", std::to_string(boundary)},
+        std::vector<std::string>{"--address-vgpr", "256"}}) {
+    std::vector<std::string> command = args();
+    command.insert(command.end(), {"--output", output_.string()});
+    command.insert(command.end(), extra.begin(), extra.end());
+    EXPECT_NE(run(command), 0);
+    EXPECT_FALSE(std::filesystem::exists(output_));
+  }
+  EXPECT_TRUE(std::ranges::equal(context.image(), image));
+}
+
+INSTANTIATE_TEST_SUITE_P(TargetFormWaves, FaultLdsCliSubword,
+                         ::testing::ValuesIn(subword_cli_cases()),
+                         [](const ::testing::TestParamInfo<SubwordCliCase> &info) {
+                           const uint32_t wave = info.param.fixture.arch == IsaFamily::Cdna5
+                                                     ? 32u
+                                                     : (info.param.wave32 ? 32u : 64u);
+                           return "T" +
+                                  std::to_string(static_cast<int>(info.param.fixture.target)) +
+                                  "_" + std::string(info.param.fixture.form) + "_Wave" +
+                                  std::to_string(wave);
+                         });
 
 } // namespace
 } // namespace rocjitsu

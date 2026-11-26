@@ -9,6 +9,8 @@
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3/opcodes.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -21,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -30,6 +33,201 @@ namespace rocjitsu::consan {
 namespace {
 
 constexpr const TargetProfile &kTarget = kNativeLdsTargets[2];
+
+TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiveLane) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
+  ASSERT_FALSE(image.empty());
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto baseline = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  constexpr uint32_t shared = 0xbe8401eb;  // s_mov_b64 s[4:5], src_shared_base
+  constexpr uint32_t copy = 0x7e060205;    // v_mov_b32_e32 v3, s5
+  constexpr uint32_t clobber = 0x7e060280; // v_mov_b32_e32 v3, 0
+  constexpr uint32_t narrow = 0xbe88206a;  // s_and_saveexec_b64 s[8:9], vcc
+  constexpr uint32_t restore = 0xbefe0108; // s_mov_b64 exec, s[8:9]
+  constexpr uint32_t select = 0x85050705;  // s_cselect_b32 s5, s5, s7
+  const auto check = [&](std::initializer_list<uint32_t> setup, bool admitted,
+                         FlatAssumption premise = FlatAssumption::None) {
+    auto candidate = image;
+    std::vector<uint32_t> words(setup);
+    words.insert(words.end(), {0xdc500000, 0x02000002, 0xbf810000}); // FLAT load then endpgm
+    ASSERT_LE(entry + words.size() * 4, candidate.size());
+    std::memcpy(candidate.data() + entry, words.data(), words.size() * 4);
+    const auto input = build_input_program(candidate, target, "lds_producer_consumer", error);
+    ASSERT_EQ(input.succeeded(), admitted) << error.message;
+    if (admitted) {
+      ASSERT_EQ(input.value().accesses.size(), 1u);
+      EXPECT_EQ(input.value().accesses.front().origin, AccessOrigin::GroupFlat);
+      EXPECT_EQ(input.value().accesses.front().assumption, premise);
+      if (premise == FlatAssumption::SelectedSharedHigh) {
+        EXPECT_TRUE(build_input_program(candidate, target, "lds_producer_consumer", error, {},
+                                        FlatPolicy::Strict)
+                        .failed());
+        EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+      }
+    } else {
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+    }
+  };
+  // An extended literal carries its numeric payload in the decoded operand.
+  // Even the two aperture selector values must behave like an unknown pointer.
+  constexpr uint32_t literal = 0xbe8401ff; // s_mov_b64 s[4:5], literal32
+  for (const uint32_t value : {235u, 237u, 239u}) {
+    SCOPED_TRACE(value);
+    const std::array<uint32_t, 10> words = {
+        shared,    copy,  0xdc500000, 0x02000002,             // observed shared load
+        literal,   value, copy,       0xdc500000, 0x02000002, // excluded load from the literal
+        0xbf810000};
+    auto candidate = image;
+    ASSERT_LE(entry + sizeof(words), candidate.size());
+    std::memcpy(candidate.data() + entry, words.data(), sizeof(words));
+    const auto result = prepare(candidate, target, "lds_producer_consumer", error);
+    ASSERT_TRUE(result.succeeded()) << error.message;
+    const auto &manifest = result.value().manifest;
+    ASSERT_EQ(manifest.sites.size(), 1u);
+    ASSERT_EQ(manifest.flat_exclusions.size(), 1u);
+    const auto &exclusion = manifest.flat_exclusions.front();
+    EXPECT_EQ(exclusion.original_offset, baseline.value().kernel.entry_text_offset + 28);
+    EXPECT_EQ(exclusion.reason, FlatExclusionReason::Unresolved);
+  }
+  check({shared, narrow, copy}, true);
+  check({shared, copy, narrow}, true);
+  check({shared, narrow, copy, restore}, false);
+  check({shared, copy, clobber}, false);
+  check({0xbe8401ed, copy}, false);                  // src_private_base, with the same low VGPR
+  check({0xbe840100, copy}, false);                  // kernarg (global) pointer
+  check({copy}, false);                              // no high-word definition
+  check({shared, copy, 0xbf840001, clobber}, false); // conditional branch bypasses the clobber
+  check({shared, 0xbe8601eb, select, copy}, true);   // both high words are shared
+  check({shared, select, copy}, true, FlatAssumption::SelectedSharedHigh);
+  constexpr uint32_t shared_or_zero = 0x85058005; // s_cselect_b32 s5, s5, 0
+  constexpr uint32_t zero_or_shared = 0x85050580; // s_cselect_b32 s5, 0, s5
+  check({shared, shared_or_zero, copy}, true, FlatAssumption::SelectedSharedHigh);
+  check({shared, zero_or_shared, copy}, true, FlatAssumption::SelectedSharedHigh);
+  check({shared_or_zero, copy}, false);             // no shared input
+  check({0xbe8401ed, shared_or_zero, copy}, false); // private high or zero
+  check({shared, 0x85058105, copy}, false);         // shared high or inline one
+  check({shared, 0x8505ff05, 0, copy}, false);      // shared high or extended literal zero
+  check({shared, 0x8505ff05, 128, copy}, false);    // payload matches the inline selector
+  check({select, copy}, false);                     // neither high word is known shared
+  check({shared, 0xbe8601ed, select, copy}, false); // known private alternative in s7
+  check({shared, 0xbe860100, select, copy}, false); // known kernarg high in s7
+  check({shared, select, narrow, copy, restore}, false);
+  check({shared, select, copy, clobber}, false);
+}
+
+TEST(ConSanInput, StrictRejectsConditionalOnlyImageAndRevalidatesTheSavedPolicy) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-likely");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  auto image = test::read_fixture(fixture);
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto mixed = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(mixed.succeeded()) << error.message;
+  ASSERT_EQ(mixed.value().accesses.size(), 2u);
+  ASSERT_EQ(mixed.value().accesses[0].origin, AccessOrigin::Native);
+  const auto offset = mixed.value().text_file_offset + mixed.value().accesses[0].original_offset;
+  constexpr std::array<uint32_t, 2> nops = {0xbf800000, 0xbf800000};
+  ASSERT_LE(offset + sizeof(nops), image.size());
+  std::memcpy(image.data() + offset, nops.data(), sizeof(nops));
+  auto likely = prepare(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(likely.succeeded()) << error.message;
+  ASSERT_EQ(likely.value().manifest.sites.size(), 1u);
+  EXPECT_EQ(likely.value().manifest.sites.front().assumption, FlatAssumption::SelectedSharedHigh);
+  likely.value().manifest.options = mvp_options_digest(FlatPolicy::Strict);
+  EXPECT_TRUE(validate_prepared(image, likely.value(), error).failed());
+  EXPECT_TRUE(prepare(image, target, "lds_producer_consumer", error, FlatPolicy::Strict).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+  EXPECT_NE(error.message.find("no observed LDS sites"), std::string::npos);
+}
+
+TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndNonGroupMappings) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  std::vector<uint8_t> image = test::read_fixture(fixture);
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto baseline = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const std::array<uint32_t, 10> words = {
+      0xbe8401ed, 0x85050105,                         // select private high s5 or kernarg high s1
+      0x7e060205, 0xdc500ffc, 0x02000002,             // non-group pointer, load +4092
+      0xbe8401eb, 0x7e060205, 0xdc500ffc, 0x02000002, // shared-base pointer, identical operation
+      0xbf810000};
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  ASSERT_LE(entry + sizeof(words), image.size());
+  std::memcpy(image.data() + entry, words.data(), sizeof(words));
+  const auto result = prepare(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(result.succeeded()) << error.message;
+  ASSERT_EQ(result.value().manifest.sites.size(), 1u);
+  EXPECT_EQ(result.value().manifest.sites.front().origin, AccessOrigin::GroupFlat);
+  EXPECT_EQ(result.value().manifest.sites.front().original_offset,
+            baseline.value().kernel.entry_text_offset + 28);
+  ASSERT_EQ(result.value().manifest.flat_exclusions.size(), 1u);
+  EXPECT_EQ(result.value().manifest.flat_exclusions.front().reason, FlatExclusionReason::NonGroup);
+  EXPECT_TRUE(validate_prepared(image, result.value(), error).succeeded()) << error.message;
+}
+
+TEST(ConSanInput, GroupFlatChecksBothAddressWordsAndTheCompleteValueTuple) {
+  const std::unique_ptr<Decoder> decoder = Decoder::create(IsaFamily::Cdna4);
+  ASSERT_NE(decoder, nullptr);
+  const auto check = [&](uint16_t opcode, cdna4::FlatBuilderFields fields) {
+    const DecodeResult decoded = decoder->decode_window(cdna4::build_flat(opcode, fields));
+    ASSERT_TRUE(decoded.succeeded());
+    InputError error;
+    std::vector<NativeLdsAccess> sites;
+    EXPECT_TRUE(classify_lds_race_instruction(*decoded.value(), IsaFamily::Cdna4, 8, sites, error)
+                    .failed());
+    EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+    EXPECT_EQ(error.message, "FLAT operands exceed allocation");
+    EXPECT_TRUE(sites.empty());
+  };
+  check(cdna4::kFlatLoadShortD16HiFlat, {.addr = 7, .vdst = 0});
+  check(cdna4::kFlatLoadShortD16Flat, {.addr = 0, .vdst = 8});
+  check(cdna4::kFlatStoreShortD16HiFlat, {.addr = 0, .data = 8});
+  check(cdna4::kFlatLoadDwordx2Flat, {.addr = 0, .vdst = 7});
+  check(cdna4::kFlatStoreDwordx2Flat, {.addr = 0, .data = 7});
+  check(cdna4::kFlatLoadDwordx4Flat, {.addr = 0, .vdst = 5});
+  check(cdna4::kFlatStoreDwordx4Flat, {.addr = 0, .data = 5});
+}
+
+TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
+  const auto decoder = Decoder::create(IsaFamily::Cdna4);
+  ASSERT_NE(decoder, nullptr);
+  const auto check = [&](uint16_t opcode, cdna4::DsBuilderFields fields, InputErrorCode expected) {
+    const DecodeResult decoded = decoder->decode_window(cdna4::build_ds(opcode, fields));
+    ASSERT_TRUE(decoded.succeeded());
+    std::vector<NativeLdsAccess> sites;
+    InputError error;
+    EXPECT_TRUE(classify_lds_race_instruction(*decoded.value(), IsaFamily::Cdna4, 8, sites, error)
+                    .failed());
+    EXPECT_EQ(error.code, expected);
+    EXPECT_TRUE(sites.empty());
+  };
+  check(cdna4::kDsAddU32Ds, {.gds = 1, .addr = 3, .data0 = 7},
+        InputErrorCode::UnsupportedSynchronization);
+  check(cdna4::kDsAddRtnU32Ds, {.addr = 3, .data0 = 7, .vdst = 2},
+        InputErrorCode::UnsupportedSynchronization);
+  check(cdna4::kDsAddU32Ds, {.acc = 1, .addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsAddU32Ds, {.addr = 3, .data0 = 8}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsAddU64Ds, {.addr = 3, .data0 = 7}, InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsCmpstRtnB32Ds, {.addr = 3, .data0 = 7, .data1 = 8, .vdst = 3},
+        InputErrorCode::UnsupportedAccess);
+  check(cdna4::kDsCmpstRtnB32Ds, {.addr = 3, .data0 = 7, .data1 = 2, .vdst = 8},
+        InputErrorCode::UnsupportedAccess);
+}
 
 TEST(ConSanInput, Gfx1100UsesConcreteModelOnlyDecoder) {
   const IsaTargetRegistry &registry = default_isa_target_registry();
@@ -102,6 +300,55 @@ TEST(ConSanInput, MissingEntryAndAdditionalKernelHaveDistinctDiagnostics) {
   EXPECT_EQ(error.code, InputErrorCode::UnsupportedEntry);
   EXPECT_EQ(error.message, "ConSan requires a single-kernel code object; found 2 kernels");
 }
+
+#ifdef CONSAN_MULTI_ENTRY_FIXTURE
+TEST(ConSanInputImage, QualifiesDistinctEntriesWithoutExtractingTheirImage) {
+  std::ifstream file(CONSAN_MULTI_ENTRY_FIXTURE, std::ios::binary);
+  const std::vector<uint8_t> image = {std::istreambuf_iterator<char>(file),
+                                      std::istreambuf_iterator<char>()};
+  ASSERT_FALSE(image.empty());
+  const TargetProfile &target = *target_profile("gfx1250");
+  InputError error;
+  const FailureOr<InputProgram> first = build_image_entry_program(image, target, "mk_a", error);
+  ASSERT_TRUE(first.succeeded()) << error.message;
+  const FailureOr<InputProgram> second = build_image_entry_program(image, target, "mk_b", error);
+  ASSERT_TRUE(second.succeeded()) << error.message;
+  EXPECT_EQ(first.value().image, image);
+  EXPECT_EQ(second.value().image, image);
+  EXPECT_NE(first.value().kernel.descriptor_file_offset,
+            second.value().kernel.descriptor_file_offset);
+  EXPECT_EQ(first.value().original_sgprs, 16u);
+  EXPECT_EQ(second.value().original_sgprs, 32u);
+  EXPECT_EQ(first.value().kernel.descriptor.kernarg_size, 16u);
+  EXPECT_EQ(second.value().kernel.descriptor.kernarg_size, 32u);
+  EXPECT_EQ(first.value().accesses.size(), 2u);
+  EXPECT_EQ(second.value().accesses.size(), 2u);
+  EXPECT_NE(first.value().accesses[0].original_offset, second.value().accesses[0].original_offset);
+}
+
+TEST(ConSanInputImage, SelectedFlowCannotEnterASiblingKernel) {
+  std::ifstream file(CONSAN_MULTI_ENTRY_FIXTURE, std::ios::binary);
+  std::vector<uint8_t> image = {std::istreambuf_iterator<char>(file),
+                                std::istreambuf_iterator<char>()};
+  const TargetProfile &target = *target_profile("gfx1250");
+  InputError error;
+  const FailureOr<InputProgram> first = build_image_entry_program(image, target, "mk_a", error);
+  const FailureOr<InputProgram> second = build_image_entry_program(image, target, "mk_b", error);
+  ASSERT_TRUE(first.succeeded());
+  ASSERT_TRUE(second.succeeded());
+  const int16_t displacement = static_cast<int16_t>(
+      (second.value().kernel.entry_text_offset - first.value().kernel.entry_text_offset - 4) / 4);
+  const util::FailureOr<uint32_t> branch = build_s_branch(displacement, IsaFamily::Cdna5);
+  ASSERT_TRUE(branch.succeeded());
+  const uint32_t word = branch.value();
+  std::memcpy(image.data() + first.value().text_file_offset +
+                  first.value().kernel.entry_text_offset,
+              &word, sizeof(word));
+  EXPECT_TRUE(build_image_entry_program(image, target, "mk_a", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedFlow);
+  EXPECT_EQ(error.message, "selected control flow enters another kernel");
+}
+#endif
 
 class ConSanInputFixture : public ::testing::Test {
 protected:
@@ -205,8 +452,9 @@ protected:
     const util::FailureOr<uint32_t> maybe_nop = build_s_nop(0, kTarget.arch);
     ASSERT_TRUE(maybe_nop.succeeded());
     const uint32_t nop = maybe_nop.value();
-    for (uint32_t offset = sizeof(uint32_t); offset < first_size; offset += sizeof(uint32_t))
+    for (uint32_t offset = sizeof(uint32_t); offset < first_size; offset += sizeof(uint32_t)) {
       std::memcpy(patched.data() + anchor + offset, &nop, sizeof(nop));
+    }
     CodeObjectPatcher patcher(source);
     ASSERT_TRUE(patcher.replace_text(patched));
     image = std::move(patcher).emit();
@@ -446,10 +694,14 @@ TEST_F(ConSanInputFixture, BarrierAndExcludedAccessCannotBecomeNoSyncFacts) {
   EXPECT_TRUE(inspect(load("barrier")).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedSynchronization);
   EXPECT_TRUE(error_.text_offset.has_value());
-  const std::vector<uint8_t> excluded =
-      test::read_fixture(test::target_fixture_path({"gfx1100", 32}, "width-excluded-b8"));
-  ASSERT_FALSE(excluded.empty());
-  EXPECT_TRUE(inspect(excluded).failed());
+  const FailureOr<InputProgram> ordinary = inspect(image_);
+  ASSERT_TRUE(ordinary.succeeded());
+  ASSERT_FALSE(ordinary.value().accesses.empty());
+  const size_t offset = text_offset_ + ordinary.value().accesses.front().original_offset;
+  const std::array<uint32_t, 2> gds = rdna3::build_ds(rdna3::kDsStoreB32Ds, {.gds = 1});
+  ASSERT_LE(offset + sizeof(gds), image_.size());
+  std::memcpy(image_.data() + offset, gds.data(), sizeof(gds));
+  EXPECT_TRUE(inspect(image_).failed());
   EXPECT_EQ(error_.code, InputErrorCode::UnsupportedAccess);
   EXPECT_TRUE(error_.text_offset.has_value());
 }
@@ -618,8 +870,9 @@ TEST_F(ConSanInputFixture, LdsAccessOrderAtAJoinIncludesEveryPredecessor) {
     words[first + 4] = join_branch.value();
     std::memcpy(words.data() + first + 6, text.data() + read, 8);
     words[first + 8] = terminator.value();
-    if (high_access)
+    if (high_access) {
       std::memcpy(words.data() + first + 10, text.data() + write, 8);
+    }
     words[first + 12] = backward_branch.value();
     CodeObjectPatcher patcher(source);
     ASSERT_TRUE(patcher.replace_text(

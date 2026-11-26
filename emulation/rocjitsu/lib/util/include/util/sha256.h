@@ -39,11 +39,13 @@ public:
     const uint8_t pad = 0x80;
     update(&pad, 1);
     const uint8_t zero = 0;
-    while (buffered_ != 56)
+    while (buffered_ != 56) {
       update(&zero, 1);
+    }
     uint8_t tail[8];
-    for (int index = 0; index < 8; ++index)
+    for (int index = 0; index < 8; ++index) {
       tail[index] = static_cast<uint8_t>(bits >> (56 - index * 8));
+    }
     // Length is appended directly: routing it through update() would grow
     // bit_count_ again and corrupt the padding invariant.
     std::memcpy(buffer_ + buffered_, tail, sizeof(tail));
@@ -82,11 +84,12 @@ private:
         0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u, 0x90befffau, 0xa4506cebu, 0xbef9a3f7u,
         0xc67178f2u};
     uint32_t schedule[64];
-    for (int index = 0; index < 16; ++index)
+    for (int index = 0; index < 16; ++index) {
       schedule[index] = (static_cast<uint32_t>(block[index * 4]) << 24) |
                         (static_cast<uint32_t>(block[index * 4 + 1]) << 16) |
                         (static_cast<uint32_t>(block[index * 4 + 2]) << 8) |
                         static_cast<uint32_t>(block[index * 4 + 3]);
+    }
     for (int index = 16; index < 64; ++index) {
       const uint32_t sigma0 = rotr(schedule[index - 15], 7) ^ rotr(schedule[index - 15], 18) ^
                               (schedule[index - 15] >> 3);

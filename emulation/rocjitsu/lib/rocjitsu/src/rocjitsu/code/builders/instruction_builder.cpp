@@ -76,8 +76,9 @@ enum class ScalarSop2Op {
 }
 
 void report_unsupported_pc_delta_builder(const util::DiagnosticEmitter *error) {
-  if (error != nullptr)
+  if (error != nullptr) {
     error->emit() << "Unimplemented instruction: scalar PC delta builder for target architecture";
+  }
 }
 
 /// @brief Build an encoded scalar `s_add_u32` instruction.
@@ -94,8 +95,9 @@ void report_unsupported_pc_delta_builder(const util::DiagnosticEmitter *error) {
     return std::nullopt;
   }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
-  if (word.failed())
+  if (word.failed()) {
     return std::nullopt;
+  }
   return word.value();
 }
 
@@ -110,8 +112,9 @@ void report_unsupported_pc_delta_builder(const util::DiagnosticEmitter *error) {
     return std::nullopt;
   }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
-  if (word.failed())
+  if (word.failed()) {
     return std::nullopt;
+  }
   return word.value();
 }
 
@@ -126,8 +129,9 @@ void report_unsupported_pc_delta_builder(const util::DiagnosticEmitter *error) {
     return std::nullopt;
   }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
-  if (word.failed())
+  if (word.failed()) {
     return std::nullopt;
+  }
   return word.value();
 }
 
@@ -142,8 +146,9 @@ void report_unsupported_pc_delta_builder(const util::DiagnosticEmitter *error) {
     return std::nullopt;
   }
   util::FailureOr<uint32_t> word = build_sop2_encoding(arch, *opcode, sdst, ssrc0, ssrc1, error);
-  if (word.failed())
+  if (word.failed()) {
     return std::nullopt;
+  }
   return word.value();
 }
 
@@ -151,19 +156,24 @@ void report_unsupported_pc_delta_builder(const util::DiagnosticEmitter *error) {
 
 bool patch_pcrel_branch_offset(const Instruction &inst, std::span<uint32_t> words,
                                int64_t delta_bytes, [[maybe_unused]] rocjitsu::IsaFamily arch) {
-  if ((inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_CALL)) == 0)
+  if ((inst.flags() & (BRANCH | COND_BRANCH | INDIRECT_CALL)) == 0) {
     return false;
-  if (!inst.branch_offset_bytes())
+  }
+  if (!inst.branch_offset_bytes()) {
     return false;
-  if (words.empty())
+  }
+  if (words.empty()) {
     return false;
-  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0)
+  }
+  if (delta_bytes % static_cast<int64_t>(sizeof(uint32_t)) != 0) {
     return false;
+  }
 
   const int64_t delta_dwords = delta_bytes / static_cast<int64_t>(sizeof(uint32_t));
   if (delta_dwords < std::numeric_limits<int16_t>::min() ||
-      delta_dwords > std::numeric_limits<int16_t>::max())
+      delta_dwords > std::numeric_limits<int16_t>::max()) {
     return false;
+  }
 
   // AMDGPU SOPP direct branches and SOPK s_call_b64 encode a signed 16-bit
   // dword offset from the next instruction. Preserve the already-translated
@@ -195,12 +205,14 @@ bool append_pc_delta_builder(std::vector<uint32_t> &words, rocjitsu::IsaFamily a
     util::FailureOr<uint32_t> word =
         build_sop2_encoding(arch, *opcode, pc_sreg, pc_sreg,
                             use_literal32 ? kLiteralOperand : kLiteral64Operand, error);
-    if (word.failed())
+    if (word.failed()) {
       return false;
+    }
     words.push_back(word.value());
     words.push_back(static_cast<uint32_t>(raw_delta));
-    if (!use_literal32)
+    if (!use_literal32) {
       words.push_back(static_cast<uint32_t>(raw_delta >> 32));
+    }
     return true;
   }
 
@@ -218,30 +230,35 @@ bool append_pc_delta_builder(std::vector<uint32_t> &words, rocjitsu::IsaFamily a
   if (negative) {
     const std::optional<uint32_t> sub =
         build_s_sub_u32(arch, pc_sreg, pc_sreg, kLiteralOperand, error);
-    if (!sub)
+    if (!sub) {
       return false;
+    }
     const std::optional<uint32_t> subb =
         build_s_subb_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand, error);
-    if (!subb)
+    if (!subb) {
       return false;
+    }
     words.push_back(*sub);
     words.push_back(lo);
     words.push_back(*subb);
   } else {
     const std::optional<uint32_t> add =
         build_s_add_u32(arch, pc_sreg, pc_sreg, kLiteralOperand, error);
-    if (!add)
+    if (!add) {
       return false;
+    }
     const std::optional<uint32_t> addc =
         build_s_addc_u32(arch, pc_hi, pc_hi, hi == 0 ? kInlineInt0 : kLiteralOperand, error);
-    if (!addc)
+    if (!addc) {
       return false;
+    }
     words.push_back(*add);
     words.push_back(lo);
     words.push_back(*addc);
   }
-  if (hi != 0)
+  if (hi != 0) {
     words.push_back(hi);
+  }
   return true;
 }
 

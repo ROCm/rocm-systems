@@ -100,13 +100,15 @@ public:
 /// different completion classes is not ordered as a whole.
 inline MemoryOrderClass
 memoryOrderForObligations(std::span<const amdgpu::MemoryCounterObligation> obligations) {
-  if (obligations.empty())
+  if (obligations.empty()) {
     return MemoryOrderClass::UNORDERED;
+  }
 
   const MemoryOrderClass order = obligations.front().completion_class();
   for (const auto obligation : obligations) {
-    if (obligation.completion_class() != order)
+    if (obligation.completion_class() != order) {
       return MemoryOrderClass::UNORDERED;
+    }
   }
   return order;
 }
@@ -201,8 +203,9 @@ public:
       amdgpu::WaitCounterType wait_counter_type, MemoryOrderClass memory_order,
       std::optional<amdgpu::WaitCounterType> additional_wait_counter_type = std::nullopt)
       : obligations_{amdgpu::MemoryCounterObligation{wait_counter_type, memory_order}, {}} {
-    if (additional_wait_counter_type)
+    if (additional_wait_counter_type) {
       obligations_[count_++] = {*additional_wait_counter_type, memory_order};
+    }
   }
 
   /// @brief The default counter and order for an event type.

@@ -122,7 +122,7 @@ def enumerate_kernels():
   # AllGather_TmaSTMC and the other *MC algos need multimem, which ROCm has no
   # equivalent for, so they stay out regardless of the target.
   ar_algos = ["AGxLL_R","RSxLD_AGxST"] + (["RSxTmaLD_AGxTmaST"] if have_tdm else [])
-  rs_algos = ["LL","LD","RailA2A_LsaLD"] + (["TmaLD"] if have_tdm else [])
+  rs_algos = ["LL","LD","RailA2A_LsaLD","HierLsaLDST"] + (["TmaLD"] if have_tdm else [])
   for algo in ag_algos:
     yield Rec(coll="AllGather", algo=algo)
   for algo in ["LL"]:
@@ -135,7 +135,9 @@ def enumerate_kernels():
           continue
         yield Rec(coll="AllReduce", algo=algo, red=red, ty=ty)
       for algo in rs_algos:
-        # ReduceScatter emits sum and avg for every float type.
+        # HierLsaLDST stores its cross-package partials as T, so sum only, for the types with fp32's range.
+        if algo == "HierLsaLDST" and (red == "avg" or ty not in ("f32", "bf16")):
+          continue
         yield Rec(coll="ReduceScatter", algo=algo, red=red, ty=ty)
 
 def required_cuda(k):
@@ -217,14 +219,14 @@ def kernel_cname_profile(k):
 
 def instantiate(k, profile):
   form_red_ty = (
-    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "__global__ {bounds}void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
     "{start}"
     "  ncclSymkRun_{id}<{prof}, {red}, {ty}>(&args4K.args);\n"
     "{stop}"
     "}}"
   )
   form = (
-    "__global__ void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
+    "__global__ {bounds}void {cname}(ncclSymkDevWorkArgs4K NCCL_GRID_CONSTANT const args4K) {{\n"
     "{start}"
     "  ncclSymkRun_{id}<{prof}>(&args4K.args);\n"
     "{stop}"
@@ -236,11 +238,13 @@ def instantiate(k, profile):
   prof = 'true' if profile else 'false'
   start = '  ncclSymkProfilerStart(&args4K.args);\n' if profile else ''
   stop  = '  ncclSymkProfilerStop(&args4K.args);\n' if profile else ''
+  # The hierarchical ReduceScatter launches at ncclSymkMaxThreads.
+  bounds = '__launch_bounds__(ncclSymkMaxThreads) ' if k.algo == "HierLsaLDST" else ''
   if k.coll in reductions:
     inst = form_red_ty.format(cname=cname, id=id, prof=prof, red=red_to_Func[k.red], ty=ty_to_cxxtype[k.ty],
-                              start=start, stop=stop)
+                              start=start, stop=stop, bounds=bounds)
   else:
-    inst = form.format(cname=cname, id=id, prof=prof, start=start, stop=stop)
+    inst = form.format(cname=cname, id=id, prof=prof, start=start, stop=stop, bounds=bounds)
   return inst
 
 def prototype(k):

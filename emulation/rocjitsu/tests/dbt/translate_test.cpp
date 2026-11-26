@@ -111,8 +111,9 @@ using test_support::write_value_for_test;
 uint32_t add_elf_name(std::vector<uint8_t> &names, std::string_view name) {
   const uint32_t offset = static_cast<uint32_t>(names.size());
   names.resize(names.size() + name.size() + 1);
-  if (!name.empty())
+  if (!name.empty()) {
     std::memcpy(names.data() + offset, name.data(), name.size());
+  }
   return offset;
 }
 
@@ -163,8 +164,9 @@ make_minimal_amdgpu_elf_with_text_and_rodata(std::span<const uint8_t> text_bytes
   ehdr.e_shstrndx = 3;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  if (!text_bytes.empty())
+  if (!text_bytes.empty()) {
     std::memcpy(image.data() + text_offset, text_bytes.data(), text_size);
+  }
 
   const uint32_t rodata_word = 0xA5A55A5Au;
   std::memcpy(image.data() + rodata_offset, &rodata_word, sizeof(rodata_word));
@@ -1009,10 +1011,11 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchDifferentMachineStillFails) {
 }
 
 TEST(BinaryTranslatorE2E, FormattedAccessesRequireCrossFamilySemanticExpansion) {
-  for (bool typed : {false, true})
+  for (bool typed : {false, true}) {
     for (uint16_t opcode : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 38, 39}) {
-      if (typed && opcode > 15)
+      if (typed && opcode > 15) {
         continue;
+      }
       const auto store =
           typed ? cdna4::build_mtbuf(
                       opcode, {.dfmt = 10, .nfmt = 4, .vdata = 8, .srsrc = 1, .soffset = 128})
@@ -1028,6 +1031,7 @@ TEST(BinaryTranslatorE2E, FormattedAccessesRequireCrossFamilySemanticExpansion) 
       EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
                                        "no expansion rule is implemented"));
     }
+  }
 }
 
 TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
@@ -1043,8 +1047,9 @@ TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
     BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4);
     const TranslatedCodeObject result = translator.translate(source);
     std::string diagnostics;
-    for (const TranslationDiagnostic &diagnostic : result.diagnostics)
+    for (const TranslationDiagnostic &diagnostic : result.diagnostics) {
       diagnostics += diagnostic.message + "\n";
+    }
     EXPECT_FALSE(result.ok());
     EXPECT_EQ(result.elf_bytes, image);
     EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
@@ -1067,8 +1072,9 @@ TEST(BinaryTranslatorE2E, LegacyCacheAtomicAddRequiresSemanticExpansion) {
   BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna4);
   const TranslatedCodeObject result = translator.translate(source);
   std::string diagnostics;
-  for (const TranslationDiagnostic &diagnostic : result.diagnostics)
+  for (const TranslationDiagnostic &diagnostic : result.diagnostics) {
     diagnostics += diagnostic.message + "\n";
+  }
   EXPECT_FALSE(result.ok());
   EXPECT_EQ(result.elf_bytes, image);
   EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
@@ -1090,8 +1096,9 @@ TEST(BinaryTranslatorE2E, Gfx950CacheAtomicAddToGfx1100RequiresSemanticExpansion
   BinaryTranslator translator(rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Rdna3);
   const TranslatedCodeObject result = translator.translate(source);
   std::string diagnostics;
-  for (const TranslationDiagnostic &diagnostic : result.diagnostics)
+  for (const TranslationDiagnostic &diagnostic : result.diagnostics) {
     diagnostics += diagnostic.message + "\n";
+  }
   EXPECT_FALSE(result.ok());
   EXPECT_EQ(result.elf_bytes, image);
   EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
@@ -1316,8 +1323,9 @@ public:
                       const DecodeErrorEmitter &emit_error) override {
     ++decode_calls;
     observed_words.assign(words, words + max_instruction_words_);
-    if (reject_)
+    if (reject_) {
       return emit_error.emit() << "test decoder rejected encoding";
+    }
     return std::make_unique<RewriteDischargeBoundTestInstruction>(decoded_words_);
   }
 
@@ -2780,19 +2788,22 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
                            rocjitsu::IsaFamily target_arch) -> std::optional<uint32_t> {
     auto local_image = image;
     AmdGpuCodeObject local_co(local_image.data(), local_image.size());
-    if (!local_co.is_valid())
+    if (!local_co.is_valid()) {
       return std::nullopt;
+    }
     const Section *rodata = find_section(local_co, ".rodata");
-    if (rodata == nullptr)
+    if (rodata == nullptr) {
       return std::nullopt;
+    }
 
     auto descriptor = read_kernel_descriptor_for_test(rodata->data());
     descriptor.compute_pgm_rsrc3 = source_rsrc3;
     write_kernel_descriptor_for_test(local_image.data() + rodata->sectionOffset(), descriptor);
 
     AmdGpuCodeObject seeded(local_image.data(), local_image.size());
-    if (!seeded.is_valid())
+    if (!seeded.is_valid()) {
       return std::nullopt;
+    }
 
     KdTranslation translation{};
     translation.descriptor_file_offset = rodata->sectionOffset();
@@ -2800,8 +2811,9 @@ TEST(CodeObjectPatcher, Rsrc3IsCarriedOnlyBetweenMatchingLayouts) {
     translation.source_arch = source_arch;
 
     CodeObjectPatcher patcher(seeded);
-    if (!patcher.apply_kernel_descriptor_translation(translation, target_arch))
+    if (!patcher.apply_kernel_descriptor_translation(translation, target_arch)) {
       return std::nullopt;
+    }
     const auto patched_image = patcher.emit();
     return read_kernel_descriptor_for_test(patched_image.data() +
                                            translation.descriptor_file_offset)
@@ -2897,11 +2909,13 @@ TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
                      uint32_t vgpr_granulated) -> PatchOutcome {
     auto local_image = image;
     AmdGpuCodeObject probe(local_image.data(), local_image.size());
-    if (!probe.is_valid())
+    if (!probe.is_valid()) {
       return {};
+    }
     const Section *rodata = find_section(probe, ".rodata");
-    if (rodata == nullptr)
+    if (rodata == nullptr) {
       return {};
+    }
 
     auto descriptor = read_kernel_descriptor_for_test(rodata->data());
     descriptor.compute_pgm_rsrc3 = 0;
@@ -2910,8 +2924,9 @@ TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
     write_kernel_descriptor_for_test(local_image.data() + rodata->sectionOffset(), descriptor);
 
     AmdGpuCodeObject seeded(local_image.data(), local_image.size());
-    if (!seeded.is_valid())
+    if (!seeded.is_valid()) {
       return {};
+    }
 
     KdTranslation translation{};
     translation.descriptor_file_offset = rodata->sectionOffset();
@@ -2924,8 +2939,9 @@ TEST(CodeObjectPatcher, SharedVgprCountIsReconciledWithTheTargetAllocation) {
     CodeObjectPatcher patcher(seeded);
     outcome.patched =
         patcher.apply_kernel_descriptor_translation(translation, rocjitsu::IsaFamily::Rdna3);
-    if (!outcome.patched)
+    if (!outcome.patched) {
       return outcome;
+    }
     const auto out = patcher.emit();
     outcome.shared_count = RJ_AMDHSA_BITS_GET(
         read_kernel_descriptor_for_test(out.data() + translation.descriptor_file_offset)
@@ -2981,16 +2997,18 @@ TEST(CodeObjectPatcher, AppliesArchSpecificWgpModeBit) {
 
   auto patched_rsrc1 = [&](rocjitsu::IsaFamily arch) -> std::optional<uint32_t> {
     AmdGpuCodeObject local_co(image.data(), image.size());
-    if (!local_co.is_valid())
+    if (!local_co.is_valid()) {
       return std::nullopt;
+    }
 
     KdTranslation translation{};
     translation.descriptor_file_offset = rodata->sectionOffset();
     translation.target_wave_size = 32;
 
     CodeObjectPatcher patcher(local_co);
-    if (!patcher.apply_kernel_descriptor_translation(translation, arch))
+    if (!patcher.apply_kernel_descriptor_translation(translation, arch)) {
       return std::nullopt;
+    }
 
     const auto patched_image = patcher.emit();
     const auto kd =
@@ -3117,11 +3135,13 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesSectionAlignmentWithOrWithoutLoads) 
                             original_sections[2].sh_size),
                 0);
       std::vector<Elf64_Phdr> segments;
-      if (header.e_phnum != 0)
+      if (header.e_phnum != 0) {
         segments = read_elf_array_for_test<Elf64_Phdr>(output, header.e_phoff, header.e_phnum);
+      }
       EXPECT_EQ(segments.size(), with_loads ? 2u : 0u);
-      for (const Elf64_Phdr &segment : segments)
+      for (const Elf64_Phdr &segment : segments) {
         EXPECT_EQ(segment.p_offset % segment.p_align, segment.p_vaddr % segment.p_align);
+      }
       EXPECT_EQ(std::memcmp(source.image_data(), image.data(), image.size()), 0);
     }
   }
@@ -3492,8 +3512,9 @@ TEST(CodeObjectPatcher, RejectsDynamicNoneBeforeInspectingPlaceOrSymbolMetadata)
     const auto rela_it = std::ranges::find_if(
         shdrs, [](const Elf64_Shdr &section) { return section.sh_type == SHT_RELA; });
     EXPECT_NE(rela_it, shdrs.end());
-    if (rela_it == shdrs.end())
+    if (rela_it == shdrs.end()) {
       return image;
+    }
     const size_t rela_index = static_cast<size_t>(rela_it - shdrs.begin());
     auto relocation = read_elf_struct_for_test<Elf64_Rela>(image, rela_it->sh_offset);
     mutate(shdrs, rela_index, relocation);
@@ -4051,8 +4072,9 @@ TEST(BinaryTranslator, InlineExpansionIgnoresUnreachableTextTail) {
 
   const auto *target_words =
       reinterpret_cast<const uint32_t *>(translated.text_sections()[0]->data());
-  for (size_t i = 0; i < expected_waitcnt.size(); ++i)
+  for (size_t i = 0; i < expected_waitcnt.size(); ++i) {
     EXPECT_EQ(target_words[i], expected_waitcnt[i]);
+  }
   util::FailureOr<uint32_t> maybe_s_endpgm = build_s_endpgm(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(maybe_s_endpgm.succeeded());
   EXPECT_EQ(target_words[expected_waitcnt.size()], maybe_s_endpgm.value());
@@ -4461,8 +4483,9 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
     const uint32_t getpc = pack_sop1(0x1c, pc_sreg, 0);
     size_t found = 0;
     for (size_t i = 0; i + 2 < word_count; ++i) {
-      if (target_words[i] != getpc)
+      if (target_words[i] != getpc) {
         continue;
+      }
       ++found;
       const uint64_t target = (i + 1) * sizeof(uint32_t) + target_words[i + 2];
       ASSERT_EQ(target % sizeof(uint32_t), 0u);
@@ -4690,13 +4713,15 @@ make_shared_address_taken_helper_image(bool oversized_kernel0_lds) {
 
   auto image = test_support::make_minimal_amdgpu_elf_with_two_kernels_and_function_pointers(
       words, /*kernel1_entry_word=*/2, {{.offset_word = kSharedHelperEntryWord, .words = 2}});
-  if (!oversized_kernel0_lds)
+  if (!oversized_kernel0_lds) {
     return image;
+  }
 
   AmdGpuCodeObject layout(image.data(), image.size());
   const auto *rodata = find_section(layout, ".rodata");
-  if (rodata == nullptr)
+  if (rodata == nullptr) {
     return image;
+  }
   // Kernel 0's descriptor is first in .rodata, so this leaves kernel 1 on the hardware-LDS model.
   write_value_for_test<uint32_t>(
       image, rodata->sectionOffset() + offsetof(TestKernelDescriptor, group_segment_fixed_size),
@@ -4724,8 +4749,9 @@ make_shared_address_taken_helper_image(bool oversized_kernel0_lds) {
 [[nodiscard]] std::vector<uint64_t>
 translated_helper_entry_offsets(const AmdGpuCodeObject &object) {
   std::vector<uint64_t> entries;
-  if (object.text_sections().empty())
+  if (object.text_sections().empty()) {
     return entries;
+  }
   const Section &text = *object.text_sections().front();
   const auto *words = reinterpret_cast<const uint32_t *>(text.data());
   const size_t word_count = text.size() / sizeof(uint32_t);
@@ -4734,8 +4760,9 @@ translated_helper_entry_offsets(const AmdGpuCodeObject &object) {
   static_assert(return_result.succeeded());
   const uint32_t ret = return_result.value();
   for (size_t i = 1; i < word_count; ++i) {
-    if (words[i] == ret)
+    if (words[i] == ret) {
       entries.push_back((i - 1) * sizeof(uint32_t));
+    }
   }
   return entries;
 }
@@ -4743,12 +4770,14 @@ translated_helper_entry_offsets(const AmdGpuCodeObject &object) {
 /// @brief The single `R_AMDGPU_RELATIVE64` addend the fixture's pointer slot carries.
 [[nodiscard]] std::optional<uint64_t> only_relative64_addend(const AmdGpuCodeObject &object) {
   const auto *rela = find_section(object, ".rela.dyn");
-  if (rela == nullptr || rela->size() != sizeof(Elf64_Rela))
+  if (rela == nullptr || rela->size() != sizeof(Elf64_Rela)) {
     return std::nullopt;
+  }
   Elf64_Rela entry{};
   std::memcpy(&entry, rela->data(), sizeof(entry));
-  if (elf_reloc_type(entry.r_info) != R_AMDGPU_RELATIVE64 || entry.r_addend < 0)
+  if (elf_reloc_type(entry.r_info) != R_AMDGPU_RELATIVE64 || entry.r_addend < 0) {
     return std::nullopt;
+  }
   return static_cast<uint64_t>(entry.r_addend);
 }
 

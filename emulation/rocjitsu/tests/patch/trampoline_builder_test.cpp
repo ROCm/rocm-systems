@@ -162,8 +162,9 @@ TEST(TrampolineBuilder, OmittedOriginalEmptyBodySplicesCompleteInstructionExtent
     ASSERT_EQ(bytes->patched_anchor_bytes.size(), original_size);
     EXPECT_EQ(word_at(bytes->patched_anchor_bytes, 0), forward_branch.value());
     EXPECT_EQ(resolve_sopp_target(kAnchor, word_at(bytes->patched_anchor_bytes, 0)), kTrampoline);
-    for (uint32_t offset = sizeof(uint32_t); offset < original_size; offset += sizeof(uint32_t))
+    for (uint32_t offset = sizeof(uint32_t); offset < original_size; offset += sizeof(uint32_t)) {
       EXPECT_EQ(word_at(bytes->patched_anchor_bytes, offset), nop.value());
+    }
     // An empty replacement contains only the branch past the complete original.
     ASSERT_EQ(bytes->trampoline_words.size(), 1u);
     EXPECT_EQ(bytes->trampoline_words.front() & 0xffff0000u, branch_opcode.value());
@@ -201,8 +202,9 @@ TEST(TrampolineBuilder, OmittedOriginalReplacementBodyContainsNoReplayedGuestWor
       ASSERT_TRUE(bytes) << error;
       ASSERT_EQ(bytes->patched_anchor_bytes.size(), original_size);
       EXPECT_EQ(resolve_sopp_target(kAnchor, word_at(bytes->patched_anchor_bytes, 0)), kTrampoline);
-      for (uint32_t offset = sizeof(uint32_t); offset < original_size; offset += sizeof(uint32_t))
+      for (uint32_t offset = sizeof(uint32_t); offset < original_size; offset += sizeof(uint32_t)) {
         EXPECT_EQ(word_at(bytes->patched_anchor_bytes, offset), padding.value());
+      }
       ASSERT_EQ(bytes->trampoline_words.size(), replacement.size() + 1);
       EXPECT_TRUE(
           std::equal(replacement.begin(), replacement.end(), bytes->trampoline_words.begin()));
@@ -210,9 +212,10 @@ TEST(TrampolineBuilder, OmittedOriginalReplacementBodyContainsNoReplayedGuestWor
       const uint64_t return_pc = kTrampoline + replacement.size() * sizeof(uint32_t);
       EXPECT_EQ(bytes->trampoline_words.back() & 0xffff0000u, branch_opcode.value());
       EXPECT_EQ(resolve_sopp_target(return_pc, bytes->trampoline_words.back()), plan.return_target);
-      for (const uint32_t original_word : original)
+      for (const uint32_t original_word : original) {
         EXPECT_EQ(std::ranges::find(bytes->trampoline_words, original_word),
                   bytes->trampoline_words.end());
+      }
     }
   }
 }
@@ -252,11 +255,11 @@ TEST(TrampolineBuilder, OmittedOriginalChecksBothBranchRangesForTwelveByteAnchor
   }
 }
 
-TEST(TrampolineBuilder, OmittedOriginalDoesNotRelaxTheRelocatedOriginalSizeLimit) {
+TEST(TrampolineBuilder, ReplayRejectsOversizedInstructionsWithOrWithoutAnAnchorSplice) {
   for (const bool patch_anchor : {false, true}) {
     SCOPED_TRACE(patch_anchor);
     TrampolinePlan plan =
-        make_omitted_original_plan(rocjitsu::IsaFamily::Rdna4, {0xee068002u, 0x00800000u, 0});
+        make_omitted_original_plan(rocjitsu::IsaFamily::Rdna4, std::vector<uint32_t>(4));
     plan.emit_original = true;
     plan.patch_anchor = patch_anchor;
     std::string error;
@@ -532,18 +535,21 @@ constexpr ProbeAbi kProbeAbi = *derive_probe_abi(ProbeCallingConvention::AmdGpuF
 
 RegisterSet make_sgpr_set(std::initializer_list<uint16_t> indices) {
   RegisterSet set;
-  for (uint16_t i : indices)
+  for (uint16_t i : indices) {
     set.expand(RegisterRef{RegClass::SGPR, i, 1});
+  }
   return set;
 }
 
 // All allocatable SGPRs marked live, except the listed indices left dead.
 RegisterSet all_sgprs_live_except(std::initializer_list<uint16_t> dead) {
   RegisterSet set;
-  for (uint16_t i = 0; i < REGISTER_SET_ALLOCATABLE_SGPRS; ++i)
+  for (uint16_t i = 0; i < REGISTER_SET_ALLOCATABLE_SGPRS; ++i) {
     set.expand(RegisterRef{RegClass::SGPR, i, 1});
-  for (uint16_t i : dead)
+  }
+  for (uint16_t i : dead) {
     set.erase(RegisterRef{RegClass::SGPR, i, 1});
+  }
   return set;
 }
 
@@ -614,8 +620,9 @@ TEST(TrampolineBuilderPlan, NoSccPreserveSkipsSccTemp) {
 // the conservative 102-SGPR scan but absent from this kernel).
 TEST(TrampolineBuilderPlan, TempPastKernelAllocationFailsClosed) {
   RegisterSet live;
-  for (uint16_t i = 0; i < 30; ++i)
+  for (uint16_t i = 0; i < 30; ++i) {
     live.expand(RegisterRef{RegClass::SGPR, i, 1});
+  }
 
   TrampolinePlan plan;
   plan.kernel_sgpr_count = 32; // kernel owns s0..s31 only.
@@ -631,8 +638,9 @@ TEST(TrampolineBuilderPlan, TempPastKernelAllocationFailsClosed) {
 // out-of-allocation pick the cap above prevents.
 TEST(TrampolineBuilderPlan, TempAboveKernelLineAllowedWithoutCap) {
   RegisterSet live;
-  for (uint16_t i = 0; i < 30; ++i)
+  for (uint16_t i = 0; i < 30; ++i) {
     live.expand(RegisterRef{RegClass::SGPR, i, 1});
+  }
 
   TrampolinePlan plan; // default kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS.
   std::string err;
@@ -749,8 +757,9 @@ ProbeAbi arg_abi(uint8_t n) {
 
 RegisterSet make_vgpr_set(std::initializer_list<uint16_t> indices) {
   RegisterSet set;
-  for (uint16_t i : indices)
+  for (uint16_t i : indices) {
     set.expand(RegisterRef{RegClass::VGPR, i, 1});
+  }
   return set;
 }
 
@@ -775,8 +784,9 @@ TEST(TrampolineBuilderPlan, GuestArgumentCyclesUseAnOwnedDeadTemporary) {
       << error;
   ASSERT_EQ(plan.argument_copy_temp, 3u);
   std::array<uint32_t, 8> registers{10, 20, 30, 40};
-  for (const ProbeArgumentMove &move : plan.argument_moves)
+  for (const ProbeArgumentMove &move : plan.argument_moves) {
     registers[move.destination] = registers[move.source];
+  }
   EXPECT_EQ(registers[0], 20u);
   EXPECT_EQ(registers[1], 10u);
   EXPECT_EQ(registers[2], 30u);
@@ -942,8 +952,9 @@ TrampolinePlan entry_storage_crowded_plan(rocjitsu::IsaFamily arch) {
 
 RegisterSet sgprs_below(uint16_t count) {
   RegisterSet live;
-  for (uint16_t i = 0; i < count; ++i)
+  for (uint16_t i = 0; i < count; ++i) {
     live.expand(RegisterRef{RegClass::SGPR, i, 1});
+  }
   return live;
 }
 
@@ -1065,11 +1076,14 @@ TEST(TrampolineBuilderPlan, ArgumentVgprsAreBuilderClobbers) {
 TEST(TrampolineBuilderPlan, PassingArgumentsReservesTheExecSave) {
   auto exec_saved = [](const TrampolinePlan &plan) {
     util::FailureOr<uint16_t> exec = scalar_operand_exec_lo(plan.arch);
-    if (exec.failed())
+    if (exec.failed()) {
       return false;
-    for (const SpecialStateSlot &s : plan.special_state_saves)
-      if (s.operand == exec.value())
+    }
+    for (const SpecialStateSlot &s : plan.special_state_saves) {
+      if (s.operand == exec.value()) {
         return true;
+      }
+    }
     return false;
   };
 
@@ -1255,12 +1269,13 @@ TEST(TrampolineBuilderEmit, ProbeCallRejectsUnsupportedSpillBuildersWithoutOutpu
     TrampolinePlan plan;
     plan.is_probe_call = true;
     plan.arch = rocjitsu::IsaFamily::Cdna2;
-    if (cls == RegClass::VGPR)
+    if (cls == RegClass::VGPR) {
       plan.vgpr_spills.push_back({cls, 0, 0});
-    else if (cls == RegClass::SGPR)
+    } else if (cls == RegClass::SGPR) {
       plan.sgpr_spills.push_back({cls, 0, 0});
-    else
+    } else {
       plan.acc_spills.push_back({cls, 0, 0});
+    }
     std::string error;
     EXPECT_NO_THROW({
       const auto bytes = TrampolineBuilder::emit_probe_call(plan, &error);

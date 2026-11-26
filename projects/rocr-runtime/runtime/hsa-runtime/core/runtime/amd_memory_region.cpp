@@ -97,6 +97,9 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
     mem_flag_.ui32.NoSubstitute = 1;
     mem_flag_.ui32.HostAccess =
         (mem_props_.HeapType == HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE) ? 0 : 1;
+    // HSA_DEVICE_MEM_NO_HOST_ACCESS: map device memory PROT_NONE on the CPU so CPU access faults.
+    if (core::Runtime::runtime_singleton_->flag().device_mem_no_host_access())
+      mem_flag_.ui32.HostAccess = 0;
     mem_flag_.ui32.NonPaged = 1;
 
     // Kernel argument buffers are mapped executable because the CP enforces
@@ -333,6 +336,8 @@ bool MemoryRegion::SignalCapable() const {
       return fine_grain();
     case core::Agent::DeviceType::kAmdGpuDevice: {
       if (!IsPublic()) return false;
+      // Device memory is not host accessible; keep signals in host memory.
+      if (core::Runtime::runtime_singleton_->flag().device_mem_no_host_access()) return false;
       // The uncached (extended-scope fine-grained) pool on gfx94x/gfx95x, where the other pools
       // are MTYPE RW and a binary completion store is not seen by another queue's CP; the
       // coarse-grained pool on gfx12+, whose CP writes completions at system scope.
@@ -428,6 +433,12 @@ hsa_amd_memory_pool_access_t MemoryRegion::GetAccessInfo(
   // guaranteed to be HSA_HEAPTYPE_FRAME_BUFFER_PUBLIC
 
   if (IsLocalMemory()) {
+    // HSA_DEVICE_MEM_NO_HOST_ACCESS: CPU can never access device-local memory.
+    if (core::Runtime::runtime_singleton_->flag().device_mem_no_host_access() &&
+        agent.device_type() == core::Agent::kAmdCpuDevice) {
+      return HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
+    }
+
     // Return disallowed by default if memory is coarse
     // grained or extended scope fine grained without regard to link type
     if (fine_grain() == false) {
