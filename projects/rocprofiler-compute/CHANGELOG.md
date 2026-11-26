@@ -9,6 +9,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Changed
 
+* Analyze mode accepts numpy versions from 1.26.4 to 2.5.x. It previously required exactly 1.26.4, or 2.5.2 on Python 3.13 and newer.
+
 ### Removed
 
 ### Optimized
