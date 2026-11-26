@@ -33,6 +33,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
 #include "rocm_smi/rocm_smi_cpu_link.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "test_fixture_utils.h"
 
@@ -201,6 +202,33 @@ TEST(SystemUnit, DebugProbeKfdNodeFileAccess) {
   }
 }
 
+// TEMP DIAGNOSTIC -- not for commit. Calls the actual production function
+// (amd::smi::ReadKFDGpuId(), not an approximation of it) directly against
+// every topology node. ProbeFile() above uses std::ifstream the same way
+// ReadKFDGpuId() does, and a local experiment showed that approach can be
+// misleading: when the underlying read() is denied (confirmed via `cat`
+// returning EPERM) rather than open() itself failing, std::ifstream's
+// is_open() stays true and the stream silently yields empty content instead
+// of surfacing the read error -- ProbeFile() reports that as "OK
+// content=[]", which looks like success. Calling ReadKFDGpuId() directly
+// shows what that actually becomes once the caller's own is_number() check
+// rejects the resulting empty string.
+TEST(SystemUnit, DebugProbeReadKFDGpuIdDirect) {
+  const std::string topo_root = "/sys/class/kfd/kfd/topology/nodes";
+  std::vector<int> nodes = ListNumericEntries(topo_root);
+  for (int n : nodes) {
+    uint64_t gpu_id = 0xDEADBEEF;  // sentinel: must change on success
+    int ret = amd::smi::ReadKFDGpuId(static_cast<uint32_t>(n), &gpu_id);
+    std::cerr << "[CPU_LINK_DEBUG][read-kfd-gpu-id-direct] node=" << n << " ret=" << ret;
+    if (ret == 0) {
+      std::cerr << " (SUCCESS) gpu_id=" << gpu_id;
+    } else {
+      std::cerr << " (" << strerror(ret) << ")";
+    }
+    std::cerr << "\n";
+  }
+}
+
 // TEMP DIAGNOSTIC -- not for commit. Calls the raw public APIs directly (not
 // through the CLI) for every discovered GPU, printing xgmi_read_data_acc /
 // xgmi_write_data_acc / link_speed / link_width with explicit sentinel
@@ -294,6 +322,29 @@ TEST(SystemUnit, DebugDumpDriverVersionInfo) {
       "echo ===uname===; uname -a; "
       "echo ===amdgpu_module_version===; cat /sys/module/amdgpu/version 2>&1; "
       "echo ===modinfo_amdgpu===; modinfo amdgpu 2>&1 | grep -iE 'version|vermagic'; "
+      // Decisive check for the container/GPU-isolation hypothesis: if KFD
+      // topology sees more GPU nodes than /dev/dri exposes device files for,
+      // this container hides peer GPUs from /dev while sysfs topology (which
+      // DiscoverGpuCpuLinks() walks) stays global -- exactly the condition
+      // needed for it to walk into a neighbor it can't fully read. If the
+      // counts match, that hypothesis is wrong.
+      // ROCR_VISIBLE_DEVICES/HIP_VISIBLE_DEVICES are consumed by the ROCR/HSA
+      // userspace runtime during its own agent enumeration -- amd-smi doesn't
+      // go through ROCR/HSA, it reads KFD topology sysfs and correlates to
+      // DRM render nodes directly, so those env vars don't affect what it
+      // sees. What matters here is the actual Docker device cgroup grant:
+      // which /dev/dri/* and /dev/kfd nodes exist and are accessible at all.
+      "echo ===dev_dri_listing===; ls -la /dev/dri/ 2>&1; "
+      "echo ===dev_kfd===; ls -la /dev/kfd 2>&1; "
+      "echo ===node_count_vs_dev_count===; "
+      "echo \"kfd topology nodes: $(ls /sys/class/kfd/kfd/topology/nodes/ 2>/dev/null | wc -l)\"; "
+      "echo \"/dev/dri renderD* nodes: $(ls /dev/dri/ 2>/dev/null | grep -c '^renderD')\"; "
+      "echo \"/dev/dri card* nodes: $(ls /dev/dri/ 2>/dev/null | grep -c '^card')\"; "
+      "echo \"gpu_id!=0 topology nodes (real GPUs per KFD): \"; "
+      "for n in /sys/class/kfd/kfd/topology/nodes/*/gpu_id; do "
+      "  v=$(cat \"$n\" 2>/dev/null); "
+      "  [ -n \"$v\" ] && [ \"$v\" != \"0\" ] && echo \"  $n = $v\"; "
+      "done; "
       "echo ===xgmi_port_num_presence===; "
       // Several /sys/class/drm/cardN-<connector> entries resolve to the same
       // underlying GPU device dir; dedupe so each real device prints once.
