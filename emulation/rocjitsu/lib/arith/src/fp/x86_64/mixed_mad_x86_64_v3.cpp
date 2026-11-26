@@ -23,4 +23,18 @@ void mixed_mad_x86_64_v3(MixedFma destination, uint64_t flags, uint32_t exec_mas
   }
 }
 
+// Narrow guest-rounded FP32 results without repeating their arithmetic.
+void mixed_narrow_x86_64_v3(MixedFma destination, uint64_t flags, uint32_t exec_mask, uint32_t *d,
+                            const uint32_t *source) {
+  for (int lane = 0; lane < 32; lane += 8) {
+    auto low = mixed_mad_merge(
+        destination,
+        narrow_mixed_half(_mm256_loadu_ps(reinterpret_cast<const float *>(source + lane)), flags),
+        d + lane);
+    auto active = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
+                                    _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+    _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), active, low);
+  }
+}
+
 } // namespace rocjitsu::arith

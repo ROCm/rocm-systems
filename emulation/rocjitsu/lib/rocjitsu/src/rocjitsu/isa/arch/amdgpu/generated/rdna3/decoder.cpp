@@ -93,8 +93,9 @@ DecodeResult DecoderImpl::decodeInvalid(const MachineInst *opcode,
 DecodeResult DecoderImpl::decodeVopd(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Vopd::validate_encoding(opcode, emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<Vopd>(opcode);
 }
 

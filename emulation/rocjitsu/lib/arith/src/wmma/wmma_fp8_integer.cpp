@@ -54,43 +54,34 @@ void store(uint32_t *const *d, const uint32_t (&result)[8][32]) {
   }
 }
 
-// Evaluate a gfx12 Wave32 FP8/BF8 tile with resolved semantics. D may alias
-// inputs; unsupported modifiers return an error without modifying D.
+// Exact scalar gfx12 FP8/BF8 WMMA fallback; kept out-of-line so the SIMD
+// dispatcher avoids stack-frame setup on the hot path.
 template <bool Bf8A, bool Bf8B>
-int floating(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
-             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
-  // Captured C ABS/NEG bits are ignored aliases. A/B instruction_flags remain unsupported.
-  if (int error = rocjitsu::arith::validate(
-          flags, instruction_flags & ~uint64_t(RJ_ARITH_WMMA_NEG_C | RJ_ARITH_WMMA_ABS_C),
-          rocjitsu::arith::kMatrixIgnoredFpFlags)) {
-    return error;
-  }
-  if (rocjitsu::arith::is_exact(flags)) {
-    uint32_t result[8][32];
-    for (int row = 0; row < 16; ++row) {
-      for (int col = 0; col < 16; ++col) {
-        int lane = col + 16 * (row / 8), reg = row % 8;
-        uint32_t acc = c[reg][lane];
-        for (int stage = 0; stage < 2; ++stage) {
-          uint8_t left[8], right[8];
-          for (int i = 0; i < 8; ++i) {
-            left[i] = uint8_t(element<8>(a, row, stage * 8 + i));
-            right[i] = uint8_t(element<8>(b, col, stage * 8 + i));
-          }
-          acc = rocjitsu::arith::gfx12_dot8_f32<Bf8A, Bf8B>(left, right, acc);
+[[gnu::noinline]] void floating_exact_scalar(uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c) {
+  uint32_t result[8][32];
+  for (int row = 0; row < 16; ++row) {
+    for (int col = 0; col < 16; ++col) {
+      int lane = col + 16 * (row / 8), reg = row % 8;
+      uint32_t acc = c[reg][lane];
+      for (int stage = 0; stage < 2; ++stage) {
+        uint8_t left[8], right[8];
+        for (int i = 0; i < 8; ++i) {
+          left[i] = uint8_t(element<8>(a, row, stage * 8 + i));
+          right[i] = uint8_t(element<8>(b, col, stage * 8 + i));
         }
-        result[reg][lane] = acc;
+        acc = rocjitsu::arith::gfx12_dot8_f32<Bf8A, Bf8B>(left, right, acc);
       }
+      result[reg][lane] = acc;
     }
-    store(d, result);
-    return RJ_ARITH_SUCCESS;
   }
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::fp8_wmma_x86_64_v3<Bf8A, Bf8B>(d, a, b, c);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
+  store(d, result);
+}
+
+// Keep the scalar reference out of line so SIMD dispatch needs no result buffer.
+template <bool Bf8A, bool Bf8B>
+[[gnu::noinline]] void floating_loose_scalar(uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b, const uint32_t *const *c) {
   uint32_t result[8][32];
   for (int row = 0; row < 16; ++row) {
     for (int col = 0; col < 16; ++col) {
@@ -106,7 +97,62 @@ int floating(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
     }
   }
   store(d, result);
+}
+
+// Dispatch a validated gfx12 Wave32 FP8/BF8 tile.
+template <bool Bf8A, bool Bf8B>
+int floating_validated(uint64_t flags, uint32_t *const *d, const uint32_t *const *a,
+                       const uint32_t *const *b, const uint32_t *const *c) {
+  if (rocjitsu::arith::is_exact(flags)) {
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+      rocjitsu::arith::fp8_wmma_exact_x86_64_v4(Bf8A, Bf8B, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+      rocjitsu::arith::fp8_wmma_exact_x86_64_v3(Bf8A, Bf8B, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+#endif
+    floating_exact_scalar<Bf8A, Bf8B>(d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
+      rocjitsu::arith::fp8_wmma_x86_64_v4_bf16<Bf8A, Bf8B>(d, a, b, c)) {
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::fp8_wmma_x86_64_v4<Bf8A, Bf8B>(d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::fp8_wmma_x86_64_v3<Bf8A, Bf8B>(d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  floating_loose_scalar<Bf8A, Bf8B>(d, a, b, c);
   return RJ_ARITH_SUCCESS;
+}
+
+// Evaluate a gfx12 Wave32 FP8/BF8 tile with resolved semantics. D may alias
+// inputs; unsupported modifiers return an error without modifying D.
+template <bool Bf8A, bool Bf8B>
+int floating(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  // Captured C ABS/NEG bits are ignored aliases. A/B instruction_flags remain unsupported.
+  if (int error = rocjitsu::arith::validate(
+          flags, instruction_flags & ~uint64_t(RJ_ARITH_WMMA_NEG_C | RJ_ARITH_WMMA_ABS_C),
+          rocjitsu::arith::kMatrixIgnoredFpFlags)) {
+    return error;
+  }
+  return floating_validated<Bf8A, Bf8B>(flags, d, a, b, c);
 }
 
 // Evaluate a gfx12 Wave64 FP8/BF8 tile with resolved semantics, preserving
@@ -120,31 +166,14 @@ int floating_wave64(uint64_t flags, uint64_t instruction_flags, uint32_t *const 
     return error;
   }
   Wave32Views view(d, a, b, c);
-  return floating<Bf8A, Bf8B>(flags, instruction_flags, view.d, view.a, view.b, view.c);
+  return floating_validated<Bf8A, Bf8B>(flags, view.d, view.a, view.b, view.c);
 }
 
-// Evaluate a gfx12 Wave32 INT8/INT4 tile with resolved semantics, signedness
-// and optional CLAMP. Errors preserve D; D may overlap input registers.
+// Keep the scalar reference out of line so SIMD dispatch needs no result buffer.
 template <int Bits, int K>
-int integer(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
-            const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
-  if (int error = rocjitsu::arith::validate(
-          flags, instruction_flags & ~uint64_t(RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B |
-                                               RJ_ARITH_WMMA_CLAMP))) {
-    return error;
-  }
-#if defined(RJ_ARITH_HAVE_AVX512VNNI)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
-    rocjitsu::arith::integer_wmma_avx512vnni<Bits, K>(uint32_t(instruction_flags), d, a, b, c);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::integer_wmma_x86_64_v3<Bits, K>(uint32_t(instruction_flags), d, a, b, c);
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
+[[gnu::noinline]] void integer_scalar(uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      const uint32_t *const *c) {
   // Interpret an extracted Bits-wide value with the requested signedness.
   const auto extend = [](uint32_t bits, bool is_signed) -> int64_t {
     return int64_t(bits) - (is_signed && (bits & (1u << (Bits - 1))) ? (1u << Bits) : 0);
@@ -173,7 +202,53 @@ int integer(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
     }
   }
   store(d, result);
+}
+
+// Dispatch a validated gfx12 Wave32 INT8/INT4 tile.
+template <int Bits, int K>
+int integer_validated(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+                      const uint32_t *const *a, const uint32_t *const *b,
+                      const uint32_t *const *c) {
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+  bool use_zen4 = rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4);
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if constexpr (Bits == 4 && K == 32) {
+    const bool signed_input = instruction_flags & (RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B);
+    use_zen4 = use_zen4 && signed_input && (instruction_flags & RJ_ARITH_WMMA_CLAMP);
+  }
+#endif
+  if (use_zen4) {
+    rocjitsu::arith::integer_wmma_avx512vnni<Bits, K>(uint32_t(instruction_flags), d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::integer_wmma_x86_64_v4<Bits, K>(uint32_t(instruction_flags), d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    rocjitsu::arith::integer_wmma_x86_64_v3<Bits, K>(uint32_t(instruction_flags), d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  integer_scalar<Bits, K>(instruction_flags, d, a, b, c);
   return RJ_ARITH_SUCCESS;
+}
+
+// Evaluate a gfx12 Wave32 INT8/INT4 tile with resolved semantics, signedness
+// and optional CLAMP. Errors preserve D; D may overlap input registers.
+template <int Bits, int K>
+int integer(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+            const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
+  if (int error = rocjitsu::arith::validate(
+          flags, instruction_flags & ~uint64_t(RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B |
+                                               RJ_ARITH_WMMA_CLAMP))) {
+    return error;
+  }
+  return integer_validated<Bits, K>(flags, instruction_flags, d, a, b, c);
 }
 
 // Evaluate a gfx12 Wave64 integer tile with resolved semantics. CLAMP keeps
@@ -187,7 +262,7 @@ int integer_wave64(uint64_t flags, uint64_t instruction_flags, uint32_t *const *
     return error;
   }
   Wave32Views view(d, a, b, c);
-  return integer<Bits, K>(flags, instruction_flags, view.d, view.a, view.b, view.c);
+  return integer_validated<Bits, K>(flags, instruction_flags, view.d, view.a, view.b, view.c);
 }
 
 } // namespace

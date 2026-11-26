@@ -77,7 +77,6 @@ class GpuSqttBuilder
 public:
     explicit GpuSqttBuilder(const AgentInfo* agent_info)
     : xcc_number_(agent_info->xcc_num)
-    , se_number_total(agent_info->se_num)
     , builder_(agent_info)
     {}
 
@@ -109,7 +108,6 @@ public:
 
 private:
     uint32_t xcc_number_;
-    size_t   se_number_total;
     Builder  builder_;
 };
 

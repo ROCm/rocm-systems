@@ -187,7 +187,8 @@ class PythonApiTest(unittest.TestCase):
                 rocjitsu.RemoteError, "ZeroDivisionError"
             ) as caught:
                 session.run(lambda: 1 / 0)
-            self.assertIn("test_api.py", caught.exception.remote_traceback)
+            # Cloudpickle can elide the source filename of a dynamic callable.
+            self.assertIn("in <lambda>\n", caught.exception.remote_traceback)
             self.assertEqual(session.run(lambda: 42), 42)
         with self.assertRaisesRegex(RuntimeError, "closed"):
             session.run(lambda: 1)

@@ -42,29 +42,38 @@ namespace rocjitsu::arith {
 // every source in a lane group is consumed before any destination is written.
 template <ScaledSource Src, bool ByteScale>
 void wide_scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledDestination destination,
-                                 bool saturate, int scale_shift, uint32_t *const *d,
-                                 const uint32_t *const *a, const uint32_t *b) {
+                                 bool saturate, bool flush_output, int scale_shift,
+                                 uint32_t *const *d, const uint32_t *const *a, const uint32_t *b) {
   constexpr int bits = Src == ScaledSource::Fp4                                 ? 4
                        : (Src == ScaledSource::Fp6 || Src == ScaledSource::Bf6) ? 6
                                                                                 : 8;
   constexpr int elements = ByteScale ? (bits == 6 ? 16 : 8) : 32;
   constexpr int input_words = elements * bits / 32;
+  constexpr int nan_bits = ByteScale ? 0x7fc00000 : int(0xffc00000U);
   int words = destination == ScaledDestination::F32 ? elements : elements / 2;
   for (int lane = 0; lane < lanes; lane += 8) {
-    __m256i source[input_words], result[elements];
-    for (int word = 0; word < input_words; ++word) {
-      source[word] = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a[word] + lane));
+    if (uint8_t(exec_mask >> lane) == 0) {
+      continue;
     }
     auto exponent = _mm256_and_si256(
         _mm256_srl_epi32(_mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane)),
                          _mm_cvtsi32_si128(scale_shift)),
         _mm256_set1_epi32(255));
     auto special = _mm256_cmpeq_epi32(exponent, _mm256_set1_epi32(255));
+    __m256i source[input_words], result[elements];
+    if (_mm256_movemask_epi8(special) == -1) {
+      for (int word = 0; word < input_words; ++word) {
+        source[word] = _mm256_setzero_si256();
+      }
+    } else {
+      for (int word = 0; word < input_words; ++word) {
+        source[word] = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a[word] + lane));
+      }
+    }
     auto scale_bits =
         _mm256_blendv_epi8(_mm256_slli_epi32(exponent, 23), _mm256_set1_epi32(0x00400000),
                            _mm256_cmpeq_epi32(exponent, _mm256_setzero_si256()));
-    scale_bits = _mm256_blendv_epi8(
-        scale_bits, _mm256_set1_epi32(ByteScale ? 0x7fc00000 : 0x3f800000), special);
+    scale_bits = _mm256_blendv_epi8(scale_bits, _mm256_set1_epi32(nan_bits), special);
     auto scale = _mm256_castsi256_ps(scale_bits);
     for (int element = 0; element < elements; ++element) {
       int bit = bits * element, word = bit / 32, shift = bit % 32;
@@ -75,12 +84,9 @@ void wide_scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledDestinatio
       }
       auto scaled_bits =
           _mm256_castps_si256(_mm256_mul_ps(x86_64_v3::wide_scaled_decode<Src>(raw), scale));
-      if constexpr (ByteScale) {
-        // Canonicalize the E8M0 NaN scale, including when both operands are NaNs.
-        scaled_bits = _mm256_blendv_epi8(scaled_bits, _mm256_set1_epi32(0x7fc00000), special);
-      }
+      scaled_bits = _mm256_blendv_epi8(scaled_bits, _mm256_set1_epi32(nan_bits), special);
       auto value = x86_64_v3::scaled_widen_detail::encode(_mm256_castsi256_ps(scaled_bits),
-                                                          destination, saturate);
+                                                          destination, saturate, flush_output);
       if (destination == ScaledDestination::F32) {
         result[element] = value;
       } else if (element % 2) {
@@ -89,45 +95,46 @@ void wide_scaled_widen_x86_64_v3(int lanes, uint64_t exec_mask, ScaledDestinatio
         result[element / 2] = value;
       }
     }
-    // gfx950 special scales suppress writes; gfx1250 writes the NaN results.
     auto active = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
                                     _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
-    if constexpr (!ByteScale) {
-      active = _mm256_andnot_si256(special, active);
-    }
     for (int word = 0; word < words; ++word) {
       _mm256_maskstore_epi32(reinterpret_cast<int *>(d[word] + lane), active, result[word]);
     }
   }
 }
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Fp4, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   bool, bool, int,
+                                                                   uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Fp8, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   bool, bool, int,
+                                                                   uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Bf8, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   bool, bool, int,
+                                                                   uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Fp6, false>(int, uint64_t,
-                                                                    ScaledDestination, bool, int,
-                                                                    uint32_t *const *,
+                                                                    ScaledDestination, bool, bool,
+                                                                    int, uint32_t *const *,
                                                                     const uint32_t *const *,
                                                                     const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Fp6, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   bool, bool, int,
+                                                                   uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Bf6, false>(int, uint64_t,
-                                                                    ScaledDestination, bool, int,
-                                                                    uint32_t *const *,
+                                                                    ScaledDestination, bool, bool,
+                                                                    int, uint32_t *const *,
                                                                     const uint32_t *const *,
                                                                     const uint32_t *);
 template void wide_scaled_widen_x86_64_v3<ScaledSource::Bf6, true>(int, uint64_t, ScaledDestination,
-                                                                   bool, int, uint32_t *const *,
+                                                                   bool, bool, int,
+                                                                   uint32_t *const *,
                                                                    const uint32_t *const *,
                                                                    const uint32_t *);
 } // namespace rocjitsu::arith

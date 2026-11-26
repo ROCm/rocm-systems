@@ -110,11 +110,6 @@ public:
         REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_DROPPED_CNTR);
     static constexpr Register SQ_THREAD_TRACE_WPTR_ADDR =
         REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_WPTR);
-    static constexpr Register SQ_THREAD_TRACE_STATUS_OFFSET = []() {
-        Register reg = REG_32B_ADDR(GC, 0, mmSQ_THREAD_TRACE_STATUS);
-        reg.offset -= UCONFIG_SPACE_START;
-        return reg;
-    }();
     static const uint32_t     TT_BUFF_ALIGN_SHIFT = 12;
     static constexpr Register GUS_PERFCOUNTER_RSLT_CNTL_ADDR =
         REG_32B_ADDR(GC, 0, mmGUS_PERFCOUNTER_RSLT_CNTL);

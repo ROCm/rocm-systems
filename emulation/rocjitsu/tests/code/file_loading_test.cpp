@@ -127,8 +127,9 @@ TEST(FileLoadingTest, RejectsUnreadableRegularFileWithoutThrowing) {
 
   {
     std::ifstream probe(file.path(), std::ios::binary);
-    if (probe.is_open())
+    if (probe.is_open()) {
       GTEST_SKIP() << "The process can still read a file with mode 000";
+    }
   }
 
   EXPECT_TRUE(detail::read_file_bytes(file.path()).failed());

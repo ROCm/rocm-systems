@@ -618,17 +618,6 @@ metadata_registry::add_kernel_symbol(
     detail::insert_if_absent(m_kernel_symbols, kernel_symbol);
 }
 
-std::optional<rocprofiler_callback_tracing_code_object_load_data_t>
-metadata_registry::get_code_object(std::uint64_t code_object_id) const
-{
-    return get_type_info<rocprofiler_callback_tracing_code_object_load_data_t>(
-        m_code_objects,
-        [&code_object_id](
-            const rocprofiler_callback_tracing_code_object_load_data_t& val) {
-            return val.code_object_id == code_object_id;
-        });
-}
-
 std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
 metadata_registry::get_kernel_symbol(std::uint64_t kernel_id) const
 {

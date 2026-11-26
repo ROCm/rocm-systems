@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna1/opcodes.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -24,7 +25,7 @@ namespace rocjitsu {
 namespace {
 constexpr uint32_t kGfx9DataFormat32 = 4u << 15;
 
-class BufferLdsTransfer : public testing::TestWithParam<rj_code_arch_t> {
+class BufferLdsTransfer : public testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   void SetUp() override {
     l2_.set_backing_memory(&memory_);
@@ -44,8 +45,9 @@ protected:
     pipeline_ = std::make_unique<amdgpu::GlobalMemPipeline>(&cu_->l1_vector(), &l2_);
   }
   void TearDown() override {
-    if (wave_)
+    if (wave_) {
       wave_->halt();
+    }
   }
   void scalar(unsigned reg, uint32_t value) {
     cu_->write_sgpr(wave_->sgpr_alloc().base + reg, value);
@@ -65,8 +67,9 @@ protected:
     EXPECT_EQ(wave_->wait_counters().lgkmcnt, 0u);
   }
   void clear_lds() {
-    for (uint32_t a = 0; a < 4608; a += 4)
+    for (uint32_t a = 0; a < 4608; a += 4) {
       wave_->lds().write32(a, 0xcccccccc);
+    }
   }
   amdgpu::GpuMemory memory_{"lds_transfer_memory"};
   amdgpu::L2Cache l2_{"lds_transfer_l2"};
@@ -76,8 +79,62 @@ protected:
   amdgpu::Wavefront *wave_ = nullptr;
 };
 
+TEST_P(BufferLdsTransfer, Cdna2InvalidatePreservesDirtyLocalMemory) {
+  if (GetParam() != rocjitsu::IsaFamily::Cdna2) {
+    GTEST_SKIP();
+  }
+  constexpr uint64_t address = 0x4000;
+  memory_.write32(address, 1);
+  std::array<uint8_t, amdgpu::L2Cache::LINE_SIZE> line{};
+  line[0] = 2;
+  ASSERT_EQ(l2_.writeback_line(address, line.data(), 0, 4, amdgpu::Mtype::RW, wave_->process_id()),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(memory_.read32(address), 1u);
+  const auto words = cdna2::build_mubuf(cdna2::kBufferInvl2);
+  std::unique_ptr<Instruction> inst(decode_valid(*decoder_, words.data()));
+  ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wave_).succeeded());
+  EXPECT_EQ(memory_.read32(address), 1u);
+  ASSERT_EQ(l2_.flush_all(), amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(memory_.read32(address), 2u);
+}
+
+TEST_P(BufferLdsTransfer, Cdna2StoreLdsUsesM0OffsetAndCapturedActiveLanes) {
+  if (GetParam() != rocjitsu::IsaFamily::Cdna2) {
+    GTEST_SKIP();
+  }
+  const auto missing_lds = cdna2::build_mubuf(cdna2::kBufferStoreLdsDword);
+  EXPECT_TRUE(decoder_->decode_window(missing_lds).failed());
+
+  const auto vector_offset =
+      cdna2::build_mubuf(cdna2::kBufferStoreLdsDword, {.offen = 1, .lds = 1});
+  auto decoded = decoder_->decode_window(vector_offset);
+  ASSERT_TRUE(decoded.succeeded());
+  ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wave_).failed());
+  EXPECT_EQ(wave_->instruction_execution_error(),
+            amdgpu::InstructionExecutionError::InvalidInstructionEncoding);
+  wave_->clear_instruction_execution_error();
+  wave_->set_m0(8);
+  wave_->set_exec(7);
+  wave_->set_lds_size(20); // Third source word is beyond this workgroup.
+  scalar(0, 0x4000);
+  scalar(1, 4u << 16);
+  scalar(2, 256);
+  scalar(3, 1u << 23); // add TID, linear stride of four bytes
+  for (unsigned i = 0; i < 3; ++i) {
+    wave_->lds().write32(wave_->lds_base() + 12 + 4 * i, 0x11000000u + i);
+    memory_.write32(0x4004 + 4 * i, 0xccccccccu);
+  }
+  ASSERT_NO_FATAL_FAILURE(issue(
+      cdna2::build_mubuf(cdna2::kBufferStoreLdsDword, {.offset = 4, .lds = 1, .soffset = 128})));
+  cu_->l1_vector().flush_all();
+  l2_.flush_all();
+  EXPECT_EQ(memory_.read32(0x4004), 0x11000000u);
+  EXPECT_EQ(memory_.read32(0x4008), 0x11000001u);
+  EXPECT_EQ(memory_.read32(0x400c), 0xccccccccu);
+}
+
 TEST(BufferLdsTransferDecode, Gfx950RestrictsLdsBitToDocumentedLoadOpcodes) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   ASSERT_NE(decoder, nullptr);
   for (auto op : {cdna4::kBufferLoadFormatX, cdna4::kBufferLoadUbyte, cdna4::kBufferLoadSbyte,
                   cdna4::kBufferLoadUshort, cdna4::kBufferLoadSshort, cdna4::kBufferLoadDword,
@@ -95,7 +152,7 @@ TEST(BufferLdsTransferDecode, Gfx950RestrictsLdsBitToDocumentedLoadOpcodes) {
 }
 
 TEST(BufferLdsDecode, Gfx10RejectsUnsupportedLdsLoads) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     auto decoder = Decoder::create(arch);
     SCOPED_TRACE(arch);
     const auto valid = rdna1::build_mubuf(rdna1::kBufferLoadFormatXMubuf, {.lds = 1});
@@ -114,7 +171,7 @@ TEST_P(BufferLdsTransfer, BufferNarrowAndX3TransfersUseDwordLaneLayout) {
   for (unsigned opcode :
        {cdna4::kBufferLoadSbyteMubuf,
         cdna4::kBufferLoadDwordx3Mubuf}) { // BUFFER_LOAD_SBYTE / BUFFER_LOAD_DWORDX3.
-    if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4 && opcode == cdna4::kBufferLoadDwordx3Mubuf) {
+    if (GetParam() != rocjitsu::IsaFamily::Cdna4 && opcode == cdna4::kBufferLoadDwordx3Mubuf) {
       const auto words = cdna4::build_mubuf(opcode, {.lds = 1});
       EXPECT_TRUE(decoder_->decode(words.data()).failed());
       continue;
@@ -128,8 +185,9 @@ TEST_P(BufferLdsTransfer, BufferNarrowAndX3TransfersUseDwordLaneLayout) {
     scalar(3, kGfx9DataFormat32);
     for (unsigned lane = 0; lane < 64; ++lane) {
       vector(2, lane, lane * 16);
-      for (unsigned component = 0; component < 4; ++component)
+      for (unsigned component = 0; component < 4; ++component) {
         memory_.write32(0x4000 + lane * 16 + component * 4, 0x76548081 + component);
+      }
     }
     auto words = cdna4::build_mubuf(
         opcode, {.offen = 1, .lds = 1, .vaddr = 2, .vdata = 8, .srsrc = 0, .soffset = 128});
@@ -148,7 +206,7 @@ TEST_P(BufferLdsTransfer, BufferNarrowAndX3TransfersUseDwordLaneLayout) {
 }
 
 TEST(BufferLdsDecode, Mi100RequiresOneOfSixLoadsOrTheDedicatedStore) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA1);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna1);
   ASSERT_NE(decoder, nullptr);
   // LLVM gfx908 bytes for BUFFER_LOAD_FORMAT_X and BUFFER_STORE_LDS_DWORD
   // with s[4:7] and s0. Both require TFE clear.
@@ -166,7 +224,7 @@ TEST(BufferLdsDecode, Mi100RequiresOneOfSixLoadsOrTheDedicatedStore) {
 }
 
 TEST_P(BufferLdsTransfer, RawAndFormatBufferLoadsShareM0WidthAndAllocationBounds) {
-  for (auto opcode : {cdna4::kBufferLoadDwordMubuf, cdna4::kBufferLoadFormatXMubuf})
+  for (auto opcode : {cdna4::kBufferLoadDwordMubuf, cdna4::kBufferLoadFormatXMubuf}) {
     for (uint32_t m0 : {0x10040u, 0xfffc0042u}) {
       SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " m0=" << m0);
       clear_lds();
@@ -185,10 +243,10 @@ TEST_P(BufferLdsTransfer, RawAndFormatBufferLoadsShareM0WidthAndAllocationBounds
       auto words = cdna4::build_mubuf(
           opcode, {.offen = 1, .lds = 1, .vaddr = 2, .vdata = 8, .srsrc = 0, .soffset = 128});
       ASSERT_NO_FATAL_FAILURE(issue(words));
-      if (GetParam() == ROCJITSU_CODE_ARCH_CDNA2) {
+      if (GetParam() == rocjitsu::IsaFamily::Cdna2) {
         EXPECT_EQ(wave_->trapsts() & (1u << 8), 0u);
       }
-      const unsigned offset = m0 & (GetParam() == ROCJITSU_CODE_ARCH_CDNA4 ? 0x3ffff : 0xffff);
+      const unsigned offset = m0 & (GetParam() == rocjitsu::IsaFamily::Cdna4 ? 0x3ffff : 0xffff);
       for (unsigned lane = 0; lane < 3; ++lane) {
         if (offset < 4096) {
           EXPECT_EQ(wave_->lds().read32(128 + offset + lane * 4),
@@ -200,6 +258,7 @@ TEST_P(BufferLdsTransfer, RawAndFormatBufferLoadsShareM0WidthAndAllocationBounds
         EXPECT_EQ(wave_->lds().read32(128 + 64), 0xccccccccu);
       }
     }
+  }
 }
 
 TEST_P(BufferLdsTransfer, UnboundRawLoadsStoresAndAtomicsDoNotAccessMemory) {
@@ -259,7 +318,7 @@ TEST_P(BufferLdsTransfer, UnboundRawLdsLoadsWriteZerosWithoutReadingMemory) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Cdna, BufferLdsTransfer,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Cdna3, rocjitsu::IsaFamily::Cdna4));
 } // namespace
 } // namespace rocjitsu

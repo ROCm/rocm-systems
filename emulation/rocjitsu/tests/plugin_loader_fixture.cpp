@@ -14,8 +14,9 @@ namespace {
 
 void trace(const char *event) {
   const char *path = std::getenv("ROCJITSU_PLUGIN_TEST_TRACE");
-  if (!path)
+  if (!path) {
     return;
+  }
   if (FILE *file = std::fopen(path, "a")) {
     std::fprintf(file, "%s:%s\n", PLUGIN_FIXTURE_NAME, event);
     std::fclose(file);

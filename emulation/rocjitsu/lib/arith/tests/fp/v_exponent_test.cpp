@@ -8,6 +8,7 @@
 #include "fp/ldexp_test.h"
 #include "fp/loose_unary_f64.h"
 #include "rj_arith/detail/rj_arith_fp.h"
+#include <array>
 
 #include "common/cpu.h"
 #include "common/semantics.h"
@@ -16,6 +17,8 @@
 
 #include <cmath>
 #include <gtest/gtest.h>
+#include <stdint.h>
+#include <type_traits>
 
 // Check integer exponent results, operand selection, and inactive-lane preservation.
 TEST(FpFrexpExpI16F16W32Gfx12, Arithmetic) {
@@ -337,6 +340,65 @@ const CapturedGfx11 ldexp_f64_lanes[] = {
     {"Mul2", RJ_ARITH_ALU_OMOD_2, 0x100, 0x7ff0000000000001, 0x0, 0, 0x7ff0000000000001},
 };
 
+TEST(FrexpExponent, SimdBoundaries) {
+  using namespace rocjitsu::arith::test;
+  for (int width : {32, 64}) {
+    const uint64_t normal = width == 64 ? 0x0010000000000000ULL : 0x00800000ULL;
+    const uint64_t infinity = width == 64 ? 0x7ff0000000000000ULL : 0x7f800000ULL;
+    const uint64_t sign = 1ULL << (width - 1);
+    const int top = width == 64 ? 51 : 22;
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (bool flush : {false, true}) {
+        for (int scenario = 0; scenario < 3; ++scenario) {
+          Registers<4, 32> input;
+          for (int lane = 0; lane < 32; ++lane) {
+            const int power = (lane / 3) * top / 10;
+            uint64_t bits = (1ULL << power) + uint64_t(lane % 3) - 1;
+            if (scenario == 1) {
+              bits = (lane & 1 ? normal : infinity) + uint64_t(lane % 3) - 1;
+            }
+            if (scenario == 2) {
+              bits = lane & 1 ? 0 : infinity + 1;
+            }
+            if (lane & 2) {
+              bits |= sign;
+            }
+            write_fp(input.v, lane, width, bits);
+          }
+          auto call =
+              width == 64 ? rj_arith_v_frexp_exp_i32_f64_w32 : rj_arith_v_frexp_exp_i32_f32_w32;
+          for (int aliasing_offset : {0, 1, 3}) {
+            SCOPED_TRACE(::testing::Message() << width << ':' << cpu << ':' << flush << ':'
+                                              << scenario << ':' << aliasing_offset);
+            auto actual = input;
+            uint32_t status = 0x100;
+            constexpr uint32_t exec_mask = 0x8000aaaa;
+            const uint64_t flags = cpu | RJ_ARITH_SEMANTICS_COMPATIBILITY |
+                                   (flush ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0);
+            ASSERT_EQ(call(flags, exec_mask, 0, actual.v + aliasing_offset, actual.v, &status),
+                      RJ_ARITH_SUCCESS);
+            EXPECT_EQ(status, 0x100U);
+            actual.expect_preserved(input, aliasing_offset, 1);
+            for (int lane = 0; lane < 32; ++lane) {
+              uint32_t expected = input.v[aliasing_offset][lane];
+              if (exec_mask >> lane & 1) {
+                const uint64_t bits = read_fp(input.v, lane, width);
+                const double x = fp_value(bits, width);
+                int exponent = 0;
+                if (std::isfinite(x) && x != 0 && (!flush || (bits & ~sign) >= normal)) {
+                  std::frexp(x, &exponent);
+                }
+                expected = uint32_t(exponent);
+              }
+              EXPECT_EQ(actual.v[aliasing_offset][lane], expected) << lane;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 } // namespace
 
 // Compatibility reproduces captured gfx1100 LDEXP lanes.
@@ -350,11 +412,70 @@ TEST(FpLdexpGfx11, CapturedSignalingNans) {
   check_captured_gfx11<64, 64>(rj_arith_v_ldexp_f64_w64, ldexp_f64_lanes);
 }
 
-// Compatibility reproduces captured gfx1100 FREXP_MANT lanes.
+// Compatibility and strict exact reproduce captured gfx1100 FREXP_MANT lanes.
 TEST(FpFrexpMantF64Gfx11, CapturedSignalingNans) {
-  using rocjitsu::arith::test::check_captured_gfx11;
-  check_captured_gfx11<32, 64>(rj_arith_v_frexp_mant_f64_w32, frexp_mant_f64_lanes);
-  check_captured_gfx11<64, 64>(rj_arith_v_frexp_mant_f64_w64, frexp_mant_f64_lanes);
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_frexp_mant_f64_w32, frexp_mant_f64_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_frexp_mant_f64_w64, frexp_mant_f64_lanes);
+}
+
+namespace {
+
+// gfx1100 (W7900, mkm2) hw1100-noieee lanes (2026-09-25): denormal inputs decompose when kept
+// (0x1f0) and flush to signed zero when input denormals are flushed (0x100).
+const CapturedGfx11 frexp_mant_f64_denormal_lanes[] = {
+    {"SmallestDenormalKept", 0, 0x1f0, 0x0000000000000001, 0, 0, 0x3fe0000000000000},
+    {"LargestNegativeDenormalKept", 0, 0x1f0, 0x800fffffffffffff, 0, 0, 0xbfeffffffffffffe},
+    {"SmallestDenormalFlushed", 0, 0x100, 0x0000000000000001, 0, 0, 0},
+    {"LargestNegativeDenormalFlushed", 0, 0x100, 0x800fffffffffffff, 0, 0, 0x8000000000000000},
+};
+
+// FREXP_EXP_I32_F64 integer exponents from the same corpus and from the gfx1201 (RX 9070 XT)
+// rj-valu-audit-local capture (2026-09-28); both cards agree. Denormals kept: 2^-1074 has
+// exponent -1073 and the largest denormal -1022; flushed denormals, infinities and NaNs give 0.
+struct FrexpExpF64Case {
+  uint64_t guest_flags;
+  uint64_t input;
+  uint32_t expected;
+};
+const FrexpExpF64Case frexp_exp_f64_cases[] = {
+    {0, 0x0000000000000001, 0xfffffbcfU},
+    {0, 0x800fffffffffffff, 0xfffffc02U},
+    {0, 0x7ff0000000000000, 0},
+    {RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, 0x0000000000000001, 0},
+};
+
+} // namespace
+
+// Compatibility and strict exact reproduce captured gfx1100 FREXP_MANT denormal handling.
+TEST(FpFrexpMantF64Gfx11, CapturedDenormals) {
+  using rocjitsu::arith::test::check_captured_gfx11_exact;
+  check_captured_gfx11_exact<32, 64>(rj_arith_v_frexp_mant_f64_w32, frexp_mant_f64_denormal_lanes);
+  check_captured_gfx11_exact<64, 64>(rj_arith_v_frexp_mant_f64_w64, frexp_mant_f64_denormal_lanes);
+}
+
+// Both architectures' FREXP_EXP_I32_F64 entries reproduce the captured exponents in
+// Compatibility and strict exact mode.
+TEST(FpFrexpExpF64, CapturedExponentsBothArchitectures) {
+  using namespace rocjitsu::arith::test;
+  using Entry =
+      int (*)(uint64_t, uint32_t, uint64_t, uint32_t *const *, const uint32_t *const *, uint32_t *);
+  for (Entry entry :
+       {Entry(rj_arith_v_frexp_exp_i32_f64_w32), Entry(rj_arith_v_frexp_exp_i32_f64_w32_gfx12)}) {
+    for (uint64_t cpu : supported_cpu_levels()) {
+      for (uint64_t semantics : hardware_semantics()) {
+        for (const FrexpExpF64Case &test : frexp_exp_f64_cases) {
+          SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << test.input);
+          Registers<4, 32> r;
+          write_fp(r.v, 0, 64, test.input);
+          r.v[2][0] = 0xa5a5a5a5U;
+          ASSERT_EQ(entry(cpu | semantics | test.guest_flags, 1, 0, r.v + 2, r.v, nullptr),
+                    RJ_ARITH_SUCCESS);
+          EXPECT_EQ(r.v[2][0], test.expected);
+        }
+      }
+    }
+  }
 }
 
 // SIMD must retain the inherited scalar model across guest modes and exceptional inputs.
@@ -431,6 +552,179 @@ TEST(FpLdexpF16Cdna, Qualification) {
       EXPECT_EQ(error, expected);
       EXPECT_EQ(result[0], expected ? 0xdeadbeefU : 0xdead7e01U);
       EXPECT_EQ(status, 0x80U);
+    }
+  }
+}
+
+// CDNA inherits a Compatibility model without claiming empirical qualification.
+TEST(FpLdexpCdna, Qualification) {
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
+      for (bool fp64 : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << cpu << "/" << semantics << "/" << fp64);
+        rocjitsu::arith::test::Registers<6, 64> r{};
+        r.v[0][0] = fp64 ? 0x12345678U : 0x7f800123U;
+        r.v[1][0] = 0x7ff00000U;
+        r.v[4][0] = r.v[5][0] = 0xdeadbeefU;
+        uint32_t status = 0x80;
+        const int expected = semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS
+                                 ? RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS
+                             : semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL
+                                 ? RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS
+                                 : RJ_ARITH_SUCCESS;
+        const uint64_t flags = cpu | semantics;
+        const int result =
+            fp64 ? rj_arith_v_ldexp_f64_w64_gfx942(flags, 1, 0, r.v + 4, r.v, r.v + 2, &status)
+                 : rj_arith_v_ldexp_f32_w64_gfx942(flags, 1, 0, r.v + 4, r.v, r.v + 2, &status);
+        EXPECT_EQ(result, expected);
+        EXPECT_EQ(status, 0x80U);
+        if (expected != RJ_ARITH_SUCCESS) {
+          EXPECT_EQ(r.v[4][0], 0xdeadbeefU);
+          EXPECT_EQ(r.v[5][0], 0xdeadbeefU);
+        }
+      }
+    }
+  }
+}
+
+namespace {
+
+// Compare SIMD with the established scalar model over normal waves and raw
+// encodings, including signaling NaNs, boundary scales, aliases and sparse EXEC.
+template <int Lanes, bool Older, typename Call> void check_ldexp_cpu_agreement(Call call) {
+  using Mask = std::conditional_t<Lanes == 32, uint32_t, uint64_t>;
+  const auto cpus = rocjitsu::arith::test::supported_cpu_levels();
+  std::minstd_rand random;
+  uint32_t a[Lanes], b[Lanes], expected[Lanes], actual[Lanes];
+  const uint32_t *bp = b;
+  for (int batch = 0; batch < 8; ++batch) {
+    for (int lane = 0; lane < Lanes; ++lane) {
+      const uint32_t first = uint32_t(random());
+      const uint32_t second = uint32_t(random());
+      // Keep high bits for normal inputs; raw waves cover the entire encoding.
+      a[lane] = batch < 4
+                    ? ((first & 0x40000000U) << 1) | ((first >> 7) & 0x007fffffU) | 0x3f000000U
+                    : (first << 1) | (second >> 30);
+      b[lane] = uint32_t(int(random() >> 20) % (batch < 4 ? 9 : 601) - (batch < 4 ? 4 : 300));
+    }
+    a[7] = 0x7f812345U;
+    a[8] = 0xff800000U;
+    a[9] = 0x80000000U;
+    a[10] = 0x00ffffffU;
+    b[10] = uint32_t(-1);
+    a[11] = 0x7f7fffffU;
+    b[11] = 1;
+    a[12] = 1;
+    b[12] = 24;
+    a[13] = 0x80000001U;
+    b[13] = 0x80000000U;
+    for (uint64_t denorm :
+         {uint64_t(0), RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+          RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS}) {
+      for (uint64_t rounding :
+           {uint64_t(0), RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN, RJ_ARITH_FP_ROUND_ZERO}) {
+        for (uint64_t mode : {uint64_t(0), uint64_t(RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_CLAMP),
+                              uint64_t(RJ_ARITH_ALU_OMOD_2),
+                              uint64_t(RJ_ARITH_ALU_OMOD_HALF | RJ_ARITH_ALU_NEG_A)}) {
+          const uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | denorm | rounding |
+                                 (batch & 1 ? RJ_ARITH_FP_IEEE_MODE : 0) |
+                                 (Older && (batch & 2) ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0);
+          for (Mask exec_mask : {Mask(-1), Mask(0x8000000180000001ULL)}) {
+            std::copy_n(a, Lanes, expected);
+            const uint32_t *source = expected;
+            uint32_t *dest = expected;
+            uint32_t status = 0x12345678U;
+            ASSERT_EQ(call(flags, exec_mask, mode, &dest, &source, &bp, &status), RJ_ARITH_SUCCESS);
+            for (uint64_t cpu : cpus) {
+              SCOPED_TRACE(::testing::Message() << Lanes << '/' << batch << '/' << cpu << '/'
+                                                << flags << '/' << mode << '/' << exec_mask);
+              std::copy_n(a, Lanes, actual);
+              source = actual;
+              dest = actual;
+              ASSERT_EQ(call(flags | cpu, exec_mask, mode, &dest, &source, &bp, &status),
+                        RJ_ARITH_SUCCESS);
+              EXPECT_EQ(status, 0x12345678U);
+              for (int lane = 0; lane < Lanes; ++lane) {
+                EXPECT_EQ(actual[lane], expected[lane]) << lane;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+} // namespace
+
+// Keep the three existing NaN/output-policy variants on the same SIMD arithmetic.
+TEST(FpLdexpF32, ScalarAndSimdAgree) {
+  check_ldexp_cpu_agreement<32, true>(rj_arith_v_ldexp_f32_w32);
+  check_ldexp_cpu_agreement<64, true>(rj_arith_v_ldexp_f32_w64);
+  check_ldexp_cpu_agreement<32, false>(rj_arith_v_ldexp_f32_w32_gfx12);
+  check_ldexp_cpu_agreement<64, false>(rj_arith_v_ldexp_f32_w64_gfx12);
+  check_ldexp_cpu_agreement<32, true>(rj_arith_v_ldexp_f32_w32_gfx942);
+  check_ldexp_cpu_agreement<64, true>(rj_arith_v_ldexp_f32_w64_gfx942);
+}
+
+// The existing scalar integer model remains the reference when normal lanes
+// use SIMD and neighboring exceptional lanes require individual repair.
+TEST(FpLdexpF64, SimdMatchesInheritedScalar) {
+  using namespace rocjitsu::arith::test;
+  auto input = make_ldexp_inputs<64, 64>();
+  const int exponents[] = {INT32_MIN, -1075, -1, 0, 1, 1024, INT32_MAX};
+  for (int lane = 0; lane < 64; ++lane) {
+    input.v[2][lane] = uint32_t(exponents[lane % 7]);
+  }
+  const uint64_t special[] = {
+      0x7ff0000000000001ULL, 0x7ff8000000000123ULL, 0x7ff0000000000000ULL, 1ULL,
+      0x0010000000000000ULL, 0x7fefffffffffffffULL, 0x8000000000000000ULL};
+  for (int lane = 0; lane < 7; ++lane) {
+    input.v[0][lane] = uint32_t(special[lane]);
+    input.v[1][lane] = uint32_t(special[lane] >> 32);
+  }
+  using Call = decltype(&rj_arith_v_ldexp_f64_w64_gfx942);
+  const Call functions[] = {rj_arith_v_ldexp_f64_w64_gfx942, rj_arith_v_ldexp_f64_w64,
+                            rj_arith_v_ldexp_f64_w64_gfx12};
+  const uint64_t fp_cases[] = {
+      0, RJ_ARITH_FP_ROUND_UP, RJ_ARITH_FP_ROUND_DOWN | RJ_ARITH_FP_FLUSH_INPUT_DENORMALS,
+      RJ_ARITH_FP_ROUND_ZERO | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_IEEE_MODE};
+  for (Call call : functions) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_COMPATIBILITY, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+      if (call == rj_arith_v_ldexp_f64_w64_gfx942 &&
+          semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+        continue; // The inherited CDNA model is exercised through Compatibility.
+      }
+      for (uint64_t fp : fp_cases) {
+        for (uint64_t mode : {0U, RJ_ARITH_ALU_ABS_A | RJ_ARITH_ALU_NEG_A, RJ_ARITH_ALU_CLAMP,
+                              RJ_ARITH_ALU_OMOD_2, RJ_ARITH_ALU_OMOD_HALF}) {
+          for (int aliasing_offset : {0, 1, 6}) {
+            constexpr uint64_t exec_mask = 0xa5a5a5a55a5a5a7fULL;
+            auto expected = input;
+            uint32_t status = 0x10000;
+            ASSERT_EQ(call(semantics | fp, exec_mask, mode, expected.v + aliasing_offset,
+                           expected.v, expected.v + 2, &status),
+                      RJ_ARITH_SUCCESS);
+            for (uint64_t cpu : supported_cpu_levels()) {
+              SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << fp << '/'
+                                                << mode << '/' << aliasing_offset);
+              auto actual = input;
+              ASSERT_EQ(call(cpu | semantics | fp, exec_mask, mode, actual.v + aliasing_offset,
+                             actual.v, actual.v + 2, &status),
+                        RJ_ARITH_SUCCESS);
+              EXPECT_EQ(status, 0x10000U);
+              actual.expect_preserved(input, aliasing_offset, 2);
+              for (int word = 0; word < 2; ++word) {
+                for (int lane = 0; lane < 64; ++lane) {
+                  EXPECT_EQ(actual.v[aliasing_offset + word][lane],
+                            expected.v[aliasing_offset + word][lane]);
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

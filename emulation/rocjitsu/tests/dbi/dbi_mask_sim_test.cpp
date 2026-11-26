@@ -29,6 +29,7 @@
 #include "../amdhsa_metadata_test_util.h"
 #include "../dbi_test_util.h"
 #include "dbi_sim.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
@@ -75,7 +76,7 @@ constexpr uint32_t kMovV2V1 = 0x7E040301u;
 
 struct MaskSimArch {
   const char *sim_arch;
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t e_flags;
   uint32_t wave_size;
   // The descriptor's wave32 bit drives the patch-time gates, which is all this
@@ -86,13 +87,13 @@ struct MaskSimArch {
   bool wave32;
 };
 
-inline constexpr MaskSimArch kCdna3MaskArch{"cdna3", ROCJITSU_CODE_ARCH_CDNA3,
+inline constexpr MaskSimArch kCdna3MaskArch{"cdna3", rocjitsu::IsaFamily::Cdna3,
                                             EF_AMDGPU_MACH_AMDGCN_GFX942, /*wave_size=*/64,
                                             /*wave32=*/false};
-inline constexpr MaskSimArch kCdna4MaskArch{"cdna4", ROCJITSU_CODE_ARCH_CDNA4,
+inline constexpr MaskSimArch kCdna4MaskArch{"cdna4", rocjitsu::IsaFamily::Cdna4,
                                             EF_AMDGPU_MACH_AMDGCN_GFX950, /*wave_size=*/64,
                                             /*wave32=*/false};
-inline constexpr MaskSimArch kRdna4MaskArch{"rdna4", ROCJITSU_CODE_ARCH_RDNA4,
+inline constexpr MaskSimArch kRdna4MaskArch{"rdna4", rocjitsu::IsaFamily::Rdna4,
                                             EF_AMDGPU_MACH_AMDGCN_GFX1200, /*wave_size=*/32,
                                             /*wave32=*/true};
 
@@ -162,8 +163,9 @@ protected:
     auto result = instr.patch_with_debug_summaries();
     EXPECT_TRUE(result.errors.empty())
         << (result.errors.empty() ? std::string{} : result.errors.front());
-    if (!result.errors.empty())
+    if (!result.errors.empty()) {
       return util::Result::failure();
+    }
 
     AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
     EXPECT_TRUE(patched.is_valid());
@@ -173,8 +175,9 @@ protected:
 
     test::DbiSim sim;
     sim.initialize(a_.sim_arch, a_.wave_size);
-    if (testing::Test::HasFatalFailure())
+    if (testing::Test::HasFatalFailure()) {
       return util::Result::failure();
+    }
     return sim.run_and_read_vgprs(patched_text_, patched_scratch_, regs);
   }
 
@@ -225,9 +228,10 @@ protected:
     ASSERT_TRUE(v3_result.succeeded());
     const auto v3 = std::move(v3_result).value().front();
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3[lane], lane_active(lane) ? kProbeSentinel : kUntouched)
           << "lane " << lane << ": a masked probe must run exactly on the anchor's lanes";
+    }
   }
 
   void expect_full_exec_probe_reaches_every_lane() {
@@ -235,9 +239,10 @@ protected:
     ASSERT_TRUE(v3_result.succeeded());
     const auto v3 = std::move(v3_result).value().front();
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion (no dispatched wave)";
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3[lane], kProbeSentinel)
           << "lane " << lane << ": a full-exec probe must run on every lane";
+    }
   }
 
   //============================================================================
@@ -297,9 +302,10 @@ protected:
     ASSERT_TRUE(v3_result.succeeded());
     const auto v3 = std::move(v3_result).value().front();
     ASSERT_EQ(v3.size(), a_.wave_size) << "kernel did not run to completion";
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3[lane], kAnchorMask)
           << "lane " << lane << ": probe did not receive the guest's EXEC mask";
+    }
   }
 
   // Wave64 only: the high dword is rejected outright on a Wave32 kernel. v2 is
@@ -416,9 +422,10 @@ protected:
     const std::vector<uint32_t> v0 = broken.run_and_read_vgpr(sabotaged, patched_scratch_,
                                                               /*reg=*/0);
     ASSERT_EQ(v0.size(), a_.wave_size);
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v0[lane], lane_active(lane) ? kGuestValue : kArgValue)
           << "lane " << lane << ": without the re-widen the reload cannot reach this lane";
+    }
   }
 
   // Nop the widen that opens the full-mask window and the full-exec probe stops
@@ -450,9 +457,10 @@ protected:
     const std::vector<uint32_t> v3 = broken.run_and_read_vgpr(sabotaged, patched_scratch_,
                                                               /*reg=*/3);
     ASSERT_EQ(v3.size(), a_.wave_size);
-    for (uint32_t lane = 0; lane < a_.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < a_.wave_size; ++lane) {
       EXPECT_EQ(v3[lane], lane_active(lane) ? kProbeSentinel : kUntouched)
           << "lane " << lane << ": without the widen the probe must stay under the anchor mask";
+    }
   }
 
   MaskSimArch a_;

@@ -24,6 +24,11 @@ static_assert(sizeof(__hip_uint32_t) * CHAR_BIT == 32);
 static_assert(sizeof(__hip_uint64_t) * CHAR_BIT == 64);
 #endif  // !defined(__HIPCC_RTC__)
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpsabi"
+#endif
+
 // HW Detection
 #if defined(__gfx950__)
 #define HIP_ENABLE_GFX950_OCP_BUILTINS 1
@@ -2307,6 +2312,8 @@ __amd_cvt_float_to_fp16_sr(const float in, const unsigned int round) {
   ret = __builtin_amdgcn_cvt_sr_f16_f32(ret, in, round, 0);
   return ret[0];
 #else
+  (void)in;
+  (void)round;
   __builtin_trap();
 #endif
 }
@@ -2330,6 +2337,9 @@ __amd_cvt_float_float_to_fp16x2_sr(const float in1, const float in2, const unsig
   ret2 = __builtin_amdgcn_cvt_sr_f16_f32(ret2, in2, round, 0);
   return __amd_fp16x2_storage_t{ret1[0], ret2[0]};
 #else
+  (void)in1;
+  (void)in2;
+  (void)round;
   __builtin_trap();
 #endif
 }
@@ -2352,6 +2362,8 @@ __amd_cvt_float_to_bf16_sr(const float in, const unsigned int round) {
   ret = __builtin_amdgcn_cvt_sr_bf16_f32(ret, in, round, 0);
   return ret[0];
 #else
+  (void)in;
+  (void)round;
   __builtin_trap();
 #endif
 }
@@ -3757,9 +3769,7 @@ __amd_cvt_floatx2_to_float2(const __amd_floatx2_storage_t val) {
  * @return __half
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __half __amd_cvt_fp16_to_half(const __amd_fp16_storage_t val) {
-  __half_raw hr;
-  hr.data = val;
-  return hr;
+  return __builtin_bit_cast(__half_raw, val);
 }
 
 /**
@@ -3769,9 +3779,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ __half __amd_cvt_fp16_to_half(const __amd_fp16_sto
  * @return __half2
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __half2 __amd_cvt_fp16x2_to_half2(const __amd_fp16x2_storage_t val) {
-  __half2_raw hr;
-  hr.data = val;
-  return hr;
+  return __builtin_bit_cast(__half2_raw, val);
 }
 
 /**
@@ -3781,8 +3789,8 @@ __OCP_FP_HOST_DEVICE_STATIC__ __half2 __amd_cvt_fp16x2_to_half2(const __amd_fp16
  * @return __amd_fp16_storage_t
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16_storage_t __amd_cvt_half_to_fp16(const __half val) {
-  __half_raw tmp = val;
-  return tmp.data;
+  const __half_raw tmp = val;
+  return __builtin_bit_cast(__amd_fp16_storage_t, tmp);
 }
 
 /**
@@ -3792,8 +3800,8 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16_storage_t __amd_cvt_half_to_fp16(const 
  * @return __amd_fp16x2_storage_t
  */
 __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp16x2_storage_t __amd_cvt_half2_to_fp16x2(const __half2 val) {
-  __half2_raw tmp = val;
-  return tmp.data;
+  const __half2_raw tmp = val;
+  return __builtin_bit_cast(__amd_fp16x2_storage_t, tmp);
 }
 
 /**
@@ -3859,5 +3867,9 @@ __amd_cvt_hipbf162_to_bf16x2(const __hip_bfloat162 val) {
   } u{val};
   return u.bf16;
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 #endif  // _HIP_INCLUDE_HIP_AMD_DETAIL_HIP_OCP_FP_HPP_

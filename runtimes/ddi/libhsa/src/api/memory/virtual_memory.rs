@@ -11,11 +11,12 @@ use rocddi::memory::device::{
 };
 
 use crate::ffi::*;
+use crate::lifecycle::{initialized_mut, lock};
 use crate::memory::pool::*;
 use crate::memory::virtual_memory::*;
 use crate::memory::*;
 use crate::platform::memory as native_memory;
-use crate::runtime::{HsaState, boundary, initialized_mut, lock, map_error};
+use crate::status::{boundary, map_error};
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -75,6 +76,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_address_reserve_align(
             Err(status) => return status,
         };
         let devices = runtime
+            .agents
             .gpus
             .iter()
             .map(|gpu| &gpu.device)
@@ -197,36 +199,39 @@ pub unsafe extern "C" fn hsa_amd_vmem_handle_create(
             Err(status) => return status,
         };
         let uncached = flags & u64::from(ALLOC_UNCACHED) != 0;
-        let (device_index, kind) = if let Some((cpu_index, _)) = runtime.decode_cpu_pool(pool) {
-            (runtime.gpu_for_cpu(cpu_index), MemoryKind::System)
-        } else if let Some((index, pool_kind)) = runtime.decode_gpu_pool(pool) {
-            if pool_kind == GpuPoolKind::Group {
-                return INVALID_ALLOCATION;
-            }
-            (
-                index,
-                MemoryKind::DeviceLocal {
-                    host_visible: false,
-                    coherent: gpu_pool_coherent(pool_kind, uncached, false),
-                    extended_coherent: pool_kind == GpuPoolKind::ExtendedFine && !uncached,
-                    uncached,
-                    contiguous: false,
-                },
-            )
-        } else {
-            return INVALID_ARGUMENT;
-        };
+        let (device_index, kind) =
+            if let Some((cpu_index, _)) = runtime.agents.decode_cpu_pool(pool) {
+                (runtime.agents.gpu_for_cpu(cpu_index), MemoryKind::System)
+            } else if let Some((index, pool_kind)) = runtime.agents.decode_gpu_pool(pool) {
+                if pool_kind == GpuPoolKind::Group {
+                    return INVALID_ALLOCATION;
+                }
+                (
+                    index,
+                    MemoryKind::DeviceLocal {
+                        host_visible: false,
+                        coherent: gpu_pool_coherent(pool_kind, uncached, false),
+                        extended_coherent: pool_kind == GpuPoolKind::ExtendedFine && !uncached,
+                        uncached,
+                        contiguous: false,
+                    },
+                )
+            } else {
+                return INVALID_ARGUMENT;
+            };
         if runtime.memory_state.vmem_handles.try_reserve(1).is_err() {
             return OUT_OF_RESOURCES;
         }
-        let memory = match runtime.gpus[device_index].device.create_virtual_memory(
-            kind,
-            size as u64,
-            VirtualMemoryOptions {
-                pinned: memory_type == MEMORY_TYPE_PINNED,
-                uncached,
-            },
-        ) {
+        let memory = match runtime.agents.gpus[device_index]
+            .device
+            .create_virtual_memory(
+                kind,
+                size as u64,
+                VirtualMemoryOptions {
+                    pinned: memory_type == MEMORY_TYPE_PINNED,
+                    uncached,
+                },
+            ) {
             Ok(memory) => memory,
             Err(error) => return map_error(error),
         };
@@ -304,7 +309,7 @@ pub extern "C" fn hsa_amd_vmem_map(
     size: usize,
     offset: usize,
     memory_handle: HsaAmdVmemAllocHandle,
-    flags: u64,
+    _flags: u64,
 ) -> Status {
     boundary(|| {
         let page = match current_host_page() {
@@ -316,7 +321,6 @@ pub extern "C" fn hsa_amd_vmem_map(
             || size == 0
             || size % page != 0
             || offset % page != 0
-            || flags != 0
         {
             return INVALID_ARGUMENT;
         }
@@ -549,7 +553,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_set_access(
             std::slice::from_raw_parts(descriptors, descriptor_count)
         });
         for descriptor in &requested {
-            if !runtime.is_agent(descriptor.agent_handle) {
+            if !runtime.agents.is_agent(descriptor.agent_handle) {
                 return INVALID_AGENT;
             }
             if !valid_access_permissions(descriptor.permissions) {
@@ -600,7 +604,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_access(
         let Some(runtime) = guard.as_ref() else {
             return NOT_INITIALIZED;
         };
-        if !runtime.is_agent(agent) {
+        if !runtime.agents.is_agent(agent) {
             return INVALID_AGENT;
         }
         let Some((_, mapping)) = runtime
@@ -653,9 +657,9 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_shareable_handle(
         let Some(memory) = handle.owned_memory() else {
             return ERROR;
         };
-        let index = if let Some((cpu_index, _)) = runtime.decode_cpu_pool(handle.pool) {
-            runtime.gpu_for_cpu(cpu_index)
-        } else if let Some((index, _)) = runtime.decode_gpu_pool(handle.pool) {
+        let index = if let Some((cpu_index, _)) = runtime.agents.decode_cpu_pool(handle.pool) {
+            runtime.agents.gpu_for_cpu(cpu_index)
+        } else if let Some((index, _)) = runtime.agents.decode_gpu_pool(handle.pool) {
             index
         } else {
             return INVALID_ALLOCATION;
@@ -703,7 +707,7 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
             Ok(descriptor) => descriptor,
             Err(error) => return map_error(error),
         };
-        let Some(session) = runtime.session() else {
+        let Some(session) = runtime.native_session() else {
             return ERROR;
         };
         let memory = match native_memory::import_virtual_memory(session, &descriptor) {
@@ -711,13 +715,16 @@ pub unsafe extern "C" fn hsa_amd_vmem_import_shareable_handle(
             Err(error) => return map_error(error),
         };
         let pool = match memory.info().placement {
-            Some(VirtualMemoryPlacement::System) => HsaState::cpu_pool(0, CpuPoolKind::Fine),
+            Some(VirtualMemoryPlacement::System) => {
+                crate::agent::Agents::cpu_pool(0, CpuPoolKind::Fine)
+            }
             Some(VirtualMemoryPlacement::Device(id)) => runtime
+                .agents
                 .gpus
                 .iter()
                 .position(|gpu| gpu.endpoint.id == id)
                 .map_or(HsaMemoryPool { handle: 0 }, |index| {
-                    HsaState::gpu_pool(index, GpuPoolKind::Coarse)
+                    crate::agent::Agents::gpu_pool(index, GpuPoolKind::Coarse)
                 }),
             None => HsaMemoryPool { handle: 0 },
         };
@@ -757,7 +764,13 @@ pub unsafe extern "C" fn hsa_amd_vmem_retain_alloc_handle(
             Ok(runtime) => runtime,
             Err(status) => return status,
         };
-        let Some(mapping) = runtime.memory_state.vmem_mappings.get(&(address as usize)) else {
+        let Some((_, mapping)) = runtime
+            .memory_state
+            .vmem_mappings
+            .range(..=address as usize)
+            .next_back()
+            .filter(|(_, mapping)| mapping.contains(address as usize))
+        else {
             return INVALID_ALLOCATION;
         };
         let handle_id = mapping.handle;
@@ -839,11 +852,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
         };
         let (size, agent) = match &handle.backing {
             VmemBacking::Owned(memory) => {
-                let agent = if let Some((index, _)) = runtime.decode_cpu_pool(handle.pool) {
+                let agent = if let Some((index, _)) = runtime.agents.decode_cpu_pool(handle.pool) {
                     HsaAgent {
                         handle: CPU_AGENT + index as u64,
                     }
-                } else if let Some((index, _)) = runtime.decode_gpu_pool(handle.pool) {
+                } else if let Some((index, _)) = runtime.agents.decode_gpu_pool(handle.pool) {
                     HsaAgent {
                         handle: GPU_AGENT_BASE + index as u64,
                     }
@@ -856,7 +869,11 @@ pub unsafe extern "C" fn hsa_amd_vmem_get_vmem_info(
                 let agent = match memory.info().placement {
                     Some(VirtualMemoryPlacement::System) => HsaAgent { handle: CPU_AGENT },
                     Some(VirtualMemoryPlacement::Device(id)) => {
-                        let Some(index) = runtime.gpus.iter().position(|gpu| gpu.endpoint.id == id)
+                        let Some(index) = runtime
+                            .agents
+                            .gpus
+                            .iter()
+                            .position(|gpu| gpu.endpoint.id == id)
                         else {
                             return INVALID_ALLOCATION;
                         };
@@ -907,10 +924,10 @@ pub unsafe extern "C" fn hsa_amd_vmem_export_fabric_handle(
         if handle.imported() {
             return INCOMPATIBLE_ARGUMENTS;
         }
-        let Some((index, _)) = runtime.decode_gpu_pool(handle.pool) else {
+        let Some((index, _)) = runtime.agents.decode_gpu_pool(handle.pool) else {
             return INVALID_ARGUMENT;
         };
-        if !runtime.gpus[index].info().fabric_handles_supported {
+        if !runtime.agents.gpus[index].info().fabric_handles_supported {
             return NOT_SUPPORTED;
         }
         let Some(memory) = handle.owned_memory() else {

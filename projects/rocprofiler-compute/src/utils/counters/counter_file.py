@@ -3,7 +3,7 @@
 
 """Perfmon pass files and the counter slots each hardware block has."""
 
-from typing import Dict, List
+from typing import Dict, List, Set
 
 from utils.utils_counter_defs import counter_to_block
 
@@ -29,18 +29,21 @@ def flat_counters_in_perfmon_file(counter_file: "CounterFile") -> List[str]:
 class LimitedSet:
     def __init__(self, maxsize: int) -> None:
         self.avail: int = maxsize
-        self.elements: List[str] = []
+        # Ordered set: keeps the order counters are written in
+        self.elements: Dict[str, None] = {}
+        self._bases: Set[str] = set()
 
     def add(self, element: str, cost: int = 1) -> bool:
         if element in self.elements:
             return True
         # Store all channels for a TCC channel counter in the same file
-        if element.split("[")[0] in {elem.split("[")[0] for elem in self.elements}:
-            self.elements.append(element)
+        if element.split("[")[0] in self._bases:
+            self.elements[element] = None
             return True
         if self.avail >= cost:
             self.avail -= cost
-            self.elements.append(element)
+            self.elements[element] = None
+            self._bases.add(element.split("[")[0])
             return True
         return False
 

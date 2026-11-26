@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 
 #include <array>
@@ -44,10 +45,10 @@ struct ImageSampler {
 /// @details SQ_IMG_SAMP_WORD layouts follow ROCr resource_ai/gfx11/gfx12 and
 /// PAL gfx10_sq_ko_reg.h. GFX12 reuses the high word-2 bits for PERF_MIP.
 inline ImageSampler decode_image_sampler(const std::array<uint32_t, 4> &words,
-                                         rj_code_arch_t arch) {
+                                         rocjitsu::IsaFamily arch) {
   const bool gfx9 = arch_is_cdna_4_or_lower(arch);
-  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
-  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
+  const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4;
   const uint32_t lod_bits = gfx12 ? 13 : 12;
   const uint32_t lod_mask = (1u << lod_bits) - 1;
   return {

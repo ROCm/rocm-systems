@@ -31,7 +31,7 @@
 
 #include "fakes/init_fakes.h"
 #include "fakes/amdsmi_fakes.h"                      // g_amdSmiFabricTelemetry{Acquire,Release}
-#include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize
+#include "fakes/sym_kernels_fakes.h"                 // g_symkFinalize, g_symkHierAvailable
 #include "fakes/rccl_wrap_fakes.h"                   // g_rcclScaleCollLl128BuffSize{Calls,Factor}
 #include "fakes/mgmt_task_enq_fakes.h"               // g_ncclMgmtTaskEnqueue
 #include "../common/LogCapture.hpp"                 // CaptureLog: assert on WARN/INFO text
@@ -2648,6 +2648,16 @@ TEST_F(InitMicrotest, CommAlloc_MemPoolCreateFails_ReturnsError) {
   g_hipMemPoolResult = hipErrorInvalidValue;  // cudaMemPoolCreate arm
   auto comm = FreshComm();
   EXPECT_NE(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+}
+
+// A device that reports no memory-pool support skips pool creation and leaves comm->memPool unset.
+TEST_F(InitMicrotest, CommAlloc_MemPoolsUnsupported_SkipsPoolCreate) {
+  InstallCommAllocSuccess();
+  g_hipMemPoolResult = hipErrorNotSupported;  // would fail init if commAlloc still created the pool
+  g_hipMemoryPoolsSupported = 0;
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, 8, 0));
+  EXPECT_EQ(nullptr, comm->memPool);
 }
 
 namespace {
@@ -6164,6 +6174,36 @@ void FillInfo_FillFabricInfo(struct amdsmiFabricDeviceInfo* info) {
   }
 }
 
+void FillInfo_ReadUuidHalves(const struct amdsmiFabricDeviceInfo& info, uint64_t* lo, uint64_t* hi) {
+  std::memcpy(lo, info.clusterUuid, sizeof(*lo));
+  std::memcpy(hi, info.clusterUuid + sizeof(*lo), sizeof(*hi));
+}
+
+ncclResult_t FillInfo_RunWithAmdFabricHooks(FillInfoComm* c, ncclPeerInfo* info, bool fabricHandleSupport) {
+  ScopedHook attr(g_hipDeviceGetAttribute, [fabricHandleSupport](int* pi, hipDeviceAttribute_t, int) {
+    if (pi) *pi = fabricHandleSupport ? 1 : 0;
+    return hipSuccess;
+  });
+  ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char*, uint32_t* out) {
+    *out = FillInfo_kFabricDeviceIndex;
+    return ncclSuccess;
+  });
+  ScopedHook fabric(g_amdSmiGetFabricDeviceInfo,
+                    [](uint32_t, struct amdsmiFabricDeviceInfo* out) {
+                      FillInfo_FillFabricInfo(out);
+                      return ncclSuccess;
+                    });
+  return fillInfo(c->get(), info, 0);
+}
+
+void FillInfo_ExpectBaseFabricValues(const ncclPeerInfo& info) {
+  EXPECT_EQ(5u, info.fabricInfo.cliqueId);
+  uint64_t uuid0 = 0, uuid1 = 0;
+  FillInfo_ReadUuidHalves(info.fabricInfo, &uuid0, &uuid1);
+  EXPECT_EQ(0x0807060504030201ull, uuid0);
+  EXPECT_EQ(0x100f0e0d0c0b0a09ull, uuid1);
+}
+
 std::string FillInfo_RunCapturingInfo(FillInfoComm* c, ncclPeerInfo* info, ncclResult_t* result) {
   ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
   return RcclUnitTesting::CaptureLog([&] { *result = fillInfo(c->get(), info, 0); });
@@ -6240,6 +6280,73 @@ TEST_F(InitMicrotest, FillInfo_FabricSupported_LogsTopologyWithBothUuidHalves) {
   EXPECT_TRUE(LogHas(log, "acceleratorId 11 bandwidth 400000 Mb/s latency 250 ns")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "UUID 807060504030201.100f0e0d0c0b0a09")) << "actual log:\n" << log;
   EXPECT_TRUE(LogHas(log, "ppodSize 8 cliqueId 5 clique size 4")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, FillInfo_AmdMnnvlCliqueOverride_AppliesForEligibleRank) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  SetParams({{"MNNVL_ENABLE", 2}, {"MNNVL_CLIQUE_ID", 101}});
+  g_cuMemEnable = [] { return 1; };
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, FillInfo_RunWithAmdFabricHooks(&c, &info, /*fabricHandleSupport=*/true));
+  EXPECT_EQ(101u, info.fabricInfo.cliqueId);
+}
+
+TEST_F(InitMicrotest, FillInfo_AmdMnnvlUuidOverride_AppliesForEligibleRank) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  constexpr uint64_t kUuidOverride = 0x12345678u;
+  SetParams({{"MNNVL_ENABLE", 2}, {"MNNVL_UUID", static_cast<int64_t>(kUuidOverride)}});
+  g_cuMemEnable = [] { return 1; };
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, FillInfo_RunWithAmdFabricHooks(&c, &info, /*fabricHandleSupport=*/true));
+  uint64_t uuid0 = 0, uuid1 = 0;
+  FillInfo_ReadUuidHalves(info.fabricInfo, &uuid0, &uuid1);
+  EXPECT_EQ(kUuidOverride, uuid0);
+  EXPECT_EQ(kUuidOverride, uuid1);
+}
+
+TEST_F(InitMicrotest, FillInfo_AmdMnnvlEnvOverride_DisabledMnnvlKeepsFabricValues) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  constexpr uint64_t kUuidOverride = 0xabcdefu;
+  SetParams({{"MNNVL_ENABLE", 0}, {"MNNVL_CLIQUE_ID", 101}, {"MNNVL_UUID", static_cast<int64_t>(kUuidOverride)}});
+  g_cuMemEnable = [] { return 1; };
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, FillInfo_RunWithAmdFabricHooks(&c, &info, /*fabricHandleSupport=*/true));
+  FillInfo_ExpectBaseFabricValues(info);
+}
+
+TEST_F(InitMicrotest, FillInfo_AmdMnnvlEnvOverride_CuMemDisabledKeepsFabricValues) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  constexpr uint64_t kUuidOverride = 0xabcdefu;
+  SetParams({{"MNNVL_ENABLE", 2}, {"MNNVL_CLIQUE_ID", 101}, {"MNNVL_UUID", static_cast<int64_t>(kUuidOverride)}});
+  g_cuMemEnable = [] { return 0; };
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, FillInfo_RunWithAmdFabricHooks(&c, &info, /*fabricHandleSupport=*/true));
+  FillInfo_ExpectBaseFabricValues(info);
+}
+
+TEST_F(InitMicrotest, FillInfo_AmdMnnvlEnvOverride_NoFabricHandleSupportKeepsFabricValues) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  constexpr uint64_t kUuidOverride = 0xabcdefu;
+  SetParams({{"MNNVL_ENABLE", 2}, {"MNNVL_CLIQUE_ID", 101}, {"MNNVL_UUID", static_cast<int64_t>(kUuidOverride)}});
+  g_cuMemEnable = [] { return 1; };
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, FillInfo_RunWithAmdFabricHooks(&c, &info, /*fabricHandleSupport=*/false));
+  FillInfo_ExpectBaseFabricValues(info);
+}
+
+TEST_F(InitMicrotest, FillInfo_AmdMnnvlCliqueOverride_NegativeTwoKeepsFabricValues) {
+  FillInfoComm c;
+  c.get()->busId = kPhysGpuBusId;
+  SetParams({{"MNNVL_ENABLE", 2}, {"MNNVL_CLIQUE_ID", -2}});
+  g_cuMemEnable = [] { return 1; };
+  ncclPeerInfo info{};
+  EXPECT_EQ(ncclSuccess, FillInfo_RunWithAmdFabricHooks(&c, &info, /*fabricHandleSupport=*/true));
+  EXPECT_EQ(5u, info.fabricInfo.cliqueId);
 }
 
 // Comm teardown / lifecycle (init.cc:453-4100): commFree, setCommAbortFlags, destroy/finalize/revoke/abort.
@@ -10826,6 +10933,7 @@ struct Tr_AllGatherInfo {
   int nc;
   int romeTopoModelIdx;
   int treeCompact;
+  bool blocking;
   bool pivotA2AEnabled;
   bool ll128Enabled;
   char hostname[128];
@@ -10838,6 +10946,11 @@ struct Tr_AllGatherInfo {
   int localCollNetCount;
   int isAllNvlink;
   bool nicFused;
+  int minCTAs;
+  int maxCTAs;
+  int symAgHierMaxBlocks;
+  int64_t symAgHierMaxChunkBytes;
+  int64_t symCtas;
 };
 
 // One GPU node per rank, so ncclTopoRankToIndex (:1869) resolves and every rank carries an arch string.
@@ -11540,6 +11653,49 @@ TEST_F(InitMicrotest, InitTransportsRank_RomeConsensusFails_PropagatesThatCode) 
   EXPECT_EQ(0, g_ncclTopoPostsetCalls);
 }
 
+TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyWhereHierAllGatherCanRun) {
+  using Patch = std::function<void(Tr_AllGatherInfo&)>;
+  // The mismatch and kTrPostsetReached share a code, so the Postset call count tells them apart.
+  // Every comm is partitioned, so a hierarchical AllGather that can't run (MI300X, MI355X) must skip the check.
+  auto reachesPostset = [](bool hierAvailable, const Patch& patch) {
+    TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+    Tr_ReachAllGather3(c, "gfx900");
+    c.get()->config.minCTAs = 3;
+    c.get()->config.maxCTAs = 5;
+    ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deft) {
+      return std::string(env) == "SYM_CTAS" ? 7 : deft;
+    });
+    ScopedHook available(g_symkHierAvailable, [=](ncclComm*) { return hierAvailable; });
+    std::vector<PeerSpec> specs(4);
+    for (auto& s : specs) s.mloPart = 1;
+    const auto gathers = Tr_InstallGathers(c, specs, [&](int r, Tr_AllGatherInfo& row) {
+      if (r == 0) {
+        EXPECT_EQ(row.minCTAs, 3);
+        EXPECT_EQ(row.maxCTAs, 5);
+        EXPECT_EQ(row.symCtas, 7);
+        EXPECT_EQ(row.symAgHierMaxBlocks, ncclSymkAgHierMaxBlocks);
+        EXPECT_EQ(row.symAgHierMaxChunkBytes, int64_t(ncclSymkAgHierMaxChunkBytes));
+      }
+      if (r == 2 && patch) patch(row);
+    });
+    const int before = g_ncclTopoPostsetCalls;
+    EXPECT_EQ(ncclInvalidUsage, initTransportsRank(c.get(), nullptr, c.timers()));
+    return g_ncclTopoPostsetCalls > before;
+  };
+  const Patch patches[] = {
+      [](Tr_AllGatherInfo& row) { row.minCTAs += 1; },
+      [](Tr_AllGatherInfo& row) { row.maxCTAs -= 1; },
+      [](Tr_AllGatherInfo& row) { row.symAgHierMaxBlocks += 1; },
+      [](Tr_AllGatherInfo& row) { row.symAgHierMaxChunkBytes *= 2; },
+      [](Tr_AllGatherInfo& row) { row.symCtas += 1; },
+  };
+  EXPECT_TRUE(reachesPostset(/*hierAvailable=*/true, nullptr)) << "matching values";
+  for (size_t i = 0; i < std::size(patches); i++) {
+    EXPECT_TRUE(reachesPostset(/*hierAvailable=*/false, patches[i])) << "hier unavailable, field " << i;
+    EXPECT_FALSE(reachesPostset(/*hierAvailable=*/true, patches[i])) << "field " << i;
+  }
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_TopoPresetFails_PropagatesBeforeTheSecondAllGather) {
   TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
   Tr_ReachAllGather3(c, "gfx900");
@@ -11610,6 +11766,28 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerReportsLowerMinNetBw_FoldsDownToIt)
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(1, minBw.calls);
   EXPECT_FLOAT_EQ(kPeerBw, c.get()->minNetBw);
+}
+
+TEST_F(InitMicrotest, InitTransportsRank_AllRanksBlockingAgreesAcrossLocalAndPeerModes) {
+  for (int rankCount : {1, 2, 4}) {
+    const int modeCount = 1 << rankCount;
+    for (int blockingMask = 0; blockingMask < modeCount; ++blockingMask) {
+      for (int selfRank = 0; selfRank < rankCount; ++selfRank) {
+        SCOPED_TRACE(testing::Message() << "ranks=" << rankCount << " blockingMask=" << blockingMask
+                                       << " selfRank=" << selfRank);
+        TransportsRankComm comm(rankCount, selfRank);
+        comm.get()->config.blocking = (blockingMask >> selfRank) & 1;
+        comm.get()->allRanksBlocking = blockingMask != modeCount - 1;
+        Tr_ReachAllGather3(comm, "gfx900");
+        const auto gathers = Tr_InstallGathers(comm, {}, [&](int peer, Tr_AllGatherInfo& row) {
+          if (peer == selfRank) EXPECT_EQ(row.blocking, comm.get()->config.blocking != 0);
+          row.blocking = ((blockingMask >> peer) & 1) != 0;
+        });
+        EXPECT_EQ(kTrPostsetReached, initTransportsRank(comm.get(), nullptr, comm.timers()));
+        EXPECT_EQ(comm.get()->allRanksBlocking, blockingMask == modeCount - 1);
+      }
+    }
+  }
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_AnyPeerNotAllNvlink_ClearsIsAllNvlink) {

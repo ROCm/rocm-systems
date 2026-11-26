@@ -65,7 +65,7 @@ pub struct MipLayout {
 /// Complete surface layout for the requested mip chain.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SurfaceLayout {
-    /// Explicit input pitch, which GFX12's per-mip output does not preserve.
+    /// Explicit input pitch retained for linear coordinate mapping.
     requested_pitch_in_elements: u32,
     /// Total byte extent of the surface.
     pub size: u64,
@@ -320,8 +320,8 @@ impl SurfaceMapper {
             && self.request.mip_levels == 1
             && self.request.pitch_in_elements != 0
         {
-            // The vendored GFX12 coordinate mapper replaces an explicit pitch
-            // with the natural mip pitch. Address this linear layout directly.
+            // Address explicit linear pitches directly, including source
+            // revisions whose coordinate mapper uses the natural mip pitch.
             return self.map_linear_row(x, y, slice, offsets);
         }
         // SAFETY: This mapper owns the live handle and the bridge writes at

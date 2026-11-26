@@ -6,6 +6,7 @@
 
 #include "rocjitsu/code/basic_block.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -20,16 +21,18 @@ namespace rocjitsu {
 /// call sites while rejection-specific tests inspect DecodeResult directly.
 inline Instruction *decode_valid(Decoder &decoder, const rj_code_binary_inst_t *inst) {
   DecodeResult result = decoder.decode(inst);
-  if (result.failed())
+  if (result.failed()) {
     return nullptr;
+  }
   return result.value().release();
 }
 
 inline Instruction *decode_valid(Decoder &decoder, const rj_code_binary_inst_t *inst,
                                  uint64_t src_loc) {
   DecodeResult result = decoder.decode(inst, src_loc);
-  if (result.failed())
+  if (result.failed()) {
     return nullptr;
+  }
   return result.value().release();
 }
 
@@ -39,7 +42,7 @@ inline bool decode_fails(Decoder &decoder, const rj_code_binary_inst_t *inst) {
 
 /// Unwrap a block build expected to succeed by the surrounding test.
 inline std::vector<std::unique_ptr<BasicBlock>>
-build_valid_blocks(const CodeObject &co, Decoder &decoder, rj_code_arch_t arch,
+build_valid_blocks(const CodeObject &co, Decoder &decoder, rocjitsu::IsaFamily arch,
                    std::span<const uint64_t> extra_leaders = {},
                    ExternalEntryPolicy entry_policy = ExternalEntryPolicy::InferPredecessorless,
                    std::span<const uint64_t> extra_split_points = {}) {

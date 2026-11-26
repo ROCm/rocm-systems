@@ -1,7 +1,7 @@
 ---
 threadfence:
   Unit___threadfence_block_Positive_Basic_Shared:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [fence, synchronization]
   Unit___threadfence_block_Positive_Basic_Global:
     <<: *level_default
@@ -19,7 +19,7 @@ threadfence:
     <<: *level_default
     tags: [fence, synchronization]
   Unit___threadfence_Positive_Basic_Global:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [fence, synchronization]
   Unit___threadfence_Positive_Basic_Pinned:
     <<: *level_default

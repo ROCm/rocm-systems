@@ -629,7 +629,11 @@ void KFDMemoryTest::FlatScratchAccess(int gpuNode) {
 
         for (unsigned int bank = 0; bank < pNodeProperties->NumMemoryBanks; bank++) {
             if (memoryProperties[bank].HeapType == HSA_HEAPTYPE_GPU_SCRATCH) {
-                int numWaves = pNodeProperties->NumShaderBanks;  // WAVES must be >= # SE
+                int numWaves = m_FamilyId >= FAMILY_GFX13 ? // WAVES must be >= # CU per SE, use # CU per GPU here
+                               pNodeProperties->NumShaderBanks *
+                               pNodeProperties->NumArrays *
+                               pNodeProperties->NumCUPerArray :
+                               pNodeProperties->NumShaderBanks;  // WAVES must be >= # SE
                 int waveSize = 1;  // Amount of space used by each wave in units of 256 dwords
 
                 PM4Queue queue;

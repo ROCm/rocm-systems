@@ -183,8 +183,9 @@ DrainStats LogBuffer::drain(const LogRecordCallback &callback) {
       ++stats.incompatible_records;
       continue;
     }
-    if (callback)
+    if (callback) {
       callback(record);
+    }
     record.valid = 0;
     ++stats.records_drained;
   }
@@ -201,8 +202,9 @@ void LogBuffer::reinitialize() {
   hdr->overflow_count = 0;
 
   RjLogRecord *recs = records();
-  for (uint32_t i = 0; i < slot_count_; ++i)
+  for (uint32_t i = 0; i < slot_count_; ++i) {
     recs[i].valid = 0;
+  }
 }
 
 std::string format_log_line(const RjLogRecord &record) {

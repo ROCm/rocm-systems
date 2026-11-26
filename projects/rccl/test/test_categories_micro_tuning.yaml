@@ -6,9 +6,13 @@ test_categories:
   quick: &micro_tuning_quick
     description: "Smoke - host-only src/tuning/ micro-tests, sub-second."
     test_patterns:
+      - "CeModel*"
+      - "Collnet*"
       - "CostModel*"
+      - "Pat*"
       - "SymModel*"
       - "SymTdmEndpoints/SymModelTdmSelectionTest.*"
+      - "Tree*"
       - "Tuning*"  # tuning.cc; also matches tuning_general.cc's TuningGeneral suite
     exclude_windows:
       - "*"

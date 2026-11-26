@@ -29,8 +29,7 @@ namespace rocprofsys
 {
 // bundle of components used in instrumentation
 using instrumentation_bundle_t =
-    tim::component_bundle<project::rocprofsys, comp::wall_clock*,
-                          comp::user_global_bundle*>;
+    tim::component_bundle<project::rocprofsys, comp::user_global_bundle*>;
 
 // allocator for instrumentation_bundle_t
 using bundle_allocator_t = tim::data::ring_buffer_allocator<instrumentation_bundle_t>;
@@ -49,7 +48,7 @@ struct base_thread_data
             }
             return _v ? _v->capacity() : 0;
         };
-        grow_functors().emplace_back(_func);
+        register_grow_functor(_func);
 
         // NOTE: Do not call _func() here - causes recursive static initialization
         // deadlock. Container resizing is handled via grow_functors() in thread_info.cpp.
@@ -358,8 +357,8 @@ thread_data<std::optional<Tp>, Tag, MaxThreads>::construct(construct_on_thread&&
         container::stable_vector<bool, MaxThreads, container::k_cacheline_align>{};
     static auto _grow = []() {
         container::resize(_constructed, MaxThreads, false);
-        grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
-            if(static_cast<size_t>(_n) >= _constructed.size())
+        register_grow_functor([](std::int64_t required) -> std::int64_t {
+            if(static_cast<size_t>(required) >= _constructed.size())
             {
                 _constructed.reserve(_constructed.capacity() + 1);
                 container::resize(_constructed, _constructed.capacity(), false);
@@ -537,8 +536,8 @@ thread_data<identity<Tp>, Tag, MaxThreads>::construct(construct_on_thread&& _t,
         container::stable_vector<bool, MaxThreads, container::k_cacheline_align>{};
     static auto const _grow = []() {
         container::resize(_constructed, MaxThreads, false);
-        grow_functors().emplace_back([](std::int64_t _n) -> std::int64_t {
-            if(static_cast<size_t>(_n) >= _constructed.size())
+        register_grow_functor([](std::int64_t required) -> std::int64_t {
+            if(static_cast<size_t>(required) >= _constructed.size())
             {
                 _constructed.reserve(_constructed.capacity() + 1);
                 container::resize(_constructed, _constructed.capacity(), false);

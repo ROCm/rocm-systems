@@ -30,6 +30,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <iterator>
 #include <memory>
 #include <memory_resource>
@@ -37,7 +38,6 @@
 #include <optional>
 #include <shared_mutex>
 #include <span>
-#include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -62,6 +62,8 @@ class PrivateGttCopySourceGate;
 class KfdProcess {
 public:
   class PageTableTransaction;
+  struct GpuGrantRange;
+  struct GpuGrantIndex;
   enum class SvmAccessMode { Access, AccessInPlace, NoAccess };
 
   /// @brief Per-GPU state within a process.
@@ -268,8 +270,7 @@ public:
     // Scratch backing is created by the driver for an executing GPU request,
     // rather than by an application KFD allocation/MAP sequence.
     bool driver_gpu_mapping = false;
-    // A page-table allocation failure can leave a mapped prefix. A later
-    // scratch request must finish the map before treating this VA as backed.
+    // A rejected scratch map must be retried before treating this VA as backed.
     bool scratch_mapping_incomplete = false;
     uint64_t driver_admission_generation = 0;
     // KFD MAP/UNMAP grants. The process page table is shared by all local
@@ -369,8 +370,9 @@ public:
   /// @details UC access decisions intentionally expose generation zero, so an
   /// ingress consumer must compare against this live grant index instead.
   [[nodiscard]] bool gpu_alias_grant_current(const GpuAliasRecord &alias) const {
-    if (alias.process_id != process_id_ || alias.process_incarnation != process_incarnation_)
+    if (alias.process_id != process_id_ || alias.process_incarnation != process_incarnation_) {
       return false;
+    }
     std::shared_lock lock(gpu_grants_mutex_);
     const std::shared_ptr<const GpuGrantIndex> &grants = gpu_grants_;
     const GpuAliasSnapshot &aliases = alias.local ? grants->local_aliases : grants->aliases;
@@ -421,12 +423,14 @@ private:
   gpu_access_grant_impl(uint32_t gpu_id, uint64_t address, size_t size, GpuBackingLease *backing,
                         bool local_backing = false,
                         std::pair<uint64_t, uint64_t> *bounds = nullptr) const {
-    if (size == 0 || size - 1 > UINT64_MAX - address)
+    if (size == 0 || size - 1 > UINT64_MAX - address) {
       return {};
+    }
     std::shared_lock lock(gpu_grants_mutex_);
     const std::shared_ptr<const GpuGrantIndex> &grants = gpu_grants_;
-    if (!grants->valid)
+    if (!grants->valid) {
       return {};
+    }
     // SVM NO_ACCESS also applies to ordinary host pages, which have no KFD
     // allocation or retired-range entry in the grant index.
     const uint64_t last_byte = address + size - 1;
@@ -440,8 +444,9 @@ private:
              range.gpu_va + range.size > address;
     };
     if ((first_denial != grants->svm_denials.end() && overlaps(*first_denial)) ||
-        (first_denial != grants->svm_denials.begin() && overlaps(*std::prev(first_denial))))
+        (first_denial != grants->svm_denials.begin() && overlaps(*std::prev(first_denial)))) {
       return {};
+    }
     uint64_t generation = 0;
     bool matched = false;
     bool cacheable = true;
@@ -455,21 +460,25 @@ private:
     for (size_t index = static_cast<size_t>(first - grants->max_end_prefix.begin());
          index < grants->ranges.size(); ++index) {
       const auto &range = grants->ranges[index];
-      if (range.gpu_va > last_byte)
+      if (range.gpu_va > last_byte) {
         break;
+      }
       const uint64_t range_end = range.gpu_va + range.size;
-      if (range_end <= address)
+      if (range_end <= address) {
         continue;
+      }
       // Every touched range must join the preceding one without a hole or an
       // overlap. Keep scanning after covering the request to reject a second
       // allocation that overlaps an otherwise valid first one.
-      if (range.gpu_va > covered_end || (matched && range.gpu_va < previous_end))
+      if (range.gpu_va > covered_end || (matched && range.gpu_va < previous_end)) {
         return decision;
+      }
       if (bounds && !matched && grants->svm_denials.empty() &&
           (index == 0 || grants->max_end_prefix[index - 1] <= range.gpu_va) &&
           (index + 1 == grants->ranges.size() || grants->ranges[index + 1].gpu_va >= range_end) &&
-          address >= range.gpu_va && last_byte < range_end)
+          address >= range.gpu_va && last_byte < range_end) {
         *bounds = {range.gpu_va, range_end};
+      }
       if (!matched) {
         decision.domain = range.domain;
         decision.owner_gpu_id = range.owner_gpu_id;
@@ -484,25 +493,29 @@ private:
              range.backing_owner->controlled_peer_for_testing());
       }
       if (range.domain == GpuGrantDomain::Vram && range.owner_gpu_id != gpu_id) {
-        if (decision.peer_candidate && decision.peer_owner_gpu_id != range.owner_gpu_id)
+        if (decision.peer_candidate && decision.peer_owner_gpu_id != range.owner_gpu_id) {
           decision.mixed_peer_owners = true;
-        if (!decision.peer_candidate)
+        }
+        if (!decision.peer_candidate) {
           decision.peer_owner_gpu_id = range.owner_gpu_id;
+        }
         decision.peer_candidate = true;
       }
       // The controlled peer fixture has no coherence path for owner raw
       // writes. Accumulate across the entire request, not just its first BO.
       if (range.domain == GpuGrantDomain::Vram && range.owner_gpu_id == gpu_id &&
           (range.cacheable_peer_for_testing ||
-           (range.backing_owner && range.backing_owner->controlled_peer_for_testing())))
+           (range.backing_owner && range.backing_owner->controlled_peer_for_testing()))) {
         decision.direct_backing_write_allowed = false;
+      }
       uint64_t range_generation = 0;
       if (range.driver_gpu_mapping) {
         range_generation = range.driver_admission_generation;
       } else {
         const auto grant = range.admission_generations.find(gpu_id);
-        if (grant == range.admission_generations.end())
+        if (grant == range.admission_generations.end()) {
           return decision;
+        }
         range_generation = grant->second;
       }
       if (!matched) {
@@ -523,8 +536,9 @@ private:
       covered_end = range_end;
       previous_end = range_end;
     }
-    if (matched && covered_end <= last_byte)
+    if (matched && covered_end <= last_byte) {
       return decision;
+    }
     if (bounds && !matched && grants->svm_denials.empty()) {
       // Queue rings and code can be outside allocated BOs. The gap between
       // neighboring ranges has one local policy until the next publication.
@@ -536,8 +550,9 @@ private:
     // A span crossing grants is valid architecturally, but cannot use one
     // generation to identify every cache line it touches.
     if (backing && single_backing && backing_offset <= single_backing->size() &&
-        size <= single_backing->size() - backing_offset)
+        size <= single_backing->size() - backing_offset) {
       *backing = GpuBackingLease(std::move(single_backing), backing_offset, size);
+    }
     decision.allowed = true;
     decision.generation = cacheable ? generation : 0;
     decision.cacheable = cacheable;
@@ -548,23 +563,26 @@ public:
   /// @brief Allocate an identity for the next GPU MAP or driver-created range.
   /// @pre The caller holds alloc_mutex_.
   uint64_t next_gpu_admission_generation_locked() {
-    if (++gpu_admission_generation_ == 0)
+    if (++gpu_admission_generation_ == 0) {
       ++gpu_admission_generation_;
+    }
     return gpu_admission_generation_;
   }
 
   /// @pre The caller holds alloc_mutex_.
   uint64_t next_host_view_generation_locked() {
-    if (++host_view_generation_ == 0)
+    if (++host_view_generation_ == 0) {
       ++host_view_generation_;
+    }
     return host_view_generation_;
   }
 
   /// @brief Keep a freed GPU VA denied while the process VMID remains live.
   /// @pre The caller holds alloc_mutex_.
   void retire_gpu_range_locked(uint64_t gpu_va, uint64_t size, bool host_vma_backed = false) {
-    if (size == 0 || size > UINT64_MAX - gpu_va)
+    if (size == 0 || size > UINT64_MAX - gpu_va) {
       return;
+    }
     const uint64_t end = gpu_va + size;
     std::vector<GpuGrantRange> updated;
     updated.reserve(retired_gpu_ranges_.size() + 3);
@@ -611,17 +629,15 @@ public:
         }
       }
     }
-    if (!inserted)
+    if (!inserted) {
       append(denied);
+    }
     retired_gpu_ranges_ = std::move(updated);
   }
 
-  /// @brief Replace a tombstone only for bytes claimed by a new allocation.
-  /// @pre The caller holds alloc_mutex_.
-  void claim_gpu_range_locked(uint64_t gpu_va, uint64_t size) {
-    if (size == 0 || size > UINT64_MAX - gpu_va)
-      return;
-    const uint64_t end = gpu_va + size;
+private:
+  /// @pre The caller holds alloc_mutex_ and passes a nonwrapping range.
+  std::vector<GpuGrantRange> retired_ranges_outside_locked(uint64_t gpu_va, uint64_t end) const {
     std::vector<GpuGrantRange> remaining;
     remaining.reserve(retired_gpu_ranges_.size() + 1);
     for (const auto &range : retired_gpu_ranges_) {
@@ -642,6 +658,18 @@ public:
         remaining.push_back(std::move(suffix));
       }
     }
+    return remaining;
+  }
+
+public:
+  /// @brief Replace a tombstone only for bytes claimed by a new allocation.
+  /// @pre The caller holds alloc_mutex_.
+  void claim_gpu_range_locked(uint64_t gpu_va, uint64_t size) {
+    if (size == 0 || size > UINT64_MAX - gpu_va) {
+      return;
+    }
+    const uint64_t end = gpu_va + size;
+    auto remaining = retired_ranges_outside_locked(gpu_va, end);
     // A new BO or host view at this VA must not inherit an earlier host SVM
     // denial. Prepare both vectors before changing either published state.
     std::vector<GpuSvmDeniedRange> remaining_denials;
@@ -652,10 +680,12 @@ public:
         remaining_denials.push_back(range);
         continue;
       }
-      if (range.gpu_va < gpu_va)
+      if (range.gpu_va < gpu_va) {
         remaining_denials.push_back({range.gpu_id, range.gpu_va, gpu_va - range.gpu_va});
-      if (end < old_end)
+      }
+      if (end < old_end) {
         remaining_denials.push_back({range.gpu_id, end, old_end - end});
+      }
     }
     (void)clear_svm_access_locked(gpu_va, size);
     retired_gpu_ranges_ = std::move(remaining);
@@ -675,10 +705,12 @@ public:
         access.push_back(range);
         continue;
       }
-      if (range.gpu_va < gpu_va)
+      if (range.gpu_va < gpu_va) {
         access.push_back({gpu_id, range.gpu_va, gpu_va - range.gpu_va, range.mode});
-      if (end < old_end)
+      }
+      if (end < old_end) {
         access.push_back({gpu_id, end, old_end - end, range.mode});
+      }
     }
     access.push_back({gpu_id, gpu_va, size, mode});
     std::sort(access.begin(), access.end(), [](const auto &left, const auto &right) {
@@ -703,13 +735,16 @@ public:
         updated.push_back(range);
         continue;
       }
-      if (range.gpu_va < gpu_va)
+      if (range.gpu_va < gpu_va) {
         updated.push_back({gpu_id, range.gpu_va, gpu_va - range.gpu_va});
-      if (end < old_end)
+      }
+      if (end < old_end) {
         updated.push_back({gpu_id, end, old_end - end});
+      }
     }
-    if (mode == SvmAccessMode::NoAccess)
+    if (mode == SvmAccessMode::NoAccess) {
       updated.push_back({gpu_id, gpu_va, size});
+    }
     std::sort(updated.begin(), updated.end(), [](const auto &left, const auto &right) {
       return std::pair{left.gpu_id, left.gpu_va} < std::pair{right.gpu_id, right.gpu_va};
     });
@@ -747,40 +782,50 @@ public:
     bool has_access = false;
     bool has_in_place = false;
     for (const auto &range : svm_access_ranges_) {
-      if (range.gpu_va >= end || range.gpu_va + range.size <= gpu_va)
+      if (range.gpu_va >= end || range.gpu_va + range.size <= gpu_va) {
         continue;
+      }
       has_range = true;
-      if (range.gpu_id != gpu_id)
+      if (range.gpu_id != gpu_id) {
         continue;
-      if (range.mode == SvmAccessMode::NoAccess)
+      }
+      if (range.mode == SvmAccessMode::NoAccess) {
         return SvmAccessMode::NoAccess;
+      }
       has_access |= range.mode == SvmAccessMode::Access;
       has_in_place |= range.mode == SvmAccessMode::AccessInPlace;
-      if (has_access && has_in_place)
+      if (has_access && has_in_place) {
         return SvmAccessMode::NoAccess;
+      }
     }
-    if (!has_range)
+    if (!has_range) {
       return SvmAccessMode::Access;
+    }
     // Each GPU's ranges are disjoint. A range for another GPU establishes an
     // SVM object even where this GPU has no explicit mode. GET_ATTR reports
     // NO_ACCESS for those bytes, unlike a gap with no object at all; only an
     // explicit target-GPU NO_ACCESS also closes raw host-page admission.
     for (const auto &range : svm_access_ranges_) {
-      if (range.gpu_id == gpu_id || range.gpu_va >= end || range.gpu_va + range.size <= gpu_va)
+      if (range.gpu_id == gpu_id || range.gpu_va >= end || range.gpu_va + range.size <= gpu_va) {
         continue;
+      }
       const uint64_t other_end = std::min(end, range.gpu_va + range.size);
       uint64_t covered_until = std::max(gpu_va, range.gpu_va);
       for (const auto &own : svm_access_ranges_) {
-        if (own.gpu_id != gpu_id || own.gpu_va + own.size <= covered_until)
+        if (own.gpu_id != gpu_id || own.gpu_va + own.size <= covered_until) {
           continue;
-        if (own.gpu_va > covered_until)
+        }
+        if (own.gpu_va > covered_until) {
           break;
+        }
         covered_until = std::min(other_end, own.gpu_va + own.size);
-        if (covered_until == other_end)
+        if (covered_until == other_end) {
           break;
+        }
       }
-      if (covered_until != other_end)
+      if (covered_until != other_end) {
         return SvmAccessMode::NoAccess;
+      }
     }
     return has_in_place ? SvmAccessMode::AccessInPlace : SvmAccessMode::Access;
   }
@@ -791,8 +836,9 @@ public:
     const uint64_t end = gpu_va + size;
     if (std::ranges::none_of(svm_access_ranges_, [&](const auto &range) {
           return range.gpu_va < end && gpu_va < range.gpu_va + range.size;
-        }))
+        })) {
       return false;
+    }
     std::vector<GpuSvmAccessRange> remaining;
     remaining.reserve(svm_access_ranges_.size() + 1);
     bool changed = false;
@@ -803,13 +849,16 @@ public:
         continue;
       }
       changed = true;
-      if (range.gpu_va < gpu_va)
+      if (range.gpu_va < gpu_va) {
         remaining.push_back({range.gpu_id, range.gpu_va, gpu_va - range.gpu_va, range.mode});
-      if (end < old_end)
+      }
+      if (end < old_end) {
         remaining.push_back({range.gpu_id, end, old_end - end, range.mode});
+      }
     }
-    if (changed)
+    if (changed) {
       svm_access_ranges_ = std::move(remaining);
+    }
     return changed;
   }
 
@@ -819,16 +868,45 @@ public:
   [[nodiscard]] bool clear_host_svm_policy_locked(uint64_t gpu_va, uint64_t size,
                                                   uint64_t preserve_userptr_handle = 0) {
     const uint64_t end = gpu_va + size;
+    const bool retired_view_removed =
+        std::ranges::any_of(retired_identity_views_, [&](const auto &view) {
+          return view.gpu_va < end && gpu_va < view.gpu_va + view.mapped_bytes;
+        });
+    if (retired_view_removed) {
+      // A fixed BO's denial follows its surviving CPU view, including fragments
+      // left by partial unmaps or replacements of a guarded SVM reservation.
+      std::vector<RetiredIdentityView> remaining_views;
+      remaining_views.reserve(retired_identity_views_.size() + 1);
+      for (const auto &view : retired_identity_views_) {
+        const uint64_t view_end = view.gpu_va + view.mapped_bytes;
+        if (view_end <= gpu_va || end <= view.gpu_va) {
+          remaining_views.push_back(view);
+          continue;
+        }
+        const uint64_t removed_begin = std::max(gpu_va, view.gpu_va);
+        const uint64_t removed_end = std::min(end, view_end);
+        claim_gpu_range_locked(removed_begin, removed_end - removed_begin);
+        if (view.gpu_va < removed_begin) {
+          remaining_views.push_back({view.gpu_va, removed_begin - view.gpu_va});
+        }
+        if (removed_end < view_end) {
+          remaining_views.push_back({removed_end, view_end - removed_end});
+        }
+      }
+      retired_identity_views_ = std::move(remaining_views);
+    }
     const auto overlaps = [&](const auto &range) {
       return range.gpu_va < end && gpu_va < range.gpu_va + range.size;
     };
     for (auto &[handle, allocation] : allocations_) {
-      if (handle == preserve_userptr_handle)
+      if (handle == preserve_userptr_handle) {
         continue;
+      }
       if (std::ranges::none_of(allocation.userptr_host_vma_spans, [&](const auto &span) {
             return span.first < end && gpu_va < span.first + span.second;
-          }))
+          })) {
         continue;
+      }
       std::vector<std::pair<uint64_t, uint64_t>> surviving;
       surviving.reserve(allocation.userptr_host_vma_spans.size() + 1);
       for (const auto &[start, length] : allocation.userptr_host_vma_spans) {
@@ -837,10 +915,12 @@ public:
           surviving.emplace_back(start, length);
           continue;
         }
-        if (start < gpu_va)
+        if (start < gpu_va) {
           surviving.emplace_back(start, gpu_va - start);
-        if (end < span_end)
+        }
+        if (end < span_end) {
           surviving.emplace_back(end, span_end - end);
+        }
       }
       allocation.userptr_host_vma_spans = std::move(surviving);
     }
@@ -850,8 +930,9 @@ public:
         std::ranges::any_of(retired_gpu_ranges_, [&](const auto &range) {
           return range.host_vma_backed && overlaps(range);
         });
-    if (!has_denials && !has_host_tombstones && !has_access)
-      return false;
+    if (!has_denials && !has_host_tombstones && !has_access) {
+      return retired_view_removed;
+    }
     std::vector<GpuSvmDeniedRange> remaining;
     if (has_denials) {
       remaining.reserve(svm_denied_ranges_.size() + 1);
@@ -861,10 +942,12 @@ public:
           remaining.push_back(range);
           continue;
         }
-        if (range.gpu_va < gpu_va)
+        if (range.gpu_va < gpu_va) {
           remaining.push_back({range.gpu_id, range.gpu_va, gpu_va - range.gpu_va});
-        if (end < old_end)
+        }
+        if (end < old_end) {
           remaining.push_back({range.gpu_id, end, old_end - end});
+        }
       }
     }
     std::vector<GpuGrantRange> remaining_retired;
@@ -889,12 +972,15 @@ public:
         }
       }
     }
-    if (has_access)
+    if (has_access) {
       (void)clear_svm_access_locked(gpu_va, size);
-    if (has_denials)
+    }
+    if (has_denials) {
       svm_denied_ranges_ = std::move(remaining);
-    if (has_host_tombstones)
+    }
+    if (has_host_tombstones) {
       retired_gpu_ranges_ = std::move(remaining_retired);
+    }
     return true;
   }
 
@@ -924,10 +1010,11 @@ public:
       auto changed = range;
       changed.gpu_va = changed_begin;
       changed.size = changed_end - changed_begin;
-      if (allowed)
+      if (allowed) {
         changed.admission_generations[gpu_id] = next_gpu_admission_generation_locked();
-      else
+      } else {
         changed.admission_generations.erase(gpu_id);
+      }
       updated.push_back(std::move(changed));
       if (changed_end < old_end) {
         auto suffix = range;
@@ -945,22 +1032,13 @@ public:
   /// @brief Publish while retaining the request lock across grant and PTE work.
   /// @pre The caller holds alloc_mutex_ and owns a transaction for this process.
   void publish_gpu_grants_locked(PageTableTransaction &transaction);
-  /// @brief Deny GPU access permanently if host VMA cleanup cannot publish.
-  /// @pre The caller holds alloc_mutex_. No allocation occurs on this path.
-  void fail_closed_gpu_grants_locked() noexcept {
-    gpu_grants_poisoned_ = true;
-    replace_gpu_grants(deny_all_gpu_grants_);
-  }
 
 private:
-  void publish_gpu_grants_impl_locked() {
-    if (gpu_grants_poisoned_) {
-      replace_gpu_grants(deny_all_gpu_grants_);
-      return;
-    }
+  std::shared_ptr<const GpuGrantIndex>
+  build_gpu_grant_index_locked(std::span<const GpuGrantRange> retired_ranges) const {
     auto next = std::make_shared<GpuGrantIndex>();
     next->svm_denials = svm_denied_ranges_;
-    next->ranges.reserve(allocations_.size() + retired_gpu_ranges_.size());
+    next->ranges.reserve(allocations_.size() + retired_ranges.size());
     for (const auto &[handle, allocation] : allocations_) {
       (void)handle;
       const auto domain =
@@ -971,7 +1049,7 @@ private:
                               allocation.local_backing_owner,
                               allocation.cacheable_peer_for_testing});
     }
-    next->ranges.insert(next->ranges.end(), retired_gpu_ranges_.begin(), retired_gpu_ranges_.end());
+    next->ranges.insert(next->ranges.end(), retired_ranges.begin(), retired_ranges.end());
     std::sort(next->ranges.begin(), next->ranges.end(),
               [](const GpuGrantRange &left, const GpuGrantRange &right) {
                 return left.gpu_va < right.gpu_va;
@@ -988,15 +1066,18 @@ private:
     }
     if (next->valid) {
       for (const auto &range : next->ranges) {
-        if (range.domain != GpuGrantDomain::Vram || range.driver_gpu_mapping)
+        if (range.domain != GpuGrantDomain::Vram || range.driver_gpu_mapping) {
           continue;
+        }
         const auto publish_aliases = [&](const std::shared_ptr<const GpuBacking> &owner,
                                          GpuAliasSnapshot &aliases, bool local) {
-          if (!owner || owner->gpu_id() != range.owner_gpu_id || range.size > owner->size())
+          if (!owner || owner->gpu_id() != range.owner_gpu_id || range.size > owner->size()) {
             return;
+          }
           for (const auto &[gpu_id, generation] : range.admission_generations) {
-            if (generation == 0)
+            if (generation == 0) {
               continue;
+            }
             aliases.push_back({owner->backing_id(), process_id_, process_incarnation_, gpu_id,
                                range.gpu_va, 0, static_cast<size_t>(range.size), generation,
                                local});
@@ -1005,11 +1086,12 @@ private:
         publish_aliases(range.backing_owner, next->aliases, false);
         // Once canonical promotion takes ownership, the local cacheable
         // generation cannot also appear as a second alias of those bytes.
-        if (!range.backing_owner)
+        if (!range.backing_owner) {
           publish_aliases(range.local_backing_owner, next->local_aliases, true);
+        }
       }
     }
-    replace_gpu_grants(std::move(next));
+    return next;
   }
 
 public:
@@ -1110,15 +1192,17 @@ public:
 
     void consume_process_notification(uint64_t mask) {
       notified_process_exception_mask &= ~mask;
-      for (auto &[_, claim] : notification_claims)
+      for (auto &[_, claim] : notification_claims) {
         claim.consumed_mask |= claim.exception_mask & mask;
+      }
     }
 
     void begin_process_notification(uint64_t mask) {
       for (uint32_t bit = 0; bit < 64; ++bit) {
         const uint64_t bit_mask = uint64_t{1} << bit;
-        if ((mask & bit_mask) == 0)
+        if ((mask & bit_mask) == 0) {
           continue;
+        }
         ++pending_process_exception_counts[bit];
         pending_process_exception_mask |= bit_mask;
       }
@@ -1127,10 +1211,12 @@ public:
     void finish_process_notification(uint64_t mask) {
       for (uint32_t bit = 0; bit < 64; ++bit) {
         const uint64_t bit_mask = uint64_t{1} << bit;
-        if ((mask & bit_mask) == 0 || pending_process_exception_counts[bit] == 0)
+        if ((mask & bit_mask) == 0 || pending_process_exception_counts[bit] == 0) {
           continue;
-        if (--pending_process_exception_counts[bit] == 0)
+        }
+        if (--pending_process_exception_counts[bit] == 0) {
           pending_process_exception_mask &= ~bit_mask;
+        }
       }
     }
 
@@ -1211,8 +1297,9 @@ public:
 
       /// @brief Return whether an access overlaps the watched address block.
       [[nodiscard]] constexpr bool overlaps(uint64_t access_address, uint32_t bytes) const {
-        if (!active || bytes == 0)
+        if (!active || bytes == 0) {
           return false;
+        }
         const uint64_t block_base = address & mask;
         const uint64_t block_size = ~mask + 1;
         const uint64_t access_end =
@@ -1243,8 +1330,9 @@ public:
       for (uint32_t slot = 0; slot < kMaxAddressWatches; ++slot) {
         const auto &watch = address_watches[slot];
         if (watch.mode < 32 && ((matching_modes >> watch.mode) & 1u) != 0 &&
-            watch.overlaps(access_address, bytes))
+            watch.overlaps(access_address, bytes)) {
           slots |= uint32_t{1} << slot;
+        }
       }
       return slots;
     }
@@ -1297,19 +1385,23 @@ public:
   bool active_gpu_grant_overlaps(PageTableTransaction &transaction, uint64_t gpu_va,
                                  size_t size) const {
     if (transaction.process_ != this || !transaction.request_lock_.owns_lock() || size == 0 ||
-        size - 1 > UINT64_MAX - gpu_va)
+        size - 1 > UINT64_MAX - gpu_va) {
       return true;
+    }
     std::shared_lock lock(gpu_grants_mutex_);
     const std::shared_ptr<const GpuGrantIndex> &grants = gpu_grants_;
-    if (!grants || !grants->valid)
+    if (!grants || !grants->valid) {
       return true;
+    }
     const uint64_t last_byte = gpu_va + size - 1;
     for (const auto &range : grants->ranges) {
-      if (range.size == 0 || range.size > UINT64_MAX - range.gpu_va)
+      if (range.size == 0 || range.size > UINT64_MAX - range.gpu_va) {
         return true;
+      }
       if (range.gpu_va <= last_byte && gpu_va <= range.gpu_va + range.size - 1 &&
-          (!range.admission_generations.empty() || range.driver_gpu_mapping))
+          (!range.admission_generations.empty() || range.driver_gpu_mapping)) {
         return true;
+      }
     }
     return false;
   }
@@ -1320,12 +1412,15 @@ public:
   PageTableMutationResult has_foreign_resident_overlap(PageTableTransaction &transaction,
                                                        uint64_t gpu_va, size_t size,
                                                        VaOwner va_owner) const {
-    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock()) {
       return PageTableMutationResult::InvalidTransaction;
-    if (size == 0)
+    }
+    if (size == 0) {
       return PageTableMutationResult::Applied;
-    if (size - 1 > UINT64_MAX - gpu_va)
+    }
+    if (size - 1 > UINT64_MAX - gpu_va) {
       return PageTableMutationResult::InvalidRange;
+    }
     std::unique_lock lock(page_table_mutex_);
     return has_foreign_va_overlap_locked(gpu_va, size, va_owner, false)
                ? PageTableMutationResult::ForeignOwnerCollision
@@ -1350,15 +1445,19 @@ public:
                                     amdgpu::Mtype mtype = amdgpu::Mtype::RW,
                                     HostExtentOwner owner = HostExtentOwner::Application,
                                     VaOwner va_owner = {}) {
-    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock()) {
       return PageTableMutationResult::InvalidTransaction;
-    if (size == 0)
+    }
+    if (size == 0) {
       return PageTableMutationResult::Applied;
-    if (size - 1 > UINT64_MAX - gpu_va)
+    }
+    if (size - 1 > UINT64_MAX - gpu_va) {
       return PageTableMutationResult::InvalidRange;
+    }
     std::unique_lock lock(page_table_mutex_);
-    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, false))
+    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, false)) {
       return PageTableMutationResult::ForeignOwnerCollision;
+    }
     // MTYPE is a page field. A disjoint subpage map may coexist with the
     // other interface only when it preserves that page's existing policy.
     uint64_t inspected_va = gpu_va;
@@ -1366,8 +1465,9 @@ public:
     while (inspected_bytes < size) {
       const auto page = page_table_.find(inspected_va >> kPageShift);
       if (page != page_table_.end() && page->second.mtype != mtype &&
-          has_foreign_va_overlap_locked(inspected_va, 1, va_owner, false, true))
+          has_foreign_va_overlap_locked(inspected_va, 1, va_owner, false, true)) {
         return PageTableMutationResult::ForeignOwnerCollision;
+      }
       const size_t chunk =
           std::min<size_t>(kPageSize - (inspected_va & (kPageSize - 1)), size - inspected_bytes);
       inspected_va += chunk;
@@ -1377,33 +1477,52 @@ public:
     auto *base = static_cast<uint8_t *>(host_ptr);
     uint64_t mapped_va = gpu_va;
     size_t host_offset = 0;
-    try {
-      while (host_offset < size) {
-        const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
-        const size_t host_backed_bytes =
-            std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
-        auto [page, inserted] =
-            page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset, mtype,
-                                    host_backed_bytes, gpu_page_offset, owner, va_owner);
-        if (!inserted) {
-          page->second.mtype = mtype;
-          replace_host_extent(page->second, {base + host_offset, host_backed_bytes, gpu_page_offset,
-                                             owner, va_owner});
-        }
-        mapped_va += host_backed_bytes;
-        host_offset += host_backed_bytes;
+    while (host_offset < size) {
+      const size_t gpu_page_offset = mapped_va & (kPageSize - 1);
+      const size_t host_backed_bytes =
+          std::min<size_t>(kPageSize - gpu_page_offset, size - host_offset);
+      auto [page, inserted] =
+          page_table_.try_emplace(mapped_va >> kPageShift, base + host_offset, mtype,
+                                  host_backed_bytes, gpu_page_offset, owner, va_owner);
+      if (!inserted) {
+        page->second.mtype = mtype;
+        replace_host_extent(page->second, {base + host_offset, host_backed_bytes, gpu_page_offset,
+                                           owner, va_owner});
       }
-    } catch (...) {
-      // An allocation failure can leave a mapped prefix or an updated MTYPE.
-      // Cached translations must still observe the changed page table.
-      publish_page_table_mutation_locked();
-      throw;
+      mapped_va += host_backed_bytes;
+      host_offset += host_backed_bytes;
     }
     // Keep publication in the page-table critical section. Cached readers
     // validate this generation while holding the shared side of the same lock;
     // publishing after unlock would permit a stale-cache hit in between.
     publish_page_table_mutation_locked();
     return PageTableMutationResult::Applied;
+  }
+
+  /// @brief Install a GEM mapping and reclaim any freed KFD VA it reuses.
+  /// @pre The caller holds alloc_mutex_ and has preflighted the nonwrapping range
+  ///      under this transaction.
+  PageTableMutationResult map_gem_pages(PageTableTransaction &transaction, uint64_t gpu_va,
+                                        void *host_ptr, size_t size, amdgpu::Mtype mtype,
+                                        HostExtentOwner owner, uint64_t drm_file_id) {
+    const uint64_t end = gpu_va + size;
+    std::vector<GpuGrantRange> remaining;
+    std::shared_ptr<const GpuGrantIndex> grants;
+    if (std::ranges::any_of(retired_gpu_ranges_, [&](const auto &range) {
+          return range.gpu_va < end && gpu_va < range.gpu_va + range.size;
+        })) {
+      // Stage the grant update before editing PTEs. A failed map must leave
+      // the old denials in effect, including on any partially installed PTEs.
+      remaining = retired_ranges_outside_locked(gpu_va, end);
+      grants = build_gpu_grant_index_locked(remaining);
+    }
+    const auto result = map_pages(transaction, gpu_va, host_ptr, size, mtype, owner,
+                                  {VaOwnerKind::Gem, drm_file_id});
+    if (result == PageTableMutationResult::Applied && grants) {
+      retired_gpu_ranges_.swap(remaining);
+      replace_gpu_grants(std::move(grants));
+    }
+    return result;
   }
 
   /// @brief Unmap pages from this process's GPU page table.
@@ -1414,36 +1533,37 @@ public:
 
   PageTableMutationResult unmap_pages(PageTableTransaction &transaction, uint64_t gpu_va,
                                       size_t size, VaOwner va_owner = {}) {
-    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock()) {
       return PageTableMutationResult::InvalidTransaction;
-    if (size == 0)
+    }
+    if (size == 0) {
       return PageTableMutationResult::Applied;
-    if (size - 1 > UINT64_MAX - gpu_va)
+    }
+    if (size - 1 > UINT64_MAX - gpu_va) {
       return PageTableMutationResult::InvalidRange;
+    }
     std::unique_lock lock(page_table_mutex_);
-    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, true))
+    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, true)) {
       return PageTableMutationResult::ForeignOwnerCollision;
+    }
     invalidate_page_policies_locked();
     uint64_t mapped_va = gpu_va;
     size_t unmapped_bytes = 0;
-    try {
-      while (unmapped_bytes < size) {
-        const size_t chunk =
-            std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
-        auto page = page_table_.find(mapped_va >> kPageShift);
-        if (page != page_table_.end()) {
-          // Avoid building a temporary extent vector for a page being discarded.
-          if (chunk != kPageSize)
-            erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
-          if (chunk == kPageSize || page->second.host_extents.empty())
-            page_table_.erase(page);
+    while (unmapped_bytes < size) {
+      const size_t chunk =
+          std::min<size_t>(kPageSize - (mapped_va & (kPageSize - 1)), size - unmapped_bytes);
+      auto page = page_table_.find(mapped_va >> kPageShift);
+      if (page != page_table_.end()) {
+        // Avoid building a temporary extent vector for a page being discarded.
+        if (chunk != kPageSize) {
+          erase_host_extent(page->second, mapped_va & (kPageSize - 1), chunk);
         }
-        mapped_va += chunk;
-        unmapped_bytes += chunk;
+        if (chunk == kPageSize || page->second.host_extents.empty()) {
+          page_table_.erase(page);
+        }
       }
-    } catch (...) {
-      publish_page_table_mutation_locked();
-      throw;
+      mapped_va += chunk;
+      unmapped_bytes += chunk;
     }
     // See map_pages(): the mutation and generation publication are one
     // page-table critical section by design.
@@ -1465,15 +1585,19 @@ public:
   PageTableMutationResult remap_page_host_ptrs(PageTableTransaction &transaction, uint64_t gpu_va,
                                                void *old_host_ptr, void *new_host_ptr, size_t size,
                                                VaOwner va_owner = {}) {
-    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock()) {
       return PageTableMutationResult::InvalidTransaction;
-    if (size == 0)
+    }
+    if (size == 0) {
       return PageTableMutationResult::Applied;
-    if (size - 1 > UINT64_MAX - gpu_va)
+    }
+    if (size - 1 > UINT64_MAX - gpu_va) {
       return PageTableMutationResult::InvalidRange;
+    }
     std::unique_lock lock(page_table_mutex_);
-    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, false))
+    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, false)) {
       return PageTableMutationResult::ForeignOwnerCollision;
+    }
     invalidate_page_policies_locked();
     auto *old_base = static_cast<uint8_t *>(old_host_ptr);
     auto *new_base = static_cast<uint8_t *>(new_host_ptr);
@@ -1486,8 +1610,9 @@ public:
         const uint64_t page_base = mapped_va & ~(kPageSize - 1);
         for (auto &extent : page->second.host_extents) {
           const uint64_t extent_va = page_base + extent.gpu_page_offset;
-          if (extent_va < gpu_va || extent_va - gpu_va >= size)
+          if (extent_va < gpu_va || extent_va - gpu_va >= size) {
             continue;
+          }
           const size_t extent_host_offset = extent_va - gpu_va;
           if (extent.host_ptr == old_base + extent_host_offset &&
               extent.host_ptr != new_base + extent_host_offset) {
@@ -1501,8 +1626,9 @@ public:
       mapped_va += chunk;
       host_offset += chunk;
     }
-    if (changed)
+    if (changed) {
       publish_page_table_mutation_locked();
+    }
     return PageTableMutationResult::Applied;
   }
 
@@ -1515,17 +1641,21 @@ public:
 
   PageTableMutationResult set_page_mtype(PageTableTransaction &transaction, uint64_t gpu_va,
                                          size_t size, amdgpu::Mtype mtype, VaOwner va_owner = {}) {
-    if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
+    if (transaction.process_ != this || !transaction.request_lock_.owns_lock()) {
       return PageTableMutationResult::InvalidTransaction;
-    if (size == 0)
+    }
+    if (size == 0) {
       return PageTableMutationResult::Applied;
-    if (size - 1 > UINT64_MAX - gpu_va)
+    }
+    if (size - 1 > UINT64_MAX - gpu_va) {
       return PageTableMutationResult::InvalidRange;
+    }
     std::unique_lock lock(page_table_mutex_);
     // MTYPE belongs to a whole PTE. Even a disjoint foreign extent within one
     // touched page would have its memory policy changed by this operation.
-    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, false, true))
+    if (has_foreign_va_overlap_locked(gpu_va, size, va_owner, false, true)) {
       return PageTableMutationResult::ForeignOwnerCollision;
+    }
     invalidate_page_policies_locked();
     bool changed = false;
     uint64_t mapped_va = gpu_va;
@@ -1541,8 +1671,9 @@ public:
       mapped_va += chunk;
       updated_bytes += chunk;
     }
-    if (changed)
+    if (changed) {
       publish_page_table_mutation_locked();
+    }
     return PageTableMutationResult::Applied;
   }
 
@@ -1652,12 +1783,6 @@ public:
   std::atomic<uint64_t> gpu_grant_publication_{1};
   mutable util::DistributedSharedMutex gpu_grants_mutex_;
   std::shared_ptr<const GpuGrantIndex> gpu_grants_ = std::make_shared<const GpuGrantIndex>();
-  std::shared_ptr<const GpuGrantIndex> deny_all_gpu_grants_ = [] {
-    auto denied = std::make_shared<GpuGrantIndex>();
-    denied->valid = false;
-    return denied;
-  }();
-  bool gpu_grants_poisoned_ = false;
   std::shared_ptr<amdgpu::VmRawBackingWriteGate> raw_write_gate_ =
       std::make_shared<amdgpu::VmRawBackingWriteGate>();
   uint64_t gpu_admission_generation_ = 0;
@@ -1751,19 +1876,22 @@ public:
 
     void record_debug_notification_event(uint64_t mask) {
       if (mask != 0 && std::find(debug_notification_events.begin(), debug_notification_events.end(),
-                                 mask) == debug_notification_events.end())
+                                 mask) == debug_notification_events.end()) {
         debug_notification_events.push_back(mask);
+      }
     }
 
     void clear_debug_notification_events(uint64_t mask) {
-      for (uint64_t &event : debug_notification_events)
+      for (uint64_t &event : debug_notification_events) {
         event &= ~mask;
+      }
       std::erase(debug_notification_events, uint64_t{0});
     }
 
     void prune_debug_notification_events() {
-      for (uint64_t &event : debug_notification_events)
+      for (uint64_t &event : debug_notification_events) {
         event &= exception_status;
+      }
       std::erase(debug_notification_events, uint64_t{0});
     }
 
@@ -1783,8 +1911,9 @@ public:
       record_debug_notification_event(mask);
       for (uint32_t bit = 0; bit < 64; ++bit) {
         const uint64_t bit_mask = uint64_t{1} << bit;
-        if ((mask & bit_mask) == 0)
+        if ((mask & bit_mask) == 0) {
           continue;
+        }
         ++runtime_exception_pending_counts[bit];
         runtime_exception_pending_status |= bit_mask;
       }
@@ -1793,12 +1922,14 @@ public:
     /// @brief Resolve one in-flight ROCr decision without losing overlaps.
     uint64_t finish_runtime_exception(uint64_t mask, bool delivered, bool retain_failure) {
       uint64_t failed = 0;
-      if (!delivered && retain_failure)
+      if (!delivered && retain_failure) {
         runtime_exception_failed_status |= mask;
+      }
       for (uint32_t bit = 0; bit < 64; ++bit) {
         const uint64_t bit_mask = uint64_t{1} << bit;
-        if ((mask & bit_mask) == 0)
+        if ((mask & bit_mask) == 0) {
           continue;
+        }
         if (runtime_exception_pending_counts[bit] == 0) {
           if (!delivered && retain_failure) {
             exception_status |= bit_mask;
@@ -1808,8 +1939,9 @@ public:
           }
           continue;
         }
-        if (--runtime_exception_pending_counts[bit] != 0)
+        if (--runtime_exception_pending_counts[bit] != 0) {
           continue;
+        }
         runtime_exception_pending_status &= ~bit_mask;
         if ((runtime_exception_failed_status & bit_mask) != 0) {
           runtime_exception_retained_status |= bit_mask;
@@ -1837,8 +1969,9 @@ public:
       exception_status |= mask;
       for (uint32_t bit = 0; bit < 64; ++bit) {
         const uint64_t bit_mask = uint64_t{1} << bit;
-        if ((mask & bit_mask) == 0)
+        if ((mask & bit_mask) == 0) {
           continue;
+        }
         ++debug_notification_pending_counts[bit];
         debug_notification_pending_status |= bit_mask;
       }
@@ -1849,24 +1982,28 @@ public:
       debug_notification_delivered_status |= mask & delivered_mask;
       for (uint32_t bit = 0; bit < 64; ++bit) {
         const uint64_t bit_mask = uint64_t{1} << bit;
-        if ((mask & bit_mask) == 0 || debug_notification_pending_counts[bit] == 0)
+        if ((mask & bit_mask) == 0 || debug_notification_pending_counts[bit] == 0) {
           continue;
-        if (--debug_notification_pending_counts[bit] != 0)
+        }
+        if (--debug_notification_pending_counts[bit] != 0) {
           continue;
+        }
         debug_notification_pending_status &= ~bit_mask;
         if ((debug_notification_delivered_status & bit_mask) == 0 &&
             (debug_notification_retained_status & bit_mask) == 0 &&
             (runtime_exception_pending_status & bit_mask) == 0 &&
-            (runtime_exception_retained_status & bit_mask) == 0)
+            (runtime_exception_retained_status & bit_mask) == 0) {
           exception_status &= ~bit_mask;
+        }
       }
       prune_debug_notification_events();
     }
 
     /// @brief Require another wake if this session later re-enables @p mask.
     void reset_debug_notification_delivery(uint64_t mask, uint64_t session_generation) {
-      if (debug_notification_session_generation == session_generation)
+      if (debug_notification_session_generation == session_generation) {
         debug_notification_delivered_status &= ~mask;
+      }
     }
 
     /// @brief Consume only status currently visible to the debugger.
@@ -1930,8 +2067,9 @@ private:
     std::unique_lock lock(gpu_grants_mutex_);
     gpu_grants_.swap(next);
     const uint64_t publication = gpu_grant_publication_.load(std::memory_order_relaxed);
-    if (publication != UINT64_MAX)
+    if (publication != UINT64_MAX) {
       gpu_grant_publication_.store(publication + 1, std::memory_order_release);
+    }
     // The parameter releases the old index after the lock. Its last backing
     // owner can unmap memory and acquire locks outside grant publication.
   }
@@ -1951,12 +2089,14 @@ private:
         for (const auto &extent : page->second.host_extents) {
           const size_t extent_begin = extent.gpu_page_offset;
           const size_t extent_end = extent_begin + extent.host_backed_bytes;
-          if (extent_end <= range_begin || range_end <= extent_begin)
+          if (extent_end <= range_begin || range_end <= extent_begin) {
             continue;
+          }
           if (extent.va_owner.kind != va_owner.kind ||
               (unmapping && va_owner.identity != 0 && extent.va_owner.identity != 0 &&
-               extent.va_owner.identity != va_owner.identity))
+               extent.va_owner.identity != va_owner.identity)) {
             return true;
+          }
         }
       }
       mapped_va += chunk;
@@ -1967,12 +2107,14 @@ private:
 
   static void normalize_host_extents(PageTableEntry &page) {
     auto &extents = page.host_extents;
-    if (extents.size() > 1)
+    if (extents.size() > 1) {
       std::ranges::sort(extents, {}, &HostExtent::gpu_page_offset);
+    }
     size_t out = 0;
     for (const auto &extent : extents) {
-      if (extent.host_ptr == nullptr || extent.host_backed_bytes == 0)
+      if (extent.host_ptr == nullptr || extent.host_backed_bytes == 0) {
         continue;
+      }
       if (out > 0) {
         auto &previous = extents[out - 1];
         if (previous.owner == extent.owner && previous.va_owner == extent.va_owner &&
@@ -2003,13 +2145,15 @@ private:
         updated.push_back(extent);
         continue;
       }
-      if (extent_begin < replacement_begin)
+      if (extent_begin < replacement_begin) {
         updated.push_back({extent.host_ptr, replacement_begin - extent_begin, extent_begin,
                            extent.owner, extent.va_owner});
-      if (replacement_end < extent_end)
+      }
+      if (replacement_end < extent_end) {
         updated.push_back({extent.host_ptr + (replacement_end - extent_begin),
                            extent_end - replacement_end, replacement_end, extent.owner,
                            extent.va_owner});
+      }
     }
     updated.push_back(replacement);
     page.host_extents = std::move(updated);
@@ -2027,19 +2171,20 @@ private:
         updated.push_back(extent);
         continue;
       }
-      if (extent_begin < erased_begin)
+      if (extent_begin < erased_begin) {
         updated.push_back({extent.host_ptr, erased_begin - extent_begin, extent_begin, extent.owner,
                            extent.va_owner});
-      if (erased_end < extent_end)
+      }
+      if (erased_end < extent_end) {
         updated.push_back({extent.host_ptr + (erased_end - extent_begin), extent_end - erased_end,
                            erased_end, extent.owner, extent.va_owner});
+      }
     }
     page.host_extents = std::move(updated);
     normalize_host_extents(page);
   }
 
-  // Invalidate copied policies before mutation, including a partial update
-  // that throws before publishing the ordinary translation generation.
+  // Invalidate copied policies before publishing page-table mutations.
   void invalidate_page_policies_locked() {
     page_table_mutation_epoch_->value.fetch_add(1, std::memory_order_release);
     page_table_cache_state_->invalidate_and_wait();
@@ -2057,7 +2202,7 @@ private:
   ///          so the counter itself does not need atomics.
   uint64_t page_table_generation_{1};
   /// @brief Retained atomic token for lockless copied-policy checks.
-  /// @details Invalidate before mutation, including partially throwing updates.
+  /// @details Invalidate before mutation, before updating page ownership.
   /// Cache hits read the epoch while misses copy and release its owner.
   util::IntrusiveSharedPtr<amdgpu::VmMutationEpoch> page_table_mutation_epoch_ =
       util::IntrusiveSharedPtr<amdgpu::VmMutationEpoch>::make(1);
@@ -2071,9 +2216,10 @@ inline void KfdProcess::publish_gpu_grants_locked() {
 }
 
 inline void KfdProcess::publish_gpu_grants_locked(PageTableTransaction &transaction) {
-  if (transaction.process_ != this || !transaction.request_lock_.owns_lock())
-    throw std::logic_error("GPU grant publication requires a live page-table transaction");
-  publish_gpu_grants_impl_locked();
+  if (transaction.process_ != this || !transaction.request_lock_.owns_lock()) {
+    std::abort();
+  }
+  replace_gpu_grants(build_gpu_grant_index_locked(retired_gpu_ranges_));
 }
 
 } // namespace rocjitsu

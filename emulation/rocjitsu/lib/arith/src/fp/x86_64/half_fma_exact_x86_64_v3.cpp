@@ -5,9 +5,11 @@
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "common/compiler.h"
+#include "common/sdwa_output.h"
 #include "common/simd.h"
 #include "common/validation.h"
 #include "common/x86_64/half_x86_64_v3.h"
+#include "conversion/x86_64/lanes.h"
 #include "fp/packed_fma.h"
 #include "fp/scalar_repair.h"
 #include "fp/x86_64/mixed_half_x86_64_v3.h"
@@ -19,11 +21,12 @@
 namespace rocjitsu::arith {
 
 // Reuse the established compensated FP64/round-to-odd half-output arithmetic.
-// Directed rounding and unsuppressed reporting retain the scalar implementation.
+// Guest rounding stays in integer narrowing; unsuppressed reporting remains scalar.
 // Repair special lanes with the ordinary half-FMA model, not MIX's NaN policy.
 void half_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags,
                               uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c,
                               bool rdna3) {
+  const unsigned rounding = unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24);
   uint32_t output[32];
   for (int lane = 0; lane < 32; lane += 8) {
     const uint32_t *sources[] = {a, b, c};
@@ -56,15 +59,16 @@ void half_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t instr
       auto x = part ? _mm256_extractf128_ps(values[0], 1) : _mm256_castps256_ps128(values[0]);
       auto y = part ? _mm256_extractf128_ps(values[1], 1) : _mm256_castps256_ps128(values[1]);
       auto z = part ? _mm256_extractf128_ps(values[2], 1) : _mm256_castps256_ps128(values[2]);
-      halves[part] = mixed_half_value4<false>(x, y, z, flags & RJ_ARITH_FP16_OVFL, false,
-                                              omod || (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS));
+      halves[part] =
+          mixed_half_value4(x, y, z, flags & RJ_ARITH_FP16_OVFL, false,
+                            omod || (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS), false, rounding);
     }
     auto result = _mm256_inserti128_si256(_mm256_castsi128_si256(halves[0]), halves[1], 1);
     if (omod) {
       const float scales[] = {1, 2, 4, 0.5f};
       auto wide = prepare_omod_f16(half_input(result, 0, 0), instruction_flags);
       wide = _mm256_mul_ps(wide, _mm256_set1_ps(scales[omod]));
-      result = half_narrow(wide, flags & RJ_ARITH_FP16_OVFL);
+      result = half_narrow(wide, flags & RJ_ARITH_FP16_OVFL, rounding);
     }
     if (instruction_flags & RJ_ARITH_ALU_CLAMP) {
       auto negative = _mm256_cmpgt_epi32(result, _mm256_set1_epi32(0x7fff));
@@ -108,20 +112,24 @@ bool packed_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, const uint32
   for (int lane = 0; lane < 32; ++lane) {
     staged[lane] = d[lane];
   }
-  if ((flags & RJ_ARITH_FP_ROUND_MASK) ||
-      (reports_fp_status(flags) &&
-       (!(modes[0] & RJ_ARITH_ALU_CLAMP) || !(modes[1] & RJ_ARITH_ALU_CLAMP)))) {
+  if (reports_fp_status(flags) &&
+      (!(modes[0] & RJ_ARITH_ALU_CLAMP) || !(modes[1] & RJ_ARITH_ALU_CLAMP))) {
     return false;
   }
-  half_fma_exact_x86_64_v3(flags, exec_mask, modes[0], staged, a, b, c, rdna3);
-  half_fma_exact_x86_64_v3(flags, exec_mask, modes[1] | RJ_ARITH_ALU_HIGH_D, staged, a, b, c,
-                           rdna3);
+  half_fma_exact_x86_64_v3(flags, exec_mask, modes[0] & ~RJ_ARITH_ALU_SDWA, staged, a, b, c, rdna3);
+  half_fma_exact_x86_64_v3(flags, exec_mask, (modes[1] & ~RJ_ARITH_ALU_SDWA) | RJ_ARITH_ALU_HIGH_D,
+                           staged, a, b, c, rdna3);
 
   for (int lane = 0; lane < 32; lane += 8) {
     auto mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
                                   _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
-    _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), mask,
-                           _mm256_loadu_si256(reinterpret_cast<const __m256i *>(staged + lane)));
+    auto result = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(staged + lane));
+    if (modes[0] & RJ_ARITH_ALU_SDWA) {
+      result = sdwa_finalize_packed_f16(conversion_simd::Lanes<32>(result),
+                                        sdwa_output_policy(flags, modes[0]))
+                   .bits;
+    }
+    _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), mask, result);
   }
   return true;
 }

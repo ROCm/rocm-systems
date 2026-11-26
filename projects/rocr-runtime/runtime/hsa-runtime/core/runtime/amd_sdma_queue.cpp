@@ -232,6 +232,12 @@ hsa_status_t SdmaQueue::GetInfo(hsa_queue_info_attribute_t attribute, void* valu
     case HSA_AMD_QUEUE_INFO_WRITE_POINTER:
       *static_cast<uint64_t*>(value) = reinterpret_cast<uint64_t>(queue_wptr_);
       return HSA_STATUS_SUCCESS;
+    case HSA_AMD_QUEUE_INFO_SUBMISSION_TAIL_BYTES:
+      // Mirror BlitSdma::Initialize: NativeSDMAEpilogueBytes is 0 when native SDMA is off,
+      // but guard on gpu_agent()->sdma_native() explicitly rather than relying on the topology invariant.
+      *static_cast<uint32_t*>(value) = gpu_agent()->sdma_native()
+          ? static_cast<uint32_t>(gpu_agent()->properties().NativeSDMAEpilogueBytes) : 0u;
+      return HSA_STATUS_SUCCESS;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }

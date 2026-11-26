@@ -7,8 +7,9 @@ use std::ffi::c_void;
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::runtime::{boundary, initialized_mut, lock};
+use crate::lifecycle::{initialized_mut, lock};
 use crate::signal::asynchronous::AsyncRequest;
+use crate::status::boundary;
 
 #[cfg_attr(
     all(hsa_tool_dispatch, not(test)),
@@ -37,7 +38,7 @@ pub unsafe extern "C" fn hsa_amd_async_function(
                 callback,
                 arg: unsafe { CallbackArg::new(arg) },
             },
-            &runtime.stop_workers,
+            &runtime.control.stop_workers,
         )
     })
 }
@@ -90,7 +91,7 @@ pub unsafe extern "C" fn hsa_amd_signal_async_handler(
                 handler,
                 arg: unsafe { CallbackArg::new(arg) },
             },
-            &runtime.stop_workers,
+            &runtime.control.stop_workers,
         );
         if status != SUCCESS {
             runtime.signal_state.release_async_signal(signal);

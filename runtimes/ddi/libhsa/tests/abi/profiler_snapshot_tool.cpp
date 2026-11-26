@@ -26,8 +26,13 @@ static_assert(sizeof(Provider) == 40);
 
 namespace {
 Provider provider{};
-std::atomic<uint32_t> registrations{0}, refreshes{0}, quiesces{0};
+std::atomic<uint32_t> registrations{0}, refreshes{0}, quiesces{0}, prepares{0};
+std::atomic<uint32_t> legacy_loads{0}, legacy_unloads{0};
+std::atomic<uint32_t> legacy_unload_query{HSA_STATUS_ERROR};
 std::atomic<uint32_t> active_updates{0}, failed_quiesce{0}, nested_status{0};
+std::atomic<uint32_t> delayed_cleanup_status{6};
+std::atomic<uint32_t> delayed_cleanup_query{HSA_STATUS_ERROR};
+std::atomic<bool> delay_cleanup{false};
 std::atomic<decltype(CoreApiTable::hsa_system_get_info_fn)> original{nullptr};
 decltype(CoreApiTable::hsa_signal_create_fn) signal_create = nullptr;
 decltype(CoreApiTable::hsa_signal_destroy_fn) signal_destroy = nullptr;
@@ -39,6 +44,7 @@ std::mutex pause_mutex;
 std::condition_variable pause_cv;
 bool paused = false;
 bool released = false;
+bool cleanup_finished = false;
 uint64_t last_generation = 0;
 bool expect_status(const char *stage, uint32_t actual, uint32_t expected = 0) {
   if (actual == expected)
@@ -61,6 +67,12 @@ hsa_status_t alpha(hsa_system_info_t attribute, void *value) {
 hsa_status_t beta(hsa_system_info_t attribute, void *value) {
   return query(attribute, value, 222);
 }
+void pause_operation() {
+  std::unique_lock lock(pause_mutex);
+  paused = true;
+  pause_cv.notify_all();
+  pause_cv.wait(lock, [] { return released; });
+}
 int mutate(void *data, void **tables, uint64_t count, uint64_t) {
   if (count != 1 || !tables || !tables[0])
     return -1;
@@ -79,10 +91,7 @@ int mutate(void *data, void **tables, uint64_t count, uint64_t) {
   auto mode = reinterpret_cast<uintptr_t>(data);
   table->core_->hsa_system_get_info_fn = mode == 1 ? beta : alpha;
   if (mode == 2) {
-    std::unique_lock lock(pause_mutex);
-    paused = true;
-    pause_cv.notify_all();
-    pause_cv.wait(lock, [] { return released; });
+    pause_operation();
     uint16_t version = 0;
     // This nested call must still inherit the admitted generation after its
     // public admission has closed on the shutdown thread.
@@ -112,9 +121,26 @@ int signal_cleanup(void *data) {
              ? 0
              : -1;
 }
+int paused_cleanup(void *) {
+  pause_operation();
+  uint16_t version = 0;
+  delayed_cleanup_query =
+      original.load()(HSA_SYSTEM_INFO_VERSION_MAJOR, &version);
+  return delayed_cleanup_query == HSA_STATUS_SUCCESS ? 0 : -1;
+}
 } // namespace
 
 extern "C" {
+bool OnLoad(HsaApiTable *, uint64_t, uint64_t, const char *const *) {
+  ++legacy_loads;
+  return true;
+}
+void OnUnload() {
+  ++legacy_unloads;
+  uint16_t version = 0;
+  legacy_unload_query =
+      original.load()(HSA_SYSTEM_INFO_VERSION_MAJOR, &version);
+}
 uint32_t rocprofiler_register_library_api_table_v2(const char *, uint32_t (*)(),
                                                    uint32_t,
                                                    const Provider *input,
@@ -137,6 +163,7 @@ rocprofiler_register_prepare_library_api_table_v2(uint64_t id,
                                                   uint64_t generation) {
   if (id != 17 || active_updates.load() != 0)
     return 6;
+  ++prepares;
   hsa_signal_t signal{};
   callback_status = HSA_STATUS_ERROR;
   if (!expect_status("prepare signal create",
@@ -174,6 +201,19 @@ rocprofiler_register_prepare_library_api_table_v2(uint64_t id,
       !expect_status("prepare signal destroy", signal_destroy(signal)))
     result = 6;
   last_generation = generation;
+  if (result == 0 && delay_cleanup.exchange(false)) {
+    // A known worker owns a delegated cleanup lease before prepare returns.
+    // Holding it exercises the post-prepare drain without replaying prepare.
+    std::thread([generation] {
+      delayed_cleanup_status = provider.run_cleanup(
+          provider.data, generation, paused_cleanup, nullptr);
+      std::lock_guard lock(pause_mutex);
+      cleanup_finished = true;
+      pause_cv.notify_all();
+    }).detach();
+    std::unique_lock lock(pause_mutex);
+    pause_cv.wait(lock, [] { return paused; });
+  }
   return result;
 }
 uint32_t rocprofiler_register_quiesce_library_api_table_v2(uint64_t id) {
@@ -208,6 +248,18 @@ uint32_t test_count(uint32_t index) {
     return quiesces.load();
   case 3:
     return nested_status.load();
+  case 4:
+    return prepares.load();
+  case 5:
+    return delayed_cleanup_status.load();
+  case 6:
+    return delayed_cleanup_query.load();
+  case 7:
+    return legacy_loads.load();
+  case 8:
+    return legacy_unloads.load();
+  case 9:
+    return legacy_unload_query.load();
   default:
     return 0;
   }
@@ -220,6 +272,11 @@ void test_release() {
   std::lock_guard lock(pause_mutex);
   released = true;
   pause_cv.notify_all();
+}
+void test_hold_cleanup() { delay_cleanup = true; }
+void test_wait_cleanup_finished() {
+  std::unique_lock lock(pause_mutex);
+  pause_cv.wait(lock, [] { return cleanup_finished; });
 }
 void test_fail_quiesce() { failed_quiesce = 1; }
 }

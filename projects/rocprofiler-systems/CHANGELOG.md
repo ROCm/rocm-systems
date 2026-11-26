@@ -8,16 +8,61 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- New options added for rocsys, `rocsys <subcommand> --traces` selects what is traced
+  with one list of names, for example `rocsys <subcommand> --traces hip mpi -- ./app`.
+  `rocsys <subcommand> --output-path` and `rocsys <subcommand> --log-level` set
+  `ROCPROFSYS_OUTPUT_PATH` and `ROCPROFSYS_LOG_LEVEL` for `profile`, `instrument`, `python`,
+  and `attach`.
 - Agent skills for choosing a profiling preset, discovering configuration options, and
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
   agent's personal skills folder.
 - `rocprof-sys-attach` re-attaches now use the output format selected for that attach (`-F`),
   so a process can be profiled to rocpd in one session and to Perfetto in the next.
+- `rocprof-sys-attach` can attach to multiple processes in one invocation
+  (`-p 101,102` or `-p 101 -p 102`) and detach from each of them individually, or
+  from all of them at once, through an interactive session prompt.
+
+### Changed
+
+- The `wall_clock` profile (`wall_clock.txt` and `wall_clock.json`) is now generated from
+  the trace cache instead of Timemory. GPU kernels and memory copies are nested under the
+  API call that launched them, and each worker thread's tree starts at the top level
+  instead of under the `pthread_create` call that spawned it. The report is written
+  whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
+  `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed, and the default of
+  that setting is now empty instead of `wall_clock`.
+- `rocsys` now requires a `--` separator between it's options and the application, even
+  when no profiling options are provided. For example, `rocsys profile ./app`is now
+  `rocsys profile -- ./app`.
+
+### Removed
+
+- The `--profile-diff` option of `rocprof-sys-run` and `rocprof-sys-sample`. It compared
+  timemory profiles against a previous run, and the `wall_clock` profile is no longer
+  produced by timemory. Passing `--profile-diff` is now an unknown-argument error.
+
+### Changed
+
+- `ROCPROFSYS_ROCM_DOMAINS` accepts only domains that ROCm Systems Profiler can trace.
+  A value the ROCProfiler-SDK reports but the profiler has no handler for (for example
+  `marker_core_range_api` or `hip_graph`) is now an error at startup instead of being
+  ignored with a warning. Run `rocprof-sys-avail --list-domains` to see the valid names.
+- A domain whose `ROCPROFSYS_ROCM_<DOMAIN>_OPERATIONS` / `..._OPERATIONS_EXCLUDE` filters
+  leave no operation is skipped with a warning. Previously it was traced in full.
 
 ### Resolved issues
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
+- Fixed overflow sampling on hardware events, including the default
+  `perf::PERF_COUNT_HW_CACHE_REFERENCES`, failing at startup with
+  `Failed to open perf event: Invalid argument`.
+- Fixed overflow sampling on hardware cache events. `ROCPROFSYS_SAMPLING_OVERFLOW_EVENT`
+  values such as `perf::PERF_COUNT_HW_CACHE_LL:MISS` or
+  `perf::PERF_COUNT_HW_CACHE_L1D:WRITE:ACCESS` failed with `Unknown perf hardware config`.
+  The operation (`READ`, `WRITE`, `PREFETCH`) and result (`ACCESS`, `MISS`) modifiers are now
+  both honored, in any order, defaulting to `READ` and `MISS`; an unknown or repeated
+  modifier is an error.
 - Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
   finalization. Regions that never received their end callback are now emitted with the
   finalization timestamp and an `[incomplete]` name suffix instead of being dropped.
@@ -32,6 +77,12 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - The `profiler-hub` version is shown in the `rocprof-sys-*` version output. The tool now
   aborts at startup with an error if the loaded `libprofiler-hub` version differs from the
   version it was built against.
+- Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
+  reported several orders of magnitude too small.
+- Fixed a race in the process and thread state machines where concurrent `set()` calls
+  could lower the state (for example from `Finalized` back to `Active`). The transition is
+  now an atomic compare-and-swap. `push()` also no longer changes the state when recording
+  the previous state in the history throws (for example `std::bad_alloc`).
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 

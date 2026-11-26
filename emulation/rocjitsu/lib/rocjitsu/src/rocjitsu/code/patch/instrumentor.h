@@ -9,7 +9,8 @@
 /// Mental model
 /// ------------
 /// The Instrumentor is the central hub. Callers queue InstrumentationPoints
-/// (the requests). On patch(), the orchestrator runs a multi-stage pipeline:
+/// (the requests). Observation and replacement share the trampoline pipeline:
+/// replacement omits the original instruction and supplies its effective guest body.
 ///
 ///   InstrumentationPoint        -- request: "instrument here, with this body"
 ///         |  validate_points()
@@ -29,7 +30,9 @@
 ///                                  + per-site InstrumentationPatch (test/debug)
 ///
 /// Current pipeline is all-or-nothing across all queued points: any per-site
-/// failure aborts the whole patch.
+/// failure aborts the whole patch. Replacements and probes can share a site;
+/// all mutations are reflected in a private guest layout for fresh CFG/liveness
+/// before a probe envelope is planned. The final output uses one checked writer.
 /// Future work: predicate-based anchor selection (Instrumentor walks blocks
 /// itself), per-site failure tolerance,
 /// BlockEntry / BlockExit kinds.
@@ -52,7 +55,9 @@
 #include "rocjitsu/code/patch/text_edit_error.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/register_set.h"
+#include "rocjitsu/result.h"
 
 #include <cstdint>
 #include <memory>
@@ -70,6 +75,7 @@ class BasicBlock;
 class Decoder;
 class Instruction;
 class LivenessAnalysis;
+struct SourceTextFacts;
 
 /// @brief Where the instrumentation should attach relative to the anchor.
 ///
@@ -79,8 +85,9 @@ class LivenessAnalysis;
 /// boundary kinds require a callable probe. AfterInst calls a probe after a
 /// relocated instruction, observing its resulting state. Anchors changing VGPR
 /// addressing or allocation state, enabling VSKIP, or deallocating VGPRs and
-/// scratch are rejected. BlockEntry and BlockExit remain
-/// reserved.
+/// scratch are rejected. BlockEntry and BlockExit remain reserved.
+/// ReplaceWithInst executes a replacement sequence in the trampoline instead
+/// of the original instruction; an optional probe runs before that sequence.
 enum class InstrumentationKind {
   BeforeInst,
   AfterInst,
@@ -88,6 +95,19 @@ enum class InstrumentationKind {
   BlockExit,
   KernelEntry,
   KernelExit,
+  ReplaceWithInst,
+};
+
+/// @brief Complete source encoding and its replacement trampoline body.
+/// @details Expected bytes identify one complete 4/8/12-byte source instruction.
+/// The replacement is an independently sized sequence of complete instructions;
+/// empty means deletion. PC-dependent instructions and clauses are unsupported
+/// because the body moves to a cave. A final s_endpgm is permitted; otherwise
+/// the source extent must have a decoded continuation. Both vectors are owned
+/// by the queued request and the source instruction is never replayed.
+struct InstructionReplacement {
+  std::vector<uint8_t> expected_bytes;
+  std::vector<uint8_t> replacement_bytes;
 };
 
 /// @brief A request to instrument one site.
@@ -105,7 +125,8 @@ struct InstrumentationPoint {
   // TODO: consume filter_flags to filter based on InstFlags.
   uint32_t filter_flags = 0;
   // probe_obj / probe_symbol are consumed: set both to request a probe-call
-  // trampoline, or leave both empty for the inline nop.
+  // trampoline, or leave both empty for the observation inline nop / supplied
+  // replacement body.
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
   // Argument dwords to hand the probe, one per VGPR from the ABI's
@@ -128,6 +149,9 @@ struct InstrumentationPoint {
   // The envelope already widens EXEC around the spill and argument writes; this
   // holds that window open across the call instead of closing it first.
   bool force_full_exec = false;
+  /// Required for ReplaceWithInst. An optional callable probe runs before the
+  /// replacement; a separate same-site callable BeforeInst can also be coalesced.
+  std::optional<InstructionReplacement> replacement = std::nullopt;
   // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
   // (e.g. probe_consumes_scc) since the probe call clobbers it
 };
@@ -149,6 +173,8 @@ struct ResolvedInstrumentationSite {
   // shape they must conform to, and the mask policy, live on the
   // ProbeCallable that probe_index names.
   std::vector<ProbeArgValue> probe_args;
+  std::vector<uint32_t> replacement_words = {};
+  bool replacement_terminates = false;
 
   [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };
@@ -163,7 +189,7 @@ struct InstrumentationPatch {
   uint64_t anchor_offset;
   uint32_t original_size;
   uint64_t trampoline_offset; // .text-relative.
-  /// Target of the emitted return branch; absent for terminal callbacks.
+  /// Target of the emitted return branch; absent for terminal bodies/callbacks.
   std::optional<uint64_t> return_target;
   std::vector<uint8_t> original_bytes;
   std::vector<uint8_t> patched_anchor_bytes;
@@ -177,21 +203,30 @@ struct InstrumentationPatch {
 };
 
 /// @brief Production attribution from an original anchor to its emitted bytes.
-/// @details Offsets are relative to .text. KernelEntry has no relocated guest
-/// instruction, so guest_size is zero and guest_offset names its return branch.
-/// For callable sites, instrumentation_offset and instrumentation_size cover
-/// the call envelope and exclude the relocated guest instruction and resume
-/// branch.
-/// AfterInst maps the relocated guest before its instrumentation range; ordinary
-/// BeforeInst maps it after that range. Probe bodies are shared separately.
+/// @details Offsets are relative to .text. The guest range is the effective
+/// sequence: original replay for observations, replacement bytes for replacement.
+/// KernelEntry and empty deletion have zero guest_size. For callable sites,
+/// instrumentation_offset and instrumentation_size cover the call envelope and
+/// exclude the effective guest sequence and resume branch. AfterInst maps the
+/// relocated guest before its instrumentation range; ordinary BeforeInst maps
+/// it after that range. Probe bodies are shared separately. An inline observation
+/// reports its nop; replacement without a probe has an empty instrumentation range.
+/// Return branches follow the guest and instrumentation ranges and are described
+/// by the debug patch.
 struct InstrumentedSite {
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
   uint64_t original_offset = 0;
+  uint32_t original_size = 0;
   uint64_t guest_offset = 0;
   uint32_t guest_size = 0;
   uint64_t instrumentation_offset = 0;
   uint32_t instrumentation_size = 0;
 };
+
+/// @brief Runtime obligation for the entry-prologue wrapper declared in the ELF.
+enum class DbiKernargBinding { None, CallerSuppliedWrapper };
+/// @brief Whether growth preserves live values or every originally declared GPR.
+enum class GuestStatePreservation { LiveRegisters, DeclaredRegisters };
 
 /// @brief Original SGPR/VGPR metadata counts needed to request register growth.
 struct OriginalRegisterCounts {
@@ -205,21 +240,39 @@ struct InstrumentationResources {
   uint32_t kernarg_bytes = 0;
 };
 
+/// @brief Source-bound attribution and resources for one explicitly selected entry.
+struct InstrumentedEntry {
+  uint64_t original_descriptor_offset = 0;
+  uint64_t prepared_descriptor_offset = 0;
+  uint64_t original_entry_offset = 0;
+  uint64_t prepared_entry_offset = 0;
+  InstrumentationResources resources;
+  std::vector<InstrumentedSite> sites = {};
+};
+
 /// @brief All-or-nothing result: failures publish neither ELF bytes nor sites.
 struct InstrumentedCodeObject {
   std::vector<uint8_t> elf_bytes;
   std::vector<std::string> errors;
-  /// Present for anchor-batch failures; errors retains the human-readable diagnostic.
+  /// Present for source-facts or checked-edit failures; errors retains the diagnostic.
+  /// Request-shape and option errors use errors only.
   std::optional<TextEditError> edit_error;
   std::vector<std::string> warnings;
   std::vector<InstrumentedSite> sites;
+  /// Legacy-path resources; zero for explicit entry requests, even one selection.
   InstrumentationResources resources;
+  /// Explicit-entry results sorted by original_descriptor_offset. Find the
+  /// requested descriptor here and read its resources for the kernarg wrapper size.
+  std::vector<InstrumentedEntry> entries;
 };
 
-/// @brief Runtime obligation for the entry-prologue wrapper declared in the ELF.
-enum class DbiKernargBinding { None, CallerSuppliedWrapper };
-/// @brief Whether growth preserves live values or every originally declared GPR.
-enum class GuestStatePreservation { LiveRegisters, DeclaredRegisters };
+/// @brief Per-entry options keyed to a descriptor in the immutable input image.
+struct EntryInstrumentationOptions {
+  uint64_t descriptor_file_offset = 0;
+  DbiKernargBinding kernarg_binding = DbiKernargBinding::None;
+  GuestStatePreservation preservation = GuestStatePreservation::LiveRegisters;
+  std::optional<OriginalRegisterCounts> register_growth;
+};
 
 struct InstrumentationOptions {
   DbiKernargBinding kernarg_binding = DbiKernargBinding::None;
@@ -228,12 +281,17 @@ struct InstrumentationOptions {
   /// register-to-register preservation and bounded allocation growth; absent
   /// means the existing allocation/scratch policy.
   std::optional<OriginalRegisterCounts> register_growth;
+  /// Explicit disjoint-entry observations; cannot be combined with legacy options.
+  /// ReplaceWithInst is unsupported: ownership is proved on the original CFG.
+  /// Every queued point must belong to exactly one requested entry scope.
+  std::vector<EntryInstrumentationOptions> entries = {};
 };
 
 /// @brief Result of Instrumentor::patch_with_debug_summaries().
 ///
 /// Extends InstrumentedCodeObject with one InstrumentationPatch per applied
-/// site. Test / debug surface only; the per-site schema is unstable.
+/// trampoline site, including replacement/deletion. Test / debug surface only;
+/// the schema is unstable.
 struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
   std::vector<InstrumentationPatch> patches;
 };
@@ -247,11 +305,11 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 ///
 /// Rules enforced (last two will eventually be relaxed):
 ///   - @p anchor_offset is dword aligned.
-///   - anchor.size() is 4 or 8 and fits inside @p text_bytes.
+///   - anchor.size() is 4, 8 or 12 and fits inside @p text_bytes.
 ///   - anchor.raw_encoding() is non-null.
 ///   - anchor is not a branch/cond branch/indirect branch/indirect call/
 ///     program terminator, and branch_offset_bytes() is nullopt.
-///   - anchor.mnemonic() is not in the small PC-relative denylist
+///   - the anchor operation has no prohibited PC-relative semantics
 ///     (s_getpc_b64, s_call_b64, s_setpc_b64, s_swappc_b64, s_rfe_*).
 ///   - anchor is not s_clause. Because this predicate has no surrounding
 ///     instruction-stream context, Instrumentor additionally rejects anchors
@@ -260,7 +318,8 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 /// @p arch is accepted now so a future denylist can grow ISA-specific entries
 /// without an API change; today's checks are uniform across all AMDGPU ISAs.
 [[nodiscard]] bool is_relocatable_anchor(const Instruction &anchor, uint64_t anchor_offset,
-                                         std::span<const uint8_t> text_bytes, rj_code_arch_t arch,
+                                         std::span<const uint8_t> text_bytes,
+                                         rocjitsu::IsaFamily arch,
                                          std::string *error_out = nullptr);
 
 /// @brief Validate that @p anchor is a legal trampoline anchor for @p pt.
@@ -272,6 +331,7 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 /// and the probe fields. See is_relocatable_anchor for rules.
 ///
 /// Temporary rules enforced here:
+///   - @p pt.replacement is absent; replacement requests use a separate path.
 ///   - @p pt.filter_flags is zero.
 ///   - @p pt.kind is BeforeInst, AfterInst, KernelEntry, or KernelExit. Boundaries require
 ///     a probe; KernelExit must name s_endpgm. The orchestrator separately checks
@@ -291,35 +351,28 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
-                rj_code_arch_t arch, std::string *error_out = nullptr,
+                rocjitsu::IsaFamily arch, std::string *error_out = nullptr,
                 bool setreg_vgpr_msb_fixup = true);
 
 /// @brief Build a TrampolinePlan from a validated site.
 ///
-/// Temporarily fills it ONLY with a plan to instrument with a nop.
-/// Fills before_items = {{ s_nop 0 }}, after_items = {}, emit_original = true.
+/// Observation plans emit an inline nop before replaying the original.
+/// Replacement plans omit the original and emit their supplied body (or empty
+/// deletion) after any probe envelope. Probe-call plans share the base fields.
 /// The caller chooses @p trampoline_offset (typically `patcher.text_size()`).
 /// @returns std::nullopt for an unsupported architecture; writes the reason to
 /// @p error_out when supplied.
 [[nodiscard]] std::optional<TrampolinePlan>
-make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
+make_trampoline_plan(const ResolvedInstrumentationSite &site, rocjitsu::IsaFamily arch,
                      uint64_t trampoline_offset, std::string *error_out = nullptr);
 
-/// @brief Verify @p plan matches the (temporary) inlined nop body shape:
+/// @brief Verify @p plan matches the inline-nop observation body shape:
 ///        exactly one `before_items` entry containing `s_nop 0`, empty
 ///        `after_items`, and `emit_original == true`.
 ///
-/// One of several places where temporary constraints are enforced. The others:
-/// validate_anchor() rejects a non-zero `filter_flags`, the only
-/// InstrumentationPoint field still reserved, and any `kind` other than
-/// BeforeInst on the inline-nop path; Instrumentor::patch() rejects multi-text
-/// code objects. This one
-/// lives at the orchestrator boundary rather than inside TrampolineBuilder so
-/// the builder stays generic.
-/// Called by Instrumentor::patch() as a defense-check (make sure users/agents
-/// do not misinterpret current DBI support) and also directly by tests
-///
-/// TODO: delete this when DBI supports more plans
+/// This observation-specific guard lives at the orchestrator boundary so the
+/// builder also accepts replacement and probe-call plans. Instrumentor::patch()
+/// invokes it only for inline-nop observations; tests exercise it directly.
 [[nodiscard]] bool validate_inline_nop_plan(const TrampolinePlan &plan,
                                             std::string *error_out = nullptr);
 
@@ -379,7 +432,7 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arc
 /// with no scratch emitter, a slot past the scratch limit, or an offset that
 /// does not fit the scratch offset field.
 [[nodiscard]] bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills,
-                                    rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                                    rocjitsu::IsaFamily arch, std::vector<SpillSlot> &out,
                                     std::string *error_out = nullptr);
 
 /// @brief Reserve a scratch slot per SGPR in @p spill_set, pick a bridge VGPR
@@ -401,7 +454,7 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arc
                                     const RegisterSet &bridge_unavailable,
                                     const std::vector<SpillSlot> &vgpr_spills,
                                     uint32_t kernel_vgpr_count, SpillManager &spills,
-                                    rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                                    rocjitsu::IsaFamily arch, std::vector<SpillSlot> &out,
                                     uint16_t &out_bridge, std::string *error_out = nullptr);
 
 /// @brief Reserve a scratch slot per AccVGPR in @p spill_set and fill @p out.
@@ -416,7 +469,7 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arc
 /// scratch emitter, a slot past the scratch limit, or an offset that does not fit the
 /// scratch offset field.
 [[nodiscard]] bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count,
-                                   SpillManager &spills, rj_code_arch_t arch,
+                                   SpillManager &spills, rocjitsu::IsaFamily arch,
                                    std::vector<SpillSlot> &out, std::string *error_out = nullptr);
 
 /// @brief Does a kernel that allocates @p kernel_sgpr_count SGPRs own the fixed
@@ -450,10 +503,8 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arc
          static_cast<uint32_t>(abi.arg_vgpr_base) + static_cast<uint32_t>(abi.num_arg_vgprs);
 }
 
-/// @brief DBI orchestrator. Collects InstrumentationPoints, validates each
-///        anchor, plans + builds per-site trampolines, and drives the
-///        CodeObjectPatcher to splice the patches into a new ELF. See the
-///        mental-model diagram at the top of this file for the full pipeline.
+/// @brief DBI orchestrator. Resolves observation/replacement sites, plans and
+///        builds their trampolines, and uses CodeObjectPatcher to emit a new ELF.
 ///
 /// Single-attempt: each Instrumentor instance owns one call to patch() or
 /// patch_with_debug_summaries(), success or failure. Could expand to allow
@@ -461,8 +512,10 @@ make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arc
 /// is a much more difficult task.
 ///
 /// Block decoding is lazy so the CFG is built on the first call that needs
-/// it (validate_points / find_instruction_at_offset). An Instrumentor that
-/// never gets patched also never decodes.
+/// it (validate_points / find_instruction_at_offset). Structural facts are also
+/// lazy; queries and probe-free replacements without resource growth normally
+/// need no CFG or liveness. Sized RDNA4 function alignment requires the original
+/// CFG to qualify the gaps. Mixed batches analyze the effective replacement program.
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
@@ -471,7 +524,7 @@ public:
   ///             registered Decoder (RV32I/RV64I/INVALID/etc.) surfaces as
   ///             a ValidationResult / InstrumentedCodeObject error at
   ///             validate_points() / patch() time rather than at construction.
-  Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch,
+  Instrumentor(const AmdGpuCodeObject &obj, rocjitsu::IsaFamily arch,
                InstrumentationOptions options = {});
   ~Instrumentor();
 
@@ -491,16 +544,37 @@ public:
   struct ValidationResult {
     std::vector<ResolvedInstrumentationSite> sites;
     std::vector<std::string> errors; // Fatal; sites is empty when non-empty.
+    /// Present for source-facts or structural replacement-batch failures.
+    /// Request-shape and option errors use errors only, as in the patch result.
+    std::optional<TextEditError> edit_error;
   };
 
   /// @brief Look up each queued point's anchor and validate it.
   ///
   /// Currently all-or-nothing: on any failure, `sites` is empty and `errors`
   /// lists every fatal diagnostic encountered. On success, `sites` contains
-  /// one record per queued point in insertion order and `errors` is empty.
-  /// Success establishes per-site eligibility, not that the final patch will succeed.
-  /// Complete encoded-batch reference checks and final layout checks run in patch().
+  /// one record per resolved site and `errors` is empty. A same-site
+  /// BeforeInst/probe plus replacement pair becomes one site in the replacement
+  /// request's position; other points retain insertion order.
+  /// Observation success establishes per-site eligibility; final encoded-batch
+  /// reference and layout checks run in patch(). Replacement validation checks
+  /// source extents and complete bodies; final anchor edits are checked before writing.
   [[nodiscard]] ValidationResult validate_points();
+
+  /// @brief Full-source instruction, clause and direct-reference facts.
+  /// @details Performs shared structural admission, using the original CFG to
+  /// qualify sized RDNA4 function alignment when present. No liveness is required.
+  /// Returns null and sets error on failure. The borrowed result must not outlive
+  /// the last Instrumentor sharing these facts or the immutable, unmoved source.
+  [[nodiscard]] const InstructionBoundaries *instruction_boundaries(TextEditError &error);
+
+  /// @brief Create an empty single-attempt queue for the same source and options.
+  /// @details Initializes and shares immutable full-text structural facts only;
+  /// queued points, patch-attempt state, CFG and liveness are never inherited.
+  /// This works before or after the parent's patch attempt. The child may outlive
+  /// the parent, but the borrowed source must outlive both and remain immutable
+  /// and unmoved. A different source or architecture requires a new Instrumentor.
+  [[nodiscard]] FailureOr<std::unique_ptr<Instrumentor>> fork(TextEditError &error);
 
   /// @brief Validate, plan, build, and apply the queued points; emit a
   ///        patched ELF.
@@ -516,7 +590,11 @@ public:
   ///
   /// Entry-storage arguments require CallerSuppliedWrapper. The caller must
   /// bind that wrapper for every instrumented dispatch. Resource edits require
-  /// an existing supported AMDHSA metadata note.
+  /// an existing supported AMDHSA metadata note. ReplaceWithInst shares probe
+  /// and resource planning with observations. One replacement can carry a probe
+  /// directly, or coalesce a callable BeforeInst at the same offset in either
+  /// request order. Conflicting duplicate operations are rejected. The private
+  /// mutation layout supplies fresh CFG/liveness for the whole mixed batch.
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
@@ -531,10 +609,17 @@ public:
 
 private:
   const AmdGpuCodeObject &obj_;
-  rj_code_arch_t arch_;
+  rocjitsu::IsaFamily arch_;
   InstrumentationOptions options_;
   std::vector<InstrumentationPoint> points_;
   bool patched_ = false;
+
+  struct EntryPatchPlan;
+  EntryPatchPlan *entry_plan_ = nullptr;
+  ValidationResult *entry_validation_ = nullptr;
+  std::optional<uint64_t> planning_descriptor_offset_;
+  std::optional<uint64_t> planning_cave_offset_;
+  [[nodiscard]] InstrumentedCodeObjectDebug patch_entries();
 
   // Tests can bypass runtime-binding gates to inspect a plan or supply their own
   // dispatch support. Planner validation still runs; production callers cannot
@@ -544,6 +629,9 @@ private:
 
   // Lazily populated.
   std::unique_ptr<Decoder> decoder_;
+  // Private mutation-only layout used to analyze effective guest semantics
+  // before planning any probe. Owns its bytes; never emitted or shared.
+  std::unique_ptr<AmdGpuCodeObject> analysis_object_;
   std::vector<std::unique_ptr<BasicBlock>> blocks_;
   std::unique_ptr<LivenessAnalysis> liveness_;
   class CallableStateAnalysis;
@@ -552,18 +640,23 @@ private:
   // blocks_ so find_instruction_at_offset is O(1). Pointers are stable for
   // the lifetime of blocks_ (BasicBlock owns the Instructions via unique_ptr).
   std::unordered_map<uint64_t, const Instruction *> offset_to_inst_;
-  // Owned full-section index built with this source's decoder alongside blocks_.
-  // The local anchor transaction borrows it during patching.
+  // Full-section index for the current CFG, possibly the private mutation layout.
+  // Source facts retain their own immutable pristine index; source writes never
+  // use an effective-program index as proof of original instruction extents.
   InstructionBoundaries instruction_boundaries_;
+  std::shared_ptr<const SourceTextFacts> source_facts_;
   bool blocks_built_ = false;
 
   // Returns false if no decoder exists for arch_ (RV32I/RV64I/INVALID/etc.);
   // in that case *error_out is set and blocks_built_ stays false so the failure
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
+  [[nodiscard]] bool ensure_decoder(std::string *error_out = nullptr);
+  [[nodiscard]] bool ensure_source_facts(TextEditError &error);
   [[nodiscard]] bool ensure_liveness_built(uint8_t wave_size,
                                            std::span<const KernelDescriptorInfo> kernels,
-                                           std::string *error_out = nullptr);
+                                           std::string *error_out = nullptr,
+                                           std::span<const InstrumentationPoint> observations = {});
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
 
   // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor
@@ -574,7 +667,7 @@ private:
     uint64_t padding_bytes = 0;           ///< s_nop fill ahead of the stub, for entry alignment.
     uint64_t stub_offset = 0;             ///< .text offset the descriptor enters at.
     std::optional<uint16_t> storage_base; ///< Persistent pair, when context is requested.
-    std::vector<EntryVgprCapture> captured_vgprs;
+    std::vector<EntryRegisterCapture> captured_registers;
     std::vector<uint32_t> words; ///< Prologue, then s_branch to the original entry.
   };
 
@@ -588,18 +681,13 @@ private:
       std::string *error_out);
 
   // Everything one resolution pass produces.
-  struct ResolvedPoints {
-    std::vector<ResolvedInstrumentationSite> sites;
-    std::vector<ProbeCallable> probes;
-    std::vector<std::string> errors;
-    // The object's kernel descriptors and the wave size they share. A probe-call
-    // site is resolved only when there is at least one kernel and one wave size.
-    std::vector<KernelDescriptorInfo> kernels;
-    std::optional<uint8_t> wave_size;
-  };
+  struct ResolvedPoints;
 
   // Validate and resolve every queued point in one pass.
   [[nodiscard]] ResolvedPoints resolve_points();
+  [[nodiscard]] bool
+  prepare_mutation_analysis(std::span<const ResolvedInstrumentationSite> replacements,
+                            TextEditError &error);
 };
 
 } // namespace rocjitsu

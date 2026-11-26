@@ -9,6 +9,7 @@
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rdna_isa_base.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "rocjitsu/code/kernel_descriptor_abi.h"
 
@@ -122,8 +123,9 @@ make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) 
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
   std::memcpy(image.data() + text_offset, &text_word, sizeof(text_word));
-  if (!rodata.empty())
+  if (!rodata.empty()) {
     std::memcpy(image.data() + rodata_offset, rodata.data(), rodata.size());
+  }
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
   std::memcpy(image.data() + symtab_offset, syms.data(), syms.size() * sizeof(Elf64_Sym));
   std::memcpy(image.data() + shstrtab_offset, shstrtab.data(), shstrtab.size());
@@ -201,7 +203,7 @@ TEST(AmdGpuCodeObjectSgpr, CdnaGranulatedZeroIsEightSgprs) {
   const auto image = make_elf_with_kds({{"k", 0}});
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
-  const auto count = obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2);
+  const auto count = obj.min_kernel_sgpr_count(rocjitsu::IsaFamily::Cdna2);
   ASSERT_TRUE(count.has_value());
   EXPECT_EQ(*count, 8u);
 }
@@ -211,7 +213,7 @@ TEST(AmdGpuCodeObjectSgpr, CdnaGranulatedDecodesTimesEight) {
   const auto image = make_elf_with_kds({{"k", 3}});
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
-  EXPECT_EQ(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2), std::optional<uint32_t>(32u));
+  EXPECT_EQ(obj.min_kernel_sgpr_count(rocjitsu::IsaFamily::Cdna2), std::optional<uint32_t>(32u));
 }
 
 // RDNA: a granulated field of 0 is a sentinel; the wave owns the fixed per-wave
@@ -221,7 +223,7 @@ TEST(AmdGpuCodeObjectSgpr, RdnaGranulatedZeroIsFixedPool) {
   const auto image = make_elf_with_kds({{"k", 0}});
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
-  const auto count = obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_RDNA4);
+  const auto count = obj.min_kernel_sgpr_count(rocjitsu::IsaFamily::Rdna4);
   ASSERT_TRUE(count.has_value());
   EXPECT_EQ(*count, amdgpu::RdnaIsaBase::MAX_SGPRS_PER_WF);
   EXPECT_GE(*count, 32u); // so the fixed link pair s[30:31] always fits on RDNA
@@ -232,7 +234,7 @@ TEST(AmdGpuCodeObjectSgpr, ReturnsMinAcrossKernels) {
   const auto image = make_elf_with_kds({{"big", 7}, {"small", 0}}); // 64 and 8
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
-  EXPECT_EQ(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2), std::optional<uint32_t>(8u));
+  EXPECT_EQ(obj.min_kernel_sgpr_count(rocjitsu::IsaFamily::Cdna2), std::optional<uint32_t>(8u));
 }
 
 // No kernel descriptor -> nullopt, so the caller falls back permissively.
@@ -240,7 +242,7 @@ TEST(AmdGpuCodeObjectSgpr, NoKernelDescriptorReturnsNullopt) {
   const auto image = make_elf_with_kds({}); // no .kd symbols
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
-  EXPECT_FALSE(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2).has_value());
+  EXPECT_FALSE(obj.min_kernel_sgpr_count(rocjitsu::IsaFamily::Cdna2).has_value());
 }
 
 TEST(AmdGpuCodeObjectSections, RetainsAllocatedExecutableNobitsForLayoutValidation) {
@@ -452,7 +454,7 @@ TEST(AmdGpuCodeObjectInput, UnalignedSymbolTableIsReadSafely) {
 
   const AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
-  EXPECT_EQ(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2), std::optional<uint32_t>(8u));
+  EXPECT_EQ(obj.min_kernel_sgpr_count(rocjitsu::IsaFamily::Cdna2), std::optional<uint32_t>(8u));
 }
 
 } // namespace

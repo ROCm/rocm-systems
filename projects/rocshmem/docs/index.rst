@@ -22,6 +22,7 @@ The rocSHMEM public repository is located within the ROCm Systems Super Repo at 
 
       * :doc:`Compile and run applications <./compile_and_run>`
       * :doc:`Using the Docker container <./docker>`
+      * :doc:`Analysis and debugging tools <./analysis_tools>`
 
   .. grid-item-card:: Library constants
 
@@ -43,6 +44,8 @@ The rocSHMEM public repository is located within the ROCm Systems Super Repo at 
       * :doc:`Collective routines <./api/coll>`
       * :doc:`Point-to-point synchronization routines <./api/pt2pt_sync>`
       * :doc:`Memory ordering routines <./api/memory_ordering>`
+      * :doc:`Tile routines <./api/tile>`
+      * :doc:`LDS-staged copy routines <./api/lds_stage>`
 
 To contribute to the documentation, refer to
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.

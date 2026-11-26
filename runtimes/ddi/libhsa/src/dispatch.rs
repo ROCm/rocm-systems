@@ -10,10 +10,16 @@ use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU32, Ordering};
 use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocloader::{LoadedImage, Symbol, SymbolKind};
 
-use crate::api::queue::{core::*, index::*};
-use crate::api::signal::{atomic::*, core::*, wait::*};
+use crate::admission::InFlightToken;
+use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
-use crate::runtime::{GenerationHealth, InFlightToken, RetainOnDrop, lock, map_error};
+use crate::lifecycle::lock;
+use crate::queue::index::{QueueIndex, with_queue_index};
+use crate::queue::{AqlQueueKind, AqlQueueRequest};
+use crate::session::SessionHealth;
+use crate::signal;
+use crate::status::map_error;
+use rocddi::memory::storage::RetainOnDrop;
 
 /// Result after the private queue has attempted explicit retirement.
 pub(crate) struct DispatchResult {
@@ -38,7 +44,7 @@ struct Assets<D> {
 /// Owns one private queue and launches one packet at a time with 64-lane groups.
 pub(crate) struct Dispatch<D> {
     /// Queue handle, null before successful creation and after retirement.
-    queue: *mut HsaQueue,
+    queue: Option<std::ptr::NonNull<HsaQueue>>,
     /// Completion signal owned until native queue retirement.
     completion: HsaSignal,
     /// Native dependencies use fail-closed ownership during unwinding.
@@ -48,11 +54,52 @@ pub(crate) struct Dispatch<D> {
     /// Cancellation requested by runtime shutdown.
     stop: Arc<AtomicBool>,
     /// Prevents generation teardown after uncertain cleanup.
-    health: Arc<GenerationHealth>,
+    health: Arc<SessionHealth>,
     /// Always released, even if assets are retained, so shutdown can progress.
     _inflight: InFlightToken,
     /// Explicit cleanup has run and must not be retried.
     finished: bool,
+}
+
+/// Retains code if publication fails or unwinds with uncertain native users.
+struct PendingCode {
+    /// The image is transferred only after complete publication.
+    image: Option<LoadedImage>,
+    /// Uncertain code publication blocks this HSA generation's teardown.
+    health: Arc<SessionHealth>,
+}
+
+impl PendingCode {
+    /// Publishes executable bytes and caches through the loader's single owner.
+    fn publish(mut self, stop: &AtomicBool) -> Result<LoadedImage, Status> {
+        let image = self.image.as_ref().ok_or(ERROR)?;
+        if let Some(publication) = image.publication() {
+            publication
+                .publish(stop)
+                .map_err(crate::loader::map_loader_error)?;
+        }
+        self.image.take().ok_or(ERROR)
+    }
+}
+
+impl Drop for PendingCode {
+    fn drop(&mut self) {
+        if let Some(image) = self.image.take() {
+            let can_release = image.can_release();
+            release_after_publication(image, can_release, &self.health);
+        }
+    }
+}
+
+/// Applies the publication owner's release proof to its retained backing.
+/// Keeping this disposition explicit also covers unwinding during publication.
+fn release_after_publication<T>(owner: T, can_release: bool, health: &SessionHealth) {
+    let owner = RetainOnDrop::new(owner);
+    if can_release {
+        drop(owner.into_inner());
+    } else {
+        health.quarantine();
+    }
 }
 
 /// Records a native queue fault without calling back into the HSA runtime.
@@ -69,16 +116,16 @@ impl<D> Dispatch<D> {
         let (device, page, stop, health, inflight) = {
             let guard = lock()?;
             let runtime = guard.as_ref().ok_or(NOT_INITIALIZED)?;
-            let index = runtime.gpu_index(agent).ok_or(INVALID_AGENT)?;
-            if runtime.operation_stop().load(Ordering::Acquire) {
+            let index = runtime.agents.gpu_index(agent).ok_or(INVALID_AGENT)?;
+            if runtime.control.operation_stop().load(Ordering::Acquire) {
                 return Err(INVALID_RUNTIME_STATE);
             }
             (
-                runtime.gpus[index].device.clone(),
-                runtime.host_page_size as u64,
-                runtime.operation_stop(),
-                runtime.health.clone(),
-                runtime.inflight.enter().ok_or(OUT_OF_RESOURCES)?,
+                runtime.agents.gpus[index].device.clone(),
+                runtime.agents.host_page_size as u64,
+                runtime.control.operation_stop(),
+                runtime.control.health.clone(),
+                runtime.control.inflight.enter().ok_or(OUT_OF_RESOURCES)?,
             )
         };
         let (image, mut symbols) =
@@ -108,21 +155,16 @@ impl<D> Dispatch<D> {
         if arguments.info().host_address.is_none() {
             return Err(NOT_SUPPORTED);
         }
-        // Code publication can itself leave a native queue live. Keep the code
-        // image and quarantine its generation before returning that failure.
-        if let Err(failure) = device.gpu().map_err(map_error)?.invalidate_code_cache(
-            image.device_base(),
-            image.size(),
-            &stop,
-        ) {
-            if failure.operands_may_be_live {
-                health.quarantine();
-                std::mem::forget(image);
-            }
-            return Err(map_error(failure.error));
+        // Publication owns both ordinary images and target entry stubs. Its
+        // guard preserves the image through errors and unwinding while native
+        // code-cache work might still reference either allocation.
+        let image = PendingCode {
+            image: Some(image),
+            health: health.clone(),
         }
+        .publish(&stop)?;
         let mut dispatch = Self {
-            queue: std::ptr::null_mut(),
+            queue: None,
             completion: HsaSignal { handle: 0 },
             assets: Some(RetainOnDrop::new(Assets {
                 _image: image,
@@ -136,36 +178,36 @@ impl<D> Dispatch<D> {
             _inflight: inflight,
             finished: false,
         };
-        // SAFETY: The output signal and queue handles are writable; callback
-        // storage is held in assets before queue creation can expose it.
-        let status =
-            unsafe { hsa_signal_create(1, 0, std::ptr::null(), &raw mut dispatch.completion) };
-        if status != SUCCESS {
-            return Err(status);
-        }
+        // The current admitted operation and the dispatch in-flight token keep
+        // the generation alive while its signal and queue owners are published.
+        dispatch.completion = {
+            let mut guard = lock()?;
+            let runtime = crate::lifecycle::initialized_mut(&mut guard)?;
+            runtime.create_signal(1, true)?
+        };
         let Some(assets) = dispatch.assets.as_ref() else {
             return Err(ERROR);
         };
         let callback = (&raw const *assets.error).cast_mut().cast();
-        let status = unsafe {
-            hsa_queue_create(
-                agent,
-                256,
-                QUEUE_TYPE_SINGLE,
-                Some(queue_error),
-                callback,
-                private_bytes,
-                0,
-                &raw mut dispatch.queue,
-            )
+        let request = AqlQueueRequest {
+            agent,
+            size: 256,
+            kind: AqlQueueKind::Single,
+            callback: Some(queue_error),
+            // SAFETY: Assets retain this atomic until native queue retirement.
+            data: unsafe { CallbackArg::new(callback) },
+            private_segment_size: private_bytes,
         };
-        if status != SUCCESS {
-            // create_hardware_queue marks this generation on uncertain native
-            // rollback. Its retained callback still needs the atomic owner.
-            if dispatch.health.is_quarantined() {
-                dispatch.finished = true;
+        // SAFETY: The retained assets cover callback code/data through the last
+        // native use, including ambiguous queue-creation rollback.
+        match unsafe { crate::queue::create(request) } {
+            Ok(queue) => dispatch.queue = Some(queue),
+            Err(status) => {
+                if dispatch.health.is_quarantined() {
+                    dispatch.finished = true;
+                }
+                return Err(status);
             }
-            return Err(status);
         }
         Ok(dispatch)
     }
@@ -215,9 +257,18 @@ impl<D> Dispatch<D> {
         unsafe {
             std::ptr::write_bytes(host as *mut u8, 0, symbol.kernarg_size as usize);
             std::ptr::copy_nonoverlapping(args.as_ptr(), host as *mut u8, args.len());
-            hsa_signal_store_relaxed(self.completion, 1);
-            let index = hsa_queue_add_write_index_relaxed(self.queue, 1);
-            let queue = &*self.queue;
+            if signal::store(self.completion, 1, Ordering::Relaxed).is_none() {
+                return INVALID_RUNTIME_STATE;
+            }
+            let Some(queue) = self.queue else {
+                return INVALID_RUNTIME_STATE;
+            };
+            let Some(index) = with_queue_index(queue.as_ptr(), QueueIndex::Write, |index| {
+                index.fetch_add(1, Ordering::Relaxed)
+            }) else {
+                return INVALID_RUNTIME_STATE;
+            };
+            let queue = queue.as_ref();
             let packet = queue
                 .base_address
                 .cast::<HsaKernelDispatchPacket>()
@@ -242,10 +293,15 @@ impl<D> Dispatch<D> {
             });
             // System fences order both the external operands and private args.
             (&*packet.cast::<AtomicU16>()).store(2 | (2 << 9) | (2 << 11), Ordering::Release);
-            hsa_signal_store_screlease(
+            if signal::store(
                 queue.doorbell_signal,
                 i64::from_ne_bytes(index.to_ne_bytes()),
-            );
+                Ordering::Release,
+            )
+            .is_none()
+            {
+                return INVALID_RUNTIME_STATE;
+            }
         }
         loop {
             let error = assets.error.load(Ordering::Acquire);
@@ -257,12 +313,13 @@ impl<D> Dispatch<D> {
             }
             // A finite wait permits cancellation and queue-error observation.
             let value = unsafe {
-                hsa_signal_wait_scacquire(
+                signal::wait::signal_wait(
                     self.completion,
                     SIGNAL_CONDITION_EQ,
                     0,
                     1_000_000,
                     WAIT_STATE_BLOCKED,
+                    Ordering::Acquire,
                 )
             };
             if value == 0 {
@@ -275,7 +332,9 @@ impl<D> Dispatch<D> {
     #[allow(unsafe_code)]
     fn retire(&mut self, status: Status) -> DispatchResult {
         self.finished = true;
-        let retired = self.queue.is_null() || unsafe { hsa_queue_destroy(self.queue) } == SUCCESS;
+        let retired = self
+            .queue
+            .is_none_or(|queue| crate::queue::destroy(queue).is_ok());
         if !retired {
             self.health.quarantine();
             return DispatchResult {
@@ -283,11 +342,14 @@ impl<D> Dispatch<D> {
                 operands_may_be_live: true,
             };
         }
-        self.queue = std::ptr::null_mut();
+        self.queue = None;
         let signal_status = if self.completion.handle == 0 {
             SUCCESS
         } else {
-            unsafe { hsa_signal_destroy(self.completion) }
+            match signal::destroy(self.completion) {
+                Ok(()) => SUCCESS,
+                Err(status) => status,
+            }
         };
         self.completion.handle = 0;
         if let Some(assets) = self.assets.take() {
@@ -313,6 +375,31 @@ impl<D> Drop for Dispatch<D> {
     fn drop(&mut self) {
         if !self.finished {
             let _ = self.retire(ERROR);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Observable native backing used to inject a publication release proof.
+    struct Backing(Arc<AtomicBool>);
+
+    impl Drop for Backing {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    #[test]
+    fn failed_publication_retains_backing_until_native_retirement_is_proved() {
+        for can_release in [false, true] {
+            let released = Arc::new(AtomicBool::new(false));
+            let health = SessionHealth::new();
+            release_after_publication(Backing(released.clone()), can_release, &health);
+            assert_eq!(released.load(Ordering::Acquire), can_release);
+            assert_eq!(health.is_quarantined(), !can_release);
         }
     }
 }

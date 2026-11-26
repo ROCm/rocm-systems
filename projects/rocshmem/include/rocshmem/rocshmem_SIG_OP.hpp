@@ -33,6 +33,20 @@ __device__ ATTR_NO_INLINE void rocshmem_ctx_putmem_signal(
     rocshmem_ctx_t ctx, void *dest, const void *source, size_t nelems,
     uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
 
+/*
+ * Blocking host-initiated put-with-signal (verbs host transport). Separate
+ * __host__ overloads of the same signature as the __device__ ones above (HIP
+ * permits the host/device split; cf. rocshmem_uint64_wait_until in
+ * rocshmem_P2P_SYNC.hpp). Supported only on the GDA backend's verbs host path.
+ */
+__host__ void rocshmem_putmem_signal(void *dest, const void *source,
+                                     size_t nelems, uint64_t *sig_addr,
+                                     uint64_t signal, int sig_op, int pe);
+__host__ void rocshmem_ctx_putmem_signal(rocshmem_ctx_t ctx, void *dest,
+                                         const void *source, size_t nelems,
+                                         uint64_t *sig_addr, uint64_t signal,
+                                         int sig_op, int pe);
+
 __device__ ATTR_NO_INLINE void rocshmem_ctx_float_put_signal(
     rocshmem_ctx_t ctx, float *dest, const float *source, size_t nelems,
     uint64_t *sig_addr, uint64_t signal, int sig_op, int pe);
@@ -646,6 +660,16 @@ __device__ ATTR_NO_INLINE void rocshmem_signal_set(
 __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_wait_until(
     uint64_t *sig_addr, int cmp, uint64_t cmp_value);
 
+/*
+ * Blocking host-initiated signal query/wait (verbs host transport). Local ops:
+ * an HDP-flushed direct load of the fine-grained host-coherent signal word.
+ * signal_fetch is a __host__ overload of the __device__ one above;
+ * signal_wait_until is a __host__ overload of the __device__ one above.
+ */
+__host__ uint64_t rocshmem_signal_fetch(const uint64_t *sig_addr);
+__host__ void rocshmem_signal_wait_until(uint64_t *sig_addr, int cmp,
+                                         uint64_t cmp_value);
+
 /**
  * @brief Kernel wrapper for putmem_signal operation on stream
  *
@@ -657,8 +681,6 @@ __device__ ATTR_NO_INLINE uint64_t rocshmem_signal_wait_until(
  * @param[in] sig_op    Signal operation (ROCSHMEM_SIGNAL_SET or
  * ROCSHMEM_SIGNAL_ADD)
  * @param[in] pe        PE of the remote process
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
     void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
@@ -670,8 +692,6 @@ __global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
  * @param[in] sig_addr  Address of signal variable on remote PE
  * @param[in] signal    Value to add to the signal variable
  * @param[in] pe        PE of the remote process
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_signal_add_kernel(uint64_t *sig_addr,
                                                           uint64_t signal,
@@ -683,8 +703,6 @@ __global__ ATTR_NO_INLINE void rocshmem_signal_add_kernel(uint64_t *sig_addr,
  * @param[in] sig_addr  Address of signal variable on remote PE
  * @param[in] signal    Value to store in the signal variable
  * @param[in] pe        PE of the remote process
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_signal_set_kernel(uint64_t *sig_addr,
                                                           uint64_t signal,
@@ -696,8 +714,6 @@ __global__ ATTR_NO_INLINE void rocshmem_signal_set_kernel(uint64_t *sig_addr,
  * @param[in] sig_addr  Address of signal variable on the symmetric heap
  * @param[in] cmp       Comparison operator
  * @param[in] cmp_value Value to compare against
- *
- * @return void
  */
 __global__ ATTR_NO_INLINE void rocshmem_signal_wait_until_kernel(
     uint64_t *sig_addr, int cmp, uint64_t cmp_value);

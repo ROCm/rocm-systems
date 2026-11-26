@@ -5585,6 +5585,27 @@ static hipError_t playback_hipGraphExecGetId(PlaybackContext& ctx, const uint8_t
   return hipSuccess;
 }
 
+static hipError_t playback_hipDeviceGetExecAffinitySupport(PlaybackContext& ctx, const uint8_t* payload) {
+  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetExecAffinitySupport*>(payload);
+  int _out_pi{};
+  hipError_t _r = (hipError_t)hipDeviceGetExecAffinitySupport(&_out_pi, (hipExecAffinityType)a->type, (hipDevice_t)a->dev);
+  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
+    hrr_note_recorded_error(ctx, "hipDeviceGetExecAffinitySupport", a->ret);
+    return hipSuccess;
+  }
+  return _r;
+}
+
+static hipError_t playback_hipArrayGetPlane(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipArrayGetPlane — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
 static hipError_t playback___hipPopCallConfiguration(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
   return hipSuccess;
@@ -6188,15 +6209,17 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipGraphNodeGetToolsId)),  // [554] HRR_API_HIPGRAPHNODEGETTOOLSID
     static_cast<uint32_t>(sizeof(hrr_args_hipGraphGetId)),  // [555] HRR_API_HIPGRAPHGETID
     static_cast<uint32_t>(sizeof(hrr_args_hipGraphExecGetId)),  // [556] HRR_API_HIPGRAPHEXECGETID
-    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [557] HRR_API_HIPPOPCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [558] HRR_API_HIPPUSHCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [559] HRR_API_HIPREGISTERFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [560] HRR_API_HIPREGISTERFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [561] HRR_API_HIPREGISTERMANAGEDVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [562] HRR_API_HIPREGISTERSURFACE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [563] HRR_API_HIPREGISTERTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [564] HRR_API_HIPREGISTERVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [565] HRR_API_HIPUNREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args_hipDeviceGetExecAffinitySupport)),  // [557] HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT
+    static_cast<uint32_t>(sizeof(hrr_args_hipArrayGetPlane)),  // [558] HRR_API_HIPARRAYGETPLANE
+    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [559] HRR_API_HIPPOPCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [560] HRR_API_HIPPUSHCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [561] HRR_API_HIPREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [562] HRR_API_HIPREGISTERFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [563] HRR_API_HIPREGISTERMANAGEDVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [564] HRR_API_HIPREGISTERSURFACE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [565] HRR_API_HIPREGISTERTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [566] HRR_API_HIPREGISTERVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [567] HRR_API_HIPUNREGISTERFATBINARY
 };
 
 // ============================================================
@@ -6760,13 +6783,15 @@ hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
     playback_hipGraphNodeGetToolsId,  // [554] HRR_API_HIPGRAPHNODEGETTOOLSID
     playback_hipGraphGetId,  // [555] HRR_API_HIPGRAPHGETID
     playback_hipGraphExecGetId,  // [556] HRR_API_HIPGRAPHEXECGETID
-    playback___hipPopCallConfiguration,  // [557] HRR_API_HIPPOPCALLCONFIGURATION
-    playback___hipPushCallConfiguration,  // [558] HRR_API_HIPPUSHCALLCONFIGURATION
-    playback___hipRegisterFatBinary,  // [559] HRR_API_HIPREGISTERFATBINARY
-    playback___hipRegisterFunction,  // [560] HRR_API_HIPREGISTERFUNCTION
-    playback___hipRegisterManagedVar,  // [561] HRR_API_HIPREGISTERMANAGEDVAR
-    playback___hipRegisterSurface,  // [562] HRR_API_HIPREGISTERSURFACE
-    playback___hipRegisterTexture,  // [563] HRR_API_HIPREGISTERTEXTURE
-    playback___hipRegisterVar,  // [564] HRR_API_HIPREGISTERVAR
-    playback___hipUnregisterFatBinary,  // [565] HRR_API_HIPUNREGISTERFATBINARY
+    playback_hipDeviceGetExecAffinitySupport,  // [557] HRR_API_HIPDEVICEGETEXECAFFINITYSUPPORT
+    playback_hipArrayGetPlane,  // [558] HRR_API_HIPARRAYGETPLANE
+    playback___hipPopCallConfiguration,  // [559] HRR_API_HIPPOPCALLCONFIGURATION
+    playback___hipPushCallConfiguration,  // [560] HRR_API_HIPPUSHCALLCONFIGURATION
+    playback___hipRegisterFatBinary,  // [561] HRR_API_HIPREGISTERFATBINARY
+    playback___hipRegisterFunction,  // [562] HRR_API_HIPREGISTERFUNCTION
+    playback___hipRegisterManagedVar,  // [563] HRR_API_HIPREGISTERMANAGEDVAR
+    playback___hipRegisterSurface,  // [564] HRR_API_HIPREGISTERSURFACE
+    playback___hipRegisterTexture,  // [565] HRR_API_HIPREGISTERTEXTURE
+    playback___hipRegisterVar,  // [566] HRR_API_HIPREGISTERVAR
+    playback___hipUnregisterFatBinary,  // [567] HRR_API_HIPUNREGISTERFATBINARY
 };

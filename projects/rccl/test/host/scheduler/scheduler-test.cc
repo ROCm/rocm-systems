@@ -12,6 +12,7 @@
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -145,7 +146,7 @@ class MakeSymmetricTaskList_Scene {
 ncclTaskColl MakeSymmetricTaskList_MakeTask(MakeSymmetricTaskList_Scene& scene, ncclFunc_t func = ncclFuncBroadcast,
                                             ncclDataType_t datatype = ncclInt8) {
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
   ncclTaskColl task{};
   task.func = func;
   task.datatype = datatype;
@@ -168,6 +169,14 @@ MakeSymmetricTaskList_TuningFindsKernel(int nChannels, int nWarps) {
     return ncclSuccess;
   };
 }
+
+// The in-place test runs on kInPlaceRanks ranks with kInPlaceCount floats per rank, so recvbuff holds
+// kInPlaceRanks slices of kInPlaceSliceBytes each. A count off the 1 KiB sym cell keeps nBytes and the slice size
+// from agreeing by accident.
+constexpr int kInPlaceRanks = 4;
+constexpr size_t kInPlaceCount = 100;
+constexpr size_t kInPlaceSliceBytes = kInPlaceCount * sizeof(float);
+constexpr uintptr_t kInPlaceRecvAddr = 0x100000;
 
 // Unlike ncclMakeSymmetricTaskList (raw list + output param), this takes an already-populated queue directly.
 class SymmetricTaskScheduler_Scene {
@@ -197,10 +206,41 @@ ncclTaskColl SymmetricTaskScheduler_MakeTask() {
   return task;
 }
 
-// calcArgsSize() floors at sizeof(ncclSymkDevWorkArgs4K)=4096; kSymSchedBigBatchTasks alone clears it (64*64B).
-constexpr int kSymSchedBigBatchTasks = 64;
+// Largest batch whose args fit the 4 KB symmetric kernel argument; one more work trips the scheduler's guard.
+constexpr int SymSchedMaxWorksIn4K(int nChannels, bool profiler) {
+  int n = 0;
+  while (ncclSymkDevWorkArgs::calcArgsSize(nChannels, n + 1, profiler) <= sizeof(ncclSymkDevWorkArgs4K)) n++;
+  return n;
+}
 // Headroom above kSymSchedBigBatchTasks so a 1-cell-per-task batch never exhausts the channel budget mid-loop.
 constexpr int kSymSchedBigBatchChannels = 100;
+// A batch filled exactly to the 4 KB limit, so including one extra task would make the scheduler fail.
+constexpr int kSymSchedBigBatchTasks = SymSchedMaxWorksIn4K(kSymSchedBigBatchChannels, false);
+static_assert(kSymSchedBigBatchTasks > 1 && kSymSchedBigBatchTasks < kSymSchedBigBatchChannels,
+              "big batch must hold several works and leave channel headroom");
+// A channel count whose fullest batch lands on exactly 4 KB, so the guard's `>` boundary is exercised.
+constexpr int SymSchedExact4KChannels() {
+  for (int c = 2; c <= MAXCHANNELS; c++) {
+    int n = SymSchedMaxWorksIn4K(c, false);
+    if (n > 1 && n < c && ncclSymkDevWorkArgs::calcArgsSize(c, n, false) == sizeof(ncclSymkDevWorkArgs4K)) return c;
+  }
+  return 0;
+}
+constexpr int kSymSchedExact4KChannels = SymSchedExact4KChannels();
+static_assert(kSymSchedExact4KChannels > 0, "no channel count fills the 4 KB symmetric argument exactly");
+constexpr int kSymSchedExact4KTasks = SymSchedMaxWorksIn4K(kSymSchedExact4KChannels, false);
+static_assert(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedExact4KChannels, kSymSchedExact4KTasks, false) ==
+                sizeof(ncclSymkDevWorkArgs4K),
+              "exact-fill batch must be exactly 4 KB");
+
+// Counts ncclSymkMakeDevWork calls, i.e. the works the scheduler packed into its one batch.
+std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*)>
+SymmetricTaskScheduler_CountMakeDevWork(int* calls) {
+  return [calls](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
+    ++*calls;
+    return ncclSuccess;
+  };
+}
 
 // Builds n tasks (1 cell each, one channel apiece); only the last gets isSymLast. Caller must keep it alive.
 std::vector<ncclTaskColl> SymmetricTaskScheduler_EnqueueBatch(
@@ -1331,17 +1371,19 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_CrossTrayAllGatherNeedsSelector
 }
 
 namespace {
-constexpr uint64_t kTdmOnlyMask = 1ULL << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_TmaST);
+constexpr rcclTuningMask kTdmOnlyMask = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_TmaST);
 
 // Schedules a TDM-window AllGather (ALLOW_TDM_ONLY) and a plain one (ALLOW), windowFirst deciding which leads
 // the input. Returns the tuning mask each batch offered, in batch order, tagged 'w' or 'p' by its head task.
-std::vector<std::pair<char, uint64_t>> ScheduleWindowAndPlain(bool windowFirst, uint64_t windowAlgMask = 0) {
+std::vector<std::pair<char, rcclTuningMask>> ScheduleWindowAndPlain(
+  bool windowFirst, rcclTuningMask windowAlgMask = rcclTuningMask(),
+  ncclSymkKernelMask tdmKernels = ncclSymkKernelMask(1) << ncclSymkKernelId_AllGather_TmaST) {
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
-  ScopedHook tmaMask(g_symkTmaKernelMask, [] { return 1 << (int)ncclSymkKernelId_AllGather_TmaST; });
-  std::vector<std::pair<char, uint64_t>> batches;
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
+  ScopedHook tmaMask(g_symkTmaKernelMask, [tdmKernels] { return tdmKernels; });
+  std::vector<std::pair<char, rcclTuningMask>> batches;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* in, struct ncclTuningResult_t*) {
     batches.emplace_back(in->count == 64 ? 'w' : 'p', in->tuningMask);
     return ncclSuccess;
@@ -1370,7 +1412,7 @@ std::vector<std::pair<char, uint64_t>> ScheduleWindowAndPlain(bool windowFirst, 
 // A task the AllGather TDM window admitted offers the cost model only the TDM kernels, and batches alone,
 // whether it heads the bucket or follows another task. Classification reverses the input order.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskOffersOnlyTdmKernelsInItsOwnBatch) {
-  using Batches = std::vector<std::pair<char, uint64_t>>;
+  using Batches = std::vector<std::pair<char, rcclTuningMask>>;
   EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false),
             (Batches{{'w', kTdmOnlyMask}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
   EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/true),
@@ -1379,12 +1421,24 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskOffersOnlyTdmKerne
 
 // An algSelection that leaves out the TDM kernels keeps its own symmetric kernels.
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskKeepsAnAlgSelectionWithoutTdm) {
-  using Batches = std::vector<std::pair<char, uint64_t>>;
-  const uint64_t st = 1ULL << (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST);
+  using Batches = std::vector<std::pair<char, rcclTuningMask>>;
+  const rcclTuningMask st = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_ST);
   EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st),
             (Batches{{'w', st}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
   EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, st | kTdmOnlyMask),
             (Batches{{'w', kTdmOnlyMask}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
+}
+
+// [RCCL] The TDM-only narrowing keeps TDM kernels with ids above 31, such as AllGather_HierLsaTmaST.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TdmWindowTaskKeepsTdmKernelsPastKernelId31) {
+  using Batches = std::vector<std::pair<char, rcclTuningMask>>;
+  const ncclSymkKernelMask tdm = ncclSymkKernelMask(1) << ncclSymkKernelId_AllGather_TmaST |
+                                 ncclSymkKernelMask(1) << ncclSymkKernelId_AllGather_HierLsaTmaST;
+  const rcclTuningMask expected =
+    rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_TmaST) |
+    rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET + ncclSymkKernelId_AllGather_HierLsaTmaST);
+  EXPECT_EQ(ScheduleWindowAndPlain(/*windowFirst=*/false, rcclTuningMask(), tdm),
+            (Batches{{'w', expected}, {'p', NCCL_TUNING_MASK_SYM_KERNELS}}));
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_UnregisteredRegType_StillEntersSymmetricBucket) {
@@ -1552,7 +1606,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ArgsSizeGuard_TooSmall_ReturnsI
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
   task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = 0;  // deliberately below calcArgsSize(MAXCHANNELS, 1, false)'s minimum
+  scene.comm->workArgsBytes = 0;  // deliberately below the single-work minimum
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
@@ -1571,7 +1625,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_ArgsSizeGuard_SufficientlyLarge
   ncclTaskColl task{};
   task.func = ncclFuncBroadcast;
   task.datatype = ncclInt8;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 1, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 1, false));
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   // Explicit success: the fallback-to-remainder needs this to succeed, but the canonical default now fails loudly.
@@ -1587,7 +1641,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_OuterCursorLoop_VisitsEveryDist
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 1, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 1, false));
 
   ncclTaskColl task2{};
   task2.func = ncclFuncAllGather;  // distinct bucket from task1 (different func)
@@ -1613,7 +1667,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ConfigBoundary_Fo
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   ncclTaskColl task1{};  // classified first -> becomes the bucket's tail (processed 2nd by the cursor loop)
   task1.func = ncclFuncBroadcast;
@@ -1640,7 +1694,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ConfigBoundary_Ne
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   ncclTaskColl task1{};  // classified first -> tail (processed second): its OWN aggIsolate isolates it too
   task1.func = ncclFuncBroadcast;
@@ -1668,7 +1722,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExh
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
   // Room for exactly 2 works per batch, not 3: forces a break after the 2nd task of a 3-task bucket.
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 2, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 2, false));
 
   // Bucket is LIFO (last classified = head = first processed), so classify taskThird, taskSecond, taskFirst.
   ncclTaskColl taskFirst{};
@@ -1696,6 +1750,68 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_ArgsSizeBudgetExh
   EXPECT_EQ(taskSecond.next, &taskThird);
   EXPECT_EQ(taskThird.next, nullptr);
   EXPECT_EQ(scene.comm->planner.nTasksColl, 5);  // 3 classification-- + 3 fallback++ round-trips to original
+}
+
+// The default workArgsBytes is 5 KB, but the symmetric kernels take a 4 KB argument: batches must still fit 4 KB.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_BatchBoundary_WorkArgsAbove4K_CapsBatchesAt4KKernelArg) {
+  constexpr size_t kSymkArgBytes = sizeof(ncclSymkDevWorkArgs4K);
+  // The scheduler must reserve exactly this many channel ranges for a 128-channel communicator.
+  constexpr int nCh = 128;
+  MakeSymmetricTaskList_Scene scene;
+  scene.comm->nChannels = scene.comm->config.maxCTAs = nCh;
+  int maxWorksIn4K = 0;
+  while (symkMaxDevWorkArgsSize(nCh, maxWorksIn4K + 1, false) <= kSymkArgBytes) maxWorksIn4K++;
+  ASSERT_GT(maxWorksIn4K, 0);
+  const int nTasks = maxWorksIn4K + 13;
+
+  scene.comm->planner.nTasksColl = nTasks;
+  g_symRegType = ncclSymSendRegRecvReg;
+  scene.comm->workArgsBytes = sizeof(ncclDevKernelArgs5K);
+  // Without the 4 KB cap the first batch would take more works than the kernel argument holds.
+  ASSERT_LE(symkMaxDevWorkArgsSize(nCh, maxWorksIn4K + 1, false), scene.comm->workArgsBytes);
+
+  std::vector<ncclTaskColl> tasks(nTasks);
+  for (int i = 0; i < nTasks; ++i) {
+    tasks[i].func = ncclFuncAllReduce;
+    tasks[i].datatype = ncclFloat32;
+    tasks[i].opDev.op = ncclDevSum;
+    tasks[i].next = (i + 1 < nTasks) ? &tasks[i + 1] : nullptr;
+  }
+
+  ScopedHook tuningHook(g_tuningCompute, MakeSymmetricTaskList_TuningSucceeds());
+  struct ncclTaskColl* remainTasksHead = nullptr;
+  ASSERT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &tasks[0], nullptr, &remainTasksHead, &scene.needGenkDevComm), ncclSuccess);
+
+  // Remainder order follows the batch loop's processing order, so isSymLast delimits each batch.
+  std::vector<int> batchSizes;
+  int seen = 0, inBatch = 0;
+  for (ncclTaskColl* t = remainTasksHead; t != nullptr; t = t->next) {
+    seen++;
+    inBatch++;
+    if (t->isSymLast) {
+      batchSizes.push_back(inBatch);
+      inBatch = 0;
+    }
+  }
+  EXPECT_EQ(seen, nTasks);
+  EXPECT_EQ(inBatch, 0);
+  ASSERT_EQ(batchSizes.size(), 2u);
+  EXPECT_EQ(batchSizes[0], maxWorksIn4K);
+  EXPECT_EQ(batchSizes[1], nTasks - maxWorksIn4K);
+  for (int n : batchSizes) EXPECT_LE(symkMaxDevWorkArgsSize(nCh, n, false), kSymkArgBytes);
+}
+
+// The per-launch channel bound: at least ncclSymkRsHierMaxBlocks (96), else min(nChannels, maxCTAs).
+TEST_F(SchedulerMicrotest, SymkMaxLaunchChannels_FloorAt96_ElseMinOfNChannelsAndMaxCtas) {
+  std::unique_ptr<ncclComm> comm(new ncclComm{});
+  struct Case {
+    int nChannels, maxCTAs, expected;
+  };
+  for (const Case& c : {Case{0, 0, 96}, Case{128, 128, 128}, Case{128, 64, 96}, Case{200, 100, 100}}) {
+    comm->nChannels = c.nChannels;
+    comm->config.maxCTAs = c.maxCTAs;
+    EXPECT_EQ(symkMaxLaunchChannels(comm.get()), c.expected) << "nChannels=" << c.nChannels << " maxCTAs=" << c.maxCTAs;
+  }
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_BasicScalarFieldsWiring) {
@@ -1739,7 +1855,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_AggregatesAcrossBat
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   // Bucket is LIFO (last classified = head = first processed), so classify secondTask before headTask.
   ncclTaskColl headTask{};
@@ -1775,7 +1891,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_TuningMaskDefault_W
   MakeSymmetricTaskList_Scene scene;
   ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
 
-  uint64_t capturedMask = 0;
+  rcclTuningMask capturedMask{};
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
     capturedMask = input->tuningMask;
     return ncclSuccess;
@@ -1783,17 +1899,17 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_TuningMaskDefault_W
   struct ncclTaskColl* remainTasksHead = nullptr;
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead, &scene.needGenkDevComm), ncclSuccess);
-  EXPECT_EQ(capturedMask, static_cast<uint64_t>(NCCL_TUNING_MASK_SYM_KERNELS));
+  EXPECT_EQ(capturedMask, NCCL_TUNING_MASK_SYM_KERNELS);
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_TuningMaskOverridden_WhenSymkMaskBitsNonZero) {
   MakeSymmetricTaskList_Scene scene;
   ncclTaskColl task = MakeSymmetricTaskList_MakeTask(scene);
   // A single sym-range bit, not the whole mask, so the overridden value differs from the pre-override default.
-  const uint64_t kOneSymBit = 1ull << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
+  const rcclTuningMask kOneSymBit = rcclTuningMask::bit(NCCL_TUNING_SYM_KERNEL_ID_OFFSET);
   task.algMask = kOneSymBit;
 
-  uint64_t capturedMask = 0;
+  rcclTuningMask capturedMask{};
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
     capturedMask = input->tuningMask;
     return ncclSuccess;
@@ -1814,7 +1930,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_ViaNccl
   task.func = ncclFuncBroadcast;  // not AllGather: the bypass operand must not be what makes this true
   task.datatype = ncclInt32;
   task.opDev.op = ncclDevSum;  // ncclNvlsSupported(ncclDevSum, ncclInt32) == true
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   int capturedNvlsSupport = -1;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1834,7 +1950,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_ViaAllG
   ncclTaskColl task{};
   task.func = ncclFuncAllGather;  // bypasses ncclNvlsSupported entirely
   task.datatype = ncclInt8;       // ncclNvlsSupported(_, ncclInt8) == false: proves the bypass, not this
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   int capturedNvlsSupport = -1;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1855,7 +1971,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_FalseWh
   task.func = ncclFuncAllGather;
   task.datatype = ncclInt32;
   task.opDev.op = ncclDevSum;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   int capturedNvlsSupport = -1;
   ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
@@ -1866,6 +1982,44 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_NvlsSupport_FalseWh
 
   EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), &task, nullptr, &remainTasksHead, &scene.needGenkDevComm), ncclSuccess);
   EXPECT_FALSE(capturedNvlsSupport);
+}
+
+// At rank 0 an in-place AllGather also has sendbuff == recvbuff, so only the other ranks pin the rank offset.
+// The cases that stay 0 keep a producer that marks every AllGather, or every batch, in place from passing.
+TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_InPlace_AllGatherFromItsOwnSliceAtEveryRank) {
+  auto tunedInPlace = [](int rank, std::initializer_list<uintptr_t> sendSlices) {
+    MakeSymmetricTaskList_Scene scene;
+    scene.comm->nRanks = kInPlaceRanks;
+    scene.comm->rank = rank;
+    std::vector<ncclTaskColl> tasks(sendSlices.size());
+    int i = 0;
+    for (uintptr_t sendSlice : sendSlices) {
+      tasks[i] = MakeSymmetricTaskList_MakeTask(scene, ncclFuncAllGather, ncclFloat32);
+      tasks[i].count = kInPlaceCount;
+      tasks[i].recvbuff = reinterpret_cast<void*>(kInPlaceRecvAddr + i * 0x100000);
+      tasks[i].sendbuff = reinterpret_cast<void*>(kInPlaceRecvAddr + i * 0x100000 + sendSlice * kInPlaceSliceBytes);
+      if (i > 0) tasks[i - 1].next = &tasks[i];
+      ++i;
+    }
+    int inPlace = -1;
+    ScopedHook tuningHook(g_tuningCompute, [&](struct ncclTuningInput_t* input, struct ncclTuningResult_t*) {
+      inPlace = input->inPlace;
+      return ncclSuccess;
+    });
+    struct ncclTaskColl* remainTasksHead = nullptr;
+    EXPECT_EQ(ncclMakeSymmetricTaskList(scene.comm.get(), tasks.data(), nullptr, &remainTasksHead,
+                                        &scene.needGenkDevComm),
+              ncclSuccess);
+    EXPECT_EQ(tuningHook.calls, 1);
+    return inPlace;
+  };
+
+  for (int rank = 0; rank < kInPlaceRanks; ++rank) {
+    EXPECT_EQ(tunedInPlace(rank, {static_cast<uintptr_t>(rank)}), 1) << "rank " << rank;
+  }
+  EXPECT_EQ(tunedInPlace(2, {1}), 0) << "rank 2 sending from rank 1's slice";
+  EXPECT_EQ(tunedInPlace(2, {0}), 0) << "rank 2 sending from slice 0, the start of recvbuff";
+  EXPECT_EQ(tunedInPlace(2, {2, 2}), 0) << "a batch of two in-place AllGathers is never tuned as in place";
 }
 
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_TuningInput_CollNetSupportAndRegBuff_WiredFromTheirOwnFakes) {
@@ -2147,7 +2301,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_ConvertSymT
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_MultiTaskBatch_EnqueuesAllInOrder) {
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 5, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 5, false));
 
   // Bucket is LIFO (last classified = head = first processed), so classify secondTask before headTask.
   ncclTaskColl headTask{};
@@ -2180,7 +2334,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_MultiTaskBa
 TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_OuterCursorLoop_MultipleBucketsAllKernelFound_EnqueuesBoth) {
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 1, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 1, false));
 
   ncclTaskColl task2{};
   task2.func = ncclFuncAllGather;  // distinct bucket from task1 (different func)
@@ -2207,7 +2361,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_MixedBuckets_OneKernelFoundOneN
   MakeSymmetricTaskList_Scene scene;
   scene.comm->planner.nTasksColl = 5;
   g_symRegType = ncclSymSendRegRecvReg;
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 1, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 1, false));
 
   ncclTaskColl foundTask{};
   foundTask.func = ncclFuncBroadcast;
@@ -2293,7 +2447,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_FinalAssignmentLoop_StopsAtIsSy
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
   // Room for exactly 2 works per batch, not 3: same split as ...ArgsSizeBudgetExhausted_SplitsIntoTwoBatches.
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 2, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 2, false));
 
   // Bucket is LIFO (last classified = head = first processed): classify taskThird, taskSecond, taskFirst.
   ncclTaskColl taskFirst{};
@@ -2341,7 +2495,7 @@ TEST_F(SchedulerMicrotest, MakeSymmetricTaskList_KnownBug_FallbackTailNextNotNul
   MakeSymmetricTaskList_Scene scene;
   g_symRegType = ncclSymSendRegRecvReg;
   // Room for exactly 2 works per batch, not 3: same split as ...ArgsSizeBudgetExhausted_SplitsIntoTwoBatches.
-  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(MAXCHANNELS, 2, false));
+  scene.comm->workArgsBytes = static_cast<uint32_t>(symkMaxDevWorkArgsSize(symkMaxLaunchChannels(scene.comm.get()), 2, false));
 
   // Bucket is LIFO (last classified = head = first processed): classify taskThird, taskSecond, taskFirst.
   ncclTaskColl taskFirst{};
@@ -2684,18 +2838,20 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_NonTmaKernel_UndersizedGrantAn
   EXPECT_EQ(scene.plan->threadPerBlock, kWarps * kSymTmaWaveSize);
 }
 
-// Head task's nMaxChannels(60) differs from the rest of the batch(kSymSchedBigBatchChannels=100): proves the
-// value comes from headTask specifically, not a std::max shared across the batch (both clear the 4096 floor).
+// Head task's nMaxChannels(60) differs from the rest of the batch(kSymSchedBigBatchChannels=100): the batch fits
+// 4 KB only with 60 channels, so success proves the value comes from headTask, not a std::max across the batch.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_NMaxChannels_DerivedFromHeadTask_FeedsArgsSize) {
-  SymmetricTaskScheduler_Scene scene;
-  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
-                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
   constexpr int kHeadNMaxChannels = 60;
+  constexpr int kTasks = SymSchedMaxWorksIn4K(kHeadNMaxChannels, false);
+  static_assert(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kTasks, false) >
+                  sizeof(ncclSymkDevWorkArgs4K),
+                "with the batch's 100 channels the same works must not fit");
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kTasks, ncclSymkKernelId_AllGather_LL,
+                                                    /*lastIsSymLast=*/1);
   tasks[0].nMaxChannels = kHeadNMaxChannels;
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            std::max(ncclSymkDevWorkArgs::calcArgsSize(kHeadNMaxChannels, kSymSchedBigBatchTasks, false),
-                     sizeof(ncclSymkDevWorkArgs4K)));
+  EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
 
 // A hardcoded cellCount would give alignUp(1,1024)=1024 here, not the correct alignUp(1,256)=256 for float32.
@@ -2715,11 +2871,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_SingleTask_Pr
   ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &task);
   int makeDevWorkCalls = 0;
-  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
-                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
-                               ++makeDevWorkCalls;
-                               return ncclSuccess;
-                             });
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   EXPECT_EQ(makeDevWorkCalls, 1);
 }
@@ -2729,11 +2881,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_ManySameDevFu
   auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
   int makeDevWorkCalls = 0;
-  ScopedHook makeDevWorkHook(g_symkMakeDevWork,
-                             [&](struct ncclComm*, struct ncclTaskColl*, struct ncclSymkDevWork*) {
-                               ++makeDevWorkCalls;
-                               return ncclSuccess;
-                             });
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
   // workCount-specific: one ncclSymkMakeDevWork call per task, so all kSymSchedBigBatchTasks were counted as one batch.
   EXPECT_EQ(makeDevWorkCalls, kSymSchedBigBatchTasks);
@@ -2746,10 +2894,11 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_StopsAtDevFun
   ncclTaskColl mismatchTask = SymmetricTaskScheduler_MakeTask();
   mismatchTask.devFuncId = ncclSymkKernelId_AllGather_LLMC;  // different batch, appended after the big one
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &mismatchTask);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
+  // The batch is full, so counting the trailing task would also trip the 4 KB guard.
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
-                     sizeof(ncclSymkDevWorkArgs4K)));
+  EXPECT_EQ(makeDevWorkCalls, kSymSchedBigBatchTasks);
 }
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_IsSymLastBreak_ExcludesLaterSameBatchTask) {
@@ -2759,10 +2908,11 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_IsSymLastBrea
   ncclTaskColl trailingTask = SymmetricTaskScheduler_MakeTask();  // same devFuncId as the batch, appended after
   trailingTask.isSymLast = 0;
   ncclIntruQueueEnqueue(&scene.symTaskQueue, &trailingTask);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
+  // The batch is full, so counting the trailing task would also trip the 4 KB guard.
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
-                     sizeof(ncclSymkDevWorkArgs4K)));
+  EXPECT_EQ(makeDevWorkCalls, kSymSchedBigBatchTasks);
 }
 
 // Exercises task != nullptr alone: the chain ends before isSymLast ever fires, so only the null check stops it.
@@ -2770,10 +2920,10 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_TerminatesAtC
   SymmetricTaskScheduler_Scene scene;
   auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/0);
+  int makeDevWorkCalls = 0;
+  ScopedHook makeDevWorkHook(g_symkMakeDevWork, SymmetricTaskScheduler_CountMakeDevWork(&makeDevWorkCalls));
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            std::max(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false),
-                     sizeof(ncclSymkDevWorkArgs4K)));
+  EXPECT_EQ(makeDevWorkCalls, kSymSchedBigBatchTasks);
 }
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_TotalCount_AlignsEachTaskUpToCellCount) {
@@ -2815,7 +2965,7 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_WorkCountingLoop_CgaClusterSiz
 
 // ncclSymmetricTaskScheduler args-buffer allocation (symmetric_sched.cc:354-364); packing's own fields unasserted.
 
-// calcArgsSize(2,1,false) is well below the 4096-byte floor, so max() must pick the floor here.
+// calcArgsSize(2,1,false) is well below 4 KB; the scheduler always sizes the args buffer at 4 KB.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_FloorWins_BelowCalcArgsSize) {
   SymmetricTaskScheduler_Scene scene;
   ncclTaskColl task = SymmetricTaskScheduler_MakeTask();
@@ -2824,28 +2974,57 @@ TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_FloorWins_BelowCalcAr
   EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
 
-// The big batch's raw calcArgsSize clears the 4096 floor; a crash here would mean calloc's size didn't match.
-TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_CalcWins_AboveFloor) {
+// A batch whose args are exactly 4 KB is accepted; packing it must not overrun calloc.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_ExactlyFillsSymkArg_Accepted) {
   SymmetricTaskScheduler_Scene scene;
-  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedExact4KTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  for (auto& t : tasks) t.nMaxChannels = kSymSchedExact4KChannels;
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, false));
-  ASSERT_GT(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
+  EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
 
-// A big batch with profiling on: the profiler-counters region is large enough that dropping it would crash.
+// One work past the 4 KB symmetric kernel argument: the kernel would read past it, so the scheduler must refuse.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_AboveSymkArg_ReturnsInternalErrorWithWarn) {
+  SymmetricTaskScheduler_Scene scene;
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks + 1,
+                                                    ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
+  RcclUnitTesting::ScopedDebugLogging debugLogging(NCCL_LOG_WARN, NCCL_ALL);
+  ncclResult_t result = ncclSuccess;
+  const std::string log = RcclUnitTesting::CaptureLog(
+      [&]() { result = ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()); });
+  EXPECT_EQ(result, ncclInternalError);
+  EXPECT_TRUE(RcclUnitTesting::LogHas(log, "exceeds the 4096-byte symmetric kernel argument"));
+  EXPECT_EQ(g_symSchedLastCalloc, nullptr);
+  EXPECT_EQ(scene.plan->kernelSymArgs, nullptr);
+}
+
+// The profiler-counters region counts toward the 4 KB limit: a batch that fits without it must be refused with it.
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_IncludesProfilerCountersRegion_WhenEnabled) {
+  static_assert(ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, true) >
+                  sizeof(ncclSymkDevWorkArgs4K),
+                "the profiler region must push the full batch past 4 KB");
   SymmetricTaskScheduler_Scene scene;
   ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
   auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kSymSchedBigBatchTasks,
                                                     ncclSymkKernelId_AllGather_LL, /*lastIsSymLast=*/1);
   tasks[0].eActivationMask = ncclProfileKernelCh;
   scene.plan->persistent = false;
+  EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclInternalError);
+}
+
+// With profiling on, the largest batch that still fits once the profiler region is counted is accepted.
+TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsSize_ProfilerBatchWithinSymkArg_Accepted) {
+  constexpr int kTasks = SymSchedMaxWorksIn4K(kSymSchedBigBatchChannels, true);
+  static_assert(kTasks > 0, "a profiled batch must fit at least one work");
+  SymmetricTaskScheduler_Scene scene;
+  ScopedHook pluginHook(g_profilerPluginLoaded, []() { return true; });
+  auto tasks = SymmetricTaskScheduler_EnqueueBatch(&scene.symTaskQueue, kTasks, ncclSymkKernelId_AllGather_LL,
+                                                    /*lastIsSymLast=*/1);
+  tasks[0].eActivationMask = ncclProfileKernelCh;
+  scene.plan->persistent = false;
   EXPECT_EQ(ncclSymmetricTaskScheduler(scene.comm.get(), &scene.symTaskQueue, scene.plan.get()), ncclSuccess);
-  EXPECT_EQ(scene.plan->kernelArgsSize,
-            ncclSymkDevWorkArgs::calcArgsSize(kSymSchedBigBatchChannels, kSymSchedBigBatchTasks, true));
+  EXPECT_EQ(scene.plan->kernelArgsSize, sizeof(ncclSymkDevWorkArgs4K));
 }
 
 TEST_F(SchedulerMicrotest, SymmetricTaskScheduler_ArgsBufNMaxChannels_SetFromLocal) {

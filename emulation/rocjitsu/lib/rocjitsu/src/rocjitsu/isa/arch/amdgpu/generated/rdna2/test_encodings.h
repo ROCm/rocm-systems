@@ -229,6 +229,8 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"s_dcache_inv", {0xF4800000U, 0x00000000U}},
     {"s_memtime", {0xF4900000U, 0x00000000U}},
     {"s_memrealtime", {0xF4940000U, 0x00000000U}},
+    {"s_atc_probe", {0xF4980000U, 0x00000000U}},
+    {"s_atc_probe_buffer", {0xF49C0000U, 0x00000000U}},
     {"v_nop", {0x7E000000U, 0x00000000U}},
     {"v_mov_b32", {0x7E000200U, 0x00000000U}},
     {"v_readfirstlane_b32", {0x7E000400U, 0x00000000U}},
@@ -604,6 +606,9 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"v_frexp_mant_f32", {0xD5C00000U, 0x00000000U}},
     {"v_clrexcp", {0xD5C10000U, 0x00000000U}},
     {"v_movreld_b32", {0xD5C20000U, 0x00000000U}},
+    {"v_movrels_b32", {0xD5C30000U, 0x00000000U}},
+    {"v_movrelsd_b32", {0xD5C40000U, 0x00000000U}},
+    {"v_movrelsd_2_b32", {0xD5C80000U, 0x00000000U}},
     {"v_cvt_f16_u16", {0xD5D00000U, 0x00000000U}},
     {"v_cvt_f16_i16", {0xD5D10000U, 0x00000000U}},
     {"v_cvt_u16_f16", {0xD5D20000U, 0x00000000U}},
@@ -1388,7 +1393,7 @@ inline constexpr TestEncoding ENCODINGS[] = {
     {"flat_atomic_fmax_x2", {0xDD800000U, 0x00000000U}},
 };
 
-inline constexpr size_t NUM_ENCODINGS = 1367;
+inline constexpr size_t NUM_ENCODINGS = 1372;
 
 } // namespace rocjitsu::rdna2::test_data
 

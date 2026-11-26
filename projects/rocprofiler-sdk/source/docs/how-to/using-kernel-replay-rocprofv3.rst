@@ -69,6 +69,11 @@ Collecting counters with kernel replay
 counter groups (one pass per group). There is no separate pass-count flag. ``rocprofv3`` uses
 callback dispatch counting for counter records; ``replay_pass`` is emitted on that path.
 
+``--kernel-replay-beta-enabled`` only acknowledges the beta; it does not select kernel replay.
+Passing it without ``--replay-mode kernel`` or an input-file job with ``replay_mode: kernel`` is
+rejected rather than ignored, so a command line that asks only for the acknowledgement cannot
+quietly fall back to application replay.
+
 .. code-block:: bash
 
    rocprofv3 --pmc SQ_WAVES GRBM_COUNT --pmc GRBM_GUI_ACTIVE --replay-mode kernel --kernel-replay-beta-enabled -- <application_path>
@@ -156,11 +161,16 @@ columns and continues to report the sum across hardware instances.
 What is snapshotted
 ===================
 
-Snapshot and restore are implemented in the SDK. Between passes, kernel replay restores
-coarse-grained device VRAM and module-scope ``__device__`` / ``__constant__`` variables. Unified,
-managed, ``hipMallocAsync``, host, fine-grained, kernarg, and executable allocations are not
-restored. Capture is a full in-memory copy; cost is ``O(tracked_bytes × passes)``. See
-:ref:`kernel-replay-memory-snapshot` and :ref:`using-kernel-replay`.
+Between passes, kernel replay restores tracked coarse-grained device VRAM and module-scope
+``__device__`` / ``__constant__`` variables exposed as HSA variable symbols. Internal or static
+state not exposed as symbols is not restored. Detected unsupported argument memory, failed
+snapshot capture, or failed required memory checks cause the dispatch to run once without replay.
+Capture is a full in-memory copy; cost is ``O(tracked_bytes × passes)``.
+
+The guard is best effort: it checks metadata-described pointers, ``by_value`` arguments of at
+least 16 bytes, and printf/hostcall/heap pointers. Other hidden arguments, smaller aggregates,
+pointer fields off the eight-byte scan stride, and indirect pointers can be missed.
+See :ref:`kernel-replay-memory-snapshot` and :ref:`using-kernel-replay`.
 
 The last executed pass is **not** restored, so the application sees the memory the kernel actually
 produced.

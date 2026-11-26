@@ -3614,7 +3614,7 @@ def test_split_counters_by_pass_keeps_each_pass_values():
 
     assert list(pass_tables) == ["pmc_perf_0", "pmc_perf_1"]
     second = pass_tables["pmc_perf_1"]
-    assert "GRBM_GUI_ACTIVE" not in second.columns
+    assert "GRBM_GUI_ACTIVE" not in second
     assert second["Kernel_Name"].tolist() == ["kernel_a", "kernel_a"]
     assert second["SQ_WAVES"].tolist()[0] == 6
     assert (second["End_Timestamp"] - second["Start_Timestamp"]).tolist()[0] == 30

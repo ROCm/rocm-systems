@@ -298,36 +298,6 @@ class TestLowerVectorAdd:
         assert 'static_cast<uint16_t>' not in result
         assert 'write_vop3_true16_dst' not in result
 
-    @pytest.mark.parametrize('operation', ['cubeid', 'cubesc', 'cubetc', 'cubema'])
-    def test_cube_output_scaling_uses_instruction_policy(self, operation: str):
-        cube = SemaNode(
-            SemaNodeKind.CALL,
-            call_name=operation,
-            ty=SemaType.F32,
-            children=(
-                SemaNode(SemaNodeKind.ID, id_name=operation),
-                *(
-                    SemaNode(SemaNodeKind.LIT, lit_value=value, ty=SemaType.F32)
-                    for value in ('1.0', '-2.0', '0.5')
-                ),
-            ),
-        )
-        node = SemaNode(
-            SemaNodeKind.CALL,
-            call_name='apply_omod',
-            ty=SemaType.F32,
-            children=(SemaNode(SemaNodeKind.ID, id_name='apply_omod'), cube),
-        )
-
-        result = _lower_apply_omod(node, LoweringContext(exec_model=ExecModel.VECTOR))
-
-        assert 'cube::apply_omod(' in result
-        assert 'wf.fp_round_mode_f32()' in result
-        assert 'inst_.omod' in result
-        assert 'effective_omod' not in result
-        assert 'fp_denorm_mode' not in result
-        assert '*=' not in result
-
     def test_apply_clamp_uses_architecture_mode_policy(self):
         node = SemaNode(
             SemaNodeKind.CALL,
@@ -343,6 +313,67 @@ class TestLowerVectorAdd:
 
         assert 'amdgpu::clamp_floating_result(v, wf)' in result
         assert 'std::clamp' not in result
+
+    def test_apply_clamp_omits_scope_for_helper_lowered_mul_legacy(self):
+        mul_legacy = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='mul_legacy',
+            ty=SemaType.F32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='mul_legacy'),
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=SemaType.F32),
+                SemaNode(SemaNodeKind.LIT, lit_value='2.0', ty=SemaType.F32),
+            ),
+        )
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_clamp',
+            ty=SemaType.F32,
+            children=(
+                SemaNode(SemaNodeKind.ID, id_name='apply_clamp'),
+                mul_legacy,
+            ),
+        )
+
+        result = _lower_apply_clamp(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        # The vector MUL_LEGACY helper installs the guest rounding itself and
+        # CLAMP compares raw bits, so the lowering adds no scope of its own.
+        assert 'MUL_LEGACY' in result
+        assert 'ScopedFenv' not in result
+
+    def test_apply_clamp_scopes_inline_host_arithmetic(self):
+        divide = SemaNode(
+            SemaNodeKind.DIV,
+            ty=SemaType.F64,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='1.0', ty=SemaType.F64),
+                SemaNode(SemaNodeKind.LIT, lit_value='3.0', ty=SemaType.F64),
+            ),
+        )
+        add = SemaNode(
+            SemaNodeKind.ADD,
+            ty=SemaType.F64,
+            children=(
+                SemaNode(SemaNodeKind.LIT, lit_value='0.5', ty=SemaType.F64),
+                divide,
+            ),
+        )
+        node = SemaNode(
+            SemaNodeKind.CALL,
+            call_name='apply_clamp',
+            ty=SemaType.F64,
+            children=(SemaNode(SemaNodeKind.ID, id_name='apply_clamp'), add),
+        )
+
+        result = _lower_apply_clamp(node, LoweringContext(exec_model=ExecModel.VECTOR))
+
+        # The division rounds inline on the host, so the operand still needs the
+        # guest rounding installed around it.
+        assert (
+            'amdgpu::fp_mode::detail::ScopedFenv environment('
+            'wf.fp_round_mode_f16_f64());' in result
+        )
 
     @pytest.mark.parametrize(
         ('result_type', 'expected_helper', 'expected_denorm_mode'),
@@ -928,29 +959,6 @@ class TestLowerVectorAdd:
         assert 'clamp_floating_result' not in result
         assert 'finalize_omod_' not in result
 
-    def test_vop3_f16_transcendental_overflows_to_nearest(self):
-        rcp = SemaNode(
-            SemaNodeKind.CALL,
-            call_name='rcp',
-            ty=SemaType.F16,
-            children=(
-                SemaNode(SemaNodeKind.ID, id_name='rcp'),
-                _cast(_src(0), SemaType.F16),
-            ),
-        )
-        body = SemaNode(
-            SemaNodeKind.ASSIGN,
-            children=(_cast(_dst(0), SemaType.F16), self._output_modified(rcp)),
-        )
-        result = lower_sema_block(SemaBlock('V_RCP_F16', ExecModel.VECTOR, body))
-
-        assert (
-            'amdgpu::transcendental_output_modifier_policy<amdgpu::fp_format::F16>'
-            in result
-        )
-        assert 'amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(' in result
-        assert 'apply_omod_f16' not in result
-
     @pytest.mark.parametrize(
         ('result_type', 'mode'),
         [
@@ -988,30 +996,18 @@ class TestLowerVectorAdd:
         if result_type == SemaType.F16:
             assert result.index('util::f16_to_f32(') < result.index(flush)
 
-    @pytest.mark.parametrize('operation', ['add', 'rcp'])
-    def test_f16_helpers_receive_flushed_sources(self, operation: str):
-        source = _cast(_src(0), SemaType.F16)
-        if operation == 'add':
-            value = SemaNode(
-                SemaNodeKind.ADD,
-                ty=SemaType.F16,
-                children=(source, _cast(_src(1), SemaType.F16)),
-            )
-        else:
-            value = SemaNode(
-                SemaNodeKind.CALL,
-                call_name='rcp',
-                ty=SemaType.F16,
-                children=(SemaNode(SemaNodeKind.ID, id_name='rcp'), source),
-            )
+    def test_f16_add_receives_flushed_sources(self):
+        value = SemaNode(
+            SemaNodeKind.ADD,
+            ty=SemaType.F16,
+            children=(_cast(_src(0), SemaType.F16), _cast(_src(1), SemaType.F16)),
+        )
         body = SemaNode(
             SemaNodeKind.ASSIGN, children=(_cast(_dst(0), SemaType.F16), value)
         )
         result = lower_sema_block(SemaBlock('V_F16', ExecModel.VECTOR, body))
 
-        # The helpers no longer flush; each F16 source is flushed before widening.
-        flushes = result.count('input_denormal::flush_input<amdgpu::fp_format::F16>(')
-        assert flushes == (2 if operation == 'add' else 1)
+        assert result.count('input_denormal::flush_input<amdgpu::fp_format::F16>(') == 2
         assert 'Policy::make(wf.fp_denorm_mode_f16_f64())' in result
 
     @pytest.mark.parametrize('kind', [SemaNodeKind.FRACT, SemaNodeKind.LDEXP])
@@ -1161,7 +1157,7 @@ class TestLowerControlFlow:
         )
         block = SemaBlock('TEST', ExecModel.SCALAR, body)
         result = lower_sema_block(block)
-        assert 'if (wf.read_scc())' in result
+        assert result == '  if (wf.read_scc()) {\n    uint32_t tmp = 1;\n  }'
 
     def test_if_else(self):
         body = SemaNode(

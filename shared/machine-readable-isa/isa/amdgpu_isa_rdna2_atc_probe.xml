@@ -1,0 +1,109 @@
+<IsaAdditions Id="rdna2-atc-probe" BaseArchitecture="AMD RDNA 2" BaseSchemaVersion="1.1.1">
+  <!-- RDNA2 manual sections 12.6 and 13.2, SMEM opcodes 38 and 39.
+       The GFX10 layout and operands match RDNA1. LLVM SMInstructions.td
+       defines both gfx10 probe encodings. RDNA2 has no SIMM8 operand
+       enumerator; represent the eight-bit argument with its integer immediate
+       class and retain OperandSize=8 and the encoded SDATA width. -->
+  <EncodingIdentifierAdditions>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_SMEM</EncodingName>
+      <Opcode>38</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011110100100110000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+    <EncodingIdentifierAddition>
+      <EncodingName>ENC_SMEM</EncodingName>
+      <Opcode>39</Opcode>
+      <EncodingIdentifier Radix="2">0000000000000000000000000000000011110100100111000000000000000000</EncodingIdentifier>
+    </EncodingIdentifierAddition>
+  </EncodingIdentifierAdditions>
+  <InstructionAdditions>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>S_ATC_PROBE</InstructionName>
+      <Description>Probe or prefetch an address into the scalar data cache.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_SMEM</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">38</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>SDATA</FieldName>
+              <DataFormatName>FMT_NUM_B8</DataFormatName>
+              <OperandType>OPR_SIMM16</OperandType>
+              <OperandSize>8</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SBASE</FieldName>
+              <DataFormatName>FMT_BUF</DataFormatName>
+              <OperandType>OPR_SREG_NONULL</OperandType>
+              <OperandSize>64</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SOFFSET</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_SMEM_OFFSET</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>SMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+    <Instruction>
+      <InstructionFlags>
+        <IsBranch>FALSE</IsBranch>
+        <IsConditionalBranch>FALSE</IsConditionalBranch>
+        <IsIndirectBranch>FALSE</IsIndirectBranch>
+        <IsProgramTerminator>FALSE</IsProgramTerminator>
+        <IsImmediatelyExecuted>FALSE</IsImmediatelyExecuted>
+      </InstructionFlags>
+      <InstructionName>S_ATC_PROBE_BUFFER</InstructionName>
+      <Description>Probe or prefetch an address into the scalar data cache.</Description>
+      <InstructionEncodings>
+        <InstructionEncoding>
+          <EncodingName>ENC_SMEM</EncodingName>
+          <EncodingCondition>default</EncodingCondition>
+          <Opcode Radix="10">39</Opcode>
+          <Operands>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="1">
+              <FieldName>SDATA</FieldName>
+              <DataFormatName>FMT_NUM_B8</DataFormatName>
+              <OperandType>OPR_SIMM16</OperandType>
+              <OperandSize>8</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="2">
+              <FieldName>SBASE</FieldName>
+              <DataFormatName>FMT_RSRC_SCALAR</DataFormatName>
+              <OperandType>OPR_SREG_NONULL</OperandType>
+              <OperandSize>128</OperandSize>
+            </Operand>
+            <Operand Input="true" Output="false" IsImplicit="false" IsBinaryMicrocodeRequired="true" Order="3">
+              <FieldName>SOFFSET</FieldName>
+              <DataFormatName>FMT_NUM_B32</DataFormatName>
+              <OperandType>OPR_SMEM_OFFSET</OperandType>
+              <OperandSize>32</OperandSize>
+            </Operand>
+          </Operands>
+        </InstructionEncoding>
+      </InstructionEncodings>
+      <FunctionalGroup>
+        <Name>SMEM</Name>
+        <FunctionalSubgroups>
+          <Subgroup>NOT_ASSIGNED</Subgroup>
+        </FunctionalSubgroups>
+      </FunctionalGroup>
+    </Instruction>
+  </InstructionAdditions>
+</IsaAdditions>

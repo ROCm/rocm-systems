@@ -16,9 +16,17 @@ if(UNIX)
   list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH})
 endif()
 
-set(CMAKE_HIP_ARCHITECTURES OFF)
+if(WIN32)
+  if(NOT DEFINED HIP_PATH)
+    if(DEFINED ENV{HIP_PATH})
+      set(HIP_PATH "$ENV{HIP_PATH}" CACHE STRING "HIP Path")
+    endif()
+  endif()
+endif()
 
-project(12_cmake_hip_add_executable LANGUAGES CXX)
+set(CMAKE_HIP_ARCHITECTURES OFF CACHE STRING "HIP architectures to compile for")
+
+project(12_cmake_hip_add_executable LANGUAGES CXX HIP)
 
 # FindHIP.cmake compatibility shim — exercises the legacy find_package(HIP MODULE)
 # path and HIP_ADD_EXECUTABLE macro, which internally delegate to
@@ -38,6 +46,7 @@ else()
   set(EXCLUDE_OPTION)
 endif()
 
+set_source_files_properties(MatrixTranspose.cpp PROPERTIES LANGUAGE HIP)
 hip_add_executable(MatrixTranspose1 ${EXCLUDE_OPTION} MatrixTranspose.cpp)
 
 target_include_directories(MatrixTranspose1 PRIVATE ../../common)

@@ -13,6 +13,39 @@ Torch and Triton tracing are experimental. Every command needs
 `--experimental`, and option names can change between releases, so run
 `rocprof-compute profile --experimental --help` first.
 
+## Before you start
+
+If `command -v rocprof-compute` finds the tool and
+`rocprof-compute analyze --debug-verify-deps` passes, skip this section.
+On ROCm 10.2, use `--verify-deps` instead of `--debug-verify-deps`.
+
+Otherwise, check that ROCm and a GPU are present:
+
+```bash
+rocminfo
+amd-smi list
+```
+
+If either command fails, ROCm is not installed or no GPU is visible. Stop and
+point the user to "Install the ROCm Core SDK" in the
+[install guide](../../docs/install/core-install.rst). Installing rocprof-compute
+alone does not help.
+
+Check the GPU against
+[compatible accelerators](../../docs/reference/compatible-accelerators.rst).
+The table lists product families, so match the `Marketing Name` that `rocminfo`
+prints, and use the `gfx` name to confirm. If the GPU is not supported, stop and
+tell the user.
+
+Then follow "Install the analyze mode dependencies" in the
+[install guide](../../docs/install/core-install.rst), which installs
+rocprof-compute in a virtual environment of its own. Use the nightly index so the
+version matches these skills. Activate that environment with
+`source <venv>/bin/activate` before you run rocprof-compute, and confirm with
+`rocprof-compute analyze --debug-verify-deps`. If the application is a Python
+script, note the full path of its Python before you activate, and run the
+script with that path.
+
 ## 1. Check the requirements
 
 Torch tracing needs PyTorch installed against a matching ROCm. PyTorch 2.13
@@ -54,6 +87,12 @@ do not get `|triton` ranges. Attribute them with `--trace-ml-api torch`.
 The two combine as `--trace-ml-api torch triton`. User-defined ROCTx regions
 are included with every `--trace-ml-api` run. A bare `--trace-ml-api` traces
 all supported ML frameworks as well.
+
+On ROCm 10.2 and earlier, use `--torch-trace`, `--triton-trace` and
+`--ml-api-trace` instead of `--trace-ml-api torch`, `--trace-ml-api triton` and
+a bare `--trace-ml-api`, and use `--list-torch-operators`,
+`--list-triton-operators`, `--torch-operator` and `--triton-operator` instead of
+`--list-operators torch`, `--list-operators triton` and `--operator`.
 
 Tracing adds overhead on top of the usual counter replay. Profile a few
 iterations of a steady-state model rather than a full training run, and skip

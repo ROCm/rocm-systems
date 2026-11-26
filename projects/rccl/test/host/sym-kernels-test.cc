@@ -365,6 +365,25 @@ TEST_F(SymKernelMaskTest, NeedGinTrue_HasGinFalse_EverythingCleared) {
   EXPECT_EQ(kmask, 0u);
 }
 
+// A window left without GIN segments must not keep the rail kernels: their put
+// would read a null segment table. The default argument still keeps them.
+TEST_F(SymKernelMaskTest, NeedGinTrue_UnregisteredGinWindow_EverythingCleared) {
+  ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
+    ncclTeam_t t{};
+    t.nRanks = 2;
+    return t;
+  });
+  ScopedHook loadParam(g_loadParam, SymGinKernelsEnable(1));
+  ncclSymkKernelMask blocked =
+      ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true,
+                   /*ginWindowsUnregistered=*/true);
+  EXPECT_EQ(blocked, 0u);
+  ncclSymkKernelMask kept =
+      ncclSymkMask(comm_.get(), ncclFuncAllGather, ncclDevSum, kTy, /*nElts=*/1024, /*symAligned16B=*/true,
+                   /*ginWindowsUnregistered=*/false);
+  EXPECT_TRUE(KernelBitSet(kept, ncclSymkKernelId_AllGather_RailRing_LsaST));
+}
+
 // Init marks the GIN backend unsupported (Anvil SDMA): the same empty mask as SYM_GIN_KERNELS_ENABLE=0.
 TEST_F(SymKernelMaskTest, NeedGinTrue_GinBackendUnsupported_EverythingCleared) {
   ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
@@ -492,6 +511,25 @@ TEST_F(SymKernelMaskTest, AllGather_AGKernelSurvives) {
 
 // ---- Hierarchical AllGather: packages found in peerInfo, and the mask gate ----
 
+TEST_F(SymKernelMicrotest, AgHierLimits_UnsetEnvKeepsTheDefaults) {
+  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierMaxBlocks);
+  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), ncclSymkAgHierMaxChunkBytes);
+}
+
+TEST_F(SymKernelMicrotest, AgHierLimits_EnvOverridesAndClamps) {
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 96}, {"SYM_AG_HIER_CHUNK_BYTES", 64 << 10}});
+  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), 96);
+  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), size_t(64 << 10));
+
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 10000}, {"SYM_AG_HIER_CHUNK_BYTES", int64_t(1) << 40}});
+  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), MAXCHANNELS);
+  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), size_t(1) << 30);
+
+  g_loadParam = ParamOverride({{"SYM_AG_HIER_CTAS", 0}, {"SYM_AG_HIER_CHUNK_BYTES", -1}});
+  EXPECT_EQ(ncclSymkAgHierMaxBlocksLimit(), ncclSymkAgHierMaxBlocks);
+  EXPECT_EQ(ncclSymkAgHierMaxChunkBytesLimit(), ncclSymkAgHierMaxChunkBytes);
+}
+
 // A package is a run of consecutive ranks on one physical device, and every package must be the same size.
 TEST_F(SymKernelMicrotest, HierScaleInSize_EqualRunsOfConsecutiveRanksPerDevice) {
   struct {
@@ -518,7 +556,7 @@ TEST_F(SymKernelMicrotest, HierScaleInSize_EqualRunsOfConsecutiveRanksPerDevice)
   comm_->peerInfo = nullptr;
 }
 
-TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePackages) {
+TEST_F(SymKernelMaskTest, HierKernels_OnlyOnGfx1250PartitionModeWithTwoOrMorePackages) {
   struct {
     const char* name;
     bool gfx1250;
@@ -543,7 +581,44 @@ TEST_F(SymKernelMaskTest, HierLsaST_OnlyOnGfx1250PartitionModeWithTwoOrMorePacka
     EXPECT_EQ(KernelBitSet(kmask, ncclSymkKernelId_AllGather_HierLsaTmaST), c.offered && TmaReachableOnThisBuild())
         << c.name;
     EXPECT_TRUE(KernelBitSet(kmask, ncclSymkKernelId_AllGather_ST)) << c.name;
+    // The hierarchical ReduceScatter has the same gate, and is sum only.
+    ncclSymkKernelMask rsSum = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSum, kTy, /*nElts=*/1024);
+    EXPECT_EQ(KernelBitSet(rsSum, ncclSymkKernelId_ReduceScatter_HierLsaLDST), c.offered) << c.name;
+    ncclSymkKernelMask rsAvg = ncclSymkMask(comm_.get(), ncclFuncReduceScatter, ncclDevSumPostDiv, kTy, /*nElts=*/1024);
+    EXPECT_FALSE(KernelBitSet(rsAvg, ncclSymkKernelId_ReduceScatter_HierLsaLDST)) << c.name;
   }
+}
+
+// Blocks step up at 16 and 64 MiB of bus bytes. The chunk drops to the small one below 512 KiB per block, and never
+// exceeds what the slots were sized for.
+TEST_F(SymKernelMicrotest, RsHierLaunch_BlocksAndChunkSize) {
+  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, (size_t(4) << 20) - 1), 64);
+  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, size_t(4) << 20), 80);
+  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, (size_t(16) << 20) - 1), 80);
+  EXPECT_EQ(ncclSymkRsHierLaunchBlocks(4, size_t(16) << 20), ncclSymkRsHierMaxBlocks);
+
+  comm_->symkState.kcomm.rsHierChunkSize = ncclSymkRsHierMaxChunkBytes;
+  EXPECT_EQ(ncclSymkRsHierLaunchChunkSize(comm_.get(), ncclSymkRsHierChunkSwitchBlockBytes - 1),
+            ncclSymkRsHierMinChunkBytes);
+  EXPECT_EQ(ncclSymkRsHierLaunchChunkSize(comm_.get(), ncclSymkRsHierChunkSwitchBlockBytes),
+            ncclSymkRsHierMaxChunkBytes);
+  comm_->symkState.kcomm.rsHierChunkSize = 16 << 10;  // slots shrunk to fit many packages
+  EXPECT_EQ(ncclSymkRsHierLaunchChunkSize(comm_.get(), 0), 16u << 10);
+}
+
+// The mask drops the hierarchical kernels across LSA teams, so the groups that open their window must be 0 too.
+TEST_F(SymKernelMaskTest, HierGroups_LsaTeamSmallerThanTheComm_NoGroups) {
+  SetTdmCapableArch(comm_.get());
+  comm_->hasMloPart = true;
+  comm_->symkState.kcomm.hierScaleInSize = 2;
+  ScopedHook teamLsa(g_ncclTeamLsa, [](ncclComm_t) {
+    ncclTeam_t t{};
+    t.nRanks = 4;
+    return t;
+  });
+  EXPECT_EQ(ncclSymkHierGroups(comm_.get()), 2);
+  comm_->nRanks = 8;
+  EXPECT_EQ(ncclSymkHierGroups(comm_.get()), 0);
 }
 
 TEST_F(SymKernelMaskTest, UnsupportedCollective_EntireMaskZeroed) {
@@ -618,6 +693,20 @@ TEST_F(SymKernelMicrotest, SymkAvailable_AllReduceFloat64_NotAvailable) {
   comm_->symmetricSupport = true;  // otherwise the first guard answers before f64 is considered
   ASSERT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat32, /*nElts=*/1024));
   EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat64, /*nElts=*/1024));
+}
+
+// An all-direct-link comm without symmetric memory is not offered the symmetric kernels.
+TEST_F(SymKernelMicrotest, SymkAvailable_NoSymmetricSupport_NotAvailable) {
+  comm_->isAllDirectNvlink = true;
+  comm_->symmetricSupport = 0;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, /*nElts=*/1024));
+}
+
+// The same comm with symmetric support is offered them, so the flag alone makes the difference.
+TEST_F(SymKernelMicrotest, SymkAvailable_SymmetricSupport_Available) {
+  comm_->isAllDirectNvlink = true;
+  comm_->symmetricSupport = 1;
+  EXPECT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, /*nElts=*/1024));
 }
 
 // HIP builds no AlltoAll_LL kernel (it is inline PTX), so the symmetric path must never be offered for AlltoAll, even

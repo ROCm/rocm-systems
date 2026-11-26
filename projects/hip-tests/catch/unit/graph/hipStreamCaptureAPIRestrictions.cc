@@ -495,6 +495,7 @@ HIP_TEST_CASE(Unit_hipEventQuery_SameThread_GlobalCapture) {
   HIP_CHECK(hipFree(d_data));
   HIP_CHECK(hipStreamDestroy(otherStream));
   HIP_CHECK(hipStreamDestroy(captureStream));
+  (void)hipGetLastError();
 }
 
 /**

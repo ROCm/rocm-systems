@@ -5,44 +5,46 @@
 
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 
+#include <gtest/gtest.h>
+
 #include <array>
 #include <span>
 
 namespace mma_test {
 using namespace rocjitsu;
+
+// Policy-only instructions deliberately have no executable callback or mnemonic
+// identity. Qualification must come from the explicitly supplied metadata.
+class PolicyInstruction final : public Instruction {
+public:
+  explicit PolicyInstruction(amdgpu::Operation operation,
+                             amdgpu::Operation secondary = amdgpu::Operation::Unknown,
+                             uint64_t flags = 0)
+      : Instruction("policy_test", nullptr) {
+    set_amdgpu_operation(operation, secondary);
+    flags_ = flags;
+  }
+};
+
 // Exercise the production ticket API with caller-owned instructions. Keep the
 // last instruction on the issuer and join every accepted job before returning.
 inline unsigned execute_independent(amdgpu::matrix_coexecution::SharedPool &pool,
                                     std::span<Instruction *> instructions, void *context) {
   assert(instructions.size() <= 8);
   std::array<amdgpu::matrix_coexecution::SharedPool::Ticket, 8> tickets{};
-  std::exception_ptr error;
-  size_t error_index = instructions.size();
   unsigned submitted = 0;
   for (size_t i = 0; i != instructions.size(); ++i) {
     if (i + 1 < instructions.size() && (tickets[i] = pool.submit(*instructions[i], context))) {
       ++submitted;
       continue;
     }
-    try {
-      instructions[i]->execute(*instructions[i], context);
-    } catch (...) {
-      error = std::current_exception();
-      error_index = i;
-      break;
+    instructions[i]->execute(*instructions[i], context);
+  }
+  for (auto ticket : tickets) {
+    if (ticket) {
+      EXPECT_TRUE(pool.finish(ticket).succeeded());
     }
   }
-  for (size_t i = 0; i != instructions.size(); ++i) {
-    if (tickets[i]) {
-      auto helper_error = pool.finish(tickets[i]);
-      if (helper_error && i < error_index) {
-        error = helper_error;
-        error_index = i;
-      }
-    }
-  }
-  if (error)
-    std::rethrow_exception(error);
   return submitted;
 }
 } // namespace mma_test

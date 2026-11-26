@@ -9,6 +9,7 @@
 #define NCCL_SYMMETRIC_SCHED_H_
 
 #include "device.h"
+#include "dev_runtime.h"
 #include "nccl.h"
 #include "scheduler.h"
 #include "tuning.h"
@@ -102,6 +103,18 @@ static bool symBatchesAlone(const struct ncclTaskColl* t) {
   return t->aggIsolate || t->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY;
 }
 
+// [RCCL] Upper bound on a symmetric launch's tuned channel count: the Symk tuning models cap at the
+// hierarchical kernels' max blocks and the Genk model at min(nChannels, maxCTAs).
+static int symkMaxLaunchChannels(struct ncclComm* comm) {
+  return std::max({ncclSymkAgHierMaxBlocks, ncclSymkRsHierMaxBlocks, std::min(comm->nChannels, comm->config.maxCTAs)});
+}
+
+// [RCCL] Symk/Genk kernels take a 4 KB argument even when workArgsBytes is 5 KB, so a batch must fit 4 KB.
+static_assert(sizeof(ncclGenkDevWorkArgs4K) == sizeof(ncclSymkDevWorkArgs4K), "symkMaxArgsBytes assumes one size");
+static size_t symkMaxArgsBytes(struct ncclComm* comm) {
+  return std::min<size_t>(comm->workArgsBytes, sizeof(ncclSymkDevWorkArgs4K));
+}
+
 ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskColl* task,
                                        struct ncclIntruQueue<struct ncclTaskColl, &ncclTaskColl::next>* symTaskQueue,
                                        struct ncclTaskColl** remainTasksHead, bool* needGenkDevComm) {
@@ -137,8 +150,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     if (task->acc != nullptr) symAvailable = false;
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
-    uint64_t effAlgMask = symTaskHasForcedTuning(comm, task->func) ? 0 : task->algMask;
-    bool cfgAllowsSymk = (effAlgMask == 0) || ((effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) != 0);
+    rcclTuningMask effAlgMask = symTaskHasForcedTuning(comm, task->func) ? rcclTuningMask() : task->algMask;
+    bool cfgAllowsSymk = effAlgMask.none() || (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS).any();
 
     bool wantSym = symAvailable && cfgAllowsSymk;
     if (wantSym) {
@@ -178,9 +191,9 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
   if (!foundSymm) return ret;
 
   // make sure kernel args space can hold at least a single work
-  size_t const minArgsSize = symkMaxDevWorkArgsSize(MAXCHANNELS, 1, ncclProfilerPluginLoaded());
-  if (comm->workArgsBytes < minArgsSize) {
-    WARN("Symmetric kernel args size %u is smaller than minimum size %zu", comm->workArgsBytes, minArgsSize);
+  size_t const minArgsSize = symkMaxDevWorkArgsSize(symkMaxLaunchChannels(comm), 1, ncclProfilerPluginLoaded());
+  if (symkMaxArgsBytes(comm) < minArgsSize) {
+    WARN("Symmetric kernel args size %zu is smaller than minimum size %zu", symkMaxArgsBytes(comm), minArgsSize);
     return ncclInternalError;
   }
 
@@ -208,7 +221,8 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
         // (it is the head), or if the next task is one (so it starts its own batch).
         bool configBoundary = symBatchesAlone(task) || (task->next != nullptr && symBatchesAlone(task->next));
         if (headTask->func == ncclFuncAlltoAll ||
-            symkMaxDevWorkArgsSize(MAXCHANNELS, nWorks + 1, ncclProfilerPluginLoaded()) > comm->workArgsBytes ||
+            symkMaxDevWorkArgsSize(symkMaxLaunchChannels(comm), nWorks + 1, ncclProfilerPluginLoaded()) >
+              symkMaxArgsBytes(comm) ||
             task->next == nullptr || configBoundary) {
           task->isSymLast = 1;
           break;
@@ -220,16 +234,16 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       input.tuningMask = NCCL_TUNING_MASK_SYM_KERNELS;
       // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
       // algSelection for any function it forced.
-      uint64_t effAlgMask = symTaskHasForcedTuning(comm, headTask->func) ? 0 : headTask->algMask;
-      if (effAlgMask != 0) {
-        uint64_t symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
-        if (symkMask != 0) input.tuningMask = symkMask;
+      rcclTuningMask effAlgMask = symTaskHasForcedTuning(comm, headTask->func) ? rcclTuningMask() : headTask->algMask;
+      if (effAlgMask.any()) {
+        rcclTuningMask symkMask = effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS;
+        if (symkMask.any()) input.tuningMask = symkMask;
       }
       // [RCCL] The selector admitted this task for its TDM kernel, so offer only TDM kernels,
       // unless the caller's algSelection leaves them out.
       if (headTask->symkExtract == RCCL_SYMK_EXTRACT_ALLOW_TDM_ONLY) {
-        const uint64_t tdmMask = (uint64_t)(uint32_t)ncclSymkTmaKernelMask() << NCCL_TUNING_SYM_KERNEL_ID_OFFSET;
-        if (input.tuningMask & tdmMask) input.tuningMask &= tdmMask;
+        const rcclTuningMask tdmMask = rcclTuningMaskFromSymk(ncclSymkTmaKernelMask());
+        if ((input.tuningMask & tdmMask).any()) input.tuningMask &= tdmMask;
       }
       input.func = headTask->func;
       input.redOp = headTask->opHost;
@@ -249,6 +263,13 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       NCCLCHECK(symBatchAlignment(comm, headTask, &input.symAligned16B));
       input.chunkSteps = headTask->chunkSteps;
       input.sliceSteps = headTask->sliceSteps;
+      input.ginWindowsUnregistered = false;
+      for (struct ncclTaskColl* scan = headTask; scan != nullptr; scan = scan->next) {
+        if (ncclDevrWindowMissingGinSegments(scan->sendWin) || ncclDevrWindowMissingGinSegments(scan->recvWin)) {
+          input.ginWindowsUnregistered = true;
+        }
+        if (scan->isSymLast) break;
+      }
       input.minCTAs = headTask->minCTAs;
       input.maxCTAs = headTask->maxCTAs;
       input.CTAPolicy = headTask->CTAPolicy;
@@ -271,13 +292,13 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
       task = headTask;
       // Hard-error only when the selection was symmetric-only (no general algorithm to fall
       // back to) and force is on; otherwise let the legacy fallback below run.
-      if (kernelId == ncclSymkKernelId_Count && effAlgMask != 0 && (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) != 0 &&
-          (effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS) == 0 && headTask->forceAlgSelection) {
+      if (kernelId == ncclSymkKernelId_Count && effAlgMask.any() && (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS).any() &&
+          (effAlgMask & NCCL_TUNING_MASK_GENERAL_KERNELS).none() && headTask->forceAlgSelection) {
         WARN("algSelection names only symmetric kernel(s) that are unavailable for %s",
              ncclFuncToString(headTask->func));
         return ncclInvalidArgument;
       }
-      if (effAlgMask != 0 && kernelId != ncclSymkKernelId_Count) {
+      if (effAlgMask.any() && kernelId != ncclSymkKernelId_Count) {
         INFO(NCCL_TUNING, "algSelection: %s picked within the selected set", ncclAlgNameForSymk(kernelId));
       }
       // Override needFallback when buffers are registered but VAs contain sysmem segments.
@@ -424,10 +445,18 @@ static ncclResult_t ncclSymmetricTaskSchedulerImpl(
   }
 
   plan->kernelArgsSize = ncclSymkDevWorkArgsSize<Args>(nMaxChannels, workCount, profilerEnabled);
-  // [RCCL] Both kernel families take their args as a by-value 4K union; size the buffer to match.
-  plan->kernelArgsSize =
-    std::max<size_t>(plan->kernelArgsSize,
-                     sizeof(typename std::conditional<Genk, ncclGenkDevWorkArgs4K, ncclSymkDevWorkArgs4K>::type));
+  {
+    // [RCCL] Both kernel families take their args as a by-value 4K union; size the buffer to match.
+    constexpr size_t kArgs4K =
+      sizeof(typename std::conditional<Genk, ncclGenkDevWorkArgs4K, ncclSymkDevWorkArgs4K>::type);
+    if (plan->kernelArgsSize > kArgs4K) {
+      WARN("Symmetric kernel args size %zu for %d works exceeds the %zu-byte symmetric kernel argument",
+           plan->kernelArgsSize, workCount, kArgs4K);
+      ret = ncclInternalError;
+      goto fail;
+    }
+    plan->kernelArgsSize = kArgs4K;
+  }
   argsBuf = (Args*)calloc(1, plan->kernelArgsSize);
   if (argsBuf == NULL) {
     WARN("Failed to allocate %zu bytes of symmetric kernel args", plan->kernelArgsSize);
@@ -552,6 +581,12 @@ static ncclResult_t ncclSymmetricTaskSchedulerImpl(
 
   memcpy(&argsBuf->kcomm, &kcomm, sizeof(kcomm));
   plan->workBytes = totalCount * ncclTypeSize(headTask->datatype);
+  if constexpr (!Genk) {
+    if (kernelId == ncclSymkKernelId_ReduceScatter_HierLsaLDST && curChannel > 0) {
+      // Every rank sees the same count and block count, so they all pick the same chunk size.
+      argsBuf->kcomm.rsHierChunkSize = ncclSymkRsHierLaunchChunkSize(comm, size_t(plan->workBytes) / curChannel);
+    }
+  }
   for (int c = 0; c < curChannel; c++) {
     plan->channelMask.masks[c / 64] |= (uint64_t(1) << (c % 64));
   }

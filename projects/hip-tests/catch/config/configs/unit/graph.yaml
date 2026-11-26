@@ -85,7 +85,7 @@ graph:
     <<: *level_default
     tags: [node]
   Unit_hipGraph_BasicFunctional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [lifecycle, P0]
   Unit_hipGraph_SimpleGraphWithKernel:
     <<: *level_default
@@ -107,6 +107,18 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphClone_MultiThreaded:
     <<: *level_default
+    tags: [lifecycle]
+  Unit_hipGraphInstantiate_NullStreamFenceUnchanged:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, nvidia_linux, nvidia_windows]
+      reason: "ROCM-33637 - requires AMD AQL packet tracing and Linux fork/exec."
+    tags: [lifecycle]
+  Unit_hipGraphInstantiate_CapturedPacketSystemScopePreserved:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, nvidia_linux, nvidia_windows]
+      reason: "ROCM-33637 - requires AMD AQL packet tracing and Linux fork/exec."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_Negative:
     <<: *level_default
@@ -276,9 +288,6 @@ graph:
   Unit_hipGraphExecUpdate_3DMemset_AllocationExtent: *level_default
   Unit_hipGraphExecMemsetNodeSetParams_FlatAlloc_2D: *level_default
   Unit_hipGraphExecNodeSetParams_Memset_FlatAlloc_2D: *level_default
-  Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative:
-    <<: *level_default
-    tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_default
     disabled:
@@ -429,6 +438,15 @@ graph:
   Unit_hipGraphAddChildGraphNode_CmplxGrph_SchedLogic:
     <<: *level_default
     tags: [node]
+  Unit_hipGraphChildMultiStream_ParentChildBoundarySync:
+    <<: *level_2
+    tags: [node, child, multistream]
+  Unit_hipGraphChildMultiStream_SiblingChildren:
+    <<: *level_2
+    tags: [node, child, multistream]
+  Unit_hipGraphChildMultiStream_NestedChild:
+    <<: *level_2
+    tags: [node, child, multistream]
   Unit_hipGraphNodeGetType_Negative:
     <<: *level_default
     tags: [query]
@@ -672,7 +690,7 @@ graph:
       reason: "AIRUNTIME-2892 - fails under device ASAN on gfx90a but passes on the non-ASAN build; disabled on asan pending re-triage."
     tags: [exec, image]
   Unit_hipStreamBeginCapture_Positive_Functional:
-    <<: *level_default
+    level: [*level_0, *level_default]
     tags: [capture]
   Unit_hipStreamBeginCapture_Negative_Parameters:
     <<: *level_default
@@ -1079,7 +1097,8 @@ graph:
   Unit_hipGraphExecGetFlags_Negative:
     <<: *level_default
     tags: [exec]
-  Unit_hipGraphExecGetFlags_Positive: *level_default
+  Unit_hipGraphExecGetFlags_Positive:
+    <<: *level_default
   Unit_hipStreamGetCaptureInfo_Positive_Functional:
     <<: *level_default
     tags: [capture]
@@ -1154,6 +1173,9 @@ graph:
     tags: [exec]
   Unit_hipGraphAddMemsetNode_Positive_Basic:
     <<: *level_default
+  Unit_hipGraphAddMemsetNode_Positive_2DPadding:
+    <<: *level_default
+    tags: [node]
   Unit_hipGraphAddMemsetNode_Negative_Parameters:
     <<: *level_default
     tags: [node]
@@ -1214,8 +1236,6 @@ graph:
   Unit_hipGraphKernelNodeGetParams_Functional:
     <<: *level_default
     tags: [query]
-  Unit_hipGraphKernelNodeSetAttribute_Functional: *level_default
-  Unit_hipGraphKernelNodeSetAttribute_Negative: *level_default
   Unit_hipGraphKernelNodeSetParams_Negative:
     <<: *level_default
     tags: [node]

@@ -4,33 +4,22 @@
 // AVX-512 lane permutations across rows, half-waves, and whole waves.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
-#include "common/simd.h"
 #include "register/permlane.h"
+#include "register/swap.h"
 #include "rj_arith/detail/rj_arith_register.h"
 
 #include <immintrin.h>
 #include <stdint.h>
 
 namespace rocjitsu::arith {
-// Exchange adjacent rows with independent destination masks. Load each pair
-// before storing so the two operands may refer to the same VGPR.
-void swap_rows_x86_64_v4(int lanes, int stride, uint64_t exec_mask, uint32_t *d, uint32_t *a) {
-  for (int base = 0; base + stride < lanes; base += 2 * stride) {
-    for (int i = 0; i < stride; i += 16) {
-      int low = base + i, high = low + stride;
-      auto old_a = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(a + low));
-      auto old_d = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(d + high));
-      _mm512_mask_storeu_epi32(a + low, __mmask16(exec_mask >> low), old_d);
-      _mm512_mask_storeu_epi32(d + high, __mmask16(exec_mask >> high), old_a);
-    }
-  }
-}
-
 // Route within normalized groups, retaining the original lane at invalid boundaries.
 // Stage the complete wave before publishing aliases.
 void group_permutation_x86_64_v4(GroupPermutation op, int lanes, uint64_t exec_mask, uint32_t *d,
                                  const uint32_t *a, uint32_t selector, uint32_t width) {
-  uint32_t result[64];
+  const auto a0 = _mm512_loadu_si512(a);
+  const auto a1 = _mm512_loadu_si512(a + 16);
+  const auto a2 = lanes == 64 ? _mm512_loadu_si512(a + 32) : a0;
+  const auto a3 = lanes == 64 ? _mm512_loadu_si512(a + 48) : a1;
   auto mask = _mm512_set1_epi32(int(width - 1));
   auto selected = _mm512_set1_epi32(int(selector));
   for (int lane = 0; lane < lanes; lane += 16) {
@@ -63,11 +52,12 @@ void group_permutation_x86_64_v4(GroupPermutation op, int lanes, uint64_t exec_m
       break;
     }
     }
-    auto value = _mm512_i32gather_epi32(address, a, 4);
-    _mm512_storeu_si512(result + lane, value);
-  }
-  for (int lane = 0; lane < lanes; lane += 16) {
-    auto value = _mm512_loadu_si512(reinterpret_cast<const __m512i *>(result + lane));
+    auto value = _mm512_permutex2var_epi32(a0, address, a1);
+    if (lanes == 64) {
+      auto upper = _mm512_permutex2var_epi32(a2, address, a3);
+      value = _mm512_mask_mov_epi32(value, _mm512_test_epi32_mask(address, _mm512_set1_epi32(32)),
+                                    upper);
+    }
     _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane), value);
   }
 }

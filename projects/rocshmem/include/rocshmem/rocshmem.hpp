@@ -90,10 +90,10 @@ __host__ void rocshmem_init(void);
  *             which provides better CUDA graph compatibility and automatic
  *             module initialization.
  *
- * @param[out] ctx      Returns ROCSHMEM_CTX_DEFAULT device pointer that users
- *                      can query from one instance of rocshmem host library and
- *                      use later for dynamic module initialization in
- *                      kernel bitcode device library in the same application
+ * @return ROCSHMEM_CTX_DEFAULT device pointer that users can query from one
+ *         instance of rocshmem host library and use later for dynamic module
+ *         initialization in kernel bitcode device library in the same
+ *         application
  */
 [[deprecated("Use rocshmem_hipmodule_init() instead")]]
 __host__ void * rocshmem_get_device_ctx();
@@ -124,9 +124,9 @@ __host__ int rocshmem_hipmodule_init(hipModule_t module, hipStream_t stream = nu
  *
  * @param[in]  pe       remote PE
  *
- * @param[out] ptr      Returns remote symmetric heap device pointer from host-side API.
- *                      This can be used to issue load/store from custom kernels
- *                      instead of using rocshmem device side get/put APIs for RMA operations.
+ * @return Remote symmetric heap device pointer. This can be used to issue
+ *         load/store from custom kernels instead of using rocshmem device
+ *         side get/put APIs for RMA operations.
  */
 __host__ void* rocshmem_ptr(const void *dest, int pe);
 __device__ ATTR_NO_INLINE void* rocshmem_ptr(const void *dest, int pe);
@@ -191,8 +191,6 @@ __host__ int rocshmem_set_attr_uniqueid_args(int rank, int nranks,
  * @brief Query the thread mode used by the runtime.
  *
  * @param[out] provided Thread mode the runtime is operating in.
- *
- * @return void.
  */
 __host__ void rocshmem_query_thread(int *provided);
 
@@ -433,8 +431,6 @@ __host__ int rocshmem_ctx_create(int64_t options, rocshmem_ctx_t *ctx);
  * @brief Destroys an OpenSHMEM context.
  *
  * @param[out] ctx    Context handle.
- *
- * @return void.
  */
 __host__ void rocshmem_ctx_destroy(rocshmem_ctx_t ctx);
 
@@ -505,7 +501,7 @@ __host__ int rocshmem_team_split_2d(rocshmem_team_t parent_team, int xrange,
  * @param[in] start       The lowest PE number of the subset of the PEs
  *                        from the parent team that will form the new
  *                        team.
- * @param[in] stide       The stride between team PE members in the
+ * @param[in] stride      The stride between team PE members in the
  *                        parent team that comprise the subset of PEs
  *                        that will form the new team.
  * @param[in] size        The number of PEs in the new team.
@@ -538,8 +534,6 @@ __host__ int rocshmem_team_split_strided(rocshmem_team_t parent_team,
  *                 ROCSHMEM_TEAM_SHARED are silently ignored (no-op).
  *                 Passing a handle that was already destroyed or
  *                 never created results in undefined behavior.
- *
- * @return None.
  */
 __host__ void rocshmem_team_destroy(rocshmem_team_t team);
 
@@ -548,8 +542,6 @@ __host__ void rocshmem_team_destroy(rocshmem_team_t team);
  * OpenSHMEM semantics.
  *
  * @param[in] ctx     Context with which to perform this operation.
- *
- * @return void.
  */
 __host__ void rocshmem_ctx_fence(rocshmem_ctx_t ctx);
 
@@ -559,8 +551,6 @@ __host__ void rocshmem_fence();
  * @brief Completes all previous operations posted on the host.
  *
  * @param[in] ctx     Context with which to perform this operation.
- *
- * @return void.
  */
 __host__ void rocshmem_ctx_quiet(rocshmem_ctx_t ctx);
 
@@ -570,16 +560,12 @@ __host__ void rocshmem_quiet();
  * @brief enqueues a quiet operation on given stream.
  *
  * @param[in] stream  HIP stream on which to enqueue the operation.
- *
- * @return void
  */
 __host__ void rocshmem_quiet_on_stream(hipStream_t stream);
 
 /**
  * @brief perform a collective barrier between all PEs in the system.
  * The caller is blocked until the barrier is resolved.
- *
- * @return void
  */
 __host__ void rocshmem_barrier_all();
 
@@ -590,15 +576,11 @@ __host__ void rocshmem_barrier_all();
  * Passing ROCSHMEM_TEAM_INVALID is a no-op.
  *
  * @param[in] team Team participating in the barrier.
- *
- * @return void
  */
 __host__ void rocshmem_barrier(rocshmem_team_t team);
 
 /**
  * @brief enqueues a collective barrier on given stream.
- *
- * @return void
  */
 __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
 
@@ -610,8 +592,6 @@ __host__ void rocshmem_barrier_all_on_stream(hipStream_t stream);
  *
  * @param[in] team    Team participating in the barrier.
  * @param[in] stream  HIP stream on which to enqueue the operation.
- *
- * @return void
  */
 __host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
                                          hipStream_t stream);
@@ -620,8 +600,6 @@ __host__ void rocshmem_barrier_on_stream(rocshmem_team_t team,
  * @brief enqueues a sync_all operation on given stream.
  *
  * @param[in] stream  HIP stream on which to enqueue the operation.
- *
- * @return void
  */
 __host__ void rocshmem_sync_all_on_stream(hipStream_t stream);
 
@@ -636,8 +614,6 @@ __host__ void rocshmem_sync_all_on_stream(hipStream_t stream);
  *
  * @param[in] team    Team participating in the sync.
  * @param[in] stream  HIP stream on which to enqueue the operation.
- *
- * @return void
  */
 __host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
                                            hipStream_t stream);
@@ -651,8 +627,6 @@ __host__ void rocshmem_team_sync_on_stream(rocshmem_team_t team,
  * @param[in] source  Source address. Must be an address on the symmetric heap.
  * @param[in] size    Number of bytes to transfer per pair of PEs.
  * @param[in] stream  HIP stream on which to enqueue the operation.
- *
- * @return void
  */
 __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
                                              const void *source, size_t size,
@@ -668,8 +642,6 @@ __host__ void rocshmem_alltoallmem_on_stream(rocshmem_team_t team, void *dest,
  * @param[in] nelems  Number of bytes to broadcast.
  * @param[in] pe_root Root PE (relative to team) from which to broadcast.
  * @param[in] stream  HIP stream on which to enqueue the operation.
- *
- * @return void
  */
 __host__ void rocshmem_broadcastmem_on_stream(rocshmem_team_t team, void *dest,
                                               const void *source, size_t nelems,
@@ -684,8 +656,6 @@ __host__ void rocshmem_broadcastmem_on_stream(rocshmem_team_t team, void *dest,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  * @param[in] stream  HIP stream on which to enqueue the operation.
- *
- * @return void
  */
 __host__ void rocshmem_getmem_on_stream(void *dest, const void *source,
                                         size_t nelems, int pe,
@@ -700,8 +670,6 @@ __host__ void rocshmem_getmem_on_stream(void *dest, const void *source,
  * @param[in] nelems  Size of the transfer in bytes.
  * @param[in] pe      PE of the remote process.
  * @param[in] stream  HIP stream on which to enqueue the operation.
- *
- * @return void
  */
 __host__ void rocshmem_putmem_on_stream(void *dest, const void *source,
                                         size_t nelems, int pe,
@@ -724,8 +692,6 @@ __host__ void rocshmem_putmem_on_stream(void *dest, const void *source,
  * ROCSHMEM_SIGNAL_ADD)
  * @param[in] pe        PE number of the remote PE
  * @param[in] stream    HIP stream on which to enqueue the operation
- *
- * @return void
  */
 __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
                                                size_t nelems,
@@ -745,8 +711,6 @@ __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
  * @param[in] signal    Value to add to the signal data object
  * @param[in] pe        PE number of the remote PE
  * @param[in] stream    HIP stream on which to enqueue the operation
- *
- * @return void
  */
 __host__ void rocshmem_signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
                                             int pe, hipStream_t stream);
@@ -763,8 +727,6 @@ __host__ void rocshmem_signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
  * @param[in] signal    Value to store in the signal data object
  * @param[in] pe        PE number of the remote PE
  * @param[in] stream    HIP stream on which to enqueue the operation
- *
- * @return void
  */
 __host__ void rocshmem_signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
                                             int pe, hipStream_t stream);
@@ -783,8 +745,6 @@ __host__ void rocshmem_signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
  * ROCSHMEM_CMP_GE, ROCSHMEM_CMP_NE, etc.)
  * @param[in] cmp_value Value to compare against
  * @param[in] stream    HIP stream on which to enqueue the operation
- *
- * @return void
  */
 __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
                                                    uint64_t cmp_value,
@@ -797,8 +757,6 @@ __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
  * In contrast with the shmem_barrier_all routine, shmem_sync_all only ensures
  * completion and visibility of previously issued memory stores and does not
  * ensure completion of remote memory updates issued via OpenSHMEM routines.
- *
- * @return void
  */
 __host__ void rocshmem_sync_all();
 
@@ -813,8 +771,6 @@ __host__ void rocshmem_sync_all();
  * Passing ROCSHMEM_TEAM_INVALID is a no-op.
  *
  * @param[in] team Team participating in the sync.
- *
- * @return void
  */
 __host__ void rocshmem_team_sync(rocshmem_team_t team);
 
@@ -822,8 +778,6 @@ __host__ void rocshmem_team_sync(rocshmem_team_t team);
  * @brief allows any PE to force the termination of an entire program.
  *
  * @param[in] status    The exit status from the main program.
- *
- * @return void
  */
 __host__ void rocshmem_global_exit(int status);
 
@@ -836,8 +790,6 @@ __host__ void rocshmem_global_exit(int status);
  * any threads in this work-group invoke other rocSHMEM functions.
  *
  * Must be called collectively by all threads in the work-group.
- *
- * @return void.
  */
 [[deprecated]] __device__ void rocshmem_wg_init();
 
@@ -846,8 +798,6 @@ __host__ void rocshmem_global_exit(int status);
  * work-group completion if the work-group also called rocshmem_wg_init().
  *
  * Must be called collectively by all threads in the work-group.
- *
- * @return void.
  */
 [[deprecated]] __device__ void rocshmem_wg_finalize();
 
@@ -862,8 +812,6 @@ __host__ void rocshmem_global_exit(int status);
  *                      to requested thread mode.
  *
  * Must be called collectively by all threads in the work-group.
- *
- * @return void.
  */
 [[deprecated]] __device__ void rocshmem_wg_init_thread(int requested, int *provided);
 
@@ -871,8 +819,6 @@ __host__ void rocshmem_global_exit(int status);
  * @brief Query the thread mode used by the runtime.
  *
  * @param[out] provided Thread mode the runtime is operating in.
- *
- * @return void.
  */
 __device__ void rocshmem_query_thread(int *provided);
 
@@ -953,9 +899,7 @@ __device__ ATTR_NO_INLINE int rocshmem_wg_team_create_ctx(
  *
  * Must be called collectively by all threads in the work-group.
  *
- * @param[in] The context to destroy.
- *
- * @return void.
+ * @param[in] ctx The context to destroy.
  */
 __device__ ATTR_NO_INLINE void rocshmem_wg_ctx_destroy(rocshmem_ctx_t *ctx);
 
@@ -969,8 +913,6 @@ __device__ ATTR_NO_INLINE void rocshmem_wg_ctx_destroy(rocshmem_ctx_t *ctx);
  * rocSHMEM function.
  *
  * @param[in] ctx Context with which to perform this operation.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_fence(rocshmem_ctx_t ctx);
 
@@ -985,8 +927,6 @@ __device__ ATTR_NO_INLINE void rocshmem_fence();
  *
  * @param[in] ctx Context with which to perform this operation.
  * @param[in] pe destination pe.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_fence(rocshmem_ctx_t ctx, int pe);
 
@@ -1001,8 +941,6 @@ __device__ ATTR_NO_INLINE void rocshmem_fence(int pe);
  * rocSHMEM function.
  *
  * @param[in] ctx Context with which to perform this operation.
- *
- * @return void.
  */
 __device__ ATTR_NO_INLINE void rocshmem_ctx_quiet(rocshmem_ctx_t ctx);
 
@@ -1017,8 +955,6 @@ __device__ ATTR_NO_INLINE void rocshmem_quiet();
  * @param[in] target_pes Address of target PE array where the operations need to be completed.
  *
  * @param[in] npes The number of PEs in the target PE array.
- *
- * @return void.
  */
 
 __device__ ATTR_NO_INLINE void rocshmem_ctx_pe_quiet(rocshmem_ctx_t ctx, const int *target_pes, size_t npes);

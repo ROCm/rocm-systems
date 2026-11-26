@@ -224,6 +224,17 @@ pub(crate) enum VirtualHostMappingState {
 }
 
 impl VirtualHostMappingState {
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(mapping) => mapping.diagnostic_memory(),
+        }
+    }
+
     pub(crate) fn set_permissions(&mut self, permissions: DeviceAccess) -> Result<(), Error> {
         match self {
             #[cfg(not(target_os = "linux"))]
@@ -323,6 +334,22 @@ impl AllocationState {
             Self::LinuxKfd(allocation) => allocation.info(),
             #[cfg(test)]
             Self::Test(allocation) => allocation.info(),
+        }
+    }
+
+    pub(crate) fn diagnostic_memory(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::DiagnosticMemory<'_>, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(allocation) => allocation.driver_state().diagnostic_memory(),
+            #[cfg(test)]
+            Self::Test(_) => Err(Error::Operation {
+                kind: ErrorKind::Unsupported,
+                detail: "test diagnostic memory",
+            }),
         }
     }
 
@@ -769,6 +796,19 @@ impl QueueState {
             Self::LinuxKfd(queue) => queue.progress(),
             #[cfg(test)]
             Self::Test(queue) => queue.progress(),
+        }
+    }
+
+    pub(crate) fn core_snapshot(
+        &mut self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreQueueSnapshot<'_>, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd(queue) => queue.core_snapshot(),
+            #[cfg(test)]
+            Self::Test(queue) => queue.core_snapshot(),
         }
     }
 

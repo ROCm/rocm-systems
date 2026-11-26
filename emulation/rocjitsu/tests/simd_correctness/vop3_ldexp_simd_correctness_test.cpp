@@ -12,6 +12,7 @@
 
 #include "compute_unit_test_util.h"
 #include "decode_test_util.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "util/simd_test_hooks.h"
 
 #include "rocjitsu/code/rj_code.h"
@@ -98,15 +99,16 @@ struct Fixture {
 
   Fixture() : gpu_mem("vop3_ldexp_mem"), l2("vop3_ldexp_l2") {
     amdgpu::ComputeUnitCore::Config cfg{};
-    cfg.arch = ROCJITSU_CODE_ARCH_CDNA4;
+    cfg.arch = rocjitsu::IsaFamily::Cdna4;
     cfg.num_wf_slots = 1;
     cfg.sgprs_per_wf = SGPRS_PER_WF;
     cfg.vgprs_per_wf = VGPRS_PER_WF;
     cfg.lds_size_kb = 64;
     rocjitsu::test::initialize_compute_unit(cu, "cu_vop3_ldexp", cfg, &gpu_mem, &l2);
-    if (!cu)
+    if (!cu) {
       return;
-    decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+    }
+    decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
     wf = cu->dispatch_wf(0, 0, SGPRS_PER_WF, VGPRS_PER_WF);
   }
 
@@ -137,11 +139,12 @@ struct Fixture {
     std::array<uint64_t, WF_SIZE> out{};
     uint32_t vb = wf->vgpr_alloc().base;
     for (uint32_t lane = 0; lane < WF_SIZE; ++lane) {
-      if (f64)
+      if (f64) {
         out[lane] =
             static_cast<uint64_t>(cu->read_vgpr(vb + 5, lane)) << 32 | cu->read_vgpr(vb + 4, lane);
-      else
+      } else {
         out[lane] = cu->read_vgpr(vb + 4, lane);
+      }
     }
     return out;
   }
@@ -162,8 +165,9 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
   auto run_mode = [&](bool force_scalar, uint32_t rot) -> std::array<uint64_t, WF_SIZE> {
     util::set_force_scalar_for_testing(force_scalar);
     Fixture fx;
-    if (::testing::Test::HasFatalFailure())
+    if (::testing::Test::HasFatalFailure()) {
       return {};
+    }
     EXPECT_NE(fx.cu, nullptr);
     EXPECT_NE(fx.wf, nullptr);
     const uint32_t src1_v = c.f64 ? 2u : 1u;
@@ -190,11 +194,15 @@ void check_case(const Case &c, uint32_t abs, uint32_t neg, uint32_t omod, uint32
 
 void check_all_mods(const Case &c, uint64_t exec) {
   // Only src0 has abs/neg in ldexp (src1 is integer exp); sweep src0 bits only.
-  for (uint32_t abs = 0; abs < 2; ++abs)
-    for (uint32_t neg = 0; neg < 2; ++neg)
-      for (uint32_t omod = 0; omod < 4; ++omod)
-        for (uint32_t clamp = 0; clamp < 2; ++clamp)
+  for (uint32_t abs = 0; abs < 2; ++abs) {
+    for (uint32_t neg = 0; neg < 2; ++neg) {
+      for (uint32_t omod = 0; omod < 4; ++omod) {
+        for (uint32_t clamp = 0; clamp < 2; ++clamp) {
           check_case(c, abs, neg, omod, clamp, exec);
+        }
+      }
+    }
+  }
 }
 
 TEST(Vop3LdexpSimdCorrectness, FullExec) {
@@ -202,8 +210,9 @@ TEST(Vop3LdexpSimdCorrectness, FullExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_all_mods(c, /*exec=*/~0ULL);
+  }
 }
 
 TEST(Vop3LdexpSimdCorrectness, PartialExec) {
@@ -211,8 +220,9 @@ TEST(Vop3LdexpSimdCorrectness, PartialExec) {
     GTEST_SKIP() << "<experimental/simd> unavailable — scalar fallback in use";
     return;
   }
-  for (const auto &c : kCases)
+  for (const auto &c : kCases) {
     check_case(c, /*abs=*/0, /*neg=*/0, /*omod=*/0, /*clamp=*/0, /*exec=*/0xA5A5'F0F0'1234'8001ULL);
+  }
 }
 
 } // namespace

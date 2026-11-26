@@ -5,11 +5,26 @@
 #include "common/internal.h"
 #include "mfma/backends.h"
 #include "mfma/fp8_formats.h"
+#include "mfma/gfx942_exact.h"
 #include "mfma/reduction.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 
 namespace {
+// Keep the scalar stack buffer out of the SIMD dispatch prologue.
+template <int M, int K, bool Bf8A, bool Bf8B, bool Fnuz>
+[[gnu::noinline]] void evaluate_scalar(uint64_t controls, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c) {
+  using namespace rocjitsu::arith;
+  float left[M * K], right[M * K];
+  for (int i = 0; i < M * K; ++i) {
+    left[i] = mfma_decode_fp8<Bf8A, Fnuz>(uint8_t(a[i / 256][i / 4 % 64] >> (8 * (i % 4))));
+    right[i] = mfma_decode_fp8<Bf8B, Fnuz>(uint8_t(b[i / 256][i / 4 % 64] >> (8 * (i % 4))));
+  }
+  mfma_reduce_scalar<M, K, 1, 4>(controls, d, left, right, c);
+}
+
 // Validate the approximate policy before accessing any source or destination.
 template <int M, int K, bool Bf8A, bool Bf8B, bool Fnuz>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
@@ -20,9 +35,39 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
   }
+  // Only the captured gfx942 forms with default source controls are qualified.
+  // Compatibility retains the existing fast approximate implementation.
+  if constexpr (Fnuz) {
+    if (is_exact(flags) && !controls) {
+      constexpr MfmaGfx942Format format =
+          Bf8A ? (Bf8B ? MfmaGfx942Format::Bf8Bf8 : MfmaGfx942Format::Bf8Fp8)
+               : (Bf8B ? MfmaGfx942Format::Fp8Bf8 : MfmaGfx942Format::Fp8Fp8);
+      const bool no_inf_nan = (flags & RJ_ARITH_FP16_OVFL) != 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+        mfma_gfx942_exact_x86_64_v4<format, M, K, 1>(d, a, b, c);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+      if (!no_inf_nan && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+        mfma_gfx942_exact_x86_64_v3<format, M, K, 1>(d, a, b, c);
+        return RJ_ARITH_SUCCESS;
+      }
+#endif
+      mfma_gfx942_exact(format, M, K, 1, no_inf_nan, d, a, b, c);
+      return RJ_ARITH_SUCCESS;
+    }
+  }
   if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
     return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
+      mfma_fp8_x86_64_v4_bf16<M, K, Bf8A, Bf8B, Fnuz>(controls, d, a, b, c)) {
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
     mfma_fp8_x86_64_v4<M, K, Bf8A, Bf8B, Fnuz>(controls, d, a, b, c);
@@ -35,12 +80,7 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  float left[M * K], right[M * K];
-  for (int i = 0; i < M * K; ++i) {
-    left[i] = mfma_decode_fp8<Bf8A, Fnuz>(uint8_t(a[i / 256][i / 4 % 64] >> (8 * (i % 4))));
-    right[i] = mfma_decode_fp8<Bf8B, Fnuz>(uint8_t(b[i / 256][i / 4 % 64] >> (8 * (i % 4))));
-  }
-  mfma_reduce_scalar<M, K, 1, 4>(controls, d, left, right, c);
+  evaluate_scalar<M, K, Bf8A, Bf8B, Fnuz>(controls, d, a, b, c);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace

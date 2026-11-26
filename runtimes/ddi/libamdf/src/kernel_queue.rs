@@ -7,14 +7,15 @@
 //! translation stay here. rocddi owns only bounded native submission state.
 
 use crate::generated::amdf::*;
-use crate::instance::{self, Device};
 use crate::memory;
+use crate::session::{self, Device};
 use crate::support::*;
 use rocddi::device::gpu::queue::{
     KernelQueue as NativeQueue, KernelQueueFormat, KernelQueueStatus as NativeStatus,
     KernelQueueWait,
 };
 use rocddi::memory::storage::Owned;
+use rocddi::memory::storage::RetainOnDrop;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Instant;
 
@@ -91,7 +92,7 @@ pub(crate) unsafe extern "C" fn create(
         )?;
         let device = object(pointer.cast::<Device>())?;
         device.require_current_process()?;
-        let family = instance::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
+        let family = session::family(device.native.endpoint(), create_info.queue_family_ordinal)?;
         if family.publication_modes & AMDF_QUEUE_PUBLICATION_MODE_KERNEL == 0 {
             return Err(UNSUPPORTED);
         }
@@ -100,7 +101,7 @@ pub(crate) unsafe extern "C" fn create(
             AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA => KernelQueueFormat::Sdma,
             _ => return Err(UNSUPPORTED),
         };
-        let instance = instance::device_instance(device);
+        let instance = session::device_instance(device);
         let slot = instance.owner_slot::<KernelQueue>()?;
         register(&device.queues)?;
         let gpu = match device.native.gpu() {
@@ -336,13 +337,11 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_kernel_queue_t) -> u6
             return result;
         }
         unregister(&(*queue.device).queues);
-        let owner = Owned::from_raw(pointer.cast::<KernelQueue>());
-        if result.is_err() {
-            // A failed native cleanup consumes the public handle. Retain the
-            // native owner and its dependencies without a second release.
-            std::mem::forget(owner);
-        } else {
-            drop(owner);
+        // A failed native cleanup consumes the public handle. Retain the
+        // native owner and its dependencies without a second release.
+        let owner = RetainOnDrop::new(Owned::from_raw(pointer.cast::<KernelQueue>()));
+        if result.is_ok() {
+            drop(owner.into_inner());
         }
         result
     })

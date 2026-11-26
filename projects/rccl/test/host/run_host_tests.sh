@@ -27,6 +27,8 @@
 #                   pytest suites, the tools/scripts/test_runner unittests
 #                   (which include the rccl-device-compile driver cases),
 #                   src/include/test_poison_hip_atomics.py,
+#                   test/test_nccl_device_c99.py (after
+#                   copy_nccl_device_headers),
 #                   test/test_makefile_depflags.py,
 #                   test/test_symk_peer_pointer_isa.py (needs hipify), and the
 #                   tools/RcclReplayer host checks (make test)
@@ -229,6 +231,17 @@ do_poison_hip_atomics() {
   python3 "$RCCL_ROOT/src/include/test_poison_hip_atomics.py"
 }
 
+# C99 compile of the staged nccl_device.h. The script reads $RCCL_BUILD/include,
+# which copy_nccl_device_headers copies out of the hipify tree; hipify_all does
+# not. A missing compiler or build tree skips every test and exits 77, and
+# do_guards treats that non-zero status as a failure.
+do_nccl_device_c99() {
+  echo "==> nccl_device.h C99 (test/test_nccl_device_c99.py)"
+  cmake --build "$RCCL_BUILD_DIR" --target copy_nccl_device_headers -j"$JOBS" || return
+  RCCL_BUILD="$RCCL_BUILD_DIR" ROCM_PATH="$ROCM_PATH" \
+    python3 "$RCCL_ROOT/test/test_nccl_device_c99.py"
+}
+
 # Kernel ISA guards: compiles an LL peer-pointer probe for gfx942/gfx950/gfx1250
 # against the hipified tree and counts in-loop vector loads and store-stalling
 # waits. Needs amdclang++ and the `hipify` phase; no GPU. Like the poison probe,
@@ -312,11 +325,12 @@ do_test_runner_guards() {
 
 # All CPU-only guards: makefile -MM scan, the device-table unittest, the
 # kernel-count and accl-reporter pytest suites, the tools/scripts/test_runner
-# unittests, the __hip_atomic_* poison compile probe, the peer-pointer ISA
-# guards, then the RcclReplayer host checks. Collected with `|| rc=1` rather than
-# run back to back so that under `set -e` an early failure still leaves the
-# later guards running and reported, instead of aborting the phase at the first
-# one. Same idiom as do_host_tests above.
+# unittests, the __hip_atomic_* poison compile probe, the nccl_device.h C99
+# compile probe, the peer-pointer ISA guards, then the RcclReplayer host
+# checks. Collected with `|| rc=1` rather than run back to back so that under
+# `set -e` an early failure still leaves the later guards running and reported,
+# instead of aborting the phase at the first one. Same idiom as do_host_tests
+# above.
 do_guards() {
   local rc=0
   do_makefile_depflags || rc=1
@@ -326,6 +340,7 @@ do_guards() {
   do_accl_report_guards || rc=1
   do_test_runner_guards || rc=1
   do_poison_hip_atomics || rc=1
+  do_nccl_device_c99 || rc=1
   do_symk_peer_pointer_isa || rc=1
   do_replayer_guards || rc=1
   return "$rc"

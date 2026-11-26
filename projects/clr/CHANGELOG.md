@@ -21,9 +21,19 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       * `hipArrayGetSparseProperties` returns the layout properties of a sparse HIP array in a
         `hipArraySparseProperties` structure. Added for source compatibility: AMD devices do not
         support sparse arrays, so it zeroes the structure and returns `hipErrorNotSupported`.
+      * `hipArrayGetPlane` returns a single format plane of a multiplanar HIP array. Added for
+        source compatibility: HIP does not implement multiplanar arrays, so no array has planes
+        and it validates its arguments and returns `hipErrorNotSupported`.
+    - Execution affinity: support for API parity with corresponding CUDA API.
+      * `hipDeviceGetExecAffinitySupport` reports whether a device supports a given execution-affinity
+        type and the device's CU-masking granularity. `hipExecAffinityTypeCUCount` is always reported
+        as supported. Two HIP-specific extension types, `hipExtExecAffinityTypeGranularityCU` and
+        `hipExtExecAffinityTypeGranularityWGP`, report the granularity the applies to the CU mask.
 
 ### Resolved issues
 
+* Fixed `surf1DLayeredread/write` and `surf2DLayeredread/write` to address array layers rather than treating the layer index as a mip level. Reads and writes now access the requested nonzero layer.
+* Fixed texture-object gather component selection, the `tex2Dgather` and `tex2DLayered` pointer overloads, the horizontal derivative passed by `tex3DGrad`, and explicit mip levels in `tex1DLayeredLod`/`tex2DLayeredLod`.
 * `hipDrvLaunchKernelEx` now validates cluster dimensions before dispatch. Previously, an oversized or overflowing cluster size (e.g. exceeding the device maximum, or a product that overflows `uint32_t`) reached the hardware and caused an `HSA_STATUS_ERROR_INVALID_ARGUMENT` queue abort. Both `hipDrvLaunchKernelEx` and `hipLaunchKernelExC` now return `hipErrorInvalidClusterSize` at the API boundary for invalid cluster dimensions, matching CUDA's `cudaErrorInvalidClusterSize` / `CUDA_ERROR_INVALID_CLUSTER_SIZE` behavior. A cluster size greater than 1 on a device that does not support clusters (`clusterMaxSize == 0`) is also rejected.
 * Kernels without an LDS carveout preference now dispatch with no preference instead of a 0% LDS hint, and `hipFuncSetCacheConfig(hipFuncCachePreferNone)` no longer overrides `hipDeviceSetCacheConfig`.
 * `hipDeviceGetCacheConfig` now returns the value set by `hipDeviceSetCacheConfig` on devices with a configurable LDS carveout.
@@ -39,6 +49,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * `hipCtxDestroy` returns `hipErrorInvalidContext` for a context the caller did not create with `hipCtxCreate` (was `hipSuccess`).
 * On gfx12 and later, pitched allocations use 128-byte alignment instead of 256, matching the hardware's linear pitch granularity. `hipMallocPitch`, `hipMemAllocPitch` and `hipMalloc3D` return a 128-byte-aligned pitch, and `hipDeviceProp_t::texturePitchAlignment` (OpenCL `CL_DEVICE_IMAGE_PITCH_ALIGNMENT`) reports 128. A 260-byte row now yields a 384-byte pitch rather than 512, so the allocation size changes with it. Earlier hardware is unchanged at 256 bytes. Applications that hard-coded the previous pitch, or derived a buffer size from it, will see different values.
 * Stream completion signals are now placed in device memory by default, as graph signals already are, on GPUs with a large BAR whose ROCr reports a signal-capable device pool, while no profiler tool is attached. Empty kernel dispatches and multi-stream launches get faster, while host reads of completion state get slower: `hipEventQuery`, `hipEventElapsedTime`, and a short kernel launched and synchronized on its own can take a few microseconds longer. Set `DEBUG_CLR_DEV_SIGNALS=0` to keep stream completion signals in host memory.
+* `hipMemPrefetchAsync` and `hipMemPrefetchAsync_v2` with a null stream and a GPU destination now enqueue the prefetch on the current device's null stream, as they already did for a host destination and as CUDA does (was the destination GPU's null stream). Null-stream prefetches are now ordered with each other and with other work on the current device's null stream, and `hipStreamSynchronize(nullptr)` and `hipDeviceSynchronize` wait for them. They are no longer ordered after work on the destination GPU's null stream.
 
 ## HIP 7.17.0 for ROCm 10.2.0
 

@@ -16,6 +16,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef _WIN32
+#include <unistd.h>
+#endif
+
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 #include <resource_guards.hh>
@@ -1846,7 +1850,383 @@ HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_LargeBatch) {
                             kPatternValue + static_cast<int>(i), i);
   }
 }
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies a batch that becomes more SDMA operations than the device-memory signal ring holds
+ *   (16 x ROC_SIGNAL_POOL_SIZE). Each source is copied to two destinations, so every source is
+ *   its own broadcast operation.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_ManyBroadcasts) {
+  // Eight times the ring's 16 x ROC_SIGNAL_POOL_SIZE signals (RetiringSignalTracker::max_signals_):
+  // 16384 copies with the default pool of 64.
+  const char* poolEnv = std::getenv("ROC_SIGNAL_POOL_SIZE");
+  const size_t pool =
+      poolEnv != nullptr ? std::clamp<size_t>(std::strtoul(poolEnv, nullptr, 10), 1, 1024) : 64;
+  const size_t kSources = 8 * 16 * pool;
+  constexpr size_t kDstsPerSource = 2;
+  const size_t kCopyCount = kSources * kDstsPerSource;
+  constexpr size_t kCopySize = 64;
+
+  StreamGuard stream_guard(Streams::created);
+  std::vector<unsigned char> srcValues(kSources * kCopySize);
+  std::vector<unsigned char> dstValues(kCopyCount * kCopySize);
+  for (size_t i = 0; i < kSources; ++i) {
+    std::fill_n(srcValues.begin() + i * kCopySize, kCopySize,
+                static_cast<unsigned char>(i % 251 + 1));
+  }
+  for (size_t i = 0; i < kCopyCount; ++i) {
+    std::copy_n(srcValues.begin() + i / kDstsPerSource * kCopySize, kCopySize,
+                dstValues.begin() + i * kCopySize);
+  }
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  char* src = static_cast<char*>(addBuffer(allocations, srcValues, LinearAllocs::hipMalloc));
+  char* dst = static_cast<char*>(addBuffer(
+      allocations, std::vector<unsigned char>(dstValues.size(), 0), LinearAllocs::hipMalloc));
+
+  std::vector<void*> srcPtrs(kCopyCount);
+  std::vector<void*> dstPtrs(kCopyCount);
+  std::vector<size_t> sizes(kCopyCount, kCopySize);
+  for (size_t i = 0; i < kCopyCount; ++i) {
+    srcPtrs[i] = src + i / kDstsPerSource * kCopySize;
+    dstPtrs[i] = dst + i * kCopySize;
+  }
+  // PreferCE keeps the same-device copies on SDMA, where equal sources become broadcasts.
+  hipMemcpyAttributes attr{hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE};
+  size_t attrsIdx = 0;
+
+  HIP_CHECK(hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), kCopyCount, &attr,
+                                &attrsIdx, 1, nullptr, stream_guard.stream()));
+  HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+  requireBufferEquals(dst, dstValues, LinearAllocs::hipMalloc);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Verifies batches that are the first operation on their stream and mix a shader copy with
+ *   SDMA broadcast operations. Every count below ROC_SIGNAL_POOL_SIZE runs, so one of them makes
+ *   the device-memory signal ring rearm signals past the stream's prior signal.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_D2D_BroadcastsWithShaderCopy) {
+  const char* poolEnv = std::getenv("ROC_SIGNAL_POOL_SIZE");
+  const size_t pool =
+      poolEnv != nullptr ? std::clamp<size_t>(std::strtoul(poolEnv, nullptr, 10), 1, 1024) : 64;
+  if (pool < 2) {
+    HIP_SKIP_TEST("ROC_SIGNAL_POOL_SIZE is too small for this test");
+  }
+  const size_t kMaxSources = pool - 1;
+  constexpr size_t kDstsPerSource = 2;
+  constexpr size_t kCopySize = 64;
+
+  std::vector<unsigned char> srcValues(kMaxSources * kCopySize);
+  std::vector<unsigned char> dstValues(kMaxSources * kDstsPerSource * kCopySize);
+  for (size_t i = 0; i < kMaxSources; ++i) {
+    std::fill_n(srcValues.begin() + i * kCopySize, kCopySize,
+                static_cast<unsigned char>(i % 251 + 1));
+  }
+  for (size_t i = 0; i < kMaxSources * kDstsPerSource; ++i) {
+    std::copy_n(srcValues.begin() + i / kDstsPerSource * kCopySize, kCopySize,
+                dstValues.begin() + i * kCopySize);
+  }
+  const std::vector<unsigned char> shaderValues(kCopySize, 0xa5);
+  std::vector<LinearAllocGuard<unsigned char>> allocations;
+  char* src = static_cast<char*>(addBuffer(allocations, srcValues, LinearAllocs::hipMalloc));
+  char* dst = static_cast<char*>(addBuffer(
+      allocations, std::vector<unsigned char>(dstValues.size(), 0), LinearAllocs::hipMalloc));
+  void* shaderSrc = addBuffer(allocations, shaderValues, LinearAllocs::hipMalloc);
+  void* shaderDst = addBuffer(allocations, std::vector<unsigned char>(kCopySize, 0),
+                              LinearAllocs::hipMalloc);
+
+  // PreferCE keeps the broadcasts on SDMA; the last copy has no preference and uses a shader.
+  hipMemcpyAttributes attrs[2] = {
+      {hipMemcpySrcAccessOrderStream, {}, {}, hipMemcpyFlagExtPreferCE},
+      {hipMemcpySrcAccessOrderStream, {}, {}, 0}};
+
+  for (size_t sources = 1; sources <= kMaxSources; ++sources) {
+    CAPTURE(sources);
+    const size_t broadcastCopies = sources * kDstsPerSource;
+    HIP_CHECK(hipMemset(dst, 0, dstValues.size()));
+    HIP_CHECK(hipMemset(shaderDst, 0, kCopySize));
+    // Pending work on the default stream would give the new stream a prior operation.
+    HIP_CHECK(hipDeviceSynchronize());
+
+    std::vector<void*> srcPtrs(broadcastCopies + 1);
+    std::vector<void*> dstPtrs(broadcastCopies + 1);
+    std::vector<size_t> sizes(broadcastCopies + 1, kCopySize);
+    for (size_t i = 0; i < broadcastCopies; ++i) {
+      srcPtrs[i] = src + i / kDstsPerSource * kCopySize;
+      dstPtrs[i] = dst + i * kCopySize;
+    }
+    srcPtrs[broadcastCopies] = shaderSrc;
+    dstPtrs[broadcastCopies] = shaderDst;
+    size_t attrsIdxs[2] = {0, broadcastCopies};
+
+    // The batch must be the stream's first operation.
+    StreamGuard stream_guard(Streams::created);
+    HIP_CHECK(hipMemcpyBatchAsync(dstPtrs.data(), srcPtrs.data(), sizes.data(), srcPtrs.size(),
+                                  attrs, attrsIdxs, 2, nullptr, stream_guard.stream()));
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+
+    const std::vector<unsigned char> expected(dstValues.begin(),
+                                              dstValues.begin() + broadcastCopies * kCopySize);
+    requireBufferEquals(dst, expected, LinearAllocs::hipMalloc);
+    requireBufferEquals(shaderDst, shaderValues, LinearAllocs::hipMalloc);
+  }
+}
 #endif
+
+#if HT_AMD && !defined(_WIN32)
+
+namespace {
+
+constexpr size_t kKiB = 1024;
+constexpr size_t kExternalBytes = 64 * kKiB;
+
+// Buffer views of one external allocation: the inner view sits inside the outer view.
+constexpr size_t kOuterOffset = 0;
+constexpr size_t kOuterSize = 32 * kKiB;
+constexpr size_t kInnerOffset = 8 * kKiB;
+constexpr size_t kInnerSize = 8 * kKiB;
+
+uint8_t PatternByte(size_t i) { return static_cast<uint8_t>(i * 7 + 3); }
+
+// Imports a dmabuf of a device allocation as external memory and creates the nested buffer views.
+// The views are separate memory objects that overlap in the runtime's global memory-object map.
+class NestedViews {
+ public:
+  NestedViews() = default;
+  NestedViews(const NestedViews&) = delete;
+  NestedViews& operator=(const NestedViews&) = delete;
+  ~NestedViews() {
+    static_cast<void>(Release());
+  }
+
+  // Frees the views, destroys the external memory, then closes the exported dmabuf descriptor.
+  // hipDestroyExternalMemory does not release the mapped buffers (each view has its own global-map
+  // entry and is freed with hipFree), and the runtime does not take ownership of the descriptor.
+  // Safe to call more than once and after a partly completed Create.
+  hipError_t Release() {
+    hipError_t result = hipSuccess;
+    const auto keep_first_error = [&result](hipError_t err) {
+      if (result == hipSuccess) {
+        result = err;
+      }
+    };
+    if (inner_ != nullptr) {
+      keep_first_error(hipFree(inner_));
+      inner_ = nullptr;
+    }
+    if (outer_ != nullptr) {
+      keep_first_error(hipFree(outer_));
+      outer_ = nullptr;
+    }
+    if (ext_mem_ != nullptr) {
+      keep_first_error(hipDestroyExternalMemory(ext_mem_));
+      ext_mem_ = nullptr;
+    }
+    if (fd_ >= 0) {
+      static_cast<void>(close(fd_));
+      fd_ = -1;
+    }
+    return result;
+  }
+
+  // Returns false if the device cannot export or import the allocation.
+  bool Create(void* device_alloc) {
+    int fd = -1;
+    hipError_t err = hipMemGetHandleForAddressRange(&fd, reinterpret_cast<hipDeviceptr_t>(device_alloc),
+                                                    kExternalBytes, hipMemRangeHandleTypeDmaBufFd, 0);
+    if (err == hipErrorNotSupported) {
+      consumeLastError();
+      return false;
+    }
+    HIP_CHECK(err);
+    fd_ = fd;
+
+    hipExternalMemoryHandleDesc handle_desc{};
+    handle_desc.type = hipExternalMemoryHandleTypeOpaqueFd;
+    handle_desc.handle.fd = fd;
+    handle_desc.size = kExternalBytes;
+    err = hipImportExternalMemory(&ext_mem_, &handle_desc);
+    if (err == hipErrorNotSupported) {
+      consumeLastError();
+      return false;
+    }
+    HIP_CHECK(err);
+
+    hipExternalMemoryBufferDesc outer_desc{};
+    outer_desc.offset = kOuterOffset;
+    outer_desc.size = kOuterSize;
+    HIP_CHECK(hipExternalMemoryGetMappedBuffer(&outer_, ext_mem_, &outer_desc));
+    hipExternalMemoryBufferDesc inner_desc{};
+    inner_desc.offset = kInnerOffset;
+    inner_desc.size = kInnerSize;
+    HIP_CHECK(hipExternalMemoryGetMappedBuffer(&inner_, ext_mem_, &inner_desc));
+    return true;
+  }
+
+  uint8_t* outer() const { return static_cast<uint8_t*>(outer_); }
+  uint8_t* inner() const { return static_cast<uint8_t*>(inner_); }
+
+ private:
+  int fd_ = -1;
+  hipExternalMemory_t ext_mem_ = nullptr;
+  void* outer_ = nullptr;
+  void* inner_ = nullptr;
+};
+
+struct Copy {
+  void* src;
+  size_t dst_offset;
+  size_t size;
+};
+
+}  // namespace
+
+/**
+ * Test Description
+ * ------------------------
+ * - The global memory-object map can hold nested entries: buffer views created by
+ * hipExternalMemoryGetMappedBuffer of one external allocation. A pointer inside the inner view
+ * belongs to the inner view, so a copy that starts there and runs past the inner view's end is out
+ * of bounds, even though it still lies inside the outer view.
+ * - Verifies that hipMemcpyBatchAsync reports that error whichever order the entries are in, and
+ * that valid copies from both views succeed and move the right data. The result must not depend on
+ * whether an earlier entry of the batch resolved to the outer view.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpyBatchAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ *  - Linux, with dmabuf export and external memory import support
+ */
+HIP_TEST_CASE(Unit_hipMemcpyBatchAsync_NestedBufferViews) {
+  HIP_CHECK(hipSetDevice(0));
+
+  LinearAllocGuard<uint8_t> external(LinearAllocs::hipMalloc, kExternalBytes);
+  std::vector<uint8_t> pattern(kExternalBytes);
+  for (size_t i = 0; i < pattern.size(); ++i) {
+    pattern[i] = PatternByte(i);
+  }
+  HIP_CHECK(hipMemcpy(external.ptr(), pattern.data(), kExternalBytes, hipMemcpyHostToDevice));
+
+  NestedViews views;
+  if (!views.Create(external.ptr())) {
+    HIP_SKIP_TEST("Skipping because dmabuf export or external memory import is not supported");
+  }
+  REQUIRE(views.inner() == views.outer() + (kInnerOffset - kOuterOffset));
+
+  LinearAllocGuard<uint8_t> dst(LinearAllocs::hipMalloc, kExternalBytes);
+  HIP_CHECK(hipMemset(dst.ptr(), 0, kExternalBytes));
+  StreamGuard stream_guard(Streams::created);
+
+  // Entirely inside the outer view, before the inner view starts.
+  const Copy in_outer{views.outer() + kOuterOffset, 0, 4 * kKiB};
+  // Entirely inside the inner view.
+  const Copy in_inner{views.inner() + 1 * kKiB, 8 * kKiB, 2 * kKiB};
+  // Starts inside the inner view and runs 2 KiB past its end, still inside the outer view.
+  const Copy past_inner{views.inner() + 6 * kKiB, 16 * kKiB, 4 * kKiB};
+
+  const auto run = [&](const std::vector<Copy>& copies, size_t* fail_idx) {
+    std::vector<void*> dsts;
+    std::vector<void*> srcs;
+    std::vector<size_t> sizes;
+    for (const Copy& c : copies) {
+      srcs.push_back(c.src);
+      dsts.push_back(dst.ptr() + c.dst_offset);
+      sizes.push_back(c.size);
+    }
+    *fail_idx = ~size_t{0};
+    return hipMemcpyBatchAsync(dsts.data(), srcs.data(), sizes.data(), copies.size(), nullptr,
+                               nullptr, 0, fail_idx, stream_guard.stream());
+  };
+
+  // The expected content of the destination for a copy: the bytes of the external allocation that
+  // the source pointer addresses.
+  const auto expect_copied = [&](const Copy& c) {
+    const size_t ext_offset = static_cast<size_t>(static_cast<uint8_t*>(c.src) - views.outer()) +
+                              kOuterOffset;
+    std::vector<uint8_t> got(c.size);
+    HIP_CHECK(hipMemcpy(got.data(), dst.ptr() + c.dst_offset, c.size, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < c.size; ++i) {
+      INFO("dst offset " << c.dst_offset << " byte " << i);
+      REQUIRE(got[i] == PatternByte(ext_offset + i));
+    }
+  };
+
+  SECTION("Copy past the inner view alone is rejected") {
+    size_t fail_idx = 0;
+    HIP_CHECK_ERROR(run({past_inner}, &fail_idx), hipErrorInvalidValue);
+    consumeLastError();
+    REQUIRE(fail_idx == 0);
+  }
+
+  SECTION("Copies inside each view succeed, in either order") {
+    const bool outer_first = GENERATE(true, false);
+    const std::vector<Copy> copies = outer_first ? std::vector<Copy>{in_outer, in_inner}
+                                                 : std::vector<Copy>{in_inner, in_outer};
+    size_t fail_idx = 0;
+    HIP_CHECK(run(copies, &fail_idx));
+    HIP_CHECK(hipStreamSynchronize(stream_guard.stream()));
+    expect_copied(in_outer);
+    expect_copied(in_inner);
+  }
+
+  SECTION("Copy past the inner view is rejected after an entry in the outer view") {
+    size_t fail_idx = 0;
+    HIP_CHECK_ERROR(run({in_outer, past_inner}, &fail_idx), hipErrorInvalidValue);
+    consumeLastError();
+    REQUIRE(fail_idx == 1);
+  }
+
+  SECTION("Copy past the inner view is rejected before an entry in the outer view") {
+    size_t fail_idx = 0;
+    HIP_CHECK_ERROR(run({past_inner, in_outer}, &fail_idx), hipErrorInvalidValue);
+    consumeLastError();
+    REQUIRE(fail_idx == 0);
+  }
+
+  SECTION("Copy past the inner view is rejected after an entry in the inner view") {
+    size_t fail_idx = 0;
+    HIP_CHECK_ERROR(run({in_inner, past_inner}, &fail_idx), hipErrorInvalidValue);
+    consumeLastError();
+    REQUIRE(fail_idx == 1);
+  }
+
+  // Release the views and the external memory, and check that the views are really gone: before,
+  // both pointers are registered device memory; after, the runtime no longer knows them.
+  const void* outer_ptr = views.outer();
+  const void* inner_ptr = views.inner();
+  const auto memory_type_of = [](const void* ptr) {
+    hipPointerAttribute_t attributes{};
+    HIP_CHECK(hipPointerGetAttributes(&attributes, ptr));
+    return attributes.type;
+  };
+  REQUIRE(memory_type_of(outer_ptr) == hipMemoryTypeDevice);
+  REQUIRE(memory_type_of(inner_ptr) == hipMemoryTypeDevice);
+  HIP_CHECK(views.Release());
+  REQUIRE(memory_type_of(outer_ptr) == hipMemoryTypeUnregistered);
+  REQUIRE(memory_type_of(inner_ptr) == hipMemoryTypeUnregistered);
+}
+
+#endif  // HT_AMD && !defined(_WIN32)
+
 /**
  * End doxygen group MemoryTest.
  * @}

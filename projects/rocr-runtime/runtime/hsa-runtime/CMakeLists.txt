@@ -198,6 +198,26 @@ if ( CMAKE_CXX_COMPILER_ID MATCHES "Clang")
   endif()
 endif()
 
+## ThreadSanitizer flags
+## IMPORTANT: TSAN requires the entire process image to be built with -fsanitize=thread.
+## Linking only hsa-runtime64 with TSAN (via HSA_SHARED_LINK_FLAGS) leaves __tsan_init
+## undefined in the shared object. Consumers not built with TSAN will fail to load it.
+## ThreadSanitizer flags.  TSAN requires the entire process image — the
+## executable and every shared library — to be compiled and linked with
+## -fsanitize=thread.  Loading a TSAN-instrumented libhsa-runtime64.so from
+## a non-TSAN executable will fail to resolve __tsan_init at dlopen time.
+if ( THREAD_SANITIZER OR THEROCK_SANITIZER STREQUAL "TSAN" OR DEFINED ENV{THREAD_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "TSAN" )
+  # Use -O1 per ThreadSanitizer documentation: aggressive optimization can mask race conditions
+  # -Wno-tsan is only needed for GCC, as clang has no -Wtsan warning
+  if ( CMAKE_COMPILER_IS_GNUCXX )
+    set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=thread -g -O1 -Wno-tsan )
+  else()
+    set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=thread -g -O1 )
+  endif()
+  set ( HSA_SHARED_LINK_FLAGS "${HSA_SHARED_LINK_FLAGS} -fsanitize=thread" )
+  message(STATUS "hsa-runtime64: ThreadSanitizer (TSAN) enabled")
+endif()
+
 ## UndefinedBehaviorSanitizer flags
 if ( UNDEFINED_SANITIZER OR THEROCK_SANITIZER STREQUAL "UBSAN" OR DEFINED ENV{UNDEFINED_SANITIZER} OR "$ENV{THEROCK_SANITIZER}" STREQUAL "UBSAN" )
   set ( HSA_CXX_FLAGS ${HSA_CXX_FLAGS} -fsanitize=undefined -fsanitize-recover=undefined -g )
@@ -211,6 +231,20 @@ if (UNIX)
   set(HSA_SHARED_LINK_FLAGS "-Wl,-Bdynamic -Wl,-z,noexecstack -Wl,${CMAKE_CURRENT_SOURCE_DIR}/${LNKSCR} -Wl,--version-script=${DRVDEF} -Wl,--enable-new-dtags ${HSA_SHARED_LINK_FLAGS}")
 else()
   target_sources(${CORE_RUNTIME_TARGET} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/hsacore.dll.def")
+endif()
+
+## Enable code coverage
+if(ENABLE_CODE_COVERAGE)
+  target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE
+    -O0
+    -g
+    -fprofile-instr-generate
+    -fcoverage-mapping)
+
+  target_link_options(${CORE_RUNTIME_TARGET} PRIVATE
+    -fprofile-instr-generate)
+
+  message(STATUS "Code coverage enabled")
 endif()
 
 target_compile_options(${CORE_RUNTIME_TARGET} PRIVATE ${HSA_CXX_FLAGS})

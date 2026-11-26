@@ -6,6 +6,7 @@
 
 #include "compute_unit_test_util.h"
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -22,7 +23,7 @@ using namespace rocjitsu;
 using namespace rocjitsu::amdgpu;
 
 struct RedispatchCase {
-  rj_code_arch_t arch;
+  rocjitsu::IsaFamily arch;
   uint32_t wave_size;
   uint32_t vgprs_per_wf;
   const char *name;
@@ -57,8 +58,9 @@ TEST_P(VgprRedispatchTest, RecycledAllocationStartsZero) {
   compute_unit->write_sgpr(first_sgpr_base, 0x12345678u);
   compute_unit->write_sgpr(first_sgpr_base + 31, 0x9abcdef0u);
   for (uint32_t reg = 0; reg < block_size; ++reg) {
-    for (uint32_t lane = 0; lane < test_case.wave_size; ++lane)
+    for (uint32_t lane = 0; lane < test_case.wave_size; ++lane) {
       compute_unit->write_vgpr(first_base + reg, lane, 1u + reg * test_case.wave_size + lane);
+    }
   }
 
   first->halt();
@@ -130,10 +132,10 @@ TEST_P(VgprRedispatchTest, BlockOwnershipTracksDispatchAndRetirement) {
 
 INSTANTIATE_TEST_SUITE_P(
     Configurations, VgprRedispatchTest,
-    ::testing::Values(RedispatchCase{ROCJITSU_CODE_ARCH_RDNA4, 32, 256, "Wave32"},
-                      RedispatchCase{ROCJITSU_CODE_ARCH_RDNA4, 32, 17, "OddBlock"},
-                      RedispatchCase{ROCJITSU_CODE_ARCH_CDNA4, 64, 256, "Wave64"},
-                      RedispatchCase{ROCJITSU_CODE_ARCH_CDNA5, 32, 1024, "Gfx1250"}),
+    ::testing::Values(RedispatchCase{rocjitsu::IsaFamily::Rdna4, 32, 256, "Wave32"},
+                      RedispatchCase{rocjitsu::IsaFamily::Rdna4, 32, 17, "OddBlock"},
+                      RedispatchCase{rocjitsu::IsaFamily::Cdna4, 64, 256, "Wave64"},
+                      RedispatchCase{rocjitsu::IsaFamily::Cdna5, 32, 1024, "Gfx1250"}),
     [](const ::testing::TestParamInfo<RedispatchCase> &info) { return info.param.name; });
 
 } // namespace

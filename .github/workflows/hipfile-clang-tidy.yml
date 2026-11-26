@@ -6,8 +6,8 @@ env:
   AIS_HIP_ARCHITECTURES: gfx950;gfx1201;gfx1200;gfx1101;gfx1100;gfx1030;gfx942;gfx90a;gfx908
   # LLVM major version of the upstream clang-tidy used for linting. Keep this in
   # sync with the LLVM major version of the ROCm toolchain in the CI image
-  # (ROCm 7.14 and 10.0 are both LLVM 23).
-  AIS_CLANG_TIDY_VERSION: 23
+  # (ROCm 10.2 is LLVM 24).
+  AIS_CLANG_TIDY_VERSION: 24
   # Ubuntu codename for the apt.llvm.org repository, matching the CI image.
   AIS_CLANG_TIDY_DISTRO: noble
 
@@ -31,12 +31,12 @@ jobs:
       - name: Set AIS CI container name
         # On non-pull_request triggering workflows, AIS_PR_NUMBER may be empty.
         run: |
-          echo "AIS_PR_NUMBER=$(echo "${GITHUB_REF}" | sed 's|[^0-9]||g')" >> "${GITHUB_ENV}"
+          echo "AIS_PR_NUMBER=${GITHUB_REF//[^0-9]/}" >> "${GITHUB_ENV}"
       - name: Compute container name
         run: |
           echo "AIS_CONTAINER_NAME=${AIS_PR_NUMBER:=${GITHUB_RUN_ID}}_${GITHUB_JOB}_clang_tidy" >> "${GITHUB_ENV}"
       - name: Fetching code repository...
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           path: rocm-systems
@@ -44,7 +44,7 @@ jobs:
             projects/hipfile
             .github/workflows
       - name: Authenticating to GitHub Container Registry
-        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -55,7 +55,7 @@ jobs:
             -dt \
             --rm \
             --pull always \
-            -v ${GITHUB_WORKSPACE}:/mnt/ais:ro \
+            -v "${GITHUB_WORKSPACE}:/mnt/ais:ro" \
             --name "${AIS_CONTAINER_NAME}" \
             "${AIS_INPUT_CI_IMAGE}"
       - name: Make copy of the code repository and create build directories
@@ -75,13 +75,21 @@ jobs:
         #
         # The ROCm LLVM toolchain is built with CLANG_TIDY_ENABLE_STATIC_ANALYZER=OFF
         # (ROCm/TheRock compiler/CMakeLists.txt), so its clang-tidy has zero
-        # clang-analyzer-* checks compiled in and errors out with
-        # "no checks enabled". An upstream build is used for linting instead; the
+        # clang-analyzer-* checks compiled in and silently skips them. An
+        # upstream build is used for linting instead; the
         # compiler under test is still ROCm's amdclang++.
         #
         # AIS_CLANG_TIDY_VERSION must track the LLVM major version of the ROCm
-        # toolchain (ROCm 7.14 and 10.0 are both LLVM 23). Mismatched clang-tidy
-        # versions report conflicting diagnostics.
+        # toolchain (ROCm 10.2 is LLVM 24). Mismatched clang-tidy versions report
+        # conflicting diagnostics.
+        #
+        # A released LLVM version has its own apt.llvm.org repository
+        # (llvm-toolchain-<distro>-<version>), but the development version only
+        # comes from the nightly trunk snapshot (llvm-toolchain-<distro>). Use the
+        # versioned repository if it exists and fall back to the snapshot
+        # otherwise. apt.llvm.org creates the versioned repository when the
+        # release branches, which is also when the snapshot moves on to the next
+        # version, so this follows the switch without a workflow change.
         run: |
           docker exec \
             -t \
@@ -94,11 +102,17 @@ jobs:
               apt-get install -y --no-install-recommends ca-certificates curl gnupg
               curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key \
                 -o /etc/apt/trusted.gpg.d/apt.llvm.org.asc
-              echo "deb http://apt.llvm.org/${AIS_CLANG_TIDY_DISTRO}/ llvm-toolchain-${AIS_CLANG_TIDY_DISTRO}-${AIS_CLANG_TIDY_VERSION} main" \
+              suite="llvm-toolchain-${AIS_CLANG_TIDY_DISTRO}-${AIS_CLANG_TIDY_VERSION}"
+              if ! curl -fsL --retry 3 -o /dev/null \
+                "https://apt.llvm.org/${AIS_CLANG_TIDY_DISTRO}/dists/${suite}/Release"; then
+                suite="llvm-toolchain-${AIS_CLANG_TIDY_DISTRO}"
+              fi
+              echo "Installing clang-tidy-${AIS_CLANG_TIDY_VERSION} from apt.llvm.org ${suite}"
+              echo "deb http://apt.llvm.org/${AIS_CLANG_TIDY_DISTRO}/ ${suite} main" \
                 > /etc/apt/sources.list.d/llvm.list
               apt-get update
-              apt-get install -y --no-install-recommends clang-tidy-${AIS_CLANG_TIDY_VERSION}
-              clang-tidy-${AIS_CLANG_TIDY_VERSION} --version
+              apt-get install -y --no-install-recommends "clang-tidy-${AIS_CLANG_TIDY_VERSION}"
+              "clang-tidy-${AIS_CLANG_TIDY_VERSION}" --version
             '
       - name: Generate build files for hipFile with clang-tidy enabled
         run: |

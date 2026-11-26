@@ -67,9 +67,8 @@ struct experiment
         void serialize(ArchiveT& ar, const unsigned);
     };
 
-    static std::string                     label();
-    static std::string                     description();
-    static const std::atomic<experiment*>& get_current_experiment();
+    static std::string label();
+    static std::string description();
 
     bool        start();
     bool        wait() const;  // returns false if interrupted
@@ -81,7 +80,6 @@ struct experiment
 
     // in nanoseconds
     static std::uint64_t get_delay();
-    static double        get_delay_scaling();
     static std::uint32_t get_index();
     static bool          is_active();
     static bool          is_selected(std::uint64_t);

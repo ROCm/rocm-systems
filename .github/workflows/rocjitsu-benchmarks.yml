@@ -8,8 +8,6 @@ on:
       - "emulation/rocjitsu/**"
       - ".github/workflows/rocjitsu-benchmarks.yml"
   pull_request:
-    branches:
-      - "develop"
     types:
       - labeled
       - synchronize
@@ -28,7 +26,7 @@ on:
         required: false
         type: string
       pull_request_number:
-        description: "Optional open, same-repository PR from the selected side branch to develop"
+        description: "Optional open, same-repository PR from the selected side branch, including stacked PRs"
         required: false
         type: string
       publish_results:
@@ -45,19 +43,25 @@ defaults:
     shell: bash
 
 env:
-  BENCHMARK_MANIFEST: benchmarks/suites/performance-v1.toml
+  BENCHMARK_MANIFEST: benchmarks/suites/performance-v2.toml
   # Theoretical feature-compatibility floor: --cpu-thread-budget (PR #12245).
   MIN_BENCHMARK_SOURCE_COMMIT: b38e78f1b7cb0f45904fcac3680cdf072ceecd7c
   GFX950_CONFIG_FILENAME: gfx950_mi355x_kmd.json
   GFX1250_CONFIG_FILENAME: gfx1250_mi455x.json
-  CORPUS_SHA: b95ea549e1f500ce4ce83ae511ae5e4434930374
+  GFX1100_CONFIG_FILENAME: gfx1100_w7900.json
+  GFX1201_CONFIG_FILENAME: gfx1201_r9700.json
+  CORPUS_SHA: 970fb7cb6d94f818a6dd65f9a928eeee26edce7a
   TENSILE_SHA: dd77374194a3ea1a7258cd54f87af6747b6362a5
+  FULL_TENSILE_SHA: 1c63e26254a357007ce2d963266085a30b39515b
+  LLAMA_SHA: 26d52b0f9543f441fc2bfa383557c992a4fbf4b9
   NANOBIND_SHA: 9b3afa9dbdc23641daf26fadef7743e7127ff92f
-  ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
+  ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/ci-sources/rocm-systems/emulation/rocjitsu
   WORKFLOW_SOURCE_DIR: ${{ github.workspace }}/workflow-source/emulation/rocjitsu
-  CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
-  TENSILE_SOURCE: ${{ github.workspace }}/tensile-source
-  NANOBIND_SOURCE: ${{ github.workspace }}/native-nanobind
+  CORPUS_SOURCE_DIR: ${{ github.workspace }}/ci-sources/rocjitsu-test-corpus
+  TENSILE_SOURCE: ${{ github.workspace }}/ci-sources/tensile-source
+  FULL_TENSILE_SOURCE: ${{ github.workspace }}/ci-sources/full-tensile-source
+  LLAMA_SOURCE: ${{ github.workspace }}/ci-sources/llama-source
+  NANOBIND_SOURCE: ${{ github.workspace }}/ci-sources/native-nanobind
   RESULTS_BRANCH: gh-pages-rocjitsu
   RESULTS_ARTIFACT: rocjitsu-benchmark-${{ github.run_id }}-${{ github.run_attempt }}
   RESULTS_DOWNLOAD_DIR: ${{ github.workspace }}/benchmark-results
@@ -161,6 +165,15 @@ jobs:
               if [[ -n "${REQUESTED_PULL_REQUEST}" ]]; then
                 fail "A pull request number is only valid for a side-branch run."
               fi
+              # Post-merge comparisons prefer the revision before this change.
+              BASE_SHA="$(gh api \
+                "repos/${GITHUB_REPOSITORY}/commits/${BENCHMARK_SHA}" \
+                --jq '.parents[0].sha')"
+              if [[ ! "${BASE_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+                fail "Could not resolve the measured develop commit's first parent."
+              fi
+              printf 'base_branch=develop\nbase_sha=%s\n' \
+                "${BASE_SHA}" >> "${GITHUB_OUTPUT}"
               return
             fi
 
@@ -192,18 +205,33 @@ jobs:
             PR_JSON="$(gh api \
               "repos/${GITHUB_REPOSITORY}/pulls/${REQUESTED_PULL_REQUEST}")"
             PR_STATE="$(jq -r '.state' <<< "${PR_JSON}")"
-            PR_BASE="$(jq -r '.base.ref' <<< "${PR_JSON}")"
+            PR_BASE="$(jq -r '.base.ref // ""' <<< "${PR_JSON}")"
+            PR_BASE_REPOSITORY="$(jq -r '.base.repo.full_name // ""' <<< "${PR_JSON}")"
             PR_HEAD_REPOSITORY="$(jq -r '.head.repo.full_name // ""' <<< "${PR_JSON}")"
             PR_HEAD_BRANCH="$(jq -r '.head.ref' <<< "${PR_JSON}")"
             PR_HEAD_SHA="$(jq -r '.head.sha' <<< "${PR_JSON}")"
             PR_URL="$(jq -r '.html_url' <<< "${PR_JSON}")"
-            if [[ "${PR_STATE}" != open \
-                  || "${PR_BASE}" != "${BASE_BRANCH}" \
-                  || "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" \
-                  || "${PR_HEAD_BRANCH}" != "${BENCHMARK_BRANCH}" \
-                  || ! "${PR_HEAD_SHA}" =~ ^[0-9a-f]{40}$ \
-                  || "${PR_URL}" != "https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}" ]]; then
-              fail "PR #${REQUESTED_PULL_REQUEST} must be an open same-repository ${BENCHMARK_BRANCH} PR to develop."
+            if [[ "${PR_STATE}" != open ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} is '${PR_STATE}'; benchmarking requires an open PR."
+            fi
+            if [[ "${PR_BASE_REPOSITORY}" != "${GITHUB_REPOSITORY}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} base repository is '${PR_BASE_REPOSITORY}'; benchmarking requires '${GITHUB_REPOSITORY}'."
+            fi
+            if [[ -z "${PR_BASE}" || "${PR_BASE}" == -* ]] \
+               || ! git check-ref-format "refs/heads/${PR_BASE}"; then
+              fail "The PR base must be a valid branch name."
+            fi
+            if [[ "${PR_HEAD_REPOSITORY}" != "${GITHUB_REPOSITORY}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} head repository is '${PR_HEAD_REPOSITORY}'; benchmarking requires '${GITHUB_REPOSITORY}'."
+            fi
+            if [[ "${PR_HEAD_BRANCH}" != "${BENCHMARK_BRANCH}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} head branch is '${PR_HEAD_BRANCH}'; selected benchmark branch is '${BENCHMARK_BRANCH}'."
+            fi
+            if [[ ! "${PR_HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} has invalid head SHA '${PR_HEAD_SHA}'; expected a full 40-character lowercase hex commit SHA."
+            fi
+            if [[ "${PR_URL}" != "https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}" ]]; then
+              fail "PR #${REQUESTED_PULL_REQUEST} URL is '${PR_URL}'; expected 'https://github.com/${GITHUB_REPOSITORY}/pull/${REQUESTED_PULL_REQUEST}'."
             fi
             PR_MERGE_BASE="$(gh api \
               "repos/${GITHUB_REPOSITORY}/compare/${BENCHMARK_SHA}...${PR_HEAD_SHA}" \
@@ -231,10 +259,11 @@ jobs:
       group: ${{ github.workflow }}-benchmark-${{ github.event.pull_request.number || github.run_id }}
       cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     env:
+      ROCJITSU_PACKAGE_CACHE: /opt/rocjitsu-cache
       BENCHMARK_SHA: ${{ needs.source-metadata.outputs.source_sha }}
       BENCHMARK_BRANCH: ${{ needs.source-metadata.outputs.source_branch }}
     runs-on: rocjitsu-benchmark
-    timeout-minutes: 120
+    timeout-minutes: 240
     permissions:
       contents: read
     outputs:
@@ -249,6 +278,8 @@ jobs:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
       options: >-
         --user 0:0
+        --mount type=bind,source=/srv/rocjitsu-ci/sources,target=/__w/rocm-systems/rocm-systems/ci-sources
+        --mount type=bind,source=/srv/rocjitsu-ci/cache,target=/opt/rocjitsu-cache
         --cgroup-parent=benchmark.slice
         --cgroupns=host
         --cpuset-cpus=0-63
@@ -289,11 +320,16 @@ jobs:
           apt-get install -y --no-install-recommends \
             build-essential \
             ca-certificates \
+            ccache \
             clang \
             cmake \
             git \
+            jq \
             libclang-rt-dev \
             libdrm-dev \
+            libboost-dev \
+            libmsgpack-dev \
+            libmsgpack-cxx-dev \
             libomp-dev \
             libzstd-dev \
             ninja-build \
@@ -305,7 +341,8 @@ jobs:
       - name: Checkout rocm-systems
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
-          path: rocm-systems
+          path: ci-sources/rocm-systems
+          clean: true
           ref: ${{ needs.source-metadata.outputs.source_sha }}
           persist-credentials: false
 
@@ -319,7 +356,7 @@ jobs:
 
       - name: Record benchmark source
         id: source
-        working-directory: rocm-systems
+        working-directory: ci-sources/rocm-systems
         run: |
           COMMIT_MESSAGE="$(git show -s --format=%s HEAD)"
           SOURCE_SHA="$(git rev-parse --verify HEAD^{commit})"
@@ -334,7 +371,8 @@ jobs:
         with:
           repository: ROCm/rocjitsu-test-corpus
           ref: ${{ env.CORPUS_SHA }}
-          path: rocjitsu-test-corpus
+          path: ci-sources/rocjitsu-test-corpus
+          clean: true
           persist-credentials: false
 
       - name: Checkout pinned Tensile source
@@ -342,7 +380,33 @@ jobs:
         with:
           repository: ROCm/rocm-libraries
           ref: ${{ env.TENSILE_SHA }}
-          path: tensile-source
+          path: ci-sources/tensile-source
+          clean: true
+          sparse-checkout: |
+            projects/hipblaslt/tensilelite
+            cmake
+            shared/origami
+            shared/stinkytofu
+            shared/mxdatagenerator
+          persist-credentials: false
+
+      - name: Checkout pinned full Tensile source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ROCm/rocm-libraries
+          ref: ${{ env.FULL_TENSILE_SHA }}
+          path: ci-sources/full-tensile-source
+          clean: true
+          sparse-checkout: shared/tensile
+          persist-credentials: false
+
+      - name: Checkout pinned llama source
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          repository: ggml-org/llama.cpp
+          ref: ${{ env.LLAMA_SHA }}
+          path: ci-sources/llama-source
+          clean: true
           persist-credentials: false
 
       - name: Record checked Tensile revision
@@ -357,7 +421,8 @@ jobs:
         with:
           repository: wjakob/nanobind
           ref: ${{ env.NANOBIND_SHA }}
-          path: native-nanobind
+          path: ci-sources/native-nanobind
+          clean: true
           submodules: recursive
           persist-credentials: false
 
@@ -370,23 +435,39 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up uv
+        id: uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.12.21"
+          enable-cache: false
+          cache-local-path: /opt/rocjitsu-cache/uv
+
       - name: Install benchmark dependencies
+        env:
+          UV_EXECUTABLE: ${{ steps.uv.outputs.uv-path }}
         run: python "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" dependencies
 
       - name: Build rocjitsu
         run: python "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" rocjitsu
 
-      - name: Prepare Tensile wheel and native adapter
-        run: python "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" native
-
-      - name: Generate pinned Tensile artifacts
-        id: prepare
+      - name: Prepare benchmark providers
+        id: providers
+        env:
+          UV_EXECUTABLE: ${{ steps.uv.outputs.uv-path }}
         run: |
-          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" generate --manifest "${BENCHMARK_MANIFEST}"
+          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" rocisa
+          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" tensilelite-build
+          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" tensilelite-generate --manifest "${BENCHMARK_MANIFEST}"
+          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" tensile-build --manifest "${BENCHMARK_MANIFEST}"
+          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" tensile-generate --manifest "${BENCHMARK_MANIFEST}"
+          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" llama-build --manifest "${BENCHMARK_MANIFEST}"
+          "${ROCJITSU_VENV}/bin/python" "${WORKFLOW_SOURCE_DIR}/scripts/prepare-benchmarks.py" gluon-verify --manifest "${BENCHMARK_MANIFEST}"
 
       - name: Run performance suite
-        if: ${{ success() && steps.prepare.outcome == 'success' }}
-        timeout-minutes: 60
+        if: ${{ success() && steps.providers.outcome == 'success' }}
+        # Sequential cases include cold compilation and CPU validation.
+        timeout-minutes: 180
         id: benchmark
         working-directory: ${{ env.CORPUS_SOURCE_DIR }}
         run: |
@@ -399,6 +480,8 @@ jobs:
             --build-dir "${ROCJITSU_BUILD_DIR}" \
             --target-config "gfx950=${ROCJITSU_SOURCE_DIR}/configs/${GFX950_CONFIG_FILENAME}" \
             --target-config "gfx1250=${ROCJITSU_SOURCE_DIR}/configs/${GFX1250_CONFIG_FILENAME}" \
+            --target-config "gfx1100=${ROCJITSU_SOURCE_DIR}/configs/${GFX1100_CONFIG_FILENAME}" \
+            --target-config "gfx1201=${ROCJITSU_SOURCE_DIR}/configs/${GFX1201_CONFIG_FILENAME}" \
             --run-wrapper "/usr/bin/python3 -E -s /usr/local/libexec/rocjitsu-benchmark-runner/benchmark_run.py -- \"${ROCJITSU_BUILD_DIR}/tools/rocjitsu/rocjitsu\" --config {config} --" \
             --manifest "${BENCHMARK_MANIFEST}" \
             --output "${ROCJITSU_RESULT_DIR}" | taskset -c 0-15 tee "${BENCHMARK_DIR}/runner-output.txt"
@@ -427,17 +510,18 @@ jobs:
       - name: Record result workflow revision
         if: ${{ always() && (steps.benchmark.outcome == 'success' || steps.benchmark.outcome == 'failure') }}
         run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          result = Path(os.environ['ROCJITSU_RESULT_DIR']) / 'run.json'
-          if result.is_file():
-              run = json.loads(result.read_text())
-              run['publication']['workflow_commit_sha'] = os.environ['GITHUB_SHA']
-              result.write_text(json.dumps(run, indent=2) + '\n')
-          PY
+          result="${ROCJITSU_RESULT_DIR}/run.json"
+          if [[ -f "$result" ]]; then
+            tmp="$(mktemp "${result}.XXXXXX")"
+            if jq --arg sha "${GITHUB_SHA}" \
+                '.publication.workflow_commit_sha = $sha' \
+                "$result" > "$tmp"; then
+              mv -- "$tmp" "$result"
+            else
+              rm -f -- "$tmp"
+              exit 1
+            fi
+          fi
 
       - name: Collect preparation diagnostics
         if: always()
@@ -487,12 +571,14 @@ jobs:
     timeout-minutes: 30
     outputs:
       run_id: ${{ steps.publication.outputs.run_id }}
+      summary_artifact: ${{ steps.publication.outputs.summary_artifact }}
     permissions:
       contents: write
     env:
       RUN_ID: github-${{ github.run_id }}-attempt-${{ needs.benchmark.outputs.run_attempt }}
       RESULTS_ARTIFACT: ${{ needs.benchmark.outputs.results_artifact }}
       BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
+      ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       DATA_DIR: ${{ github.workspace }}/publication/rocjitsu-dashboard/data
       BENCHMARK_MACHINE: ${{ needs.benchmark.outputs.machine }}
       BENCHMARK_BRANCH: ${{ needs.source-metadata.outputs.source_branch }}
@@ -517,6 +603,8 @@ jobs:
         with:
           path: publication
           ref: ${{ env.RESULTS_BRANCH }}
+          # "Commit and push publication" pushes with this checkout's token.
+          persist-credentials: true
 
       - name: Checkout publication validation source
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -530,8 +618,14 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Set up publication validation uv
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          version: "0.12.21"
+          enable-cache: false
+
       - name: Install publication validation dependencies
-        run: python -m pip install -r "${ROCJITSU_SOURCE_DIR}/website/dashboard/scripts/dashboard-data/requirements-test.txt"
+        run: uv --no-config pip install --system --python "$(command -v python)" -r "${ROCJITSU_SOURCE_DIR}/website/dashboard/scripts/dashboard-data/requirements-test.txt"
 
       - name: Fill publication metadata
         run: |
@@ -673,7 +767,24 @@ jobs:
 
       - name: Export published run ID
         id: publication
-        run: printf 'run_id=%s\n' "${RUN_ID}" >> "${GITHUB_OUTPUT}"
+        run: |
+          printf 'run_id=%s\nsummary_artifact=rocjitsu-publication-%s-%s\n' \
+            "${RUN_ID}" "${GITHUB_RUN_ID}" "${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up summary Node.js
+        continue-on-error: true
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22.13.0"
+
+      - name: Summarize benchmark changes
+        # A summary failure must not discard otherwise publishable measurements.
+        continue-on-error: true
+        run: |
+          node "${GITHUB_WORKSPACE}/rocm-systems/.github/scripts/rocjitsu_benchmark_report.js" \
+            --data-dir "${DATA_DIR}" --run-id "${RUN_ID}" \
+            --head-sha "${BENCHMARK_SHA}" \
+            --output "${DIAGNOSTICS_DIR}/summary.json"
 
       - name: Upload publication diagnostics
         if: always()
@@ -691,7 +802,8 @@ jobs:
     # Report job-level cancellation too; a blanket !cancelled() would suppress it.
     if: >-
       always() &&
-      github.event_name == 'pull_request' &&
+      (github.event_name == 'pull_request' ||
+       (github.event_name == 'push' && github.ref == 'refs/heads/develop')) &&
       needs.source-metadata.result == 'success' &&
       needs.benchmark.result != 'skipped'
     runs-on: ubuntu-24.04
@@ -701,7 +813,7 @@ jobs:
       pull-requests: write
     # Serialize comment lookup/create/update so concurrent attempts cannot create duplicates.
     concurrency:
-      group: rocjitsu-benchmark-report-${{ github.event.pull_request.number }}
+      group: rocjitsu-benchmark-report-${{ github.event.pull_request.number || github.sha }}
       cancel-in-progress: false
       queue: max
     steps:
@@ -713,13 +825,21 @@ jobs:
           persist-credentials: false
           sparse-checkout: .github/scripts
 
+      - name: Download benchmark summary
+        if: needs.publish.result == 'success'
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ needs.publish.outputs.summary_artifact }}
+          path: benchmark-summary
+
       - name: Comment on the pull request
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         env:
           BENCHMARK_RESULT: ${{ needs.benchmark.result }}
+          BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
           PUBLICATION_RESULT: ${{ needs.publish.result }}
           PUBLISHED_RUN_ID: ${{ needs.publish.outputs.run_id }}
-          BENCHMARK_RUN_ATTEMPT: ${{ needs.benchmark.outputs.run_attempt }}
           SOURCE_SHA: ${{ needs.source-metadata.outputs.source_sha }}
         with:
           script: |
@@ -729,11 +849,14 @@ jobs:
             await reportBenchmark({
               github,
               context,
+              core,
               benchmarkResult: process.env.BENCHMARK_RESULT,
               publishResult: process.env.PUBLICATION_RESULT,
               runNumber: process.env.GITHUB_RUN_NUMBER,
               runAttempt: process.env.GITHUB_RUN_ATTEMPT,
+              benchmarkRunAttempt: process.env.BENCHMARK_RUN_ATTEMPT,
               publishedRunId: process.env.PUBLISHED_RUN_ID,
-              benchmarkAttempt: process.env.BENCHMARK_RUN_ATTEMPT,
               headSha: process.env.SOURCE_SHA,
+              summaryPath: process.env.PUBLICATION_RESULT === 'success'
+                ? `${process.env.GITHUB_WORKSPACE}/benchmark-summary/summary.json` : undefined,
             });

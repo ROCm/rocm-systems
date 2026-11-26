@@ -31,14 +31,16 @@ ExpExp::ExpExp(const MachineInst *inst)
   num_dst_ = 1;
   sdst_exec.apply_fieldless_caps(false, false, false);
   flags_ |= MEMORY_WAIT_PRODUCER;
+  set_amdgpu_operation(amdgpu::Operation::EXP);
 }
 
 namespace detail {
 DecodeResult decodeExpExp(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation =
       Exp::validate_encoding("exp", reinterpret_cast<const Exp::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<ExpExp>(opcode);
 }
 } // namespace detail

@@ -10,6 +10,7 @@
 #include "rocjitsu/code/relocation_function_table.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/machine_insts.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include <gtest/gtest.h>
 
@@ -50,8 +51,9 @@ std::vector<uint8_t> make_relocation_function_table_elf(std::span<const uint32_t
   constexpr uint64_t kGotVaddr = 0x3000;
   constexpr uint64_t kTextOffset = 0x100;
   const std::array<uint32_t, 4> default_text = {0xbf800000u, 0xbf800000u, 0xbf800000u, 0xbf800000u};
-  if (text_words.empty())
+  if (text_words.empty()) {
     text_words = default_text;
+  }
   const uint64_t text_size = text_words.size() * sizeof(uint32_t);
   constexpr uint64_t kTableSize = 24;
   constexpr uint64_t kGotSize = 8;
@@ -204,8 +206,9 @@ std::vector<uint8_t> make_text_symbol_reference_elf(bool trailing_partial_record
   // The existing first record is ABS64(symbol 1, addend 0) into the GOT slot.
   relocations.sh_size = sizeof(Elf64_Rela) + (trailing_partial_record ? 1u : 0u);
   relocations.sh_info = nonallocated_reference ? header.e_shstrndx : SHN_UNDEF;
-  if (trailing_partial_record)
+  if (trailing_partial_record) {
     image[relocations.sh_offset + sizeof(Elf64_Rela)] = 0xa5;
+  }
   std::memcpy(image.data() + header.e_shoff, sections.data(), sections.size() * sizeof(Elf64_Shdr));
   return image;
 }
@@ -376,8 +379,9 @@ void edit_first_relative64(std::vector<uint8_t> &image,
     const uint64_t off = rela_shdr->sh_offset + i * sizeof(Elf64_Rela);
     Elf64_Rela rela{};
     std::memcpy(&rela, image.data() + off, sizeof(rela));
-    if (elf_reloc_type(rela.r_info) != R_AMDGPU_RELATIVE64)
+    if (elf_reloc_type(rela.r_info) != R_AMDGPU_RELATIVE64) {
       continue;
+    }
     editor(rela);
     std::memcpy(image.data() + off, &rela, sizeof(rela));
     return;
@@ -660,10 +664,10 @@ TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
   const auto tables = discover_relocation_function_tables(object);
   ASSERT_EQ(tables.size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{40};
-  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, rocjitsu::IsaFamily::Cdna5, leaders);
   const auto dispatches =
       analyze_relocation_pairs(blocks, tables, 0x1000, /*wave_size=*/32).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
@@ -676,7 +680,7 @@ TEST(RelocationFunctionTable, ResolvesDynamicDispatchThroughGotAndTableLoads) {
 }
 
 TEST(RelocationFunctionTable, GotSlotLoadRequiresAConstantZeroOffset) {
-  for (uint8_t soffset : {0, 4, 124})
+  for (uint8_t soffset : {0, 4, 124}) {
     for (uint32_t ioffset : {0u, 8u}) {
       SCOPED_TRACE(unsigned(soffset));
       SCOPED_TRACE(ioffset);
@@ -686,13 +690,14 @@ TEST(RelocationFunctionTable, GotSlotLoadRequiresAConstantZeroOffset) {
       ASSERT_TRUE(object.is_valid());
       const auto tables = discover_relocation_function_tables(object);
       ASSERT_EQ(tables.size(), 1u);
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+      auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
       std::array<uint64_t, 1> leaders{40};
-      const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
+      const auto blocks = build_valid_blocks(object, *decoder, rocjitsu::IsaFamily::Cdna5, leaders);
       const auto dispatches =
           analyze_relocation_pairs(blocks, tables, 0x1000, /*wave_size=*/32).dispatches;
       EXPECT_EQ(dispatches.size(), soffset == 124 && ioffset == 0 ? 1u : 0u);
     }
+  }
 }
 
 TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
@@ -706,10 +711,10 @@ TEST(RelocationFunctionTable, ResolvesRcclDirectIndexedTableDispatch) {
   ASSERT_EQ(tables.size(), 1u);
   EXPECT_TRUE(tables[0].got_slot_vaddrs.empty());
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
-  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, rocjitsu::IsaFamily::Cdna5, leaders);
   const auto analysis = analyze_relocation_pairs(blocks, tables, 0x1000, /*wave_size=*/32);
   const auto &dispatches = analysis.dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
@@ -745,10 +750,10 @@ TEST(RelocationFunctionTable, RejectsChainedAddressAddDispatch) {
   const auto tables = discover_relocation_function_tables(object);
   ASSERT_EQ(tables.size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{44};
-  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, rocjitsu::IsaFamily::Cdna5, leaders);
   const auto dispatches =
       analyze_relocation_pairs(blocks, tables, 0x1000, /*wave_size=*/32).dispatches;
   // The base is built with two literal adds; only one add offset can be relocated,
@@ -775,10 +780,10 @@ TEST(RelocationFunctionTable, ResolvesBackwardTableAddress) {
   const auto tables = discover_relocation_function_tables(object);
   ASSERT_EQ(tables.size(), 1u);
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   ASSERT_NE(decoder, nullptr);
   std::array<uint64_t, 1> leaders{32};
-  const auto blocks = build_valid_blocks(object, *decoder, ROCJITSU_CODE_ARCH_CDNA5, leaders);
+  const auto blocks = build_valid_blocks(object, *decoder, rocjitsu::IsaFamily::Cdna5, leaders);
   const auto dispatches =
       analyze_relocation_pairs(blocks, tables, kAssumedTextVaddr, /*wave_size=*/32).dispatches;
   ASSERT_EQ(dispatches.size(), 1u);
@@ -941,8 +946,9 @@ TEST(RelocationFunctionTable, PatcherChecksCompleteDynamicWriteIntervalsAndKeeps
                 sections.size() * sizeof(Elf64_Shdr));
     const AmdGpuCodeObject object(image.data(), image.size());
     ASSERT_EQ(object.is_valid(), item.valid_image);
-    if (!item.valid_image)
+    if (!item.valid_image) {
       continue; // The parser rejects this form before shared patcher admission.
+    }
     const CodeObjectPatcher patcher(object);
     EXPECT_EQ(patcher.has_relocations_within_text(), item.overlaps);
     if (item.type == R_AMDGPU_NONE) {

@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <atomic>
 #include <functional>
+#include <utility>
 #include <vector>
 
 namespace amd {
@@ -246,6 +247,9 @@ class Event : public RuntimeObject {
   //! follows the wait. Takes over one reference. Called while the command is submitted, before it
   //! can complete
   void PinHwEvent(void* hw_event) { pinned_hw_events_.push_back(hw_event); }
+
+  //! Hands the pinned HW events and their references to the caller
+  std::vector<void*> TakePinnedHwEvents() { return std::exchange(pinned_hw_events_, {}); }
 
   //! Returns notify even associated with the current command
   Event* NotifyEvent() const { return notify_event_; }

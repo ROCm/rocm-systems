@@ -53,26 +53,30 @@ util::Result DecodeTargetFlag::set_value(std::optional<rj_code_target_id_t> valu
 std::string DecodeTargetFlag::format_value() const {
   if (value_) {
     std::optional<std::string_view> name = choice_name<rj_code_target_id_t>(kTargets, *value_);
-    if (name)
+    if (name) {
       return std::string(*name);
+    }
   }
   return "auto";
 }
 
 util::Result DecodeTargetFlag::parse_value(std::string_view text,
                                            util::DiagnosticEmitter diagnostic) {
-  if (text == "auto")
+  if (text == "auto") {
     return set_value(std::nullopt, diagnostic);
+  }
   std::optional<rj_code_target_id_t> target = find_choice<rj_code_target_id_t>(kTargets, text);
-  if (target)
+  if (target) {
     return set_value(*target, diagnostic);
+  }
   return diagnostic.emit() << "unsupported decoder target '" << text << "'";
 }
 
 util::Result DecodeCountFlag::set_value(uint64_t value, util::DiagnosticEmitter diagnostic) {
-  if (value < minimum_ || value > std::numeric_limits<size_t>::max())
+  if (value < minimum_ || value > std::numeric_limits<size_t>::max()) {
     return diagnostic.emit() << "expected an integer in [" << minimum_ << ", "
                              << std::numeric_limits<size_t>::max() << "]";
+  }
   value_ = static_cast<size_t>(value);
   return util::Result::success();
 }
@@ -82,8 +86,9 @@ std::string DecodeCountFlag::format_value() const { return std::to_string(value_
 util::Result DecodeCountFlag::parse_value(std::string_view text,
                                           util::DiagnosticEmitter diagnostic) {
   auto parsed = cli::parse_uint(text, diagnostic);
-  if (parsed.failed())
+  if (parsed.failed()) {
     return util::Result::failure();
+  }
   return set_value(parsed.value(), diagnostic);
 }
 
@@ -93,8 +98,9 @@ util::Result register_decode_benchmark_flags(cli::Command &command,
   if (command
           .add_flags("Decoder settings", {flags.target, flags.iterations, flags.invalid_limit},
                      diagnostic)
-          .failed())
+          .failed()) {
     return util::Result::failure();
+  }
   return command.add_flag(flags.help, diagnostic);
 }
 
