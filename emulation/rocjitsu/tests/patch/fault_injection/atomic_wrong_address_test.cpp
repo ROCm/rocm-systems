@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "atomic_cdna_exchange_fixture.h"
+#include "atomic_ds_fixture.h"
 #include "atomic_fixture.h"
 #include "atomic_native_inventory_fixture.h"
 #include "rocjitsu/code/patch/fault_injection/atomic_wrong_address.h"
@@ -182,14 +183,13 @@ TEST_P(FaultAtomicWrongAddress, BufferAndDsKeepTheirOriginalAtomicOrdinals) {
     const FailureOr<AtomicSelection> selected = select_atomic_wrong_address(
         inventory.value(), {.exact = std::nullopt, .ordinal = ordinal}, error);
     ASSERT_TRUE(selected.succeeded()) << error.message;
-    EXPECT_EQ(selected.value().site().address_supported, ordinal != 1);
+    EXPECT_TRUE(selected.value().site().address_supported);
     const FailureOr<AtomicResult> mutant =
         apply_atomic_wrong_address(source, selected.value(), 8, error);
+    ASSERT_TRUE(mutant.succeeded()) << error.message;
     if (ordinal == 1) {
-      EXPECT_TRUE(mutant.failed());
-      EXPECT_EQ(error.code, FaultMutationErrorCode::UnsupportedForm);
+      EXPECT_TRUE(test::atomic_ds_output_matches(source, 12, 8, mutant.value().image));
     } else {
-      ASSERT_TRUE(mutant.succeeded()) << error.message;
       EXPECT_TRUE(test::atomic_output_matches(source, selected.value().site().offset, 8,
                                               mutant.value().image));
     }

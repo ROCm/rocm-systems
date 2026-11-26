@@ -10,6 +10,7 @@
 #include "rocjitsu/code/kernel_scope.h"
 #include "rocjitsu/code/patch/fault_injection/fault_mutation_internal.h"
 #include "rocjitsu/code/patch/instrumentor.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ds_offset_encoded_fields.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/memory_displacement_encoded_fields.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
@@ -81,6 +82,55 @@ bool atomic_instruction(std::string_view form) {
                              [&](std::string_view prefix) { return form.starts_with(prefix); });
 }
 
+bool ds_atomic32(std::string_view form) {
+  if (!form.starts_with("ds_") || !atomic_instruction(form))
+    return false;
+  // Preserve the prototype's width admission, including its stride64 exchange exclusion.
+  for (std::string_view wider : {"128", "96", "64", "x4", "x3", "x2"}) {
+    if (form.find(wider) != std::string_view::npos)
+      return false;
+  }
+  return form.find("32") != std::string_view::npos || form.find("dword") != std::string_view::npos;
+}
+
+std::optional<int32_t> read_atomic_offset(rj_code_target_id_t target, std::string_view form,
+                                          std::span<const uint32_t> words) {
+  if (words.size() == 2 && form.starts_with("ds_")) {
+    const std::optional<uint32_t> offset = amdgpu::read_ds_offset0_field(target, words);
+    return offset ? std::optional<int32_t>{static_cast<int32_t>(*offset)} : std::nullopt;
+  }
+  return amdgpu::read_vmem_signed24_offset(target, words);
+}
+
+bool admitted_atomic_form(rj_code_target_id_t target, std::string_view form, uint32_t size,
+                          std::optional<int32_t> offset) {
+  if (!offset)
+    return false;
+  if (size == 8 && ds_atomic32(form))
+    return true;
+  return size == 12 && modern_atomic_target(target) && admitted_modern_atomic_form(form, offset);
+}
+
+std::optional<std::vector<uint32_t>> replace_atomic_offset(rj_code_target_id_t target,
+                                                           std::string_view form,
+                                                           std::span<const uint32_t> words,
+                                                           int64_t offset) {
+  if (words.size() == 2 && ds_atomic32(form)) {
+    if (offset < 0 || offset > 255 || offset % 4 != 0)
+      return std::nullopt;
+    const std::optional<std::array<uint32_t, 2>> replacement =
+        amdgpu::replace_ds_offset0_field(target, words, static_cast<uint32_t>(offset));
+    if (!replacement)
+      return std::nullopt;
+    return std::vector<uint32_t>(replacement->begin(), replacement->end());
+  }
+  const std::optional<std::array<uint32_t, 3>> replacement =
+      amdgpu::replace_vmem_signed24_offset(target, words, offset);
+  if (!replacement)
+    return std::nullopt;
+  return std::vector<uint32_t>(replacement->begin(), replacement->end());
+}
+
 bool supported_wave(IsaFamily arch, const KernelDescriptorInfo &kernel) {
   const uint32_t wave = kernel_wavefront_size(arch, kernel.descriptor);
   if (arch == IsaFamily::Rdna3 || arch == IsaFamily::Rdna4)
@@ -97,14 +147,18 @@ std::vector<AtomicCapability> atomic_wrong_address_capabilities() {
   const IsaTargetRegistry &registry = default_isa_target_registry();
   std::vector<AtomicCapability> capabilities;
   for (rj_code_target_id_t target : kAtomicTargets) {
-    if (!modern_atomic_target(target) || !registry.find_target(target) ||
-        !Decoder::create(registry, target))
+    if (!registry.find_target(target) || !Decoder::create(registry, target))
       continue;
     const bool cdna5 =
         target == ROCJITSU_CODE_TARGET_GFX1250 || target == ROCJITSU_CODE_TARGET_GFX1251;
-    for (std::string_view form : {"flat_atomic", "global_atomic", "buffer_atomic"}) {
+    const bool rdna = target == ROCJITSU_CODE_TARGET_GFX1100 ||
+                      target == ROCJITSU_CODE_TARGET_GFX1200 ||
+                      target == ROCJITSU_CODE_TARGET_GFX1201;
+    for (std::string_view form : {"flat_atomic", "global_atomic", "buffer_atomic", "ds_atomic"}) {
+      if (!modern_atomic_target(target) && form != "ds_atomic")
+        continue;
       capabilities.push_back({.target = target, .wave_size = cdna5 ? 32u : 64u, .form = form});
-      if (!cdna5)
+      if (rdna)
         capabilities.push_back({.target = target, .wave_size = 32u, .form = form});
     }
   }
@@ -227,17 +281,14 @@ FailureOr<AtomicInventory> discover_atomic_wrong_address(const FaultMutationCont
       }
       std::vector<uint8_t> original(size);
       std::memcpy(original.data(), image.data() + facts.section.file_offset + offset, size);
-      std::optional<int32_t> byte_offset;
-      if (size == 12) {
-        std::array<uint32_t, 3> words = {};
-        std::memcpy(words.data(), original.data(), size);
-        byte_offset = amdgpu::read_vmem_signed24_offset(target, words);
-      }
+      std::vector<uint32_t> words(size / sizeof(uint32_t));
+      std::memcpy(words.data(), original.data(), size);
+      const std::optional<int32_t> byte_offset =
+          read_atomic_offset(target, instruction.mnemonic(), words);
       const InstructionBoundaries::Entry *boundary = facts.boundaries->find(offset);
-      const bool supported = modern_atomic_target(target) &&
-                             admitted_modern_atomic_form(instruction.mnemonic(), byte_offset) &&
-                             boundary && boundary->size == size && !boundary->clause &&
-                             !boundary->clause_member;
+      const bool supported =
+          admitted_atomic_form(target, instruction.mnemonic(), size, byte_offset) && boundary &&
+          boundary->size == size && !boundary->clause && !boundary->clause_member;
       record->source_bytes.emplace(offset, std::move(original));
       record->sites.push_back({.offset = offset,
                                .instruction_size = size,
@@ -306,27 +357,28 @@ FailureOr<AtomicResult> apply_atomic_wrong_address(const FaultMutationContext &c
     return reject_fault_mutation(
         error, FaultMutationErrorCode::InvalidParameters,
         "atomic byte delta must be positive, four-byte aligned, and at most 0x7fffff", offset);
-  if (!selection.site_.address_supported || selection.site_.instruction_size != 12 ||
-      !modern_atomic_target(context.source().target_id()) ||
-      !admitted_modern_atomic_form(selection.site_.form, selection.site_.byte_offset))
+  const uint32_t size = selection.site_.instruction_size;
+  if (!selection.site_.address_supported ||
+      !admitted_atomic_form(context.source().target_id(), selection.site_.form, size,
+                            selection.site_.byte_offset))
     return reject_fault_mutation(error, FaultMutationErrorCode::UnsupportedForm,
                                  "selected atomic form has no address recipe", offset);
   const std::unordered_map<uint64_t, std::vector<uint8_t>>::const_iterator expected =
       selection.record_->source_bytes.find(offset);
   const std::span<const uint8_t> image = context.image();
-  if (expected == selection.record_->source_bytes.end() || expected->second.size() != 12 ||
-      offset > selection.record_->section.size || 12 > selection.record_->section.size - offset ||
+  if (expected == selection.record_->source_bytes.end() || expected->second.size() != size ||
+      offset > selection.record_->section.size || size > selection.record_->section.size - offset ||
       selection.record_->section.file_offset > image.size() ||
       offset > image.size() - selection.record_->section.file_offset ||
-      12 > image.size() - selection.record_->section.file_offset - offset)
+      size > image.size() - selection.record_->section.file_offset - offset)
     return reject_fault_mutation(error, FaultMutationErrorCode::ValidationFailure,
                                  "invalid atomic extent", offset);
   const uint8_t *source = image.data() + selection.record_->section.file_offset + offset;
-  if (std::memcmp(source, expected->second.data(), 12) != 0)
+  if (std::memcmp(source, expected->second.data(), size) != 0)
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                  "atomic source bytes changed", offset);
-  std::array<uint32_t, 3> original = {};
-  std::memcpy(original.data(), source, 12);
+  std::vector<uint32_t> original(size / sizeof(uint32_t));
+  std::memcpy(original.data(), source, size);
   std::unique_ptr<Decoder> decoder =
       Decoder::create(default_isa_target_registry(), context.source().target_id());
   if (!decoder)
@@ -334,24 +386,25 @@ FailureOr<AtomicResult> apply_atomic_wrong_address(const FaultMutationContext &c
                                  "missing atomic decoder", offset);
   const DecodeResult decoded = decoder->decode_window(original, offset);
   const std::optional<int32_t> original_offset =
-      amdgpu::read_vmem_signed24_offset(context.source().target_id(), original);
-  if (decoded.failed() || decoded.value()->size() != 12 ||
+      read_atomic_offset(context.source().target_id(), selection.site_.form, original);
+  if (decoded.failed() || static_cast<uint32_t>(decoded.value()->size()) != size ||
       decoded.value()->mnemonic() != selection.site_.form || !original_offset ||
       original_offset != selection.site_.byte_offset)
     return reject_fault_mutation(error, FaultMutationErrorCode::BadIdentity,
                                  "stale atomic form or offset", offset);
   const int64_t replacement_offset = static_cast<int64_t>(*original_offset) + *byte_delta;
-  const std::optional<std::array<uint32_t, 3>> replacement = amdgpu::replace_vmem_signed24_offset(
-      context.source().target_id(), original, replacement_offset);
+  const std::optional<std::vector<uint32_t>> replacement = replace_atomic_offset(
+      context.source().target_id(), selection.site_.form, original, replacement_offset);
   if (!replacement)
     return reject_fault_mutation(error, FaultMutationErrorCode::InvalidParameters,
-                                 "atomic byte delta overflows the signed24 offset", offset);
+                                 "atomic delta exceeds the form's offset range or alignment",
+                                 offset);
   FailureOr<std::unique_ptr<Instrumentor>> fork = context.fork_instrumentor(error);
   if (fork.failed())
     return Result::failure();
   InstructionReplacement edit = {.expected_bytes = expected->second,
-                                 .replacement_bytes = std::vector<uint8_t>(12)};
-  std::memcpy(edit.replacement_bytes.data(), replacement->data(), 12);
+                                 .replacement_bytes = std::vector<uint8_t>(size)};
+  std::memcpy(edit.replacement_bytes.data(), replacement->data(), size);
   std::unique_ptr<Instrumentor> instrumentor = std::move(fork).value();
   instrumentor->add_point({.anchor_offset = offset,
                            .kind = InstrumentationKind::ReplaceWithInst,
