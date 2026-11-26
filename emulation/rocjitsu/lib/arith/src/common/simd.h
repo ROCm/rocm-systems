@@ -343,6 +343,13 @@ void integer_wmma_avx512vnni(uint32_t instruction_flags, uint32_t *const *d,
                              const uint32_t *const *a, const uint32_t *const *b,
                              const uint32_t *const *c);
 
+// Exact integer WMMA in gfx11 replicated layout, with staged CLAMP. D may alias inputs.
+// Requires Zen4/VNNI support and validated instruction controls.
+template <int Bits, int Lanes>
+void integer_wmma_replicated_avx512vnni(uint32_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c);
+
 #endif
 
 } // namespace rocjitsu::arith

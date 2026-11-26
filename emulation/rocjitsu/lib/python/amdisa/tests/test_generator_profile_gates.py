@@ -170,7 +170,7 @@ def _matrix_profile_for_arch(
         )
     if arch_name in ('rdna3', 'rdna3_5'):
         return _matrix_profile(
-            uses_rj_arith_matrix=arch_name == 'rdna3',
+            uses_rj_arith_matrix=True,
             uses_vgpr_msb_indexing=uses_vgpr_msb_indexing,
             matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
             wave_size=32,
@@ -2075,7 +2075,7 @@ def test_unsupported_swmmac_layout_does_not_emit_sparse_setup(
     assert 'index_base' not in body
     assert 'index_key' not in body
     assert 'exec_swmmac' not in body
-    assert 'amdgpu::exec_f32<16, 16, 32, 0>(' in body
+    assert 'throw util::UnimplementedInst(mnemonic());' in body
 
 
 @pytest.mark.parametrize(
@@ -2107,14 +2107,15 @@ def test_replicated_halfwave_dense_layout_does_not_depend_on_arch_name():
         Instruction('V_WMMA_F32_16X16X16_F16', 'ENC_VOP3P', 0, []),
         'renamed_replicated_halfwave_arch',
         _matrix_profile(
+            uses_rj_arith_matrix=True,
             matrix_layout=MatrixLayout.WMMA_REPLICATED_HALFWAVE,
             wave_size=32,
             wave_size_max=64,
         ),
     )
 
-    assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-    assert 'amdgpu::exec_gfx11_wmma_dot2<false>(' in body
+    assert 'const uint32_t dst = vb + vdst.encoding_value_;' in body
+    assert 'rj_arith_v_wmma_f32_16x16x16_f16_w32 :' in body
 
 
 def _generated_matrix_call(body: str, callee: str) -> str:
@@ -2165,7 +2166,12 @@ def _generated_matrix_call(body: str, callee: str) -> str:
             ('V_WMMA_I32_16X16X16_IU8', 'rdna3', 'arith::exec_wmma', False),
             ('V_WMMA_I32_16X16X16_IU8', 'rdna4', 'arith::exec_wmma', False),
             # I32 MFMA-style fallback dispatches.
-            ('V_MFMA_I32_16X16X16_I8', 'cdna3', 'exec_i32_i8', False),
+            (
+                'V_MFMA_I32_16X16X32_I8',
+                'cdna3',
+                'arith::exec_dense_fp_matrix<2, 4, 64>',
+                False,
+            ),
             # Dynamic matrix-format WMMA.
             (
                 'V_WMMA_F32_16X16X128_F8F6F4',
@@ -2342,7 +2348,6 @@ def _generated_matrix_call(body: str, callee: str) -> str:
                 'arith::exec_dense_fp_matrix<2, 4, 64>',
                 False,
             ),
-            ('V_MFMA_F32_16X16X16_F16', 'test_arch', 'exec_f32', False),
         ]
         for indexed in ([False] if case[1] in ('rdna3', 'rdna4') else [False, True])
     ],
@@ -2350,8 +2355,12 @@ def _generated_matrix_call(body: str, callee: str) -> str:
 def test_every_matrix_executor_uses_profile_selected_operand_bases(
     mnemonic, arch, callee, is_sparse, uses_vgpr_msb_indexing
 ):
+    # MFMA destination width determines the block count.
+    operands = []
+    if mnemonic == 'V_MFMA_I32_16X16X32_I8' or mnemonic.startswith('V_MFMA_F32_'):
+        operands = [Operand('vdst', 128, 'OPR_VGPR', False, True, False, False, 0)]
     body = _gen_mfma(
-        Instruction(mnemonic, 'ENC_VOP3P', 0, []),
+        Instruction(mnemonic, 'ENC_VOP3P', 0, operands),
         arch,
         _matrix_profile_for_arch(
             arch,
@@ -2429,10 +2438,11 @@ def test_every_matrix_executor_uses_profile_selected_operand_bases(
 
 
 def test_matrix_f64_resolved_sources_use_normalized_base_expressions():
-    inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, [])
+    destination = Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0)
+    inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, [destination])
     profile = _matrix_profile(uses_vgpr_msb_indexing=True)
 
-    body = _gen_mfma(inst, 'rdna4', profile)
+    body = _gen_mfma(inst, 'cdna2', profile)
 
     assert (
         'auto src0_base_off = Isa::resolved_vgpr_offset(wf, '
@@ -2442,17 +2452,18 @@ def test_matrix_f64_resolved_sources_use_normalized_base_expressions():
         'auto src1_base_off = Isa::resolved_vgpr_offset(wf, '
         'src1.opr_type_, src1.encoding_value_, src1.vgpr_msb_role());'
     ) in body
-    assert '                 src0_base,\n                 src1_base,' in body
+    assert 'dst, src0_base, src1_base, s2,\n      inline_c' in body
 
 
 def test_matrix_f64_direct_sources_use_direct_base_expressions():
-    inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, [])
+    destination = Operand('vdst', 256, 'OPR_VGPR', False, True, False, False, 0)
+    inst = Instruction('V_MFMA_F64_16X16X4_F64', 'ENC_VOP3P_MFMA', 0, [destination])
     profile = _matrix_profile()
 
-    body = _gen_mfma(inst, 'cdna5', profile)
+    body = _gen_mfma(inst, 'cdna2', profile)
 
     assert 'Isa::resolved_vgpr_offset' not in body
-    assert ('                 src0_base,\n' '                 src1_base,') in body
+    assert 'dst, src0_base, src1_base, s2,\n      inline_c' in body
 
 
 @pytest.mark.parametrize(
@@ -2793,10 +2804,8 @@ def test_rdna_wmma_uses_arch_specific_wave32_operand_layout():
         body = _gen_mfma(inst, arch)
 
         assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-        if arch == 'rdna3':
-            assert 'rj_arith_v_wmma_f32_16x16x16_f16_w32' in body
-        else:
-            assert 'amdgpu::exec_gfx11_wmma_dot2<false>(cu, wf.wf_size(), dst,' in body
+        assert 'rj_arith_v_wmma_f32_16x16x16_f16_w32 :' in body
+        assert 'rj_arith_v_wmma_f32_16x16x16_f16_w64,' in body
         assert 'amdgpu::exec_f32(cu, 16, 16, 16' not in body
 
     body = _gen_mfma(inst, 'rdna4')
@@ -2812,18 +2821,14 @@ def test_rdna_wmma_i32_uses_measured_accumulation_policy(bits, arch):
     body = _gen_mfma(inst, arch)
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'src2.encoding_value_ < 256 ? std::optional<uint32_t>(const_acc)' in body
-    if arch == 'rdna3_5':
+    suffix = '_gfx12' if arch == 'rdna4' else ''
+    for wave in (32, 64):
         assert (
-            f'amdgpu::exec_rdna_wmma_i32<false, {bits}>(cu, wf.wf_size(), dst,' in body
-        )
-        assert (
-            '/*a_signed=*/(inst_.neg & 0x1u) != 0, /*b_signed=*/(inst_.neg & 0x2u) != 0, inst_.clamp'
+            f'rj_arith_v_wmma_i32_16x16x16_iu{bits}_w{wave}{suffix}'
+            + (' :' if wave == 32 else ',')
             in body
         )
-    else:
-        suffix = '_w32_gfx12' if arch == 'rdna4' else ''
-        assert f'rj_arith_v_wmma_i32_16x16x16_iu{bits}{suffix}' in body
-        assert '(inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u)' in body
+    assert '(inst_.neg & 3u) | (inst_.clamp ? RJ_ARITH_WMMA_CLAMP : 0u)' in body
     assert 'amdgpu::exec_i32_mixed(cu, 16, 16, 16' not in body
 
 
@@ -2832,11 +2837,7 @@ def test_rdna_wmma_i32_uses_measured_accumulation_policy(bits, arch):
 )
 def test_rdna_unmeasured_integer_shape_is_not_approximated(arch, dtype):
     inst = Instruction(f'V_WMMA_I32_16X16X32_{dtype}', 'ENC_VOP3P', 0, [])
-    if arch in ('rdna3', 'rdna4'):
-        with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
-            _gen_mfma(inst, arch)
-        return
-    with pytest.raises(ValueError, match='missing rj-arith'):
+    with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
         _gen_mfma(inst, arch)
 
 
@@ -2945,20 +2946,15 @@ def test_rdna_wmma_f16_bf16_use_arch_specific_wave32_dispatch():
             body = _gen_mfma(inst, arch)
 
             assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
-            if arch == 'rdna3':
+            for wave in (32, 64):
                 assert (
-                    f'rj_arith_v_wmma_{dtype.lower()}_16x16x16_{dtype.lower()}' in body
-                )
-                assert '(inst_.op_sel & 4u) != 0' in body
-                assert 'RJ_ARITH_WMMA_HIGH_C_D' in body
-                assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in body
-            else:
-                assert (
-                    f'amdgpu::exec_gfx11_wmma_dot2<{bf16}, true>(cu, wf.wf_size(), dst,'
+                    f'rj_arith_v_wmma_{dtype.lower()}_16x16x16_{dtype.lower()}_w{wave}'
+                    + (' :' if wave == 32 else ',')
                     in body
                 )
-                assert '(inst_.op_sel >> 2) & 1u' in body
-                assert 'inst_.neg, inst_.neg_hi' in body
+            assert '(inst_.op_sel & 4u) != 0' in body
+            assert 'RJ_ARITH_WMMA_HIGH_C_D' in body
+            assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in body
             assert 'wf.fp16_ovfl()' in body
             assert f'dot_packed16::inline_word<{bf16}>' in body
 
@@ -3061,7 +3057,7 @@ def test_disabled_gpr_idx_capability_reaches_sparse_and_dense_mixed_matrix_branc
 
     assert 'apply_gpr_idx_to_mma_base' not in sparse_body
     assert 'apply_gpr_idx_to_mma_base' not in dense_body
-    assert 'rj_arith_v_mfma_f32_16x16x128_f8_f6_f4_w64' in dense_body
+    assert 'rj_arith_v_mfma_f32_16x16x128_f8f6f4_w64,' in dense_body
     assert 'exec_f32_scaled_mixed' not in dense_body
     assert 'raw_words_' not in dense_body
 
@@ -3162,11 +3158,14 @@ def test_cdna_f64_mfma_uses_blgp_as_neg_immediate():
         body = _gen_mfma(inst, arch)
         assert 'cu.arithmetic_flags(), inst_.blgp,' in body
 
-    for arch in ('rdna3_5', 'cdna5'):
-        body = _gen_mfma(inst, arch)
-        assert 's2, const_acc, 0u);' in body
+    body = _gen_mfma(inst, 'cdna2')
+    assert 'cu.arithmetic_flags(), 0u,' in body
+    assert 'inst_.blgp' not in body
 
-    for arch in ('rdna3', 'rdna4'):
+    body = _gen_mfma(inst, 'cdna5')
+    assert 'throw util::UnimplementedInst' in body
+
+    for arch in ('rdna3', 'rdna3_5', 'rdna4'):
         with pytest.raises(ValueError, match='Missing rj-arith matrix binding'):
             _gen_mfma(inst, arch)
 
@@ -3182,8 +3181,10 @@ def test_gfx1251_f64_wmma_uses_wave32_mode_independent_executor():
 
     body = gen_mfma(inst, ['vdst'], ['src0', 'src1', 'src2'], 'cdna5')
 
-    assert 'amdgpu::exec_wmma_f64_16x16x4_f64(cu, dst,' in body
-    assert 'inst_.neg, inst_.neg_hi' in body
+    assert 'exec_dense_fp_matrix<4, 16, 32, 16, false, true>' in body
+    assert 'rj_arith_v_wmma_f64_16x16x4_f64_w32,' in body
+    assert 'inst_.neg | (uint64_t(inst_.neg_hi) << 3)' in body
+    assert '!src2_off ? std::optional<uint64_t>(const_acc) : std::nullopt' in body
     assert 'amdgpu::RegisterAccess(wf).read_scalar64(src2)' in body
     assert 'wf.fp_round_mode_f16_f64()' not in body
     assert 'wf.fp_denorm_mode_f16_f64()' not in body
@@ -6699,7 +6700,7 @@ def test_cdna5_variant_execution_callback_inventory(
         assert f'rj_arith_v_pk_{operation}_f64_w32' in execution_source
     assert 'packed_register_dword_offset' not in execution_source
     assert 'make_after_selector_validation' not in execution_source
-    assert 'exec_wmma_f64_16x16x4_f64' in execution_source
+    assert 'rj_arith_v_wmma_f64_16x16x4_f64_w32' in execution_source
     execute_body = execution_source.split(
         'void VWmmaF6416x16x4F64Vop3p::execute_impl', 1
     )[1].split('void VWmmaScaleF32Vop3px2::execute_impl', 1)[0]
@@ -10406,6 +10407,12 @@ def test_cdna4_wide_global_lds_load_semantics(count, opcode):
     'shape', ['32X32X4_2B', '16X16X4_4B', '4X4X4_16B', '32X32X8', '16X16X16']
 )
 def test_half_mfma_migration_retains_bank_resolution(arch, format, shape):
+    if format == 'BF16' and arch in ('cdna1', 'cdna2'):
+        dimensions, *batch_suffix = shape.split('_')
+        dimensions = dimensions.rsplit('X', 1)
+        shape = 'X'.join([dimensions[0], str(int(dimensions[1]) // 2)])
+        if batch_suffix:
+            shape += '_' + batch_suffix[0]
     name = f'V_MFMA_F32_{shape}_{format}'
     m = int(shape.split('X')[0])
     batch = int(shape.split('_')[1][:-1]) if '_' in shape else 1
@@ -10417,19 +10424,23 @@ def test_half_mfma_migration_retains_bank_resolution(arch, format, shape):
         arch,
         enc_field_names={'acc_cd'},
     )
-    migrated = arch in ('cdna3', 'cdna4')
-    assert ('amdgpu::arith::exec_dense_fp_matrix<' in body) == migrated
+    assert 'amdgpu::arith::exec_dense_fp_matrix<' in body
     assert ('wf.fp16_ovfl() ? RJ_ARITH_FP16_OVFL' in body) == (
         arch == 'cdna3' or arch == 'cdna4' and format == 'BF16'
     )
     assert 'inst_.acc_cd' in body
     assert f'{arch}::resolve_acc' in body
-    if migrated:
-        suffix = '_gfx950' if arch == 'cdna4' else ''
-        assert 'rj_arith_' + name.lower() + f'_w64{suffix},' in body
-        assert 'arithmetic_flags()' in body
-        assert 'inst_.cbsz' in body and 'inst_.abid' in body and 'inst_.blgp' in body
-        assert 'std::optional<uint32_t>(const_acc)' in body
+    target = (
+        '_gfx908'
+        if arch == 'cdna1'
+        else ('_gfx90a' if arch == 'cdna2' else ('_gfx950' if arch == 'cdna4' else ''))
+    )
+    assert 'rj_arith_' + name.lower() + '_w64' + target in body
+    assert 'arithmetic_flags()' in body
+    assert 'inst_.cbsz' in body and 'inst_.abid' in body and 'inst_.blgp' in body
+    assert 'std::optional<uint32_t>(const_acc)' in body
+    if arch == 'cdna2':
+        assert 'fp_denorm_mode_f32()' not in body
 
 
 @pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
@@ -10497,7 +10508,7 @@ def test_f32_gfx1250_wmma_library_dispatch():
     assert 'rj_arith_v_wmma_f32_16x16x4_f32_w32' in body
 
 
-@pytest.mark.parametrize('arch', ['cdna3', 'cdna4'])
+@pytest.mark.parametrize('arch', ['cdna2', 'cdna3', 'cdna4'])
 @pytest.mark.parametrize('m,batch', [(16, 1), (4, 4)])
 def test_f64_mfma_library_dispatch(arch, m, batch):
     suffix = '_4B' if batch == 4 else ''
@@ -10513,7 +10524,10 @@ def test_f64_mfma_library_dispatch(arch, m, batch):
     )
     assert f'exec_dense_fp_matrix<2, {outputs}, 64, {outputs}, false, true>' in body
     assert f'rj_arith_{name.lower()}_w64' in body
-    assert 'cu.arithmetic_flags(), inst_.blgp' in body
+    controls = '0u' if arch == 'cdna2' else 'inst_.blgp'
+    assert f'cu.arithmetic_flags(), {controls}' in body
+    if arch == 'cdna2':
+        assert 'inst_.blgp' not in body
     assert 'inst_.acc_cd' in body
     assert 'amdgpu::RegisterAccess(wf).read_scalar64(src2)' in body
     assert 'std::optional<uint64_t> inline_c' in body
@@ -10561,6 +10575,30 @@ def test_dense_integer_mfma_library_dispatch(arch, m, k, batch):
         assert 'permute_b_lane' not in body
     else:
         assert 'permute_b_lane' in body
+
+
+@pytest.mark.parametrize('arch,target', [('cdna1', 'gfx908'), ('cdna2', 'gfx90a')])
+@pytest.mark.parametrize(
+    'm,k,batch', [(32, 4, 2), (16, 4, 4), (4, 4, 16), (32, 8, 1), (16, 16, 1)]
+)
+def test_older_integer_mfma_keeps_target_controls(arch, target, m, k, batch):
+    name = f'V_MFMA_I32_{m}X{m}X{k}I8'
+    outputs = m * m * batch // 64
+    destination = Operand(
+        'vdst', outputs * 32, 'OPR_VGPR', False, True, False, False, 0
+    )
+    body = _gen_mfma(
+        Instruction(name, 'ENC_VOP3P_MFMA', 0, [destination]),
+        arch,
+        enc_field_names={'acc_cd'} if arch == 'cdna2' else set(),
+    )
+    batch_suffix = f'_{batch}b' if batch > 1 else ''
+    assert f'rj_arith_v_mfma_i32_{m}x{m}x{k}{batch_suffix}_i8_w64_{target}' in body
+    assert f'exec_dense_fp_matrix<{m*k*batch//256}, {outputs}, 64>' in body
+    assert 'FP16_OVFL' not in body
+    a_block = f', {m}' if arch == 'cdna2' else ''
+    assert f'permute_a_lane(lane, inst_.cbsz, inst_.abid{a_block})' in body
+    assert 'std::optional<uint32_t>(const_acc)' in body
 
 
 def test_dense_integer_gfx1250_wmma_library_dispatch():
@@ -10697,3 +10735,24 @@ def test_cdna_screen_partition_uses_wave64_library_bridge():
             assert 'execute_screen_partition(*this, wf, vdst, src0)' in result
         else:
             assert result is None
+
+
+@pytest.mark.parametrize('arch,target', [('cdna1', 'gfx908'), ('cdna2', 'gfx90a')])
+@pytest.mark.parametrize(
+    'm,k,batch', [(32, 1, 2), (16, 1, 4), (4, 1, 16), (32, 2, 1), (16, 4, 1)]
+)
+def test_older_f32_mfma_library_controls(arch, target, m, k, batch):
+    destination = Operand(
+        'vdst', m * m * batch // 64 * 32, 'OPR_VGPR', False, True, False, False, 0
+    )
+    body = _gen_mfma(
+        Instruction(f'V_MFMA_F32_{m}X{m}X{k}F32', 'ENC_VOP3P_MFMA', 0, [destination]),
+        arch,
+        enc_field_names={'acc_cd'} if arch == 'cdna2' else set(),
+    )
+    batches = f'_{batch}b' if batch > 1 else ''
+    assert f'rj_arith_v_mfma_f32_{m}x{m}x{k}{batches}_f32_w64_{target}' in body
+    assert 'FP16_OVFL' not in body
+    block = f', {m}' if arch == 'cdna2' else ''
+    assert f'permute_a_lane(lane, inst_.cbsz, inst_.abid{block})' in body
+    assert ('wf.fp_denorm_mode_f32()' in body) == (arch == 'cdna2')

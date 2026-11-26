@@ -363,3 +363,52 @@ are also SIMD. Directed AVX2 arithmetic uses its inherited integer fallback.
 Strict numeric and required FP-status semantics remain unsupported. All float
 values, per-element signs, CLAMP, scalar carriers, EXEC and overlap are supported.
 This is inherited behavior, not new empirical hardware qualification.
+
+## gfx908 and gfx90a integer matrix instructions
+
+Each target's five signed-byte MFMA forms have scalar, AVX2 and AVX-512-v4
+implementations. All semantics use wrapping integer arithmetic and ignore FP
+controls. gfx90a retains its adjacent M-lane A broadcasts; gfx908 retains the
+inherited full-wave mapping. The target suffix also distinguishes the ignored
+FP16_OVFL control from the newer MFMA saturation contract. This migration does
+not qualify the older targets' floating-point MFMA models.
+
+## gfx90a FP64 MFMA
+
+Both gfx90a FP64 MFMA instructions use the existing two dense FP64 library
+operations, with scalar, AVX2 and AVX-512 implementations. Loose, allow-Loose
+and Compatibility are supported; strict bit-exact modes remain unsupported.
+The binding ignores BLGP on gfx90a instead of forwarding the newer targets'
+sign controls. EXEC and guest FP controls do not affect this inherited model.
+Compatibility retains legacy FP32 widening for inline accumulators.
+
+## gfx1150 dense WMMA
+
+All six gfx1150 dense WMMA forms, in Wave32 and Wave64, use the existing gfx11
+library operations: FP16/BF16 factors with FP32 or packed output, and IU8/IU4
+factors with INT32 output. Compatibility retains the legacy ordered DOT2 model
+and packed narrowing, or integer group saturation. Loose uses the existing
+faster arithmetic. The gfx1150 binding preserves its operand-tuple remapping.
+This reuses the inherited gfx11 model; it is not a new gfx1150 hardware
+qualification. Existing scalar, AVX2 and applicable AVX-512 paths are shared.
+Integer gfx11 WMMA also uses the shared AVX-512 VNNI kernel at the Zen4 CPU
+level, in both wave sizes and with staged saturation.
+
+## gfx1251 FP64 WMMA
+
+The Wave32 FP64 WMMA instruction uses the library's shared dense FP64 scalar,
+AVX2 and AVX-512-v4 kernels. Compatibility and Loose retain the inherited fixed
+nearest-even fused arithmetic with preserved subnormals; guest FP controls do
+not alter it. Explicit strict modes remain unsupported pending qualification.
+The decoder still requires a complete Wave32 EXEC and validates tuples before
+operand reads. The whole-tile library API has no EXEC parameter.
+
+## gfx908 and gfx90a FP32 matrix instructions
+
+The five FP32-input MFMA forms on each older CDNA target use rj-arith in
+Loose, allow-Loose and Compatibility semantics, with scalar, AVX2 and
+AVX-512-v4 paths. Strict empirical modes are not qualified. gfx90a retains
+its adjacent-block A broadcasts and independent guest input/output denormal
+controls; gfx908 retains full-wave broadcasts and preserves denormals.
+Both ignore overflow saturation. This does not qualify their FP16/BF16 or
+FP64 forms, which remain separate instruction families.

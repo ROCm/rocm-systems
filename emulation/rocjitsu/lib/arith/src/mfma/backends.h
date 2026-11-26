@@ -3,18 +3,12 @@
 
 // MFMA backend declarations. Each implementation has an ISA-specific symbol.
 #pragma once
+#include "mfma/f32_model.h"
 #include <stdint.h>
 
 namespace rocjitsu::arith {
 // XF32 factors retain ten fraction bits before multiplication.
 inline constexpr uint32_t kMfmaXf32InputMask = 0xffffe000u;
-
-template <int M, int Batch>
-void mfma_f64_x86_64_v3(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                        const uint32_t *const *b, const uint32_t *const *c);
-template <int M, int Batch>
-void mfma_f64_x86_64_v4(uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
-                        const uint32_t *const *b, const uint32_t *const *c);
 
 // gfx1250 Wave32 byte matrix operands have passed public validation and metadata normalization.
 using Gfx1250IntegerBackend = void(uint64_t, bool, uint32_t *const *, const uint32_t *const *,
@@ -33,29 +27,29 @@ void sparse_matrix_i8_x86_64_v4(uint64_t controls, bool clamp, bool clamp_per_pa
                                 uint32_t *const *d, const uint32_t *const *a,
                                 const uint32_t *const *b, const uint32_t *const *index);
 
-template <int M, int K, int Batch, bool Wmma>
+template <int M, int K, int Batch, bool Wmma, int ABlockLanes = 0>
 void matrix_i8_x86_64_v3(uint64_t controls, bool clamp_overflow, bool clamp_per_pass,
                          uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                          const uint32_t *const *c);
-template <int M, int K, int Batch, bool Wmma>
+template <int M, int K, int Batch, bool Wmma, int ABlockLanes = 0>
 void matrix_i8_x86_64_v4(uint64_t controls, bool clamp_overflow, bool clamp_per_pass,
                          uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                          const uint32_t *const *c);
 
-template <int M, int K, int Batch, bool Bf16>
-void mfma_half_x86_64_v3(uint64_t instruction_flags, bool clamp_overflow, uint32_t *const *d,
+template <int M, int K, int Batch, bool Bf16, MfmaF32Model Model = MfmaF32Model::Default>
+void mfma_half_x86_64_v3(uint64_t instruction_flags, uint64_t flags, uint32_t *const *d,
                          const uint32_t *const *a, const uint32_t *const *b,
                          const uint32_t *const *c);
-template <int M, int K, int Batch, bool Bf16>
-void mfma_half_x86_64_v4(uint64_t instruction_flags, bool clamp_overflow, uint32_t *const *d,
+template <int M, int K, int Batch, bool Bf16, MfmaF32Model Model = MfmaF32Model::Default>
+void mfma_half_x86_64_v4(uint64_t instruction_flags, uint64_t flags, uint32_t *const *d,
                          const uint32_t *const *a, const uint32_t *const *b,
                          const uint32_t *const *c);
-template <int M, int K, int Batch, bool Xf32 = false>
-void mfma_f32_x86_64_v3(uint64_t controls, bool clamp_overflow, uint32_t *const *d,
+template <int M, int K, int Batch, bool Xf32 = false, MfmaF32Model Model = MfmaF32Model::Default>
+void mfma_f32_x86_64_v3(uint64_t controls, uint64_t flags, uint32_t *const *d,
                         const uint32_t *const *a, const uint32_t *const *b,
                         const uint32_t *const *c);
-template <int M, int K, int Batch, bool Xf32 = false>
-void mfma_f32_x86_64_v4(uint64_t controls, bool clamp_overflow, uint32_t *const *d,
+template <int M, int K, int Batch, bool Xf32 = false, MfmaF32Model Model = MfmaF32Model::Default>
+void mfma_f32_x86_64_v4(uint64_t controls, uint64_t flags, uint32_t *const *d,
                         const uint32_t *const *a, const uint32_t *const *b,
                         const uint32_t *const *c);
 template <int M, int K, bool Bf8A, bool Bf8B, bool Fnuz>

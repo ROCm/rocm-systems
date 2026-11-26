@@ -10,6 +10,12 @@ namespace rocjitsu::arith::test {
 
 // Append WMMA workloads and their supported CPU/semantics variants.
 void add_wmma(std::vector<Benchmark> &cases) {
+  add_flag_variant(
+      cases, "wmma", "v_wmma_f64_16x16x4_f64_w32",
+      [](Operands &r, uint64_t flags, uint64_t modifiers) {
+        return rj_arith_v_wmma_f64_16x16x4_f64_w32(flags, modifiers, r.d, r.a, r.b, r.c);
+      },
+      RJ_ARITH_WMMA_ABS_C | RJ_ARITH_WMMA_NEG_C, "abs/neg C");
   add(cases, "wmma", "v_wmma_f32_16x16x4_f32_w32", [](Operands &r, uint64_t flags) {
     return rj_arith_v_wmma_f32_16x16x4_f32_w32(flags, 0, r.d, r.a, r.b, r.c);
   });

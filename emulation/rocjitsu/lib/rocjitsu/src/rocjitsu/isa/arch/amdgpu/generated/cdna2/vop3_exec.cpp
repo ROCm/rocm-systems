@@ -1111,7 +1111,7 @@ void VSwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VAccvgprMovB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_v_accvgpr_mov_b32_vop3(*this, wf);
+  amdgpu::arith::execute_move32(*this, wf, vdst, src0);
 }
 
 void VCndmaskB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
