@@ -733,6 +733,7 @@ struct ncclComm {
   ncclFabricMemHandler* ddaFabricMemHandler; /* fabric path only */
   void* ddaScratch;
   size_t ddaScratchBytes;
+  // Device peer table. IPC: [0, 8) scratch bases, [8, 16) LL region bases (nccl_dda_detail::ddaLLRegion).
   void* ddaPeerPtrsDev;
   nccl_dda_detail::DdaIpcBarrierState* ddaIpcBarrierState; /* IPC path only */
   nccl_dda_detail::DdaFabricBarrierState* ddaFabricBarrierState; /* fabric path only */

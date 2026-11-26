@@ -26,7 +26,6 @@
 namespace {
 
 using nccl_dda_detail::DdaIpcBarrierState;
-using nccl_dda_detail::ddaMaxNBlocksForScratch;
 using nccl_dda_detail::kDdaNranks;
 
 /** Flat below this size; tree above (see ddaAllReduceFlatIpc / ddaAllReduceTreeIpc). */
@@ -35,7 +34,7 @@ constexpr size_t kDdaFlatTreeThresholdBytes = 1ULL << 18;
 // Single source of the launch geometry: grid/block for `count` elements of
 // `typeSize` bytes, capped by the scratch-derived block count.
 static inline std::pair<dim3, dim3> ddaAllReduceIpcGeom(size_t count, int typeSize) {
-  return dda::common::getGridAndBlockDims(count, typeSize, ddaMaxNBlocksForScratch());
+  return nccl_dda_detail::ddaIpcSimpleGeom(count, typeSize);
 }
 
 template <typename T>

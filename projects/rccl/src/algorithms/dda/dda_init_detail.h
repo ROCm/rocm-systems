@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <memory>
 #include <new>
+#include <utility>
 
 #define DDA_IPC_MAXBLOCKS 24
 #define DDA_IPC_BUFFER_SIZE 268435456
@@ -94,6 +95,11 @@ struct DdaFabricBarrierState {
 inline int ddaMaxNBlocksForScratch() {
   unsigned maxBlocks = DDA_IPC_MAXBLOCKS;
   return static_cast<int>(maxBlocks);
+}
+
+// Grid and block of the IPC Simple kernels for `count` elements of `typeSize` bytes.
+inline std::pair<dim3, dim3> ddaIpcSimpleGeom(size_t count, int typeSize) {
+  return dda::common::getGridAndBlockDims(count, typeSize, ddaMaxNBlocksForScratch());
 }
 
 struct DdaFabricMaxBlocksOverride {
