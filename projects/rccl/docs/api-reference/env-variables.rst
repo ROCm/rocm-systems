@@ -1797,9 +1797,9 @@ threshold table introduced for gfx1250.
         | ``1``: Force-enabled (``CTA_POLICY_ZERO`` requirement bypassed for non-registered path).
 
     * - | ``RCCL_CE_REDUCESCATTER``
-        | Opt-in Copy Engine ReduceScatter. Off by default. When enabled, it shares
-          the CE AllReduce staging buffer (``ceARTmpBuf``); user buffers do not need
-          symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
+        | Opt-in Copy Engine ReduceScatter, including grouped BF16 average. Off by
+          default. When enabled, it shares the CE AllReduce staging buffer
+          (``ceARTmpBuf``); user buffers do not need symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
           Single-node symmetric communicators only. There is no upper message-size
           cap; large messages are pipelined through the staging slots. Messages
           below ``RCCL_CE_COLL_MIN_BYTES`` skip CE. That variable is shared with
@@ -1859,10 +1859,11 @@ threshold table introduced for gfx1250.
         | ``N``: Reserve ``N`` slots (2 to 8).
 
     * - | ``RCCL_CE_REDUCE_MAX_BLOCKS``
-        | Caps the local CE reduction grid. The runtime value is clamped to the
-          compiled range of 1 through 92 blocks. Smaller values leave more compute
-          units available to concurrent model kernels; larger values reduce each
-          staged chunk faster.
+        | Caps the local CE reduction grid. The default comes from the
+          compile-time macro ``NCCL_CE_REDUCE_DEFAULT_BLOCKS`` (46). The runtime
+          value is clamped to the compiled range of 1 through 92 blocks. Smaller
+          values leave more compute units available to concurrent model kernels;
+          larger values reduce each staged chunk faster.
       - | ``46``: Default reduction-grid cap.
         | ``N``: Use ``N`` blocks after clamping to ``[1, 92]``.
 
