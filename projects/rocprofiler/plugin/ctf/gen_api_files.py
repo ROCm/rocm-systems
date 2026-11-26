@@ -23,6 +23,7 @@
 import os
 import os.path
 import sys
+import ast
 import re
 import yaml
 import CppHeaderParser
@@ -255,6 +256,38 @@ def _make_sure(cond, error_msg):
         sys.exit(1)
 
 
+def _integer_expression(node):
+    """Evaluate the integer and bitwise expressions used by C enums."""
+    if isinstance(node, ast.Expression):
+        return _integer_expression(node.body)
+    if isinstance(node, ast.Constant) and type(node.value) is int:
+        return node.value
+    if isinstance(node, ast.UnaryOp):
+        value = _integer_expression(node.operand)
+        if isinstance(node.op, ast.UAdd):
+            return value
+        if isinstance(node.op, ast.USub):
+            return -value
+        if isinstance(node.op, ast.Invert):
+            return ~value
+    if isinstance(node, ast.BinOp):
+        left = _integer_expression(node.left)
+        right = _integer_expression(node.right)
+        operations = {
+            ast.Add: lambda: left + right,
+            ast.Sub: lambda: left - right,
+            ast.BitOr: lambda: left | right,
+            ast.BitAnd: lambda: left & right,
+            ast.BitXor: lambda: left ^ right,
+            ast.LShift: lambda: left << right,
+            ast.RShift: lambda: left >> right,
+        }
+        for operation, evaluate in operations.items():
+            if isinstance(node.op, operation):
+                return evaluate()
+    raise ValueError("unsupported integer expression")
+
+
 def _enumerator_effective_val(enum_val):
     # Try the value, but this value may be a string (an
     # enumerator/definition).
@@ -262,6 +295,12 @@ def _enumerator_effective_val(enum_val):
 
     if type(val) is int:
         return val
+
+    if isinstance(val, str):
+        try:
+            return _integer_expression(ast.parse(val, mode="eval"))
+        except (SyntaxError, ValueError, TypeError):
+            pass
 
     # Try the raw value.
     val = enum_val.get("raw_value")
@@ -277,8 +316,12 @@ def _enumerator_effective_val(enum_val):
             except:
                 pass
 
-    _make_sure(False, f'Cannot get the integral value of enumerator `{enum_val["name"]}`')
+        try:
+            return _integer_expression(ast.parse(val, mode="eval"))
+        except (SyntaxError, ValueError, TypeError):
+            pass
 
+    _make_sure(False, f'Cannot get the integral value of enumerator `{enum_val["name"]}`')
 
 # Returns the equivalent field type of the C type `c_type`.
 def _number_ft_from_c_type(cpp_header, c_type):
