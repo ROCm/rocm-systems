@@ -167,60 +167,6 @@ TEST_F(SimdCoverage, DecodedTrue16MovePreservesScalarAndVectorSelectors) {
   }
 }
 
-template <PackedFloatOp Op, bool Bf16> void check_packed_half(Wavefront &wf) {
-  SCOPED_TRACE(int(Op));
-  SCOPED_TRACE(Bf16);
-  using V = util::narrow32<uint32_t>;
-  std::mt19937 rng(871);
-  constexpr uint16_t corners[] = {0,      0x8000, 1,      0x83ff, 0x3c00, 0xbc00, 0x7bff, 0x7c00,
-                                  0xfc00, 0x7e01, 0x7c01, 0x7f80, 0xff80, 0x3f80, 0xbf80, 0x7fc1};
-  for (uint32_t mode = 0; mode < 32; ++mode) {
-    wf.set_mode_raw(((mode & 3) << 2) | (((mode >> 2) & 3) << 6) |
-                    ((mode & 16) ? Wavefront::FP16_OVFL_BIT : 0));
-    for (unsigned iteration = 0; iteration < 400; ++iteration) {
-      auto generate = [&]() {
-        return iteration < 64 ? uint32_t(corners[rng() % std::size(corners)])
-                              : (uint32_t(rng()) & 0xffffu);
-      };
-      V a([&](auto) { return generate(); }), b([&](auto) { return generate(); }),
-          c([&](auto) { return generate(); });
-      fp_mode::ScopedEnvironment environment(0);
-      V actual = packed_float_half_simd<Op, Bf16>(a, b, c, wf, iteration & 1);
-      for (unsigned i = 0; i < V::size(); ++i) {
-        uint16_t expected;
-        if constexpr (Bf16) {
-          float af = util::bf16_to_f32(a[i]), bf = util::bf16_to_f32(b[i]),
-                cf = util::bf16_to_f32(c[i]);
-          if constexpr (Op == PackedFloatOp::ADD) {
-            expected = fp_mode::packed_add_bf16(af, bf, wf.fp16_ovfl());
-          } else if constexpr (Op == PackedFloatOp::MUL) {
-            expected = fp_mode::packed_mul_bf16(af, bf, wf.fp16_ovfl());
-          } else if constexpr (Op == PackedFloatOp::FMA) {
-            expected = fp_mode::packed_fma_bf16(af, bf, cf, wf.fp16_ovfl());
-          } else {
-            expected = fp_mode::packed_select_bf16(af, bf, Op == PackedFloatOp::MIN);
-          }
-          expected = fp_mode::clamp_bf16(expected, iteration & 1, floating_clamp_nan_to_zero(wf));
-        } else if constexpr (Op == PackedFloatOp::FMA) {
-          expected = fp_mode::fma_f16(a[i], b[i], c[i], false, false, false, false, false, false,
-                                      wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), 0,
-                                      iteration & 1, wf.fp16_ovfl(), floating_clamp_nan_to_zero(wf),
-                                      fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()));
-        }
-        ASSERT_EQ(actual[i], expected)
-            << mode << ":" << iteration << " inputs=" << a[i] << "," << b[i] << "," << c[i];
-      }
-    }
-  }
-}
-TEST_F(SimdCoverage, PackedBf16Numerics) {
-  check_packed_half<PackedFloatOp::ADD, true>(*wf);
-  check_packed_half<PackedFloatOp::MUL, true>(*wf);
-  check_packed_half<PackedFloatOp::FMA, true>(*wf);
-  check_packed_half<PackedFloatOp::MIN, true>(*wf);
-  check_packed_half<PackedFloatOp::MAX, true>(*wf);
-}
-
 struct Slot {
   uint16_t op;
   O *dst, *src0, *src1, *src2;

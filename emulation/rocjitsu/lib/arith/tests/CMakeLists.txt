@@ -21,10 +21,14 @@ function(rj_arith_add_test target source)
 endfunction()
 
 rj_arith_add_test(rj_arith_gfx1250_binary_test fp/gfx1250_binary_test.cpp)
+rj_arith_add_test(rj_arith_inherited_math_goldens_test math/inherited_goldens_test.cpp)
+
 rj_arith_add_test(rj_arith_separately_rounded_mad_test fp/separately_rounded_mad_test.cpp)
 
-rj_arith_add_test(rj_arith_packed_u64_gfx1251_test integer/packed_u64_gfx1251_test.cpp)
 rj_arith_add_test(rj_arith_packed_f64_gfx1251_test fp/packed_f64_gfx1251_test.cpp)
+rj_arith_add_test(rj_arith_conversion_inherited_goldens_test conversion/inherited_goldens_test.cpp)
+
+rj_arith_add_test(rj_arith_packed_u64_gfx1251_test integer/packed_u64_gfx1251_test.cpp)
 rj_arith_add_test(rj_arith_sparse_matrix_i8_test mfma/sparse_matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_matrix_i8_test mfma/matrix_i8_test.cpp)
 rj_arith_add_test(rj_arith_mfma_f64_test mfma/mfma_f64_test.cpp)
