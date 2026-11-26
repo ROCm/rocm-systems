@@ -510,3 +510,36 @@ Older FP64 native-math migration also routes TRIG_PREOP on gfx908/gfx90a,
 gfx1010/gfx1030 and gfx1150 through the inherited 1201-bit table and existing
 scalar/AVX2/AVX-512 implementations. Compatibility/Loose remain the supported
 semantics; strict empirical requests are not newly qualified.
+
+## gfx950 dense FP32/FP64 MFMA, FP16 DOT2, and mixed FMA
+
+MI350X (gfx950) dense FP32 MFMA (`32x32x1_2b`, `16x16x1_4b`, `4x4x1_16b`,
+`32x32x2`, `16x16x4`) and FP64 MFMA (`16x16x4`, `4x4x4_4b`) have dedicated
+`_gfx950` Wave64 entry points calibrated against physical MI350X `wave2_3f`
+captures. FP32 MFMA uses sequential RNE fused multiply-add, honors symmetric
+`FP_DENORM_32` input/output subnormal flushing (`v_mfma_f32_4x4x1_16b_f32`:
+`0x806043d5 * 0xff000000 + 0x0046078c -> 0x3fc087aa` with subnormals kept vs
+`0x00000000` when flushed) while ignoring guest rounding and `FP16_OVFL`
+(`0xdf800000 * 0xff000000 + 0xff7fffff -> 0x7f800000` under both `FP16_OVFL=0`
+and `1`), prioritizes `0 * Inf` (`0xffc00000`) ahead of `NaN(C)` while quieting
+`sNaN` in `A, B, C`, and applies CDNA4 adjacent-block `CBSZ`/`ABID` broadcasting
+(clamping `1 << cbsz > 64 / M` to lanes `0..15`) in both Loose and exact modes.
+FP64 MFMA uses sequential RNE fused multiply-add, ignores guest `MODE`,
+prioritizes `0 * Inf` (`0xfff8000000000000`) ahead of `NaN(C)`, and applies
+`CBSZ` (`|A|, |B|, |C|`, qualified for `cbsz <= 4` in mode 2; e.g.
+`v_mfma_f64_4x4x4_4b_f64` wave 1 lane 0 yields `0xc02f5485490e821b` at `cbsz=0`,
+`0x40268d6532f05171` at `cbsz=1`, and `0xc020cea71cc4b49c` at `cbsz=4`) before
+`BLGP` (`-A, -B, -C`, retained in Loose/Compatibility and rejected when nonzero
+in mode 2). Mode 3 returns `UNSUPPORTED_FP_STATUS` on FP64 MFMA because CDNA4
+DGEMM arithmetic exceptions have no `TRAPSTS` output on the matrix API.
+
+MI350X `v_dot2_f32_f16` and `v_dot2c_f32_f16` (`_gfx950`, Wave32/Wave64) use the
+2-product 24-bit aligned fixed-point dot with nearest-even normalization and
+canonical `-qNaN` (`0xffc00000`), independent of guest `MODE` and `CLAMP`.
+MI350X `v_mad_mix_f32`, `v_mad_mixlo_f16`, and `v_mad_mixhi_f16` (`_gfx950`,
+Wave32/Wave64) route to single-rounded mixed FMA across guest rounding,
+symmetric denormal flushing, and `FP16_OVFL` under `MODE.IEEE=1` (`wave2_3f`
+row 32: `0x7f800005 * 0x7f800000 + 0xbf2a33e3 -> 0x7fc00005`), rejecting DPP
+flags and rejecting uncaptured `MODE.IEEE=0` or split `F16`/`F32` input-denormal
+flags in strict mode 2 (falling back to Loose in allow-Loose). Mode 3 returns
+`UNSUPPORTED_FP_STATUS` on the DOT2 and mixed FMA entry points.

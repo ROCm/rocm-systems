@@ -1593,8 +1593,8 @@ void VDot2cF32F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   const uint64_t modifiers = 0;
   const unsigned narrow_sources = 0;
   const unsigned replicate_sources = 0;
-  amdgpu::arith::execute_dot2_f32(wf, rj_arith_v_dot2_f32_f16_w32_gfx942,
-                                  rj_arith_v_dot2_f32_f16_w64_gfx942, wf.cu().arithmetic_flags(),
+  amdgpu::arith::execute_dot2_f32(wf, rj_arith_v_dot2_f32_f16_w32_gfx950,
+                                  rj_arith_v_dot2_f32_f16_w64_gfx950, wf.cu().arithmetic_flags(),
                                   modifiers, vdst, src0, src1, vdst, false, narrow_sources,
                                   replicate_sources);
 }

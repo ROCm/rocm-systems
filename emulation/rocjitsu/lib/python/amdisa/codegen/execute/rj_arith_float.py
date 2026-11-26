@@ -2752,7 +2752,11 @@ def gen_mixed_fma(ctx: ExecuteContext) -> str | None:
         + (
             '_gfx908'
             if arch == 'cdna1'
-            else '_gfx12' if not bf16 and arch in ('rdna4', 'cdna5') else ''
+            else (
+                '_gfx950'
+                if arch == 'cdna4'
+                else '_gfx12' if not bf16 and arch in ('rdna4', 'cdna5') else ''
+            )
         )
     )
     byte_mask = (
@@ -3090,7 +3094,7 @@ def gen_float_dot32(ctx: ExecuteContext) -> str | None:
         'rj_arith_v_dot2_f32_'
         + ('bf16' if bf16 else 'f16')
         + (
-            ('_gfx950' if bf16 else '_gfx942')
+            ('_gfx950' if arch == 'cdna4' else '_gfx942')
             if host_model
             else '_gfx12' if arch == 'rdna4' else ''
         )
