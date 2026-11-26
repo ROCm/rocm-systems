@@ -11749,6 +11749,8 @@ TEST_F(InitMicrotest, InitTransportsRank_DdaNranksRelaxConsensusFails_Propagates
   const auto gathers = Tr_InstallGathers(c);
   EXPECT_EQ(ncclInvalidArgument, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+}
+
 TEST_F(InitMicrotest, InitTransportsRank_HierAllGatherSizingMismatch_FailsOnlyWhereHierAllGatherCanRun) {
   using Patch = std::function<void(Tr_AllGatherInfo&)>;
   // The mismatch and kTrPostsetReached share a code, so the Postset call count tells them apart.
