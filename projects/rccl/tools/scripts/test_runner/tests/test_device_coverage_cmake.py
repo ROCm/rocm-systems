@@ -88,13 +88,19 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
             )
             return runtime, result, argv
 
-    def test_probe_finds_selected_compiler_profile_runtime(self):
+    def run_device_probe(self, runtime_relpaths):
+        """Run the device probe against a fake compiler whose resource dir
+        holds an archive at each of runtime_relpaths.
+
+        Returns the resource dir, the "<runtime>\\n<reason>" result and argv.
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            resource_dir = root / "resource"
-            runtime = resource_dir / PRIMARY_RUNTIME_RELPATH
-            runtime.parent.mkdir(parents=True)
-            runtime.touch()
+            resource_dir = Path(temp_dir) / "resource"
+            resource_dir.mkdir()
+            for relpath in runtime_relpaths:
+                runtime = resource_dir / relpath
+                runtime.parent.mkdir(parents=True, exist_ok=True)
+                runtime.touch()
             compiler_body = (
                 'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n'
                 f"printf '%s\\n' '{resource_dir}'\n"
@@ -104,82 +110,50 @@ class DeviceCoverageCMakeTest(unittest.TestCase):
                 '"${COMPILER}" runtime reason)\n'
                 'file(WRITE "${RESULT_FILE}" "${runtime}\\n${reason}")\n'
             )
-            _probe_root, result, argv, _ = self._run_cmake_probe(
+            _root, result, argv, _ = self._run_cmake_probe(
                 compiler_body, probe_call
             )
+            return resource_dir, result, argv
 
-        self.assertEqual(result, f"{runtime}\n")
+    def test_probe_finds_selected_compiler_profile_runtime(self):
+        resource_dir, result, argv = self.run_device_probe(
+            [PRIMARY_RUNTIME_RELPATH]
+        )
+
+        self.assertEqual(result, f"{resource_dir / PRIMARY_RUNTIME_RELPATH}\n")
         self.assertIn("--target=amdgcn-amd-amdhsa", argv)
         self.assertIn("-fprofile-instr-generate", argv)
         self.assertIn("-fcoverage-mapping", argv)
         self.assertIn("-print-resource-dir", argv)
 
     def test_probe_finds_amdgpu_triple_profile_runtime(self):
-        # Newer ROCm compilers (10.3 nightlies) install the device runtime only
-        # under lib/amdgpu-amd-amdhsa/. Without this candidate AUTO resolved
-        # device coverage OFF and only the host report was produced.
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            resource_dir = root / "resource"
-            runtime = resource_dir / AMDGPU_RUNTIME_RELPATH
-            runtime.parent.mkdir(parents=True)
-            runtime.touch()
-            compiler_body = (
-                'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n'
-                f"printf '%s\\n' '{resource_dir}'\n"
-            )
-            probe_call = (
-                "rccl_find_device_profile_runtime("
-                '"${COMPILER}" runtime reason)\n'
-                'file(WRITE "${RESULT_FILE}" "${runtime}\\n${reason}")\n'
-            )
-            _probe_root, result, _argv, _ = self._run_cmake_probe(
-                compiler_body, probe_call
-            )
+        # Newer ROCm compilers install the device runtime only under lib/amdgpu-amd-amdhsa/.
+        resource_dir, result, _argv = self.run_device_probe(
+            [AMDGPU_RUNTIME_RELPATH]
+        )
 
-        self.assertEqual(result, f"{runtime}\n")
+        self.assertEqual(result, f"{resource_dir / AMDGPU_RUNTIME_RELPATH}\n")
+
+    def test_probe_prefers_amdgcn_triple_when_both_exist(self):
+        # A toolchain that already resolved the amdgcn archive must keep it.
+        resource_dir, result, _argv = self.run_device_probe(
+            [AMDGPU_RUNTIME_RELPATH, PRIMARY_RUNTIME_RELPATH]
+        )
+
+        self.assertEqual(result, f"{resource_dir / PRIMARY_RUNTIME_RELPATH}\n")
 
     def test_probe_finds_linux_fallback_profile_runtime(self):
         # Only the last candidate (lib/linux/...-amdgcn.a) exists, exercising
         # the final loop iteration in rccl_find_device_profile_runtime.
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir)
-            resource_dir = root / "resource"
-            runtime = resource_dir / FALLBACK_RUNTIME_RELPATH
-            runtime.parent.mkdir(parents=True)
-            runtime.touch()
-            compiler_body = (
-                'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n'
-                f"printf '%s\\n' '{resource_dir}'\n"
-            )
-            probe_call = (
-                "rccl_find_device_profile_runtime("
-                '"${COMPILER}" runtime reason)\n'
-                'file(WRITE "${RESULT_FILE}" "${runtime}\\n${reason}")\n'
-            )
-            _probe_root, result, argv, _ = self._run_cmake_probe(
-                compiler_body, probe_call
-            )
+        resource_dir, result, argv = self.run_device_probe(
+            [FALLBACK_RUNTIME_RELPATH]
+        )
 
-        self.assertEqual(result, f"{runtime}\n")
+        self.assertEqual(result, f"{resource_dir / FALLBACK_RUNTIME_RELPATH}\n")
         self.assertIn("-print-resource-dir", argv)
 
     def test_probe_explains_missing_profile_runtime(self):
-        with tempfile.TemporaryDirectory() as temp_dir:
-            resource_dir = Path(temp_dir) / "resource"
-            resource_dir.mkdir()
-            compiler_body = (
-                'printf "%s\\n" "$@" >> "${ARGV_FILE:-/dev/null}"\n'
-                f"printf '%s\\n' '{resource_dir}'\n"
-            )
-            probe_call = (
-                "rccl_find_device_profile_runtime("
-                '"${COMPILER}" runtime reason)\n'
-                'file(WRITE "${RESULT_FILE}" "${runtime}\\n${reason}")\n'
-            )
-            _root, result, _argv, _ = self._run_cmake_probe(
-                compiler_body, probe_call
-            )
+        _resource_dir, result, _argv = self.run_device_probe([])
 
         self.assertTrue(result.startswith("\nthe selected compiler"))
         self.assertIn("libclang_rt.profile.a", result)
