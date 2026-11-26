@@ -14488,8 +14488,6 @@ TEST(ArithBridgeTest, CdnaNumericQualification) {
         const bool fmac = variant == 13;
         const int op = fmac ? 0 : e32 ? variant - 6 : variant;
         for (uint64_t exec_mask : {0ULL, 1ULL}) {
-          SCOPED_TRACE(testing::Message()
-                       << arch << ":" << int(semantics) << ":" << variant << ":" << exec_mask);
           BridgeFixture f(arches[arch], arch == 2 ? 32 : 64, ArithmeticPolicy{semantics});
           f.wave->set_exec(exec_mask);
           f.wave->set_mode_raw(0xf0);
