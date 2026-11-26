@@ -320,6 +320,14 @@ TEST(SystemUnit, DebugDumpRawGpuMetricsAndLinkMetrics) {
 TEST(SystemUnit, DebugDumpDriverVersionInfo) {
   std::string out = RunCommandCaptureOutput(
       "echo ===uname===; uname -a; "
+      // Direct container confirmation: PID 1 running as a container's init
+      // (not systemd/real init) and/or a non-root cgroup path are the two
+      // reliable host-vs-container signals that don't depend on inferring
+      // anything from env vars some orchestrator happens to forward.
+      "echo ===container_detection===; "
+      "echo \"/.dockerenv exists: $([ -f /.dockerenv ] && echo yes || echo no)\"; "
+      "echo \"pid1 cmdline: $(tr '\\0' ' ' < /proc/1/cmdline 2>/dev/null)\"; "
+      "echo \"cgroup: $(cat /proc/self/cgroup 2>&1)\"; "
       "echo ===amdgpu_module_version===; cat /sys/module/amdgpu/version 2>&1; "
       "echo ===modinfo_amdgpu===; modinfo amdgpu 2>&1 | grep -iE 'version|vermagic'; "
       // Decisive check for the container/GPU-isolation hypothesis: if KFD
