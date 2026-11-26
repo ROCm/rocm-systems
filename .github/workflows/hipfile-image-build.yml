@@ -81,6 +81,7 @@ jobs:
           docker buildx build \
             -f "${GITHUB_WORKSPACE}/projects/hipfile/util/docker/DOCKERFILE.ais_ci_${AIS_INPUT_PLATFORM}" \
             --target base \
+            --provenance=false \
             --build-arg BUILDKIT_INLINE_CACHE=1 \
             --build-arg ROCM_VERSION="${AIS_INPUT_ROCM_VERSION}" \
             --build-arg ROCM_NIGHTLY_BUILD="${AIS_INPUT_ROCM_NIGHTLY_BUILD}" \

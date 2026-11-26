@@ -9,6 +9,7 @@
 // raise INT_DIV0, while CLAMP suppresses a new cause (not an existing flag).
 
 #include "math/rcp_iflag.h"
+#include "common/sdwa_dispatch.h"
 #include "common/validation.h"
 #include "math/unary_exact.h"
 #include "math/x86_64/rcp_exact.h"
@@ -65,7 +66,7 @@ int rcp_iflag(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const
         (Rdna3 || Cdna || !(mode & RJ_ARITH_ALU_CLAMP))) {
       uint32_t zeros = 0;
 
-      // RDNA3 and CDNA inherit rocjitsu's classify_rcp_iflag_f32_exceptions:
+      // RDNA3 and CDNA retain the inherited input-zero classifier:
       // signed zero raises INT_DIV0 regardless of CLAMP. RDNA4 instead uses
       // the captured flushed-subnormal and CLAMP-suppression policy.
       for (int lane = 0; lane < 32; ++lane) {
@@ -286,14 +287,22 @@ int rj_arith_v_rcp_iflag_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint6
 int rj_arith_v_rcp_iflag_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                         uint32_t *const *d, const uint32_t *const *a,
                                         uint32_t *state) {
-  return cdna_rcp_iflag<false>(flags, exec_mask, mode, d, a, state);
+  const uint64_t core_flags = mode & RJ_ARITH_ALU_SDWA ? flags & ~RJ_ARITH_FP_ROUND_MASK : flags;
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, mode, d, [&](uint64_t core_mode) {
+        return cdna_rcp_iflag<false>(core_flags, exec_mask, core_mode, d, a, state);
+      });
 }
 
 // Evaluate the inherited CDNA reciprocal and signed-zero status policy for active lanes.
 int rj_arith_v_rcp_iflag_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                         uint32_t *const *d, const uint32_t *const *a,
                                         uint32_t *state) {
-  return cdna_rcp_iflag<false>(flags, exec_mask, mode, d, a, state);
+  const uint64_t core_flags = mode & RJ_ARITH_ALU_SDWA ? flags & ~RJ_ARITH_FP_ROUND_MASK : flags;
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, mode, d, [&](uint64_t core_mode) {
+        return cdna_rcp_iflag<false>(core_flags, exec_mask, core_mode, d, a, state);
+      });
 }
 
 // Evaluate the inherited CDNA reciprocal and signed-zero status policy for active lanes.

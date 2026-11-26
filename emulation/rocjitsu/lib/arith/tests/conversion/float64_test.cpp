@@ -415,64 +415,125 @@ TEST(ConversionCvtU32F64W64Gfx942, Arithmetic) {
                                        Conversion64::DoubleToUnsigned);
 }
 
-// gfx950 inherits the RDNA3/gfx942 model but stays loose-only until gfx950 captures are reviewed.
+// gfx950 shares the RDNA3/gfx942 model and matches MI350X captures.
 TEST(ConversionCvtF32F64W32Gfx950, Arithmetic) {
-  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w32_gfx950,
-                                        Conversion64::DoubleToFloat);
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_f32_f64_w32_gfx950,
+                                       Conversion64::DoubleToFloat);
 }
 
 TEST(ConversionCvtF32F64W64Gfx950, Arithmetic) {
-  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w64_gfx950,
-                                        Conversion64::DoubleToFloat);
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_f32_f64_w64_gfx950,
+                                       Conversion64::DoubleToFloat);
 }
 
 TEST(ConversionCvtF64F32W32Gfx950, Arithmetic) {
-  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w32_gfx950,
-                                        Conversion64::FloatToDouble);
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_f32_w32_gfx950,
+                                       Conversion64::FloatToDouble);
 }
 
 TEST(ConversionCvtF64F32W64Gfx950, Arithmetic) {
-  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w64_gfx950,
-                                        Conversion64::FloatToDouble);
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_f32_w64_gfx950,
+                                       Conversion64::FloatToDouble);
 }
 
 TEST(ConversionCvtF64I32W32Gfx950, Arithmetic) {
-  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w32_gfx950,
-                                        Conversion64::SignedToDouble);
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_i32_w32_gfx950,
+                                       Conversion64::SignedToDouble);
 }
 
 TEST(ConversionCvtF64I32W64Gfx950, Arithmetic) {
-  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w64_gfx950,
-                                        Conversion64::SignedToDouble);
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_i32_w64_gfx950,
+                                       Conversion64::SignedToDouble);
 }
 
 TEST(ConversionCvtF64U32W32Gfx950, Arithmetic) {
-  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w32_gfx950,
-                                        Conversion64::UnsignedToDouble);
+  check_float64<32, 1, 2, false, true>(rj_arith_v_cvt_f64_u32_w32_gfx950,
+                                       Conversion64::UnsignedToDouble);
 }
 
 TEST(ConversionCvtF64U32W64Gfx950, Arithmetic) {
-  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w64_gfx950,
-                                        Conversion64::UnsignedToDouble);
+  check_float64<64, 1, 2, false, true>(rj_arith_v_cvt_f64_u32_w64_gfx950,
+                                       Conversion64::UnsignedToDouble);
 }
 
 TEST(ConversionCvtI32F64W32Gfx950, Arithmetic) {
-  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w32_gfx950,
-                                        Conversion64::DoubleToSigned);
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_i32_f64_w32_gfx950,
+                                       Conversion64::DoubleToSigned);
 }
 
 TEST(ConversionCvtI32F64W64Gfx950, Arithmetic) {
-  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w64_gfx950,
-                                        Conversion64::DoubleToSigned);
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_i32_f64_w64_gfx950,
+                                       Conversion64::DoubleToSigned);
 }
 
 TEST(ConversionCvtU32F64W32Gfx950, Arithmetic) {
-  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w32_gfx950,
-                                        Conversion64::DoubleToUnsigned);
+  check_float64<32, 2, 1, false, true>(rj_arith_v_cvt_u32_f64_w32_gfx950,
+                                       Conversion64::DoubleToUnsigned);
 }
 
 TEST(ConversionCvtU32F64W64Gfx950, Arithmetic) {
-  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w64_gfx950,
+  check_float64<64, 2, 1, false, true>(rj_arith_v_cvt_u32_f64_w64_gfx950,
+                                       Conversion64::DoubleToUnsigned);
+}
+
+// gfx10/gfx115x/gfx908/gfx90a share the RDNA3 numeric model via loose-only _gfx10 wrappers.
+TEST(ConversionCvtF32F64W32Gfx10, Arithmetic) {
+  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w32_gfx10,
+                                        Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF32F64W64Gfx10, Arithmetic) {
+  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_f32_f64_w64_gfx10,
+                                        Conversion64::DoubleToFloat);
+}
+
+TEST(ConversionCvtF64F32W32Gfx10, Arithmetic) {
+  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w32_gfx10,
+                                        Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64F32W64Gfx10, Arithmetic) {
+  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_f32_w64_gfx10,
+                                        Conversion64::FloatToDouble);
+}
+
+TEST(ConversionCvtF64I32W32Gfx10, Arithmetic) {
+  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w32_gfx10,
+                                        Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64I32W64Gfx10, Arithmetic) {
+  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_i32_w64_gfx10,
+                                        Conversion64::SignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W32Gfx10, Arithmetic) {
+  check_float64<32, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w32_gfx10,
+                                        Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtF64U32W64Gfx10, Arithmetic) {
+  check_float64<64, 1, 2, false, false>(rj_arith_v_cvt_f64_u32_w64_gfx10,
+                                        Conversion64::UnsignedToDouble);
+}
+
+TEST(ConversionCvtI32F64W32Gfx10, Arithmetic) {
+  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w32_gfx10,
+                                        Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtI32F64W64Gfx10, Arithmetic) {
+  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_i32_f64_w64_gfx10,
+                                        Conversion64::DoubleToSigned);
+}
+
+TEST(ConversionCvtU32F64W32Gfx10, Arithmetic) {
+  check_float64<32, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w32_gfx10,
+                                        Conversion64::DoubleToUnsigned);
+}
+
+TEST(ConversionCvtU32F64W64Gfx10, Arithmetic) {
+  check_float64<64, 2, 1, false, false>(rj_arith_v_cvt_u32_f64_w64_gfx10,
                                         Conversion64::DoubleToUnsigned);
 }
 

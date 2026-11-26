@@ -43,6 +43,8 @@ template <int Lanes, bool Older, typename Call> void check(Call call) {
     b[4] = 0x3f000000U;
     a[5] = 0x80000001U;
     b[5] = 0x3f000000U;
+    a[7] = 0x00ffffffU;
+    b[7] = 0x3f800000U;
     a[6] = 0x3f800000U;
     b[6] = 0x3f800000U;
     for (unsigned rounding = 0; rounding < 4; ++rounding) {
@@ -52,7 +54,11 @@ template <int Lanes, bool Older, typename Call> void check(Call call) {
             uint64_t(Older ? RJ_ARITH_FP_DX10_CLAMP_OFF : 0)}) {
         for (uint32_t mode :
              {0U, uint32_t(RJ_ARITH_ALU_OMOD_HALF), uint32_t(RJ_ARITH_ALU_OMOD_2),
+              uint32_t(RJ_ARITH_ALU_SDWA | RJ_ARITH_ALU_OMOD_HALF),
               uint32_t(RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_ABS_A)}) {
+          if (!Older && (mode & RJ_ARITH_ALU_SDWA)) {
+            continue;
+          }
           const uint64_t flags = RJ_ARITH_SEMANTICS_COMPATIBILITY | fp | (uint64_t(rounding) << 24);
           uint32_t *out = expected;
           ASSERT_EQ(call(flags, Mask(-1), mode, &out, &ap, &bp, nullptr), RJ_ARITH_SUCCESS);
@@ -71,6 +77,12 @@ template <int Lanes, bool Older, typename Call> void check(Call call) {
             const bool suppressed = Older && (!(fp & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) ||
                                               (fp & RJ_ARITH_FP_IEEE_MODE));
             EXPECT_EQ(expected[6], suppressed ? 0x3f800000U : 0x40000000U);
+          }
+          if (mode & RJ_ARITH_ALU_SDWA) {
+            // SDWA rounds /2 before flushing, but still obeys the older OMOD gate.
+            const bool suppressed =
+                !(fp & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) || (fp & RJ_ARITH_FP_IEEE_MODE);
+            EXPECT_EQ(expected[7], suppressed ? 0x00ffffffU : rounding < 2 ? 0x00800000U : 0U);
           }
           for (uint64_t cpu : cpus) {
             for (Mask exec_mask : {Mask(-1), Mask(0x8000000180000001ULL)}) {

@@ -19,16 +19,18 @@ template <bool Bf8>
 inline uint32_t decode_stage(Factor *factors, const uint32_t *const *operand, int stage,
                              int slice) {
   Vec largest = constant<Vec>(0);
+  RJ_ARITH_UNROLL(2)
   for (int k = 0; k < 8; k += 4) {
     int reg = wmma_gfx12_packed_local(8 * stage + k) / 4;
     Vec words = load<Vec>(operand[reg] + 16 * stage + slice * Columns);
+    Factor batch[4];
+    decode_word4<Bf8>(words, batch, largest);
     RJ_ARITH_UNROLL(4)
     for (int i = 0; i < 4; ++i) {
-      Vec bits = bit_and(shift_right(words, 8 * i), constant<Vec>(255));
-      factors[k + i] = decode_factor<Bf8>(bits, largest);
+      factors[k + i] = batch[i];
     }
   }
-  return uint32_t(lane_mask(greater(largest, constant<Vec>(FirstSpecial<Bf8> - 1))));
+  return special_mask_from_largest16<Bf8>(largest);
 }
 
 // Fixed dense K lets each row broadcast its A lane straight from the decoded
@@ -48,7 +50,13 @@ template <bool Bf8> inline void prepare_left(Left &left, const uint32_t *const *
       uint32_t special = decode_stage<Bf8>(factors, a, stage, slice);
       RJ_ARITH_UNROLL(8)
       for (int k = 0; k < 8; ++k) {
+#if defined(RJ_ARITH_TARGET_X86_64_V4)
         store(left.units[8 * stage + k] + slice * Columns, factors[k].units);
+#else
+        // Zero-extend signed 16-bit Q12 units so VPMADDWD computes exact products.
+        store(left.units[8 * stage + k] + slice * Columns,
+              bit_and(factors[k].units, constant<Vec>(0xffff)));
+#endif
         store(left.grid[8 * stage + k] + slice * Columns, factors[k].grid);
       }
       left.special[stage] |= special << (slice * Columns);
@@ -67,7 +75,7 @@ inline Vec dot8(const int32_t (*units)[16], const int32_t (*grid)[16], int row, 
     RJ_ARITH_UNROLL(4)
     for (int i = 0; i < 4; ++i) {
       int k = 4 * group + i;
-      products[i] = mul(constant<Vec>(units[k][row]), b[k].units);
+      products[i] = mul_units(units[k][row], b[k].units);
       grids[i] = add(constant<Vec>(grid[k][row]), b[k].grid);
     }
     groups[group] = align4(products, grids);
@@ -78,7 +86,8 @@ inline Vec dot8(const int32_t (*units)[16], const int32_t (*grid)[16], int row, 
 inline Vec exceptional(const int32_t (*units)[16], int row, const Factor *b, Vec acc, Vec result) {
   Exceptions seen{constant<Vec>(0), constant<Vec>(0), constant<Vec>(0)};
   for (int k = 0; k < 8; ++k) {
-    classify(seen, constant<Vec>(units[k][row]), b[k].units);
+    int32_t u = int32_t(int16_t(units[k][row]));
+    classify(seen, constant<Vec>(u), b[k].units);
   }
   return resolve(seen, acc, result);
 }

@@ -1965,13 +1965,17 @@ TEST(SdmaPacketProcessorTest, ClosingAnAdmittedLocalStepDrainsBeforeARejectedPac
   }
 
   std::mutex owner_mutex;
-  std::vector<std::function<void()>> owner_queue;
+  std::vector<std::function<int()>> owner_queue;
   bool drained = false;
-  const auto post = [&](std::function<void()> continuation) {
+  const auto post = [&](std::function<int()> continuation) {
     std::lock_guard lock(owner_mutex);
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
-  ASSERT_TRUE(gate->close(alias, post, [&] { drained = true; }));
+  ASSERT_TRUE(gate->close(alias, post, [&] {
+    drained = true;
+    return 0;
+  }));
   {
     std::lock_guard lock(owner_mutex);
     EXPECT_TRUE(owner_queue.empty());
@@ -1991,7 +1995,7 @@ TEST(SdmaPacketProcessorTest, ClosingAnAdmittedLocalStepDrainsBeforeARejectedPac
   EXPECT_EQ(first_result.packet.status, PacketProcessStatus::Complete);
   EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination), 0x11223344u);
   EXPECT_FALSE(drained);
-  std::function<void()> continuation;
+  std::function<int()> continuation;
   {
     std::lock_guard lock(owner_mutex);
     ASSERT_EQ(owner_queue.size(), 1u);

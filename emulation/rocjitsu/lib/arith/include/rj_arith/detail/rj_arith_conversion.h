@@ -56,8 +56,7 @@ int rj_arith_v_pack_b32_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *excp_flag_user);
 
-// gfx942 shares the RDNA3 packing model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 packing model (empirically exact on MI300X and MI350X).
 int rj_arith_v_pack_b32_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b,
@@ -89,6 +88,18 @@ int rj_arith_v_pack_b32_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
                                         uint32_t *excp_flag_user);
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 packing model; strict exact
+// stays unsupported pending per-architecture captures.
+int rj_arith_v_pack_b32_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
+
+int rj_arith_v_pack_b32_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                      uint64_t instruction_flags, uint32_t *const *d,
+                                      const uint32_t *const *a, const uint32_t *const *b,
+                                      uint32_t *trapsts);
 
 // DPP8/DPP16 permute A before modifiers; B remains in its original lane,
 // including when B is the stochastic seed.
@@ -167,8 +178,7 @@ int rj_arith_v_cvt_pk_u8_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t in
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_u8_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
@@ -189,6 +199,13 @@ int rj_arith_v_cvt_pk_u8_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                          uint64_t instruction_flags, uint32_t *const *d,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c, uint32_t *excp_flag_user);
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 numeric model; strict exact
+// stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_pk_u8_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t *trapsts);
 
 // DPP8/DPP16 permute A before half selection or saturation; B stays in its
 // original lane. Integer widening and saturating packing use one VGPR per
@@ -250,8 +267,7 @@ int rj_arith_v_cvt_pk_norm_i16_f32_w32(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b);
@@ -270,8 +286,7 @@ int rj_arith_v_cvt_pk_norm_u16_f32_w32(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b);
@@ -292,8 +307,7 @@ int rj_arith_v_cvt_pk_norm_i16_f16_w32(uint64_t flags, uint32_t exec_mask,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
@@ -320,8 +334,7 @@ int rj_arith_v_cvt_pk_norm_u16_f16_w32(uint64_t flags, uint32_t exec_mask,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
@@ -367,8 +380,7 @@ int rj_arith_v_cvt_pk_norm_i16_f32_w64(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b);
@@ -386,8 +398,7 @@ int rj_arith_v_cvt_pk_norm_u16_f32_w64(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, const uint32_t *const *b);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b);
@@ -406,8 +417,7 @@ int rj_arith_v_cvt_pk_norm_i16_f16_w64(uint64_t flags, uint64_t exec_mask,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
@@ -434,8 +444,7 @@ int rj_arith_v_cvt_pk_norm_u16_f16_w64(uint64_t flags, uint64_t exec_mask,
                                        const uint32_t *const *a, const uint32_t *const *b,
                                        uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
@@ -474,6 +483,37 @@ int rj_arith_v_cvt_norm_u16_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                             uint64_t instruction_flags, uint32_t *const *d,
                                             const uint32_t *const *a);
 
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 packed normalized model;
+// strict exact stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_pk_norm_i16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts);
+int rj_arith_v_cvt_pk_norm_i16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts);
+int rj_arith_v_cvt_pk_norm_u16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts);
+int rj_arith_v_cvt_pk_norm_u16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             uint32_t *trapsts);
+int rj_arith_v_cvt_pk_norm_i16_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cvt_pk_norm_i16_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cvt_pk_norm_u16_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b);
+int rj_arith_v_cvt_pk_norm_u16_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b);
+
 // DPP8/DPP16 permute A before conversion and modifiers; B stays in its
 // original lane. Pack two FP32 source VGPRs into one 16-bit-pair destination: A goes to the
 // low half, B to the high half. Supports ABS/NEG on A/B, full EXEC masking and
@@ -498,8 +538,7 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w32(uint64_t flags, uint32_t exec_mask,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
@@ -520,6 +559,13 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
                                               uint32_t *excp_flag_user);
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 numeric model; strict exact
+// stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *trapsts);
 
 int rj_arith_v_cvt_pk_i16_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
@@ -558,8 +604,7 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64(uint64_t flags, uint64_t exec_mask,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
@@ -580,6 +625,13 @@ int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a, const uint32_t *const *b,
                                               uint32_t *excp_flag_user);
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 numeric model; strict exact
+// stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                            uint64_t instruction_flags, uint32_t *const *d,
+                                            const uint32_t *const *a, const uint32_t *const *b,
+                                            uint32_t *trapsts);
 
 int rj_arith_v_cvt_pk_i16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,
@@ -736,8 +788,7 @@ int rj_arith_v_cvt_pk_u8_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_pk_u8_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                         uint64_t instruction_flags, uint32_t *const *d,
                                         const uint32_t *const *a, const uint32_t *const *b,
@@ -758,6 +809,13 @@ int rj_arith_v_cvt_pk_u8_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                          uint64_t instruction_flags, uint32_t *const *d,
                                          const uint32_t *const *a, const uint32_t *const *b,
                                          const uint32_t *const *c, uint32_t *excp_flag_user);
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 numeric model; strict exact
+// stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_pk_u8_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c, uint32_t *trapsts);
 
 // FP16 conversions, one VGPR per operand; loose and bit-exact numeric semantics,
 // with Compatibility resolving to mode 2. HIGH_A selects
@@ -847,8 +905,7 @@ int rj_arith_v_cvt_f16_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_f32_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f32_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -931,8 +988,7 @@ int rj_arith_v_cvt_f16_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_f32_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f32_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -971,8 +1027,7 @@ int rj_arith_v_cvt_f32_f16_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_f64_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f64_i32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a);
@@ -992,8 +1047,7 @@ int rj_arith_v_cvt_f64_i32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_f64_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f64_u32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a);
@@ -1013,8 +1067,7 @@ int rj_arith_v_cvt_f64_u32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_i32_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_i32_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1035,8 +1088,7 @@ int rj_arith_v_cvt_i32_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_u32_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_u32_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1057,8 +1109,7 @@ int rj_arith_v_cvt_u32_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_f64_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f64_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1079,8 +1130,7 @@ int rj_arith_v_cvt_f64_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_f32_f64_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f32_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1103,8 +1153,7 @@ int rj_arith_v_cvt_f32_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_f64_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f64_i32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a);
@@ -1124,8 +1173,7 @@ int rj_arith_v_cvt_f64_i32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_f64_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f64_u32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a);
@@ -1145,8 +1193,7 @@ int rj_arith_v_cvt_f64_u32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_i32_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_i32_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1167,8 +1214,7 @@ int rj_arith_v_cvt_i32_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_u32_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_u32_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1189,8 +1235,7 @@ int rj_arith_v_cvt_u32_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_f64_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f64_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1211,8 +1256,7 @@ int rj_arith_v_cvt_f64_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_f32_f64_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f32_f64_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1229,6 +1273,41 @@ int rj_arith_v_cvt_f32_f64_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_
 int rj_arith_v_cvt_f32_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a, uint32_t *excp_flag_user);
+
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 FP64 conversion model; strict
+// exact stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_f64_i32_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f64_i32_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f64_u32_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f64_u32_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_i32_f64_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_i32_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_u32_f64_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_u32_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f64_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f64_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f32_f64_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f32_f64_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
 
 // FP32/integer conversions, one VGPR per operand. Loose and bit-exact numeric
 // semantics; Compatibility resolves to mode 2.
@@ -1252,8 +1331,7 @@ int rj_arith_v_cvt_f32_f64_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_f32_i32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f32_i32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a);
@@ -1273,8 +1351,7 @@ int rj_arith_v_cvt_f32_i32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_f32_u32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f32_u32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a);
@@ -1295,8 +1372,7 @@ int rj_arith_v_cvt_f32_u32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_i32_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_i32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1317,8 +1393,7 @@ int rj_arith_v_cvt_i32_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_u32_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_u32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1341,8 +1416,7 @@ int rj_arith_v_cvt_nearest_i32_f32_w32(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_nearest_i32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a);
@@ -1361,8 +1435,7 @@ int rj_arith_v_cvt_nearest_i32_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mas
 int rj_arith_v_cvt_floor_i32_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_floor_i32_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                             uint64_t instruction_flags, uint32_t *const *d,
                                             const uint32_t *const *a);
@@ -1382,8 +1455,7 @@ int rj_arith_v_cvt_floor_i32_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
 int rj_arith_v_cvt_f32_i32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f32_i32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a);
@@ -1402,8 +1474,7 @@ int rj_arith_v_cvt_f32_i32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_f32_u32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_f32_u32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a);
@@ -1422,8 +1493,7 @@ int rj_arith_v_cvt_f32_u32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_i32_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_i32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1443,8 +1513,7 @@ int rj_arith_v_cvt_i32_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
 int rj_arith_v_cvt_u32_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_u32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1465,8 +1534,7 @@ int rj_arith_v_cvt_nearest_i32_f32_w64(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_nearest_i32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                               uint64_t instruction_flags, uint32_t *const *d,
                                               const uint32_t *const *a);
@@ -1483,8 +1551,7 @@ int rj_arith_v_cvt_nearest_i32_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mas
 int rj_arith_v_cvt_floor_i32_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
                                      uint32_t *const *d, const uint32_t *const *a);
 
-// gfx942 shares the RDNA3 numeric model (empirically exact on MI300X); gfx950 remains Loose-only
-// pending architecture-specific captures.
+// gfx942 and gfx950 share the RDNA3 numeric model (empirically exact on MI300X and MI350X).
 int rj_arith_v_cvt_floor_i32_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                             uint64_t instruction_flags, uint32_t *const *d,
                                             const uint32_t *const *a);
@@ -1499,13 +1566,50 @@ int rj_arith_v_cvt_floor_i32_f32_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a);
 
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3 FP32/integer conversion model;
+// strict exact stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_f32_i32_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f32_i32_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f32_u32_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f32_u32_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_i32_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_i32_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_u32_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_u32_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_floor_i32_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a);
+int rj_arith_v_cvt_floor_i32_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                           uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a);
+int rj_arith_v_cvt_nearest_i32_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a);
+int rj_arith_v_cvt_nearest_i32_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a);
+
 // CDNA FP32-to-FP8/BF8 narrowing, inheriting the existing rocjitsu models.
 // gfx942 uses FNUZ; gfx950 uses sign-preserving OCP. gfx1250 FP8 also supports
 // unsigned E5M3 via CLAMP. ABS/NEG apply to floating sources, except in the raw
 // E5M3 path; OMOD is ignored. PK writes the selected half, SR the selected byte
 // using B as the stochastic seed. All other destination bits and inactive lanes
-// are preserved. FP16_OVFL saturates finite overflow. With CLAMP clear, gfx1250
-// converts +infinity to FP8 0x7f (NaN) or BF8 0x7c (infinity), even with FP16_OVFL.
+// are preserved. FP16_OVFL saturates finite overflow. gfx950 and CLAMP-clear
+// gfx1250 convert +infinity to FP8 0x7f (NaN) or BF8 0x7c (infinity), even with
+// FP16_OVFL, and encode input NaNs as 0xff / 0xfe; gfx950 additionally honors
+// RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS.
 int rj_arith_v_cvt_pk_fp8_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b);
@@ -1607,8 +1711,8 @@ int rj_arith_v_cvt_sr_bf8_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t m
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b);
 
-// gfx942 widens FNUZ; gfx950 (also used by gfx1250) widens OCP, preserving NaN signs.
-// These inherit Rocjitsu's format conversion model, without new hardware characterization.
+// gfx942 widens FNUZ and gfx950 widens OCP, both canonicalizing NaNs to 0xffc00000.
+// gfx1250 widens OCP preserving NaN signs, with single FP8 CLAMP selecting unsigned E5M3.
 // Single conversions select CVT_BYTE; packed conversions select a half with HIGH_A and write two
 // VGPRs.
 int rj_arith_v_cvt_f32_fp8_w32_gfx942(uint64_t flags, uint32_t exec_mask,
@@ -1661,12 +1765,33 @@ int rj_arith_v_cvt_pk_f32_bf8_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                          const uint32_t *const *a);
 
 // gfx1250 single FP8 widening uses CLAMP as an unsigned E5M3 format selector.
+// Single BF8 and packed FP8/BF8 _gfx1250 wrappers preserve the inherited
+// OCP signed-NaN model in loose modes and reject strict modes 2 and 3 pending
+// gfx1250 hardware captures.
 int rj_arith_v_cvt_f32_fp8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a);
 int rj_arith_v_cvt_f32_fp8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
                                        uint64_t instruction_flags, uint32_t *const *d,
                                        const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                       uint64_t instruction_flags, uint32_t *const *d,
+                                       const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_fp8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_fp8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_bf8_w32_gfx1250(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+int rj_arith_v_cvt_pk_f32_bf8_w64_gfx1250(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
 
 // gfx1250 FP8/BF8 to FP16 conversions: each operand occupies one VGPR.
 // Single forms select a source byte with CVT_BYTE_0..3 and write low/HIGH_D half.
@@ -1701,13 +1826,23 @@ int rj_arith_v_cvt_pkaccum_u8_f32_w64(uint64_t flags, uint64_t exec_mask,
                                       const uint32_t *const *a, const uint32_t *const *b,
                                       const uint32_t *const *c, uint32_t *trapsts);
 
-// MI300X (gfx942) PKACCUM honors guest FP32 rounding and input-denormal flushing like PK_U8_F32.
-// Unmodified forms support empirical exact without FP status; VOP3 modifiers remain Loose-only.
+// MI300X (gfx942) and MI350X (gfx950) PKACCUM honor guest FP32 rounding and input-denormal
+// flushing like PK_U8_F32. Unmodified forms support empirical exact without FP status; VOP3
+// modifiers remain Loose-only.
 int rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
                                              const uint32_t *const *c, uint32_t *trapsts);
 int rj_arith_v_cvt_pkaccum_u8_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c, uint32_t *trapsts);
+
+int rj_arith_v_cvt_pkaccum_u8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                             uint64_t instruction_flags, uint32_t *const *d,
+                                             const uint32_t *const *a, const uint32_t *const *b,
+                                             const uint32_t *const *c, uint32_t *trapsts);
+int rj_arith_v_cvt_pkaccum_u8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                              uint64_t instruction_flags, uint32_t *const *d,
                                              const uint32_t *const *a, const uint32_t *const *b,
                                              const uint32_t *const *c, uint32_t *trapsts);
@@ -1771,10 +1906,47 @@ int rj_arith_v_cvt_sr_pk_f16_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_
                                      uint32_t *const *d, const uint32_t *const *a,
                                      const uint32_t *const *b, const uint32_t *const *c);
 
+// MI350X (gfx950) BF16/FP16 conversion entry points, calibrated for exact result semantics:
+// - v_cvt_f32_bf16_gfx950 honors HIGH_A, ABS_A, NEG_A, CDNA-gated OMOD, DX10-gated CLAMP,
+//   input/output denormal flushing, and unconditional sNaN quieting.
+// - v_cvt_{pk,sr}_bf16_f32_gfx950 honor FLUSH_INPUT_DENORMALS and quiet sNaNs while preserving
+//   upper payload bits; SR saturates +-infinity to +-max finite under FP16_OVFL.
+// - v_cvt_pk_f16_f32_gfx950 honors guest FP16 rounding, FLUSH_OUTPUT_DENORMALS, FP16_OVFL finite
+//   saturation, and quieted NaN payloads; v_cvt_sr_f16_f32_gfx950 quiets NaN payloads and
+//   saturates +-infinity under FP16_OVFL.
+int rj_arith_v_cvt_f32_bf16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_f32_bf16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                       uint32_t *const *d, const uint32_t *const *a);
+int rj_arith_v_cvt_pk_bf16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_pk_bf16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_sr_bf16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b);
+int rj_arith_v_cvt_pk_f16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_pk_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_f16_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+int rj_arith_v_cvt_sr_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                         uint32_t *const *d, const uint32_t *const *a,
+                                         const uint32_t *const *b);
+
 // gfx942/gfx950 conversions: a low-half destination zero-extends into its VGPR;
 // HIGH_D preserves the low half. Conversions to FP16 additionally accept CVT_SDWA
-// for inherited scale-before-rounding arithmetic. gfx942 supports empirical exact
-// without FP status; gfx950 remains Loose-only pending hardware captures.
+// for inherited scale-before-rounding arithmetic. Both support empirical exact
+// without FP status (excluding CVT_SDWA prescaling).
 int rj_arith_v_cvt_f16_i16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
@@ -1836,9 +2008,48 @@ int rj_arith_v_cvt_f16_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                       uint64_t instruction_flags, uint32_t *const *d,
                                       const uint32_t *const *a, uint32_t *trapsts);
 
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the RDNA3/gfx942 FP16 conversion
+// models; strict exact stays unsupported pending per-architecture captures.
+int rj_arith_v_cvt_f16_i16_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f16_i16_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f16_u16_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f16_u16_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_i16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_i16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_u16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_u16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f16_f32_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f16_f32_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f32_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+int rj_arith_v_cvt_f32_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                     uint32_t *const *d, const uint32_t *const *a,
+                                     uint32_t *trapsts);
+
 // gfx942/gfx950 normalized FP16 conversions zero-extend low-half destinations;
 // HIGH_D preserves the low half. Guest input flushing applies; rounding is nearest-even.
-// gfx942 supports empirical exact without FP status; gfx950 remains Loose-only.
+// Both support empirical exact without FP status.
 int rj_arith_v_cvt_norm_i16_f16_w32_gfx942(uint64_t flags, uint32_t exec_mask,
                                            uint64_t instruction_flags, uint32_t *const *d,
                                            const uint32_t *const *a);
@@ -1864,6 +2075,22 @@ int rj_arith_v_cvt_norm_u16_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
                                            uint64_t instruction_flags, uint32_t *const *d,
                                            const uint32_t *const *a);
 
+// Older CDNA (gfx908/gfx90a) and RDNA1/2/3.5 inherit the zero-extending unary normalized
+// model (the VM masks destination bytes on RDNA); strict exact stays unsupported pending
+// per-architecture captures.
+int rj_arith_v_cvt_norm_i16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+int rj_arith_v_cvt_norm_i16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+int rj_arith_v_cvt_norm_u16_f16_w32_gfx10(uint64_t flags, uint32_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+int rj_arith_v_cvt_norm_u16_f16_w64_gfx10(uint64_t flags, uint64_t exec_mask,
+                                          uint64_t instruction_flags, uint32_t *const *d,
+                                          const uint32_t *const *a);
+
 // gfx942/gfx950: saturate two signed INT16 values to U8, then zero-extend the packed
 // result for low-half destinations. HIGH_D instead replaces the high half and preserves
 // the low half. CLAMP is accepted and ignored.
@@ -1888,17 +2115,19 @@ int rj_arith_v_sat_pk4_u4_u8_w64(uint64_t flags, uint64_t exec_mask, uint64_t mo
                                  uint32_t *const *d, const uint32_t *const *a);
 
 // gfx950 scaled widening. A and B each use one VGPR; B's exponent selects
-// 2^(exponent-127), including exponent zero. Exponent 255 forces positive
-// canonical NaNs. B's sign and fraction do not affect the scale. FP8 is OCP
-// E4M3FN, BF8 is E5M2, and FP4 is E2M1. Input NaNs otherwise retain their sign.
-// Single forms select A's byte with CVT_BYTE_*; packed FP4 selects a byte of
-// two nibbles, while packed FP8/BF8 selects a half with HIGH_A. Packed FP32
-// writes two VGPRs; packed F16/BF16 writes one. Single F16 writes the HIGH_D
-// half of one VGPR, preserving the other half. Single FP32 writes one VGPR.
-// No other instruction modifiers or guest FP controls apply, except FP16_OVFL
-// saturates finite FP32 overflow when narrowing to F16/BF16. Loose and
-// Compatibility retain the inherited conversion model; strict exact modes
-// are unsupported. Inactive lanes are preserved and operands may overlap.
+// 2^(exponent-127), including exponent zero. Exponent 255 and input NaNs emit
+// negative canonical quiet NaNs (-qNaN). B's sign and fraction do not affect
+// the scale. FP8 is OCP E4M3FN, BF8 is E5M2, and FP4 is E2M1. Single forms
+// select A's byte with CVT_BYTE_*; packed FP4 selects a byte of two nibbles,
+// while packed FP8/BF8 selects a half with HIGH_A. Packed FP32 writes two
+// VGPRs; packed F16/BF16 writes one. Single F16 writes the HIGH_D half of one
+// VGPR, preserving the other half. Single FP32 writes one VGPR. Output
+// subnormals honor FP_FLUSH_OUTPUT_DENORMALS, and RJ_ARITH_FP16_OVFL is
+// accepted and ignored; other guest FP controls in flags (such as rounding
+// modes) or unsupported instruction_flags (such as RJ_ARITH_ALU_CLAMP) return
+// RJ_ARITH_ERROR_INVALID_FLAGS and leave D unchanged. All semantics modes
+// succeed (no FP status output; Compatibility resolves to mode 2). Inactive
+// lanes are preserved and operands may overlap.
 int rj_arith_v_cvt_scalef32_pk_f32_fp8_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                                   uint64_t instruction_flags, uint32_t *const *d,
                                                   const uint32_t *const *a,
@@ -1998,11 +2227,14 @@ int rj_arith_v_cvt_scalef32_pk_bf16_fp4_w64_gfx950(uint64_t flags, uint64_t exec
 
 // gfx950 wide scaled FP6/BF6 widening. A holds 32 little-endian six-bit values
 // across six VGPRs; B is one FP32 scale VGPR (only exponent bits are used).
-// D holds 32 FP32 VGPRs or 16 packed FP16/BF16 VGPRs. Inactive lanes and scale
-// exponent 255 retain D. Other scales multiply by 2^(exponent-127), then round
-// through FP32 to the destination format; FP16_OVFL saturates finite narrowing
-// overflow. Source/destination register ranges may overlap. No instruction
-// modifiers or FP-status output; Compatibility uses the inherited Loose model.
+// D holds 32 FP32 VGPRs or 16 packed FP16/BF16 VGPRs. Inactive lanes retain D;
+// scale exponent 255 writes canonical -qNaN to all 32 elements. Other scales
+// multiply by 2^(exponent-127), round to nearest-even in the destination
+// format, and honor FP_FLUSH_OUTPUT_DENORMALS. RJ_ARITH_FP16_OVFL is accepted
+// and ignored; other guest FP controls in flags or non-zero instruction_flags
+// return RJ_ARITH_ERROR_INVALID_FLAGS and leave D unchanged. Source/destination
+// register ranges may overlap. All semantics modes succeed (no FP-status
+// output; Compatibility resolves to mode 2).
 int rj_arith_v_cvt_scalef32_pk32_f32_fp6_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                                     uint64_t instruction_flags, uint32_t *const *d,
                                                     const uint32_t *const *a,
@@ -2122,15 +2354,17 @@ int rj_arith_v_cvt_scale_pk8_bf16_bf8_w32_gfx1250(uint64_t flags, uint32_t exec_
 
 // gfx950 SCALEF32 narrowing to OCP FP8 (E4M3FN) / BF8 (E5M2). The scale's
 // exponent selects division by 2^(exponent-127); exponent zero means 2^-127,
-// and exponent 255 preserves D. Scale sign/fraction are ignored. PK rounds
-// two inputs to nearest-even and writes the HIGH_D half, preserving the other
-// half. PK F32 uses A/B data and C scale; PK F16/BF16 uses both halves of A
-// and B scale. SR uses A data (low half for F16/BF16), B seed and C scale,
+// and exponent 255 or NaN data emits unsigned canonical NaN (0xff FP8 / 0xfe
+// BF8). Scale sign/fraction are ignored. PK rounds two inputs to nearest-even
+// and writes the HIGH_D half, preserving the other half. PK F32 uses A/B data
+// and C scale; PK F16/BF16 uses both halves of A and B scale. SR uses A data
+// (low half for F16/BF16), B seed and C scale in source-significand precision,
 // writing the CVT_BYTE_* destination byte while preserving the others. Each
-// operand uses one VGPR. FP16_OVFL controls final FP8/BF8 saturation; no other
-// guest FP controls or instruction modifiers apply. Loose and Compatibility
-// FP32 source denormals honor FP_FLUSH_INPUT_DENORMALS before scaling.
-// retain the inherited arithmetic; strict exact modes are unsupported.
+// operand uses one VGPR. Source denormals honor FP_FLUSH_INPUT_DENORMALS before
+// scaling, and FP16_OVFL saturates finite overflow and +/-Inf to max finite;
+// other guest FP controls in flags or unsupported instruction_flags return
+// RJ_ARITH_ERROR_INVALID_FLAGS and leave D unchanged. All semantics modes
+// succeed (Compatibility resolves to mode 2).
 int rj_arith_v_cvt_scalef32_pk_fp8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                                   uint64_t instruction_flags, uint32_t *const *d,
                                                   const uint32_t *const *a,
@@ -2246,15 +2480,18 @@ int rj_arith_v_cvt_scalef32_sr_bf8_bf16_w64_gfx950(uint64_t flags, uint64_t exec
 
 // gfx950 scaled packed FP4 (E2M1): each call packs two values into the
 // CVT_BYTE_* byte of D, retaining other bytes. Scale rules match scaled FP8:
-// exponent255 preserves D, all other exponents divide by 2^(exponent-127).
-// PK uses nearest-even rounding. PK F32 takes A/B data and C scale; PK
-// F16/BF16 takes the two halves of A and B scale. SR takes A data, B seed,
-// and C scale; SR F32 consumes two VGPRs in A, while SR F16/BF16 consumes
-// both halves of one VGPR. Other operands each consume one VGPR. The second
-// SR element uses seed (B<<1)^((B>>31)?197:0). FP16_OVFL is ignored. NaNs
-// become positive zero, infinities saturate, and values below 0.25 become
-// signed zero even with SR. Loose/Compatibility preserve this inherited
-// model; strict exact modes are unsupported. No other modifiers apply.
+// exponent 255, NaN, and infinity saturate to signed max finite (+/-6.0), and
+// all other exponents divide by 2^(exponent-127). PK uses nearest-even
+// rounding. PK F32 takes A/B data and C scale; PK F16/BF16 takes the two
+// halves of A and B scale. SR takes A data, B seed, and C scale in source
+// significand precision; SR F32 consumes two VGPRs in A, while SR F16/BF16
+// consumes both halves of one VGPR. Other operands each consume one VGPR. The
+// second SR element uses seed (B<<1)^((B>>31)?197:0). Source denormals honor
+// FP_FLUSH_INPUT_DENORMALS before scaling, and RJ_ARITH_FP16_OVFL is accepted
+// and ignored; other guest FP controls in flags or unsupported
+// instruction_flags (including RJ_ARITH_ALU_CLAMP; only CVT_BYTE_* is
+// accepted) return RJ_ARITH_ERROR_INVALID_FLAGS and leave D unchanged. All
+// semantics modes succeed (Compatibility resolves to mode 2).
 int rj_arith_v_cvt_scalef32_pk_fp4_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                                   uint64_t instruction_flags, uint32_t *const *d,
                                                   const uint32_t *const *a,
@@ -2312,17 +2549,18 @@ int rj_arith_v_cvt_scalef32_sr_pk_fp4_bf16_w64_gfx950(uint64_t flags, uint64_t e
                                                       const uint32_t *const *b,
                                                       const uint32_t *const *c);
 
-// FP32 source denormals honor FP_FLUSH_INPUT_DENORMALS before scaling.
 // gfx950 wide scaled FP6/BF6 narrowing writes 32 six-bit codes into six
 // little-endian VGPRs. RNE FP32 takes 16 A and 16 B VGPRs, interleaved A0,B0,...,
 // plus scale C. SR FP32 takes 32 A VGPRs, seed B and scale C. FP16/BF16 take 16
-// packed A VGPRs and scale B (RNE), or seed B and scale C (SR). Only scale
-// exponent bits are used: 255 preserves D, others divide by 2^(exponent-127).
-// NaNs become positive zero; infinities saturate. Magnitudes below 2^-4 (FP6)
-// or 2^-5 (BF6) flush to signed zero, including SR. Inactive lanes are preserved;
-// source/destination ranges may
-// overlap. FP16_OVFL is ignored. No instruction modifiers or FP-status output;
-// Compatibility uses Loose. SR advances the supplied seed per element locally.
+// packed A VGPRs and scale B (RNE), or seed B and scale C (SR). Source
+// denormals honor FP_FLUSH_INPUT_DENORMALS before scaling. Only scale exponent
+// bits are used: 255, NaN, and infinity saturate to signed max finite, while
+// other exponents divide by 2^(exponent-127). SR uses fixed-width source
+// significand precision and advances the supplied seed per element locally.
+// Inactive lanes are preserved; source/destination ranges may overlap.
+// RJ_ARITH_FP16_OVFL is accepted and ignored; other guest FP controls in flags
+// or non-zero instruction_flags return RJ_ARITH_ERROR_INVALID_FLAGS and leave
+// D unchanged. All semantics modes succeed (Compatibility resolves to mode 2).
 int rj_arith_v_cvt_scalef32_2xpk16_fp6_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
                                                       uint64_t instruction_flags,
                                                       uint32_t *const *d, const uint32_t *const *a,
@@ -2432,8 +2670,8 @@ int rj_arith_v_cvt_scalef32_sr_pk32_bf6_bf16_w64_gfx950(
 // A has 16 FP32 or eight packed FP16/BF16 VGPRs. RNE reads the scale from B[0].
 // SR reads the scale from C[0] and advances the B[0] seed per element. Bits
 // [30:23] of the scale operand hold the E8M0 divisor. A scale byte of 0 is
-// 2^-127; 255 supplies a NaN to the narrowing conversion. Finite rounding,
-// NaN/Inf policy and tiny cutoffs match the gfx950 forms above. FP16_OVFL is
+// 2^-127; 255 supplies a NaN to the narrowing conversion, which maps NaNs to +0
+// and tiny values below half the minimum subnormal to signed zero. FP16_OVFL is
 // ignored. Every active lane writes its result. Sources may overlap D.
 // Loose/Compatibility only; strict exact modes are unsupported.
 int rj_arith_v_cvt_scalef32_pk16_fp6_f32_w32_gfx1250(uint64_t flags, uint32_t exec_mask,

@@ -6139,9 +6139,8 @@ TEST(InterposerSyncobjTest, WaitValidationMatchesDrm) {
   EXPECT_EQ(close(kfd), 0);
 }
 
-TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
-  // These runtimes reserve large shadow mappings and may abort on allocation
-  // failure instead of letting the C++ allocation throw.
+TEST(InterposerSyncobjTest, OversizedBinaryWaitAllocationIsFatal) {
+  // These runtimes reserve large shadow mappings that conflict with RLIMIT_AS.
   if (dlsym(RTLD_DEFAULT, "__asan_init") || dlsym(RTLD_DEFAULT, "__tsan_init")) {
     GTEST_SKIP() << "address-space limits are incompatible with ASan and TSan";
   }
@@ -6157,14 +6156,15 @@ TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
     environment.push_back(child_env.data());
     environment.push_back(nullptr);
     char executable[] = "/proc/self/exe";
-    char filter[] = "--gtest_filter=InterposerSyncobjTest.OversizedBinaryWaitReturnsEnomem";
-    char *arguments[] = {executable, filter, nullptr};
+    char filter[] = "--gtest_filter=InterposerSyncobjTest.OversizedBinaryWaitAllocationIsFatal";
+    char uncaught[] = "--gtest_catch_exceptions=0";
+    char *arguments[] = {executable, filter, uncaught, nullptr};
     pid_t child = -1;
     ASSERT_EQ(posix_spawn(&child, executable, nullptr, nullptr, arguments, environment.data()), 0);
     int status = 0;
     ASSERT_EQ(waitpid(child, &status, 0), child);
-    ASSERT_TRUE(WIFEXITED(status));
-    EXPECT_EQ(WEXITSTATUS(status), 0);
+    ASSERT_TRUE(WIFSIGNALED(status));
+    EXPECT_EQ(WTERMSIG(status), SIGABRT);
     return;
   }
 
@@ -6183,8 +6183,8 @@ TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
   }
   const long page_size = sysconf(_SC_PAGESIZE);
   ASSERT_GT(page_size, 0);
-  // Leave room for background driver threads while rejecting the 32 GiB
-  // points allocation, regardless of the backend's existing VM reservations.
+  // Leave room for background driver threads while rejecting the oversized
+  // wait allocation, regardless of the backend's existing VM reservations.
   struct rlimit limited = original;
   limited.rlim_cur =
       std::min<rlim_t>(original.rlim_cur, virtual_pages * page_size + rlim_t{512} * 1024 * 1024);
@@ -6195,10 +6195,8 @@ TEST(InterposerSyncobjTest, OversizedBinaryWaitReturnsEnomem) {
   const int result = ioctl(drm, DRM_IOCTL_SYNCOBJ_WAIT, &wait);
   const int wait_errno = errno;
   ASSERT_EQ(setrlimit(RLIMIT_AS, &original), 0);
-  EXPECT_EQ(result, -1);
-  EXPECT_EQ(wait_errno, ENOMEM);
-  EXPECT_EQ(close(drm), 0);
-  EXPECT_EQ(close(kfd), 0);
+  FAIL() << "expected fatal allocation failure, but wait returned " << result << " with errno "
+         << wait_errno;
 }
 
 TEST(InterposerSyncobjTest, DestroyRejectsInvalidInput) {
@@ -6363,8 +6361,12 @@ TEST(InterposerSyncobjTest, TimelineWaitReturnsEintrForSignal) {
 }
 
 TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
+  auto ref_count =
+      reinterpret_cast<int (*)()>(dlsym(RTLD_DEFAULT, "rj_interposer_test_local_ref_count"));
+  ASSERT_NE(ref_count, nullptr);
   int kfd = open_kfd();
   ASSERT_GE(kfd, 0);
+  const int refs_before_drm = ref_count();
   int drm = open_drm_render();
   ASSERT_GE(drm, 0);
   drm_syncobj_create create{};
@@ -6381,24 +6383,27 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
   // inheriting the C++ libc header's noexcept declaration in the caller, too.
   auto call = reinterpret_cast<int (*)(int, unsigned long, ...)>(dlsym(RTLD_DEFAULT, "ioctl"));
   ASSERT_NE(call, nullptr);
+  // TSan delivers SIGSYS immediately. It can defer SIGUSR1 until the waiter
+  // tries to reacquire the mutex, which would unwind from inside the lock call.
+  constexpr int kExitSignal = SIGSYS;
   struct sigaction action {
   }, old_action{};
   action.sa_handler = +[](int) { pthread_exit(nullptr); };
   sigemptyset(&action.sa_mask);
-  ASSERT_EQ(sigaction(SIGUSR1, &action, &old_action), 0);
+  ASSERT_EQ(sigaction(kExitSignal, &action, &old_action), 0);
   std::atomic<pid_t> tid{0};
-  bool unwound = false, returned = false;
+  bool cleaned_up = false, returned = false;
   std::thread waiter([&] {
-    struct Cleanup {
-      bool &unwound;
-      ~Cleanup() { unwound = true; }
-    } cleanup{unwound};
+    // Observe native cleanup even when C++ exception unwinding is disabled.
+    pthread_cleanup_push(
+        +[](void *argument) { *static_cast<bool *>(argument) = true; }, &cleaned_up);
     tid.store(syscall(SYS_gettid), std::memory_order_release);
     (void)call(drm, DRM_IOCTL_SYNCOBJ_TIMELINE_WAIT, &wait);
     returned = true;
+    pthread_cleanup_pop(0);
   });
   // Wait for the actual futex sleep so a signal during setup cannot make this
-  // pass without exercising forced unwinding through the interposer.
+  // pass without exercising native thread exit through the interposer.
   bool blocked = false;
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
   while (std::chrono::steady_clock::now() < deadline) {
@@ -6415,18 +6420,19 @@ TEST(InterposerSyncobjTest, TimelineWaitAllowsThreadExitFromSignal) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   if (blocked) {
-    EXPECT_EQ(pthread_kill(waiter.native_handle(), SIGUSR1), 0);
+    EXPECT_EQ(pthread_kill(waiter.native_handle(), kExitSignal), 0);
   }
   waiter.join();
   EXPECT_TRUE(blocked);
-  EXPECT_TRUE(unwound);
+  EXPECT_TRUE(cleaned_up);
   EXPECT_FALSE(returned);
-  EXPECT_EQ(sigaction(SIGUSR1, &old_action, nullptr), 0);
+  EXPECT_EQ(sigaction(kExitSignal, &old_action, nullptr), 0);
   drm_syncobj_destroy destroy{};
   destroy.handle = create.handle;
   EXPECT_EQ(ioctl(drm, DRM_IOCTL_SYNCOBJ_DESTROY, &destroy), 0);
-  // Closing the file also checks that unwinding released its ioctl reservation.
+  // Check before final KFD close so backend teardown cannot hide a leaked lease.
   EXPECT_EQ(close(drm), 0);
+  EXPECT_EQ(ref_count(), refs_before_drm);
   EXPECT_EQ(close(kfd), 0);
 }
 

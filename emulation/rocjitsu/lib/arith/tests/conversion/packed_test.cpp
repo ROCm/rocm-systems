@@ -166,13 +166,22 @@ TEST(ConversionCvtPkRtzF16F32W64Gfx942, Arithmetic) {
   check_packed<64, true>(rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx942, PackedConversion::HalfRtz);
 }
 
-// gfx950 inherits the RDNA3/gfx942 model but stays loose-only until gfx950 captures are reviewed.
+// gfx950 shares the RDNA3/gfx942 model and matches MI350X captures.
 TEST(ConversionCvtPkRtzF16F32W32Gfx950, Arithmetic) {
-  check_packed<32, false>(rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx950, PackedConversion::HalfRtz);
+  check_packed<32, true>(rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx950, PackedConversion::HalfRtz);
 }
 
 TEST(ConversionCvtPkRtzF16F32W64Gfx950, Arithmetic) {
-  check_packed<64, false>(rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx950, PackedConversion::HalfRtz);
+  check_packed<64, true>(rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx950, PackedConversion::HalfRtz);
+}
+
+// gfx10/gfx115x/gfx908/gfx90a share the RDNA3/gfx942 model via loose-only _gfx10 wrappers.
+TEST(ConversionCvtPkRtzF16F32W32Gfx10, Arithmetic) {
+  check_packed<32, false>(rj_arith_v_cvt_pk_rtz_f16_f32_w32_gfx10, PackedConversion::HalfRtz);
+}
+
+TEST(ConversionCvtPkRtzF16F32W64Gfx10, Arithmetic) {
+  check_packed<64, false>(rj_arith_v_cvt_pk_rtz_f16_f32_w64_gfx10, PackedConversion::HalfRtz);
 }
 
 // gfx1100 (W7900, mkm2) hw1100-noieee lanes (2026-09-25, MODE.IEEE clear): RTZ packing quiets a

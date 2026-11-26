@@ -46,6 +46,15 @@ std::string_view access_name(AccessKind access) {
   return "unknown";
 }
 
+void write_flat_confidence(std::ostream &out, FlatAssumption assumption) {
+  if (assumption == FlatAssumption::None)
+    out << ",\"confidence\":\"exact\"";
+  else {
+    out << ",\"confidence\":\"conservative\",\"assumption\":";
+    write_json_string(out, flat_assumption_text(assumption));
+  }
+}
+
 void write_participant(std::ostream &out, const LdsRaceParticipant &value) {
   out << "{\"workgroup_x\":" << value.workgroup << ",\"wave\":" << value.wave
       << ",\"site\":" << value.site << ",\"range_id\":" << value.range_id
@@ -53,6 +62,10 @@ void write_participant(std::ostream &out, const LdsRaceParticipant &value) {
       << ",\"mask\":" << value.mask << ",\"offset\":" << value.offset
       << ",\"width\":" << value.width << ",\"original_offset\":" << value.original_offset
       << ",\"access\":\"" << access_name(value.access) << '"';
+  if (value.origin == AccessOrigin::GroupFlat) {
+    out << ",\"origin\":\"group_flat\"";
+    write_flat_confidence(out, value.assumption);
+  }
   if (value.transpose_exec)
     out << ",\"mask_role\":\"transpose_source_lanes\",\"anchor_exec\":" << *value.transpose_exec;
   out << '}';
@@ -92,6 +105,38 @@ void write_examples(std::ostream &out, const std::vector<LdsRaceFinding> &findin
   out << ']';
 }
 
+void write_flat_sites(std::ostream &out, const LdsRaceImageEntry &entry) {
+  if (!entry.flat_sites.empty()) {
+    out << ",\"flat_sites\":[";
+    for (const SiteFacts &site : entry.flat_sites) {
+      if (&site != &entry.flat_sites.front())
+        out << ',';
+      out << "{\"site\":" << site.id << ",\"original_offset\":" << site.original_offset;
+      write_flat_confidence(out, site.assumption);
+      out << '}';
+    }
+    out << ']';
+  }
+  if (!entry.flat_exclusions.empty()) {
+    out << ",\"flat_exclusions\":[";
+    uint32_t id = entry.observed_sites;
+    for (const FlatExclusion &site : entry.flat_exclusions) {
+      if (id != entry.observed_sites)
+        out << ',';
+      out << "{\"site\":" << id++ << ",\"original_offset\":" << site.original_offset
+          << ",\"original_size\":" << site.original_size << ",\"reason\":\""
+          << (site.reason == FlatExclusionReason::NonGroup ? "non_group"
+              : site.reason == FlatExclusionReason::Strict ? "strict_excludes_likely"
+                                                           : "unresolved")
+          << '"';
+      if (site.reason == FlatExclusionReason::Strict)
+        write_flat_confidence(out, site.assumption);
+      out << '}';
+    }
+    out << ']';
+  }
+}
+
 } // namespace
 
 std::string render_lds_race_analysis(const LdsRaceResult &result) {
@@ -100,8 +145,8 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
   out << std::boolalpha;
   out << "{\"verdict\":\""
       << (result.cross_wave_pairs || result.collision_groups ? "findings" : "no_observed_findings")
-      << "\",\"scope\":\""
-      << (result.has_dual_ranges ? "native_lds_multi_range_" : "native_lds_single_range_")
+      << "\",\"scope\":\"" << (result.has_group_flat ? "native_and_group_flat_lds_" : "native_lds_")
+      << (result.has_dual_ranges ? "multi_range_" : "single_range_")
       << (result.has_transpose ? "transpose_" : "")
       << (result.scope != ScopeKind::NativeLdsNoSynchronization ? "epoch_workgroup_barriers"
                                                                 : "no_sync_bounded_1d")
@@ -119,10 +164,21 @@ std::string render_lds_race_analysis(const LdsRaceResult &result) {
     write_json_string(out, entry.name);
     out << ",\"disposition\":\""
         << (entry.disposition == EntryDisposition::Selected ? "selected" : "native_uncovered")
-        << "\"}";
+        << '"';
+    if (result.flat_policy && result.entries.size() > 1) {
+      write_flat_sites(out, entry);
+    }
+    out << '}';
   }
   out << "],\"entry\":";
   write_json_string(out, result.entry);
+  if (result.flat_policy) {
+    out << ",\"flat_policy\":\""
+        << (*result.flat_policy == FlatPolicy::Likely ? "likely" : "strict") << '\"';
+    if (result.entries.size() == 1) {
+      write_flat_sites(out, result.entries.front());
+    }
+  }
   out << ",\"target\":" << result.target << ",\"wave_size\":" << result.wave_size
       << ",\"execution_conditions\":" << result.execution_conditions
       << ",\"coverage_complete\":" << result.coverage_complete
