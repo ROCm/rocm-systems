@@ -320,7 +320,7 @@ void read_wave(const Manifest &facts, const CapturedExecution &execution,
       }
       group.records.push_back(
           {{wave, site.id, sequence, mask, offset, width, site.original_offset, site.access, phase,
-            workgroup, 0, group.transpose_exec, site.origin},
+            workgroup, 0, group.transpose_exec, site.origin, site.assumption},
            phase_valid});
     }
   }

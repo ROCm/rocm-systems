@@ -48,6 +48,7 @@ bool admitted_instruction(const Instruction &instruction) {
   case amdgpu::Operation::S_LOAD_B64:
   case amdgpu::Operation::S_WAITCNT:
   case amdgpu::Operation::S_WAITCNT_VSCNT:
+  case amdgpu::Operation::S_CSELECT_B32:
   case amdgpu::Operation::S_MOV_B32:
   case amdgpu::Operation::S_AND_SAVEEXEC_B32:
   case amdgpu::Operation::S_AND_B32:
@@ -313,8 +314,7 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
 Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                                      uint32_t allocated_vgprs,
                                      std::vector<NativeLdsAccess> &accesses, InputError &error,
-                                     const RegisterSet *shared_high,
-                                     const RegisterSet *private_high) {
+                                     const FlatSitePolicy *flat_policy) {
   const std::string_view name = instruction.mnemonic();
   const amdgpu::Operation operation = instruction.amdgpu_operation();
   const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
@@ -356,12 +356,25 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
                                 "FLAT operands exceed allocation", offset);
     const RegisterRef high{RegClass::VGPR, static_cast<uint16_t>(address->index + 1), 1};
-    if (private_high && private_high->contains(high))
-      return Result::success();
-    if (!shared_high || !shared_high->contains(high))
+    if (!flat_policy)
       return reject_instruction(error, InputErrorCode::UnsupportedAccess,
-                                "FLAT access requires proven shared aperture", offset);
-    // The shared aperture is 4-GiB aligned. Its high dword is proven, so
+                                "FLAT access requires aperture classification", offset);
+    FlatAssumption assumption = FlatAssumption::None;
+    if (!flat_policy->shared_high.contains(high)) {
+      if (flat_policy->selected_shared_high.contains(high))
+        assumption = FlatAssumption::SelectedSharedHigh;
+      if (flat_policy->non_group_high.contains(high) || assumption == FlatAssumption::None ||
+          flat_policy->mode == FlatPolicy::Strict) {
+        const auto reason = flat_policy->non_group_high.contains(high)
+                                ? FlatExclusionReason::NonGroup
+                            : assumption == FlatAssumption::None ? FlatExclusionReason::Unresolved
+                                                                 : FlatExclusionReason::Strict;
+        flat_policy->exclusions.push_back(
+            {offset, static_cast<uint32_t>(instruction.size()), reason, assumption});
+        return Result::success();
+      }
+    }
+    // The shared aperture is 4-GiB aligned. Under the saved classification,
     // BeforeInst captures its relative byte offset in the low VGPR. The
     // ordinary probe widens before adding the immediate and flags overflow.
     accesses.push_back({.site = static_cast<uint32_t>(accesses.size()),
@@ -371,7 +384,8 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                         .immediate_bytes = immediate,
                         .guest_size = static_cast<uint32_t>(instruction.size()),
                         .width = 4,
-                        .origin = AccessOrigin::GroupFlat});
+                        .origin = AccessOrigin::GroupFlat,
+                        .assumption = assumption});
     return Result::success();
   }
   const bool atomic = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic;
@@ -671,7 +685,7 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
   if (barrier_offsets != expected_barriers) {
     return reject(error, "final reachable barrier multiplicity differs from original");
   }
-  if (access_offsets.size() != manifest.sites.size() + program.non_lds_flat.size()) {
+  if (access_offsets.size() != manifest.sites.size() + program.flat_exclusions.size()) {
     return reject(error, "final reachable guest access multiplicity differs from original");
   }
   for (const SiteFacts &site : manifest.sites) {
@@ -681,24 +695,25 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
       return reject(error, "final guest LDS operation/map differs from original bytes");
     }
   }
-  // Uninstrumented private instructions can share an opcode with an observed
+  // Uninstrumented FLAT instructions can share an opcode with an observed
   // FLAT site. Check their bytes/multiplicity after consuming the mapped sites.
   const bool wide_flat =
       program.target->arch == IsaFamily::Rdna4 || program.target->arch == IsaFamily::Cdna5;
   const size_t flat_bytes = wide_flat ? 12 : 8;
-  std::multiset<std::array<uint8_t, 12>> private_guests;
-  for (const uint64_t pc : program.non_lds_flat) {
+  std::multiset<std::array<uint8_t, 12>> excluded_guests;
+  for (const FlatExclusion &excluded : program.flat_exclusions) {
+    const uint64_t pc = excluded.original_offset;
     std::array<uint8_t, 12> words{};
     std::memcpy(words.data(), program.image.data() + program.text_file_offset + pc, flat_bytes);
-    private_guests.insert(words);
+    excluded_guests.insert(words);
   }
   for (const uint64_t pc : access_offsets) {
     std::array<uint8_t, 12> words{};
     std::memcpy(words.data(), prepared_text.data() + pc, flat_bytes);
-    const auto found = private_guests.find(words);
-    if (found == private_guests.end())
-      return reject(error, "unmapped guest FLAT operation differs from the private original");
-    private_guests.erase(found);
+    const auto found = excluded_guests.find(words);
+    if (found == excluded_guests.end())
+      return reject(error, "unmapped guest FLAT operation differs from an excluded original");
+    excluded_guests.erase(found);
   }
   return Result::success();
 }

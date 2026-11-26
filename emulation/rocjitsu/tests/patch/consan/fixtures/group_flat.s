@@ -38,8 +38,14 @@ CONSAN_KERNEL:
 
 .macro group_flat_pointer
   // Build the entire pair under the same EXEC as the dereference.
+#if defined(FLAT_NONGROUP)
+  v_mov_b32_e32 v3, s1
+  v_mov_b32_e32 v2, s0
+#else
   v_mov_b32_e32 v3, s5
-#if defined(FLAT_ADJACENT) && !defined(FLAT_STORE)
+#if defined(FLAT_ALTERNATE)
+  v_mov_b32_e32 v2, s6
+#elif defined(FLAT_ADJACENT) && !defined(FLAT_STORE)
   v_mov_b32_e32 v2, (1016-FLAT_IMMEDIATE)
 #elif defined(FLAT_UNDERFLOW)
   v_mov_b32_e32 v2, 0
@@ -49,6 +55,7 @@ CONSAN_KERNEL:
   v_mov_b32_e32 v2, (1024-FLAT_IMMEDIATE)
 #else
   v_mov_b32_e32 v2, (1020-FLAT_IMMEDIATE)
+#endif
 #endif
 .endm
 
@@ -66,6 +73,19 @@ CONSAN_KERNEL:
   v_mov_b32 v4, 1020
 #endif
   s_mov_b64 s[4:5], src_shared_base
+#if defined(FLAT_LIKELY) || defined(FLAT_ALTERNATE)
+  // s7 holds the high word of the output pointer loaded from kernargs.
+  // The two controls use opposite SCC values with the same pointer select.
+#ifdef FLAT_ALTERNATE
+  s_cmp_eq_u32 0, 1
+#else
+  s_cmp_eq_u32 0, 0
+#endif
+  s_cselect_b32 s5, s5, s7
+#elif defined(FLAT_UNKNOWN)
+  // A numerical identity has no recognized aperture provenance.
+  s_add_u32 s5, s5, 0
+#endif
 
   v_cmp_eq_u32 MASK_VCC, (CONSAN_WAVE_SIZE-1), v12
   MASK_AND_SAVE MASK_SAVE, MASK_VCC
