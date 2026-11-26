@@ -22,7 +22,8 @@ namespace rocjitsu {
 namespace cdna2 {
 
 void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -44,7 +45,8 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -66,7 +68,8 @@ void ImageLoadMipMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -87,13 +90,15 @@ void ImageLoadPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageLoadPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -114,13 +119,15 @@ void ImageLoadPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, true)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageLoadMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -141,13 +148,15 @@ void ImageLoadMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -168,13 +177,15 @@ void ImageLoadMipPckSgnMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, true)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -197,7 +208,8 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -220,7 +232,8 @@ void ImageStoreMipMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -240,13 +253,15 @@ void ImageStorePckMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
@@ -266,8 +281,9 @@ void ImageStoreMipPckMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
@@ -278,7 +294,8 @@ void ImageGetResinfoMimg::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::SWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -300,13 +317,15 @@ void ImageAtomicSwapMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::CMPSWAP;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -328,13 +347,15 @@ void ImageAtomicCmpswapMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::ADD;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -356,13 +377,15 @@ void ImageAtomicAddMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::SUB;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -384,13 +407,15 @@ void ImageAtomicSubMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::SMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -412,13 +437,15 @@ void ImageAtomicSminMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::UMIN;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -440,13 +467,15 @@ void ImageAtomicUminMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::SMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -468,13 +497,15 @@ void ImageAtomicSmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::UMAX;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -496,13 +527,15 @@ void ImageAtomicUmaxMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::AND;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -524,13 +557,15 @@ void ImageAtomicAndMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::OR;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -552,13 +587,15 @@ void ImageAtomicOrMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::XOR;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -580,13 +617,15 @@ void ImageAtomicXorMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::INC;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -608,13 +647,15 @@ void ImageAtomicIncMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = inst_.glc;
   d->atomic_op = amdgpu::AtomicOp::DEC;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
@@ -636,13 +677,15 @@ void ImageAtomicDecMimg::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (amdgpu::prepare_raw_image_payload(
           wf, *d, wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata, inst_.dmask, false)
-          .failed())
+          .failed()) {
     return;
+  }
   set_data(std::move(d));
 }
 
 void ImageSampleMimg::execute_impl(amdgpu::Wavefront &wf) {
-  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+  std::unique_ptr<amdgpu::VectorMemState> d =
+      acquire_data<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->is_load = true;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;

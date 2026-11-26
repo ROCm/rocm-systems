@@ -20,13 +20,15 @@ SemanticSpillFrame::SemanticSpillFrame(TranslationContext &context)
 std::optional<SemanticSpillRange> SemanticSpillFrame::allocate_dwords(uint16_t dword_count,
                                                                       uint32_t byte_alignment,
                                                                       uint32_t max_dword_offset) {
-  if (dword_count == 0 || byte_alignment == 0)
+  if (dword_count == 0 || byte_alignment == 0) {
     return std::nullopt;
+  }
 
   const uint32_t bytes = static_cast<uint32_t>(dword_count) * sizeof(uint32_t);
   auto base = cursor_.preview(bytes, byte_alignment);
-  if (!base || static_cast<uint64_t>(*base) + bytes - sizeof(uint32_t) > max_dword_offset)
+  if (!base || static_cast<uint64_t>(*base) + bytes - sizeof(uint32_t) > max_dword_offset) {
     return std::nullopt;
+  }
 
   base = cursor_.allocate(bytes, byte_alignment);
   context_.require_private_segment_bytes(cursor_.high_water_mark());
@@ -43,8 +45,9 @@ bool SemanticScratchAllocator::window_is_allowed(uint16_t base,
                                                  const SemanticScratchRequest &request,
                                                  uint16_t available_count) const {
   if (request.count == 0 || request.alignment == 0 || base % request.alignment != 0 ||
-      static_cast<uint32_t>(base) + request.count > available_count)
+      static_cast<uint32_t>(base) + request.count > available_count) {
     return false;
+  }
 
   RegisterSet candidate;
   candidate.expand(RegisterRef{RegClass::VGPR, base, static_cast<uint8_t>(request.count)});
@@ -68,11 +71,13 @@ SemanticScratchAllocator::acquire_vgprs(const SemanticScratchRequest &request) {
   while (true) {
     auto maybe_unused = liveness_.find_globally_unused_vgpr_run(
         &inst_, request.count, unused_search_start, request.alignment, allocated_vgprs);
-    if (maybe_unused.failed())
+    if (maybe_unused.failed()) {
       return {.lease = std::nullopt, .failure = SemanticScratchFailure::LivenessUnavailable};
+    }
     const auto unused = maybe_unused.value();
-    if (!unused)
+    if (!unused) {
       break;
+    }
     if (window_is_allowed(*unused, request, allocated_vgprs)) {
       context_.require_vgprs(static_cast<uint32_t>(*unused) + request.count);
       return {.lease = SemanticScratchLease{.reg_class = RegClass::VGPR,
@@ -89,13 +94,16 @@ SemanticScratchAllocator::acquire_vgprs(const SemanticScratchRequest &request) {
   while (true) {
     auto maybe_free =
         liveness_.find_free_run(&inst_, request.count, search_start, request.alignment);
-    if (maybe_free.failed())
+    if (maybe_free.failed()) {
       return {.lease = std::nullopt, .failure = SemanticScratchFailure::LivenessUnavailable};
+    }
     const auto free = maybe_free.value();
-    if (!free)
+    if (!free) {
       break;
-    if (static_cast<uint32_t>(*free) + request.count > policy_.max_vgprs)
+    }
+    if (static_cast<uint32_t>(*free) + request.count > policy_.max_vgprs) {
       break;
+    }
     if (window_is_allowed(*free, request, policy_.max_vgprs)) {
       context_.require_vgprs(static_cast<uint32_t>(*free) + request.count);
       return {.lease = SemanticScratchLease{.reg_class = RegClass::VGPR,
@@ -108,8 +116,9 @@ SemanticScratchAllocator::acquire_vgprs(const SemanticScratchRequest &request) {
     search_start = static_cast<uint16_t>(*free + request.alignment);
   }
 
-  if (!request.allow_spill)
+  if (!request.allow_spill) {
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::NoRegisterWindow};
+  }
 
   std::optional<uint16_t> victim;
   if (request.preferred_victim_base &&
@@ -125,16 +134,18 @@ SemanticScratchAllocator::acquire_vgprs(const SemanticScratchRequest &request) {
     }
   }
 
-  if (!victim)
+  if (!victim) {
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::NoRegisterWindow};
+  }
 
   if (context_.uses_dynamic_stack) {
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::DynamicStackUnsupported};
   }
 
   auto spill = allocate_spill_dwords(request.count);
-  if (!spill)
+  if (!spill) {
     return {.lease = std::nullopt, .failure = SemanticScratchFailure::SpillOffsetUnencodable};
+  }
 
   return {.lease = SemanticScratchLease{.reg_class = RegClass::VGPR,
                                         .base = *victim,

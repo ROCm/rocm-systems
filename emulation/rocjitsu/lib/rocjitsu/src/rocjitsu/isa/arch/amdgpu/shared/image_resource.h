@@ -7,6 +7,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/image_sampler.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/image_addressing.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -22,9 +23,9 @@
 
 namespace rocjitsu::amdgpu {
 
-constexpr uint32_t rdna_image_format(rj_code_arch_t arch, uint32_t word1) {
-  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
-  return (word1 >> (arch == ROCJITSU_CODE_ARCH_RDNA4 ? 17 : 20)) & (gfx10 ? 511u : 255u);
+constexpr uint32_t rdna_image_format(rocjitsu::IsaFamily arch, uint32_t word1) {
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
+  return (word1 >> (arch == rocjitsu::IsaFamily::Rdna4 ? 17 : 20)) & (gfx10 ? 511u : 255u);
 }
 
 /// Translate the R8, RG8 and RGBA8 sRGB texture storage to its UNORM carrier.
@@ -34,9 +35,11 @@ constexpr uint32_t image_srgb_storage_format(uint32_t format, bool gfx10) {
   };
   constexpr std::array<SrgbFormat, 3> gfx10_formats{{{128, 1}, {129, 14}, {130, 56}}};
   constexpr std::array<SrgbFormat, 3> gfx11_formats{{{64, 1}, {65, 14}, {66, 42}}};
-  for (const auto &entry : (gfx10 ? gfx10_formats : gfx11_formats))
-    if (format == entry.srgb)
+  for (const auto &entry : (gfx10 ? gfx10_formats : gfx11_formats)) {
+    if (format == entry.srgb) {
       return entry.unorm;
+    }
+  }
   return format;
 }
 
@@ -63,7 +66,7 @@ constexpr bool native_filterable_format(uint32_t format) {
 
 /// Use the ordinary compute sampler for feedback on views, tiled 1D layouts
 /// and filter formats that need its addressing or interpolation.
-inline bool compute_filtered_image_feedback(rj_code_arch_t arch, uint32_t dim,
+inline bool compute_filtered_image_feedback(rocjitsu::IsaFamily arch, uint32_t dim,
                                             uint32_t resource_word3, uint32_t resource_word1,
                                             uint32_t sampler_word2, ImageSampleMode mode,
                                             bool offset, bool compare) {
@@ -72,12 +75,13 @@ inline bool compute_filtered_image_feedback(rj_code_arch_t arch, uint32_t dim,
   // GFX11 prefix operations keep the native sampler's fixed-LOD source reads.
   const bool one_dimensional = dim == kImageDim1d || dim == kImageDim1dArray;
   if (one_dimensional && (offset || compare || mode == ImageSampleMode::Bias ||
-                          mode == ImageSampleMode::Derivatives16))
+                          mode == ImageSampleMode::Derivatives16)) {
     return false;
+  }
   const uint32_t format = rdna_image_format(arch, resource_word1);
   const bool filtered_xy = (sampler_word2 & (15u << 20)) != 0;
   const bool filtered_mip = ((sampler_word2 >> 26) & 3u) == 2;
-  const bool tiled_1d = arch == ROCJITSU_CODE_ARCH_RDNA4 && swizzle && swizzle <= 4 &&
+  const bool tiled_1d = arch == rocjitsu::IsaFamily::Rdna4 && swizzle && swizzle <= 4 &&
                         one_dimensional && dim + kImage1d == type;
   return image_sample_has_implicit_y(dim, type) || tiled_1d ||
          (image_is_1d_or_2d_sample(dim) && dim + kImage1d == type &&
@@ -87,26 +91,30 @@ inline bool compute_filtered_image_feedback(rj_code_arch_t arch, uint32_t dim,
 /// Select the 2D linear filter by storage format and effective coordinate mode.
 /// Filter arithmetic for low-precision storage is independent of tiling and pitch.
 template <typename Read, typename Backed>
-bool uses_native_2d_sampler(rj_code_arch_t arch, uint32_t resource, uint32_t sampler, uint32_t dim,
-                            bool unorm, Read read, Backed backed) {
-  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
-  if ((!gfx12 && arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) ||
-      !image_is_1d_or_2d_sample(dim) || !backed(resource, 8))
+bool uses_native_2d_sampler(rocjitsu::IsaFamily arch, uint32_t resource, uint32_t sampler,
+                            uint32_t dim, bool unorm, Read read, Backed backed) {
+  const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4;
+  if ((!gfx12 && arch != rocjitsu::IsaFamily::Rdna3 && arch != rocjitsu::IsaFamily::Rdna3_5) ||
+      !image_is_1d_or_2d_sample(dim) || !backed(resource, 8)) {
     return false;
-  if (!backed(sampler, 4))
+  }
+  if (!backed(sampler, 4)) {
     return false;
+  }
   const bool normalized = !unorm && !(read(sampler) & (1u << 15));
   const uint32_t word3 = read(resource + 3);
   const bool array_view = dim == kImageDim1dArray || dim == kImageDim2dArray;
   const bool one_dimensional = dim == kImageDim1d || dim == kImageDim1dArray;
   if (dim + kImage1d != word3 >> 28 || (read(resource + 5) & (1u << 24)) ||
-      (one_dimensional && ((word3 >> 20) & 31u)))
+      (one_dimensional && ((word3 >> 20) & 31u))) {
     return false;
+  }
   const uint32_t word1 = read(resource + 1);
   const uint32_t format = rdna_image_format(arch, word1);
   if ((array_view || one_dimensional) && !native_low_precision_filter(format) &&
-      !native_fp32_filter(format))
+      !native_fp32_filter(format)) {
     return false;
+  }
   if ((word3 >> 20) & 31u) {
     const uint32_t filter = read(sampler + 2);
     const bool linear_xy = (filter & ((1u << 20) | (1u << 22))) != 0;
@@ -118,12 +126,12 @@ bool uses_native_2d_sampler(rj_code_arch_t arch, uint32_t resource, uint32_t sam
           (array_view || one_dimensional || !(read(resource + 4) & (gfx12 ? 0xffffu : 0x3fffu))));
 }
 
-inline uint32_t rdna_image_lod_warning_threshold(rj_code_arch_t arch, uint32_t word5) {
-  return arch == ROCJITSU_CODE_ARCH_RDNA4 ? (word5 >> 5) & 0x1fffu : (word5 >> 8) & 0xfffu;
+inline uint32_t rdna_image_lod_warning_threshold(rocjitsu::IsaFamily arch, uint32_t word5) {
+  return arch == rocjitsu::IsaFamily::Rdna4 ? (word5 >> 5) & 0x1fffu : (word5 >> 8) & 0xfffu;
 }
 
 template <typename Read>
-ImageSampler read_image_sampler_controls(rj_code_arch_t arch, uint32_t sampler, Read read) {
+ImageSampler read_image_sampler_controls(rocjitsu::IsaFamily arch, uint32_t sampler, Read read) {
   return decode_image_sampler(
       {read(sampler), read(sampler + 1), read(sampler + 2), read(sampler + 3)}, arch);
 }
@@ -135,25 +143,33 @@ inline bool has_unimplemented_image_sampler_controls(const ImageSampler &sampler
 /// Choose the compute sampler for supported ordinary descriptors. Value probes
 /// supply a non-observing reader when planning waits before execution.
 template <typename Read, typename Backed>
-bool use_linear_image_path(rj_code_arch_t arch, uint32_t resource, uint32_t sampler, uint32_t dim,
-                           bool sample, Read read, Backed backed, bool feedback = false) {
-  if (!backed(resource, 8))
+bool use_linear_image_path(rocjitsu::IsaFamily arch, uint32_t resource, uint32_t sampler,
+                           uint32_t dim, bool sample, Read read, Backed backed,
+                           bool feedback = false) {
+  if (!backed(resource, 8)) {
     return true;
+  }
   const auto word = [&](uint32_t n) { return read(resource + n); };
   const uint32_t format = rdna_image_format(arch, word(1)), type = word(3) >> 28;
-  if (type < kImage1d)
+  if (type < kImage1d) {
     return true;
-  if (word(5) & (1u << 24))
+  }
+  if (word(5) & (1u << 24)) {
     return true;
-  if (!feedback && rdna_image_lod_warning_threshold(arch, word(5)))
+  }
+  if (!feedback && rdna_image_lod_warning_threshold(arch, word(5))) {
     return false;
-  if ((word(6) & (1u << 21)) && ((word(6) >> 24) || word(7)))
+  }
+  if ((word(6) & (1u << 21)) && ((word(6) >> 24) || word(7))) {
     return false;
+  }
   if (native_block_filter(format) || (type == kImageCube && dim == kImageDimCube) ||
-      (type >= kImage2dMsaa && dim >= kImageDim2dMsaa))
+      (type >= kImage2dMsaa && dim >= kImageDim2dMsaa)) {
     return false;
-  if (!sample || type == kImage3d || !backed(sampler, 4))
+  }
+  if (!sample || type == kImage3d || !backed(sampler, 4)) {
     return true;
+  }
   const ImageSampler control = read_image_sampler_controls(arch, sampler, read);
   const uint32_t perf_mod = (word(5) >> 20) & 7u;
   return control.mag_filter == control.min_filter && control.min_filter <= ImageXyFilter::Linear &&
@@ -162,7 +178,7 @@ bool use_linear_image_path(rj_code_arch_t arch, uint32_t resource, uint32_t samp
          !has_unimplemented_image_sampler_controls(control);
 }
 
-inline bool image_descriptor_is_unbound(rj_code_arch_t arch, uint32_t word1, uint32_t word3) {
+inline bool image_descriptor_is_unbound(rocjitsu::IsaFamily arch, uint32_t word1, uint32_t word3) {
   return (word3 >> 28) < kImage1d || rdna_image_format(arch, word1) == 0;
 }
 
@@ -204,13 +220,13 @@ public:
            (mode == ImageSampleMode::Explicit || (gather && mode == ImageSampleMode::Zero));
   }
 
-  bool has_unqualified_sample_controls(rj_code_arch_t arch, bool resident_mip = false) const {
-    const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  bool has_unqualified_sample_controls(rocjitsu::IsaFamily arch, bool resident_mip = false) const {
+    const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
     return (!gfx10 && min_lod && !resident_mip) || corner_samples;
   }
 
   /// A zero PITCH field selects native rows for a GFX11/12 2D sample or mip chain.
-  uint32_t layout_pitch(rj_code_arch_t arch, bool sample_2d) const {
+  uint32_t layout_pitch(rocjitsu::IsaFamily arch, bool sample_2d) const {
     return pitch == 1 && type == kImage2d && (sample_2d || max_level) &&
                    has_gfx11_plus_image_operands(arch)
                ? 0u
@@ -223,7 +239,8 @@ public:
     return !swizzle_mode && (type == kImage2d || (type == kImage1d && !max_level));
   }
 
-  bool supports_linear_pitch(rj_code_arch_t arch, bool sample_2d, uint32_t element_bytes) const {
+  bool supports_linear_pitch(rocjitsu::IsaFamily arch, bool sample_2d,
+                             uint32_t element_bytes) const {
     return supports_linear_image_pitch(arch, width, layout_pitch(arch, sample_2d), element_bytes);
   }
 };
@@ -265,32 +282,36 @@ struct ImageMipRange {
   uint32_t last;
 };
 
-inline ImageMipRange rdna_image_mip_range(rj_code_arch_t arch, uint32_t word1, uint32_t word3) {
-  if (arch == ROCJITSU_CODE_ARCH_RDNA4)
+inline ImageMipRange rdna_image_mip_range(rocjitsu::IsaFamily arch, uint32_t word1,
+                                          uint32_t word3) {
+  if (arch == rocjitsu::IsaFamily::Rdna4) {
     return {(word1 >> 25) & 31u, (word3 >> 15) & 31u};
+  }
   return {(word3 >> 12) & 15u, (word3 >> 16) & 15u};
 }
 
 /// @brief Decode a T# using the requesting generation's resource layout.
 inline ImageResource decode_image_resource(const std::array<uint32_t, 8> &descriptor,
-                                           rj_code_arch_t arch, bool r128 = false) {
-  if (arch_is_cdna_4_or_lower(arch))
+                                           rocjitsu::IsaFamily arch, bool r128 = false) {
+  if (arch_is_cdna_4_or_lower(arch)) {
     return decode_gfx9_image_resource(descriptor);
+  }
   const auto field = [&](uint32_t bit, uint32_t width) {
     return util::extract_bits_from_words(descriptor.data(), bit, width);
   };
-  const bool rdna4 = arch == ROCJITSU_CODE_ARCH_RDNA4;
-  const bool rdna1 = arch == ROCJITSU_CODE_ARCH_RDNA1;
+  const bool rdna4 = arch == rocjitsu::IsaFamily::Rdna4;
+  const bool rdna1 = arch == rocjitsu::IsaFamily::Rdna1;
   ImageResource resource;
-  resource.min_lod = rdna1 || arch == ROCJITSU_CODE_ARCH_RDNA2
+  resource.min_lod = rdna1 || arch == rocjitsu::IsaFamily::Rdna2
                          ? field(40, 12)
                          : field(rdna4 ? 186 : 187, rdna4 ? 13 : 12);
   resource.base = ((uint64_t{field(32, 8)} << 32) | descriptor[0]) << 8;
   resource.perf_mod = field(180, 3);
   resource.corner_samples = field(183, 1);
   resource.linked_resource = field(184, 1);
-  if (!resource.linked_resource)
+  if (!resource.linked_resource) {
     resource.min_lod_warn = rdna_image_lod_warning_threshold(arch, descriptor[5]);
+  }
   resource.type = field(124, 4);
   resource.width = field(62, rdna4 || rdna1 ? 16 : 14) + 1;
   resource.height = field(78, rdna4 || rdna1 ? 16 : 14) + 1;
@@ -299,9 +320,9 @@ inline ImageResource decode_image_resource(const std::array<uint32_t, 8> &descri
   const auto mip = rdna_image_mip_range(arch, descriptor[1], descriptor[3]);
   resource.base_level = mip.first;
   resource.last_level = mip.last;
-  resource.max_level = field(rdna4                                       ? 44
-                             : rdna1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ? 164
-                                                                         : 48,
+  resource.max_level = field(rdna4                                         ? 44
+                             : rdna1 || arch == rocjitsu::IsaFamily::Rdna2 ? 164
+                                                                           : 48,
                              rdna4 ? 5 : 4);
   resource.compressed = field(213, 1) || field(212, 1);
   resource.swizzle_mode = field(116, 5);
@@ -322,7 +343,7 @@ inline ImageResource decode_image_resource(const std::array<uint32_t, 8> &descri
     resource.array_pitch = field(160, 4);
     // An ordinary GFX11.5 descriptor holds MIN_LOD_WARN here. Linked
     // resources overlay the same bits with three scales.
-    if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
+    if ((arch == rocjitsu::IsaFamily::Rdna3 || arch == rocjitsu::IsaFamily::Rdna3_5) &&
         resource.linked_resource) {
       resource.depth_scale = field(168, 4);
       resource.height_scale = field(172, 4);
@@ -332,10 +353,11 @@ inline ImageResource decode_image_resource(const std::array<uint32_t, 8> &descri
   if (image_resource_encodes_pitch(resource.type)) {
     resource.depth = 1;
     // GFX10.3+ repurpose DEPTH as PITCH for non-array images.
-    if (!rdna1)
+    if (!rdna1) {
       resource.pitch = field(128, rdna4 ? 16 : 14) + 1;
+    }
   }
-  if (r128 && (rdna1 || arch == ROCJITSU_CODE_ARCH_RDNA2)) {
+  if (r128 && (rdna1 || arch == rocjitsu::IsaFamily::Rdna2)) {
     // Four-word resources have no extended pitch, depth or allocation mip field.
     resource.pitch = 0;
     resource.depth = 1;
@@ -346,20 +368,23 @@ inline ImageResource decode_image_resource(const std::array<uint32_t, 8> &descri
 
 /// Descriptor-only IMAGE_GET_RESINFO; no image allocation or texture addressing is needed.
 inline std::array<uint32_t, 4> image_resource_info(const std::array<uint32_t, 8> &descriptor,
-                                                   rj_code_arch_t arch, uint32_t lod) {
+                                                   rocjitsu::IsaFamily arch, uint32_t lod) {
   const ImageResource resource = decode_image_resource(descriptor, arch);
   const uint32_t type = resource.type;
-  if (type < kImage1d)
+  if (type < kImage1d) {
     return {};
+  }
   const bool gfx9 = arch_is_cdna_4_or_lower(arch);
   const bool msaa = type >= kImage2dMsaa;
   const uint32_t base = msaa ? 0 : resource.base_level;
   const uint32_t last = msaa ? 0 : resource.last_level;
-  if (last < base)
+  if (last < base) {
     return {};
+  }
   const uint32_t levels = last - base + 1;
-  if (lod >= levels)
+  if (lod >= levels) {
     return {0, 0, 0, levels};
+  }
   const uint32_t level = base + lod;
   const auto mip_size = [level](uint32_t size) { return std::max(1u, size >> level); };
   const uint32_t width = mip_size(resource.width);
@@ -389,47 +414,57 @@ inline void execute_image_resource_info(Wavefront &wf, uint32_t resource, uint32
                                         uint32_t dst_reg_base, uint32_t mask, bool r128, bool a16,
                                         bool result_in_range = true) {
   const auto arch = wf.cu().arch();
-  const bool gfx10 = arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10 = arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   const bool modern_sources = has_gfx11_plus_image_operands(arch);
   if (gfx10 || modern_sources) {
     const unsigned data_words = std::max(1, std::popcount(mask));
-    if (!wf.vgpr_alloc().contains(dst_reg_base, data_words))
+    if (!wf.vgpr_alloc().contains(dst_reg_base, data_words)) {
       return;
+    }
     if (mask == 0) {
       RegisterAccess regs(wf);
-      for (uint64_t lanes = wf.exec(); lanes; lanes &= lanes - 1)
+      for (uint64_t lanes = wf.exec(); lanes; lanes &= lanes - 1) {
         regs.write_vgpr(dst_reg_base, std::countr_zero(lanes), 0);
+      }
       return;
     }
   }
-  if (modern_sources)
+  if (modern_sources) {
     lod_vgpr = gfx115_source_vgpr(lod_vgpr, wf.num_vgprs());
+  }
   const uint32_t words = r128 ? 4 : 8;
   std::array<uint32_t, 8> descriptor{};
   // Validate each selector before reading, including descriptors ending in VCC.
-  for (uint32_t i = 0; i < words; ++i)
-    if (!scalar_selector_range_is_backed(wf, resource + i, 1))
+  for (uint32_t i = 0; i < words; ++i) {
+    if (!scalar_selector_range_is_backed(wf, resource + i, 1)) {
       return;
-  if (!result_in_range)
+    }
+  }
+  if (!result_in_range) {
     return;
-  for (uint32_t i = 0; i < words; ++i)
+  }
+  for (uint32_t i = 0; i < words; ++i) {
     descriptor[i] = read_scalar_selector(wf, resource + i);
+  }
   RegisterAccess regs(wf);
   const uint32_t base = wf.vgpr_alloc().base;
   const auto lods = regs.read_vgpr_region(
       base + lod_vgpr, 1, wf.exec(),
       image_coordinate_component_bytes(0, !arch_is_cdna_4_or_lower(arch) && a16));
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (!(wf.exec() & (uint64_t{1} << lane)))
+    if (!(wf.exec() & (uint64_t{1} << lane))) {
       continue;
+    }
     // Read LOD before writing any result, since VADDR may alias VDATA.
     const auto result = image_resource_info(descriptor, wf.cu().arch(),
                                             lods.lane(0, lane) & (a16 ? 0xffffu : 0xffffffffu));
     // RESINFO leaves the extra TFE status register unchanged on gfx11/gfx12.
     uint32_t dst = dst_reg_base;
-    for (uint32_t component = 0; component < 4; ++component)
-      if (mask & (1u << component))
+    for (uint32_t component = 0; component < 4; ++component) {
+      if (mask & (1u << component)) {
         regs.write_vgpr(dst++, lane, result[component]);
+      }
+    }
   }
 }
 

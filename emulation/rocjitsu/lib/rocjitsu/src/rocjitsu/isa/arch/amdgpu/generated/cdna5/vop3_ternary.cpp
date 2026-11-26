@@ -26,18 +26,21 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -60,6 +63,7 @@ VFmaDx9ZeroF32Vop3::VFmaDx9ZeroF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FMA_DX9_ZERO_F32);
 }
 
 namespace detail {
@@ -69,12 +73,14 @@ DecodeResult decodeVFmaDx9ZeroF32Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_fma_dx9_zero_f32",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_fma_dx9_zero_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VFmaDx9ZeroF32Vop3>(opcode);
 }
@@ -93,18 +99,21 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         24, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         24, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(24, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -127,6 +136,7 @@ VMadI32I24Vop3::VMadI32I24Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_I32_I24);
 }
 
 namespace detail {
@@ -135,12 +145,14 @@ DecodeResult decodeVMadI32I24Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_mad_i32_i24", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_mad_i32_i24: reserved DPP control";
+    }
   }
   return std::make_unique<VMadI32I24Vop3>(opcode);
 }
@@ -159,18 +171,21 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         24, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         24, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(24, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -193,6 +208,7 @@ VMadU32U24Vop3::VMadU32U24Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_U32_U24);
 }
 
 namespace detail {
@@ -201,12 +217,14 @@ DecodeResult decodeVMadU32U24Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_mad_u32_u24", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_mad_u32_u24: reserved DPP control";
+    }
   }
   return std::make_unique<VMadU32U24Vop3>(opcode);
 }
@@ -225,18 +243,21 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -259,6 +280,7 @@ VBfeU32Vop3::VBfeU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_BFE_U32);
 }
 
 namespace detail {
@@ -267,12 +289,14 @@ DecodeResult decodeVBfeU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_bfe_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_bfe_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VBfeU32Vop3>(opcode);
 }
@@ -291,18 +315,21 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -325,6 +352,7 @@ VBfeI32Vop3::VBfeI32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_BFE_I32);
 }
 
 namespace detail {
@@ -333,12 +361,14 @@ DecodeResult decodeVBfeI32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_bfe_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_bfe_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VBfeI32Vop3>(opcode);
 }
@@ -357,18 +387,21 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -391,6 +424,7 @@ VBfiB32Vop3::VBfiB32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_BFI_B32);
 }
 
 namespace detail {
@@ -399,12 +433,14 @@ DecodeResult decodeVBfiB32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_bfi_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_bfi_b32: reserved DPP control";
+    }
   }
   return std::make_unique<VBfiB32Vop3>(opcode);
 }
@@ -423,18 +459,21 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -457,6 +496,7 @@ VFmaF32Vop3::VFmaF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FMA_F32);
 }
 
 namespace detail {
@@ -465,12 +505,14 @@ DecodeResult decodeVFmaF32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_fma_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_fma_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VFmaF32Vop3>(opcode);
 }
@@ -489,21 +531,24 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::F64HighBits);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
@@ -519,6 +564,7 @@ VFmaF64Vop3::VFmaF64Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FMA_F64);
 }
 
 namespace detail {
@@ -527,18 +573,24 @@ DecodeResult decodeVFmaF64Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_fma_f64", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit() << "V_FMA_F64 does not support DPP8";
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit() << "v_fma_f64: only DPP row-select controls 0x150-0x15f are supported";
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (dp->dpp_ctrl < amdgpu::dpp::ROW_SELECT_BASE || dp->dpp_ctrl > amdgpu::dpp::ROW_SELECT_MAX)
-        [[unlikely]]
+        [[unlikely]] {
       return emit_error.emit()
              << "v_fma_f64: only DPP row-select controls 0x150-0x15f are supported";
+    }
   }
   return std::make_unique<VFmaF64Vop3>(opcode);
 }
@@ -557,18 +609,21 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -591,6 +646,7 @@ VLerpU8Vop3::VLerpU8Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LERP_U8);
 }
 
 namespace detail {
@@ -599,12 +655,14 @@ DecodeResult decodeVLerpU8Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_lerp_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_lerp_u8: reserved DPP control";
+    }
   }
   return std::make_unique<VLerpU8Vop3>(opcode);
 }
@@ -623,15 +681,17 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -639,6 +699,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -662,6 +723,7 @@ VAlignbitB32Vop3::VAlignbitB32Vop3(const MachineInst *inst)
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ALIGNBIT_B32);
 }
 
 namespace detail {
@@ -671,12 +733,14 @@ DecodeResult decodeVAlignbitB32Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_alignbit_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_alignbit_b32: reserved DPP control";
+    }
   }
   return std::make_unique<VAlignbitB32Vop3>(opcode);
 }
@@ -695,15 +759,17 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -711,6 +777,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -734,6 +801,7 @@ VAlignbyteB32Vop3::VAlignbyteB32Vop3(const MachineInst *inst)
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ALIGNBYTE_B32);
 }
 
 namespace detail {
@@ -743,12 +811,14 @@ DecodeResult decodeVAlignbyteB32Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_alignbyte_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_alignbyte_b32: reserved DPP control";
+    }
   }
   return std::make_unique<VAlignbyteB32Vop3>(opcode);
 }
@@ -767,18 +837,21 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -801,6 +874,7 @@ VMin3I32Vop3::VMin3I32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN3_I32);
 }
 
 namespace detail {
@@ -809,12 +883,14 @@ DecodeResult decodeVMin3I32Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_min3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_min3_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VMin3I32Vop3>(opcode);
 }
@@ -833,18 +909,21 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -867,6 +946,7 @@ VMin3U32Vop3::VMin3U32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN3_U32);
 }
 
 namespace detail {
@@ -875,12 +955,14 @@ DecodeResult decodeVMin3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_min3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_min3_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VMin3U32Vop3>(opcode);
 }
@@ -899,18 +981,21 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -933,6 +1018,7 @@ VMax3I32Vop3::VMax3I32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX3_I32);
 }
 
 namespace detail {
@@ -941,12 +1027,14 @@ DecodeResult decodeVMax3I32Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_max3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_max3_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VMax3I32Vop3>(opcode);
 }
@@ -965,18 +1053,21 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -999,6 +1090,7 @@ VMax3U32Vop3::VMax3U32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX3_U32);
 }
 
 namespace detail {
@@ -1007,12 +1099,14 @@ DecodeResult decodeVMax3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_max3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_max3_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VMax3U32Vop3>(opcode);
 }
@@ -1031,18 +1125,21 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1065,6 +1162,7 @@ VMed3I32Vop3::VMed3I32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MED3_I32);
 }
 
 namespace detail {
@@ -1073,12 +1171,14 @@ DecodeResult decodeVMed3I32Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_med3_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_med3_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VMed3I32Vop3>(opcode);
 }
@@ -1097,18 +1197,21 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1131,6 +1234,7 @@ VMed3U32Vop3::VMed3U32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MED3_U32);
 }
 
 namespace detail {
@@ -1139,12 +1243,14 @@ DecodeResult decodeVMed3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_med3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_med3_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VMed3U32Vop3>(opcode);
 }
@@ -1163,18 +1269,21 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1197,6 +1306,7 @@ VSadU8Vop3::VSadU8Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SAD_U8);
 }
 
 namespace detail {
@@ -1205,12 +1315,14 @@ DecodeResult decodeVSadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitte
   Result validation =
       Vop3::validate_encoding("v_sad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_sad_u8: reserved DPP control";
+    }
   }
   return std::make_unique<VSadU8Vop3>(opcode);
 }
@@ -1229,18 +1341,21 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1263,6 +1378,7 @@ VSadHiU8Vop3::VSadHiU8Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SAD_HI_U8);
 }
 
 namespace detail {
@@ -1271,12 +1387,14 @@ DecodeResult decodeVSadHiU8Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_sad_hi_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_sad_hi_u8: reserved DPP control";
+    }
   }
   return std::make_unique<VSadHiU8Vop3>(opcode);
 }
@@ -1295,18 +1413,21 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1329,6 +1450,7 @@ VSadU16Vop3::VSadU16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SAD_U16);
 }
 
 namespace detail {
@@ -1337,12 +1459,14 @@ DecodeResult decodeVSadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_sad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_sad_u16: reserved DPP control";
+    }
   }
   return std::make_unique<VSadU16Vop3>(opcode);
 }
@@ -1361,18 +1485,21 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1395,6 +1522,7 @@ VSadU32Vop3::VSadU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_SAD_U32);
 }
 
 namespace detail {
@@ -1403,12 +1531,14 @@ DecodeResult decodeVSadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_sad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_sad_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VSadU32Vop3>(opcode);
 }
@@ -1427,18 +1557,21 @@ VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1461,6 +1594,7 @@ VMin3NumF32Vop3::VMin3NumF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN3_NUM_F32);
 }
 
 namespace detail {
@@ -1470,12 +1604,14 @@ DecodeResult decodeVMin3NumF32Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_min3_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_min3_num_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VMin3NumF32Vop3>(opcode);
 }
@@ -1494,18 +1630,21 @@ VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1528,6 +1667,7 @@ VMax3NumF32Vop3::VMax3NumF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX3_NUM_F32);
 }
 
 namespace detail {
@@ -1537,12 +1677,14 @@ DecodeResult decodeVMax3NumF32Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_max3_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_max3_num_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VMax3NumF32Vop3>(opcode);
 }
@@ -1561,7 +1703,7 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1569,7 +1711,8 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1577,7 +1720,8 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1585,6 +1729,7 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1607,6 +1752,7 @@ VMin3NumF16Vop3::VMin3NumF16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN3_NUM_F16);
 }
 
 namespace detail {
@@ -1616,12 +1762,14 @@ DecodeResult decodeVMin3NumF16Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_min3_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_min3_num_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VMin3NumF16Vop3>(opcode);
 }
@@ -1629,15 +1777,17 @@ DecodeResult decodeVMin3NumF16Vop3(const MachineInst *opcode,
 
 void VMin3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMin3NumF16Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
@@ -1653,7 +1803,7 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1661,7 +1811,8 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1669,7 +1820,8 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1677,6 +1829,7 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1699,6 +1852,7 @@ VMax3NumF16Vop3::VMax3NumF16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX3_NUM_F16);
 }
 
 namespace detail {
@@ -1708,12 +1862,14 @@ DecodeResult decodeVMax3NumF16Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_max3_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_max3_num_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VMax3NumF16Vop3>(opcode);
 }
@@ -1721,15 +1877,17 @@ DecodeResult decodeVMax3NumF16Vop3(const MachineInst *opcode,
 
 void VMax3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMax3NumF16Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
@@ -1745,18 +1903,21 @@ VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1779,6 +1940,7 @@ VMinimum3F32Vop3::VMinimum3F32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINIMUM3_F32);
 }
 
 namespace detail {
@@ -1788,12 +1950,14 @@ DecodeResult decodeVMinimum3F32Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_minimum3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_minimum3_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VMinimum3F32Vop3>(opcode);
 }
@@ -1812,18 +1976,21 @@ VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1846,6 +2013,7 @@ VMaximum3F32Vop3::VMaximum3F32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXIMUM3_F32);
 }
 
 namespace detail {
@@ -1855,12 +2023,14 @@ DecodeResult decodeVMaximum3F32Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_maximum3_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_maximum3_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VMaximum3F32Vop3>(opcode);
 }
@@ -1879,7 +2049,7 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1887,7 +2057,8 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1895,7 +2066,8 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1903,6 +2075,7 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -1925,6 +2098,7 @@ VMinimum3F16Vop3::VMinimum3F16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINIMUM3_F16);
 }
 
 namespace detail {
@@ -1934,12 +2108,14 @@ DecodeResult decodeVMinimum3F16Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_minimum3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_minimum3_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VMinimum3F16Vop3>(opcode);
 }
@@ -1947,15 +2123,17 @@ DecodeResult decodeVMinimum3F16Vop3(const MachineInst *opcode,
 
 void VMinimum3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMinimum3F16Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
@@ -1971,7 +2149,7 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1979,7 +2157,8 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1987,7 +2166,8 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -1995,6 +2175,7 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2017,6 +2198,7 @@ VMaximum3F16Vop3::VMaximum3F16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXIMUM3_F16);
 }
 
 namespace detail {
@@ -2026,12 +2208,14 @@ DecodeResult decodeVMaximum3F16Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_maximum3_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_maximum3_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VMaximum3F16Vop3>(opcode);
 }
@@ -2039,15 +2223,17 @@ DecodeResult decodeVMaximum3F16Vop3(const MachineInst *opcode,
 
 void VMaximum3F16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMaximum3F16Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
@@ -2063,18 +2249,21 @@ VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2097,6 +2286,7 @@ VMed3NumF32Vop3::VMed3NumF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MED3_NUM_F32);
 }
 
 namespace detail {
@@ -2106,12 +2296,14 @@ DecodeResult decodeVMed3NumF32Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_med3_num_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_med3_num_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VMed3NumF32Vop3>(opcode);
 }
@@ -2130,7 +2322,7 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2138,7 +2330,8 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2146,7 +2339,8 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2154,6 +2348,7 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2176,6 +2371,7 @@ VMed3NumF16Vop3::VMed3NumF16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MED3_NUM_F16);
 }
 
 namespace detail {
@@ -2185,12 +2381,14 @@ DecodeResult decodeVMed3NumF16Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_med3_num_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_med3_num_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VMed3NumF16Vop3>(opcode);
 }
@@ -2198,15 +2396,17 @@ DecodeResult decodeVMed3NumF16Vop3(const MachineInst *opcode,
 
 void VMed3NumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMed3NumF16Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMadU32Vop3::VMadU32Vop3(const MachineInst *inst)
@@ -2222,18 +2422,21 @@ VMadU32Vop3::VMadU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
@@ -2249,6 +2452,7 @@ VMadU32Vop3::VMadU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_U32);
 }
 
 namespace detail {
@@ -2257,18 +2461,24 @@ DecodeResult decodeVMadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_mad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit() << "V_MAD_U32 does not support DPP8";
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit() << "v_mad_u32: only DPP row-select controls 0x150-0x15f are supported";
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (dp->dpp_ctrl < amdgpu::dpp::ROW_SELECT_BASE || dp->dpp_ctrl > amdgpu::dpp::ROW_SELECT_MAX)
-        [[unlikely]]
+        [[unlikely]] {
       return emit_error.emit()
              << "v_mad_u32: only DPP row-select controls 0x150-0x15f are supported";
+    }
   }
   return std::make_unique<VMadU32Vop3>(opcode);
 }
@@ -2287,18 +2497,21 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2321,6 +2534,7 @@ VMsadU8Vop3::VMsadU8Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MSAD_U8);
 }
 
 namespace detail {
@@ -2329,12 +2543,14 @@ DecodeResult decodeVMsadU8Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_msad_u8", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_msad_u8: reserved DPP control";
+    }
   }
   return std::make_unique<VMsadU8Vop3>(opcode);
 }
@@ -2353,18 +2569,21 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2387,6 +2606,7 @@ VXor3B32Vop3::VXor3B32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_XOR3_B32);
 }
 
 namespace detail {
@@ -2395,12 +2615,14 @@ DecodeResult decodeVXor3B32Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_xor3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_xor3_b32: reserved DPP control";
+    }
   }
   return std::make_unique<VXor3B32Vop3>(opcode);
 }
@@ -2419,7 +2641,7 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2427,7 +2649,8 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2435,7 +2658,8 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2443,6 +2667,7 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2470,6 +2695,7 @@ VMadU16Vop3::VMadU16Vop3(const MachineInst *inst)
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_U16);
 }
 
 namespace detail {
@@ -2478,12 +2704,14 @@ DecodeResult decodeVMadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_mad_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_mad_u16: reserved DPP control";
+    }
   }
   return std::make_unique<VMadU16Vop3>(opcode);
 }
@@ -2491,14 +2719,16 @@ DecodeResult decodeVMadU16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 
 void VMadU16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMadU16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
@@ -2514,18 +2744,21 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2548,6 +2781,7 @@ VXadU32Vop3::VXadU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_XAD_U32);
 }
 
 namespace detail {
@@ -2556,12 +2790,14 @@ DecodeResult decodeVXadU32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_xad_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_xad_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VXadU32Vop3>(opcode);
 }
@@ -2580,18 +2816,21 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2614,6 +2853,7 @@ VLshlAddU32Vop3::VLshlAddU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LSHL_ADD_U32);
 }
 
 namespace detail {
@@ -2623,12 +2863,14 @@ DecodeResult decodeVLshlAddU32Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_lshl_add_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_lshl_add_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VLshlAddU32Vop3>(opcode);
 }
@@ -2647,18 +2889,21 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2681,6 +2926,7 @@ VAddLshlU32Vop3::VAddLshlU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_LSHL_U32);
 }
 
 namespace detail {
@@ -2690,12 +2936,14 @@ DecodeResult decodeVAddLshlU32Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_add_lshl_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_add_lshl_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VAddLshlU32Vop3>(opcode);
 }
@@ -2714,7 +2962,7 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2722,7 +2970,8 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2730,7 +2979,8 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2738,6 +2988,7 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2762,6 +3013,7 @@ VFmaF16Vop3::VFmaF16Vop3(const MachineInst *inst)
   vdst.set_register_byte_mask((amdgpu::vop3_opsel(inst_) & 8u) ? 0xc : 0x3);
   vdst.set_preserve_unwritten_bytes();
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_FMA_F16);
 }
 
 namespace detail {
@@ -2770,12 +3022,14 @@ DecodeResult decodeVFmaF16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_fma_f16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_fma_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VFmaF16Vop3>(opcode);
 }
@@ -2783,14 +3037,16 @@ DecodeResult decodeVFmaF16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 
 void VFmaF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VFmaF16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
@@ -2806,7 +3062,7 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2814,7 +3070,8 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2822,7 +3079,8 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2830,6 +3088,7 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2855,6 +3114,7 @@ VMin3I16Vop3::VMin3I16Vop3(const MachineInst *inst)
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN3_I16);
 }
 
 namespace detail {
@@ -2863,12 +3123,14 @@ DecodeResult decodeVMin3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_min3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_min3_i16: reserved DPP control";
+    }
   }
   return std::make_unique<VMin3I16Vop3>(opcode);
 }
@@ -2876,14 +3138,16 @@ DecodeResult decodeVMin3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 
 void VMin3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMin3I16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
@@ -2899,7 +3163,7 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2907,7 +3171,8 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2915,7 +3180,8 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -2923,6 +3189,7 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -2948,6 +3215,7 @@ VMin3U16Vop3::VMin3U16Vop3(const MachineInst *inst)
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MIN3_U16);
 }
 
 namespace detail {
@@ -2956,12 +3224,14 @@ DecodeResult decodeVMin3U16Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_min3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_min3_u16: reserved DPP control";
+    }
   }
   return std::make_unique<VMin3U16Vop3>(opcode);
 }
@@ -2969,14 +3239,16 @@ DecodeResult decodeVMin3U16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 
 void VMin3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMin3U16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
@@ -2992,7 +3264,7 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3000,7 +3272,8 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3008,7 +3281,8 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3016,6 +3290,7 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3041,6 +3316,7 @@ VMax3I16Vop3::VMax3I16Vop3(const MachineInst *inst)
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX3_I16);
 }
 
 namespace detail {
@@ -3049,12 +3325,14 @@ DecodeResult decodeVMax3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_max3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_max3_i16: reserved DPP control";
+    }
   }
   return std::make_unique<VMax3I16Vop3>(opcode);
 }
@@ -3062,14 +3340,16 @@ DecodeResult decodeVMax3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 
 void VMax3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMax3I16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
@@ -3085,7 +3365,7 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3093,7 +3373,8 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3101,7 +3382,8 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3109,6 +3391,7 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3134,6 +3417,7 @@ VMax3U16Vop3::VMax3U16Vop3(const MachineInst *inst)
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAX3_U16);
 }
 
 namespace detail {
@@ -3142,12 +3426,14 @@ DecodeResult decodeVMax3U16Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_max3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_max3_u16: reserved DPP control";
+    }
   }
   return std::make_unique<VMax3U16Vop3>(opcode);
 }
@@ -3155,14 +3441,16 @@ DecodeResult decodeVMax3U16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 
 void VMax3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMax3U16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
@@ -3178,7 +3466,7 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3186,7 +3474,8 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3194,7 +3483,8 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3202,6 +3492,7 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3227,6 +3518,7 @@ VMed3I16Vop3::VMed3I16Vop3(const MachineInst *inst)
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MED3_I16);
 }
 
 namespace detail {
@@ -3235,12 +3527,14 @@ DecodeResult decodeVMed3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_med3_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_med3_i16: reserved DPP control";
+    }
   }
   return std::make_unique<VMed3I16Vop3>(opcode);
 }
@@ -3248,14 +3542,16 @@ DecodeResult decodeVMed3I16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 
 void VMed3I16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMed3I16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
@@ -3271,7 +3567,7 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3279,7 +3575,8 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3287,7 +3584,8 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3295,6 +3593,7 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3320,6 +3619,7 @@ VMed3U16Vop3::VMed3U16Vop3(const MachineInst *inst)
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MED3_U16);
 }
 
 namespace detail {
@@ -3328,12 +3628,14 @@ DecodeResult decodeVMed3U16Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_med3_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_med3_u16: reserved DPP control";
+    }
   }
   return std::make_unique<VMed3U16Vop3>(opcode);
 }
@@ -3341,14 +3643,16 @@ DecodeResult decodeVMed3U16Vop3(const MachineInst *opcode, const DecodeErrorEmit
 
 void VMed3U16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMed3U16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
@@ -3364,20 +3668,23 @@ VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     src0 = Operand(64, OperandType::OPR_VGPR, dp->vsrc0);
@@ -3393,6 +3700,7 @@ VLshlAddU64Vop3::VLshlAddU64Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LSHL_ADD_U64);
 }
 
 namespace detail {
@@ -3402,19 +3710,25 @@ DecodeResult decodeVLshlAddU64Vop3(const MachineInst *opcode,
   Result validation =
       Vop3::validate_encoding("v_lshl_add_u64", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit() << "V_LSHL_ADD_U64 does not support DPP8";
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit()
            << "v_lshl_add_u64: only DPP row-select controls 0x150-0x15f are supported";
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (dp->dpp_ctrl < amdgpu::dpp::ROW_SELECT_BASE || dp->dpp_ctrl > amdgpu::dpp::ROW_SELECT_MAX)
-        [[unlikely]]
+        [[unlikely]] {
       return emit_error.emit()
              << "v_lshl_add_u64: only DPP row-select controls 0x150-0x15f are supported";
+    }
   }
   return std::make_unique<VLshlAddU64Vop3>(opcode);
 }
@@ -3433,7 +3747,7 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3441,7 +3755,8 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3449,7 +3764,8 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3457,6 +3773,7 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3484,6 +3801,7 @@ VMadI16Vop3::VMadI16Vop3(const MachineInst *inst)
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src2.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_I16);
 }
 
 namespace detail {
@@ -3492,12 +3810,14 @@ DecodeResult decodeVMadI16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_mad_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_mad_i16: reserved DPP control";
+    }
   }
   return std::make_unique<VMadI16Vop3>(opcode);
 }
@@ -3505,14 +3825,16 @@ DecodeResult decodeVMadI16Vop3(const MachineInst *opcode, const DecodeErrorEmitt
 
 void VMadI16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMadI16Vop3::implicit_use_operands(std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
@@ -3528,18 +3850,21 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3562,6 +3887,7 @@ VAdd3U32Vop3::VAdd3U32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD3_U32);
 }
 
 namespace detail {
@@ -3570,12 +3896,14 @@ DecodeResult decodeVAdd3U32Vop3(const MachineInst *opcode, const DecodeErrorEmit
   Result validation =
       Vop3::validate_encoding("v_add3_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_add3_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VAdd3U32Vop3>(opcode);
 }
@@ -3594,18 +3922,21 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3628,6 +3959,7 @@ VLshlOrB32Vop3::VLshlOrB32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_LSHL_OR_B32);
 }
 
 namespace detail {
@@ -3636,12 +3968,14 @@ DecodeResult decodeVLshlOrB32Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_lshl_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_lshl_or_b32: reserved DPP control";
+    }
   }
   return std::make_unique<VLshlOrB32Vop3>(opcode);
 }
@@ -3660,18 +3994,21 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3694,6 +4031,7 @@ VAndOrB32Vop3::VAndOrB32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_AND_OR_B32);
 }
 
 namespace detail {
@@ -3702,12 +4040,14 @@ DecodeResult decodeVAndOrB32Vop3(const MachineInst *opcode, const DecodeErrorEmi
   Result validation =
       Vop3::validate_encoding("v_and_or_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_and_or_b32: reserved DPP control";
+    }
   }
   return std::make_unique<VAndOrB32Vop3>(opcode);
 }
@@ -3726,18 +4066,21 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3760,6 +4103,7 @@ VOr3B32Vop3::VOr3B32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_OR3_B32);
 }
 
 namespace detail {
@@ -3768,12 +4112,14 @@ DecodeResult decodeVOr3B32Vop3(const MachineInst *opcode, const DecodeErrorEmitt
   Result validation =
       Vop3::validate_encoding("v_or3_b32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_or3_b32: reserved DPP control";
+    }
   }
   return std::make_unique<VOr3B32Vop3>(opcode);
 }
@@ -3792,7 +4138,7 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3800,7 +4146,8 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3808,10 +4155,12 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3835,6 +4184,7 @@ VMadU32U16Vop3::VMadU32U16Vop3(const MachineInst *inst)
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_U32_U16);
 }
 
 namespace detail {
@@ -3843,12 +4193,14 @@ DecodeResult decodeVMadU32U16Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_mad_u32_u16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_mad_u32_u16: reserved DPP control";
+    }
   }
   return std::make_unique<VMadU32U16Vop3>(opcode);
 }
@@ -3867,7 +4219,7 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3875,7 +4227,8 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -3883,10 +4236,12 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3910,6 +4265,7 @@ VMadI32I16Vop3::VMadI32I16Vop3(const MachineInst *inst)
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   src0.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
   src1.set_lane_inline_float_format(Operand::LaneInlineFloatFormat::F32);
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_I32_I16);
 }
 
 namespace detail {
@@ -3918,12 +4274,14 @@ DecodeResult decodeVMadI32I16Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_mad_i32_i16", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_mad_i32_i16: reserved DPP control";
+    }
   }
   return std::make_unique<VMadI32I16Vop3>(opcode);
 }
@@ -3942,18 +4300,21 @@ VAddMaxI32Vop3::VAddMaxI32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -3976,6 +4337,7 @@ VAddMaxI32Vop3::VAddMaxI32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_MAX_I32);
 }
 
 namespace detail {
@@ -3984,12 +4346,14 @@ DecodeResult decodeVAddMaxI32Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_add_max_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_add_max_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VAddMaxI32Vop3>(opcode);
 }
@@ -4008,18 +4372,21 @@ VAddMaxU32Vop3::VAddMaxU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4042,6 +4409,7 @@ VAddMaxU32Vop3::VAddMaxU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_MAX_U32);
 }
 
 namespace detail {
@@ -4050,12 +4418,14 @@ DecodeResult decodeVAddMaxU32Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_add_max_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_add_max_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VAddMaxU32Vop3>(opcode);
 }
@@ -4074,18 +4444,21 @@ VAddMinI32Vop3::VAddMinI32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4108,6 +4481,7 @@ VAddMinI32Vop3::VAddMinI32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_MIN_I32);
 }
 
 namespace detail {
@@ -4116,12 +4490,14 @@ DecodeResult decodeVAddMinI32Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_add_min_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_add_min_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VAddMinI32Vop3>(opcode);
 }
@@ -4140,18 +4516,21 @@ VAddMinU32Vop3::VAddMinU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4174,6 +4553,7 @@ VAddMinU32Vop3::VAddMinU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ADD_MIN_U32);
 }
 
 namespace detail {
@@ -4182,12 +4562,14 @@ DecodeResult decodeVAddMinU32Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_add_min_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_add_min_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VAddMinU32Vop3>(opcode);
 }
@@ -4206,18 +4588,21 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4240,6 +4625,7 @@ VMaxminU32Vop3::VMaxminU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXMIN_U32);
 }
 
 namespace detail {
@@ -4248,12 +4634,14 @@ DecodeResult decodeVMaxminU32Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_maxmin_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_maxmin_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VMaxminU32Vop3>(opcode);
 }
@@ -4272,18 +4660,21 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4306,6 +4697,7 @@ VMinmaxU32Vop3::VMinmaxU32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINMAX_U32);
 }
 
 namespace detail {
@@ -4314,12 +4706,14 @@ DecodeResult decodeVMinmaxU32Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_minmax_u32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_minmax_u32: reserved DPP control";
+    }
   }
   return std::make_unique<VMinmaxU32Vop3>(opcode);
 }
@@ -4338,18 +4732,21 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4372,6 +4769,7 @@ VMaxminI32Vop3::VMaxminI32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXMIN_I32);
 }
 
 namespace detail {
@@ -4380,12 +4778,14 @@ DecodeResult decodeVMaxminI32Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_maxmin_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_maxmin_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VMaxminI32Vop3>(opcode);
 }
@@ -4404,18 +4804,21 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4438,6 +4841,7 @@ VMinmaxI32Vop3::VMinmaxI32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINMAX_I32);
 }
 
 namespace detail {
@@ -4446,12 +4850,14 @@ DecodeResult decodeVMinmaxI32Vop3(const MachineInst *opcode, const DecodeErrorEm
   Result validation =
       Vop3::validate_encoding("v_minmax_i32", reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_minmax_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VMinmaxI32Vop3>(opcode);
 }
@@ -4470,18 +4876,21 @@ VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4504,6 +4913,7 @@ VMinmaxNumF32Vop3::VMinmaxNumF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINMAX_NUM_F32);
 }
 
 namespace detail {
@@ -4513,12 +4923,14 @@ DecodeResult decodeVMinmaxNumF32Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_minmax_num_f32",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_minmax_num_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VMinmaxNumF32Vop3>(opcode);
 }
@@ -4537,18 +4949,21 @@ VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4571,6 +4986,7 @@ VMaxminNumF32Vop3::VMaxminNumF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXMIN_NUM_F32);
 }
 
 namespace detail {
@@ -4580,12 +4996,14 @@ DecodeResult decodeVMaxminNumF32Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_maxmin_num_f32",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_maxmin_num_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VMaxminNumF32Vop3>(opcode);
 }
@@ -4604,7 +5022,7 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -4612,7 +5030,8 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -4620,7 +5039,8 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -4628,6 +5048,7 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4650,6 +5071,7 @@ VMinmaxNumF16Vop3::VMinmaxNumF16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINMAX_NUM_F16);
 }
 
 namespace detail {
@@ -4659,12 +5081,14 @@ DecodeResult decodeVMinmaxNumF16Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_minmax_num_f16",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_minmax_num_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VMinmaxNumF16Vop3>(opcode);
 }
@@ -4672,15 +5096,17 @@ DecodeResult decodeVMinmaxNumF16Vop3(const MachineInst *opcode,
 
 void VMinmaxNumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMinmaxNumF16Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
@@ -4696,7 +5122,7 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -4704,7 +5130,8 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -4712,7 +5139,8 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -4720,6 +5148,7 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4742,6 +5171,7 @@ VMaxminNumF16Vop3::VMaxminNumF16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXMIN_NUM_F16);
 }
 
 namespace detail {
@@ -4751,12 +5181,14 @@ DecodeResult decodeVMaxminNumF16Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_maxmin_num_f16",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_maxmin_num_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VMaxminNumF16Vop3>(opcode);
 }
@@ -4764,15 +5196,17 @@ DecodeResult decodeVMaxminNumF16Vop3(const MachineInst *opcode,
 
 void VMaxminNumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMaxminNumF16Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
@@ -4788,18 +5222,21 @@ VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4822,6 +5259,7 @@ VMinimummaximumF32Vop3::VMinimummaximumF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINIMUMMAXIMUM_F32);
 }
 
 namespace detail {
@@ -4831,12 +5269,14 @@ DecodeResult decodeVMinimummaximumF32Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_minimummaximum_f32",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_minimummaximum_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VMinimummaximumF32Vop3>(opcode);
 }
@@ -4855,18 +5295,21 @@ VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4889,6 +5332,7 @@ VMaximumminimumF32Vop3::VMaximumminimumF32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXIMUMMINIMUM_F32);
 }
 
 namespace detail {
@@ -4898,12 +5342,14 @@ DecodeResult decodeVMaximumminimumF32Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_maximumminimum_f32",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_maximumminimum_f32: reserved DPP control";
+    }
   }
   return std::make_unique<VMaximumminimumF32Vop3>(opcode);
 }
@@ -4922,7 +5368,7 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -4930,7 +5376,8 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -4938,7 +5385,8 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -4946,6 +5394,7 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -4968,6 +5417,7 @@ VMinimummaximumF16Vop3::VMinimummaximumF16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MINIMUMMAXIMUM_F16);
 }
 
 namespace detail {
@@ -4977,12 +5427,14 @@ DecodeResult decodeVMinimummaximumF16Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_minimummaximum_f16",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_minimummaximum_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VMinimummaximumF16Vop3>(opcode);
 }
@@ -4990,15 +5442,17 @@ DecodeResult decodeVMinimummaximumF16Vop3(const MachineInst *opcode,
 
 void VMinimummaximumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMinimummaximumF16Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
@@ -5014,7 +5468,7 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -5022,7 +5476,8 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 0) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -5030,7 +5485,8 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 1) & 1u) * 16u)) &
                               0xFFFFu),
         true);
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         16, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
@@ -5038,6 +5494,7 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
                                (((amdgpu::vop3_opsel(inst_) >> 2) & 1u) * 16u)) &
                               0xFFFFu),
         true);
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(16, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5060,6 +5517,7 @@ VMaximumminimumF16Vop3::VMaximumminimumF16Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_MAXIMUMMINIMUM_F16);
 }
 
 namespace detail {
@@ -5069,12 +5527,14 @@ DecodeResult decodeVMaximumminimumF16Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_maximumminimum_f16",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_maximumminimum_f16: reserved DPP control";
+    }
   }
   return std::make_unique<VMaximumminimumF16Vop3>(opcode);
 }
@@ -5082,15 +5542,17 @@ DecodeResult decodeVMaximumminimumF16Vop3(const MachineInst *opcode,
 
 void VMaximumminimumF16Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VMaximumminimumF16Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VAshrPkI8I32Vop3::VAshrPkI8I32Vop3(const MachineInst *inst)
@@ -5106,18 +5568,21 @@ VAshrPkI8I32Vop3::VAshrPkI8I32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5140,6 +5605,7 @@ VAshrPkI8I32Vop3::VAshrPkI8I32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ASHR_PK_I8_I32);
 }
 
 namespace detail {
@@ -5149,12 +5615,14 @@ DecodeResult decodeVAshrPkI8I32Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_ashr_pk_i8_i32",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_ashr_pk_i8_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VAshrPkI8I32Vop3>(opcode);
 }
@@ -5162,15 +5630,17 @@ DecodeResult decodeVAshrPkI8I32Vop3(const MachineInst *opcode,
 
 void VAshrPkI8I32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VAshrPkI8I32Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VAshrPkU8I32Vop3::VAshrPkU8I32Vop3(const MachineInst *inst)
@@ -5186,18 +5656,21 @@ VAshrPkU8I32Vop3::VAshrPkU8I32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
+  }
   if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const OpEncoding *>(inst)->src0)) {
     auto *dp8 = reinterpret_cast<const Vop3VopDpp8MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp8->vsrc0);
@@ -5220,6 +5693,7 @@ VAshrPkU8I32Vop3::VAshrPkU8I32Vop3(const MachineInst *inst)
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
   flags_ |= DIRECT_REGISTER_ACCESSES;
+  set_amdgpu_operation(amdgpu::Operation::V_ASHR_PK_U8_I32);
 }
 
 namespace detail {
@@ -5229,12 +5703,14 @@ DecodeResult decodeVAshrPkU8I32Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_ashr_pk_u8_i32",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
-    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]]
+    if (!amdgpu::dpp::dpp_ctrl_is_valid(dp->dpp_ctrl, false, false, true)) [[unlikely]] {
       return emit_error.emit() << "v_ashr_pk_u8_i32: reserved DPP control";
+    }
   }
   return std::make_unique<VAshrPkU8I32Vop3>(opcode);
 }
@@ -5242,15 +5718,17 @@ DecodeResult decodeVAshrPkU8I32Vop3(const MachineInst *opcode,
 
 void VAshrPkU8I32Vop3::implicit_uses(RegisterSet &uses) const {
   Vop3::implicit_uses(uses);
-  if (auto r = vdst.to_register_ref())
+  if (auto r = vdst.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 void VAshrPkU8I32Vop3::implicit_use_operands(
     std::vector<const ::rocjitsu::Operand *> &operands) const {
   Vop3::implicit_use_operands(operands);
-  if (vdst.to_register_ref())
+  if (vdst.to_register_ref()) {
     operands.push_back(&vdst);
+  }
 }
 
 VMadNcU64U32Vop3::VMadNcU64U32Vop3(const MachineInst *inst)
@@ -5266,19 +5744,22 @@ VMadNcU64U32Vop3::VMadNcU64U32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::ZeroExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
@@ -5293,6 +5774,7 @@ VMadNcU64U32Vop3::VMadNcU64U32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_NC_U64_U32);
 }
 
 namespace detail {
@@ -5302,19 +5784,25 @@ DecodeResult decodeVMadNcU64U32Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_mad_nc_u64_u32",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit() << "V_MAD_NC_U64_U32 does not support DPP8";
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit()
            << "v_mad_nc_u64_u32: only DPP row-select controls 0x150-0x15f are supported";
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (dp->dpp_ctrl < amdgpu::dpp::ROW_SELECT_BASE || dp->dpp_ctrl > amdgpu::dpp::ROW_SELECT_MAX)
-        [[unlikely]]
+        [[unlikely]] {
       return emit_error.emit()
              << "v_mad_nc_u64_u32: only DPP row-select controls 0x150-0x15f are supported";
+    }
   }
   return std::make_unique<VMadNcU64U32Vop3>(opcode);
 }
@@ -5333,19 +5821,22 @@ VMadNcI64I32Vop3::VMadNcI64I32Vop3(const MachineInst *inst)
   src_operands_[2] = &src2;
   num_src_ = 3;
   num_dst_ = 1;
-  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255)
+  if (reinterpret_cast<const OpEncoding *>(inst)->src0 == 255) {
     src0 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src1 == 255) {
     src1 = Operand(
         32, OperandType::OPR_SIMM32,
         static_cast<int>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32));
-  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255)
+  }
+  if (reinterpret_cast<const OpEncoding *>(inst)->src2 == 255) {
     src2 = Operand::make_literal32(
         64,
         static_cast<uint32_t>(reinterpret_cast<const Vop3InstLiteralMachineInst *>(inst)->simm32),
         Operand::Literal32Widening::SignExtend);
+  }
   if (reinterpret_cast<const OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     src0 = Operand(32, OperandType::OPR_VGPR, dp->vsrc0);
@@ -5360,6 +5851,7 @@ VMadNcI64I32Vop3::VMadNcI64I32Vop3(const MachineInst *inst)
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
   src1.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src1);
   src2.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src2);
+  set_amdgpu_operation(amdgpu::Operation::V_MAD_NC_I64_I32);
 }
 
 namespace detail {
@@ -5369,19 +5861,25 @@ DecodeResult decodeVMadNcI64I32Vop3(const MachineInst *opcode,
   Result validation = Vop3::validate_encoding("v_mad_nc_i64_i32",
                                               reinterpret_cast<const Vop3::OpEncoding *>(opcode),
                                               emit_error, LiteralSupport::Literal32);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit() << "V_MAD_NC_I64_I32 does not support DPP8";
-  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
+  }
+  if (amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0))
+      [[unlikely]] {
     return emit_error.emit()
            << "v_mad_nc_i64_i32: only DPP row-select controls 0x150-0x15f are supported";
+  }
   if (reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0 == amdgpu::SRC_DPP) {
     auto *dp = reinterpret_cast<const Vop3VopDpp16MachineInst *>(inst);
     if (dp->dpp_ctrl < amdgpu::dpp::ROW_SELECT_BASE || dp->dpp_ctrl > amdgpu::dpp::ROW_SELECT_MAX)
-        [[unlikely]]
+        [[unlikely]] {
       return emit_error.emit()
              << "v_mad_nc_i64_i32: only DPP row-select controls 0x150-0x15f are supported";
+    }
   }
   return std::make_unique<VMadNcI64I32Vop3>(opcode);
 }

@@ -452,14 +452,24 @@ fn shutdown_waits_for_retained_native_call() {
         handle: GPU_AGENT_BASE,
     })
     .unwrap();
+    let cancel_work = lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .control
+        .cancel_work
+        .clone();
     let (send, receive) = std::sync::mpsc::channel();
     let worker = std::thread::spawn(move || send.send(hsa_shut_down()).unwrap());
     let start = std::time::Instant::now();
-    while lock().unwrap().as_ref().is_some() {
+    while !cancel_work.load(std::sync::atomic::Ordering::Acquire) {
         assert!(start.elapsed() < std::time::Duration::from_secs(1));
         std::thread::yield_now();
     }
-    assert!(receive.try_recv().is_err());
+    assert!(matches!(
+        receive.try_recv(),
+        Err(std::sync::mpsc::TryRecvError::Empty)
+    ));
     drop(device);
     drop(call);
     assert_eq!(

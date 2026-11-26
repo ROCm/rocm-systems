@@ -138,3 +138,18 @@ target_include_directories(
     wall-clock-report-tests
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
 )
+
+add_library(perf-tests OBJECT test_perf.cpp)
+
+target_link_libraries(
+    perf-tests
+    PRIVATE
+        rocprofiler-systems-googletest-library
+        rocprofiler-systems-core-library
+        rocprofiler-systems-timemory
+)
+
+target_include_directories(
+    perf-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
+)

@@ -49,19 +49,17 @@ def stages_expr(dtype: str, fields: tuple[str, ...] = ()) -> str:
 def declaration(dtype: str, fields: tuple[str, ...] | None = None) -> str:
     """Declare the scalar stage object once, before the lane loop.
 
-    ``fields`` are the VOP3 (ABS, NEG, OMOD, CLAMP) expressions; an
-    F32-to-integer conversion uses only ABS and NEG. Without them an F16
+    ``fields`` are the VOP3 (ABS, NEG, OMOD, CLAMP) expressions. Without them an F16
     result takes the SDWA OMOD, which scales before rounding and is zero for
     encodings without SDWA.
     """
+    if dtype in ('f16_i16', 'f16_u16', 'f16_f32'):
+        raise ValueError('Half conversions require rj-arith lowering')
     if dtype in F32_TO_INTEGER_CONVERSIONS:
-        operation = f'amdgpu::conversion::{F32_TO_INTEGER_CONVERSIONS[dtype]}'
-        modifiers = list((fields or ())[:2])
-        while modifiers and modifiers[-1] == '0u':
-            modifiers.pop()
-        args = ', '.join(['wf', *modifiers])
-        stages = f'amdgpu::conversion_f32_to_integer<{operation}>({args})'
-    elif fields is None and destination(dtype) == 'F16':
+        raise ValueError(
+            'F32 floor/nearest integer conversions require rj-arith lowering'
+        )
+    if fields is None and destination(dtype) == 'F16':
         source = _format(TO_FLOAT_CONVERSIONS[dtype][0])
         stages = f'amdgpu::sdwa_conversion_to_f16<{source}>(*this, wf)'
     else:
@@ -111,6 +109,8 @@ def simd_probe(
     if match is None or match['dtype'] not in TO_FLOAT_CONVERSIONS:
         return None
     dtype = match['dtype']
+    if dtype in ('f16_i16', 'f16_u16', 'f16_f32'):
+        return None
     vop3 = match['encoding'] == 'vop3'
     half_dst = destination(dtype) == 'F16'
     half_source = int(dtype.endswith('16'))
@@ -121,10 +121,9 @@ def simd_probe(
             f'  if (amdgpu::try_execute_words_simd<{args}>(inst, wf, {STAGES})) return;'
         )
     source, result = TO_FLOAT_CONVERSIONS[dtype]
-    if source == 'F64':
-        return f'  ROCJITSU_TRY_SIMD_CONVERSION_FROM_F64({STAGES});'
-    if result == 'F64':
-        return f'  ROCJITSU_TRY_SIMD_CONVERSION_TO_F64({STAGES});'
+    if source == 'F64' or result == 'F64':
+        # All current profiles route these operations through rj-arith.
+        return None
     return f'  ROCJITSU_TRY_SIMD_VOP1_UNARY(uint32_t, uint32_t, {STAGES});'
 
 
@@ -136,27 +135,6 @@ def _resolve_with_source_modifiers(
         return f'{resolver}(wf)'
     abs_field = f'{inst}.abs' if has_abs else '0u'
     return f'{resolver}(wf, {abs_field}, {inst}.neg)'
-
-
-def pk_rtz_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve V_CVT_PK_RTZ_F16_F32's stages."""
-    return _resolve_with_source_modifiers(
-        'amdgpu::conversion_pk_rtz_f16', is_vop3, has_abs, inst
-    )
-
-
-def pk_u8_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve V_CVT_PK_U8_F32's stages."""
-    return _resolve_with_source_modifiers(
-        'amdgpu::conversion_pk_u8', is_vop3, has_abs, inst
-    )
-
-
-def pack_b32_f16_expr(is_vop3: bool, has_abs: bool, inst: str) -> str:
-    """Resolve V_PACK_B32_F16's stages."""
-    return _resolve_with_source_modifiers(
-        'amdgpu::conversion_pack_b32_f16', is_vop3, has_abs, inst
-    )
 
 
 # OCP 8-bit float formats in shared/conversion.h, for targets whose

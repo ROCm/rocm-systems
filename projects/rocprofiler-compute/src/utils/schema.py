@@ -1,10 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-from collections import OrderedDict
+from collections import ChainMap, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 import pandas as pd
 
@@ -48,7 +48,7 @@ class Workload:
     sys_info: pd.DataFrame = field(default_factory=pd.DataFrame)
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
     # One counter table per pass, on raw_pmc's rows, keyed by pass name.
-    pass_tables: dict[str, pd.DataFrame] = field(default_factory=dict)
+    pass_tables: Dict[str, ChainMap] = field(default_factory=dict)
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
     filter_kernel_ids: list[int] = field(default_factory=list)

@@ -5,6 +5,7 @@
 #define ROCJITSU_KMD_LINUX_AMDGPU_PROPERTIES_H_
 
 #include "rocjitsu/code/rj_code.h"
+#include "rocjitsu/isa/isa_family.h"
 
 #include "util/bit.h"
 
@@ -94,24 +95,29 @@ constexpr uint32_t gc_ip_version_for_gfx_target_version(uint32_t gfx_target_vers
 inline std::string gfx_target_name(uint32_t gfx_target_version) {
   auto ip = decode_gfx_target_version(gfx_target_version);
   constexpr char kHexDigits[] = "0123456789abcdef";
-  if (ip.minor < 16 && ip.stepping < 16)
+  if (ip.minor < 16 && ip.stepping < 16) {
     return "gfx" + std::to_string(ip.major) + kHexDigits[ip.minor] + kHexDigits[ip.stepping];
+  }
   return "gfx" + std::to_string(ip.major) + std::to_string(ip.minor) + std::to_string(ip.stepping);
 }
 
 inline std::optional<uint32_t> gfx_target_version_from_name(std::string_view name) {
   constexpr std::string_view prefix = "gfx";
-  if (!name.starts_with(prefix) || name.size() < prefix.size() + 3)
+  if (!name.starts_with(prefix) || name.size() < prefix.size() + 3) {
     return std::nullopt;
+  }
 
   name.remove_prefix(prefix.size());
   auto hex_nibble = [](char digit) -> std::optional<uint32_t> {
-    if (digit >= '0' && digit <= '9')
+    if (digit >= '0' && digit <= '9') {
       return static_cast<uint32_t>(digit - '0');
-    if (digit >= 'a' && digit <= 'f')
+    }
+    if (digit >= 'a' && digit <= 'f') {
       return static_cast<uint32_t>(digit - 'a' + 10);
-    if (digit >= 'A' && digit <= 'F')
+    }
+    if (digit >= 'A' && digit <= 'F') {
       return static_cast<uint32_t>(digit - 'A' + 10);
+    }
     return std::nullopt;
   };
 
@@ -119,55 +125,71 @@ inline std::optional<uint32_t> gfx_target_version_from_name(std::string_view nam
   uint32_t major = 0;
   auto [ptr, err] =
       std::from_chars(major_text.data(), major_text.data() + major_text.size(), major);
-  if (err != std::errc{} || ptr != major_text.data() + major_text.size())
+  if (err != std::errc{} || ptr != major_text.data() + major_text.size()) {
     return std::nullopt;
+  }
 
   std::optional<uint32_t> minor = hex_nibble(name[name.size() - 2]);
   std::optional<uint32_t> stepping = hex_nibble(name[name.size() - 1]);
-  if (!minor || !stepping)
+  if (!minor || !stepping) {
     return std::nullopt;
+  }
   return major * 10000 + *minor * 100 + *stepping;
 }
 
 constexpr uint32_t external_rev_id_for_gfx_target_version(uint32_t gfx_target_version,
                                                           uint32_t revision_id) {
   // Navi10/Navi21 offsets from the amdgpu driver's nv_common_early_init.
-  if (gfx_target_version == 100100)
+  if (gfx_target_version == 100100) {
     return revision_id + 0x1;
-  if (gfx_target_version == 100300)
+  }
+  if (gfx_target_version == 100300) {
     return revision_id + 0x28;
+  }
   auto ip = decode_gfx_target_version(gfx_target_version);
   if (ip.major == 12 && ip.minor == 0) {
-    if (ip.stepping == 0)
+    if (ip.stepping == 0) {
       return revision_id + 0x40;
-    if (ip.stepping == 1)
+    }
+    if (ip.stepping == 1) {
       return revision_id + 0x50;
+    }
   }
 
   if (ip.major == 11 && ip.minor == 0) {
-    if (ip.stepping == 0 || ip.stepping == 1)
+    if (ip.stepping == 0 || ip.stepping == 1) {
       return revision_id + 0x1;
-    if (ip.stepping == 2)
+    }
+    if (ip.stepping == 2) {
       return revision_id + 0x10;
-    if (ip.stepping == 3)
+    }
+    if (ip.stepping == 3) {
       return revision_id + 0x20;
-    if (ip.stepping == 4)
+    }
+    if (ip.stepping == 4) {
       return revision_id + 0x80;
+    }
   }
 
   if (ip.major == 11 && ip.minor == 5) {
-    if (ip.stepping == 0)
+    if (ip.stepping == 0) {
       return revision_id == 0 ? 0x1 : revision_id + 0x10;
-    if (ip.stepping == 1)
+    }
+    if (ip.stepping == 1) {
       return revision_id + 0xc1;
-    if (ip.stepping == 2)
+    }
+    if (ip.stepping == 2) {
       return revision_id + 0x40;
-    if (ip.stepping == 3)
+    }
+    if (ip.stepping == 3) {
       return revision_id + 0x50;
-    if (ip.stepping == 4)
+    }
+    if (ip.stepping == 4) {
       return revision_id + 0x1;
-    if (ip.stepping == 6)
+    }
+    if (ip.stepping == 6) {
       return revision_id + 0xd0;
+    }
   }
 
   return revision_id;
@@ -182,15 +204,15 @@ constexpr uint32_t num_hw_gfx_contexts_for_gfx_target_version(uint32_t gfx_targe
 // RDNA1/2 use the Navi10/Navi21 defaults from gc_10_1_0/gc_10_3_0_default.h.
 // RDNA3/4 use W7900/R9700 captures through AMDKFD_IOC_GET_TILE_CONFIG, whose
 // gfx_v11_0/gfx_v12_0 kernel implementations read the hardware register.
-constexpr uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
+constexpr uint32_t gb_addr_config_for_arch(rocjitsu::IsaFamily arch) {
   switch (arch) {
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     return 0x44;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     return 0x444;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     return 0x545;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     return 0x8200545;
   default:
     return 0;
@@ -199,21 +221,26 @@ constexpr uint32_t gb_addr_config_for_arch(rj_code_arch_t arch) {
 
 constexpr uint32_t gb_addr_config_for_gfx_target_version(uint32_t gfx_target_version) {
   // Navi10/Navi21 GB_ADDR_CONFIG defaults in gc_10_1_0/gc_10_3_0_default.h.
-  if (gfx_target_version == 100100)
+  if (gfx_target_version == 100100) {
     return 0x44;
-  if (gfx_target_version == 100300)
+  }
+  if (gfx_target_version == 100300) {
     return 0x444;
+  }
   auto ip = decode_gfx_target_version(gfx_target_version);
-  if (ip.major == 12 && ip.minor == 0)
-    return gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA4);
-  if (ip.major == 11 && ip.minor == 0)
-    return gb_addr_config_for_arch(ROCJITSU_CODE_ARCH_RDNA3);
+  if (ip.major == 12 && ip.minor == 0) {
+    return gb_addr_config_for_arch(rocjitsu::IsaFamily::Rdna4);
+  }
+  if (ip.major == 11 && ip.minor == 0) {
+    return gb_addr_config_for_arch(rocjitsu::IsaFamily::Rdna3);
+  }
   return 0;
 }
 
 constexpr uint32_t drm_shader_engine_count(uint32_t kfd_array_count, uint32_t arrays_per_engine) {
-  if (kfd_array_count == 0 || arrays_per_engine <= 1)
+  if (kfd_array_count == 0 || arrays_per_engine <= 1) {
     return kfd_array_count;
+  }
   return util::ceil_div(kfd_array_count, arrays_per_engine);
 }
 

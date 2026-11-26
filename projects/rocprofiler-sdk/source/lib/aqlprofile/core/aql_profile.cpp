@@ -721,15 +721,13 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                 sample_info.sample_id       = sample_id;
                 sample_info.pmc_data.event  = *p;
                 sample_info.pmc_data.result = *samples;
-#if DEBUG_TRACE == 2
-                printf("DATA: sample index(%u) id(%u) bloc id(%u) index(%u) counter id(%u) "
-                       "res(%lu)\n",
-                       sample_index,
+#if AQLPROFILE_DEBUG_LEVEL == 2
+                printf("DATA: sample id(%u) block id(%u) index(%u) counter id(%u) res(%lu)\n",
                        sample_id,
                        p->block_name,
                        p->block_index,
                        p->counter_id,
-                       samples[sample_index]);
+                       *samples);
 #endif
 
                 status = callback(HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA, &sample_info, data);
@@ -770,7 +768,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                         hsa_ven_amd_aqlprofile_info_data_t sample_info;
                         sample_info.sample_id      = blk;
                         sample_info.pmc_data.event = *p;
-#if DEBUG_TRACE == 2
+#if AQLPROFILE_DEBUG_LEVEL == 2
                         printf(
                             "DATA: xcc(%u) id(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
                             xcc_index,
@@ -814,7 +812,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
                         hsa_ven_amd_aqlprofile_info_data_t sample_info;
                         sample_info.sample_id      = blk;
                         sample_info.pmc_data.event = *p;
-#if DEBUG_TRACE == 2
+#if AQLPROFILE_DEBUG_LEVEL == 2
                         printf(
                             "DATA: xcc(%u) id(%u) bloc id(%u) index(%u) counter id(%u) res(%lu)\n",
                             xcc_index,

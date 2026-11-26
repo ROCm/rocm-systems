@@ -16,6 +16,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <string>
 
@@ -32,6 +33,22 @@ constexpr size_t kTwoShotBaseCount = 262176;
 
 /// Default RCCL_DDA_LL_ONESHOT_THRESHOLD; kOneShotCount and kTwoShotBaseCount are sized against it.
 constexpr size_t kDefaultLLOneShotThresholdBytes = size_t(1) * 1024 * 1024;
+
+/// Default RCCL_DDA_LL128_ONESHOT_THRESHOLD.
+constexpr size_t kDefaultLL128OneShotThresholdBytes = size_t(4) * 1024 * 1024;
+
+/// gfx1250's rcclArchThresholds::ddaArLL128OneShotRankBytes: with the peer-parallel LL128 kernels (the default) the
+/// LL128 one-shot runs to min(kDefaultLL128OneShotThresholdBytes, this / nRanks).
+constexpr size_t kLL128OneShotRankBytes = size_t(4) * 1024 * 1024;
+
+/// `bytes`, cut to the largest message the LL128 one-shot takes at nRanks under the default thresholds, in whole
+/// 16-byte lines. A smaller message is still a one-shot when the cap is flat (peer-parallel off, no rank scaling).
+inline size_t ll128OneShotBytes(size_t bytes, int nRanks)
+{
+    const size_t cap
+        = std::min(kDefaultLL128OneShotThresholdBytes, kLL128OneShotRankBytes / static_cast<size_t>(nRanks));
+    return std::min(bytes, cap / 16 * 16);
+}
 
 /// Architecture name of the HIP device bound to the calling thread.
 inline std::string currentDeviceArch()

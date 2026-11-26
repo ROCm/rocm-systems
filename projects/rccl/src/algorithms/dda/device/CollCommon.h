@@ -34,6 +34,7 @@ using bf162 = __nv_bfloat162;
 #endif
 
 #include "algorithms/dda/device/dda_kernel_params.h"
+#include "bitops.h"
 #include "nccl_device/rccl_ptr.h"
 
 namespace dda::common {
@@ -247,7 +248,7 @@ enum class DdaRsIpcStaging {
 };
 
 inline DdaRsIpcStaging ddaReduceScatterIpcStaging(size_t recvcount, int typeSize) {
-  if (recvcount * static_cast<size_t>(typeSize) <= kDdaRsIpcKernelCopyMaxBytes) {
+  if (recvcount * static_cast<size_t>(typeSize) < kDdaRsIpcKernelCopyMaxBytes) {
     return DdaRsIpcStaging::InKernel;
   }
   return DdaRsIpcStaging::HostPreCopy;
@@ -383,6 +384,23 @@ union LLPacket16 {
   uint4 raw;
 };
 static_assert(sizeof(LLPacket16) == 16, "LLPacket16 must be exactly 16 bytes");
+
+// Per-peer slot in 16-byte packets for an LL tier that keeps one staging area per rank in a bank,
+// so bank 1 sits at the offset every DDA LL/LL128 tier uses. Kernel and eligibility both call this.
+constexpr size_t ddaLLPeerSlotPkts(size_t bankSize, int nRanks) {
+  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
+}
+
+// Blocks per peer of a block-per-peer LL grid (grid.x = peer, grid.y = blocks per peer): one block
+// per kDdaLLPeerPktsPerBlock packets, at most maxPerPeer, and at most the block budget's share per
+// peer. The floor is one block per peer, so the grid fits totalBlockCap only when nRanks <= totalBlockCap.
+constexpr size_t kDdaLLPeerPktsPerBlock = 256;
+constexpr unsigned ddaLLBlocksPerPeer(size_t perPeerBytes, int nRanks, size_t maxPerPeer, size_t totalBlockCap) {
+  const size_t nPk = perPeerBytes >> 3; // 8 payload bytes per packet
+  const size_t share = totalBlockCap / (nRanks < 1 ? 1 : (size_t)nRanks);
+  const size_t bpp = minval(divUp(nPk, kDdaLLPeerPktsPerBlock), maxPerPeer, share);
+  return bpp < 1 ? 1u : (unsigned)bpp;
+}
 
 // Folds one packet's 8B payload (d0, d1) into the accumulator (acc0, acc1).
 template <typename T>
@@ -651,6 +669,17 @@ __device__ __forceinline__ void ddaGridCopy16B(const void* src, void* dst, size_
   v4u_gptr d4 = (v4u_gptr)dst;
   const size_t nVec = bytes >> 4;
   for (size_t i = gtid; i < nVec; i += gstride) d4[i] = s4[i];
+}
+
+// Workgroup barrier for LDS only: on gfx1250 __syncthreads() would also wait for every remote store in flight.
+__device__ __forceinline__ void ddaLdsBarrier() {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+  __builtin_amdgcn_s_barrier();
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+#else
+  __syncthreads();
+#endif
 }
 
 } // namespace dda::common

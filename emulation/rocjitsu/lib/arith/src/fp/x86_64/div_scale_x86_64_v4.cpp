@@ -317,7 +317,8 @@ namespace rocjitsu::arith {
 template <int Width>
 uint32_t div_scale_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
                              const uint32_t *const *a, const uint32_t *const *b,
-                             const uint32_t *const *c, bool quiet_nan, uint64_t flags) {
+                             const uint32_t *const *c, bool quiet_nan, uint64_t flags,
+                             bool rdna_scale_down) {
   constexpr int lanes = Width == 64 ? 8 : 16;
   uint32_t staged[2][32], conditions = 0;
   for (int lane = 0; lane < 32; lane += lanes) {
@@ -325,7 +326,7 @@ uint32_t div_scale_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *const 
     auto result =
         scale_value<Width>(load<Width>(a, lane, mode, 0), load<Width>(b, lane, mode, 1),
                            load<Width>(c, lane, mode, 2), mode, quiet_nan, flags, post, repair);
-    if (__builtin_expect(repair != 0, 0)) {
+    if (__builtin_expect(rdna_scale_down && repair != 0, 0)) {
       result = repair_lanes<Width>(result, unsigned(repair), lane, mode, a, b, c, quiet_nan, flags);
     }
     conditions |= uint32_t(post) << lane;
@@ -352,9 +353,9 @@ uint32_t div_scale_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *const 
 
 template uint32_t div_scale_x86_64_v4<32>(uint32_t, uint32_t, uint32_t *const *,
                                           const uint32_t *const *, const uint32_t *const *,
-                                          const uint32_t *const *, bool, uint64_t);
+                                          const uint32_t *const *, bool, uint64_t, bool);
 template uint32_t div_scale_x86_64_v4<64>(uint32_t, uint32_t, uint32_t *const *,
                                           const uint32_t *const *, const uint32_t *const *,
-                                          const uint32_t *const *, bool, uint64_t);
+                                          const uint32_t *const *, bool, uint64_t, bool);
 
 } // namespace rocjitsu::arith

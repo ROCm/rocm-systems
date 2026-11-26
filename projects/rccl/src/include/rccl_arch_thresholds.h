@@ -98,6 +98,10 @@ struct rcclArchThresholds {
   size_t symTdmMaxR2Graph[RCCL_DDA_FUNC_COUNT];
   // Upper edge across UALink trays; it only lowers the window. 0 = no cap.
   size_t symTdmCrossTrayMaxR2[RCCL_DDA_FUNC_COUNT];
+  // AllGather only, R2 total bytes. On a comm where the hierarchical LSA AllGather kernel can run,
+  // these replace symMinR2 / symMaxR2 / symMaxR2Graph for AllGather. 0 = no hierarchical window.
+  size_t agHierSymMinR2;
+  size_t agHierSymMaxR2;
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching
@@ -119,11 +123,31 @@ struct rcclArchThresholds {
   size_t ddaArVmmFirstMinBytes;
   size_t ddaArVmmFirstMaxPerRank;
 
+  // AllReduce only: with the peer-parallel LL128 kernels (RCCL_DDA_LL128_AR_PEER_PARALLEL) the LL128 one-shot runs
+  // to min(RCCL_DDA_LL128_ONESHOT_THRESHOLD's default, this / nRanks), since it moves (nRanks - 1) x the message per
+  // rank. 0 = that default at every rank count.
+  size_t ddaArLL128OneShotRankBytes;
+
   // AllReduce only: registered sum calls symkWithdrawn hands to DDA (rccl_wrap.cc). 0 turns that re-route off.
   size_t ddaArRegCaptureMinBytes;      // graph capture: DDA instead of Ring up to max(this, nRanks x the next)
   size_t ddaArRegCapturePerRankBytes;  // per-rank part of the capture bound
   size_t ddaArRegEagerMinShardBytes;   // eager: DDA LL128 instead of CE-registered from this per-rank shard
   size_t ddaArRegEagerMaxShardBytes;   // up to this per-rank shard
+
+  // On comms of at most ddaNarrowMaxRanks ranks the DDA LL AllReduce one-shot launches ddaNarrowThreads-wide blocks
+  // instead of 512. 0 threads = off.
+  int ddaNarrowThreads;
+  int ddaNarrowMaxRanks;
+
+  // On comms of ddaLargeCommMinRanks to ddaLargeCommMaxRanks ranks (at least rankScaledMinRanks), a non-zero entry
+  // replaces ddaLLMaxPerRank / ddaLL128MaxPerRank (still clipped to rankScaledMaxBytes), and the DDA LL AllReduce
+  // one-shot tier runs to ddaLargeCommArLLOneShotMax when set; RCCL_DDA_LL_ONESHOT_THRESHOLD, when set, wins.
+  // 0 ranks = off.
+  int ddaLargeCommMinRanks;
+  int ddaLargeCommMaxRanks;
+  size_t ddaLargeCommLLMaxPerRank[RCCL_DDA_FUNC_COUNT];
+  size_t ddaLargeCommLL128MaxPerRank[RCCL_DDA_FUNC_COUNT];
+  size_t ddaLargeCommArLLOneShotMax;
 
   // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,
   // clamp(ddaVmmBlockBudget / nRanks, ddaVmmMinBlocks, ddaVmmMaxBlocks)) blocks
@@ -149,6 +173,9 @@ struct rcclArchThresholds {
   int ddaA2aLL128MaxBlocks;
   size_t ddaA2aLL128MaxBlocksMinBytes;
   size_t ddaA2aLL128MaxBlocksMaxBytes;
+  // DDA LL128 two-shot Broadcast: threads per block (0 = use kDdaLL128BcDefaultThreads).
+  // The two-shot variant benefits from fewer threads (better occupancy at large messages).
+  unsigned ddaLL128BcTwoShotThreads;
 
   // DDA LL128 ReduceScatter batched kernel block size at every size. 0 keeps 512 threads.
   int ddaRsLL128Threads;
@@ -182,6 +209,11 @@ struct rcclArchThresholds {
   size_t rsRingSimpleCappedMaxPerRank;  // Ring Simple ReduceScatter above the LL128 band,
   int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
 
+  // ReduceScatter on rank-scaled comms of at most rsSmallCommMaxRanks ranks: a non-zero entry replaces
+  // rsRingLL128MaxPerRank (2- and 4-byte types). 0 ranks = off.
+  int rsSmallCommMaxRanks;
+  size_t rsSmallCommRingLL128MaxPerRank;
+
   // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter
   // whenever the receive fits ddaScratch, on top of the ceNonRegMin/Max window.
   // NCCL_CTA_POLICY_ZERO forces it on every arch (it is the one zero-CU path for
@@ -202,6 +234,18 @@ enum rcclTuningPartition {
   RCCL_TUNING_PARTITION_SPX = 0,
   RCCL_TUNING_PARTITION_DPX = 1,
 };
+
+// True when the rsSmallComm* entries apply to an nRanks comm.
+inline bool rcclRsSmallComm(const rcclArchThresholds* t, int nRanks) {
+  return t != nullptr && t->rsSmallCommMaxRanks > 0 && t->rankScaledMinRanks > 0 &&
+         nRanks >= t->rankScaledMinRanks && nRanks <= t->rsSmallCommMaxRanks;
+}
+
+// True when the ddaLargeComm* entries apply to an nRanks comm.
+inline bool rcclDdaLargeComm(const rcclArchThresholds* t, int nRanks) {
+  return t != nullptr && t->ddaLargeCommMinRanks > 0 && t->rankScaledMinRanks > 0 &&
+         nRanks >= t->rankScaledMinRanks && nRanks >= t->ddaLargeCommMinRanks && nRanks <= t->ddaLargeCommMaxRanks;
+}
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn,
                                                 rcclTuningPartition partition = RCCL_TUNING_PARTITION_SPX);

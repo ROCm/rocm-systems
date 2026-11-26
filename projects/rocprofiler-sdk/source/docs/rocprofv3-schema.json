@@ -1533,6 +1533,10 @@
                                                 "workgroup_size",
                                                 "grid_size"
                                             ]
+                                        },
+                                        "pipe_id": {
+                                            "type": "integer",
+                                            "description": "Hardware pipe the kernel ran on (the pipe its completion was reported on), counted from 0. -1 unless the dispatch completed through KFD dispatch-log signal-less completion (ROCPROFILER_KFD_DISPATCH_LOG_SIGNAL_LESS)."
                                         }
                                     },
                                     "required": [
@@ -1543,7 +1547,8 @@
                                         "correlation_id",
                                         "start_timestamp",
                                         "end_timestamp",
-                                        "dispatch_info"
+                                        "dispatch_info",
+                                        "pipe_id"
                                     ]
                                 }
                             },

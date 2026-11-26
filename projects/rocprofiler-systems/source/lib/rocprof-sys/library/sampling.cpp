@@ -4,12 +4,12 @@
 #include "library/sampling.hpp"
 #include "common/clocks.hpp"
 #include "common/env_vars.hpp"
+#include "common/spin_mutex.hpp"
 #include "common/units/power.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/demangler.hpp"
-#include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/perf.hpp"
 #include "core/state.hpp"
@@ -529,11 +529,11 @@ get_offload_file()
     return _v;
 }
 
-locking::atomic_mutex&
+spin_mutex&
 get_offload_mutex()
 {
-    static auto _v = locking::atomic_mutex{};
-    return _v;
+    static auto s_mutex = spin_mutex{};
+    return s_mutex;
 }
 
 using sampler_bundle_t = sampler_t::bundle_type;
@@ -553,9 +553,9 @@ offload_buffer(std::int64_t _seq, sampler_buffer_t&& _buf)
         std::exit(1);
     }
 
-    // use homemade atomic_mutex/atomic_lock since contention will be low
+    // use spin_mutex since contention will be low
     // and using pthread_lock might trigger our wrappers
-    auto const  _lk   = locking::atomic_lock{ get_offload_mutex() };
+    auto const  lock  = std::lock_guard{ get_offload_mutex() };
     auto const& _file = get_offload_file();
 
     if(!_file)
@@ -599,9 +599,9 @@ load_offload_buffer(std::int64_t _thread_idx)
         return _data;
     }
 
-    // use homemade atomic_mutex/atomic_lock since contention will be low
+    // use spin_mutex since contention will be low
     // and using pthread_lock might trigger our wrappers
-    auto const  _lk   = locking::atomic_lock{ get_offload_mutex() };
+    auto const  lock  = std::lock_guard{ get_offload_mutex() };
     auto const& _file = get_offload_file();
     if(!_file)
     {
@@ -787,12 +787,6 @@ configure(bool _setup, std::int64_t _tid)
             _pe.exclude_callchain_kernel = 1;
             _pe.disabled                 = 1;
             _pe.inherit                  = 0;
-
-            // Hardware events are the default overflow source. Their sample times
-            // otherwise stay on perf's CLOCK_MONOTONIC, and parse_overflow_data()
-            // freezes the monotonic-to-timeline offset from the first sample.
-            _pe.use_clockid = 1;
-            _pe.clockid     = clocks::timeline::k_timeline_clock_id;
 
             auto _perf_open_error =
                 _perf_sampler->open(_pe, _info->index_data->system_value);

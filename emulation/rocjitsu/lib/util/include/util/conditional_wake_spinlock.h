@@ -57,8 +57,9 @@ public:
 #ifdef CONDITIONAL_WAKE_SPINLOCK_TSAN
     __tsan_mutex_pre_lock(this, 0);
 #endif
-    if (!try_acquire())
+    if (!try_acquire()) {
       lock_contended();
+    }
 #ifdef CONDITIONAL_WAKE_SPINLOCK_TSAN
     __tsan_mutex_post_lock(this, 0, 0);
 #endif
@@ -69,8 +70,9 @@ public:
     __tsan_mutex_pre_unlock(this, 0);
 #endif
     state_.store(kFree, std::memory_order_release);
-    if (parked_.load(std::memory_order_relaxed) != 0)
+    if (parked_.load(std::memory_order_relaxed) != 0) {
       Parking::wake(futex_word());
+    }
 #ifdef CONDITIONAL_WAKE_SPINLOCK_TSAN
     __tsan_mutex_post_unlock(this, 0);
 #endif
@@ -82,10 +84,11 @@ public:
 #endif
     bool acquired = try_acquire();
 #ifdef CONDITIONAL_WAKE_SPINLOCK_TSAN
-    if (acquired)
+    if (acquired) {
       __tsan_mutex_post_lock(this, __tsan_mutex_try_lock, 0);
-    else
+    } else {
       __tsan_mutex_post_lock(this, __tsan_mutex_try_lock | __tsan_mutex_try_lock_failed, 0);
+    }
 #endif
     return acquired;
   }
@@ -123,8 +126,9 @@ private:
 
   void lock_contended() noexcept {
     for (unsigned spin = 0; spin < kSpinCount; ++spin) {
-      if (state_.load(std::memory_order_relaxed) == kFree && try_acquire())
+      if (state_.load(std::memory_order_relaxed) == kFree && try_acquire()) {
         return;
+      }
       relax_cpu();
     }
     long timeout_ns = kFirstParkNs;
@@ -139,8 +143,9 @@ private:
         Parking::wait(futex_word(), kLocked, timeout_ns);
       }
       parked_.fetch_sub(1, std::memory_order_relaxed);
-      if (try_acquire())
+      if (try_acquire()) {
         return;
+      }
       timeout_ns = timeout_ns > kMaxParkNs / 2 ? kMaxParkNs : timeout_ns * 2;
     }
   }

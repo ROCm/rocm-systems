@@ -8,10 +8,12 @@
 
 #include "util/unique_handle.h"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdio>
 #include <dirent.h>
 #include <fcntl.h>
+#include <mutex>
 #include <poll.h>
 #include <sched.h>
 #include <sys/epoll.h>
@@ -121,13 +123,18 @@ public:
   ssize_t (*getdents64)(int, void *, size_t) = nullptr;
 
   /// @brief Return true after all required symbols have been resolved.
-  [[nodiscard]] bool ready() const { return initialized_; }
+  [[nodiscard]] bool ready() const { return initialized_.load(std::memory_order_acquire); }
 
   /// @brief Resolve the real libc functions from the next dynamic object.
   void resolve();
 
 private:
-  bool initialized_ = false;
+  void resolve_once();
+
+  // Every initializer waits for the complete process-wide function table.
+  std::once_flag initialization_once_;
+  // Publishes the resolved entries to interposer readiness checks.
+  std::atomic<bool> initialized_{false};
 };
 
 /// @brief Resolve the host realpath that supports caller-allocated and libc-allocated buffers.
@@ -144,8 +151,9 @@ decltype(auto) host_call(Function resolved, Fallback fallback, Args... args) {
 
 /// @brief Close an optional host descriptor, including before pass-through is resolved.
 inline void host_close_fd(int fd) {
-  if (fd >= 0)
+  if (fd >= 0) {
     host_call(libc_passthrough().close, ::close, fd);
+  }
 }
 
 /// @brief Read a pinned proc stat file. Return 1 for an exited group, 0 for a live group, or

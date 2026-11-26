@@ -12,13 +12,14 @@
 
 namespace rocjitsu {
 void InstructionBoundaries::record(const Instruction &instruction, uint64_t address_base) {
-  const bool clause = instruction.mnemonic() == "s_clause";
+  const bool clause = instruction.amdgpu_operation() == amdgpu::Operation::S_CLAUSE;
   entries_.push_back({.offset = instruction.src_loc(),
                       .size = static_cast<uint32_t>(instruction.size()),
                       .clause_member = clause_remaining_ != 0,
                       .clause = clause});
-  if (clause_remaining_ != 0)
+  if (clause_remaining_ != 0) {
     --clause_remaining_;
+  }
   if (clause && instruction.size() == 4 && instruction.num_src_operands() == 1 &&
       instruction.src_operand(0)) {
     // BREAK_SPAN in bits 8:11 is not part of the following-instruction count.
@@ -33,10 +34,11 @@ void InstructionBoundaries::record(const Instruction &instruction, uint64_t addr
                 : std::nullopt;
     const std::optional<uint64_t> destination =
         next_address ? add_signed_offset(*next_address, *displacement) : std::nullopt;
-    if (destination)
+    if (destination) {
       reference_addresses_.push_back(*destination);
-    else
+    } else {
       reference_overflow_ = true;
+    }
   }
 }
 

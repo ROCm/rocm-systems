@@ -1,0 +1,1 @@
+* On gfx1250 SPX, `ncclReduceScatter` on 8, 16 and 32 ranks (2, 4 and 8 nodes of 4 GPUs) runs Ring LL128 up to 32 MiB per rank (previously 8 MiB per rank) before Ring Simple. Above the DDA LL128 caps this moves 512 MiB on 16 ranks and 1 GiB on 32 ranks from Ring Simple to Ring LL128, with about 9% lower latency. Other rank counts and DPX are unchanged.

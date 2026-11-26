@@ -141,7 +141,7 @@ grow_data(std::int64_t _tid)
             LOG_WARNING("[{}] Growing thread data from {} to {}...", _tid,
                         peak_num_threads, peak_num_threads + max_supported_threads);
 
-            for(auto itr : grow_functors())
+            for(auto itr : get_grow_functors())
             {
                 if(itr)
                 {

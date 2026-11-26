@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna5/vop3p.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -31,11 +32,11 @@ using namespace rocjitsu;
 
 class MatrixExecutionErrorTest : public ::testing::Test {
 protected:
-  void initialize(rj_code_arch_t arch, uint32_t wave_size = 0) {
+  void initialize(rocjitsu::IsaFamily arch, uint32_t wave_size = 0) {
     amdgpu::ComputeUnitCore::Config config{};
     config.arch = arch;
     config.num_wf_slots = 1;
-    config.sgprs_per_wf = arch == ROCJITSU_CODE_ARCH_CDNA4 ? 102 : 106;
+    config.sgprs_per_wf = arch == rocjitsu::IsaFamily::Cdna4 ? 102 : 106;
     config.vgprs_per_wf = 128;
     config.lds_size_kb = 64;
     cu = amdgpu::ComputeUnitCore::create("matrix_error_cu", config, &memory, &l2);
@@ -45,15 +46,18 @@ protected:
     wave->set_exec(5);
     wave->set_vcc(0x1234);
     wave->write_scc(1);
-    for (uint32_t reg = 0; reg < 128; ++reg)
-      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+    for (uint32_t reg = 0; reg < 128; ++reg) {
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
         cu->write_vgpr(wave->vgpr_alloc().base + reg, lane,
                        reg < 64 ? 0 : 0xdead0000u + reg * 64 + lane);
+      }
+    }
   }
 
   void TearDown() override {
-    if (wave && !wave->is_halted())
+    if (wave && !wave->is_halted()) {
       wave->halt();
+    }
   }
 
   void expect_rejected(Instruction &instruction) {
@@ -73,9 +77,11 @@ protected:
 
   std::vector<uint32_t> read_vgprs() const {
     std::vector<uint32_t> words;
-    for (uint32_t reg = 0; reg < 128; ++reg)
-      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane)
+    for (uint32_t reg = 0; reg < 128; ++reg) {
+      for (uint32_t lane = 0; lane < wave->wf_size(); ++lane) {
         words.push_back(cu->read_vgpr(wave->vgpr_alloc().base + reg, lane));
+      }
+    }
     return words;
   }
 
@@ -86,7 +92,7 @@ protected:
 };
 
 TEST_F(MatrixExecutionErrorTest, PackedConversionsRejectRequiredSourcesBeforeWriting) {
-  ASSERT_NO_FATAL_FAILURE(initialize(ROCJITSU_CODE_ARCH_CDNA4));
+  ASSERT_NO_FATAL_FAILURE(initialize(rocjitsu::IsaFamily::Cdna4));
   ScopedIsaExecutionBackend backend(&cdna4::execution_backend());
   const auto sr_words = cdna4::build_vop3(cdna4::kVCvtScalef32SrPkFp4F32Vop3,
                                           {.vdst = 64, .src0 = 128, .src1 = 128, .src2 = 128});
@@ -111,7 +117,7 @@ TEST_F(MatrixExecutionErrorTest, PackedConversionsRejectRequiredSourcesBeforeWri
 }
 
 TEST_F(MatrixExecutionErrorTest, SparseMatrixRejectsRequiredOperandsBeforeWriting) {
-  ASSERT_NO_FATAL_FAILURE(initialize(ROCJITSU_CODE_ARCH_CDNA5));
+  ASSERT_NO_FATAL_FAILURE(initialize(rocjitsu::IsaFamily::Cdna5));
   ScopedIsaExecutionBackend backend(&cdna5::execution_backend());
   const auto words = cdna5::build_vop3p(cdna5::kVSwmmacF3216x16x64F16Vop3p,
                                         {.vdst = 64, .src0 = 256, .src1 = 288, .src2 = 304});
@@ -131,9 +137,9 @@ TEST_F(MatrixExecutionErrorTest, SparseMatrixRejectsRequiredOperandsBeforeWritin
 }
 
 TEST_F(MatrixExecutionErrorTest, MfmaFormatsFailWithoutCommittingResults) {
-  ASSERT_NO_FATAL_FAILURE(initialize(ROCJITSU_CODE_ARCH_CDNA4));
+  ASSERT_NO_FATAL_FAILURE(initialize(rocjitsu::IsaFamily::Cdna4));
   ScopedIsaExecutionBackend backend(&cdna4::execution_backend());
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna4);
   for (const auto formats : {std::array{5u, 4u}, std::array{4u, 7u}}) {
     SCOPED_TRACE(::testing::PrintToString(formats));
     const auto dense_words =
@@ -155,9 +161,9 @@ TEST_F(MatrixExecutionErrorTest, MfmaFormatsFailWithoutCommittingResults) {
 }
 
 TEST_F(MatrixExecutionErrorTest, WmmaFormatsAndScaleFormatsFailBeforeWriting) {
-  ASSERT_NO_FATAL_FAILURE(initialize(ROCJITSU_CODE_ARCH_CDNA5));
+  ASSERT_NO_FATAL_FAILURE(initialize(rocjitsu::IsaFamily::Cdna5));
   ScopedIsaExecutionBackend backend(&cdna5::execution_backend());
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna5);
   for (const auto formats : {std::array{5u, 4u}, std::array{4u, 7u}}) {
     SCOPED_TRACE(::testing::PrintToString(formats));
     const auto words = cdna5::build_vop3p(cdna5::kVWmmaF3216x16x128F8f6f4Vop3p,
@@ -202,8 +208,8 @@ TEST_F(MatrixExecutionErrorTest, WmmaFormatsAndScaleFormatsFailBeforeWriting) {
 }
 
 TEST_F(MatrixExecutionErrorTest, MixedMatricesDistinguishInlineMinusOneFromRegisterC) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
-    const bool mfma = arch == ROCJITSU_CODE_ARCH_CDNA4;
+  for (const auto arch : {rocjitsu::IsaFamily::Cdna4, rocjitsu::IsaFamily::Cdna5}) {
+    const bool mfma = arch == rocjitsu::IsaFamily::Cdna4;
     ScopedIsaExecutionBackend backend(mfma ? &cdna4::execution_backend()
                                            : &cdna5::execution_backend());
     ASSERT_NO_FATAL_FAILURE(initialize(arch));
@@ -212,9 +218,11 @@ TEST_F(MatrixExecutionErrorTest, MixedMatricesDistinguishInlineMinusOneFromRegis
     const auto lanes = wave->wf_size();
     wave->set_exec(~uint64_t{0} >> (64 - lanes));
     // Both factors are zero. C in v48 is 3.0, while inline integer -1 is a NaN as F32.
-    for (uint32_t reg = 48; reg < 64; ++reg)
-      for (uint32_t lane = 0; lane < lanes; ++lane)
+    for (uint32_t reg = 48; reg < 64; ++reg) {
+      for (uint32_t lane = 0; lane < lanes; ++lane) {
         cu->write_vgpr(base + reg, lane, std::bit_cast<uint32_t>(3.0f));
+      }
+    }
     for (const uint32_t src2 : {193u, 256u + 48u}) {
       for (const bool scaled : {false, true}) {
         const auto words =

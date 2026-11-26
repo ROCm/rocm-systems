@@ -157,6 +157,9 @@ typedef struct abce_hsa_ring_options_t {
   // See abce_ring_config_t::readback_before_doorbell. For a ring in device
   // memory, take it from HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH.
   bool readback_before_doorbell;
+  // See abce_ring_config_t::submission_tail_bytes: 32 on a Windows native SDMA
+  // user queue, which writes its progress fence there; 0 elsewhere.
+  uint32_t submission_tail_bytes;
 } abce_hsa_ring_options_t;
 
 static inline void abce_hsa_ring_options_initialize(abce_hsa_ring_options_t* out_options) {
@@ -213,6 +216,7 @@ static inline void abce_hsa_queue_ring_publish_direct(void* user_data, volatile 
                                                       volatile uint64_t* doorbell,
                                                       uint64_t new_write_index) {
   (void)user_data;
+  assert(doorbell != NULL && "direct_queue_words requires a mapped doorbell word");
   *write_ptr = new_write_index;
   abce_host_fence_release();
   *doorbell = new_write_index;
@@ -244,6 +248,23 @@ static inline hsa_status_t abce_hsa_queue_ring_initialize(
   const size_t ring_size = (size_t)queue->size;
   if (queue->base_address == NULL || !abce_is_power_of_two(ring_size))
     return HSA_STATUS_ERROR_INVALID_QUEUE;
+
+  // If the caller did not set a tail, query it: on a Windows native SDMA queue the driver
+  // writes its progress fence into NativeSDMAEpilogueBytes bytes at the end of every submitted
+  // span; ROCr exposes it via HSA_AMD_QUEUE_INFO_SUBMISSION_TAIL_BYTES (0 elsewhere).
+  uint32_t tail = options->submission_tail_bytes;
+  if (tail == 0) {
+    uint32_t queried = 0;
+    if (api->queue_get_info(queue, HSA_AMD_QUEUE_INFO_SUBMISSION_TAIL_BYTES, &queried) ==
+            HSA_STATUS_SUCCESS)
+      tail = queried;
+  }
+  // abce_ring_initialize only asserts these. In a release build a tail that is not a power of two
+  // mis-sizes every reservation (abce_align_up masks), and a write index off the tail's alignment
+  // leaves wrap pads shorter than the fence the tail is there for.
+  if (tail != 0 && (!abce_is_power_of_two(tail) || tail >= ring_size))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  if (tail != 0 && api->load_write_index(queue) % tail != 0) return HSA_STATUS_ERROR_INVALID_QUEUE;
 
   abce_ring_config_t config;
   memset(&config, 0, sizeof(config));
@@ -279,6 +300,7 @@ static inline hsa_status_t abce_hsa_queue_ring_initialize(
   config.write = options->write;
   config.write_user_data = options->write_user_data;
   config.readback_before_doorbell = options->readback_before_doorbell;
+  config.submission_tail_bytes = tail;
   // The adapter reads as initialized once queue is set, so set it only after every query that
   // can fail. The ring's queue callbacks read these fields, so they precede ring initialization.
   out_adapter->queue = queue;

@@ -244,5 +244,16 @@ int main(int argc, char **argv) {
     }
 
     std::cout << std::endl << "info: " << num_supported << " supported codec/chroma/bit-depth combination(s)." << std::endl;
+
+    // Every GPU rocDecode runs on has a VCN decoder, so a run that finds nothing supported is a
+    // broken stack -- a driver that loaded but advertised no usable profile, say -- not a hardware
+    // answer. Exiting 0 there lets a caller record "queried the caps, all good" for a device that
+    // can decode nothing. Report it as a failure so the setup gets looked at.
+    if (num_supported == 0) {
+        std::cerr << "Error: no codec/chroma/bit-depth combination is supported on device " << device_id
+                  << ". The VA driver stack is reporting no decode capability at all; check the"
+                  << " installation rather than treating this as a hardware limitation." << std::endl;
+        return 1;
+    }
     return 0;
 }

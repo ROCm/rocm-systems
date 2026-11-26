@@ -299,6 +299,7 @@ if(BUILD_TESTS)
     GraphCaptureStreamOrderingTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
+    RasClientHelpersTests.cpp
     RasDiagnosticsTests.cpp
     RasJsonTests.cpp
     ReduceScatterTests.cpp
@@ -306,17 +307,20 @@ if(BUILD_TESTS)
     RegisterTests.cpp
     ScatterTests.cpp
     TeamTopologyTests.cpp
+    UniqueIdHexTests.cpp
     P2pChannelScalingTests.cpp
     PipeUtilsTests.cpp
     VersionGateTests.cpp
+    HipProbeTests.cpp
     SendRecvTests.cpp
     SendRecvSingleRankTests.cpp
     StandaloneTests.cpp
     SymmetricInPlaceSliceTests.cpp
     DdaIpcTests.cpp
-    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so it runs the b128 re-read.
+    # Also in rccl-UnitTestsFixtures; built here without DWORDX4_INTRINSICS_FORCE_OFF, so they run the b128 paths.
     device/DdaReduceScatterFabricLLTests.cpp
     device/DdaAllReduceFabricLLTests.cpp
+    device/DdaAllReduceFabricLL128PeerParTests.cpp
     NetPluginReloadTests.cpp
     GinPluginInitFailTests.cpp
     plugin/net_reload_plugin.cpp
@@ -325,6 +329,8 @@ if(BUILD_TESTS)
     ProfilerApiEventRankTests.cpp
     TunerPluginConstantsTests.cpp
     CpuAffinityTests.cpp
+    ProxyProtocolTests.cpp
+    TopoCpuArchTests.cpp
     TeardownStressTests.cpp
     _RecorderTests.cpp
     IbvSymbolsEnvTests.cpp
@@ -435,6 +441,7 @@ if(BUILD_TESTS)
       device/DdaReduceScatterFabricLLTests.cpp
       device/DdaAllReduceFabricLLTests.cpp
       device/DdaAllReduceFabricLL128TwoShotTests.cpp
+      device/DdaAllReduceFabricLL128PeerParTests.cpp
       device/DdaVecElementAddTests.cpp
       device/DdaLL128PollWireTests.cpp
       device/DdaLL128ArchGeometryTests.cpp
@@ -844,6 +851,7 @@ if(BUILD_TESTS)
       CeAllReduceEligibilityTests.cpp
       CeReduceScatterEligibilityTests.cpp
       CeAlltoAllvEligibilityTests.cpp
+      GinAllGatherEligibilityTests.cpp
       GinAlltoAllEligibilityTests.cpp
       GinAllReduceEligibilityTests.cpp
       EnqueueTests.cpp
@@ -1171,6 +1179,7 @@ if(BUILD_TESTS)
       DdaIpcIndexDataMPITests.cpp
       DdaFp8MPITests.cpp
       DdaAlltoAllInPlaceMPITests.cpp
+      DdaAlltoAllLLBankMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 

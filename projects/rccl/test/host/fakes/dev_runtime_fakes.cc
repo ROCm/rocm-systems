@@ -55,6 +55,13 @@ bool ncclDevrWindowHasSysmemSegment(struct ncclDevrWindow* window) {
   return g_devrWindowHasSysmemSegment(window);
 }
 
+// Same predicate as dev_runtime.cc. A null memory object stays false, so host
+// windows that never model GIN registration leave the symk GIN mask alone.
+bool ncclDevrWindowMissingGinSegments(struct ncclDevrWindow* win) {
+  return win != nullptr && win->memory != nullptr && win->memory->numGinSegments <= 0 &&
+         win->memory->maxGlobalNumSegments > 1 && !win->memory->globalHasSysmemSegment;
+}
+
 // Same arithmetic as dev_runtime.cc, so ce_coll.cc's receive-window bound sees production sizes.
 size_t ncclDevrWindowPeerSafeSize(struct ncclDevrWindow const* win) {
   if (win == nullptr) return 0;

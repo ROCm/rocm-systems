@@ -93,9 +93,15 @@ rdc_status_t RdcSmiLib::rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields,
       bulk_count = 0;
     }
     values[bulk_count].gpu_index = fields[i].gpu_index;
-    metric_fetcher_->fetch_smi_field(fields[i].gpu_index,
-                                     static_cast<rdc_field_t>(fields[i].field_id),
-                                     &(values[bulk_count].field_value));
+    rdc_field_value& value = values[bulk_count].field_value;
+    value = {};  // ts stays 0 when the fetch returns before it reads anything
+    rdc_status_t status = metric_fetcher_->fetch_smi_field(
+        fields[i].gpu_index, static_cast<rdc_field_t>(fields[i].field_id), &value);
+    if (status != RDC_ST_OK && value.ts == 0) {
+      // Nothing was read, for example from a GPU AMD SMI cannot identify: no sample, rather
+      // than whatever this slot held for the previous field.
+      continue;
+    }
     bulk_count++;
   }
   if (bulk_count != 0) {

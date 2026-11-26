@@ -6,6 +6,7 @@
 #include "backends/rocprofiler_sdk/backend.hpp"
 #include "backends/rocprofiler_sdk/wrapper.hpp"
 #include "binary/analysis.hpp"
+#include "common/defines.h"
 #include "common/delimit.hpp"
 #include "common/env_vars.hpp"
 #include "common/environment.hpp"
@@ -62,6 +63,11 @@
 #    include <rocprofiler-sdk/experimental/registration.h>
 #else
 #    include <rocprofiler-sdk/registration.h>
+#endif
+
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+#    include <rocprofiler-sdk/ompt.h>
+#    include <rocprofiler-sdk/ompt/omp-tools.h>
 #endif
 
 #include <rocprofiler-sdk/fwd.h>
@@ -1402,12 +1408,27 @@ reset_sdk_session_guards()
 
 void
 setup()
-{}
+{
+    // rocprofiler-register initializes the SDK when HSA or HIP loads; a host-only OpenMP
+    // process loads neither, and OMPT discovery is honored only when the SDK is already
+    // initialized. Bring it up here instead of waiting for that registration.
+    int initialized = 0;
+    if(rocprofiler_is_initialized(&initialized) == ROCPROFILER_STATUS_SUCCESS &&
+       initialized != 0)
+    {
+        return;
+    }
+
+    ROCPROFILER_CALL(rocprofiler_force_configure(&::rocprofiler_configure));
+}
 
 void
-shutdown()
+shutdown(client_registration registration)
 {
-    if(g_tool_data && g_tool_data->client_id && g_tool_data->client_fini)
+    // client_fini makes the SDK finalize and drop this client, after which the process
+    // cannot be attached again.
+    if(registration == client_registration::release && g_tool_data &&
+       g_tool_data->client_id && g_tool_data->client_fini)
     {
         g_tool_data->client_fini(*g_tool_data->client_id);
     }
@@ -1485,7 +1506,7 @@ tool_attach_fini(void* /* tool_data */)
     // Flush any pending region cache entries
     rocprofsys_flush_pending_region_cache_hidden();
 
-    rocprofsys_finalize_hidden();
+    rocprofsys_finalize_attach_session_hidden();
 }
 
 int
@@ -1654,4 +1675,21 @@ extern "C"
         return &cfg;
     }
 #endif  // ROCPROFILER_VERSION >= 10200
+
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+    ompt_start_tool_result_t* ompt_start_tool(
+        unsigned int omp_version, const char* runtime_version) ROCPROFSYS_PUBLIC_API;
+
+    // OMPT tool entry point. The OpenMP runtime calls this while holding its init lock,
+    // and offloading binaries call it from a static initializer, so the body is a plain
+    // forward with no initialization or library loading. A NULL result means
+    // rocprofiler-sdk declined the OMPT tool role and it stays with this library.
+    // <rocprofiler-sdk/ompt.h> gates availability: an SDK without
+    // rocprofiler_ompt_start_tool() does not ship that header.
+    ompt_start_tool_result_t* ompt_start_tool(unsigned int omp_version,
+                                              const char*  runtime_version)
+    {
+        return rocprofiler_ompt_start_tool(omp_version, runtime_version);
+    }
+#endif  // ROCPROFSYS_USE_OMPT
 }

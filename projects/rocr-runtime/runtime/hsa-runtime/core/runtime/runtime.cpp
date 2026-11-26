@@ -2850,6 +2850,16 @@ hsa_status_t Runtime::Load() {
 
   flag_.Refresh();
 
+  if (flag_.device_mem_no_host_access()) {
+    log_warning_n(1,
+                  "HSA_DEVICE_MEM_NO_HOST_ACCESS is set: CPU access to GPU device memory will "
+                  "fault\n");
+    if (rocr::Flag::IsEnvVarTruthy("HSA_USE_UDMABUF"))
+      log_warning_n(1,
+                    "HSA_USE_UDMABUF is ignored for device-local memory when "
+                    "HSA_DEVICE_MEM_NO_HOST_ACCESS is set\n");
+  }
+
   thunkLoader_ = new ThunkLoader();
   thunkLoader_->LoadThunkApiTable();
 

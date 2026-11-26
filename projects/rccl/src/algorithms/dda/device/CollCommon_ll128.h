@@ -47,9 +47,13 @@ struct LLLine128 {
 };
 static_assert(sizeof(LLLine128) == 128, "LLLine128 must be exactly 128 bytes");
 
+// Integer ceiling division, usable in constexpr and device code.
+template <typename T>
+__host__ __device__ constexpr T ddaCeilDiv(T a, T b) { return (a + b - 1) / b; }
+
 // Number of 128B lines needed to carry nWords 8B words (ceil).
 __host__ __device__ __forceinline__ size_t ddaLL128NumLines(size_t nWords) {
-  return (nWords + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems;
+  return ddaCeilDiv(nWords, (size_t)kDdaLL128DataElems);
 }
 
 // ---- 8B system-scope, non-tearing store/load (one word == one lane) ----
@@ -71,6 +75,14 @@ __device__ __forceinline__ bool ddaLL128WaitFlag(const uint64_t* flagAddr, uint6
     if (params.abortSpinTick(spins)) return false;
   }
   return true;
+}
+
+// Wait until this wave's wire stores have completed (gfx1250; a no-op elsewhere),
+// e.g. before the kernel publishes its LL epoch.
+__device__ __forceinline__ void ddaLL128WaitStores() {
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
+  asm volatile("s_wait_storecnt 0x0" ::: "memory");
+#endif
 }
 
 // Element-wise add of the T-elements packed into two 8B payload words. An 8B
@@ -489,6 +501,25 @@ constexpr size_t ddaLL128SlotPayloadBytes(size_t slotWords) {
 // True for a block size the LL128 kernels accept: a multiple of the warp in [warp, 1024].
 constexpr bool ddaLL128ValidThreads(int64_t threads) {
   return threads >= kDdaLL128Warp && threads <= 1024 && threads % kDdaLL128Warp == 0;
+}
+
+// Zero one slice in local scratch after consumption to prevent stale-flag matches.
+// Must use the cooperative atomic store (not plain store) so the zero is ordered
+// with respect to the cooperative_atomic_load_8x16B used by ddaLL128PollWire.
+__device__ __forceinline__ void ddaLL128ClearWire(uint64_t* wire, int lane) {
+  (void)lane;
+#pragma unroll
+  for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
+    ddaLL128StoreAtomic16B(wire + u * kDdaLL128Warp, 0, 0);
+}
+
+// Blocks in one peer column: a warp per slice, capped by the column's share of
+// the grid budget. Used by AllGather, Broadcast, and other fabric LL128 launchers.
+inline unsigned ddaLL128BlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t totalBlockCap) {
+  const size_t cap = totalBlockCap / (size_t)nPeers;
+  size_t bpp = (slices + warps - 1) / warps;
+  if (bpp > cap) bpp = cap;
+  return bpp < 1 ? 1u : (unsigned)bpp;
 }
 
 template <int kLineElems, int kWarp = kDdaLL128Warp>

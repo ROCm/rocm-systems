@@ -21,14 +21,16 @@ SMovkI32Sopk::SMovkI32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_MOVK_I32);
 }
 
 namespace detail {
 DecodeResult decodeSMovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_movk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMovkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -40,14 +42,16 @@ SVersionSopk::SVersionSopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  set_amdgpu_operation(amdgpu::Operation::S_VERSION);
 }
 
 namespace detail {
 DecodeResult decodeSVersionSopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_version", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SVersionSopk>(opcode);
 }
 } // namespace detail
@@ -66,14 +70,16 @@ SCmovkI32Sopk::SCmovkI32Sopk(const MachineInst *inst)
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
   flags_ |= PREDICATED_DEF;
+  set_amdgpu_operation(amdgpu::Operation::S_CMOVK_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmovkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmovk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmovkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -90,14 +96,16 @@ SCmpkEqI32Sopk::SCmpkEqI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_EQ_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkEqI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_eq_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkEqI32Sopk>(opcode);
 }
 } // namespace detail
@@ -114,14 +122,16 @@ SCmpkLgI32Sopk::SCmpkLgI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LG_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkLgI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_lg_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLgI32Sopk>(opcode);
 }
 } // namespace detail
@@ -138,14 +148,16 @@ SCmpkGtI32Sopk::SCmpkGtI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_GT_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkGtI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_gt_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkGtI32Sopk>(opcode);
 }
 } // namespace detail
@@ -162,14 +174,16 @@ SCmpkGeI32Sopk::SCmpkGeI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_GE_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkGeI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_ge_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkGeI32Sopk>(opcode);
 }
 } // namespace detail
@@ -186,14 +200,16 @@ SCmpkLtI32Sopk::SCmpkLtI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LT_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkLtI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_lt_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLtI32Sopk>(opcode);
 }
 } // namespace detail
@@ -210,14 +226,16 @@ SCmpkLeI32Sopk::SCmpkLeI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LE_I32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkLeI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_le_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLeI32Sopk>(opcode);
 }
 } // namespace detail
@@ -234,14 +252,16 @@ SCmpkEqU32Sopk::SCmpkEqU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_EQ_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkEqU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_eq_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkEqU32Sopk>(opcode);
 }
 } // namespace detail
@@ -258,14 +278,16 @@ SCmpkLgU32Sopk::SCmpkLgU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LG_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkLgU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_lg_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLgU32Sopk>(opcode);
 }
 } // namespace detail
@@ -282,14 +304,16 @@ SCmpkGtU32Sopk::SCmpkGtU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_GT_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkGtU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_gt_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkGtU32Sopk>(opcode);
 }
 } // namespace detail
@@ -306,14 +330,16 @@ SCmpkGeU32Sopk::SCmpkGeU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_GE_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkGeU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_ge_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkGeU32Sopk>(opcode);
 }
 } // namespace detail
@@ -330,14 +356,16 @@ SCmpkLtU32Sopk::SCmpkLtU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LT_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkLtU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_lt_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLtU32Sopk>(opcode);
 }
 } // namespace detail
@@ -354,14 +382,16 @@ SCmpkLeU32Sopk::SCmpkLeU32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 1;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_CMPK_LE_U32);
 }
 
 namespace detail {
 DecodeResult decodeSCmpkLeU32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_cmpk_le_u32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCmpkLeU32Sopk>(opcode);
 }
 } // namespace detail
@@ -379,14 +409,16 @@ SAddkI32Sopk::SAddkI32Sopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 2;
   scc.apply_fieldless_caps(false, false, false);
+  set_amdgpu_operation(amdgpu::Operation::S_ADDK_I32);
 }
 
 namespace detail {
 DecodeResult decodeSAddkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_addk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SAddkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -401,14 +433,16 @@ SMulkI32Sopk::SMulkI32Sopk(const MachineInst *inst)
   src_operands_[1] = &simm16;
   num_src_ = 2;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_MULK_I32);
 }
 
 namespace detail {
 DecodeResult decodeSMulkI32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_mulk_i32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SMulkI32Sopk>(opcode);
 }
 } // namespace detail
@@ -422,14 +456,16 @@ SGetregB32Sopk::SGetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_GETREG_B32);
 }
 
 namespace detail {
 DecodeResult decodeSGetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_getreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SGetregB32Sopk>(opcode);
 }
 } // namespace detail
@@ -443,22 +479,25 @@ SSetregB32Sopk::SSetregB32Sopk(const MachineInst *inst)
   src_operands_[0] = &sdst;
   num_src_ = 1;
   num_dst_ = 1;
+  set_amdgpu_operation(amdgpu::Operation::S_SETREG_B32);
 }
 
 namespace detail {
 DecodeResult decodeSSetregB32Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_setreg_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSetregB32Sopk>(opcode);
 }
 } // namespace detail
 
 void SSetregB32Sopk::implicit_uses(RegisterSet &uses) const {
   Sopk::implicit_uses(uses);
-  if (auto r = simm16.to_register_ref())
+  if (auto r = simm16.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
@@ -471,6 +510,7 @@ SSetregImm32B32Sopk::SSetregImm32B32Sopk(const MachineInst *inst)
   num_src_ = 1;
   num_dst_ = 1;
   simm32 = Operand(32, OperandType::OPR_SIMM32, static_cast<int>(literal_));
+  set_amdgpu_operation(amdgpu::Operation::S_SETREG_IMM32_B32);
 }
 
 namespace detail {
@@ -478,16 +518,18 @@ DecodeResult decodeSSetregImm32B32Sopk(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_setreg_imm32_b32", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSetregImm32B32Sopk>(opcode);
 }
 } // namespace detail
 
 void SSetregImm32B32Sopk::implicit_uses(RegisterSet &uses) const {
   Sopk::implicit_uses(uses);
-  if (auto r = simm16.to_register_ref())
+  if (auto r = simm16.to_register_ref()) {
     uses.expand(*r);
+  }
 }
 
 SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
@@ -505,14 +547,17 @@ SCallB64Sopk::SCallB64Sopk(const MachineInst *inst)
   pc.apply_fieldless_caps(false, false, false);
   pc_in.apply_fieldless_caps(false, false, false);
   flags_ |= INDIRECT_CALL;
+  set_amdgpu_operation(amdgpu::Operation::S_CALL_B64);
+  flags_ |= READS_PC;
 }
 
 namespace detail {
 DecodeResult decodeSCallB64Sopk(const MachineInst *opcode, const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_call_b64", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SCallB64Sopk>(opcode);
 }
 } // namespace detail
@@ -532,6 +577,7 @@ SWaitcntVscntSopk::SWaitcntVscntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT_VSCNT);
 }
 
 namespace detail {
@@ -539,8 +585,9 @@ DecodeResult decodeSWaitcntVscntSopk(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_waitcnt_vscnt", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWaitcntVscntSopk>(opcode);
 }
 } // namespace detail
@@ -555,6 +602,7 @@ SWaitcntVmcntSopk::SWaitcntVmcntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT_VMCNT);
 }
 
 namespace detail {
@@ -562,8 +610,9 @@ DecodeResult decodeSWaitcntVmcntSopk(const MachineInst *opcode,
                                      const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_waitcnt_vmcnt", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWaitcntVmcntSopk>(opcode);
 }
 } // namespace detail
@@ -578,6 +627,7 @@ SWaitcntExpcntSopk::SWaitcntExpcntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT_EXPCNT);
 }
 
 namespace detail {
@@ -585,8 +635,9 @@ DecodeResult decodeSWaitcntExpcntSopk(const MachineInst *opcode,
                                       const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_waitcnt_expcnt", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWaitcntExpcntSopk>(opcode);
 }
 } // namespace detail
@@ -601,6 +652,7 @@ SWaitcntLgkmcntSopk::SWaitcntLgkmcntSopk(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   flags_ |= WAITCNT;
+  set_amdgpu_operation(amdgpu::Operation::S_WAITCNT_LGKMCNT);
 }
 
 namespace detail {
@@ -608,8 +660,9 @@ DecodeResult decodeSWaitcntLgkmcntSopk(const MachineInst *opcode,
                                        const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_waitcnt_lgkmcnt", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SWaitcntLgkmcntSopk>(opcode);
 }
 } // namespace detail
@@ -631,6 +684,7 @@ SSubvectorLoopBeginSopk::SSubvectorLoopBeginSopk(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= PREDICATED_DEF;
+  set_amdgpu_operation(amdgpu::Operation::S_SUBVECTOR_LOOP_BEGIN);
 }
 
 namespace detail {
@@ -638,8 +692,9 @@ DecodeResult decodeSSubvectorLoopBeginSopk(const MachineInst *opcode,
                                            const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_subvector_loop_begin", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSubvectorLoopBeginSopk>(opcode);
 }
 } // namespace detail
@@ -668,6 +723,7 @@ SSubvectorLoopEndSopk::SSubvectorLoopEndSopk(const MachineInst *inst)
   sdst_exec_in.apply_fieldless_caps(false, false, false);
   flags_ |= COND_BRANCH;
   flags_ |= PREDICATED_DEF;
+  set_amdgpu_operation(amdgpu::Operation::S_SUBVECTOR_LOOP_END);
 }
 
 namespace detail {
@@ -675,8 +731,9 @@ DecodeResult decodeSSubvectorLoopEndSopk(const MachineInst *opcode,
                                          const DecodeErrorEmitter &emit_error) {
   Result validation = Sopk::validate_encoding(
       "s_subvector_loop_end", reinterpret_cast<const Sopk::OpEncoding *>(opcode), emit_error);
-  if (validation.failed()) [[unlikely]]
+  if (validation.failed()) [[unlikely]] {
     return Result::failure();
+  }
   return std::make_unique<SSubvectorLoopEndSopk>(opcode);
 }
 } // namespace detail

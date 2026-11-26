@@ -114,10 +114,9 @@ class Memory : public device::Memory {
     return agent;
   }
 
-  //! Get the global index of the owning agent (computed during create(), thread-safe).
-  //! Lets copy paths classify agents (CPU / local / peer) without handle comparisons.
-  int getOwningAgentIndex() const {
-    return owningAgentIndex_.load(std::memory_order_acquire);
+  //! Get the owning agent's KFD topology node ID (computed during create(), thread-safe).
+  uint32_t getOwningAgentDriverNodeId() const {
+    return owningAgentDriverNodeId_.load(std::memory_order_acquire);
   }
 
   //! Recompute and cache the owning agent: from the physical handle for a mapped VMM range,
@@ -133,6 +132,14 @@ class Memory : public device::Memory {
   //! Returns the reconstructed-SRD interop image descriptor (may be null).
   hsa_amd_image_descriptor_t* getAmdImageDesc() const { return amdImageDesc_; }
 
+  //! True only for the device::Memory that called hsa_amd_memory_lock; only it may call
+  //! Hsa::memory_unlock. Public so a sibling can read it through a roc::Memory base pointer.
+  bool HostLockOwner() const { return hostLockOwner_; }
+
+  //! True only when this object's lock covered every GPU agent. Siblings may only reuse
+  //! the owner's mapping when this is true.
+  bool HostLockAllAgents() const { return hostLockAllAgents_; }
+
  protected:
   bool allocateMapMemory(size_t allocationSize);
 
@@ -140,10 +147,16 @@ class Memory : public device::Memory {
   void decIndMapCount() override;
 
   //! Set the owning agent (called during create() after allocation, thread-safe).
-  //! Also caches the agent's global index for fast classification during copies.
+  //! Also caches its KFD topology node ID for copy-engine selection.
   void setOwningAgent(hsa_agent_t agent) {
     owningAgentHandle_.store(agent.handle, std::memory_order_release);
-    owningAgentIndex_.store(Device::agentGlobalIndex(agent), std::memory_order_release);
+    owningAgentDriverNodeId_.store(Device::agentDriverNodeId(agent), std::memory_order_release);
+  }
+
+  //! Record the outcome of this object's host-lock attempt (see Buffer::create()).
+  void setHostLockState(bool owner, bool allAgents) {
+    hostLockOwner_ = owner;
+    hostLockAllAgents_ = allAgents;
   }
 
   // Free / deregister device memory.
@@ -201,9 +214,12 @@ class Memory : public device::Memory {
   // Disable operator=
   Memory& operator=(const Memory&);
 
+  bool hostLockOwner_ = false;      //!< This object called hsa_amd_memory_lock
+  bool hostLockAllAgents_ = false;  //!< This object's lock covered every GPU agent
+
   amd::Memory* pinnedMemory_;        //!< Memory used as pinned system memory
   std::atomic<uint64_t> owningAgentHandle_;  //!< HSA agent handle (atomic for thread-safety)
-  std::atomic<int> owningAgentIndex_{-1};    //!< Global index of the owning agent (thread-safe)
+  std::atomic<uint32_t> owningAgentDriverNodeId_{UINT32_MAX};  //!< KFD node ID (thread-safe)
 };
 
 class Buffer : public roc::Memory {

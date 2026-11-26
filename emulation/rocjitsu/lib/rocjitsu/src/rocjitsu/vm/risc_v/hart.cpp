@@ -15,8 +15,9 @@ Hart::Hart(std::string name, const simdojo::ClockDomain &domain)
     : simdojo::Clocked<simdojo::Component>(std::move(name), domain) {}
 
 bool Hart::advance(simdojo::Tick /*now*/) {
-  if (state_.halted)
+  if (state_.halted) {
     return false;
+  }
 
   uint32_t word = memory_.fetch32(state_.pc);
   auto inst = Decoder::decode(word);

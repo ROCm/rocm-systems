@@ -636,11 +636,9 @@ pub unsafe extern "C" fn hsa_agent_get_info(
                 }
                 EXT_AGENT_INFO_IMAGE_LINEAR_ROW_PITCH_ALIGNMENT => write_value(
                     value,
-                    if image_gpu {
-                        image_descriptor::ROW_ALIGNMENT
-                    } else {
-                        0
-                    },
+                    gpu.filter(|_| image_gpu)
+                        .and_then(image_descriptor::Generation::from_gpu)
+                        .map_or(0, image_descriptor::row_pitch_alignment),
                 ),
                 EXT_AGENT_INFO_IMAGE_SUPPORT => write_value(value, image_gpu),
                 _ => INVALID_ARGUMENT,
@@ -649,10 +647,12 @@ pub unsafe extern "C" fn hsa_agent_get_info(
     })
 }
 
-/// Writes the common 2D geometry limits using the public `size_t[2]` ABI.
+/// Writes the common 2D geometry limits using `ROCr`'s `uint32_t[2]` ABI.
+/// The header describes `size_t[2]`, but `ROCr` and existing consumers use two
+/// 32-bit values. Writing wider elements corrupts those callers' output storage.
 ///
 /// # Safety
-/// For a recognized attribute, `value` must address two writable `size_t` values.
+/// For a recognized attribute, `value` must address two writable `uint32_t` values.
 unsafe fn write_image_2d_limit(
     attribute: u32,
     image_gpu: bool,
@@ -664,7 +664,7 @@ unsafe fn write_image_2d_limit(
         | EXT_AGENT_INFO_IMAGE_2DDEPTH_MAX_ELEMENTS
         | EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS => {
             if image_gpu {
-                [16_384_usize; 2]
+                [16_384_u32; 2]
             } else {
                 [0; 2]
             }
@@ -883,6 +883,13 @@ mod tests {
 
     #[test]
     fn image_2d_limits_match_the_abi_and_supported_depth_extents() {
+        #[repr(C)]
+        struct GuardedLimits {
+            before: u64,
+            values: [u32; 2],
+            after: u64,
+        }
+
         for (attribute, geometry) in [
             (EXT_AGENT_INFO_IMAGE_2D_MAX_ELEMENTS, 1),
             (EXT_AGENT_INFO_IMAGE_2DA_MAX_ELEMENTS, 4),
@@ -890,16 +897,30 @@ mod tests {
             (EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS, 7),
         ] {
             for supported in [false, true] {
-                let mut storage = [usize::MAX; 4];
-                // SAFETY: The middle two entries have the public output type.
+                let mut storage = GuardedLimits {
+                    before: u64::MAX,
+                    values: [u32::MAX; 2],
+                    after: u64::MAX,
+                };
+                let storage_ptr = &raw mut storage;
+                // SAFETY: The two entries have ROCr's output type. The trailing
+                // guard also contains an erroneous wider write within this object.
                 assert_eq!(
                     unsafe {
-                        write_image_2d_limit(attribute, supported, storage[1..].as_mut_ptr().cast())
+                        write_image_2d_limit(
+                            attribute,
+                            supported,
+                            storage_ptr
+                                .byte_add(std::mem::offset_of!(GuardedLimits, values))
+                                .cast(),
+                        )
                     },
                     Some(SUCCESS)
                 );
                 let expected = if supported { 16_384 } else { 0 };
-                assert_eq!(storage, [usize::MAX, expected, expected, usize::MAX]);
+                assert_eq!(storage.before, u64::MAX);
+                assert_eq!(storage.values, [expected; 2]);
+                assert_eq!(storage.after, u64::MAX);
                 if !supported || geometry < 6 {
                     continue;
                 }
@@ -915,8 +936,8 @@ mod tests {
                     let format = image_descriptor::format(image_format).unwrap();
                     let descriptor = HsaExtImageDescriptor {
                         geometry,
-                        width: storage[1],
-                        height: storage[2],
+                        width: storage.values[0] as usize,
+                        height: storage.values[1] as usize,
                         depth: 0,
                         array_size: usize::from(geometry == 7),
                         format: image_format,

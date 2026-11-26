@@ -7,6 +7,7 @@
 #include "conversion/scaled_narrow.h"
 #include "common/float_encoding.h"
 #include "common/validation.h"
+#include "common/wave_alignment.h"
 #include "conversion/scaled_narrow_impl.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_conversion.h"
@@ -21,28 +22,26 @@ using Destination = ScaledNarrowDestination;
 // only the low half of FP16/BF16 sources.
 template <Source Format> float decode(uint32_t raw, bool flush_input) {
   if constexpr (Format == Source::F16) {
-    return f16_to_float(uint16_t(raw));
+    uint16_t h = uint16_t(raw);
+    return f16_to_float(flush_input && (h & 0x7c00U) == 0 ? uint16_t(h & 0x8000U) : h);
   } else if constexpr (Format == Source::Bf16) {
-    return bf16_to_float(uint16_t(raw));
+    uint32_t b = uint32_t(uint16_t(raw)) << 16;
+    return as_float(flush_input && (b & 0x7f800000U) == 0 ? (b & 0x80000000U) : b);
   } else {
-    return as_float(flush_input && (raw & 0x7f800000U) == 0 ? raw & 0x80000000U : raw);
+    return as_float(flush_input && (raw & 0x7f800000U) == 0 ? (raw & 0x80000000U) : raw);
   }
 }
 
-// Scale then narrow active lanes. Scale exponent 255 preserves the destination;
-// every other exponent divides by 2^(exponent-127). Validate before any access.
+// Scale then narrow active lanes. Scale exponent 255 emits NaN (FP8/BF8) or
+// signed max finite (FP4); every other exponent divides by 2^(exponent-127).
 template <int Lanes, Source Src, Destination Dst, bool Stochastic>
 int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
             const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
-  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_LOOSE);
+  flags = resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
   constexpr bool fp4 = Dst == Destination::Fp4;
   constexpr uint64_t known = Stochastic || fp4 ? RJ_ARITH_CVT_BYTE_3 : RJ_ARITH_ALU_HIGH_D;
-  if (int error = validate(flags, mode & ~known,
-                           Src == Source::F32 ? RJ_ARITH_FP_FLUSH_INPUT_DENORMALS : 0)) {
+  if (int error = validate(flags, mode & ~known, RJ_ARITH_FP_FLUSH_INPUT_DENORMALS)) {
     return error;
-  }
-  if ((flags & RJ_ARITH_SEMANTICS_MASK) >= RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
-    return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
@@ -51,12 +50,15 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   // and B scale. Stochastic forms always use A data, B seed and C scale.
   const uint32_t *scale = Stochastic || Src == Source::F32 ? c[0] : b[0];
   int shift = Stochastic || fp4 ? 8 * int((mode >> 16) & 3) : mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
-  const uint32_t *upper_a = nullptr;
+  [[maybe_unused]] const uint32_t *upper_a = nullptr;
   if constexpr (fp4 && Stochastic && Src == Source::F32) {
     upper_a = a[1];
   }
+  [[maybe_unused]] const auto level =
+      wave_cpu_level(flags, !Stochastic || Src != Source::Bf16 || Dst != Destination::Fp8 ||
+                                (exec_mask & (exec_mask - 1)));
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V4) {
     scaled_narrow_x86_64_v4<Dst, Stochastic>(Lanes, exec_mask, Src, flags & RJ_ARITH_FP16_OVFL,
                                              flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, shift, d[0],
                                              a[0], b[0], scale, upper_a);
@@ -64,15 +66,16 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+  if (level >= RJ_ARITH_CPU_X86_64_V3) {
     scaled_narrow_x86_64_v3<Dst, Stochastic>(Lanes, exec_mask, Src, flags & RJ_ARITH_FP16_OVFL,
                                              flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, shift, d[0],
                                              a[0], b[0], scale, upper_a);
     return RJ_ARITH_SUCCESS;
   }
 #endif
+  constexpr uint32_t sig_mask = scaled_sig_mask(Src);
   uint32_t selected = (Stochastic || fp4 ? 0xffU : 0xffffU) << shift;
-  const bool flush_input = flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS;
+  const bool flush_input = (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) != 0;
   uint32_t result[Lanes];
   for (int lane = 0; lane < Lanes; ++lane) {
     if (!((exec_mask >> lane) & 1)) {
@@ -80,16 +83,21 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
     }
     result[lane] = d[0][lane];
     uint32_t exponent = (scale[lane] >> 23) & 255;
-    if (exponent == 255) {
-      continue;
-    }
     // The reciprocal power of two is exactly representable, including 2^-127
-    // at exponent 254. This retains the old double-division model's FP32 rounding.
-    float inverse_scale = as_float(exponent == 254 ? 0x00400000U : (254 - exponent) << 23);
+    // at exponent 254. Exponent 255 substitutes a signed NaN into the encoder.
+    float inverse_scale = as_float(exponent == 255   ? 0x3f800000U
+                                   : exponent == 254 ? 0x00400000U
+                                                     : (254 - exponent) << 23);
+    auto scale_elem = [&](uint32_t raw_elem) {
+      float decoded = decode<Src>(raw_elem, flush_input);
+      if (exponent == 255) {
+        return (as_bits(decoded) & 0x80000000U) | 0x7fc00000U;
+      }
+      return as_bits(decoded * inverse_scale);
+    };
     uint32_t seed = Stochastic ? b[0][lane] : 0;
-    uint32_t value = scaled_narrow_encode<Dst, Stochastic>(
-        as_bits(decode<Src>(a[0][lane], flush_input) * inverse_scale), seed,
-        flags & RJ_ARITH_FP16_OVFL);
+    uint32_t value = scaled_narrow_encode<Dst, Stochastic, true>(
+        scale_elem(a[0][lane]), seed, flags & RJ_ARITH_FP16_OVFL, sig_mask);
     if constexpr (!Stochastic || fp4) {
       uint32_t upper;
       if constexpr (Src == Source::F32) {
@@ -102,9 +110,8 @@ int convert(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *
         upper = a[0][lane] >> 16;
       }
       uint32_t next_seed = Stochastic ? narrow_next_seed(seed) : 0;
-      value |= scaled_narrow_encode<Dst, Stochastic>(
-                   as_bits(decode<Src>(upper, flush_input) * inverse_scale), next_seed,
-                   flags & RJ_ARITH_FP16_OVFL)
+      value |= scaled_narrow_encode<Dst, Stochastic, true>(scale_elem(upper), next_seed,
+                                                           flags & RJ_ARITH_FP16_OVFL, sig_mask)
                << (fp4 ? 4 : 8);
     }
     result[lane] = (result[lane] & ~selected) | (value << shift);

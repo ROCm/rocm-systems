@@ -26,6 +26,7 @@
 #include "rocjitsu/isa/arch/amdgpu/shared/image_resource.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/image_transfer.h"
 #include "rocjitsu/isa/decoder.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
@@ -62,18 +63,21 @@ TEST(ImageMetadataTest, RetryAReadOrPartialClearExpansionBeforePublishingTheDccK
     uint32_t fail_once = 0;
     mutable std::array<uint8_t, 65536> pixels{};
     VmAccessOutcome read(uint64_t, std::span<std::byte> dst) const {
-      if (++operation == fail_once)
+      if (++operation == fail_once) {
         return VmAccessOutcome::Unavailable;
+      }
       dst.front() = std::byte{key};
       return VmAccessOutcome::Complete;
     }
     VmAccessOutcome write(uint64_t address, std::span<const std::byte> src) const {
-      if (++operation == fail_once)
+      if (++operation == fail_once) {
         return VmAccessOutcome::Unavailable;
-      if (address == pixels.size())
+      }
+      if (address == pixels.size()) {
         key = std::to_integer<uint8_t>(src.front());
-      else
+      } else {
         std::memcpy(pixels.data() + address, src.data(), src.size());
+      }
       return VmAccessOutcome::Complete;
     }
   };
@@ -100,13 +104,15 @@ TEST(ImageMetadataTest, RetryAReadOrPartialClearExpansionBeforePublishingTheDccK
     ASSERT_TRUE(second.succeeded());
     EXPECT_EQ(second.value(), VmAccessOutcome::Complete);
     EXPECT_EQ(memory.key, 0xff);
-    for (uint32_t y = 0; y < 8; ++y)
+    for (uint32_t y = 0; y < 8; ++y) {
       for (uint32_t x = 0; x < 8; ++x) {
         const auto address = amdgpu::gfx11_image_address(0, x, y, 8, 4, 27);
         ASSERT_TRUE(address);
-        for (uint32_t byte = 0; byte < 4; ++byte)
+        for (uint32_t byte = 0; byte < 4; ++byte) {
           EXPECT_EQ(memory.pixels[*address + byte], 0xff);
+        }
       }
+    }
   }
 }
 
@@ -153,13 +159,14 @@ struct Image {
   bool corner_samples = false;
 };
 
-std::array<uint32_t, 8> rdna_descriptor(const Image &image, rj_code_arch_t arch);
+std::array<uint32_t, 8> rdna_descriptor(const Image &image, rocjitsu::IsaFamily arch);
 
 std::array<uint32_t, 8> descriptor(const Image &image) {
   std::array<uint32_t, 8> r{};
   const auto set = [&](uint32_t bit, uint32_t width, uint64_t value) {
-    for (uint32_t i = 0; i < width; ++i)
+    for (uint32_t i = 0; i < width; ++i) {
       r[(bit + i) / 32] |= static_cast<uint32_t>((value >> i) & 1u) << ((bit + i) % 32);
+    }
   };
   set(0, 40, kBase >> 8);
   set(40, 12, image.min_lod);
@@ -190,26 +197,29 @@ struct RdnaImageDescriptor {
   bool gfx12_bit_157 = false;
 };
 
-std::array<uint32_t, 8> rdna_image_descriptor(rj_code_arch_t arch,
+std::array<uint32_t, 8> rdna_image_descriptor(rocjitsu::IsaFamily arch,
                                               const RdnaImageDescriptor &image = {}) {
   std::array<uint32_t, 8> words{};
   const auto set = [&](uint32_t bit, uint32_t width, uint64_t value) {
-    for (uint32_t i = 0; i < width; ++i)
+    for (uint32_t i = 0; i < width; ++i) {
       words[(bit + i) / 32] |= static_cast<uint32_t>((value >> i) & 1u) << ((bit + i) % 32);
+    }
   };
-  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4;
   set(0, 40, kBase >> 8);
   set(gfx12 ? 49 : 52, 8, image.format);
   set(62, gfx12 ? 16 : 14, image.width - 1);
   set(78, gfx12 ? 16 : 14, image.height - 1);
   set(96, 12, image.selectors);
   set(124, 4, image.type);
-  if (amdgpu::image_resource_encodes_pitch(image.type))
+  if (amdgpu::image_resource_encodes_pitch(image.type)) {
     set(128, gfx12 ? 16 : 14, image.pitch - 1);
-  else
+  } else {
     set(128, gfx12 ? 14 : 13, image.depth - 1);
-  if (gfx12 && image.gfx12_bit_157)
+  }
+  if (gfx12 && image.gfx12_bit_157) {
     set(157, 1, 1);
+  }
   return words;
 }
 
@@ -218,8 +228,9 @@ public:
   ImageInputBytes() : ExecutionPlugin("image_coordinate_inputs") {}
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                              uint8_t bytes) override {
-    if (lanes & 1)
+    if (lanes & 1) {
       read.at(reg - wave->vgpr_alloc().base) |= bytes;
+    }
   }
   std::array<uint8_t, 32> read{};
 };
@@ -232,7 +243,7 @@ protected:
   amdgpu::Wavefront *wf_ = nullptr;
   uint32_t sb_ = 0, vb_ = 0;
 
-  virtual rj_code_arch_t arch() const = 0;
+  virtual rocjitsu::IsaFamily arch() const = 0;
   virtual std::optional<uint32_t> image_gb_addr_config() const { return std::nullopt; }
   void SetUp() override {
     l2_.set_backing_memory(&memory_);
@@ -252,21 +263,24 @@ protected:
     wf_->set_exec(5); // Lane 1 must not read, store or receive a load result.
   }
   void TearDown() override {
-    if (wf_)
+    if (wf_) {
       wf_->halt();
+    }
   }
 
   void write_coordinates(uint32_t lane, std::array<uint32_t, 3> coords) {
-    for (uint32_t i = 0; i < coords.size(); ++i)
+    for (uint32_t i = 0; i < coords.size(); ++i) {
       cu_->write_vgpr(vb_ + i, lane, coords[i]);
+    }
   }
   void check_zero_dmask_atomics() {
     wf_->set_exec(1);
-    const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+    const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
     auto decoder = Decoder::create(arch());
     const auto resource = rdna_image_descriptor(arch(), {.format = kR32Uint});
-    for (unsigned i = 0; i < resource.size(); ++i)
+    for (unsigned i = 0; i < resource.size(); ++i) {
       cu_->write_sgpr(sb_ + i, resource[i]);
+    }
     write_coordinates(0, {0, 0, 0});
     memory_.write32(kBase, 13);
     for (bool compare : {false, true}) {
@@ -330,8 +344,9 @@ protected:
       PayloadReads() : ExecutionPlugin("out_of_bounds_atomic_payload") {}
       void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                  uint8_t) override {
-        if (reg == wave->vgpr_alloc().base + 8)
+        if (reg == wave->vgpr_alloc().base + 8) {
           read_lanes |= lanes;
+        }
       }
       uint64_t read_lanes = 0;
     };
@@ -341,10 +356,11 @@ protected:
     ASSERT_TRUE(group->add(std::move(observer)));
     cu_->set_plugin_group(group);
 
-    const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+    const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
     const auto descriptor = rdna_image_descriptor(arch());
-    for (unsigned i = 0; i < descriptor.size(); ++i)
+    for (unsigned i = 0; i < descriptor.size(); ++i) {
       cu_->write_sgpr(sb_ + i, descriptor[i]);
+    }
     wf_->set_exec(1);
     write_coordinates(0, {100, 0, 0}); // Outside this 3 x 2 image.
     for (bool returns : {false, true}) {
@@ -353,14 +369,15 @@ protected:
       const auto install = [&](const auto &words) {
         memory_.load_image(reinterpret_cast<const uint8_t *>(words.data()), sizeof(words), wf_->pc);
       };
-      if (gfx12)
+      if (gfx12) {
         install(rdna4::build_vimage(
             rdna4::kImageAtomicAddUintVimage,
             {.dim = 1, .dmask = 1, .vdata = 8, .th = uint8_t(returns), .vaddr1 = 1}));
-      else
+      } else {
         install(
             rdna3_5::build_mimg(rdna3_5::kImageAtomicAddMimg,
                                 {.dim = 1, .unorm = 1, .dmask = 1, .glc = returns, .vdata = 8}));
+      }
       auto &state = wf_->ensure_memory_wait_scoreboard();
       state.clear();
       const auto counter = amdgpu::WaitCounterKind::Ds;
@@ -403,7 +420,7 @@ protected:
     ASSERT_TRUE(handle);
     cu_->set_gpu_vm(&vm);
     wf_->set_address_space(handle);
-    const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+    const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
     // The last mip in an RDNA linear chain starts at kBase. Use the native pitch
     // for a GFX11 mip chain and an explicit full row for a single-level image.
     const uint32_t width = 2048u << base_level;
@@ -413,8 +430,9 @@ protected:
                                            .base_level = base_level,
                                            .last_level = base_level},
                                           arch());
-    for (unsigned i = 0; i < resource.size(); ++i)
+    for (unsigned i = 0; i < resource.size(); ++i) {
       cu_->write_sgpr(sb_ + i, resource[i]);
+    }
     wf_->set_exec(3);
     write_coordinates(0, {0, 0, 0});
     write_coordinates(1, {1024, 0, 0});
@@ -487,19 +505,21 @@ protected:
   }
 
   void fill_destination(uint32_t value) {
-    for (uint32_t lane = 0; lane < 3; ++lane)
-      for (uint32_t reg = 0; reg < 4; ++reg)
+    for (uint32_t lane = 0; lane < 3; ++lane) {
+      for (uint32_t reg = 0; reg < 4; ++reg) {
         cu_->write_vgpr(vb_ + 8 + reg, lane, value);
+      }
+    }
   }
 };
 
 class Rdna1ShaderExportTest : public ImageAccessFixture {
 protected:
-  rj_code_arch_t arch() const override { return ROCJITSU_CODE_ARCH_RDNA1; }
+  rocjitsu::IsaFamily arch() const override { return rocjitsu::IsaFamily::Rdna1; }
 };
 
 TEST(Gfx10ExportTest, WaitsCheckOnlyThePayloadRegistersReadByExp) {
-  for (const auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2}) {
+  for (const auto arch : {rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2}) {
     amdgpu::GpuMemory memory{"export_writes"};
     amdgpu::L2Cache l2{"export_l2"};
     l2.set_backing_memory(&memory);
@@ -589,7 +609,8 @@ TEST_F(Rdna1ShaderExportTest, CompressedColorAndNullExportCarryActiveMaskAndDone
   }
 }
 
-class Gfx11BvhTest : public ImageAccessFixture, public testing::WithParamInterface<rj_code_arch_t> {
+class Gfx11BvhTest : public ImageAccessFixture,
+                     public testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
   enum RayFlag : uint32_t {
     kForceOpaque = 1u << 0,
@@ -605,7 +626,7 @@ protected:
   };
   static constexpr unsigned kTriangleVertices[4][3] = {{0, 1, 2}, {1, 3, 2}, {2, 3, 4}, {2, 4, 0}};
   static constexpr uint32_t kBvhTypeField = amdgpu::kGfx11BvhResourceType << 28;
-  rj_code_arch_t arch() const override { return GetParam(); }
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
 
   void write_box16_bounds(uint64_t address, const std::array<float, 6> &bounds) {
     // Box16 packs min.xyz followed by max.xyz into three consecutive DWORDs.
@@ -643,8 +664,9 @@ protected:
     cu_->write_sgpr(sb_, kBase >> 8);
     // Preserve the W7900 capture's TYPE field independently of the decoder.
     cu_->write_sgpr(sb_ + 3, (8u << 28) | uint32_t(barycentrics) << 24);
-    for (unsigned i = 0; i < vertices.size(); ++i)
+    for (unsigned i = 0; i < vertices.size(); ++i) {
       memory_.write32(kBase + i * 4, vertices[i]);
+    }
     memory_.write32(kBase + 60, 9);
     cu_->l1_vector().invalidate_all();
     l2_.invalidate_all();
@@ -662,13 +684,14 @@ protected:
     ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
     ASSERT_EQ(pipeline.issue(inst.value().release(), *wf_), amdgpu::VmAccessOutcome::Complete);
-    for (unsigned word = 0; word < 4; ++word)
+    for (unsigned word = 0; word < 4; ++word) {
       EXPECT_EQ(cu_->read_vgpr(vb_ + 16 + word, 0), expected[word]);
+    }
   }
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11BvhTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(Gfx11BvhTest, InvalidResultNullifiesBeforeNodeLookup) {
   cu_->write_sgpr(sb_, kBase >> 8);
@@ -703,8 +726,9 @@ TEST_P(Gfx11BvhTest, InvalidResultNullifiesBeforeNodeLookup) {
         if (lanes && pointer) {
           amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
           ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
-          for (unsigned word = 0; word < 4; ++word)
+          for (unsigned word = 0; word < 4; ++word) {
             EXPECT_EQ(cu_->read_vgpr(vb_ + dst + word, 0), 0xffffffffu);
+          }
         }
         EXPECT_EQ(wf_->exec(), exec);
       }
@@ -761,19 +785,20 @@ TEST_P(Gfx11BvhTest, NullifiedResultStillReadsThePendingDescriptor) {
 }
 
 class Gfx11ImageAtomicTest : public ImageAccessFixture,
-                             public testing::WithParamInterface<rj_code_arch_t> {
+                             public testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
-  rj_code_arch_t arch() const override { return GetParam(); }
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
 };
 INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11ImageAtomicTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(Gfx11ImageAtomicTest, AtomicsRejectZeroDmask) { check_zero_dmask_atomics(); }
 
 TEST_P(Gfx11ImageAtomicTest, UnboundAtomicsValidateTheEncodedPayload) {
   wf_->set_exec(1);
-  for (unsigned i = 0; i < 8; ++i)
+  for (unsigned i = 0; i < 8; ++i) {
     cu_->write_sgpr(sb_ + i, 0);
+  }
   auto decoder = Decoder::create(arch());
   for (bool compare : {false, true}) {
     const auto opcode = compare ? rdna3_5::kImageAtomicCmpswapMimg : rdna3_5::kImageAtomicAddMimg;
@@ -801,8 +826,9 @@ TEST_P(Gfx11ImageAtomicTest, UnboundAtomicsValidateTheEncodedPayload) {
 
 TEST_P(Gfx11ImageAtomicTest, AtomicAddRequiresUnnormalizedCoordinates) {
   const auto desc = rdna_image_descriptor(arch(), {.format = kR32Uint});
-  for (unsigned i = 0; i < desc.size(); ++i)
+  for (unsigned i = 0; i < desc.size(); ++i) {
     cu_->write_sgpr(sb_ + i, desc[i]);
+  }
   auto decoder = Decoder::create(arch());
   wf_->set_exec(1);
   write_coordinates(0, {0, 0, 0});
@@ -860,9 +886,10 @@ TEST_P(Gfx11BvhTest, ReturnsHardwareRoundedProjectedBarycentrics) {
        {0xc0644fd8, 0xbfe023d8, 0xc0744a12},
        {0xc6094f66, 0xc5f41b60, 0xc4f41b61, 0xc4f41b61}},
   };
-  for (const auto &test : cases)
+  for (const auto &test : cases) {
     ASSERT_NO_FATAL_FAILURE(check_triangle(test.vertices, test.origin, test.direction, 10.f,
                                            /*barycentrics=*/true, test.expected));
+  }
 }
 
 TEST_P(Gfx11BvhTest, DominantAxisTiesMatchW7900BarycentricResults) {
@@ -900,9 +927,10 @@ TEST_P(Gfx11BvhTest, DominantAxisTiesMatchW7900BarycentricResults) {
        {0x4006091c, 0xc006091c, 0x4006091c},
        {0x432c8997, 0x43995ddb, 0x42195ddc, 0x42e60ccb}},
   };
-  for (const auto &test : cases)
+  for (const auto &test : cases) {
     ASSERT_NO_FATAL_FAILURE(check_triangle(vertices, test.origin, test.direction, 10.f,
                                            /*barycentrics=*/true, test.expected));
+  }
 }
 
 TEST_P(Gfx11BvhTest, RoundedEdgesMatchW7900InBothResultModes) {
@@ -937,8 +965,9 @@ TEST_P(Gfx11BvhTest, TriangleStatusUsesBasePrimitiveOrPerTagId) {
   const auto bits = [](float f) { return std::bit_cast<uint32_t>(f); };
   // These W7900 rays hit tags 0 and 1, and miss tags 2 and 3.
   const std::array<float, 9> vertices{0, 0, 1, 0, 1, 1, 1, 0, 1};
-  for (unsigned i = 0; i < vertices.size(); ++i)
+  for (unsigned i = 0; i < vertices.size(); ++i) {
     memory_.write32(kBase + i * 4, bits(vertices[i]));
+  }
   auto decoder = Decoder::create(arch());
   cu_->write_sgpr(sb_, kBase >> 8);
   wf_->set_exec(15);
@@ -946,8 +975,9 @@ TEST_P(Gfx11BvhTest, TriangleStatusUsesBasePrimitiveOrPerTagId) {
     cu_->write_vgpr(vb_, tag, tag);
     cu_->write_vgpr(vb_ + 2, tag, bits(20));
     const float data[]{.25f, .25f, 0.f, 0.f, 0.f, 1.f, INFINITY, INFINITY, 1.f};
-    for (unsigned i = 0; i < 9; ++i)
+    for (unsigned i = 0; i < 9; ++i) {
       cu_->write_vgpr(vb_ + 3 + i, tag, bits(data[i]));
+    }
   }
   const auto instruction = rdna3_5::build_mimg(rdna3_5::kImageBvh64IntersectRayMimg,
                                                {.unorm = 1, .dmask = 15, .r128 = 1, .vdata = 16});
@@ -958,10 +988,12 @@ TEST_P(Gfx11BvhTest, TriangleStatusUsesBasePrimitiveOrPerTagId) {
     for (bool pointer_flags : {false, true}) {
       cu_->write_sgpr(sb_ + 3, kBvhTypeField | (uint32_t(pointer_flags) << 23));
       for (bool pointer_flip : {false, true}) {
-        if (!pointer_flags && pointer_flip)
+        if (!pointer_flags && pointer_flip) {
           continue;
-        for (unsigned tag = 0; tag < 4; ++tag)
+        }
+        for (unsigned tag = 0; tag < 4; ++tag) {
           cu_->write_vgpr(vb_ + 1, tag, uint32_t(pointer_flip) << 25);
+        }
         auto decoded = decoder->decode_window(instruction);
         ASSERT_TRUE(decoded.succeeded());
         auto op = std::move(decoded).value();
@@ -980,8 +1012,9 @@ TEST_P(Gfx11BvhTest, TriangleStatusUsesBasePrimitiveOrPerTagId) {
           const float sign = (tag == 1) != flip ? -1.f : 1.f;
           const uint32_t numerator = bits(hit ? sign * (tag == 1 ? .5f : 1.f) : INFINITY);
           const std::array<uint32_t, 4> expected{numerator, bits(hit ? sign : 1.f), id, hit};
-          for (unsigned i = 0; i < 4; ++i)
+          for (unsigned i = 0; i < 4; ++i) {
             EXPECT_EQ(cu_->read_vgpr(vb_ + 16 + i, tag), expected[i]);
+          }
         }
       }
     }
@@ -1000,8 +1033,9 @@ TEST_P(Gfx11BvhTest, FlaggedPointerWaitsReadRayOnlyWhenDescriptorEnablesFlags) {
   for (bool pointer_flags : {false, true}) {
     SCOPED_TRACE(testing::Message() << "pointer_flags=" << pointer_flags);
     cu_->write_sgpr(sb_ + 3, kBvhTypeField | (uint32_t(pointer_flags) << 23));
-    for (unsigned source = 0; source < 12; ++source)
+    for (unsigned source = 0; source < 12; ++source) {
       expect_source_wait(*decoded.value(), 0, source, source < 2 || pointer_flags);
+    }
   }
 }
 
@@ -1019,14 +1053,17 @@ TEST_P(Gfx11BvhTest, TriangleIdControlsFaceCullingAndWinding) {
     // For a nonzero tag, byte 0 carries the opposite double-sided bit.
     id_words[lane] = tag == 0 ? id : (id << (8 * tag)) | (id ^ 0x10u);
     const uint64_t address = kBase + 64 * lane;
-    for (unsigned vertex = 0; vertex < 3; ++vertex)
-      for (unsigned axis = 0; axis < 3; ++axis)
+    for (unsigned vertex = 0; vertex < 3; ++vertex) {
+      for (unsigned axis = 0; axis < 3; ++axis) {
         memory_.write32(address + 12 * kTriangleVertices[tag][vertex] + 4 * axis,
                         bits(vertices[3 * vertex + axis]));
+      }
+    }
     memory_.write32(address + 60, id_words[lane]);
     cu_->write_vgpr(vb_, lane, 8 * lane + tag);
-    for (unsigned i = 0; i < ray.size(); ++i)
+    for (unsigned i = 0; i < ray.size(); ++i) {
       cu_->write_vgpr(vb_ + 2 + i, lane, bits(ray[i]));
+    }
   }
   wf_->set_exec((1u << lane_count) - 1);
   cu_->write_sgpr(sb_, kBase >> 8);
@@ -1047,8 +1084,9 @@ TEST_P(Gfx11BvhTest, TriangleIdControlsFaceCullingAndWinding) {
                                                          {true, kCullFront | kDoubleSided, 0xf},
                                                          {true, kCullBack | kDoubleSided, 0xf},
                                                          {true, kCullOpaque, 0}}) {
-    for (unsigned lane = 0; lane < lane_count; ++lane)
+    for (unsigned lane = 0; lane < lane_count; ++lane) {
       cu_->write_vgpr(vb_ + 1, lane, flags << 22);
+    }
     for (bool barycentrics : {false, true}) {
       cu_->write_sgpr(sb_ + 3, kBvhTypeField | (uint32_t(pointer_flags) << 23) |
                                    (uint32_t(barycentrics) << 24));
@@ -1075,8 +1113,9 @@ TEST_P(Gfx11BvhTest, TriangleIdControlsFaceCullingAndWinding) {
                                            bits(sign), bits(.5f * sign), bits(.5f * sign)}
                                    : Words{bits(hit ? sign : INFINITY), bits(hit ? sign : 1.f),
                                            pointer_flags ? id : id_words[lane] + tag, hit};
-        for (unsigned word = 0; word < expected.size(); ++word)
+        for (unsigned word = 0; word < expected.size(); ++word) {
           EXPECT_EQ(cu_->read_vgpr(vb_ + 16 + word, lane), expected[word]);
+        }
       }
     }
   }
@@ -1089,8 +1128,9 @@ TEST_P(Gfx11BvhTest, IntersectsMixedNodeTypesAtCompletion) {
   for (uint64_t descriptor_base : {kBase, UINT64_C(0xffff800000010000)}) {
     for (bool wide : {false, true}) {
       // BVH32 adds a descriptor base. BVH64 uses raw addresses above 32 GB.
-      if (wide && descriptor_base != kBase)
+      if (wide && descriptor_base != kBase) {
         continue;
+      }
       const uint64_t base = wide ? (uint64_t{1} << 36) + kBase : descriptor_base;
       const uint64_t node_base = wide ? base / 8 : 0;
       const uint64_t bound = node_base / 8 + 4;
@@ -1098,11 +1138,12 @@ TEST_P(Gfx11BvhTest, IntersectsMixedNodeTypesAtCompletion) {
       const uint32_t base_high = wide ? 0u : uint32_t((base >> 40) & 255);
       cu_->write_sgpr(sb_ + 1, base_high);
       cu_->write_sgpr(sb_ + 2, uint32_t(bound));
-      for (unsigned i = 0; i < 3; ++i)
+      for (unsigned i = 0; i < 3; ++i) {
         for (unsigned ax = 0; ax < 3; ++ax) {
           const float vertex = ax == 2 || (i == 1 && ax == 1) || (i == 2 && ax == 0) ? 1 : 0;
           memory_.write32(base + 4 * (i * 3 + ax), bits(vertex));
         }
+      }
       memory_.write32(base + 60, 0x12340009); // I=vertex 1, J=vertex 2.
       // Four children, one ray miss. FP32 / FP16 nodes use the same coordinates.
       const uint32_t child[4] = {0xaa, 0xbb, 0xcc, 0xdf};
@@ -1111,8 +1152,9 @@ TEST_P(Gfx11BvhTest, IntersectsMixedNodeTypesAtCompletion) {
         memory_.write32(base + 192 + i * 4, child[i]);
         const float near = i == 0 ? 5 : i + 1;
         const std::array<float, 6> bounds{i == 2 ? 2.f : -1.f, -1.f, near, 4.f, 4.f, near + 1};
-        for (unsigned j = 0; j < 6; ++j)
+        for (unsigned j = 0; j < 6; ++j) {
           memory_.write32(base + 80 + (i * 6 + j) * 4, bits(bounds[j]));
+        }
         write_box16_bounds(base + 208 + i * 12, bounds);
       }
       memory_.write32(base + 64 + 28 * 4, 0x02000101); // Box32 child opacity flags.
@@ -1139,25 +1181,30 @@ TEST_P(Gfx11BvhTest, IntersectsMixedNodeTypesAtCompletion) {
                                                   : lane == 6 ? 4 * 8 + 5
                                                               : 0);
             cu_->write_vgpr(vb_, lane, uint32_t(pointer));
-            if (wide)
+            if (wide) {
               cu_->write_vgpr(vb_ + 1, lane, pointer >> 32);
+            }
             cu_->write_vgpr(vb_ + extent, lane, bits(20));
             for (unsigned ax = 0; ax < 3; ++ax) {
               cu_->write_vgpr(vb_ + origin + ax, lane, bits(ax == 2 ? 0 : 0.25f));
               cu_->write_vgpr(vb_ + dir + ax, lane,
                               a16 ? (ax == 2 ? 0x3c003c00 : 0x7c000000) : bits(ax == 2 ? 1 : 0));
-              if (!a16)
+              if (!a16) {
                 cu_->write_vgpr(vb_ + inv + ax, lane, ax == 2 ? bits(1) : 0x7f800000);
+              }
             }
-            for (unsigned j = 0; j < 4; ++j)
+            for (unsigned j = 0; j < 4; ++j) {
               cu_->write_vgpr(vb_ + 16 + j, lane, 0xdeadbeef);
+            }
           }
           cu_->write_sgpr(sb_ + 3, kBvhTypeField | uint32_t(bound >> 32));
           auto decoded = decoder->decode(inst);
           ASSERT_TRUE(decoded.succeeded());
-          for (unsigned lane : {0u, 4u, 5u, 6u})
-            for (unsigned source : {0u, extent})
+          for (unsigned lane : {0u, 4u, 5u, 6u}) {
+            for (unsigned source : {0u, extent}) {
               expect_source_wait(*decoded.value(), lane, source, source == 0 || lane == 0);
+            }
+          }
           for (auto [sort_boxes, return_barycentrics] :
                {std::pair{false, false}, {false, true}, {true, false}, {true, true}}) {
             cu_->write_sgpr(sb_ + 1, base_high | (uint32_t(sort_boxes) << 31));
@@ -1186,12 +1233,14 @@ TEST_P(Gfx11BvhTest, IntersectsMixedNodeTypesAtCompletion) {
               EXPECT_EQ(cu_->read_vgpr(vb_ + 16 + j, 1), 0xdeadbeef);
               EXPECT_EQ(cu_->read_vgpr(vb_ + 16 + j, 2), box[j]);
               EXPECT_EQ(cu_->read_vgpr(vb_ + 16 + j, 3), box[j]);
-              for (unsigned lane : {4u, 5u, 6u})
+              for (unsigned lane : {4u, 5u, 6u}) {
                 EXPECT_EQ(cu_->read_vgpr(vb_ + 16 + j, lane), missing);
+              }
             }
           }
-          if (!wide || a16 || nsa)
+          if (!wide || a16 || nsa) {
             continue;
+          }
           // W7900 pointer-flag controls. Box16 has no per-child opacity metadata.
           using Words = std::array<uint32_t, 4>;
           const Words box_hits{0xaa, 0xbb, missing, 0xdf},
@@ -1228,8 +1277,9 @@ TEST_P(Gfx11BvhTest, IntersectsMixedNodeTypesAtCompletion) {
             SCOPED_TRACE(testing::Message() << "flags=0x" << std::hex << test.flags
                                             << " pointer_flags=" << test.pointer_flags);
             wf_->set_exec(0xd); // Triangle, Box32 and Box16 occupy lanes 0, 2 and 3.
-            for (unsigned lane : {0u, 2u, 3u})
+            for (unsigned lane : {0u, 2u, 3u}) {
               cu_->write_vgpr(vb_ + 1, lane, uint32_t(node_base >> 32) | (test.flags << 22));
+            }
             cu_->write_sgpr(sb_ + 1, base_high);
             for (bool barycentrics : {false, true}) {
               cu_->write_sgpr(sb_ + 3, kBvhTypeField | (uint32_t(test.pointer_flags) << 23) |
@@ -1262,8 +1312,9 @@ TEST_P(Gfx11BvhTest, Box32ChildMetadataCullsBoxAndInstancePointers) {
     memory_.write32(kBase + 4 * child, children[child]);
     memory_.write32(kBase + 128 + 4 * child, children[child]);
     const std::array<float, 6> bounds{-1, -1, 1, 4, 4, 2};
-    for (unsigned j = 0; j < bounds.size(); ++j)
+    for (unsigned j = 0; j < bounds.size(); ++j) {
       memory_.write32(kBase + 16 + 4 * (6 * child + j), std::bit_cast<uint32_t>(bounds[j]));
+    }
     write_box16_bounds(kBase + 144 + child * 12, bounds);
   }
   memory_.write32(kBase + 28 * 4, 0x08040804); // Alternating triangle-only and procedural-only.
@@ -1274,8 +1325,9 @@ TEST_P(Gfx11BvhTest, Box32ChildMetadataCullsBoxAndInstancePointers) {
   for (unsigned lane = 0; lane < 2; ++lane) {
     cu_->write_vgpr(vb_, lane, lane == 0 ? 5 : 16 + 4); // Box32 at +0, Box16 at +128.
     constexpr std::array<float, 10> ray{20, .25f, .25f, 0, 0, 0, 1, INFINITY, INFINITY, 1};
-    for (unsigned j = 0; j < ray.size(); ++j)
+    for (unsigned j = 0; j < ray.size(); ++j) {
       cu_->write_vgpr(vb_ + 2 + j, lane, std::bit_cast<uint32_t>(ray[j]));
+    }
   }
   auto decoder = Decoder::create(arch());
   const auto encoding = rdna3_5::build_mimg(rdna3_5::kImageBvh64IntersectRayMimg,
@@ -1285,8 +1337,9 @@ TEST_P(Gfx11BvhTest, Box32ChildMetadataCullsBoxAndInstancePointers) {
     const uint32_t flags = skip_triangles ? kSkipTriangles : kSkipProcedural;
     SCOPED_TRACE(testing::Message()
                  << "skip_triangles=" << skip_triangles << " flags=0x" << std::hex << flags);
-    for (unsigned lane = 0; lane < 2; ++lane)
+    for (unsigned lane = 0; lane < 2; ++lane) {
       cu_->write_vgpr(vb_ + 1, lane, flags << 22);
+    }
     auto decoded = decoder->decode_window(encoding);
     ASSERT_TRUE(decoded.succeeded());
     auto op = std::move(decoded).value();
@@ -1348,8 +1401,9 @@ TEST_P(Gfx11BvhTest, AssignsSharedEdgesAndVerticesInRaySpace) {
         amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
         ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
         const unsigned hit_lanes = back ? 0b1001011 : 0b1000010;
-        for (unsigned lane = 0; lane < points.size(); ++lane)
+        for (unsigned lane = 0; lane < points.size(); ++lane) {
           EXPECT_EQ(cu_->read_vgpr(vb_ + 19, lane), (hit_lanes >> lane) & 1u) << lane;
+        }
       }
     }
   }
@@ -1396,9 +1450,10 @@ TEST_P(Gfx11BvhTest, OppositeWindingsShareEdgesForNonUnitRayDirections) {
         cu_->write_vgpr(vb_, lane, lane << 3);
         cu_->write_vgpr(vb_ + 1, lane, std::bit_cast<uint32_t>(10.f));
         for (unsigned axis = 0; axis < 3; ++axis) {
-          for (unsigned vertex = 0; vertex < 3; ++vertex)
+          for (unsigned vertex = 0; vertex < 3; ++vertex) {
             memory_.write32(node + 12 * vertex + 4 * axis,
                             std::bit_cast<uint32_t>(vertices[vertex][axis]));
+          }
           cu_->write_vgpr(vb_ + 2 + axis, lane, std::bit_cast<uint32_t>(ray.origin[axis]));
           cu_->write_vgpr(vb_ + 5 + axis, lane, std::bit_cast<uint32_t>(ray.direction[axis]));
           cu_->write_vgpr(vb_ + 8 + axis, lane, std::bit_cast<uint32_t>(1.f / ray.direction[axis]));
@@ -1494,13 +1549,14 @@ TEST_P(Gfx11BvhTest, RotatesBarycentricsAndCullsTaggedTriangles) {
 
 class Rdna4ImageMemoryTest : public ImageAccessFixture {
 protected:
-  rj_code_arch_t arch() const override { return ROCJITSU_CODE_ARCH_RDNA4; }
+  rocjitsu::IsaFamily arch() const override { return rocjitsu::IsaFamily::Rdna4; }
 
   void bind(uint32_t format, uint32_t selectors = kIdentity) {
     wf_->set_exec(1);
     const auto words = rdna_image_descriptor(arch(), {.format = format, .selectors = selectors});
-    for (unsigned i = 0; i < words.size(); ++i)
+    for (unsigned i = 0; i < words.size(); ++i) {
       cu_->write_sgpr(sb_ + i, words[i]);
+    }
     write_coordinates(0, {0, 0, 0});
   }
 
@@ -1524,12 +1580,14 @@ TEST_F(Rdna4ImageMemoryTest, SampleBoundsAndDroppedFetchQualifyInputsBeforeIssue
     Reads() : ExecutionPlugin("sample_coordinate_reads") {}
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t) override {
-      if (reg == wave->vgpr_alloc().base)
+      if (reg == wave->vgpr_alloc().base) {
         v0 |= lanes;
+      }
     }
     void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef reg) override {
-      if (reg.cls == RegClass::SGPR && reg.index < 12)
+      if (reg.cls == RegClass::SGPR && reg.index < 12) {
         scalar_reads |= 1u << reg.index;
+      }
     }
     uint32_t scalar_reads = 0;
     uint64_t v0 = 0;
@@ -1541,8 +1599,9 @@ TEST_F(Rdna4ImageMemoryTest, SampleBoundsAndDroppedFetchQualifyInputsBeforeIssue
   cu_->set_plugin_group(group);
   const auto resource =
       rdna_image_descriptor(arch(), {.format = 22, .width = 256, .height = 64, .pitch = 256});
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (2 << 6));
   cu_->write_sgpr(sb_ + 9, (3 * 256) << 13);
   cu_->write_sgpr(sb_ + 10, 1u << 26);
@@ -1592,8 +1651,9 @@ TEST_F(Rdna4ImageMemoryTest, SampleBoundsAndDroppedFetchQualifyInputsBeforeIssue
     EXPECT_EQ(warnings[0], 2u * unsigned(c.reads_coordinates));
     EXPECT_EQ(warnings[1], unsigned(c.writes_data));
     cu_->write_vgpr(vb_ + c.dst, 0, 0xdeadbeef);
-    if (c.tfe && c.dst < 31)
+    if (c.tfe && c.dst < 31) {
       cu_->write_vgpr(vb_ + c.dst + 1, 0, 0xcafe1234);
+    }
     reads->v0 = 0;
     reads->scalar_reads = 0;
     ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
@@ -1669,13 +1729,15 @@ TEST_F(Rdna4ImageMemoryTest, ReturningAtomicsAcquireSourcesOnlyWhenTheirResultFi
     SourceObserver() : ExecutionPlugin("atomic_sources") {}
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t) override {
-      if (lanes & 1)
+      if (lanes & 1) {
         regs |= 1ull << (reg - wave->vgpr_alloc().base);
+      }
     }
     void onAmdgpuReadSgpr(const amdgpu::Wavefront *wave, uint32_t reg) override {
       const uint32_t word = reg - wave->sgpr_alloc().base;
-      if (word < 8)
+      if (word < 8) {
         descriptor_words |= 1u << word;
+      }
     }
     unsigned descriptor_words = 0;
     uint64_t regs = 0;
@@ -1705,8 +1767,9 @@ TEST_F(Rdna4ImageMemoryTest, ReturningAtomicsAcquireSourcesOnlyWhenTheirResultFi
       memory_.write64(kBase, old);
       cu_->write_vgpr(vb_, 0, 41);
       cu_->write_vgpr(vb_ + data, 0, 99);
-      if (data == 30)
+      if (data == 30) {
         cu_->write_vgpr(vb_ + 31, 0, 0);
+      }
       cu_->write_vgpr(vb_ + 4, 0, 0);
       cu_->write_vgpr(vb_ + 5, 0, 0);
       const auto words = rdna4::build_vimage(
@@ -1763,8 +1826,9 @@ TEST_F(Rdna4ImageMemoryTest, PayloadReadsAndWaitsSubstituteVgprZeroForEachMissin
     Inputs() : ExecutionPlugin("image_payload_inputs") {}
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t bytes) override {
-      if (reg == wave->vgpr_alloc().base && (lanes & 1))
+      if (reg == wave->vgpr_alloc().base && (lanes & 1)) {
         v0_bytes |= bytes;
+      }
     }
     uint8_t v0_bytes = 0;
   };
@@ -1813,8 +1877,9 @@ TEST_F(Rdna4ImageMemoryTest, PayloadReadsAndWaitsSubstituteVgprZeroForEachMissin
         const auto warnings = cu_->memory_wait_diagnostic_count();
         inputs->v0_bytes = 0;
         cu_->run_issue_cycle(1);
-        for (unsigned cycle = 0; cycle < 64 && !wf_->wait_counters().empty(); ++cycle)
+        for (unsigned cycle = 0; cycle < 64 && !wf_->wait_counters().empty(); ++cycle) {
           cu_->run_issue_cycle(0);
+        }
         ASSERT_TRUE(wf_->wait_counters().empty());
         cu_->l1_vector().flush_all();
         l2_.flush_all();
@@ -1851,8 +1916,9 @@ TEST_F(Rdna4ImageMemoryTest, PayloadReadsAndWaitsSubstituteVgprZeroForEachMissin
     const auto warnings = cu_->memory_wait_diagnostic_count();
     inputs->v0_bytes = 0;
     cu_->run_issue_cycle(1);
-    for (unsigned cycle = 0; cycle < 64 && !wf_->wait_counters().empty(); ++cycle)
+    for (unsigned cycle = 0; cycle < 64 && !wf_->wait_counters().empty(); ++cycle) {
       cu_->run_issue_cycle(0);
+    }
     EXPECT_EQ(inputs->v0_bytes, 0x3);
     EXPECT_EQ(cu_->memory_wait_diagnostic_count() - warnings, unsigned(pending_bytes == 0x3));
   }
@@ -1879,8 +1945,9 @@ TEST_F(Rdna4ImageMemoryTest, AtomicAddTfeReservesStatusOnlyForAResult) {
       bind(20);
       memory_.write32(kBase, 17);
       cu_->write_vgpr(vb_ + vdata, 0, 5);
-      if (vdata == 8)
+      if (vdata == 8) {
         cu_->write_vgpr(vb_ + 9, 0, 0xdeadbeef);
+      }
       auto words = rdna4::build_vimage(
           rdna4::kImageAtomicAddUintVimage,
           {.dim = 1, .dmask = 1, .vdata = vdata, .th = uint8_t(returns), .tfe = 1, .vaddr1 = 1});
@@ -1906,13 +1973,15 @@ TEST_F(Rdna4ImageMemoryTest, OutOfBoundsAtomicSeparatesPayloadReadsFromResultOve
 }
 
 TEST_F(Rdna4ImageMemoryTest, AtomicTfeReportsOnlyTheNonresidentReturningLane) {
-  for (uint32_t level : {0u, 1u})
+  for (uint32_t level : {0u, 1u}) {
     ASSERT_NO_FATAL_FAILURE(check_atomic_prt_access(/*compare_swap=*/false, level));
+  }
 }
 
 TEST_F(Rdna4ImageMemoryTest, CompareSwapTfeWritesStatusOverFirstComparisonWordOnANack) {
-  for (uint32_t level : {0u, 1u})
+  for (uint32_t level : {0u, 1u}) {
     ASSERT_NO_FATAL_FAILURE(check_atomic_prt_access(/*compare_swap=*/true, level));
+  }
 }
 
 TEST_F(Rdna4ImageMemoryTest, ImageAtomicsSelectTheirIntegerAndFloatOperation) {
@@ -1993,12 +2062,13 @@ protected:
     bool unorm = true;
   };
 
-  rj_code_arch_t arch() const override { return ROCJITSU_CODE_ARCH_CDNA2; }
+  rocjitsu::IsaFamily arch() const override { return rocjitsu::IsaFamily::Cdna2; }
 
   void bind(const Image &image) {
     const auto words = descriptor(image);
-    for (uint32_t i = 0; i < words.size(); ++i)
+    for (uint32_t i = 0; i < words.size(); ++i) {
       cu_->write_sgpr(sb_ + i, words[i]);
+    }
   }
   bool issue(bool load, uint32_t dmask = 15) { return issue(load, dmask, Encoding{}); }
   /// @brief Execute IMAGE_LOAD/STORE from s[0:7], VADDR v0, VDATA v8.
@@ -2045,8 +2115,9 @@ protected:
     auto inst = std::make_unique<Inst>(raw);
     EXPECT_TRUE(inst->is_memory_op());
     inst->execute_impl(*wf_);
-    if (!inst->data())
+    if (!inst->data()) {
       return false;
+    }
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
     EXPECT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
     cu_->l1_vector().flush_all();
@@ -2138,8 +2209,9 @@ TEST_F(Cdna2ImageAccessTest, WideImageCompareSwapSeparatesSourcePairAndComparePa
     memory_.write32(kBase + 4, 4);
     cu_->l1_vector().invalidate_all();
     l2_.invalidate_all();
-    for (unsigned i = 0; i < 3; ++i)
+    for (unsigned i = 0; i < 3; ++i) {
       cu_->write_vgpr(vb_ + 8 + i, 0, 1 + i);
+    }
     cu_->write_vgpr(vb_ + 11, 0, comparison_high);
     ASSERT_NO_FATAL_FAILURE(issue_raw(cdna2::kImageAtomicCmpswap, 15, true));
     EXPECT_EQ(memory_.read32(kBase), comparison_high == 4 ? 1u : 3u);
@@ -2168,8 +2240,9 @@ TEST_F(Cdna2ImageAccessTest, PackedImagesBypassConversionAndZeroUnselectedDwords
   bind(image);
   cu_->write_vgpr(vb_ + 8, 0, 0x11111111u);
   cu_->write_vgpr(vb_ + 9, 0, 0x33333333u);
-  for (unsigned w = 0; w < 4; ++w)
+  for (unsigned w = 0; w < 4; ++w) {
     memory_.write32(kBase + 4 * w, 0xcccccccc);
+  }
   l2_.invalidate_all();
   cu_->l1_vector().invalidate_all();
   ASSERT_NO_FATAL_FAILURE(issue_raw(cdna2::kImageStoreMipPck, 5));
@@ -2214,7 +2287,7 @@ TEST_F(Cdna2ImageAccessTest, DecodedMipLoadAndStoreAccessLevelZero) {
   wf_->set_exec(1);
   write_coordinates(0, {1, 1, 0});
   constexpr uint64_t kAddress = kBase + (64 + 1) * sizeof(uint32_t);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna2);
   ASSERT_NE(decoder, nullptr);
 
   for (const bool load : {false, true}) {
@@ -2250,8 +2323,9 @@ TEST_F(Cdna2ImageAccessTest, ZeroSelectorsDoNotUseBufferStoreA8Routing) {
     image.data_format = format;
     image.selectors = 0;
     bind(image);
-    for (uint32_t reg = 0; reg < 4; ++reg)
+    for (uint32_t reg = 0; reg < 4; ++reg) {
       cu_->write_vgpr(vb_ + 8 + reg, 0, format == kDfmt32 ? 0x12345678u : 0x11u * (reg + 1));
+    }
     memory_.write32(kBase, 0xdeadbeef);
     ASSERT_TRUE(issue(false));
     EXPECT_EQ(memory_.read32(kBase), 0u);
@@ -2399,8 +2473,9 @@ TEST_F(Cdna2ImageAccessTest, XyzOneStoresRetainCompactedSelectorBehavior) {
   for (const auto &test : cases) {
     SCOPED_TRACE(unsigned{test.dmask});
     memory_.write32(kBase, 0xdeadbeef);
-    for (uint32_t component = 0; component < test.packed.size(); ++component)
+    for (uint32_t component = 0; component < test.packed.size(); ++component) {
       cu_->write_vgpr(vb_ + 8 + component, 0, test.packed[component]);
+    }
     ASSERT_TRUE(issue(false, test.dmask));
     EXPECT_EQ(memory_.read32(kBase), test.expected);
   }
@@ -2415,8 +2490,9 @@ TEST_F(Cdna2ImageAccessTest, ArgbStoreRetainsCompactedSelectorBehavior) {
   bind(image);
   wf_->set_exec(1);
   write_coordinates(0, {0, 0, 0});
-  for (uint32_t component = 0; component < 4; ++component)
+  for (uint32_t component = 0; component < 4; ++component) {
     cu_->write_vgpr(vb_ + 8 + component, 0, 0x11 * (component + 1));
+  }
 
   ASSERT_TRUE(issue(false, 15));
   EXPECT_EQ(memory_.read32(kBase), 0x33221144u);
@@ -2470,8 +2546,9 @@ TEST_F(Cdna2ImageAccessTest, UnormStoresConvertAndLoadsReturnFloats) {
   bind(image);
   wf_->set_exec(1);
   write_coordinates(0, {1, 0, 0});
-  for (uint32_t i = 0; i < 4; ++i)
+  for (uint32_t i = 0; i < 4; ++i) {
     cu_->write_vgpr(vb_ + 8 + i, 0, std::bit_cast<uint32_t>(i == 3 ? 1.0f : 0.0f));
+  }
   ASSERT_TRUE(issue(false));
   EXPECT_EQ(memory_.read32(kBase + 4), 0xff000000u);
   fill_destination(0);
@@ -2496,15 +2573,17 @@ TEST_F(Cdna2ImageAccessTest, OutOfBoundsLanesLoadZeroAndDropTheirStores) {
 }
 
 TEST_F(Cdna2ImageAccessTest, NullDescriptorLoadsZero) {
-  for (uint32_t i = 0; i < 8; ++i)
+  for (uint32_t i = 0; i < 8; ++i) {
     cu_->write_sgpr(sb_ + i, 0);
+  }
   wf_->set_exec(1);
   write_coordinates(0, {0, 0, 0});
   memory_.write32(kBase, 0x99999999u);
   fill_destination(0xdeadbeef);
   ASSERT_TRUE(issue(true));
-  for (uint32_t reg = 0; reg < 4; ++reg)
+  for (uint32_t reg = 0; reg < 4; ++reg) {
     EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + reg, 0), 0u);
+  }
 }
 
 TEST_F(Cdna2ImageAccessTest, CompressedDescriptorsStopBeforeImageMemoryAccess) {
@@ -2571,13 +2650,14 @@ TEST_F(Cdna2ImageAccessTest, NullFormatIgnoresConstantOneSelector) {
   wf_->set_exec(1);
   fill_destination(0xdeadbeef);
   ASSERT_TRUE(issue(true));
-  for (uint32_t reg = 0; reg < 4; ++reg)
+  for (uint32_t reg = 0; reg < 4; ++reg) {
     EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + reg, 0), 0u);
+  }
 }
 
 TEST_F(Cdna2ImageAccessTest, DecodedLoadTracksOnlyItsDestinationRegisters) {
   wf_->set_exec(1);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna2);
   amdgpu::MemoryWaitScoreboard &state = wf_->ensure_memory_wait_scoreboard();
   unsigned reports = 0;
   for (bool d16 : {false, true}) {
@@ -2604,7 +2684,7 @@ TEST_F(Cdna2ImageAccessTest, DecodedLoadTracksOnlyItsDestinationRegisters) {
 
 TEST_F(Cdna2ImageAccessTest, DecodedImageChecksTheScaledResourceRegisterRange) {
   wf_->set_exec(1);
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Cdna2);
   amdgpu::MemoryWaitScoreboard &state = wf_->ensure_memory_wait_scoreboard();
   unsigned reports = 0;
   state.bind(0x200, &reports,
@@ -2672,7 +2752,7 @@ TEST(ImageAccessTest, InstructionDimCoordinatesShareA16PackingContract) {
   }
 }
 
-class RdnaDecodedImageAccessTest : public testing::TestWithParam<rj_code_arch_t> {
+class RdnaDecodedImageAccessTest : public testing::TestWithParam<rocjitsu::IsaFamily> {
 protected:
   struct Encoding {
     bool r128 = false;
@@ -2711,8 +2791,9 @@ protected:
 
   void bind_resource(const RdnaImageDescriptor &descriptor) {
     const auto resource = rdna_image_descriptor(GetParam(), descriptor);
-    for (uint32_t i = 0; i < resource.size(); ++i)
+    for (uint32_t i = 0; i < resource.size(); ++i) {
       cu_->write_sgpr(wf_->sgpr_alloc().base + kResourceBase + i, resource[i]);
+    }
   }
 
   void bind_resource(uint32_t format = kR32Uint, uint32_t selectors = kXOne) {
@@ -2720,8 +2801,9 @@ protected:
   }
 
   void TearDown() override {
-    if (wf_)
+    if (wf_) {
       wf_->halt();
+    }
   }
 
   DecodeResult decode(bool load) { return decode(load, Encoding{}); }
@@ -2739,12 +2821,12 @@ protected:
                                        .srsrc = 2,
                                        .tfe = encoding.tfe,
                                        .nsa_word = 6};
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3) {
       return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
           *decoder_, rdna3::build_mimg, load ? rdna3::kImageLoadMimg : rdna3::kImageStoreMimg,
           mimg);
     }
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
       return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
           *decoder_, rdna3_5::build_mimg, load ? rdna3_5::kImageLoadMimg : rdna3_5::kImageStoreMimg,
           mimg);
@@ -2772,12 +2854,12 @@ protected:
                                        .vdata = 8,
                                        .srsrc = 2,
                                        .nsa_word = 6};
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3) {
       return test::decode_gfx11_mimg<rdna3::MimgBuilderFields>(
           *decoder_, rdna3::build_mimg, load ? rdna3::kImageLoadMipMimg : rdna3::kImageStoreMipMimg,
           mimg);
     }
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
       return test::decode_gfx11_mimg<rdna3_5::MimgBuilderFields>(
           *decoder_, rdna3_5::build_mimg,
           load ? rdna3_5::kImageLoadMipMimg : rdna3_5::kImageStoreMipMimg, mimg);
@@ -2851,8 +2933,9 @@ TEST_P(RdnaDecodedImageAccessTest, DecodedLoadAndStorePrintNoncontiguousCoordina
     ASSERT_NE(inst, nullptr);
     std::string expected =
         load ? "image_load v8, [v2, v6], s[8:15]" : "image_store v8, [v2, v6], s[8:15]";
-    if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3 || GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5)
+    if (GetParam() == rocjitsu::IsaFamily::Rdna3 || GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
       expected += " dmask:0x1 dim:SQ_RSRC_IMG_2D unorm";
+    }
     EXPECT_EQ(inst->disassemble(), expected);
 
     const InstDefUse def_use(*inst, wf_->wf_size());
@@ -2863,7 +2946,7 @@ TEST_P(RdnaDecodedImageAccessTest, DecodedLoadAndStorePrintNoncontiguousCoordina
 }
 
 TEST(ImageAccessTest, Rdna3MipAndAtomicPrintTheirNsaSelectorsAndModifiers) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA3);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna3);
   ASSERT_NE(decoder, nullptr);
   const test::Gfx11MimgEncoding mimg{.nsa = true,
                                      .dim = amdgpu::kImageDim2d,
@@ -2961,8 +3044,9 @@ TEST_P(RdnaDecodedImageAccessTest,
   cu_->write_vgpr(vb + 6, 1, 0);
   cu_->write_vgpr(vb + 2, 2, 1);
   cu_->write_vgpr(vb + 6, 2, 0);
-  for (uint32_t lane = 0; lane < 3; ++lane)
+  for (uint32_t lane = 0; lane < 3; ++lane) {
     cu_->write_vgpr(vb + 3, lane, 0); // Consecutive-register bug reads this as Y.
+  }
 
   cu_->write_vgpr(vb + 8, 0, 0x11111111);
   cu_->write_vgpr(vb + 8, 1, 0x22222222);
@@ -2972,8 +3056,9 @@ TEST_P(RdnaDecodedImageAccessTest,
   EXPECT_EQ(memory_.read32(kBase), 0u);
   EXPECT_EQ(memory_.read32(kBase + 4), 0x33333333u);
 
-  for (uint32_t lane = 0; lane < 3; ++lane)
+  for (uint32_t lane = 0; lane < 3; ++lane) {
     cu_->write_vgpr(vb + 8, lane, 0xdeadbeef);
+  }
   issue(true);
   EXPECT_EQ(cu_->read_vgpr(vb + 8, 0), 0x11111111u);
   EXPECT_EQ(cu_->read_vgpr(vb + 8, 1), 0xdeadbeefu);
@@ -3012,7 +3097,7 @@ TEST_P(RdnaDecodedImageAccessTest, NarrowRowPitchIsRejectedAndUnitWidthUsesQuali
 
   bind_resource(RdnaImageDescriptor{.width = 1, .height = 2, .pitch = 1});
   cu_->write_vgpr(vb + 8, 0, 0x87654321);
-  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+  if (GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
     auto decoded = decode(false);
     ASSERT_TRUE(decoded.succeeded());
     EXPECT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).failed());
@@ -3021,7 +3106,7 @@ TEST_P(RdnaDecodedImageAccessTest, NarrowRowPitchIsRejectedAndUnitWidthUsesQuali
   } else {
     issue(false);
     // Physical gfx1100/gfx1201 captures establish the minimum row quantum.
-    const uint32_t row_bytes = GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 256;
+    const uint32_t row_bytes = GetParam() == rocjitsu::IsaFamily::Rdna4 ? 128 : 256;
     EXPECT_EQ(memory_.read32(kBase + row_bytes), 0x87654321u);
   }
   EXPECT_EQ(memory_.read32(kBase + 4), 0xbbbbbbbbu);
@@ -3066,9 +3151,10 @@ TEST_P(RdnaDecodedImageAccessTest, StoreDmaskExpandsPackedInputsAndAppliesQualif
       cu_->write_vgpr(vb + 8 + offset, 0, test.packed[offset]);
     }
     issue(false, {.dmask = test.dmask, .d16 = test.d16});
-    const auto &expected = GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? test.gfx12 : test.gfx11;
-    for (uint32_t offset = 0; offset < expected.size(); ++offset)
+    const auto &expected = GetParam() == rocjitsu::IsaFamily::Rdna4 ? test.gfx12 : test.gfx11;
+    for (uint32_t offset = 0; offset < expected.size(); ++offset) {
       EXPECT_EQ(memory_.read32(kBase + offset * 4), expected[offset]) << "offset=" << offset;
+    }
   }
 }
 
@@ -3083,8 +3169,9 @@ TEST_P(RdnaDecodedImageAccessTest, PackedRgbStoresWriteConstantAlpha) {
         std::pair{kZyxOne, 0x33u | (0x22u << 10) | (0x11u << 20) | (1u << 30)}}) {
     SCOPED_TRACE(selectors);
     bind_resource(kRgba2101010Uint, selectors);
-    for (uint32_t component = 0; component < 4; ++component)
+    for (uint32_t component = 0; component < 4; ++component) {
       cu_->write_vgpr(vb + 8 + component, 0, 0x11 * (component + 1));
+    }
     issue(false, {.dmask = 15});
     EXPECT_EQ(memory_.read32(kBase), expected);
   }
@@ -3124,8 +3211,9 @@ TEST_P(RdnaDecodedImageAccessTest, D16LoadPreservesAndReadsOnlyThePartialDestina
   for (const bool d16 : {false, true}) {
     for (const uint8_t dmask : {1, 3, 7, 15}) {
       SCOPED_TRACE(testing::Message() << "d16=" << d16 << " dmask=" << unsigned{dmask});
-      for (uint32_t reg = 8; reg < 12; ++reg)
+      for (uint32_t reg = 8; reg < 12; ++reg) {
         cu_->write_vgpr(vb + reg, 0, 0xabcdffff);
+      }
 
       auto decoded = decode(true, {.dmask = dmask, .d16 = d16});
       ASSERT_TRUE(decoded.succeeded());
@@ -3152,12 +3240,15 @@ TEST_P(RdnaDecodedImageAccessTest, D16LoadPreservesAndReadsOnlyThePartialDestina
 
       for (uint32_t offset = 0; offset < registers; ++offset) {
         uint32_t expected = offset == 0 ? 0x1234 : 0;
-        if (!d16 && dmask == 15 && offset == 3)
+        if (!d16 && dmask == 15 && offset == 3) {
           expected = 1; // Descriptor W selector is constant one.
-        if (d16 && dmask == 15 && offset == 1)
+        }
+        if (d16 && dmask == 15 && offset == 1) {
           expected = 1u << 16;
-        if (preserves_last && offset == components / 2)
+        }
+        if (preserves_last && offset == components / 2) {
           expected |= 0xabcd0000;
+        }
         EXPECT_EQ(cu_->read_vgpr(vb + 8 + offset, 0), expected) << "offset=" << offset;
       }
     }
@@ -3180,8 +3271,8 @@ TEST_P(RdnaDecodedImageAccessTest, TfeLoadChecksTargetSupportAndPreservesResiden
   const InstDefUse def_use(*inst, wf_->wf_size());
   EXPECT_TRUE(def_use.defs.contains({RegClass::VGPR, 8, 2}));
 
-  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-      GetParam() == ROCJITSU_CODE_ARCH_RDNA3) {
+  if (GetParam() == rocjitsu::IsaFamily::Rdna1 || GetParam() == rocjitsu::IsaFamily::Rdna3_5 ||
+      GetParam() == rocjitsu::IsaFamily::Rdna3) {
     ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
     ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
@@ -3202,8 +3293,9 @@ TEST_P(RdnaDecodedImageAccessTest, OneDimensionalDimRejectsTwoDimensionalResourc
     for (const bool load : {false, true}) {
       for (const bool a16 : {false, true}) {
         for (const bool nsa : {false, true}) {
-          if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4 && nsa)
+          if (GetParam() == rocjitsu::IsaFamily::Rdna4 && nsa) {
             continue;
+          }
           SCOPED_TRACE(testing::Message() << "dim=" << unsigned{dim} << " load=" << load
                                           << " a16=" << a16 << " nsa=" << nsa);
           auto decoded = decode(load, {.dim = dim, .a16 = a16, .nsa = nsa});
@@ -3225,10 +3317,11 @@ TEST_P(RdnaDecodedImageAccessTest, TwoDimensionalArrayDimUsesTwoDimensionalResou
   wf_->set_exec(1);
   for (const bool a16 : {false, true}) {
     for (const bool nsa : {false, true}) {
-      if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4 && nsa)
+      if (GetParam() == rocjitsu::IsaFamily::Rdna4 && nsa) {
         continue;
+      }
       SCOPED_TRACE(testing::Message() << "a16=" << a16 << " nsa=" << nsa);
-      const bool noncontiguous = GetParam() == ROCJITSU_CODE_ARCH_RDNA4 || nsa;
+      const bool noncontiguous = GetParam() == rocjitsu::IsaFamily::Rdna4 || nsa;
       cu_->write_vgpr(vb + 2, 0, a16 ? 2u | (1u << 16) : 2u);
       cu_->write_vgpr(vb + 3, 0, noncontiguous ? 0xdeadbeef : 1u);
       cu_->write_vgpr(vb + 6, 0, noncontiguous ? 1u : 0xdeadbeef);
@@ -3264,8 +3357,9 @@ TEST_P(RdnaDecodedImageAccessTest, TwoDimensionalArrayDimUsesTwoDimensionalResou
 }
 
 TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
-  if (GetParam() == ROCJITSU_CODE_ARCH_RDNA4)
+  if (GetParam() == rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "RDNA4 VIMAGE encodes address registers individually";
+  }
 
   struct Case {
     uint8_t dim;
@@ -3290,11 +3384,12 @@ TEST_P(RdnaDecodedImageAccessTest, NonNsaAddressWidthFollowsDimAndA16) {
       EXPECT_EQ(vaddr->size_bits(), test.expected_bits);
       std::string expected =
           std::string(load ? "image_load v8, " : "image_store v8, ") + test.address + ", s[8:15]";
-      if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3 || GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      if (GetParam() == rocjitsu::IsaFamily::Rdna3 || GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
         expected += std::string{" dmask:0x1 dim:SQ_RSRC_IMG_"} +
                     (test.dim == amdgpu::kImageDim1d ? "1D" : "2D") + " unorm";
-        if (test.a16)
+        if (test.a16) {
           expected += " a16";
+        }
       }
       EXPECT_EQ(inst->disassemble(), expected);
     }
@@ -3310,9 +3405,11 @@ TEST_P(RdnaDecodedImageAccessTest, R128LoadAndStoreUseOnlyTheFourDescriptorWords
       SCOPED_TRACE(testing::Message() << "poison_trailing_words=" << poison_trailing_words);
       bind_resource(RdnaImageDescriptor{.type = amdgpu::kImage1d + dim,
                                         .height = dim == amdgpu::kImageDim1d ? 1u : 2u});
-      if (poison_trailing_words)
-        for (uint32_t reg = kResourceBase + 4; reg < kResourceBase + 8; ++reg)
+      if (poison_trailing_words) {
+        for (uint32_t reg = kResourceBase + 4; reg < kResourceBase + 8; ++reg) {
           cu_->write_sgpr(sb + reg, 0xffffffffu);
+        }
+      }
 
       for (bool load : {false, true}) {
         SCOPED_TRACE(testing::Message() << "load=" << load);
@@ -3322,7 +3419,8 @@ TEST_P(RdnaDecodedImageAccessTest, R128LoadAndStoreUseOnlyTheFourDescriptorWords
         ASSERT_TRUE(decoded.succeeded());
         std::unique_ptr<Instruction> inst = std::move(decoded).value();
         ASSERT_NE(inst, nullptr);
-        if (GetParam() == ROCJITSU_CODE_ARCH_RDNA3 || GetParam() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+        if (GetParam() == rocjitsu::IsaFamily::Rdna3 ||
+            GetParam() == rocjitsu::IsaFamily::Rdna3_5) {
           wf_->set_exec(1);
           inst->execute(*inst, wf_);
           ASSERT_FALSE(wf_->instruction_execution_failed());
@@ -3369,22 +3467,22 @@ TEST_P(RdnaDecodedImageAccessTest, LayeredAnd3dLinearImagesUseImplicitRowPitch) 
              .da = true,
              .unorm = true})
             .succeeded());
-    const uint32_t row_bytes = GetParam() == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 256;
+    const uint32_t row_bytes = GetParam() == rocjitsu::IsaFamily::Rdna4 ? 128 : 256;
     EXPECT_EQ(state.per_lane_addr[0], kBase + row_bytes);
     EXPECT_EQ(state.lane_mask, 1u);
   }
 }
 
 INSTANTIATE_TEST_SUITE_P(RdnaArchitectures, RdnaDecodedImageAccessTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                         ROCJITSU_CODE_ARCH_RDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                         rocjitsu::IsaFamily::Rdna4));
 
 TEST(ImageAccessTest, UnsupportedArchitectureIsRejected) {
   amdgpu::GpuMemory memory{"unsupported_image_memory"};
   amdgpu::L2Cache l2{"unsupported_image_l2"};
   l2.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_CDNA3;
+  cfg.arch = rocjitsu::IsaFamily::Cdna3;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 32;
   cfg.vgprs_per_wf = 32;
@@ -3406,12 +3504,13 @@ TEST(ImageAccessTest, UnsupportedArchitectureIsRejected) {
   wf->halt();
 }
 
-std::array<uint32_t, 8> rdna_descriptor(const Image &image, rj_code_arch_t arch) {
+std::array<uint32_t, 8> rdna_descriptor(const Image &image, rocjitsu::IsaFamily arch) {
   std::array<uint32_t, 8> words{};
-  const bool gfx12 = arch == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = arch == rocjitsu::IsaFamily::Rdna4;
   const auto set = [&](uint32_t bit, uint32_t count, uint64_t value) {
-    for (uint32_t index = 0; index < count; ++index)
+    for (uint32_t index = 0; index < count; ++index) {
       words[(bit + index) / 32] |= ((value >> index) & 1u) << ((bit + index) % 32);
+    }
   };
   set(0, 40, kBase >> 8);
   set(gfx12 ? 49 : 52, 8, image.rdna_format);
@@ -3422,7 +3521,7 @@ std::array<uint32_t, 8> rdna_descriptor(const Image &image, rj_code_arch_t arch)
   set(gfx12 ? 57 : 108, gfx12 ? 5 : 4, image.base_level);
   set(gfx12 ? 111 : 112, gfx12 ? 5 : 4, image.last_level);
   const bool max_level_in_word5 =
-      arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2;
+      arch == rocjitsu::IsaFamily::Rdna1 || arch == rocjitsu::IsaFamily::Rdna2;
   set(gfx12 ? 44 : max_level_in_word5 ? 164 : 48, gfx12 ? 5 : 4, image.mip_levels - 1);
   set(max_level_in_word5 ? 40 : gfx12 ? 186 : 187, gfx12 ? 13 : 12, image.min_lod);
   set(180, 3, image.perf_mod);
@@ -3430,10 +3529,11 @@ std::array<uint32_t, 8> rdna_descriptor(const Image &image, rj_code_arch_t arch)
   set(116, 5, image.swizzle_mode);
   if (image.type == amdgpu::kImage3d || image.type == amdgpu::kImage1dArray ||
       image.type == amdgpu::kImage2dArray || image.type == amdgpu::kImageCube ||
-      image.type == amdgpu::kImage2dMsaaArray)
-    set(128, arch == ROCJITSU_CODE_ARCH_RDNA1 ? 16 : 13, image.depth - 1);
-  else if (arch != ROCJITSU_CODE_ARCH_RDNA1)
+      image.type == amdgpu::kImage2dMsaaArray) {
+    set(128, arch == rocjitsu::IsaFamily::Rdna1 ? 16 : 13, image.depth - 1);
+  } else if (arch != rocjitsu::IsaFamily::Rdna1) {
     set(128, gfx12 ? 16 : 14, image.pitch - 1);
+  }
   return words;
 }
 
@@ -3458,7 +3558,7 @@ TEST(ImageAccessTest, Rdna2ImageResultsMustFitTheLogicalAllocation) {
   amdgpu::L2Cache l2{"image_l2"};
   l2.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = ROCJITSU_CODE_ARCH_RDNA2;
+  cfg.arch = rocjitsu::IsaFamily::Rdna2;
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -3472,8 +3572,9 @@ TEST(ImageAccessTest, Rdna2ImageResultsMustFitTheLogicalAllocation) {
   const auto sbase = wf->sgpr_alloc().base;
   const auto vbase = wf->vgpr_alloc().base;
   const auto desc = rdna_descriptor(Image{.rdna_format = 22}, cfg.arch); // R32_FLOAT at kBase.
-  for (uint32_t i = 0; i < desc.size(); ++i)
+  for (uint32_t i = 0; i < desc.size(); ++i) {
     cu->write_sgpr(sbase + i, desc[i]);
+  }
   memory.write32(kBase, 0x3f800000);
   amdgpu::GlobalMemPipeline pipeline(&cu->l1_vector(), &l2);
 
@@ -3501,8 +3602,9 @@ TEST(ImageAccessTest, Rdna2ImageResultsMustFitTheLogicalAllocation) {
       const auto first = static_cast<uint8_t>(16 - c.words + overflow);
       SCOPED_TRACE(testing::Message()
                    << c.opcode << " d16=" << c.d16 << " first=" << unsigned(first));
-      for (uint32_t i = first; i <= 16; ++i)
+      for (uint32_t i = first; i <= 16; ++i) {
         cu->write_vgpr(vbase + i, 0, sentinel);
+      }
       const bool query = c.opcode == rdna2::kImageGetResinfoMimg;
       auto inst = decoder->decode_window(rdna2::build_mimg(c.opcode, {.dim = amdgpu::kImageDim2d,
                                                                       .dmask = c.mask,
@@ -3521,15 +3623,17 @@ TEST(ImageAccessTest, Rdna2ImageResultsMustFitTheLogicalAllocation) {
         EXPECT_EQ(state->exec_mask, overflow ? 0u : 15u);
         EXPECT_EQ(state->lane_mask, overflow ? 0u : 15u);
         if (state->image_sample && overflow) {
-          for (const auto &tap : state->image_sample->taps)
+          for (const auto &tap : state->image_sample->taps) {
             EXPECT_EQ(tap.lane_mask, 0u);
+          }
         }
         ASSERT_EQ(pipeline.issue(inst.value().release(), *wf), amdgpu::VmAccessOutcome::Complete);
       }
       EXPECT_EQ(wf->exec(), 15u);
       if (overflow) {
-        for (uint32_t i = first; i <= 16; ++i)
+        for (uint32_t i = first; i <= 16; ++i) {
           EXPECT_EQ(cu->read_vgpr(vbase + i, 0), sentinel);
+        }
       } else {
         EXPECT_EQ(cu->read_vgpr(vbase + first, 0), c.first_value);
         EXPECT_EQ(cu->read_vgpr(vbase + 16, 0), sentinel);
@@ -3577,7 +3681,7 @@ TEST(ImageAccessTest, Rdna2ImageResultsMustFitTheLogicalAllocation) {
 }
 
 class AllImageAccessTest : public ImageAccessFixture,
-                           public testing::WithParamInterface<rj_code_arch_t> {
+                           public testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
   bool scattered_ = false;
   bool packed_coordinates_ = false;
@@ -3588,7 +3692,7 @@ protected:
   bool texel_fault_ = false;
   bool declare_array_ = true;
   std::optional<uint32_t> dimension_override_;
-  rj_code_arch_t arch() const override { return GetParam(); }
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
 
   void bind_image(uint32_t dimensions, uint32_t width = 3, uint32_t height = 2,
                   uint32_t swizzle = 0) {
@@ -3605,37 +3709,44 @@ protected:
   void bind_image(const Image &image) {
     const std::array<uint32_t, 8> words =
         arch_is_cdna_4_or_lower(arch()) ? descriptor(image) : rdna_descriptor(image, arch());
-    for (uint32_t index = 0; index < words.size(); ++index)
+    for (uint32_t index = 0; index < words.size(); ++index) {
       cu_->write_sgpr(sb_ + index, words[index]);
+    }
   }
 
   template <typename Fields> Fields fields(uint32_t dimensions) {
     Fields encoding{};
     encoding.dmask = component_mask_;
-    if constexpr (requires { encoding.tfe; })
+    if constexpr (requires { encoding.tfe; }) {
       encoding.tfe = texel_fault_;
+    }
     encoding.a16 = packed_coordinates_;
     encoding.d16 = packed_data_;
-    if constexpr (requires { encoding.srsrc; })
+    if constexpr (requires { encoding.srsrc; }) {
       encoding.srsrc = resource_selector_;
-    else
+    } else {
       encoding.rsrc = resource_selector_ * 4;
+    }
     encoding.vdata = 8;
-    if constexpr (requires { encoding.vaddr; })
+    if constexpr (requires { encoding.vaddr; }) {
       encoding.vaddr = 0;
-    else {
+    } else {
       encoding.vaddr0 = 0;
       encoding.vaddr1 = scattered_ ? 10 : 1;
       encoding.vaddr2 = scattered_ ? 12 : 2;
     }
-    if constexpr (requires { encoding.nsa; })
+    if constexpr (requires { encoding.nsa; }) {
       encoding.nsa = scattered_;
-    if constexpr (requires { encoding.unorm; })
+    }
+    if constexpr (requires { encoding.unorm; }) {
       encoding.unorm = unnormalized_;
-    if constexpr (requires { encoding.da; })
+    }
+    if constexpr (requires { encoding.da; }) {
       encoding.da = declare_array_;
-    if constexpr (requires { encoding.dim; })
+    }
+    if constexpr (requires { encoding.dim; }) {
       encoding.dim = dimension_override_.value_or(dimensions - 1);
+    }
     return encoding;
   }
   template <typename Fields, typename Builder>
@@ -3652,49 +3763,49 @@ protected:
                                                    bool explicit_mip = false) {
     std::array<uint32_t, 3> words{};
     switch (arch()) {
-    case ROCJITSU_CODE_ARCH_CDNA1:
+    case rocjitsu::IsaFamily::Cdna1:
       words = image_instruction_words(
           cdna1::build_mimg,
           load ? (explicit_mip ? cdna1::kImageLoadMipMimg : cdna1::kImageLoadMimg)
                : (explicit_mip ? cdna1::kImageStoreMipMimg : cdna1::kImageStoreMimg),
           fields<cdna1::MimgBuilderFields>(dimensions));
       break;
-    case ROCJITSU_CODE_ARCH_CDNA2:
+    case rocjitsu::IsaFamily::Cdna2:
       words = image_instruction_words(
           cdna2::build_mimg,
           load ? (explicit_mip ? cdna2::kImageLoadMipMimg : cdna2::kImageLoadMimg)
                : (explicit_mip ? cdna2::kImageStoreMipMimg : cdna2::kImageStoreMimg),
           fields<cdna2::MimgBuilderFields>(dimensions));
       break;
-    case ROCJITSU_CODE_ARCH_RDNA1:
+    case rocjitsu::IsaFamily::Rdna1:
       words = image_instruction_words(
           rdna1::build_mimg,
           load ? (explicit_mip ? rdna1::kImageLoadMipMimg : rdna1::kImageLoadMimg)
                : (explicit_mip ? rdna1::kImageStoreMipMimg : rdna1::kImageStoreMimg),
           fields<rdna1::MimgBuilderFields>(dimensions));
       break;
-    case ROCJITSU_CODE_ARCH_RDNA2:
+    case rocjitsu::IsaFamily::Rdna2:
       words = image_instruction_words(
           rdna2::build_mimg,
           load ? (explicit_mip ? rdna2::kImageLoadMipMimg : rdna2::kImageLoadMimg)
                : (explicit_mip ? rdna2::kImageStoreMipMimg : rdna2::kImageStoreMimg),
           fields<rdna2::MimgBuilderFields>(dimensions));
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3:
+    case rocjitsu::IsaFamily::Rdna3:
       words = image_instruction_words(
           rdna3::build_mimg,
           load ? (explicit_mip ? rdna3::kImageLoadMipMimg : rdna3::kImageLoadMimg)
                : (explicit_mip ? rdna3::kImageStoreMipMimg : rdna3::kImageStoreMimg),
           fields<rdna3::MimgBuilderFields>(dimensions));
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3_5:
+    case rocjitsu::IsaFamily::Rdna3_5:
       words = image_instruction_words(
           rdna3_5::build_mimg,
           load ? (explicit_mip ? rdna3_5::kImageLoadMipMimg : rdna3_5::kImageLoadMimg)
                : (explicit_mip ? rdna3_5::kImageStoreMipMimg : rdna3_5::kImageStoreMimg),
           fields<rdna3_5::MimgBuilderFields>(dimensions));
       break;
-    case ROCJITSU_CODE_ARCH_RDNA4:
+    case rocjitsu::IsaFamily::Rdna4:
       words = image_instruction_words(
           rdna4::build_vimage,
           load ? (explicit_mip ? rdna4::kImageLoadMipVimage : rdna4::kImageLoadVimage)
@@ -3704,23 +3815,27 @@ protected:
     default:
       return {};
     }
-    if (scattered_ && arch() != ROCJITSU_CODE_ARCH_RDNA4)
+    if (scattered_ && arch() != rocjitsu::IsaFamily::Rdna4) {
       words[2] = 10 | (12 << 8);
+    }
     std::unique_ptr<Decoder> decoder = Decoder::create(arch());
     DecodeResult decoded = decoder->decode(words.data());
     EXPECT_TRUE(decoded.succeeded());
-    if (decoded.failed())
+    if (decoded.failed()) {
       return {};
+    }
     return std::move(decoded).value();
   }
   bool decoded_issue(bool load, uint32_t dimensions, bool mip = false) {
     std::unique_ptr<Instruction> inst = decoded_instruction(load, dimensions, mip);
-    if (!inst)
+    if (!inst) {
       return false;
+    }
     EXPECT_TRUE(inst->is_memory_op());
     inst->execute(*inst, wf_);
-    if (!inst->data())
+    if (!inst->data()) {
       return false;
+    }
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
     EXPECT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
     cu_->l1_vector().flush_all();
@@ -3740,13 +3855,15 @@ protected:
       void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                  uint8_t) override {
         const auto index = reg - wave->vgpr_alloc().base;
-        if (index < coords.size())
+        if (index < coords.size()) {
           coords[index] |= lanes;
+        }
       }
       void onAmdgpuReadSgpr(const amdgpu::Wavefront *wave, uint32_t reg) override {
         const auto index = reg - wave->sgpr_alloc().base;
-        if (index < 12)
+        if (index < 12) {
           scalars |= 1u << index;
+        }
       }
     };
     bind_image(2, 4, 4);
@@ -3763,14 +3880,14 @@ protected:
       const uint8_t dst = !lod_query && (mask == 1 || mask == 3) ? wf_->num_vgprs() - 1 : 8;
       const bool reads_inputs = (mask || warning) && (lod_query || mask != 3);
       auto decode = [&] {
-        if (arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+        if (arch() == rocjitsu::IsaFamily::Rdna4) {
           rdna4::VimageBuilderFields fields{};
           fields.dim = 1;
           fields.dmask = mask;
           fields.vdata = dst;
           return decoder->decode_window(rdna4::build_vimage(rdna4::kImageGetResinfoVimage, fields));
         }
-        if (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5) {
+        if (arch() == rocjitsu::IsaFamily::Rdna3 || arch() == rocjitsu::IsaFamily::Rdna3_5) {
           rdna3::MimgBuilderFields fields{};
           fields.dim = 1;
           fields.dmask = mask;
@@ -3800,8 +3917,9 @@ protected:
         unsigned hazards = 0;
         score.clear();
         score.bind(0x200, &hazards, [](void *data, const auto &hazard) {
-          if (!hazard.write)
+          if (!hazard.write) {
             ++*static_cast<unsigned *>(data);
+          }
         });
         constexpr auto kind = amdgpu::WaitCounterKind::Load;
         score.add({score.issue(kind), 0x100, uint64_t{1} << lane, reg, kind, 0xf});
@@ -3815,7 +3933,7 @@ protected:
       cu_->write_vgpr(vb_ + 8, 1, 0xfeedbeef);
       cu_->write_vgpr(vb_ + 9, 0, 0xfeedbeef);
       const auto issued = cu_->execute_instruction(inst.value().get(), *wf_);
-      if (lod_query && mask == 8 && arch() != ROCJITSU_CODE_ARCH_RDNA3) {
+      if (lod_query && mask == 8 && arch() != rocjitsu::IsaFamily::Rdna3) {
         ASSERT_TRUE(issued.failed());
         EXPECT_EQ(wf_->instruction_execution_error(),
                   amdgpu::InstructionExecutionError::UnsupportedOperandValue);
@@ -3832,35 +3950,38 @@ protected:
           EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), 0xfeedbeefu);
         }
       }
-      for (unsigned reg = 0; reg < 2; ++reg)
+      for (unsigned reg = 0; reg < 2; ++reg) {
         for (unsigned lane : {0u, 1u, 2u, 3u}) {
           const bool actual = (reads->coords[reg] >> lane) & 1u;
           EXPECT_EQ(actual, bool(reads_inputs && (lod_query ? lane < 3 : reg == 0 && lane == 0)));
           EXPECT_EQ(pending({RegClass::VGPR, static_cast<uint16_t>(reg), 1}, lane), actual);
         }
+      }
       const uint16_t expected_scalars = reads_inputs ? (lod_query ? 0xfffu : 0xffu) : 0u;
       EXPECT_EQ(reads->scalars, expected_scalars);
-      for (uint16_t s : {0u, 7u, 8u, 11u})
+      for (uint16_t s : {0u, 7u, 8u, 11u}) {
         EXPECT_EQ(pending({RegClass::SGPR, s, 1}, 0), bool(expected_scalars & (1u << s)));
+      }
     }
   }
 };
 INSTANTIATE_TEST_SUITE_P(RdnaTargets, ImageQueryFootprintTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                         ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                         ROCJITSU_CODE_ARCH_RDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                         rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                         rocjitsu::IsaFamily::Rdna4));
 
 TEST_P(ImageQueryFootprintTest, ResourceQueryWaitsFollowTheChannelMask) {
   check_query_inputs(false);
 }
 
 TEST_P(ImageQueryFootprintTest, LodQueryWaitsFollowTheChannelMask) {
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (arch() == rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "GFX12 GET_LOD has no execution handler";
   }
   check_query_inputs(true);
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() == rocjitsu::IsaFamily::Rdna3 || arch() == rocjitsu::IsaFamily::Rdna3_5) {
     check_query_inputs(true, true);
+  }
 }
 
 class Gfx10PixelTransferTest : public AllImageAccessTest {
@@ -3870,12 +3991,14 @@ protected:
     auto rdna1_fields = fields<rdna1::MimgBuilderFields>(2);
     auto rdna2_fields = fields<rdna2::MimgBuilderFields>(2);
     rdna1_fields.r128 = rdna2_fields.r128 = r128;
-    const auto words = arch() == ROCJITSU_CODE_ARCH_RDNA1 ? rdna1::build_mimg(opcode, rdna1_fields)
-                                                          : rdna2::build_mimg(opcode, rdna2_fields);
+    const auto words = arch() == rocjitsu::IsaFamily::Rdna1
+                           ? rdna1::build_mimg(opcode, rdna1_fields)
+                           : rdna2::build_mimg(opcode, rdna2_fields);
     auto decoder = Decoder::create(arch());
     auto decoded = decoder->decode(words.data());
-    if (decoded.failed())
+    if (decoded.failed()) {
       return false;
+    }
     auto inst = std::move(decoded).value();
     inst->execute(*inst, wf_);
     if (!inst->data()) {
@@ -3892,7 +4015,7 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx10, Gfx10PixelTransferTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2));
+                         testing::Values(rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2));
 
 TEST_P(Gfx10PixelTransferTest, FloatingImageAtomicsRequireSingleDwordTexels) {
   wf_->set_exec(1);
@@ -3951,8 +4074,9 @@ TEST_P(Gfx10PixelTransferTest, FloatingImageAtomicsRequireSingleDwordTexels) {
 }
 
 TEST_P(AllImageAccessTest, StoresDiscardOnlyExplicitSparseTexels) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA2 && !amdgpu::has_gfx11_plus_image_operands(arch()))
+  if (arch() != rocjitsu::IsaFamily::Rdna2 && !amdgpu::has_gfx11_plus_image_operands(arch())) {
     GTEST_SKIP();
+  }
   class Pages final : public amdgpu::AddressSpaceTranslator {
   public:
     amdgpu::IdentityAddressSpaceTranslator identity;
@@ -3960,8 +4084,9 @@ TEST_P(AllImageAccessTest, StoresDiscardOnlyExplicitSparseTexels) {
     bool sparse = false;
     amdgpu::VmTranslationResult translate(uint64_t address, size_t width,
                                           amdgpu::VmAccessKind kind) const override {
-      if (!mapped && address >= kBase + 4096 && address < kBase + 8192)
+      if (!mapped && address >= kBase + 4096 && address < kBase + 8192) {
         return {};
+      }
       return identity.translate(address, width, kind);
     }
     std::shared_ptr<const amdgpu::PrtRanges> nonresident_prt_ranges() const override {
@@ -3981,8 +4106,9 @@ TEST_P(AllImageAccessTest, StoresDiscardOnlyExplicitSparseTexels) {
   wf_->set_address_space(handle);
   const auto resource =
       rdna_image_descriptor(arch(), {.format = 20, .width = 2048, .height = 1, .pitch = 2048});
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   for (bool packed : {false, true}) {
     const auto gfx10_words =
         rdna2::build_mimg(packed ? rdna2::kImageStorePckMimg : rdna2::kImageStoreMimg,
@@ -3994,9 +4120,9 @@ TEST_P(AllImageAccessTest, StoresDiscardOnlyExplicitSparseTexels) {
         rdna4::build_vimage(packed ? rdna4::kImageStorePckVimage : rdna4::kImageStoreVimage,
                             {.dim = 1, .dmask = 1, .vdata = 8, .vaddr1 = 1});
     const std::span<const uint32_t> words =
-        arch() == ROCJITSU_CODE_ARCH_RDNA2   ? std::span<const uint32_t>(gfx10_words)
-        : arch() == ROCJITSU_CODE_ARCH_RDNA4 ? std::span<const uint32_t>(gfx12_words)
-                                             : std::span<const uint32_t>(gfx11_words);
+        arch() == rocjitsu::IsaFamily::Rdna2   ? std::span<const uint32_t>(gfx10_words)
+        : arch() == rocjitsu::IsaFamily::Rdna4 ? std::span<const uint32_t>(gfx12_words)
+                                               : std::span<const uint32_t>(gfx11_words);
     auto decoder = Decoder::create(arch());
     wf_->set_exec(3);
     write_coordinates(0, {0, 0, 0});
@@ -4036,15 +4162,17 @@ TEST_P(AllImageAccessTest, StoresDiscardOnlyExplicitSparseTexels) {
 }
 
 TEST_P(AllImageAccessTest, SparseImageRoutingIsIndependentOfDebuggerProbes) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
   class MissingPage final : public amdgpu::AddressSpaceTranslator {
     amdgpu::IdentityAddressSpaceTranslator identity_;
     amdgpu::VmTranslationResult translate(uint64_t addr, size_t size,
                                           amdgpu::VmAccessKind access) const override {
-      if ((addr >> 12) == (kBase + 4096) >> 12)
+      if ((addr >> 12) == (kBase + 4096) >> 12) {
         return {};
+      }
       return identity_.translate(addr, size, access);
     }
     std::shared_ptr<const amdgpu::PrtRanges> nonresident_prt_ranges() const override {
@@ -4060,8 +4188,9 @@ TEST_P(AllImageAccessTest, SparseImageRoutingIsIndependentOfDebuggerProbes) {
     bool observes_memory_routing() const override { return true; }
     void onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access) override {
       masks.push_back(access.request_lane_mask);
-      for (const auto &tap : access.image_sample_footprints)
+      for (const auto &tap : access.image_sample_footprints) {
         tap_mask |= tap.lane_mask;
+      }
     }
     std::vector<uint64_t> masks;
     uint64_t tap_mask = 0;
@@ -4077,15 +4206,17 @@ TEST_P(AllImageAccessTest, SparseImageRoutingIsIndependentOfDebuggerProbes) {
   wf_->set_exec(3);
   memory_.write32(kBase, 0x3f800000);
   memory_.write32(kBase + 4, 0x3f800000);
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
   auto resource =
       rdna_image_descriptor(arch(), {.format = 22, .width = 2048, .height = 1, .pitch = 2048});
   resource[5] = gfx12 ? 1u << 5 : 1u << 8;
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 8, 2 | (2 << 3));
-  if (gfx12)
+  if (gfx12) {
     cu_->write_sgpr(sb_ + 10, (1u << 20) | (1u << 22));
+  }
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto observer = std::make_unique<Observer>();
   auto *observed = observer.get();
@@ -4113,14 +4244,16 @@ TEST_P(AllImageAccessTest, SparseImageRoutingIsIndependentOfDebuggerProbes) {
         fields.dim = fields.unorm = fields.dmask = fields.tfe = fields.vaddr1 = 1;
         fields.vdata = fields.samp = 8;
         const auto words = rdna4::build_vsample(rdna4::kImageSampleLzVsample, fields);
-        for (unsigned i = 0; i < words.size(); ++i)
+        for (unsigned i = 0; i < words.size(); ++i) {
           memory_.write32(pc + 4 * i, words[i]);
+        }
       } else {
         write_coordinates(1, {x, 0, 0});
         const auto words = rdna3_5::build_mimg(
             rdna3_5::kImageLoadMimg, {.dim = 1, .unorm = 1, .dmask = 1, .vdata = 8, .tfe = 1});
-        for (unsigned i = 0; i < words.size(); ++i)
+        for (unsigned i = 0; i < words.size(); ++i) {
           memory_.write32(pc + 4 * i, words[i]);
+        }
       }
       wf_->pc = pc;
       cu_->step();
@@ -4180,7 +4313,7 @@ TEST_P(Gfx10PixelTransferTest, ResidentAndSparseLanesWriteIndependentTexelStatus
     auto fields2 = fields<rdna2::MimgBuilderFields>(2);
     fields1.dmask = fields2.dmask = 1;
     fields1.tfe = fields2.tfe = tfe;
-    auto words = arch() == ROCJITSU_CODE_ARCH_RDNA1
+    auto words = arch() == rocjitsu::IsaFamily::Rdna1
                      ? rdna1::build_mimg(rdna1::kImageLoadMimg, fields1)
                      : rdna2::build_mimg(rdna2::kImageLoadMimg, fields2);
     auto decoded = Decoder::create(arch())->decode_window(words);
@@ -4209,14 +4342,16 @@ TEST_P(Gfx10PixelTransferTest, ShortResourceAndMsaaOperandsAddressDistinctFragme
   dimension_override_ = amdgpu::kImageDim2dMsaa;
   wf_->set_exec(1);
   // Poison all following SGPRs. R128 brings exactly four descriptor words.
-  for (uint32_t i = 4; i < 8; ++i)
+  for (uint32_t i = 4; i < 8; ++i) {
     cu_->write_sgpr(sb_ + i, 0xffffffffu);
+  }
   // Independent Addr2ComputeSurfaceAddrFromCoord results for (3,7), 32bpp.
-  const std::array<uint32_t, 4> offsets = arch() == ROCJITSU_CODE_ARCH_RDNA1
+  const std::array<uint32_t, 4> offsets = arch() == rocjitsu::IsaFamily::Rdna1
                                               ? std::array<uint32_t, 4>{124, 16508, 32892, 49276}
                                               : std::array<uint32_t, 4>{188, 16572, 32956, 49340};
-  for (uint32_t fragment = 0; fragment < 4; ++fragment)
+  for (uint32_t fragment = 0; fragment < 4; ++fragment) {
     memory_.write32(kBase + offsets[fragment], 0x1000u + fragment);
+  }
   for (uint32_t fragment = 0; fragment < 4; ++fragment) {
     write_coordinates(0, {3, 7, fragment});
     ASSERT_TRUE(transfer(rdna1::kImageLoadMimg, 1, true));
@@ -4228,7 +4363,7 @@ TEST_P(Gfx10PixelTransferTest, ShortResourceAndMsaaOperandsAddressDistinctFragme
   EXPECT_EQ(memory_.read32(kBase + offsets[1]), 0x1001u);
   EXPECT_EQ(memory_.read32(kBase + offsets[2]), 0x2au);
   EXPECT_EQ(memory_.read32(kBase + offsets[3]), 0x1003u);
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA2) {
+  if (arch() == rocjitsu::IsaFamily::Rdna2) {
     write_coordinates(0, {3, 7, 0});
     ASSERT_TRUE(transfer(rdna2::kImageMsaaLoadMimg, 0xe, true));
     EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0x1001u);
@@ -4301,8 +4436,9 @@ TEST_P(Gfx10PixelTransferTest, FormattedStoresInvertAChannelPermutation) {
   bind_image(image);
   constexpr unsigned yzwx = 5 | (6 << 3) | (7 << 6) | (4 << 9);
   cu_->write_sgpr(sb_ + 3, (cu_->read_sgpr(sb_ + 3) & ~0xfffu) | yzwx);
-  for (unsigned i = 0; i < 4; ++i)
+  for (unsigned i = 0; i < 4; ++i) {
     cu_->write_vgpr(vb_ + 8 + i, 0, i + 1);
+  }
   ASSERT_TRUE(transfer(rdna1::kImageStoreMimg, 15));
   EXPECT_EQ(memory_.read32(kBase), 0x03020104u);
 }
@@ -4348,8 +4484,9 @@ TEST_P(Gfx10PixelTransferTest, ReadsCompressedBlocksWithPerLaneTexelSelectors) {
     const uint32_t block_bytes = format == 169 || format == 175 || format == 176 ? 8 : 16;
     for (unsigned block = 0; block < 2; ++block) {
       const uint64_t address = kBase + block * block_bytes;
-      for (unsigned word = 0; word < block_bytes; word += 4)
+      for (unsigned word = 0; word < block_bytes; word += 4) {
         memory_.write32(address + word, 0);
+      }
       if (color) {
         const uint64_t rgb = address + (format == 169 ? 0 : 8);
         memory_.write32(rgb, 0x07e0f800);  // endpoint 0 red, endpoint 1 green
@@ -4390,9 +4527,9 @@ TEST_P(Gfx10PixelTransferTest, RawMaskedWordsAndConvertedStoresUseDifferentTexel
 TEST_P(AllImageAccessTest, ImplicitSampleUsesQuadDerivativesToSelectTheMip) {
   Image image;
   image.width = image.height = 64;
-  image.swizzle_mode = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 0;
+  image.swizzle_mode = arch() == rocjitsu::IsaFamily::Rdna4 ? 1 : 0;
   image.mip_levels = 4;
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
   const auto bind_view = [&](uint32_t base, uint32_t last) {
     image.base_level = base;
     image.last_level = last;
@@ -4400,35 +4537,36 @@ TEST_P(AllImageAccessTest, ImplicitSampleUsesQuadDerivativesToSelectTheMip) {
   };
   const std::array<uint32_t, 4> sampler{2 | (2 << 3) | (2 << 6),
                                         gfx12 ? 0x1fffu << 13 : 0xfffu << 12, 1u << 26, 0};
-  for (uint32_t i = 0; i < sampler.size(); ++i)
+  for (uint32_t i = 0; i < sampler.size(); ++i) {
     cu_->write_sgpr(sb_ + 8 + i, sampler[i]);
+  }
   std::array<uint32_t, 3> words{};
   switch (arch()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     words = sample_mimg_words<cdna1::MimgBuilderFields>(cdna1::build_mimg, cdna1::kImageSampleMimg,
                                                         false, 8);
     break;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     words = sample_mimg_words<cdna2::MimgBuilderFields>(cdna2::build_mimg, cdna2::kImageSampleMimg,
                                                         false, 8);
     break;
-  case ROCJITSU_CODE_ARCH_RDNA1:
+  case rocjitsu::IsaFamily::Rdna1:
     words = sample_mimg_words<rdna1::MimgBuilderFields>(rdna1::build_mimg, rdna1::kImageSampleMimg,
                                                         false, 8);
     break;
-  case ROCJITSU_CODE_ARCH_RDNA2:
+  case rocjitsu::IsaFamily::Rdna2:
     words = sample_mimg_words<rdna2::MimgBuilderFields>(rdna2::build_mimg, rdna2::kImageSampleMimg,
                                                         false, 8);
     break;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     words = sample_mimg_words<rdna3::MimgBuilderFields>(rdna3::build_mimg, rdna3::kImageSampleMimg,
                                                         false, 8);
     break;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     words = sample_mimg_words<rdna3_5::MimgBuilderFields>(rdna3_5::build_mimg,
                                                           rdna3_5::kImageSampleMimg, false, 8);
     break;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     words = rdna4::build_vsample(
         rdna4::kImageSampleVsample,
         {.dim = 1, .dmask = 1, .vdata = 8, .rsrc = 0, .samp = 8, .vaddr0 = 0, .vaddr1 = 1});
@@ -4477,31 +4615,35 @@ TEST_P(AllImageAccessTest, ImplicitSampleUsesQuadDerivativesToSelectTheMip) {
       EXPECT_TRUE(decoded.succeeded());
       auto inst = std::move(decoded).value();
       inst->execute(*inst, wf_);
-      if (!inst->data())
+      if (!inst->data()) {
         return false;
+      }
       amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
       EXPECT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
       return true;
     };
     ASSERT_TRUE(issue_sample());
-    for (uint32_t lane = 0; lane < 4; ++lane)
+    for (uint32_t lane = 0; lane < 4; ++lane) {
       EXPECT_EQ(cu_->read_vgpr(vb_ + 8, lane), 0xa0000000u + level);
+    }
     EXPECT_TRUE(wf_->wait_counters().empty());
     if (test.base == 0 && (level == 0 || level == 2)) {
       for (uint64_t mask : {1u, 7u}) {
-        for (unsigned lane = 0; lane < 4; ++lane)
+        for (unsigned lane = 0; lane < 4; ++lane) {
           cu_->write_vgpr(vb_ + 8, lane, 0xdeadbeef);
+        }
         wf_->set_exec(mask);
         wf_->clear_instruction_execution_error();
         const bool helpers =
-            arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5 || gfx12;
+            arch() == rocjitsu::IsaFamily::Rdna3 || arch() == rocjitsu::IsaFamily::Rdna3_5 || gfx12;
         EXPECT_EQ(issue_sample(), helpers);
         EXPECT_EQ(wf_->instruction_execution_error(),
                   helpers ? amdgpu::InstructionExecutionError::None
                           : amdgpu::InstructionExecutionError::UnimplementedInstruction);
-        for (unsigned lane = 0; lane < 4; ++lane)
+        for (unsigned lane = 0; lane < 4; ++lane) {
           EXPECT_EQ(cu_->read_vgpr(vb_ + 8, lane),
                     helpers && (mask & (1u << lane)) ? 0xa0000000u + level : 0xdeadbeef);
+        }
         wf_->clear_instruction_execution_error();
         bind_view(0, 0);
         EXPECT_TRUE(issue_sample());
@@ -4515,8 +4657,9 @@ TEST_P(AllImageAccessTest, ImplicitSampleUsesQuadDerivativesToSelectTheMip) {
 TEST_P(AllImageAccessTest, MipOpcodesUseViewRelativeLevelsForLoadsAndStores) {
   for (bool a16 : {false, true}) {
     for (bool nsa : {false, true}) {
-      if (nsa && arch_is_cdna_4_or_lower(arch()))
+      if (nsa && arch_is_cdna_4_or_lower(arch())) {
         continue;
+      }
       packed_coordinates_ = a16;
       scattered_ = nsa;
       SCOPED_TRACE(testing::Message() << "a16=" << a16 << " nsa=" << nsa);
@@ -4526,7 +4669,7 @@ TEST_P(AllImageAccessTest, MipOpcodesUseViewRelativeLevelsForLoadsAndStores) {
       };
       Image image;
       image.width = image.height = 64;
-      image.swizzle_mode = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 0;
+      image.swizzle_mode = arch() == rocjitsu::IsaFamily::Rdna4 ? 1 : 0;
       image.mip_levels = 2;
       const auto bind_level = [&](uint32_t base, uint32_t last = 1) {
         image.base_level = base;
@@ -4534,8 +4677,9 @@ TEST_P(AllImageAccessTest, MipOpcodesUseViewRelativeLevelsForLoadsAndStores) {
         bind_image(image);
       };
       wf_->set_exec(1);
-      for (uint32_t reg : {0u, 1u, 2u, 10u, 12u})
+      for (uint32_t reg : {0u, 1u, 2u, 10u, 12u}) {
         cu_->write_vgpr(vb_ + reg, 0, 0);
+      }
       // Seed the two physical levels through independently qualified plain opcodes.
       bind_level(0);
       cu_->write_vgpr(vb_ + 8, 0, 0x11112222);
@@ -4588,8 +4732,9 @@ TEST_P(AllImageAccessTest, DecodedLoadAndStoreRoundTripDimensionsAndExec) {
   for (uint32_t dimensions = 1; dimensions <= 3; ++dimensions) {
     SCOPED_TRACE(dimensions);
     for (bool array_dim : {false, true}) {
-      if (array_dim && (dimensions != 3 || arch_is_cdna_4_or_lower(arch())))
+      if (array_dim && (dimensions != 3 || arch_is_cdna_4_or_lower(arch()))) {
         continue;
+      }
       SCOPED_TRACE(array_dim);
       dimension_override_ = array_dim ? amdgpu::kImageDim2dArray : dimensions - 1;
       bind_image(dimensions);
@@ -4608,9 +4753,10 @@ TEST_P(AllImageAccessTest, DecodedLoadAndStoreRoundTripDimensionsAndExec) {
 }
 
 TEST_P(AllImageAccessTest, ScaledViewsStopBeforeImageMemoryAccess) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP() << "GFX11 and GFX12 expose separate resource scales";
+  }
   wf_->set_exec(1);
   write_coordinates(0, {0, 0, 0});
   // Exercise each depth, height and width scale bit and GFX12 UAV3D.
@@ -4636,11 +4782,11 @@ TEST_P(AllImageAccessTest, ScaledViewsStopBeforeImageMemoryAccess) {
 TEST_P(AllImageAccessTest, TiledAddressesMatchIndependentBackingOffsets) {
   // Direct ROCr AddrLib reference calls establish these R32 offsets in a
   // 64x64 image. The latter coordinates cross 256-byte and 4-KiB tile edges.
-  const rj_code_arch_t architecture = arch();
+  const rocjitsu::IsaFamily architecture = arch();
   const bool gfx9 = arch_is_cdna_4_or_lower(architecture);
   const bool gfx10 =
-      architecture == ROCJITSU_CODE_ARCH_RDNA1 || architecture == ROCJITSU_CODE_ARCH_RDNA2;
-  const uint32_t swizzle = gfx9 ? 22 : architecture == ROCJITSU_CODE_ARCH_RDNA4 ? 1 : 2;
+      architecture == rocjitsu::IsaFamily::Rdna1 || architecture == rocjitsu::IsaFamily::Rdna2;
+  const uint32_t swizzle = gfx9 ? 22 : architecture == rocjitsu::IsaFamily::Rdna4 ? 1 : 2;
   bind_image(2, 64, 64, swizzle);
   wf_->set_exec(1);
   const std::array<std::array<uint32_t, 3>, 3> cases{{{1, 1, gfx9 || gfx10 ? 20u : 12u},
@@ -4669,8 +4815,9 @@ TEST_P(AllImageAccessTest, TiledAddressesMatchIndependentBackingOffsets) {
 }
 
 TEST_P(AllImageAccessTest, Rdna2RbPlusMatchesIndependentBackingOffsets) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "Navi21 RB+ qualification";
+  }
   // Independent Navi21 (revision 0x28), GB_ADDR_CONFIG=0x444 witnesses.
   constexpr uint32_t cases[][4] = {
       {2, 4, 0, 64},  {2, 33, 17, 17428}, {6, 4, 0, 64},  {6, 33, 17, 5140},
@@ -4697,12 +4844,13 @@ TEST_P(AllImageAccessTest, Rdna2RbPlusMatchesIndependentBackingOffsets) {
 }
 
 TEST_P(AllImageAccessTest, TiledStoresMatchPhysicalGpuBacking) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "Physical backing captures are available for gfx1100 and gfx1201";
+  }
   // ROCr opaque R32 37x29 captures on W7900 and R9700: these texel values
   // occur at exactly one DWORD in each raw backing dump. The last coordinate
   // crosses a 4-KiB tile boundary. No emulator-generated address is the oracle.
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
   bind_image(2, 37, 29, gfx12 ? 2 : 22);
   wf_->set_exec(1);
   const std::array<std::array<uint32_t, 4>, 3> cases{{{1, 1, 12, 0xb5f93d83},
@@ -4719,17 +4867,17 @@ TEST_P(AllImageAccessTest, TiledStoresMatchPhysicalGpuBacking) {
 
 TEST_P(AllImageAccessTest, MipViewsUseTheWholeAllocationAndTheirSelectedLevel) {
   const bool gfx9 = arch_is_cdna_4_or_lower(arch());
-  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10 = arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2;
   Image image;
   image.width = 37;
   image.height = 19;
   image.mip_levels = 4;
-  image.swizzle_mode = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 2 : 22;
+  image.swizzle_mode = arch() == rocjitsu::IsaFamily::Rdna4 ? 2 : 22;
   wf_->set_exec(1);
   // Independent reference constants; the GFX11/12 layouts also match physical
   // full-allocation captures after each mip-level import.
   const std::array<uint32_t, 2> offsets = gfx9 ? std::array<uint32_t, 2>{116, 8308}
-                                          : arch() == ROCJITSU_CODE_ARCH_RDNA2
+                                          : arch() == rocjitsu::IsaFamily::Rdna2
                                               ? std::array<uint32_t, 2>{8308, 4212}
                                           : gfx10 ? std::array<uint32_t, 2>{8372, 4276}
                                                   : std::array<uint32_t, 2>{8300, 4204};
@@ -4754,15 +4902,16 @@ TEST_P(AllImageAccessTest, MipViewsUseTheWholeAllocationAndTheirSelectedLevel) {
 }
 
 TEST_P(AllImageAccessTest, LinearRowsMatchPhysicalGpuBackingAtExplicitPitches) {
-  if (!amdgpu::has_gfx11_plus_image_operands(arch()))
+  if (!amdgpu::has_gfx11_plus_image_operands(arch())) {
     GTEST_SKIP();
+  }
   Image image;
   image.width = 30;
   wf_->set_exec(1);
   // Captures on gfx1100/gfx1201 establish 256/128-byte row alignment.
   // gfx1150 is qualified here for 256-byte aligned pitches only.
-  const bool gfx115 = arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx115 = arch() == rocjitsu::IsaFamily::Rdna3_5;
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
   constexpr uint32_t sentinel = 0xdeadbeef;
   auto &waits = wf_->ensure_memory_wait_scoreboard();
   unsigned reports = 0;
@@ -4779,12 +4928,14 @@ TEST_P(AllImageAccessTest, LinearRowsMatchPhysicalGpuBackingAtExplicitPitches) {
         cu_->write_sgpr(sb_ + 5, uint32_t(warn) << (gfx12 ? 5 : 8));
         for (bool tfe : {false, true}) {
           // VIMAGE load/store on this branch rejects TFE before reading the descriptor.
-          if (gfx12 && tfe)
+          if (gfx12 && tfe) {
             continue;
+          }
           texel_fault_ = tfe;
           for (uint32_t row : {0u, 1u, 3u}) {
-            if (row >= image.height)
+            if (row >= image.height) {
               continue;
+            }
             SCOPED_TRACE(testing::Message()
                          << "dimensions=" << dimensions << " pitch=" << pitch << " warn=" << warn
                          << " tfe=" << tfe << " row=" << row);
@@ -4837,8 +4988,9 @@ TEST_P(AllImageAccessTest, LinearRowsMatchPhysicalGpuBackingAtExplicitPitches) {
     for (bool warn : {false, true}) {
       cu_->write_sgpr(sb_ + 5, uint32_t(warn) << (gfx12 ? 5 : 8));
       for (bool tfe : {false, true}) {
-        if (gfx12 && tfe)
+        if (gfx12 && tfe) {
           continue;
+        }
         texel_fault_ = tfe;
         for (uint32_t relative : {0u, 1u}) {
           const uint32_t level = base_level + relative;
@@ -4849,8 +5001,9 @@ TEST_P(AllImageAccessTest, LinearRowsMatchPhysicalGpuBackingAtExplicitPitches) {
           constexpr uint32_t mip1 = (2 * 64 + 5) * 4;
           constexpr uint32_t mip0 = (4 * 64 + 2 * 128 + 5) * 4;
           constexpr uint32_t wrong_row = (2 * 128 + 5) * 4;
-          for (auto offset : {mip0, mip1, wrong_row})
+          for (auto offset : {mip0, mip1, wrong_row}) {
             memory_.write32(kBase + offset, sentinel);
+          }
           cu_->l1_vector().invalidate_all();
           l2_.invalidate_all();
           constexpr uint32_t value = 0x1234abcd;
@@ -4869,13 +5022,14 @@ TEST_P(AllImageAccessTest, LinearRowsMatchPhysicalGpuBackingAtExplicitPitches) {
 }
 
 TEST_P(AllImageAccessTest, TiledPitchFieldMatchesPhysicalGpuBacking) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "Physical tiled pitch captures cover gfx1100 and gfx1201";
+  }
   Image image;
   image.width = 300;
   image.height = 70;
-  image.swizzle_mode = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 3 : 27;
-  const uint32_t offset = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 156316 : 146588;
+  image.swizzle_mode = arch() == rocjitsu::IsaFamily::Rdna4 ? 3 : 27;
+  const uint32_t offset = arch() == rocjitsu::IsaFamily::Rdna4 ? 156316 : 146588;
   wf_->set_exec(1);
   // Full backing dumps are identical for these descriptor pitches on both GPUs.
   for (uint32_t pitch : {1u, 320u, 384u, 512u, 1024u}) {
@@ -4889,8 +5043,9 @@ TEST_P(AllImageAccessTest, TiledPitchFieldMatchesPhysicalGpuBacking) {
 }
 
 TEST_P(AllImageAccessTest, LinearArrayAndVolumeRowsMatchPhysicalGpuBacking) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "Physical linear captures are available for gfx1100 and gfx1201";
+  }
   Image image;
   image.width = 30;
   image.height = 5;
@@ -4898,7 +5053,7 @@ TEST_P(AllImageAccessTest, LinearArrayAndVolumeRowsMatchPhysicalGpuBacking) {
   wf_->set_exec(1);
   // Independent raw captures: GFX12 rows advance by 128 bytes, while slices
   // advance by 5 * 256 bytes. GFX11 rows and slice allocation use 256 bytes.
-  const uint32_t row_pitch = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 256;
+  const uint32_t row_pitch = arch() == rocjitsu::IsaFamily::Rdna4 ? 128 : 256;
   for (uint32_t type : {amdgpu::kImage2dArray, amdgpu::kImage3d}) {
     image.type = type;
     for (uint32_t dim : {type - amdgpu::kImage1d, uint32_t{amdgpu::kImageDim2dArray}}) {
@@ -4924,8 +5079,9 @@ TEST_P(AllImageAccessTest, LinearArrayAndVolumeRowsMatchPhysicalGpuBacking) {
 }
 
 TEST_P(AllImageAccessTest, ArrayLayerPositionFollowsInstructionDimension) {
-  if (arch_is_cdna_4_or_lower(arch()))
+  if (arch_is_cdna_4_or_lower(arch())) {
     GTEST_SKIP() << "GFX9 uses DA rather than DIM";
+  }
   Image image;
   image.width = 30;
   image.depth = 3;
@@ -4955,8 +5111,9 @@ TEST_P(AllImageAccessTest, ArrayLayerPositionFollowsInstructionDimension) {
 }
 
 TEST_P(AllImageAccessTest, ArrayResourcesRejectDimensionsWithoutALayerOperand) {
-  if (arch_is_cdna_4_or_lower(arch()))
+  if (arch_is_cdna_4_or_lower(arch())) {
     GTEST_SKIP() << "GFX9 uses DA rather than DIM";
+  }
   Image image;
   image.width = 30;
   image.depth = 3;
@@ -4964,7 +5121,7 @@ TEST_P(AllImageAccessTest, ArrayResourcesRejectDimensionsWithoutALayerOperand) {
   bind_image(image);
   wf_->set_exec(1);
   write_coordinates(0, {5, 2, 1});
-  for (uint32_t dim : {amdgpu::kImageDim1d, amdgpu::kImageDim2d})
+  for (uint32_t dim : {amdgpu::kImageDim1d, amdgpu::kImageDim2d}) {
     for (bool load : {false, true}) {
       dimension_override_ = dim;
       wf_->clear_instruction_execution_error();
@@ -4972,50 +5129,52 @@ TEST_P(AllImageAccessTest, ArrayResourcesRejectDimensionsWithoutALayerOperand) {
       EXPECT_EQ(wf_->instruction_execution_error(),
                 amdgpu::InstructionExecutionError::UnimplementedInstruction);
     }
+  }
 }
 
 TEST_P(AllImageAccessTest, StubMimgInstructionsScaleDescriptorSelectors) {
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() == rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "GFX12 uses VIMAGE/VSAMPLE rather than MIMG";
+  }
   for (uint32_t operation = 0; operation < 3; ++operation) {
     std::array<uint32_t, 3> words{};
     switch (arch()) {
-    case ROCJITSU_CODE_ARCH_CDNA1:
+    case rocjitsu::IsaFamily::Cdna1:
       words = stub_image_instruction_words(cdna1::build_mimg,
                                            operation == 0   ? cdna1::kImageSampleMimg
                                            : operation == 1 ? cdna1::kImageLoadMipMimg
                                                             : cdna1::kImageAtomicAddMimg,
                                            fields<cdna1::MimgBuilderFields>(2));
       break;
-    case ROCJITSU_CODE_ARCH_CDNA2:
+    case rocjitsu::IsaFamily::Cdna2:
       words = stub_image_instruction_words(cdna2::build_mimg,
                                            operation == 0   ? cdna2::kImageSampleMimg
                                            : operation == 1 ? cdna2::kImageLoadMipMimg
                                                             : cdna2::kImageAtomicAddMimg,
                                            fields<cdna2::MimgBuilderFields>(2));
       break;
-    case ROCJITSU_CODE_ARCH_RDNA1:
+    case rocjitsu::IsaFamily::Rdna1:
       words = stub_image_instruction_words(rdna1::build_mimg,
                                            operation == 0   ? rdna1::kImageSampleMimg
                                            : operation == 1 ? rdna1::kImageLoadMipMimg
                                                             : rdna1::kImageAtomicAddMimg,
                                            fields<rdna1::MimgBuilderFields>(2));
       break;
-    case ROCJITSU_CODE_ARCH_RDNA2:
+    case rocjitsu::IsaFamily::Rdna2:
       words = stub_image_instruction_words(rdna2::build_mimg,
                                            operation == 0   ? rdna2::kImageSampleMimg
                                            : operation == 1 ? rdna2::kImageLoadMipMimg
                                                             : rdna2::kImageAtomicAddMimg,
                                            fields<rdna2::MimgBuilderFields>(2));
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3:
+    case rocjitsu::IsaFamily::Rdna3:
       words = stub_image_instruction_words(rdna3::build_mimg,
                                            operation == 0   ? rdna3::kImageSampleMimg
                                            : operation == 1 ? rdna3::kImageLoadMipMimg
                                                             : rdna3::kImageAtomicAddMimg,
                                            fields<rdna3::MimgBuilderFields>(2));
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3_5:
+    case rocjitsu::IsaFamily::Rdna3_5:
       words = stub_image_instruction_words(rdna3_5::build_mimg,
                                            operation == 0   ? rdna3_5::kImageSampleMimg
                                            : operation == 1 ? rdna3_5::kImageLoadMipMimg
@@ -5062,9 +5221,10 @@ TEST_P(AllImageAccessTest, LinearOneDimensionalArraysUseIndependentLayerStride) 
 }
 
 TEST_P(AllImageAccessTest, RdnaSrgbFormatsDecodeColorAndKeepLinearAlpha) {
-  if (arch_is_cdna_4_or_lower(arch()))
+  if (arch_is_cdna_4_or_lower(arch())) {
     GTEST_SKIP() << "GFX9 encodes sRGB in NFMT, covered separately";
-  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  }
+  const bool gfx10 = arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2;
   // IEC sRGB transfer after F32 UNORM conversion. GFX11/12 point captures
   // round color channels to BF16; alpha retains its linear F32 UNORM value.
   const std::array<uint32_t, 4> expected =
@@ -5075,20 +5235,22 @@ TEST_P(AllImageAccessTest, RdnaSrgbFormatsDecodeColorAndKeepLinearAlpha) {
     Image image;
     auto words = rdna_descriptor(image, arch());
     util::insert_bits_into_words<uint32_t>(words.data(),
-                                           arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 49 : 52,
+                                           arch() == rocjitsu::IsaFamily::Rdna4 ? 49 : 52,
                                            gfx10 ? 9 : 8, (gfx10 ? 128u : 64u) + format);
     util::insert_bits_into_words<uint32_t>(words.data(), 96, 12, kIdentity);
     util::insert_bits_into_words<uint32_t>(words.data(), 128, 14, (256u >> format) - 1);
-    for (uint32_t i = 0; i < words.size(); ++i)
+    for (uint32_t i = 0; i < words.size(); ++i) {
       cu_->write_sgpr(sb_ + i, words[i]);
+    }
     const uint32_t components = 1u << format;
     component_mask_ = (1u << components) - 1;
     memory_.write32(kBase, 0x80ff4080);
     wf_->set_exec(1);
     write_coordinates(0, {0, 0, 0});
     ASSERT_TRUE(decoded_issue(true, 2));
-    for (uint32_t component = 0; component < components; ++component)
+    for (uint32_t component = 0; component < components; ++component) {
       EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + component, 0), expected[component]);
+    }
     wf_->clear_instruction_execution_error();
     EXPECT_FALSE(decoded_issue(false, 2));
     EXPECT_EQ(wf_->instruction_execution_error(),
@@ -5107,33 +5269,33 @@ TEST_P(AllImageAccessTest, ImageAtomicAddAvailabilityAndReturnValue) {
   cu_->write_vgpr(vb_ + 8, 0, 1);
   std::array<uint32_t, 3> words{};
   switch (arch()) {
-  case ROCJITSU_CODE_ARCH_CDNA1:
+  case rocjitsu::IsaFamily::Cdna1:
     words = image_instruction_words(cdna1::build_mimg, cdna1::kImageAtomicAddMimg,
                                     fields<cdna1::MimgBuilderFields>(2));
     break;
-  case ROCJITSU_CODE_ARCH_CDNA2:
+  case rocjitsu::IsaFamily::Cdna2:
     words = image_instruction_words(cdna2::build_mimg, cdna2::kImageAtomicAddMimg,
                                     fields<cdna2::MimgBuilderFields>(2));
     break;
-  case ROCJITSU_CODE_ARCH_RDNA1: {
+  case rocjitsu::IsaFamily::Rdna1: {
     auto encoding = fields<rdna1::MimgBuilderFields>(2);
     encoding.glc = 1;
     words = image_instruction_words(rdna1::build_mimg, rdna1::kImageAtomicAddMimg, encoding);
   } break;
-  case ROCJITSU_CODE_ARCH_RDNA2: {
+  case rocjitsu::IsaFamily::Rdna2: {
     auto encoding = fields<rdna2::MimgBuilderFields>(2);
     encoding.glc = 1;
     words = image_instruction_words(rdna2::build_mimg, rdna2::kImageAtomicAddMimg, encoding);
   } break;
-  case ROCJITSU_CODE_ARCH_RDNA3:
+  case rocjitsu::IsaFamily::Rdna3:
     words = image_instruction_words(rdna3::build_mimg, rdna3::kImageAtomicAddMimg,
                                     fields<rdna3::MimgBuilderFields>(2));
     break;
-  case ROCJITSU_CODE_ARCH_RDNA3_5:
+  case rocjitsu::IsaFamily::Rdna3_5:
     words = image_instruction_words(rdna3_5::build_mimg, rdna3_5::kImageAtomicAddMimg,
                                     fields<rdna3_5::MimgBuilderFields>(2));
     break;
-  case ROCJITSU_CODE_ARCH_RDNA4:
+  case rocjitsu::IsaFamily::Rdna4:
     words = rdna4::build_vimage(rdna4::kImageAtomicAddUintVimage,
                                 fields<rdna4::VimageBuilderFields>(2));
     break;
@@ -5144,7 +5306,7 @@ TEST_P(AllImageAccessTest, ImageAtomicAddAvailabilityAndReturnValue) {
   auto decoded = decoder->decode(words.data());
   ASSERT_TRUE(decoded.succeeded());
   auto instruction = std::move(decoded).value();
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+  if (arch() == rocjitsu::IsaFamily::Rdna4) {
     ASSERT_TRUE(cu_->execute_instruction(instruction.get(), *wf_).succeeded());
     const auto *info = instruction->amdgpu_memory_issue_info();
     ASSERT_NE(info, nullptr);
@@ -5159,16 +5321,16 @@ TEST_P(AllImageAccessTest, ImageAtomicAddAvailabilityAndReturnValue) {
     return;
   }
   instruction->execute(*instruction, wf_);
-  if (arch_is_rdna(arch()) || arch() == ROCJITSU_CODE_ARCH_CDNA2) {
+  if (arch_is_rdna(arch()) || arch() == rocjitsu::IsaFamily::Cdna2) {
     ASSERT_TRUE(instruction->data());
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
     ASSERT_EQ(pipeline.issue(instruction.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
     cu_->l1_vector().flush_all();
     l2_.flush_all();
     EXPECT_EQ(memory_.read32(kBase), 0x12345679u);
-    if (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2) {
+    if (arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2) {
       EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0x12345678u);
-    } else if (arch() == ROCJITSU_CODE_ARCH_CDNA2) {
+    } else if (arch() == rocjitsu::IsaFamily::Cdna2) {
       EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 1u);
     }
     return;
@@ -5182,15 +5344,15 @@ TEST_P(AllImageAccessTest, ImageAtomicAddAvailabilityAndReturnValue) {
 }
 
 class Gfx11MsaaAccessTest : public ImageAccessFixture,
-                            public testing::WithParamInterface<rj_code_arch_t> {
+                            public testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
-  rj_code_arch_t arch() const override { return GetParam(); }
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
   // Replay the physical W7900 fragment-address capture on both GFX11 targets.
   std::optional<uint32_t> image_gb_addr_config() const override { return 0x545u; }
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11MsaaAccessTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(Gfx11MsaaAccessTest, LoadsFourFragmentChannelsWithPackedOrFullResults) {
   // GFX11 64 KiB R_X, 8 fragments, RGBA8_UINT. At (0,0), AddrLib
@@ -5207,10 +5369,12 @@ TEST_P(Gfx11MsaaAccessTest, LoadsFourFragmentChannelsWithPackedOrFullResults) {
     image.mip_levels = log2_samples + 1;
     auto resource = rdna_descriptor(image, arch());
     resource[3] = (resource[3] & ~0xfffu) | kIdentity;
-    for (uint32_t i = 0; i < resource.size(); ++i)
+    for (uint32_t i = 0; i < resource.size(); ++i) {
       cu_->write_sgpr(sb_ + i, resource[i]);
-    for (uint32_t i = 0; i < 8; ++i)
+    }
+    for (uint32_t i = 0; i < 8; ++i) {
       memory_.write32(kBase + 4 * i, 0x80706050u + (i << 8));
+    }
     // W7900 returns fragments 4..7 for selectors 8 and UINT_MAX on an 8x surface.
     for (uint32_t fragment : {1u, 4u, 8u, 0xffffffffu}) {
       write_coordinates(0, {0, 0, fragment});
@@ -5264,8 +5428,9 @@ TEST_F(Rdna4ImageMemoryTest, ImplicitSampleWaitsOnContributingLanes) {
     image.base_level = base;
     image.last_level = last;
     const auto words = rdna_descriptor(image, arch());
-    for (unsigned i = 0; i < words.size(); ++i)
+    for (unsigned i = 0; i < words.size(); ++i) {
       cu_->write_sgpr(sb_ + i, words[i]);
+    }
   };
   auto decoder = Decoder::create(arch());
   for (unsigned level : {0u, 2u}) {
@@ -5307,18 +5472,21 @@ TEST_F(Rdna4ImageMemoryTest, ImplicitSampleWaitsOnContributingLanes) {
         }
         cu_->write_vgpr(vb_ + 8, 0, 0xdeadbeef);
         wf_->set_exec(1ull << lane);
-        for (unsigned i = 0; i < load.size(); ++i)
+        for (unsigned i = 0; i < load.size(); ++i) {
           memory_.write32(pc + 4 * i, load[i]);
+        }
         uint64_t sample_pc = pc + 4 * load.size();
         if (waited) {
           memory_.write32(sample_pc, rdna4::build_sopp(rdna4::kSWaitDscntSopp)[0]);
           sample_pc += 4;
         }
-        for (unsigned i = 0; i < sample.size(); ++i)
+        for (unsigned i = 0; i < sample.size(); ++i) {
           memory_.write32(sample_pc + 4 * i, sample[i]);
+        }
         wf_->pc = pc;
-        for (unsigned i = 0; i < 8 && wf_->pc != sample_pc; ++i)
+        for (unsigned i = 0; i < 8 && wf_->pc != sample_pc; ++i) {
           cu_->step();
+        }
         ASSERT_EQ(wf_->pc, sample_pc);
         EXPECT_EQ(cu_->read_vgpr(vb_, lane), bits(12.5f / 64));
         wf_->set_exec(1);
@@ -5368,14 +5536,16 @@ TEST_P(Gfx10PixelTransferTest, DepthComparisonSharesVmcntWithOrdinaryImageLoad) 
     };
     emit(sample);
     emit(load);
-    if (threshold >= 0)
+    if (threshold >= 0) {
       emit(rdna1::build_sopp(rdna1::kSWaitcnt, {.simm16 = uint16_t(0x3f70 | threshold)}));
+    }
     const uint64_t move_pc = next;
     emit(move);
     wf_->pc = pc;
     const auto before = cu_->memory_wait_diagnostic_count();
-    for (unsigned i = 0; i < 12 && wf_->pc != move_pc; ++i)
+    for (unsigned i = 0; i < 12 && wf_->pc != move_pc; ++i) {
       cu_->step();
+    }
     ASSERT_EQ(wf_->pc, move_pc);
     EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(0.5f));
     EXPECT_EQ(cu_->read_vgpr(vb_ + 12, 0), bits(1.f));
@@ -5419,8 +5589,9 @@ TEST_P(Gfx10PixelTransferTest, GetLodChecksHelperCoordinatesOnlyForBoundAllocate
     memory_.write32(pc + 8, query[0]);
     memory_.write32(pc + 12, query[1]);
     wf_->pc = pc;
-    for (unsigned i = 0; i < 8 && wf_->pc != pc + 8; ++i)
+    for (unsigned i = 0; i < 8 && wf_->pc != pc + 8; ++i) {
       cu_->step();
+    }
     ASSERT_EQ(wf_->pc, pc + 8);
     EXPECT_EQ(cu_->read_vgpr(vb_, 1), bits(4.f / 64));
     wf_->set_exec(1);
@@ -5448,8 +5619,9 @@ TEST_F(Rdna4ImageMemoryTest, ResourceQueryTracksOnlyTheEncodedLodRegister) {
     // RESINFO reads the descriptor dimensions and LOD even with FORMAT=INVALID.
     image.rdna_format = format;
     const auto resource = rdna_descriptor(image, arch());
-    for (unsigned word = 0; word < resource.size(); ++word)
+    for (unsigned word = 0; word < resource.size(); ++word) {
       cu_->write_sgpr(sb_ + word, resource[word]);
+    }
     for (uint8_t encoded : {5, 32}) {
       for (uint8_t mask : {0, 1}) {
         auto decoded = decoder->decode_window(rdna4::build_vimage(
@@ -5479,9 +5651,9 @@ TEST_F(Rdna4ImageMemoryTest, ResourceQueryTracksOnlyTheEncodedLodRegister) {
 }
 
 class Gfx11ImageFeedbackTest : public ImageAccessFixture,
-                               public testing::WithParamInterface<rj_code_arch_t> {
+                               public testing::WithParamInterface<rocjitsu::IsaFamily> {
 protected:
-  rj_code_arch_t arch() const override { return GetParam(); }
+  rocjitsu::IsaFamily arch() const override { return GetParam(); }
 
   void issue_image(uint16_t opcode, rdna3_5::MimgBuilderFields fields) {
     const auto words = rdna3_5::build_mimg(opcode, fields);
@@ -5499,14 +5671,15 @@ private:
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11ImageFeedbackTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(Gfx11ImageFeedbackTest, PackedLoadsSignExtendOnlyTheSignedOpcode) {
   constexpr uint32_t r8_unorm = 1;
   const auto resource =
       rdna_image_descriptor(arch(), {.format = r8_unorm, .selectors = 0, .pitch = 256});
-  for (uint32_t i = 0; i < resource.size(); ++i)
+  for (uint32_t i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   wf_->set_exec(1);
   cu_->write_vgpr(vb_, 0, 0);
   cu_->write_vgpr(vb_ + 1, 0, 0);
@@ -5526,13 +5699,15 @@ TEST_P(Gfx11ImageFeedbackTest, OutOfBoundsAtomicSeparatesPayloadReadsFromResultO
 }
 
 TEST_P(Gfx11ImageFeedbackTest, AtomicTfeReportsOnlyTheNonresidentReturningLane) {
-  for (uint32_t level : {0u, 1u})
+  for (uint32_t level : {0u, 1u}) {
     ASSERT_NO_FATAL_FAILURE(check_atomic_prt_access(/*compare_swap=*/false, level));
+  }
 }
 
 TEST_P(Gfx11ImageFeedbackTest, CompareSwapTfeWritesStatusOverFirstComparisonWordOnANack) {
-  for (uint32_t level : {0u, 1u})
+  for (uint32_t level : {0u, 1u}) {
     ASSERT_NO_FATAL_FAILURE(check_atomic_prt_access(/*compare_swap=*/true, level));
+  }
 }
 
 TEST_P(Gfx11ImageFeedbackTest, ImplicitDerivativesCheckOnlyContributingHelperCoordinates) {
@@ -5542,8 +5717,9 @@ TEST_P(Gfx11ImageFeedbackTest, ImplicitDerivativesCheckOnlyContributingHelperCoo
   image.mip_levels = 3;
   image.last_level = 2;
   const auto resource = rdna_descriptor(image, arch());
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 9, 0xfffu << 12); // maximum sample LOD
   for (unsigned mip = 0; mip <= 2; ++mip) {
     const auto layout = amdgpu::ImageAddressing::prepare(
@@ -5591,8 +5767,9 @@ TEST_P(Gfx11ImageFeedbackTest, ImplicitDerivativesCheckOnlyContributingHelperCoo
       auto &scoreboard = wf_->ensure_memory_wait_scoreboard();
       scoreboard.clear();
       for (unsigned lane = 0; lane < 8; ++lane) {
-        for (unsigned reg : {2u, 3u, 4u, 5u, 6u, 7u, 12u})
+        for (unsigned reg : {2u, 3u, 4u, 5u, 6u, 7u, 12u}) {
           cu_->write_vgpr(vb_ + reg, lane, 0);
+        }
         cu_->write_vgpr(vb_ + 8, lane, sentinel);
         cu_->write_vgpr(vb_ + 9, lane, sentinel);
       }
@@ -5621,13 +5798,15 @@ TEST_P(Gfx11ImageFeedbackTest, ImplicitDerivativesCheckOnlyContributingHelperCoo
                                             .ssamp = 2});
       memory_.write32(next, words[0]);
       memory_.write32(next + 4, words[1]);
-      if (test.nsa)
+      if (test.nsa) {
         memory_.write32(next + 8, 12);
+      }
       wf_->pc = pc;
       wf_->set_exec(uint64_t{1} << test.producer_lane);
       const auto before = cu_->memory_wait_diagnostic_count();
-      for (unsigned step = 0; step < 8 && wf_->pc != next; ++step)
+      for (unsigned step = 0; step < 8 && wf_->pc != next; ++step) {
         cu_->step();
+      }
       ASSERT_EQ(wf_->pc, next);
       ASSERT_EQ(wf_->exec(), uint64_t{1} << test.consumer_lane);
       ASSERT_EQ(cu_->memory_wait_diagnostic_count(), before);
@@ -5638,10 +5817,11 @@ TEST_P(Gfx11ImageFeedbackTest, ImplicitDerivativesCheckOnlyContributingHelperCoo
       const unsigned result_reg = is_query ? 9 : 8;
       const auto result =
           is_query ? std::bit_cast<uint32_t>(static_cast<float>(test.lod)) : 100u + test.lod;
-      for (unsigned lane = 0; lane < 8; ++lane)
+      for (unsigned lane = 0; lane < 8; ++lane) {
         EXPECT_EQ(cu_->read_vgpr(vb_ + result_reg, lane),
                   lane == test.consumer_lane ? result : sentinel)
             << lane;
+      }
       pc += amdgpu::InstructionCache::kLineSize;
     }
   }
@@ -5660,8 +5840,9 @@ TEST_P(Gfx11ImageFeedbackTest, PackedArrayCoordinateWaitsSeparateLayerAndGradien
     image.last_level = mip_chain ? 2 : 0;
     image.mip_levels = image.last_level + 1;
     const auto resource = rdna_descriptor(image, arch());
-    for (unsigned i = 0; i < resource.size(); ++i)
+    for (unsigned i = 0; i < resource.size(); ++i) {
       cu_->write_sgpr(sb_ + i, resource[i]);
+    }
     for (bool query : {false, true}) {
       const auto words =
           rdna3_5::build_mimg(query ? rdna3_5::kImageGetLodMimg : rdna3_5::kImageSampleMimg,
@@ -5698,8 +5879,9 @@ TEST_P(Gfx11ImageFeedbackTest, PackedArrayCoordinateWaitsSeparateLayerAndGradien
 TEST_P(Gfx11ImageFeedbackTest, WaitsCheckOnlyTheImageStorePayloadWordsFetched) {
   const auto resource =
       rdna_image_descriptor(arch(), {.format = kRgba32Uint, .selectors = kIdentity});
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   wf_->set_lds_size(64);
   wf_->lds().write32(0, 0x5a7e1234);
   cu_->write_vgpr(vb_ + 20, 0, 0);
@@ -5740,16 +5922,18 @@ TEST_P(Gfx11ImageFeedbackTest, WaitsCheckOnlyTheImageStorePayloadWordsFetched) {
       memory_.write32(store_pc + 4, store[1]);
       wf_->pc = pc;
       const auto before = cu_->memory_wait_diagnostic_count();
-      for (unsigned step = 0; step < 8 && wf_->pc != store_pc; ++step)
+      for (unsigned step = 0; step < 8 && wf_->pc != store_pc; ++step) {
         cu_->step();
+      }
       ASSERT_EQ(wf_->pc, store_pc);
       ASSERT_EQ(cu_->memory_wait_diagnostic_count(), before);
       cu_->step();
       EXPECT_EQ(wf_->pc, store_pc + 8);
       EXPECT_FALSE(wf_->instruction_execution_failed());
       EXPECT_EQ(cu_->memory_wait_diagnostic_count() - before, unsigned(test.hazard));
-      if (wf_->instruction_execution_failed())
+      if (wf_->instruction_execution_failed()) {
         return;
+      }
       if (!test.out_of_bounds) {
         cu_->l1_vector().flush_all();
         l2_.flush_all();
@@ -5765,8 +5949,9 @@ TEST_P(Gfx11ImageFeedbackTest, ImageStoresReadIndividualAllocatedAndFallbackData
   wf_->set_exec(1);
   const auto resource =
       rdna_image_descriptor(arch(), {.format = kRgba32Uint, .selectors = kIdentity});
-  for (uint32_t i = 0; i < resource.size(); ++i)
+  for (uint32_t i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   constexpr uint32_t fallback = 0x00440033;
   constexpr uint32_t first = 0x00220011;
   constexpr uint32_t second = 0x00660055;
@@ -5779,10 +5964,12 @@ TEST_P(Gfx11ImageFeedbackTest, ImageStoresReadIndividualAllocatedAndFallbackData
       for (const uint8_t data : {30, 31, 32}) {
         SCOPED_TRACE(testing::Message()
                      << "r128=" << r128 << " d16=" << d16 << " vdata=" << unsigned(data));
-        if (data < 32)
+        if (data < 32) {
           cu_->write_vgpr(vb_ + data, 0, first);
-        if (data == 30)
+        }
+        if (data == 30) {
           cu_->write_vgpr(vb_ + 31, 0, second);
+        }
         ASSERT_NO_FATAL_FAILURE(
             issue_image(rdna3_5::kImageStoreMimg, {.dim = 1,
                                                    .unorm = true,
@@ -5798,8 +5985,9 @@ TEST_P(Gfx11ImageFeedbackTest, ImageStoresReadIndividualAllocatedAndFallbackData
         const std::array<uint32_t, 4> expected =
             d16 ? std::array<uint32_t, 4>{x & 0xffffu, x >> 16, y & 0xffffu, y >> 16}
                 : std::array<uint32_t, 4>{x, y, 0, 0};
-        for (unsigned channel = 0; channel < expected.size(); ++channel)
+        for (unsigned channel = 0; channel < expected.size(); ++channel) {
           EXPECT_EQ(memory_.read32(kBase + 4 * channel), expected[channel]) << channel;
+        }
       }
     }
   }
@@ -5808,10 +5996,12 @@ TEST_P(Gfx11ImageFeedbackTest, ImageStoresReadIndividualAllocatedAndFallbackData
 TEST_P(Gfx11ImageFeedbackTest, ImageTransfersAndSamplesResolveEachCoordinateWord) {
   wf_->set_exec(1);
   const auto resource = rdna_image_descriptor(arch(), {.width = 4, .height = 2});
-  for (uint32_t i = 0; i < resource.size(); ++i)
+  for (uint32_t i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
-  for (uint32_t i = 0; i < 4; ++i)
-    cu_->write_sgpr(sb_ + 8 + i, 0);                             // Point sampling at level zero.
+  }
+  for (uint32_t i = 0; i < 4; ++i) {
+    cu_->write_sgpr(sb_ + 8 + i, 0); // Point sampling at level zero.
+  }
   constexpr uint64_t texel = kBase + 256 + 2 * sizeof(uint32_t); // (2, 1)
   memory_.write32(kBase + 2 * sizeof(uint32_t), 19);
   for (const uint8_t address : {30, 31}) {
@@ -5824,8 +6014,9 @@ TEST_P(Gfx11ImageFeedbackTest, ImageTransfersAndSamplesResolveEachCoordinateWord
       const uint32_t y = sample ? std::bit_cast<uint32_t>(1.5f) : 1u;
       cu_->write_vgpr(vb_, 0, address == 31 ? y : 0);
       cu_->write_vgpr(vb_ + address, 0, x);
-      if (address == 30)
+      if (address == 30) {
         cu_->write_vgpr(vb_ + 31, 0, y);
+      }
       cu_->write_vgpr(vb_ + 8, 0, 7);
       cu_->write_vgpr(vb_ + 9, 0, 107);
       memory_.write32(texel, 107);
@@ -5853,8 +6044,9 @@ TEST_P(Gfx11ImageFeedbackTest, ResourceInfoReadsLodFromVgprZeroForAnUnallocatedS
   image.mip_levels = 2;
   image.last_level = 1;
   const auto resource = rdna_descriptor(image, arch());
-  for (uint32_t i = 0; i < resource.size(); ++i)
+  for (uint32_t i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_vgpr(vb_, 0, 1);
   for (const uint8_t address : {0, 32}) {
     cu_->write_vgpr(vb_ + 8, 0, 0xdeadbeef);
@@ -5872,8 +6064,9 @@ TEST_P(Gfx11ImageFeedbackTest, ReturningAtomicsValidateTheWholeResultIndependent
     Image image;
     image.rdna_format = wide ? 48 : kR32Uint; // 32_32_UINT and 32_UINT
     const auto resource = rdna_descriptor(image, arch());
-    for (uint32_t i = 0; i < resource.size(); ++i)
+    for (uint32_t i = 0; i < resource.size(); ++i) {
       cu_->write_sgpr(sb_ + i, resource[i]);
+    }
     const unsigned texel_words = wide ? 2 : 1;
     const uint64_t old = wide ? (uint64_t{107} << 32) | 107 : 107;
     for (const bool compare_swap : {false, true}) {
@@ -5896,10 +6089,12 @@ TEST_P(Gfx11ImageFeedbackTest, ReturningAtomicsValidateTheWholeResultIndependent
              .tfe = boundary != Boundary::NoTfe});
         memory_.write64(kBase, old);
         cu_->write_vgpr(vb_, 0, 107); // Any missing comparison word selects v0.
-        for (unsigned reg = data; reg < 32; ++reg)
+        for (unsigned reg = data; reg < 32; ++reg) {
           cu_->write_vgpr(vb_ + reg, 0, 0xdeadbeef);
-        for (unsigned word = 0; word < input_words && data + word < 32; ++word)
+        }
+        for (unsigned word = 0; word < input_words && data + word < 32; ++word) {
           cu_->write_vgpr(vb_ + data + word, 0, word >= texel_words ? 107 : word == 0 ? 7 : 0);
+        }
         const uint32_t status = data + texel_words;
         const uint32_t before_status = status < 32 ? cu_->read_vgpr(vb_ + status, 0) : 0;
         memory_.write32(pc, words[0]);
@@ -5979,8 +6174,9 @@ TEST_P(Gfx11ImageFeedbackTest, R128ControlsScalarResourceReadsAcrossMimgForms) {
 
 TEST_P(Gfx11ImageFeedbackTest, QueriesSuppressTheEntireOutOfRangeRegisterTuple) {
   // A null resource returns zero for every enabled query component.
-  for (uint32_t i = 0; i < 8; ++i)
+  for (uint32_t i = 0; i < 8; ++i) {
     cu_->write_sgpr(sb_ + i, 0);
+  }
   auto decoder = Decoder::create(arch());
   constexpr uint32_t sentinel = 0xdeadbeef;
   for (auto opcode : {rdna3_5::kImageGetLodMimg, rdna3_5::kImageGetResinfoMimg}) {
@@ -5990,16 +6186,20 @@ TEST_P(Gfx11ImageFeedbackTest, QueriesSuppressTheEntireOutOfRangeRegisterTuple) 
       fields.dim = 1;
       fields.dmask = 3;
       fields.vdata = dst;
-      for (unsigned lane = 0; lane < 3; ++lane)
-        for (unsigned reg : {30u, 31u})
+      for (unsigned lane = 0; lane < 3; ++lane) {
+        for (unsigned reg : {30u, 31u}) {
           cu_->write_vgpr(vb_ + reg, lane, sentinel);
+        }
+      }
       auto words = rdna3_5::build_mimg(opcode, fields);
       auto decoded = decoder->decode_window(words);
       ASSERT_TRUE(decoded.succeeded());
       ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
-      for (unsigned lane = 0; lane < 3; ++lane)
-        for (unsigned reg : {30u, 31u})
+      for (unsigned lane = 0; lane < 3; ++lane) {
+        for (unsigned reg : {30u, 31u}) {
           EXPECT_EQ(cu_->read_vgpr(vb_ + reg, lane), dst == 30 && lane != 1 ? 0u : sentinel);
+        }
+      }
     }
   }
 }
@@ -6009,13 +6209,15 @@ TEST_P(Gfx11ImageFeedbackTest, DroppedSamplesWaitOnlyForTheResultsTheyWrite) {
   public:
     ScalarReads() : ExecutionPlugin("sample_scalar_reads") {}
     void onAmdgpuReadScalarRegister(const amdgpu::Wavefront *, RegisterRef reg) override {
-      if (reg.cls == RegClass::SGPR && (reg.index == 0 || reg.index == 8))
+      if (reg.cls == RegClass::SGPR && (reg.index == 0 || reg.index == 8)) {
         mask |= 1u << reg.index;
+      }
     }
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t) override {
-      if (reg == wave->vgpr_alloc().base)
+      if (reg == wave->vgpr_alloc().base) {
         v0 |= lanes;
+      }
     }
     uint64_t v0 = 0;
     unsigned mask = 0;
@@ -6026,14 +6228,15 @@ TEST_P(Gfx11ImageFeedbackTest, DroppedSamplesWaitOnlyForTheResultsTheyWrite) {
   ASSERT_TRUE(group->add(std::move(observer)));
   cu_->set_plugin_group(group);
   const auto resource = rdna_image_descriptor(arch(), {.format = 22});
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   wf_->set_exec(1);
   auto decoder = Decoder::create(arch());
   auto &score = wf_->ensure_memory_wait_scoreboard();
   for (auto [mask, dst] :
-       std::array<std::pair<uint8_t, uint8_t>, 4>{{{0, 8}, {1, 8}, {3, 30}, {3, 31}}})
-    for (bool tfe : {false, true})
+       std::array<std::pair<uint8_t, uint8_t>, 4>{{{0, 8}, {1, 8}, {3, 30}, {3, 31}}}) {
+    for (bool tfe : {false, true}) {
       for (bool lwe : {false, true}) {
         SCOPED_TRACE(testing::Message() << unsigned(mask) << " dst=" << unsigned(dst)
                                         << " TFE=" << tfe << " LWE=" << lwe);
@@ -6049,18 +6252,20 @@ TEST_P(Gfx11ImageFeedbackTest, DroppedSamplesWaitOnlyForTheResultsTheyWrite) {
         score.clear();
         constexpr auto counter = amdgpu::WaitCounterKind::Ds;
         for (const auto reg : {RegisterRef{RegClass::SGPR, 0, 1}, RegisterRef{RegClass::SGPR, 8, 1},
-                               RegisterRef{RegClass::VGPR, dst, 1}})
+                               RegisterRef{RegClass::VGPR, dst, 1}}) {
           score.add({score.issue(counter), 0x100, 1, reg, counter, 0xf});
+        }
         struct Waits {
           unsigned scalars = 0;
           bool destination = false;
         } waits;
         score.bind(0x200, &waits, [](void *data, const auto &hazard) {
           auto &waits = *static_cast<Waits *>(data);
-          if (hazard.write)
+          if (hazard.write) {
             waits.destination = true;
-          else if (hazard.reg.cls == RegClass::SGPR)
+          } else if (hazard.reg.cls == RegClass::SGPR) {
             waits.scalars |= 1u << hazard.reg.index;
+          }
         });
         score.check_instruction(*decoded.value(), *wf_);
         score.clear();
@@ -6074,6 +6279,8 @@ TEST_P(Gfx11ImageFeedbackTest, DroppedSamplesWaitOnlyForTheResultsTheyWrite) {
         EXPECT_EQ(waits.scalars, reads->mask);
         EXPECT_EQ(waits.destination, fits);
       }
+    }
+  }
 }
 
 TEST_P(Gfx11ImageFeedbackTest, DroppedFetchReservesTfeAndResourceQueryReturnsZero) {
@@ -6087,8 +6294,9 @@ TEST_P(Gfx11ImageFeedbackTest, DroppedFetchReservesTfeAndResourceQueryReturnsZer
       ASSERT_TRUE(decoded.succeeded());
       auto inst = std::move(decoded).value();
       EXPECT_NE(inst->disassemble().find(tfe ? " v[31:32]," : " v31,"), std::string::npos);
-      for (unsigned lane : {0u, 1u, 2u})
+      for (unsigned lane : {0u, 1u, 2u}) {
         cu_->write_vgpr(vb_ + 31, lane, sentinel);
+      }
       ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
       if (opcode == rdna3_5::kImageLoadMimg) {
         amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
@@ -6128,13 +6336,16 @@ TEST_P(Gfx11ImageFeedbackTest, GetLodChecksFeedbackAllocationAndKeepsSuccessfulL
   auto decoder = Decoder::create(arch());
   auto image = rdna_descriptor(Image{}, arch());
   image[5] |= 256u << 8; // Warn for a requested LOD below one.
-  for (unsigned i = 0; i < image.size(); ++i)
+  for (unsigned i = 0; i < image.size(); ++i) {
     cu_->write_sgpr(sb_ + i, image[i]);
-  for (unsigned i = 8; i < 12; ++i)
+  }
+  for (unsigned i = 8; i < 12; ++i) {
     cu_->write_sgpr(sb_ + i, 0);
+  }
   cu_->write_sgpr(sb_ + 10, 1u << 26); // Mipmapped sampling can warn, GET_LOD cannot.
-  for (unsigned lane = 0; lane < 4; ++lane)
+  for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {0, 0, 0});
+  }
   constexpr uint32_t sentinel = 0xdeadbeef;
   for (uint8_t mask : {0u, 3u}) {
     for (unsigned flags = 0; flags < 4; ++flags) {
@@ -6144,9 +6355,11 @@ TEST_P(Gfx11ImageFeedbackTest, GetLodChecksFeedbackAllocationAndKeepsSuccessfulL
         const uint8_t dst = 32 - data_words - allocate_status;
         SCOPED_TRACE(testing::Message()
                      << "mask=" << +mask << " flags=" << flags << " dst=" << +dst);
-        for (unsigned reg = dst; reg < 32; ++reg)
-          for (unsigned lane : {0u, 1u, 2u})
+        for (unsigned reg = dst; reg < 32; ++reg) {
+          for (unsigned lane : {0u, 1u, 2u}) {
             cu_->write_vgpr(vb_ + reg, lane, sentinel);
+          }
+        }
         const auto words = rdna3_5::build_mimg(
             rdna3_5::kImageGetLodMimg,
             {.dim = 1, .dmask = mask, .vdata = dst, .tfe = tfe, .lwe = lwe, .ssamp = 2});
@@ -6155,8 +6368,9 @@ TEST_P(Gfx11ImageFeedbackTest, GetLodChecksFeedbackAllocationAndKeepsSuccessfulL
         ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
         const bool suppressed = (tfe || lwe) && !allocate_status;
         for (unsigned lane : {0u, 1u, 2u}) {
-          for (unsigned reg = dst; reg < dst + data_words; ++reg)
+          for (unsigned reg = dst; reg < dst + data_words; ++reg) {
             EXPECT_EQ(cu_->read_vgpr(vb_ + reg, lane), suppressed || lane == 1 ? sentinel : 0u);
+          }
           if (allocate_status) {
             EXPECT_EQ(cu_->read_vgpr(vb_ + dst + data_words, lane), sentinel);
           }
@@ -6172,7 +6386,7 @@ protected:
 };
 
 INSTANTIATE_TEST_SUITE_P(Gfx11, Gfx11MsaaFeedbackTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5));
+                         testing::Values(rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5));
 
 TEST_P(Gfx11MsaaFeedbackTest, MsaaFragmentsDriveRoutedFootprintsAndWatchpoints) {
   class Footprints final : public ExecutionPlugin {
@@ -6202,10 +6416,12 @@ TEST_P(Gfx11MsaaFeedbackTest, MsaaFragmentsDriveRoutedFootprintsAndWatchpoints) 
   image.rdna_format = kGfx11Rgba8Uint;
   auto resource = rdna_descriptor(image, arch());
   resource[3] = (resource[3] & ~0xfffu) | kIdentity;
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
-  for (unsigned i = 0; i < 8; ++i)
+  }
+  for (unsigned i = 0; i < 8; ++i) {
     memory_.write32(kBase + 4 * i, 0x80706050u + (i << 8));
+  }
   wf_->set_exec(1);
   write_coordinates(0, {0, 0, 4});
   std::vector<uint64_t> watched;
@@ -6237,8 +6453,9 @@ TEST_P(Gfx11ImageFeedbackTest, DebuggerDistinguishesSparseTextureMissesFromVmFau
     amdgpu::IdentityAddressSpaceTranslator identity_;
     amdgpu::VmTranslationResult translate(uint64_t addr, size_t size,
                                           amdgpu::VmAccessKind access) const override {
-      if ((addr >> 12) == (kBase + 4096) >> 12)
+      if ((addr >> 12) == (kBase + 4096) >> 12) {
         return {};
+      }
       return identity_.translate(addr, size, access);
     }
   };
@@ -6264,8 +6481,9 @@ TEST_P(Gfx11ImageFeedbackTest, DebuggerDistinguishesSparseTextureMissesFromVmFau
   for (bool sparse : {false, true}) {
     auto resource = rdna_descriptor(Image{.width = 2048, .pitch = 2048}, arch());
     pages->published = sparse;
-    for (unsigned i = 0; i < resource.size(); ++i)
+    for (unsigned i = 0; i < resource.size(); ++i) {
       cu_->write_sgpr(sb_ + i, resource[i]);
+    }
     for (bool resident : {true, false}) {
       SCOPED_TRACE(testing::Message() << "sparse=" << sparse << " resident=" << resident);
       faults.clear();
@@ -6292,12 +6510,14 @@ TEST_P(Gfx11ImageFeedbackTest, GatherFloatPayloadAcrossLayoutsAndFeedback) {
     for (unsigned threshold : {0u, 256u}) {
       auto resource = rdna_descriptor(image, arch());
       resource[5] |= threshold << 8;
-      for (unsigned i = 0; i < resource.size(); ++i)
+      for (unsigned i = 0; i < resource.size(); ++i) {
         cu_->write_sgpr(sb_ + i, resource[i]);
+      }
       cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (1 << 15));
       for (uint32_t payload : {0x7fc12345u, 0x80000001u, 0x3f800000u}) {
-        for (unsigned offset = 0; offset < 65536; offset += 4)
+        for (unsigned offset = 0; offset < 65536; offset += 4) {
           memory_.write32(kBase + offset, payload);
+        }
         cu_->l1_vector().invalidate_all();
         l2_.invalidate_all();
         write_coordinates(0, {0x3f800000u, 0x3f800000u, 0});
@@ -6310,8 +6530,9 @@ TEST_P(Gfx11ImageFeedbackTest, GatherFloatPayloadAcrossLayoutsAndFeedback) {
             cu_->write_vgpr(vb_ + 12, 0, 0xdeadbeefu);
             ASSERT_NO_FATAL_FAILURE(issue_image(
                 opcode, {.dim = 1, .unorm = 1, .dmask = 1, .vdata = 8, .lwe = lwe, .ssamp = 2}));
-            for (unsigned reg = 8; reg < 12; ++reg)
+            for (unsigned reg = 8; reg < 12; ++reg) {
               EXPECT_EQ(cu_->read_vgpr(vb_ + reg, 0), payload);
+            }
             // Without mip filtering the LWE bit does not report a warning.
             EXPECT_EQ(cu_->read_vgpr(vb_ + 12, 0), 0xdeadbeefu);
           }
@@ -6333,15 +6554,18 @@ TEST_P(Gfx11ImageFeedbackTest, VolumeShaderClampSelectsTheFilterAndRoundsBeforeW
               .rdna_format = 22};
   auto resource = rdna_descriptor(image, arch());
   resource[5] |= 129u << 8; // LWE threshold of 129/256.
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 8, 2u | 2u << 3 | 2u << 6);
   cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
-  for (unsigned i = 0; i < 4096; ++i)
+  for (unsigned i = 0; i < 4096; ++i) {
     memory_.write32(kBase + 4 * i, bits(float(i)));
+  }
   wf_->set_exec(1);
-  for (unsigned lane = 0; lane < 4; ++lane)
+  for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {bits(0.25f), bits(0.25f), 0});
+  }
   rdna3_5::MimgBuilderFields fields{};
   fields.dim = 2;
   fields.dmask = fields.lwe = 1;
@@ -6378,8 +6602,9 @@ TEST_P(Gfx11ImageFeedbackTest, VolumeQueriesAndSamplesReadAllThreeAxes) {
                     .last_level = 2,
                     .rdna_format = 22};
   const auto resource = rdna_descriptor(image, arch());
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (2 << 6));
   cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
   cu_->write_sgpr(sb_ + 10, 1u << 26);
@@ -6390,12 +6615,14 @@ TEST_P(Gfx11ImageFeedbackTest, VolumeQueriesAndSamplesReadAllThreeAxes) {
         amdgpu::ImageAddressing::prepare(cu_->image_address_config(), layout, mip);
     ASSERT_TRUE(addresses);
     memory_.write32(kBase + addresses->byte_offset(0, 0, 0), bits(float(mip + 1)));
-    if (addresses->contains(1, 0, 1))
+    if (addresses->contains(1, 0, 1)) {
       memory_.write32(kBase + addresses->byte_offset(1, 0, 1), bits(8.0f + mip));
+    }
   }
   wf_->set_exec(1);
-  for (unsigned lane = 0; lane < 4; ++lane)
+  for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {0, 0, bits(lane == 1 ? 0.5f : 0.0f)});
+  }
   ASSERT_NO_FATAL_FAILURE(
       issue_image(rdna3_5::kImageGetLodMimg, {.dim = 2, .dmask = 3, .vdata = 8, .ssamp = 2}));
   EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(1));
@@ -6404,8 +6631,9 @@ TEST_P(Gfx11ImageFeedbackTest, VolumeQueriesAndSamplesReadAllThreeAxes) {
   // Two DWORDs per direction: XY share a word, and Z occupies the next low half.
   for (unsigned axis = 0; axis < 3; ++axis) {
     for (unsigned direction = 0; direction < 2; ++direction) {
-      for (unsigned reg = 0; reg < 7; ++reg)
+      for (unsigned reg = 0; reg < 7; ++reg) {
         cu_->write_vgpr(vb_ + reg, 0, reg == 1 || reg == 3 ? 0x7e000000 : 0);
+      }
       const unsigned reg = direction * 2 + axis / 2;
       cu_->write_vgpr(vb_ + reg, 0,
                       (axis == 2 ? 0x7e000000u : 0u) | (uint32_t{0x3800} << (16 * (axis % 2))));
@@ -6423,8 +6651,9 @@ TEST_P(Gfx11ImageFeedbackTest, VolumeQueriesAndSamplesReadAllThreeAxes) {
   for (const bool offset : {false, true}) {
     const auto opcode = offset ? rdna3_5::kImageSampleDOG16Mimg : rdna3_5::kImageSampleDG16Mimg;
     const rdna3_5::MimgBuilderFields fields{.dim = 2, .dmask = 1, .vdata = 8, .ssamp = 2};
-    for (unsigned reg = 0; reg < 7 + unsigned(offset); ++reg)
+    for (unsigned reg = 0; reg < 7 + unsigned(offset); ++reg) {
       cu_->write_vgpr(vb_ + reg, 0, 0);
+    }
     cu_->write_vgpr(vb_ + offset + 1, 0, 0x7e003800);
     inputs->read.fill(0);
     ASSERT_NO_FATAL_FAILURE(issue_image(opcode, fields));
@@ -6452,8 +6681,9 @@ TEST_P(Gfx11ImageFeedbackTest, VolumeQueriesAndSamplesReadAllThreeAxes) {
   }
   cu_->write_sgpr(sb_ + 10, 0);           // SAMPLE_O uses the base level.
   cu_->write_vgpr(vb_, 0, 1 | (1 << 16)); // X and Z offsets of +1.
-  for (unsigned reg = 1; reg <= 3; ++reg)
+  for (unsigned reg = 1; reg <= 3; ++reg) {
     cu_->write_vgpr(vb_ + reg, 0, bits(0.125f));
+  }
   ASSERT_NO_FATAL_FAILURE(
       issue_image(rdna3_5::kImageSampleOMimg, {.dim = 2, .dmask = 1, .vdata = 8, .ssamp = 2}));
   EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), bits(8));
@@ -6511,8 +6741,9 @@ TEST_P(Gfx11ImageFeedbackTest, VolumeQueriesAndSamplesReadAllThreeAxes) {
 TEST_P(Gfx11ImageFeedbackTest, OneDimensionalViewPreservesFixedLodPrefixReadsAcrossFeedback) {
   const auto resource =
       rdna_descriptor({.width = 4, .height = 1, .pitch = 64, .rdna_format = 22}, arch());
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (2 << 6)); // Edge, point, no mip selection.
   constexpr uint32_t texel = std::bit_cast<uint32_t>(3.f), sentinel = 0xdeadbeef;
   memory_.write32(kBase + 4, texel);
@@ -6550,8 +6781,9 @@ TEST_P(Gfx11ImageFeedbackTest, OneDimensionalViewPreservesFixedLodPrefixReadsAcr
 TEST_P(Gfx11ImageFeedbackTest, SingleLevelFilteredFeedbackReadsShaderBiasAndGradient) {
   auto resource =
       rdna_descriptor({.width = 64, .height = 64, .pitch = 1, .rdna_format = 2}, arch());
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
   cu_->write_sgpr(sb_ + 10, (1u << 26) | (1u << 22) | (1u << 20)); // Point mip, linear XY.
   auto decoder = Decoder::create(arch());
@@ -6584,13 +6816,15 @@ TEST_P(Gfx11ImageFeedbackTest, SingleLevelFilteredFeedbackReadsShaderBiasAndGrad
       scoreboard.check_instruction(*decoded.value(), *wf_);
       EXPECT_EQ(hazards, unsigned(lwe || tfe || threshold));
       scoreboard.clear();
-      if (!lwe || !threshold)
+      if (!lwe || !threshold) {
         continue;
+      }
       for (bool large_footprint : {false, true}) {
         for (unsigned lane = 0; lane < 4; ++lane) {
           cu_->write_vgpr(vb_, lane, large_footprint ? (bias ? 0x40000000u : 0x3400u) : 0u);
-          if (!bias)
+          if (!bias) {
             cu_->write_vgpr(vb_ + 1, lane, 0u);
+          }
           const unsigned first_coord = bias ? 1u : 2u;
           cu_->write_vgpr(vb_ + first_coord, lane, std::bit_cast<uint32_t>(float(lane & 1) / 64.f));
           cu_->write_vgpr(vb_ + first_coord + 1, lane,
@@ -6598,8 +6832,9 @@ TEST_P(Gfx11ImageFeedbackTest, SingleLevelFilteredFeedbackReadsShaderBiasAndGrad
           cu_->write_vgpr(vb_ + 9, lane, 0xdeadbeef);
         }
         ASSERT_NO_FATAL_FAILURE(issue_image(opcode, fields));
-        for (unsigned lane = 0; lane < 4; ++lane)
+        for (unsigned lane = 0; lane < 4; ++lane) {
           EXPECT_EQ(cu_->read_vgpr(vb_ + 9, lane), large_footprint ? 0xdeadbeefu : 2u);
+        }
       }
     }
   }
@@ -6612,8 +6847,9 @@ TEST_P(Gfx11ImageFeedbackTest, PackedBiasReadMatchesTheWaitMask) {
     uint8_t bias_bytes = 0;
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t bytes) override {
-      if (reg == wave->vgpr_alloc().base && (lanes & 1))
+      if (reg == wave->vgpr_alloc().base && (lanes & 1)) {
         bias_bytes |= bytes;
+      }
     }
   };
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -6625,12 +6861,14 @@ TEST_P(Gfx11ImageFeedbackTest, PackedBiasReadMatchesTheWaitMask) {
       Image{
           .width = 4, .height = 4, .pitch = 1, .mip_levels = 3, .last_level = 2, .rdna_format = 22},
       arch());
-  for (unsigned i = 0; i < words.size(); ++i)
+  for (unsigned i = 0; i < words.size(); ++i) {
     cu_->write_sgpr(sb_ + i, words[i]);
+  }
   cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
   cu_->write_sgpr(sb_ + 10, 1u << 26);
-  for (unsigned i = 0; i < 4096; i += 4)
+  for (unsigned i = 0; i < 4096; i += 4) {
     memory_.write32(kBase + i, 0x3f800000);
+  }
   wf_->set_exec(15);
   for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane,
@@ -6669,8 +6907,9 @@ TEST_P(Gfx11ImageFeedbackTest, QuantizesShaderLodInputsBeforeWarningComparison) 
   image.last_level = 3;
   image.rdna_format = 22;
   auto resource = rdna_descriptor(image, arch());
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 8, 2 | (2 << 3));
   cu_->write_sgpr(sb_ + 9, 640u << 12);
   cu_->write_sgpr(sb_ + 10, 1u << 26);
@@ -6717,8 +6956,9 @@ TEST_P(Gfx11ImageFeedbackTest, QuantizesVolumeAndSnormShaderBiasBeforeAddingTheF
                 .rdna_format = volume ? 22u : 2u};
     auto descriptor = rdna_descriptor(image, arch());
     descriptor[5] |= 129u << 8;
-    for (uint32_t word = 0; word < descriptor.size(); ++word)
+    for (uint32_t word = 0; word < descriptor.size(); ++word) {
       cu_->write_sgpr(sb_ + word, descriptor[word]);
+    }
     cu_->write_sgpr(sb_ + 8, 2 | (2 << 3) | (2 << 6));
     cu_->write_sgpr(sb_ + 9, 640u << 12);
     cu_->write_sgpr(sb_ + 10, (1u << 26) | (1u << 22) | (1u << 20));
@@ -6751,8 +6991,9 @@ TEST_P(Gfx11ImageFeedbackTest, LodWarningsMatchTheSampleAndSetStickyMode) {
   image.rdna_format = 22; // R32_FLOAT, valid for linear mip filtering.
   auto resource = rdna_descriptor(image, arch());
   resource[5] |= 384u << 8; // Warn below absolute LOD 1.5.
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 8, 2 | (2 << 3));
   auto decoder = Decoder::create(arch());
   const auto read_mode = decoder->decode_window(
@@ -6784,8 +7025,9 @@ TEST_P(Gfx11ImageFeedbackTest, LodWarningsMatchTheSampleAndSetStickyMode) {
                  << " lod=" << test.lod << " min=" << test.minimum);
     cu_->write_sgpr(sb_ + 9, test.minimum | (0xfffu << 12));
     cu_->write_sgpr(sb_ + 10, uint32_t{test.mip_filter} << 26);
-    if (test.clear_mode)
+    if (test.clear_mode) {
       wf_->set_mode_raw(wf_->mode_raw() & ~(1u << 10));
+    }
     wf_->set_exec(test.active ? 1 : 0);
     const unsigned status_reg = test.opcode == rdna3_5::kImageGather4LzMimg ? 12 : 9;
     for (unsigned lane = 0; lane < 4; ++lane) {
@@ -6809,8 +7051,9 @@ TEST_P(Gfx11ImageFeedbackTest, UnfilteredSamplesAndQueriesHonorTheFirstResidentM
   image.last_level = 3;
   image.rdna_format = 22;
   auto resource = rdna_descriptor(image, arch());
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 8, 2 | (2 << 3));
   cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
   cu_->write_sgpr(sb_ + 10, 0); // Disabled mip filtering.
@@ -6865,15 +7108,17 @@ TEST_P(Gfx11ImageFeedbackTest, SparseAndResidentLanesCompleteOneImageLoad) {
     amdgpu::IdentityAddressSpaceTranslator identity_;
     amdgpu::VmTranslationResult translate(uint64_t address, size_t bytes,
                                           amdgpu::VmAccessKind access) const override {
-      if ((address >> 12) != (kBase >> 12))
+      if ((address >> 12) != (kBase >> 12)) {
         return {};
+      }
       return identity_.translate(address, bytes, access);
     }
   };
   auto image = rdna_descriptor(Image{.width = 2048, .pitch = 2048}, arch());
   image[5] |= 256u << 8; // MIN_LOD_WARN = 1 for the LWE controls.
-  for (uint32_t i = 0; i < image.size(); ++i)
+  for (uint32_t i = 0; i < image.size(); ++i) {
     cu_->write_sgpr(sb_ + i, image[i]);
+  }
   memory_.write32(kBase, 0x12345678);
   write_coordinates(0, {0, 0, 0});
   write_coordinates(2, {1024, 0, 0}); // X=1024 begins the missing VA page.
@@ -6988,13 +7233,14 @@ TEST_P(Gfx11ImageFeedbackTest, SparseAndResidentLanesCompleteOneImageLoad) {
 }
 
 TEST_P(AllImageAccessTest, CompressedDescriptorsStopBeforeAccessingOrdinaryBacking) {
-  for (uint32_t swizzle : {0u, arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 2u : 22u}) {
+  for (uint32_t swizzle : {0u, arch() == rocjitsu::IsaFamily::Rdna4 ? 2u : 22u}) {
     SCOPED_TRACE(swizzle);
     bind_image(2, 64, 64, swizzle);
     const uint32_t word6 = cu_->read_sgpr(sb_ + 6);
     for (uint32_t flag : {21u, 20u}) {
-      if (flag == 20 && arch_is_cdna_4_or_lower(arch()))
+      if (flag == 20 && arch_is_cdna_4_or_lower(arch())) {
         continue;
+      }
       cu_->write_sgpr(sb_ + 6, word6 | (1u << flag));
       for (bool load : {false, true}) {
         wf_->clear_instruction_execution_error();
@@ -7019,8 +7265,9 @@ TEST_P(AllImageAccessTest, UnsupportedLayoutIsDiagnosedEvenWithoutInBoundsLanes)
 }
 
 TEST_P(AllImageAccessTest, StoreRequiresUnnormalizedCoordinates) {
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() == rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "VIMAGE has no UNORM control";
+  }
   bind_image(2);
   unnormalized_ = false;
   EXPECT_FALSE(decoded_issue(false, 2));
@@ -7029,15 +7276,16 @@ TEST_P(AllImageAccessTest, StoreRequiresUnnormalizedCoordinates) {
 }
 
 TEST_P(AllImageAccessTest, LegalCubeAndMsaaDimensionsStopAsUnimplemented) {
-  if (arch_is_cdna_4_or_lower(arch()))
+  if (arch_is_cdna_4_or_lower(arch())) {
     GTEST_SKIP() << "GFX9 has no DIM field";
+  }
   bind_image(2);
   for (uint32_t dimension : {3u, 6u, 7u}) {
     SCOPED_TRACE(dimension);
     wf_->clear_instruction_execution_error();
     dimension_override_ = dimension;
     EXPECT_FALSE(decoded_issue(true, 2));
-    const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+    const bool gfx10 = arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2;
     EXPECT_EQ(wf_->instruction_execution_error(),
               gfx10 && dimension >= amdgpu::kImageDim2dMsaa
                   ? amdgpu::InstructionExecutionError::UnsupportedOperandValue
@@ -7046,13 +7294,14 @@ TEST_P(AllImageAccessTest, LegalCubeAndMsaaDimensionsStopAsUnimplemented) {
 }
 
 TEST_P(AllImageAccessTest, ScatteredAndPackedCoordinatesReachTheSameTexel) {
-  if (arch_is_cdna_4_or_lower(arch()))
+  if (arch_is_cdna_4_or_lower(arch())) {
     GTEST_SKIP() << "GFX9 image coordinates are sequential";
+  }
   wf_->set_exec(1);
   bind_image(3);
   scattered_ = true;
   // Independent 3D linear layout: byte offset = slice + row + 2 DWORDs.
-  const uint32_t byte_offset = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 648 : 776;
+  const uint32_t byte_offset = arch() == rocjitsu::IsaFamily::Rdna4 ? 648 : 776;
   for (bool packed : {false, true}) {
     packed_coordinates_ = packed;
     cu_->write_vgpr(vb_, 0, packed ? 2 | (1u << 16) : 2);
@@ -7123,8 +7372,9 @@ TEST_P(AllImageAccessTest, LivenessUsesScatteredCoordinatesAndScaledDescriptor) 
 }
 
 TEST_P(AllImageAccessTest, WaitsAndRegisterReadsUseTheBoundTransferShape) {
-  if (arch_is_cdna_4_or_lower(arch()))
+  if (arch_is_cdna_4_or_lower(arch())) {
     GTEST_SKIP() << "RDNA DIM can supply more coordinates than the resource requires";
+  }
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto observer = std::make_unique<ImageInputBytes>();
   auto *inputs = observer.get();
@@ -7204,17 +7454,19 @@ TEST_P(AllImageAccessTest, D16LoadWaitOwnershipDistinguishesPreservedAndZeroedHi
 }
 
 TEST_P(AllImageAccessTest, TiledBaseXorStopsBeforeImageMemoryAccess) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  const bool gfx11 = arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  const bool gfx11 = arch() == rocjitsu::IsaFamily::Rdna3 || arch() == rocjitsu::IsaFamily::Rdna3_5;
   wf_->set_exec(1);
   for (uint32_t swizzle : {gfx12 ? 2u : 22u, gfx12 ? 3u : 27u}) {
-    if (!gfx11 && !gfx12 && swizzle == 27)
+    if (!gfx11 && !gfx12 && swizzle == 27) {
       continue;
+    }
     bind_image(2, 64, 64, swizzle);
     cu_->write_sgpr(sb_, (kBase + 256) >> 8);
     for (bool tfe : {false, true}) {
-      if (tfe && !gfx11 && !gfx12)
+      if (tfe && !gfx11 && !gfx12) {
         continue;
+      }
       texel_fault_ = tfe;
       for (uint32_t x : {3u, 64u}) {
         write_coordinates(0, {x, 1, 0});
@@ -7238,8 +7490,9 @@ TEST_P(AllImageAccessTest, TiledBaseXorStopsBeforeImageMemoryAccess) {
 }
 
 TEST_P(AllImageAccessTest, ThickDisplayVolumesStopBeforeImageMemoryAccess) {
-  if (arch_is_cdna_4_or_lower(arch()) || arch() == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch_is_cdna_4_or_lower(arch()) || arch() == rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "GFX9 display volumes are thin; GFX12 has different swizzle encodings";
+  }
   bind_image(3, 64, 64, 26);
   for (bool load : {false, true}) {
     wf_->clear_instruction_execution_error();
@@ -7250,8 +7503,9 @@ TEST_P(AllImageAccessTest, ThickDisplayVolumesStopBeforeImageMemoryAccess) {
 }
 
 TEST_P(AllImageAccessTest, VolumeFeedbackUsesTheOrdinaryGfx11SwizzleLayout) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   write_coordinates(0, {8, 0, 1});
   auto decoder = Decoder::create(arch());
@@ -7280,8 +7534,9 @@ TEST_P(AllImageAccessTest, VolumeFeedbackUsesTheOrdinaryGfx11SwizzleLayout) {
 }
 
 TEST_P(AllImageAccessTest, Gfx11FeedbackVolumesKeepDccAddressAndSlice) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 || cu_->image_address_config().gb_addr_config != 0x545)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 || cu_->image_address_config().gb_addr_config != 0x545) {
     GTEST_SKIP();
+  }
   bind_image(
       Image{.width = 64, .height = 64, .depth = 8, .type = amdgpu::kImage3d, .swizzle_mode = 27});
   cu_->write_sgpr(sb_ + 6, cu_->read_sgpr(sb_ + 6) | (1u << 21) | (1u << 19));
@@ -7304,7 +7559,7 @@ TEST_P(AllImageAccessTest, Gfx11FeedbackVolumesKeepDccAddressAndSlice) {
 }
 
 TEST(ImageOpcodeBuilderTest, SplitImageOpcodeAndRawBufferModifiersRoundTrip) {
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA2);
+  auto decoder = Decoder::create(rocjitsu::IsaFamily::Rdna2);
   const auto check = [&](const auto &words, const char *mnemonic) {
     auto instruction = decoder->decode_window(words);
     ASSERT_TRUE(instruction.succeeded());
@@ -7321,10 +7576,10 @@ TEST(ImageOpcodeBuilderTest, SplitImageOpcodeAndRawBufferModifiersRoundTrip) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Architectures, AllImageAccessTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                         ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                         ROCJITSU_CODE_ARCH_RDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                         rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                         rocjitsu::IsaFamily::Rdna4));
 
 enum class SampleTestOperation { Zero, Lod, Gradients, Gather, Offset };
 
@@ -7364,7 +7619,7 @@ protected:
     gfx11_fields.vdata = 8;
     gfx11_fields.ssamp = 2;
     auto decoder = Decoder::create(arch());
-    return arch() == ROCJITSU_CODE_ARCH_RDNA4
+    return arch() == rocjitsu::IsaFamily::Rdna4
                ? decoder->decode_window(
                      rdna4::build_vsample(rdna4::kImageSampleLzVsample, gfx12_fields))
                : decoder->decode_window(
@@ -7388,7 +7643,7 @@ protected:
   }
 
   void bind_sampler(const Sampler &sampler = {}) {
-    const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+    const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
     const uint32_t xy_filter = sampler.linear_xy ? 1u : 0u;
     // Z_FILTER_NONE, zero anisotropy, transparent black border.
     const std::array<uint32_t, 4> words{
@@ -7400,8 +7655,9 @@ protected:
             (xy_filter << 22) | (static_cast<uint32_t>(sampler.mip) << 26) |
             (gfx12 ? (sampler.perf_mip & 3) << 30 : 0u),
         gfx12 ? sampler.perf_mip >> 2 : 0u};
-    for (uint32_t word = 0; word < words.size(); ++word)
+    for (uint32_t word = 0; word < words.size(); ++word) {
       cu_->write_sgpr(sb_ + 8 + word, words[word]);
+    }
   }
 
   template <typename Fields, typename Builder>
@@ -7416,51 +7672,52 @@ protected:
                                                   uint32_t sampler = 8) {
     std::array<uint32_t, 3> words{};
     switch (arch()) {
-    case ROCJITSU_CODE_ARCH_CDNA1:
+    case rocjitsu::IsaFamily::Cdna1:
       words = sample_control_mimg_words<cdna1::MimgBuilderFields>(
           cdna1::build_mimg,
           {cdna1::kImageSampleLzMimg, cdna1::kImageSampleLMimg, cdna1::kImageSampleDMimg,
            cdna1::kImageGather4LzMimg, cdna1::kImageSampleOMimg},
           operation, d16, sampler);
       break;
-    case ROCJITSU_CODE_ARCH_RDNA1:
+    case rocjitsu::IsaFamily::Rdna1:
       words = sample_control_mimg_words<rdna1::MimgBuilderFields>(
           rdna1::build_mimg,
           {rdna1::kImageSampleLzMimg, rdna1::kImageSampleLMimg, rdna1::kImageSampleDMimg,
            rdna1::kImageGather4LzMimg, rdna1::kImageSampleOMimg},
           operation, d16, sampler);
       break;
-    case ROCJITSU_CODE_ARCH_RDNA2:
+    case rocjitsu::IsaFamily::Rdna2:
       words = sample_control_mimg_words<rdna2::MimgBuilderFields>(
           rdna2::build_mimg,
           {rdna2::kImageSampleLzMimg, rdna2::kImageSampleLMimg, rdna2::kImageSampleDMimg,
            rdna2::kImageGather4LzMimg, rdna2::kImageSampleOMimg},
           operation, d16, sampler);
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3:
+    case rocjitsu::IsaFamily::Rdna3:
       words = sample_control_mimg_words<rdna3::MimgBuilderFields>(
           rdna3::build_mimg,
           {rdna3::kImageSampleLzMimg, rdna3::kImageSampleLMimg, rdna3::kImageSampleDMimg,
            rdna3::kImageGather4LzMimg, rdna3::kImageSampleOMimg},
           operation, d16, sampler);
       break;
-    case ROCJITSU_CODE_ARCH_RDNA3_5:
+    case rocjitsu::IsaFamily::Rdna3_5:
       words = sample_control_mimg_words<rdna3_5::MimgBuilderFields>(
           rdna3_5::build_mimg,
           {rdna3_5::kImageSampleLzMimg, rdna3_5::kImageSampleLMimg, rdna3_5::kImageSampleDMimg,
            rdna3_5::kImageGather4LzMimg, rdna3_5::kImageSampleOMimg},
           operation, d16, sampler);
       break;
-    case ROCJITSU_CODE_ARCH_CDNA2: {
+    case rocjitsu::IsaFamily::Cdna2: {
       // CDNA2's public ISA input exposes only base IMAGE_SAMPLE. A single-level
       // sample without mip filtering has the same controls as the zero form.
-      if (operation != SampleTestOperation::Zero)
+      if (operation != SampleTestOperation::Zero) {
         return {};
+      }
       words = sample_mimg_words<cdna2::MimgBuilderFields>(cdna2::build_mimg,
                                                           cdna2::kImageSampleMimg, d16, sampler);
       break;
     }
-    case ROCJITSU_CODE_ARCH_RDNA4: {
+    case rocjitsu::IsaFamily::Rdna4: {
       auto encoding = rdna4::VsampleBuilderFields{};
       encoding.dim = dimension_override_.value_or(1);
       encoding.dmask = 1;
@@ -7493,11 +7750,13 @@ protected:
 
   bool sample(SampleTestOperation operation, bool d16 = false, uint32_t sampler = 8) {
     std::unique_ptr<Instruction> instruction = sample_instruction(operation, d16, sampler);
-    if (!instruction)
+    if (!instruction) {
       return false;
+    }
     instruction->execute(*instruction, wf_);
-    if (!instruction->data())
+    if (!instruction->data()) {
       return false;
+    }
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
     EXPECT_EQ(pipeline.issue(instruction.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
     // Later cases seed backing storage directly, as in the base image fixture.
@@ -7508,9 +7767,10 @@ protected:
 };
 
 TEST_P(ImageSamplerControlTest, WaitChecksFollowDescriptorLodAndGradientOperands) {
-  const bool gfx9 = arch() == ROCJITSU_CODE_ARCH_CDNA1;
-  if (!gfx9 && arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  const bool gfx9 = arch() == rocjitsu::IsaFamily::Cdna1;
+  if (!gfx9 && arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "Covers descriptor-selected GFX9 tuples and GFX12 VSAMPLE selectors";
+  }
   wf_->set_exec(1);
   std::unique_ptr<Decoder> decoder = Decoder::create(arch());
   amdgpu::MemoryWaitScoreboard &state = wf_->ensure_memory_wait_scoreboard();
@@ -7563,8 +7823,9 @@ TEST_P(ImageSamplerControlTest, WaitChecksFollowDescriptorLodAndGradientOperands
         const auto words = rdna4::build_vsample(rdna4::kImageSampleDVsample, encoding);
         DecodeResult grad = decoder->decode(words.data());
         ASSERT_TRUE(grad.succeeded());
-        for (uint16_t reg : {1, 12, 14, 20})
+        for (uint16_t reg : {1, 12, 14, 20}) {
           EXPECT_TRUE(has_hazard(*grad.value(), reg, 0xc)) << reg;
+        }
         EXPECT_FALSE(has_hazard(*grad.value(), 2, 0xf));
         const uint16_t first_coordinate = 21 + (dimensions == 3 ? 2 : 0);
         if (dimensions == 3) {
@@ -7583,10 +7844,11 @@ TEST_P(ImageSamplerControlTest, UnnormalizedWrapUsesClampAndMirrorOnce) {
   Image image;
   image.width = 16;
   bind_sample_image(image);
-  for (uint32_t x = 0; x < 16; ++x)
+  for (uint32_t x = 0; x < 16; ++x) {
     memory_.write32(kBase + x * 4, std::bit_cast<uint32_t>(float(x)));
+  }
   wf_->set_exec(1);
-  for (Clamp wrap : {Clamp::Repeat, Clamp::Mirror})
+  for (Clamp wrap : {Clamp::Repeat, Clamp::Mirror}) {
     for (bool linear : {false, true}) {
       bind_sampler({.clamp_x = wrap,
                     .clamp_y = wrap,
@@ -7604,12 +7866,14 @@ TEST_P(ImageSamplerControlTest, UnnormalizedWrapUsesClampAndMirrorOnce) {
                                                                               : 15.0f));
       }
     }
+  }
 }
 
 TEST_P(ImageSamplerControlTest, NativePitchSelectsTheHardwareRowAndFp16Filter) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP() << "GFX11 and GFX12 native texture layout";
+  }
 
   wf_->set_exec(1);
   const auto bind_texture = [&](uint32_t format, uint32_t width, uint32_t pitch, bool mip = false,
@@ -7623,8 +7887,9 @@ TEST_P(ImageSamplerControlTest, NativePitchSelectsTheHardwareRowAndFp16Filter) {
         0,
         0,
         0};
-    for (unsigned i = 0; i < words.size(); ++i)
+    for (unsigned i = 0; i < words.size(); ++i) {
       cu_->write_sgpr(sb_ + i, words[i]);
+    }
   };
 
   // Physical gfx1100/gfx1201 samples of a 2x2 sRGB texture use 256/128-byte rows.
@@ -7693,10 +7958,11 @@ TEST_P(ImageSamplerControlTest, NativePitchSelectsTheHardwareRowAndFp16Filter) {
 }
 
 TEST_P(ImageSamplerControlTest, ForcedUnnormalizedSamplerCoordinatesClampLikeUnrm) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  }
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
   Image image;
   image.width = 16;
   image.pitch = gfx12 ? 64 : 128;
@@ -7720,8 +7986,9 @@ TEST_P(ImageSamplerControlTest, ForcedUnnormalizedSamplerCoordinatesClampLikeUnr
 }
 
 TEST_P(ImageSamplerControlTest, CapturesRawTransferAndAtomicPayloadsBeforeGeneration) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   write_coordinates(0, {1, 0, 0});
   const auto coords = amdgpu::contiguous_image_address_registers(0);
@@ -7757,8 +8024,9 @@ TEST_P(ImageSamplerControlTest, CapturesRawTransferAndAtomicPayloadsBeforeGenera
 }
 
 TEST_P(ImageSamplerControlTest, MultisampleFragmentAddressesUseTheCapturedDeviceConfiguration) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   Image image;
   image.width = image.height = image.pitch = 32;
   image.type = amdgpu::kImage2dMsaa;
@@ -7784,21 +8052,24 @@ TEST_P(ImageSamplerControlTest, MultisampleFragmentAddressesUseTheCapturedDevice
   ASSERT_TRUE(issued.succeeded());
   ASSERT_TRUE(state.graphics_sample);
   constexpr std::array<uint64_t, 4> expected{kBase + 16, kBase + 20, kBase + 24, kBase + 28};
-  for (unsigned tap = 0; tap < expected.size(); ++tap)
+  for (unsigned tap = 0; tap < expected.size(); ++tap) {
     EXPECT_EQ(state.graphics_sample->taps[tap].addresses[0], expected[tap]);
+  }
 }
 
 TEST_P(ImageSamplerControlTest, SampleOperandMasksMatchPreparation) {
-  if (arch_is_cdna_4_or_lower(arch()))
+  if (arch_is_cdna_4_or_lower(arch())) {
     GTEST_SKIP();
-  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  }
+  const bool gfx10 = arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2;
   auto decoder = Decoder::create(arch());
   const auto decode = [&](uint8_t mask, bool bias, bool a16) {
-    if (gfx10)
+    if (gfx10) {
       return decoder->decode_window(rdna2::build_mimg(
           bias ? rdna2::kImageSampleBOMimg : rdna2::kImageSampleMimg,
           {.dim = 1, .dmask = mask, .vdata = 8, .ssamp = 2, .a16 = a16, .d16 = 1}));
-    if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
+    }
+    if (arch() == rocjitsu::IsaFamily::Rdna4) {
       return decoder->decode_window(rdna4::build_vsample(
           bias ? rdna4::kImageSampleBOVsample : rdna4::kImageSampleVsample, {.dim = 1,
                                                                              .d16 = 1,
@@ -7809,6 +8080,7 @@ TEST_P(ImageSamplerControlTest, SampleOperandMasksMatchPreparation) {
                                                                              .vaddr1 = 1,
                                                                              .vaddr2 = 2,
                                                                              .vaddr3 = 3}));
+    }
     return decoder->decode_window(rdna3_5::build_mimg(
         bias ? rdna3_5::kImageSampleBOMimg : rdna3_5::kImageSampleMimg,
         {.dim = 1, .dmask = mask, .a16 = a16, .d16 = 1, .vdata = 8, .ssamp = 2}));
@@ -7818,12 +8090,13 @@ TEST_P(ImageSamplerControlTest, SampleOperandMasksMatchPreparation) {
   bind_sample_image(Image{.width = 64, .height = 64, .pitch = 64});
   bind_sampler();
   memory_.write32(kBase, 0x3f800000u);
-  for (unsigned lane = 0; lane < 4; ++lane)
+  for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {0, 0, 0});
+  }
 
   // Plain samples issue, while offset/bias samples currently only expose decoded operands.
   // The newer TA overrides an empty fetch mask to one zero D16 component. GFX10 rejects it.
-  for (uint8_t mask : {0, 1})
+  for (uint8_t mask : {0, 1}) {
     for (bool bias : {false, true}) {
       auto decoded = decode(mask, bias, true);
       ASSERT_TRUE(decoded.succeeded());
@@ -7833,8 +8106,9 @@ TEST_P(ImageSamplerControlTest, SampleOperandMasksMatchPreparation) {
       EXPECT_EQ(modifiers.memory_result_last_bytes, partial ? 3u : 15u);
       const InstDefUse use(*decoded.value(), wf_->wf_size());
       EXPECT_EQ(use.uses.contains({RegClass::VGPR, 8, 1}), partial);
-      if (bias)
+      if (bias) {
         continue;
+      }
       cu_->write_vgpr(vb_ + 8, 0, 0xdeadc0de);
       wf_->clear_instruction_execution_error();
       const auto issued = cu_->execute_instruction(decoded.value().get(), *wf_);
@@ -7852,6 +8126,7 @@ TEST_P(ImageSamplerControlTest, SampleOperandMasksMatchPreparation) {
         EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), mask ? 0xdead3c00u : 0xdead0000u);
       }
     }
+  }
 
   class PrefixReads final : public ExecutionPlugin {
   public:
@@ -7860,8 +8135,9 @@ TEST_P(ImageSamplerControlTest, SampleOperandMasksMatchPreparation) {
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t mask) override {
       const uint32_t index = reg - wave->vgpr_alloc().base;
-      if ((lanes & 1) && index < bytes.size())
+      if ((lanes & 1) && index < bytes.size()) {
         bytes[index] |= mask;
+      }
     }
   };
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -7892,8 +8168,9 @@ TEST_P(ImageSamplerControlTest, SampleOperandMasksMatchPreparation) {
       cu_->write_vgpr(vb_ + 3, lane, std::bit_cast<uint32_t>(y));
     }
     for (bool graphics : {false, true}) {
-      if (graphics && gfx10)
+      if (graphics && gfx10) {
         continue; // GFX10 uses the compute preparation.
+      }
       amdgpu::VectorMemState state(amdgpu::GLOBAL_MEM);
       state.is_load = true;
       state.dst_reg_base = vb_ + 8;
@@ -7911,9 +8188,10 @@ TEST_P(ImageSamplerControlTest, SampleOperandMasksMatchPreparation) {
 }
 
 TEST_P(ImageSamplerControlTest, GraphicsPrefixesSelectMipTexelsAndMatchSourceWaits) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
   class Reads final : public ExecutionPlugin {
   public:
     Reads() : ExecutionPlugin("graphics_prefix_reads") {}
@@ -7921,10 +8199,13 @@ TEST_P(ImageSamplerControlTest, GraphicsPrefixesSelectMipTexelsAndMatchSourceWai
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t mask) override {
       const unsigned index = reg - wave->vgpr_alloc().base;
-      if (index < bytes[0].size())
-        for (size_t lane = 0; lane < bytes.size(); ++lane)
-          if (lanes & (1u << lane))
+      if (index < bytes[0].size()) {
+        for (size_t lane = 0; lane < bytes.size(); ++lane) {
+          if (lanes & (1u << lane)) {
             bytes[lane][index] |= mask;
+          }
+        }
+      }
     }
   };
   // Carry the extended form through the scoreboard until its opcode is generated.
@@ -7985,7 +8266,7 @@ TEST_P(ImageSamplerControlTest, GraphicsPrefixesSelectMipTexelsAndMatchSourceWai
     ASSERT_TRUE(state.image_status);
     EXPECT_EQ(state.image_status->levels[0], level);
     const auto mip =
-        amdgpu::image_mip_layout(arch() == ROCJITSU_CODE_ARCH_RDNA4, 0, 4, 64, height, 3, level);
+        amdgpu::image_mip_layout(arch() == rocjitsu::IsaFamily::Rdna4, 0, 4, 64, height, 3, level);
     ASSERT_TRUE(mip);
     if (gradient) {
       EXPECT_EQ(state.per_lane_addr[0], kBase + mip->offset + 9 * 4);
@@ -7995,9 +8276,10 @@ TEST_P(ImageSamplerControlTest, GraphicsPrefixesSelectMipTexelsAndMatchSourceWai
       EXPECT_EQ(state.graphics_sample->comparison->function, 1u);
       EXPECT_EQ(state.graphics_sample->comparison->references[0], 3.f);
       ASSERT_EQ(state.graphics_sample->tap_count, 4u);
-      for (unsigned tap = 0; tap < 4; ++tap)
+      for (unsigned tap = 0; tap < 4; ++tap) {
         EXPECT_EQ(state.graphics_sample->taps[tap].addresses[0],
                   kBase + mip->offset + 4 * (8 * mip->pitch + 7 + tap));
+      }
     }
 
     SampleInputs operation(*sample);
@@ -8046,8 +8328,9 @@ TEST_P(ImageSamplerControlTest, GraphicsPrefixesSelectMipTexelsAndMatchSourceWai
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10PackedPrefixesSelectTexelsAndConsumeTheirEncodedBytes) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   class CoordinateReads final : public ExecutionPlugin {
   public:
     CoordinateReads() : ExecutionPlugin("image_coordinate_reads") {}
@@ -8055,8 +8338,9 @@ TEST_P(ImageSamplerControlTest, Gfx10PackedPrefixesSelectTexelsAndConsumeTheirEn
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t mask) override {
       const uint32_t index = reg - wave->vgpr_alloc().base;
-      if ((lanes & 1) && index < bytes.size())
+      if ((lanes & 1) && index < bytes.size()) {
         bytes[index] |= mask;
+      }
     }
   };
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -8123,8 +8407,9 @@ TEST_P(ImageSamplerControlTest, Gfx10PackedPrefixesSelectTexelsAndConsumeTheirEn
     std::memcpy(sample.response.data(), &depth, sizeof(depth));
   }
   amdgpu::complete_buffer_format_load(*wf_, *cu_, gather);
-  for (unsigned tap = 0; tap < 4; ++tap)
+  for (unsigned tap = 0; tap < 4; ++tap) {
     EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + tap, 0), tap >= 2 ? 0x3f800000u : 0u);
+  }
   EXPECT_EQ(reads->bytes, (std::array<uint8_t, 6>{15, 3, 15, 15, 0, 0}));
 
   bind_sample_image(Image{.width = 64, .height = 64, .mip_levels = 3, .last_level = 2});
@@ -8135,8 +8420,9 @@ TEST_P(ImageSamplerControlTest, Gfx10PackedPrefixesSelectTexelsAndConsumeTheirEn
     cu_->write_vgpr(vb_ + 2, lane, std::bit_cast<uint32_t>((8.f + (lane >> 1)) / 64));
   }
   for (const float bias : {0.f, 1.f}) {
-    for (unsigned lane = 0; lane < 4; ++lane)
+    for (unsigned lane = 0; lane < 4; ++lane) {
       cu_->write_vgpr(vb_, lane, std::bit_cast<uint32_t>(bias));
+    }
     amdgpu::VectorMemState biased(amdgpu::GLOBAL_MEM);
     biased.is_load = true;
     biased.dst_reg_base = vb_ + 8;
@@ -8150,9 +8436,10 @@ TEST_P(ImageSamplerControlTest, Gfx10PackedPrefixesSelectTexelsAndConsumeTheirEn
 }
 
 TEST_P(ImageSamplerControlTest, Gfx9AndGfx10RejectUnqualifiedShaderLodClamp) {
-  if (!arch_is_cdna_4_or_lower(arch()) && arch() != ROCJITSU_CODE_ARCH_RDNA1 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (!arch_is_cdna_4_or_lower(arch()) && arch() != rocjitsu::IsaFamily::Rdna1 &&
+      arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   bind_sample_image(
       Image{.width = 64, .height = 64, .pitch = 64, .mip_levels = 2, .last_level = 1});
   bind_sampler({.mip = MipFilter::Point, .max_lod_fixed8 = 256, .bias_fixed8 = 256});
@@ -8171,9 +8458,10 @@ TEST_P(ImageSamplerControlTest, Gfx9AndGfx10RejectUnqualifiedShaderLodClamp) {
 }
 
 TEST_P(ImageSamplerControlTest, ShaderClampSelectsTheSameMipInBothPreparations) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
   bind_sample_image(Image{.width = 64, .height = 64, .pitch = 1, .mip_levels = 2, .last_level = 1});
   bind_sampler({.mip = MipFilter::Point, .max_lod_fixed8 = 256});
   wf_->set_exec(1);
@@ -8200,9 +8488,10 @@ TEST_P(ImageSamplerControlTest, ShaderClampSelectsTheSameMipInBothPreparations) 
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10WarningReportsIntegerLodBeforePointMipRounding) {
-  const bool rdna1 = arch() == ROCJITSU_CODE_ARCH_RDNA1;
-  if (!rdna1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  const bool rdna1 = arch() == rocjitsu::IsaFamily::Rdna1;
+  if (!rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   bind_image(
       {.width = 64, .height = 64, .pitch = 1, .mip_levels = 2, .last_level = 1, .rdna_format = 22});
   cu_->write_sgpr(sb_ + 5, cu_->read_sgpr(sb_ + 5) | (512u << 8));
@@ -8236,8 +8525,9 @@ TEST_P(ImageSamplerControlTest, Gfx10WarningReportsIntegerLodBeforePointMipRound
 }
 
 TEST_P(ImageSamplerControlTest, Gfx11Swizzle30UsesTheQualifiedAddressForOrdinaryAndFeedback) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   const bool qualified = cu_->image_address_config().gb_addr_config == 0x545;
   wf_->set_exec(1);
   bind_sampler();
@@ -8302,8 +8592,9 @@ TEST_P(ImageSamplerControlTest, Gfx11Swizzle30UsesTheQualifiedAddressForOrdinary
 }
 
 TEST_P(ImageSamplerControlTest, Gfx11CompressionWithoutMetadataStopsBeforeIssue) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   for (bool volume : {false, true}) {
     bind_image({.width = 64,
@@ -8327,9 +8618,10 @@ TEST_P(ImageSamplerControlTest, Gfx11CompressionWithoutMetadataStopsBeforeIssue)
 }
 
 TEST_P(ImageSamplerControlTest, ResidentHalfArrayUsesNativeFilterPrecision) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   bind_sampler({.linear_xy = true});
   write_coordinates(0, std::bit_cast<std::array<uint32_t, 3>>(std::array{0.375f, 0.375f, 0.f}));
@@ -8345,8 +8637,9 @@ TEST_P(ImageSamplerControlTest, ResidentHalfArrayUsesNativeFilterPrecision) {
         {.width = 2, .height = 2, .depth = 2, .element_bytes = 2, .swizzle_mode = swizzle}, 0);
     ASSERT_TRUE(layout);
     const uint16_t texels[]{0, 0x3c00, 0x3bff, 0x3401};
-    for (uint32_t i = 0; i < 4; ++i)
+    for (uint32_t i = 0; i < 4; ++i) {
       memory_.write16(kBase + layout->byte_offset(i % 2, i / 2, 0), texels[i]);
+    }
     cu_->l1_vector().invalidate_all();
     l2_.invalidate_all();
     for (bool tfe : {false, true}) {
@@ -8370,8 +8663,9 @@ TEST_P(ImageSamplerControlTest, ResidentHalfArrayUsesNativeFilterPrecision) {
 }
 
 TEST_P(ImageSamplerControlTest, OneDimensionalSamplesValidateTheFullDescriptorPitch) {
-  if (!amdgpu::has_gfx11_plus_image_operands(arch()))
+  if (!amdgpu::has_gfx11_plus_image_operands(arch())) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   bind_sampler(); // Point filtering uses only X.
   write_coordinates(0, {std::bit_cast<uint32_t>(5.5f / 30), 0, 0});
@@ -8381,19 +8675,21 @@ TEST_P(ImageSamplerControlTest, OneDimensionalSamplesValidateTheFullDescriptorPi
   for (uint32_t format : {kR32Uint, 22u, 7u}) {
     const bool unorm16 = format == 7;
     const uint32_t value = unorm16 ? std::bit_cast<uint32_t>(1.f) : 0x41234567u;
-    if (unorm16)
+    if (unorm16) {
       memory_.write16(kBase + 10, 0xffff);
-    else
+    } else {
       memory_.write32(kBase + 20, value);
+    }
     cu_->l1_vector().invalidate_all();
     l2_.invalidate_all();
     for (uint32_t pitch : {1u, 8u, 30u, 64u, 128u}) {
       bind_image({.width = 30, .pitch = pitch, .type = amdgpu::kImage1d, .rdna_format = format});
       for (bool r128 : {false, true}) {
-        const bool valid = r128 || (pitch >= 30 && (arch() != ROCJITSU_CODE_ARCH_RDNA3_5 ||
+        const bool valid = r128 || (pitch >= 30 && (arch() != rocjitsu::IsaFamily::Rdna3_5 ||
                                                     pitch * (unorm16 ? 2 : 4) % 256 == 0));
         for (bool warn : {false, true}) {
-          cu_->write_sgpr(sb_ + 5, uint32_t(warn) << (arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 5 : 8));
+          cu_->write_sgpr(sb_ + 5, uint32_t(warn)
+                                       << (arch() == rocjitsu::IsaFamily::Rdna4 ? 5 : 8));
           for (bool tfe : {false, true}) {
             SCOPED_TRACE(testing::Message() << "format=" << format << " pitch=" << pitch << " r128="
                                             << r128 << " warn=" << warn << " tfe=" << tfe);
@@ -8438,8 +8734,9 @@ TEST_P(ImageSamplerControlTest, OneDimensionalSamplesValidateTheFullDescriptorPi
 }
 
 TEST_P(ImageSamplerControlTest, ResidentFloatAndUnormArraysPreserveValuesWithFeedback) {
-  if (!amdgpu::has_gfx11_plus_image_operands(arch()))
+  if (!amdgpu::has_gfx11_plus_image_operands(arch())) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   bind_sampler({.linear_xy = true});
   auto &waits = wf_->ensure_memory_wait_scoreboard();
@@ -8460,9 +8757,10 @@ TEST_P(ImageSamplerControlTest, ResidentFloatAndUnormArraysPreserveValuesWithFee
     const float u = fp32 ? std::bit_cast<float>(0x3f1b9f54u) * .25f : .1875f;
     write_coordinates(0, {std::bit_cast<uint32_t>(u), 0, 0});
     for (uint32_t dim : {amdgpu::kImageDim1d, amdgpu::kImageDim1dArray, amdgpu::kImageDim2dArray}) {
-      for (uint32_t swizzle : {0u, arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 3u : 27u}) {
-        if (swizzle && dim != amdgpu::kImageDim2dArray && arch() != ROCJITSU_CODE_ARCH_RDNA4)
+      for (uint32_t swizzle : {0u, arch() == rocjitsu::IsaFamily::Rdna4 ? 3u : 27u}) {
+        if (swizzle && dim != amdgpu::kImageDim2dArray && arch() != rocjitsu::IsaFamily::Rdna4) {
           continue;
+        }
         bind_image({.width = 4,
                     .height = dim == amdgpu::kImageDim2dArray ? 4u : 1u,
                     .depth = dim == amdgpu::kImageDim1d ? 1u : 2u,
@@ -8501,8 +8799,9 @@ TEST_P(ImageSamplerControlTest, ResidentFloatAndUnormArraysPreserveValuesWithFee
 }
 
 TEST_P(ImageSamplerControlTest, SamplerControlAdmissionAndSourceWaitsAgreeAcrossFeedback) {
-  if (!amdgpu::has_gfx11_plus_image_operands(arch()))
+  if (!amdgpu::has_gfx11_plus_image_operands(arch())) {
     GTEST_SKIP();
+  }
   struct Control {
     const char *name;
     unsigned word, bits, perf_mip;
@@ -8518,8 +8817,9 @@ TEST_P(ImageSamplerControlTest, SamplerControlAdmissionAndSourceWaitsAgreeAcross
   wf_->set_exec(1);
   write_coordinates(0, {0, 0, 0});
   for (const auto &c : controls) {
-    if (c.word == 2 && c.bits == (1u << 31) && arch() == ROCJITSU_CODE_ARCH_RDNA4)
+    if (c.word == 2 && c.bits == (1u << 31) && arch() == rocjitsu::IsaFamily::Rdna4) {
       continue; // GFX12 repurposes DERIVATIVE_ADJUST for PERF_MIP.
+    }
     bind_sample_image({.width = 4, .height = 4, .pitch = 64, .perf_mod = c.perf_mip ? 1u : 0u});
     bind_sampler({.perf_mip = c.perf_mip});
     cu_->write_sgpr(sb_ + 8 + c.word, cu_->read_sgpr(sb_ + 8 + c.word) | c.bits);
@@ -8570,9 +8870,10 @@ TEST_P(ImageSamplerControlTest, SamplerControlAdmissionAndSourceWaitsAgreeAcross
 }
 
 TEST_P(ImageSamplerControlTest, NativeBorderAndAnisotropyHaveConsistentAdmission) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA4 && arch() != ROCJITSU_CODE_ARCH_RDNA3 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() != rocjitsu::IsaFamily::Rdna4 && arch() != rocjitsu::IsaFamily::Rdna3 &&
+      arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   bind_image({.width = 4, .height = 4, .pitch = 64});
   wf_->set_exec(1);
   memory_.write32(kBase, 42);
@@ -8585,10 +8886,12 @@ TEST_P(ImageSamplerControlTest, NativeBorderAndAnisotropyHaveConsistentAdmission
                     .clamp_y = Clamp::Border,
                     .max_lod_fixed8 = 0,
                     .normalized = normalization != 2});
-      if (control == 1 || control == 2)
+      if (control == 1 || control == 2) {
         cu_->write_sgpr(sb_ + 11, control << 30);
-      if (control == 3)
+      }
+      if (control == 3) {
         cu_->write_sgpr(sb_ + 8, cu_->read_sgpr(sb_ + 8) | (1u << 9));
+      }
       for (bool tfe : {false, true}) {
         SCOPED_TRACE(testing::Message()
                      << control << " normalization=" << normalization << " tfe=" << tfe);
@@ -8597,7 +8900,7 @@ TEST_P(ImageSamplerControlTest, NativeBorderAndAnisotropyHaveConsistentAdmission
         EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 42u);
       }
     }
-    if (arch() == ROCJITSU_CODE_ARCH_RDNA4) {
+    if (arch() == rocjitsu::IsaFamily::Rdna4) {
       // A resource with allocated mips but a single visible level distinguishes the
       // graphics sampler's implicit quad reads from the ordinary compute sampler's.
       bind_image({.width = 4, .height = 4, .pitch = 1, .mip_levels = 2});
@@ -8626,9 +8929,10 @@ TEST_P(ImageSamplerControlTest, NativeBorderAndAnisotropyHaveConsistentAdmission
 }
 
 TEST_P(ImageSamplerControlTest, SeamlessCubeIgnoresNonresidentZeroWeightTexels) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA4 && arch() != ROCJITSU_CODE_ARCH_RDNA3 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() != rocjitsu::IsaFamily::Rdna4 && arch() != rocjitsu::IsaFamily::Rdna3 &&
+      arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   class SparseCube final : public amdgpu::AddressSpaceTranslator {
   public:
     amdgpu::VmTranslationResult translate(uint64_t addr, size_t size,
@@ -8668,27 +8972,29 @@ TEST_P(ImageSamplerControlTest, SeamlessCubeIgnoresNonresidentZeroWeightTexels) 
   cu_->write_vgpr(vb_ + 8, 0, 0xdeadbeef);
   cu_->write_vgpr(vb_ + 9, 0, 0xdeadbeef);
   ASSERT_NO_FATAL_FAILURE(issue_modern_sample_lz(false, 1, true, amdgpu::kImageDimCube));
-  EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 0x3f400000u : 0u);
+  EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), arch() == rocjitsu::IsaFamily::Rdna4 ? 0x3f400000u : 0u);
   EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), 1u);
   wf_->set_address_space({});
   cu_->set_gpu_vm(nullptr);
 }
 
 TEST_P(ImageSamplerControlTest, LayeredResourcesRequireALayerCoordinate) {
-  if (!amdgpu::has_gfx11_plus_image_operands(arch()))
+  if (!amdgpu::has_gfx11_plus_image_operands(arch())) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   struct Case {
     uint32_t type, dim, swizzle, height;
   };
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
   for (const auto test : {Case{amdgpu::kImageCube, amdgpu::kImageDim2dArray, gfx12 ? 3u : 27u, 64},
                           Case{amdgpu::kImageCube, amdgpu::kImageDim2dArray, 30u, 64},
                           Case{amdgpu::kImageCube, amdgpu::kImageDim2dArray, 31u, 64},
                           Case{amdgpu::kImage2dArray, amdgpu::kImageDim2d, gfx12 ? 3u : 27u, 64},
                           Case{amdgpu::kImage1dArray, amdgpu::kImageDim1d, 0, 1}}) {
-    if (gfx12 && test.swizzle >= 30)
+    if (gfx12 && test.swizzle >= 30) {
       continue;
+    }
     dimension_override_ = test.dim;
     bind_image({.width = 64,
                 .height = test.height,
@@ -8711,8 +9017,9 @@ TEST_P(ImageSamplerControlTest, LayeredResourcesRequireALayerCoordinate) {
 }
 
 TEST_P(ImageSamplerControlTest, FeedbackReadsTheSameNonuniformTiledTexelAsAnOrdinarySample) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   const uint32_t config = cu_->image_address_config().gb_addr_config;
   ASSERT_TRUE(config == 0 || config == 0x545);
   bind_image(Image{.width = 256, .height = 256, .pitch = 1, .swizzle_mode = 27});
@@ -8731,8 +9038,9 @@ TEST_P(ImageSamplerControlTest, FeedbackReadsTheSameNonuniformTiledTexelAsAnOrdi
 }
 
 TEST_P(ImageSamplerControlTest, BvhWaitTargetsItsOwnOutstandingCounter) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
   wf_->wait_counters().increment(amdgpu::WaitCounterType::BVHCNT);
   wf_->wait_for({.bvhcnt = 0});
   EXPECT_FALSE(wf_->wait_satisfied());
@@ -8749,9 +9057,10 @@ TEST_P(ImageSamplerControlTest, BvhWaitTargetsItsOwnOutstandingCounter) {
 }
 
 TEST_P(ImageSamplerControlTest, Fp32LinearFilteringUsesTheSamePrecisionForEquivalentCoordinates) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
 
   struct Texture {
     uint32_t format;
@@ -8771,15 +9080,16 @@ TEST_P(ImageSamplerControlTest, Fp32LinearFilteringUsesTheSamePrecisionForEquiva
   };
   wf_->set_exec(1);
   for (const auto &texture : textures) {
-    const uint32_t explicit_pitch = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 32u : 64u;
+    const uint32_t explicit_pitch = arch() == rocjitsu::IsaFamily::Rdna4 ? 32u : 64u;
     for (const uint32_t pitch : {1u, explicit_pitch}) {
       bind_image(Image{.width = 4, .height = 4, .pitch = pitch, .rdna_format = texture.format});
       // Request XYZW even when the stored texel only has one or two channels.
       cu_->write_sgpr(sb_ + 3, (cu_->read_sgpr(sb_ + 3) & ~0xfffu) | 0xfacu);
       cu_->l1_vector().flush_all();
       l2_.flush_all();
-      for (size_t i = 0; i < texture.texels.size(); ++i)
+      for (size_t i = 0; i < texture.texels.size(); ++i) {
         memory_.write32(kBase + 4 * i, texture.texels[i]);
+      }
       for (bool unrm : {false, true}) {
         for (bool force : {false, true}) {
           SCOPED_TRACE(testing::Message()
@@ -8791,8 +9101,9 @@ TEST_P(ImageSamplerControlTest, Fp32LinearFilteringUsesTheSamePrecisionForEquiva
                                 0});
           for (const bool tfe : {false, true}) {
             ASSERT_NO_FATAL_FAILURE(issue_modern_sample_lz(unrm, 0xf, tfe));
-            for (uint32_t c = 0; c < texture.result.size(); ++c)
+            for (uint32_t c = 0; c < texture.result.size(); ++c) {
               EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + c, 0), texture.result[c]);
+            }
           }
         }
       }
@@ -8801,9 +9112,10 @@ TEST_P(ImageSamplerControlTest, Fp32LinearFilteringUsesTheSamePrecisionForEquiva
 }
 
 TEST_P(ImageSamplerControlTest, ResidentIntegerSamplesRepeatStoredChannelsWithAndWithoutFeedback) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   bind_sampler();
   write_coordinates(0, {std::bit_cast<uint32_t>(0.125f), std::bit_cast<uint32_t>(0.125f), 0});
@@ -8818,22 +9130,25 @@ TEST_P(ImageSamplerControlTest, ResidentIntegerSamplesRepeatStoredChannelsWithAn
                                            format == 20 ? 123u : 456u};
     for (const bool tfe : {false, true}) {
       ASSERT_NO_FATAL_FAILURE(issue_modern_sample_lz(false, 15, tfe));
-      for (uint32_t index = 0; index < expected.size(); ++index)
+      for (uint32_t index = 0; index < expected.size(); ++index) {
         EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + index, 0), expected[index]);
+      }
     }
   }
 }
 
 TEST_P(ImageSamplerControlTest, Gfx12VolumeSampleFeedbackUsesActualHelperReads) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
   class Reads final : public ExecutionPlugin {
   public:
     Reads() : ExecutionPlugin("volume_sampler_reads") {}
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t) override {
-      if (reg == wave->vgpr_alloc().base)
+      if (reg == wave->vgpr_alloc().base) {
         read_lanes |= lanes;
+      }
     }
     uint64_t read_lanes = 0;
   };
@@ -8850,8 +9165,9 @@ TEST_P(ImageSamplerControlTest, Gfx12VolumeSampleFeedbackUsesActualHelperReads) 
                    .mip_levels = 2,
                    .last_level = 1,
                    .rdna_format = 22});
-  for (unsigned lane = 0; lane < 4; ++lane)
+  for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {lane == 1 ? 0x3f000000u : 0u, 0, 0});
+  }
   auto decoder = Decoder::create(arch());
   auto &scoreboard = wf_->ensure_memory_wait_scoreboard();
   for (unsigned flags : {0u, 1u, 2u, 3u}) {
@@ -8900,9 +9216,10 @@ TEST_P(ImageSamplerControlTest, Gfx12VolumeSampleFeedbackUsesActualHelperReads) 
 }
 
 TEST_P(ImageSamplerControlTest, TrilinearSamplingIssuesOnlyContributingMipLevels) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   auto decoder = Decoder::create(arch());
   rdna4::VsampleBuilderFields modern{};
@@ -8953,15 +9270,17 @@ TEST_P(ImageSamplerControlTest, TrilinearSamplingIssuesOnlyContributingMipLevels
     if (c.upper && !c.lower) {
       EXPECT_EQ(state->per_lane_addr[0], sample.taps[4].addresses[0]);
     }
-    for (unsigned i = 0; i < sample.tap_count; ++i)
+    for (unsigned i = 0; i < sample.tap_count; ++i) {
       EXPECT_EQ(sample.taps[i].lane_mask, i < 4 ? uint64_t(c.lower) : uint64_t(c.upper));
+    }
   }
 }
 
 TEST_P(ImageSamplerControlTest, LinearSamplingSkipsZeroWeightNeighborsAcrossSparseTiles) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   bind_sample_image({.width = 256, .height = 256, .pitch = 1}, true);
   bind_sampler({.clamp_x = Clamp::Border, .clamp_y = Clamp::Border, .linear_xy = true});
   auto decoder = Decoder::create(arch());
@@ -9000,17 +9319,19 @@ TEST_P(ImageSamplerControlTest, LinearSamplingSkipsZeroWeightNeighborsAcrossSpar
       const auto &sample = *state->graphics_sample;
       ASSERT_GE(sample.tap_count, 4u);
       uint32_t active = 0;
-      for (size_t i = 0; i < 4; ++i)
+      for (size_t i = 0; i < 4; ++i) {
         active |= uint32_t(sample.taps[i].lane_mask & 1) << i;
+      }
       EXPECT_EQ(active, gather && c.taps ? 15u : c.taps);
     }
   }
 }
 
 TEST_P(ImageSamplerControlTest, SparseSampleAndGatherHonorTheGfx11BlendPrtBit) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && !amdgpu::has_gfx11_plus_image_operands(arch()))
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && !amdgpu::has_gfx11_plus_image_operands(arch())) {
     GTEST_SKIP();
+  }
   class SparseColumn final : public amdgpu::AddressSpaceTranslator {
   public:
     amdgpu::VmTranslationResult translate(uint64_t address, size_t bytes,
@@ -9039,12 +9360,14 @@ TEST_P(ImageSamplerControlTest, SparseSampleAndGatherHonorTheGfx11BlendPrtBit) {
       0, {std::bit_cast<uint32_t>(128.f / 1024), std::bit_cast<uint32_t>(0.5f / 1024), 0});
   auto decoder = Decoder::create(arch());
   for (bool blend : {false, true}) {
-    if (gfx12 && !blend)
+    if (gfx12 && !blend) {
       continue;
+    }
     bind_sampler({.linear_xy = true});
-    if (!gfx12 && blend)
+    if (!gfx12 && blend) {
       cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (1u << 30));
-    for (bool gather : {false, true})
+    }
+    for (bool gather : {false, true}) {
       for (bool tfe : {false, true}) {
         SCOPED_TRACE(testing::Message()
                      << "blend=" << blend << " tfe=" << tfe << " gather=" << gather);
@@ -9064,27 +9387,31 @@ TEST_P(ImageSamplerControlTest, SparseSampleAndGatherHonorTheGfx11BlendPrtBit) {
                   : decoder->decode_window(rdna3_5::build_mimg(
                         gather ? rdna3_5::kImageGather4LzMimg : rdna3_5::kImageSampleLzMimg, g11));
         ASSERT_TRUE(inst.succeeded());
-        for (unsigned i = 0; i < 5; ++i)
+        for (unsigned i = 0; i < 5; ++i) {
           cu_->write_vgpr(vb_ + 8 + i, 0, 0xdeadbeefu);
+        }
         ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
         amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
         ASSERT_EQ(pipeline.issue(inst.value().release(), *wf_), amdgpu::VmAccessOutcome::Complete);
         const std::array<float, 4> expected =
             gather ? std::array{8.f, 0.f, 0.f, 4.f} : std::array{2.f, 0.f, 0.f, 0.f};
-        for (unsigned i = 0; i < (gather ? 4u : 1u); ++i)
+        for (unsigned i = 0; i < (gather ? 4u : 1u); ++i) {
           EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + i, 0),
                     std::bit_cast<uint32_t>(blend ? expected[i] : 0.f));
+        }
         EXPECT_EQ(cu_->read_vgpr(vb_ + (gather ? 12 : 9), 0), tfe ? 1u : 0xdeadbeefu);
       }
+    }
   }
   wf_->set_address_space({});
   cu_->set_gpu_vm(nullptr);
 }
 
 TEST_P(ImageSamplerControlTest, SparseFeedbackUsesPublishedPagesAndReportsTheRequestedMip) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   class Pages final : public amdgpu::AddressSpaceTranslator {
   public:
     bool resident = true, explicit_hole = false;
@@ -9112,8 +9439,9 @@ TEST_P(ImageSamplerControlTest, SparseFeedbackUsesPublishedPagesAndReportsTheReq
 
   constexpr uint32_t sentinel = 0xdeadbeef;
   constexpr auto one = std::bit_cast<uint32_t>(1.0f);
-  for (uint32_t address = 0; address < 4096; address += 4)
+  for (uint32_t address = 0; address < 4096; address += 4) {
     memory_.write32(kBase + address, one);
+  }
   auto decoder = Decoder::create(arch());
   for (auto filter : {MipFilter::Point, MipFilter::Linear}) {
     bind_sampler({.mip = filter});
@@ -9175,10 +9503,11 @@ TEST_P(ImageSamplerControlTest, SparseFeedbackUsesPublishedPagesAndReportsTheReq
               uint32_t status = sentinel;
               const uint32_t selected_level =
                   static_cast<uint32_t>(lod + (filter == MipFilter::Point ? 0.5f : 0.0f));
-              if (pages->explicit_hole && (flags & 1))
+              if (pages->explicit_hole && (flags & 1)) {
                 status = (selected_level << 16) | 1;
-              else if (resident && (flags & 2) && lod * 256 < threshold)
+              } else if (resident && (flags & 2) && lod * 256 < threshold) {
                 status = (selected_level << 16) | 2;
+              }
               EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), status);
             }
           }
@@ -9191,12 +9520,15 @@ TEST_P(ImageSamplerControlTest, SparseFeedbackUsesPublishedPagesAndReportsTheReq
 }
 
 TEST_P(ImageSamplerControlTest, Gfx12GatherPreservesMirroredTapsWithFeedback) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
   bind_image(Image{.width = 8, .height = 8, .pitch = 32, .rdna_format = kR32Uint});
-  for (uint32_t y = 0; y < 8; ++y)
-    for (uint32_t x = 0; x < 8; ++x)
+  for (uint32_t y = 0; y < 8; ++y) {
+    for (uint32_t x = 0; x < 8; ++x) {
       memory_.write32(kBase + 4 * (y * 32 + x), 10 * y + x);
+    }
+  }
   wf_->set_exec(15);
   auto decoder = Decoder::create(arch());
   struct Case {
@@ -9212,9 +9544,10 @@ TEST_P(ImageSamplerControlTest, Gfx12GatherPreservesMirroredTapsWithFeedback) {
       bind_sampler({.clamp_x = clamp, .clamp_y = clamp, .normalized = normalized});
       const float scale = normalized ? 1.0f : 8.0f;
       for (const auto &test : cases) {
-        for (unsigned lane = 0; lane < 4; ++lane)
+        for (unsigned lane = 0; lane < 4; ++lane) {
           write_coordinates(lane, {std::bit_cast<uint32_t>(test.x * scale),
                                    std::bit_cast<uint32_t>(test.y * scale), 0});
+        }
         for (const bool tfe : {false, true}) {
           SCOPED_TRACE(testing::Message() << opcode << " normalized=" << normalized
                                           << " x=" << test.x << " tfe=" << tfe);
@@ -9228,8 +9561,9 @@ TEST_P(ImageSamplerControlTest, Gfx12GatherPreservesMirroredTapsWithFeedback) {
           // Resident gfx1201 gathers preserve the trailing word for both TFE settings.
           constexpr uint32_t resident_status = 0xdeadbeef;
           for (unsigned lane = 0; lane < 4; ++lane) {
-            for (unsigned tap = 0; tap < test.taps.size(); ++tap)
+            for (unsigned tap = 0; tap < test.taps.size(); ++tap) {
               cu_->write_vgpr(vb_ + 8 + tap, lane, 0xa5a5a5a5);
+            }
             cu_->write_vgpr(vb_ + 12, lane, resident_status);
           }
           amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
@@ -9237,8 +9571,9 @@ TEST_P(ImageSamplerControlTest, Gfx12GatherPreservesMirroredTapsWithFeedback) {
                     amdgpu::VmAccessOutcome::Complete);
           for (unsigned lane = 0; lane < 4; ++lane) {
             SCOPED_TRACE(lane);
-            for (unsigned tap = 0; tap < test.taps.size(); ++tap)
+            for (unsigned tap = 0; tap < test.taps.size(); ++tap) {
               EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + tap, lane), test.taps[tap]);
+            }
             EXPECT_EQ(cu_->read_vgpr(vb_ + 12, lane), resident_status);
           }
         }
@@ -9248,9 +9583,10 @@ TEST_P(ImageSamplerControlTest, Gfx12GatherPreservesMirroredTapsWithFeedback) {
 }
 
 TEST_P(ImageSamplerControlTest, GetLodTinyAnisotropicGradientsUseTheSamplerFloorBeforeBias) {
-  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
-  if (!gfx10 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx10 = arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2;
+  if (!gfx10 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   bind_sample_image({.width = 64, .height = 64});
   wf_->set_exec(15);
   unnormalized_ = false;
@@ -9282,9 +9618,10 @@ TEST_P(ImageSamplerControlTest, GetLodTinyAnisotropicGradientsUseTheSamplerFloor
     cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (2u << 20) | (2u << 22));
     for (const auto &test : cases) {
       SCOPED_TRACE(testing::Message() << test.dx << ", " << test.dy << " bias=" << bias);
-      for (unsigned lane = 0; lane < 4; ++lane)
+      for (unsigned lane = 0; lane < 4; ++lane) {
         write_coordinates(lane, {std::bit_cast<uint32_t>((lane & 1) ? test.dx : 0.0f),
                                  std::bit_cast<uint32_t>((lane & 2) ? test.dy : 0.0f), 0});
+      }
       auto decoded = decoder->decode_window(words);
       ASSERT_TRUE(decoded.succeeded());
       ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
@@ -9295,16 +9632,19 @@ TEST_P(ImageSamplerControlTest, GetLodTinyAnisotropicGradientsUseTheSamplerFloor
 }
 
 TEST_P(ImageSamplerControlTest, Gfx12SampleFeedbackUsesTheResourceWarningThreshold) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
+  }
   constexpr uint32_t one = 0x3f800000, sentinel = 0xdeadbeef;
   bind_image(Image{
       .width = 4, .height = 4, .pitch = 1, .mip_levels = 2, .last_level = 1, .rdna_format = 22});
   bind_sampler({.mip = MipFilter::Point});
-  for (uint32_t offset = 0; offset < 4096; offset += 4)
+  for (uint32_t offset = 0; offset < 4096; offset += 4) {
     memory_.write32(kBase + offset, one);
-  for (unsigned lane = 0; lane < 4; ++lane)
+  }
+  for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {one, one, 0});
+  }
   wf_->set_exec(1);
   auto read_flags = Decoder::create(arch())->decode_window(
       rdna4::build_sopk(rdna4::kSGetregB32Sopk, {.simm16 = 18 | (31 << 6), .sdst = 16}));
@@ -9336,8 +9676,9 @@ TEST_P(ImageSamplerControlTest, Gfx12SampleFeedbackUsesTheResourceWarningThresho
         amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
         ASSERT_EQ(pipeline.issue(instruction.value().release(), *wf_),
                   amdgpu::VmAccessOutcome::Complete);
-        for (unsigned i = 0; i < words; ++i)
+        for (unsigned i = 0; i < words; ++i) {
           EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + i, 0), one);
+        }
         EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + words, 0), (warn && (flags & 2)) ? 2u : sentinel);
         EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + words, 1), sentinel);
         sticky |= warn && (flags & 2);
@@ -9350,9 +9691,10 @@ TEST_P(ImageSamplerControlTest, Gfx12SampleFeedbackUsesTheResourceWarningThresho
 }
 
 TEST_P(ImageSamplerControlTest, DroppedFilteredSamplesStillWriteLodWarnings) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   write_coordinates(0, {std::bit_cast<uint32_t>(1.0f), std::bit_cast<uint32_t>(0.5f), 0});
   memory_.write32(kBase, 0xffff0000u);
@@ -9422,9 +9764,10 @@ TEST_P(ImageSamplerControlTest, DroppedFilteredSamplesStillWriteLodWarnings) {
 }
 
 TEST_P(ImageSamplerControlTest, ResidentSampleStatusKeepsTheOlderWaitDependency) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   bind_image({.width = 2, .height = 1, .pitch = 1, .rdna_format = 7});
   bind_sampler({.linear_xy = true, .normalized = false});
   memory_.write32(kBase, 0xffff0000u);
@@ -9478,9 +9821,10 @@ TEST_P(ImageSamplerControlTest, ResidentSampleStatusKeepsTheOlderWaitDependency)
 }
 
 TEST_P(ImageSamplerControlTest, ResidentFilteredSamplesPreserveValuesWithFeedback) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   auto decoder = Decoder::create(arch());
   wf_->set_exec(1);
   const uint16_t values[]{0, 65535, 0x1234, 0x8765};
@@ -9522,8 +9866,9 @@ TEST_P(ImageSamplerControlTest, ResidentFilteredSamplesPreserveValuesWithFeedbac
         ASSERT_EQ(pipeline.issue(decoded.value().release(), *wf_),
                   amdgpu::VmAccessOutcome::Complete);
         const uint32_t result = cu_->read_vgpr(vb_ + 8, 0);
-        if (!flags)
+        if (!flags) {
           ordinary = result;
+        }
         EXPECT_EQ(result, ordinary);
         EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), sentinel);
         if (u == 1.0f) {
@@ -9535,10 +9880,11 @@ TEST_P(ImageSamplerControlTest, ResidentFilteredSamplesPreserveValuesWithFeedbac
 }
 
 TEST_P(ImageSamplerControlTest, R16UnormFiltersWithImplicitOrExplicitPitch) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP();
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  }
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
   Image image;
   image.rdna_format = 7; // R16_UNORM.
   image.height = 2;
@@ -9574,8 +9920,9 @@ TEST_P(Gfx11ImageFeedbackTest, TfeImplicitSamplesReadOnlyContributingCoordinates
     Inputs() : ExecutionPlugin("sampler_reads") {}
     void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *wave, uint32_t reg, uint64_t lanes,
                                uint8_t) override {
-      if (reg == wave->vgpr_alloc().base)
+      if (reg == wave->vgpr_alloc().base) {
         read_lanes |= lanes;
+      }
     }
     uint64_t read_lanes = 0;
   };
@@ -9591,12 +9938,14 @@ TEST_P(Gfx11ImageFeedbackTest, TfeImplicitSamplesReadOnlyContributingCoordinates
   image.last_level = 1;
   image.rdna_format = 13;
   const auto resource = rdna_descriptor(image, arch());
-  for (unsigned i = 0; i < resource.size(); ++i)
+  for (unsigned i = 0; i < resource.size(); ++i) {
     cu_->write_sgpr(sb_ + i, resource[i]);
+  }
   cu_->write_sgpr(sb_ + 8, 2 | (2 << 3));
   cu_->write_sgpr(sb_ + 9, 0xfffu << 12);
-  for (unsigned lane = 0; lane < 4; ++lane)
+  for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {0, 0, 0});
+  }
   auto decoder = Decoder::create(arch());
   auto &scoreboard = wf_->ensure_memory_wait_scoreboard();
   wf_->set_exec(1);
@@ -9628,9 +9977,10 @@ TEST_P(Gfx11ImageFeedbackTest, TfeImplicitSamplesReadOnlyContributingCoordinates
 }
 
 TEST_P(ImageSamplerControlTest, SrgbChannelCountsShareNativePitchAndFiltering) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
 
   wf_->set_exec(1);
   bind_sampler({.linear_xy = true});
@@ -9663,8 +10013,9 @@ TEST_P(ImageSamplerControlTest, SrgbChannelCountsShareNativePitchAndFiltering) {
                                                0,
                                                0,
                                                0};
-      for (unsigned word = 0; word < descriptor.size(); ++word)
+      for (unsigned word = 0; word < descriptor.size(); ++word) {
         cu_->write_sgpr(sb_ + word, descriptor[word]);
+      }
       constexpr uint32_t sentinel = 0xabcdef01u;
       cu_->write_vgpr(vb_ + 8, 0, sentinel);
       const bool issued = sample(SampleTestOperation::Zero);
@@ -9684,10 +10035,11 @@ TEST_P(ImageSamplerControlTest, SrgbChannelCountsShareNativePitchAndFiltering) {
 }
 
 TEST_P(ImageSamplerControlTest, MipChainPitchAdmissionIsIndependentOfFeedback) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  const bool gfx115 = arch() == ROCJITSU_CODE_ARCH_RDNA3_5;
-  if (!gfx12 && !gfx115 && arch() != ROCJITSU_CODE_ARCH_RDNA3)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  const bool gfx115 = arch() == rocjitsu::IsaFamily::Rdna3_5;
+  if (!gfx12 && !gfx115 && arch() != rocjitsu::IsaFamily::Rdna3) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   bind_sampler();
   const auto check = [&](const Image &image, uint8_t dim, float x, float y, uint64_t offset,
@@ -9737,9 +10089,10 @@ TEST_P(ImageSamplerControlTest, MipChainPitchAdmissionIsIndependentOfFeedback) {
   }
 
   // Linear 1D and tiled 2D mip chains derive their row spacing from the allocation.
-  for (const uint32_t pitch : {1u, 128u})
+  for (const uint32_t pitch : {1u, 128u}) {
     check({.width = 4, .pitch = pitch, .type = amdgpu::kImage1d, .mip_levels = 2, .last_level = 1},
           amdgpu::kImageDim1d, 0.f, 0.f, 256, true);
+  }
 
   for (const auto swizzle : gfx12 ? std::vector{1u, 2u, 3u} : std::vector{2u, 22u}) {
     const auto layout = amdgpu::ImageAddressing::prepare(
@@ -9747,7 +10100,7 @@ TEST_P(ImageSamplerControlTest, MipChainPitchAdmissionIsIndependentOfFeedback) {
         {.width = 16, .height = 16, .element_bytes = 4, .swizzle_mode = swizzle, .mip_levels = 2},
         0);
     ASSERT_TRUE(layout);
-    for (const uint32_t pitch : {1u, 16u, 64u, 128u})
+    for (const uint32_t pitch : {1u, 16u, 64u, 128u}) {
       check({.width = 16,
              .height = 16,
              .pitch = pitch,
@@ -9756,13 +10109,15 @@ TEST_P(ImageSamplerControlTest, MipChainPitchAdmissionIsIndependentOfFeedback) {
              .last_level = 1,
              .rdna_format = 22},
             amdgpu::kImageDim2d, 5.5f / 16, 3.5f / 16, layout->byte_offset(5, 3, 0), true);
+    }
   }
 }
 
 TEST_P(ImageSamplerControlTest, ExtendedPitchSetsEveryMipRowAndLevelOffset) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   Image image;
   image.width = 16;
   image.height = 8;
@@ -9796,8 +10151,9 @@ TEST_P(ImageSamplerControlTest, ExtendedPitchSetsEveryMipRowAndLevelOffset) {
 }
 
 TEST_P(ImageSamplerControlTest, GatherPreservesFloatPayloadsThatPointSamplingCanonicalizes) {
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+  if (arch() == rocjitsu::IsaFamily::Cdna2) {
     GTEST_SKIP() << "The public CDNA2 ISA omits gather forms";
+  }
   Image image;
   image.width = image.height = 2;
   bind_sample_image(image);
@@ -9824,23 +10180,27 @@ TEST_P(ImageSamplerControlTest, GatherPreservesFloatPayloadsThatPointSamplingCan
 }
 
 TEST_P(ImageSamplerControlTest, GatherReturnsAllFourTexelsInComponentOrder) {
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+  if (arch() == rocjitsu::IsaFamily::Cdna2) {
     GTEST_SKIP() << "The public CDNA2 ISA omits gather forms";
+  }
   Image image;
   image.width = image.height = 2;
   bind_sample_image(image);
   bind_sampler({.normalized = false});
   wf_->set_exec(1);
   write_coordinates(0, {std::bit_cast<uint32_t>(1.0f), std::bit_cast<uint32_t>(1.0f), 0});
-  for (uint32_t y = 0; y < 2; ++y)
-    for (uint32_t x = 0; x < 2; ++x)
+  for (uint32_t y = 0; y < 2; ++y) {
+    for (uint32_t x = 0; x < 2; ++x) {
       memory_.write32(kBase + 256 * y + 4 * x, std::bit_cast<uint32_t>(float(1 + 2 * y + x)));
+    }
+  }
 
   // A row-major {1, 2, 3, 4} returned these F32 and D16 tuples on gfx1100 and gfx1201.
   ASSERT_TRUE(sample(SampleTestOperation::Gather));
   constexpr std::array<float, 4> expected{3, 4, 2, 1};
-  for (size_t i = 0; i < expected.size(); ++i)
+  for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + i, 0), std::bit_cast<uint32_t>(expected[i]));
+  }
   ASSERT_TRUE(sample(SampleTestOperation::Gather, true));
   EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), 0x44004200u);
   EXPECT_EQ(cu_->read_vgpr(vb_ + 9, 0), 0x3c004000u);
@@ -9866,11 +10226,12 @@ TEST_P(ImageSamplerControlTest, LinearXyFilterBlendsVolumeSlicesWithZFilterNone)
 }
 
 TEST_P(ImageSamplerControlTest, UnqualifiedLodControlsAreRejected) {
-  const bool legacy = arch_is_cdna_4_or_lower(arch()) || arch() == ROCJITSU_CODE_ARCH_RDNA1 ||
-                      arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool legacy = arch_is_cdna_4_or_lower(arch()) || arch() == rocjitsu::IsaFamily::Rdna1 ||
+                      arch() == rocjitsu::IsaFamily::Rdna2;
   for (bool resource_control : {false, true}) {
-    if (!resource_control && !legacy)
+    if (!resource_control && !legacy) {
       continue;
+    }
     Image image;
     image.min_lod = resource_control ? 1 : 0;
     bind_sample_image(image);
@@ -9881,7 +10242,7 @@ TEST_P(ImageSamplerControlTest, UnqualifiedLodControlsAreRejected) {
     wf_->set_exec(1);
     wf_->clear_instruction_execution_error();
     if (resource_control &&
-        (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2)) {
+        (arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2)) {
       ASSERT_TRUE(sample(SampleTestOperation::Zero));
       continue;
     }
@@ -9889,8 +10250,9 @@ TEST_P(ImageSamplerControlTest, UnqualifiedLodControlsAreRejected) {
     EXPECT_EQ(wf_->instruction_execution_error(),
               amdgpu::InstructionExecutionError::UnimplementedInstruction);
   }
-  if (!amdgpu::has_gfx11_plus_image_operands(arch()))
+  if (!amdgpu::has_gfx11_plus_image_operands(arch())) {
     return;
+  }
   unsigned reports = 0;
   auto &waits = wf_->ensure_memory_wait_scoreboard();
   waits.bind(0x200, &reports, [](void *p, const auto &) { ++*static_cast<unsigned *>(p); });
@@ -9898,16 +10260,18 @@ TEST_P(ImageSamplerControlTest, UnqualifiedLodControlsAreRejected) {
   constexpr uint32_t sentinel = 0xdeadbeef;
   for (uint32_t min_lod : {0u, 1u, 256u}) {
     const bool uav3d = !min_lod;
-    if (uav3d && arch() != ROCJITSU_CODE_ARCH_RDNA4)
+    if (uav3d && arch() != rocjitsu::IsaFamily::Rdna4) {
       continue;
+    }
     for (uint32_t levels : {1u, 2u}) {
       bind_sample_image({.width = 4,
                          .height = 4,
                          .mip_levels = levels,
                          .last_level = levels - 1,
                          .min_lod = min_lod});
-      if (uav3d)
+      if (uav3d) {
         cu_->write_sgpr(sb_ + 5, cu_->read_sgpr(sb_ + 5) | (1u << 4));
+      }
       bind_sampler();
       for (bool tfe : {false, true}) {
         for (uint64_t exec : {0u, 1u}) {
@@ -9939,8 +10303,9 @@ TEST_P(ImageSamplerControlTest, UnqualifiedLodControlsAreRejected) {
 }
 
 TEST_P(ImageSamplerControlTest, OneDimensionalViewUsesZeroForTheMissingCoordinate) {
-  if (arch_is_cdna_4_or_lower(arch()))
+  if (arch_is_cdna_4_or_lower(arch())) {
     GTEST_SKIP() << "GFX9 has no DIM operand";
+  }
   for (bool layered : {false, true}) {
     for (uint32_t layer = 0; layer < (layered ? 2u : 1u); ++layer) {
       Image image;
@@ -9952,7 +10317,7 @@ TEST_P(ImageSamplerControlTest, OneDimensionalViewUsesZeroForTheMissingCoordinat
       bind_sample_image(image);
       // GFX12 array rows use 128-byte alignment, while allocation keeps
       // 256-byte rows for the layer stride (two rows = 512 bytes).
-      const uint32_t row_bytes = layered && arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 256;
+      const uint32_t row_bytes = layered && arch() == rocjitsu::IsaFamily::Rdna4 ? 128 : 256;
       for (uint32_t i = 0; i < 4; ++i) {
         memory_.write32(kBase + layer * 512 + i * 4, std::bit_cast<uint32_t>(1000.0f * layer + i));
         memory_.write32(kBase + layer * 512 + row_bytes + i * 4,
@@ -9974,8 +10339,9 @@ TEST_P(ImageSamplerControlTest, OneDimensionalViewUsesZeroForTheMissingCoordinat
               cu_->write_vgpr(vb_ + 2, lane, std::bit_cast<uint32_t>(1.5f));
             }
             for (bool tfe : {false, true}) {
-              if (tfe && !amdgpu::has_gfx11_plus_image_operands(arch()))
+              if (tfe && !amdgpu::has_gfx11_plus_image_operands(arch())) {
                 continue;
+              }
               if (amdgpu::has_gfx11_plus_image_operands(arch())) {
                 ASSERT_NO_FATAL_FAILURE(
                     issue_modern_sample_lz(!normalized, 1, tfe, *dimension_override_));
@@ -9984,10 +10350,11 @@ TEST_P(ImageSamplerControlTest, OneDimensionalViewUsesZeroForTheMissingCoordinat
               }
               for (uint32_t lane = 0; lane < 4; ++lane) {
                 float expected = 1000.0f * layer + (linear && lane ? lane - 0.25f : float(lane));
-                if (linear && wrap == Clamp::Border)
+                if (linear && wrap == Clamp::Border) {
                   expected *= 0.5f; // Half the footprint reads transparent black.
-                else if (linear && normalized && wrap == Clamp::Repeat)
+                } else if (linear && normalized && wrap == Clamp::Repeat) {
                   expected += 50.0f; // Half reads the last row, whose values are 100 higher.
+                }
                 EXPECT_EQ(cu_->read_vgpr(vb_ + 8, lane), std::bit_cast<uint32_t>(expected));
               }
             }
@@ -10000,12 +10367,14 @@ TEST_P(ImageSamplerControlTest, OneDimensionalViewUsesZeroForTheMissingCoordinat
 
 TEST_P(ImageSamplerControlTest, GenerationSpecificUnsupportedSamplerControlsPreserveDestination) {
   const bool gfx9 = arch_is_cdna_4_or_lower(arch());
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() == rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "GFX12 has none of these controls";
+  }
   wf_->set_exec(1);
   for (bool filter_precision : {false, true}) {
-    if (filter_precision && !gfx9)
+    if (filter_precision && !gfx9) {
       continue;
+    }
     Image image;
     image.width = image.height = 2;
     bind_sampler({.linear_xy = filter_precision, .mip = gfx9 ? MipFilter::None : MipFilter::Point});
@@ -10017,15 +10386,16 @@ TEST_P(ImageSamplerControlTest, GenerationSpecificUnsupportedSamplerControlsPres
       cu_->write_sgpr(sb_ + 11, 1u << 12); // SKIP_DEGAMMA
     } else {
       bind_sample_image(image);
-      if (filter_precision)
+      if (filter_precision) {
         cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (1u << 30)); // FILTER_PREC_FIX
-      else {
+      } else {
         cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (1u << 31)); // DERIV_ADJUST_EN
         cu_->write_sgpr(sb_ + 11, 0x01234567);
       }
     }
-    for (uint32_t reg = 0; reg < 6; ++reg)
+    for (uint32_t reg = 0; reg < 6; ++reg) {
       cu_->write_vgpr(vb_ + reg, 0, std::bit_cast<uint32_t>(0.25f));
+    }
     cu_->write_vgpr(vb_ + 8, 0, 0xabcdef01);
     wf_->clear_instruction_execution_error();
     const SampleTestOperation operation =
@@ -10040,7 +10410,7 @@ TEST_P(ImageSamplerControlTest, GenerationSpecificUnsupportedSamplerControlsPres
 
 TEST_P(ImageSamplerControlTest, UnqualifiedSamplerFlagsPreserveDestination) {
   const bool gfx9 = arch_is_cdna_4_or_lower(arch());
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
   bind_sample_image(Image{});
   bind_sampler();
   wf_->set_exec(1);
@@ -10058,8 +10428,9 @@ TEST_P(ImageSamplerControlTest, UnqualifiedSamplerFlagsPreserveDestination) {
        !gfx12 && !amdgpu::has_gfx11_plus_image_operands(arch())}, // BLEND_ZERO_PRT
       {2, gfx9 ? 31u : 29u, true}};                               // ANISO_OVERRIDE
   for (const auto &flag : flags) {
-    if (!flag.present)
+    if (!flag.present) {
       continue;
+    }
     SCOPED_TRACE(testing::Message() << flag.word << ':' << flag.bit);
     bind_sampler();
     cu_->write_sgpr(sb_ + 8 + flag.word, cu_->read_sgpr(sb_ + 8 + flag.word) | (1u << flag.bit));
@@ -10074,7 +10445,7 @@ TEST_P(ImageSamplerControlTest, UnqualifiedSamplerFlagsPreserveDestination) {
 }
 
 TEST_P(ImageSamplerControlTest, UnbackedSamplerChecksTheNonNullResourceFirst) {
-  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10 = arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2;
   const bool modern = amdgpu::has_gfx11_plus_image_operands(arch());
   wf_->set_exec(1);
   bind_sampler();
@@ -10163,11 +10534,12 @@ TEST_P(ImageSamplerControlTest, InvalidFormatCompletesBeforeResourceTypeQualific
 
 TEST_P(ImageSamplerControlTest, SrgbConversionPrecedesSpatialAndMipFiltering) {
   const bool gfx9 = arch_is_cdna_4_or_lower(arch());
-  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool gfx10 = arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2;
   wf_->set_exec(15);
-  for (uint32_t lane = 0; lane < 4; ++lane)
+  for (uint32_t lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {std::bit_cast<uint32_t>(0.5f), std::bit_cast<uint32_t>(0.5f),
                              std::bit_cast<uint32_t>(0.5f)});
+  }
   // gfx1100 and gfx1201 returned 0x1.284p-2 for both filters, versus
   // 0x1.010102p-1 with R8_UNORM. Earlier ISAs use the IEC sRGB transfer
   // of 64/255 and 192/255 followed by their arithmetic mean.
@@ -10179,22 +10551,24 @@ TEST_P(ImageSamplerControlTest, SrgbConversionPrecedesSpatialAndMipFiltering) {
     image.data_format = 1; // R8
     image.num_format = 9;  // sRGB
     image.rdna_format = gfx10 ? 128 : 64;
-    image.pitch = mip && arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 256;
+    image.pitch = mip && arch() == rocjitsu::IsaFamily::Rdna4 ? 128 : 256;
     image.mip_levels = mip ? 2 : 1;
     image.last_level = image.mip_levels - 1;
     bind_image(image);
     // CDNA2 exposes the base SAMPLE form. Its MIN_LOD clamp supplies the
     // same fractional level as the explicit LOD operand on the other ISAs.
-    const bool implicit_mip = mip && arch() == ROCJITSU_CODE_ARCH_CDNA2;
+    const bool implicit_mip = mip && arch() == rocjitsu::IsaFamily::Cdna2;
     bind_sampler({.linear_xy = !mip,
                   .mip = mip ? MipFilter::Linear : MipFilter::None,
                   .min_lod_fixed8 = implicit_mip ? 128u : 0u});
     const uint64_t base = kBase + (mip && !gfx9 ? 256 : 0);
     const uint32_t pitch = image.pitch;
-    for (uint32_t y = 0; y < 2; ++y)
+    for (uint32_t y = 0; y < 2; ++y) {
       memory_.write32(base + y * pitch, 64 | ((mip ? 64u : 192u) << 8));
-    if (mip)
+    }
+    if (mip) {
       memory_.write32(kBase + (gfx9 ? 512 : 0), 192);
+    }
     cu_->l1_vector().invalidate_all();
     l2_.invalidate_all();
     ASSERT_TRUE(
@@ -10204,8 +10578,9 @@ TEST_P(ImageSamplerControlTest, SrgbConversionPrecedesSpatialAndMipFiltering) {
 }
 
 TEST_P(ImageSamplerControlTest, D16FloatFilteringMatchesGfx11AndGfx12Captures) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "D16 filtering captured on gfx1100 and gfx1201";
+  }
   // R32_FLOAT, blend exactly halfway between 1 and each high texel.
   // Physical gfx1100 and gfx1201 agree for spatial and mip filtering.
   // In particular 1 + 3/4096 returns 0x3c00, distinguishing truncation
@@ -10216,7 +10591,7 @@ TEST_P(ImageSamplerControlTest, D16FloatFilteringMatchesGfx11AndGfx12Captures) {
   };
   constexpr Case cases[] = {
       {0x1.004p+0f, 0x3c00}, {0x1.006p+0f, 0x3c00}, {0x1.008p+0f, 0x3c01}, {0x1.00cp+0f, 0x3c01}};
-  const uint32_t row_pitch = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 256;
+  const uint32_t row_pitch = arch() == rocjitsu::IsaFamily::Rdna4 ? 128 : 256;
   wf_->set_exec(1);
   write_coordinates(0, {std::bit_cast<uint32_t>(0.5f), std::bit_cast<uint32_t>(0.5f),
                         std::bit_cast<uint32_t>(0.5f)});
@@ -10236,8 +10611,9 @@ TEST_P(ImageSamplerControlTest, D16FloatFilteringMatchesGfx11AndGfx12Captures) {
         memory_.write32(base_level + row * row_pitch + 4,
                         std::bit_cast<uint32_t>(mip ? 1.0f : test.high));
       }
-      if (mip)
+      if (mip) {
         memory_.write32(kBase, std::bit_cast<uint32_t>(test.high));
+      }
       cu_->l1_vector().invalidate_all();
       l2_.invalidate_all();
       cu_->write_vgpr(vb_ + 8, 0, 0xabcdef01);
@@ -10275,8 +10651,9 @@ TEST_P(ImageSamplerControlTest, CornerAndPerformanceControlsQualifyTheSample) {
   wf_->set_exec(1);
   write_coordinates(0, {0, 0, 0});
   for (const Case &test : cases) {
-    if (test.image.corner_samples && arch_is_cdna_4_or_lower(arch()))
+    if (test.image.corner_samples && arch_is_cdna_4_or_lower(arch())) {
       continue; // GFX9 has no CORNER_SAMPLES.
+    }
     SCOPED_TRACE(test.name);
     dimension_override_ =
         test.image.type == amdgpu::kImage3d ? amdgpu::kImageDim3d : amdgpu::kImageDim2d;
@@ -10291,10 +10668,11 @@ TEST_P(ImageSamplerControlTest, CornerAndPerformanceControlsQualifyTheSample) {
     }
     EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), test.accepted ? texel : sentinel);
   }
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-      arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5 &&
+      arch() != rocjitsu::IsaFamily::Rdna4) {
     return;
-  const uint32_t swizzle = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 3 : 27;
+  }
+  const uint32_t swizzle = arch() == rocjitsu::IsaFamily::Rdna4 ? 3 : 27;
   bind_image(Image{.width = 4,
                    .height = 4,
                    .pitch = 1,
@@ -10321,9 +10699,10 @@ TEST_P(ImageSamplerControlTest, CornerAndPerformanceControlsQualifyTheSample) {
 }
 
 TEST_P(ImageSamplerControlTest, ScaledViewsStopBeforeSampling) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP() << "GFX11 and GFX12 expose separate resource scales";
+  }
   Image image;
   image.type = amdgpu::kImage3d;
   image.depth = 2;
@@ -10354,16 +10733,17 @@ TEST_P(ImageSamplerControlTest, ScaledViewsStopBeforeSampling) {
 TEST_P(ImageSamplerControlTest, TiledSamplerBaseXorIsRejected) {
   Image image;
   image.width = image.height = 64;
-  image.swizzle_mode = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 2 : 22;
+  image.swizzle_mode = arch() == rocjitsu::IsaFamily::Rdna4 ? 2 : 22;
   bind_sample_image(image);
   bind_sampler();
   cu_->write_sgpr(sb_, (kBase + 256) >> 8);
   wf_->set_exec(1);
   write_coordinates(0, {0, 0, 0});
   for (bool tfe : {false, true}) {
-    if (tfe && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5 &&
-        arch() != ROCJITSU_CODE_ARCH_RDNA4)
+    if (tfe && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5 &&
+        arch() != rocjitsu::IsaFamily::Rdna4) {
       continue;
+    }
     SCOPED_TRACE(tfe);
     texel_fault_ = tfe;
     wf_->clear_instruction_execution_error();
@@ -10641,8 +11021,9 @@ TEST(ImageFootprintTest, CapturedFractionalLodCoversLogSegmentsAndVolumeProjecti
 }
 
 TEST_P(ImageSamplerControlTest, DecodedGradientsSelectCapturedBoundaryMips) {
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+  if (arch() == rocjitsu::IsaFamily::Cdna2) {
     GTEST_SKIP() << "The public CDNA2 ISA omits explicit gradient forms";
+  }
   Image image;
   image.width = 37;
   image.height = 19;
@@ -10654,12 +11035,15 @@ TEST_P(ImageSamplerControlTest, DecodedGradientsSelectCapturedBoundaryMips) {
   const std::array<uint32_t, 6> offsets =
       arch_is_cdna_4_or_lower(arch()) ? std::array<uint32_t, 6>{0, 4864, 7424, 8704, 9472, 9984}
                                       : std::array<uint32_t, 6>{5376, 2816, 1536, 768, 256, 0};
-  const uint32_t pitch = arch() == ROCJITSU_CODE_ARCH_RDNA4 ? 128 : 256;
-  for (uint32_t mip = 0; mip < 6; ++mip)
-    for (uint32_t y = 0; y < std::max(1u, 19u >> mip); ++y)
-      for (uint32_t x = 0; x < std::max(1u, 37u >> mip); ++x)
+  const uint32_t pitch = arch() == rocjitsu::IsaFamily::Rdna4 ? 128 : 256;
+  for (uint32_t mip = 0; mip < 6; ++mip) {
+    for (uint32_t y = 0; y < std::max(1u, 19u >> mip); ++y) {
+      for (uint32_t x = 0; x < std::max(1u, 37u >> mip); ++x) {
         memory_.write32(kBase + offsets[mip] + y * pitch + x * 4,
                         std::bit_cast<uint32_t>(float(mip)));
+      }
+    }
+  }
   struct Case {
     std::array<float, 4> gradients;
     float expected;
@@ -10698,8 +11082,9 @@ TEST_P(ImageSamplerControlTest, DecodedGradientsSelectCapturedBoundaryMips) {
     // Constant-valued mips and linear blending expose the captured fractional LOD.
     bind_sampler(
         {.mip = test.linear_mip ? MipFilter::Linear : MipFilter::Point, .max_lod_fixed8 = 5 * 256});
-    for (uint32_t word = 0; word < 4; ++word)
+    for (uint32_t word = 0; word < 4; ++word) {
       cu_->write_vgpr(vb_ + word, 0, std::bit_cast<uint32_t>(test.gradients[word]));
+    }
     cu_->write_vgpr(vb_ + 4, 0, std::bit_cast<uint32_t>(0.5f));
     cu_->write_vgpr(vb_ + 5, 0, std::bit_cast<uint32_t>(0.5f));
     ASSERT_TRUE(sample(SampleTestOperation::Gradients));
@@ -10708,12 +11093,14 @@ TEST_P(ImageSamplerControlTest, DecodedGradientsSelectCapturedBoundaryMips) {
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10SelectsTheXyFilterAfterLodClamping) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
   bind_sample_image({.width = 8, .height = 8, .pitch = 1, .mip_levels = 4, .last_level = 3});
-  for (unsigned i = 0; i < 1024; ++i)
+  for (unsigned i = 0; i < 1024; ++i) {
     memory_.write32(kBase + 4 * i, bits(float(i)));
+  }
   wf_->set_exec(1);
   auto decoder = Decoder::create(arch());
   const auto check = [&](uint16_t opcode, float gradient, uint32_t minimum, uint32_t maximum,
@@ -10723,8 +11110,9 @@ TEST_P(ImageSamplerControlTest, Gfx10SelectsTheXyFilterAfterLodClamping) {
     bind_sampler({.mip = MipFilter::Point, .min_lod_fixed8 = minimum, .max_lod_fixed8 = maximum});
     cu_->write_sgpr(sb_ + 10, (1u << 26) | (1u << 22)); // Point MAG, linear MIN.
     const std::array<float, 7> coordinates{gradient, 0, 0, gradient, 0.3f, 0.3f, 0};
-    for (unsigned i = 0; i < coordinates.size(); ++i)
+    for (unsigned i = 0; i < coordinates.size(); ++i) {
       cu_->write_vgpr(vb_ + i, 0, bits(coordinates[i]));
+    }
     const auto words = rdna1::build_mimg(opcode, {.dim = 1, .dmask = 1, .vdata = 8, .ssamp = 2});
     auto inst = decoder->decode_window(words);
     ASSERT_TRUE(inst.succeeded());
@@ -10754,23 +11142,27 @@ TEST_P(ImageSamplerControlTest, Gfx10SelectsTheXyFilterAfterLodClamping) {
 }
 
 TEST_P(ImageSamplerControlTest, ExplicitLodRoundsBeforeBiasAndSaturatesInfiniteInputs) {
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+  if (arch() == rocjitsu::IsaFamily::Cdna2) {
     GTEST_SKIP() << "The public CDNA2 ISA and installed SDK omit explicit-LOD forms";
+  }
   Image image;
   image.width = image.height = 16;
   image.mip_levels = 4;
   image.last_level = image.mip_levels - 1;
   bind_sample_image(image);
   const bool gfx9 = arch_is_cdna_4_or_lower(arch());
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
   // Independent linear mip-atlas offsets; each mip contains its level number.
   const std::array<uint32_t, 4> offsets = gfx9 ? std::array<uint32_t, 4>{0, 4096, 6144, 7168}
                                                : std::array<uint32_t, 4>{3584, 1536, 512, 0};
-  for (uint32_t level = 0; level < 4; ++level)
-    for (uint32_t y = 0; y < (16u >> level); ++y)
-      for (uint32_t x = 0; x < (16u >> level); ++x)
+  for (uint32_t level = 0; level < 4; ++level) {
+    for (uint32_t y = 0; y < (16u >> level); ++y) {
+      for (uint32_t x = 0; x < (16u >> level); ++x) {
         memory_.write32(kBase + offsets[level] + y * (gfx12 ? 128 : 256) + x * 4,
                         std::bit_cast<uint32_t>(static_cast<float>(level)));
+      }
+    }
+  }
   struct Case {
     bool zero;
     float lod;
@@ -10795,7 +11187,7 @@ TEST_P(ImageSamplerControlTest, ExplicitLodRoundsBeforeBiasAndSaturatesInfiniteI
                         {false, 1.0e30f, -256, 0, 3},
                         {false, 0, 0, 384, 1.5f}};
   wf_->set_exec(1);
-  for (const Case &test : cases)
+  for (const Case &test : cases) {
     for (MipFilter mip_filter : {MipFilter::Point, MipFilter::Linear}) {
       SCOPED_TRACE(testing::Message() << test.zero << ',' << test.lod << ',' << test.bias << ','
                                       << test.minimum << ',' << static_cast<uint32_t>(mip_filter));
@@ -10808,13 +11200,17 @@ TEST_P(ImageSamplerControlTest, ExplicitLodRoundsBeforeBiasAndSaturatesInfiniteI
           mip_filter == MipFilter::Linear ? test.expected : std::floor(test.expected + 0.5f);
       EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), std::bit_cast<uint32_t>(expected));
     }
+  }
   // Independent GFX11/12 captures distinguish integer-LOD mip blending.
-  for (uint32_t level = 0; level < 4; ++level)
-    for (uint32_t y = 0; y < (16u >> level); ++y)
-      for (uint32_t x = 0; x < (16u >> level); ++x)
+  for (uint32_t level = 0; level < 4; ++level) {
+    for (uint32_t y = 0; y < (16u >> level); ++y) {
+      for (uint32_t x = 0; x < (16u >> level); ++x) {
         memory_.write32(kBase + offsets[level] + y * (gfx12 ? 128 : 256) + x * 4, 0x80000000u);
-  for (bool linear : {false, true})
-    for (MipFilter mip_filter : {MipFilter::Point, MipFilter::Linear})
+      }
+    }
+  }
+  for (bool linear : {false, true}) {
+    for (MipFilter mip_filter : {MipFilter::Point, MipFilter::Linear}) {
       for (float lod : {0.0f, 0.25f, 0.5f, 1.0f, 1.5f, 2.75f, 3.0f}) {
         bind_sampler({.linear_xy = linear, .mip = mip_filter});
         cu_->write_vgpr(vb_, 0, 0u);
@@ -10824,6 +11220,8 @@ TEST_P(ImageSamplerControlTest, ExplicitLodRoundsBeforeBiasAndSaturatesInfiniteI
         const bool blends = mip_filter == MipFilter::Linear && lod != std::floor(lod);
         EXPECT_EQ(cu_->read_vgpr(vb_ + 8, 0), blends ? 0u : 0x80000000u);
       }
+    }
+  }
   struct BlendCase {
     uint64_t exec;
     uint32_t fractional_lane;
@@ -10839,7 +11237,7 @@ TEST_P(ImageSamplerControlTest, ExplicitLodRoundsBeforeBiasAndSaturatesInfiniteI
                               {15, 3, 1.0f + 1.0f / 512, 0, 0},
                               {15, 3, 3.5f, 0, 0},
                               {2, 8, 0.25f, 0, 0}};
-  for (bool linear : {false, true})
+  for (bool linear : {false, true}) {
     for (const BlendCase &test : blends) {
       SCOPED_TRACE(testing::Message()
                    << test.exec << ',' << test.fractional_lane << ',' << test.lod);
@@ -10862,13 +11260,15 @@ TEST_P(ImageSamplerControlTest, ExplicitLodRoundsBeforeBiasAndSaturatesInfiniteI
         EXPECT_EQ(cu_->read_vgpr(vb_ + 8, lane), expected);
       }
     }
+  }
 }
 
 TEST_P(ImageSamplerControlTest, NullGatherClearsEveryPackedAndUnpackedDestination) {
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+  if (arch() == rocjitsu::IsaFamily::Cdna2) {
     GTEST_SKIP() << "The public CDNA2 ISA and installed SDK omit gather forms";
+  }
   wf_->set_exec(5);
-  for (bool d16 : {false, true})
+  for (bool d16 : {false, true}) {
     for (uint32_t invalid : {0u, 1u, 2u}) {
       SCOPED_TRACE(testing::Message() << d16 << ',' << invalid);
       Image image;
@@ -10876,9 +11276,11 @@ TEST_P(ImageSamplerControlTest, NullGatherClearsEveryPackedAndUnpackedDestinatio
       bind_sample_image(image, false);
       memory_.write32(kBase, 0x11);
       memory_.write32(kBase + 4, 0x33);
-      if (invalid == 0)
-        for (uint32_t word = 0; word < 8; ++word)
+      if (invalid == 0) {
+        for (uint32_t word = 0; word < 8; ++word) {
           cu_->write_sgpr(sb_ + word, 0);
+        }
+      }
       if (invalid == 1) {
         cu_->write_sgpr(sb_ + 1, 0);
       }
@@ -10886,15 +11288,19 @@ TEST_P(ImageSamplerControlTest, NullGatherClearsEveryPackedAndUnpackedDestinatio
       for (uint32_t lane : {0u, 1u, 2u}) {
         cu_->write_vgpr(vb_, lane, std::bit_cast<uint32_t>(0.5f));
         cu_->write_vgpr(vb_ + 1, lane, std::bit_cast<uint32_t>(0.5f));
-        for (uint32_t reg = 0; reg < 4; ++reg)
+        for (uint32_t reg = 0; reg < 4; ++reg) {
           cu_->write_vgpr(vb_ + 8 + reg, lane, 0xdeadbeef);
+        }
       }
       ASSERT_TRUE(sample(SampleTestOperation::Gather, d16, invalid == 2 ? 104 : 8));
-      for (uint32_t lane : {0u, 1u, 2u})
-        for (uint32_t reg = 0; reg < 4; ++reg)
+      for (uint32_t lane : {0u, 1u, 2u}) {
+        for (uint32_t reg = 0; reg < 4; ++reg) {
           EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + reg, lane),
                     lane != 1 && reg < (d16 ? 2u : 4u) ? 0u : 0xdeadbeefu);
+        }
+      }
     }
+  }
 }
 
 TEST_P(ImageSamplerControlTest, IntegerFilteringIsExplicitlyUnsupportedButPointSamplingWorks) {
@@ -10956,8 +11362,9 @@ TEST_P(ImageSamplerControlTest, ClampedLinearTapsPreserveNegativeZero) {
                  << test.width << ',' << static_cast<uint32_t>(test.wrap) << ',' << test.x);
     image.width = test.width;
     bind_sample_image(image);
-    for (uint32_t x = 0; x < image.width; ++x)
+    for (uint32_t x = 0; x < image.width; ++x) {
       memory_.write32(kBase + x * 4, 0x80000000u);
+    }
     bind_sampler({.clamp_x = test.wrap, .linear_xy = true});
     cu_->write_vgpr(vb_, 0, std::bit_cast<uint32_t>(test.x));
     cu_->write_vgpr(vb_ + 1, 0, std::bit_cast<uint32_t>(0.5f));
@@ -10967,11 +11374,12 @@ TEST_P(ImageSamplerControlTest, ClampedLinearTapsPreserveNegativeZero) {
 }
 
 TEST_P(ImageSamplerControlTest, SignedTexelOffsetUsesItsOwnAddressRegister) {
-  if (arch() == ROCJITSU_CODE_ARCH_CDNA2)
+  if (arch() == rocjitsu::IsaFamily::Cdna2) {
     GTEST_SKIP() << "The public CDNA2 ISA exposes only the base sample form";
+  }
   wf_->clear_instruction_execution_error();
-  if (arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2 ||
-      (arch() == ROCJITSU_CODE_ARCH_RDNA3 || arch() == ROCJITSU_CODE_ARCH_RDNA3_5)) {
+  if (arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2 ||
+      (arch() == rocjitsu::IsaFamily::Rdna3 || arch() == rocjitsu::IsaFamily::Rdna3_5)) {
     Image image;
     image.width = 4;
     bind_sample_image(image);
@@ -10990,8 +11398,9 @@ TEST_P(ImageSamplerControlTest, SignedTexelOffsetUsesItsOwnAddressRegister) {
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10CompressedSeamlessCubeMatchesUncompressedCornersAndEdges) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 BC cube sampler";
+  }
   Image image;
   image.type = amdgpu::kImageCube;
   image.depth = 6;
@@ -11009,11 +11418,12 @@ TEST_P(ImageSamplerControlTest, Gfx10CompressedSeamlessCubeMatchesUncompressedCo
       uint32_t indices = 0;
       for (unsigned texel = 0; texel < 16; ++texel) {
         const bool green = (texel + 3 * face) % 5 < 2;
-        if (bc)
+        if (bc) {
           indices |= uint32_t(green) << (2 * texel);
-        else
+        } else {
           memory_.write32(kBase + (face * 4 + texel / 4) * 256 + (texel % 4) * 4,
                           std::bit_cast<uint32_t>(green ? 0.f : 1.f));
+        }
       }
       if (bc) {
         memory_.write32(kBase + face * 256, 0x07e0f800);
@@ -11026,17 +11436,19 @@ TEST_P(ImageSamplerControlTest, Gfx10CompressedSeamlessCubeMatchesUncompressedCo
       write_coordinates(0, std::bit_cast<std::array<uint32_t, 3>>(coords[i]));
       ASSERT_TRUE(sample(SampleTestOperation::Zero));
       const uint32_t actual = cu_->read_vgpr(vb_ + 8, 0);
-      if (bc)
+      if (bc) {
         EXPECT_EQ(actual, expected[i]) << i;
-      else
+      } else {
         expected[i] = actual;
+      }
     }
   }
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10CubeSamplerAndRawAccessSelectFacesWithinArrayView) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 cube coordinates";
+  }
   Image image;
   image.width = image.height = 1;
   image.type = amdgpu::kImageCube;
@@ -11060,8 +11472,9 @@ TEST_P(ImageSamplerControlTest, Gfx10CubeSamplerAndRawAccessSelectFacesWithinArr
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10PredefinedWhiteBorderReturnsOne) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 sampler border colors";
+  }
   Image image;
   bind_sample_image(image);
   bind_sampler({.clamp_x = Clamp::Border, .normalized = false});
@@ -11073,17 +11486,19 @@ TEST_P(ImageSamplerControlTest, Gfx10PredefinedWhiteBorderReturnsOne) {
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10GetLodReportsSelectedMipAndAnisotropicFootprint) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   Image image;
   image.width = image.height = 64;
   image.mip_levels = 5;
   image.last_level = 4;
   bind_sample_image(image);
   wf_->set_exec(15);
-  for (uint32_t lane = 0; lane < 4; ++lane)
+  for (uint32_t lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane % 2) / 8),
                              std::bit_cast<uint32_t>(float(lane / 2) / 32), 0});
+  }
   auto decoder = Decoder::create(arch());
   auto encoding = fields<rdna1::MimgBuilderFields>(2);
   encoding.unorm = false;
@@ -11094,8 +11509,9 @@ TEST_P(ImageSamplerControlTest, Gfx10GetLodReportsSelectedMipAndAnisotropicFootp
     for (auto filter : {MipFilter::None, MipFilter::Point, MipFilter::Linear}) {
       bind_sampler({.mip = filter, .max_lod_fixed8 = 4 * 256, .bias_fixed8 = 96});
       cu_->write_sgpr(sb_ + 8, cu_->read_sgpr(sb_ + 8) | (2u << 9)); // 4:1 maximum ratio.
-      if (anisotropic)
+      if (anisotropic) {
         cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (2u << 20) | (2u << 22));
+      }
       auto decoded = decoder->decode_window(words);
       ASSERT_TRUE(decoded.succeeded());
       ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
@@ -11111,16 +11527,18 @@ TEST_P(ImageSamplerControlTest, Gfx10GetLodReportsSelectedMipAndAnisotropicFootp
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10GetLodAppliesPerfMipOnlyToTheTrilinearResult) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   Image image;
   image.width = image.height = 64;
   image.mip_levels = 5;
   image.last_level = 4;
   wf_->set_exec(15);
-  for (uint32_t lane = 0; lane < 4; ++lane)
+  for (uint32_t lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane % 2) / 8),
                              std::bit_cast<uint32_t>(float(lane / 2) / 32), 0});
+  }
   auto encoding = fields<rdna1::MimgBuilderFields>(2);
   encoding.unorm = false;
   encoding.dmask = 3;
@@ -11138,8 +11556,9 @@ TEST_P(ImageSamplerControlTest, Gfx10GetLodAppliesPerfMipOnlyToTheTrilinearResul
                       .bias_fixed8 = 96,
                       .perf_mip = perf_mip});
         cu_->write_sgpr(sb_ + 8, cu_->read_sgpr(sb_ + 8) | (2u << 9));
-        if (anisotropic)
+        if (anisotropic) {
           cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (2u << 20) | (2u << 22));
+        }
         auto inst = decoder->decode_window(words);
         ASSERT_TRUE(inst.succeeded());
         ASSERT_TRUE(cu_->execute_instruction(inst.value().get(), *wf_).succeeded());
@@ -11153,8 +11572,9 @@ TEST_P(ImageSamplerControlTest, Gfx10GetLodAppliesPerfMipOnlyToTheTrilinearResul
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10CoarseDerivativesRequireOneLodPerLiveQuad) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   Image image;
   image.width = image.height = 16;
   image.mip_levels = 4;
@@ -11167,8 +11587,9 @@ TEST_P(ImageSamplerControlTest, Gfx10CoarseDerivativesRequireOneLodPerLiveQuad) 
     for (unsigned lane : {0u, 1u, 4u, 5u}) {
       const float dx = lane >= 4 || (unequal && lane == 1) ? 0.25f : 0.0625f;
       cu_->write_vgpr(vb_, lane, std::bit_cast<uint32_t>(dx));
-      for (unsigned word = 1; word < 6; ++word)
+      for (unsigned word = 1; word < 6; ++word) {
         cu_->write_vgpr(vb_ + word, lane, 0);
+      }
     }
     for (bool coarse : {false, true}) {
       const auto words = sample_mimg_words<rdna1::MimgBuilderFields>(
@@ -11193,11 +11614,13 @@ TEST_P(ImageSamplerControlTest, Gfx10CoarseDerivativesRequireOneLodPerLiveQuad) 
 }
 
 TEST_P(ImageSamplerControlTest, GatherSelectsTheNearestMipWithLinearFiltering) {
-  const bool gfx12 = arch() == ROCJITSU_CODE_ARCH_RDNA4;
-  if (!gfx12 && arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  const bool gfx12 = arch() == rocjitsu::IsaFamily::Rdna4;
+  if (!gfx12 && arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
-  for (uint32_t offset = 0; offset < (1u << 16); offset += 4)
+  }
+  for (uint32_t offset = 0; offset < (1u << 16); offset += 4) {
     memory_.write32(kBase + offset, offset / 4);
+  }
   wf_->set_exec(1);
   unnormalized_ = false;
   auto decoder = Decoder::create(arch());
@@ -11234,8 +11657,9 @@ TEST_P(ImageSamplerControlTest, GatherSelectsTheNearestMipWithLinearFiltering) {
       ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
       amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
       ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
-      for (unsigned tap = 0; tap < out.size(); ++tap)
+      for (unsigned tap = 0; tap < out.size(); ++tap) {
         out[tap] = cu_->read_vgpr(vb_ + 8 + tap, 0);
+      }
     };
     std::array<uint32_t, 4> level0, level1, actual;
     ASSERT_NO_FATAL_FAILURE(gather(0, MipFilter::Point, level0));
@@ -11249,13 +11673,15 @@ TEST_P(ImageSamplerControlTest, GatherSelectsTheNearestMipWithLinearFiltering) {
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10GatherUsesQuadDerivativesOnlyForMipSelection) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   wf_->set_exec(1);
   unnormalized_ = false;
   const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
-  for (unsigned lane = 0; lane < 4; ++lane)
+  for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {bits(lane & 1 ? 0.5f : 0.25f), bits(0.5f), 0});
+  }
   Image image{.width = 8, .height = 4, .mip_levels = 2};
   const amdgpu::ImageLayout layout{.width = image.width,
                                    .height = image.height,
@@ -11267,9 +11693,11 @@ TEST_P(ImageSamplerControlTest, Gfx10GatherUsesQuadDerivativesOnlyForMipSelectio
     const auto addressing =
         amdgpu::ImageAddressing::prepare(cu_->image_address_config(), layout, level);
     ASSERT_TRUE(addressing);
-    for (unsigned y = 0; y < image.height >> level; ++y)
-      for (unsigned x = 0; x < image.width >> level; ++x)
+    for (unsigned y = 0; y < image.height >> level; ++y) {
+      for (unsigned x = 0; x < image.width >> level; ++x) {
         memory_.write32(kBase + addressing->byte_offset(x, y, 0), bits(100 * level + 10 * y + x));
+      }
+    }
   }
   auto encoding = fields<rdna1::MimgBuilderFields>(2);
   encoding.ssamp = 2;
@@ -11282,8 +11710,9 @@ TEST_P(ImageSamplerControlTest, Gfx10GatherUsesQuadDerivativesOnlyForMipSelectio
     bind_sample_image(image);
     for (bool min_linear : {false, true}) {
       bind_sampler({.mip = mip ? MipFilter::Point : MipFilter::None});
-      if (min_linear)
+      if (min_linear) {
         cu_->write_sgpr(sb_ + 10, cu_->read_sgpr(sb_ + 10) | (1u << 22));
+      }
       for (auto opcode : {rdna1::kImageGather4Mimg, rdna1::kImageGather4hMimg}) {
         SCOPED_TRACE(testing::Message()
                      << "mip=" << mip << " min_linear=" << min_linear << " opcode=" << opcode);
@@ -11321,8 +11750,9 @@ TEST_P(ImageSamplerControlTest, Gfx10GatherUsesQuadDerivativesOnlyForMipSelectio
         if (mip) {
           if (opcode == rdna1::kImageGather4Mimg) {
             std::array<uint32_t, 4> implicit;
-            for (unsigned tap = 0; tap < implicit.size(); ++tap)
+            for (unsigned tap = 0; tap < implicit.size(); ++tap) {
               implicit[tap] = cu_->read_vgpr(vb_ + 8 + tap, 0);
+            }
             cu_->write_vgpr(vb_ + 2, 0, bits(1.f));
             auto reference =
                 decoder->decode_window(rdna1::build_mimg(rdna1::kImageGather4LMimg, encoding));
@@ -11339,22 +11769,26 @@ TEST_P(ImageSamplerControlTest, Gfx10GatherUsesQuadDerivativesOnlyForMipSelectio
         }
         const auto expected = opcode == rdna1::kImageGather4Mimg ? std::array{21, 22, 12, 11}
                                                                  : std::array{20, 21, 22, 23};
-        for (unsigned tap = 0; tap < expected.size(); ++tap)
+        for (unsigned tap = 0; tap < expected.size(); ++tap) {
           EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + tap, 0), bits(expected[tap]));
+        }
       }
     }
   }
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10HorizontalGatherPreservesBorderAndClampsOtherWrapModes) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   Image image{.width = 8, .height = 4};
   bind_sample_image(image);
-  for (uint32_t y = 0; y < image.height; ++y)
-    for (uint32_t x = 0; x < image.width; ++x)
+  for (uint32_t y = 0; y < image.height; ++y) {
+    for (uint32_t x = 0; x < image.width; ++x) {
       memory_.write32(kBase + 4 * (image.pitch * y + x),
                       std::bit_cast<uint32_t>(float(10 * y + x)));
+    }
+  }
   wf_->set_exec(1);
   unnormalized_ = false;
   auto fields10 = fields<rdna1::MimgBuilderFields>(2);
@@ -11369,24 +11803,28 @@ TEST_P(ImageSamplerControlTest, Gfx10HorizontalGatherPreservesBorderAndClampsOth
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
     ASSERT_EQ(pipeline.issue(inst.value().release(), *wf_), amdgpu::VmAccessOutcome::Complete);
     const std::array<float, 4> expected{5, 6, 7, wrap == Clamp::Border ? 0.0f : 7.0f};
-    for (unsigned tap = 0; tap < expected.size(); ++tap)
+    for (unsigned tap = 0; tap < expected.size(); ++tap) {
       EXPECT_EQ(cu_->read_vgpr(vb_ + 8 + tap, 0), std::bit_cast<uint32_t>(expected[tap]));
+    }
   }
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10Gather4hCentersFourTexelsOnOneRow) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   Image image;
   image.width = 8;
   image.height = 4;
   bind_sample_image(image);
   bind_sampler({.normalized = false});
   wf_->set_exec(1);
-  for (uint32_t y = 0; y < image.height; ++y)
-    for (uint32_t x = 0; x < image.width; ++x)
+  for (uint32_t y = 0; y < image.height; ++y) {
+    for (uint32_t x = 0; x < image.width; ++x) {
       memory_.write32(kBase + 4 * (image.pitch * y + x),
                       std::bit_cast<uint32_t>(float(10 * y + x)));
+    }
+  }
   auto decoder = Decoder::create(arch());
   auto encoding = fields<rdna1::MimgBuilderFields>(2);
   encoding.ssamp = 2;
@@ -11398,27 +11836,30 @@ TEST_P(ImageSamplerControlTest, Gfx10Gather4hCentersFourTexelsOnOneRow) {
     ASSERT_TRUE(cu_->execute_instruction(inst.get(), *wf_).succeeded());
     amdgpu::GlobalMemPipeline pipeline(&cu_->l1_vector(), &l2_);
     ASSERT_EQ(pipeline.issue(inst.release(), *wf_), amdgpu::VmAccessOutcome::Complete);
-    for (uint32_t tap = 0; tap < 4; ++tap)
+    for (uint32_t tap = 0; tap < 4; ++tap) {
       EXPECT_FLOAT_EQ(std::bit_cast<float>(cu_->read_vgpr(vb_ + 8 + tap, 0)),
                       20.0f + (u >= 2.5f) + tap);
+    }
   }
 }
 
 TEST_P(ImageSamplerControlTest, GetLodWaitsForWrittenDataAndSkipsSuppressedQueryInputs) {
-  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
-  if (!gfx10 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx10 = arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2;
+  if (!gfx10 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   bind_sample_image({.width = 64, .height = 64, .pitch = 1, .mip_levels = 4, .last_level = 3},
                     true);
   bind_sampler({.mip = MipFilter::Linear});
-  for (unsigned lane = 0; lane < 4; ++lane)
+  for (unsigned lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane & 1u) / 64),
                              std::bit_cast<uint32_t>(float(lane >> 1) / 64), 0});
+  }
   auto decoder = Decoder::create(arch());
   wf_->set_exec(15);
   auto &wait = wf_->ensure_memory_wait_scoreboard();
-  for (uint8_t mask : {0u, 1u, 3u})
-    for (uint8_t flags = 0; flags < 4; ++flags)
+  for (uint8_t mask : {0u, 1u, 3u}) {
+    for (uint8_t flags = 0; flags < 4; ++flags) {
       for (uint8_t dst : {8u, 31u}) {
         const bool tfe = flags & 1, lwe = flags & 2;
         const unsigned words = std::max(1, std::popcount(mask));
@@ -11458,8 +11899,9 @@ TEST_P(ImageSamplerControlTest, GetLodWaitsForWrittenDataAndSkipsSuppressedQuery
         EXPECT_EQ(reads != 0, allocated && (mask || (!gfx10 && lwe)));
         for (unsigned reg = 0; reg <= words; ++reg) {
           wait.clear();
-          if (dst + words < wf_->num_vgprs())
+          if (dst + words < wf_->num_vgprs()) {
             cu_->write_vgpr(vb_ + dst + words, 0, 0xdeadbeef);
+          }
           cu_->write_vgpr(vb_ + dst, 0, 0xdeadbeef);
           cu_->track_memory_wait(*decoded.value(), *wf_);
           ASSERT_TRUE(cu_->execute_instruction(decoded.value().get(), *wf_).succeeded());
@@ -11474,13 +11916,16 @@ TEST_P(ImageSamplerControlTest, GetLodWaitsForWrittenDataAndSkipsSuppressedQuery
           }
         }
       }
+    }
+  }
   wait.clear();
 }
 
 TEST_P(ImageSamplerControlTest, GetLodPacksSelectedChannelsAndDropsToOneZero) {
-  const bool gfx10 = arch() == ROCJITSU_CODE_ARCH_RDNA1 || arch() == ROCJITSU_CODE_ARCH_RDNA2;
-  if (!gfx10 && arch() != ROCJITSU_CODE_ARCH_RDNA3 && arch() != ROCJITSU_CODE_ARCH_RDNA3_5)
+  const bool gfx10 = arch() == rocjitsu::IsaFamily::Rdna1 || arch() == rocjitsu::IsaFamily::Rdna2;
+  if (!gfx10 && arch() != rocjitsu::IsaFamily::Rdna3 && arch() != rocjitsu::IsaFamily::Rdna3_5) {
     GTEST_SKIP();
+  }
   Image image;
   image.width = image.height = 64;
   image.mip_levels = 4;
@@ -11488,15 +11933,17 @@ TEST_P(ImageSamplerControlTest, GetLodPacksSelectedChannelsAndDropsToOneZero) {
   bind_sample_image(image);
   bind_sampler({.mip = MipFilter::Point, .max_lod_fixed8 = 256});
   wf_->set_exec(15);
-  for (uint32_t lane = 0; lane < 4; ++lane)
+  for (uint32_t lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane % 2) / 16),
                              std::bit_cast<uint32_t>(float(lane / 2) / 16), 0});
+  }
   constexpr uint32_t sentinel = 0xdeadbeef;
   auto decoder = Decoder::create(arch());
   for (uint32_t mask = 0; mask < 16; ++mask) {
     SCOPED_TRACE(mask);
-    for (unsigned reg = 8; reg < 13; ++reg)
+    for (unsigned reg = 8; reg < 13; ++reg) {
       cu_->write_vgpr(vb_ + reg, 0, sentinel);
+    }
     auto gfx10_fields = fields<rdna1::MimgBuilderFields>(2);
     auto gfx11_fields = fields<rdna3::MimgBuilderFields>(2);
     gfx10_fields.dmask = gfx11_fields.dmask = mask;
@@ -11507,12 +11954,13 @@ TEST_P(ImageSamplerControlTest, GetLodPacksSelectedChannelsAndDropsToOneZero) {
     auto decoded = decoder->decode_window(words);
     ASSERT_TRUE(decoded.succeeded());
     const auto result = cu_->execute_instruction(decoded.value().get(), *wf_);
-    if ((mask & 0xcu) && arch() != ROCJITSU_CODE_ARCH_RDNA3) {
+    if ((mask & 0xcu) && arch() != rocjitsu::IsaFamily::Rdna3) {
       EXPECT_TRUE(result.failed());
       EXPECT_EQ(wf_->instruction_execution_error(),
                 amdgpu::InstructionExecutionError::UnsupportedOperandValue);
-      for (unsigned reg = 8; reg < 13; ++reg)
+      for (unsigned reg = 8; reg < 13; ++reg) {
         EXPECT_EQ(cu_->read_vgpr(vb_ + reg, 0), sentinel);
+      }
       wf_->clear_instruction_execution_error();
       continue;
     }
@@ -11523,17 +11971,19 @@ TEST_P(ImageSamplerControlTest, GetLodPacksSelectedChannelsAndDropsToOneZero) {
     if (!mask) {
       EXPECT_EQ(cu_->read_vgpr(vb_ + out++, 0), 0u);
     }
-    for (unsigned channel = 0; channel < expected.size(); ++channel)
+    for (unsigned channel = 0; channel < expected.size(); ++channel) {
       if (mask & (1u << channel)) {
         EXPECT_FLOAT_EQ(std::bit_cast<float>(cu_->read_vgpr(vb_ + out++, 0)), expected[channel]);
       }
+    }
     EXPECT_EQ(cu_->read_vgpr(vb_ + out, 0), sentinel);
   }
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10GetLodReturnsClampedAndRawWithoutTextureAccess) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 MIMG";
+  }
   Image image;
   image.width = 64;
   image.height = 64;
@@ -11542,9 +11992,10 @@ TEST_P(ImageSamplerControlTest, Gfx10GetLodReturnsClampedAndRawWithoutTextureAcc
   bind_sample_image(image);
   bind_sampler({.mip = MipFilter::Point, .max_lod_fixed8 = 256});
   wf_->set_exec(15);
-  for (uint32_t lane = 0; lane < 4; ++lane)
+  for (uint32_t lane = 0; lane < 4; ++lane) {
     write_coordinates(lane, {std::bit_cast<uint32_t>(float(lane % 2) / 16),
                              std::bit_cast<uint32_t>(float(lane / 2) / 16), 0});
+  }
   // VDATA aliases VADDR. All four lanes must use the same original quad.
   auto fields = rdna1::MimgBuilderFields{};
   fields.dim = 1;
@@ -11562,8 +12013,9 @@ TEST_P(ImageSamplerControlTest, Gfx10GetLodReturnsClampedAndRawWithoutTextureAcc
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10GetLodValidatesDataWidthAndSurfaceDimension) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 GET_LOD";
+  }
   bind_sample_image({.width = 64, .height = 64, .pitch = 1, .mip_levels = 4, .last_level = 3});
   bind_sampler({.mip = MipFilter::Point});
   wf_->set_exec(15);
@@ -11602,8 +12054,9 @@ TEST_P(ImageSamplerControlTest, Gfx10GetLodValidatesDataWidthAndSurfaceDimension
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10GetLodRejectsUnsupportedDescriptorTypesBeforeWriting) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   auto decoder = Decoder::create(arch());
   bind_sampler({.mip = MipFilter::Point});
   wf_->set_exec(15);
@@ -11641,8 +12094,9 @@ TEST_P(ImageSamplerControlTest, Gfx10GetLodRejectsUnsupportedDescriptorTypesBefo
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10CubeDerivativesRequireOneFacePerSourceQuad) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP();
+  }
   const auto bits = [](float value) { return std::bit_cast<uint32_t>(value); };
   bind_sample_image({.width = 64,
                      .height = 64,
@@ -11706,8 +12160,9 @@ TEST_P(ImageSamplerControlTest, Gfx10CubeDerivativesRequireOneFacePerSourceQuad)
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10GetLodRejectsUnsupportedSamplerControlsWithoutWritingResults) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 sampler layout";
+  }
   wf_->set_exec(1);
   auto encoding = fields<rdna1::MimgBuilderFields>(2);
   encoding.dmask = 3;
@@ -11751,8 +12206,9 @@ TEST_P(ImageSamplerControlTest, Gfx10GetLodRejectsUnsupportedSamplerControlsWith
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10RejectsWholeImageResultsThatCrossTheWaveAllocation) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 VGPR allocation rule";
+  }
   wf_->halt();
   wf_ = cu_->dispatch_wf(0, 0, 106, 16);
   ASSERT_NE(wf_, nullptr);
@@ -11775,8 +12231,9 @@ TEST_P(ImageSamplerControlTest, Gfx10RejectsWholeImageResultsThatCrossTheWaveAll
                                                         {rdna1::kImageLoadMimg, false},
                                                         {rdna1::kImageLoadMimg, true}}};
   for (const auto &[op, tfe] : cases) {
-    if (tfe && arch() != ROCJITSU_CODE_ARCH_RDNA1)
+    if (tfe && arch() != rocjitsu::IsaFamily::Rdna1) {
       continue;
+    }
     encoding.tfe = tfe;
     encoding.dmask = tfe ? 1 : 3;
     cu_->write_vgpr(vb_ + last, 0, 0xdeadbeef);
@@ -11793,8 +12250,9 @@ TEST_P(ImageSamplerControlTest, Gfx10RejectsWholeImageResultsThatCrossTheWaveAll
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10PackedHorizontalGatherConcatenatesRawTexels) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 MIMG";
+  }
   Image image;
   image.width = 8;
   image.rdna_format = 5; // 8_UINT
@@ -11825,8 +12283,9 @@ TEST_P(ImageSamplerControlTest, Gfx10PackedHorizontalGatherConcatenatesRawTexels
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10G16UsesTwoPackedGradientWordsBeforeFullCoordinates) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 G16 MIMG";
+  }
   Image image;
   image.width = 2;
   bind_sample_image(image);
@@ -11854,8 +12313,9 @@ TEST_P(ImageSamplerControlTest, Gfx10G16UsesTwoPackedGradientWordsBeforeFullCoor
 }
 
 TEST_P(ImageSamplerControlTest, Gfx10DepthComparisonFiltersPerTexel) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA1 && arch() != ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch() != rocjitsu::IsaFamily::Rdna1 && arch() != rocjitsu::IsaFamily::Rdna2) {
     GTEST_SKIP() << "GFX10 MIMG";
+  }
   Image image;
   image.width = 2;
   bind_sample_image(image);
@@ -11879,8 +12339,9 @@ TEST_P(ImageSamplerControlTest, Gfx10DepthComparisonFiltersPerTexel) {
 }
 
 TEST_P(ImageSamplerControlTest, DerivativeMetadataUsesTwoCubeComponents) {
-  if (arch_is_cdna_4_or_lower(arch()) || arch() == ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch_is_cdna_4_or_lower(arch()) || arch() == rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "MIMG DIM encoding on GFX10/GFX11";
+  }
   for (uint32_t dim : {1u, 2u, 3u}) {
     dimension_override_ = dim;
     std::unique_ptr<Instruction> instruction = sample_instruction(SampleTestOperation::Gradients);
@@ -11892,16 +12353,18 @@ TEST_P(ImageSamplerControlTest, DerivativeMetadataUsesTwoCubeComponents) {
     EXPECT_EQ(modifiers.image_prefix_words, prefix);
     EXPECT_EQ(modifiers.image_coordinate_count, coordinates);
     InstDefUse uses(*instruction, 32);
-    for (uint32_t reg = 0; reg < prefix + coordinates; ++reg)
+    for (uint32_t reg = 0; reg < prefix + coordinates; ++reg) {
       EXPECT_TRUE(uses.uses.contains({RegClass::VGPR, static_cast<uint16_t>(reg), 1}));
+    }
     EXPECT_FALSE(
         uses.uses.contains({RegClass::VGPR, static_cast<uint16_t>(prefix + coordinates), 1}));
   }
 }
 
 TEST_P(ImageSamplerControlTest, VimageMipTracksItsFifthIndependentSelector) {
-  if (arch() != ROCJITSU_CODE_ARCH_RDNA4)
+  if (arch() != rocjitsu::IsaFamily::Rdna4) {
     GTEST_SKIP() << "VIMAGE is a GFX12 encoding";
+  }
   rdna4::VimageBuilderFields encoding{};
   encoding.dim = 7;
   encoding.dmask = 1;
@@ -11919,14 +12382,15 @@ TEST_P(ImageSamplerControlTest, VimageMipTracksItsFifthIndependentSelector) {
   amdgpu::RegisterModifiers modifiers{};
   decoded.value()->amdgpu_register_modifiers(modifiers);
   EXPECT_EQ(modifiers.image_coordinate_count, 5);
-  for (uint32_t i = 0; i < 5; ++i)
+  for (uint32_t i = 0; i < 5; ++i) {
     EXPECT_EQ(modifiers.image_coordinates[i], (std::array<uint32_t, 5>{1, 9, 16, 23, 30})[i]);
+  }
 }
 
 INSTANTIATE_TEST_SUITE_P(Architectures, ImageSamplerControlTest,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
-                                         ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
-                                         ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5,
-                                         ROCJITSU_CODE_ARCH_RDNA4));
+                         testing::Values(rocjitsu::IsaFamily::Cdna1, rocjitsu::IsaFamily::Cdna2,
+                                         rocjitsu::IsaFamily::Rdna1, rocjitsu::IsaFamily::Rdna2,
+                                         rocjitsu::IsaFamily::Rdna3, rocjitsu::IsaFamily::Rdna3_5,
+                                         rocjitsu::IsaFamily::Rdna4));
 
 } // namespace

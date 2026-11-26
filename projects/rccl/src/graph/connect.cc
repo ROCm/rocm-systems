@@ -542,15 +542,28 @@ static ncclResult_t setTreeDown(struct ncclTree* tree, int* indexes, int d, int 
   return ncclSuccess;
 }
 
+// Number of search channels above which connectTrees splits them between the two trees (the first half carries the
+// first tree, the second half the second one) instead of using channel c and c + nChannels for the two trees.
+// It must match whether ncclTopoPostset doubles the channel count afterwards: channels added by the doubling get no
+// link to the other node, and Tree AllReduce is silently wrong.
+static int getTreeChannelLimit(const struct ncclComm* comm) {
+  const char* gcn = comm->topo->nodes[GPU].nodes[0].gpu.gcn;
+
+  // gfx1250 over MNNVL cliques skips the 64-channel cap, so Postset doubles up to maxChannels / 2. Keep in sync.
+  if (IsArchMatch(gcn, "gfx1250") && comm->MNNVL && comm->nNodes > 1) {
+    return std::min(comm->topo->nodes[GPU].nodes[0].gpu.cu, MAXCHANNELS) / 2;
+  }
+
+  // gfx942/gfx950/gfx1250 use the doubled channel limit (2*CHANNEL_LIMIT)
+  if (IsArchMatch(gcn, "gfx942") || IsArchMatch(gcn, "gfx950") || IsArchMatch(gcn, "gfx1250")) {
+    return 2 * CHANNEL_LIMIT;
+  }
+  return CHANNEL_LIMIT;
+}
+
 static ncclResult_t connectTrees(struct ncclComm* comm, int* treeToParent, int* treeToChild0, int* treeToChild1,
                                  int* treePatterns) {
-  // gfx942/gfx950/gfx1250 use the doubled channel limit (2*CHANNEL_LIMIT)
-  const int channelLimit = (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx942") ||
-                            IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") ||
-                            IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx1250")) ?
-                             2 * CHANNEL_LIMIT :
-                             CHANNEL_LIMIT;
-  const int nChannels = (comm->nChannels > channelLimit) ? comm->nChannels / 2 : comm->nChannels;
+  const int nChannels = (comm->nChannels > getTreeChannelLimit(comm)) ? comm->nChannels / 2 : comm->nChannels;
   const int nNodes = comm->nNodes, node = comm->node;
   // Compute tree depth. Not an exact value but a good approximation in most
   // cases

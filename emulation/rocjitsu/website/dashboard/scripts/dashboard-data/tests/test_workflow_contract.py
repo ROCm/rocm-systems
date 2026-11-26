@@ -30,7 +30,7 @@ def test_benchmark_pr_trigger_extends_develop_push_paths():
         '.github/workflows/rocjitsu-benchmarks.yml',
     ]
     trigger = workflow[True]['pull_request']
-    assert trigger['branches'] == ['develop']
+    assert 'branches' not in trigger and 'branches-ignore' not in trigger
     assert trigger['types'] == ['labeled', 'synchronize']
     assert trigger['paths'] == push['paths'] + [
         '.github/scripts/rocjitsu_benchmark_report.js',
@@ -218,7 +218,7 @@ def test_dispatch_form_explains_source_and_pr_constraints():
     assert 'side-branch SHA' in source and 'develop' in source
     pr = inputs['pull_request_number']['description']
     assert 'open' in pr and 'same-repository' in pr
-    assert 'selected side branch' in pr and 'develop' in pr
+    assert 'selected side branch' in pr and 'stacked' in pr
 
 
 def test_python_ci_names_its_current_workflow_responsibilities():
@@ -311,6 +311,7 @@ def test_publication_steps_follow_responsibility_order():
         'Checkout repository for publication',
         'Checkout publication validation source',
         'Set up publication validation Python',
+        'Set up publication validation uv',
         'Install publication validation dependencies',
         'Fill publication metadata',
         'Validate publication candidate',
@@ -334,14 +335,17 @@ def test_publication_validation_uses_workflow_source_and_declared_dependencies()
         'ref': '${{ github.sha }}',
         'persist-credentials': False,
     }
-    assert workflow['env']['ROCJITSU_SOURCE_DIR'] == (
+    assert workflow['jobs']['publish']['env']['ROCJITSU_SOURCE_DIR'] == (
         '${{ github.workspace }}/rocm-systems/emulation/rocjitsu'
     )
     python = steps['Set up publication validation Python']
     assert python['uses'].startswith('actions/setup-python@')
     assert python['with']['python-version'] == '3.12'
+    uv = steps['Set up publication validation uv']
+    assert uv['uses'] == 'astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2'
+    assert uv['with'] == {'version': '0.12.21', 'enable-cache': False}
     assert steps['Install publication validation dependencies']['run'] == (
-        'python -m pip install -r '
+        'uv --no-config pip install --system --python "$(command -v python)" -r '
         '"${ROCJITSU_SOURCE_DIR}/website/dashboard/scripts/dashboard-data/requirements-test.txt"'
     )
     validation = steps['Validate publication candidate']
@@ -417,10 +421,10 @@ def test_benchmark_pin_and_unfiltered_execution():
     generation = next(
         s['run']
         for s in benchmark['steps']
-        if s['name'] == 'Generate pinned Tensile artifacts'
+        if s['name'] == 'Prepare benchmark providers'
     )
     assert (
-        'prepare-benchmarks.py" generate --manifest "${BENCHMARK_MANIFEST}"'
+        'prepare-benchmarks.py" tensilelite-generate --manifest "${BENCHMARK_MANIFEST}"'
         in generation
     )
     workflow_text = (WORKFLOWS / 'rocjitsu-benchmarks.yml').read_text()
@@ -640,8 +644,7 @@ def test_benchmark_and_tooling_checkouts_have_separate_owners():
     for name in (
         'Install benchmark dependencies',
         'Build rocjitsu',
-        'Prepare Tensile wheel and native adapter',
-        'Generate pinned Tensile artifacts',
+        'Prepare benchmark providers',
         'Collect preparation diagnostics',
         'Clean owned benchmark scratch',
     ):

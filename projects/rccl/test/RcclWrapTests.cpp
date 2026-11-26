@@ -2487,8 +2487,9 @@ TEST(Rcclwrap, AdjustChannels_Enabled_DividesByMultiplier)
 // -> divided then doubled (the "reduced CU usage" special case).
 TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles)
 {
-    // Relies on default RCCL_MAX_NCHANNELS (-2, i.e. < 0). Isolate so the cached
-    // ncclParamMaxNchannels() value is deterministic regardless of test ordering.
+    // Relies on NCCL_MAX_NCHANNELS, NCCL_MAX_NRINGS and NCCL_WORK_ARGS_BYTES at their
+    // defaults, so ncclMaxNchannels() == MAXCHANNELS. Isolate so the cached params are
+    // deterministic regardless of test ordering.
     RUN_ISOLATED_TEST_WITH_ENV(
         "AdjustChannels_Gfx950SingleNode8Ranks_NonMainColl_Doubles",
         []()
@@ -2536,6 +2537,59 @@ TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MainColl_NoDouble)
             CleanupMockComm(comm);
         },
         {}
+    );
+}
+
+// NCCL_MAX_NRINGS skips the gfx950 halving, so the doubling is skipped too: 64/4 = 16.
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MaxNringsSkipsDoubling)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_MaxNringsSkipsDoubling",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            auto                  topo = std::make_unique<ncclTopoSystem>();
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncBroadcast;
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/64), 16);
+
+            CleanupMockComm(comm);
+        },
+        {{"NCCL_MAX_NRINGS", "16"}}
+    );
+}
+
+// NCCL_MAX_NCHANNELS=MAXCHANNELS leaves ncclMaxNchannels() at its default, so the
+// halving ran and the doubling must restore it: 32/4 = 8, *2 = 16.
+TEST(Rcclwrap, AdjustChannels_Gfx950SingleNode8Ranks_MaxNchannelsAtDefaultKeepsDoubling)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "AdjustChannels_Gfx950SingleNode8Ranks_MaxNchannelsAtDefaultKeepsDoubling",
+        []()
+        {
+            ncclComm_t            comm = nullptr;
+            auto                  topo = std::make_unique<ncclTopoSystem>();
+            struct ncclTopoNode   gpu;
+            CreateMockComm(comm, *topo, gpu, "gfx950", /*nRanks=*/8);
+            comm->nNodes                     = 1;
+            comm->topo->warpSpeedEnabled     = true;
+            comm->warpSpeedChannelMultiplier = 4;
+
+            ncclTaskColl info = {};
+            info.func         = ncclFuncBroadcast;
+
+            EXPECT_EQ(rcclWarpSpeedAdjustChannels(comm, &info, /*nc=*/32), 16);
+
+            CleanupMockComm(comm);
+        },
+        {{"NCCL_MAX_NCHANNELS", std::to_string(MAXCHANNELS)}}
     );
 }
 
@@ -3077,11 +3131,11 @@ TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
             InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
             comm->archThresholds = rcclGetArchThresholds("gfx1250");
             ASSERT_NE(comm->archThresholds, nullptr);
-            // On an 8-rank gfx1250 comm the AR LL ceiling is rank-scaled to 8 MiB
-            // (1 MiB per rank) and the LL128 ceiling is 256 MiB; VMM ceiling is
-            // 16 MiB (above this, Ring/CE takes over).
+            // On an 8-rank gfx1250 comm the AR LL ceiling is 1 MiB (LL128 above it) and
+            // the LL128 ceiling is 256 MiB; VMM ceiling is 16 MiB (above this, Ring/CE
+            // takes over).
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce),
-                      8ULL * 1024 * 1024);
+                      1ULL * 1024 * 1024);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce),
                       256ULL * 1024 * 1024);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce),
@@ -3093,7 +3147,8 @@ TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
 // The rank-scaled caps from the 8-64 rank H13 sweep (AICOMRCCL-1756): below 8 ranks
 // the totals stay in force, from 8 ranks each tier grows with the comm and is
 // clipped at 256 MiB. ReduceScatter LL keeps its 1 MiB total below 32 ranks, and from 32 ranks
-// ReduceScatter LL runs to 2 MiB and LL128 to 512 MiB.
+// ReduceScatter LL runs to 2 MiB and LL128 to 512 MiB. 32 ranks take the ddaLargeComm* AllReduce
+// caps: LL to 2 MiB and LL128 to 64 MiB.
 TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
 {
     RUN_ISOLATED_TEST_WITH_ENV(
@@ -3106,7 +3161,7 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             comm->archThresholds = rcclGetArchThresholds("gfx1250");
             ASSERT_NE(comm->archThresholds, nullptr);
             // 4 ranks: totals.
-            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 1 * MiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 64 * KiB);
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 1 * MiB);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
@@ -3115,7 +3170,8 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
             for (int nRanks : {8, 16, 32, 64}) {
                 comm->nRanks = nRanks;
                 const size_t n = static_cast<size_t>(nRanks);
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), n * MiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), nRanks == 32 ? 2 * MiB : 1 * MiB)
+                    << nRanks; // not scaled, apart from the 32-rank cap
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), n * 16 * KiB) << nRanks;
                 EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), nRanks >= 32 ? 2 * MiB : 1 * MiB)
                     << nRanks;
@@ -3125,10 +3181,11 @@ TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
                           nRanks >= 32 ? 512 * MiB : std::min(n * 32 * MiB, 256 * MiB))
                     << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
-                // Unscaled tiers keep their totals.
-                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
+                // Unscaled tiers keep their totals, apart from the 32-rank AllReduce LL128 cap.
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), nRanks == 32 ? 64 * MiB : 256 * MiB)
+                    << nRanks;
                 EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce), 16 * MiB) << nRanks;
-                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAlltoAll), 64 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAlltoAll), 128 * KiB) << nRanks;
             }
         },
         {});
@@ -3381,7 +3438,7 @@ ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out,
 }
 } // namespace
 
-// gfx1250, message at the DDA-LL ceiling (ddaLLMax[A2A] = 64 KiB total):
+// gfx1250, message at the DDA-LL ceiling (ddaLLMax[A2A] = 128 KiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 {
@@ -3400,10 +3457,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 }
 
 // gfx1250, message just above the LL ceiling and within the LL128 band
-// (ddaLL128Max[A2A] = 8 MiB total):
+// (ddaLL128Max[A2A] = 16 MiB total):
 // rcclSelectAlltoAll must choose RCCL_DDA_FABRIC_LL128.
-// gfx1250, LL128 tier disabled (ddaLL128Max[A2A] = 0 after commit 363b197e):
-// a message just above the LL ceiling must fall to Direct p2p, not LL128.
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3425,7 +3480,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
-// gfx1250: above the 8 MiB LL128 cap (VMM off), AlltoAll falls to Direct p2p.
+// gfx1250: above the 16 MiB LL128 cap AlltoAll takes DDA VMM up to its 256 MiB cap, then Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3433,18 +3488,22 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
     InitA2ADecisionComm(*comm, *topo, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
-    ASSERT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul)
-        << "gfx1250 VMM must be disabled for AlltoAll";
     const size_t ll128Max = tbl->ddaLL128Max[ncclFuncAlltoAll];
+    const size_t vmmMax   = tbl->ddaVmmMax[ncclFuncAlltoAll];
     ASSERT_GT(ll128Max, 0ul) << "gfx1250 must have a non-zero LL128 cap for AlltoAll";
+    ASSERT_GT(vmmMax, ll128Max) << "gfx1250 VMM must cover AlltoAll above the LL128 cap";
 
-    // One alignment step above the LL128 ceiling; VMM disabled, so this falls to Direct.
-    const size_t align      = 16u * (size_t)comm->nRanks;
-    const size_t totalBytes = ((ll128Max + align) / align) * align;
-
-    rcclCollDecision dec{};
-    ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
-    EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+    // One alignment step above each cap, and the VMM cap itself.
+    const size_t align = 16u * (size_t)comm->nRanks;
+    const std::pair<size_t, int> cases[] = {{((ll128Max + align) / align) * align, RCCL_DDA_FABRIC_VMM},
+                                            {vmmMax, RCCL_DDA_FABRIC_VMM},
+                                            {((vmmMax + align) / align) * align, RCCL_DIRECT_ALLTOALL}};
+    for (const auto& c : cases)
+    {
+        rcclCollDecision dec{};
+        ASSERT_EQ(SelectA2A(*comm, c.first, dec), ncclSuccess) << c.first;
+        EXPECT_EQ(dec.algo, c.second) << c.first;
+    }
 }
 
 // gfx1250 DPX table, 8 ranks: DDA LL to 128 KiB total, DDA LL128 above it to 16 MiB, DDA VMM past that.
@@ -3468,8 +3527,9 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBands)
     }
 }
 
-// gfx1250 DPX table, 8 ranks, bf16: buffer offsets of 1 and 2 bytes, in and out of place, take the band
-// a 256-byte aligned call takes, so ranks whose buffers differ in alignment pick the same kernel.
+// gfx1250 DPX table, 8 ranks, bf16: out of place, buffer offsets of 1 and 2 bytes take the band a 256-byte aligned
+// call takes, so ranks whose buffers differ in alignment pick the same kernel. In place, every band, VMM included,
+// takes Direct p2p.
 TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3480,7 +3540,8 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
     const size_t align = 16u * (size_t)comm->nRanks;
     const std::pair<size_t, int> cases[] = {{128ul << 10, RCCL_DDA_FABRIC_LL},
                                             {(128ul << 10) + align, RCCL_DDA_FABRIC_LL128},
-                                            {16ul << 20, RCCL_DDA_FABRIC_LL128}};
+                                            {16ul << 20, RCCL_DDA_FABRIC_LL128},
+                                            {(16ul << 20) + align, RCCL_DDA_FABRIC_VMM}};
     const std::pair<size_t, size_t> offsets[] = {{0, 0}, {2, 0}, {0, 2}, {1, 1}};
     for (const auto& c : cases)
     {
@@ -3490,12 +3551,15 @@ TEST(RcclAlltoAllDecision, Gfx1250Dpx_A2aBandsIgnoreBufferAlignment)
             ASSERT_EQ(SelectA2A(*comm, c.first, dec, o.first, o.second, ncclBfloat16), ncclSuccess) << c.first;
             EXPECT_EQ(dec.algo, c.second) << c.first << " send+" << o.first << " recv+" << o.second;
         }
-        rcclCollDecision dec{};
         const size_t count = c.first / ncclTypeSize(ncclBfloat16) / comm->nRanks;
-        ASSERT_EQ(rcclSelectAlltoAll(comm.get(), a2aRecvStorage + 2, a2aRecvStorage + 2, count, ncclBfloat16,
-                                     /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &dec),
-                  ncclSuccess);
-        EXPECT_EQ(dec.algo, c.second) << c.first << " in place +2";
+        for (size_t off : {size_t(0), size_t(2)})
+        {
+            rcclCollDecision dec{};
+            ASSERT_EQ(rcclSelectAlltoAll(comm.get(), a2aRecvStorage + off, a2aRecvStorage + off, count, ncclBfloat16,
+                                         /*stream=*/nullptr, /*query=*/true, /*graphCapturingHint=*/false, &dec),
+                      ncclSuccess);
+            EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL) << c.first << " in place +" << off;
+        }
     }
 }
 

@@ -626,6 +626,19 @@ pub(crate) fn unsupported_test_gpu() -> Error {
 
 /// Routes GPU-only operations through a checked GPU driver projection.
 impl GpuDriverRef<'_> {
+    pub(crate) fn core_snapshot(
+        &self,
+    ) -> Result<crate::device::gpu::diagnostic::CoreDeviceSnapshot, Error> {
+        match self {
+            #[cfg(not(target_os = "linux"))]
+            Self::Unavailable(never, ..) => match *never {},
+            #[cfg(target_os = "linux")]
+            Self::LinuxKfd { state, .. } => state.core_snapshot(),
+            #[cfg(test)]
+            Self::Test { .. } => Err(unsupported_test_gpu()),
+        }
+    }
+
     pub(crate) fn admit(&self) -> Result<crate::session::SessionOperation, Error> {
         match self {
             #[cfg(not(target_os = "linux"))]

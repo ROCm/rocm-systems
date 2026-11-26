@@ -14,6 +14,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/flat_address.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -43,29 +44,37 @@ inline void add_private_scratch_lanes(VectorMemState &state, unsigned wave_size,
 inline bool check_private_lane(const Wavefront &wf, VectorMemState &d, unsigned lane,
                                uint64_t offset, bool generic) {
   const auto arch = wf.cu().arch();
-  const bool partial = arch == ROCJITSU_CODE_ARCH_CDNA2 || arch == ROCJITSU_CODE_ARCH_RDNA2;
-  if ((!partial && arch != ROCJITSU_CODE_ARCH_CDNA1 && arch != ROCJITSU_CODE_ARCH_RDNA1) ||
-      !d.elem_size || !d.num_elems)
+  const bool partial = arch == rocjitsu::IsaFamily::Cdna2 || arch == rocjitsu::IsaFamily::Rdna2;
+  if ((!partial && arch != rocjitsu::IsaFamily::Cdna1 && arch != rocjitsu::IsaFamily::Rdna1) ||
+      !d.elem_size || !d.num_elems) {
     return true;
+  }
   const uint64_t size = wf.scratch_lane_size();
   const uint64_t count = offset < size ? (size - offset) / d.elem_size : 0;
-  if (count >= d.num_elems)
+  if (count >= d.num_elems) {
     return true;
+  }
   const uint64_t bit = uint64_t{1} << lane;
-  if (arch == ROCJITSU_CODE_ARCH_RDNA2)
+  if (arch == rocjitsu::IsaFamily::Rdna2) {
     d.address_range_violation_lanes |= bit;
-  if (generic && arch == ROCJITSU_CODE_ARCH_CDNA2)
+  }
+  if (generic && arch == rocjitsu::IsaFamily::Cdna2) {
     d.flat_memory_violation = true;
-  if (!partial || !count)
+  }
+  if (!partial || !count) {
     d.lane_mask &= ~bit;
-  if (!partial)
+  }
+  if (!partial) {
     return false;
+  }
   // Keep the nominal address for observers even if no element transferred.
   // Any previously-created per-element masks must also drop this lane.
-  if (count && d.element_lane_masks.empty())
+  if (count && d.element_lane_masks.empty()) {
     d.element_lane_masks.assign(d.num_elems, d.lane_mask);
-  for (uint32_t elem = static_cast<uint32_t>(count); elem < d.element_lane_masks.size(); ++elem)
+  }
+  for (uint32_t elem = static_cast<uint32_t>(count); elem < d.element_lane_masks.size(); ++elem) {
     d.element_lane_masks[elem] &= ~bit;
+  }
   return true;
 }
 
@@ -75,8 +84,9 @@ inline uint64_t capture_flat_private_address(Wavefront &wf, VectorMemState &d, u
   const auto translated = translate_flat_address(
       wf, address, lane, flat_private_layout(wf.cu().arch()), segment_offset);
   if (translated.private_address && translated.swizzled) {
-    if (!check_private_lane(wf, d, lane, translated.private_offset, true))
+    if (!check_private_lane(wf, d, lane, translated.private_offset, true)) {
       return 0;
+    }
     add_private_scratch_lanes(d, wf.wf_size(), uint64_t{1} << lane);
   }
   return translated.value;
@@ -116,10 +126,11 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     offset = static_cast<int32_t>(inst.offset << 20) >> 20;
   } else if (inst.seg != 0) {
     uint32_t raw;
-    if constexpr (requires { inst.pad_12; })
+    if constexpr (requires { inst.pad_12; }) {
       raw = inst.offset | (inst.pad_12 << 12);
-    else
+    } else {
       raw = inst.offset;
+    }
     offset = static_cast<int64_t>(static_cast<int32_t>(raw << 19) >> 19);
   } else {
     offset = inst.offset & 0xFFF;
@@ -147,13 +158,14 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
         reject_vector_memory_access(d);
         return;
       }
-      if constexpr (rdna)
+      if constexpr (rdna) {
         saddr_val = *saddr;
-      else
+      } else {
         // Preserve CDNA's existing arithmetic for high-bit scalar offsets.
         // LLVM avoids these inputs before GFX12; changing their behavior
         // requires separate hardware qualification.
         saddr_val = static_cast<int32_t>(*saddr);
+      }
     }
     bool has_vaddr = true;
     if constexpr (mode == ScratchAddressMode::LegacyCdna) {
@@ -169,18 +181,22 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     }
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     std::optional<RegisterAccess::VgprReadRegion> vaddr_region;
-    if (has_vaddr)
+    if (has_vaddr) {
       vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
+    }
     add_private_scratch_lanes(d, lane_count, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
+      if (!(exec & (1ULL << lane))) {
         continue;
+      }
       uint32_t vaddr = 0;
-      if (has_vaddr)
+      if (has_vaddr) {
         vaddr = vaddr_region->lane(0, lane);
+      }
       uint64_t priv_off = static_cast<uint64_t>(static_cast<int64_t>(vaddr) + saddr_val + offset);
-      if (!check_private_lane(wf, d, lane, priv_off, false))
+      if (!check_private_lane(wf, d, lane, priv_off, false)) {
         continue;
+      }
       d.per_lane_addr[lane] = scratch_lane_address(scratch_base, priv_off, lane, lane_count);
     }
   } else if (inst.seg == 2) {
@@ -199,8 +215,9 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, inst.saddr != 0x7F ? 1 : 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
+      if (!(exec & (1ULL << lane))) {
         continue;
+      }
       uint64_t vaddr;
       if (inst.saddr != 0x7F) {
         vaddr = amdgpu::flat_vector_offset(vaddr_region.lane(0, lane), /*signed_offset=*/false);
@@ -220,8 +237,9 @@ void flat_calculate_addresses(const FlatInst &inst, amdgpu::Wavefront &wf, Vecto
     uint32_t vbase = wf.vgpr_alloc().base + inst.addr;
     auto vaddr_region = regs.read_vgpr_region(vbase, 2, exec);
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-      if (!(exec & (1ULL << lane)))
+      if (!(exec & (1ULL << lane))) {
         continue;
+      }
       uint64_t vaddr = vaddr_region.lane64(0, lane);
       uint64_t addr = vaddr + offset;
       d.per_lane_addr[lane] = capture_flat_private_address(wf, d, addr, lane);
