@@ -73,14 +73,17 @@ Roofline performance rates
 --------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-roofline-performance-rates-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-roofline-performance-rates-gfx1201
          :file: _templates/metrics_table.j2
@@ -89,14 +92,17 @@ Roofline plot points
 --------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-roofline-plot-points-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-roofline-plot-points-gfx1201
          :file: _templates/metrics_table.j2
@@ -108,14 +114,17 @@ WGP utilization
 ---------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-wgp-utilization-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-wgp-utilization-gfx1201
          :file: _templates/metrics_table.j2
@@ -124,14 +133,17 @@ Wavefront launch stats
 ----------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-wavefront-launch-stats-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-wavefront-launch-stats-gfx1201
          :file: _templates/metrics_table.j2
@@ -140,14 +152,17 @@ Wave dispatch
 -------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-wave-dispatch-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-wave-dispatch-gfx1201
          :file: _templates/metrics_table.j2
@@ -156,14 +171,17 @@ Wave life
 ---------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-wave-life-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-wave-life-gfx1201
          :file: _templates/metrics_table.j2
@@ -172,14 +190,17 @@ Wave instruction mix
 --------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-wave-instruction-mix-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-wave-instruction-mix-gfx1201
          :file: _templates/metrics_table.j2
@@ -214,14 +235,17 @@ VMEM instruction mix
 --------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-vmem-instruction-mix-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-vmem-instruction-mix-gfx1201
          :file: _templates/metrics_table.j2
@@ -230,14 +254,17 @@ LDS instruction mix
 -------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-lds-instruction-mix-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-lds-instruction-mix-gfx1201
          :file: _templates/metrics_table.j2
@@ -246,14 +273,17 @@ Wait state analysis
 -------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-wait-state-analysis-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no wait-state table.
 
@@ -261,14 +291,17 @@ WGP instruction cache
 ---------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-wgp-instruction-cache-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-wgp-instruction-cache-gfx1201
          :file: _templates/metrics_table.j2
@@ -277,14 +310,17 @@ WGP scalar data cache
 ---------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-wgp-scalar-data-cache-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-wgp-scalar-data-cache-gfx1201
          :file: _templates/metrics_table.j2
@@ -299,13 +335,16 @@ Memory chart - Instruction cache
 --------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       The gfx115x instruction-cache metrics are in the WGP instruction cache table above and on the GL0 cache page.
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-memory-chart-instruction-cache-gfx1201
          :file: _templates/metrics_table.j2
@@ -314,13 +353,16 @@ Memory chart - Scalar data cache
 --------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       The gfx115x scalar data cache metrics are in the WGP scalar data cache table above and on the GL0 cache page.
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-memory-chart-scalar-data-cache-gfx1201
          :file: _templates/metrics_table.j2
@@ -329,13 +371,16 @@ Memory chart - Workgroup processors (WGPs)
 ------------------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       gfx115x does not publish this Memory Chart table on the WGP page.
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-memory-chart-wgps-gfx1201
          :file: _templates/metrics_table.j2

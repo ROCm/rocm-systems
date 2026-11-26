@@ -27,14 +27,17 @@ CPC utilization
 ---------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-cpc-utilization-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no CPC panel.
 
@@ -42,14 +45,17 @@ CPC interface utilization
 -------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-cpc-interface-utilization-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no CPC panel.
 
@@ -57,14 +63,17 @@ Micro Engine (ME) stall cycles
 -------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-mec-stall-cycles-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no CPC panel.
 
@@ -72,14 +81,17 @@ CPC memory requests
 -------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-cpc-memory-requests-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no CPC panel.
 
@@ -87,13 +99,16 @@ Micro Engine (ME) instruction cache
 ------------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-mec-instruction-cache-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no CPC panel.

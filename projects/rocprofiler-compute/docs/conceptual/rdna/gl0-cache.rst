@@ -26,14 +26,17 @@ GL0 utilization
 ---------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-gl0-utilization-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL0 utilization table.
 
@@ -41,14 +44,17 @@ GL0 request statistics
 ----------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-gl0-request-statistics-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-gl0-request-statistics-gfx1201
          :file: _templates/metrics_table.j2
@@ -57,14 +63,17 @@ GL0 cache performance
 ---------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-gl0-cache-performance-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-gl0-cache-performance-gfx1201
          :file: _templates/metrics_table.j2
@@ -73,14 +82,17 @@ GL0-GL1 interface
 -----------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-gl0-gl1-interface-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL0-GL1 interface table.
 
@@ -88,14 +100,17 @@ GL0 stalls
 ----------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-gl0-stalls-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-gl0-stalls-gfx1201
          :file: _templates/metrics_table.j2
@@ -110,14 +125,17 @@ Memory chart - instruction cache
 ---------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-memory-chart-instruction-cache-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-memory-chart-instruction-cache-gfx1201
          :file: _templates/metrics_table.j2
@@ -126,14 +144,17 @@ Memory chart - scalar data cache
 ---------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-memory-chart-scalar-data-cache-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-memory-chart-scalar-data-cache-gfx1201
          :file: _templates/metrics_table.j2
@@ -142,14 +163,17 @@ Memory chart - TCP cache (GL0 vector cache)
 --------------------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-memory-chart-tcp-cache-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-memory-chart-gl0-cache-gfx1201
          :file: _templates/metrics_table.j2
@@ -158,14 +182,17 @@ Memory chart - LDS (local data share)
 --------------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-memory-chart-lds-local-data-share-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-memory-chart-lds-gfx1201
          :file: _templates/metrics_table.j2
@@ -174,13 +201,16 @@ Memory chart - TCP-GL1 interface
 ---------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-memory-chart-tcp-gl1-interface-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL0-GL1 interface Memory Chart table.

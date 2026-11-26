@@ -20,14 +20,17 @@ GPU utilization
 ---------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-gpu-utilization-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-grbm-metrics-gfx1201
          :file: _templates/metrics_table.j2
@@ -36,13 +39,16 @@ Shader engine utilization
 ---------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-shader-engine-utilization-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no shader engine utilization table.

@@ -175,13 +175,11 @@ rdna_gfx115x_section_map = {
 
 # Generate gfx115x jinja contexts
 for context_name, section_name in rdna_gfx115x_section_map.items():
-    jinja_contexts[context_name] = {
-        "data": gfx115x_metrics.get(section_name, {}),
-    }
+    jinja_contexts[context_name] = {"data": gfx115x_metrics[section_name]}
 
 rdna_gfx1201_section_map = {
-    "rdna4-gl2-utilization-gfx1201": "GL2 Cache Request Statistics",
-    "rdna4-gl2-lookup-gfx1201": "GL2 Cache Performance",
+    "rdna4-gl2-request-statistics-gfx1201": "GL2 Cache Request Statistics",
+    "rdna4-gl2-cache-performance-gfx1201": "GL2 Cache Performance",
     "rdna4-sys-sol-gfx1201": "System Speed-of-Light",
     "rdna4-gl0-cache-performance-gfx1201": "GL0 Cache Performance",
     "rdna4-gl0-request-statistics-gfx1201": "GL0 Request Statistics",
@@ -213,7 +211,7 @@ rdna_gfx1201_section_map = {
     "rdna4-memory-chart-gl0-cache-gfx1201": "Memory chart - GL0 Cache (Vector L0)",
     "rdna4-memory-chart-lds-gfx1201": "Memory chart - LDS (Local Data Share)",
     "rdna4-memory-chart-gl2-cache-gfx1201": "Memory chart - GL2 Cache (L2)",
-    "rdna4-memory-chart-ea-to-dram-gfx1201": "Memory chart - L2 to Memory",
+    "rdna4-memory-chart-l2-to-memory-gfx1201": "Memory chart - L2 to Memory",
     "rdna4-memory-chart-wgps-gfx1201": "Memory chart - Workgroup Processors (WGPs)",
 }
 

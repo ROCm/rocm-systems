@@ -25,14 +25,17 @@ GL1 Cache utilization
 ---------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-gl1-cache-utilization-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL1 utilization table. GL1 reports only ``Total Requests``.
 
@@ -40,14 +43,17 @@ GL1 Cache request statistics
 ----------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-gl1-cache-request-statistics-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-gl1-request-statistics-gfx1201
          :file: _templates/metrics_table.j2
@@ -56,14 +62,17 @@ GL1 Cache performance
 ---------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-gl1-cache-performance-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL1 cache performance table. GL1 reports only ``Total Requests``.
 
@@ -71,14 +80,17 @@ GL1-GL2 interface
 -----------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-gl1-gl2-interface-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL1-GL2 interface table. GL1 reports only ``Total Requests``.
 
@@ -86,14 +98,17 @@ GL1 Cache stalls
 ----------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-gl1-cache-stalls-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL1 stall table. GL1 reports only ``Total Requests``.
 
@@ -107,14 +122,17 @@ Memory chart - GL1 cache
 ------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-memory-chart-gl1-cache-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL1 cache Memory Chart table.
 
@@ -122,13 +140,16 @@ Memory chart - GL1-GL2 interface
 --------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA 3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-memory-chart-gl1-gl2-interface-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL1-GL2 interface Memory Chart table.

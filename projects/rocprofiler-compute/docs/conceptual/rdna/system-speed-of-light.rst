@@ -23,14 +23,17 @@ For AMD Instinct GPUs (CDNA-CDNA4), see :doc:`../cdna/system-speed-of-light`.
    workload.
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: sys-sol-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-sys-sol-gfx1201
          :file: _templates/metrics_table.j2

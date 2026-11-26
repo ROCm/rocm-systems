@@ -27,46 +27,55 @@ GL2 cache performance
 ---------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-gl2-cache-performance-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
-      .. jinja:: rdna4-gl2-lookup-gfx1201
+      .. jinja:: rdna4-gl2-cache-performance-gfx1201
          :file: _templates/metrics_table.j2
 
 GL2 cache request statistics
 ----------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-gl2-cache-request-statistics-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
-      .. jinja:: rdna4-gl2-utilization-gfx1201
+      .. jinja:: rdna4-gl2-request-statistics-gfx1201
          :file: _templates/metrics_table.j2
 
 GL2 cache bandwidth
 -------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-gl2-cache-bandwidth-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no GL2 cache bandwidth table.
 
@@ -79,14 +88,17 @@ Memory chart - GL2 cache
 ------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-memory-chart-gl2-cache-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
       .. jinja:: rdna4-memory-chart-gl2-cache-gfx1201
          :file: _templates/metrics_table.j2

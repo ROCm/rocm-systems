@@ -25,14 +25,17 @@ DRAM read interface
 -------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-dram-read-interface-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
@@ -40,14 +43,17 @@ DRAM write interface
 --------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-dram-write-interface-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
@@ -55,14 +61,17 @@ System arbiter (SARB)
 ---------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-system-arbiter-sarb-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
@@ -70,14 +79,17 @@ Return interface
 ----------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
       :selected:
 
       .. jinja:: rdna115x-return-interface-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
+      :sync: gfx1201
 
       gfx1201 has no Efficiency Arbiter panel. Its L2-to-memory traffic is in the Memory Chart table below.
 
@@ -91,16 +103,19 @@ Memory chart - GCEA to system memory
 ------------------------------------
 
 .. tab-set::
+   :sync-group: rdna-arch
 
    .. tab-item:: RDNA3.5 (gfx115x)
+      :sync: gfx115x
+      :selected:
 
       .. jinja:: rdna115x-memory-chart-gcea-to-system-memory-gfx115x
          :file: _templates/metrics_table.j2
 
    .. tab-item:: RDNA4 (gfx1201)
-      :selected:
+      :sync: gfx1201
 
-      .. jinja:: rdna4-memory-chart-ea-to-dram-gfx1201
+      .. jinja:: rdna4-memory-chart-l2-to-memory-gfx1201
          :file: _templates/metrics_table.j2
 
 ``Memory Read Bandwidth`` and ``Memory Write Bandwidth`` count requests that L2 sends
