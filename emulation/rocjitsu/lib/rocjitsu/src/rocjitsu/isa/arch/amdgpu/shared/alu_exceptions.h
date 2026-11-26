@@ -4,8 +4,6 @@
 #ifndef ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 #define ROCJITSU_ISA_AMDGPU_SHARED_ALU_EXCEPTIONS_H_
 
-#include "rocjitsu/isa/arch/amdgpu/cdna1/alu_status.h"
-#include "rocjitsu/isa/arch/amdgpu/rdna3_5/valu.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
@@ -119,33 +117,11 @@ inline uint32_t classify_mul_f32(float lhs, float rhs, float omod_scale = 1.0f) 
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop2(const Inst &inst, Wavefront &wf) {
-  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) {
-    const uint32_t causes =
-        rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Multiply>(inst, wf, inst.vsrc1);
-    wf.raise_alu_causes(causes);
-    return causes;
-  }
-  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna1) {
-    const uint32_t causes = rocjitsu::cdna1::classify_binary_f32<true>(inst, wf, inst.vsrc1);
-    wf.raise_alu_causes(causes);
-    return causes;
-  }
   return detail::classify_mul_lanes(
       inst.src0, inst.vsrc1, wf, [](float lhs, float rhs) { return classify_mul_f32(lhs, rhs); });
 }
 
 template <typename Inst> uint32_t classify_mul_f32_vop3(const Inst &inst, Wavefront &wf) {
-  if (wf.cu().arch() == rocjitsu::IsaFamily::Rdna3_5) {
-    const uint32_t causes =
-        rdna3_5::arithmetic_flags<rdna3_5::FmaOperation::Multiply>(inst, wf, inst.src1);
-    wf.raise_alu_causes(causes);
-    return causes;
-  }
-  if (wf.cu().arch() == rocjitsu::IsaFamily::Cdna1) {
-    const uint32_t causes = rocjitsu::cdna1::classify_binary_f32<true>(inst, wf, inst.src1);
-    wf.raise_alu_causes(causes);
-    return causes;
-  }
   // OMOD scales the exact and rounded products alike. Its policy is uniform
   // across the wave, including which causes the target suppresses.
   const uint32_t omod = fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(),
