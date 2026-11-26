@@ -13,6 +13,7 @@
 #include "rocjitsu/code/patch/fault_injection/atomic_wrong_address.h"
 #include "rocjitsu/code/patch/fault_injection/drop_barrier.h"
 #include "rocjitsu/code/patch/fault_injection/lds_wrong_address.h"
+#include "rocjitsu/code/patch/fault_injection/ordinary_wrong_address.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "scoped_temp.h"
@@ -518,7 +519,8 @@ TEST_F(FaultMutationCli, HelpCapabilitiesAndArguments) {
   EXPECT_EQ(invoke({"--capabilities"}), 0);
   const std::string capabilities = stdout_;
   EXPECT_EQ(std::count(capabilities.begin(), capabilities.end(), '\n'),
-            309 + static_cast<std::ptrdiff_t>(atomic_wrong_address_capabilities().size()));
+            309 + static_cast<std::ptrdiff_t>(atomic_wrong_address_capabilities().size() +
+                                              ordinary_wrong_address_capabilities().size()));
   EXPECT_NE(capabilities.find("kind=LdsWrongAddress target=gfx1250 wave=32 "
                               "form=ds_store_b32 admission=proven-all-owners\n"),
             std::string::npos);
