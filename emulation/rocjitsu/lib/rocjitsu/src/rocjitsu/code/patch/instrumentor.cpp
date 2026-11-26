@@ -1928,9 +1928,11 @@ std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologu
           : original_scalar_bound;
   for (const InstrumentationPoint &point : points_) {
     for (const ProbeArgValue &arg : point.probe_args) {
-      if (arg.source == ProbeArgSource::EntrySgpr) {
+      if (arg.source == ProbeArgSource::AnchorSgpr || arg.source == ProbeArgSource::EntrySgpr) {
         if (arg.register_index >= scalar_bound) {
-          report(error_out, "entry SGPR capture exceeds the original guest allocation");
+          report(error_out, arg.source == ProbeArgSource::EntrySgpr
+                                ? "entry SGPR capture exceeds the original guest allocation"
+                                : "anchor SGPR exceeds the original guest allocation");
           return std::nullopt;
         }
         reserved.expand(RegisterRef{RegClass::SGPR, arg.register_index, 1});
@@ -4192,20 +4194,28 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                                      : KernelVgprBounds{};
   // Keep source bounds and growth reservations tied to the original allocation.
   // Per-site preservation instead follows observation reads in the effective CFG.
-  RegisterSet observed_vgprs;
+  RegisterSet observed_registers;
   const uint32_t source_vgpr_bound = std::min(vgpr_bounds.ordinary_bound, 256u);
   for (const ResolvedInstrumentationSite &site : sites) {
     if (!site.is_probe_call()) {
       continue;
     }
     for (const ProbeArgValue &arg : site.probe_args) {
+      if (arg.source == ProbeArgSource::AnchorSgpr &&
+          (!kernel_sgpr_count ||
+           arg.register_index >= ordinary_sgpr_bound(arch_, *kernel_sgpr_count) ||
+           (options_.register_growth && arg.register_index >= options_.register_growth->sgprs))) {
+        result.errors.emplace_back(
+            "guest SGPR argument exceeds the kernel's ordinary SGPR allocation");
+        return result;
+      }
       if (arg.source == ProbeArgSource::AnchorVgpr && arg.register_index >= source_vgpr_bound) {
         result.errors.emplace_back(
             "guest VGPR argument exceeds the kernel's ordinary VGPR allocation");
         return result;
       }
     }
-    observed_vgprs |= probe_argument_registers(site.probe_args);
+    observed_registers |= probe_argument_registers(site.probe_args);
   }
   // What each probe body overwrites. Keyed on the probe, not the site, so it is
   // decoded once per distinct body and indexed alongside resolved.probes.
@@ -4293,7 +4303,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
     // Inputs may occupy physical padding beyond the original metadata counts.
     // Keep growth's backup destinations above those observed registers too.
-    include_registers(observed_vgprs);
+    include_registers(observed_registers);
     sgpr_save_base = result.resources.sgprs + kDbiEntryStorageRegisters;
     vgpr_save_base = result.resources.vgprs;
     kernel_sgpr_count = REGISTER_SET_ALLOCATABLE_SGPRS +

@@ -6,19 +6,22 @@
 WIDTHS = {'half': 2, 'b64': 8, 'b128': 16}
 
 FLAT_WIDTH_CASES = tuple(
-    f'flat_{form}_{scenario}'
+    f'flat_{address}{form}_{scenario}'
+    for address in ('', 'saddr')
     for form in WIDTHS
     for scenario in ('values', 'overlap', 'adjacent')
 )
 
 
 def flat_width_pairs(case):
+    case = case.replace('flat_saddr', 'flat_')
     if not case.endswith('_overlap'):
         return 0
     return 6 if case.startswith('flat_half_') else 2
 
 
 def assert_flat_width_observations(decoded, case, wave_size, completed_status):
+    case = case.replace('flat_saddr', 'flat_')
     _, form, scenario = case.split('_')
     values = scenario == 'values'
     half = form == 'half'
@@ -84,6 +87,7 @@ def assert_flat_width_observations(decoded, case, wave_size, completed_status):
 
 
 def assert_flat_width_findings(raw_sites, analyzed, case, wave_size):
+    case = case.replace('flat_saddr', 'flat_')
     assert analyzed['ordered_pairs'] == analyzed['ordering_unresolved_pairs'] == 0
     assert (
         analyzed['completed_barrier_waves'] == analyzed['required_barrier_waves'] == 0

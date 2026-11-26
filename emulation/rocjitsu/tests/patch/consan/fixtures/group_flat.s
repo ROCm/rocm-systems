@@ -17,7 +17,9 @@ CONSAN_KERNEL:
 #define FLAT_WRITE flat_store_b32
 #endif
 
-#if defined(FLAT_UNDERFLOW) || (CONSAN_GFX12 && defined(FLAT_OFFSET))
+#if defined(FLAT_BACKWARD)
+#define FLAT_IMMEDIATE -4
+#elif defined(FLAT_UNDERFLOW) || (CONSAN_GFX12 && defined(FLAT_OFFSET))
 // Enter with a positive offset beyond the last dword, then return to it.
 #define FLAT_IMMEDIATE -4
 #elif defined(FLAT_STORE) || defined(FLAT_OFFSET) || defined(FLAT_OVERFLOW)
@@ -37,6 +39,20 @@ CONSAN_KERNEL:
 .endm
 
 .macro group_flat_pointer
+#if defined(FLAT_SCALAR) || defined(FLAT_BACKWARD)
+  // The scalar low word changes after dispatch. Make its signed displacement
+  // select the last legal dword with and without scaling.
+#if defined(FLAT_BACKWARD)
+  s_mov_b32 s4, 1056
+  v_mov_b32_e32 v2, -8
+#elif defined(FLAT_STORE)
+  s_mov_b32 s4, 1040
+  v_mov_b32_e32 v2, -24
+#else
+  s_mov_b32 s4, 988
+  v_mov_b32_e32 v2, 8
+#endif
+#else
   // Build the entire pair under the same EXEC as the dereference.
 #if defined(FLAT_NONGROUP)
   v_mov_b32_e32 v3, s1
@@ -55,6 +71,7 @@ CONSAN_KERNEL:
   v_mov_b32_e32 v2, (1024-FLAT_IMMEDIATE)
 #else
   v_mov_b32_e32 v2, (1020-FLAT_IMMEDIATE)
+#endif
 #endif
 #endif
 .endm
@@ -93,7 +110,13 @@ CONSAN_KERNEL:
   MASK_AND_SAVE MASK_PEER_SAVE, MASK_VCC
 #if defined(FLAT_STORE)
   group_flat_pointer
+#if defined(FLAT_BACKWARD)
+  FLAT_WRITE v2, v5, s[4:5] offset:FLAT_IMMEDIATE scale_offset
+#elif defined(FLAT_SCALAR)
+  FLAT_WRITE v2, v5, s[4:5] offset:FLAT_IMMEDIATE
+#else
   FLAT_WRITE v[2:3], v5 offset:FLAT_IMMEDIATE
+#endif
 #elif defined(FLAT_READREAD)
   DS_LOAD_B32 v10, v4
   flat_wait_memory
@@ -133,7 +156,11 @@ CONSAN_KERNEL:
 #else
   group_flat_pointer
   // Alias the result with the low address half to exercise the BeforeInst probe.
+#if defined(FLAT_SCALAR) || defined(FLAT_BACKWARD)
+  FLAT_READ v2, v2, s[4:5] offset:FLAT_IMMEDIATE scale_offset
+#else
   FLAT_READ v2, v[2:3] offset:FLAT_IMMEDIATE
+#endif
   flat_wait_memory
 #ifdef FLAT_ORDERED
   v_mov_b32 v8, v2

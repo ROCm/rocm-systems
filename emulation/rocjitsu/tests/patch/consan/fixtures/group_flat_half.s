@@ -25,6 +25,22 @@ CONSAN_KERNEL:
 #define HALF_LOAD_HI flat_load_d16_hi_b16
 #endif
 
+.macro half_load op, dst
+#ifdef FLAT_SCALAR_WIDTH
+  \op \dst, v14, s[4:5] scale_offset
+#else
+  \op \dst, v[2:3]
+#endif
+.endm
+
+.macro half_store op
+#ifdef FLAT_SCALAR_WIDTH
+  \op v14, v5, s[4:5] scale_offset
+#else
+  \op v[2:3], v5
+#endif
+.endm
+
 .macro flat_wait
 #if CONSAN_GFX12
   consan_wait_all
@@ -47,6 +63,15 @@ CONSAN_KERNEL:
   v_and_b32 v12, (CONSAN_WAVE_SIZE-1), v0
   VECTOR_ADD v13, s4, v6
   s_mov_b64 s[4:5], src_shared_base
+#ifdef FLAT_SCALAR_WIDTH
+  s_mov_b32 s4, 1030
+#ifdef FLAT_VALUES
+  v_lshlrev_b32 v14, 2, v6
+  VECTOR_ADD v14, -8, v14
+#else
+  v_mov_b32 v14, -4
+#endif
+#endif
   v_mov_b32 v5, 0xabcd8123
 #ifdef FLAT_VALUES
   // One isolated aligned dword per wave, including the last two allocated bytes.
@@ -72,7 +97,7 @@ CONSAN_KERNEL:
 
   VECTOR_ADD v2, 2, v4
   v_mov_b32_e32 v3, s5
-  HALF_STORE v[2:3], v5
+  half_store HALF_STORE
   flat_wait
   consan_wait_stores
 #ifdef FLAT_VALUES
@@ -80,22 +105,22 @@ CONSAN_KERNEL:
   flat_wait
   save_result v9
 #endif
-  HALF_LOAD_U v9, v[2:3]
+  half_load HALF_LOAD_U, v9
   flat_wait
   save_result v9
-  HALF_LOAD_I v9, v[2:3]
+  half_load HALF_LOAD_I, v9
   flat_wait
   save_result v9
   v_mov_b32 v9, 0xdeadbeef
-  HALF_LOAD_LO v9, v[2:3]
+  half_load HALF_LOAD_LO, v9
   flat_wait
   save_result v9
   // A D16 high write aliases the address low VGPR. Save its result before restoring the pointer.
-  HALF_LOAD_HI v2, v[2:3]
+  half_load HALF_LOAD_HI, v2
   flat_wait
   save_result v2
   VECTOR_ADD v2, 2, v4
-  HALF_STORE_HI v[2:3], v5
+  half_store HALF_STORE_HI
   flat_wait
   consan_wait_stores
 #ifdef FLAT_VALUES
