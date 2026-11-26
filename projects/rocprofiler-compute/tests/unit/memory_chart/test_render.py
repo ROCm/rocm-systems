@@ -171,8 +171,8 @@ def test_panel_blocks_in_the_columns_share_one_width(gpu_arch):
 @pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_typical_values_stay_on_their_label_line(gpu_arch):
     output = render(gpu_arch)
-    assert re.search(r"Scratch/Wave \d+\.\d{3} KB", output)
-    assert re.search(r"Wave Occ \d+\.\d%", output)
+    assert re.search(r"Scratch Allocation \d+ B", output)
+    assert re.search(r"Wavefront Occupancy \d+\.\d%", output)
 
 
 def test_a_long_scope_label_widens_every_panel(tmp_path):
@@ -217,7 +217,7 @@ def test_arrows_stay_inside_their_box(gpu_arch, values):
 @pytest.mark.parametrize(
     ("gpu_arch", "box", "outer", "side"),
     [
-        ("gfx950", "VL1D", "VL1D", "left"),
+        ("gfx950", "vL1D", "vL1D", "left"),
         ("gfx1250", "LDS", "TCP", "left"),
         ("gfx1250", "LDS", "TCP", "right"),
     ],
@@ -288,7 +288,8 @@ def test_item_bar_follows_the_layout(tmp_path):
 
 def test_arrow_style_follows_the_layout(tmp_path):
     data = common.memory_chart_layout_data("gfx942")
-    inline = common.with_metric_change(data, "3.1.16", style="inline")  # VL1_L2 Read
+    # 3.1.16 is the vL1D -> L2 Read BW arrow
+    inline = common.with_metric_change(data, "3.1.16", style="inline")
     assert not re.search(r"Read BW\s+: ", render("gfx942"))
     assert re.search(r"Read BW\s+: ", render_layout(tmp_path, "gfx942", inline))
 
@@ -307,17 +308,19 @@ def test_progress_bar_is_clamped(percent, filled):
 
 
 @pytest.mark.parametrize(
-    ("level", "block"), [("GL1", "VL1D"), ("GL2", "L2"), ("EA", "Data Fabric")]
+    ("level", "block"), [("GL1", "vL1D"), ("GL2", "L2"), ("EA", "Data Fabric")]
 )
 def test_active_stall_is_annotated_on_its_block(level, block):
     output = render("gfx950", membw=make_membw(make_node(f"{level} stall", level)))
-    row = next(line for line in output.splitlines() if f"[!] {level} stall" in line)
-    title_row = next(
-        line for line in output.splitlines() if f" {block} " in line and "╭" in line
-    )
+    lines = output.splitlines()
+    index = next(i for i, line in enumerate(lines) if f"[!] {level} stall" in line)
+    row = lines[index]
+    title_row = next(line for line in lines if f" {block} " in line and "╭" in line)
     assert "18.7%" in row
+    # The stall's percentage also shows as a bar, below its row
+    assert progress_bar(18.7) in lines[index + 1]
     assert abs(row.index("[!]") - title_row.index(block)) < 20
-    assert "Stall" in output.splitlines()[-1]
+    assert "Stall" in lines[-1]
 
 
 def test_only_active_leaves_are_annotated():

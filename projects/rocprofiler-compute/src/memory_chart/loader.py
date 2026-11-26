@@ -43,7 +43,7 @@ class Keys:
 
 
 # Version of the layout format; README.md says when to bump it
-LAYOUT_VERSION = "1.0.0"
+LAYOUT_VERSION = "1.1.0"
 
 # Each Keys lists every key in file order, then the keys a file may leave out
 LAYOUT_KEYS = Keys(("archs", "description", "scope", "blocks", "arrows"))
@@ -400,8 +400,6 @@ def _block(
     if children and {"content", "stall_level"} & set(raw):
         _fail(path, f"{block_id!r} has nested blocks, so its metrics go in them")
     items = tuple(_item(path, entry) for entry in raw.get("content", []))
-    if raw["style"] == "list" and any(item.bar for item in items):
-        _fail(path, f"{block_id!r} is a compact list, so its metrics have no bar")
     return LayoutBlock(
         id=block_id,
         title=raw["title"],
