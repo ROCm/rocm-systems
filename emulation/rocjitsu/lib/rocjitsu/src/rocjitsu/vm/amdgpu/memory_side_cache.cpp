@@ -826,7 +826,7 @@ void MemorySideCache::invalidate_clean_locked() { cache_.invalidate_clean(); }
 
 VmAccessOutcome MemorySideCache::flush_dirty_to_legacy_backing_locked() {
   if (legacy_maintenance_memory_ == nullptr || legacy_maintenance_vm_ == nullptr) {
-    throw util::ConfigError("memory-side cache has no legacy maintenance backing");
+    return VmAccessOutcome::Malformed;
   }
   if (!may_have_dirty_lines_.load(std::memory_order_relaxed)) {
     ++skipped_clean_scans_;

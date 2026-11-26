@@ -72,6 +72,19 @@ TEST_F(ConSanPrepareImage, WholeImageHasIndependentEntryPlansAndNativeSibling) {
   EXPECT_EQ(native.binding.original_group_bytes, native.binding.prepared_group_bytes);
   EXPECT_EQ(native.original_sgprs, native.binding.prepared_sgprs);
   EXPECT_EQ(native.original_vgprs, native.binding.prepared_vgprs);
+
+  const FailureOr<PreparedImageArtifact> strict =
+      prepare_image(original_, *target_profile("gfx1250"), entries, error_, FlatPolicy::Strict);
+  ASSERT_TRUE(strict.succeeded()) << error_.message;
+  const ImageFacts &strict_facts = strict.value().facts;
+  ASSERT_EQ(strict_facts.entries.size(), facts.entries.size());
+  EXPECT_NE(strict_facts.selection_profile, facts.selection_profile);
+  for (size_t i = 0; i < entries.size(); ++i) {
+    ASSERT_TRUE(strict_facts.entries[i].selected);
+    EXPECT_EQ(strict_facts.entries[i].selected->options, mvp_options_digest(FlatPolicy::Strict));
+    EXPECT_EQ(facts.entries[i].selected->options, mvp_options_digest(FlatPolicy::Likely));
+  }
+  EXPECT_EQ(strict_facts.entries[2], native);
   util::StringDiagnostic contract_error;
   EXPECT_TRUE(
       verify_artifact_images(facts, original_, artifact.value().image, contract_error.emitter())

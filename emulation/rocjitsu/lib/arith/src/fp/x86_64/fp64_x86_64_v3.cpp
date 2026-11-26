@@ -9,6 +9,7 @@
 #include "fp/fp64_impl.h"
 #include "fp/fp64_round.h"
 #include "fp/x86_64/minmax_x86_64_v3.h"
+#include "math/x86_64/fract_x86_64_v3.h"
 #include "rj_arith/detail/rj_arith_fp.h"
 
 #include <immintrin.h>
@@ -190,11 +191,8 @@ bool evaluate(uint64_t flags, uint32_t mode, const uint32_t *const *a, const uin
       value = _mm256_div_pd(_mm256_set1_pd(1), value);
     }
     if constexpr (Op == Fp64::Fract) {
-      value = _mm256_sub_pd(x, _mm256_floor_pd(x));
-      value = _mm256_blendv_pd(value, _mm256_setzero_pd(),
-                               _mm256_cmp_pd(value, _mm256_setzero_pd(), _CMP_EQ_OQ));
-      auto limit = _mm256_castsi256_pd(_mm256_set1_epi64x(INT64_C(0x3fefffffffffffff)));
-      value = _mm256_blendv_pd(value, limit, _mm256_cmp_pd(value, limit, _CMP_GT_OQ));
+      value =
+          fract_value_x86_64_v3(x, unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24), quiet_snan);
     }
     if constexpr (Op == Fp64::Trunc || Op == Fp64::Ceil || Op == Fp64::Rndne || Op == Fp64::Floor ||
                   Op == Fp64::Fract) {

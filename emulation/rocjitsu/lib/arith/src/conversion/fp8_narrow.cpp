@@ -44,24 +44,28 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
       (Stochastic ? RJ_ARITH_CVT_BYTE_3
                   : RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_HIGH_D) |
       (Half ? RJ_ARITH_ALU_HIGH_A : 0);
-  if (int error = rocjitsu::arith::validate(flags, mode & ~known)) {
+  const uint64_t supported_fp_flags =
+      policy == Fp8NarrowPolicy::Gfx950 ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0;
+  if (int error = rocjitsu::arith::validate(flags, mode & ~known, supported_fp_flags)) {
     return error;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
   bool saturate = !Half && (flags & RJ_ARITH_FP16_OVFL);
+  bool flush_out =
+      policy == Fp8NarrowPolicy::Gfx950 && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    rocjitsu::arith::fp8_narrow_x86_64_v4<Bf8, Stochastic, Half>(exec_mask, mode, saturate, d[0],
-                                                                 a[0], b ? b[0] : nullptr, policy);
+    rocjitsu::arith::fp8_narrow_x86_64_v4<Bf8, Stochastic, Half>(
+        exec_mask, mode, saturate, d[0], a[0], b ? b[0] : nullptr, policy, flush_out);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    rocjitsu::arith::fp8_narrow_x86_64_v3<Bf8, Stochastic, Half>(exec_mask, mode, saturate, d[0],
-                                                                 a[0], b ? b[0] : nullptr, policy);
+    rocjitsu::arith::fp8_narrow_x86_64_v3<Bf8, Stochastic, Half>(
+        exec_mask, mode, saturate, d[0], a[0], b ? b[0] : nullptr, policy, flush_out);
     return RJ_ARITH_SUCCESS;
   }
 #endif
@@ -79,11 +83,12 @@ int convert(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *
     }
     av &= mode & RJ_ARITH_ALU_ABS_A ? 0x7fffffff : UINT32_MAX;
     av ^= mode & RJ_ARITH_ALU_NEG_A ? 0x80000000 : 0;
-    uint32_t value = rocjitsu::arith::narrow_fp8<Bf8, Stochastic>(av, bv, saturate, policy);
+    uint32_t value =
+        rocjitsu::arith::narrow_fp8<Bf8, Stochastic>(av, bv, saturate, policy, flush_out);
     if constexpr (!Stochastic) {
       bv &= mode & RJ_ARITH_ALU_ABS_B ? 0x7fffffff : UINT32_MAX;
       bv ^= mode & RJ_ARITH_ALU_NEG_B ? 0x80000000 : 0;
-      value |= rocjitsu::arith::narrow_fp8<Bf8, false>(bv, 0, saturate, policy) << 8;
+      value |= rocjitsu::arith::narrow_fp8<Bf8, false>(bv, 0, saturate, policy, flush_out) << 8;
     }
     result[lane] = (d[0][lane] & ~selected) | (value << shift);
   }
@@ -352,7 +357,8 @@ int rj_arith_v_cvt_sr_bf8_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uin
                                     policy);
 }
 
-// Narrow with inherited gfx950 format, overflow and destination-half rules; honor EXEC.
+// Narrow with MI350X (gfx950) format, overflow, denormal-flush and destination-half rules; honor
+// EXEC.
 int rj_arith_v_cvt_pk_fp8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b) {
@@ -361,12 +367,13 @@ int rj_arith_v_cvt_pk_fp8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uin
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  auto policy = Fp8NarrowPolicy::Ocp;
+  auto policy = Fp8NarrowPolicy::Gfx950;
   return convert<false, false>(flags, exec_mask, cdna_narrow_mode<false>(mode, policy), d, a, b,
                                policy);
 }
 
-// Narrow with inherited gfx950 format, overflow and destination-half rules; honor EXEC.
+// Narrow with MI350X (gfx950) format, overflow, denormal-flush and destination-half rules; honor
+// EXEC.
 int rj_arith_v_cvt_pk_fp8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b) {
@@ -375,12 +382,13 @@ int rj_arith_v_cvt_pk_fp8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uin
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  auto policy = Fp8NarrowPolicy::Ocp;
+  auto policy = Fp8NarrowPolicy::Gfx950;
   return convert_wave64<false, false>(flags, exec_mask, cdna_narrow_mode<false>(mode, policy), d, a,
                                       b, policy);
 }
 
-// Narrow with inherited gfx950 format, overflow and destination-half rules; honor EXEC.
+// Narrow with MI350X (gfx950) format, overflow, denormal-flush and destination-half rules; honor
+// EXEC.
 int rj_arith_v_cvt_sr_fp8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b) {
@@ -389,12 +397,13 @@ int rj_arith_v_cvt_sr_fp8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uin
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  auto policy = Fp8NarrowPolicy::Ocp;
+  auto policy = Fp8NarrowPolicy::Gfx950;
   return convert<false, true>(flags, exec_mask, cdna_narrow_mode<true>(mode, policy), d, a, b,
                               policy);
 }
 
-// Narrow with inherited gfx950 format, overflow and destination-half rules; honor EXEC.
+// Narrow with MI350X (gfx950) format, overflow, denormal-flush and destination-half rules; honor
+// EXEC.
 int rj_arith_v_cvt_sr_fp8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b) {
@@ -403,12 +412,13 @@ int rj_arith_v_cvt_sr_fp8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uin
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  auto policy = Fp8NarrowPolicy::Ocp;
+  auto policy = Fp8NarrowPolicy::Gfx950;
   return convert_wave64<false, true>(flags, exec_mask, cdna_narrow_mode<true>(mode, policy), d, a,
                                      b, policy);
 }
 
-// Narrow with inherited gfx950 format, overflow and destination-half rules; honor EXEC.
+// Narrow with MI350X (gfx950) format, overflow, denormal-flush and destination-half rules; honor
+// EXEC.
 int rj_arith_v_cvt_pk_bf8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b) {
@@ -417,12 +427,13 @@ int rj_arith_v_cvt_pk_bf8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uin
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  auto policy = Fp8NarrowPolicy::Ocp;
+  auto policy = Fp8NarrowPolicy::Gfx950;
   return convert<true, false>(flags, exec_mask, cdna_narrow_mode<false>(mode, policy), d, a, b,
                               policy);
 }
 
-// Narrow with inherited gfx950 format, overflow and destination-half rules; honor EXEC.
+// Narrow with MI350X (gfx950) format, overflow, denormal-flush and destination-half rules; honor
+// EXEC.
 int rj_arith_v_cvt_pk_bf8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b) {
@@ -431,12 +442,13 @@ int rj_arith_v_cvt_pk_bf8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uin
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  auto policy = Fp8NarrowPolicy::Ocp;
+  auto policy = Fp8NarrowPolicy::Gfx950;
   return convert_wave64<true, false>(flags, exec_mask, cdna_narrow_mode<false>(mode, policy), d, a,
                                      b, policy);
 }
 
-// Narrow with inherited gfx950 format, overflow and destination-half rules; honor EXEC.
+// Narrow with MI350X (gfx950) format, overflow, denormal-flush and destination-half rules; honor
+// EXEC.
 int rj_arith_v_cvt_sr_bf8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b) {
@@ -445,12 +457,13 @@ int rj_arith_v_cvt_sr_bf8_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uin
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  auto policy = Fp8NarrowPolicy::Ocp;
+  auto policy = Fp8NarrowPolicy::Gfx950;
   return convert<true, true>(flags, exec_mask, cdna_narrow_mode<true>(mode, policy), d, a, b,
                              policy);
 }
 
-// Narrow with inherited gfx950 format, overflow and destination-half rules; honor EXEC.
+// Narrow with MI350X (gfx950) format, overflow, denormal-flush and destination-half rules; honor
+// EXEC.
 int rj_arith_v_cvt_sr_bf8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
                                          uint32_t *const *d, const uint32_t *const *a,
                                          const uint32_t *const *b) {
@@ -459,7 +472,7 @@ int rj_arith_v_cvt_sr_bf8_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uin
   if (int error = rocjitsu::arith::validate_semantics(flags)) {
     return error;
   }
-  auto policy = Fp8NarrowPolicy::Ocp;
+  auto policy = Fp8NarrowPolicy::Gfx950;
   return convert_wave64<true, true>(flags, exec_mask, cdna_narrow_mode<true>(mode, policy), d, a, b,
                                     policy);
 }

@@ -26,8 +26,10 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna2/operand_types.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/memory_displacement_encoded_fields.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/target_registry.h"
 #include "util/result.h"
 
 #include <gtest/gtest.h>
@@ -1330,6 +1332,104 @@ TEST(InstrumentorReplacement, ProbeAdmissionUsesEffectiveGuestVgprCompletenessAc
     }
     EXPECT_FALSE(result.edit_error);
     EXPECT_TRUE(test::source_image_matches(source, image));
+  }
+}
+
+TEST(InstrumentorReplacement, SignedOffsetFieldReplacementPreservesFullInstructionAndContinuation) {
+  struct SourceCase {
+    rj_code_target_id_t target;
+    IsaFamily arch;
+    uint32_t machine;
+    bool wave32;
+    std::array<uint32_t, 3> words;
+  };
+  // Complete global_load_b32 encodings with signed offset -4 and address v4.
+  // The gfx1250 source additionally has scale_offset set; its immediate remains bytes.
+  constexpr std::array<SourceCase, 2> cases = {{
+      {.target = ROCJITSU_CODE_TARGET_GFX1250,
+       .arch = IsaFamily::Cdna5,
+       .machine = EF_AMDGPU_MACH_AMDGCN_GFX1250,
+       .wave32 = true,
+       .words = {0xee050002u, 0x000d0003u, 0xfffffc04u}},
+      {.target = ROCJITSU_CODE_TARGET_GFX1201,
+       .arch = IsaFamily::Rdna4,
+       .machine = EF_AMDGPU_MACH_AMDGCN_GFX1201,
+       .wave32 = false,
+       .words = {0xee050002u, 0x000c0003u, 0xfffffc04u}},
+  }};
+  for (const SourceCase &source_case : cases) {
+    SCOPED_TRACE(static_cast<int>(source_case.target));
+    const std::optional<std::array<uint32_t, 3>> replacement =
+        amdgpu::replace_vmem_signed24_offset(source_case.target, source_case.words, 8);
+    ASSERT_TRUE(replacement);
+    const std::array<uint32_t, 3> expected = {source_case.words[0], source_case.words[1],
+                                              0x00000804u};
+    ASSERT_EQ(*replacement, expected);
+    const util::FailureOr<uint32_t> end = build_s_endpgm(source_case.arch);
+    ASSERT_TRUE(end.succeeded());
+    const std::vector<uint8_t> image = test::make_amdgpu_kernel_elf(
+        {source_case.words[0], source_case.words[1], source_case.words[2], end.value()}, 0, 3,
+        source_case.machine, 1, 0, false, false, false, false, source_case.wave32);
+    const std::vector<uint8_t> pristine = image;
+    const AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    ASSERT_EQ(source.target_id(), source_case.target);
+    const InstrumentationPoint point =
+        replacement_point(0, {source_case.words[0], source_case.words[1], source_case.words[2]},
+                          {(*replacement)[0], (*replacement)[1], (*replacement)[2]});
+    Instrumentor instrumentor(source, source_case.arch);
+    instrumentor.add_point(point);
+    const InstrumentedCodeObject emitted = instrumentor.patch();
+    const std::vector<uint8_t> expected_bytes =
+        instruction_bytes({expected[0], expected[1], expected[2]});
+    ASSERT_NO_FATAL_FAILURE(
+        expect_pure_replacements(source, emitted,
+                                 {{.offset = 0,
+                                   .expected = point.replacement->expected_bytes,
+                                   .replacement = expected_bytes}},
+                                 source_case.arch));
+    ASSERT_EQ(emitted.sites.size(), 1u);
+    const InstrumentedSite &site = emitted.sites.front();
+    EXPECT_EQ(site.original_size, 12u);
+    EXPECT_EQ(site.guest_size, 12u);
+    const AmdGpuCodeObject candidate(emitted.elf_bytes.data(), emitted.elf_bytes.size());
+    ASSERT_TRUE(candidate.is_valid());
+    EXPECT_EQ(candidate.target_id(), source_case.target);
+    const Section &text = *candidate.text_sections().front();
+    ASSERT_LE(site.guest_offset + 16u, text.size());
+    std::array<uint32_t, 3> guest = {};
+    std::memcpy(guest.data(), text.data() + site.guest_offset, sizeof(guest));
+    const auto matches_offset_only = [&](const std::array<uint32_t, 3> &words) {
+      return words[0] == source_case.words[0] && words[1] == source_case.words[1] &&
+             (words[2] & 0xffu) == (source_case.words[2] & 0xffu) && (words[2] >> 8) == 8u;
+    };
+    EXPECT_TRUE(matches_offset_only(guest));
+    for (size_t word = 0; word < guest.size(); ++word) {
+      std::array<uint32_t, 3> corrupted = guest;
+      corrupted[word] ^= 1u;
+      EXPECT_FALSE(matches_offset_only(corrupted));
+    }
+    std::array<uint32_t, 3> wrong_offset = guest;
+    wrong_offset[2] ^= 1u << 8;
+    EXPECT_FALSE(matches_offset_only(wrong_offset));
+    const std::optional<uint32_t> continuation =
+        test::expected_replacement_branch(site.guest_offset + 12u, 12u, source_case.arch);
+    ASSERT_TRUE(continuation);
+    uint32_t actual_return = 0;
+    std::memcpy(&actual_return, text.data() + site.guest_offset + 12u, sizeof(actual_return));
+    EXPECT_EQ(actual_return, *continuation);
+    uint32_t untouched_end = 0;
+    std::memcpy(&untouched_end, text.data() + 12u, sizeof(untouched_end));
+    EXPECT_EQ(untouched_end, end.value());
+    std::unique_ptr<Decoder> decoder =
+        Decoder::create(default_isa_target_registry(), source_case.target);
+    ASSERT_TRUE(decoder);
+    const DecodeResult decoded = decoder->decode_window(guest, site.guest_offset);
+    ASSERT_TRUE(decoded.succeeded());
+    EXPECT_EQ(decoded.value()->mnemonic(), "global_load_b32");
+    EXPECT_EQ(decoded.value()->size(), 12u);
+    EXPECT_EQ(image, pristine);
+    EXPECT_EQ(std::memcmp(source.image_data(), pristine.data(), pristine.size()), 0);
   }
 }
 

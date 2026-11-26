@@ -467,10 +467,10 @@ public:
   [[nodiscard]] std::optional<int> dup_mmap_memfd(uint32_t process_id, off_t offset) const;
   /// @}
 
-  void setup_topology(const Sysfs::GpuInfo &gpu);
-  void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+  bool setup_topology(const Sysfs::GpuInfo &gpu);
+  bool setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
                       const config::PciDeviceConfig &pci = {});
-  void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc,
+  bool setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc,
                       bool publish_peer_links = true, bool strict_render_minor = false,
                       const config::PciDeviceConfig &pci = {});
   /// @brief Whether render-node opens must match a configured minor exactly.
@@ -680,7 +680,7 @@ public:
   /// @brief Close and drain without running maintenance on the releasing thread.
   [[nodiscard]] bool close_gpu_alias_ingress(const KfdProcess::GpuAliasRecord &alias,
                                              GpuAliasIngressGate::OwnerPost owner_post,
-                                             std::function<void()> drained) {
+                                             std::function<int()> drained) {
     return alias_ingress_gate_->close(GpuAliasIngressGate::key(alias), std::move(owner_post),
                                       std::move(drained));
   }
@@ -955,7 +955,7 @@ private:
   void finish_ordinary_mapping(const KfdProcess &proc, uint64_t handle);
   int run_ordinary_mapping_drain(KfdProcess &proc, uint64_t handle,
                                  const PendingOrdinaryMapping &pending, bool retry,
-                                 const std::function<void()> &work);
+                                 const std::function<int()> &work);
 
   /// Resolve a multi-GPU DRM render minor through published node metadata.
   /// Before topology setup, retain the legacy ordinal fallback used by tests.
@@ -986,7 +986,7 @@ private:
   has_exclusive_canonical_lines(std::span<const KfdProcess::GpuAliasRecord> aliases) const;
 
   /// @brief Select owner GPU domains for local-only retirement, all domains for canonical aliases.
-  [[nodiscard]] std::vector<amdgpu::DeviceCacheDomain>
+  [[nodiscard]] util::FailureOr<std::vector<amdgpu::DeviceCacheDomain>>
   maintenance_domains_for_aliases(std::span<const KfdProcess::GpuAliasRecord> aliases) const;
 
   /// @brief Form an exact UC scope for a current canonical grant and VM.

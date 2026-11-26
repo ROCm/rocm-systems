@@ -314,7 +314,8 @@ ssize_t read_backing_bytes(int fd, void *buffer, size_t size, off_t offset) {
 uint32_t build_branch_word(rocjitsu::IsaFamily arch) {
   auto word = rocjitsu::build_s_branch(-1, arch);
   if (word.failed()) {
-    throw std::runtime_error("cannot encode branch for KFD test");
+    ADD_FAILURE() << "cannot encode branch for KFD test";
+    std::abort();
   }
   return word.value();
 }
@@ -322,17 +323,19 @@ uint32_t build_branch_word(rocjitsu::IsaFamily arch) {
 uint32_t build_endpgm_word(rocjitsu::IsaFamily arch) {
   auto word = rocjitsu::build_s_endpgm(arch);
   if (word.failed()) {
-    throw std::runtime_error("cannot encode endpgm for KFD test");
+    ADD_FAILURE() << "cannot encode endpgm for KFD test";
+    std::abort();
   }
   return word.value();
 }
 
 rocjitsu::config::SystemPeerRouteProjection
-project_routes_or_throw(const rocjitsu::config::SystemGraph &graph, std::string_view node) {
+project_test_routes(const rocjitsu::config::SystemGraph &graph, std::string_view node) {
   util::StringDiagnostic diagnostic;
   auto routes = graph.local_peer_routes(diagnostic.emitter(), node);
   if (routes.failed()) {
-    throw std::runtime_error(diagnostic.message());
+    ADD_FAILURE() << diagnostic.message();
+    std::abort();
   }
   return std::move(routes.value());
 }
@@ -754,12 +757,13 @@ TEST(KfdProcessGrantIndexTest, ConcurrentReadersObservePublicationAndRevocation)
   using rocjitsu::KfdProcess;
   constexpr uint32_t kGpuId = 42;
   constexpr uint64_t kVa = 0x20000;
+  constexpr size_t kBytes = 0x1000;
   constexpr size_t kReaderCount = 4;
   constexpr uint64_t kPublications = 200;
   KfdProcess process(123);
   KfdProcess::GpuAllocation allocation{};
   allocation.gpu_va = kVa;
-  allocation.size = 0x1000;
+  allocation.size = kBytes;
   allocation.gpu_id = kGpuId;
   allocation.domain = KfdProcess::GpuGrantDomain::Vram;
   allocation.local_backing_owner =
@@ -798,7 +802,7 @@ TEST(KfdProcessGrantIndexTest, ConcurrentReadersObservePublicationAndRevocation)
         }
       } while (!revoked.load(std::memory_order_acquire));
       EXPECT_FALSE(process.gpu_access_grant(kGpuId, kVa, 4).allowed);
-      EXPECT_FALSE(process.gpu_access_grant(kGpuId, kVa + 0x2000, 4).allowed);
+      EXPECT_TRUE(process.gpu_access_grant(kGpuId, kVa + 0x2000, 4).allowed);
       EXPECT_TRUE(process.gpu_local_alias_snapshot()->empty());
       EXPECT_FALSE(process.gpu_alias_grant_current(original_alias));
     });
@@ -812,7 +816,7 @@ TEST(KfdProcessGrantIndexTest, ConcurrentReadersObservePublicationAndRevocation)
   {
     std::lock_guard lock(process.alloc_mutex_);
     process.allocations_.clear();
-    process.fail_closed_gpu_grants_locked();
+    process.retire_gpu_range_locked(kVa, kBytes);
     process.publish_gpu_grants_locked();
   }
   revoked.store(true, std::memory_order_release);
@@ -871,12 +875,16 @@ TEST(GpuAliasIngressGateTest, MultiAliasAdmissionClosesAndDrainsOnOwnerContinuat
   auto held = gate->try_acquire(keys);
   ASSERT_TRUE(held);
   ASSERT_TRUE(*held);
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
   uint32_t drained = 0;
-  ASSERT_TRUE(gate->close_batch(keys, post, [&] { ++drained; }));
+  ASSERT_TRUE(gate->close_batch(keys, post, [&] {
+    ++drained;
+    return 0;
+  }));
   EXPECT_TRUE(gate->closed(first));
   EXPECT_FALSE(gate->discard_failed(first));
   EXPECT_FALSE(gate->try_acquire(keys));
@@ -906,7 +914,10 @@ TEST(GpuAliasIngressGateTest, MultiAliasAdmissionClosesAndDrainsOnOwnerContinuat
   }
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
 
-  ASSERT_TRUE(gate->close(idle, post, [&] { ++drained; }));
+  ASSERT_TRUE(gate->close(idle, post, [&] {
+    ++drained;
+    return 0;
+  }));
   ASSERT_EQ(owner_queue.size(), 1u);
   EXPECT_FALSE(gate->reopen(idle));
   owner_queue.back()();
@@ -915,16 +926,25 @@ TEST(GpuAliasIngressGateTest, MultiAliasAdmissionClosesAndDrainsOnOwnerContinuat
   EXPECT_TRUE(gate->reopen(idle));
 
   const rocjitsu::GpuAliasIngressGate::Key failed{1, 404, 0x4000, 7, 14};
-  ASSERT_TRUE(gate->close(failed, post, [] { throw std::runtime_error("maintenance failed"); }));
+  ASSERT_TRUE(gate->close(failed, post, [] { return -EIO; }));
   ASSERT_EQ(owner_queue.size(), 1u);
-  EXPECT_FALSE(gate->retry_closed(failed, post, [&] { ++drained; }));
+  EXPECT_FALSE(gate->retry_closed(failed, post, [&] {
+    ++drained;
+    return 0;
+  }));
   EXPECT_FALSE(gate->discard_failed(failed));
-  EXPECT_THROW(owner_queue.back()(), std::runtime_error);
+  EXPECT_EQ(owner_queue.back()(), -EIO);
   EXPECT_FALSE(gate->reopen(failed));
   EXPECT_EQ(gate->tracked_generation_count(), 1u);
   owner_queue.clear();
-  ASSERT_TRUE(gate->retry_closed(failed, post, [&] { ++drained; }));
-  EXPECT_FALSE(gate->retry_closed(failed, post, [&] { ++drained; }));
+  ASSERT_TRUE(gate->retry_closed(failed, post, [&] {
+    ++drained;
+    return 0;
+  }));
+  EXPECT_FALSE(gate->retry_closed(failed, post, [&] {
+    ++drained;
+    return 0;
+  }));
   EXPECT_FALSE(gate->discard_failed(failed));
   ASSERT_EQ(owner_queue.size(), 1u);
   owner_queue.back()();
@@ -934,9 +954,9 @@ TEST(GpuAliasIngressGateTest, MultiAliasAdmissionClosesAndDrainsOnOwnerContinuat
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
 
   const rocjitsu::GpuAliasIngressGate::Key abandoned{1, 505, 0x5000, 7, 15};
-  ASSERT_TRUE(gate->close(abandoned, post, [] { throw std::runtime_error("abandoned"); }));
+  ASSERT_TRUE(gate->close(abandoned, post, [] { return -EIO; }));
   ASSERT_EQ(owner_queue.size(), 1u);
-  EXPECT_THROW(owner_queue.back()(), std::runtime_error);
+  EXPECT_EQ(owner_queue.back()(), -EIO);
   owner_queue.clear();
   EXPECT_TRUE(gate->closed(abandoned));
   EXPECT_TRUE(gate->discard_failed(abandoned));
@@ -967,10 +987,18 @@ TEST(GpuAliasIngressGateTest, LocalPermitsJoinExactCloseAndCrossThreadRelease) {
                        return gate->try_acquire_local(other, worker_cache);
                      }).get();
   ASSERT_TRUE(independent);
-  std::function<void()> posted;
+  std::function<int()> posted;
   int drained = 0;
-  ASSERT_TRUE(
-      gate->close_batch(keys, [&](auto done) { posted = std::move(done); }, [&] { ++drained; }));
+  ASSERT_TRUE(gate->close_batch(
+      keys,
+      [&](auto done) {
+        posted = std::move(done);
+        return true;
+      },
+      [&] {
+        ++drained;
+        return 0;
+      }));
   EXPECT_FALSE(gate->try_acquire_local(first, cache));
   EXPECT_TRUE(gate->try_acquire_local(other, cache));
   a.reset();
@@ -1021,9 +1049,10 @@ TEST(GpuAliasIngressGateTest, CopiedDrainAuthorityExpiresAfterOwnerContinuation)
   auto gate = std::make_shared<Gate>();
   const Gate::Key alias{1, 101, 0x1000, 7, 11};
   const std::array keys{alias};
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
   std::optional<Gate::DrainAuthority> retained;
   bool owner_admitted = false;
@@ -1031,9 +1060,13 @@ TEST(GpuAliasIngressGateTest, CopiedDrainAuthorityExpiresAfterOwnerContinuation)
     retained = authority;
     EXPECT_FALSE(gate->try_acquire(keys));
     auto permit = gate->try_acquire_for_drained_owner(keys, authority);
-    ASSERT_TRUE(permit);
+    EXPECT_TRUE(permit);
+    if (!permit) {
+      return -EIO;
+    }
     owner_admitted = true;
     permit->reset();
+    return 0;
   }));
   ASSERT_EQ(owner_queue.size(), 1u);
   EXPECT_TRUE(gate->closed(alias));
@@ -1054,32 +1087,33 @@ TEST(GpuAliasIngressGateTest, ExclusiveCloseClaimBlocksIndependentKeysThroughRet
   const rocjitsu::GpuAliasIngressGate::Key other_process{2, 202, 0x2000, 8, 12};
   const std::array first_key{first};
   const std::array other_key{other_process};
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
 
-  ASSERT_TRUE(gate->close(first, post, [] { throw std::runtime_error("first failed"); }));
+  ASSERT_TRUE(gate->close(first, post, [] { return -EIO; }));
   ASSERT_EQ(owner_queue.size(), 1u);
-  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  EXPECT_FALSE(gate->close(other_process, post, [] { return 0; }));
   EXPECT_FALSE(gate->closed(other_process));
   EXPECT_EQ(gate->tracked_generation_count(), 1u);
   EXPECT_TRUE(gate->try_acquire(other_key));
-  EXPECT_THROW(owner_queue.front()(), std::runtime_error);
+  EXPECT_EQ(owner_queue.front()(), -EIO);
   owner_queue.clear();
   EXPECT_TRUE(gate->closed(first));
-  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  EXPECT_FALSE(gate->close(other_process, post, [] { return 0; }));
   EXPECT_FALSE(gate->closed(other_process));
 
-  ASSERT_TRUE(gate->retry_closed(first, post, [] {}));
+  ASSERT_TRUE(gate->retry_closed(first, post, [] { return 0; }));
   ASSERT_EQ(owner_queue.size(), 1u);
-  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  EXPECT_FALSE(gate->close(other_process, post, [] { return 0; }));
   owner_queue.front()();
   owner_queue.clear();
-  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  EXPECT_FALSE(gate->close(other_process, post, [] { return 0; }));
   ASSERT_TRUE(gate->reopen(first));
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
-  ASSERT_TRUE(gate->close(other_process, post, [] {}));
+  ASSERT_TRUE(gate->close(other_process, post, [] { return 0; }));
   ASSERT_EQ(owner_queue.size(), 1u);
   EXPECT_TRUE(gate->closed(other_process));
   owner_queue.front()();
@@ -1093,27 +1127,28 @@ TEST(GpuAliasIngressGateTest, BatchAdoptsFailedSingleCloseClaim) {
   const rocjitsu::GpuAliasIngressGate::Key sibling{1, 202, 0x2000, 7, 12};
   const rocjitsu::GpuAliasIngressGate::Key unrelated{2, 303, 0x3000, 8, 13};
   const std::array keys{failed, sibling};
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
 
-  ASSERT_TRUE(gate->close(failed, post, [] { throw std::runtime_error("failed"); }));
+  ASSERT_TRUE(gate->close(failed, post, [] { return -EIO; }));
   ASSERT_EQ(owner_queue.size(), 1u);
-  EXPECT_THROW(owner_queue.front()(), std::runtime_error);
+  EXPECT_EQ(owner_queue.front()(), -EIO);
   owner_queue.clear();
   EXPECT_TRUE(gate->closed(failed));
   EXPECT_FALSE(gate->closed(sibling));
-  ASSERT_TRUE(gate->close_batch(keys, post, [] {}));
+  ASSERT_TRUE(gate->close_batch(keys, post, [] { return 0; }));
   ASSERT_EQ(owner_queue.size(), 1u);
   EXPECT_TRUE(gate->closed(failed));
   EXPECT_TRUE(gate->closed(sibling));
-  EXPECT_FALSE(gate->close(unrelated, post, [] {}));
+  EXPECT_FALSE(gate->close(unrelated, post, [] { return 0; }));
   owner_queue.front()();
   owner_queue.clear();
-  EXPECT_FALSE(gate->close(unrelated, post, [] {}));
+  EXPECT_FALSE(gate->close(unrelated, post, [] { return 0; }));
   ASSERT_TRUE(gate->reopen_batch(keys));
-  ASSERT_TRUE(gate->close(unrelated, post, [] {}));
+  ASSERT_TRUE(gate->close(unrelated, post, [] { return 0; }));
   ASSERT_EQ(owner_queue.size(), 1u);
   owner_queue.front()();
   EXPECT_TRUE(gate->reopen(unrelated));
@@ -1124,19 +1159,20 @@ TEST(GpuAliasIngressGateTest, DiscardFailedCloseReleasesExclusiveClaim) {
   auto gate = std::make_shared<rocjitsu::GpuAliasIngressGate>();
   const rocjitsu::GpuAliasIngressGate::Key failed{1, 101, 0x1000, 7, 11};
   const rocjitsu::GpuAliasIngressGate::Key other_process{2, 202, 0x2000, 8, 12};
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
 
-  ASSERT_TRUE(gate->close(failed, post, [] { throw std::runtime_error("failed"); }));
+  ASSERT_TRUE(gate->close(failed, post, [] { return -EIO; }));
   ASSERT_EQ(owner_queue.size(), 1u);
-  EXPECT_THROW(owner_queue.front()(), std::runtime_error);
+  EXPECT_EQ(owner_queue.front()(), -EIO);
   owner_queue.clear();
-  EXPECT_FALSE(gate->close(other_process, post, [] {}));
+  EXPECT_FALSE(gate->close(other_process, post, [] { return 0; }));
   EXPECT_TRUE(gate->discard_failed(failed));
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
-  ASSERT_TRUE(gate->close(other_process, post, [] {}));
+  ASSERT_TRUE(gate->close(other_process, post, [] { return 0; }));
   ASSERT_EQ(owner_queue.size(), 1u);
   owner_queue.front()();
   EXPECT_TRUE(gate->reopen(other_process));
@@ -1155,12 +1191,16 @@ TEST(GpuAliasIngressGateTest, BatchClosesAtomicallyAndRetriesFailedMaintenance) 
   auto held_requester = gate->try_acquire(requester_key);
   ASSERT_TRUE(held_owner);
   ASSERT_TRUE(held_requester);
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
   uint32_t drained = 0;
-  ASSERT_TRUE(gate->close_batch(keys, post, [&] { ++drained; }));
+  ASSERT_TRUE(gate->close_batch(keys, post, [&] {
+    ++drained;
+    return 0;
+  }));
   EXPECT_TRUE(gate->closed(owner));
   EXPECT_TRUE(gate->closed(requester));
   EXPECT_FALSE(gate->closed(unrelated));
@@ -1177,26 +1217,40 @@ TEST(GpuAliasIngressGateTest, BatchClosesAtomicallyAndRetriesFailedMaintenance) 
   ASSERT_TRUE(gate->reopen_batch(keys));
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
 
-  ASSERT_TRUE(
-      gate->close_batch(keys, post, [] { throw std::runtime_error("maintenance failed"); }));
+  ASSERT_TRUE(gate->close_batch(keys, post, [] { return -EIO; }));
   ASSERT_EQ(owner_queue.size(), 1u);
-  EXPECT_THROW(owner_queue.back()(), std::runtime_error);
+  EXPECT_EQ(owner_queue.back()(), -EIO);
   owner_queue.clear();
   EXPECT_FALSE(gate->reopen_batch(keys));
-  EXPECT_FALSE(gate->close_batch(keys, post, [&] { ++drained; }));
-  ASSERT_TRUE(gate->retry_closed_batch(keys, post, [&] { ++drained; }));
-  EXPECT_FALSE(gate->retry_closed_batch(keys, post, [&] { ++drained; }));
+  EXPECT_FALSE(gate->close_batch(keys, post, [&] {
+    ++drained;
+    return 0;
+  }));
+  ASSERT_TRUE(gate->retry_closed_batch(keys, post, [&] {
+    ++drained;
+    return 0;
+  }));
+  EXPECT_FALSE(gate->retry_closed_batch(keys, post, [&] {
+    ++drained;
+    return 0;
+  }));
   ASSERT_EQ(owner_queue.size(), 1u);
   owner_queue.back()();
   owner_queue.clear();
   EXPECT_EQ(drained, 2u);
   ASSERT_TRUE(gate->reopen_batch(keys));
 
-  const auto failed_post = [](std::function<void()>) { throw std::runtime_error("post failed"); };
-  EXPECT_FALSE(gate->close_batch(keys, failed_post, [&] { ++drained; }));
+  const auto failed_post = [](std::function<int()>) { return false; };
+  EXPECT_FALSE(gate->close_batch(keys, failed_post, [&] {
+    ++drained;
+    return 0;
+  }));
   EXPECT_TRUE(gate->closed(owner));
   EXPECT_TRUE(gate->closed(requester));
-  ASSERT_TRUE(gate->retry_closed_batch(keys, post, [&] { ++drained; }));
+  ASSERT_TRUE(gate->retry_closed_batch(keys, post, [&] {
+    ++drained;
+    return 0;
+  }));
   ASSERT_EQ(owner_queue.size(), 1u);
   owner_queue.back()();
   owner_queue.clear();
@@ -1204,19 +1258,22 @@ TEST(GpuAliasIngressGateTest, BatchClosesAtomicallyAndRetriesFailedMaintenance) 
   EXPECT_TRUE(gate->reopen_batch(keys));
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
 
-  ASSERT_TRUE(gate->close(owner, post, [] { throw std::runtime_error("single failed"); }));
+  ASSERT_TRUE(gate->close(owner, post, [] { return -EIO; }));
   ASSERT_EQ(owner_queue.size(), 1u);
-  EXPECT_THROW(owner_queue.back()(), std::runtime_error);
+  EXPECT_EQ(owner_queue.back()(), -EIO);
   owner_queue.clear();
-  ASSERT_TRUE(gate->close_batch(keys, post, [&] { ++drained; }));
+  ASSERT_TRUE(gate->close_batch(keys, post, [&] {
+    ++drained;
+    return 0;
+  }));
   ASSERT_EQ(owner_queue.size(), 1u);
   owner_queue.back()();
   owner_queue.clear();
   EXPECT_EQ(drained, 4u);
   EXPECT_TRUE(gate->reopen_batch(keys));
 
-  ASSERT_TRUE(gate->close(owner, post, [] {}));
-  EXPECT_FALSE(gate->close_batch(keys, post, [] {}));
+  ASSERT_TRUE(gate->close(owner, post, [] { return 0; }));
+  EXPECT_FALSE(gate->close_batch(keys, post, [] { return 0; }));
   ASSERT_EQ(owner_queue.size(), 1u);
   owner_queue.back()();
   owner_queue.clear();
@@ -1237,9 +1294,10 @@ TEST(GpuAliasIngressGateTest, BatchDrainAuthorityAdmitsItsKeysOnlyDuringOwnerCon
   const std::array requester_key{requester};
   const std::array unrelated_key{unrelated};
   const std::array mixed_keys{owner, unrelated};
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
   std::optional<Gate::DrainAuthority> retained;
   bool owner_admitted = false;
@@ -1249,15 +1307,22 @@ TEST(GpuAliasIngressGateTest, BatchDrainAuthorityAdmitsItsKeysOnlyDuringOwnerCon
     EXPECT_FALSE(gate->try_acquire(requester_key));
     EXPECT_TRUE(gate->try_acquire(unrelated_key));
     auto permit = gate->try_acquire_for_drained_owner(keys, authority);
-    ASSERT_TRUE(permit);
+    EXPECT_TRUE(permit);
+    if (!permit) {
+      return -EIO;
+    }
     owner_admitted = true;
     permit->reset();
     auto mixed_permit = gate->try_acquire_for_drained_owner(mixed_keys, authority);
-    ASSERT_TRUE(mixed_permit);
+    EXPECT_TRUE(mixed_permit);
+    if (!mixed_permit) {
+      return -EIO;
+    }
     mixed_permit->reset();
     EXPECT_FALSE(gate->final_writeback_done(authority).value_or(true));
     EXPECT_TRUE(gate->mark_final_writeback_done(authority));
     EXPECT_TRUE(gate->final_writeback_done(authority).value_or(false));
+    return 0;
   }));
   ASSERT_EQ(owner_queue.size(), 1u);
   EXPECT_TRUE(gate->closed(owner));
@@ -1359,10 +1424,13 @@ TEST(GpuAliasIngressGateTest, EffectReleaseWaitsForBypassAndExcludesRetirement) 
   const std::array selected{owner, importer};
   const std::array owner_key{owner};
   const std::array unrelated_key{unrelated};
-  std::function<void()> pending;
-  const auto post = [&](std::function<void()> continuation) { pending = std::move(continuation); };
+  std::function<int()> pending;
+  const auto post = [&](std::function<int()> continuation) {
+    pending = std::move(continuation);
+    return true;
+  };
 
-  ASSERT_TRUE(gate->close(owner, post, [] {}));
+  ASSERT_TRUE(gate->close(owner, post, [] { return 0; }));
   EXPECT_FALSE(gate->try_freeze_for_effect(selected));
   ASSERT_TRUE(pending);
   pending();
@@ -1373,15 +1441,15 @@ TEST(GpuAliasIngressGateTest, EffectReleaseWaitsForBypassAndExcludesRetirement) 
   ASSERT_TRUE(window);
   auto bypass = gate->try_acquire_for_effect(owner_key, *window);
   ASSERT_TRUE(bypass);
-  EXPECT_FALSE(gate->close(unrelated, post, [] {}));
-  EXPECT_FALSE(gate->close_batch(selected, post, [] {}));
+  EXPECT_FALSE(gate->close(unrelated, post, [] { return 0; }));
+  EXPECT_FALSE(gate->close_batch(selected, post, [] { return 0; }));
   EXPECT_FALSE(gate->closed(unrelated));
   window->reset();
   EXPECT_FALSE(gate->try_acquire_for_effect(owner_key, *window));
   EXPECT_TRUE(gate->closed(owner));
   EXPECT_TRUE(gate->closed(importer));
   EXPECT_FALSE(gate->close_claimed());
-  EXPECT_FALSE(gate->close(unrelated, post, [] {}));
+  EXPECT_FALSE(gate->close(unrelated, post, [] { return 0; }));
   EXPECT_FALSE(gate->try_freeze_for_effect(unrelated_key));
   EXPECT_TRUE(gate->try_acquire(unrelated_key));
 
@@ -1390,7 +1458,7 @@ TEST(GpuAliasIngressGateTest, EffectReleaseWaitsForBypassAndExcludesRetirement) 
   EXPECT_FALSE(gate->closed(importer));
   EXPECT_FALSE(gate->close_claimed());
   EXPECT_EQ(gate->tracked_generation_count(), 0u);
-  ASSERT_TRUE(gate->close(unrelated, post, [] {}));
+  ASSERT_TRUE(gate->close(unrelated, post, [] { return 0; }));
   ASSERT_TRUE(pending);
   pending();
   EXPECT_TRUE(gate->reopen(unrelated));
@@ -3492,7 +3560,7 @@ protected:
       graph.links = {{"e0", "sw", rocjitsu::config::SystemLinkClass::ScaleUp},
                      {"e1", "sw", rocjitsu::config::SystemLinkClass::ScaleUp}};
     }
-    auto routes = project_routes_or_throw(graph, "local");
+    auto routes = project_test_routes(graph, "local");
     ASSERT_EQ(routes.routes().size(), install_peer_route() ? 1u : 0u);
     ASSERT_TRUE(machine_
                     ->install_peer_routes(std::move(routes), engine_.topology(),
@@ -4598,7 +4666,7 @@ protected:
     if (connect_second_requester()) {
       graph.links.push_back({"second_ep", "switch", rocjitsu::config::SystemLinkClass::ScaleUp});
     }
-    auto routes = project_routes_or_throw(graph, "local");
+    auto routes = project_test_routes(graph, "local");
     ASSERT_EQ(routes.routes().size(), connect_second_requester() ? 3u : 1u);
     ASSERT_TRUE(machine_
                     ->install_peer_routes(std::move(routes), engine_.topology(),
@@ -4680,15 +4748,19 @@ TEST_F(KfdPeerBindingTest, CanonicalOwnerCuIngressRetriesAndRechecksLiveBinding)
   EXPECT_EQ(driver_->join_gpu_aliases(process_id_, kOwner, *pinned, spans).outcome,
             VmAccessOutcome::Complete);
 
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
   bool drained = false;
   auto held = driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans);
   ASSERT_EQ(held.outcome, VmAccessOutcome::Complete);
   ASSERT_TRUE(held.permit);
-  ASSERT_TRUE(driver_->close_gpu_alias_ingress(alias, post, [&] { drained = true; }));
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(alias, post, [&] {
+    drained = true;
+    return 0;
+  }));
   EXPECT_TRUE(owner_queue.empty());
   EXPECT_EQ(driver_->admit_gpu_alias_ingress(process_id_, kOwner, *access, spans).outcome,
             VmAccessOutcome::Unavailable);
@@ -4749,7 +4821,10 @@ TEST_F(KfdPeerBindingTest, CanonicalOwnerCuIngressRetriesAndRechecksLiveBinding)
   };
   address_regs();
   drained = false;
-  ASSERT_TRUE(driver_->close_gpu_alias_ingress(alias, post, [&] { drained = true; }));
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(alias, post, [&] {
+    drained = true;
+    return 0;
+  }));
   ASSERT_EQ(owner_queue.size(), 1u); // No admitted effect remains.
   EXPECT_FALSE(driver_->reopen_gpu_alias_ingress(alias));
   cu->step();
@@ -4770,7 +4845,10 @@ TEST_F(KfdPeerBindingTest, CanonicalOwnerCuIngressRetriesAndRechecksLiveBinding)
   address_regs();
   cu->write_sgpr(wave->sgpr_alloc().base + 2, kWritten);
   drained = false;
-  ASSERT_TRUE(driver_->close_gpu_alias_ingress(alias, post, [&] { drained = true; }));
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(alias, post, [&] {
+    drained = true;
+    return 0;
+  }));
   cu->step();
   ASSERT_EQ(wave->state(), rocjitsu::amdgpu::WfState::VM_RETRY);
   std::memcpy(&observed, backing.data(), sizeof(observed));
@@ -4902,11 +4980,12 @@ TEST_F(KfdPeerBindingTest, CanonicalOwnerSdmaWriteRetriesClosedIngressAndNewAlia
     return value;
   };
 
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
-  ASSERT_TRUE(driver_->close_gpu_alias_ingress(old_alias, post, [] {}));
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(old_alias, post, [] { return 0; }));
   ASSERT_EQ(owner_queue.size(), 1u);
   const uint64_t first_cursor = publish_write(0, kFirst);
   ASSERT_TRUE(scheduler.wait_for_blocked_packet_for_test(process_id_, queue.queue_id,
@@ -4933,7 +5012,7 @@ TEST_F(KfdPeerBindingTest, CanonicalOwnerSdmaWriteRetriesClosedIngressAndNewAlia
   });
   ASSERT_NE(new_alias_it, remapped->end());
   EXPECT_NE(new_alias_it->admission_generation, old_alias.admission_generation);
-  ASSERT_TRUE(driver_->close_gpu_alias_ingress(old_alias, post, [] {}));
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(old_alias, post, [] { return 0; }));
   ASSERT_EQ(owner_queue.size(), 1u);
   const uint64_t second_cursor = publish_write(5, kSecond);
   ASSERT_TRUE(scheduler.synchronize_host_queue_for_test(process_id_, queue.queue_id));
@@ -10625,7 +10704,6 @@ TEST_F(KfdPeerBindingTest, ControlledOwnerWritePreservesDisjointDirtyLocalLine) 
 }
 
 TEST_F(KfdPeerBindingTest, ScopedMaintenanceRejectsOmittedDirtyImportedAlias) {
-  using rocjitsu::amdgpu::CacheMaintenanceUnavailable;
   using rocjitsu::amdgpu::DeviceCacheAliasScope;
   using rocjitsu::amdgpu::DeviceCacheCoherence;
   using rocjitsu::amdgpu::DeviceCacheDomain;
@@ -10716,18 +10794,16 @@ TEST_F(KfdPeerBindingTest, ScopedMaintenanceRejectsOmittedDirtyImportedAlias) {
   ASSERT_EQ(witness->backing_offset, scopes[0].backing_offset);
   const uint64_t epoch = domains[0].coherence->current_epoch();
   const uint64_t writes = l2->backing_write_transactions();
-  EXPECT_THROW(
-      {
-        [[maybe_unused]] auto leases = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
-            domains, scopes,
-            [&](uint32_t, uint32_t, uint64_t,
-                size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
-              ADD_FAILURE() << "an absent selected line must not resolve a writeback";
-              throw util::Exception(std::string_view("unexpected selected dirty line"));
-            },
-            resolve_witness);
+  auto refused = DeviceCacheCoherence::acquire_scoped_alias_maintenance_group(
+      domains, scopes,
+      [&](uint32_t, uint32_t, uint64_t, size_t) -> rocjitsu::amdgpu::PreparedCanonicalWriteback {
+        ADD_FAILURE() << "an absent selected line must not resolve a writeback";
+        std::abort();
       },
-      CacheMaintenanceUnavailable);
+      resolve_witness);
+  ASSERT_TRUE(refused.succeeded());
+  EXPECT_EQ(refused.value().outcome, rocjitsu::amdgpu::CacheMaintenanceOutcome::Retry);
+  EXPECT_TRUE(refused.value().leases.empty());
   EXPECT_EQ(owner_grant.backing.bytes()[kDirtyByte], std::byte{0x31});
   EXPECT_TRUE(
       KfdPreparedProviderTestAccess::dirty_l2_byte(*l2, imported.va_addr, importer_id, kDirtyByte));
@@ -12746,10 +12822,12 @@ TEST_F(KfdPeerBindingTest, ControlledPeerCacheHitSurvivesRefusedOwnerDirtyWriteb
       *owner_msc, allocation.va_addr + kMscOffset, process_id_));
   const std::array domains{
       rocjitsu::amdgpu::DeviceCacheDomain{machine_->soc(1)->cache_coherence(), kOwner}};
-  EXPECT_THROW((void)rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
-                   domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,
-                   KfdPreparedProviderTestAccess::ordinary_resolver(*driver_)),
-               rocjitsu::amdgpu::CacheMaintenanceUnavailable);
+  auto refused = rocjitsu::amdgpu::DeviceCacheCoherence::acquire_cache_maintenance_group(
+      domains, rocjitsu::amdgpu::DeviceCacheOperation::WritebackInvalidate,
+      KfdPreparedProviderTestAccess::ordinary_resolver(*driver_));
+  ASSERT_TRUE(refused.succeeded());
+  EXPECT_EQ(refused.value().outcome, rocjitsu::amdgpu::CacheMaintenanceOutcome::Retry);
+  EXPECT_TRUE(refused.value().leases.empty());
   EXPECT_TRUE(KfdPreparedProviderTestAccess::dirty_l2_byte(*owner_l2, allocation.va_addr,
                                                            process_id_, kOffset));
   uint32_t canonical = 0;
@@ -13987,6 +14065,87 @@ TEST_F(KfdIoctlTest, DriverScratchGrantRevokesBeforeFreeUnmapsBacking) {
   EXPECT_EQ(cached_read, VmAccessOutcome::Faulted);
   EXPECT_EQ(value, 0xffffffffu);
   EXPECT_EQ(free_result, 0);
+}
+
+TEST_F(KfdIoctlTest, FixedDoorbellReplacementPublishesOnce) {
+  constexpr size_t kPage = 4096;
+  const uint32_t process_id = driver_->local_process_id();
+  auto process = driver_->find_process(process_id);
+  ASSERT_NE(process, nullptr);
+  const auto access = soc_->gpu_vm().snapshot_vmid(process_id);
+  ASSERT_TRUE(access);
+  const off_t doorbell_offset =
+      static_cast<off_t>(rocjitsu::KFD_MMAP_TYPE_DOORBELL | rocjitsu::kfd_mmap_gpu_id(kGpuId));
+
+  for (uint32_t flags : {KFD_IOC_ALLOC_MEM_FLAGS_VRAM, KFD_IOC_ALLOC_MEM_FLAGS_GTT,
+                         KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC,
+                         KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_PUBLIC}) {
+    SCOPED_TRACE(flags);
+    const auto release_reservation = [](void *address) {
+      EXPECT_EQ(::munmap(address, 3 * kPage), 0);
+    };
+    void *reserved =
+        ::mmap(nullptr, 3 * kPage, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    ASSERT_NE(reserved, MAP_FAILED);
+    std::unique_ptr<void, decltype(release_reservation)> reservation(reserved, release_reservation);
+    void *target = static_cast<std::byte *>(reserved) + kPage;
+    const uint64_t target_address = reinterpret_cast<uint64_t>(target);
+    const uint64_t unrelated_address = reinterpret_cast<uint64_t>(reserved);
+
+    kfd_ioctl_alloc_memory_of_gpu_args allocation{};
+    allocation.va_addr = target_address;
+    allocation.size = kPage;
+    allocation.gpu_id = kGpuId;
+    allocation.flags = flags | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &allocation), 0);
+    ASSERT_EQ(driver_->mmap(target, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                            static_cast<off_t>(allocation.mmap_offset)),
+              target);
+    // VRAM export creates a canonical alias; GTT retains its UC host mapping.
+    if (flags & KFD_IOC_ALLOC_MEM_FLAGS_VRAM) {
+      kfd_ioctl_ipc_export_handle_args exported{};
+      exported.handle = allocation.handle;
+      exported.gpu_id = kGpuId;
+      ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &exported), 0);
+    }
+    uint32_t gpu_id = kGpuId;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.handle = allocation.handle;
+    map.n_devices = 1;
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&gpu_id);
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+    kfd_ioctl_free_memory_of_gpu_args free{};
+    free.handle = allocation.handle;
+    ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free), 0);
+    ASSERT_FALSE(process->gpu_access_grant(kGpuId, target_address, 1).allowed);
+    ASSERT_TRUE(process->gpu_access_grant(kGpuId, unrelated_address, 1).allowed);
+    ASSERT_EQ(process->retired_identity_views_.size(), 1u);
+
+    const uint64_t publication = process->gpu_grant_publication().load();
+    bool observed_host_change = false;
+    void *mapped = driver_->mmap_observing_host_vma_change(
+        target, kPage, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED, doorbell_offset, [&] {
+          observed_host_change = true;
+          // The host replacement must retain the old grant until the complete
+          // doorbell transaction can publish its new permissions.
+          EXPECT_EQ(process->gpu_grant_publication().load(), publication);
+          EXPECT_FALSE(process->gpu_access_grant(kGpuId, target_address, 1).allowed);
+          EXPECT_TRUE(process->gpu_access_grant(kGpuId, unrelated_address, 1).allowed);
+        });
+    ASSERT_EQ(mapped, target) << errno;
+    EXPECT_TRUE(observed_host_change);
+    EXPECT_EQ(process->gpu_grant_publication().load(), publication + 1);
+    EXPECT_TRUE(process->retired_identity_views_.empty());
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, target_address, 1).allowed);
+    EXPECT_TRUE(process->gpu_access_grant(kGpuId, unrelated_address, 1).allowed);
+    EXPECT_EQ(access->atomic_store(target_address, sizeof(uint64_t), 97),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(*static_cast<uint64_t *>(target), 97u);
+    EXPECT_EQ(access->atomic_store(unrelated_address, sizeof(uint64_t), 91),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+    EXPECT_EQ(*static_cast<uint64_t *>(reserved), 91u);
+    EXPECT_EQ(driver_->munmap(target, kPage), 0);
+  }
 }
 
 TEST_F(KfdIoctlTest, FreedFixedBoViewsRetireWithHostChanges) {
@@ -17396,11 +17555,12 @@ TEST_P(KfdPreparedSdmaTest, ClosedUnrelatedDirtyAliasRetriesFenceWithoutEffect) 
       *l2, local.va, process_id_, local.cache_identity, local.record.admission_generation, dirty);
   const uint64_t writes = l2->backing_write_transactions();
 
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
-  ASSERT_TRUE(driver_->close_gpu_alias_ingress(local.record, post, [] {}));
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(local.record, post, [] { return 0; }));
   struct ClosureGuard {
     std::function<void()> cleanup;
     ~ClosureGuard() {
@@ -17614,11 +17774,12 @@ TEST_P(KfdPreparedSdmaTest, CuVmidZeroAtomicRetainsKfdDirtyGrantBoundary) {
                                                       closed.cache_identity,
                                                       closed.record.admission_generation, dirty);
 
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
-  ASSERT_TRUE(driver_->close_gpu_alias_ingress(closed.record, post, [] {}));
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(closed.record, post, [] { return 0; }));
   struct ClosureGuard {
     std::function<void()> cleanup;
     ~ClosureGuard() {
@@ -17716,11 +17877,12 @@ TEST_P(KfdPreparedSdmaTest, CuAtomicRetriesClosedDirtyAliasBeforeAnyEffect) {
                                                       target.cache_identity,
                                                       target.record.admission_generation, msc_line);
 
-  std::vector<std::function<void()>> owner_queue;
-  const auto post = [&](std::function<void()> continuation) {
+  std::vector<std::function<int()>> owner_queue;
+  const auto post = [&](std::function<int()> continuation) {
     owner_queue.push_back(std::move(continuation));
+    return true;
   };
-  ASSERT_TRUE(driver_->close_gpu_alias_ingress(closed.record, post, [] {}));
+  ASSERT_TRUE(driver_->close_gpu_alias_ingress(closed.record, post, [] { return 0; }));
   struct ClosureGuard {
     std::function<void()> cleanup;
     ~ClosureGuard() {

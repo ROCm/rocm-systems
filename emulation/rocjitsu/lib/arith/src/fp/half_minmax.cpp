@@ -140,9 +140,9 @@ int minmax3_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *
 }
 
 // Packed selection stages both halves before writing D. The inherited propagating
-// form canonicalizes NaNs. Compatibility retains its final output flush; strict
-// selection preserves selected denormals, matching two nested selections.
-template <int Lanes, bool Maximum, bool Propagate>
+// form (gfx1250) canonicalizes NaNs and honors Compatibility output flushing;
+// Gfx950 preserves quieted first-NaN payloads and selected denormals per MI350X captures.
+template <int Lanes, bool Maximum, bool Propagate, bool Gfx950 = false>
 int packed_selection(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
                      const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   const bool strict_numeric =
@@ -163,7 +163,7 @@ int packed_selection(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
-  if constexpr (Propagate) {
+  if constexpr (Propagate && !Gfx950) {
     // Compatibility retains its inherited canonical NaNs; exact NaN payloads await qualification.
     const uint32_t *const *const inputs[] = {a, b, c};
     if (strict_numeric && rocjitsu::arith::packed_f16_has_nan(exec_mask, uint32_t(mode), inputs)) {
@@ -190,7 +190,7 @@ int packed_selection(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t
       for (int lane = 0; lane < 32; ++lane) {
         uint32_t value = selected[lane] & 0xffffU;
         bool nan = (value & 0x7fffU) > 0x7c00U;
-        if constexpr (Propagate) {
+        if constexpr (Propagate && !Gfx950) {
           if (nan) {
             value = 0x7e00U;
           }
@@ -198,7 +198,7 @@ int packed_selection(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t
         if ((mode & RJ_ARITH_PK_CLAMP) && !(nan && (flags & RJ_ARITH_FP_DX10_CLAMP_OFF))) {
           value = nan || (value & 0x8000U) ? 0 : value > 0x3c00U ? 0x3c00U : value;
         }
-        if (Propagate && compatibility && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+        if (Propagate && !Gfx950 && compatibility && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
             !(value & 0x7c00U)) {
           value &= 0x8000U;
         }
@@ -874,4 +874,76 @@ int rj_arith_v_med3_f16_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t 
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   return minmax3_wave64<rocjitsu::arith::Minmax3::MedianCdna>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// MI350X (gfx950) packed propagating selection preserves quieted first-NaN payloads and denormals.
+int rj_arith_v_pk_minimum3_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b, const uint32_t *const *c,
+                                          [[maybe_unused]] uint32_t *trapsts) {
+  return packed_selection<32, false, true, /*Gfx950=*/true>(flags, exec_mask, mode, d, a, b, c);
+}
+
+int rj_arith_v_pk_minimum3_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b, const uint32_t *const *c,
+                                          [[maybe_unused]] uint32_t *trapsts) {
+  return packed_selection<64, false, true, /*Gfx950=*/true>(flags, exec_mask, mode, d, a, b, c);
+}
+
+int rj_arith_v_pk_maximum3_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b, const uint32_t *const *c,
+                                          [[maybe_unused]] uint32_t *trapsts) {
+  return packed_selection<32, true, true, /*Gfx950=*/true>(flags, exec_mask, mode, d, a, b, c);
+}
+
+int rj_arith_v_pk_maximum3_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                          uint32_t *const *d, const uint32_t *const *a,
+                                          const uint32_t *const *b, const uint32_t *const *c,
+                                          [[maybe_unused]] uint32_t *trapsts) {
+  return packed_selection<64, true, true, /*Gfx950=*/true>(flags, exec_mask, mode, d, a, b, c);
+}
+
+// MI350X (gfx950) ternary FP16 selection uses first-NaN priority and ordered signed-zero median.
+int rj_arith_v_min3_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_min3_f16_w32(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_min3_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_min3_f16_w64(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_max3_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_max3_f16_w32(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_max3_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_max3_f16_w64(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_med3_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_med3_f16_w32(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_med3_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, const uint32_t *const *c,
+                                   uint32_t *trapsts) {
+  return rj_arith_v_med3_f16_w64(flags, exec_mask, mode, d, a, b, c, trapsts);
 }

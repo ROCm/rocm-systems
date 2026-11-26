@@ -433,6 +433,7 @@ static size_t rcclRingLl128OneLoopPerNode(struct ncclComm* comm, int nChannels) 
 
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
+extern int ncclMaxNchannels();  // connect.cc: NCCL_MAX_NCHANNELS / NCCL_MAX_NRINGS / NCCL_WORK_ARGS_BYTES
 
 // gfx950 multi-node choices with the remote GDR flush flag, 8 GPUs per node, all choices measured.
 //
@@ -3434,7 +3435,7 @@ int rcclWarpSpeedAdjustChannels(struct ncclComm* comm, struct ncclTaskColl* info
     // TODO: Remove this condition after optimizing all collectives
     if (IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx950") && comm->nNodes == 1 && comm->nRanks == 8 &&
         info->func != ncclFuncAllReduce && info->func != ncclFuncAllGather && info->func != ncclFuncReduceScatter &&
-        ncclParamMaxNchannels() < 0) {
+        ncclMaxNchannels() == MAXCHANNELS) {  // undo the halving only where rcclWarpSpeedComputeNChannels did it
       nc *= 2;
     }
   }

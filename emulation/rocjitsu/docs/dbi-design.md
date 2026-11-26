@@ -114,7 +114,7 @@ current limits.
 
 - Multiple queued `InstrumentationPoint`s per `patch()` call are supported; sites sharing the same `(probe_obj, probe_symbol)` reuse one copied probe body, and a site whose declared argument count, argument sources, or mask policy disagrees with the first declaration of that probe is rejected. All-or-nothing: any per-site failure fails the whole patch.
 - Single `.text` section (multi-text is fatal).
-- `ReplaceWithInst` omits one complete 4/8/12-byte source instruction and executes an independently sized replacement sequence in its trampoline, including empty deletion. `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; callable sites follow the [admission contract](#key-design-constraint). Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. It leaves that entry instruction in place, so it does not impose the ordinary 4/8-byte relocation limit. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
+- `ReplaceWithInst` omits one complete 4/8/12-byte source instruction and executes an independently sized replacement sequence in its trampoline, including empty deletion. `BeforeInst` relocates an ordinary anchor. Callable `AfterInst` relocates the same supported anchors and observes their resulting state; callable sites follow the [admission contract](#key-design-constraint). Callable `KernelEntry` runs once through the descriptor stub and composes before a before-site on the original entry. The stub returns to the original entry instruction in place. Callable `KernelExit` runs before `s_endpgm` without a return branch. Other kinds are rejected.
 - Replacement and observation requests share a batch. A replacement can carry its callable probe directly or coalesce one same-site callable BeforeInst. Probe analysis reflects all replacements in the batch; pristine CFG/liveness cannot be reused for the changed guest program.
 - For observational points, `probe_obj` + `probe_symbol` are **consumed**: set both to request a probe-call trampoline, or leave both empty for the inline nop. Setting only one is fatal.
 - `filter_flags` is still a reserved milestone guardrail; a non-default value is fatal until it gains a real consumer. `force_full_exec` is consumed by callable points (see [Mask policy](#mask-policy)); points without a probe reject it because they have no call envelope whose mask could be widened.
@@ -302,6 +302,11 @@ dispatches. An unresolved successor in a dynamic kernel excludes those sites
 throughout the code object. `KernelEntry` checks its own dispatch descriptor
 for static allocation because guest backedges bypass the entry stub.
 
+For one direct call into a uniquely sized local function with a single returning
+block, callable-state analysis propagates the caller's MODE and storage state to
+the callee. The return must preserve the saved PC. On gfx1250 the helper must
+also preserve VGPR banks, and liveness must establish zero banks at every probe.
+
 The callable-state analysis follows resolved branches in a leaf helper when
 every path leaves the state under analysis unchanged and returns through the
 original ordinary SGPR pair. A numeric pair in the allocated special-register
@@ -350,10 +355,10 @@ spacing that the envelope's load drain does not establish. Live-after preservati
 alone does not establish readiness. The builder neither validates these
 obligations nor inserts anchor-specific hazard spacing.
 
-The emitted call-target displacement includes the relocated instruction's four
-or eight bytes only when `emit_original` is true. With the original omitted,
-both placements emit the envelope at the trampoline start and call the same
-probe body, with identical bytes and attribution offsets. `original_byte_offset`
+For callable `AfterInst`, the call-target displacement accounts for the full
+`original_size` of the instruction emitted before the call envelope. With the
+original omitted, both placements emit the envelope at the trampoline start and
+call the same probe body, with identical bytes and attribution offsets. `original_byte_offset`
 then names the replacement body when present, or the return branch/end of the
 trampoline for empty deletion.
 `TrampolineBytes` reports the call envelope's offset and size separately from the
@@ -387,7 +392,7 @@ Per-arch specifics (scratch encodings, waitcnt split) live in `code/builders/spi
 
 - Encoding the forward `s_branch` that goes into the anchor slot, pointing at the trampoline's first word.
 - Emitting the trampoline body in order: `before_items` (each an `InlineAsmItem` containing one or more pre-encoded words), then the original instruction words when `emit_original`, then `after_items`. A return `s_branch` to `return_target` follows only when `returns_to_kernel`; nonterminal replacement uses `anchor_offset + original_size`, while terminal bodies omit the return.
-- Plan well-formedness: `original_size` is nonzero and dword-aligned, and `original_words.size() * sizeof(uint32_t) == original_size`. Original replay accepts 4/8-byte extents; an anchor splice accepts 4/8/12 bytes, with 12 allowed only when the original is omitted. Emitted branches must fit SOPP `simm16`. Source splices fill any bytes after the forward branch with NOPs.
+- Plan well-formedness: `original_size` is nonzero and dword-aligned, and `original_words.size() * sizeof(uint32_t) == original_size`. Replay and anchor splices accept complete 4/8/12-byte instructions. Emitted branches must fit SOPP `simm16`. Source splices fill any bytes after the forward branch with NOPs.
 - Architecture awareness — SOPP encoding format is uniform across AMDGPU but opcodes differ (e.g. `s_branch` is opcode 2 on GFX9/CDNA, opcode 32 on GFX12/RDNA4). All opcode selection goes through `instruction_builder.h` helpers.
 
 ### What it does NOT handle
@@ -413,7 +418,7 @@ Pure predicate over the anchor instruction and its position. Permanent structura
 Rules enforced:
 
 - `anchor_offset` is dword aligned.
-- `anchor.size()` is 4 or 8 and fits inside `text_bytes` (subtraction-based bounds check; resists overflow when `anchor_offset` is huge).
+- `anchor.size()` is 4, 8 or 12 and fits inside `text_bytes` (subtraction-based bounds check; resists overflow when `anchor_offset` is huge).
 - `anchor.raw_encoding()` is non-null.
 - `anchor` is not a branch / cond branch / indirect branch / indirect call / program terminator, and `branch_offset_bytes()` is `nullopt`.
 - `anchor.reads_pc()` is false: decoded ISA metadata identifies PC readers independently of their target-specific spellings. Set-PC and return-from-exception operations are also excluded by their decoded operation.
@@ -529,8 +534,7 @@ collector checks full-text boundary coverage, ELF/section aliases, relocation
 admission, symbol endpoints, raw relative destinations and descriptor entries.
 Observation can supply its already decoded pristine index, existing patcher and
 resolved descriptor entries. Replacement/query/fork share pristine facts for
-independent mutants; both operations use local transactions. Observation's replay
-admission remains 4/8 bytes; the shared splice supports complete 4/8/12-byte extents.
+independent mutants; both operations use local transactions. Both observation replay and the shared splice accept complete 4/8/12-byte extents.
 
 Replacement/query/fork are the consumers of reusable ownership. A private
 `SourceTextFacts` owns the full-text index and collected references behind
@@ -712,7 +716,7 @@ with this callable precondition, independently of its EXEC policy.
 and probe-body contracts. Patch preflight additionally checks physical register
 usage, allocation and spill requirements.
 
-Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5 without a proof that all `MODE.VGPR_MSB` roles are zero at each call site (the instrumentor derives this from the sole kernel entry and rejects guests with calls); relative (`v_movrel*`) or GPR-indexed (`MODE.GPR_IDX_EN`) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the `s_movrel*` family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one `.text`, or a body outside it, since `BasicBlock::build()` decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable `.text`; and an entry offset that starts no decoded block.
+Fail-closed, each with a distinct message: an unrecognized convention; gfx1250/CDNA5 without a proof that all `MODE.VGPR_MSB` roles are zero at each call site (analysis starts at the sole kernel entry and can follow one validated direct call to a local helper that preserves the VGPR bank state); relative (`v_movrel*`) or GPR-indexed (`MODE.GPR_IDX_EN`) VGPR access, which displaces an encoded index at runtime and so loses live-ins rather than inventing them; relative SGPR access (the `s_movrel*` family, which displaces its index through M0 the same way), rejected by a mnemonic scan rather than by liveness, which models no scalar equivalent; a probe object without exactly one `.text`, or a body outside it, since `BasicBlock::build()` decodes nothing else and restarts its offsets per section; a body ahead of its section; no decoder for the arch; an undecodable `.text`; and an entry offset that starts no decoded block.
 
 ### SpillManager
 
@@ -787,7 +791,7 @@ The trampolines live inside `.text`, immediately after the original kernel bytes
   [local cave, after the original bytes]
   @ trampoline_offset:
     s_nop 0                     <-- inline-nop body (the probe-call variant is described below)
-    <relocated original word(s)> <-- 4 or 8 bytes, same encoding as the anchor
+    <relocated original word(s)> <-- 4, 8 or 12 bytes, same encoding as the anchor
     s_branch <return>           <-- back to anchor_offset + original_size
 ```
 

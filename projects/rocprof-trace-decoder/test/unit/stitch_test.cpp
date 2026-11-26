@@ -255,6 +255,31 @@ TEST_F(InsertGfx12BarrierWaitTest, BarrierAtIndex1)
     EXPECT_EQ(wave.instructions.size(), 6);
 }
 
+TEST_F(InsertGfx12BarrierWaitTest, ReproExecIndexAfterInsertion)
+{
+    auto wave = createWaveWithInstructions(3);
+    const auto writer_pc = wave.instructions[1].pc;
+
+    // Model an EXEC write by B: timestamp 10, instruction index 1, 16 active lanes.
+    // Stitcher::stitch exports wave.popcnt as wave.execmask.
+    wave.popcnt.push_back({10, 1, 16});
+
+    // Insert a wait at B's old index. The order becomes [A, wait, B, C].
+    barrier_list_t barriers = {
+        {1, {100, 1}}
+    };
+    insert_gfx12_barrier_wait(wave, barriers);
+
+    ASSERT_EQ(wave.instructions.size(), 4u);
+    ASSERT_EQ(wave.popcnt.size(), 1u);
+
+    // Looking up the entry's index should still yield B's original address.
+    EXPECT_EQ(wave.popcnt[0].index, 2u);
+    EXPECT_EQ(wave.instructions.at(wave.popcnt[0].index).pc, writer_pc);
+    EXPECT_EQ(wave.popcnt[0].time, 10u);
+    EXPECT_EQ(wave.popcnt[0].count, 16u);
+}
+
 TEST_F(InsertGfx12BarrierWaitTest, SkipsDuplicateIndices)
 {
     auto wave = createWaveWithInstructions(5);

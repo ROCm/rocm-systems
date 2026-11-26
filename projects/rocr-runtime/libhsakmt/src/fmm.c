@@ -2753,7 +2753,9 @@ void *hsakmt_fmm_allocate_device(HsaKFDContext *ctx,
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_CONTIGUOUS_BEST_EFFORT;
 
 	mem = NULL;
-	if (hsakmt_udmabuf_dev_fd > 0 && aperture == fmm_ctx->svm.dgpu_aperture
+	/* udmabuf mappings are always host RW; skip them when host access is denied */
+	if (hsakmt_udmabuf_dev_fd > 0 && mflags.ui32.HostAccess
+		 && aperture == fmm_ctx->svm.dgpu_aperture
 		 && hsakmt_device_is_apu_by_node_id(ctx, node_id)
 		 && aperture->ops == &mmap_aperture_ops) {
 
