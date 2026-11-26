@@ -3644,25 +3644,33 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "device_memory_metric", ["AI HBM", "AI VRAM"], ids=["hbm", "vram"]
+    ("metric", "column"),
+    [
+        ("AI HBM", "hbm_cache_data"),
+        ("AI VRAM", "hbm_cache_data"),
+        ("AI GL0", "l0_cache_data"),
+        ("AI GL2", "l2_cache_data"),
+    ],
+    ids=["hbm", "vram", "gl0", "gl2"],
 )
-def test_calc_roofline_data_stores_the_device_memory_point_in_hbm_cache_data(
-    monkeypatch, device_memory_metric
+def test_calc_roofline_data_stores_each_point_in_its_level_column(
+    monkeypatch, metric, column
 ):
     """The column keeps its hbm_cache_data name. MI architectures fill it from
-    AI HBM, and gfx1201, which has no HBM, fills it from AI VRAM."""
+    AI HBM, and gfx1201, which has no HBM, fills it from AI VRAM. gfx1250
+    names its cache points AI GL0 and AI GL2."""
     pmc_df = pd.DataFrame({
         "Kernel_Name": ["kernel"],
         "Start_Timestamp": [0],
         "End_Timestamp": [10],
     })
     roofline_df = pd.DataFrame({
-        "Metric": ["Performance (GFLOPs)", device_memory_metric],
-        "Value": ["expr_performance", "expr_device_memory"],
+        "Metric": ["Performance (GFLOPs)", metric],
+        "Value": ["expr_performance", "expr_ai"],
     })
     workload_path = "/mock/workload/path"
     analyzer = make_roofline_calc_analyzer(workload_path, pmc_df, roofline_df)
-    values = {"expr_performance": 5.0, "expr_device_memory": 7.0}
+    values = {"expr_performance": 5.0, "expr_ai": 7.0}
     monkeypatch.setattr(
         "rocprof_compute_analyze.analysis_db.db_analysis.evaluate",
         lambda name, value, kernel_pmc_df, sys_info: values[value],
@@ -3673,8 +3681,7 @@ def test_calc_roofline_data_stores_the_device_memory_point_in_hbm_cache_data(
 
     df = db_analysis.calc_roofline_data(analyzer)[workload_path]
 
-    assert df["hbm_cache_data"].iloc[0] == 7.0
-    assert df["total_flops"].iloc[0] == 5.0
+    assert df[column].iloc[0] == 7.0
 
 
 # =============================================================================

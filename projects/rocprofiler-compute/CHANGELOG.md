@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added LDS arithmetic intensity points to the gfx1250 roofline.
+
 ### Changed
 
 ### Removed
@@ -15,7 +17,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Resolved issues
 
-* Fixed gfx1250 roofline not plotting kernel AI points. The GL0 and GL2 metric names were not recognized, and the LDS AI level was missing.
+* Fixed kernel points missing from the gfx1250 roofline plot.
 
 * Fixed Uncached Read Traffic (17.2.3) going above 100% on gfx908, gfx90a, gfx942 and gfx950.
 

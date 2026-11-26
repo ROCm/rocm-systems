@@ -268,13 +268,19 @@ def test_roofline_mem_levels_are_measured_levels_in_hierarchy_order() -> None:
     assert roofline_mem_levels("gfx1201", "navi48_1") == ["LDS", "L0", "VRAM"]
 
 
-def test_extract_ai_metrics_reads_the_vram_point_into_its_own_field() -> None:
-    """gfx1201 names its device-memory point AI VRAM, which fills ai_vram."""
-    ai_metrics = _extract_ai_metrics(
-        pd.DataFrame({"Metric": ["AI VRAM"], "Value": [3.5]})
-    )
+@pytest.mark.parametrize(
+    ("metric", "field"),
+    [("AI VRAM", "ai_vram"), ("AI GL0", "ai_l0"), ("AI GL2", "ai_l2")],
+    ids=["vram", "gl0", "gl2"],
+)
+def test_extract_ai_metrics_reads_each_point_into_its_level_field(
+    metric: str, field: str
+) -> None:
+    """gfx1201 names its device-memory point AI VRAM. gfx1250 names its cache
+    points AI GL0 and AI GL2. Each fills the field of its memory level."""
+    ai_metrics = _extract_ai_metrics(pd.DataFrame({"Metric": [metric], "Value": [3.5]}))
 
-    assert ai_metrics["ai_vram"] == 3.5
+    assert ai_metrics[field] == 3.5
 
 
 ##############################################################################
