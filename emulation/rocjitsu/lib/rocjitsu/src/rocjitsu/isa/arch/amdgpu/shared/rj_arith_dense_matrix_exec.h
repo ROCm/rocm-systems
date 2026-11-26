@@ -137,6 +137,16 @@ inline void exec_sparse_matrix(Wavefront &wave, WmmaFunction function, uint64_t 
       !read_matrix_pointers(ir, index.data()) || !read_matrix_pointers(cr, c.data())) {
     return;
   }
+  if (const MatrixInputSnapshot *snapshot = matrix_input_snapshot) [[unlikely]] {
+    const auto redirect = [](const MatrixInputSnapshot::Operand &operand, uint32_t source,
+                             uint32_t count, auto &pointers) {
+      if (operand.regs && operand.base == source)
+        for (uint32_t reg = 0; reg < std::min(count, operand.regs); ++reg)
+          pointers[reg] = operand.lanes + reg * Lanes;
+    };
+    redirect(snapshot->a, source_a, A, a);
+    redirect(snapshot->b, source_b, B, b);
+  }
   if constexpr (C != D) {
     // Mixed BF16F32 reads eight accumulator registers but publishes only four.
     // Private staging keeps the extra input pointers out of the write observation range.

@@ -1004,4 +1004,91 @@ TEST(AsyncInstructionQueueTest, SmallerWmmaAndMultiBlockMfmaMatchSerialAcrossReg
   }
 }
 
+TEST(AsyncInstructionQueueTest, ScratchRenameMatchesSerialAcrossDsReadsAndMidBlockCommit) {
+  constexpr uint64_t pc = 0x260000;
+  std::vector<uint32_t> program;
+  const auto emit = [&](const auto &enc) {
+    program.insert(program.end(), enc.begin(), enc.end());
+  };
+  const auto mfma = [&](uint8_t acc, uint8_t a, uint8_t b) {
+    emit(cdna4::build_vop3p_mfma(
+        cdna4::kVMfmaF3216x16x32F16Vop3pMfma,
+        {.vdst = uint8_t(64 + 4 * acc),
+         .src0 = uint16_t(256 + a),
+         .src1 = uint16_t(256 + b),
+         .src2 = uint16_t(256 + 64 + 4 * acc)}));
+  };
+  // v0: 2 MFMAs reading shared A=v[0:3].
+  mfma(0, 0, 16);
+  mfma(1, 0, 20);
+  // v1: ds_read_b128 reloads v[0:3] from LDS at v40 (renamed to scratch).
+  emit(cdna4::build_ds(cdna4::kDsReadB128, {.offset0 = 0, .addr = 40, .vdst = 0}));
+  emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0xc07f})); // lgkmcnt(0)
+  mfma(2, 0, 16);
+  mfma(3, 0, 20);
+  // v2: second ds_read_b128 reloads v[0:3] from LDS offset 64 (renamed to scratch).
+  emit(cdna4::build_ds(cdna4::kDsReadB128, {.offset0 = 64, .addr = 40, .vdst = 0}));
+  emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0xc07f})); // lgkmcnt(0)
+  mfma(4, 0, 16);
+  mfma(5, 0, 20);
+  // Mid-block reader: ds_write_b128 reads v[0:3] -> forces mid-block RenameCommit.
+  emit(cdna4::build_ds(cdna4::kDsWriteB128, {.offset0 = 128, .addr = 40, .data0 = 0}));
+  emit(cdna4::build_sopp(cdna4::kSWaitcntSopp, {.simm16 = 0xc07f})); // lgkmcnt(0)
+  const uint64_t end = pc + 4 * program.size();
+  emit(cdna4::build_sopp(cdna4::kSBranchSopp, {.simm16 = 0xffff}));
+
+  auto run_once = [&](bool async_mode) {
+    amdgpu::GpuMemory memory("scratch_rename_mem");
+    amdgpu::L2Cache l2("scratch_rename_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    if (async_mode)
+      config.async_resources = std::make_shared<mc::ExecutionResources>(4);
+    config.arch = rocjitsu::IsaFamily::Cdna4;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 106;
+    config.vgprs_per_wf = 256;
+    std::unique_ptr<amdgpu::ComputeUnitCore> cu;
+    rocjitsu::test::initialize_compute_unit(cu, "scratch_rename_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, pc, 106, 256);
+    EXPECT_NE(wf, nullptr);
+    wf->set_exec(~uint64_t{0});
+    const uint32_t base = wf->vgpr_alloc().base;
+    for (uint32_t lane = 0; lane != 64; ++lane) {
+      // Seed distinct FP16 patterns in v[0:3], v[16:23], LDS offsets 0..127.
+      cu->write_vgpr(base + 40, lane, (lane & 3u) * 16u);
+      for (uint32_t r = 0; r != 4; ++r) {
+        cu->write_vgpr(base + r, lane, 0x3c003c00u);       // 1.0, 1.0
+        cu->write_vgpr(base + 16 + r, lane, 0x38003800u);  // 0.5, 0.5
+        cu->write_vgpr(base + 20 + r, lane, 0x40004000u);  // 2.0, 2.0
+      }
+      for (uint32_t r = 64; r != 88; ++r)
+        cu->write_vgpr(base + r, lane, 0u);
+    }
+    for (uint32_t off = 0; off != 64; off += 4) {
+      wf->lds().write32(off, 0x40004000u);      // v1: 2.0, 2.0
+      wf->lds().write32(64 + off, 0x42004200u); // v2: 3.0, 3.0
+      wf->lds().write32(128 + off, 0u);
+    }
+    for (size_t i = 0; i != program.size(); ++i)
+      memory.write32(pc + 4 * i, program[i]);
+    for (unsigned steps = 0; wf->pc < end && steps != 64; ++steps)
+      cu->step();
+    EXPECT_EQ(wf->pc, end);
+    std::vector<uint32_t> state;
+    for (uint32_t r = 0; r != 4; ++r)
+      for (uint32_t lane = 0; lane != 64; ++lane)
+        state.push_back(cu->read_vgpr(base + r, lane));
+    for (uint32_t r = 64; r != 88; ++r)
+      for (uint32_t lane = 0; lane != 64; ++lane)
+        state.push_back(cu->read_vgpr(base + r, lane));
+    for (uint32_t off = 128; off != 192; off += 4)
+      state.push_back(wf->lds().read32(off));
+    return state;
+  };
+
+  const auto expected = run_once(/*async_mode=*/false);
+  const auto actual = run_once(/*async_mode=*/true);
+  EXPECT_EQ(actual, expected);
+}
+
 } // namespace

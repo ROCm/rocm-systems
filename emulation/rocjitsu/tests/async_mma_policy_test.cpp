@@ -245,11 +245,25 @@ TEST(AsyncMmaPolicyTest, QualifiedMfmaFamiliesExcludeUnmeasuredShapes) {
            Operation::V_MFMA_SCALE_F32_32X32X64_F8F6F4,
            Operation::V_MFMA_F32_16X16X32_BF16,
            Operation::V_MFMA_F32_32X32X16_BF16,
+           Operation::V_MFMA_F32_16X16X16_BF16,
+           Operation::V_MFMA_F32_32X32X8_BF16,
+           Operation::V_MFMA_F32_32X32X2_F32,
+           Operation::V_MFMA_F32_16X16X4_F32,
+           Operation::V_MFMA_F64_16X16X4_F64,
+           Operation::V_MFMA_F64_4X4X4_4B_F64,
+           Operation::V_MFMA_I32_16X16X64_I8,
+           Operation::V_MFMA_I32_32X32X32_I8,
+           Operation::V_MFMA_I32_16X16X32_I8,
+           Operation::V_MFMA_I32_32X32X16_I8,
+           Operation::V_SMFMAC_F32_16X16X64_F16,
+           Operation::V_SMFMAC_F32_32X32X32_F16,
+           Operation::V_SMFMAC_F32_16X16X128_FP8_FP8,
+           Operation::V_SMFMAC_I32_32X32X64_I8,
        })
     EXPECT_TRUE(policy::candidate(mma_test::PolicyInstruction(operation)));
   for (Operation operation : {
            Operation::V_MFMA_F32_32X32X4_2B_F16,
-           Operation::V_MFMA_I32_16X16X64_I8,
+           Operation::V_MFMA_I32_32X32X4_2B_I8,
        })
     EXPECT_FALSE(policy::candidate(mma_test::PolicyInstruction(operation)));
 }

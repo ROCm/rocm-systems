@@ -201,8 +201,10 @@ public:
     if (stopped_ || !matrix_coexecution::async_candidate(*inst))
       return false;
     auto access = async_execution::footprint(*inst, wf_.num_vgprs(), has_accvgprs_);
+    const bool cdna_smfmac = async_mma_policy::is_cdna4_smfmac(inst->amdgpu_operation());
     const int sources = inst->num_src_operands();
-    if (!access || inst->num_dst_operands() != 1 || (sources != 3 && sources != 5))
+    if (!access || inst->num_dst_operands() != 1 ||
+        (cdna_smfmac ? sources != 4 : (sources != 3 && sources != 5)))
       return false;
     for (int i = 0; i <= sources; ++i) {
       const auto *operand = i == sources ? inst->dst_operand(0) : inst->src_operand(i);
@@ -211,7 +213,7 @@ public:
         continue;
       // Inline accumulator/scale constants are immutable. SGPRs and special
       // registers are not covered by the vector-register scoreboard.
-      if (i < 2 || i == sources || !operand->const_value())
+      if (cdna_smfmac || i < 2 || i == sources || !operand->const_value())
         return false;
     }
     if (!pool_.available()) {

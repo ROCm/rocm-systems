@@ -64,31 +64,43 @@ public:
   }
   static constexpr uint8_t kResult = 1;
   static constexpr uint8_t kSource = 2;
+  static constexpr size_t kVgprMaskWords = (REGISTER_SET_MAX_VGPRS + 63u) / 64u;
   bool test(size_t i, bool write = false) const {
     return i < kRegisters && (bytes_[i] & (write ? kResult | kSource : kResult));
   }
   bool any_vgpr() const {
-    return (vgpr_mask_[0] | vgpr_mask_[1] | vgpr_mask_[2] | vgpr_mask_[3]) != 0;
+    uint64_t acc = 0;
+    for (uint64_t w : vgpr_mask_)
+      acc |= w;
+    return acc != 0;
   }
-  bool any_vgpr_in(const std::array<uint64_t, 4> &mask) const {
-    return ((vgpr_mask_[0] & mask[0]) | (vgpr_mask_[1] & mask[1]) | (vgpr_mask_[2] & mask[2]) |
-            (vgpr_mask_[3] & mask[3])) != 0;
+  bool any_vgpr_in(const std::array<uint64_t, 8> &mask) const {
+    uint64_t hit = 0;
+    for (size_t i = 0; i != 8; ++i)
+      hit |= vgpr_mask_[i] & mask[i];
+    return hit != 0;
   }
   bool pending_vgpr(uint16_t index, uint8_t width) const {
     assert(index + width <= REGISTER_SET_MAX_VGPRS);
+    if (width == 0)
+      return false;
     if (width == 1)
       return bytes_[index] != 0;
-    const unsigned word = index >> 6;
+    unsigned word = index >> 6;
     const unsigned bit = index & 63u;
     if (bit + width <= 64u) {
       const uint64_t mask = width == 64u ? ~uint64_t{0} : ((uint64_t{1} << width) - 1u) << bit;
       return (vgpr_mask_[word] & mask) != 0;
     }
-    const unsigned low_bits = 64u - bit;
-    const unsigned high_bits = width - low_bits;
-    const uint64_t lo_mask = (~uint64_t{0}) << bit;
-    const uint64_t hi_mask = (uint64_t{1} << high_bits) - 1u;
-    return ((vgpr_mask_[word] & lo_mask) | (vgpr_mask_[word + 1] & hi_mask)) != 0;
+    if ((vgpr_mask_[word++] & ((~uint64_t{0}) << bit)) != 0)
+      return true;
+    unsigned rem = width - (64u - bit);
+    while (rem >= 64u) {
+      if (vgpr_mask_[word++] != 0)
+        return true;
+      rem -= 64u;
+    }
+    return rem != 0 && (vgpr_mask_[word] & ((uint64_t{1} << rem) - 1u)) != 0;
   }
 
   bool pending(RegisterRef reg, bool write = false) const {
@@ -167,7 +179,7 @@ public:
 
 private:
   uint16_t sgpr_alias_end_ = 0;
-  std::array<uint64_t, 4> vgpr_mask_{};
+  std::array<uint64_t, kVgprMaskWords> vgpr_mask_{};
   std::array<uint8_t, kRegisters> bytes_{};
 };
 

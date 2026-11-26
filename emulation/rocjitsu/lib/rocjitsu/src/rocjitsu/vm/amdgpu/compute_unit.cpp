@@ -2996,12 +2996,17 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
     inst_cache_.fetch(*memory_, address, reinterpret_cast<uint8_t *>(words.data()));
     return true;
   };
+  const bool cross_block = mma_plan::cross_block_enabled();
+  const uint64_t full_exec = wf_size == 64 ? ~uint64_t{0} : 0xFFFFFFFFull;
+  const bool allow_rename = mma_plan::scratch_rename_enabled() && !cross_block &&
+                            !observes_register_access_ && active->exec() == full_exec;
   const mma_plan::PlanCache::Key key{fetch_pc,
                                      vmid,
                                      num_vgprs,
                                      has_accvgprs,
                                      vm_access ? vm_access->cache_namespace() : VmCacheNamespace{},
-                                     wf_size};
+                                     wf_size,
+                                     allow_rename};
   const mma_plan::Plan *plan = cache.lookup(*decoder_, inst_cache_, fetch_words, key, first, arch());
   if (!plan->accept) {
     if (!plan->truncated && plan->length > 0) {
@@ -3027,7 +3032,11 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
   // An exhausted pool still replays: each chain that finds no helper runs on
   // the issuer, which keeps the saved fetch, decode and scoreboard work.
   const bool inline_only = mma_plan::inline_only();
-  const bool cross_block = mma_plan::cross_block_enabled();
+  if (plan->rename_scratch_regs > 0) {
+    if (replay.pending() && replay.rename_scratch_needs_grow(plan->rename_scratch_regs, wf_size))
+      (void)replay.drain();
+    replay.ensure_rename_scratch(plan->rename_scratch_regs, wf_size);
+  }
 
   // Inline steps can touch new registers while helpers run. Allocate all lazy
   // chunks before the first job can race with that allocation. Chunks stay
@@ -3122,6 +3131,107 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
     }
     return false;
   };
+  const auto commit_renames_up_to = [&](uint32_t limit_step) {
+    if (plan->rename_scratch_regs == 0 || limit_step == 0)
+      return;
+    std::array<uint16_t, 256> latest{};
+    latest.fill(mma_plan::SnapshotSpec::kNoSlot);
+    const uint32_t n = std::min<uint32_t>(limit_step, static_cast<uint32_t>(plan->steps.size()));
+    size_t aw_idx = 0;
+    size_t rc_idx = 0;
+    for (uint32_t idx = 0; idx != n; ++idx) {
+      while (rc_idx < plan->rename_commits.size() &&
+             plan->rename_commits[rc_idx].before_step == idx) {
+        const auto &rc = plan->rename_commits[rc_idx++];
+        for (uint32_t d = 0; d != rc.regs; ++d)
+          if (uint32_t(rc.arch_base) + d < 256u)
+            latest[rc.arch_base + d] = mma_plan::SnapshotSpec::kNoSlot;
+      }
+      const auto &st = plan->steps[idx];
+      if (st.rename_dst_reg != mma_plan::SnapshotSpec::kNoSlot) {
+        for (uint32_t d = 0; d != st.rename_dst_regs; ++d)
+          if (uint32_t(st.rename_arch_base) + d < 256u)
+            latest[st.rename_arch_base + d] = uint16_t(st.rename_dst_reg + d);
+      }
+      while (aw_idx < plan->rename_arch_writes.size() &&
+             plan->rename_arch_writes[aw_idx].step == idx) {
+        const auto &aw = plan->rename_arch_writes[aw_idx++];
+        for (uint32_t d = 0; d != aw.regs; ++d)
+          if (uint32_t(aw.arch_base) + d < 256u)
+            latest[aw.arch_base + d] = mma_plan::SnapshotSpec::kNoSlot;
+      }
+    }
+    while (rc_idx < plan->rename_commits.size() && plan->rename_commits[rc_idx].before_step == n) {
+      const auto &rc = plan->rename_commits[rc_idx++];
+      for (uint32_t d = 0; d != rc.regs; ++d)
+        if (uint32_t(rc.arch_base) + d < 256u)
+          latest[rc.arch_base + d] = mma_plan::SnapshotSpec::kNoSlot;
+    }
+    for (uint32_t r = 0; r != 256u; ++r) {
+      if (latest[r] != mma_plan::SnapshotSpec::kNoSlot) {
+        std::memcpy(raw_vgpr_data(vgpr_base + r), replay.rename_scratch_reg(latest[r], wf_size),
+                    wf_size * sizeof(uint32_t));
+      }
+    }
+  };
+  const auto run_rename_commits_at = [&](uint32_t step_idx) -> bool {
+    if (plan->rename_commits.empty())
+      return true;
+    mma_plan::JobMask wait_jobs = 0;
+    size_t count = 0;
+    for (const auto &rc : plan->rename_commits) {
+      if (rc.before_step == step_idx) {
+        wait_jobs |= rc.wait_arch_readers;
+        ++count;
+      }
+    }
+    if (count == 0)
+      return true;
+    if (mma_plan::JobMask wait_slots = replay.slots_of(wait_jobs)) {
+      if (!replay.join(wait_slots)) {
+        (void)replay.drain();
+        commit_renames_up_to(step_idx);
+        helpers_failed(active->pc, *plan->steps.front().inst);
+        return false;
+      }
+    }
+    for (const auto &rc : plan->rename_commits) {
+      if (rc.before_step != step_idx)
+        continue;
+      const uint32_t *src = replay.rename_scratch_reg(rc.scratch_reg, wf_size);
+      for (uint32_t r = 0; r != rc.regs; ++r)
+        std::memcpy(raw_vgpr_data(vgpr_base + rc.arch_base + r), src + size_t(r) * wf_size,
+                    wf_size * sizeof(uint32_t));
+    }
+    cache.stats.rename_commits += count;
+    return true;
+  };
+  const auto run_inline_member = [&](const mma_plan::Step &st, Instruction &inst, unsigned m_idx,
+                                     uint64_t pc) {
+    const mma_plan::SnapshotSpec &spec = st.snapshot[m_idx];
+    if (spec.rename_mask == 0)
+      return run_inline(inst, pc);
+    MatrixInputSnapshot snap{};
+    const auto bind_renamed = [&](uint8_t bit, uint16_t base, uint8_t regs, uint16_t slot,
+                                  MatrixInputSnapshot::Operand &op) {
+      if ((spec.rename_mask & bit) && regs)
+        op = {vgpr_base + base, regs, replay.rename_scratch_reg(slot, wf_size)};
+    };
+    bind_renamed(mma_plan::SnapshotSpec::kRenameA, spec.a_base, spec.a_regs, spec.a_slot, snap.a);
+    bind_renamed(mma_plan::SnapshotSpec::kRenameB, spec.b_base, spec.b_regs, spec.b_slot, snap.b);
+    bind_renamed(mma_plan::SnapshotSpec::kRenameSa, spec.sa_base, spec.sa_regs, spec.sa_slot,
+                 snap.scale_a);
+    bind_renamed(mma_plan::SnapshotSpec::kRenameSb, spec.sb_base, spec.sb_regs, spec.sb_slot,
+                 snap.scale_b);
+    struct ScopedSnap {
+      const MatrixInputSnapshot *prev;
+      explicit ScopedSnap(const MatrixInputSnapshot *cur) : prev(matrix_input_snapshot) {
+        matrix_input_snapshot = cur;
+      }
+      ~ScopedSnap() { matrix_input_snapshot = prev; }
+    } scoped_snap{&snap};
+    return run_inline(inst, pc);
+  };
   for (unsigned k = 0; k != plan->steps.size(); ++k) {
     const mma_plan::Step &step = plan->steps[k];
     mma_plan::JobMask waits = replay.slots_of(step.wait);
@@ -3137,11 +3247,19 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
     }
     if (waits) {
       if (!replay.join(waits)) {
+        (void)replay.drain();
+        commit_renames_up_to(k);
         helpers_failed(active->pc, *plan->steps.front().inst);
         return MmaPlanReplayOutcome::Replayed;
       }
     }
-    if (helper_error())
+    if (replay.failure()) {
+      (void)replay.drain();
+      commit_renames_up_to(k);
+      report_pending_mma_failure(*active, replay);
+      return MmaPlanReplayOutcome::Replayed;
+    }
+    if (step.has_rename_commit_before && !run_rename_commits_at(k))
       return MmaPlanReplayOutcome::Replayed;
     switch (step.kind) {
     case mma_plan::StepKind::Chained:
@@ -3155,17 +3273,23 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
         check_static_isa_diagnostics(*step.chain[i], *active);
       active->clear_setreg_vgpr_msb_hazard();
       // Copy only the factor registers a later step overwrites, into the
-      // claimed helper's buffer; deduplicate identical (base, regs) tiles
-      // shared across members of an A/B-grouped batch.
+      // claimed helper's buffer; renamed operands point directly into
+      // PendingJobs::rename_scratch_ with zero copy.
       const auto make_fill = [&](unsigned start_member) {
         return [&, start_member](matrix_coexecution::SnapshotBuffer &buffer) {
           size_t max_words = 0;
-          for (unsigned i = start_member; i != step.members; ++i)
-            max_words += size_t(step.snapshot[i].a_regs + step.snapshot[i].b_regs +
-                                step.snapshot[i].sa_regs + step.snapshot[i].sb_regs) *
-                         wf_size;
-          buffer.data.resize(max_words);
-          uint32_t *out = buffer.data.data();
+          for (unsigned i = start_member; i != step.members; ++i) {
+            const auto &sp = step.snapshot[i];
+            const size_t copy_regs =
+                ((sp.rename_mask & mma_plan::SnapshotSpec::kRenameA) ? 0u : sp.a_regs) +
+                ((sp.rename_mask & mma_plan::SnapshotSpec::kRenameB) ? 0u : sp.b_regs) +
+                ((sp.rename_mask & mma_plan::SnapshotSpec::kRenameSa) ? 0u : sp.sa_regs) +
+                ((sp.rename_mask & mma_plan::SnapshotSpec::kRenameSb) ? 0u : sp.sb_regs);
+            max_words += copy_regs * wf_size;
+          }
+          if (max_words)
+            buffer.data.resize(max_words);
+          uint32_t *out = max_words ? buffer.data.data() : nullptr;
           const auto find_cached = [&](unsigned upto, uint32_t phys_base,
                                        uint8_t regs) -> const uint32_t * {
             for (unsigned p = 0; p != upto; ++p) {
@@ -3181,11 +3305,16 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
             }
             return nullptr;
           };
-          const auto copy = [&](unsigned dst_idx, uint16_t base, uint8_t regs,
+          const auto copy = [&](unsigned dst_idx, uint8_t rename_bit, uint8_t rmask, uint16_t base,
+                                uint8_t regs, uint16_t slot_id,
                                 MatrixInputSnapshot::Operand &operand) {
             if (!regs)
               return;
             const uint32_t phys_base = vgpr_base + base;
+            if (rmask & rename_bit) {
+              operand = {phys_base, regs, replay.rename_scratch_reg(slot_id, wf_size)};
+              return;
+            }
             if (const uint32_t *cached = find_cached(dst_idx + 1, phys_base, regs)) {
               operand = {phys_base, regs, cached};
               return;
@@ -3198,17 +3327,26 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
             const unsigned dst_idx = i - start_member;
             const mma_plan::SnapshotSpec &spec = step.snapshot[i];
             buffer.entries[dst_idx] = {};
-            copy(dst_idx, spec.a_base, spec.a_regs, buffer.entries[dst_idx].a);
-            copy(dst_idx, spec.b_base, spec.b_regs, buffer.entries[dst_idx].b);
-            copy(dst_idx, spec.sa_base, spec.sa_regs, buffer.entries[dst_idx].scale_a);
-            copy(dst_idx, spec.sb_base, spec.sb_regs, buffer.entries[dst_idx].scale_b);
+            copy(dst_idx, mma_plan::SnapshotSpec::kRenameA, spec.rename_mask, spec.a_base,
+                 spec.a_regs, spec.a_slot, buffer.entries[dst_idx].a);
+            copy(dst_idx, mma_plan::SnapshotSpec::kRenameB, spec.rename_mask, spec.b_base,
+                 spec.b_regs, spec.b_slot, buffer.entries[dst_idx].b);
+            copy(dst_idx, mma_plan::SnapshotSpec::kRenameSa, spec.rename_mask, spec.sa_base,
+                 spec.sa_regs, spec.sa_slot, buffer.entries[dst_idx].scale_a);
+            copy(dst_idx, mma_plan::SnapshotSpec::kRenameSb, spec.rename_mask, spec.sb_base,
+                 spec.sb_regs, spec.sb_slot, buffer.entries[dst_idx].scale_b);
             buffer.pointers[dst_idx] =
                 spec.a_regs || spec.b_regs || spec.sa_regs || spec.sb_regs
                     ? &buffer.entries[dst_idx]
                     : nullptr;
           }
-          ++cache.stats.snapshot_chains;
-          cache.stats.snapshot_bytes += size_t(out - buffer.data.data()) * sizeof(uint32_t);
+          if (max_words) {
+            const size_t copied = size_t(out - buffer.data.data());
+            if (copied) {
+              ++cache.stats.snapshot_chains;
+              cache.stats.snapshot_bytes += copied * sizeof(uint32_t);
+            }
+          }
           return static_cast<const MatrixInputSnapshot *const *>(buffer.pointers.data());
         };
       };
@@ -3231,8 +3369,11 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
         // serialize an entire 4-MFMA batch while helpers become free.
         ++cache.stats.pool_full;
         for (unsigned i = 0; i != step.members; ++i) {
-          if (!run_inline(*step.chain[i], entry_pc + plan->steps[step.member_step[i]].offset))
+          if (!run_inline_member(step, *step.chain[i], i,
+                                 entry_pc + plan->steps[step.member_step[i]].offset)) {
+            commit_renames_up_to(k);
             return MmaPlanReplayOutcome::Replayed;
+          }
           if (!inline_only && i + 1 < step.members &&
               replay.submit(step.job, step, active, make_fill(i + 1), reap,
                             mma_plan::bounded_wait_enabled(), i + 1)) {
@@ -3249,8 +3390,13 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
       ++(step.kind == mma_plan::StepKind::Alu ? cache.stats.alu : cache.stats.issuer_mma);
       ++active->trace_inst_count_;
       check_waits(step);
-      if (!run_inline(*step.inst, active->pc))
+      const bool ok = step.kind == mma_plan::StepKind::IssuerMma
+                          ? run_inline_member(step, *step.inst, 0, active->pc)
+                          : run_inline(*step.inst, active->pc);
+      if (!ok) {
+        commit_renames_up_to(k);
         return MmaPlanReplayOutcome::Replayed;
+      }
       active->pc += step.size;
       record_gws_instruction_progress(process);
       break;
@@ -3270,24 +3416,113 @@ ComputeUnitCore::MmaPlanReplayOutcome ComputeUnitCore::replay_mma_plan_fetched(
       }
       [[fallthrough]];
     }
+    case mma_plan::StepKind::Lds: {
+      if (step.kind == mma_plan::StepKind::Lds && lds_inline_allowed() &&
+          !observes_register_access_ && !(active->mode_raw() & Wavefront::VSKIP_BIT)) {
+        const bool renamed_load = step.rename_dst_reg != mma_plan::SnapshotSpec::kNoSlot;
+        active->note_potential_execution_effect();
+        active->clear_pending_alu_causes();
+        lds_inline_completed_ = nullptr;
+        util::Result lds_result = util::Result::success();
+        {
+          struct ScopedLdsInline {
+            bool &issue;
+            bool clear_rename;
+            ~ScopedLdsInline() {
+              issue = false;
+              if (clear_rename) {
+                rename_dst_override = nullptr;
+                rename_dst_arch_phys = 0;
+                rename_dst_regs = 0;
+              }
+            }
+          } scoped_lds_inline{lds_inline_issue_, renamed_load};
+          lds_inline_issue_ = true;
+          if (renamed_load) {
+            rename_dst_override = reinterpret_cast<uint8_t *>(
+                replay.rename_scratch_reg(step.rename_dst_reg, wf_size));
+            rename_dst_arch_phys = vgpr_base + step.rename_arch_base;
+            rename_dst_regs = step.rename_dst_regs;
+          }
+          lds_result = execute_instruction(step.inst, *active, &execution_failure_detail_);
+        }
+        if (!step.inst->data()) {
+          if (wait_checks) {
+            if (auto *wait_state = active->memory_wait_scoreboard();
+                wait_state && !wait_state->empty()) {
+              wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
+              if (step.inst->has_embedded_memory_wait() || step.inst->is_memory_wait_producer())
+                wait_state->before(*step.inst, config_.arch);
+              check_waits(step);
+            }
+            if (step.inst->is_memory_wait_producer() && lds_result.succeeded() &&
+                !active->is_halted())
+              track_memory_wait(*step.inst, *active);
+          }
+          if (!lds_result.succeeded() || active->is_halted()) {
+            (void)replay.drain();
+            commit_renames_up_to(k);
+            if (!active->is_halted()) {
+              const std::string_view preserved = active->instruction_execution_error_mnemonic();
+              fail_wave_instruction(*active, preserved.empty() ? step.inst->mnemonic() : preserved,
+                                    active->pc, active->instruction_execution_error(),
+                                    std::exchange(execution_failure_detail_, {}));
+            } else {
+              execution_failure_detail_.clear();
+            }
+            return MmaPlanReplayOutcome::Replayed;
+          }
+          ++cache.stats.lds;
+          if (renamed_load)
+            ++cache.stats.load_renames;
+          ++active->trace_inst_count_;
+          active->pc += step.size;
+          record_gws_instruction_progress(process);
+          break;
+        }
+        step.inst->retire_data();
+      }
+      [[fallthrough]];
+    }
     case mma_plan::StepKind::Ordinary: {
       ++cache.stats.ordinary;
       const uint64_t next = active->pc + step.size;
-      (void)issue_instruction_impl<false>(active);
+      const bool renamed_load = step.rename_dst_reg != mma_plan::SnapshotSpec::kNoSlot;
+      if (renamed_load) {
+        struct ScopedRenameDst {
+          ~ScopedRenameDst() {
+            rename_dst_override = nullptr;
+            rename_dst_arch_phys = 0;
+            rename_dst_regs = 0;
+          }
+        } scoped_rename_dst;
+        rename_dst_override = reinterpret_cast<uint8_t *>(
+            replay.rename_scratch_reg(step.rename_dst_reg, wf_size));
+        rename_dst_arch_phys = vgpr_base + step.rename_arch_base;
+        rename_dst_regs = step.rename_dst_regs;
+        (void)issue_instruction_impl<false>(active);
+      } else {
+        (void)issue_instruction_impl<false>(active);
+      }
       if (active->pc != next || active->state() != WfState::RUNNING || active->is_halted()) {
         // A stall, fault or redirect ends the block. With cross-block off,
         // drain here so ordinary issue never needs the gap footprint check.
         ++cache.stats.early_exit;
         if (!cross_block)
           (void)replay.drain();
+        commit_renames_up_to(k);
         if (!active->is_halted())
           (void)helper_error();
         return MmaPlanReplayOutcome::Replayed;
       }
+      if (renamed_load)
+        ++cache.stats.load_renames;
       break;
     }
     }
   }
+  if (!run_rename_commits_at(static_cast<uint32_t>(plan->steps.size())))
+    return MmaPlanReplayOutcome::Replayed;
   // With cross-block execution the jobs keep running and whatever follows
   // joins only what it depends on; otherwise the block drains here.
   if (!cross_block && !replay.drain())

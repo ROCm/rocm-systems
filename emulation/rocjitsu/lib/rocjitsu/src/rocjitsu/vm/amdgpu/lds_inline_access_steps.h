@@ -10,6 +10,7 @@
 #pragma once
 
 #include "rocjitsu/base/rj_compiler.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/matrix_input_snapshot.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/lds_inline_access.h"
@@ -102,8 +103,13 @@ RJ_ALWAYS_INLINE inline void read_steps(const LdsAccessRequest &req, Wavefront &
   // 4. The writeback's registers (ownership was checked in 1d) and lanes. The
   //    caller's typed writeback (lds_writeback.h) stores the active lanes,
   //    applying sign_extend / d16.
-  for (uint32_t i = 0; i < dst_vgprs; ++i)
-    load.dst[i] = cu.raw_vgpr_data(dst_vgpr + i);
+  if (uint8_t *override_dst = resolve_rename_dst(dst_vgpr, dst_vgprs, Wave)) [[unlikely]] {
+    for (uint32_t i = 0; i < dst_vgprs; ++i)
+      load.dst[i] = override_dst + i * Wave * sizeof(uint32_t);
+  } else {
+    for (uint32_t i = 0; i < dst_vgprs; ++i)
+      load.dst[i] = cu.raw_vgpr_data(dst_vgpr + i);
+  }
   load.exec = exec;
 }
 

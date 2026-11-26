@@ -176,7 +176,7 @@ TEST(MmaPlanTest, SuccessorIsChainedAcrossAnLdsReadOfOtherRegisters) {
   const auto result = p.compile();
   ASSERT_TRUE(result.accept);
   ASSERT_EQ(result.steps.size(), 6u);
-  EXPECT_EQ(result.steps[2].kind, plan::StepKind::Ordinary);
+  EXPECT_EQ(result.steps[2].kind, plan::StepKind::Lds);
   EXPECT_EQ(result.steps[4].kind, plan::StepKind::Chained);
   EXPECT_EQ(result.steps[5].kind, plan::StepKind::Chained);
   EXPECT_EQ(result.steps[0].members, 2u);
@@ -210,7 +210,7 @@ TEST(MmaPlanTest, LdsWritesAndScalarM0UpdatesStayInsideTheBlock) {
   p.mfma(1);
   const auto result = p.compile();
   ASSERT_EQ(result.steps.size(), 4u);
-  EXPECT_EQ(result.steps[1].kind, plan::StepKind::Ordinary);
+  EXPECT_EQ(result.steps[1].kind, plan::StepKind::Lds);
   EXPECT_EQ(result.steps[2].kind, plan::StepKind::Alu);
   EXPECT_TRUE(result.accept);
 }
@@ -235,7 +235,8 @@ TEST(MmaPlanTest, LdsReadsBetweenIndependentChainsDoNotEndJobs) {
   EXPECT_EQ(jobs, 10u);
   EXPECT_EQ(members, 10u);
   EXPECT_EQ(count(result, plan::StepKind::IssuerMma), 0u);
-  EXPECT_EQ(count(result, plan::StepKind::Ordinary), 10u);
+  EXPECT_EQ(count(result, plan::StepKind::Lds), 10u);
+  EXPECT_EQ(count(result, plan::StepKind::Ordinary), 0u);
 }
 
 TEST(MmaPlanTest, SuccessorWhoseFactorIsLoadedLaterIsNotChained) {
@@ -1096,6 +1097,173 @@ TEST(MmaPlanTest, RejectedSerialChainSetsNonTruncatedSpanAndInvalidatesOnEpochCh
   EXPECT_FALSE(span.contains(&fake_wave, 2, icache.epoch(), 64, wmma_pcs[1]));
   cache.clear();
   EXPECT_FALSE(cache.rejected_span(0).contains(&fake_wave, 1, icache.epoch(), 64, wmma_pcs[0]));
+}
+
+TEST(MmaPlanTest, ScratchRenameEliminatesRepeatedDsReadWarSnapshots) {
+  Program p;
+  p.pack_limit = 1;
+  // v0: two independent MFMAs reading shared A=v[0:3].
+  p.mfma(0, /*a=*/0, /*b=*/16);
+  p.mfma(1, /*a=*/0, /*b=*/20);
+  // v1: ds_read_b128 overwrites v[0:3] (step 2).
+  p.ds_read_b128(0);
+  p.mfma(2, /*a=*/0, /*b=*/16);
+  p.mfma(3, /*a=*/0, /*b=*/20);
+  // Read acc 0 (v64) & acc 1 (v68) via ALU so v0_readers are joined before v2 write.
+  for (uint8_t src : {uint8_t(64), uint8_t(68)}) {
+    const auto w = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = uint16_t(256 + src), .vdst = 50});
+    p.words.insert(p.words.end(), w.begin(), w.end());
+  }
+  // v2 (final write, step 7): v0_readers already joined -> final_uses_arch, zero commits.
+  p.ds_read_b128(0);
+  p.mfma(2, /*a=*/0, /*b=*/16);
+  p.mfma(3, /*a=*/0, /*b=*/20);
+
+  const auto result = p.compile();
+  ASSERT_TRUE(result.accept);
+  EXPECT_EQ(result.rename_scratch_regs, 4u);
+  EXPECT_TRUE(result.rename_commits.empty());
+  // Step 2 (v1 load) writes scratch slot 0; step 7 (v2 final load) writes arch directly.
+  EXPECT_EQ(result.steps[2].rename_dst_reg, 0u);
+  EXPECT_EQ(result.steps[2].rename_arch_base, 0u);
+  EXPECT_EQ(result.steps[2].rename_dst_regs, 4u);
+  EXPECT_EQ(result.steps[7].rename_dst_reg, plan::SnapshotSpec::kNoSlot);
+  // v0 readers (steps 0, 1) have snapshots cleared; v1 readers (steps 3, 4) read scratch slot 0.
+  EXPECT_EQ(result.steps[0].snapshot[0].a_regs, 0u);
+  EXPECT_EQ(result.steps[1].snapshot[0].a_regs, 0u);
+  EXPECT_NE(result.steps[3].snapshot[0].rename_mask & plan::SnapshotSpec::kRenameA, 0u);
+  EXPECT_EQ(result.steps[3].snapshot[0].a_slot, 0u);
+  EXPECT_NE(result.steps[4].snapshot[0].rename_mask & plan::SnapshotSpec::kRenameA, 0u);
+  EXPECT_EQ(result.steps[4].snapshot[0].a_slot, 0u);
+}
+
+TEST(MmaPlanTest, ScratchRenameCutoffHandlesDeadOverwriteAndLiveMidBlockCommit) {
+  // Case 1: Late non-load ALU overwrites v[0:3] completely (dead at cutoff -> 0 commits,
+  // but v0_readers must be joined before the first architectural write at step 5).
+  {
+    Program p;
+    p.pack_limit = 1;
+    p.mfma(0, /*a=*/0, /*b=*/16);
+    p.mfma(1, /*a=*/0, /*b=*/20);
+    p.ds_read_b128(0); // step 2 -> renamed
+    p.mfma(2, /*a=*/0, /*b=*/16);
+    p.mfma(3, /*a=*/0, /*b=*/20);
+    for (uint8_t r = 0; r != 4; ++r) {
+      const auto w = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = uint16_t(256 + 40 + r), .vdst = r});
+      p.words.insert(p.words.end(), w.begin(), w.end());
+    }
+    const auto result = p.compile();
+    ASSERT_TRUE(result.accept);
+    EXPECT_EQ(result.rename_scratch_regs, 4u);
+    EXPECT_EQ(result.steps[2].rename_dst_reg, 0u);
+    EXPECT_TRUE(result.rename_commits.empty());
+    // Step 5 (first v_mov into v0) must join both v0_readers (jobs 0 and 1).
+    const plan::JobMask v0_mask = (plan::JobMask{1} << result.steps[0].job) |
+                                  (plan::JobMask{1} << result.steps[1].job);
+    EXPECT_EQ(result.steps[5].wait & v0_mask, v0_mask);
+  }
+  // Case 2: Late ds_write_b128 reads v[0:3] (live at cutoff -> mid-block RenameCommit).
+  {
+    Program p;
+    p.pack_limit = 1;
+    p.mfma(0, /*a=*/0, /*b=*/16);
+    p.mfma(1, /*a=*/0, /*b=*/20);
+    p.ds_read_b128(0); // step 2 -> renamed
+    p.mfma(2, /*a=*/0, /*b=*/16);
+    p.mfma(3, /*a=*/0, /*b=*/20);
+    p.ds_write_b128(0); // step 5 -> reads v[0:3] -> triggers mid-block commit
+    const auto result = p.compile();
+    ASSERT_TRUE(result.accept);
+    EXPECT_EQ(result.rename_scratch_regs, 4u);
+    EXPECT_EQ(result.steps[2].rename_dst_reg, 0u);
+    EXPECT_TRUE(result.steps[5].has_rename_commit_before);
+    ASSERT_EQ(result.rename_commits.size(), 1u);
+    EXPECT_EQ(result.rename_commits[0].before_step, 5u);
+    EXPECT_EQ(result.rename_commits[0].arch_base, 0u);
+    EXPECT_EQ(result.rename_commits[0].scratch_reg, 0u);
+    EXPECT_EQ(result.rename_commits[0].regs, 4u);
+  }
+}
+
+TEST(MmaPlanTest, ScratchRenameHandlesSplitTransposeLoads) {
+  Program p;
+  p.pack_limit = 1;
+  p.mfma(0, /*a=*/0, /*b=*/16);
+  p.mfma(1, /*a=*/0, /*b=*/20);
+  const auto tr_lo = cdna4::build_ds(cdna4::kDsReadB64TrB16, {.addr = 200, .vdst = 0});
+  const auto tr_hi = cdna4::build_ds(cdna4::kDsReadB64TrB16, {.addr = 200, .vdst = 2});
+  p.words.insert(p.words.end(), tr_lo.begin(), tr_lo.end());
+  p.words.insert(p.words.end(), tr_hi.begin(), tr_hi.end());
+  p.mfma(2, /*a=*/0, /*b=*/16);
+  p.mfma(3, /*a=*/0, /*b=*/20);
+
+  const auto result = p.compile();
+  ASSERT_TRUE(result.accept);
+  EXPECT_EQ(result.rename_scratch_regs, 4u);
+  EXPECT_EQ(result.steps[2].rename_dst_reg, 0u);
+  EXPECT_EQ(result.steps[2].rename_dst_regs, 2u);
+  EXPECT_EQ(result.steps[3].rename_dst_reg, 2u);
+  EXPECT_EQ(result.steps[3].rename_dst_regs, 2u);
+  EXPECT_NE(result.steps[4].snapshot[0].rename_mask & plan::SnapshotSpec::kRenameA, 0u);
+  EXPECT_EQ(result.steps[4].snapshot[0].a_slot, 0u);
+  EXPECT_NE(result.steps[5].snapshot[0].rename_mask & plan::SnapshotSpec::kRenameA, 0u);
+  EXPECT_EQ(result.steps[5].snapshot[0].a_slot, 0u);
+}
+
+TEST(MmaPlanTest, Cdna4DenseF64F32Bf16I8AndSparseSmfmacPlanAndRenameCorrectly) {
+  auto decoder = Decoder::create(IsaFamily::Cdna4);
+  for (uint16_t opcode :
+       {cdna4::kVMfmaF6416x16x4F64Vop3pMfma, cdna4::kVMfmaF3232x32x2F32Vop3pMfma,
+        cdna4::kVMfmaF3216x16x16Bf16Vop3pMfma, cdna4::kVMfmaI3216x16x64I8Vop3pMfma}) {
+    Program p;
+    for (unsigned acc = 0; acc != 2; ++acc) {
+      const uint8_t dst = static_cast<uint8_t>(64 + 16 * acc);
+      const auto w = cdna4::build_vop3p_mfma(
+          opcode, {.vdst = dst, .src0 = 256 + 0, .src1 = 256 + 8, .src2 = uint16_t(256 + dst)});
+      p.words.insert(p.words.end(), w.begin(), w.end());
+    }
+    const auto compiled = p.compile();
+    ASSERT_TRUE(compiled.accept) << "opcode=" << opcode;
+    EXPECT_EQ(count(compiled, plan::StepKind::Offload), 2u) << "opcode=" << opcode;
+  }
+
+  const auto smfmac0_w = cdna4::build_vop3p_mfma(
+      cdna4::kVSmfmacF3216x16x64F16Vop3pMfma,
+      {.vdst = 64, .src0 = 256 + 0, .src1 = 256 + 16, .src2 = 256 + 40});
+  std::unique_ptr<Instruction> smfmac0(decode_valid(*decoder, smfmac0_w.data()));
+  ASSERT_TRUE(plan::offloadable(*smfmac0, /*has_accvgprs=*/true));
+  const auto mo = plan::member_operands(*smfmac0, 0, 256, /*has_accvgprs=*/true, 64);
+  ASSERT_TRUE(mo.has_value());
+  EXPECT_EQ(mo->a_base, 0u);
+  EXPECT_EQ(mo->a_regs, 4u);
+  EXPECT_EQ(mo->b_base, 16u);
+  EXPECT_EQ(mo->b_regs, 8u);
+  EXPECT_EQ(mo->sa_regs, 0u);
+  EXPECT_EQ(mo->sb_regs, 0u);
+  EXPECT_TRUE(mo->other.reads.test(64) && mo->other.reads.test(67));
+  EXPECT_TRUE(mo->other.writes.test(64) && mo->other.writes.test(67));
+  EXPECT_TRUE(mo->other.reads.test(40));
+
+  Program sp;
+  sp.pack_limit = 1;
+  sp.words.insert(sp.words.end(), smfmac0_w.begin(), smfmac0_w.end());
+  const auto smfmac1_w = cdna4::build_vop3p_mfma(
+      cdna4::kVSmfmacF3216x16x64F16Vop3pMfma,
+      {.vdst = 72, .src0 = 256 + 0, .src1 = 256 + 24, .src2 = 256 + 41});
+  sp.words.insert(sp.words.end(), smfmac1_w.begin(), smfmac1_w.end());
+  sp.ds_read_b128(0); // overwrites A=v[0:3] -> resolved by scratch rename (no snapshot, no join)
+  const auto mov_idx = cdna4::build_vop1(cdna4::kVMovB32Vop1, {.src0 = 256 + 42, .vdst = 40});
+  sp.words.insert(sp.words.end(), mov_idx.begin(), mov_idx.end());
+  const auto compiled_sp = sp.compile();
+  ASSERT_TRUE(compiled_sp.accept);
+  EXPECT_EQ(count(compiled_sp, plan::StepKind::Offload), 2u);
+  EXPECT_EQ(compiled_sp.steps[2].rename_dst_reg, 0u);
+  EXPECT_EQ(compiled_sp.steps[0].snapshot[0].a_regs, 0u);
+  EXPECT_EQ(compiled_sp.steps[2].wait, 0u) << "A overwrite must rename, not wait";
+  EXPECT_EQ(compiled_sp.steps[3].wait, plan::JobMask{1} << compiled_sp.steps[0].job)
+      << "sparse index overwrite must wait for job 0";
+  EXPECT_EQ(compiled_sp.steps[2].kind, plan::StepKind::Lds);
+  EXPECT_TRUE(compiled_sp.steps[0].direct_vgpr_wait);
 }
 
 } // namespace

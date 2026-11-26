@@ -57,7 +57,9 @@ inline unsigned idle_spin_count() {
     if (pauses)
       return pauses;
     // A borrowed core belongs to dispatch the moment the helper is idle.
-    return borrow_budget() ? 1u << 10 : 1u << 13;
+    // Dedicated helpers stay awake across K-loop gaps to avoid CU-path futex
+    // wakeups while still sleeping during long non-MMA phases.
+    return borrow_budget() ? 1u << 10 : 1u << 16;
   }();
   return count;
 }

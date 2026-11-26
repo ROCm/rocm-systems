@@ -81,14 +81,22 @@ enum class StepKind : uint8_t {
   IssuerMma, ///< Matrix instruction kept on the issuer.
   Alu,       ///< Retained pure arithmetic executed on the issuer.
   Wait,      ///< Retained non-SOPK waitcnt executed directly when wait counters are zero.
+  Lds,       ///< Retained plain LDS access executed directly via LdsInlineAccess.
   Ordinary,  ///< Ordinary issue: memory and other stateful instructions.
 };
 
 /// @brief Factor registers copied at submission because a later issuer step overwrites them.
 struct SnapshotSpec {
+  static constexpr uint16_t kNoSlot = 0xffffu;
+  static constexpr uint8_t kRenameA = 1u << 0;
+  static constexpr uint8_t kRenameB = 1u << 1;
+  static constexpr uint8_t kRenameSa = 1u << 2;
+  static constexpr uint8_t kRenameSb = 1u << 3;
   uint16_t a_base = 0, b_base = 0; ///< Wave-relative; AccVGPRs start at 256.
   uint16_t sa_base = 0, sb_base = 0; ///< Block scales of a scaled MFMA, one register each.
   uint8_t a_regs = 0, b_regs = 0, sa_regs = 0, sb_regs = 0;
+  uint8_t rename_mask = 0; ///< Bitmask of operands reading PendingJobs::rename_scratch_.
+  uint16_t a_slot = kNoSlot, b_slot = kNoSlot, sa_slot = kNoSlot, sb_slot = kNoSlot;
 };
 
 struct Step {
@@ -99,7 +107,11 @@ struct Step {
   JobMask wait = 0;  ///< Helper jobs joined before the step.
   uint8_t members = 0;
   bool direct_vgpr_wait = false; ///< True when vgpr_wait_mask suffices for MemoryWaitScoreboard prefilter.
-  std::array<uint64_t, 4> vgpr_wait_mask{}; ///< Precompiled VGPR [0..255] reads|writes for wait checks.
+  bool has_rename_commit_before = false; ///< True when Plan::rename_commits has entries at this step.
+  uint16_t rename_dst_reg = SnapshotSpec::kNoSlot; ///< Scratch VGPR offset for redirected load.
+  uint16_t rename_arch_base = 0;                   ///< Wave-relative arch VGPR base of redirected load.
+  uint8_t rename_dst_regs = 0;                     ///< Contiguous scratch VGPRs written by redirected load.
+  std::array<uint64_t, 8> vgpr_wait_mask{}; ///< Precompiled VGPR [0..255] + AccVGPR [256..511] reads|writes.
   Instruction *inst = nullptr;
   std::array<Instruction *, kMaxChain> chain{};
   bool snapshots = false;
@@ -113,15 +125,17 @@ struct Step {
 inline bool offloadable(const Instruction &inst, bool has_accvgprs) {
   if (!async_mma_policy::candidate(inst))
     return false;
+  const bool cdna_smfmac = async_mma_policy::is_cdna4_smfmac(inst.amdgpu_operation());
   const int sources = inst.num_src_operands();
-  if (inst.num_dst_operands() != 1 || (sources != 3 && sources != 5))
+  if (inst.num_dst_operands() != 1 ||
+      (cdna_smfmac ? sources != 4 : (sources != 3 && sources != 5)))
     return false;
   for (int i = 0; i <= sources; ++i) {
     const auto *operand = i == sources ? inst.dst_operand(0) : inst.src_operand(i);
     const auto ref = operand->to_register_ref();
     if (ref && (ref->cls == RegClass::VGPR || (has_accvgprs && ref->cls == RegClass::ACC_VGPR)))
       continue;
-    if (i < 2 || i == sources || !operand->const_value())
+    if (cdna_smfmac || i < 2 || i == sources || !operand->const_value())
       return false;
   }
   return true;
@@ -150,6 +164,78 @@ inline bool fast_wait(const Instruction &inst) {
          inst.num_src_operands() < 2;
 }
 
+/// @brief Plain LDS access retained in the plan for direct LdsInlineAccess issue.
+inline bool fast_lds(const Instruction &inst) {
+  return async_mma_policy::lds_access(inst.amdgpu_operation()) &&
+         !async_mma_policy::global_data_share(inst);
+}
+
+/// @brief Whole-dword LDS/VMEM loads eligible for compile-time scratch VGPR
+/// destination renaming (no d16 partial updates, no atomics, no GDS).
+inline bool renamable_load(const Instruction &inst) {
+  if (async_mma_policy::global_data_share(inst))
+    return false;
+  switch (inst.amdgpu_operation()) {
+  case Operation::DS_LOAD_B32:
+  case Operation::DS_LOAD_B64:
+  case Operation::DS_LOAD_B96:
+  case Operation::DS_LOAD_B128:
+  case Operation::DS_LOAD_2ADDR_B32:
+  case Operation::DS_LOAD_2ADDR_B64:
+  case Operation::DS_LOAD_2ADDR_STRIDE64_B32:
+  case Operation::DS_LOAD_2ADDR_STRIDE64_B64:
+  case Operation::DS_LOAD_TR4_B64:
+  case Operation::DS_LOAD_TR6_B96:
+  case Operation::DS_LOAD_TR8_B64:
+  case Operation::DS_LOAD_TR16_B128:
+  case Operation::DS_READ_B32:
+  case Operation::DS_READ_B64:
+  case Operation::DS_READ_B96:
+  case Operation::DS_READ_B128:
+  case Operation::DS_READ2_B32:
+  case Operation::DS_READ2_B64:
+  case Operation::DS_READ2ST64_B32:
+  case Operation::DS_READ2ST64_B64:
+  case Operation::DS_READ_B64_TR_B16:
+  case Operation::DS_READ_B64_TR_B8:
+  case Operation::DS_READ_B64_TR_B4:
+  case Operation::DS_READ_B96_TR_B6:
+  case Operation::BUFFER_LOAD_DWORD:
+  case Operation::BUFFER_LOAD_DWORDX2:
+  case Operation::BUFFER_LOAD_DWORDX3:
+  case Operation::BUFFER_LOAD_DWORDX4:
+  case Operation::BUFFER_LOAD_B32:
+  case Operation::BUFFER_LOAD_B64:
+  case Operation::BUFFER_LOAD_B96:
+  case Operation::BUFFER_LOAD_B128:
+  case Operation::GLOBAL_LOAD_DWORD:
+  case Operation::GLOBAL_LOAD_DWORDX2:
+  case Operation::GLOBAL_LOAD_DWORDX3:
+  case Operation::GLOBAL_LOAD_DWORDX4:
+  case Operation::GLOBAL_LOAD_B32:
+  case Operation::GLOBAL_LOAD_B64:
+  case Operation::GLOBAL_LOAD_B96:
+  case Operation::GLOBAL_LOAD_B128:
+  case Operation::GLOBAL_LOAD_TR_B64:
+  case Operation::GLOBAL_LOAD_TR_B128:
+  case Operation::GLOBAL_LOAD_TR4_B64:
+  case Operation::GLOBAL_LOAD_TR6_B96:
+  case Operation::GLOBAL_LOAD_TR8_B64:
+  case Operation::GLOBAL_LOAD_TR16_B128:
+  case Operation::FLAT_LOAD_DWORD:
+  case Operation::FLAT_LOAD_DWORDX2:
+  case Operation::FLAT_LOAD_DWORDX3:
+  case Operation::FLAT_LOAD_DWORDX4:
+  case Operation::FLAT_LOAD_B32:
+  case Operation::FLAT_LOAD_B64:
+  case Operation::FLAT_LOAD_B96:
+  case Operation::FLAT_LOAD_B128:
+    return true;
+  default:
+    return false;
+  }
+}
+
 /// @brief Issuer steps that can neither stall nor trap, so a helper may run a
 /// later member before them: LDS accesses (no virtual memory behind them) and
 /// waits (functional memory completes at issue). Register effects are still
@@ -176,9 +262,18 @@ inline bool alu_enabled() {
   static const bool enabled = knob("RJ_MMA_PLAN_ALU");
   return enabled;
 }
+inline bool lds_enabled() {
+  static const bool enabled = knob("RJ_MMA_PLAN_LDS");
+  return enabled;
+}
 /// RJ_MMA_PLAN_SNAPSHOT=0 keeps write-after-read hazards as joins.
 inline bool snapshot_enabled() {
   static const bool enabled = knob("RJ_MMA_PLAN_SNAPSHOT");
+  return enabled;
+}
+/// RJ_MMA_SCRATCH_RENAME=0 disables compile-time scratch VGPR renaming for WAR loads.
+inline bool scratch_rename_enabled() {
+  static const bool enabled = knob("RJ_MMA_SCRATCH_RENAME");
   return enabled;
 }
 /// RJ_MMA_CROSS_BLOCK=1 lets helper jobs outlive their block: the next block
@@ -244,8 +339,23 @@ inline unsigned mma_weight(const Instruction &inst) {
   case Operation::V_MFMA_F32_16X16X32_BF16:
   case Operation::V_MFMA_F32_32X32X16_BF16:
     return 9;
+  case Operation::V_MFMA_F64_16X16X4_F64:
+  case Operation::V_MFMA_F64_4X4X4_4B_F64:
+    return 3;
+  case Operation::V_MFMA_F32_32X32X2_F32:
+    return 15;
+  case Operation::V_MFMA_F32_16X16X4_F32:
+    return 2;
+  case Operation::V_MFMA_I32_16X16X64_I8:
+  case Operation::V_MFMA_I32_32X32X32_I8:
+    return 10;
+  case Operation::V_MFMA_I32_16X16X32_I8:
+  case Operation::V_MFMA_I32_32X32X16_I8:
+    return 6;
   case Operation::V_MFMA_F32_16X16X16_F16:
   case Operation::V_MFMA_F32_32X32X8_F16:
+  case Operation::V_MFMA_F32_16X16X16_BF16:
+  case Operation::V_MFMA_F32_32X32X8_BF16:
     return 5;
   case Operation::V_WMMA_F32_16X16X16_FP8_FP8:
   case Operation::V_WMMA_F32_16X16X16_FP8_BF8:
@@ -378,7 +488,9 @@ inline std::optional<MemberOperands> member_operands(const Instruction &inst, un
                                                      uint32_t wave_size = 32) {
   MemberOperands member;
   member.step = step;
-  const bool tied_dst = async_mma_policy::is_rdna4_swmmac(inst.amdgpu_operation());
+  const Operation op = inst.amdgpu_operation();
+  const bool cdna_smfmac = async_mma_policy::is_cdna4_smfmac(op);
+  const bool tied_dst = async_mma_policy::is_rdna4_swmmac(op) || cdna_smfmac;
   const auto range = [&](const Operand *operand, uint16_t &base,
                          uint8_t &regs) -> std::optional<bool> {
     const auto ref = operand ? operand->to_register_ref() : std::nullopt;
@@ -402,6 +514,21 @@ inline std::optional<MemberOperands> member_operands(const Instruction &inst, un
       return std::nullopt;
     if (!*found)
       continue;
+    if (cdna_smfmac) {
+      // CDNA4 V_SMFMAC_* puts tied vdst at src[0], A at src[1], B at src[2],
+      // and sparse index at src[3].
+      if (i == 1) {
+        member.a_base = base;
+        member.a_regs = regs;
+      } else if (i == 2) {
+        member.b_base = base;
+        member.b_regs = regs;
+      } else {
+        for (unsigned r = 0; r != regs; ++r)
+          member.other.reads.set(base + r);
+      }
+      continue;
+    }
     if (i == 0) {
       member.a_base = base;
       member.a_regs = regs;
@@ -447,7 +574,7 @@ struct Plan {
   std::vector<Snapshot> code;
   std::vector<Step> steps;
   std::vector<std::unique_ptr<Instruction>> owned;
-  unsigned chains = 0, chained = 0, issuer_mma = 0, alu = 0, wait = 0, ordinary = 0;
+  unsigned chains = 0, chained = 0, issuer_mma = 0, alu = 0, wait = 0, lds = 0, ordinary = 0;
   /// Union of every step's registers, and per register the first step that
   /// touches or writes it (kNoStep if none): a block entered while earlier
   /// jobs still run joins each job at the first step that depends on it.
@@ -457,6 +584,26 @@ struct Plan {
   std::array<uint8_t, 2 * Access::kRegistersPerBank> first_access{}, first_write{};
   /// Per-job register accesses (snapshotted factors excluded), indexed by Step::job.
   std::vector<Access> job_accesses;
+  /// Renamed register range to commit back to architectural VgprFile before
+  /// `before_step` (or at block end when `before_step == steps.size()`).
+  struct RenameCommit {
+    uint16_t before_step = 0;
+    uint16_t arch_base = 0;
+    uint16_t scratch_reg = 0;
+    uint8_t regs = 0;
+    JobMask wait_arch_readers = 0;
+  };
+  /// Architectural writes by non-renamed steps into registers claimed by renaming,
+  /// used only on the cold early-exit/fault commit path to avoid clobbering newer defs.
+  struct ArchWrite {
+    uint16_t step = 0;
+    uint16_t arch_base = 0;
+    uint8_t regs = 0;
+  };
+  static constexpr uint16_t kMaxRenameRegs = 512;
+  uint16_t rename_scratch_regs = 0;
+  std::vector<RenameCommit> rename_commits;
+  std::vector<ArchWrite> rename_arch_writes;
 
   Plan() = default;
   Plan(Plan &&) = default;
@@ -469,6 +616,9 @@ struct Plan {
     first_access = other.first_access;
     first_write = other.first_write;
     job_accesses = std::move(other.job_accesses);
+    rename_scratch_regs = other.rename_scratch_regs;
+    rename_commits = std::move(other.rename_commits);
+    rename_arch_writes = std::move(other.rename_arch_writes);
     epoch = other.epoch;
     length = other.length;
     first = other.first;
@@ -480,6 +630,7 @@ struct Plan {
     issuer_mma = other.issuer_mma;
     alu = other.alu;
     wait = other.wait;
+    lds = other.lds;
     ordinary = other.ordinary;
     return *this;
   }
@@ -505,7 +656,8 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
              unsigned pack_limit = batch_pack_limit(),
              unsigned min_chains = batch_min_chains(),
              unsigned min_weight = min_job_weight(), uint32_t wave_size = 32,
-             rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4) {
+             rocjitsu::IsaFamily arch = rocjitsu::IsaFamily::Cdna4,
+             bool allow_rename = scratch_rename_enabled()) {
   Instruction::ScopedHeapAllocation heap;
   // A logical chain: one helper job if offloaded. `joined` is the first step
   // that must wait for it; the block end if none does.
@@ -529,6 +681,9 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
   std::vector<int> step_chain;            // logical chain executing each MMA step, -1 otherwise
   std::vector<std::vector<unsigned>> joins; // logical chains each step waits for
   std::vector<bool> wall;                 // issuer step that could stall or fault
+  std::vector<bool> step_renamable_load;
+  std::vector<decltype(Access::reads)> step_load_src_reads;
+  std::vector<std::optional<MemberOperands>> step_mma_operands;
   uint64_t offset = 0;
   unsigned current = 0;
   const auto join = [&](const std::vector<unsigned> &which) {
@@ -615,18 +770,16 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     Step step;
     step.size = static_cast<uint8_t>(inst->size());
     step.offset = static_cast<uint16_t>(offset);
-    // Precompile the VGPR [0..255] wait-check mask so replay_mma_plan can skip
-    // per-operand virtual calls in MemoryWaitScoreboard::check_instruction().
+    // Precompile the VGPR [0..255] + AccVGPR [256..511] wait-check mask so
+    // replay_mma_plan can skip per-operand virtual calls in
+    // MemoryWaitScoreboard::check_instruction().
     {
       const auto touched = access->reads | access->writes;
-      bool has_acc_bits = false;
       for_each_register(touched, [&](unsigned r) {
-        if (r < 256u)
+        if (r < 512u)
           step.vgpr_wait_mask[r >> 6] |= uint64_t{1} << (r & 63u);
-        else
-          has_acc_bits = true;
       });
-      bool direct = !has_acc_bits && (inst->flags() & DIRECT_REGISTER_ACCESSES) != 0;
+      bool direct = (inst->flags() & DIRECT_REGISTER_ACCESSES) != 0;
       if (direct) {
         for (int i = 0; i < inst->num_src_operands() && direct; ++i) {
           const auto *op = inst->src_operand(i);
@@ -682,13 +835,16 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     } else {
       join(conflicts);
       joins.back() = conflicts;
-      // Retain stateless arithmetic and non-SOPK waits. Memory instructions
-      // keep per-issue state and go through ordinary issue.
+      // Retain stateless arithmetic, non-SOPK waits, and plain LDS accesses.
+      // Vector memory keeps per-issue state and goes through ordinary issue.
       if (alu_enabled() && pure_alu(*inst)) {
         step.kind = StepKind::Alu;
         step.inst = inst.get();
       } else if (alu_enabled() && fast_wait(*inst)) {
         step.kind = StepKind::Wait;
+        step.inst = inst.get();
+      } else if (alu_enabled() && lds_enabled() && fast_lds(*inst)) {
+        step.kind = StepKind::Lds;
         step.inst = inst.get();
       }
       // An issuer step that could stall or fault closes every running chain
@@ -699,6 +855,26 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
           chains[c].open = false;
       }
     }
+    const bool is_renamable =
+        (step.kind == StepKind::Ordinary || step.kind == StepKind::Lds) && renamable_load(*inst);
+    step_renamable_load.push_back(is_renamable);
+    decltype(Access::reads) load_src{};
+    if (is_renamable) {
+      for (int i = 0; i < inst->num_src_operands(); ++i) {
+        const auto *op = inst->src_operand(i);
+        if (!op || !op->is_vgpr())
+          continue;
+        if (const auto ref = op->to_register_ref();
+            ref && (ref->cls == RegClass::VGPR || (has_accvgprs && ref->cls == RegClass::ACC_VGPR))) {
+          const uint32_t base =
+              ref->index + (ref->cls == RegClass::ACC_VGPR ? Access::kRegistersPerBank : 0);
+          for (uint32_t r = 0; r != ref->width && base + r < load_src.size(); ++r)
+            load_src.set(base + r);
+        }
+      }
+    }
+    step_load_src_reads.push_back(load_src);
+    step_mma_operands.push_back(operands);
     if (step.inst)
       plan.owned.push_back(std::move(inst));
     plan.steps.push_back(step);
@@ -725,7 +901,8 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
   }
   unsigned total_issuer_work = 0;
   for (unsigned k = 0; k != steps; ++k) {
-    if (plan.steps[k].kind == StepKind::Alu || plan.steps[k].kind == StepKind::Ordinary)
+    if (plan.steps[k].kind == StepKind::Alu || plan.steps[k].kind == StepKind::Lds ||
+        plan.steps[k].kind == StepKind::Ordinary)
       ++total_issuer_work;
   }
   bool single_chain_overlap = false;
@@ -738,7 +915,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
         continue;
       unsigned mem_overlap = 0, alu_overlap = 0;
       for (unsigned k = chain.head + 1; k < chain.joined; ++k) {
-        if (plan.steps[k].kind == StepKind::Ordinary)
+        if (plan.steps[k].kind == StepKind::Ordinary || plan.steps[k].kind == StepKind::Lds)
           ++mem_overlap;
         else if (plan.steps[k].kind == StepKind::Alu)
           ++alu_overlap;
@@ -893,16 +1070,26 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
   }
   // Fill each job's member list in program order of its host chain, then of
   // the chains appended to it.
+  struct StepMemberLoc {
+    unsigned head_step = 0;
+    uint8_t member_idx = 0;
+    int job_id = -1;
+    const MemberOperands *mem = nullptr;
+  };
+  std::vector<StepMemberLoc> step_member(steps);
   plan.job_accesses.assign(job_host.size(), {});
   for (unsigned j = 0; j != job_host.size(); ++j) {
-    auto &head = plan.steps[chains[job_host[j]].head];
+    const unsigned head_step = chains[job_host[j]].head;
+    auto &head = plan.steps[head_step];
     for (int c : job_chains[j]) {
       plan.job_accesses[j].reads |= chains[c].access.reads;
       plan.job_accesses[j].writes |= chains[c].access.writes;
       for (unsigned i = 0; i != chains[c].count; ++i) {
         const auto &member = chains[c].members[i];
         const unsigned at = member.step;
-        auto &spec = head.snapshot[head.members];
+        const uint8_t m_idx = head.members;
+        step_member[at] = {head_step, m_idx, int(j), &member};
+        auto &spec = head.snapshot[m_idx];
         if (member.a_snap)
           spec.a_base = member.a_base, spec.a_regs = member.a_regs;
         if (member.b_snap)
@@ -912,8 +1099,462 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
         if (member.sb_snap)
           spec.sb_base = member.sb_base, spec.sb_regs = 1;
         head.snapshots |= member.a_snap || member.b_snap || member.sa_snap || member.sb_snap;
-        head.member_step[head.members] = uint8_t(at);
+        head.member_step[m_idx] = uint8_t(at);
         head.chain[head.members++] = plan.steps[at].inst;
+      }
+    }
+  }
+  // Compile-time scratch-VGPR register renaming (static SSA inside one block):
+  // redirect whole-dword WAR loads into a tiny per-wave scratch VGPR tail and
+  // point consumer MMA jobs (both Offload and IssuerMma) directly at those
+  // scratch slots via MatrixInputSnapshot (0 B snapshot copies).
+  plan.rename_scratch_regs = 0;
+  plan.rename_commits.clear();
+  plan.rename_arch_writes.clear();
+  if (allow_rename && snapshot_enabled() && !tail_snapshot) {
+    struct CandRange {
+      uint16_t base = 0;
+      uint8_t regs = 0;
+      bool operator==(const CandRange &) const = default;
+    };
+    std::vector<CandRange> candidates;
+    const auto add_cand = [&](uint16_t base, uint8_t regs) {
+      if (!regs || regs > 8u || uint32_t(base) + regs > Access::kRegistersPerBank)
+        return;
+      const CandRange r{base, regs};
+      if (std::find(candidates.begin(), candidates.end(), r) == candidates.end())
+        candidates.push_back(r);
+    };
+    for (unsigned j = 0; j != job_host.size(); ++j) {
+      const auto &head = plan.steps[chains[job_host[j]].head];
+      if (!head.snapshots)
+        continue;
+      for (unsigned i = 0; i != head.members; ++i) {
+        const auto &spec = head.snapshot[i];
+        add_cand(spec.a_base, spec.a_regs);
+        add_cand(spec.b_base, spec.b_regs);
+        add_cand(spec.sa_base, spec.sa_regs);
+        add_cand(spec.sb_base, spec.sb_regs);
+      }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const CandRange &x, const CandRange &y) {
+      return x.base != y.base ? x.base < y.base : x.regs > y.regs;
+    });
+    const auto set_spec_rename = [](SnapshotSpec &spec, uint8_t which, uint16_t op_base,
+                                    uint8_t op_regs, uint16_t slot) {
+      spec.rename_mask |= uint8_t(1u << which);
+      switch (which) {
+      case 0:
+        spec.a_base = op_base;
+        spec.a_regs = op_regs;
+        spec.a_slot = slot;
+        break;
+      case 1:
+        spec.b_base = op_base;
+        spec.b_regs = op_regs;
+        spec.b_slot = slot;
+        break;
+      case 2:
+        spec.sa_base = op_base;
+        spec.sa_regs = op_regs;
+        spec.sa_slot = slot;
+        break;
+      case 3:
+        spec.sb_base = op_base;
+        spec.sb_regs = op_regs;
+        spec.sb_slot = slot;
+        break;
+      }
+    };
+    const auto clear_spec_snap = [](SnapshotSpec &spec, uint8_t which) {
+      if (spec.rename_mask & uint8_t(1u << which))
+        return;
+      switch (which) {
+      case 0:
+        spec.a_regs = 0;
+        break;
+      case 1:
+        spec.b_regs = 0;
+        break;
+      case 2:
+        spec.sa_regs = 0;
+        break;
+      case 3:
+        spec.sb_regs = 0;
+        break;
+      }
+    };
+    const auto spec_has_snap = [](const SnapshotSpec &spec, uint8_t which) -> bool {
+      if (spec.rename_mask & uint8_t(1u << which))
+        return false;
+      switch (which) {
+      case 0:
+        return spec.a_regs != 0;
+      case 1:
+        return spec.b_regs != 0;
+      case 2:
+        return spec.sa_regs != 0;
+      case 3:
+        return spec.sb_regs != 0;
+      }
+      return false;
+    };
+    const auto joined_through = [&](unsigned upto_inclusive) {
+      JobMask m = 0;
+      const unsigned limit = std::min(upto_inclusive + 1u, steps);
+      for (unsigned t = 0; t != limit; ++t)
+        m |= plan.steps[t].wait;
+      return m;
+    };
+    decltype(Access::writes) claimed_arch{};
+    for (const CandRange &cand : candidates) {
+      decltype(Access::writes) r_mask{};
+      for (unsigned r = 0; r != cand.regs; ++r)
+        r_mask.set(cand.base + r);
+      if ((claimed_arch & r_mask).any())
+        continue;
+      struct WriterRef {
+        unsigned step = 0;
+        uint8_t off = 0;
+        uint8_t regs = 0;
+      };
+      struct ReaderRef {
+        unsigned head_step = 0;
+        uint8_t member_idx = 0;
+        uint8_t which = 0;
+        int job_id = -1;
+        uint16_t op_base = 0;
+        uint8_t op_regs = 0;
+        uint8_t off = 0;
+      };
+      struct Version {
+        unsigned first_write_step = 0;
+        unsigned last_write_step = 0;
+        JobMask readers_mask = 0;
+        std::vector<WriterRef> writers;
+        std::vector<ReaderRef> readers;
+      };
+      std::vector<Version> versions(1); // versions[0] = live-in architectural values.
+      decltype(Access::writes) pending_mask{};
+      std::vector<WriterRef> pending_writers;
+      JobMask v0_readers = 0;
+      unsigned cutoff_step = steps;
+      for (unsigned k = 0; k != steps; ++k) {
+        // footprint() conservatively marks every memory op's dst in reads too;
+        // for renamable whole-dword loads use only explicit source VGPR reads.
+        const auto reads_r =
+            (step_renamable_load[k] ? step_load_src_reads[k] : accesses[k].reads) & r_mask;
+        const auto writes_r = accesses[k].writes & r_mask;
+        if (!reads_r.any() && !writes_r.any())
+          continue;
+        if (writes_r.any()) {
+          if (reads_r.any() || !step_renamable_load[k]) {
+            cutoff_step = pending_mask.any() ? pending_writers.front().step : k;
+            break;
+          }
+          unsigned w_first = Access::kRegistersPerBank;
+          unsigned w_last = 0;
+          unsigned w_count = 0;
+          for_each_register(accesses[k].writes, [&](unsigned r) {
+            if (r < w_first)
+              w_first = r;
+            if (r > w_last)
+              w_last = r;
+            ++w_count;
+          });
+          if (w_count == 0 || w_last - w_first + 1u != w_count || w_first < cand.base ||
+              w_first + w_count > uint32_t(cand.base) + cand.regs) {
+            cutoff_step = pending_mask.any() ? pending_writers.front().step : k;
+            break;
+          }
+          if (w_first == cand.base && w_count == cand.regs) {
+            if (pending_mask.any()) {
+              cutoff_step = pending_writers.front().step;
+              break;
+            }
+            Version v;
+            v.first_write_step = k;
+            v.last_write_step = k;
+            v.writers.push_back({k, 0, uint8_t(w_count)});
+            versions.push_back(std::move(v));
+          } else {
+            if ((pending_mask & writes_r).any()) {
+              cutoff_step = pending_writers.front().step;
+              break;
+            }
+            pending_mask |= writes_r;
+            pending_writers.push_back({k, uint8_t(w_first - cand.base), uint8_t(w_count)});
+            if (pending_mask == r_mask) {
+              Version v;
+              v.first_write_step = pending_writers.front().step;
+              v.last_write_step = k;
+              v.writers = std::move(pending_writers);
+              pending_writers.clear();
+              pending_mask.reset();
+              versions.push_back(std::move(v));
+            }
+          }
+          continue;
+        }
+        // Step k reads from r_mask without writing to it.
+        if (pending_mask.any()) {
+          cutoff_step = pending_writers.front().step;
+          break;
+        }
+        const size_t cur_v = versions.size() - 1u;
+        const StepMemberLoc &loc = step_member[k];
+        if (cur_v == 0) {
+          if (loc.mem) {
+            v0_readers |= JobMask{1} << loc.job_id;
+            const auto check_v0_op = [&](uint8_t which, uint16_t ob, uint8_t oregs) {
+              if (!oregs)
+                return;
+              if (ob >= cand.base && uint32_t(ob) + oregs <= uint32_t(cand.base) + cand.regs)
+                versions[0].readers.push_back({loc.head_step, loc.member_idx, which, loc.job_id, ob,
+                                               oregs, uint8_t(ob - cand.base)});
+            };
+            check_v0_op(0, loc.mem->a_base, loc.mem->a_regs);
+            check_v0_op(1, loc.mem->b_base, loc.mem->b_regs);
+            if (loc.mem->sa_regs)
+              check_v0_op(2, loc.mem->sa_base, 1);
+            if (loc.mem->sb_regs)
+              check_v0_op(3, loc.mem->sb_base, 1);
+          }
+          continue;
+        }
+        // In renamed versions (cur_v >= 1), every reader must be an MMA
+        // (Offload/Chained or IssuerMma) consuming the renamed register solely
+        // as a factor (A/B/scale), submitted after the renamed load executed.
+        const MemberOperands *m = nullptr;
+        unsigned hstep = 0;
+        uint8_t midx = 0;
+        int jid = -1;
+        if (loc.mem && loc.head_step >= versions[cur_v].last_write_step) {
+          m = loc.mem;
+          hstep = loc.head_step;
+          midx = loc.member_idx;
+          jid = loc.job_id;
+        } else if (plan.steps[k].kind == StepKind::IssuerMma && step_mma_operands[k].has_value()) {
+          m = &*step_mma_operands[k];
+          hstep = k;
+          midx = 0;
+          jid = -1;
+        } else {
+          cutoff_step = k;
+          break;
+        }
+        decltype(Access::reads) covered{};
+        std::vector<ReaderRef> step_refs;
+        const auto check_factor = [&](uint8_t which, uint16_t ob, uint8_t oregs) {
+          if (!oregs)
+            return true;
+          bool overlaps_r = false;
+          for (unsigned r = 0; r != oregs; ++r)
+            if (r_mask.test(ob + r))
+              overlaps_r = true;
+          if (!overlaps_r)
+            return true;
+          if (ob < cand.base || uint32_t(ob) + oregs > uint32_t(cand.base) + cand.regs)
+            return false;
+          for (unsigned r = 0; r != oregs; ++r)
+            covered.set(ob + r);
+          step_refs.push_back({hstep, midx, which, jid, ob, oregs, uint8_t(ob - cand.base)});
+          return true;
+        };
+        if (!check_factor(0, m->a_base, m->a_regs) || !check_factor(1, m->b_base, m->b_regs) ||
+            (m->sa_regs && !check_factor(2, m->sa_base, 1)) ||
+            (m->sb_regs && !check_factor(3, m->sb_base, 1)) || covered != reads_r) {
+          cutoff_step = k;
+          break;
+        }
+        for (const auto &ref : step_refs)
+          versions[cur_v].readers.push_back(ref);
+        if (jid >= 0)
+          versions[cur_v].readers_mask |= JobMask{1} << jid;
+      }
+      if (pending_mask.any())
+        cutoff_step = pending_writers.front().step;
+      if (versions.size() <= 1u)
+        continue;
+      const size_t num_writes = versions.size() - 1u;
+      // Check liveness of r_mask at cutoff_step: a register overwritten before
+      // any read in [cutoff_step, steps) is dead and needs no commit.
+      decltype(Access::writes) live_at_cutoff{};
+      for (unsigned r = 0; r != cand.regs; ++r) {
+        const unsigned reg = cand.base + r;
+        bool decided = false;
+        for (unsigned t = cutoff_step; t != steps; ++t) {
+          const auto &t_reads = step_renamable_load[t] ? step_load_src_reads[t] : accesses[t].reads;
+          if (t_reads.test(reg)) {
+            live_at_cutoff.set(reg);
+            decided = true;
+            break;
+          }
+          if (accesses[t].writes.test(reg)) {
+            decided = true;
+            break;
+          }
+        }
+        if (!decided)
+          live_at_cutoff.set(reg);
+      }
+      const JobMask joined_by_final = joined_through(versions[num_writes].first_write_step);
+      const bool final_uses_arch =
+          (cutoff_step == steps) && live_at_cutoff.any() && ((v0_readers & ~joined_by_final) == 0);
+      const size_t renamed_versions = final_uses_arch ? (num_writes - 1u) : num_writes;
+      // Profitability: count unique per-job snapshot copies eliminated vs commit copies added.
+      struct JobCopyKey {
+        int job_id;
+        uint16_t base;
+        uint8_t regs;
+        bool operator==(const JobCopyKey &) const = default;
+      };
+      std::vector<JobCopyKey> saved_keys;
+      for (size_t v = 0; v <= num_writes; ++v) {
+        for (const auto &rd : versions[v].readers) {
+          if (rd.job_id < 0)
+            continue;
+          const auto &spec = plan.steps[rd.head_step].snapshot[rd.member_idx];
+          if (!spec_has_snap(spec, rd.which))
+            continue;
+          const JobCopyKey key{rd.job_id, rd.op_base, rd.op_regs};
+          if (std::find(saved_keys.begin(), saved_keys.end(), key) == saved_keys.end())
+            saved_keys.push_back(key);
+        }
+      }
+      const unsigned commit_copies = (live_at_cutoff.any() && !final_uses_arch) ? 1u : 0u;
+      if (saved_keys.size() <= commit_copies)
+        continue;
+      // Allocate scratch slots with safe liveness reuse across non-adjacent versions
+      // whose reader jobs are already joined before the new version's first write.
+      struct SlotUse {
+        uint16_t slot = 0;
+        size_t last_ver = 0;
+        JobMask readers = 0;
+      };
+      std::vector<SlotUse> slot_pool;
+      std::vector<uint16_t> ver_slot(renamed_versions + 1u, SnapshotSpec::kNoSlot);
+      uint32_t tentative_scratch = plan.rename_scratch_regs;
+      bool fits = true;
+      for (size_t v = 1; v <= renamed_versions; ++v) {
+        const JobMask joined_by_v = joined_through(versions[v].first_write_step);
+        uint16_t chosen = SnapshotSpec::kNoSlot;
+        for (auto &su : slot_pool) {
+          if (su.last_ver + 1u < v && (su.readers & ~joined_by_v) == 0) {
+            chosen = su.slot;
+            su.last_ver = v;
+            su.readers = versions[v].readers_mask;
+            break;
+          }
+        }
+        if (chosen == SnapshotSpec::kNoSlot) {
+          if (tentative_scratch + cand.regs > Plan::kMaxRenameRegs) {
+            fits = false;
+            break;
+          }
+          chosen = static_cast<uint16_t>(tentative_scratch);
+          tentative_scratch += cand.regs;
+          slot_pool.push_back({chosen, v, versions[v].readers_mask});
+        }
+        ver_slot[v] = chosen;
+      }
+      if (!fits)
+        continue;
+      plan.rename_scratch_regs = static_cast<uint16_t>(tentative_scratch);
+      claimed_arch |= r_mask;
+      for (const auto &rd : versions[0].readers) {
+        clear_spec_snap(plan.steps[rd.head_step].snapshot[rd.member_idx], rd.which);
+        if (rd.job_id >= 0) {
+          for (unsigned r = 0; r != rd.op_regs; ++r)
+            plan.job_accesses[rd.job_id].reads.set(rd.op_base + r);
+        }
+      }
+      for (size_t v = 1; v <= renamed_versions; ++v) {
+        const uint16_t slot = ver_slot[v];
+        for (const auto &w : versions[v].writers) {
+          auto &ws = plan.steps[w.step];
+          ws.rename_dst_reg = uint16_t(slot + w.off);
+          ws.rename_dst_regs = w.regs;
+          ws.rename_arch_base = uint16_t(cand.base + w.off);
+        }
+        for (const auto &rd : versions[v].readers) {
+          auto &head = plan.steps[rd.head_step];
+          set_spec_rename(head.snapshot[rd.member_idx], rd.which, rd.op_base, rd.op_regs,
+                          uint16_t(slot + rd.off));
+          head.snapshots = true;
+        }
+      }
+      if (final_uses_arch) {
+        for (const auto &rd : versions[num_writes].readers) {
+          clear_spec_snap(plan.steps[rd.head_step].snapshot[rd.member_idx], rd.which);
+          if (rd.job_id >= 0) {
+            for (unsigned r = 0; r != rd.op_regs; ++r)
+              plan.job_accesses[rd.job_id].reads.set(rd.op_base + r);
+          }
+        }
+      } else if (live_at_cutoff.any()) {
+        JobMask joined_by_cutoff = 0;
+        const unsigned wait_lim = cutoff_step < steps ? (cutoff_step + 1u) : steps;
+        for (unsigned t = 0; t != wait_lim; ++t)
+          joined_by_cutoff |= plan.steps[t].wait;
+        plan.rename_commits.push_back({static_cast<uint16_t>(cutoff_step), cand.base,
+                                       ver_slot[renamed_versions], cand.regs,
+                                       v0_readers & ~joined_by_cutoff});
+        if (cutoff_step < steps)
+          plan.steps[cutoff_step].has_rename_commit_before = true;
+      } else if (v0_readers != 0) {
+        // r_mask is dead at cutoff_step (overwritten before any read): no commit
+        // needed, but ensure v0_readers finish before the first architectural write.
+        for (unsigned t = cutoff_step; t != steps; ++t) {
+          if ((accesses[t].writes & r_mask).any()) {
+            const JobMask rem = v0_readers & ~joined_through(t);
+            plan.steps[t].wait |= rem;
+            break;
+          }
+        }
+      }
+    }
+    std::sort(plan.rename_commits.begin(), plan.rename_commits.end(),
+              [](const Plan::RenameCommit &a, const Plan::RenameCommit &b) {
+                return a.before_step < b.before_step;
+              });
+    for (unsigned j = 0; j != job_host.size(); ++j) {
+      auto &head = plan.steps[chains[job_host[j]].head];
+      bool any_snap = false;
+      for (unsigned i = 0; i != head.members; ++i) {
+        const auto &spec = head.snapshot[i];
+        any_snap |= spec.rename_mask != 0 || spec.a_regs != 0 || spec.b_regs != 0 ||
+                    spec.sa_regs != 0 || spec.sb_regs != 0;
+      }
+      head.snapshots = any_snap;
+    }
+    for (unsigned k = 0; k != steps; ++k) {
+      auto &st = plan.steps[k];
+      if (st.kind == StepKind::IssuerMma)
+        st.snapshots = st.snapshot[0].rename_mask != 0;
+      if (claimed_arch.any() && st.rename_dst_reg == SnapshotSpec::kNoSlot) {
+        const auto aw = accesses[k].writes & claimed_arch;
+        if (aw.any()) {
+          unsigned run_start = Access::kRegistersPerBank;
+          unsigned run_len = 0;
+          for_each_register(aw, [&](unsigned r) {
+            if (run_len == 0) {
+              run_start = r;
+              run_len = 1;
+            } else if (r == run_start + run_len && run_len < 255u) {
+              ++run_len;
+            } else {
+              plan.rename_arch_writes.push_back(
+                  {uint16_t(k), uint16_t(run_start), uint8_t(run_len)});
+              run_start = r;
+              run_len = 1;
+            }
+          });
+          if (run_len != 0) {
+            plan.rename_arch_writes.push_back(
+                {uint16_t(k), uint16_t(run_start), uint8_t(run_len)});
+          }
+        }
       }
     }
   }
@@ -948,6 +1589,7 @@ void compile(Plan &plan, Decoder &decoder, Fetch &&fetch_words, uint64_t pc, uin
     plan.issuer_mma += step.kind == StepKind::IssuerMma;
     plan.alu += step.kind == StepKind::Alu;
     plan.wait += step.kind == StepKind::Wait;
+    plan.lds += step.kind == StepKind::Lds;
     plan.ordinary += step.kind == StepKind::Ordinary;
   }
 }
@@ -983,9 +1625,25 @@ public:
     job_of_slot_ = other.job_of_slot_;
     access_ = other.access_;
     failure_ = std::move(other.failure_);
+    rename_scratch_ = std::move(other.rename_scratch_);
     return *this;
   }
   void bind(matrix_coexecution::SharedPool &pool) { pool_ = &pool; }
+
+  /// True when growing the scratch VGPR tail would reallocate while helpers may
+  /// still hold pointers into it.
+  bool rename_scratch_needs_grow(uint32_t regs, uint32_t wf_size) const {
+    return size_t(regs) * wf_size > rename_scratch_.size();
+  }
+  /// Ensure the per-wave scratch VGPR tail has at least `regs` wave-wide slots.
+  void ensure_rename_scratch(uint32_t regs, uint32_t wf_size) {
+    const size_t needed = size_t(regs) * wf_size;
+    if (needed > rename_scratch_.size())
+      rename_scratch_.resize(needed);
+  }
+  uint32_t *rename_scratch_reg(uint16_t reg, uint32_t wf_size) {
+    return rename_scratch_.data() + size_t(reg) * wf_size;
+  }
 
   /// Begin a block: map its job ids to free slots as they are submitted, and
   /// compute which inherited jobs each step must join (split into result RAW/WAW
@@ -1230,6 +1888,7 @@ private:
   std::array<uint8_t, kMaxJobs> member_offset_{};
   mutable Access access_;
   std::optional<Failure> failure_;
+  std::vector<uint32_t> rename_scratch_;
   JobMask active_ = 0;
   JobMask inherited_ = 0;
 };
@@ -1240,9 +1899,10 @@ public:
   using Words = Plan::Words;
   struct Counters {
     uint64_t decodes = 0, builds = 0, accept = 0, reject = 0, hits = 0, validations = 0;
-    uint64_t replays = 0, offloads = 0, chained = 0, issuer_mma = 0, alu = 0, wait = 0, ordinary = 0;
+    uint64_t replays = 0, offloads = 0, chained = 0, issuer_mma = 0, alu = 0, wait = 0, lds = 0,
+             ordinary = 0;
     uint64_t pool_full = 0, early_exit = 0, entry_rejects = 0;
-    uint64_t snapshot_chains = 0, snapshot_bytes = 0;
+    uint64_t snapshot_chains = 0, snapshot_bytes = 0, load_renames = 0, rename_commits = 0;
     /// Cross-block: blocks entered with jobs outstanding, of which the fast
     /// filter found a conflict; joins forced by a running job's result or
     /// factor; drains by cause.
@@ -1266,6 +1926,7 @@ public:
     bool acc;
     VmCacheNamespace cache_namespace;
     uint32_t wave_size = 32;
+    bool allow_rename = false;
     bool operator==(const Key &) const = default;
   };
 
@@ -1306,7 +1967,7 @@ public:
       ++stats.builds;
       compile(plan, decoder, fetch_words, key.pc, key.vgprs, key.acc, stats.decodes,
               cross_block_enabled() && tail_snapshot_enabled(), batch_pack_limit(),
-              batch_min_chains(), min_job_weight(), key.wave_size, arch);
+              batch_min_chains(), min_job_weight(), key.wave_size, arch, key.allow_rename);
       ++(plan.accept ? stats.accept : stats.reject);
     } else {
       ++stats.hits;
@@ -1390,16 +2051,18 @@ public:
     std::fprintf(stderr, "%s\n",
                  std::format("RJ_PLAN builds={} accept={} reject={} hits={} validations={} "
                              "decodes={} replays={} offloads={} chained={} issuer_mma={} alu={} "
-                             "wait={} ordinary={} pool_full={} early_exit={} entry_rejects={} "
-                             "snapshot_chains={} snapshot_bytes={} pending_entries={} "
+                             "wait={} lds={} ordinary={} pool_full={} early_exit={} entry_rejects={} "
+                             "snapshot_chains={} snapshot_bytes={} load_renames={} "
+                             "rename_commits={} pending_entries={} "
                              "filtered={} result_waits={} factor_waits={} drains(gap={} mode={} "
                              "fault={} wave_end={} evict={} reject={} quantum={}) gap_passes={} "
                              "gap_joins={}",
                              stats.builds, stats.accept, stats.reject, stats.hits,
                              stats.validations, stats.decodes, stats.replays, stats.offloads,
-                             stats.chained, stats.issuer_mma, stats.alu, stats.wait, stats.ordinary,
-                             stats.pool_full, stats.early_exit, stats.entry_rejects,
-                             stats.snapshot_chains, stats.snapshot_bytes, stats.pending_entries,
+                             stats.chained, stats.issuer_mma, stats.alu, stats.wait, stats.lds,
+                             stats.ordinary, stats.pool_full, stats.early_exit,
+                             stats.entry_rejects, stats.snapshot_chains, stats.snapshot_bytes,
+                             stats.load_renames, stats.rename_commits, stats.pending_entries,
                              stats.filtered_entries, stats.result_waits, stats.factor_waits,
                              stats.drains_gap, stats.drains_mode, stats.drains_fault,
                              stats.drains_wave_end, stats.drains_evict, stats.drains_reject,
@@ -1417,6 +2080,7 @@ private:
       hash ^= size_t{key.vgprs} << 1;
       hash ^= key.acc;
       hash ^= size_t{key.wave_size} << 9;
+      hash ^= size_t{key.allow_rename} << 3;
       hash ^= std::hash<uint64_t>{}(key.cache_namespace.address_space.generation);
       hash ^= size_t{key.cache_namespace.address_space.slot} << 2;
       hash ^= std::hash<uint64_t>{}(key.cache_namespace.translation_epoch);

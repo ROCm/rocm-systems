@@ -12,6 +12,7 @@
 #include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/cluster_lds_multicast.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/matrix_input_snapshot.h"
 #include "rocjitsu/vm/amdgpu/coalesced_lane_runs.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -555,8 +556,14 @@ bool write_back_response(const VectorMemState &d, ComputeUnitCore &cu, uint32_t 
   if (lanes == 0)
     return true;
   uint8_t *dst[4];
-  for (uint32_t r = 0; r < vgpr_writeback::regs(*format); ++r)
-    dst[r] = cu.raw_vgpr_data(dst_reg_base + r);
+  const uint32_t num_regs = vgpr_writeback::regs(*format);
+  if (uint8_t *override_dst = resolve_rename_dst(dst_reg_base, num_regs, d.wf_size)) [[unlikely]] {
+    for (uint32_t r = 0; r < num_regs; ++r)
+      dst[r] = override_dst + r * d.wf_size * sizeof(uint32_t);
+  } else {
+    for (uint32_t r = 0; r < num_regs; ++r)
+      dst[r] = cu.raw_vgpr_data(dst_reg_base + r);
+  }
   vgpr_writeback::write_back(*format, dst, cu.sram_ecc(), d.wf_size, lanes, response.data());
   return true;
 }
@@ -649,6 +656,9 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
          << "] OOB zeroing: exec=" << std::hex << d.exec_mask << " lane=" << d.lane_mask
          << " oob=" << oob_mask << std::dec << " dst=" << d.dst_reg_base << " vgprs=" << vgpr_count;
     });
+    uint8_t *oob_override = (!d.d16_hi && !d.d16_lo)
+                                ? resolve_rename_dst(d.dst_reg_base, vgpr_count, d.wf_size)
+                                : nullptr;
     for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
       if (!(oob_mask & (1ULL << lane)))
         continue;
@@ -660,7 +670,11 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
           const uint32_t old = cu.read_vgpr_storage(d.dst_reg_base + i, lane);
           val = d.d16_hi ? (old & 0x0000FFFFu) : (old & 0xFFFF0000u);
         }
-        cu.write_vgpr(d.dst_reg_base + i, lane, val);
+        if (oob_override) {
+          reinterpret_cast<uint32_t *>(oob_override + i * d.wf_size * sizeof(uint32_t))[lane] = val;
+        } else {
+          cu.write_vgpr(d.dst_reg_base + i, lane, val);
+        }
       }
     }
   }
@@ -674,11 +688,16 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
   // already checked, and completion sends no register observation.
   const bool full_wave = (d.wf_size == 32 && result_lanes == UINT32_MAX) ||
                          (d.wf_size == 64 && result_lanes == UINT64_MAX);
+  uint8_t *override_dst = (!is_atomic && !d.d16_hi && !d.d16_lo)
+                              ? resolve_rename_dst(d.dst_reg_base, vgpr_count, d.wf_size)
+                              : nullptr;
   if (!is_atomic && d.elem_size == sizeof(uint32_t) && !d.sign_extend && !d.d16_hi && !d.d16_lo) {
     for (uint32_t i = 0; i < vgpr_count; ++i) {
       if (!writes_dword(i))
         continue;
-      auto *destination = reinterpret_cast<uint32_t *>(cu.raw_vgpr_data(d.dst_reg_base + i));
+      auto *destination = reinterpret_cast<uint32_t *>(
+          override_dst ? (override_dst + i * d.wf_size * sizeof(uint32_t))
+                       : cu.raw_vgpr_data(d.dst_reg_base + i));
       if (full_wave) {
         const auto *source = d.response_data.data() + i * sizeof(uint32_t);
         if (vgpr_count == 1) {
@@ -736,7 +755,11 @@ MemoryAccessCompletion vector_complete(VectorMemState &d, Wavefront &wf, Compute
             val = (old & 0xFFFF0000) | (val & 0xFFFF);
         }
       }
-      cu.write_vgpr(d.dst_reg_base + i, lane, val);
+      if (override_dst) {
+        reinterpret_cast<uint32_t *>(override_dst + i * d.wf_size * sizeof(uint32_t))[lane] = val;
+      } else {
+        cu.write_vgpr(d.dst_reg_base + i, lane, val);
+      }
     }
   }
   return MemoryAccessCompletion::Complete;

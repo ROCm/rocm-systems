@@ -69,6 +69,42 @@ inline bool is_rdna4_wmma(Operation operation) {
   return is_rdna4_dense_wmma(operation) || is_rdna4_swmmac(operation);
 }
 
+inline bool is_cdna4_smfmac(Operation operation) {
+  switch (operation) {
+  case Operation::V_SMFMAC_F32_16X16X64_BF16:
+  case Operation::V_SMFMAC_I32_16X16X128_I8:
+  case Operation::V_SMFMAC_F32_16X16X128_BF8_BF8:
+  case Operation::V_SMFMAC_F32_16X16X128_BF8_FP8:
+  case Operation::V_SMFMAC_F32_16X16X128_FP8_BF8:
+  case Operation::V_SMFMAC_F32_16X16X128_FP8_FP8:
+  case Operation::V_SMFMAC_F32_32X32X32_BF16:
+  case Operation::V_SMFMAC_I32_32X32X64_I8:
+  case Operation::V_SMFMAC_F32_32X32X64_BF8_BF8:
+  case Operation::V_SMFMAC_F32_32X32X64_BF8_FP8:
+  case Operation::V_SMFMAC_F32_32X32X64_FP8_BF8:
+  case Operation::V_SMFMAC_F32_32X32X64_FP8_FP8:
+  case Operation::V_SMFMAC_F32_16X16X64_F16:
+  case Operation::V_SMFMAC_F32_32X32X32_F16:
+  case Operation::V_SMFMAC_F32_16X16X32_F16:
+  case Operation::V_SMFMAC_F32_32X32X16_F16:
+  case Operation::V_SMFMAC_F32_16X16X32_BF16:
+  case Operation::V_SMFMAC_F32_32X32X16_BF16:
+  case Operation::V_SMFMAC_I32_16X16X64_I8:
+  case Operation::V_SMFMAC_I32_32X32X32_I8:
+  case Operation::V_SMFMAC_F32_16X16X64_BF8_BF8:
+  case Operation::V_SMFMAC_F32_16X16X64_BF8_FP8:
+  case Operation::V_SMFMAC_F32_16X16X64_FP8_BF8:
+  case Operation::V_SMFMAC_F32_16X16X64_FP8_FP8:
+  case Operation::V_SMFMAC_F32_32X32X32_BF8_BF8:
+  case Operation::V_SMFMAC_F32_32X32X32_BF8_FP8:
+  case Operation::V_SMFMAC_F32_32X32X32_FP8_BF8:
+  case Operation::V_SMFMAC_F32_32X32X32_FP8_FP8:
+    return true;
+  default:
+    return false;
+  }
+}
+
 inline bool is_safe_vopd_op(Operation operation) {
   switch (operation) {
   case Operation::V_DUAL_FMAC_F32:
@@ -102,7 +138,7 @@ inline bool is_safe_vopd(const Instruction &inst) {
 
 inline bool candidate(const Instruction &inst) {
   const Operation op = inst.amdgpu_operation();
-  if (is_rdna4_wmma(op))
+  if (is_rdna4_wmma(op) || is_cdna4_smfmac(op))
     return true;
   switch (op) {
   case Operation::V_MFMA_SCALE_F32_16X16X128_F8F6F4:
@@ -123,6 +159,16 @@ inline bool candidate(const Instruction &inst) {
   case Operation::V_MFMA_F32_32X32X8_F16:
   case Operation::V_MFMA_F32_16X16X32_BF16:
   case Operation::V_MFMA_F32_32X32X16_BF16:
+  case Operation::V_MFMA_F32_16X16X16_BF16:
+  case Operation::V_MFMA_F32_32X32X8_BF16:
+  case Operation::V_MFMA_F32_32X32X2_F32:
+  case Operation::V_MFMA_F32_16X16X4_F32:
+  case Operation::V_MFMA_F64_16X16X4_F64:
+  case Operation::V_MFMA_F64_4X4X4_4B_F64:
+  case Operation::V_MFMA_I32_16X16X64_I8:
+  case Operation::V_MFMA_I32_32X32X32_I8:
+  case Operation::V_MFMA_I32_16X16X32_I8:
+  case Operation::V_MFMA_I32_32X32X16_I8:
     return true;
   default:
     return false;
@@ -133,14 +179,26 @@ inline bool candidate(const Instruction &inst) {
 // This is only a hint: decoded eligibility remains authoritative.
 inline bool encoding_may_be_candidate(rocjitsu::IsaFamily arch, uint32_t word) {
   if (arch == rocjitsu::IsaFamily::Cdna4) {
-    // VOP3P with a candidate MFMA opcode, or the scaled-MFMA prefix (44). Other
-    // VOP3P (e.g. v_fma_mix_f32) shares the encoding and would only build and
-    // look up rejected plans.
+    // VOP3P with a candidate MFMA/SMFMAC opcode, or the scaled-MFMA prefix (44).
+    // Other VOP3P (e.g. v_fma_mix_f32) shares the encoding and would only build
+    // and look up rejected plans.
     constexpr uint64_t kLow = (uint64_t{1} << 44) | (uint64_t{1} << 45) | (uint64_t{1} << 46) |
-                              (uint64_t{1} << 53) | (uint64_t{1} << 55);
-    constexpr uint64_t kHigh = (uint64_t{1} << (76 - 64)) | (uint64_t{1} << (77 - 64)) |
-                               (uint64_t{1} << (84 - 64)) | (uint64_t{1} << (85 - 64)) |
-                               (uint64_t{0xff} << (112 - 64));
+                              (uint64_t{1} << 53) | (uint64_t{1} << 54) | (uint64_t{1} << 55) |
+                              (uint64_t{1} << 56) | (uint64_t{0x1f} << 57);
+    constexpr uint64_t kHigh = (uint64_t{1} << (67 - 64)) | (uint64_t{1} << (68 - 64)) |
+                               (uint64_t{1} << (69 - 64)) | (uint64_t{1} << (70 - 64)) |
+                               (uint64_t{1} << (71 - 64)) | (uint64_t{1} << (75 - 64)) |
+                               (uint64_t{1} << (76 - 64)) | (uint64_t{1} << (77 - 64)) |
+                               (uint64_t{1} << (78 - 64)) | (uint64_t{1} << (79 - 64)) |
+                               (uint64_t{1} << (83 - 64)) | (uint64_t{1} << (84 - 64)) |
+                               (uint64_t{1} << (85 - 64)) | (uint64_t{1} << (86 - 64)) |
+                               (uint64_t{1} << (87 - 64)) | (uint64_t{1} << (90 - 64)) |
+                               (uint64_t{1} << (91 - 64)) | (uint64_t{1} << (96 - 64)) |
+                               (uint64_t{1} << (97 - 64)) | (uint64_t{1} << (98 - 64)) |
+                               (uint64_t{1} << (100 - 64)) | (uint64_t{1} << (102 - 64)) |
+                               (uint64_t{1} << (104 - 64)) | (uint64_t{1} << (106 - 64)) |
+                               (uint64_t{1} << (108 - 64)) | (uint64_t{1} << (110 - 64)) |
+                               (uint64_t{1} << (111 - 64)) | (uint64_t{0xffff} << (112 - 64));
     const uint32_t opcode = (word >> 16) & 0x7f;
     return word >> 23 == 423 && ((opcode < 64 ? kLow >> opcode : kHigh >> (opcode - 64)) & 1);
   }
@@ -355,7 +413,8 @@ inline uint32_t matrix_operand_width(const Instruction &inst, uint32_t width, ui
 inline std::optional<Access> footprint(const Instruction &inst, uint32_t num_vgprs,
                                        bool has_accvgprs = false, uint32_t wave_size = 32) {
   Access access;
-  const bool tied_dst = is_rdna4_swmmac(inst.amdgpu_operation());
+  const bool tied_dst =
+      is_rdna4_swmmac(inst.amdgpu_operation()) || is_cdna4_smfmac(inst.amdgpu_operation());
   for (bool dst : {false, true}) {
     const int count = dst ? inst.num_dst_operands() : inst.num_src_operands();
     for (int i = 0; i != count; ++i) {
