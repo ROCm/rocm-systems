@@ -508,10 +508,10 @@ def check_build_matrix_file() -> None:
     system_deps = as_list(data.get("system_deps"), "system-deps build matrix")
 
     expected_counts = {
-        "ubuntu-22.04": (5, 2),
-        "ubuntu-24.04": (5, 2),
+        "ubuntu-22.04": (6, 2),
+        "ubuntu-24.04": (6, 2),
         "debian": (4, 2),
-        "rhel": (12, 4),
+        "rhel": (13, 4),
     }
     for group, (primary_count, system_deps_count) in expected_counts.items():
         actual_primary = [entry for entry in primary if entry.get("group") == group]
