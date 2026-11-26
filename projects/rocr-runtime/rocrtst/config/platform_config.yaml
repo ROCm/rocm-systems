@@ -125,6 +125,18 @@ groups:
     - rocrtstFunc.Signal_Batch_Agent_Queries
     - rocrtstFunc.Signal_Handle_Hints
 
+  MemoryBatchCopy:
+    - rocrtstFunc.MemoryBatchCopy_Linear_Single
+    - rocrtstFunc.MemoryBatchCopy_Linear_Multi
+    - rocrtstFunc.MemoryBatchCopy_Linear_Peer
+    - rocrtstFunc.MemoryBatchCopy_Broadcast
+    - rocrtstFunc.MemoryBatchCopy_Swap
+    - rocrtstFunc.MemoryBatchCopy_Rect
+    - rocrtstFunc.MemoryBatchCopy_Indirect
+    - rocrtstFunc.MemoryBatchCopy_Dependency
+    - rocrtstFunc.MemoryBatchCopy_Mixed_Ops
+    - rocrtstFunc.MemoryBatchCopy_Negative
+
   Performance:
     - rocrtstPerf.Memory_Async_Copy_On_Engine
     - rocrtstPerf.ENQUEUE_LATENCY
