@@ -9,6 +9,7 @@
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -48,8 +49,9 @@ inline Registers integer_input(uint32_t width, bool gfx12) {
       uint32_t value = reg >= 16 && reg < 32 ? c[(rng >> 24) & 7] : rng;
       if (reg == 32) {
         value = 0;
-        for (uint32_t i = 0; i < 8; ++i)
+        for (uint32_t i = 0; i < 8; ++i) {
           value |= pairs[((rng >> (4 * i)) & 15) % 6] << (4 * i);
+        }
       }
       input[reg][lane] = !gfx12 && reg < 16 && lane >= 16 ? input[reg][lane % 16] : value;
     }
@@ -61,8 +63,9 @@ inline Registers integer_input(uint32_t width, bool gfx12) {
 // with sparse indices in v32. These ranges also allow operand overlap tests.
 inline Registers uniform_input(std::array<uint32_t, 5> words) {
   Registers input{};
-  for (uint32_t reg = 0; reg < 33; ++reg)
+  for (uint32_t reg = 0; reg < 33; ++reg) {
     input[reg].fill(words[reg / 8]);
+  }
   return input;
 }
 
@@ -105,9 +108,10 @@ inline Registers float_input(uint32_t width, uint32_t bits, bool bfloat, bool gf
 
 // Execute one instruction, check selected destination words, and verify that
 // registers outside the destination range are unchanged.
-inline void check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t, 2> words,
-                  uint32_t mode, const Registers &input, std::span<const Sample> expected,
-                  uint32_t output_words = 256) {
+inline void
+check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
+      const Registers &input, std::span<const Sample> expected, uint32_t output_words = 256,
+      amdgpu::ArithmeticSemantics semantics = amdgpu::ArithmeticSemantics::Compatibility) {
   SCOPED_TRACE(testing::Message() << "arch=" << arch << " width=" << width << " word0=" << std::hex
                                   << words[0] << " word1=" << words[1] << " mode=" << mode);
   ASSERT_NE(expected.size(), 0u);
@@ -116,6 +120,7 @@ inline void check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t,
   cache.set_backing_memory(&memory);
   amdgpu::ComputeUnitCore::Config cfg{};
   cfg.arch = arch;
+  cfg.arithmetic = {semantics};
   cfg.num_wf_slots = 1;
   cfg.sgprs_per_wf = 106;
   cfg.vgprs_per_wf = 256;
@@ -128,9 +133,11 @@ inline void check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t,
   wave->set_exec(width == 64 ? ~uint64_t{0} : 0xffffffffu);
   wave->set_mode_raw(mode);
   const uint32_t base = wave->vgpr_alloc().base, dst = words[0] & 255;
-  for (uint32_t reg = 0; reg < 33; ++reg)
-    for (uint32_t lane = 0; lane < width; ++lane)
+  for (uint32_t reg = 0; reg < 33; ++reg) {
+    for (uint32_t lane = 0; lane < width; ++lane) {
       cu->write_vgpr(base + reg, lane, input[reg][lane]);
+    }
+  }
   const std::array<uint32_t, 4> code{words[0], words[1], 0, 0};
   auto decoded = Decoder::create(arch)->decode(code.data());
   ASSERT_TRUE(decoded.succeeded());
@@ -151,10 +158,11 @@ inline void check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t,
   wave->halt();
 }
 // Allow short expectations to stay inline at their call sites.
-inline void check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t, 2> words,
-                  uint32_t mode, const Registers &input, std::initializer_list<Sample> expected,
-                  uint32_t output_words = 256) {
+inline void
+check(rocjitsu::IsaFamily arch, uint32_t width, std::array<uint32_t, 2> words, uint32_t mode,
+      const Registers &input, std::initializer_list<Sample> expected, uint32_t output_words = 256,
+      amdgpu::ArithmeticSemantics semantics = amdgpu::ArithmeticSemantics::Compatibility) {
   check(arch, width, words, mode, input, std::span<const Sample>(expected.begin(), expected.size()),
-        output_words);
+        output_words, semantics);
 }
 } // namespace rocjitsu::matrix_test

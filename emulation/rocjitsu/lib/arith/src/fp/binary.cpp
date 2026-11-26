@@ -6,6 +6,7 @@
 
 #include "fp/binary.h"
 #include "common/alu.h"
+#include "common/sdwa_dispatch.h"
 #include "common/validation.h"
 #include "fp/binary_impl.h"
 #include "fp/compatibility_binary_status.h"
@@ -49,7 +50,8 @@ template <bool Multiply, bool Rdna3>
     if (rocjitsu::arith::reports_fp_status(flags)) {
       for (int lane = 0; lane < 32; ++lane) {
         if ((exec_mask >> lane) & 1) {
-          causes |= rocjitsu::arith::mul_exceptions_f32(a[0][lane], b[0][lane]);
+          causes |=
+              rocjitsu::arith::mul_exceptions_f32(a[0][lane], b[0][lane], flags, instruction_flags);
         }
       }
     }
@@ -297,14 +299,24 @@ int binary_wave64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags
   return RJ_ARITH_SUCCESS;
 }
 
-// Preserve the inherited Compatibility classifier without qualifying explicit mode 3.
-// Source classification precedes aliased writes; DPP stores and MUL causes use
-// different masks when row/bank controls suppress a destination.
+// Compatibility reports the shared hardware MUL classifier in every guest mode without
+// qualifying explicit mode 3 beyond its captured domain; ADD/SUB/SUBREV and selection keep
+// the inherited gfx12 causes. Source classification precedes aliased writes; DPP stores
+// and MUL range causes use different masks when row/bank controls suppress a destination.
 template <rocjitsu::arith::Binary Op, bool Rdna3 = false, bool Gfx1250 = false>
 int binary_policy(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
                   const uint32_t *const *a, const uint32_t *const *b, uint32_t *state,
                   uint32_t allowed_writes = ~0U) {
   using namespace rocjitsu::arith;
+  if constexpr (Rdna3 && Op == Binary::Mul) {
+    if (mode & RJ_ARITH_ALU_SDWA) {
+      return with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+          flags, exec_mask & allowed_writes, mode, d, [&](uint64_t core_mode) {
+            return binary_policy<Op, Rdna3>(flags, exec_mask, core_mode, d, a, b, state,
+                                            allowed_writes);
+          });
+    }
+  }
   // gfx1250 inherits range-only MUL reporting and no ADD/SUB reporting.
   if constexpr (Gfx1250) {
     if ((flags & RJ_ARITH_SEMANTICS_MASK) == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
@@ -402,7 +414,10 @@ int rj_arith_v_add_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary<rocjitsu::arith::Binary::Add, true>(flags, exec_mask, instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary<rocjitsu::arith::Binary::Add, true>(flags, exec_mask, core_mode, d, a, b);
+      });
 }
 
 // Add the operands for selected lanes.
@@ -429,7 +444,10 @@ int rj_arith_v_sub_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary<rocjitsu::arith::Binary::Sub, true>(flags, exec_mask, instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary<rocjitsu::arith::Binary::Sub, true>(flags, exec_mask, core_mode, d, a, b);
+      });
 }
 
 // Subtract B from A for selected lanes.
@@ -456,8 +474,10 @@ int rj_arith_v_subrev_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instr
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary<rocjitsu::arith::Binary::Subrev, true>(flags, exec_mask, instruction_flags, d, a,
-                                                       b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary<rocjitsu::arith::Binary::Subrev, true>(flags, exec_mask, core_mode, d, a, b);
+      });
 }
 
 // Subtract A from B for selected lanes.
@@ -580,8 +600,11 @@ int rj_arith_v_min_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary<rocjitsu::arith::Binary::MinLegacy, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary<rocjitsu::arith::Binary::MinLegacy, true>(flags, exec_mask, core_mode, d, a,
+                                                                b);
+      });
 }
 
 // Select the maximum for selected lanes.
@@ -598,8 +621,11 @@ int rj_arith_v_max_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary<rocjitsu::arith::Binary::MaxLegacy, true>(flags, exec_mask, instruction_flags, d, a,
-                                                          b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary<rocjitsu::arith::Binary::MaxLegacy, true>(flags, exec_mask, core_mode, d, a,
+                                                                b);
+      });
 }
 
 // Add the operands for selected lanes.
@@ -616,8 +642,11 @@ int rj_arith_v_add_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary_wave64<rocjitsu::arith::Binary::Add, true>(flags, exec_mask, instruction_flags, d,
-                                                           a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary_wave64<rocjitsu::arith::Binary::Add, true>(flags, exec_mask, core_mode, d, a,
+                                                                 b);
+      });
 }
 
 // Add the operands for selected lanes.
@@ -644,8 +673,11 @@ int rj_arith_v_sub_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary_wave64<rocjitsu::arith::Binary::Sub, true>(flags, exec_mask, instruction_flags, d,
-                                                           a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary_wave64<rocjitsu::arith::Binary::Sub, true>(flags, exec_mask, core_mode, d, a,
+                                                                 b);
+      });
 }
 
 // Subtract B from A for selected lanes.
@@ -672,8 +704,11 @@ int rj_arith_v_subrev_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instr
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary_wave64<rocjitsu::arith::Binary::Subrev, true>(flags, exec_mask, instruction_flags,
-                                                              d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary_wave64<rocjitsu::arith::Binary::Subrev, true>(flags, exec_mask, core_mode, d,
+                                                                    a, b);
+      });
 }
 
 // Subtract A from B for selected lanes.
@@ -797,8 +832,11 @@ int rj_arith_v_min_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary_wave64<rocjitsu::arith::Binary::MinLegacy, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary_wave64<rocjitsu::arith::Binary::MinLegacy, true>(flags, exec_mask, core_mode,
+                                                                       d, a, b);
+      });
 }
 
 // Select the maximum for selected lanes.
@@ -815,8 +853,11 @@ int rj_arith_v_max_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruct
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary_wave64<rocjitsu::arith::Binary::MaxLegacy, true>(flags, exec_mask,
-                                                                 instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary_wave64<rocjitsu::arith::Binary::MaxLegacy, true>(flags, exec_mask, core_mode,
+                                                                       d, a, b);
+      });
 }
 
 // CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
@@ -831,8 +872,11 @@ int rj_arith_v_min_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary<rocjitsu::arith::Binary::MinLegacyCdna, true>(flags, exec_mask, instruction_flags,
-                                                              d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary<rocjitsu::arith::Binary::MinLegacyCdna, true>(flags, exec_mask, core_mode, d,
+                                                                    a, b);
+      });
 }
 
 // CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
@@ -847,8 +891,11 @@ int rj_arith_v_min_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary_wave64<rocjitsu::arith::Binary::MinLegacyCdna, true>(flags, exec_mask,
-                                                                     instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary_wave64<rocjitsu::arith::Binary::MinLegacyCdna, true>(flags, exec_mask,
+                                                                           core_mode, d, a, b);
+      });
 }
 
 // CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
@@ -863,8 +910,11 @@ int rj_arith_v_max_f32_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t i
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary<rocjitsu::arith::Binary::MaxLegacyCdna, true>(flags, exec_mask, instruction_flags,
-                                                              d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary<rocjitsu::arith::Binary::MaxLegacyCdna, true>(flags, exec_mask, core_mode, d,
+                                                                    a, b);
+      });
 }
 
 // CDNA3/4 legacy selection: prefer B for two NaNs; IEEE signaling priority is A then B.
@@ -879,8 +929,11 @@ int rj_arith_v_max_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask, uint64_t i
   if (rocjitsu::arith::reports_fp_status(flags)) {
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
-  return binary_wave64<rocjitsu::arith::Binary::MaxLegacyCdna, true>(flags, exec_mask,
-                                                                     instruction_flags, d, a, b);
+  return rocjitsu::arith::with_sdwa_output<rocjitsu::arith::SdwaOutput::F32Mode>(
+      flags, exec_mask, instruction_flags, d, [&](uint64_t core_mode) {
+        return binary_wave64<rocjitsu::arith::Binary::MaxLegacyCdna, true>(flags, exec_mask,
+                                                                           core_mode, d, a, b);
+      });
 }
 
 // gfx1250 selection retains its numeric-only Compatibility policy.

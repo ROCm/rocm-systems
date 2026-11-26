@@ -97,6 +97,13 @@ template <int M, bool Bf8A, bool Bf8B, bool Fnuz> void arithmetic(Entry entry) {
     }
     for (uint64_t cpu : levels) {
       for (uint64_t semantics : semantics_modes()) {
+        // gfx942's qualified exact cases have captured expectations in gfx942_exact_test.
+        if constexpr (Fnuz) {
+          if (!controls && semantics != RJ_ARITH_SEMANTICS_LOOSE &&
+              semantics != RJ_ARITH_SEMANTICS_COMPATIBILITY) {
+            continue;
+          }
+        }
         for (int aliasing_offset : {0, 2, 4, 4 + Outputs}) {
           auto storage = input;
           const uint32_t *a[2], *b[2], *c[Outputs];

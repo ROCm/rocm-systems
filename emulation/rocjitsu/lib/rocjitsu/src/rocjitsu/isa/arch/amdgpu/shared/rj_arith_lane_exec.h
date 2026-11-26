@@ -6,6 +6,7 @@
 #include "rj_arith/detail/rj_arith_register.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h"
+#include "rocjitsu/isa/isa_family.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -27,18 +28,24 @@ inline void execute_read_lane(Wavefront &wave, uint64_t flags, const Operand &de
   const uint64_t exec_mask = wave.exec();
   lane = First ? (exec_mask ? std::countr_zero(exec_mask) : 0) : lane & (wave.wf_size() - 1);
   RegisterAccess registers(wave);
-  VectorInput32 a(registers, wave, source, 1ULL << lane);
-  if (wave.instruction_execution_failed())
+  // The API reads only its selected lane. Avoid building a whole-wave view
+  // for a scalar transfer; unselected array elements are never accessed.
+  std::array<uint32_t, 64> values;
+  values[lane] = registers.read_scalar_selected_lane(source, lane);
+  const uint32_t *a = values.data();
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   uint32_t result = 0;
   int status;
-  if constexpr (First)
+  if constexpr (First) {
     status = wave.wf_size() == 32
-                 ? rj_arith_v_readfirstlane_b32_w32(flags, uint32_t(exec_mask), 0, &result, &a.data)
-                 : rj_arith_v_readfirstlane_b32_w64(flags, exec_mask, 0, &result, &a.data);
-  else
-    status = wave.wf_size() == 32 ? rj_arith_v_readlane_b32_w32(flags, 0, &result, &a.data, lane)
-                                  : rj_arith_v_readlane_b32_w64(flags, 0, &result, &a.data, lane);
+                 ? rj_arith_v_readfirstlane_b32_w32(flags, uint32_t(exec_mask), 0, &result, &a)
+                 : rj_arith_v_readfirstlane_b32_w64(flags, exec_mask, 0, &result, &a);
+  } else {
+    status = wave.wf_size() == 32 ? rj_arith_v_readlane_b32_w32(flags, 0, &result, &a, lane)
+                                  : rj_arith_v_readlane_b32_w64(flags, 0, &result, &a, lane);
+  }
   if (status != RJ_ARITH_SUCCESS) {
     wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
@@ -53,8 +60,9 @@ inline void execute_write_lane(Wavefront &wave, uint64_t flags, const Operand &d
   RegisterAccess registers(wave);
   const uint32_t value = registers.read_scalar(source);
   const uint32_t lane = registers.read_scalar(selector) & (wave.wf_size() - 1);
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   std::array<uint32_t, 64> result;
   uint32_t *d = result.data();
   const int status = wave.wf_size() == 32 ? rj_arith_v_writelane_b32_w32(flags, 0, &d, value, lane)
@@ -66,31 +74,79 @@ inline void execute_write_lane(Wavefront &wave, uint64_t flags, const Operand &d
   registers.write_scalar_selected_lane(destination, lane, result[lane]);
 }
 
+// Handle gfx1150's packed VOP1 halves on physical VGPRs when bulk access is permitted.
+// Observed, delegated or out-of-allocation operands retain the logical operand path.
+inline bool try_swap_gfx1150_packed_halves(Wavefront &wave, RegisterAccess &registers,
+                                           uint64_t flags, uint64_t exec_mask,
+                                           const Operand &destination, const Operand &source) {
+  if (wave.instruction_execution_failed() || wave.cu().arch() != rocjitsu::IsaFamily::Rdna3_5 ||
+      destination.delegate() || source.delegate() || destination.size_bits() != 16 ||
+      source.size_bits() != 16 || !destination.reads_value() || !source.reads_value() ||
+      !destination.is_writable() || !source.is_writable()) {
+    return false;
+  }
+  const auto d_bytes = destination.register_byte_mask(), a_bytes = source.register_byte_mask();
+  if ((d_bytes != 0x3 && d_bytes != 0xc) || (a_bytes != 0x3 && a_bytes != 0xc)) {
+    return false;
+  }
+  const auto d_reg = destination.to_register_ref(), a_reg = source.to_register_ref();
+  if (!d_reg || !a_reg || d_reg->cls != RegClass::VGPR || a_reg->cls != RegClass::VGPR) {
+    return false;
+  }
+  const uint64_t halves =
+      (d_bytes == 0xc ? RJ_ARITH_ALU_HIGH_D : 0) | (a_bytes == 0xc ? RJ_ARITH_ALU_HIGH_A : 0);
+  const uint32_t base = wave.vgpr_alloc().base;
+  // These are normalized physical indices on gfx1150, which has no GPR_IDX mode.
+  // Both acquisitions must succeed before the kernel can change either operand.
+  auto status = registers.try_bulk_write_vgprs<1>(base + d_reg->index, 1, [&](uint32_t *const *d) {
+    return registers.try_bulk_write_vgprs<1>(base + a_reg->index, 1, [&](uint32_t *const *a) {
+      return wave.wf_size() == 32
+                 ? rj_arith_v_swap_b16_w32(flags, uint32_t(exec_mask), halves, d, a)
+                 : rj_arith_v_swap_b16_w64(flags, exec_mask, halves, d, a);
+    });
+  });
+  if (!status) {
+    return false;
+  }
+  if (*status != RJ_ARITH_SUCCESS) {
+    wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+  }
+  return true;
+}
+
 // Snapshot both read/write operands before either commit. VOP1 half operands
 // already resolve their encoded halves; commit only their logical low halves.
 template <bool Half>
 inline void execute_swap(Wavefront &wave, uint64_t flags, const Operand &destination,
                          const Operand &source) {
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
+  if constexpr (Half) {
+    if (try_swap_gfx1150_packed_halves(wave, registers, flags, exec_mask, destination, source)) {
+      return;
+    }
+  }
   constexpr uint8_t bytes = Half ? 0x3 : 0xf;
   VectorInput32 old_d(registers, wave, destination, exec_mask, bytes);
   VectorInput32 old_a(registers, wave, source, exec_mask, bytes);
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   std::array<uint32_t, 64> d_values, a_values;
   std::copy_n(old_d.data, wave.wf_size(), d_values.data());
   std::copy_n(old_a.data, wave.wf_size(), a_values.data());
   uint32_t *d = d_values.data(), *a = a_values.data();
   int status;
-  if constexpr (Half)
+  if constexpr (Half) {
     status = wave.wf_size() == 32 ? rj_arith_v_swap_b16_w32(flags, uint32_t(exec_mask), 0, &d, &a)
                                   : rj_arith_v_swap_b16_w64(flags, exec_mask, 0, &d, &a);
-  else
+  } else {
     status = wave.wf_size() == 32 ? rj_arith_v_swap_b32_w32(flags, uint32_t(exec_mask), 0, &d, &a)
                                   : rj_arith_v_swap_b32_w64(flags, exec_mask, 0, &d, &a);
+  }
   if (status != RJ_ARITH_SUCCESS) {
     wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
     return;
@@ -110,11 +166,13 @@ inline void execute_swap(Wavefront &wave, uint64_t flags, const Operand &destina
   auto output_a = registers.write_operand(source, exec_mask, bytes);
   for (unsigned lane = 0; lane < wave.wf_size(); lane += util::native_width_v<uint32_t>) {
     if (output_d.store_native(lane, util::load<uint32_t>(d_values.data() + lane), exec_mask >> lane)
-            .failed())
+            .failed()) {
       return;
+    }
     if (output_a.store_native(lane, util::load<uint32_t>(a_values.data() + lane), exec_mask >> lane)
-            .failed())
+            .failed()) {
       return;
+    }
   }
 }
 
@@ -192,13 +250,15 @@ inline void execute_permlane_index(Wavefront &wave, uint64_t flags, const Operan
 inline void execute_permlane64(Wavefront &wave, uint64_t flags, const Operand &destination,
                                const Operand &source) {
   if (wave.wf_size() == 32) {
-    if (rj_arith_v_permlane64_b32_w32(flags, 0, nullptr, nullptr) != RJ_ARITH_SUCCESS)
+    if (rj_arith_v_permlane64_b32_w32(flags, 0, nullptr, nullptr) != RJ_ARITH_SUCCESS) {
       wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+    }
     return;
   }
   const uint64_t exec_mask = wave.exec() & wave.vgpr_write_mask();
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   VectorInput32 a(registers, wave, source, (exec_mask << 32) | (exec_mask >> 32));
   write_vector32_result(wave, registers, destination, exec_mask,
@@ -216,21 +276,25 @@ inline void execute_permlane16(Wavefront &wave, Wave32 wave32, Wave64 wave64, ui
                                const Operand &source, const Operand &indices_or_lo,
                                const Operand *high = nullptr) {
   const uint64_t exec_mask = wave.exec();
-  if (!exec_mask)
+  if (!exec_mask) {
     return;
+  }
   RegisterAccess registers(wave);
   std::optional<VectorInput32> indices;
   uint32_t lo = 0, hi = 0;
-  if constexpr (Variable)
+  if constexpr (Variable) {
     indices.emplace(registers, wave, indices_or_lo, exec_mask);
-  else {
-    if (exec_mask & 0x00ff00ff00ff00ffULL)
+  } else {
+    if (exec_mask & 0x00ff00ff00ff00ffULL) {
       lo = registers.read_scalar(indices_or_lo);
-    if (exec_mask & 0xff00ff00ff00ff00ULL)
+    }
+    if (exec_mask & 0xff00ff00ff00ff00ULL) {
       hi = registers.read_scalar(*high);
+    }
   }
-  if (wave.instruction_execution_failed())
+  if (wave.instruction_execution_failed()) {
     return;
+  }
   const auto permutation = valu_permutation_lanes(
       Cross ? ValuPermutation::X16 : ValuPermutation::Perm16, exec_mask, wave.wf_size(), 16, true,
       modifiers & RJ_ARITH_PERMLANE_FI, modifiers & RJ_ARITH_PERMLANE_BOUND_CTRL,
@@ -239,28 +303,31 @@ inline void execute_permlane16(Wavefront &wave, Wave32 wave32, Wave64 wave64, ui
       });
   VectorInput32 a(registers, wave, source, permutation.read);
   const auto invoke = [&](uint32_t *const *d) {
-    if constexpr (Variable)
+    if constexpr (Variable) {
       return wave.wf_size() == 32
                  ? wave32(flags, uint32_t(exec_mask), modifiers, d, &a.data, &indices->data)
                  : wave64(flags, exec_mask, modifiers, d, &a.data, &indices->data);
-    else
+    } else {
       return wave.wf_size() == 32
                  ? wave32(flags, uint32_t(exec_mask), modifiers, d, &a.data, lo, hi)
                  : wave64(flags, exec_mask, modifiers, d, &a.data, lo, hi);
+    }
   };
   // Unobserved ordinary destinations keep rj-arith's direct SIMD masked stores.
   if ((exec_mask & wave.vgpr_write_mask()) == exec_mask) {
     auto status = registers.try_bulk_write_operand(
         destination, exec_mask, [&](uint32_t *const *d, uint64_t) { return invoke(d); });
     if (status) {
-      if (*status != RJ_ARITH_SUCCESS)
+      if (*status != RJ_ARITH_SUCCESS) {
         wave.report_instruction_execution_error(InstructionExecutionError::UnsupportedOperandValue);
+      }
       return;
     }
   }
   const uint64_t write_mask = permutation.write & wave.vgpr_write_mask();
-  if (!write_mask)
+  if (!write_mask) {
     return;
+  }
   write_vector32_result(
       wave, registers, destination, write_mask,
       [&](uint32_t *const *d, uint64_t) { return invoke(d); },

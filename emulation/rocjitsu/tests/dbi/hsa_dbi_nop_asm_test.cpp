@@ -105,8 +105,9 @@ protected:
 
     // Apply the inline-nop trampoline.
     Instrumentor instrumentor(*co, params_.arch);
-    for (uint64_t offset : anchor_offsets_)
+    for (uint64_t offset : anchor_offsets_) {
       instrumentor.add_point_by_offset(offset);
+    }
     auto result = instrumentor.patch_with_debug_summaries();
     ASSERT_TRUE(result.errors.empty())
         << "Instrumentor::patch failed: "
@@ -274,10 +275,13 @@ void HsaDbiNopAsmCdna2Hardware::run_tail_backing_case(bool file_backed) {
   auto blocks = BasicBlock::build(original, *decoder, params_.arch);
   ASSERT_TRUE(blocks.succeeded());
   uint64_t live_end = 0;
-  for (const auto &block : blocks.value())
-    for (const Instruction &inst : block->instructions())
-      if (inst.mnemonic() == "s_endpgm")
+  for (const auto &block : blocks.value()) {
+    for (const Instruction &inst : block->instructions()) {
+      if (inst.mnemonic() == "s_endpgm") {
         live_end = std::max(live_end, inst.src_loc() + static_cast<uint64_t>(inst.size()));
+      }
+    }
+  }
   ASSERT_GT(live_end, anchor_offsets_.front());
   ASSERT_LE(live_end, text.size());
 
@@ -316,39 +320,47 @@ void HsaDbiNopAsmCdna2Hardware::run_tail_backing_case(bool file_backed) {
   const uint64_t tail_offset = text.sectionOffset() + live_end;
   const uint64_t tail_vaddr = text.vaddr() + live_end;
   uint64_t gap = alignof(Elf64_Shdr);
-  for (const Elf64_Shdr &section : *sections)
+  for (const Elf64_Shdr &section : *sections) {
     gap = std::max(gap, section.sh_addralign);
-  for (const Elf64_Phdr &segment : *segments)
+  }
+  for (const Elf64_Phdr &segment : *segments) {
     gap = std::max(gap, segment.p_align);
+  }
   for (size_t index = 0; index < sections->size(); ++index) {
     Elf64_Shdr &section = (*sections)[index];
     ASSERT_TRUE(section.sh_addralign <= 1 || gap % section.sh_addralign == 0);
-    if (index == text_index)
+    if (index == text_index) {
       continue;
+    }
     ASSERT_TRUE(section.sh_type == SHT_NOBITS || section.sh_offset >= tail_offset ||
                 section.sh_size <= tail_offset - section.sh_offset);
-    if (section.sh_offset >= tail_offset)
+    if (section.sh_offset >= tail_offset) {
       section.sh_offset += gap;
+    }
   }
   for (size_t index = 0; index < segments->size(); ++index) {
     Elf64_Phdr &segment = (*segments)[index];
     ASSERT_TRUE(segment.p_align <= 1 || gap % segment.p_align == 0);
-    if (index == owner)
+    if (index == owner) {
       continue;
+    }
     ASSERT_TRUE(segment.p_offset >= tail_offset ||
                 segment.p_filesz <= tail_offset - segment.p_offset);
     if (segment.p_type == PT_LOAD && segment.p_memsz != 0) {
       ASSERT_TRUE(segment.p_vaddr >= tail_vaddr + sizeof(uint32_t) ||
                   segment.p_vaddr + segment.p_memsz <= tail_vaddr);
     }
-    if (segment.p_offset >= tail_offset)
+    if (segment.p_offset >= tail_offset) {
       segment.p_offset += gap;
+    }
   }
   image.insert(image.begin() + static_cast<std::ptrdiff_t>(tail_offset), gap, 0);
-  if (header.e_shoff >= tail_offset)
+  if (header.e_shoff >= tail_offset) {
     header.e_shoff += gap;
-  if (header.e_phoff >= tail_offset)
+  }
+  if (header.e_phoff >= tail_offset) {
     header.e_phoff += gap;
+  }
   const util::FailureOr<uint32_t> nop = build_s_nop(0, kCdna2Params.arch);
   ASSERT_TRUE(nop.succeeded());
   text_header.sh_size = live_end + sizeof(uint32_t);
@@ -356,12 +368,14 @@ void HsaDbiNopAsmCdna2Hardware::run_tail_backing_case(bool file_backed) {
   (*segments)[owner].p_memsz = text_header.sh_size;
   test_support::write_value_for_test(image, tail_offset, nop.value());
   test_support::write_elf_struct_for_test(image, 0, header);
-  for (size_t index = 0; index < sections->size(); ++index)
+  for (size_t index = 0; index < sections->size(); ++index) {
     test_support::write_elf_struct_for_test(image, header.e_shoff + index * header.e_shentsize,
                                             (*sections)[index]);
-  for (size_t index = 0; index < segments->size(); ++index)
+  }
+  for (size_t index = 0; index < segments->size(); ++index) {
     test_support::write_elf_struct_for_test(image, header.e_phoff + index * header.e_phentsize,
                                             (*segments)[index]);
+  }
   const std::vector<uint8_t> pristine = image;
   AmdGpuCodeObject source(image.data(), image.size());
   ASSERT_TRUE(source.is_valid());

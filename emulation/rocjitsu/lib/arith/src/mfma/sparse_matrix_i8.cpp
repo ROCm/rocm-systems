@@ -4,13 +4,14 @@
 // Sparse signed-byte SMFMAC and mixed-signedness gfx1250 SWMMAC dispatch.
 #include "common/internal.h"
 #include "mfma/backends.h"
+#include "mfma/gfx1250_integer_dispatch.h"
 #include "mfma/sparse_integer.h"
 #include "rj_arith/detail/rj_arith_common.h"
 #include "rj_arith/detail/rj_arith_mfma.h"
 #include "rj_arith/detail/rj_arith_wmma.h"
 namespace {
 // Validate metadata controls before reading operands; integer arithmetic is exact in every mode.
-template <int M, int K, bool Wmma>
+template <int M, int K, bool Wmma, bool Gfx950 = false>
 int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32_t *const *a,
              const uint32_t *const *b, const uint32_t *const *index) {
   using namespace rocjitsu::arith;
@@ -19,6 +20,7 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
                                           RJ_ARITH_WMMA_CLAMP | RJ_ARITH_SWMMAC_INDEX_KEY_1
                                     : 0x7fULL;
   const bool clamp = Wmma ? (controls & RJ_ARITH_WMMA_CLAMP) : (flags & RJ_ARITH_FP16_OVFL);
+  const bool clamp_per_pass = Gfx950 && clamp && K > 32;
   if (int error = validate(flags, controls & ~allowed,
                            kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
     return error;
@@ -36,19 +38,24 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
     }
     index = selected;
   }
+  if constexpr (Wmma) {
+    dispatch_gfx1250_integer<true>(flags, controls, clamp, d, a, b, d, index);
+    return RJ_ARITH_SUCCESS;
+  }
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    sparse_matrix_i8_x86_64_v4<M, K, Wmma>(controls, clamp, d, a, b, index);
+  // The 16-column K=128 tile reduces faster in two AVX2 halves.
+  if (K != 128 && cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    sparse_matrix_i8_x86_64_v4<M, K, Wmma>(controls, clamp, clamp_per_pass, d, a, b, index);
     return RJ_ARITH_SUCCESS;
   }
 #endif
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   if (cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    sparse_matrix_i8_x86_64_v3<M, K, Wmma>(controls, clamp, d, a, b, index);
+    sparse_matrix_i8_x86_64_v3<M, K, Wmma>(controls, clamp, clamp_per_pass, d, a, b, index);
     return RJ_ARITH_SUCCESS;
   }
 #endif
-  sparse_matrix_i8_kernel<M, K, Wmma>(controls, clamp, d, a, b, index);
+  sparse_matrix_i8_kernel<M, K, Wmma>(controls, clamp, clamp_per_pass, d, a, b, index);
   return RJ_ARITH_SUCCESS;
 }
 } // namespace
@@ -57,28 +64,44 @@ int evaluate(uint64_t flags, uint64_t controls, uint32_t *const *d, const uint32
 int rj_arith_v_smfmac_i32_16x16x64_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
                                           const uint32_t *const *index) {
-  return evaluate<16, 64, false>(flags, controls, d, a, b, index);
+  return evaluate<16, 64, false, false>(flags, controls, d, a, b, index);
+}
+
+// Update D from compressed A, selected dense B, and its original accumulator on gfx950.
+int rj_arith_v_smfmac_i32_16x16x64_i8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *index) {
+  return evaluate<16, 64, false, true>(flags, controls, d, a, b, index);
 }
 
 // Update D from compressed A, selected dense B, and its original accumulator.
 int rj_arith_v_smfmac_i32_32x32x32_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
                                           const uint32_t *const *index) {
-  return evaluate<32, 32, false>(flags, controls, d, a, b, index);
+  return evaluate<32, 32, false, false>(flags, controls, d, a, b, index);
+}
+
+// Update D from compressed A, selected dense B, and its original accumulator on gfx950.
+int rj_arith_v_smfmac_i32_32x32x32_i8_w64_gfx950(uint64_t flags, uint64_t controls,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *index) {
+  return evaluate<32, 32, false, true>(flags, controls, d, a, b, index);
 }
 
 // Update D from compressed A, selected dense B, and its original accumulator.
 int rj_arith_v_smfmac_i32_16x16x128_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                            const uint32_t *const *a, const uint32_t *const *b,
                                            const uint32_t *const *index) {
-  return evaluate<16, 128, false>(flags, controls, d, a, b, index);
+  return evaluate<16, 128, false, true>(flags, controls, d, a, b, index);
 }
 
 // Update D from compressed A, selected dense B, and its original accumulator.
 int rj_arith_v_smfmac_i32_32x32x64_i8_w64(uint64_t flags, uint64_t controls, uint32_t *const *d,
                                           const uint32_t *const *a, const uint32_t *const *b,
                                           const uint32_t *const *index) {
-  return evaluate<32, 64, false>(flags, controls, d, a, b, index);
+  return evaluate<32, 64, false, true>(flags, controls, d, a, b, index);
 }
 
 // Update D from compressed A, selected dense B, and its original accumulator.

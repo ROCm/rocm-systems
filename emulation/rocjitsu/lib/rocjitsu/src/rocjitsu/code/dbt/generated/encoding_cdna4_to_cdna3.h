@@ -629,30 +629,42 @@ inline TranslationResult translate_encoding_cdna4_to_cdna3(uint32_t encoding_id,
   default:
     break;
   }
-  if ((encoding_id & 0x1FC) == kEnc_VOPC)
+  if ((encoding_id & 0x1FC) == kEnc_VOPC) {
     return translate_encoding_cdna4_to_cdna3(kEnc_VOPC, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1FC) == kEnc_VOP1)
+  }
+  if ((encoding_id & 0x1FC) == kEnc_VOP1) {
     return translate_encoding_cdna4_to_cdna3(kEnc_VOP1, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_SMEM)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_SMEM) {
     return translate_encoding_cdna4_to_cdna3(kEnc_SMEM, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_VOP3)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_VOP3) {
     return translate_encoding_cdna4_to_cdna3(kEnc_VOP3, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_VOP3_SDST_ENC)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_VOP3_SDST_ENC) {
     return translate_encoding_cdna4_to_cdna3(kEnc_VOP3_SDST_ENC, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_DS)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_DS) {
     return translate_encoding_cdna4_to_cdna3(kEnc_DS, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_FLAT)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_FLAT) {
     return translate_encoding_cdna4_to_cdna3(kEnc_FLAT, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_MUBUF)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_MUBUF) {
     return translate_encoding_cdna4_to_cdna3(kEnc_MUBUF, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1F8) == kEnc_MTBUF)
+  }
+  if ((encoding_id & 0x1F8) == kEnc_MTBUF) {
     return translate_encoding_cdna4_to_cdna3(kEnc_MTBUF, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x1E0) == kEnc_SOPK)
+  }
+  if ((encoding_id & 0x1E0) == kEnc_SOPK) {
     return translate_encoding_cdna4_to_cdna3(kEnc_SOPK, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x180) == kEnc_SOP2)
+  }
+  if ((encoding_id & 0x180) == kEnc_SOP2) {
     return translate_encoding_cdna4_to_cdna3(kEnc_SOP2, w0, w1, w2, dst_op);
-  if ((encoding_id & 0x100) == kEnc_VOP2)
+  }
+  if ((encoding_id & 0x100) == kEnc_VOP2) {
     return translate_encoding_cdna4_to_cdna3(kEnc_VOP2, w0, w1, w2, dst_op);
+  }
   return {};
 }
 

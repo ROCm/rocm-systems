@@ -72,16 +72,21 @@ std::optional<RegClass> special_class_from_name(std::string_view name) {
                          [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   const std::string_view n = lower;
   auto starts_with = [&](std::string_view prefix) { return n.substr(0, prefix.size()) == prefix; };
-  if (starts_with("exec"))
+  if (starts_with("exec")) {
     return RegClass::EXEC; // exec, exec_lo, exec_hi
-  if (starts_with("vcc"))
+  }
+  if (starts_with("vcc")) {
     return RegClass::VCC; // vcc, vcc_lo, vcc_hi
-  if (starts_with("flat_scratch"))
+  }
+  if (starts_with("flat_scratch")) {
     return RegClass::FLAT_SCRATCH; // flat_scratch_lo/hi/all
-  if (n == "m0")
+  }
+  if (n == "m0") {
     return RegClass::M0;
-  if (n == "scc" || n == "src_scc")
+  }
+  if (n == "scc" || n == "src_scc") {
     return RegClass::SCC;
+  }
   return std::nullopt;
 }
 
@@ -93,8 +98,9 @@ void note_operand(const Operand &op, ProbeClobberSummary &summary) {
     note_special_state(summary, ref->cls);
     return;
   }
-  if (auto cls = special_class_from_name(op.name()))
+  if (auto cls = special_class_from_name(op.name())) {
     note_special_state(summary, *cls);
+  }
 }
 
 // Scan every explicit operand and flag special-state register classes. This is
@@ -102,16 +108,19 @@ void note_operand(const Operand &op, ProbeClobberSummary &summary) {
 void scan_special_state(const Instruction &inst, ProbeClobberSummary &summary) {
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const Operand *op = inst.dst_operand(i);
-    if (op == nullptr)
+    if (op == nullptr) {
       continue;
+    }
     note_operand(*op, summary);
   }
   for (int i = 0; i < inst.num_src_operands(); ++i) {
-    if (!inst.tracks_explicit_source(i))
+    if (!inst.tracks_explicit_source(i)) {
       continue;
+    }
     const Operand *op = inst.src_operand(i);
-    if (op == nullptr)
+    if (op == nullptr) {
       continue;
+    }
     note_operand(*op, summary);
   }
 }

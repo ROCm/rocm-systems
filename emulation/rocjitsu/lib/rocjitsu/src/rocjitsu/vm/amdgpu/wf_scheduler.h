@@ -40,8 +40,9 @@ public:
 class OldestFirstScheduler : public WavefrontScheduler {
 public:
   Wavefront *schedule(std::span<const std::unique_ptr<Wavefront>> slots) override {
-    if (current_ && current_->state() == WfState::RUNNING)
+    if (current_ && current_->state() == WfState::RUNNING) {
       return current_;
+    }
 
     Wavefront *best = nullptr;
     uint64_t oldest = UINT64_MAX;

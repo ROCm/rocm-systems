@@ -14,11 +14,13 @@
 #include <memory>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "src/cuid_device.h"
 #include "src/cuid_device_manager.h"
 #include "src/cuid_gpu.h"
+#include "src/cuid_platform.h"
 #include "src/cuid_util.h"
 #include "test_common.h"
 
@@ -212,6 +214,12 @@ TEST(cuidtstUnprivileged, BdfWithAVmdSegmentParses) {
   EXPECT_TRUE(CuidUtilities::is_valid_bdf("ffffffff:04:00.0"));
   EXPECT_FALSE(CuidUtilities::is_valid_bdf("100000000:04:00.0"));
   EXPECT_FALSE(CuidUtilities::is_valid_bdf("000:04:00.0"));
+  EXPECT_TRUE(CuidUtilities::is_valid_bdf("0000:ff:1f.7"));
+  EXPECT_FALSE(CuidUtilities::is_valid_bdf("0000:04:20.0"));
+  EXPECT_FALSE(CuidUtilities::is_valid_bdf("0000:04:00.8"));
+  CuidUtilities::AuxiliaryInput input{};
+  EXPECT_EQ(CuidUtilities::set_pcie_routing(input, "0000:04:00.8"), AMDCUID_STATUS_INVALID_FORMAT);
+  EXPECT_EQ(CuidUtilities::set_pcie_routing(input, "0000:04:00.1"), AMDCUID_STATUS_SUCCESS);
   EXPECT_EQ(CuidUtilities::routing_id_from_bdf("10000:04:00.0"), 0x00000400u);
   EXPECT_EQ(CuidUtilities::segment_high_from_bdf("10000:04:00.0"), 0x0001);
   EXPECT_EQ(CuidUtilities::segment_high_from_bdf("0000:04:00.0"), 0x0000);
@@ -262,7 +270,7 @@ TEST(cuidtstUnprivileged, TemporaryComponentHasNoPrimary) {
   EXPECT_TRUE(temporary);
 
   // Through the API: every query but the primary answers, and the primary is
-  // refused without writing (root) or for want of privilege (anyone else).
+  // refused without writing, the same way for root and anyone else.
   const auto device = std::make_shared<CuidGpu>(UnnamedGpu());
   const amdcuid_id_t handle = derived.UUIDv8_representation;
   CuidDeviceManager& mgr = CuidDeviceManager::instance();
@@ -273,7 +281,10 @@ TEST(cuidtstUnprivileged, TemporaryComponentHasNoPrimary) {
   amdcuid_source_t source = AMDCUID_SOURCE_UNKNOWN;
   bool flag = false;
   char path[128] = {0};
-  uint32_t length = sizeof(vendor_id);
+  uint32_t length = 1;
+  EXPECT_EQ(amdcuid_query_device_property(handle, AMDCUID_QUERY_VENDOR_ID, &vendor_id, &length),
+            AMDCUID_STATUS_INSUFFICIENT_SIZE);
+  EXPECT_EQ(length, sizeof(vendor_id)) << "a short buffer is told the length it needs";
   EXPECT_EQ(amdcuid_query_device_property(handle, AMDCUID_QUERY_VENDOR_ID, &vendor_id, &length),
             AMDCUID_STATUS_SUCCESS);
   length = sizeof(device_id);
@@ -309,9 +320,65 @@ TEST(cuidtstUnprivileged, TemporaryComponentHasNoPrimary) {
   EXPECT_TRUE(flag);
   EXPECT_EQ(source, AMDCUID_SOURCE_LIBRARY);
   EXPECT_STREQ(path, "/nonexistent/cuid-temporary-gpu");
-  EXPECT_EQ(primary_status,
-            geteuid() == 0 ? AMDCUID_STATUS_UNSUPPORTED : AMDCUID_STATUS_PERMISSION_DENIED);
+  EXPECT_EQ(primary_status, AMDCUID_STATUS_UNSUPPORTED);
   EXPECT_EQ(std::memcmp(&refused, &sentinel, sizeof(refused)), 0);
+}
+
+// A buffer too small for a fixed-size answer is told the size it needs.
+TEST(cuidtstUnprivileged, EveryFixedSizeQueryNamesItsLength) {
+  if (!HaveMachineId()) GTEST_SKIP() << "no machine-id, so no temporary CUID";
+  const auto device = std::make_shared<CuidGpu>(UnnamedGpu());
+  amdcuid_derived_id derived = {};
+  ASSERT_EQ(device->get_derived_cuid(derived, nullptr), AMDCUID_STATUS_SUCCESS);
+  const amdcuid_id_t handle = derived.UUIDv8_representation;
+  CuidDeviceManager& mgr = CuidDeviceManager::instance();
+  mgr.shutdown();
+  ASSERT_EQ(mgr.index_handle(device, handle), AMDCUID_STATUS_SUCCESS);
+  const std::pair<amdcuid_query_t, uint32_t> queries[] = {
+      {AMDCUID_QUERY_DERIVED_CUID, sizeof(amdcuid_id_t)},
+      {AMDCUID_QUERY_SOURCE, sizeof(amdcuid_source_t)},
+      {AMDCUID_QUERY_DEVICE_TYPE, sizeof(amdcuid_device_type_t)},
+      {AMDCUID_QUERY_VENDOR_ID, sizeof(uint16_t)},
+      {AMDCUID_QUERY_DEVICE_ID, sizeof(uint16_t)},
+      {AMDCUID_QUERY_REVISION_ID, sizeof(uint8_t)},
+      {AMDCUID_QUERY_UNIT_ID, sizeof(uint16_t)},
+      {AMDCUID_QUERY_TEMPORARY_CUID, sizeof(bool)},
+  };
+  for (const auto& q : queries) {
+    uint8_t buffer[32] = {};
+    uint32_t length = 0;
+    EXPECT_EQ(amdcuid_query_device_property(handle, q.first, buffer, &length),
+              AMDCUID_STATUS_INSUFFICIENT_SIZE)
+        << q.first;
+    EXPECT_EQ(length, q.second) << q.first;
+  }
+  mgr.shutdown();
+}
+
+// The platform has no PCI vendor ID: the query says so and leaves the buffer
+// alone, sized or not.
+TEST(cuidtstUnprivileged, PlatformHasNoVendorId) {
+  if (!HaveMachineId()) GTEST_SKIP() << "no machine-id, so no temporary CUID";
+  amdcuid_platform_info info = {};
+  info.header.device_type = AMDCUID_DEVICE_TYPE_PLATFORM;
+  const auto platform = std::make_shared<CuidPlatform>(info);
+  amdcuid_derived_id derived = {};
+  ASSERT_EQ(platform->get_derived_cuid(derived, nullptr), AMDCUID_STATUS_SUCCESS);
+  const amdcuid_id_t handle = derived.UUIDv8_representation;
+  CuidDeviceManager& mgr = CuidDeviceManager::instance();
+  mgr.shutdown();
+  ASSERT_EQ(mgr.index_handle(platform, handle), AMDCUID_STATUS_SUCCESS);
+  uint16_t vendor_id = 0xA5A5;
+  uint32_t length = sizeof(vendor_id);
+  const auto with_buffer =
+      amdcuid_query_device_property(handle, AMDCUID_QUERY_VENDOR_ID, &vendor_id, &length);
+  length = sizeof(vendor_id);
+  const auto size_only =
+      amdcuid_query_device_property(handle, AMDCUID_QUERY_VENDOR_ID, nullptr, &length);
+  mgr.shutdown();
+  EXPECT_EQ(with_buffer, AMDCUID_STATUS_UNSUPPORTED);
+  EXPECT_EQ(size_only, AMDCUID_STATUS_UNSUPPORTED);
+  EXPECT_EQ(vendor_id, 0xA5A5);
 }
 
 // A temporary CUID, written out as a string and read back, still names its

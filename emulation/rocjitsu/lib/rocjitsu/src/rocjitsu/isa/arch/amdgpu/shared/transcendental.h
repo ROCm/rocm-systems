@@ -7,7 +7,7 @@
 /// @file transcendental.h
 /// @brief Shared transcendental evaluation for AMDGPU execute bodies.
 /// @details F32 reciprocal/root/log/exp/trigonometric mappings use RDNA3/4
-/// capture-based implementations; F64 and TANH use host arithmetic. These have
+/// capture-based implementations; half widening and TANH use host arithmetic. These have
 /// separate accuracy and hardware-coverage contracts.
 /// F16 callers flush the raw source half under MODE before widening, including
 /// for RSQ/SQRT. The half helpers round and flush the result; callers apply
@@ -67,19 +67,23 @@ template <bool Logarithm>
 inline float log_exp_f16_nearest(float x, uint32_t denorm_mode, bool fp16_ovfl, bool quiet_snan) {
   uint32_t bits = std::bit_cast<uint32_t>(x);
   uint32_t magnitude = bits & 0x7fffffffu;
-  if (magnitude > 0x7f800000u)
+  if (magnitude > 0x7f800000u) {
     return std::bit_cast<float>(bits | (quiet_snan ? 0x00400000u : 0u));
+  }
   if (magnitude == 0x7f800000u) {
-    if constexpr (Logarithm)
+    if constexpr (Logarithm) {
       return bits & 0x80000000u ? std::bit_cast<float>(0xffc00000u) : x;
+    }
     return bits & 0x80000000u ? 0.0f : x;
   }
   double value;
   if constexpr (Logarithm) {
-    if (magnitude == 0)
+    if (magnitude == 0) {
       return fp16_ovfl ? -65504.0f : -std::numeric_limits<float>::infinity();
-    if (bits & 0x80000000u)
+    }
+    if (bits & 0x80000000u) {
       return std::bit_cast<float>(0xffc00000u);
+    }
     value = std::log2(static_cast<double>(x));
   } else {
     // Outside this interval every nearest half result is zero or overflows.
@@ -99,15 +103,13 @@ inline float log_exp_f16_nearest(float x, uint32_t denorm_mode, bool fp16_ovfl, 
 /// Guest rounding is ignored; FP16_OVFL controls finite overflow.
 template <bool Logarithm>
 inline float log_exp_f16(float x, uint32_t denorm_mode, bool fp16_ovfl, bool quiet_snan) {
-  fp_mode::ScopedEnvironment environment(0);
   return detail::log_exp_f16_nearest<Logarithm>(x, denorm_mode, fp16_ovfl, quiet_snan);
 }
 
-/// @brief Evaluate a native batch with one saved host floating-point environment.
+/// @brief Evaluate a native batch lane by lane.
 template <bool Logarithm>
 inline util::native<float> log_exp_f16_simd(util::native<float> x, uint32_t denorm_mode,
                                             bool fp16_ovfl, bool quiet_snan) {
-  fp_mode::ScopedEnvironment environment(0);
   return util::map_native_convert_scalar<float, float>(x, [=](float lane) {
     return detail::log_exp_f16_nearest<Logarithm>(lane, denorm_mode, fp16_ovfl, quiet_snan);
   });
@@ -139,18 +141,20 @@ enum class HalfOperation { RCP, RSQ, SQRT, SIN, COS };
 template <HalfOperation Op>
 inline float map_f16(float source, uint32_t denorm_mode, bool fp16_ovfl, bool quiet_snan) {
   float value;
-  if constexpr (Op == HalfOperation::RCP)
+  if constexpr (Op == HalfOperation::RCP) {
     value = util::amdgpu_rcp_f32(source, quiet_snan);
-  else if constexpr (Op == HalfOperation::RSQ)
+  } else if constexpr (Op == HalfOperation::RSQ) {
     value = util::amdgpu_rsq_f32(source, quiet_snan);
-  else if constexpr (Op == HalfOperation::SQRT)
+  } else if constexpr (Op == HalfOperation::SQRT) {
     value = util::amdgpu_sqrt_f32(source, quiet_snan);
-  else
+  } else {
     value = util::amdgpu_trig_f32(source, Op == HalfOperation::COS, 3, quiet_snan);
+  }
   const uint32_t bits = std::bit_cast<uint32_t>(value);
   if (fp16_ovfl && (bits & 0x7fffffffu) == 0x7f800000u &&
-      (std::bit_cast<uint32_t>(source) & 0x7fffffffu) < 0x7f800000u)
+      (std::bit_cast<uint32_t>(source) & 0x7fffffffu) < 0x7f800000u) {
     return std::bit_cast<float>((bits & 0x80000000u) | 0x477fe000u);
+  }
   const uint16_t result = util::f32_to_f16_mode(value, fp16_ovfl);
   return util::f16_to_f32(static_cast<uint16_t>(output_denormal::flush_output<fp_format::F16>(
       uint32_t{result}, output_denormal::Policy::make(denorm_mode))));
@@ -200,42 +204,10 @@ inline uint32_t execute_pseudo_f16(pseudo_scalar::Operation operation, float sou
 
 /// @brief Evaluate single-precision TANH using host std::tanh.
 inline float tanh_f32(float x) {
-  if (std::isnan(x))
+  if (std::isnan(x)) {
     return std::bit_cast<float>(std::bit_cast<uint32_t>(x) | 0x00400000u);
+  }
   return std::tanh(x);
-}
-
-/// @brief Evaluate reciprocal using host double division.
-inline double rcp_f64(double x) {
-  if (std::isnan(x))
-    return x;
-  if (x == 0.0)
-    return std::copysign(std::numeric_limits<double>::infinity(), x);
-  if (std::isinf(x))
-    return std::copysign(0.0, x);
-  return 1.0 / x;
-}
-
-/// @brief Evaluate reciprocal square root using host double sqrt/division.
-inline double rsq_f64(double x) {
-  if (std::isnan(x))
-    return x;
-  if (x == 0.0)
-    return std::copysign(std::numeric_limits<double>::infinity(), x);
-  if (x < 0.0)
-    return std::numeric_limits<double>::quiet_NaN();
-  if (std::isinf(x))
-    return 0.0;
-  return 1.0 / std::sqrt(x);
-}
-
-/// @brief Evaluate double-precision square root using host std::sqrt.
-inline double sqrt_f64(double x) {
-  if (std::isnan(x))
-    return x;
-  if (x < 0.0)
-    return std::numeric_limits<double>::quiet_NaN();
-  return std::sqrt(x);
 }
 
 } // namespace transcendental

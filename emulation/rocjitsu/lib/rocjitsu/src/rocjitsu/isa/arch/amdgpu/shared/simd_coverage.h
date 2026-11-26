@@ -28,8 +28,9 @@ template <typename Op> inline bool e32_packed_vgpr_operand(const Op &op) {
 /// full-word operand for the same physical register; keep staged DPP operands
 /// intact because their half selection has already been applied.
 template <typename Op> inline Op e32_word_operand(const Op &op) {
-  if (!e32_packed_vgpr_operand(op))
+  if (!e32_packed_vgpr_operand(op)) {
     return op;
+  }
   using Kind = decltype(op.opr_type_);
   const IsaExecutionBackend backend{.operand_backend = Op::full_execution_backend()};
   ScopedIsaExecutionBackend scope(&backend);
@@ -48,29 +49,34 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_words_simd(Inst &inst, Wavefront &wf, Op op,
                                                  uint32_t round_mode = 0) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst))
+  if (simd_force_scalar(wf) || !sdwa::supports_direct_simd_store(inst)) {
     return false;
+  }
   auto canonical = [](const auto &operand) {
-    if constexpr (E32)
+    if constexpr (E32) {
       return e32_word_operand(operand);
-    else
+    } else {
       return operand;
+    }
   };
   auto first = canonical(inst.src0);
   auto destination = canonical(inst.vdst);
   using OperandT = decltype(first);
   std::optional<OperandT> second, third;
   if constexpr (Arity >= 2) {
-    if constexpr (requires { inst.src1; })
+    if constexpr (requires { inst.src1; }) {
       second.emplace(canonical(inst.src1));
-    else
+    } else {
       second.emplace(canonical(inst.vsrc1));
+    }
   }
-  if constexpr (Arity >= 3)
+  if constexpr (Arity >= 3) {
     third.emplace(canonical(inst.src2));
+  }
   if (!first.simd_capable() || !destination.simd_capable() || (second && !second->simd_capable()) ||
-      (third && !third->simd_capable()))
+      (third && !third->simd_capable())) {
     return false;
+  }
   uint32_t selectors = 0;
   if constexpr (E32) {
     auto high = [](const auto &operand) {
@@ -78,10 +84,11 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
     };
     selectors = high(inst.src0) ? 1 : 0;
     if constexpr (Arity >= 2) {
-      if constexpr (requires { inst.src1; })
+      if constexpr (requires { inst.src1; }) {
         selectors |= high(inst.src1) ? 2 : 0;
-      else
+      } else {
         selectors |= high(inst.vsrc1) ? 2 : 0;
+      }
     }
     selectors |= (inst.inst_.vdst & 0x80) ? 8 : 0;
   } else if constexpr (HalfDst || HalfInputs) {
@@ -96,10 +103,12 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
   RegisterAccess regs(wf);
   auto a = regs.read_operand(first, exec, bytes(0));
   std::optional<RegisterAccess::OperandReadView> b, c;
-  if constexpr (Arity >= 2)
+  if constexpr (Arity >= 2) {
     b.emplace(regs.read_operand(*second, exec, bytes(1)));
-  if constexpr (Arity >= 3)
+  }
+  if constexpr (Arity >= 3) {
     c.emplace(regs.read_operand(*third, exec, bytes(2)));
+  }
   const bool high_dst = HalfDst && (selectors & 8);
   const bool zero_high = HalfDst && !E32 && !high_dst && cdna_vop3_low_dst_zeroes_high(wf);
   auto dst =
@@ -107,31 +116,38 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
   if (!run_instruction_chunks<Scoped>(dst, round_mode, [&] {
         for (uint32_t base = 0; base < wf.wf_size(); base += W) {
           const uint64_t chunk = (exec >> base) & util::mask<uint64_t>(W);
-          if (!chunk)
+          if (!chunk) {
             continue;
+          }
           auto load = [&](const auto &view, unsigned i) {
             U v = view.template load_native<uint32_t>(base);
-            if (HalfInputs & (1u << i))
+            if (HalfInputs & (1u << i)) {
               v = (v >> ((selectors & (1u << i)) ? 16 : 0)) & U(0xffffu);
+            }
             return v;
           };
           U result;
-          if constexpr (Arity == 1)
+          if constexpr (Arity == 1) {
             result = op(load(a, 0));
-          else if constexpr (Arity == 2) {
-            if constexpr (requires { op(load(a, 0), load(*b, 1), base); })
+          } else if constexpr (Arity == 2) {
+            if constexpr (requires { op(load(a, 0), load(*b, 1), base); }) {
               result = op(load(a, 0), load(*b, 1), base);
-            else
+            } else {
               result = op(load(a, 0), load(*b, 1));
-          } else
+            }
+          } else {
             result = op(load(a, 0), load(*b, 1), load(*c, 2));
-          if constexpr (HalfDst)
+          }
+          if constexpr (HalfDst) {
             result = (result & U(0xffffu)) << (high_dst ? 16 : 0);
-          if (dst.template store_native<uint32_t>(base, result, chunk).failed())
+          }
+          if (dst.template store_native<uint32_t>(base, result, chunk).failed()) {
             return;
+          }
         }
-      }))
+      })) {
     return false;
+  }
   detail::record_simd_fast_path(SimdFastPath::VOP_WORDS);
   return true;
 }
@@ -142,174 +158,44 @@ template <unsigned Arity, bool E32, bool HalfDst, unsigned HalfInputs, bool Scop
   return false;
 }
 
-/// Vector exponent classification and exact normal-range scaling. Only lanes
-/// requiring subnormal rounding, overflow or exceptional-value handling use
-/// the scalar architectural primitive.
-template <typename Float>
-  requires(!(RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS && sizeof(Float) == 8))
-inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
-                           util::native<Float> numerator, uint32_t rounding, uint32_t denorm) {
-  using F = DivisionFormat<Float>;
-  using Bits = typename F::Bits;
-  using U = util::native<Bits>;
-  using I = util::native<std::make_signed_t<Bits>>;
-  U v = std::bit_cast<U>(value), d = std::bit_cast<U>(denominator), n = std::bit_cast<U>(numerator);
-  auto exp = [](U x) {
-    return util::stdx::static_simd_cast<I>((x & U(F::infinity)) >> F::fraction);
-  };
-  if (!(denorm & 1u)) {
-    util::stdx::where((v & U(F::infinity)) == U(0), v) = v & U(F::sign);
-    util::stdx::where((d & U(F::infinity)) == U(0), d) = d & U(F::sign);
-    util::stdx::where((n & U(F::infinity)) == U(0), n) = n & U(F::sign);
-  }
-  I de = exp(d), ne = exp(n), delta = ne - de;
-  I adjustment(0);
-  // Apply conditions from last to first to retain the scalar rule priority.
-  util::stdx::where(ne <= I(sizeof(Float) == 4 ? 24 : 53), adjustment) = I(F::scale);
-  const auto denominator_selected =
-      util::stdx::static_simd_cast<I>(v) == util::stdx::static_simd_cast<I>(d);
-  auto post = delta <= I(-F::threshold);
-  util::stdx::where(post && !denominator_selected, adjustment) = I(F::scale);
-  util::stdx::where(post && denominator_selected, adjustment) = I(0);
-  const auto large_denominator = de >= I(2 * F::bias - 1);
-  util::stdx::where(large_denominator, adjustment) = I(-F::scale);
-  util::stdx::where(large_denominator && post && !denominator_selected, adjustment) = I(0);
-  util::stdx::where(de == I(0), adjustment) = I(F::scale);
-  post = post && de != I(0);
-  const auto large_delta = delta >= I(F::threshold);
-  util::stdx::where(large_delta, adjustment) = I(0);
-  util::stdx::where(large_delta && denominator_selected, adjustment) = I(F::scale);
-  post = post || large_delta;
-  I ve = exp(v), scaled_exp = ve + adjustment;
-  U result = (v & U(~F::infinity)) | (util::stdx::static_simd_cast<U>(scaled_exp) << F::fraction);
-  uint64_t post_bits = util::simd_mask_to_bits(post);
-  for (std::size_t i = 0; i < U::size(); ++i) {
-    if (ve[i] == 0 || ve[i] == int(F::infinity >> F::fraction) || scaled_exp[i] <= 0 ||
-        scaled_exp[i] >= int(F::infinity >> F::fraction) || (d[i] & ~F::sign) == 0 ||
-        (n[i] & ~F::sign) == 0) {
-      const auto scalar =
-          div_scale<Float>(value[i], denominator[i], numerator[i], rounding, denorm);
-      result[i] = std::bit_cast<Bits>(scalar.value);
-      post_bits = (post_bits & ~(uint64_t{1} << i)) | (uint64_t(scalar.post_scale) << i);
-    }
-  }
-  return std::pair{std::bit_cast<util::native<Float>>(result), post_bits};
-}
-
-#if RJ_SIMD_BROKEN_NATIVE_64BIT_MASKS
-template <typename Float>
-  requires(sizeof(Float) == 8)
-inline auto div_scale_simd(util::native<Float> value, util::native<Float> denominator,
-                           util::native<Float> numerator, uint32_t rounding, uint32_t denorm) {
-  util::native<Float> result(0);
-  uint64_t post_bits = 0;
-  for (std::size_t lane = 0; lane < result.size(); ++lane) {
-    const auto scalar =
-        div_scale<Float>(value[lane], denominator[lane], numerator[lane], rounding, denorm);
-    result[lane] = scalar.value;
-    post_bits |= uint64_t{scalar.post_scale} << lane;
-  }
-  return std::pair{result, post_bits};
-}
-#endif
-
-template <typename T, typename Inst, typename WriteResult>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_div_scale_simd(Inst &inst, Wavefront &wf,
-                                                     WriteResult commit) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.src1.simd_capable() || !inst.src2.simd_capable() || !inst.vdst.simd_capable())
-    return false;
-  constexpr uint32_t W = util::native<T>::size();
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const uint32_t rounding = sizeof(T) == 4 ? wf.fp_round_mode_f32() : wf.fp_round_mode_f16_f64();
-  const uint32_t denorm = sizeof(T) == 4 ? wf.fp_denorm_mode_f32() : wf.fp_denorm_mode_f16_f64();
-  RegisterAccess regs(wf);
-  auto read = [&](const auto &operand) {
-    if constexpr (sizeof(T) == 8)
-      return regs.read_operand64(operand, exec);
-    else
-      return regs.read_operand(operand, exec);
-  };
-  auto a = read(inst.src0), b = read(inst.src1), c = read(inst.src2);
-  auto dst = [&] {
-    if constexpr (sizeof(T) == 8)
-      return regs.write_operand64(inst.vdst, exec);
-    else
-      return regs.write_operand(inst.vdst, exec);
-  }();
-  uint64_t mask = wf.vcc();
-  for (uint32_t base = 0; base < wf.wf_size(); base += W) {
-    uint64_t chunk = (exec >> base) & util::mask<uint64_t>(W);
-    if (!chunk)
-      continue;
-    auto modify = [&](auto value, unsigned index) {
-      using U = util::native<typename DivisionFormat<T>::Bits>;
-      U bits = std::bit_cast<U>(value);
-      if constexpr (requires { inst.inst_.abs; })
-        if (inst.inst_.abs & (1u << index))
-          bits &= U(~DivisionFormat<T>::sign);
-      if (inst.inst_.neg & (1u << index))
-        bits ^= U(DivisionFormat<T>::sign);
-      return std::bit_cast<util::native<T>>(bits);
-    };
-    auto [value, bits] = div_scale_simd<T>(
-        modify(a.template load_native<T>(base), 0), modify(b.template load_native<T>(base), 1),
-        modify(c.template load_native<T>(base), 2), rounding, denorm);
-    if (dst.template store_native<T>(base, value, chunk).failed())
-      return true;
-    mask = (mask & ~(chunk << base)) | ((bits & chunk) << base);
-  }
-  commit(mask);
-  return true;
-}
-
-template <typename T, typename Inst, typename WriteResult>
-[[nodiscard]] bool try_execute_div_scale_simd(Inst &, Wavefront &, WriteResult) {
-  return false;
-}
-
 /// VOPD uses one instruction-wide read phase. Both slot results are buffered
 /// before either destination is exposed for writing, including F64 pairs.
-template <bool Extended, bool TrackStatus = false, typename Slot,
-          typename Classify = std::nullptr_t>
+template <bool Extended, typename Slot>
   requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_vopd_simd(const Slot &x, const Slot &y, Wavefront &wf,
-                                                Classify classify = nullptr) {
-  if (simd_force_scalar())
+[[nodiscard]] inline bool try_execute_vopd_simd(const Slot &x, const Slot &y, Wavefront &wf) {
+  if (simd_force_scalar(wf)) {
     return false;
+  }
   auto capable = [](const Slot &slot) {
     return slot.src0->simd_capable() && (slot.op == 8 || slot.src1->simd_capable()) &&
            slot.dst->simd_capable() && (!slot.has_src2_operand || slot.src2->simd_capable());
   };
-  if (!capable(x) || !capable(y))
+  if (!capable(x) || !capable(y)) {
     return false;
+  }
   // Each arithmetic slot must match its own MODE precision before either
   // slot reads operands. Other policies use the mode-aware scalar executor.
   auto is_arithmetic = [](const Slot &slot) {
     return slot.op <= 7 || (Extended && (slot.op == 19 || (slot.op >= 32 && slot.op <= 34)));
   };
   auto matches_mode = [&](const Slot &slot) {
-    if (!is_arithmetic(slot))
+    if (!is_arithmetic(slot)) {
       return true;
+    }
     const bool f64 = Extended && slot.op >= 32;
     return fp_mode::native_arithmetic_matches(
         f64 ? wf.fp_round_mode_f16_f64() : wf.fp_round_mode_f32(),
         f64 ? wf.fp_denorm_mode_f16_f64() : wf.fp_denorm_mode_f32());
   };
-  if (!matches_mode(x) || !matches_mode(y))
+  if (!matches_mode(x) || !matches_mode(y)) {
     return false;
-  // Matching controls still permit host computation to raise exception flags, so
-  // each slot that computes on host floats takes one environment for the whole
-  // wavefront, after its own operand reads and around its chunk loop, and uses
-  // the unscoped arithmetic cores inside it. Raw-bit routes, including the F32
-  // MIN/MAX selections, need none, and register access, which can run callbacks,
-  // stays outside every scope.
+  }
+  // With matching controls the host's default FP environment computes each slot,
+  // through the unscoped arithmetic cores.
   struct Results {
     alignas(util::native<uint32_t>) uint32_t words[64]{};
     alignas(util::native<uint64_t>) uint64_t pairs[64]{};
   } xr, yr;
-  uint32_t causes = 0;
   const uint64_t exec = wf.exec();
   RegisterAccess regs(wf);
   auto compute = [&](const Slot &slot, Results &out) {
@@ -321,18 +207,18 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
         auto a = regs.read_operand64(*slot.src0, exec);
         auto b = regs.read_operand64(*slot.src1, exec);
         std::optional<RegisterAccess::OperandRead64View> c;
-        if (slot.op == 32)
+        if (slot.op == 32) {
           c.emplace(regs.read_operand64(*slot.src2, exec));
-        // Every F64 slot computes on the host: 32-34 arithmetically, and MIN/MAX
-        // through fmax/fmin, which signal on a NaN input under no MODE gate.
-        fp_mode::ScopedEnvironment environment(0);
+        }
         for (uint32_t base = 0; base < wf.wf_size(); base += W) {
-          if (!((exec >> base) & util::mask<uint64_t>(W)))
+          if (!((exec >> base) & util::mask<uint64_t>(W))) {
             continue;
+          }
           auto load = [&](const auto &view, unsigned i) {
             U bits = view.template load_native<uint64_t>(base);
-            if (slot.neg & (1u << i))
+            if (slot.neg & (1u << i)) {
               bits ^= U(0x8000000000000000ULL);
+            }
             return std::bit_cast<D>(bits);
           };
           D av = load(a, 0), bv = load(b, 1), result;
@@ -368,32 +254,34 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
     constexpr uint32_t W = U::size();
     auto a = regs.read_operand(*slot.src0, exec);
     std::optional<RegisterAccess::OperandReadView> b, c, acc;
-    if (slot.op != 8)
+    if (slot.op != 8) {
       b.emplace(regs.read_operand(*slot.src1, exec));
-    if (slot.has_src2_operand && slot.op != 9)
+    }
+    if (slot.has_src2_operand && slot.op != 9) {
       c.emplace(regs.read_operand(*slot.src2, exec));
-    if (slot.op == 0)
+    }
+    if (slot.op == 0) {
       acc.emplace(regs.read_operand(*slot.dst, exec));
+    }
     const uint64_t condition =
         slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
-    // One environment per arithmetic slot, after that slot's reads. The gate
-    // above leaves MODE.FP_ROUND nearest-even, the rounding the cores below expect.
-    std::optional<fp_mode::ScopedEnvironment> environment;
-    if (is_arithmetic(slot))
-      environment.emplace(wf.fp_round_mode_f32());
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
-      if (!((exec >> base) & util::mask<uint64_t>(W)))
+      if (!((exec >> base) & util::mask<uint64_t>(W))) {
         continue;
+      }
       U av = a.template load_native<uint32_t>(base);
       U bv = b ? b->template load_native<uint32_t>(base) : U(0);
       U cv = c ? c->template load_native<uint32_t>(base) : U(slot.src2_imm);
       if ((slot.op <= 11 && slot.op != 8) || (Extended && slot.op == 19)) {
-        if (slot.neg & 1)
+        if (slot.neg & 1) {
           av ^= U(0x80000000u);
-        if (slot.neg & 2)
+        }
+        if (slot.neg & 2) {
           bv ^= U(0x80000000u);
-        if (slot.neg & 4)
+        }
+        if (slot.neg & 4) {
           cv ^= U(0x80000000u);
+        }
       }
       const F af = std::bit_cast<F>(av), bf = std::bit_cast<F>(bv), cf = std::bit_cast<F>(cv);
       U result;
@@ -465,10 +353,11 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
         result = bv << (av & U(31));
         break;
       case 18:
-        if constexpr (Extended)
+        if constexpr (Extended) {
           result = bitop3_words(av, bv, U(0), uint8_t(slot.src2_imm));
-        else
+        } else {
           result = av & bv;
+        }
         break;
       case 20:
         result = av - bv;
@@ -489,76 +378,50 @@ template <bool Extended, bool TrackStatus = false, typename Slot,
       default:
         return false;
       }
-      if constexpr (TrackStatus) {
-        if (slot.op <= 6 && !wf.dx10_clamp()) {
-          if (slot.op == 0)
-            cv = acc->template load_native<uint32_t>(base);
-          for (uint32_t i = 0; i < W; ++i) {
-            if (exec & (uint64_t{1} << (base + i))) {
-              const auto in = rdna3_5::dual_fma_inputs(slot.op, av[i], bv[i], cv[i]);
-              causes |= rdna3_5::fma_flags(in, result[i], wf);
-            }
-          }
-        }
-      }
-      if constexpr (!std::is_same_v<Classify, std::nullptr_t>) {
-        if (slot.op <= 7 || slot.op == 10 || slot.op == 11) {
-          if (acc)
-            cv = acc->template load_native<uint32_t>(base);
-          uint64_t active = (exec >> base) & util::mask<uint64_t>(W);
-          while (active) {
-            const unsigned i = std::countr_zero(active);
-            causes |= classify(slot.op, av[i], bv[i], cv[i], result[i], wf);
-            active &= active - 1;
-          }
-        }
-      }
       result.copy_to(out.words + base, util::stdx::vector_aligned);
     }
     return true;
   };
-  if (!compute(x, xr) || !compute(y, yr))
+  if (!compute(x, xr) || !compute(y, yr)) {
     return false;
+  }
   auto store = [&](const Slot &slot, const Results &result) -> Result {
     if constexpr (Extended) {
       if (slot.op >= 32) {
         auto dst = regs.write_operand64(*slot.dst, exec);
         constexpr uint32_t W = util::native<uint64_t>::size();
-        for (uint32_t base = 0; base < wf.wf_size(); base += W)
+        for (uint32_t base = 0; base < wf.wf_size(); base += W) {
           if (dst.template store_native<uint64_t>(
                      base, util::native<uint64_t>(result.pairs + base, util::stdx::vector_aligned),
                      (exec >> base) & util::mask<uint64_t>(W))
-                  .failed())
+                  .failed()) {
             return Result::failure();
+          }
+        }
         return Result::success();
       }
     }
     auto dst = regs.write_operand(*slot.dst, exec);
     constexpr uint32_t W = util::native<uint32_t>::size();
-    for (uint32_t base = 0; base < wf.wf_size(); base += W)
+    for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (dst.template store_native<uint32_t>(
                  base, util::native<uint32_t>(result.words + base, util::stdx::vector_aligned),
                  (exec >> base) & util::mask<uint64_t>(W))
-              .failed())
+              .failed()) {
         return Result::failure();
+      }
+    }
     return Result::success();
   };
-  if (store(x, xr).failed() || store(y, yr).failed())
+  if (store(x, xr).failed() || store(y, yr).failed()) {
     return true;
-  if constexpr (TrackStatus)
-    rdna3_5::record_alu_causes(wf, causes);
-  if constexpr (!std::is_same_v<Classify, std::nullptr_t>) {
-    wf.set_trapsts(wf.trapsts() | causes);
-    wf.raise_alu_causes(causes);
   }
   detail::record_simd_fast_path(SimdFastPath::VOPD);
   return true;
 }
 
-template <bool Extended, bool TrackStatus = false, typename Slot,
-          typename Classify = std::nullptr_t>
-[[nodiscard]] bool try_execute_vopd_simd(const Slot &, const Slot &, Wavefront &,
-                                         Classify = nullptr) {
+template <bool Extended, typename Slot>
+[[nodiscard]] bool try_execute_vopd_simd(const Slot &, const Slot &, Wavefront &) {
   return false;
 }
 

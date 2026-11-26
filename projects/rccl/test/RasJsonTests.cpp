@@ -7,96 +7,15 @@
 #include <rccl/rccl.h>
 #include <hip/hip_runtime.h>
 
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <sys/socket.h>
-#include <unistd.h>
-
 #include <chrono>
-#include <cstring>
 #include <string>
 #include <thread>
 
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
+#include "common/RasClientHelpers.hpp"
 
 namespace RcclUnitTesting {
-
-// Picks a likely-free TCP port by binding to port 0 and reading the kernel
-// assignment, then closes the probe socket. Caller must use SO_REUSEADDR (the
-// RAS listener does) or accept a small race window before the chosen port is
-// reused by something else on the host.
-static int pickFreePort() {
-  int s = ::socket(AF_INET, SOCK_STREAM, 0);
-  if (s < 0) return 0;
-  sockaddr_in addr{};
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-  addr.sin_port = 0;
-  if (::bind(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
-    ::close(s);
-    return 0;
-  }
-  socklen_t len = sizeof(addr);
-  if (::getsockname(s, reinterpret_cast<sockaddr*>(&addr), &len) != 0) {
-    ::close(s);
-    return 0;
-  }
-  int port = ntohs(addr.sin_port);
-  ::close(s);
-  return port;
-}
-
-// Connects to the local RAS server and runs one STATUS query in the requested
-// format ("text" or "json"). Returns the entire response body, or an empty
-// string on connection/protocol failure. Uses 127.0.0.1 (IPv4 loopback) to
-// match the address family used by pickFreePort() and NCCL_RAS_ADDR.
-static std::string queryRas(const std::string& format, const std::string& portStrIn) {
-  int sock = -1;
-  addrinfo hints{};
-  hints.ai_family   = AF_INET;
-  hints.ai_socktype = SOCK_STREAM;
-  const char* portStr = portStrIn.c_str();
-
-  for (int attempt = 0; attempt < 20 && sock < 0; ++attempt) {
-    addrinfo* results = nullptr;
-    if (::getaddrinfo("127.0.0.1", portStr, &hints, &results) == 0) {
-      for (addrinfo* ai = results; ai != nullptr; ai = ai->ai_next) {
-        int s = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-        if (s < 0) continue;
-        if (::connect(s, ai->ai_addr, ai->ai_addrlen) == 0) {
-          sock = s;
-          break;
-        }
-        ::close(s);
-      }
-      ::freeaddrinfo(results);
-    }
-    if (sock < 0) std::this_thread::sleep_for(std::chrono::milliseconds(100));
-  }
-  if (sock < 0) return {};
-
-  if (format != "text") {
-    std::string setFmt = "SET FORMAT " + format + "\n";
-    ::send(sock, setFmt.c_str(), setFmt.size(), 0);
-    char ack[16] = {};
-    ssize_t n = ::recv(sock, ack, sizeof(ack) - 1, 0);
-    if (n <= 0 || std::string(ack, n).find("OK") == std::string::npos) {
-      ::close(sock);
-      return {};
-    }
-  }
-
-  const char* status = "STATUS\n";
-  ::send(sock, status, ::strlen(status), 0);
-
-  std::string body;
-  char buf[4096];
-  ssize_t n;
-  while ((n = ::recv(sock, buf, sizeof(buf), 0)) > 0) body.append(buf, n);
-  ::close(sock);
-  return body;
-}
 
 // Verifies the RAS subsystem supports JSON output and that switching to JSON
 // actually returns a structured document rather than the human-readable text
@@ -113,7 +32,7 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
 
         // Pick the RAS port and publish NCCL_RAS_ADDR *inside* this process,
         // which is the same process that runs ncclCommInitRank() (so the RAS
-        // server binds here) and queryRas() (so the client connects here).
+        // server binds here) and rasRequest() (so the client connects here).
         // The process-isolation harness re-execs the test binary, which would
         // re-run any port selection placed in the TEST() body in a *second*
         // process; the server and client would then disagree on the port and
@@ -126,8 +45,7 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
         // otherwise target an IPv6 port that was never checked for being free.
         int port = pickFreePort();
         ASSERT_GT(port, 0) << "Could not allocate a free TCP port for RAS";
-        std::string portStr = std::to_string(port);
-        std::string rasAddr = "127.0.0.1:" + portStr;
+        std::string rasAddr = "127.0.0.1:" + std::to_string(port);
         ASSERT_EQ(setenv("NCCL_RAS_ENABLE", "1", /*overwrite=*/1), 0);
         ASSERT_EQ(setenv("NCCL_RAS_ADDR", rasAddr.c_str(), /*overwrite=*/1), 0);
 
@@ -140,8 +58,8 @@ TEST(RasJson, JsonFormatIsSupportedAndDistinctFromText) {
         // Give the RAS listener a brief moment to come up after init.
         std::this_thread::sleep_for(std::chrono::milliseconds(250));
 
-        std::string textBody = queryRas("text", portStr);
-        std::string jsonBody = queryRas("json", portStr);
+        std::string textBody = rasRequest(port, "STATUS");
+        std::string jsonBody = rasRequest(port, "STATUS", "json");
 
         ASSERT_FALSE(textBody.empty()) << "RAS returned no text response";
         ASSERT_FALSE(jsonBody.empty())

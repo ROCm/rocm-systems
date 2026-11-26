@@ -8,6 +8,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ### Added
 
+- New options added for rocsys, `rocsys <subcommand> --traces` selects what is traced
+  with one list of names, for example `rocsys <subcommand> --traces hip mpi -- ./app`.
+  `rocsys <subcommand> --output-path` and `rocsys <subcommand> --log-level` set
+  `ROCPROFSYS_OUTPUT_PATH` and `ROCPROFSYS_LOG_LEVEL` for `profile`, `instrument`, `python`,
+  and `attach`.
 - Agent skills for choosing a profiling preset, discovering configuration options, and
   instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
   bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
@@ -27,6 +32,9 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   whenever `ROCPROFSYS_PROFILE` is enabled; `wall_clock` in
   `ROCPROFSYS_TIMEMORY_COMPONENTS` is accepted but no longer needed, and the default of
   that setting is now empty instead of `wall_clock`.
+- `rocsys` now requires a `--` separator between it's options and the application, even
+  when no profiling options are provided. For example, `rocsys profile ./app`is now
+  `rocsys profile -- ./app`.
 
 ### Removed
 
@@ -37,6 +45,15 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
+- Fixed overflow sampling on hardware events, including the default
+  `perf::PERF_COUNT_HW_CACHE_REFERENCES`, failing at startup with
+  `Failed to open perf event: Invalid argument`.
+- Fixed overflow sampling on hardware cache events. `ROCPROFSYS_SAMPLING_OVERFLOW_EVENT`
+  values such as `perf::PERF_COUNT_HW_CACHE_LL:MISS` or
+  `perf::PERF_COUNT_HW_CACHE_L1D:WRITE:ACCESS` failed with `Unknown perf hardware config`.
+  The operation (`READ`, `WRITE`, `PREFETCH`) and result (`ACCESS`, `MISS`) modifiers are now
+  both honored, in any order, defaulting to `READ` and `MISS`; an unknown or repeated
+  modifier is an error.
 - Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
   finalization. Regions that never received their end callback are now emitted with the
   finalization timestamp and an `[incomplete]` name suffix instead of being dropped.
@@ -53,6 +70,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   version it was built against.
 - Fixed GPU kernel and memory copy durations in the `wall_clock` profile, which were
   reported several orders of magnitude too small.
+- Fixed a race in the process and thread state machines where concurrent `set()` calls
+  could lower the state (for example from `Finalized` back to `Active`). The transition is
+  now an atomic compare-and-swap. `push()` also no longer changes the state when recording
+  the previous state in the history throws (for example `std::bad_alloc`).
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 

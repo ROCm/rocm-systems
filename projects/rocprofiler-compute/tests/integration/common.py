@@ -251,7 +251,8 @@ def skip_unsupported_pc_sampling_soc(is_stochastic=False):
         "RDNA35_HALO",
         "RDNA35_POINT_2",
         "RDNA35_GORGON_POINT",
-        "RDNA4_NAVI48",
+        "NAVI48_1",
+        "NAVI48_2",
     }
     if is_stochastic:
         unsupported_socs.add("MI200")

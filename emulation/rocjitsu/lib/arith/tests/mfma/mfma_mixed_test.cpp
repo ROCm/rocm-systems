@@ -19,11 +19,13 @@ namespace {
 using namespace rocjitsu::arith::test;
 
 // Construct matrices logically, pack them into independent format layouts and compare the product.
-template <int M, int K, bool Scaled = false, typename Entry> void arithmetic(Entry entry) {
+template <int M, int K, bool Scaled = false, typename Entry>
+void arithmetic(Entry entry, bool finite_fp4 = false) {
   constexpr int D = M * M / 64, Scale = 16 + 2 * D;
   const auto levels = supported_cpu_levels();
-  for (int fa = 0; fa < 5; ++fa) {
-    for (int fb = 0; fb < 5; ++fb) {
+  const int first_format = finite_fp4 ? int(RJ_ARITH_MATRIX_FORMAT_FP4) : 0;
+  for (int fa = first_format; fa < 5; ++fa) {
+    for (int fb = first_format; fb < 5; ++fb) {
       std::array<std::array<uint32_t, 64>, Scale + D> input{};
       float left[M][K], right[M][K];
       std::minstd_rand random;
@@ -55,9 +57,10 @@ template <int M, int K, bool Scaled = false, typename Entry> void arithmetic(Ent
             values[row][k] = decode_matrix_format(code, format);
           }
         }
+        return M * K * width / (64 * 32);
       };
-      fill(0, fa, left);
-      fill(8, fb, right);
+      const int a_regs = fill(0, fa, left);
+      const int b_regs = fill(8, fb, right);
       for (int reg = 0; reg < D; ++reg) {
         for (auto &word : input[16 + reg]) {
           word = std::bit_cast<uint32_t>(float(int(random() >> 8) - 0x400000) * 0x1p-23f);
@@ -68,7 +71,9 @@ template <int M, int K, bool Scaled = false, typename Entry> void arithmetic(Ent
         input[Scale][lane] = uint32_t(126 + lane % 3) << 8;
         input[Scale + 1][lane] = uint32_t(126 + lane % 4) << 16;
       }
-      input[Scale][1] = 255U << 8;
+      if (!finite_fp4) {
+        input[Scale][1] = 255U << 8;
+      }
       uint64_t controls = uint64_t(fa) | (uint64_t(fb) << 3);
       if constexpr (Scaled) {
         controls |= (1ULL << 6) | (2ULL << 8);
@@ -116,10 +121,13 @@ template <int M, int K, bool Scaled = false, typename Entry> void arithmetic(Ent
         for (uint64_t cpu : levels) {
           for (uint64_t semantics : semantics_modes()) {
             auto storage = input;
-            const uint32_t *a[8], *b[8], *c[D];
+            // Compact operands provide only the VGPRs selected by their individual formats.
+            const uint32_t *a[8]{}, *b[8]{}, *c[D];
             uint32_t *d[D];
-            for (int i = 0; i < 8; ++i) {
+            for (int i = 0; i < a_regs; ++i) {
               a[i] = storage[i].data();
+            }
+            for (int i = 0; i < b_regs; ++i) {
               b[i] = storage[8 + i].data();
             }
             for (int i = 0; i < D; ++i) {
@@ -164,9 +172,11 @@ TEST(MfmaMixed, F32_16x16x128) { arithmetic<16, 128>(rj_arith_v_mfma_f32_16x16x1
 TEST(MfmaMixed, F32_32x32x64) { arithmetic<32, 64>(rj_arith_v_mfma_f32_32x32x64_f8f6f4_w64); }
 TEST(MfmaMixed, ScaleF32_16x16x128) {
   arithmetic<16, 128, true>(rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64);
+  arithmetic<16, 128, true>(rj_arith_v_mfma_scale_f32_16x16x128_f8f6f4_w64, /*finite_fp4=*/true);
 }
 TEST(MfmaMixed, ScaleF32_32x32x64) {
   arithmetic<32, 64, true>(rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64);
+  arithmetic<32, 64, true>(rj_arith_v_mfma_scale_f32_32x32x64_f8f6f4_w64, /*finite_fp4=*/true);
 }
 
 TEST(MfmaMixed, ScaleClampsFiniteOverflowAndPreservesNonfiniteInputs) {

@@ -56,19 +56,21 @@ except ImportError as e:
 def check_version(local_ver: str, desired_ver: str, operator: str) -> bool:
     """Compare dotted package versions with the operators used in requirements.txt.
 
-    Comparison is numeric, so 2.10.0 is greater than 2.9.0. A local suffix
-    after '+' is ignored.
+    Comparison is numeric, so 2.10.0 is greater than 2.9.0, and 2.6 equals 2.6.0.
+    Text such as rc1, dev0 or a local suffix after '+' is ignored.
     """
-    local = _numeric_version(local_ver)
-    desired = _numeric_version(desired_ver)
+    local, desired = _pad_to_same_length(
+        _numeric_version(local_ver), _numeric_version(desired_ver)
+    )
     ops = {
         "==": local == desired,
+        "!=": local != desired,
         ">=": local >= desired,
         "<=": local <= desired,
         ">": local > desired,
         "<": local < desired,
     }
-    return ops.get(operator, True)
+    return ops[operator]
 
 
 def check_python_version() -> None:
@@ -109,6 +111,7 @@ def verify_deps() -> None:
     """
     bindir = str(Path(__file__).resolve().parent)
     deps_locations = ["requirements.txt", "../requirements.txt"]
+    python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
 
     for location in deps_locations:
         check_file = Path(bindir).joinpath(location)
@@ -116,24 +119,25 @@ def verify_deps() -> None:
             dependencies = check_file.read_text(encoding="utf-8").splitlines()
 
             error = False
-            version_pattern = re.compile(r"^([^=<>]+)([=<>]+)(.*)$")
+            requirement_pattern = re.compile(r"^([^=<>!]*)(.*)$")
 
             for dependency in dependencies:
                 dependency = dependency.strip()
                 if not dependency or dependency.startswith("#"):
                     continue
 
-                # Skip requirements whose marker excludes this interpreter.
+                # Skip requirements whose python_version marker excludes this
+                # interpreter. Any other marker is treated as applicable.
                 requirement, _, marker = dependency.partition(";")
-                if marker and not _python_marker_applies(marker):
+                marker = marker.strip()
+                if marker.startswith("python_version") and not _meets_bounds(
+                    python_version, marker[len("python_version") :]
+                ):
                     continue
                 dependency = requirement.strip()
 
-                match = version_pattern.match(dependency)
-                if match:
-                    package, operator, desired_version = match.groups()
-                else:
-                    package, operator, desired_version = dependency, None, None
+                package, bounds = requirement_pattern.match(dependency).groups()
+                package = package.strip()
 
                 try:
                     local_version = metadata.distribution(package).version
@@ -147,9 +151,7 @@ def verify_deps() -> None:
                     continue
 
                 # Check version requirement
-                if desired_version and not check_version(
-                    local_version, desired_version, operator
-                ):
+                if bounds and not _meets_bounds(local_version, bounds):
                     console_error(
                         f"the '{dependency}' distribution does not meet "
                         "version requirements to use rocprofiler-compute."
@@ -214,6 +216,23 @@ def main() -> None:
     sys.exit(0)
 
 
+def _meets_bounds(version: str, bounds: str) -> bool:
+    """Check a version against comma-separated bounds, such as >=1.26.4,<2.6.
+
+    A bound may quote its version, as python_version markers do.
+    """
+    for bound in bounds.split(","):
+        match = re.match(r"^\s*(==|!=|>=|<=|>|<)\s*[\"']?([0-9.]+)[\"']?\s*$", bound)
+        if not match:
+            console_error(
+                f"Cannot read the version bound '{bound.strip()}' in requirements.txt."
+            )
+        operator, desired_version = match.groups()
+        if not check_version(version, desired_version, operator):
+            return False
+    return True
+
+
 def _numeric_version(version: str) -> Tuple[int, ...]:
     """Integer parts of the public dotted version, ignoring a '+' suffix.
 
@@ -223,30 +242,12 @@ def _numeric_version(version: str) -> Tuple[int, ...]:
     return tuple(int(part) for part in public.split(".") if part.isdigit())
 
 
-def _python_marker_applies(marker: str) -> bool:
-    """Evaluate a python_version environment marker from requirements.txt.
-
-    Only the python_version form used by the companion requirements file is
-    understood. An unrecognized marker is treated as applicable so that a
-    dependency is never silently skipped.
-    """
-    match = re.match(
-        r"^python_version\s*(==|!=|>=|<=|>|<)\s*[\"']([0-9.]+)[\"']$", marker.strip()
-    )
-    if not match:
-        return True
-
-    operator, target_version = match.groups()
-    ops = {
-        "==": lambda current, target: current == target,
-        "!=": lambda current, target: current != target,
-        ">=": lambda current, target: current >= target,
-        "<=": lambda current, target: current <= target,
-        ">": lambda current, target: current > target,
-        "<": lambda current, target: current < target,
-    }
-    target = tuple(int(part) for part in target_version.split("."))
-    return ops[operator](sys.version_info[: len(target)], target)
+def _pad_to_same_length(
+    first: Tuple[int, ...], second: Tuple[int, ...]
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    """Pad the shorter version with zeros, so both have the same number of parts."""
+    width = max(len(first), len(second))
+    return first + (0,) * (width - len(first)), second + (0,) * (width - len(second))
 
 
 if __name__ == "__main__":

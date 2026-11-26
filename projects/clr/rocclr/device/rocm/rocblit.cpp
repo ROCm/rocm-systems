@@ -2121,6 +2121,30 @@ bool KernelBlitManager::writeImage(const void* srcHost, device::Memory& dstMemor
 }
 
 // ================================================================================================
+// The rect kernels that give each work-item one 16-byte chunk of a row index the chunks of a
+// slice in one grid dimension. Returns the chunks per row, or 0 if a slice's chunks don't fit.
+static constexpr size_t kRectChunkGroupSize = 256;
+static size_t RectChunksPerRow(const amd::Coord3D& size) {
+  constexpr size_t kChunkSize = 16;
+  constexpr size_t kMaxChunksPerSlice =
+      std::numeric_limits<uint32_t>::max() - kRectChunkGroupSize;
+  // A row that doesn't start on a chunk boundary spans one more chunk
+  const size_t chunks_per_row = (size[0] + 2 * kChunkSize - 2) / kChunkSize;
+  return (chunks_per_row <= kMaxChunksPerSlice / size[1]) ? chunks_per_row : 0;
+}
+
+// The first grid dimension runs over the chunks of every row of a slice, the second over slices
+static void RectChunkWorkload(const amd::Coord3D& size, size_t chunks_per_row,
+                              size_t globalWorkSize[3], size_t localWorkSize[3]) {
+  globalWorkSize[0] = amd::alignUp(chunks_per_row * size[1], kRectChunkGroupSize);
+  globalWorkSize[1] = size[2];
+  globalWorkSize[2] = 1;
+  localWorkSize[0] = kRectChunkGroupSize;
+  localWorkSize[1] = 1;
+  localWorkSize[2] = 1;
+}
+
+// ================================================================================================
 bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& dstMemory,
                                        const amd::BufferRect& srcRectIn,
                                        const amd::BufferRect& dstRectIn, const amd::Coord3D& sizeIn,
@@ -2158,87 +2182,89 @@ bool KernelBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory
     }
   }
 
-  uint blitType = BlitCopyBufferRect;
   size_t dim = 3;
   size_t globalWorkOffset[3] = {0, 0, 0};
   size_t globalWorkSize[3];
   size_t localWorkSize[3];
 
-  const static uint CopyRectAlignment[3] = {16, 4, 1};
+  // Each work-item copies the widest element, 16, 4 or 1 bytes, that every row and slice start
+  // is aligned to. A large rect that isn't 16-byte aligned, and any rect at least as large as
+  // the MALL, instead gives each work-item a 16-byte chunk of a row with unaligned source loads.
+  const auto rect_aligned = [&](size_t alignment) {
+    return ((srcRectIn.rowPitch_ % alignment) == 0) &&
+           ((srcRectIn.slicePitch_ % alignment) == 0) && ((srcRectIn.start_ % alignment) == 0) &&
+           ((dstRectIn.rowPitch_ % alignment) == 0) &&
+           ((dstRectIn.slicePitch_ % alignment) == 0) && ((dstRectIn.start_ % alignment) == 0) &&
+           ((sizeIn[0] % alignment) == 0);
+  };
+  constexpr size_t kChunkSize = 16;
+  size_t element_size = rect_aligned(kChunkSize) ? kChunkSize : (rect_aligned(4) ? 4 : 1);
+  const size_t bytes = sizeIn[0] * sizeIn[1] * sizeIn[2];
+  // A copy within this device's memory at least as large as the MALL keeps neither its source
+  // nor its destination resident, and runs faster with nontemporal accesses. Only the chunk
+  // kernels have them, so such a copy takes the chunks whatever its alignment.
+  const size_t mallSize = dev().info().l3CacheSize_;
+  const uint64_t localAgent = dev().getBackendDevice().handle;
+  const bool streamed = (mallSize != 0) && (bytes >= mallSize) &&
+                        !srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess() &&
+                        (gpuMem(srcMemory).getOwningAgent().handle == localAgent) &&
+                        (gpuMem(dstMemory).getOwningAgent().handle == localAgent);
+  // Unaligned 16-byte accesses take longer than narrower aligned ones, so a rect too small to
+  // keep the element kernels issue-bound on every compute unit finishes sooner in them
+  constexpr size_t kChunkedBytesPerComputeUnit = 1 * Ki;
+  const bool chunk_sized =
+      (sizeIn[0] >= kChunkSize) &&
+      (streamed || ((element_size != kChunkSize) &&
+                    (bytes >= dev().info().maxComputeUnits_ * kChunkedBytesPerComputeUnit)));
+  const size_t chunks_per_row = chunk_sized ? RectChunksPerRow(sizeIn) : 0;
+  const bool chunked = chunks_per_row != 0;
+  if (chunked) {
+    element_size = 1;
+  }
+  const uint blitType = chunked               ? (streamed ? BlitCopyBufferRectStream
+                                                          : BlitCopyBufferRectUnaligned)
+                        : (element_size == 1) ? BlitCopyBufferRect
+                                              : BlitCopyBufferRectAligned;
 
-  uint i;
-  for (i = 0; i < sizeof(CopyRectAlignment) / sizeof(uint); i++) {
-    bool aligned;
-    // Check source alignments
-    aligned = ((srcRectIn.rowPitch_ % CopyRectAlignment[i]) == 0);
-    aligned &= ((srcRectIn.slicePitch_ % CopyRectAlignment[i]) == 0);
-    aligned &= ((srcRectIn.start_ % CopyRectAlignment[i]) == 0);
-
-    // Check destination alignments
-    aligned &= ((dstRectIn.rowPitch_ % CopyRectAlignment[i]) == 0);
-    aligned &= ((dstRectIn.slicePitch_ % CopyRectAlignment[i]) == 0);
-    aligned &= ((dstRectIn.start_ % CopyRectAlignment[i]) == 0);
-
-    // Check copy size alignment in the first dimension
-    aligned &= ((sizeIn[0] % CopyRectAlignment[i]) == 0);
-
-    if (aligned) {
-      if (CopyRectAlignment[i] != 1) {
-        blitType = BlitCopyBufferRectAligned;
-      }
-      break;
+  const amd::Coord3D size(sizeIn[0] / element_size, sizeIn[1], sizeIn[2]);
+  if (!chunked) {
+    // Program the kernel's workload depending on the transfer dimensions
+    if ((size[1] == 1) && (size[2] == 1)) {
+      globalWorkSize[0] = amd::alignUp(size[0], 256);
+      globalWorkSize[1] = 1;
+      globalWorkSize[2] = 1;
+      localWorkSize[0] = 256;
+      localWorkSize[1] = 1;
+      localWorkSize[2] = 1;
+    } else if (size[2] == 1) {
+      globalWorkSize[0] = amd::alignUp(size[0], 16);
+      globalWorkSize[1] = amd::alignUp(size[1], 16);
+      globalWorkSize[2] = 1;
+      localWorkSize[0] = localWorkSize[1] = 16;
+      localWorkSize[2] = 1;
+    } else {
+      globalWorkSize[0] = amd::alignUp(size[0], 8);
+      globalWorkSize[1] = amd::alignUp(size[1], 8);
+      globalWorkSize[2] = amd::alignUp(size[2], 4);
+      localWorkSize[0] = localWorkSize[1] = 8;
+      localWorkSize[2] = 4;
     }
-  }
-
-  amd::BufferRect srcRect;
-  amd::BufferRect dstRect;
-  amd::Coord3D size(sizeIn[0], sizeIn[1], sizeIn[2]);
-
-  srcRect.rowPitch_ = srcRectIn.rowPitch_ / CopyRectAlignment[i];
-  srcRect.slicePitch_ = srcRectIn.slicePitch_ / CopyRectAlignment[i];
-  srcRect.start_ = srcRectIn.start_ / CopyRectAlignment[i];
-  srcRect.end_ = srcRectIn.end_ / CopyRectAlignment[i];
-
-  dstRect.rowPitch_ = dstRectIn.rowPitch_ / CopyRectAlignment[i];
-  dstRect.slicePitch_ = dstRectIn.slicePitch_ / CopyRectAlignment[i];
-  dstRect.start_ = dstRectIn.start_ / CopyRectAlignment[i];
-  dstRect.end_ = dstRectIn.end_ / CopyRectAlignment[i];
-
-  size.c[0] /= CopyRectAlignment[i];
-
-  // Program the kernel's workload depending on the transfer dimensions
-  if ((size[1] == 1) && (size[2] == 1)) {
-    globalWorkSize[0] = amd::alignUp(size[0], 256);
-    globalWorkSize[1] = 1;
-    globalWorkSize[2] = 1;
-    localWorkSize[0] = 256;
-    localWorkSize[1] = 1;
-    localWorkSize[2] = 1;
-  } else if (size[2] == 1) {
-    globalWorkSize[0] = amd::alignUp(size[0], 16);
-    globalWorkSize[1] = amd::alignUp(size[1], 16);
-    globalWorkSize[2] = 1;
-    localWorkSize[0] = localWorkSize[1] = 16;
-    localWorkSize[2] = 1;
   } else {
-    globalWorkSize[0] = amd::alignUp(size[0], 8);
-    globalWorkSize[1] = amd::alignUp(size[1], 8);
-    globalWorkSize[2] = amd::alignUp(size[2], 4);
-    localWorkSize[0] = localWorkSize[1] = 8;
-    localWorkSize[2] = 4;
+    RectChunkWorkload(size, chunks_per_row, globalWorkSize, localWorkSize);
   }
-
 
   // Program kernels arguments for the blit operation
   cl_mem mem = as_cl<amd::Memory>(srcMemory.owner());
   setArgument(kernels_[blitType], 0, sizeof(cl_mem), &mem);
   mem = as_cl<amd::Memory>(dstMemory.owner());
   setArgument(kernels_[blitType], 1, sizeof(cl_mem), &mem);
-  uint64_t src[4] = {srcRect.rowPitch_, srcRect.slicePitch_, srcRect.start_, 0};
+  uint64_t src[4] = {srcRectIn.rowPitch_ / element_size, srcRectIn.slicePitch_ / element_size,
+                     srcRectIn.start_ / element_size, 0};
   setArgument(kernels_[blitType], 2, sizeof(src), src);
-  uint64_t dst[4] = {dstRect.rowPitch_, dstRect.slicePitch_, dstRect.start_, 0};
+  uint64_t dst[4] = {dstRectIn.rowPitch_ / element_size, dstRectIn.slicePitch_ / element_size,
+                     dstRectIn.start_ / element_size, 0};
   setArgument(kernels_[blitType], 3, sizeof(dst), dst);
-  uint64_t copySize[4] = {size[0], size[1], size[2], CopyRectAlignment[i]};
+  uint64_t copySize[4] = {size[0], size[1], size[2], chunked ? chunks_per_row : element_size};
   setArgument(kernels_[blitType], 4, sizeof(copySize), copySize);
 
   // Create ND range object for the kernel's execution
@@ -2588,22 +2614,25 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
 
   if (size[1] == 1 && size[2] == 1) {
     return fillBuffer1D(memory, pattern, patternSize, surface, origin, size, entire, forceBlit);
-  } else if (size[2] == 1) {
-    return fillBuffer2D(memory, pattern, patternSize, surface, origin, size, entire, forceBlit);
-  } else {
-    bool ret_val = true;
-    amd::Coord3D my_origin(origin);
-    amd::Coord3D my_region{surface[1], surface[2], size[2]};
-    amd::BufferRect rect;
-    rect.create(static_cast<size_t*>(my_origin), static_cast<size_t*>(my_region), surface[0], 0);
-    for (size_t slice = 0; slice < size[2]; ++slice) {
-      const size_t row_offset = rect.offset(0, 0, slice);
-      amd::Coord3D new_origin(row_offset, origin[1], origin[2]);
-      ret_val |=
-          fillBuffer2D(memory, pattern, patternSize, surface, new_origin, size, entire, forceBlit);
-    }
-    return ret_val;
   }
+  const bool kernelFill =
+      !setup_.disableFillBuffer_ && (forceBlit || !memory.isHostMemDirectAccess());
+  if (kernelFill && (patternSize <= 2 * sizeof(uint64_t)) && amd::isPowerOfTwo(patternSize) &&
+      (RectChunksPerRow(size) != 0)) {
+    return fillBufferRect(memory, pattern, patternSize, surface, origin, size);
+  }
+  if (size[2] == 1) {
+    return fillBuffer2D(memory, pattern, patternSize, surface, origin, size, entire, forceBlit);
+  }
+  // surface is {row pitch, row bytes, rows per slice}
+  const size_t slicePitch = surface[0] * surface[2];
+  bool ret_val = true;
+  for (size_t slice = 0; slice < size[2]; ++slice) {
+    const amd::Coord3D slice_origin(origin[0] + slice * slicePitch, origin[1], origin[2]);
+    ret_val &=
+        fillBuffer2D(memory, pattern, patternSize, surface, slice_origin, size, entire, forceBlit);
+  }
+  return ret_val;
 }
 
 struct alignas(16) FillPatternPayload {
@@ -2853,7 +2882,8 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
     setArgument(kernels_[fillType], 4, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
 
     uint64_t mem_origin = static_cast<uint64_t>(origin[0]);
-    uint64_t width = static_cast<uint64_t>(size[0]);
+    // The kernel bounds its work-items, one per pattern, by the row's pattern count
+    uint64_t width = fillSizeX;
     uint64_t height = static_cast<uint64_t>(size[1]);
     uint64_t pitch = static_cast<uint64_t>(surface[0]);
 
@@ -2876,6 +2906,39 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
     releaseArguments(parameters);
   }
 
+  synchronize();
+
+  return result;
+}
+
+// ================================================================================================
+bool KernelBlitManager::fillBufferRect(device::Memory& memory, const void* pattern,
+                                       size_t patternSize, const amd::Coord3D& surface,
+                                       const amd::Coord3D& origin,
+                                       const amd::Coord3D& size) const {
+  std::scoped_lock k(lockXferOps_);
+  constexpr uint32_t kFillType = FillBufferRect;
+
+  size_t globalWorkOffset[3] = {0, 0, 0};
+  size_t globalWorkSize[3];
+  size_t localWorkSize[3];
+  const size_t chunks_per_row = RectChunksPerRow(size);
+  RectChunkWorkload(size, chunks_per_row, globalWorkSize, localWorkSize);
+
+  cl_mem mem = as_cl<amd::Memory>(memory.owner());
+  setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem);
+  const FillPatternPayload tiled_pattern = buildTilePattern(pattern, patternSize, 0);
+  setArgument(kernels_[kFillType], 1, sizeof(tiled_pattern), &tiled_pattern);
+  uint64_t dst[4] = {surface[0], surface[0] * surface[2], origin[0], patternSize};
+  setArgument(kernels_[kFillType], 2, sizeof(dst), dst);
+  uint64_t fillSize[4] = {size[0], size[1], size[2], chunks_per_row};
+  setArgument(kernels_[kFillType], 3, sizeof(fillSize), fillSize);
+
+  amd::NDRangeContainer ndrange(3, globalWorkOffset, globalWorkSize, localWorkSize);
+  address parameters = captureArguments(kernels_[kFillType]);
+  const bool result =
+      gpu().submitKernelInternal(ndrange, *kernels_[kFillType], parameters, nullptr);
+  releaseArguments(parameters);
   synchronize();
 
   return result;

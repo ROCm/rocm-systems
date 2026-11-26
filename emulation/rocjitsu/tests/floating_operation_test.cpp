@@ -41,8 +41,9 @@ template <typename Fmt, typename V> void expect_modifier_stage_order() {
     if constexpr (std::is_same_v<V, L>) {
       EXPECT_EQ(actual, expected);
     } else {
-      for (std::size_t lane = 0; lane < V::size(); ++lane)
+      for (std::size_t lane = 0; lane < V::size(); ++lane) {
         EXPECT_EQ(actual[lane], expected);
+      }
     }
   };
 

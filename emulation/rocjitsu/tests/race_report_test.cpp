@@ -5,6 +5,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/isa_family.h"
+#include "rocjitsu/vm/plugins/plugin_exports.h"
 #include "rocjitsu/vm/plugins/race_detector/core/common_register.h"
 #include "rocjitsu/vm/plugins/race_detector/plugin.h"
 #include "util/result.h"
@@ -20,7 +21,6 @@
 #include <regex>
 #include <span>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -59,9 +59,10 @@ std::vector<PrintedRow> rows(const std::string &report) {
   std::string line;
   while (std::getline(lines, line)) {
     std::smatch match;
-    if (std::regex_search(line, match, pattern))
+    if (std::regex_search(line, match, pattern)) {
       result.push_back(
           {match[1].matched, std::stoull(match[2], nullptr, 16), std::stoull(match[3])});
+    }
   }
   return result;
 }
@@ -70,15 +71,17 @@ size_t elided_count(const std::string &report) {
   const std::regex pattern(R"(\.\.\. ([0-9]+) instructions elided)");
   size_t result = 0;
   for (auto it = std::sregex_iterator(report.begin(), report.end(), pattern);
-       it != std::sregex_iterator(); ++it)
+       it != std::sregex_iterator(); ++it) {
     result += std::stoull((*it)[1]);
+  }
   return result;
 }
 
 TEST(RaceReportTraceTest, PreservesExecutionOrderAcrossBranchesAndRepeatedPcs) {
   Trace trace;
-  for (uint32_t i = 0; uint64_t pc : {0x100u, 0x120u, 0x108u, 0x108u})
+  for (uint32_t i = 0; uint64_t pc : {0x100u, 0x120u, 0x108u, 0x108u}) {
     trace.push(snapshot(pc, i++, 1));
+  }
   EXPECT_EQ(formatTrace(trace, text, mark(trace, 0), mark(trace, 3)).value(),
             "       PC     Instruction\n"
             "  ==>  0x100  instruction 0  ; <-- wave 0 lane 0\n"
@@ -105,8 +108,9 @@ TEST(RaceReportTraceTest, ContextLimitAndRingWrapPreserveRowsAndAccountForEveryG
   for (size_t length : {1u, 2u, 127u, 128u, 129u, 255u, 256u, 257u, 513u}) {
     SCOPED_TRACE(std::format("length={}", length));
     Trace trace;
-    for (uint32_t i = 0; i < length; ++i)
+    for (uint32_t i = 0; i < length; ++i) {
       trace.push(snapshot(0x100 + i * 4, i, 1));
+    }
     const util::FailureOr<std::string> report_result =
         formatTrace(trace, text, mark(trace, 0), mark(trace, trace.size() - 1));
     ASSERT_TRUE(report_result.succeeded());
@@ -125,8 +129,9 @@ TEST(RaceReportTraceTest, ContextLimitAndRingWrapPreserveRowsAndAccountForEveryG
 
 TEST(RaceReportTraceTest, ElisionPreservesProtectedRowsAcrossPcDiscontinuities) {
   Trace trace;
-  for (uint32_t i = 0; i < 200; ++i)
+  for (uint32_t i = 0; i < 200; ++i) {
     trace.push(snapshot((i < 100 ? 0x1000u : 0x800u) + i * 4, i, 1, i == 80 || i == 120));
+  }
   for (size_t context : {size_t{2}, kDefaultTraceContext}) {
     SCOPED_TRACE(context);
     const util::FailureOr<std::string> report_result =
@@ -135,20 +140,23 @@ TEST(RaceReportTraceTest, ElisionPreservesProtectedRowsAcrossPcDiscontinuities) 
     const std::string &report = report_result.value();
     const std::vector<PrintedRow> printed = rows(report);
     ASSERT_GT(elided_count(report), 0u);
-    for (size_t required : {0u, 80u, 120u, 199u})
+    for (size_t required : {0u, 80u, 120u, 199u}) {
       EXPECT_TRUE(std::ranges::any_of(
           printed, [=](const PrintedRow &row) { return row.sequence == required; }));
-    for (size_t elided : {99u, 100u})
+    }
+    for (size_t elided : {99u, 100u}) {
       EXPECT_FALSE(std::ranges::any_of(
           printed, [=](const PrintedRow &row) { return row.sequence == elided; }));
+    }
     EXPECT_EQ(printed.size() + elided_count(report), 200u);
   }
 }
 
 TEST(RaceReportTraceTest, ElisionNeverHidesASingleInstruction) {
   Trace trace;
-  for (uint32_t i = 0; i < 200; ++i)
+  for (uint32_t i = 0; i < 200; ++i) {
     trace.push(snapshot(0x1000 + i * 4, i, 1, i == 80 || i == 82));
+  }
   const util::FailureOr<std::string> report_result =
       formatTrace(trace, text, mark(trace, 0), mark(trace, 199));
   ASSERT_TRUE(report_result.succeeded());
@@ -163,8 +171,9 @@ TEST(RaceReportTraceTest, ElisionNeverHidesASingleInstruction) {
 TEST(RaceReportTraceTest, CompactsNopsWithoutAbsorbingMarkedInstructions) {
   Trace trace;
   const std::array<uint32_t, 1> nop = cdna4::build_sopp(cdna4::kSNopSopp);
-  for (uint64_t pc = 0x100; pc <= 0x114; pc += 4)
+  for (uint64_t pc = 0x100; pc <= 0x114; pc += 4) {
     trace.push(InstructionSnapshot{pc, nop, /*preserve_in_trace=*/false, /*is_nop=*/true});
+  }
   const auto disassemble = [](const InstructionSnapshot &) { return std::string("s_nop 0"); };
   EXPECT_EQ(formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 5)).value(),
             "       PC     Instruction\n"
@@ -178,9 +187,10 @@ TEST(RaceReportTraceTest, NopRunsRespectEncodingAndPcContinuity) {
   const std::array<uint32_t, 1> nop = cdna4::build_sopp(cdna4::kSNopSopp);
   const std::array<uint32_t, 1> longer_nop = cdna4::build_sopp(cdna4::kSNopSopp, {.simm16 = 7});
   trace.push(snapshot(0x100, 0));
-  for (uint64_t pc : {0x104u, 0x108u, 0x10cu, 0x110u, 0x200u, 0x204u})
+  for (uint64_t pc : {0x104u, 0x108u, 0x10cu, 0x110u, 0x200u, 0x204u}) {
     trace.push(InstructionSnapshot{pc, pc < 0x10c ? nop : longer_nop,
                                    /*preserve_in_trace=*/false, /*is_nop=*/true});
+  }
   trace.push(snapshot(0x208, 1));
   const util::FailureOr<std::string> report_result =
       formatTrace(trace, text, mark(trace, 0), mark(trace, 7));
@@ -195,8 +205,9 @@ TEST(RaceReportTraceTest, NopRunsRespectEncodingAndPcContinuity) {
 TEST(RaceReportTraceTest, ContextCountsExecutionsBeforeCompactionAndKeepsGapsSeparate) {
   Trace trace;
   const std::array<uint32_t, 1> nop = cdna4::build_sopp(cdna4::kSNopSopp);
-  for (uint64_t pc = 0x100; pc <= 0x11c; pc += 4)
+  for (uint64_t pc = 0x100; pc <= 0x11c; pc += 4) {
     trace.push(InstructionSnapshot{pc, nop, /*preserve_in_trace=*/false, /*is_nop=*/true});
+  }
   const auto disassemble = [](const InstructionSnapshot &) { return std::string("s_nop 0"); };
   const util::FailureOr<std::string> short_report_result =
       formatTrace(trace, disassemble, mark(trace, 0), mark(trace, 7), 4);
@@ -222,25 +233,69 @@ TEST(RaceReportTraceTest, ContextCountsExecutionsBeforeCompactionAndKeepsGapsSep
   EXPECT_NE(odd_report.find("2 executions, through PC 0x118\n"), std::string::npos);
 }
 
-TEST(RaceReportConfigTest, ValidatesTraceContextAtConstruction) {
+TEST(RaceReportConfigTest, ValidatesTraceContextAtInitialization) {
   for (const char *config : {static_cast<const char *>(nullptr), "", "{}", R"({"trace_context":2})",
                              R"({"trace_context":3})", R"({"trace_context":256})"}) {
     SCOPED_TRACE(config ? config : "null");
-    EXPECT_NO_THROW({ RaceDetectorPlugin plugin(config); });
+    RaceDetectorPlugin plugin;
+    EXPECT_TRUE(plugin.initialize(config).succeeded());
   }
   for (const char *config :
        {"{", "[]", "null", R"({"trace_context":-1})", R"({"trace_context":0})",
         R"({"trace_context":1})", R"({"trace_context":257})", R"({"trace_context":1e30})",
         R"({"trace_context":2.5})", R"({"trace_context":true})", R"({"trace_context":"128"})"}) {
     SCOPED_TRACE(config);
-    EXPECT_THROW({ RaceDetectorPlugin plugin(config); }, std::invalid_argument);
+    RaceDetectorPlugin plugin;
+    util::StringDiagnostic diagnostic;
+    EXPECT_TRUE(plugin.initialize(config, diagnostic.emitter()).failed());
+    EXPECT_FALSE(diagnostic.message().empty());
   }
+}
+
+TEST(RaceReportConfigTest, FactoryRejectsInvalidConfiguration) {
+  struct RejectionCase {
+    const char *config;
+    const char *reason;
+  };
+  const RejectionCase cases[] = {
+      {"{", "configuration is not valid JSON"},
+      {"[]", "configuration must be an object"},
+      {R"({"trace_context":1})", "'trace_context' must be an integer between 2 and 256"},
+      {R"({"trace_context":257})", "'trace_context' must be an integer between 2 and 256"}};
+  for (const RejectionCase &test : cases) {
+    SCOPED_TRACE(test.config);
+    testing::internal::CaptureStderr();
+    std::unique_ptr<rocjitsu::ExecutionPlugin> plugin(
+        rocjitsu::create_plugin_instance<RaceDetectorPlugin>(test.config));
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(plugin, nullptr);
+    EXPECT_NE(diagnostic.find("create failed: Race plugin"), std::string::npos) << diagnostic;
+    EXPECT_NE(diagnostic.find(test.reason), std::string::npos) << diagnostic;
+    EXPECT_EQ(diagnostic.find("ROCJITSU RACE DETECTION SUMMARY"), std::string::npos) << diagnostic;
+    EXPECT_EQ(diagnostic.find("No races detected."), std::string::npos) << diagnostic;
+  }
+  testing::internal::CaptureStderr();
+  std::unique_ptr<rocjitsu::ExecutionPlugin> plugin(
+      rocjitsu::create_plugin_instance<RaceDetectorPlugin>(R"({"trace_context":2})"));
+  EXPECT_NE(plugin, nullptr);
+  plugin.reset();
+  const std::string summary = testing::internal::GetCapturedStderr();
+  EXPECT_NE(summary.find("ROCJITSU RACE DETECTION SUMMARY"), std::string::npos) << summary;
+  EXPECT_NE(summary.find("No races detected."), std::string::npos) << summary;
+}
+
+TEST(RaceReportConfigTest, DefaultConstructedPluginEmitsSummary) {
+  testing::internal::CaptureStderr();
+  { RaceDetectorPlugin plugin; }
+  const std::string summary = testing::internal::GetCapturedStderr();
+  EXPECT_NE(summary.find("No races detected."), std::string::npos) << summary;
 }
 
 TEST(RaceReportTraceTest, RepeatedPcWithDifferentBytesSelectsTheMatchingEncoding) {
   Trace trace;
-  for (uint32_t i = 0; i < 6; ++i)
+  for (uint32_t i = 0; i < 6; ++i) {
     trace.push(snapshot(0x100 + (i % 2) * 4, i, 1));
+  }
   const util::FailureOr<std::string> report_result =
       formatTrace(trace, text, mark(trace, 2), mark(trace, 5));
   ASSERT_TRUE(report_result.succeeded());
@@ -266,8 +321,9 @@ TEST(RaceReportTraceTest, OtherWaveConflictIsSeparateEvenWhenPcsAndEncodingsMatc
 
 TEST(RaceReportTraceTest, OtherWaveConflictStartsAtThisWavesLatestRunOfThatInstruction) {
   Trace trace;
-  for (uint32_t i = 0; i < 40; ++i)
+  for (uint32_t i = 0; i < 40; ++i) {
     trace.push(snapshot(0x100 + (i % 20) * 4, i % 20, 1));
+  }
   const MarkedInstruction producer{snapshot(0x104, 1, 1), 1, 0};
   const std::vector<PrintedRow> printed =
       rows(formatTrace(trace, text, producer, mark(trace, 39)).value());
@@ -280,8 +336,9 @@ TEST(RaceReportTraceTest, OtherWaveConflictStartsAtThisWavesLatestRunOfThatInstr
 
 TEST(RaceReportTraceTest, OtherWaveConflictNeverRunHereShowsOnlyRecentRows) {
   Trace trace;
-  for (uint32_t i = 0; i < 40; ++i)
+  for (uint32_t i = 0; i < 40; ++i) {
     trace.push(snapshot(0x100 + i * 4, i, 1));
+  }
   const MarkedInstruction producer{snapshot(0x2000, 99, 1), 1, 0};
   for (size_t context : {size_t{2}, size_t{3}, kDefaultTraceContext, kTraceHistorySize}) {
     SCOPED_TRACE(context);
@@ -302,8 +359,9 @@ TEST(RaceReportTraceTest, ExpiredProducerRetainsIdentityAndMissingHistory) {
   Trace trace;
   const InstructionSnapshot producer = snapshot(0x100, 0, 1);
   trace.push(producer);
-  for (uint32_t i = 1; i < 300; ++i)
+  for (uint32_t i = 1; i < 300; ++i) {
     trace.push(snapshot(0x100 + i * 4, i, 1));
+  }
   const util::FailureOr<std::string> report_result =
       formatTrace(trace, text, MarkedInstruction{producer, 0, 0}, mark(trace, 255));
   ASSERT_TRUE(report_result.succeeded());
@@ -379,8 +437,9 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
         WaveId{test.owner}, testInstruction(0x100), test.event_type, {2}, 1, 0xf, {},
         CounterObligations(WaitCounterType::LGKMCNT, MemoryOrderClass::LDS), MemoryOrderClass::LDS);
     if (test.complete) {
-      for (const auto obligation : detector.events().counterObligations(event))
+      for (const auto obligation : detector.events().counterObligations(event)) {
         detector.satisfyEventWaitCounter(event, obligation.wait_counter_type());
+      }
       detector.markEventWaveComplete(event);
     }
     const RaceViolation violation{
@@ -389,7 +448,8 @@ TEST(RaceReportDescriptionTest, DescribesRegisterAndLdsDirectionsAcrossCompletio
         test.write, Dim3d(1, 2, 3),
         event};
     const std::string report =
-        formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4);
+        formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4)
+            .value();
     EXPECT_NE(report.find(test.resource), std::string::npos);
     EXPECT_NE(report.find(std::string("(") + test.hazard + ")"), std::string::npos);
     EXPECT_NE(report.find(std::string("Conflict: ") + test.operation + " at PC 0x100"),
@@ -426,11 +486,13 @@ TEST(RaceReportDescriptionTest, ReportsOnlyRemainingCounterObligationsAfterAPart
       MemoryOrderClass::UNORDERED);
   const RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), event};
   EXPECT_NE(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna4)
+                .value()
                 .find("pending counters: loadcnt, dscnt."),
             std::string::npos);
   EXPECT_FALSE(detector.satisfyEventWaitCounter(event, WaitCounterType::DSCNT));
   const std::string report =
-      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna4);
+      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna4)
+          .value();
   EXPECT_NE(report.find("pending counters: loadcnt."), std::string::npos);
   EXPECT_EQ(report.find("dscnt"), std::string::npos);
 }
@@ -470,10 +532,10 @@ TEST(RaceReportDescriptionTest, ArchitecturalCounterNamesPreservePendingSubsetCh
         "  Current access: read at PC 0x200.\n"
         "  Conflict: load into VGPRs at PC 0x100, wave 0.\n"
         "  Completion for wave 0 is not guaranteed; pending counters: ";
-    EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch),
+    EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch).value(),
               prefix + test.both + ".\n");
     EXPECT_FALSE(detector.satisfyEventWaitCounter(event, test.first));
-    EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch),
+    EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, test.arch).value(),
               prefix + test.remaining + ".\n");
   }
 }
@@ -483,11 +545,13 @@ TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
   const EventId event = detector.allocateEventId(
       WaveId{1}, testInstruction(0x100), MemoryEventType::LDS_TO_VGPR, {2}, 1, 0xf, {},
       CounterObligations(WaitCounterType::LGKMCNT, MemoryOrderClass::LDS), MemoryOrderClass::LDS);
-  for (const auto obligation : detector.events().counterObligations(event))
+  for (const auto obligation : detector.events().counterObligations(event)) {
     detector.satisfyEventWaitCounter(event, obligation.wait_counter_type());
+  }
   detector.markEventWaveComplete(event);
   const RaceViolation violation{RaceViolation::Space::LDS, 16, 0, 3, true, Dim3d(1, 2, 3), event};
-  EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna3),
+  EXPECT_EQ(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Rdna3)
+                .value(),
             "Race on LDS byte 16 [workgroup (1, 2, 3), wave 0, lane 3]: write-after-read (WAR).\n"
             "  Current access: write at PC 0x200.\n"
             "  Conflict: transfer from LDS into VGPRs at PC 0x100, wave 1.\n"
@@ -498,19 +562,23 @@ TEST(RaceReportDescriptionTest, ExactCrossWaveCompletedReadConflict) {
 TEST(RaceReportDescriptionTest, RejectsUnavailableAndRetiredConflicts) {
   RaceDetector detector(1, 4, 4, Dim3d(0), [](RaceViolation) {}, {}, 65536);
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, false, Dim3d(0), {}};
-  EXPECT_THROW(
-      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4),
-      std::out_of_range);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4,
+                                    diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "race violation references an unavailable conflicting event");
   violation.conflictingEvent = detector.allocateEventId(
       WaveId{0}, testInstruction(0x100), MemoryEventType::GLOBAL_TO_VGPR, {2}, 1, 0xf, {},
       CounterObligations(WaitCounterType::VMCNT, MemoryOrderClass::VMEM), MemoryOrderClass::VMEM);
-  EXPECT_THROW(
-      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Invalid),
-      std::invalid_argument);
+  EXPECT_TRUE(formatRaceDescription(violation, detector.events(), 0x200,
+                                    rocjitsu::IsaFamily::Invalid, diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "race report has an unsupported architecture");
   detector.retireEvent(violation.conflictingEvent);
-  EXPECT_THROW(
-      formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4),
-      std::logic_error);
+  EXPECT_TRUE(formatRaceDescription(violation, detector.events(), 0x200, rocjitsu::IsaFamily::Cdna4,
+                                    diagnostic.emitter())
+                  .failed());
+  EXPECT_EQ(diagnostic.message(), "race violation references a retired memory event");
 }
 
 static_assert(sizeof(InstructionSnapshot) == 32);
