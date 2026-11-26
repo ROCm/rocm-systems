@@ -12,7 +12,7 @@ from typing import List
 
 from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backends import triton as triton_backend
-from ml_api_tracing.marker_format import compose_marker
+from ml_api_tracing.marker_format import _MAX_TENSOR_ARGUMENT_ITEMS, compose_marker
 
 
 class FindSpecWithout:
@@ -251,6 +251,7 @@ def test_format_triton_args_named_operands_keep_block_size_not_grid():
     tensor = types.SimpleNamespace(shape=(2, 3), dtype="float32")
     blob = triton_backend._format_triton_args(
         kernel,
+        triton_backend._JIT_MARKER_PREFIX,
         (tensor, 1024),
         {"grid": (8,), "BLOCK_SIZE": 256},
     )
@@ -263,20 +264,45 @@ def test_format_triton_args_drops_bound_instance():
     tensor = types.SimpleNamespace(shape=(2, 3), dtype="float32")
     blob = triton_backend._format_triton_args(
         kernel,
+        triton_backend._JIT_MARKER_PREFIX,
         (kernel, tensor, 1024),
         {"grid": (8,), "BLOCK_SIZE": 256},
     )
     assert blob == "(x_ptr=float32[2x3], n_elements=1024, BLOCK_SIZE=256)"
 
 
-def test_format_triton_args_takes_trailing_positionals():
+def test_format_triton_args_jit_ignores_extra_trailing_positionals():
+    kernel = types.SimpleNamespace(params=["x_ptr", "n_elements"])
+    tensor = types.SimpleNamespace(shape=(8,), dtype="float32")
+    blob = triton_backend._format_triton_args(
+        kernel,
+        triton_backend._JIT_MARKER_PREFIX,
+        (tensor, 8, 256),
+        {},
+    )
+    assert blob == "(x_ptr=float32[8], n_elements=8)"
+
+
+def test_format_triton_args_compiled_takes_trailing_positionals():
     kernel = types.SimpleNamespace(
         params=["x_ptr", "out_ptr", "n_elements", "BLOCK_SIZE"]
     )
     tensor = types.SimpleNamespace(shape=(8,), dtype="float32")
+    launcher_prefix = (
+        1,
+        1,
+        1,
+        object(),
+        object(),
+        object(),
+        object(),
+        object(),
+        object(),
+    )
     blob = triton_backend._format_triton_args(
         kernel,
-        (object(), object(), tensor, tensor, 8, 256),
+        triton_backend._COMPILED_MARKER_PREFIX,
+        launcher_prefix + (tensor, tensor, 8, 256),
         {},
     )
     assert blob == (
@@ -284,11 +310,56 @@ def test_format_triton_args_takes_trailing_positionals():
     )
 
 
+def test_format_triton_args_compiled_reads_names_from_src_fn():
+    tensor = types.SimpleNamespace(shape=(8,), dtype="float32")
+    kernel = types.SimpleNamespace(
+        src=types.SimpleNamespace(
+            fn=types.SimpleNamespace(arg_names=["x_ptr", "n_elements"])
+        )
+    )
+    blob = triton_backend._format_triton_args(
+        kernel,
+        triton_backend._COMPILED_MARKER_PREFIX,
+        (1, 1, 1, None, None, None, None, None, None, tensor, 8),
+        {},
+    )
+    assert blob == "(x_ptr=float32[8], n_elements=8)"
+
+
+def test_format_triton_args_uses_arg_names_when_params_empty():
+    tensor = types.SimpleNamespace(shape=(2,), dtype="float32")
+    blob = triton_backend._format_triton_args(
+        types.SimpleNamespace(params=(), arg_names=["x_ptr"]),
+        triton_backend._JIT_MARKER_PREFIX,
+        (tensor,),
+        {},
+    )
+    assert blob == "(x_ptr=float32[2])"
+
+
 def test_format_triton_args_without_names_is_n_a():
     blob = triton_backend._format_triton_args(
         types.SimpleNamespace(),
+        triton_backend._JIT_MARKER_PREFIX,
         (object(), 1024),
         {"grid": (8,)},
+    )
+    assert blob == "n/a"
+
+
+def test_format_triton_args_exception_is_n_a():
+    class Boom:
+        @property
+        def params(self):
+            raise RuntimeError("cannot walk params")
+
+        arg_names = []
+
+    blob = triton_backend._format_triton_args(
+        Boom(),
+        triton_backend._JIT_MARKER_PREFIX,
+        (1,),
+        {},
     )
     assert blob == "n/a"
 
@@ -296,6 +367,7 @@ def test_format_triton_args_without_names_is_n_a():
 def test_format_triton_args_encodes_pipe_in_string():
     blob = triton_backend._format_triton_args(
         types.SimpleNamespace(params=["msg"]),
+        triton_backend._JIT_MARKER_PREFIX,
         ("a|b",),
         {},
     )
@@ -307,10 +379,11 @@ def test_format_triton_args_caps_at_32_items():
     names = ["p%d" % index for index in range(40)]
     blob = triton_backend._format_triton_args(
         types.SimpleNamespace(params=names),
+        triton_backend._JIT_MARKER_PREFIX,
         tuple(range(40)),
         {},
     )
-    assert blob.count("=") == 32
+    assert blob.count("=") == _MAX_TENSOR_ARGUMENT_ITEMS
     assert "p31=" in blob
     assert "p32=" not in blob
 
@@ -327,7 +400,11 @@ def test_triton_wrap_records_kernel_operand_on_marker(monkeypatch):
 
     class FakeJIT:
         def __init__(self):
-            self.params = [types.SimpleNamespace(name="x_ptr")]
+            self.params = [
+                types.SimpleNamespace(name="x_ptr"),
+                types.SimpleNamespace(name="n_elements"),
+                types.SimpleNamespace(name="BLOCK_SIZE"),
+            ]
 
         def run(self, *a, **kw):
             return "launched"
@@ -336,6 +413,46 @@ def test_triton_wrap_records_kernel_operand_on_marker(monkeypatch):
     triton_backend.patch_triton_launcher()
 
     tensor = types.SimpleNamespace(shape=(2, 4), dtype="float32")
-    assert FakeJIT().run(tensor) == "launched"
+    assert FakeJIT().run(tensor, 8, grid=(8,), BLOCK_SIZE=256) == "launched"
     assert recorded
-    assert "x_ptr=float32[2x4]" in recorded[0]
+    assert recorded[0] == "(x_ptr=float32[2x4], n_elements=8, BLOCK_SIZE=256)"
+    assert "grid" not in recorded[0]
+
+
+def test_triton_wrap_records_compiled_kernel_operands_from_src_fn(monkeypatch):
+    recorded = []
+    monkeypatch.setattr(
+        marker_ranges,
+        "push_scope",
+        lambda marker, ctx, backend="", args="n/a": recorded.append((marker, args)),
+    )
+    monkeypatch.setattr(marker_ranges, "pop_scope", lambda: None)
+    monkeypatch.setattr(triton_backend._CoreState, "jit_function", None)
+
+    class FakeCompiledKernel:
+        name = "rk"
+
+        def __init__(self):
+            self.src = types.SimpleNamespace(
+                fn=types.SimpleNamespace(arg_names=["x_ptr", "n_elements"])
+            )
+
+        @property
+        def run(self):
+            def launch(*args, **kwargs):
+                return "ran"
+
+            return launch
+
+    monkeypatch.setattr(
+        triton_backend._CoreState, "compiled_kernel", FakeCompiledKernel
+    )
+    triton_backend.patch_triton_launcher()
+
+    tensor = types.SimpleNamespace(shape=(2, 4), dtype="float32")
+    prefix = (1, 1, 1, None, None, None, None, None, None)
+    assert FakeCompiledKernel().run(*prefix, tensor, 8) == "ran"
+    assert recorded
+    marker, args = recorded[0]
+    assert marker == "triton.CompiledKernel.rk"
+    assert args == "(x_ptr=float32[2x4], n_elements=8)"

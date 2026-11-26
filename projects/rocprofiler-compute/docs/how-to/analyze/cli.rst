@@ -942,8 +942,6 @@ After profiling with ``--experimental --trace-ml-api triton`` (see
 :ref:`triton-trace`), use ``--list-operators triton`` and
 ``--operator 'triton:PATTERN'``, such as ``--operator 'triton:*rmsnorm_kernel*'``.
 They show only Triton kernels.
-The call tree prints those operands after the operator name when they were
-recorded, for example ``args=(a_ptr=float32[64x64], M=64)``.
 
 
 .. _cli-debug-options:

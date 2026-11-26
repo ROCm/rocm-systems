@@ -12,14 +12,20 @@ import importlib.util
 import inspect
 from functools import partial, partialmethod
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, List
 
 from ml_api_tracing.inject_roctx import marker_ranges
 from ml_api_tracing.inject_roctx.backend_contract import register
-from ml_api_tracing.marker_format import format_args_blob, render_dtype_shape
+from ml_api_tracing.marker_format import (
+    _MAX_TENSOR_ARGUMENT_ITEMS,
+    format_args_blob,
+    render_dtype_shape,
+)
 from utils.logger import console_log, console_warning
 
 _BACKEND_NAME = "triton"
+_JIT_MARKER_PREFIX = "triton.JITFunction"
+_COMPILED_MARKER_PREFIX = "triton.CompiledKernel"
 
 
 def patch_triton_launcher() -> None:
@@ -28,14 +34,14 @@ def patch_triton_launcher() -> None:
     jit_function = _CoreState.jit_function
     compiled_kernel = _CoreState.compiled_kernel
     if jit_function is not None:
-        wrapped_any |= _wrap_launch(jit_function, "run", "triton.JITFunction")
+        wrapped_any |= _wrap_launch(jit_function, "run", _JIT_MARKER_PREFIX)
     if compiled_kernel is not None:
         # Prefer run(); fall back to __call__.
         if hasattr(compiled_kernel, "run"):
-            wrapped_any |= _wrap_launch(compiled_kernel, "run", "triton.CompiledKernel")
+            wrapped_any |= _wrap_launch(compiled_kernel, "run", _COMPILED_MARKER_PREFIX)
         else:
             wrapped_any |= _wrap_launch(
-                compiled_kernel, "__call__", "triton.CompiledKernel"
+                compiled_kernel, "__call__", _COMPILED_MARKER_PREFIX
             )
     if not wrapped_any:
         console_warning(
@@ -109,38 +115,69 @@ def _extract_kernel_name(obj: object, default: str = "<triton_kernel>") -> str:
     return default
 
 
-def _format_triton_args(
-    instance: object, call_args: object, call_kwargs: object
-) -> str:
-    """Return the ROCTX args text for a Triton launch. Return n/a
-    when no operands remain."""
-    try:
+def _operand_name(param: object) -> str:
+    """Return a kernel parameter name, or empty when param has none."""
+    if isinstance(param, str) and param:
+        return param
+    param_name = getattr(param, "name", None)
+    if isinstance(param_name, str) and param_name:
+        return param_name
+    return ""
+
+
+def _collect_named_operands(owner: object) -> List[str]:
+    """Return operand names from params, then arg_names, on owner."""
+    if owner is None:
+        return []
+    for attr in ("params", "arg_names"):
         names = []
-        for attr in ("params", "arg_names"):
-            collected = []
-            for param in getattr(instance, attr, None) or ():
-                if isinstance(param, str):
-                    if param:
-                        collected.append(param)
-                    continue
-                param_name = getattr(param, "name", None)
-                if isinstance(param_name, str) and param_name:
-                    collected.append(param_name)
-            if collected:
-                names = collected
-                break
+        for param in getattr(owner, attr, None) or ():
+            name = _operand_name(param)
+            if name:
+                names.append(name)
+        if names:
+            return names
+    return []
+
+
+def _triton_operand_names(instance: object, marker_prefix: str) -> List[str]:
+    """Return kernel operand names for the intercepted launch kind.
+
+    JITFunction exposes params / arg_names on the instance. CompiledKernel
+    does not; names live on src.fn (ASTSource). IRSource has no fn.
+    """
+    if marker_prefix == _COMPILED_MARKER_PREFIX:
+        src = getattr(instance, "src", None)
+        names = _collect_named_operands(getattr(src, "fn", None))
+        if names:
+            return names
+    return _collect_named_operands(instance)
+
+
+def _format_triton_args(
+    instance: object,
+    marker_prefix: str,
+    call_args: object,
+    call_kwargs: object,
+) -> str:
+    """Return the marker args blob for a Triton launch, or n/a.
+
+    Drops bound self. CompiledKernel also drops the launcher prefix.
+    """
+    try:
+        names = _triton_operand_names(instance, marker_prefix)
         if not names:
             return "n/a"
 
         positionals = tuple(call_args)
         if positionals and positionals[0] is instance:
             positionals = positionals[1:]
-        if len(positionals) > len(names):
+        if marker_prefix == _COMPILED_MARKER_PREFIX and len(positionals) > len(names):
             positionals = positionals[-len(names) :]
 
         parts = []
         for index, name in enumerate(names):
-            if len(parts) >= 32:
+            if len(parts) >= _MAX_TENSOR_ARGUMENT_ITEMS:
                 break
             if index < len(positionals):
                 value = positionals[index]
@@ -179,7 +216,7 @@ def _run_with_marker(
         marker,
         location,
         backend=_BACKEND_NAME,
-        args=_format_triton_args(instance, call_args, call_kwargs),
+        args=_format_triton_args(instance, marker_prefix, call_args, call_kwargs),
     )
     try:
         return call(*call_args, **call_kwargs)
