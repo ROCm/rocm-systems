@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Emit shared/ldexp.h calls for V_LDEXP_F16/F32/F64 on raw encodings.
+"""Emit shared/ldexp.h calls for the remaining legacy LDEXP formats.
 
 Scalar bodies and SIMD functors use the same helper with the same MODE policy,
 resolved once before the lane loop. VOP3 forms use shared/floating_operation.h
@@ -96,15 +96,13 @@ def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
     """
     dtype = {
         'v_ldexp_f16_vop3': 'f16',
-        'v_ldexp_f32_vop3': 'f32',
-        'v_ldexp_f64_vop3': 'f64',
     }.get(template_name)
     if dtype is None:
         return None
     if dtype == 'f16':
         macro = 'VOP3_LDEXP_TRUE16_RAW_FP16' if true16_vop3 else 'VOP3_LDEXP_RAW_FP16'
     else:
-        macro = 'VOP3_LDEXP_RAW_FP64' if dtype == 'f64' else 'VOP3_LDEXP_RAW_FP'
+        macro = 'VOP3_LDEXP_RAW_FP'
     omod = (
         f'amdgpu::output_modifier_policy<{input_policy.fp_format(dtype)}>'
         '(wf, inst.inst_.omod, inst.inst_.clamp).omod != 0'

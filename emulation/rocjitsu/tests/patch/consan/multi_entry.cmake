@@ -28,7 +28,7 @@ add_custom_target(consan_multi_entry_fixture DEPENDS ${_multi_image})
 foreach(
     _variant
     IN
-    ITEMS barrier loop mixed native-global unreachable-pc
+    ITEMS barrier loop mixed native-global unreachable-pc local-helper
 )
     set(_variant_object ${_fixture_dir}/multi-entry-${_variant}.o)
     set(_variant_image ${_fixture_dir}/multi-entry-${_variant}.hsaco)
@@ -37,6 +37,8 @@ foreach(
         list(APPEND _variant_defines -DMK_LOOP=1)
     elseif(_variant STREQUAL "mixed")
         list(APPEND _variant_defines -DMK_MIXED=1)
+    elseif(_variant STREQUAL "local-helper")
+        set(_variant_defines -DMK_LOCAL_HELPER=1)
     elseif(_variant STREQUAL "native-global")
         set(_variant_defines -DMK_NATIVE_GLOBAL=1)
     elseif(_variant STREQUAL "unreachable-pc")

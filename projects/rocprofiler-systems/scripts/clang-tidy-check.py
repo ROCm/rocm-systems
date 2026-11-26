@@ -28,6 +28,10 @@ DIFF_FILE_RE = re.compile(r'^\+\+\+\ "?b/([^ \t\n"]*)')
 DIFF_HUNK_RE = re.compile(r"^@@.*\+(\d+)(,(\d+))?")
 DIAGNOSTIC_RE = re.compile(r"^(.*):(\d+):(\d+): (warning|error): (.*) \[([\w,.\-]+)\]$")
 
+# `--base merge-base` selects the point where the current branch diverged from this ref.
+MERGE_BASE_SELECTOR = "merge-base"
+BASE_REF = "origin/develop"
+
 _ANSI = {
     "reset": "\033[0m",
     "bold": "\033[1m",
@@ -128,15 +132,23 @@ def get_repo_root() -> str:
     return _git(["rev-parse", "--show-toplevel"]).strip()
 
 
-def get_diff_changed_files(repo_root: str, base: str | None) -> dict[str, ChangedFile]:
+def get_merge_base() -> str:
+    """Return the SHA where the current branch diverged from BASE_REF."""
+    return _git(["merge-base", "HEAD", BASE_REF]).strip()
+
+
+def resolve_base(base: str) -> str:
+    """Resolve the `merge-base` selector to a SHA; any other value is used as-is."""
+    return get_merge_base() if base == MERGE_BASE_SELECTOR else base
+
+
+def get_diff_changed_files(repo_root: str, base: str) -> dict[str, ChangedFile]:
     """Parse a git diff into per-file changed line ranges.
 
-    Diffs `base` (or HEAD, by default) against the working tree, so the
-    result covers committed changes since `base` plus any staged/unstaged
-    changes on top, in one pass.
+    Diffs `base` against the working tree, so the result covers committed
+    changes since `base` plus any staged/unstaged changes on top, in one pass.
     """
-    ref = base or "HEAD"
-    diff = _git(["diff", "--no-color", "-U0", ref], cwd=repo_root)
+    diff = _git(["diff", "--no-color", "-U0", base], cwd=repo_root)
 
     changed: dict[str, ChangedFile] = {}
     current_path: str | None = None
@@ -191,7 +203,7 @@ def get_untracked_changed_files(repo_root: str) -> dict[str, ChangedFile]:
     return untracked
 
 
-def get_changed_files(repo_root: str, base: str | None) -> list[ChangedFile]:
+def get_changed_files(repo_root: str, base: str) -> list[ChangedFile]:
     """Return changed files: committed/staged/unstaged diff plus new files."""
     changed = get_diff_changed_files(repo_root, base)
     changed.update(get_untracked_changed_files(repo_root))
@@ -363,11 +375,16 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--base",
-        default=None,
+        default="HEAD",
         help=(
-            "Diff against this ref instead of HEAD, e.g. origin/develop. "
+            "Diff against this ref (default: %(default)s). "
+            f"Use '{MERGE_BASE_SELECTOR}' for the point where this "
+            f"branch diverged from {BASE_REF}, or pass any ref/SHA. "
             "Covers committed changes since the ref plus any "
-            "staged/unstaged changes on top."
+            "staged/unstaged changes on top. "
+            f"'{MERGE_BASE_SELECTOR}' reads the local '{BASE_REF}' without "
+            "fetching, so run `git fetch` first; for stacked or fork-based "
+            "branches, pass the correct base ref/SHA explicitly."
         ),
     )
     parser.add_argument(
@@ -382,8 +399,10 @@ def main() -> int:
     """Run clang-tidy over changed files and print the results; return an exit code."""
     args = parse_args()
     repo_root = get_repo_root()
+    base = resolve_base(args.base)
+    print(f"Checking changes since base commit: {base}")
 
-    changed_files = get_changed_files(repo_root, args.base)
+    changed_files = get_changed_files(repo_root, base)
     if not changed_files:
         print("No relevant changes found.")
         return 0

@@ -2947,11 +2947,6 @@ class Rdna3_5Profile(Rdna3Profile):
         }
 
     @property
-    def uses_rj_arith_matrix(self) -> bool:
-        # RDNA3.5 retains its legacy implementation despite sharing the RDNA3 layout.
-        return False
-
-    @property
     def dpp_subrev_zeroes_non_vgpr_src1(self) -> bool:
         # The gfx11.5 encoding admits these selectors. Use the measured gfx12 behavior.
         return True

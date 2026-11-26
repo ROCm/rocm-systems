@@ -164,14 +164,6 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     'v_sub_f32_vop2': ('float32_t', _binary_f32_op('sub')),
     'v_subrev_f32_vop2': ('float32_t', _binary_f32_op('subrev')),
     'v_mul_f32_vop2': ('float32_t', _binary_f32_op('mul')),
-    'v_mul_legacy_f32_vop2': (
-        'float32_t',
-        '[](auto a, auto b) { auto r = a * b; util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f); return r; }',
-    ),
-    'v_mul_dx9_zero_f32_vop2': (
-        'float32_t',
-        '[](auto a, auto b) { auto r = a * b; util::stdx::where(a == 0.0f || b == 0.0f, r) = util::native<float32_t>(0.0f); return r; }',
-    ),
     'v_add_u16_vop2': ('uint32_t', '[](auto a, auto b) { return (a + b) & 0xFFFFu; }'),
     'v_sub_u16_vop2': ('uint32_t', '[](auto a, auto b) { return (a - b) & 0xFFFFu; }'),
     'v_subrev_u16_vop2': (
@@ -284,7 +276,6 @@ def _flush_input_then(fmt: str, functor: str) -> str:
 
 
 SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
-    'v_accvgpr_mov_b32_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a; }'),
     'v_mov_b16_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return a & 0xFFFFu; }'),
     'v_not_b16_vop1': ('uint32_t', 'uint32_t', '[](auto a) { return (~a) & 0xFFFFu; }'),
     'v_cvt_i32_i16_vop1': (
@@ -297,16 +288,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         '[](auto a) { return a & 0xFFFFu; }',
     ),
-    'v_frexp_mant_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::native<float>([&](auto i) { return amdgpu::frexp_f32(static_cast<float>(a[i]), wf.fp_denorm_mode_f32()).mantissa; }); }',
-    ),
-    'v_frexp_exp_i32_f32_vop1': (
-        'uint32_t',
-        'uint32_t',
-        '[&wf](auto a) { return util::native<uint32_t>([&](auto i) { return static_cast<uint32_t>(amdgpu::frexp_f32(std::bit_cast<float>(static_cast<uint32_t>(a[i])), wf.fp_denorm_mode_f32()).exponent); }); }',
-    ),
     'v_cvt_f32_fp8_vop1': (
         'uint32_t',
         'float32_t',
@@ -316,57 +297,6 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         'uint32_t',
         'float32_t',
         '[](auto a) { return util::bf8_e5m2_to_f32_simd(a); }',
-    ),
-    'v_floor_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        _flush_input_then('F32', '[](auto a) { return util::floor_simd(a); }'),
-    ),
-    'v_ceil_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        _flush_input_then('F32', '[](auto a) { return util::ceil_simd(a); }'),
-    ),
-    'v_trunc_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[](auto a) { return util::trunc_simd(a); }',
-    ),
-    'v_rndne_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[](auto a) { return util::rndne_simd(a); }',
-    ),
-    'v_fract_f32_vop1': ('uint32_t', 'uint32_t', float_fract.simd_functor('f32')),
-    'v_rcp_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::rcp_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
-    ),
-    'v_rcp_iflag_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[](auto a) { return util::rcp_f32_simd(a); }',
-    ),
-    'v_rsq_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::rsq_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
-    ),
-    'v_sqrt_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::sqrt_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
-    ),
-    'v_exp_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::exp_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
-    ),
-    'v_log_f32_vop1': (
-        'float32_t',
-        'float32_t',
-        '[&wf](auto a) { return util::log_f32_simd(a, amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())); }',
     ),
     'v_fract_f16_vop1': ('uint32_t', 'uint32_t', float_fract.simd_functor('f16')),
     'v_rcp_f16_vop1': (
@@ -448,16 +378,8 @@ _FMA_MULK_F32 = '[&wf](auto a, auto b, auto, auto k) { return amdgpu::fma_f32_si
 _FMA_K_READ = 'amdgpu::RegisterAccess(wf).read_scalar(inst.simm32)'
 
 SIMD_VOP2_TERNARY: dict[str, tuple[str, str, str]] = {
-    # --- f32 dst-accumulate ---
     'v_fmac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
-    'v_fmac_dx9_zero_f32_vop2': (
-        'float32_t',
-        '0u',
-        '[&wf](auto a, auto b, auto d, auto) {'
-        ' return amdgpu::fma_dx9_zero_f32_simd_unscoped(a, b, d, wf); }',
-    ),
     'v_mac_f32_vop2': ('float32_t', '0u', _FMA_ACC_F32),
-    # --- f32 inline literal ---
     'v_fmaak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
     'v_madak_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_ADDK_F32),
     'v_fmamk_f32_vop2': ('float32_t', _FMA_K_READ, _FMA_MULK_F32),
@@ -498,7 +420,7 @@ SIMD_VOP2_TERNARY_ACCUMULATE = {
 # pairs, performs a native<double> fused operation under the architectural
 # FP_ROUND/FP_DENORM mode, and scalar-corrects NaN-input lanes so payload policy
 # remains identical to the scalar executor.
-SIMD_VOP2_FMA_F64 = {'v_fmac_f64_vop2'}
+SIMD_VOP2_FMA_F64 = set()
 
 
 # template_name -> cpp_bin_op (over native<double>, no modifiers). VOP2 f64
@@ -522,60 +444,17 @@ SIMD_VOP2_BINARY_FP64: dict[str, str] = {
 # the glue note + UtilSimd.*F64*_BitExact guards). v_mov_b64 is a pure 64-bit
 # copy (T = uint64_t).
 SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
-    'v_ceil_f64_vop1': (
-        'double',
-        _flush_input_then('F64', '[](auto a) { return util::ceil_simd(a); }'),
-    ),
-    'v_floor_f64_vop1': (
-        'double',
-        _flush_input_then('F64', '[](auto a) { return util::floor_simd(a); }'),
-    ),
-    'v_trunc_f64_vop1': ('double', '[](auto a) { return util::trunc_simd(a); }'),
-    'v_rndne_f64_vop1': ('double', '[](auto a) { return util::rndne_simd(a); }'),
-    'v_fract_f64_vop1': ('uint64_t', float_fract.simd_functor('f64')),
-    'v_rcp_f64_vop1': (
-        'double',
-        '[](auto a) { return util::native<double>(1.0) / a; }',
-    ),
-    'v_rsq_f64_vop1': (
-        'double',
-        '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
-    ),
-    'v_sqrt_f64_vop1': ('double', '[](auto a) { return util::sqrt_f64_simd(a); }'),
     'v_mov_b64_vop1': ('uint64_t', '[](auto a) { return a; }'),
-    # frexp mantissa: significand in [0.5,1) via bitfield rebias + denormal
-    # renorm (see util::frexp_mant_f64_simd). VOP3 twin in SIMD_VOP3_UNARY_FP64.
-    'v_frexp_mant_f64_vop1': (
-        'double',
-        _flush_input_then('F64', '[](auto a) { return util::frexp_mant_f64_simd(a); }'),
-    ),
 }
 
 
 # FREXP exponent extraction still needs a mixed-width FP64-to-32-bit bridge.
-SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
-    # FREXP exponent (F64 -> int32): flush the source under MODE, then narrow
-    # the low 32 exponent bits. The VOP3 twin reuses this functor: ABS/NEG
-    # cannot change the exponent.
-    'v_frexp_exp_i32_f64_vop1': (
-        'int32_t',
-        _flush_input_then(
-            'F64',
-            '[](auto s) {'
-            ' return util::stdx::static_simd_cast<util::narrow32<int32_t>>('
-            'util::frexp_exp_f64_simd(s)); }',
-        ),
-    ),
-}
+SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {}
 
 # VOP3 div_fmas: fused FMA and VCC-controlled scaling, rounded once using
 # the guest mode. Fixed-op / functorless.
-SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
-    'v_div_fmas_f32_vop3',
-}
-SIMD_VOP3_DIV_FMAS_FP64: set[str] = {
-    'v_div_fmas_f64_vop3',
-}
+SIMD_VOP3_DIV_FMAS_FP32: set[str] = set()
+SIMD_VOP3_DIV_FMAS_FP64: set[str] = set()
 
 # VOP3P packed-16 integer binary family. The glue applies half selectors
 # before the functor and retains scalar execution for integer CLAMP.
@@ -709,19 +588,12 @@ SIMD_VOP3P_PK_TERNARY_INT: dict[str, str] = {
 # f32 (lo/hi). Glue selects each source half at native width, including broadcasts,
 # applies neg/neg_hi (sign-bit toggle), and runs the per-half functor. Rounding,
 # denormal and clamp policies match the scalar helper.
-SIMD_VOP3P_PK_BINARY_F32: dict[str, str] = {
-    'v_pk_add_f32_vop3p': '[](auto a, auto b) { return a + b; }',
-    'v_pk_mul_f32_vop3p': '[](auto a, auto b) { return a * b; }',
-}
+SIMD_VOP3P_PK_BINARY_F32: dict[str, str] = {}
 
 # pk_fma_f32 — 3-source FMA per half, with independent source-half selection.
 # Scalar and SIMD execution share hardware NaN selection. The glue installs one
 # guest FP environment for the instruction, so the functor uses the unscoped core.
-SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {
-    'v_pk_fma_f32_vop3p': (
-        '[&wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf); }'
-    ),
-}
+SIMD_VOP3P_PK_TERNARY_F32: dict[str, str] = {}
 
 # v_dot2_f32_{f16,bf16} — two half-precision products + an f32 accumulator into
 # one f32 lane. Eligibility: the HostF32 accumulation policy and the default
@@ -1048,15 +920,7 @@ SIMD_VOP3_TRUE16_UNSAFE = frozenset(
 # (operand shape is identical: src0 in, vdst out, 32-bit lanes) — only the
 # probe routing key differs. RDNA3+; CDNA4 does not decode.
 SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
-    # ABS/NEG cannot change the exponent; the result has no FP output modifiers.
-    'v_frexp_exp_i32_f32_vop3': SIMD_VOP1_UNARY['v_frexp_exp_i32_f32_vop1'],
-    # v_not_b16: `uint16_t(~src0)`, zero-extended. Same shape as v_not_b32 but
-    # masked to 16 bits.
-    'v_not_b16_vop3': (
-        'uint32_t',
-        'uint32_t',
-        '[](auto a) { return (~a) & 0xFFFFu; }',
-    ),
+    'v_not_b16_vop3': ('uint32_t', 'uint32_t', '[](auto a) { return (~a) & 0xFFFFu; }')
 }
 
 
@@ -1070,10 +934,7 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
 #
 # Legacy min/max also route through the shared raw-bit selection stage.
 # The IEEE-2019 min/max forms read raw encodings; see float_minmax.simd_probe.
-SIMD_VOP3_BINARY_FP64: dict[str, str] = {
-    'v_add_f64_vop3': '[](auto a, auto b) { return a + b; }',
-    'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
-}
+SIMD_VOP3_BINARY_FP64: dict[str, str] = {}
 
 # Their host result is already rounded in the MODE the caller checked, so the
 # shared raw-bit stages apply ABS/NEG, OMOD and CLAMP around it.
@@ -1086,37 +947,7 @@ _ROUNDED_VOP3_BINARY_FP64 = frozenset({'v_add_f64_vop3', 'v_mul_f64_vop3'})
 # narrow widths (sign-of-zero on a zero-magnitude result, NaN-payload
 # preservation), so they are bit-identical to the scalar libm calls for every
 # finite / Inf / NaN / signed-zero input.
-SIMD_VOP3_UNARY_FP64: dict[str, str] = {
-    'v_ceil_f64_vop3': _flush_input_then(
-        'F64', '[](auto a) { return util::ceil_simd(a); }'
-    ),
-    'v_floor_f64_vop3': _flush_input_then(
-        'F64', '[](auto a) { return util::floor_simd(a); }'
-    ),
-    'v_trunc_f64_vop3': '[](auto a) { return util::trunc_simd(a); }',
-    'v_rndne_f64_vop3': '[](auto a) { return util::rndne_simd(a); }',
-    # sqrt_f64 is correctly-rounded IEEE (scalar uses transcendental::sqrt_f64
-    # which is `std::sqrt` after NaN/negative guards); stdx::sqrt matches.
-    'v_sqrt_f64_vop3': ('[](auto a) { return util::sqrt_f64_simd(a); }'),
-    # frexp mantissa: same functor as the VOP1 form, after MODE input flushing;
-    # the f64 unary FP glue applies abs/neg on the source and omod/clamp on the
-    # mantissa, matching the scalar.
-    'v_frexp_mant_f64_vop3': _flush_input_then(
-        'F64', '[](auto a) { return util::frexp_mant_f64_simd(a); }'
-    ),
-    # v_rcp_f64 / v_rsq_f64: scalar uses transcendental::*_f64 with explicit
-    # NaN passthrough, ±0 -> copysign(Inf, x), ±Inf -> copysign(0, x); negative
-    # rsq inputs -> qNaN. Plain 1.0 / x and 1.0 / sqrt match the IEEE result
-    # for all non-NaN inputs; NaN-result lanes are skipped by the A/B test.
-    'v_rcp_f64_vop3': '[](auto a) { return util::native<double>(1.0) / a; }',
-    'v_rsq_f64_vop3': '[](auto a) { return util::native<double>(1.0) / util::stdx::sqrt(a); }',
-    # NOTE: v_mov_b64 is deliberately NOT here. It is an integer 64-bit bit-move;
-    # OMOD/CLAMP are float-only, so its generated VOP3 scalar body is a raw copy
-    # that ignores them. Routing it through the f64 modifier glue made the SIMD
-    # path apply clamp/omod the scalar never does (clamp=1: scalar keeps the raw
-    # bits vs simd clamps to 1.0). With no entry here it stays scalar (a 64-bit
-    # register copy gains nothing from vectorization anyway).
-}
+SIMD_VOP3_UNARY_FP64: dict[str, str] = {}
 
 
 # F16 unary glue: flush source -> widen + ABS/NEG -> op -> round F16 -> OMOD -> CLAMP.
@@ -1143,45 +974,18 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_fma_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_mad_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
-    # DX9 FMA has zero-product and mandatory flushing rules distinct from FMA.
-    'v_fma_dx9_zero_f32_vop3': (
-        '[&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd_unscoped(a, b, c, wf); }'
-    ),
-    # Share the bit-level fixup and guest MODE policy with the scalar executor.
-    # FIXUP rounds OMOD explicitly; operand glue still applies CLAMP.
-    'v_div_fixup_f32_vop3': (
-        '[&inst, &wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_simd(p, b, c, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), ::rocjitsu::amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f32(), wf.ieee_mode(), inst.inst_.omod)); }, false'
-    ),
 }
 
 # Non-fused F16 ternaries: widen -> ABS/NEG -> evaluate -> round F16 -> OMOD/CLAMP.
 # MAD retains its existing MODE policy; selection uses the shared raw-bit stage.
 # DIV_FIXUP explicitly retains modifiers before narrowing. Native fused FMA
 # is implemented by rj-arith on every profile.
-SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
-    'v_div_fixup_f16_vop3': (
-        '[&wf](auto p, auto b, auto c) { return '
-        '::rocjitsu::amdgpu::div_fixup_f16_promoted_simd('
-        'p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); '
-        '}, amdgpu::F16TernaryOutputOrder::MODIFY_THEN_ROUND, true'
-    ),
-    'v_div_fixup_legacy_f16_vop3': (
-        '[&wf](auto p, auto b, auto c) { return '
-        '::rocjitsu::amdgpu::div_fixup_f16_promoted_simd('
-        'p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64()); '
-        '}, amdgpu::F16TernaryOutputOrder::MODIFY_THEN_ROUND, true'
-    ),
-}
+SIMD_VOP3_TERNARY_FP16: dict[str, str] = {}
 
-SIMD_VOP3_FMA_MODE_FP64 = {'v_fma_f64_vop3'}
+SIMD_VOP3_FMA_MODE_FP64 = set()
 
 # f64 ternary FMA.
-SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
-    # v_div_fixup_f64 shares the bit-level helper and explicit guest MODE policy.
-    'v_div_fixup_f64_vop3': (
-        '[&inst, &wf](auto p, auto b, auto c) { return ::rocjitsu::amdgpu::div_fixup_simd(p, b, c, wf.fp_round_mode_f16_f64(), wf.fp_denorm_mode_f16_f64(), ::rocjitsu::amdgpu::fp_mode::effective_omod(wf.cu().arch(), wf.fp_denorm_mode_f16_f64(), wf.ieee_mode(), inst.inst_.omod)); }, false'
-    ),
-}
+SIMD_VOP3_TERNARY_FP64: dict[str, str] = {}
 
 # --- VOP3 dst-accumulate FMA / MAC (vdst is the accumulator) ----------------
 #
@@ -1192,9 +996,8 @@ SIMD_VOP3_TERNARY_FP64: dict[str, str] = {
 SIMD_VOP3_FMAC_FP32: dict[str, str] = {
     'v_fmac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_mac_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd_unscoped(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
-    'v_fmac_dx9_zero_f32_vop3': SIMD_VOP3_TERNARY_FP32['v_fma_dx9_zero_f32_vop3'],
 }
-SIMD_VOP3_FMAC_FP64 = {'v_fmac_f64_vop3'}
+SIMD_VOP3_FMAC_FP64 = set()
 
 SIMD_VOP3_TERNARY_INT: dict[str, tuple[str, str]] = {
     # 16-bit: the scalar body sign-/zero-extends the low 16 bits, takes the

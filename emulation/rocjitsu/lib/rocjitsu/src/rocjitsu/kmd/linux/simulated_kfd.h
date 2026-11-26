@@ -467,10 +467,10 @@ public:
   [[nodiscard]] std::optional<int> dup_mmap_memfd(uint32_t process_id, off_t offset) const;
   /// @}
 
-  void setup_topology(const Sysfs::GpuInfo &gpu);
-  void setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
+  bool setup_topology(const Sysfs::GpuInfo &gpu);
+  bool setup_topology(const config::KfdDeviceConfig &dev, uint32_t num_xcc,
                       const config::PciDeviceConfig &pci = {});
-  void setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc,
+  bool setup_topology(const std::vector<config::KfdDeviceConfig> &devs, uint32_t num_xcc,
                       bool publish_peer_links = true, bool strict_render_minor = false,
                       const config::PciDeviceConfig &pci = {});
   /// @brief Whether render-node opens must match a configured minor exactly.

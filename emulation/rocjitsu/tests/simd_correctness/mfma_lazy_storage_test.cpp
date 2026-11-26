@@ -4,6 +4,7 @@
 /// @file mfma_lazy_storage_test.cpp
 /// @brief Focused MFMA coverage for VGPR reads and writes across lazy chunks.
 
+#include "mfma_half_test_dispatch.h"
 #include "mma_exact_test_support.h"
 #include "rocjitsu/isa/isa_family.h"
 #include "simdojo/components/register_file.h"
@@ -19,11 +20,6 @@ using MfmaVgpr = simdojo::VectorReg<WF_SIZE, uint32_t>;
 using MfmaLazyStorage = simdojo::detail::SoftwareLazyRegisterStorage<MfmaVgpr, 1024>;
 
 TEST(MfmaLazyStorageTest, F16SpecInputCrossesChunkBoundary) {
-  SKIP_IF_NO_SIMD();
-  constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-  if (!amdgpu::mma_f32_native_width_supported(32, width)) {
-    GTEST_SKIP() << "f16 MFMA shape is not divisible by the native SIMD width";
-  }
 
   constexpr uint32_t regs_per_chunk = MfmaLazyStorage::registers_per_chunk();
   constexpr uint32_t source_a = regs_per_chunk - 1;
@@ -43,7 +39,7 @@ TEST(MfmaLazyStorageTest, F16SpecInputCrossesChunkBoundary) {
     fixture.seed(accumulator, 32, Fmt::F32, Mode::RandomInt, 111);
   };
   auto kernel = [&] {
-    amdgpu::exec_f32_mfma_f16_spec<32, 32, 16>(
+    rocjitsu::test::execute_mfma_half_shape<false, 32, 32, 16>(
         *fixture.cu, fixture.vbase + destination, fixture.vbase + source_a,
         fixture.vbase + source_b, fixture.vbase + accumulator, amdgpu::ACC_FROM_VGPR, 0, 0, 0);
   };
@@ -53,11 +49,6 @@ TEST(MfmaLazyStorageTest, F16SpecInputCrossesChunkBoundary) {
 }
 
 TEST(MfmaLazyStorageTest, F16SpecOutputCrossesChunksAndOverlapsInput) {
-  SKIP_IF_NO_SIMD();
-  constexpr uint32_t width = static_cast<uint32_t>(util::native<float>::size());
-  if (!amdgpu::mma_f32_native_width_supported(32, width)) {
-    GTEST_SKIP() << "f16 MFMA shape is not divisible by the native SIMD width";
-  }
 
   constexpr uint32_t destination_and_source_a = MfmaLazyStorage::registers_per_chunk() - 1;
   constexpr uint32_t source_b = 64;
@@ -74,7 +65,7 @@ TEST(MfmaLazyStorageTest, F16SpecOutputCrossesChunksAndOverlapsInput) {
   };
   for (uint32_t const_acc : {amdgpu::ACC_FROM_VGPR, CONST_ONE}) {
     auto kernel = [&] {
-      amdgpu::exec_f32_mfma_f16_spec<32, 32, 4, 2>(
+      rocjitsu::test::execute_mfma_half_shape<false, 32, 32, 4, 2>(
           *fixture.cu, fixture.vbase + destination_and_source_a,
           fixture.vbase + destination_and_source_a, fixture.vbase + source_b,
           fixture.vbase + accumulator, const_acc, 0, 0, 0);

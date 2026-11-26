@@ -1386,9 +1386,6 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     'tanh': 'amdgpu::transcendental::tanh_f32({0})',
     'log': 'amdgpu::transcendental::log_f32({0})',
     'exp': 'amdgpu::transcendental::exp_f32({0})',
-    'rcp_f64': 'amdgpu::transcendental::rcp_f64({0})',
-    'rsq_f64': 'amdgpu::transcendental::rsq_f64({0})',
-    'sqrt_f64': 'amdgpu::transcendental::sqrt_f64({0})',
     'abs': '[&]() {{ int32_t v = static_cast<int32_t>({0});'
     ' return static_cast<uint32_t>'
     '(v < 0 ? (0u - static_cast<uint32_t>(v))'
@@ -1485,14 +1482,12 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' return a == 0 ? static_cast<uint32_t>(-1)'
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'prng_advance': 'util::prng_advance({0})',
-    'frexp_exp_f32': 'static_cast<uint32_t>(amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).exponent)',
-    'frexp_exp_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint32_t>(exp); }}()',
-    'frexp_mant_f64': '[&]() {{ double s = {0};'
-    ' int exp = 0;'
-    ' return std::frexp(s, &exp); }}()',
+    # FP16 mantissa lowering still widens through the shared FP32 model.
+    'frexp_mant_f32': 'amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).mantissa',
+    # Signed 16-bit exponent in the low half.
+    'frexp_exp_f16': '[&]() -> uint32_t {{ float s = {0}; int exp = 0;'
+    ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
+    ' return static_cast<uint16_t>(exp); }}()',
     'frexp_mant_f32': 'amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).mantissa',
     'log2': 'amdgpu::transcendental::log_f32({0})',
     'cvt_f32_i32': 'std::bit_cast<uint32_t>(static_cast<float>(static_cast<int32_t>({0})))',
