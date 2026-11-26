@@ -221,11 +221,11 @@ bool rcclHostHierAllReduceAutoWindow(int nHosts, size_t bytes) {
   switch (nHosts) {
   case 2:
     return (bytes > 1 * MiB && bytes <= 2 * MiB) || (bytes >= 8 * MiB && bytes <= 16 * MiB) ||
-           (bytes >= 128 * MiB && bytes <= 512 * MiB);
+           (bytes >= 64 * MiB && bytes <= 128 * MiB);
   case 4:
-    return bytes >= 2 * MiB && bytes <= 1024 * MiB;
+    return bytes >= 2 * MiB && bytes <= 256 * MiB;
   case 8:
-    return bytes >= 2 * MiB && bytes <= 2048 * MiB;
+    return bytes >= 2 * MiB && bytes <= 512 * MiB;
   default:
     return false;
   }
