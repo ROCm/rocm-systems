@@ -53,7 +53,6 @@ RJ_DIAGNOSTIC_POP
 #include <limits>
 #include <linux/sched.h>
 #include <linux/types.h>
-#include <new>
 #include <poll.h>
 #include <pthread.h>
 #include <shared_mutex>
@@ -4432,13 +4431,7 @@ int SimulatedKfd::close_all_processes() {
   return first_error;
 }
 
-// Allocation failure must not return through a KFD caller with an open
-// transaction. Other unwinding, including pthread_exit, still passes through.
-int SimulatedKfd::close(uint32_t process_id)
-#if defined(__cpp_exceptions)
-    try
-#endif
-{
+int SimulatedKfd::close(uint32_t process_id) {
   std::lock_guard close_lock(close_mutex_);
   std::shared_ptr<PendingClose> pending;
   std::shared_ptr<KfdProcess> candidate;
@@ -5048,33 +5041,19 @@ int SimulatedKfd::close(uint32_t process_id)
   }
   return 0;
 }
-#if defined(__cpp_exceptions)
-catch (const std::bad_alloc &) {
-  std::terminate();
-}
-#endif
 
 int SimulatedKfd::ioctl(unsigned long request, void *arg) {
   return ioctl(local_process_id_, request, arg);
 }
 
 int SimulatedKfd::ioctl(uint32_t process_id, unsigned long request, void *arg, int *target_mem_fd,
-                        int target_proc_fd)
-#if defined(__cpp_exceptions)
-    try
-#endif
-{
+                        int target_proc_fd) {
   auto proc = find_process(process_id);
   if (!proc) {
     return -ESRCH;
   }
   return dispatch_ioctl(*proc, request, arg, target_mem_fd, target_proc_fd);
 }
-#if defined(__cpp_exceptions)
-catch (const std::bad_alloc &) {
-  std::terminate();
-}
-#endif
 
 int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
                                  int *target_mem_fd, int target_proc_fd) {
@@ -5567,11 +5546,7 @@ void *SimulatedKfd::mmap_observing_host_vma_change(void *addr, size_t length, in
 }
 
 void *SimulatedKfd::mmap(uint32_t process_id, void *addr, size_t length, int prot, int flags,
-                         off_t offset, const std::function<void()> &on_host_vma_change)
-#if defined(__cpp_exceptions)
-    try
-#endif
-{
+                         off_t offset, const std::function<void()> &on_host_vma_change) {
   auto p = find_process(process_id);
   if (!p) {
     errno = ESRCH;
@@ -5626,11 +5601,6 @@ void *SimulatedKfd::mmap(uint32_t process_id, void *addr, size_t length, int pro
   }
   return dispatch_mmap(*p, addr, length, prot, flags, offset, on_host_vma_change);
 }
-#if defined(__cpp_exceptions)
-catch (const std::bad_alloc &) {
-  std::terminate();
-}
-#endif
 
 void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, int prot, int flags,
                                   off_t offset, const std::function<void()> &on_host_vma_change) {
@@ -6455,11 +6425,7 @@ int SimulatedKfd::munmap_observing_host_vma_change(void *addr, size_t length,
 }
 
 int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length,
-                         const std::function<void()> &on_host_vma_change)
-#if defined(__cpp_exceptions)
-    try
-#endif
-{
+                         const std::function<void()> &on_host_vma_change) {
   auto p = find_process(process_id);
   if (!p) {
     return -ESRCH;
@@ -6491,11 +6457,6 @@ int SimulatedKfd::munmap(uint32_t process_id, void *addr, size_t length,
   }
   return dispatch_munmap(*p, addr, length, on_host_vma_change);
 }
-#if defined(__cpp_exceptions)
-catch (const std::bad_alloc &) {
-  std::terminate();
-}
-#endif
 
 void SimulatedKfd::run_host_vma_replacement(std::span<const std::pair<uint64_t, uint64_t>> ranges,
                                             const std::function<bool()> &bare_mapping_change) {

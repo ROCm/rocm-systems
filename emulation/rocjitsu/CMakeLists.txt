@@ -18,6 +18,13 @@ include(CTest)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Errors are propagated through results, including across runtime callbacks.
+if(MSVC)
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/EHs-c->")
+else()
+    add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions>")
+endif()
+
 # Hide symbols by default so the shared library (librocjitsu.so) exports only its
 # intended ABI.
 set(CMAKE_C_VISIBILITY_PRESET hidden)

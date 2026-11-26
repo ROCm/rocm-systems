@@ -19,7 +19,6 @@ namespace rocjitsu::detail {
 /// @returns The file contents, or failure if the path is missing, is not a regular
 /// file, or an I/O error occurs. An empty regular file succeeds with an empty vector.
 /// Reject files exceeding max_bytes before allocating the input buffer.
-/// @throws std::bad_alloc if memory allocation fails.
 util::FailureOr<std::vector<char>>
 read_file_bytes(std::string_view path, size_t max_bytes = std::numeric_limits<size_t>::max());
 

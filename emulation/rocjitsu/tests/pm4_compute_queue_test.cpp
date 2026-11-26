@@ -397,7 +397,7 @@ TEST_F(Pm4ComputeQueueTest, FailedDependencyCancelsQueuedSubmissionsOnce) {
     };
     ASSERT_TRUE(cp->submit_pm4(1, 0, std::move(submission)));
   }
-  EXPECT_NO_THROW(service());
+  service();
   EXPECT_EQ(completions, 2u);
   EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0xababababu);
   EXPECT_EQ(foreign_memory->load<uint32_t>(kDirtyLine), 0u);
@@ -557,7 +557,7 @@ TEST_F(Pm4DispatchFlushTest, AqlVendorIbFlushFailurePreventsWritesCompletionAndS
   testing::internal::CaptureStderr();
   engine->schedule_event_now(cp->doorbell_event());
   for (unsigned step = 0; step < 100 && !cp->queue_faulted_for_test(1, kProcessId); ++step) {
-    EXPECT_NO_THROW(service());
+    service();
   }
   const std::string diagnostic = testing::internal::GetCapturedStderr();
   EXPECT_NE(diagnostic.find("PM4 cache flush failed"), std::string::npos) << diagnostic;
@@ -712,7 +712,7 @@ TEST_P(Pm4QueueCacheFlushFailureTest, CancellationCompletesEvenWhenCleanupFlushA
     };
     ASSERT_TRUE(cp->submit_pm4(1, 0, std::move(submission)));
   }
-  EXPECT_NO_THROW(service());
+  service();
   EXPECT_EQ(completions, 2u);
   EXPECT_EQ(memory->load<uint32_t>(kOutput), 0u);
   EXPECT_EQ(memory->load<uint32_t>(kDirtyLine), 0u);
