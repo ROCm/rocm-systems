@@ -133,6 +133,9 @@ Panel Config:
         PCIe Atomic BW:
           value: 32 * SUM(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum) / (SUM(End_Timestamp - Start_Timestamp) / 1e9)
           unit: Bytes/s
+        AGPRs:
+          value: AVG(Accum_VGPR)
+          unit: Registers
   metrics_description:
     Wavefront Occupancy: >-
       The time-averaged number of wavefronts resident on the accelerator, as a percent
@@ -145,6 +148,10 @@ Panel Config:
       The number of scalar general-purpose registers allocated for the kernel,
       see SALU. Note: this may not exactly match the number of SGPRs requested by
       the compiler due to allocation granularity.
+    AGPRs: >-
+      The number of accumulation vector general-purpose registers allocated
+      for the kernel, see AGPRs. Note: this may not exactly match the number of
+      AGPRs requested by the compiler due to allocation granularity.
     LDS Allocation: >-
       The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
       This may also be larger than what was requested at compile time due to both allocation

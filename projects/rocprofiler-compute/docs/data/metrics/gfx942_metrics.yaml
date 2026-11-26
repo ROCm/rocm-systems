@@ -102,6 +102,9 @@ Memory chart:
   SGPRs:
     rst: 'The number of scalar general-purpose registers allocated for the kernel, see :ref:`SALU <desc-salu>`. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
+  AGPRs:
+    rst: 'The number of accumulation vector general-purpose registers allocated for the kernel, see :ref:`AGPRs <desc-agprs>`. Note: this may not exactly match the number of AGPRs requested by the compiler due to allocation granularity.'
+    unit: Registers
   LDS Allocation:
     rst: 'The number of bytes of :ref:`LDS <desc-lds>` memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
     unit: Bytes per Workgroup

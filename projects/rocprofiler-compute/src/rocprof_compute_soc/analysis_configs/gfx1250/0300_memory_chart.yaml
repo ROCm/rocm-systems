@@ -304,6 +304,9 @@ Panel Config:
         Workgroups:
           value: AVG(Grid_Size / Workgroup_Size) / $cu_per_gpu
           unit: Workgroups per WGP
+        AGPRs:
+          value: AVG(Accum_VGPR)
+          unit: Registers
 
   metrics_description:
     Wavefront Occupancy: >-
@@ -317,6 +320,8 @@ Panel Config:
       The number of scalar general-purpose registers allocated for the kernel.
       Note: this may not exactly match the number of SGPRs requested by
       the compiler due to allocation granularity.
+    AGPRs: >-
+      Number of accumulation VGPRs allocated per wave.
     LDS Allocation: >-
       The number of bytes of LDS memory (or, shared memory) allocated per workgroup. Note:
       This may also be larger than what was requested at compile time due to both allocation

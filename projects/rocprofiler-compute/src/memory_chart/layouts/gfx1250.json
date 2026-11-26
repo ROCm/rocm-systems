@@ -7,6 +7,7 @@
       {"metric_id": "3.9.0", "title": "Wavefront Occupancy", "category": "util", "bar": true},
       {"metric_id": "3.9.1", "title": "VGPRs", "category": "neutral", "bar": false},
       {"metric_id": "3.9.2", "title": "SGPRs", "category": "neutral", "bar": false},
+      {"metric_id": "3.9.6", "title": "AGPRs", "category": "neutral", "bar": false},
       {"metric_id": "3.9.4", "title": "Scratch Allocation", "category": "neutral", "bar": false},
       {"metric_id": "3.9.3", "title": "LDS Allocation", "category": "neutral", "bar": false},
       {"metric_id": "3.9.5", "title": "Workgroups per WGP", "category": "neutral", "bar": false}

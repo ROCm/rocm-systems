@@ -120,6 +120,9 @@ Memory chart - Workgroup Processors (WGPs):
   SGPRs:
     rst: 'The number of scalar general-purpose registers allocated for the kernel. Note: this may not exactly match the number of SGPRs requested by the compiler due to allocation granularity.'
     unit: Registers
+  AGPRs:
+    rst: Number of accumulation VGPRs allocated per wave.
+    unit: Registers
   LDS Allocation:
     rst: 'The number of bytes of LDS memory (or, shared memory) allocated per :ref:`workgroup <desc-workgroup>`. Note: This may also be larger than what was requested at compile time due to both allocation granularity and dynamic per-dispatch LDS allocations.'
     unit: Bytes per Workgroup
