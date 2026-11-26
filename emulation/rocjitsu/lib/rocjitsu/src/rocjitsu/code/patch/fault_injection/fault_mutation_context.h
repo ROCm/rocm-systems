@@ -75,6 +75,8 @@ class LdsInventory;
 class LdsSelection;
 class AtomicInventory;
 class AtomicSelection;
+class OrdinaryAcquireInventory;
+class OrdinaryAcquireSelection;
 
 /// @brief Own an immutable source snapshot and its selection lifetime.
 /// @details Copies the input once. Independently constructed contexts have distinct
@@ -82,7 +84,7 @@ class AtomicSelection;
 /// changing the caller's input buffer does not change this snapshot. The context
 /// caches the fixed all-entry direct-ownership profile and retains an Instrumentor
 /// seed whose full-text facts are shared by independent replacement batches.
-/// LDS discovery can additionally borrow complete execution ownership for shared helpers
+/// Discovery can additionally borrow complete execution ownership for shared helpers
 /// and hardware roots. Replacement still uses the same default Instrumentor pipeline;
 /// successful discovery does not guarantee that a requested edit can be emitted.
 /// The caller/session should retain one context per immutable input across discovery,
@@ -138,6 +140,8 @@ private:
                                                                    const AtomicSelection &,
                                                                    std::optional<uint32_t>,
                                                                    FaultMutationError &);
+  friend FailureOr<OrdinaryAcquireInventory>
+  discover_ordinary_acquires(const FaultMutationContext &, std::string_view, FaultMutationError &);
 };
 
 } // namespace rocjitsu
