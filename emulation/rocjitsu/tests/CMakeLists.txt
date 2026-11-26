@@ -353,7 +353,7 @@ set_tests_properties(
 )
 set_tests_properties(
     RocjitsuOptionGpusPerNode
-    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 25,25 \\| 0 \\| 56"
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 41,41 \\| 0 \\| 88"
 )
 set_tests_properties(
     RocjitsuOptionDedicatedGpusPerNodeWinsBeforeGeneric
