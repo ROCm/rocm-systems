@@ -120,6 +120,15 @@ bool is_valid_plugin_name(std::string_view name) {
   return true;
 }
 
+FailureOr<std::string> configured_local_node(std::string_view json,
+                                             const util::DiagnosticEmitter &emit_error) {
+  return with_parsed_simulation_config_json(
+      std::string(json), rocjitsu::kEmbeddedSchema, emit_error,
+      [](const fb::SimulationConfig *config) -> FailureOr<std::string> {
+        return config->local_node() ? config->local_node()->str() : std::string{};
+      });
+}
+
 FailureOr<std::string> json_with_gpu_count(std::string_view json, uint32_t count,
                                            const util::DiagnosticEmitter &emit_error) {
   FailureOr<std::string> vm = json_top_level_field(json, "vm", emit_error);
@@ -206,7 +215,14 @@ Result validate_system_gpu_count_override(std::string_view json, const LaunchOve
     return Result::failure();
   if (!graph.value().explicit_manifest)
     return Result::success();
-  auto gpus = graph.value().local_gpus(emit_error, overrides.local_node);
+  std::string node_id = overrides.local_node;
+  if (node_id.empty()) {
+    FailureOr<std::string> configured = configured_local_node(json, emit_error);
+    if (configured.failed())
+      return Result::failure();
+    node_id = std::move(configured.value());
+  }
+  auto gpus = graph.value().local_gpus(emit_error, node_id);
   if (gpus.failed())
     return Result::failure();
   if (gpus.value().size() != *overrides.gpus_per_node)

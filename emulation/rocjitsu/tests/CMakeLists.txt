@@ -364,6 +364,28 @@ add_test(
         "-DTEST_REGEX=--plugin currently supports only one selected GPU; selected node has 2 GPUs"
         -P ${_rj_cli_failure_script}
 )
+
+add_test(
+    NAME RocjitsuPluginRejectsMultiGpuManifestLaunch
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ENVIRONMENT=ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuPluginRejectsMultiGpuManifestLaunch"
+        "-DTEST_ARGS=--config;${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fabric_node_projection.json;--node;tray7;--plugin;race;--;/usr/bin/true"
+        "-DTEST_REGEX=--plugin currently supports only one selected GPU; selected node has 2 GPUs"
+        -P ${_rj_cli_failure_script}
+)
+
+if(ROCJITSU_ENABLE_INTERPOSER)
+    add_test(
+        NAME RocjitsuPluginAllowsSingleGpuManifestLaunch
+        COMMAND
+            ${CMAKE_COMMAND} -E env
+            ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuPluginAllowsSingleGpuManifestLaunch
+            $<TARGET_FILE:rocjitsu_bin> --config
+            ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/fabric_node_projection.json
+            --node tray0 --plugin race -- /usr/bin/true
+    )
+endif()
 add_test(
     NAME RocjitsuPluginRepeatedValuesReachLaunchConfig
     COMMAND

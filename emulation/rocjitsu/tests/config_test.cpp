@@ -3438,6 +3438,42 @@ TEST(EffectiveConfigTest, RejectsInvalidLaunchPluginName) {
   EXPECT_THAT(diagnostic.message(), testing::HasSubstr("invalid plugin name '../race'"));
 }
 
+TEST(EffectiveConfigTest, LaunchPluginsPreserveSystemManifestValidation) {
+  std::string fixture_json;
+  ASSERT_TRUE(system_graph_thread_test_config(fixture_json));
+  auto selected = config::json_with_local_node(fixture_json, "tray0");
+  ASSERT_TRUE(selected.succeeded());
+
+  config::LaunchOverrides overrides;
+  overrides.plugins = {"race"};
+  auto rewritten = config::json_with_launch_overrides(selected.value(), overrides);
+  ASSERT_TRUE(rewritten.succeeded());
+
+  util::StringDiagnostic diagnostic;
+  auto graph = config::load_system_graph_from_string(rewritten.value(), rocjitsu::kEmbeddedSchema,
+                                                     diagnostic.emitter());
+  EXPECT_TRUE(graph.succeeded()) << diagnostic.message();
+}
+
+TEST(EffectiveConfigTest, GpusPerNodeUsesConfiguredLocalNode) {
+  std::string fixture_json;
+  ASSERT_TRUE(system_graph_thread_test_config(fixture_json));
+  auto selected = config::json_with_local_node(fixture_json, "tray7");
+  ASSERT_TRUE(selected.succeeded());
+
+  config::LaunchOverrides overrides;
+  overrides.gpus_per_node = 2;
+  auto rewritten = config::json_with_launch_overrides(selected.value(), overrides);
+  ASSERT_TRUE(rewritten.succeeded());
+
+  util::StringDiagnostic diagnostic;
+  overrides.gpus_per_node = 1;
+  auto mismatch =
+      config::json_with_launch_overrides(selected.value(), overrides, diagnostic.emitter());
+  EXPECT_TRUE(mismatch.failed());
+  EXPECT_THAT(diagnostic.message(), testing::HasSubstr("selected system node has 2 GPUs"));
+}
+
 TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
   using amdgpu::MemoryWaitDiagnostics;
   using config::WaitChecking;
