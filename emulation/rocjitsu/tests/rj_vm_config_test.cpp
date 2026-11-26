@@ -327,6 +327,33 @@ TEST(VmConfigApi, FailedConstructionPreservesThePassiveSnapshot) {
   expect_same_info(after, before);
 }
 
+TEST(VmConfigApi, CheckedConfigurationErrorsPreserveOutputsAndDiagnostics) {
+  std::string invalid_range = small_config(true);
+  const std::string range = "xcd[0:2]";
+  const size_t position = invalid_range.find(range);
+  ASSERT_NE(position, std::string::npos);
+  invalid_range.replace(position, range.size(), "xcd[0:18446744073709551616]");
+  const std::string invalid_link = small_config(
+      false,
+      R"(,"system":{"nodes":[{"id":"node0","gpus":[{"id":"gpu0","gpu_id":505,"unique_id":3005,
+                               "location_id":1024,"drm_render_minor":129}]}],
+                "links":[{"src":"missing0","dst":"missing1"}]})");
+  struct Case {
+    const std::string &json;
+    const char *diagnostic;
+  };
+  for (const Case &test : {Case{invalid_range, "Range bound out of unsigned long range"},
+                           Case{invalid_link, "invalid system link"}}) {
+    auto *sentinel = reinterpret_cast<rj_vm_config_t *>(uintptr_t{1});
+    testing::internal::CaptureStderr();
+    const rj_status_t status = rj_vm_config_create_from_string(test.json.c_str(), &sentinel);
+    const std::string diagnostic = testing::internal::GetCapturedStderr();
+    EXPECT_EQ(status, ROCJITSU_STATUS_INVALID_ARGUMENT);
+    EXPECT_EQ(sentinel, reinterpret_cast<rj_vm_config_t *>(uintptr_t{1}));
+    EXPECT_NE(diagnostic.find(test.diagnostic), std::string::npos) << diagnostic;
+  }
+}
+
 TEST(VmConfigApi, InvalidArgumentsLeaveOutputsUntouched) {
   const std::string json = small_config(true);
   auto *sentinel = reinterpret_cast<rj_vm_config_t *>(uintptr_t{1});
