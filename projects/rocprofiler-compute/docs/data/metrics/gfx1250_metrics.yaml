@@ -454,6 +454,9 @@ Roofline Plot Points:
   AI GL0:
     rst: Arithmetic intensity relative to GL0 data bandwidth.
     unit: FLOPs/Byte
+  AI LDS:
+    rst: Arithmetic intensity relative to LDS bandwidth.
+    unit: FLOPs/Byte
   Performance (GFLOPs):
     rst: Total achieved compute throughput combining all VALU and WMMA FLOPs.
     unit: GFLOP/s

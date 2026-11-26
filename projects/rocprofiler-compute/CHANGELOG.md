@@ -7,6 +7,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Added LDS arithmetic intensity points to the gfx1250 roofline.
+
 * Added GPU metrics, the Memory Chart and the roofline for gfx1200.
   * gfx1200 support is experimental and requires the `--experimental` option.
 
@@ -27,6 +29,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 ### Resolved issues
+
+* Fixed kernel points missing from the gfx1250 roofline plot.
 
 * Fixed Uncached Read Traffic (17.2.3) going above 100% on gfx908, gfx90a, gfx942 and gfx950.
 
