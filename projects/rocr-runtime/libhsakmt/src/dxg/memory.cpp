@@ -1013,6 +1013,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
 
     auto it = allocation_map_->find(MemoryAddress);
     if (it == allocation_map_->end()) {
+      // A map call inside an existing userptr allocation reuses that mapping and takes a
+      // reference on it but it is unmapped with its own address, which is not a key in the map.
+      // Drop the reference on the enclosing allocation, otherwise the mapping leaks and keeps stale
+      // pinned pages for that range.
+      Allocation* alloc = FindAllocation(MemoryAddress, 1);
+      if (alloc != nullptr && alloc->userptr && alloc->user_data != nullptr) {
+        gpu_mem = wsl::thunk::GpuMemory::Convert(alloc->handle);
+        if (gpu_mem->DecMappingCount() == 0) {
+          const void* cpu_key = alloc->user_data;
+          allocation_map_->erase((void*)alloc->gpu_addr);
+          allocation_map_->erase(cpu_key);
+          delete gpu_mem;
+        }
+        return HSAKMT_STATUS_SUCCESS;
+      }
       return HSAKMT_STATUS_ERROR;
     }
 
