@@ -6,7 +6,7 @@
  * A rank exits only after hearing from every rank, which keeps the two-bank
  * scratch safe for the next DDA call.
  *
- * Bank layout (16B lines): [nRanks token lines][bytes/8 data lines].
+ * Bank layout (16B lines): [nRanks token lines][bytes/8 data lines]. The two banks start at regionOffset.
  *
  * See LICENSE.txt for license information.
  ************************************************************************/
@@ -75,13 +75,14 @@ __launch_bounds__(512)
                                        size_t bytes, // multiple of 16
                                        int selfRank, int nRanks, int root,
                                        uint32_t* __restrict__ epochDev, int epochLen, size_t bankSize,
+                                       size_t regionOffset, // multiple of 16
                                        DdaKernelParams params) {
   const int tid = threadIdx.x;
   const int nthreads = blockDim.x;
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
   const int total = gridDim.x * gridDim.y;
   const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
-  const size_t bankLines = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
+  const size_t bankLines = regionOffset / sizeof(LLPacket16) + (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
   const size_t nPk = bytes >> 3;
   const bool isRoot = selfRank == root;
 

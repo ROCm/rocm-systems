@@ -5,9 +5,7 @@
  ************************************************************************/
 
 // Host-only microtests for src/algorithms/dda/broadcast/dda_broadcast_fabric_ll.cu: the block budget, the
-// threads override, the root/non-root grids, rank-uniform eligibility, and the launch.
-
-#include <gtest/gtest.h>
+// threads override, the root/non-root grids, the IPC LL region, rank-uniform eligibility, and the launch.
 
 #include <cstddef>
 #include <cstdint>
@@ -16,8 +14,11 @@
 #include <tuple>
 #include <utility>
 
+#include <gtest/gtest.h>
+
 #include "../common/DdaFabricTestHelpers.hpp"
 #include "algorithms/dda/DdaCollSeams.h"
+#include "algorithms/dda/dda_init_detail.h"
 
 #include "fakes/param_redirect.h"
 
@@ -37,6 +38,8 @@ constexpr int kRank = 5;
 constexpr int kOtherRoot = 0;
 // 16 KiB is 2048 packets: eight 256-thread chunks.
 constexpr size_t kEightChunks = 16384;
+// The Simple scratch ncclDdaIpcCommInit leaves below the IPC LL region.
+constexpr size_t kIpcSimpleBytes = DDA_IPC_BUFFER_SIZE - dda::common::kDdaIpcLLRegionBytes;
 
 template <bool kAligned>
 const void* Kernel() {
@@ -65,6 +68,13 @@ class DdaBroadcastFabricLLMicrotest : public ::testing::Test {
   }
 
   ncclComm& comm() { return mock_.comm; }
+
+  // The single-node IPC path: no fabric handler, and the Simple scratch ncclDdaIpcCommInit sets.
+  void UseIpc() {
+    comm().ddaFabricMemHandler = nullptr;
+    comm().ddaIpcMemHandler = reinterpret_cast<ncclIpcMemHandler*>(0x1);
+    comm().ddaScratchBytes = kIpcSimpleBytes;
+  }
 
   // int8 so count is bytes; broadcast is datatype-agnostic.
   bool Eligible(size_t count, ncclDataType_t datatype = ncclInt8) {
@@ -324,7 +334,7 @@ TEST_F(DdaBroadcastFabricLLMicrotest, Launch_PassesBuffersBytesRanksEpochAndBank
   EXPECT_EQ(comm().addonStopEvent, nullptr);
   EXPECT_EQ(launch.sharedMemBytes, 0u);
   EXPECT_EQ(launch.flags, 0u);
-  ASSERT_EQ(launch.args.size(), 11u);
+  ASSERT_EQ(launch.args.size(), 12u);
   EXPECT_EQ(launch.Arg<char* const*>(0), comm().ddaPeerPtrsDev);
   EXPECT_EQ(launch.Arg<char*>(1), kRecvbuff);
   EXPECT_EQ(launch.Arg<const char*>(2), kSendbuff);
@@ -335,7 +345,46 @@ TEST_F(DdaBroadcastFabricLLMicrotest, Launch_PassesBuffersBytesRanksEpochAndBank
   EXPECT_EQ(launch.Arg<uint32_t*>(7), comm().ddaLLEpochDev);
   EXPECT_EQ(launch.Arg<int>(8), comm().ddaLLEpochLen);
   EXPECT_EQ(launch.Arg<size_t>(9), 2048u);
-  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(10).flag, comm().abortFlagDev);
+  EXPECT_EQ(launch.Arg<size_t>(10), 0u); // fabric banks start at the scratch base
+  EXPECT_EQ(launch.Arg<dda::common::DdaKernelParams>(11).flag, comm().abortFlagDev);
+}
+
+// IPC banks live in the region past ddaScratchBytes, sized by it and not by the Simple scratch.
+TEST_F(DdaBroadcastFabricLLMicrotest, Launch_IpcBanksSitInTheLLRegionPastSimpleScratch) {
+  UseIpc();
+  const DdaLaunch launch = RunOne(kOtherRoot, 16);
+  ASSERT_EQ(launch.args.size(), 12u);
+  EXPECT_EQ(launch.Arg<size_t>(9), dda::common::kDdaIpcLLRegionBytes / 2);
+  EXPECT_EQ(launch.Arg<size_t>(10), kIpcSimpleBytes);
+}
+
+TEST_F(DdaBroadcastFabricLLMicrotest, Eligible_IpcPayloadMustFitTheLLRegionBank) {
+  UseIpc();
+  // A Simple scratch this small would reject 528 B on fabric; the IPC bank is half the LL region.
+  comm().ddaScratchBytes = 2 * 1152;
+  // Lift the LL threshold so only the bank bounds the payload.
+  g_rcclDdaLLThreshold = [](const ncclComm*, ncclFunc_t) { return SIZE_MAX; };
+  const size_t maxBytes = (dda::common::kDdaIpcLLRegionBytes / 2 / 16 - 8) * 8;
+  EXPECT_TRUE(Eligible(528));
+  EXPECT_TRUE(Eligible(maxBytes));
+  EXPECT_FALSE(Eligible(maxBytes + 16));
+}
+
+// The 8-rank IPC grid over the table's 2-256 KiB range: the root runs a column per peer x up to 8 chunk rows (at most
+// 56 blocks), a non-root up to 8 blocks; the CU budget never binds.
+TEST_F(DdaBroadcastFabricLLMicrotest, Launch_IpcGridIsColumnPerPeerUpTo56RootBlocks) {
+  UseIpc();
+  comm().ddaFabricMaxBlocks = 0;
+  comm().cuCount = 256;
+  const std::pair<size_t, unsigned> cases[] = {{2048, 1}, {4096, 2}, {8192, 4}, {16384, 8}, {262144, 8}};
+  for (const auto& [bytes, rows] : cases) {
+    const DdaLaunch root = RunOne(kRank, bytes);
+    EXPECT_EQ(root.grid.x, 7u) << "bytes " << bytes;
+    EXPECT_EQ(root.grid.y, rows) << "bytes " << bytes;
+    const DdaLaunch peer = RunOne(kOtherRoot, bytes);
+    EXPECT_EQ(peer.grid.x, rows) << "bytes " << bytes;
+    EXPECT_EQ(peer.grid.y, 1u) << "bytes " << bytes;
+  }
 }
 
 TEST_F(DdaBroadcastFabricLLMicrotest, Launch_LaunchErrorIsReported) {

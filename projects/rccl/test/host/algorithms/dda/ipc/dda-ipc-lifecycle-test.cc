@@ -266,6 +266,15 @@ protected:
   }};
   ScopedHook<hipError_t(void*, int, size_t)> memsetHook_{
     g_hipMemset, [](void*, int, size_t) { return hipSuccess; }};
+  // The scratch is a 64 B stand-in, so its zero fill is not written.
+  ScopedHook<hipError_t(void*, int, size_t, hipStream_t)> memsetAsyncHook_{
+    g_hipMemsetAsync, [](void*, int, size_t, hipStream_t) { return hipSuccess; }};
+  ScopedHook<hipError_t(hipStream_t*, unsigned)> streamCreateHook_{
+    g_hipStreamCreateWithFlags, [](hipStream_t* stream, unsigned) {
+    *stream = reinterpret_cast<hipStream_t>(0x5);
+    return hipSuccess;
+  }};
+  ScopedHook<hipError_t(hipStream_t)> streamSyncHook_{g_hipStreamSynchronize, [](hipStream_t) { return hipSuccess; }};
   ScopedHook<hipError_t(void*, const void*, size_t, hipMemcpyKind)> memcpyHook_{
     g_hipMemcpy, [](void* dst, const void* src, size_t bytes, hipMemcpyKind) {
     std::memcpy(dst, src, bytes);

@@ -100,13 +100,6 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
 #endif
   if (scratch != nullptr) ncclAllocTrack(comm->cudaDev, bytes, "ncclDdaIpcCommInit");
 
-  // Zero the scratch once so the LL all-gather's first epoch (>= 1) never
-  // false-matches leftover flag words (mirrors the fabric path). Harmless for
-  // the copy-based DDA collectives, which overwrite their staging area per op.
-  if (scratch != nullptr) {
-    HIP_CALL(hipMemset(scratch, 0, bytes));
-  }
-
   auto* handler = new (std::nothrow) ncclIpcMemHandler(comm->bootstrap, comm->rank, comm->nRanks);
   if (handler == nullptr) {
     freeDdaIpcScratch(comm, scratch, bytes);
@@ -194,20 +187,38 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
     barrierState->barrierHost = barrierPair.second;
   }
 
-  // LL epoch cells (DDA broadcast LL); optional, a failure only disables that tier.
-  // Sized for the CU-derived cap so the Broadcast grid is not limited by the cells.
+  // Zero fills run on their own non-blocking stream and are synced before the ready gather, so they land before any
+  // rank's first DDA kernel on any stream. Syncing the null stream would also consume the app's async errors.
+  auto cudaOk = [](cudaError_t err, const char* what) {
+    if (CUDACLEARERROR(err) != cudaSuccess) {
+      WARN("ncclDdaIpcCommInit: %s failed: %s", what, cudaGetErrorString(err));
+      return false;
+    }
+    return true;
+  };
+  cudaStream_t zeroStream = nullptr;
+  bool zeroed = cudaOk(cudaStreamCreateWithFlags(&zeroStream, cudaStreamNonBlocking), "zero-fill stream create");
+  // Zeroed once, so an LL line never false-matches a first epoch (>= 1); the copy-based paths overwrite per op.
+  zeroed = zeroed && cudaOk(cudaMemsetAsync(scratch, 0, bytes, zeroStream), "scratch memset");
+  // LL epoch cells (DDA broadcast LL); optional, a failure only disables that tier. Zeroed cells make the first
+  // flag 1. Sized for the CU-derived cap so the Broadcast grid is not limited by the cells.
   const size_t epochLen = nccl_dda_detail::ddaLLEpochCount(
     kDdaNranks, nccl_dda_detail::ddaFabricMaxNBlocksForScratch(comm->cuCount, nullptr));
   uint32_t* epochDev = nullptr;
-  if (barrierState != nullptr && (cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)) != cudaSuccess ||
-                                  cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)) != cudaSuccess)) {
-    (void)cudaGetLastError(); // clear the sticky error
+  const bool epochOk = zeroed && barrierState != nullptr &&
+                       cudaOk(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), "LL epoch alloc") &&
+                       cudaOk(cudaMemsetAsync(epochDev, 0, epochLen * sizeof(uint32_t), zeroStream), "LL epoch memset");
+  if (zeroStream != nullptr) {
+    zeroed = cudaOk(cudaStreamSynchronize(zeroStream), "zero-fill sync") && zeroed;
+    CUDACHECKIGNORE(cudaStreamDestroy(zeroStream));
+  }
+  if (!zeroed || !epochOk) {
     CUDACHECKIGNORE(cudaFree(epochDev));
     epochDev = nullptr;
   }
 
   // Rank-uniform outcome, else ranks pick different backends and hang. 0: no DDA IPC, 1: no LL epoch cells, 2: all.
-  int ready = barrierState == nullptr ? 0 : (epochDev == nullptr ? 1 : 2);
+  int ready = (barrierState == nullptr || !zeroed) ? 0 : (epochDev == nullptr ? 1 : 2);
   std::vector<int> allReady(kDdaNranks, 0);
   allReady[comm->rank] = ready;
   if (bootstrapAllGather(comm->bootstrap, allReady.data(), sizeof(int)) != ncclSuccess) {
@@ -236,7 +247,8 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
 
   comm->ddaIpcMemHandler = handler;
   comm->ddaScratch = scratch;
-  comm->ddaScratchBytes = bytes;
+  // The LL region above this stays free of Simple staging (dda::common::kDdaIpcLLRegionBytes).
+  comm->ddaScratchBytes = bytes - dda::common::kDdaIpcLLRegionBytes;
   comm->ddaPeerPtrsDev = peerDev;
   comm->ddaIpcBarrierState = barrierState;
   comm->ddaLLEpochDev = epochDev;
@@ -309,7 +321,7 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
     delete comm->ddaIpcMemHandler;
     comm->ddaIpcMemHandler = nullptr;
   }
-  freeDdaIpcScratch(comm, comm->ddaScratch, comm->ddaScratchBytes);
+  freeDdaIpcScratch(comm, comm->ddaScratch, comm->ddaScratchBytes + dda::common::kDdaIpcLLRegionBytes);
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
   return ncclSuccess;

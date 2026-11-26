@@ -10,7 +10,7 @@
  *
  * DdaIpcMPI_IndexData: every rank sends rank- and index-dependent data, so each element and each slice of the result
  * is distinct. A per-rank constant fill sums to the same value everywhere and hides a kernel that reads or writes the
- * wrong offset.
+ * wrong offset. On gfx950 and gfx942 it also checks the DDA Broadcast LL one-shot over the IPC scratch.
  *
  * DdaIpcMPI_CommLifecycle: DDA IPC must come up on a communicator created after another one is destroyed. It needs
  * cuMem, and NCCL_CUMEM_ENABLE is cached at the first read, so run this suite in its own process.
@@ -22,13 +22,15 @@
 
 #ifdef MPI_TESTS_ENABLED
 
-#include <gtest/gtest.h>
-#include <hip/hip_runtime.h>
-#include <mpi.h>
-
+#include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 #include <vector>
+
+#include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
+#include <mpi.h>
 
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
@@ -91,6 +93,20 @@ bool ddaRoutingOverridden(const ncclComm* comm) {
 
 bool ddaIpcReady(const ncclComm* comm) {
   return comm->ddaIpcMemHandler != nullptr && comm->ddaIpcBarrierState != nullptr;
+}
+
+// The flag the next DDA LL call takes from epoch cell 0, as ddaNextLLEpoch does: +1, skipping the 0 sentinel.
+uint32_t nextLLFlag(uint32_t epoch) {
+  return epoch + 1 == 0 ? 2 : epoch + 1;
+}
+
+// gfx950 or gfx942 with the LL epoch cells, and no env var that moves Broadcast off its table tier.
+bool bcDdaIpcExpected(const ncclComm* comm) {
+  const char* bc = std::getenv("RCCL_DDA_BC");
+  const std::string arch = comm->archName != nullptr ? comm->archName : "";
+  return (arch.rfind("gfx950", 0) == 0 || arch.rfind("gfx942", 0) == 0) &&
+         comm->ddaLLEpochDev != nullptr && (bc == nullptr || std::string(bc) != "0") &&
+         std::getenv("RCCL_DDA_LL") == nullptr && std::getenv("RCCL_DDA_LL_THRESHOLD") == nullptr;
 }
 
 template <typename T>
@@ -174,16 +190,10 @@ protected:
 
     const std::string tag = std::string(rs ? "ReduceScatter" : "AllReduce") + " count=" + std::to_string(c.count) +
                             (fp32 ? " fp32" : " bf16") + (inPlace ? " in-place" : " out-of-place");
-    int algo = -1;
-    int protocol = -1;
-    int maxChannels = -1;
-    ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), func, c.count, c.dtype, ncclSum, sendBuf,
-                                                   recvBuf, 0, &algo, &protocol, &maxChannels));
-    const char* algoName = nullptr;
-    rcclGetAlgoName(algo, &algoName);
-    EXPECT_EQ(static_cast<int>(RCCL_DDA_IPC), algo)
-      << "Rank " << rank_ << ": " << tag << " selected " << (algoName ? algoName : "?");
-    ASSERT_MPI_EQ(static_cast<int>(RCCL_DDA_IPC), algo);
+    expectAlgo(func, c.count, c.dtype, sendBuf, recvBuf, static_cast<int>(RCCL_DDA_IPC), tag);
+    if (HasFailure() || IsSkipped()) {
+      return;
+    }
 
     const ncclResult_t res =
       rs ? ncclReduceScatter(sendBuf, recvBuf, c.count, c.dtype, ncclSum, getActiveCommunicator(), getActiveStream()) :
@@ -195,10 +205,29 @@ protected:
     const bool ok = fp32 ? verifyOutput<float>(recvBuf, c.count, c.dtype, nRanks_, base, &detail) :
                            verifyOutput<hip_bfloat16>(recvBuf, c.count, c.dtype, nRanks_, base, &detail);
     EXPECT_TRUE(ok) << "Rank " << rank_ << ": " << tag << ": " << detail;
-    // Fail on every rank: rank 0's slice survives some offset bugs, and only rank 0's summary is shown by default.
+    expectAllRanksOk(ok, tag);
+  }
+
+  // Checks on every rank that rcclGetCollImplInfo picks `want`, or any native algorithm when want < 0.
+  void expectAlgo(ncclFunc_t func, size_t count, ncclDataType_t dtype, const void* sendBuf, void* recvBuf, int want,
+                  const std::string& tag) {
+    int algo = -1;
+    int protocol = -1;
+    int maxChannels = -1;
+    ASSERT_MPI_EQ(ncclSuccess, rcclGetCollImplInfo(getActiveCommunicator(), func, count, dtype, ncclSum, sendBuf,
+                                                   recvBuf, 0, &algo, &protocol, &maxChannels));
+    const char* algoName = nullptr;
+    rcclGetAlgoName(algo, &algoName);
+    const bool ok = want >= 0 ? algo == want : algo < NCCL_NUM_ALGORITHMS;
+    EXPECT_TRUE(ok) << "Rank " << rank_ << ": " << tag << " selected " << (algoName ? algoName : "?");
+    ASSERT_MPI_TRUE(ok);
+  }
+
+  // Fail on every rank: rank 0's slice survives some offset bugs, and only rank 0's summary is shown by default.
+  void expectAllRanksOk(bool ok, const std::string& tag) {
     int badRanks = ok ? 0 : 1;
     MPI_Allreduce(MPI_IN_PLACE, &badRanks, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
-    EXPECT_EQ(0, badRanks) << tag << ": " << badRanks << " rank(s) received wrong values";
+    EXPECT_EQ(0, badRanks) << tag << ": " << badRanks << " rank(s) failed";
   }
 
   void runAllReduce(const std::vector<IndexCase>& cases, bool tree) {
@@ -215,6 +244,74 @@ protected:
       if (HasFailure() || IsSkipped()) {
         return;
       }
+    }
+  }
+
+  // The Broadcast DDA LL cap on this comm (the arch table's, as bcDdaIpcExpected leaves the env alone).
+  size_t bcDdaLLMaxBytes() {
+    return rcclDdaLLThreshold(getActiveCommunicator(), ncclFuncBroadcast);
+  }
+
+  // Broadcasts count fp32 from root, out of place: the root sends inputValue(root, j), every rank checks it all.
+  // Epoch cell 0 must take the next LL flag exactly when DDA LL runs. rootLast: the non-roots launch first and the
+  // root only after an MPI barrier and its stream drains, so the non-roots poll before any root packet lands.
+  void runBroadcast(size_t count, int root, bool rootLast = false) {
+    const size_t bytes = count * sizeof(float);
+    void* sendBuf = nullptr;
+    void* recvBuf = nullptr;
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
+    DeviceBufferAutoGuard sendGuard(sendBuf);
+    ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
+    DeviceBufferAutoGuard recvGuard(recvBuf);
+    ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, 0xFF, bytes));
+    ASSERT_MPI_EQ(hipSuccess, fillInput<float>(sendBuf, count, ncclFloat32, root));
+
+    const std::string tag = "Broadcast count=" + std::to_string(count) + " root=" + std::to_string(root);
+    const bool dda = bytes <= bcDdaLLMaxBytes();
+    expectAlgo(ncclFuncBroadcast, count, ncclFloat32, sendBuf, recvBuf, dda ? static_cast<int>(RCCL_DDA_FABRIC_LL) : -1,
+               tag);
+    if (HasFailure() || IsSkipped()) {
+      return;
+    }
+    const ncclComm* comm = getActiveCommunicator();
+    uint32_t epoch = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&epoch, comm->ddaLLEpochDev, sizeof(epoch), hipMemcpyDeviceToHost));
+
+    auto enqueue = [&] {
+      return ncclBroadcast(sendBuf, recvBuf, count, ncclFloat32, root, getActiveCommunicator(), getActiveStream());
+    };
+    const bool rootWaits = rootLast && rank_ == root;
+    ncclResult_t res = rootWaits ? ncclSuccess : enqueue();
+    if (rootLast) {
+      const hipError_t drained = rootWaits ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+      MPI_Barrier(MPI_COMM_WORLD);
+      res = rootWaits && drained == hipSuccess ? enqueue() : res;
+      ASSERT_MPI_EQ(hipSuccess, drained);
+    }
+    ASSERT_MPI_EQ(ncclSuccess, res);
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+    uint32_t after = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&after, comm->ddaLLEpochDev, sizeof(after), hipMemcpyDeviceToHost));
+    const uint32_t wantEpoch = dda ? nextLLFlag(epoch) : epoch;
+    EXPECT_EQ(wantEpoch, after) << "Rank " << rank_ << ": " << tag << ": epoch cell 0";
+
+    size_t badIdx = 0;
+    float expected = 0.0f;
+    float got = 0.0f;
+    const bool ok = verifyBufferData<float>(
+      recvBuf, count, [=](size_t j) { return inputValue(ncclFloat32, root, j); }, 0, 0.0, &badIdx, &expected, &got);
+    EXPECT_TRUE(ok) << "Rank " << rank_ << ": " << tag << ": recv[" << badIdx << "] = " << got << ", expected "
+                    << expected;
+    expectAllRanksOk(ok && after == wantEpoch, tag);
+  }
+
+  void skipUnlessBcDdaIpc() {
+    const ncclComm* comm = getActiveCommunicator();
+    const std::string skip =
+      mpiCoordinatedSkipReason(!bcDdaIpcExpected(comm), "DDA Broadcast LL over IPC needs gfx950/gfx942, no reroute");
+    if (!skip.empty()) {
+      GTEST_SKIP() << skip;
     }
   }
 
@@ -254,6 +351,100 @@ TEST_F(DdaIpcMPI_IndexData, AllReduceTree) {
 // Each rank reduces slice rank * recvcount of every peer: one block, then several blocks per shard.
 TEST_F(DdaIpcMPI_IndexData, ReduceScatter) {
   runReduceScatter({{ncclFloat32, 1024}, {ncclFloat32, 65536}, {ncclBfloat16, 8192}});
+}
+
+// DDA Broadcast LL one-shot: a root column per peer with 1, 2, 4 and 8 chunk rows (16 B to 16 KiB), uneven chunks, the
+// table's cap; two roots. Just above the cap the ring runs.
+TEST_F(DdaIpcMPI_IndexData, BroadcastLL) {
+  skipUnlessBcDdaIpc();
+  if (IsSkipped()) {
+    return;
+  }
+  const size_t capCount = bcDdaLLMaxBytes() / sizeof(float);
+  for (size_t count : {size_t{4}, size_t{1024}, size_t{2048}, size_t{4096}, size_t{4100}, capCount, capCount + 4}) {
+    for (int root : {0, 5}) {
+      runBroadcast(count, root);
+      if (HasFailure() || IsSkipped()) {
+        return;
+      }
+    }
+  }
+}
+
+// A Simple DDA call stages user data in the scratch. Here every staged word equals the next LL flag, so an LL bank
+// sharing that scratch would take it for the root's packets and tokens. The LL region past ddaScratchBytes must not.
+// The non-roots launch before the root, so a shared bank would be polled stale before the root's packets land.
+TEST_F(DdaIpcMPI_IndexData, BroadcastLLIgnoresStaleSimpleScratch) {
+  skipUnlessBcDdaIpc();
+  if (IsSkipped()) {
+    return;
+  }
+  // RCCL_CE_ALLREDUCE=1 lets CE take the staging AllReduce ahead of DDA.
+  const std::string ceSkip = mpiCoordinatedSkipReason(rcclCeAllReduceEnabled(getActiveCommunicator()),
+                                                      "CE AllReduce routes the staging call away from DDA IPC");
+  if (!ceSkip.empty()) {
+    GTEST_SKIP() << ceSkip;
+  }
+  // The flat AllReduce stages its whole send buffer at the scratch base. Sized off the flat/tree cutoff so a retune
+  // of it keeps the flat kernel; it must cover bank 0 of the Broadcast: one 16 B token line per rank, then one 16 B
+  // line per 8 B of data.
+  constexpr size_t kArCount = kFlatTreeThresholdBytes * 3 / 4 / sizeof(float);
+  constexpr size_t kBcCount = 16384;
+  constexpr size_t kBank0Bytes = (kDdaIpcRanks + kBcCount * sizeof(float) / 8) * 16;
+  static_assert(kArCount * sizeof(float) < kFlatTreeThresholdBytes, "staging AllReduce must run the flat kernel");
+  static_assert(kBank0Bytes <= kArCount * sizeof(float), "staged words must cover the Broadcast's bank 0");
+  constexpr int kRounds = 4;
+  void* arSend = nullptr;
+  void* arRecv = nullptr;
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&arSend, kArCount * sizeof(float)));
+  DeviceBufferAutoGuard sendGuard(arSend);
+  ASSERT_MPI_EQ(hipSuccess, hipMalloc(&arRecv, kArCount * sizeof(float)));
+  DeviceBufferAutoGuard recvGuard(arRecv);
+  const ncclComm* comm = getActiveCommunicator();
+  for (int round = 0; round < kRounds; ++round) {
+    // The flag is the same on every rank; runBroadcast checks the kernel took it. An even flag selects bank 0.
+    uint32_t epoch = 0;
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(&epoch, comm->ddaLLEpochDev, sizeof(epoch), hipMemcpyDeviceToHost));
+    // Every rank must take the same branch below, or the ranks issue different collectives and hang.
+    uint32_t lo = epoch;
+    uint32_t hi = epoch;
+    MPI_Allreduce(MPI_IN_PLACE, &lo, 1, MPI_UINT32_T, MPI_MIN, MPI_COMM_WORLD);
+    MPI_Allreduce(MPI_IN_PLACE, &hi, 1, MPI_UINT32_T, MPI_MAX, MPI_COMM_WORLD);
+    ASSERT_MPI_EQ(lo, hi);
+    uint32_t flag = nextLLFlag(epoch);
+    if ((flag & 1) != 0) {
+      runBroadcast(4, 0);
+      if (HasFailure() || IsSkipped()) {
+        return;
+      }
+      flag = nextLLFlag(flag);
+    }
+    const std::vector<uint32_t> stale(kArCount, flag);
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(arSend, stale.data(), stale.size() * sizeof(stale[0]), hipMemcpyHostToDevice));
+    const std::string tag = "AllReduce staging round " + std::to_string(round);
+    expectAlgo(ncclFuncAllReduce, kArCount, ncclFloat32, arSend, arRecv, static_cast<int>(RCCL_DDA_IPC), tag);
+    if (HasFailure() || IsSkipped()) {
+      return;
+    }
+    ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(arSend, arRecv, kArCount, ncclFloat32, ncclSum, getActiveCommunicator(),
+                                             getActiveStream()));
+    ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+    // The poison must sit where a bank at the scratch base would be, or this test checks nothing.
+    std::vector<uint32_t> staged(kBank0Bytes / sizeof(uint32_t));
+    ASSERT_MPI_EQ(hipSuccess, hipMemcpy(staged.data(), comm->ddaScratch, kBank0Bytes, hipMemcpyDeviceToHost));
+    const size_t firstOff = std::find_if(staged.begin(), staged.end(), [=](uint32_t w) { return w != flag; }) -
+                            staged.begin();
+    const bool poisoned = firstOff == staged.size();
+    EXPECT_TRUE(poisoned) << "Rank " << rank_ << ": " << tag << ": scratch word " << firstOff << " is not the flag";
+    expectAllRanksOk(poisoned, tag + " poison");
+    if (HasFailure()) {
+      return;
+    }
+    runBroadcast(kBcCount, round % nRanks_, /*rootLast=*/true);
+    if (HasFailure() || IsSkipped()) {
+      return;
+    }
+  }
 }
 
 class DdaIpcMPI_CommLifecycle : public MPITestBase {

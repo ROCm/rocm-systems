@@ -65,6 +65,20 @@ dim3 ddaLLBcGrid(const ncclComm* comm, bool isRoot, size_t bytes) {
   return dim3((unsigned)(chunks < budget ? chunks : budget));
 }
 
+// Where this comm's LL banks live: [base, base + 2 * bank) of every rank's scratch. Fabric uses the whole scratch;
+// IPC the region past ddaScratchBytes that ncclDdaIpcCommInit keeps free of Simple staging.
+struct DdaLLBcRegion {
+  size_t base;
+  size_t bank;
+};
+
+DdaLLBcRegion ddaLLBcRegion(const ncclComm* comm) {
+  if (comm->ddaFabricMemHandler == nullptr) {
+    return {comm->ddaScratchBytes, ddaBankSize(dda::common::kDdaIpcLLRegionBytes)};
+  }
+  return {0, ddaBankSize(comm->ddaScratchBytes)};
+}
+
 } // namespace
 
 size_t ncclBroadcastDdaBlockBudget(const ncclComm* comm) {
@@ -75,14 +89,28 @@ size_t ncclBroadcastDdaBlockBudget(const ncclComm* comm) {
 }
 
 bool ncclBroadcastDdaFabricLLEligible(ncclComm* comm, size_t count, ncclDataType_t datatype) {
-  if (comm == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) return false;
-  if (comm->ddaFabricMemHandler == nullptr && comm->ddaIpcMemHandler == nullptr) return false;
-  if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) return false;
-  if (count == 0) return false;
+  if (comm == nullptr || comm->ddaScratch == nullptr || comm->ddaPeerPtrsDev == nullptr) {
+    return false;
+  }
+  if (comm->ddaFabricMemHandler == nullptr && comm->ddaIpcMemHandler == nullptr) {
+    return false;
+  }
+  if (comm->nRanks < 2 || comm->nRanks > dda::common::kDdaMaxNranks) {
+    return false;
+  }
+  if (count == 0) {
+    return false;
+  }
   const size_t bytes = count * ncclTypeSize(datatype);
-  if (bytes % 16 != 0) return false;
-  if (bytes > rcclDdaLLThreshold(comm, ncclFuncBroadcast)) return false;
-  if ((bytes >> 3) > ddaLLBcSlotPkts(ddaBankSize(comm->ddaScratchBytes), comm->nRanks)) return false;
+  if (bytes % 16 != 0) {
+    return false;
+  }
+  if (bytes > rcclDdaLLThreshold(comm, ncclFuncBroadcast)) {
+    return false;
+  }
+  if ((bytes >> 3) > ddaLLBcSlotPkts(ddaLLBcRegion(comm).bank, comm->nRanks)) {
+    return false;
+  }
   // Both the root and the non-root grid must fit the epoch cells.
   const dim3 r = ddaLLBcGrid(comm, /*isRoot=*/true, bytes);
   const dim3 n = ddaLLBcGrid(comm, /*isRoot=*/false, bytes);
@@ -108,7 +136,7 @@ ncclResult_t ncclBroadcastDdaFabricLL(const void* sendbuff, void* recvbuff, size
   const bool aligned = addrs % sizeof(uint32_t) == 0;
 
   char* const* peers = reinterpret_cast<char* const*>(comm->ddaPeerPtrsDev);
-  const size_t bankSize = ddaBankSize(comm->ddaScratchBytes);
+  const DdaLLBcRegion region = ddaLLBcRegion(comm);
   const dda::common::DdaKernelParams params{comm->abortFlagDev};
 
   INFO(NCCL_COLL, "DDA Broadcast LL: nRanks=%d root=%d bytes=%zu grid=%ux%u block=%u aligned=%d", comm->nRanks, root,
@@ -119,12 +147,12 @@ ncclResult_t ncclBroadcastDdaFabricLL(const void* sendbuff, void* recvbuff, size
     hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL<true>), grid, dim3(threads), 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
                           static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
+                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, region.bank, region.base, params);
   } else {
     hipExtLaunchKernelGGL((dda::common::ddaBroadcastFabricLL<false>), grid, dim3(threads), 0, stream,
                           /*startEvent=*/nullptr, stopEvent, /*flags=*/0, peers, static_cast<char*>(recvbuff),
                           static_cast<const char*>(sendbuff), bytes, comm->rank, comm->nRanks, root,
-                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, bankSize, params);
+                          comm->ddaLLEpochDev, comm->ddaLLEpochLen, region.bank, region.base, params);
   }
   CUDACHECK(cudaGetLastError());
   return ncclSuccess;

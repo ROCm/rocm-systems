@@ -19,6 +19,9 @@
 
 #define DDA_IPC_MAXBLOCKS 24
 #define DDA_IPC_BUFFER_SIZE 268435456
+static_assert(DDA_IPC_BUFFER_SIZE > dda::common::kDdaIpcLLRegionBytes, "the IPC LL region must leave Simple scratch");
+static_assert(DDA_IPC_BUFFER_SIZE % 16 == 0 && dda::common::kDdaIpcLLRegionBytes % 16 == 0,
+              "the IPC LL region offset must be a whole number of 16B LL lines");
 
 #define DDA_FABRIC_MAXBLOCKS 256
 
