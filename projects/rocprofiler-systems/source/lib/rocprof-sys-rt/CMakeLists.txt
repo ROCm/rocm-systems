@@ -90,15 +90,14 @@ if(NOT EXISTS ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME})
 endif()
 
 add_custom_target(
-    rocprofiler-systems-rt-library-dyninstAPI_RT-symlink
+    rocprofiler-systems-rt-library-dyninstAPI_RT-copy
     ALL
-    ${CMAKE_COMMAND} -E create_symlink
-    ../$<TARGET_FILE_NAME:rocprofiler-systems-rt-library>
+    ${CMAKE_COMMAND} -E copy $<TARGET_FILE:rocprofiler-systems-rt-library>
     ${CMAKE_SHARED_LIBRARY_PREFIX}dyninstAPI_RT${CMAKE_SHARED_LIBRARY_SUFFIX}
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}
     DEPENDS rocprofiler-systems-rt-library
     COMMENT
-        "Creating ${CMAKE_SHARED_LIBRARY_PREFIX}dyninstAPI_RT${CMAKE_SHARED_LIBRARY_SUFFIX} to rocprof-sys-rt..."
+        "Copying ${CMAKE_SHARED_LIBRARY_PREFIX}dyninstAPI_RT${CMAKE_SHARED_LIBRARY_SUFFIX} from rocprof-sys-rt..."
 )
 
 install(
