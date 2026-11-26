@@ -208,4 +208,48 @@ TEST(SparseIntegerMatrix, SmfmacOverflowModeSaturatesPerHardwarePassOnGfx950) {
     }
   }
 }
+TEST(SparseIntegerMatrix, SmfmacGfx950PerPassSaturationWideShapes) {
+  // Verify 32x32x64 (2 passes) and 16x16x128 (4 passes) saturate after each K=32
+  // hardware pass across all CPU tiers, matching the scalar reference bit-for-bit.
+  std::array<std::array<uint32_t, 64>, 4> a;
+  std::array<std::array<uint32_t, 64>, 8> b;
+  std::array<uint32_t, 64> idx;
+  idx.fill(0x44444444u);
+  for (auto &reg : b) {
+    reg.fill(0x01010101u);
+  }
+  for (auto &reg : a) {
+    std::fill_n(reg.begin(), 32, 0x01010101u);
+    std::fill_n(reg.begin() + 32, 32, 0xffffffffu);
+  }
+  const uint32_t *src_a[] = {a[0].data(), a[1].data(), a[2].data(), a[3].data()};
+  const uint32_t *src_b[] = {b[0].data(), b[1].data(), b[2].data(), b[3].data(),
+                             b[4].data(), b[5].data(), b[6].data(), b[7].data()};
+  const uint32_t *src_idx[] = {idx.data()};
+  auto check = [&]<int OutputRegs>(Entry fn) {
+    std::array<std::array<uint32_t, 64>, OutputRegs> ref;
+    std::array<uint32_t *, OutputRegs> ref_d;
+    for (int r = 0; r < OutputRegs; ++r) {
+      ref[r].fill(0x7ffffffcu);
+      ref_d[r] = ref[r].data();
+    }
+    const uint64_t base_flags = RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL | RJ_ARITH_FP16_OVFL;
+    ASSERT_EQ(fn(RJ_ARITH_CPU_BASELINE | base_flags, 0, ref_d.data(), src_a, src_b, src_idx),
+              RJ_ARITH_SUCCESS);
+    // Pass 0 saturates INT_MAX; pass 1 steps down below INT_MAX (distinct from final-sum clamp).
+    EXPECT_NE(ref[0][0], 0x7ffffffcu);
+    for (uint64_t cpu : supported_cpu_levels()) {
+      std::array<std::array<uint32_t, 64>, OutputRegs> out;
+      std::array<uint32_t *, OutputRegs> out_d;
+      for (int r = 0; r < OutputRegs; ++r) {
+        out[r].fill(0x7ffffffcu);
+        out_d[r] = out[r].data();
+      }
+      ASSERT_EQ(fn(cpu | base_flags, 0, out_d.data(), src_a, src_b, src_idx), RJ_ARITH_SUCCESS);
+      EXPECT_EQ(out, ref) << "cpu=" << cpu;
+    }
+  };
+  check.template operator()<16>(rj_arith_v_smfmac_i32_32x32x64_i8_w64);
+  check.template operator()<4>(rj_arith_v_smfmac_i32_16x16x128_i8_w64);
+}
 } // namespace

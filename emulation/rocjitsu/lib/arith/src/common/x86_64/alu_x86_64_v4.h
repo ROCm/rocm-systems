@@ -33,6 +33,17 @@ inline __m512i saturate_signed_sum(__m512i x, __m512i y, __m512i sum) {
       sum, _mm512_cmp_epi32_mask(overflow, _mm512_setzero_si512(), _MM_CMPINT_LT), limit);
 }
 
+#if defined(RJ_ARITH_TARGET_AVX512VNNI)
+// Add a signed 24-bit integer delta ([-8388608, 8388607]) to a signed 32-bit accumulator with
+// signed 32-bit saturation. Decomposes delta as u8(b0) + 256 * s16(b1, b2) for one VPDPWSSDS.
+inline __m512i saturate_signed_sum_24(__m512i acc, __m512i delta) {
+  const __m512i split24 =
+      _mm512_broadcast_i32x4(_mm_setr_epi8(0, -1, 1, 2, 4, -1, 5, 6, 8, -1, 9, 10, 12, -1, 13, 14));
+  const __m512i scale24 = _mm512_set1_epi32(0x01000001);
+  return _mm512_dpwssds_epi32(acc, _mm512_shuffle_epi8(delta, split24), scale24);
+}
+#endif
+
 // Replace FP32 subnormals with zero of the same sign.
 inline __m512 flush_denorm_f32(__m512 value) {
   auto bits = _mm512_castps_si512(value);
