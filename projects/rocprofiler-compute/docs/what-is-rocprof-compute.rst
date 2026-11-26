@@ -272,7 +272,7 @@ Roofline micro-benchmark support varies by :ref:`SoC family <def-soc>` independe
    * - AMD Radeon™ RX 9070 / RX 9070 XT / Radeon AI PRO R9700 (RDNA4, Navi 48; gfx1201)
      - ✅
      - ✅
-     - Uses WMMA in place of MFMA. The roofline draws the VRAM, GL0, and LDS roofs. See :doc:`conceptual/rdna/rdna-performance-model`.
+     - Experimental; add ``--experimental`` to every ``profile`` and ``analyze`` command. Uses WMMA in place of MFMA. The roofline draws the VRAM, GL0, and LDS roofs. See :doc:`conceptual/rdna/rdna-performance-model`.
    * - AMD Instinct MI50, MI60 (Vega 20)
      - ❌
      - ❌

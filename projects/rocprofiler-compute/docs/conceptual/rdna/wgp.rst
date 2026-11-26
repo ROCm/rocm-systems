@@ -328,44 +328,9 @@ WGP scalar data cache
 Memory chart: WGP
 =================
 
-The following memory chart tables cover the instruction cache, the scalar data cache,
-and the WGP launch summary on gfx1201.
-
-Memory chart - Instruction cache
---------------------------------
-
-.. tab-set::
-   :sync-group: rdna-arch
-
-   .. tab-item:: RDNA3.5 (gfx115x)
-      :sync: gfx115x
-      :selected:
-
-      The gfx115x instruction-cache metrics are in the WGP instruction cache table above and on the GL0 cache page.
-
-   .. tab-item:: RDNA4 (gfx1201)
-      :sync: gfx1201
-
-      .. jinja:: rdna4-memory-chart-instruction-cache-gfx1201
-         :file: _templates/metrics_table.j2
-
-Memory chart - Scalar data cache
---------------------------------
-
-.. tab-set::
-   :sync-group: rdna-arch
-
-   .. tab-item:: RDNA3.5 (gfx115x)
-      :sync: gfx115x
-      :selected:
-
-      The gfx115x scalar data cache metrics are in the WGP scalar data cache table above and on the GL0 cache page.
-
-   .. tab-item:: RDNA4 (gfx1201)
-      :sync: gfx1201
-
-      .. jinja:: rdna4-memory-chart-scalar-data-cache-gfx1201
-         :file: _templates/metrics_table.j2
+The following memory chart table covers the WGP launch summary on gfx1201. The
+instruction cache and scalar data cache memory chart tables are on the
+:doc:`gl0-cache` page.
 
 Memory chart - Workgroup processors (WGPs)
 ------------------------------------------
