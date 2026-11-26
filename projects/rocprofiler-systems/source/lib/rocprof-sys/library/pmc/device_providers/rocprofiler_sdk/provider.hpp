@@ -5,17 +5,21 @@
 
 #include "backends/rocprofiler_sdk/backend.hpp"
 #include "core/agent.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/counter_definitions.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/derived_expression.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/device.hpp"
+#include "library/pmc/collectors/gpu_perf_counter/expression_tree.hpp"
 #include "library/pmc/collectors/gpu_perf_counter/types.hpp"
 #include "library/pmc/common/types.hpp"
 #include "logger/debug.hpp"
 #include "policies/rocprofiler-sdk/gpu_perf_counters/backend.hpp"
 
+#include <algorithm>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <iterator>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -101,18 +105,18 @@ private:
                 continue;
             }
 
-            auto [filtered_ids, counter_meta] = filter_and_resolve_counter_details(
-                supported_ids, enabled, gpu_agent->device_type_index);
+            auto [config_ids, counters] =
+                resolve_counters(supported_ids, enabled, gpu_agent->device_type_index);
             LOG_INFO("Agent {}: {} counters after filtering", gpu_agent->handle,
-                     filtered_ids.size());
-            if(filtered_ids.empty())
+                     config_ids.size());
+            if(config_ids.empty())
             {
                 continue;
             }
 
             auto profile = typename backend_t::counter_config_id_t{};
             auto status  = m_backend_api->create_counter_config(
-                agent_id, filtered_ids.data(), filtered_ids.size(), &profile);
+                agent_id, config_ids.data(), config_ids.size(), &profile);
             if(status != backend_t::status_success)
             {
                 LOG_WARNING("Failed to create profile config for agent {} (status={})",
@@ -155,9 +159,8 @@ private:
                 continue;
             }
 
-            m_devices.push_back(std::make_shared<device_t>(m_backend_api, counter_context,
-                                                           gpu_agent, profile,
-                                                           std::move(counter_meta)));
+            m_devices.push_back(std::make_shared<device_t>(
+                m_backend_api, counter_context, gpu_agent, std::move(counters)));
         }
     }
 
@@ -185,34 +188,120 @@ private:
         return result;
     }
 
-    [[nodiscard]] std::pair<std::vector<typename backend_t::counter_id_t>,
-                            std::vector<collectors::gpu_perf_counter::counter_metadata>>
-    filter_and_resolve_counter_details(
-        const std::vector<typename backend_t::counter_id_t>& supported,
-        const collectors::gpu_perf_counter::enabled_metrics& enabled, size_t device_index)
+    // One SDK counter and the metadata of its dimension instances.
+    struct catalog_entry
     {
-        auto ids  = std::vector<typename backend_t::counter_id_t>{};
-        auto meta = std::vector<collectors::gpu_perf_counter::counter_metadata>{};
-        ids.reserve(supported.size());
-        meta.reserve(supported.size());
+        backend_t::counter_id_t                                     counter_id;
+        std::vector<collectors::gpu_perf_counter::counter_metadata> details;
+    };
 
+    // Resolves the counter names used in derived counter expressions.
+    struct catalog_lookup
+    {
+        collectors::gpu_perf_counter::counter_definitions     definitions;
+        std::unordered_map<std::string, const catalog_entry*> entries;
+    };
+
+    // The SDK counter config and what the device reports and reads.
+    struct resolved_counters
+    {
+        std::vector<typename backend_t::counter_id_t> config_ids;
+        collectors::gpu_perf_counter::device_counters counters;
+    };
+
+    [[nodiscard]] std::vector<catalog_entry> query_catalog(
+        const std::vector<typename backend_t::counter_id_t>& supported) const
+    {
+        auto catalog = std::vector<catalog_entry>{};
+        catalog.reserve(supported.size());
         for(const auto& counter_id : supported)
         {
             auto details = m_backend_api->query_counter_details(counter_id);
-            if(details.empty())
+            if(!details.empty())
             {
-                continue;
+                catalog.push_back({ counter_id, std::move(details) });
             }
-            if(!enabled.is_counter_enabled({ details.front().name, device_index }))
+        }
+        return catalog;
+    }
+
+    [[nodiscard]] resolved_counters resolve_counters(
+        const std::vector<typename backend_t::counter_id_t>& supported,
+        const collectors::gpu_perf_counter::enabled_metrics& enabled, size_t device_index)
+    {
+        auto const catalog = query_catalog(supported);
+        auto all_details = std::vector<collectors::gpu_perf_counter::counter_metadata>{};
+        auto lookup      = catalog_lookup{};
+        for(const auto& entry : catalog)
+        {
+            all_details.insert(all_details.end(), entry.details.begin(),
+                               entry.details.end());
+            lookup.entries.try_emplace(entry.details.front().name, &entry);
+        }
+        lookup.definitions =
+            collectors::gpu_perf_counter::counter_definitions{ all_details };
+
+        auto result = resolved_counters{};
+        for(const auto& entry : catalog)
+        {
+            if(enabled.is_counter_enabled({ entry.details.front().name, device_index }))
             {
-                continue;
+                add_requested(entry, lookup, device_index, result);
             }
-            ids.push_back(counter_id);
-            meta.insert(meta.end(), std::make_move_iterator(details.begin()),
-                        std::make_move_iterator(details.end()));
         }
 
-        return { std::move(ids), std::move(meta) };
+        std::ranges::sort(result.config_ids, {}, &backend_t::counter_id_t::handle);
+        auto const duplicates =
+            std::ranges::unique(result.config_ids, {}, &backend_t::counter_id_t::handle);
+        result.config_ids.erase(duplicates.begin(), duplicates.end());
+        return result;
+    }
+
+    // A derived counter that is non-linear in totals since start_context is evaluated
+    // by the device on its inputs, so the SDK collects the inputs instead of it.
+    static void add_requested(const catalog_entry& entry, const catalog_lookup& lookup,
+                              size_t device_index, resolved_counters& result)
+    {
+        const auto& meta        = entry.details.front();
+        auto&       counters    = result.counters;
+        auto        is_interval = false;
+        if(meta.is_derived)
+        {
+            try
+            {
+                collectors::gpu_perf_counter::derived_expression expression =
+                    collectors::gpu_perf_counter::expression_parser::parse(
+                        meta.expression, lookup.definitions, counters.slots);
+                is_interval = expression.evaluation ==
+                              collectors::gpu_perf_counter::derived_evaluation::interval;
+                counters.expressions.insert_or_assign(meta.name, std::move(expression));
+            } catch(const std::invalid_argument& e)
+            {
+                LOG_ERROR("GPU perf counter {} on device {} is not collected: {}. "
+                          "ROCPROFSYS_ROCM_EVENTS collects it per kernel.",
+                          meta.name, device_index, e.what());
+                return;
+            }
+        }
+
+        counters.requested.insert(counters.requested.end(), entry.details.begin(),
+                                  entry.details.end());
+        if(!is_interval)
+        {
+            result.config_ids.push_back(entry.counter_id);
+            return;
+        }
+
+        for(const auto& name : counters.expressions.at(meta.name).referenced_names)
+        {
+            const auto* input = lookup.entries.at(name);
+            if(!input->details.front().is_derived)
+            {
+                counters.inputs.insert(counters.inputs.end(), input->details.begin(),
+                                       input->details.end());
+                result.config_ids.push_back(input->counter_id);
+            }
+        }
     }
 
     std::shared_ptr<backend_t>             m_backend_api;

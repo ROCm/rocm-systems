@@ -45,6 +45,13 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 ### Resolved issues
 
 - Sampled PAPI hardware-counter tracks use the short description instead of the raw event symbol.
+- Fixed wrong values of derived GPU counters that are ratios, such as `MfmaUtil` and
+  `GPU_UTIL`, in `ROCPROFSYS_GPU_PERF_COUNTERS`. Each sample is now computed from the
+  counter's inputs over that sample interval, and constant counters such as `SIMD_NUM`
+  report their value. Derived counters that cannot be sampled this way are no longer
+  collected and are reported in the log: those that use `accumulate()` (for example
+  `LdsLatency`) and `RDC_OPS_16_PER_SIMDCYCLE`, `RDC_OPS_32_PER_SIMDCYCLE` and
+  `RDC_OPS_64_PER_SIMDCYCLE`. Use `ROCPROFSYS_ROCM_EVENTS` to collect them per kernel.
 - Fixed missing OpenMP (OMPT) events on non-main threads when a region was still open at
   finalization. Regions that never received their end callback are now emitted with the
   finalization timestamp and an `[incomplete]` name suffix instead of being dropped.

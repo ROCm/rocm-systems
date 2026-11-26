@@ -10,9 +10,15 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
+#include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace rocprofsys::pmc::collectors::gpu_perf_counter;
@@ -456,6 +462,239 @@ TEST_F(SdkPmcCollectorWorkflowTest, SampleFailureProducesEmptyMetrics)
     EXPECT_EQ(collector.get_device_count(), 1U);
 
     collector.shutdown();
+}
+
+// ============================================================================
+// Derived counters
+// ============================================================================
+
+namespace
+{
+constexpr std::uint64_t k_derived_agent_handle   = 7;
+constexpr std::uint32_t k_derived_context_handle = 300;
+
+constexpr std::uint64_t k_busy_id        = 1;
+constexpr std::uint64_t k_active_id      = 2;
+constexpr std::uint64_t k_simd_count_id  = 3;
+constexpr std::uint64_t k_simd_num_id    = 4;
+constexpr std::uint64_t k_mfma_util_id   = 5;
+constexpr std::uint64_t k_waves_id       = 6;
+constexpr std::uint64_t k_waves_sum_id   = 7;
+constexpr std::uint64_t k_lds_level_id   = 8;
+constexpr std::uint64_t k_lds_insts_id   = 9;
+constexpr std::uint64_t k_lds_latency_id = 10;
+
+counter_metadata
+catalog_counter(std::uint64_t counter_id, std::string name, std::string expression = {})
+{
+    auto meta       = counter_metadata{};
+    meta.counter_id = counter_id;
+    meta.name       = std::move(name);
+    meta.is_derived = !expression.empty();
+    meta.expression = std::move(expression);
+    return meta;
+}
+
+// Counters and definitions as rocprofiler-sdk reports them for gfx942.
+std::vector<counter_metadata>
+sdk_catalog()
+{
+    auto simd_count        = catalog_counter(k_simd_count_id, "simd_count");
+    simd_count.is_constant = true;
+    return {
+        catalog_counter(k_busy_id, "SQ_VALU_MFMA_BUSY_CYCLES"),
+        catalog_counter(k_active_id, "GRBM_GUI_ACTIVE"),
+        simd_count,
+        catalog_counter(k_simd_num_id, "SIMD_NUM", "simd_count"),
+        catalog_counter(k_mfma_util_id, "MfmaUtil",
+                        "reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/"
+                        "(reduce(GRBM_GUI_ACTIVE,max)*SIMD_NUM)*100"),
+        catalog_counter(k_waves_id, "SQ_WAVES"),
+        catalog_counter(k_waves_sum_id, "SQ_WAVES_sum", "reduce(SQ_WAVES,sum)"),
+        catalog_counter(k_lds_level_id, "SQ_INST_LEVEL_LDS"),
+        catalog_counter(k_lds_insts_id, "SQ_INSTS_LDS"),
+        catalog_counter(k_lds_latency_id, "LdsLatency",
+                        "reduce(accumulate(SQ_INST_LEVEL_LDS, HIGH_RES),sum)/"
+                        "reduce(SQ_INSTS_LDS,sum)"),
+    };
+}
+
+enabled_metrics
+enable_on_device_0(std::initializer_list<const char*> names)
+{
+    auto definitions = std::vector<counter_definition>{};
+    for(const char* name : names)
+    {
+        definitions.push_back({ .name = name, .device_index = 0 });
+    }
+    return enabled_metrics{ std::move(definitions) };
+}
+
+// Expects provider construction for one agent that supports sdk_catalog(). Returns the
+// counter ids the provider passes to create_counter_config.
+std::shared_ptr<std::vector<std::uint64_t>>
+expect_catalog_provider(MockBackendImpl& mock)
+{
+    auto const catalog = std::make_shared<std::vector<counter_metadata>>(sdk_catalog());
+
+    EXPECT_CALL(mock, iterate_agent_supported_counters(_, _, _))
+        .WillOnce([catalog](MockBackend::agent_id_t,
+                            MockBackend::available_counters_cb_t callback,
+                            void*                                user_data) {
+            auto ids = std::vector<MockBackend::counter_id_t>{};
+            for(const auto& meta : *catalog)
+            {
+                ids.push_back({ meta.counter_id });
+            }
+            callback({}, ids.data(), ids.size(), user_data);
+            return MockBackend::status_success;
+        });
+
+    EXPECT_CALL(mock, query_counter_details(_))
+        .WillRepeatedly([catalog](MockBackend::counter_id_t counter_id) {
+            auto const itr = std::ranges::find(*catalog, counter_id.handle,
+                                               &counter_metadata::counter_id);
+            return std::vector<counter_metadata>{ *itr };
+        });
+
+    auto config_ids = std::make_shared<std::vector<std::uint64_t>>();
+    EXPECT_CALL(mock, create_counter_config(_, _, _, _))
+        .WillOnce([config_ids](MockBackend::agent_id_t, MockBackend::counter_id_t* ids,
+                               size_t count, MockBackend::counter_config_id_t* config) {
+            for(const auto& counter_id : std::span{ ids, count })
+            {
+                config_ids->push_back(counter_id.handle);
+            }
+            config->handle = 1;
+            return MockBackend::status_success;
+        });
+
+    EXPECT_CALL(mock, create_context(_)).WillOnce([](MockBackend::context_id_t* ctx) {
+        ctx->handle = k_derived_context_handle;
+    });
+    EXPECT_CALL(mock, configure_device_counting_service(_, _, _, _, _))
+        .WillOnce(Return(MockBackend::status_success));
+    return config_ids;
+}
+
+[[nodiscard]] std::vector<std::string>
+reported_counter_names(MockProvider& provider)
+{
+    using device_t = MockProvider::device_t;
+    auto names     = std::vector<std::string>{};
+    for(const auto& device : provider.get_devices<device_t>(device_type::gpu))
+    {
+        for(const auto& meta : device->get_counter_metadata())
+        {
+            names.push_back(meta.name);
+        }
+    }
+    return names;
+}
+}  // namespace
+
+// Totals since start_context under a steady 87 % MFMA load after a ramp: the SDK's
+// MfmaUtil climbs 43.5 -> 65.25 -> 72.5 while the interval value is 43.5, 87, 87.
+constexpr std::array<double, 3>       k_busy_cumulative    = { 1740.0, 5220.0, 8700.0 };
+constexpr std::array<double, 3>       k_active_cumulative  = { 1000.0, 2000.0, 3000.0 };
+constexpr std::array<double, 3>       k_mfma_util_interval = { 43.5, 87.0, 87.0 };
+constexpr std::array<std::int64_t, 3> k_mfma_timestamps    = { 1000, 2000, 3000 };
+constexpr double                      k_simd_count         = 4.0;
+
+void
+expect_mfma_util_input_samples(MockBackendImpl& mock)
+{
+    auto sample_index = std::make_shared<size_t>(0);
+    EXPECT_CALL(mock, sample_device_counting_service(_, _, _, _, _))
+        .Times(static_cast<int>(k_mfma_timestamps.size()))
+        .WillRepeatedly([sample_index](
+                            MockBackend::context_id_t, MockBackend::user_data_t,
+                            MockBackend::counter_flag_t,
+                            MockBackend::counter_record_t* out, size_t* count) {
+            auto const index = *sample_index;
+            ++*sample_index;
+            out[0] = { .id = k_busy_id, .counter_value = k_busy_cumulative.at(index) };
+            out[1] = { .id            = k_active_id,
+                       .counter_value = k_active_cumulative.at(index) };
+            out[2] = { .id = k_simd_count_id, .counter_value = k_simd_count };
+            *count = 3;
+            return MockBackend::status_success;
+        });
+}
+
+void
+expect_interval_mfma_util(const std::vector<captured_sample>& samples)
+{
+    ASSERT_EQ(samples.size(), k_mfma_timestamps.size());
+    for(size_t i = 0; i < samples.size(); ++i)
+    {
+        SCOPED_TRACE(i);
+        ASSERT_EQ(samples[i].values.size(), 1U);
+        EXPECT_EQ(samples[i].values[0].counter_id, k_mfma_util_id);
+        EXPECT_DOUBLE_EQ(samples[i].values[0].value, k_mfma_util_interval.at(i));
+    }
+}
+
+// MfmaUtil is a ratio of totals since start_context, so the provider collects its
+// inputs and the device evaluates it on their interval values (ISS-116).
+TEST_F(SdkPmcCollectorWorkflowTest, DerivedRatioCounterIsEvaluatedFromItsInputs)
+{
+    auto const config_ids = expect_catalog_provider(*m_mock);
+    EXPECT_CALL(*m_mock, start_context(_)).WillOnce(Return());
+    EXPECT_CALL(*m_mock, stop_context(_)).WillOnce(Return());
+    expect_mfma_util_input_samples(*m_mock);
+
+    auto const provider = std::make_shared<MockProvider>(
+        std::vector<std::shared_ptr<rocprofsys::agent>>{
+            make_agent(k_derived_agent_handle, 0, "GPU 0") },
+        enable_on_device_0({ "MfmaUtil" }));
+
+    EXPECT_THAT(*config_ids,
+                ::testing::UnorderedElementsAre(k_busy_id, k_active_id, k_simd_count_id));
+    EXPECT_THAT(reported_counter_names(*provider), ::testing::ElementsAre("MfmaUtil"));
+
+    provider->start();
+    test_collector_t collector(provider);
+    collector.setup();
+    collector.config();
+    std::ranges::for_each(k_mfma_timestamps, [&collector](std::int64_t timestamp) {
+        collector.sample(timestamp);
+    });
+    collector.shutdown();
+
+    expect_interval_mfma_util(get_captured_samples());
+}
+
+// A constant or linear derived counter is exact from the SDK, so it is collected itself.
+TEST_F(SdkPmcCollectorWorkflowTest,
+       ConstantAndLinearDerivedCountersAreCollectedThemselves)
+{
+    auto const config_ids = expect_catalog_provider(*m_mock);
+
+    auto const provider = std::make_shared<MockProvider>(
+        std::vector<std::shared_ptr<rocprofsys::agent>>{
+            make_agent(k_derived_agent_handle, 0, "GPU 0") },
+        enable_on_device_0({ "SIMD_NUM", "SQ_WAVES_sum" }));
+
+    EXPECT_THAT(*config_ids,
+                ::testing::UnorderedElementsAre(k_simd_num_id, k_waves_sum_id));
+    EXPECT_THAT(reported_counter_names(*provider),
+                ::testing::UnorderedElementsAre("SIMD_NUM", "SQ_WAVES_sum"));
+}
+
+// LdsLatency uses accumulate(), which device-wide sampling cannot evaluate; it is
+// rejected and the other requested counters are still collected.
+TEST_F(SdkPmcCollectorWorkflowTest, UnsupportedDerivedCounterIsNotCollected)
+{
+    auto const config_ids = expect_catalog_provider(*m_mock);
+
+    auto const provider = std::make_shared<MockProvider>(
+        std::vector<std::shared_ptr<rocprofsys::agent>>{
+            make_agent(k_derived_agent_handle, 0, "GPU 0") },
+        enable_on_device_0({ "LdsLatency", "SQ_WAVES" }));
+
+    EXPECT_THAT(*config_ids, ::testing::ElementsAre(k_waves_id));
+    EXPECT_THAT(reported_counter_names(*provider), ::testing::ElementsAre("SQ_WAVES"));
 }
 
 }  // namespace rocprofsys::pmc::collectors::gpu_perf_counter::testing

@@ -4,6 +4,7 @@
 add_library(
     pmc-sdk-pmc-collector-tests
     OBJECT
+    test_derived_expression.cpp
     test_device.cpp
     test_sample.cpp
     test_collector_workflow.cpp
