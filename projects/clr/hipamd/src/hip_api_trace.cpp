@@ -198,6 +198,9 @@ hipError_t hipGraphAddChildGraphNode(hipGraphNode_t* pGraphNode, hipGraph_t grap
                                      hipGraph_t childGraph);
 hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
                                    const hipGraphNode_t* to, size_t numDependencies);
+hipError_t hipGraphAddDependencies_v2(hipGraph_t graph, const hipGraphNode_t* from,
+                                      const hipGraphNode_t* to, const hipGraphEdgeData* edgeData,
+                                      size_t numDependencies);
 hipError_t hipGraphAddEmptyNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                 const hipGraphNode_t* pDependencies, size_t numDependencies);
 hipError_t hipGraphAddEventRecordNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
@@ -278,6 +281,8 @@ hipError_t hipGraphExecUpdate(hipGraphExec_t hGraphExec, hipGraph_t hGraph,
                               hipGraphExecUpdateResult* updateResult_out);
 hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
                             size_t* numEdges);
+hipError_t hipGraphGetEdges_v2(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
+                               hipGraphEdgeData* edgeData, size_t* numEdges);
 hipError_t hipGraphGetNodes(hipGraph_t graph, hipGraphNode_t* nodes, size_t* numNodes);
 hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t* pRootNodes,
                                 size_t* pNumRootNodes);
@@ -314,8 +319,13 @@ hipError_t hipGraphNodeFindInClone(hipGraphNode_t* pNode, hipGraphNode_t origina
                                    hipGraph_t clonedGraph);
 hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDependencies,
                                        size_t* pNumDependencies);
+hipError_t hipGraphNodeGetDependencies_v2(hipGraphNode_t node, hipGraphNode_t* pDependencies,
+                                          hipGraphEdgeData* edgeData, size_t* pNumDependencies);
 hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
                                          size_t* pNumDependentNodes);
+hipError_t hipGraphNodeGetDependentNodes_v2(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
+                                            hipGraphEdgeData* edgeData,
+                                            size_t* pNumDependentNodes);
 hipError_t hipGraphNodeGetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
                                   unsigned int* isEnabled);
 hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
@@ -324,6 +334,10 @@ hipError_t hipGraphNodeSetEnabled(hipGraphExec_t hGraphExec, hipGraphNode_t hNod
 hipError_t hipGraphReleaseUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count);
 hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* from,
                                       const hipGraphNode_t* to, size_t numDependencies);
+hipError_t hipGraphRemoveDependencies_v2(hipGraph_t graph, const hipGraphNode_t* from,
+                                         const hipGraphNode_t* to,
+                                         const hipGraphEdgeData* edgeData,
+                                         size_t numDependencies);
 hipError_t hipGraphRetainUserObject(hipGraph_t graph, hipUserObject_t object, unsigned int count,
                                     unsigned int flags);
 hipError_t hipGraphUpload(hipGraphExec_t graphExec, hipStream_t stream);
@@ -1116,6 +1130,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGetTextureReference_fn = hip::hipGetTextureReference;
   ptrDispatchTable->hipGraphAddChildGraphNode_fn = hip::hipGraphAddChildGraphNode;
   ptrDispatchTable->hipGraphAddDependencies_fn = hip::hipGraphAddDependencies;
+  ptrDispatchTable->hipGraphAddDependencies_v2_fn = hip::hipGraphAddDependencies_v2;
   ptrDispatchTable->hipGraphAddEmptyNode_fn = hip::hipGraphAddEmptyNode;
   ptrDispatchTable->hipGraphAddEventRecordNode_fn = hip::hipGraphAddEventRecordNode;
   ptrDispatchTable->hipGraphAddEventWaitNode_fn = hip::hipGraphAddEventWaitNode;
@@ -1157,6 +1172,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphExecMemsetNodeSetParams_fn = hip::hipGraphExecMemsetNodeSetParams;
   ptrDispatchTable->hipGraphExecUpdate_fn = hip::hipGraphExecUpdate;
   ptrDispatchTable->hipGraphGetEdges_fn = hip::hipGraphGetEdges;
+  ptrDispatchTable->hipGraphGetEdges_v2_fn = hip::hipGraphGetEdges_v2;
   ptrDispatchTable->hipGraphGetId_fn = hip::hipGraphGetId;
   ptrDispatchTable->hipGraphGetNodes_fn = hip::hipGraphGetNodes;
   ptrDispatchTable->hipGraphGetRootNodes_fn = hip::hipGraphGetRootNodes;
@@ -1184,7 +1200,9 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphMemsetNodeSetParams_fn = hip::hipGraphMemsetNodeSetParams;
   ptrDispatchTable->hipGraphNodeFindInClone_fn = hip::hipGraphNodeFindInClone;
   ptrDispatchTable->hipGraphNodeGetDependencies_fn = hip::hipGraphNodeGetDependencies;
+  ptrDispatchTable->hipGraphNodeGetDependencies_v2_fn = hip::hipGraphNodeGetDependencies_v2;
   ptrDispatchTable->hipGraphNodeGetDependentNodes_fn = hip::hipGraphNodeGetDependentNodes;
+  ptrDispatchTable->hipGraphNodeGetDependentNodes_v2_fn = hip::hipGraphNodeGetDependentNodes_v2;
   ptrDispatchTable->hipGraphNodeGetEnabled_fn = hip::hipGraphNodeGetEnabled;
   ptrDispatchTable->hipGraphNodeGetLocalId_fn = hip::hipGraphNodeGetLocalId;
   ptrDispatchTable->hipGraphNodeGetToolsId_fn = hip::hipGraphNodeGetToolsId;
@@ -1192,6 +1210,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphNodeSetEnabled_fn = hip::hipGraphNodeSetEnabled;
   ptrDispatchTable->hipGraphReleaseUserObject_fn = hip::hipGraphReleaseUserObject;
   ptrDispatchTable->hipGraphRemoveDependencies_fn = hip::hipGraphRemoveDependencies;
+  ptrDispatchTable->hipGraphRemoveDependencies_v2_fn = hip::hipGraphRemoveDependencies_v2;
   ptrDispatchTable->hipGraphRetainUserObject_fn = hip::hipGraphRetainUserObject;
   ptrDispatchTable->hipGraphUpload_fn = hip::hipGraphUpload;
   ptrDispatchTable->hipGraphicsGLRegisterBuffer_fn = hip::hipGraphicsGLRegisterBuffer;
@@ -2350,15 +2369,22 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipDeviceGetExecAffinitySupport_fn, 557);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 44
 HIP_ENFORCE_ABI(HipDispatchTable, hipArrayGetPlane_fn, 558);
 
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 45
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphAddDependencies_v2_fn, 559);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphRemoveDependencies_v2_fn, 560);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphGetEdges_v2_fn, 561);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphNodeGetDependencies_v2_fn, 562);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphNodeGetDependentNodes_v2_fn, 563);
+
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 559)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 564)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 44,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 45,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

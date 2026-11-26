@@ -760,6 +760,13 @@ HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNT
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 44
 HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipArrayGetPlane, hipArrayGetPlane, hipArrayGetPlane_fn, pPlaneArray, hArray, planeIdx);
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 45
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphAddDependencies_v2, hipGraphAddDependencies_v2, hipGraphAddDependencies_v2_fn, graph, from, to, edgeData, numDependencies);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphRemoveDependencies_v2, hipGraphRemoveDependencies_v2, hipGraphRemoveDependencies_v2_fn, graph, from, to, edgeData, numDependencies);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphGetEdges_v2, hipGraphGetEdges_v2, hipGraphGetEdges_v2_fn, graph, from, to, edgeData, numEdges);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeGetDependencies_v2, hipGraphNodeGetDependencies_v2, hipGraphNodeGetDependencies_v2_fn, node, pDependencies, edgeData, pNumDependencies);
+HIP_API_INFO_DEFINITION_V(ROCPROFILER_HIP_TABLE_ID_Runtime, ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeGetDependentNodes_v2, hipGraphNodeGetDependentNodes_v2, hipGraphNodeGetDependentNodes_v2_fn, node, pDependentNodes, edgeData, pNumDependentNodes);
+#endif
 // clang-format on
 
 #else

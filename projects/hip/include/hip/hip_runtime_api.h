@@ -9254,6 +9254,23 @@ hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
                                    const hipGraphNode_t* to, size_t numDependencies);
 
 /**
+ * @brief Adds dependency edges to a graph, with per-edge metadata.
+ *
+ * @param [in] graph - Instance of the graph to add dependencies to.
+ * @param [in] from - Pointer to the graph nodes with dependencies to add from.
+ * @param [in] to - Pointer to the graph nodes to add dependencies to.
+ * @param [in] edgeData - Optional pointer to per-edge metadata. If non-NULL, must point to
+ * numDependencies entries. Currently only the all-zero (#hipGraphKernelNodePortDefault) value is
+ * supported for each entry.
+ * @param [in] numDependencies - Number of dependencies to add.
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ */
+hipError_t hipGraphAddDependencies_v2(hipGraph_t graph, const hipGraphNode_t* from,
+                                      const hipGraphNode_t* to, const hipGraphEdgeData* edgeData,
+                                      size_t numDependencies);
+
+/**
  * @brief Removes dependency edges from a graph.
  *
  * @param [in] graph - Instance of the graph to remove dependencies from.
@@ -9265,6 +9282,24 @@ hipError_t hipGraphAddDependencies(hipGraph_t graph, const hipGraphNode_t* from,
  */
 hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* from,
                                       const hipGraphNode_t* to, size_t numDependencies);
+
+/**
+ * @brief Removes dependency edges from a graph, with per-edge metadata.
+ *
+ * @param [in] graph - Instance of the graph to remove dependencies from.
+ * @param [in] from - Array of nodes that provide the dependencies.
+ * @param [in] to - Array of dependent nodes.
+ * @param [in] edgeData - Optional pointer to per-edge metadata. If non-NULL, must point to
+ * numDependencies entries. Currently only the all-zero (#hipGraphKernelNodePortDefault) value is
+ * supported for each entry.
+ * @param [in] numDependencies - Number of dependencies to remove.
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ */
+hipError_t hipGraphRemoveDependencies_v2(hipGraph_t graph, const hipGraphNode_t* from,
+                                         const hipGraphNode_t* to,
+                                         const hipGraphEdgeData* edgeData,
+                                         size_t numDependencies);
 
 /**
  * @brief Returns a graph's dependency edges.
@@ -9283,6 +9318,26 @@ hipError_t hipGraphRemoveDependencies(hipGraph_t graph, const hipGraphNode_t* fr
  */
 hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
                             size_t* numEdges);
+
+/**
+ * @brief Returns a graph's dependency edges, with per-edge metadata.
+ *
+ * @param [in] graph - Instance of the graph to get the edges from.
+ * @param [out] from - Pointer to the graph nodes to return edge endpoints.
+ * @param [out] to - Pointer to the graph nodes to return edge endpoints.
+ * @param [out] edgeData - Optional pointer to return per-edge metadata. If non-NULL, from and to
+ * must also be non-NULL, and it must point to the same number of entries as from and to.
+ * @param [out] numEdges - Returns number of edges.
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * from and to may both be NULL, in which case this function only returns the number of edges in
+ * numEdges. Otherwise, numEdges entries will be filled in. If numEdges is higher than the actual
+ * number of edges, the remaining entries in from and to will be set to NULL, and the number of
+ * edges actually returned will be written to numEdges.
+ *
+ */
+hipError_t hipGraphGetEdges_v2(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
+                               hipGraphEdgeData* edgeData, size_t* numEdges);
 
 /**
  * @brief Returns a graph's nodes.
@@ -9335,6 +9390,27 @@ hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDep
                                        size_t* pNumDependencies);
 
 /**
+ * @brief Returns a node's dependencies, with per-edge metadata.
+ *
+ * @param [in] node - Graph node to get the dependencies from.
+ * @param [out] pDependencies - Pointer to return the dependencies.
+ * @param [out] edgeData - Optional pointer to return per-edge metadata. If non-NULL,
+ * pDependencies must also be non-NULL, and it must point to the same number of entries as
+ * pDependencies.
+ * @param [out] pNumDependencies -  Returns the number of graph node dependencies.
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * pDependencies may be NULL, in which case this function will return the number of dependencies in
+ * pNumDependencies. Otherwise, pNumDependencies entries will be filled in. If pNumDependencies is
+ * higher than the actual number of dependencies, the remaining entries in pDependencies will be set
+ * to NULL, and the number of nodes actually obtained will be returned in pNumDependencies.
+ *
+ */
+hipError_t hipGraphNodeGetDependencies_v2(hipGraphNode_t node, hipGraphNode_t* pDependencies,
+                                          hipGraphEdgeData* edgeData,
+                                          size_t* pNumDependencies);
+
+/**
  * @brief Returns a node's dependent nodes.
  *
  * @param [in] node - Graph node to get the dependent nodes from.
@@ -9351,6 +9427,28 @@ hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDep
  */
 hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
                                          size_t* pNumDependentNodes);
+
+/**
+ * @brief Returns a node's dependent nodes, with per-edge metadata.
+ *
+ * @param [in] node - Graph node to get the dependent nodes from.
+ * @param [out] pDependentNodes - Pointer to return the graph dependent nodes.
+ * @param [out] edgeData - Optional pointer to return per-edge metadata. If non-NULL,
+ * pDependentNodes must also be non-NULL, and it must point to the same number of entries as
+ * pDependentNodes.
+ * @param [out] pNumDependentNodes - Returns the number of graph node dependent nodes.
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * pDependentNodes may be NULL, in which case this function will return the number of dependent
+ * nodes in pNumDependentNodes. Otherwise, pNumDependentNodes entries will be filled in. If
+ * pNumDependentNodes is higher than the actual number of dependent nodes, the remaining entries in
+ * pDependentNodes will be set to NULL, and the number of nodes actually obtained will be returned
+ * in pNumDependentNodes.
+ *
+ */
+hipError_t hipGraphNodeGetDependentNodes_v2(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
+                                            hipGraphEdgeData* edgeData,
+                                            size_t* pNumDependentNodes);
 
 /**
  * @brief Returns a node's type.

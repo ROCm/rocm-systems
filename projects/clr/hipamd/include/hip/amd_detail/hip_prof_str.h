@@ -521,7 +521,12 @@ enum hip_api_id_t {
   HIP_API_ID_hipGraphNodeGetToolsId = 499,
   HIP_API_ID_hipDeviceGetExecAffinitySupport = 500,
   HIP_API_ID_hipArrayGetPlane = 501,
-  HIP_API_ID_LAST = 501,
+  HIP_API_ID_hipGraphAddDependencies_v2 = 502,
+  HIP_API_ID_hipGraphGetEdges_v2 = 503,
+  HIP_API_ID_hipGraphNodeGetDependencies_v2 = 504,
+  HIP_API_ID_hipGraphNodeGetDependentNodes_v2 = 505,
+  HIP_API_ID_hipGraphRemoveDependencies_v2 = 506,
+  HIP_API_ID_LAST = 506,
 
 
   HIP_API_ID_hipBindTexture = HIP_API_ID_NONE,
@@ -699,6 +704,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGraphAddBatchMemOpNode: return "hipGraphAddBatchMemOpNode";
     case HIP_API_ID_hipGraphAddChildGraphNode: return "hipGraphAddChildGraphNode";
     case HIP_API_ID_hipGraphAddDependencies: return "hipGraphAddDependencies";
+    case HIP_API_ID_hipGraphAddDependencies_v2: return "hipGraphAddDependencies_v2";
     case HIP_API_ID_hipGraphAddEmptyNode: return "hipGraphAddEmptyNode";
     case HIP_API_ID_hipGraphAddEventRecordNode: return "hipGraphAddEventRecordNode";
     case HIP_API_ID_hipGraphAddEventWaitNode: return "hipGraphAddEventWaitNode";
@@ -749,6 +755,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGraphExternalSemaphoresWaitNodeGetParams: return "hipGraphExternalSemaphoresWaitNodeGetParams";
     case HIP_API_ID_hipGraphExternalSemaphoresWaitNodeSetParams: return "hipGraphExternalSemaphoresWaitNodeSetParams";
     case HIP_API_ID_hipGraphGetEdges: return "hipGraphGetEdges";
+    case HIP_API_ID_hipGraphGetEdges_v2: return "hipGraphGetEdges_v2";
     case HIP_API_ID_hipGraphGetId: return "hipGraphGetId";
     case HIP_API_ID_hipGraphGetNodes: return "hipGraphGetNodes";
     case HIP_API_ID_hipGraphGetRootNodes: return "hipGraphGetRootNodes";
@@ -774,7 +781,9 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGraphMemsetNodeSetParams: return "hipGraphMemsetNodeSetParams";
     case HIP_API_ID_hipGraphNodeFindInClone: return "hipGraphNodeFindInClone";
     case HIP_API_ID_hipGraphNodeGetDependencies: return "hipGraphNodeGetDependencies";
+    case HIP_API_ID_hipGraphNodeGetDependencies_v2: return "hipGraphNodeGetDependencies_v2";
     case HIP_API_ID_hipGraphNodeGetDependentNodes: return "hipGraphNodeGetDependentNodes";
+    case HIP_API_ID_hipGraphNodeGetDependentNodes_v2: return "hipGraphNodeGetDependentNodes_v2";
     case HIP_API_ID_hipGraphNodeGetEnabled: return "hipGraphNodeGetEnabled";
     case HIP_API_ID_hipGraphNodeGetLocalId: return "hipGraphNodeGetLocalId";
     case HIP_API_ID_hipGraphNodeGetToolsId: return "hipGraphNodeGetToolsId";
@@ -783,6 +792,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipGraphNodeSetParams: return "hipGraphNodeSetParams";
     case HIP_API_ID_hipGraphReleaseUserObject: return "hipGraphReleaseUserObject";
     case HIP_API_ID_hipGraphRemoveDependencies: return "hipGraphRemoveDependencies";
+    case HIP_API_ID_hipGraphRemoveDependencies_v2: return "hipGraphRemoveDependencies_v2";
     case HIP_API_ID_hipGraphRetainUserObject: return "hipGraphRetainUserObject";
     case HIP_API_ID_hipGraphUpload: return "hipGraphUpload";
     case HIP_API_ID_hipGraphicsGLRegisterBuffer: return "hipGraphicsGLRegisterBuffer";
@@ -1194,6 +1204,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGraphAddBatchMemOpNode", name) == 0) return HIP_API_ID_hipGraphAddBatchMemOpNode;
   if (strcmp("hipGraphAddChildGraphNode", name) == 0) return HIP_API_ID_hipGraphAddChildGraphNode;
   if (strcmp("hipGraphAddDependencies", name) == 0) return HIP_API_ID_hipGraphAddDependencies;
+  if (strcmp("hipGraphAddDependencies_v2", name) == 0) return HIP_API_ID_hipGraphAddDependencies_v2;
   if (strcmp("hipGraphAddEmptyNode", name) == 0) return HIP_API_ID_hipGraphAddEmptyNode;
   if (strcmp("hipGraphAddEventRecordNode", name) == 0) return HIP_API_ID_hipGraphAddEventRecordNode;
   if (strcmp("hipGraphAddEventWaitNode", name) == 0) return HIP_API_ID_hipGraphAddEventWaitNode;
@@ -1244,6 +1255,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGraphExternalSemaphoresWaitNodeGetParams", name) == 0) return HIP_API_ID_hipGraphExternalSemaphoresWaitNodeGetParams;
   if (strcmp("hipGraphExternalSemaphoresWaitNodeSetParams", name) == 0) return HIP_API_ID_hipGraphExternalSemaphoresWaitNodeSetParams;
   if (strcmp("hipGraphGetEdges", name) == 0) return HIP_API_ID_hipGraphGetEdges;
+  if (strcmp("hipGraphGetEdges_v2", name) == 0) return HIP_API_ID_hipGraphGetEdges_v2;
   if (strcmp("hipGraphGetId", name) == 0) return HIP_API_ID_hipGraphGetId;
   if (strcmp("hipGraphGetNodes", name) == 0) return HIP_API_ID_hipGraphGetNodes;
   if (strcmp("hipGraphGetRootNodes", name) == 0) return HIP_API_ID_hipGraphGetRootNodes;
@@ -1269,7 +1281,9 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGraphMemsetNodeSetParams", name) == 0) return HIP_API_ID_hipGraphMemsetNodeSetParams;
   if (strcmp("hipGraphNodeFindInClone", name) == 0) return HIP_API_ID_hipGraphNodeFindInClone;
   if (strcmp("hipGraphNodeGetDependencies", name) == 0) return HIP_API_ID_hipGraphNodeGetDependencies;
+  if (strcmp("hipGraphNodeGetDependencies_v2", name) == 0) return HIP_API_ID_hipGraphNodeGetDependencies_v2;
   if (strcmp("hipGraphNodeGetDependentNodes", name) == 0) return HIP_API_ID_hipGraphNodeGetDependentNodes;
+  if (strcmp("hipGraphNodeGetDependentNodes_v2", name) == 0) return HIP_API_ID_hipGraphNodeGetDependentNodes_v2;
   if (strcmp("hipGraphNodeGetEnabled", name) == 0) return HIP_API_ID_hipGraphNodeGetEnabled;
   if (strcmp("hipGraphNodeGetLocalId", name) == 0) return HIP_API_ID_hipGraphNodeGetLocalId;
   if (strcmp("hipGraphNodeGetToolsId", name) == 0) return HIP_API_ID_hipGraphNodeGetToolsId;
@@ -1278,6 +1292,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipGraphNodeSetParams", name) == 0) return HIP_API_ID_hipGraphNodeSetParams;
   if (strcmp("hipGraphReleaseUserObject", name) == 0) return HIP_API_ID_hipGraphReleaseUserObject;
   if (strcmp("hipGraphRemoveDependencies", name) == 0) return HIP_API_ID_hipGraphRemoveDependencies;
+  if (strcmp("hipGraphRemoveDependencies_v2", name) == 0) return HIP_API_ID_hipGraphRemoveDependencies_v2;
   if (strcmp("hipGraphRetainUserObject", name) == 0) return HIP_API_ID_hipGraphRetainUserObject;
   if (strcmp("hipGraphUpload", name) == 0) return HIP_API_ID_hipGraphUpload;
   if (strcmp("hipGraphicsGLRegisterBuffer", name) == 0) return HIP_API_ID_hipGraphicsGLRegisterBuffer;
@@ -2327,6 +2342,16 @@ typedef struct hip_api_data_s {
       size_t numDependencies;
     } hipGraphAddDependencies;
     struct {
+      hipGraph_t graph;
+      const hipGraphNode_t* from;
+      hipGraphNode_t from__val;
+      const hipGraphNode_t* to;
+      hipGraphNode_t to__val;
+      const hipGraphEdgeData* edgeData;
+      hipGraphEdgeData edgeData__val;
+      size_t numDependencies;
+    } hipGraphAddDependencies_v2;
+    struct {
       hipGraphNode_t* pGraphNode;
       hipGraphNode_t pGraphNode__val;
       hipGraph_t graph;
@@ -2675,6 +2700,17 @@ typedef struct hip_api_data_s {
     } hipGraphGetEdges;
     struct {
       hipGraph_t graph;
+      hipGraphNode_t* from;
+      hipGraphNode_t from__val;
+      hipGraphNode_t* to;
+      hipGraphNode_t to__val;
+      hipGraphEdgeData* edgeData;
+      hipGraphEdgeData edgeData__val;
+      size_t* numEdges;
+      size_t numEdges__val;
+    } hipGraphGetEdges_v2;
+    struct {
+      hipGraph_t graph;
       unsigned int* graphId;
       unsigned int graphId__val;
     } hipGraphGetId;
@@ -2822,11 +2858,29 @@ typedef struct hip_api_data_s {
     } hipGraphNodeGetDependencies;
     struct {
       hipGraphNode_t node;
+      hipGraphNode_t* pDependencies;
+      hipGraphNode_t pDependencies__val;
+      hipGraphEdgeData* edgeData;
+      hipGraphEdgeData edgeData__val;
+      size_t* pNumDependencies;
+      size_t pNumDependencies__val;
+    } hipGraphNodeGetDependencies_v2;
+    struct {
+      hipGraphNode_t node;
       hipGraphNode_t* pDependentNodes;
       hipGraphNode_t pDependentNodes__val;
       size_t* pNumDependentNodes;
       size_t pNumDependentNodes__val;
     } hipGraphNodeGetDependentNodes;
+    struct {
+      hipGraphNode_t node;
+      hipGraphNode_t* pDependentNodes;
+      hipGraphNode_t pDependentNodes__val;
+      hipGraphEdgeData* edgeData;
+      hipGraphEdgeData edgeData__val;
+      size_t* pNumDependentNodes;
+      size_t pNumDependentNodes__val;
+    } hipGraphNodeGetDependentNodes_v2;
     struct {
       hipGraphExec_t hGraphExec;
       hipGraphNode_t hNode;
@@ -2871,6 +2925,16 @@ typedef struct hip_api_data_s {
       hipGraphNode_t to__val;
       size_t numDependencies;
     } hipGraphRemoveDependencies;
+    struct {
+      hipGraph_t graph;
+      const hipGraphNode_t* from;
+      hipGraphNode_t from__val;
+      const hipGraphNode_t* to;
+      hipGraphNode_t to__val;
+      const hipGraphEdgeData* edgeData;
+      hipGraphEdgeData edgeData__val;
+      size_t numDependencies;
+    } hipGraphRemoveDependencies_v2;
     struct {
       hipGraph_t graph;
       hipUserObject_t object;
@@ -5345,6 +5409,14 @@ typedef struct hip_api_data_s {
   cb_data.args.hipGraphAddDependencies.to = (const hipGraphNode_t*)to; \
   cb_data.args.hipGraphAddDependencies.numDependencies = (size_t)numDependencies; \
 };
+// hipGraphAddDependencies_v2[('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'from'), ('const hipGraphNode_t*', 'to'), ('const hipGraphEdgeData*', 'edgeData'), ('size_t', 'numDependencies')]
+#define INIT_hipGraphAddDependencies_v2_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGraphAddDependencies_v2.graph = (hipGraph_t)graph; \
+  cb_data.args.hipGraphAddDependencies_v2.from = (const hipGraphNode_t*)from; \
+  cb_data.args.hipGraphAddDependencies_v2.to = (const hipGraphNode_t*)to; \
+  cb_data.args.hipGraphAddDependencies_v2.edgeData = (const hipGraphEdgeData*)edgeData; \
+  cb_data.args.hipGraphAddDependencies_v2.numDependencies = (size_t)numDependencies; \
+};
 // hipGraphAddEmptyNode[('hipGraphNode_t*', 'pGraphNode'), ('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'pDependencies'), ('size_t', 'numDependencies')]
 #define INIT_hipGraphAddEmptyNode_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipGraphAddEmptyNode.pGraphNode = (hipGraphNode_t*)pGraphNode; \
@@ -5677,6 +5749,14 @@ typedef struct hip_api_data_s {
   cb_data.args.hipGraphGetEdges.to = (hipGraphNode_t*)to; \
   cb_data.args.hipGraphGetEdges.numEdges = (size_t*)numEdges; \
 };
+// hipGraphGetEdges_v2[('hipGraph_t', 'graph'), ('hipGraphNode_t*', 'from'), ('hipGraphNode_t*', 'to'), ('hipGraphEdgeData*', 'edgeData'), ('size_t*', 'numEdges')]
+#define INIT_hipGraphGetEdges_v2_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGraphGetEdges_v2.graph = (hipGraph_t)graph; \
+  cb_data.args.hipGraphGetEdges_v2.from = (hipGraphNode_t*)from; \
+  cb_data.args.hipGraphGetEdges_v2.to = (hipGraphNode_t*)to; \
+  cb_data.args.hipGraphGetEdges_v2.edgeData = (hipGraphEdgeData*)edgeData; \
+  cb_data.args.hipGraphGetEdges_v2.numEdges = (size_t*)numEdges; \
+};
 // hipGraphGetId[('hipGraph_t', 'graph'), ('unsigned int*', 'graphId')]
 #define INIT_hipGraphGetId_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipGraphGetId.graph = (hipGraph_t)graph; \
@@ -5824,11 +5904,25 @@ typedef struct hip_api_data_s {
   cb_data.args.hipGraphNodeGetDependencies.pDependencies = (hipGraphNode_t*)pDependencies; \
   cb_data.args.hipGraphNodeGetDependencies.pNumDependencies = (size_t*)pNumDependencies; \
 };
+// hipGraphNodeGetDependencies_v2[('hipGraphNode_t', 'node'), ('hipGraphNode_t*', 'pDependencies'), ('hipGraphEdgeData*', 'edgeData'), ('size_t*', 'pNumDependencies')]
+#define INIT_hipGraphNodeGetDependencies_v2_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGraphNodeGetDependencies_v2.node = (hipGraphNode_t)node; \
+  cb_data.args.hipGraphNodeGetDependencies_v2.pDependencies = (hipGraphNode_t*)pDependencies; \
+  cb_data.args.hipGraphNodeGetDependencies_v2.edgeData = (hipGraphEdgeData*)edgeData; \
+  cb_data.args.hipGraphNodeGetDependencies_v2.pNumDependencies = (size_t*)pNumDependencies; \
+};
 // hipGraphNodeGetDependentNodes[('hipGraphNode_t', 'node'), ('hipGraphNode_t*', 'pDependentNodes'), ('size_t*', 'pNumDependentNodes')]
 #define INIT_hipGraphNodeGetDependentNodes_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipGraphNodeGetDependentNodes.node = (hipGraphNode_t)node; \
   cb_data.args.hipGraphNodeGetDependentNodes.pDependentNodes = (hipGraphNode_t*)pDependentNodes; \
   cb_data.args.hipGraphNodeGetDependentNodes.pNumDependentNodes = (size_t*)pNumDependentNodes; \
+};
+// hipGraphNodeGetDependentNodes_v2[('hipGraphNode_t', 'node'), ('hipGraphNode_t*', 'pDependentNodes'), ('hipGraphEdgeData*', 'edgeData'), ('size_t*', 'pNumDependentNodes')]
+#define INIT_hipGraphNodeGetDependentNodes_v2_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGraphNodeGetDependentNodes_v2.node = (hipGraphNode_t)node; \
+  cb_data.args.hipGraphNodeGetDependentNodes_v2.pDependentNodes = (hipGraphNode_t*)pDependentNodes; \
+  cb_data.args.hipGraphNodeGetDependentNodes_v2.edgeData = (hipGraphEdgeData*)edgeData; \
+  cb_data.args.hipGraphNodeGetDependentNodes_v2.pNumDependentNodes = (size_t*)pNumDependentNodes; \
 };
 // hipGraphNodeGetEnabled[('hipGraphExec_t', 'hGraphExec'), ('hipGraphNode_t', 'hNode'), ('unsigned int*', 'isEnabled')]
 #define INIT_hipGraphNodeGetEnabled_CB_ARGS_DATA(cb_data) { \
@@ -5874,6 +5968,14 @@ typedef struct hip_api_data_s {
   cb_data.args.hipGraphRemoveDependencies.from = (const hipGraphNode_t*)from; \
   cb_data.args.hipGraphRemoveDependencies.to = (const hipGraphNode_t*)to; \
   cb_data.args.hipGraphRemoveDependencies.numDependencies = (size_t)numDependencies; \
+};
+// hipGraphRemoveDependencies_v2[('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'from'), ('const hipGraphNode_t*', 'to'), ('const hipGraphEdgeData*', 'edgeData'), ('size_t', 'numDependencies')]
+#define INIT_hipGraphRemoveDependencies_v2_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipGraphRemoveDependencies_v2.graph = (hipGraph_t)graph; \
+  cb_data.args.hipGraphRemoveDependencies_v2.from = (const hipGraphNode_t*)from; \
+  cb_data.args.hipGraphRemoveDependencies_v2.to = (const hipGraphNode_t*)to; \
+  cb_data.args.hipGraphRemoveDependencies_v2.edgeData = (const hipGraphEdgeData*)edgeData; \
+  cb_data.args.hipGraphRemoveDependencies_v2.numDependencies = (size_t)numDependencies; \
 };
 // hipGraphRetainUserObject[('hipGraph_t', 'graph'), ('hipUserObject_t', 'object'), ('unsigned int', 'count'), ('unsigned int', 'flags')]
 #define INIT_hipGraphRetainUserObject_CB_ARGS_DATA(cb_data) { \
@@ -8214,6 +8316,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipGraphAddDependencies.from) data->args.hipGraphAddDependencies.from__val = *(data->args.hipGraphAddDependencies.from);
       if (data->args.hipGraphAddDependencies.to) data->args.hipGraphAddDependencies.to__val = *(data->args.hipGraphAddDependencies.to);
       break;
+// hipGraphAddDependencies_v2[('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'from'), ('const hipGraphNode_t*', 'to'), ('const hipGraphEdgeData*', 'edgeData'), ('size_t', 'numDependencies')]
+    case HIP_API_ID_hipGraphAddDependencies_v2:
+      if (data->args.hipGraphAddDependencies_v2.from) data->args.hipGraphAddDependencies_v2.from__val = *(data->args.hipGraphAddDependencies_v2.from);
+      if (data->args.hipGraphAddDependencies_v2.to) data->args.hipGraphAddDependencies_v2.to__val = *(data->args.hipGraphAddDependencies_v2.to);
+      if (data->args.hipGraphAddDependencies_v2.edgeData) data->args.hipGraphAddDependencies_v2.edgeData__val = *(data->args.hipGraphAddDependencies_v2.edgeData);
+      break;
 // hipGraphAddEmptyNode[('hipGraphNode_t*', 'pGraphNode'), ('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'pDependencies'), ('size_t', 'numDependencies')]
     case HIP_API_ID_hipGraphAddEmptyNode:
       if (data->args.hipGraphAddEmptyNode.pGraphNode) data->args.hipGraphAddEmptyNode.pGraphNode__val = *(data->args.hipGraphAddEmptyNode.pGraphNode);
@@ -8429,6 +8537,13 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipGraphGetEdges.to) data->args.hipGraphGetEdges.to__val = *(data->args.hipGraphGetEdges.to);
       if (data->args.hipGraphGetEdges.numEdges) data->args.hipGraphGetEdges.numEdges__val = *(data->args.hipGraphGetEdges.numEdges);
       break;
+// hipGraphGetEdges_v2[('hipGraph_t', 'graph'), ('hipGraphNode_t*', 'from'), ('hipGraphNode_t*', 'to'), ('hipGraphEdgeData*', 'edgeData'), ('size_t*', 'numEdges')]
+    case HIP_API_ID_hipGraphGetEdges_v2:
+      if (data->args.hipGraphGetEdges_v2.from) data->args.hipGraphGetEdges_v2.from__val = *(data->args.hipGraphGetEdges_v2.from);
+      if (data->args.hipGraphGetEdges_v2.to) data->args.hipGraphGetEdges_v2.to__val = *(data->args.hipGraphGetEdges_v2.to);
+      if (data->args.hipGraphGetEdges_v2.edgeData) data->args.hipGraphGetEdges_v2.edgeData__val = *(data->args.hipGraphGetEdges_v2.edgeData);
+      if (data->args.hipGraphGetEdges_v2.numEdges) data->args.hipGraphGetEdges_v2.numEdges__val = *(data->args.hipGraphGetEdges_v2.numEdges);
+      break;
 // hipGraphGetId[('hipGraph_t', 'graph'), ('unsigned int*', 'graphId')]
     case HIP_API_ID_hipGraphGetId:
       if (data->args.hipGraphGetId.graphId) data->args.hipGraphGetId.graphId__val = *(data->args.hipGraphGetId.graphId);
@@ -8529,10 +8644,22 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipGraphNodeGetDependencies.pDependencies) data->args.hipGraphNodeGetDependencies.pDependencies__val = *(data->args.hipGraphNodeGetDependencies.pDependencies);
       if (data->args.hipGraphNodeGetDependencies.pNumDependencies) data->args.hipGraphNodeGetDependencies.pNumDependencies__val = *(data->args.hipGraphNodeGetDependencies.pNumDependencies);
       break;
+// hipGraphNodeGetDependencies_v2[('hipGraphNode_t', 'node'), ('hipGraphNode_t*', 'pDependencies'), ('hipGraphEdgeData*', 'edgeData'), ('size_t*', 'pNumDependencies')]
+    case HIP_API_ID_hipGraphNodeGetDependencies_v2:
+      if (data->args.hipGraphNodeGetDependencies_v2.pDependencies) data->args.hipGraphNodeGetDependencies_v2.pDependencies__val = *(data->args.hipGraphNodeGetDependencies_v2.pDependencies);
+      if (data->args.hipGraphNodeGetDependencies_v2.edgeData) data->args.hipGraphNodeGetDependencies_v2.edgeData__val = *(data->args.hipGraphNodeGetDependencies_v2.edgeData);
+      if (data->args.hipGraphNodeGetDependencies_v2.pNumDependencies) data->args.hipGraphNodeGetDependencies_v2.pNumDependencies__val = *(data->args.hipGraphNodeGetDependencies_v2.pNumDependencies);
+      break;
 // hipGraphNodeGetDependentNodes[('hipGraphNode_t', 'node'), ('hipGraphNode_t*', 'pDependentNodes'), ('size_t*', 'pNumDependentNodes')]
     case HIP_API_ID_hipGraphNodeGetDependentNodes:
       if (data->args.hipGraphNodeGetDependentNodes.pDependentNodes) data->args.hipGraphNodeGetDependentNodes.pDependentNodes__val = *(data->args.hipGraphNodeGetDependentNodes.pDependentNodes);
       if (data->args.hipGraphNodeGetDependentNodes.pNumDependentNodes) data->args.hipGraphNodeGetDependentNodes.pNumDependentNodes__val = *(data->args.hipGraphNodeGetDependentNodes.pNumDependentNodes);
+      break;
+// hipGraphNodeGetDependentNodes_v2[('hipGraphNode_t', 'node'), ('hipGraphNode_t*', 'pDependentNodes'), ('hipGraphEdgeData*', 'edgeData'), ('size_t*', 'pNumDependentNodes')]
+    case HIP_API_ID_hipGraphNodeGetDependentNodes_v2:
+      if (data->args.hipGraphNodeGetDependentNodes_v2.pDependentNodes) data->args.hipGraphNodeGetDependentNodes_v2.pDependentNodes__val = *(data->args.hipGraphNodeGetDependentNodes_v2.pDependentNodes);
+      if (data->args.hipGraphNodeGetDependentNodes_v2.edgeData) data->args.hipGraphNodeGetDependentNodes_v2.edgeData__val = *(data->args.hipGraphNodeGetDependentNodes_v2.edgeData);
+      if (data->args.hipGraphNodeGetDependentNodes_v2.pNumDependentNodes) data->args.hipGraphNodeGetDependentNodes_v2.pNumDependentNodes__val = *(data->args.hipGraphNodeGetDependentNodes_v2.pNumDependentNodes);
       break;
 // hipGraphNodeGetEnabled[('hipGraphExec_t', 'hGraphExec'), ('hipGraphNode_t', 'hNode'), ('unsigned int*', 'isEnabled')]
     case HIP_API_ID_hipGraphNodeGetEnabled:
@@ -8564,6 +8691,12 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
     case HIP_API_ID_hipGraphRemoveDependencies:
       if (data->args.hipGraphRemoveDependencies.from) data->args.hipGraphRemoveDependencies.from__val = *(data->args.hipGraphRemoveDependencies.from);
       if (data->args.hipGraphRemoveDependencies.to) data->args.hipGraphRemoveDependencies.to__val = *(data->args.hipGraphRemoveDependencies.to);
+      break;
+// hipGraphRemoveDependencies_v2[('hipGraph_t', 'graph'), ('const hipGraphNode_t*', 'from'), ('const hipGraphNode_t*', 'to'), ('const hipGraphEdgeData*', 'edgeData'), ('size_t', 'numDependencies')]
+    case HIP_API_ID_hipGraphRemoveDependencies_v2:
+      if (data->args.hipGraphRemoveDependencies_v2.from) data->args.hipGraphRemoveDependencies_v2.from__val = *(data->args.hipGraphRemoveDependencies_v2.from);
+      if (data->args.hipGraphRemoveDependencies_v2.to) data->args.hipGraphRemoveDependencies_v2.to__val = *(data->args.hipGraphRemoveDependencies_v2.to);
+      if (data->args.hipGraphRemoveDependencies_v2.edgeData) data->args.hipGraphRemoveDependencies_v2.edgeData__val = *(data->args.hipGraphRemoveDependencies_v2.edgeData);
       break;
 // hipGraphRetainUserObject[('hipGraph_t', 'graph'), ('hipUserObject_t', 'object'), ('unsigned int', 'count'), ('unsigned int', 'flags')]
     case HIP_API_ID_hipGraphRetainUserObject:
@@ -10685,6 +10818,18 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       oss << ", numDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddDependencies.numDependencies);
       oss << ")";
     break;
+    case HIP_API_ID_hipGraphAddDependencies_v2:
+      oss << "hipGraphAddDependencies_v2(";
+      oss << "graph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddDependencies_v2.graph);
+      if (data->args.hipGraphAddDependencies_v2.from == NULL) oss << ", from=NULL";
+      else { oss << ", from="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddDependencies_v2.from__val); }
+      if (data->args.hipGraphAddDependencies_v2.to == NULL) oss << ", to=NULL";
+      else { oss << ", to="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddDependencies_v2.to__val); }
+      if (data->args.hipGraphAddDependencies_v2.edgeData == NULL) oss << ", edgeData=NULL";
+      else { oss << ", edgeData="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddDependencies_v2.edgeData__val); }
+      oss << ", numDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphAddDependencies_v2.numDependencies);
+      oss << ")";
+    break;
     case HIP_API_ID_hipGraphAddEmptyNode:
       oss << "hipGraphAddEmptyNode(";
       if (data->args.hipGraphAddEmptyNode.pGraphNode == NULL) oss << "pGraphNode=NULL";
@@ -11132,6 +11277,19 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", numEdges="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphGetEdges.numEdges__val); }
       oss << ")";
     break;
+    case HIP_API_ID_hipGraphGetEdges_v2:
+      oss << "hipGraphGetEdges_v2(";
+      oss << "graph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphGetEdges_v2.graph);
+      if (data->args.hipGraphGetEdges_v2.from == NULL) oss << ", from=NULL";
+      else { oss << ", from="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphGetEdges_v2.from__val); }
+      if (data->args.hipGraphGetEdges_v2.to == NULL) oss << ", to=NULL";
+      else { oss << ", to="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphGetEdges_v2.to__val); }
+      if (data->args.hipGraphGetEdges_v2.edgeData == NULL) oss << ", edgeData=NULL";
+      else { oss << ", edgeData="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphGetEdges_v2.edgeData__val); }
+      if (data->args.hipGraphGetEdges_v2.numEdges == NULL) oss << ", numEdges=NULL";
+      else { oss << ", numEdges="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphGetEdges_v2.numEdges__val); }
+      oss << ")";
+    break;
     case HIP_API_ID_hipGraphGetId:
       oss << "hipGraphGetId(";
       oss << "graph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphGetId.graph);
@@ -11329,6 +11487,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", pNumDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependencies.pNumDependencies__val); }
       oss << ")";
     break;
+    case HIP_API_ID_hipGraphNodeGetDependencies_v2:
+      oss << "hipGraphNodeGetDependencies_v2(";
+      oss << "node="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependencies_v2.node);
+      if (data->args.hipGraphNodeGetDependencies_v2.pDependencies == NULL) oss << ", pDependencies=NULL";
+      else { oss << ", pDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependencies_v2.pDependencies__val); }
+      if (data->args.hipGraphNodeGetDependencies_v2.edgeData == NULL) oss << ", edgeData=NULL";
+      else { oss << ", edgeData="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependencies_v2.edgeData__val); }
+      if (data->args.hipGraphNodeGetDependencies_v2.pNumDependencies == NULL) oss << ", pNumDependencies=NULL";
+      else { oss << ", pNumDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependencies_v2.pNumDependencies__val); }
+      oss << ")";
+    break;
     case HIP_API_ID_hipGraphNodeGetDependentNodes:
       oss << "hipGraphNodeGetDependentNodes(";
       oss << "node="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependentNodes.node);
@@ -11336,6 +11505,17 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << ", pDependentNodes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependentNodes.pDependentNodes__val); }
       if (data->args.hipGraphNodeGetDependentNodes.pNumDependentNodes == NULL) oss << ", pNumDependentNodes=NULL";
       else { oss << ", pNumDependentNodes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependentNodes.pNumDependentNodes__val); }
+      oss << ")";
+    break;
+    case HIP_API_ID_hipGraphNodeGetDependentNodes_v2:
+      oss << "hipGraphNodeGetDependentNodes_v2(";
+      oss << "node="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependentNodes_v2.node);
+      if (data->args.hipGraphNodeGetDependentNodes_v2.pDependentNodes == NULL) oss << ", pDependentNodes=NULL";
+      else { oss << ", pDependentNodes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependentNodes_v2.pDependentNodes__val); }
+      if (data->args.hipGraphNodeGetDependentNodes_v2.edgeData == NULL) oss << ", edgeData=NULL";
+      else { oss << ", edgeData="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependentNodes_v2.edgeData__val); }
+      if (data->args.hipGraphNodeGetDependentNodes_v2.pNumDependentNodes == NULL) oss << ", pNumDependentNodes=NULL";
+      else { oss << ", pNumDependentNodes="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphNodeGetDependentNodes_v2.pNumDependentNodes__val); }
       oss << ")";
     break;
     case HIP_API_ID_hipGraphNodeGetEnabled:
@@ -11396,6 +11576,18 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       if (data->args.hipGraphRemoveDependencies.to == NULL) oss << ", to=NULL";
       else { oss << ", to="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphRemoveDependencies.to__val); }
       oss << ", numDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphRemoveDependencies.numDependencies);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipGraphRemoveDependencies_v2:
+      oss << "hipGraphRemoveDependencies_v2(";
+      oss << "graph="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphRemoveDependencies_v2.graph);
+      if (data->args.hipGraphRemoveDependencies_v2.from == NULL) oss << ", from=NULL";
+      else { oss << ", from="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphRemoveDependencies_v2.from__val); }
+      if (data->args.hipGraphRemoveDependencies_v2.to == NULL) oss << ", to=NULL";
+      else { oss << ", to="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphRemoveDependencies_v2.to__val); }
+      if (data->args.hipGraphRemoveDependencies_v2.edgeData == NULL) oss << ", edgeData=NULL";
+      else { oss << ", edgeData="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphRemoveDependencies_v2.edgeData__val); }
+      oss << ", numDependencies="; roctracer::hip_support::detail::operator<<(oss, data->args.hipGraphRemoveDependencies_v2.numDependencies);
       oss << ")";
     break;
     case HIP_API_ID_hipGraphRetainUserObject:

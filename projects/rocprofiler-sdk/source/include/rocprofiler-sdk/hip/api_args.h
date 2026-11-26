@@ -3759,6 +3759,46 @@ typedef union rocprofiler_hip_api_args_t
         unsigned int planeIdx;
     } hipArrayGetPlane;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 45
+    struct
+    {
+        hipGraph_t              graph;
+        const hipGraphNode_t*   from;
+        const hipGraphNode_t*   to;
+        const hipGraphEdgeData* edgeData;
+        size_t                  numDependencies;
+    } hipGraphAddDependencies_v2;
+    struct
+    {
+        hipGraph_t              graph;
+        const hipGraphNode_t*   from;
+        const hipGraphNode_t*   to;
+        const hipGraphEdgeData* edgeData;
+        size_t                  numDependencies;
+    } hipGraphRemoveDependencies_v2;
+    struct
+    {
+        hipGraph_t        graph;
+        hipGraphNode_t*   from;
+        hipGraphNode_t*   to;
+        hipGraphEdgeData* edgeData;
+        size_t*           numEdges;
+    } hipGraphGetEdges_v2;
+    struct
+    {
+        hipGraphNode_t    node;
+        hipGraphNode_t*   pDependencies;
+        hipGraphEdgeData* edgeData;
+        size_t*           pNumDependencies;
+    } hipGraphNodeGetDependencies_v2;
+    struct
+    {
+        hipGraphNode_t    node;
+        hipGraphNode_t*   pDependentNodes;
+        hipGraphEdgeData* edgeData;
+        size_t*           pNumDependentNodes;
+    } hipGraphNodeGetDependentNodes_v2;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
