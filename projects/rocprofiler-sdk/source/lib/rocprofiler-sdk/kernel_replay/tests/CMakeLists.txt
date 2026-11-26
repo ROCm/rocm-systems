@@ -25,6 +25,17 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
+# Coverage instruments host code built with GCC. Clang rejects -fprofile-abs-path, and
+# instrumented device code does not link, so HIP takes the coverage flags without them.
+# With no flags at all, the kernels keep the device heap and hostcall arguments, and HIP
+# allocates memory for them that the snapshot tests then capture.
+if("${CMAKE_HIP_FLAGS_COVERAGE}" STREQUAL "")
+    separate_arguments(_coverage_flags NATIVE_COMMAND "${CMAKE_CXX_FLAGS_COVERAGE}")
+    list(FILTER _coverage_flags EXCLUDE REGEX
+         "^(-fprofile-.*|-ftest-coverage|--coverage)$")
+    list(JOIN _coverage_flags " " CMAKE_HIP_FLAGS_COVERAGE)
+endif()
+
 set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
