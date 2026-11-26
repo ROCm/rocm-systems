@@ -68,7 +68,8 @@ Result finish_manifest(const InputProgram &program, std::span<const uint8_t> ima
   const KernelDescriptorInfo &kernel = *found;
   manifest.original = program.identity;
   manifest.prepared = {digest(image), image.size()};
-  manifest.options = mvp_options_digest();
+  manifest.options = mvp_options_digest(program.flat_policy);
+  manifest.flat_exclusions = program.flat_exclusions;
   manifest.target = program.target->id;
   manifest.wave_size = program.wave_size;
   manifest.code_object_abi = 5;
@@ -164,7 +165,7 @@ Result append_program_facts(const InputProgram &program, const std::vector<Instr
           return site.kind == InstrumentationKind::BeforeInst &&
                  site.original_offset == access.original_offset;
         });
-    if (mapping == sites.end() || mapping->guest_size != 8) {
+    if (mapping == sites.end() || mapping->guest_size != access.guest_size) {
       return reject(error, "callable DBI lowering omitted an LDS site mapping");
     }
     manifest.sites.push_back({.id = access.site,
@@ -172,8 +173,10 @@ Result append_program_facts(const InputProgram &program, const std::vector<Instr
                               .access = access.kind,
                               .width = access.width,
                               .lds_ranges = access.lds_ranges,
+                              .origin = access.origin,
+                              .assumption = access.assumption,
                               .original_offset = access.original_offset,
-                              .original_size = 8,
+                              .original_size = access.guest_size,
                               .prepared_guest_offset = mapping->guest_offset,
                               .prepared_guest_size = mapping->guest_size,
                               .probe_offset = mapping->instrumentation_offset,
@@ -287,7 +290,7 @@ Result validate_image_entry_cfg(const InputProgram &program, const Manifest &man
 FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
                                              const TargetProfile &target,
                                              std::span<const std::string_view> entries,
-                                             InputError &error) {
+                                             InputError &error, FlatPolicy flat_policy) {
   const InputLimits limits;
   // Each selected program owns a copy of the image. Divide to bound their total
   // bytes without overflowing a size * count product; the empty check must stay
@@ -311,7 +314,8 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
                .message = "duplicate selected entry name"};
       return Result::failure();
     }
-    FailureOr<InputProgram> program = build_image_entry_program(original, target, name, error);
+    FailureOr<InputProgram> program =
+        build_image_entry_program(original, target, name, error, limits, flat_policy);
     if (program.failed()) {
       return Result::failure();
     }
@@ -488,7 +492,8 @@ FailureOr<PreparedImageArtifact> lower_image(std::span<const uint8_t> original,
   }
   std::ranges::sort(facts.entries, {}, &ImageEntryFacts::key);
   std::ranges::sort(selected_keys);
-  facts.selection_profile = selection_profile_digest(selected_keys, scope);
+  facts.selection_profile =
+      selection_profile_digest(selected_keys, scope, mvp_options_digest(flat_policy));
   util::StringDiagnostic contract_error;
   if (verify_artifact_images(facts, original, artifact.image, contract_error.emitter()).failed()) {
     return reject(error, contract_error.message());
@@ -515,8 +520,9 @@ Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifa
   }
   const TargetProfile *target = target_profile(artifact.manifest.target);
   const rocjitsu::IsaFamily arch = target->arch;
-  const FailureOr<InputProgram> program =
-      build_input_program(original, *target, artifact.manifest.entry.name, error);
+  const FailureOr<InputProgram> program = build_input_program(
+      original, *target, artifact.manifest.entry.name, error, {},
+      saved_flat_policy(artifact.manifest.options).value_or(FlatPolicy::Strict));
   if (program.failed()) {
     return Result::failure();
   }
@@ -588,8 +594,10 @@ Result validate_prepared(std::span<const uint8_t> original, const PreparedArtifa
 }
 
 FailureOr<PreparedArtifact> prepare(std::span<const uint8_t> original, const TargetProfile &target,
-                                    std::string_view entry, InputError &error) {
-  const FailureOr<InputProgram> program = build_input_program(original, target, entry, error);
+                                    std::string_view entry, InputError &error,
+                                    FlatPolicy flat_policy) {
+  const FailureOr<InputProgram> program =
+      build_input_program(original, target, entry, error, {}, flat_policy);
   if (program.failed()) {
     return Result::failure();
   }
@@ -609,12 +617,14 @@ FailureOr<PreparedArtifact> prepare(std::span<const uint8_t> original, const Tar
 FailureOr<PreparedImageArtifact> prepare_image(std::span<const uint8_t> original,
                                                const TargetProfile &target,
                                                std::span<const std::string_view> entries,
-                                               InputError &error) {
-  FailureOr<PreparedImageArtifact> artifact = lower_image(original, target, entries, error);
+                                               InputError &error, FlatPolicy flat_policy) {
+  FailureOr<PreparedImageArtifact> artifact =
+      lower_image(original, target, entries, error, flat_policy);
   if (artifact.failed()) {
     return Result::failure();
   }
-  const FailureOr<PreparedImageArtifact> canonical = lower_image(original, target, entries, error);
+  const FailureOr<PreparedImageArtifact> canonical =
+      lower_image(original, target, entries, error, flat_policy);
   if (canonical.failed()) {
     return Result::failure();
   }

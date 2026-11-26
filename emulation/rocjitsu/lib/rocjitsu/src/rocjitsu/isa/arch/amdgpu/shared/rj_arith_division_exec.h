@@ -19,8 +19,8 @@ namespace rocjitsu::amdgpu::arith {
 
 enum class DivisionOperation { Scale, Fmas, Fixup };
 
-// SCALE produces SDST after its vector result. CDNA preserves inactive bits from VCC;
-// the RDNA policy clears them.
+// SCALE writes SDST after its vector result. preserve_inactive_condition keeps
+// masked-off bits from pre-instruction VCC; otherwise they are cleared.
 // FMAS consumes pre-instruction VCC. FMAS/FIXUP optionally accumulate
 // architectural exception state. All sources are acquired before any destination is written.
 template <unsigned Width, DivisionOperation Op, typename Wave32, typename Wave64,

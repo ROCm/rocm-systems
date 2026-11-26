@@ -16,55 +16,11 @@
 
 namespace {
 
-// Evaluate a gfx11 FP16/BF16 tile with already-resolved semantics. Packed
-// results preserve the unselected half of D; errors leave all of D unchanged.
-template <bool Bf16, int Lanes, bool Packed = false>
-int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-         const uint32_t *const *b, const uint32_t *const *c) {
-  if (int error = rocjitsu::arith::validate(
-          flags,
-          instruction_flags & ~uint64_t(rocjitsu::arith::kWmmaInstructionFlags |
-                                        (Packed ? RJ_ARITH_WMMA_HIGH_C_D : 0)),
-          rocjitsu::arith::kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
-    return error;
-  }
-#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
-  if constexpr (Bf16) {
-    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
-        !rocjitsu::arith::is_exact(flags) &&
-        rocjitsu::arith::wmma_x86_64_v4_bf16<Lanes, true, Packed>(uint32_t(instruction_flags), d, a,
-                                                                  b, c)) {
-      return RJ_ARITH_SUCCESS;
-    }
-  }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V4)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
-    if (rocjitsu::arith::is_exact(flags)) {
-      rocjitsu::arith::wmma_exact_x86_64_v4<Bf16, Lanes, true, Packed>(
-          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
-    } else {
-      rocjitsu::arith::wmma_loose_x86_64_v4<Bf16, Lanes, true, Packed>(
-          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
-    }
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
-#if defined(RJ_ARITH_HAVE_X86_64_V3)
-  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
-    if (rocjitsu::arith::is_exact(flags)) {
-      rocjitsu::arith::wmma_exact_x86_64_v3<Bf16, Lanes, true, Packed>(
-          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
-    } else if constexpr (Packed) {
-      rocjitsu::arith::wmma_packed_x86_64_v3<Bf16, Lanes, true>(
-          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
-    } else {
-      rocjitsu::arith::wmma_f32_x86_64_v3<Bf16, Lanes, true>(uint32_t(instruction_flags), d, a, b,
-                                                             c);
-    }
-    return RJ_ARITH_SUCCESS;
-  }
-#endif
+// Keep the scalar reference out of line so SIMD dispatch needs no result buffer.
+template <bool Bf16, int Lanes, bool Packed>
+[[gnu::noinline]] void wmma_scalar(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+                                   const uint32_t *const *a, const uint32_t *const *b,
+                                   const uint32_t *const *c) {
   // gfx11 layouts replicate A/B in each 16-lane group and interleave output
   // rows across groups (rocjitsu shared/mma_exec.h).
   constexpr int Groups = Lanes / 16, Registers = 256 / Lanes;
@@ -129,14 +85,68 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
       d[reg][lane] = result[reg][lane];
     }
   }
+}
+
+// Evaluate a gfx11 FP16/BF16 tile with already-resolved semantics. Packed
+// results preserve the unselected half of D; errors leave all of D unchanged.
+template <bool Bf16, int Lanes, bool Packed = false>
+int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
+         const uint32_t *const *b, const uint32_t *const *c) {
+  if (int error = rocjitsu::arith::validate(
+          flags,
+          instruction_flags & ~uint64_t(rocjitsu::arith::kWmmaInstructionFlags |
+                                        (Packed ? RJ_ARITH_WMMA_HIGH_C_D : 0)),
+          rocjitsu::arith::kMatrixIgnoredFpFlags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
+    return error;
+  }
+#if defined(RJ_ARITH_HAVE_X86_64_V4_BF16)
+  if constexpr (Bf16) {
+    if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4) &&
+        !rocjitsu::arith::is_exact(flags) &&
+        rocjitsu::arith::wmma_x86_64_v4_bf16<Lanes, true, Packed>(uint32_t(instruction_flags), d, a,
+                                                                  b, c)) {
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    if (rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::wmma_exact_x86_64_v4<Bf16, Lanes, true, Packed>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    } else {
+      rocjitsu::arith::wmma_loose_x86_64_v4<Bf16, Lanes, true, Packed>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    if (rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::wmma_exact_x86_64_v3<Bf16, Lanes, true, Packed>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    } else if constexpr (Packed) {
+      rocjitsu::arith::wmma_packed_x86_64_v3<Bf16, Lanes, true>(
+          uint32_t(instruction_flags), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    } else {
+      rocjitsu::arith::wmma_f32_x86_64_v3<Bf16, Lanes, true>(uint32_t(instruction_flags), d, a, b,
+                                                             c);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+  wmma_scalar<Bf16, Lanes, Packed>(flags, instruction_flags, d, a, b, c);
   return RJ_ARITH_SUCCESS;
 }
 
 // Evaluate a gfx11 integer tile with signed C and optional staged saturation
 // (rocjitsu de4654cfc34). Requires validated modifiers; D may alias inputs.
+// Keep out of line so SIMD dispatch needs no result buffer.
 template <int Bits, int Lanes, bool Clamp>
-void integer_wmma_scalar(uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
-                         const uint32_t *const *b, const uint32_t *const *c) {
+[[gnu::noinline]] void integer_wmma_scalar(uint64_t instruction_flags, uint32_t *const *d,
+                                           const uint32_t *const *a, const uint32_t *const *b,
+                                           const uint32_t *const *c) {
   constexpr int Groups = Lanes / 16, Registers = 256 / Lanes, PerReg = 32 / Bits;
   uint32_t result[Registers][Lanes];
   for (int row = 0; row < 16; ++row) {
@@ -188,6 +198,13 @@ int integer_wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
   if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_ZEN4)) {
     rocjitsu::arith::integer_wmma_replicated_avx512vnni<Bits, Lanes>(uint32_t(instruction_flags), d,
                                                                      a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
+    rocjitsu::arith::integer_wmma_replicated_x86_64_v4<Bits, Lanes>(uint32_t(instruction_flags), d,
+                                                                    a, b, c);
     return RJ_ARITH_SUCCESS;
   }
 #endif

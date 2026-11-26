@@ -176,6 +176,65 @@ foreach(
             )
             list(APPEND _target_fixtures ${_image})
         endforeach()
+        set(_flat_specs)
+        foreach(_direction IN ITEMS load store)
+            if(_direction STREQUAL "load")
+                set(_scenarios
+                    overlap
+                    adjacent
+                    empty
+                    ordered
+                    oob
+                    offset
+                    readread
+                    likely
+                    alternate
+                    unknown
+                    nongroup
+                )
+                if(_gfx12)
+                    list(APPEND _scenarios underflow overflow)
+                endif()
+            else()
+                set(_scenarios overlap adjacent ordered tail)
+            endif()
+            string(TOUPPER "${_direction}" _direction_define)
+            foreach(_scenario IN LISTS _scenarios)
+                set(_name flat-${_direction}-${_scenario})
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _flat_specs "${_name}:32:0:0:0:0")
+                set(_flat_options_${_name}
+                    -DFLAT_${_direction_define}=1
+                    -DFLAT_${_scenario_define}=1
+                )
+                if(NOT _scenario MATCHES "^(oob|underflow|overflow)$")
+                    list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+                endif()
+            endforeach()
+        endforeach()
+        list(
+            APPEND _flat_cases_${_gpu}_${_wave_size}
+            flat-load-strict
+            flat-load-provenstrict
+            flat-load-unknownstrict
+            flat-load-nongroupstrict
+        )
+        foreach(_scenario IN ITEMS values overlap adjacent)
+            set(_name flat-half-${_scenario})
+            string(TOUPPER "${_scenario}" _scenario_define)
+            list(APPEND _flat_specs "${_name}:16:0:0:0:0")
+            set(_flat_options_${_name} -DFLAT_${_scenario_define}=1)
+            list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+        endforeach()
+        foreach(_bits IN ITEMS 64 128)
+            foreach(_scenario IN ITEMS values overlap adjacent)
+                set(_name flat-b${_bits}-${_scenario})
+                string(TOUPPER "${_scenario}" _scenario_define)
+                list(APPEND _flat_specs "${_name}:${_bits}:0:0:0:0")
+                set(_flat_options_${_name} -DFLAT_${_scenario_define}=1)
+                list(APPEND _flat_cases_${_gpu}_${_wave_size} ${_name})
+            endforeach()
+        endforeach()
         set(_atomic_specs)
         set(_atomic_forms u32 u64 f32 cas)
         if(_legacy OR _gpu STREQUAL "gfx1250")
@@ -277,6 +336,7 @@ foreach(
             IN
             ITEMS
                 ${_atomic_specs}
+                ${_flat_specs}
                 ${_transpose_specs}
                 u16:16:0:0:0:0
                 i16:16:1:0:0:0
@@ -351,6 +411,23 @@ foreach(
                 string(TOUPPER "${_scenario}" _scenario_define)
                 list(APPEND _peer_option -DTR_${_scenario_define}=1)
             endif()
+            if(_name MATCHES "^flat-")
+                set(_fixture_source fixtures/group_flat.s)
+                set(_fixture_deps)
+                if(_width EQUAL 16)
+                    set(_fixture_source fixtures/group_flat_half.s)
+                elseif(_width EQUAL 64 OR _width EQUAL 128)
+                    set(_fixture_source fixtures/group_flat_wide.s)
+                endif()
+            else()
+                set(_fixture_source fixtures/native_widths.s)
+                set(_fixture_deps
+                    fixtures/native_atomic.inc
+                    fixtures/native_d16.inc
+                    fixtures/native_dual.inc
+                    fixtures/native_transpose.inc
+                )
+            endif()
             set(_object ${_directory}/width-${_name}.o)
             set(_image ${_directory}/width-${_name}.hsaco)
             add_custom_command(
@@ -365,15 +442,12 @@ foreach(
                     -DCONSAN_SIGNED=${_signed} -DCONSAN_HIGH=${_high}
                     -DCONSAN_ALIAS=${_alias} -DCONSAN_COLLISION=${_collision}
                     ${_peer_option} ${_dual_options_${_name}}
-                    ${_atomic_options_${_name}} -c
-                    ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/native_widths.s -o
-                    ${_object}
+                    ${_atomic_options_${_name}} ${_flat_options_${_name}} -c
+                    ${CMAKE_CURRENT_SOURCE_DIR}/${_fixture_source} -o ${_object}
                 DEPENDS
-                    fixtures/native_widths.s
-                    fixtures/native_atomic.inc
-                    fixtures/native_d16.inc
-                    fixtures/native_dual.inc
-                    fixtures/native_transpose.inc
+                    ${_fixture_source}
+                    fixtures/lds_fixture_macros.s
+                    ${_fixture_deps}
                     ${AMDCXX}
                 VERBATIM
             )

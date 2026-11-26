@@ -41,8 +41,6 @@ class BroadcastWaveTester : public Tester {
   explicit BroadcastWaveTester(TesterArguments args);
   virtual ~BroadcastWaveTester();
 
-  std::string typeName() const override { return type_name<T1>(); }
-
  protected:
   virtual void resetBuffers(size_t size) override;
 

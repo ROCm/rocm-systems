@@ -1619,15 +1619,15 @@ VmAccessOutcome execute_atomic_rmw(
   std::optional<DeviceCacheMaintenanceLease> prepared_boundary;
   std::optional<DeviceCacheCoherence::AtomicBoundary> legacy_boundary;
   if (prepared_boundary_handler) {
-    try {
-      auto prepared = prepared_boundary_handler(vmid);
-      if (prepared) {
-        prepared_boundary.emplace(std::move(*prepared));
-      }
-    } catch (const CacheMaintenanceUnavailable &) {
-      return VmAccessOutcome::Unavailable;
-    } catch (const util::Exception &) {
+    auto prepared = prepared_boundary_handler(vmid);
+    if (prepared.failed()) {
       return VmAccessOutcome::Revoked;
+    }
+    if (prepared.value()) {
+      if (prepared.value()->outcome == CacheMaintenanceOutcome::Retry) {
+        return VmAccessOutcome::Unavailable;
+      }
+      prepared_boundary.emplace(std::move(prepared.value()->lease));
     }
     if (prepared_boundary &&
         !prepared_boundary->prepared_atomic_boundary_for(l2->coherence_domain().get())) {

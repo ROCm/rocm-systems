@@ -34,7 +34,7 @@ inline constexpr std::string_view kMvpOptions =
     "native-lds-widths=1,2,4,8,12,16;native-lds-epoch-workgroup-barriers;single-block-loop;"
     "loop-lane-bank=ctz-mod4;sync-"
     "quota=16;workgroup-id=entry-scalar;workgroups-1d=1..16;mask64;address-groups-per-"
-    "site=4;collision=on;relaxed-lds-atomic=single-range-access";
+    "site=4;collision=on;relaxed-lds-atomic=single-range-access;group-flat=";
 // Software record slots for distinct effective LDS address groups per wave/site.
 // Acyclic accesses fill sequential slots; lanes beyond four groups cause loss.
 // Repeated accesses instead claim immutable lane-based banks, where a collision
@@ -61,6 +61,23 @@ inline constexpr std::array<KernargExtensionPayloadLayout, 1> kContextPointerPay
 
 enum class AnalysisKind : uint32_t { Invalid = 0, LdsRaceDetection = 1 };
 enum class RecordKind : uint32_t { Access = 1 };
+// A GroupFlat site records the premise, if any, used to interpret the guest address.
+enum class FlatPolicy { Likely, Strict };
+enum class FlatAssumption : uint32_t { None, SelectedSharedHigh };
+constexpr std::string_view flat_assumption_text(FlatAssumption assumption) {
+  if (assumption == FlatAssumption::SelectedSharedHigh)
+    return "the selected pointer high word belongs to this workgroup's shared aperture";
+  return {};
+}
+enum class FlatExclusionReason : uint32_t { NonGroup = 1, Unresolved, Strict };
+struct FlatExclusion {
+  uint64_t original_offset = 0;
+  uint32_t original_size = 0;
+  FlatExclusionReason reason = FlatExclusionReason::Unresolved;
+  FlatAssumption assumption = FlatAssumption::None;
+  bool operator==(const FlatExclusion &) const = default;
+};
+enum class AccessOrigin : uint32_t { Native = 0, GroupFlat = 1 };
 enum class AccessKind : uint32_t { Read = 1, Write = 2, Atomic = 3 };
 enum class ScopeKind : uint32_t {
   NativeLdsNoSynchronization = 1,
@@ -205,6 +222,8 @@ public:
   // Byte width of each range. Zero is unspecified/invalid.
   uint32_t width = 0;
   LdsRangeRecipe lds_ranges{};
+  AccessOrigin origin = AccessOrigin::Native;
+  FlatAssumption assumption = FlatAssumption::None;
   uint64_t original_offset = 0;
   uint32_t original_size = 0;
   uint64_t prepared_guest_offset = 0;
@@ -276,6 +295,7 @@ public:
   uint64_t prepared_text_bytes = 0;
   EntryFacts entry;
   std::vector<SiteFacts> sites;
+  std::vector<FlatExclusion> flat_exclusions;
   std::vector<BarrierFacts> barriers;
   bool operator==(const Manifest &) const = default;
 };
@@ -313,7 +333,8 @@ initialize_transport(const Manifest &manifest, const LaunchDimensions &dimension
                      uint64_t report_address, util::DiagnosticEmitter diagnostic = {});
 
 [[nodiscard]] Digest digest(std::span<const uint8_t> bytes);
-[[nodiscard]] Digest mvp_options_digest();
+[[nodiscard]] Digest mvp_options_digest(FlatPolicy policy = FlatPolicy::Likely);
+[[nodiscard]] std::optional<FlatPolicy> saved_flat_policy(const Digest &options);
 
 [[nodiscard]] Result validate_manifest(const Manifest &manifest,
                                        util::DiagnosticEmitter diagnostic = {},

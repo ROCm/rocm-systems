@@ -10,12 +10,17 @@ import pytest
 from amdisa.codegen import CodeGenerator
 from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen.execute.rj_arith_vopd import gen_vopd_execution
-from amdisa.isa_profile import Rdna3Profile, Rdna4Profile, Cdna5Profile
+from amdisa.isa_profile import Rdna3Profile, Rdna4Profile, Cdna5Profile, Rdna3_5Profile
 
 
 @pytest.mark.parametrize(
     'arch,profile',
-    [('rdna3', Rdna3Profile()), ('rdna4', Rdna4Profile()), ('cdna5', Cdna5Profile())],
+    [
+        ('rdna3', Rdna3Profile()),
+        ('rdna4', Rdna4Profile()),
+        ('cdna5', Cdna5Profile()),
+        ('rdna3_5', Rdna3_5Profile()),
+    ],
 )
 def test_dual_routes_every_slot_and_removes_old_execution(
     tmp_path, monkeypatch, arch, profile
@@ -36,7 +41,9 @@ def test_dual_routes_every_slot_and_removes_old_execution(
     assert 'execute_dual_pair' in body
     wave64_guard = body.split('if (wf.wf_size() != 32) {', 1)[1].split('}', 1)[0]
     assert 'return;' in wave64_guard
-    assert ('InvalidInstructionEncoding' in wave64_guard) == (arch != 'rdna3')
+    assert ('InvalidInstructionEncoding' in wave64_guard) == (
+        arch not in ('rdna3', 'rdna3_5')
+    )
     assert 'UnimplementedInst' not in wave64_guard
     dx9 = body.split('case kVopdMulDx9ZeroF32:', 1)[1].split('case ', 1)[0]
     assert 'arithmetic_flags()' in dx9
@@ -44,6 +51,10 @@ def test_dual_routes_every_slot_and_removes_old_execution(
     for op in profile.vopd_slot_ops:
         assert f'case k{op.enum_name}:' in body
         assert f'return rj_arith_{op.mnemonic}' in body
+        if arch == 'rdna3_5' and op.mnemonic == 'v_dual_fmac_f32':
+            case = body.split('case kVopdFmacF32:', 1)[1].split('case ', 1)[0]
+            assert 'return rj_arith_v_dual_fmac_f32_w32_gfx1150(' in case
+            assert 'return rj_arith_v_dual_fmac_f32_w32(' not in case
     for legacy in (
         'execute_slot',
         'uses_src_neg_modifier',
@@ -52,6 +63,8 @@ def test_dual_routes_every_slot_and_removes_old_execution(
     ):
         assert legacy not in header
         assert legacy not in body
+    assert 'gfx12_compat_dual_mul' not in body
+    assert 'fp_status::' not in body
     assert 'try_execute_vopd' not in body
     assert 'fp_mode::arithmetic' not in body
     assert 'gfx12_dot' not in body and 'gfx11_dot' not in body
@@ -93,7 +106,7 @@ def test_dual_checked_in_execution_matches_generator():
         Path(__file__).resolve().parents[3]
         / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
     )
-    for arch in ('rdna3', 'rdna4', 'cdna5'):
+    for arch in ('rdna3', 'rdna4', 'rdna3_5', 'cdna5'):
         text = (root / arch / 'vopd_exec.cpp').read_text()
         assert text.count('return rj_arith_v_dual_') == (26 if arch == 'cdna5' else 17)
         assert 'execute_dual_pair' in text

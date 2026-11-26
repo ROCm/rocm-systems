@@ -1221,8 +1221,11 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 			props->NumSIMDPerCU = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "max_slots_scratch_cu") == 0)
 			props->MaxSlotsScratchCU = (uint32_t)prop_val;
-		else if (strcmp(prop_name, "fw_version") == 0)
+		else if (strcmp(prop_name, "fw_version") == 0) {
+			/* EngineId.uCode keeps the low 10 bits for older readers. */
 			props->EngineId.Value = (uint32_t)prop_val & 0x3ff;
+			props->uCodeEngineVersions.uCodeCompute = (uint32_t)prop_val & 0xffff;
+		}
 		else if (strcmp(prop_name, "vendor_id") == 0)
 			props->VendorId = (uint32_t)prop_val;
 		else if (strcmp(prop_name, "device_id") == 0)
@@ -1240,7 +1243,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(HsaKFDContext *ctx,
 		else if (strcmp(prop_name, "drm_render_minor") == 0)
 			props->DrmRenderMinor = (int32_t)prop_val;
 		else if (strcmp(prop_name, "sdma_fw_version") == 0)
-			props->uCodeEngineVersions.Value = (uint32_t)prop_val & 0x3ff;
+			props->uCodeEngineVersions.uCodeSDMA = (uint32_t)prop_val & 0x3ff;
 		else if (strcmp(prop_name, "hive_id") == 0)
 			props->HiveID = prop_val;
 		else if (strcmp(prop_name, "unique_id") == 0)

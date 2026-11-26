@@ -48,6 +48,7 @@ bool admitted_instruction(const Instruction &instruction) {
   case amdgpu::Operation::S_LOAD_B64:
   case amdgpu::Operation::S_WAITCNT:
   case amdgpu::Operation::S_WAITCNT_VSCNT:
+  case amdgpu::Operation::S_CSELECT_B32:
   case amdgpu::Operation::S_MOV_B32:
   case amdgpu::Operation::S_AND_SAVEEXEC_B32:
   case amdgpu::Operation::S_AND_B32:
@@ -217,6 +218,44 @@ std::optional<RegisterRef> allocated_vgpr_tuple(const Operand *operand, uint32_t
   return reg;
 }
 
+uint32_t group_flat_width(const Instruction &instruction) {
+  if (instruction.amdgpu_memory_addressing() != amdgpu::MemoryAddressing::Flat)
+    return 0;
+  using Op = amdgpu::Operation;
+  switch (instruction.amdgpu_operation()) {
+  case Op::FLAT_LOAD_USHORT:
+  case Op::FLAT_LOAD_U16:
+  case Op::FLAT_LOAD_SSHORT:
+  case Op::FLAT_LOAD_I16:
+  case Op::FLAT_LOAD_SHORT_D16:
+  case Op::FLAT_LOAD_D16_B16:
+  case Op::FLAT_LOAD_SHORT_D16_HI:
+  case Op::FLAT_LOAD_D16_HI_B16:
+  case Op::FLAT_STORE_SHORT:
+  case Op::FLAT_STORE_B16:
+  case Op::FLAT_STORE_SHORT_D16_HI:
+  case Op::FLAT_STORE_D16_HI_B16:
+    return 2;
+  case Op::FLAT_LOAD_B32:
+  case Op::FLAT_LOAD_DWORD:
+  case Op::FLAT_STORE_B32:
+  case Op::FLAT_STORE_DWORD:
+    return 4;
+  case Op::FLAT_LOAD_DWORDX2:
+  case Op::FLAT_LOAD_B64:
+  case Op::FLAT_STORE_DWORDX2:
+  case Op::FLAT_STORE_B64:
+    return 8;
+  case Op::FLAT_LOAD_DWORDX4:
+  case Op::FLAT_LOAD_B128:
+  case Op::FLAT_STORE_DWORDX4:
+  case Op::FLAT_STORE_B128:
+    return 16;
+  default:
+    return 0;
+  }
+}
+
 } // namespace
 
 Result qualify_lds_race_entry(const InputProgram &program, InputError &error) {
@@ -297,7 +336,8 @@ qualify_lds_race_cfg(std::span<const std::unique_ptr<BasicBlock>> blocks, InputE
 
 Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::IsaFamily arch,
                                      uint32_t allocated_vgprs,
-                                     std::vector<NativeLdsAccess> &accesses, InputError &error) {
+                                     std::vector<NativeLdsAccess> &accesses, InputError &error,
+                                     const FlatSitePolicy *flat_policy) {
   const std::string_view name = instruction.mnemonic();
   const amdgpu::Operation operation = instruction.amdgpu_operation();
   const amdgpu::MemoryAddressing addressing = instruction.amdgpu_memory_addressing();
@@ -306,6 +346,71 @@ Result classify_lds_race_instruction(const Instruction &instruction, rocjitsu::I
                                               operation == amdgpu::Operation::S_BARRIER_WAIT)) ||
       (!uses_split_workgroup_barrier(arch) && operation == amdgpu::Operation::S_BARRIER)) {
     return Result::success(); // The complete original group/CFG is qualified below.
+  }
+  if (const uint32_t flat_width = group_flat_width(instruction)) {
+    const bool rdna = arch == IsaFamily::Rdna3;
+    const bool wide = arch == IsaFamily::Rdna4 || arch == IsaFamily::Cdna5;
+    const bool read = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Load;
+    const uint32_t *words = instruction.raw_encoding();
+    int32_t immediate;
+    if (wide) {
+      // VFLAT uses a VGPR pair when SADDR is null. Exclude routing, scale,
+      // cache/scope and reserved bits. The unused load/store value must be zero.
+      const uint32_t value_mask = read ? 0xffu : (0xffu << 23);
+      if (instruction.size() != 12 || (words[0] & 0x00c03fffu) != 0x7c ||
+          (words[1] & ~value_mask) != 0)
+        return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                  "unsupported Group-FLAT encoding", offset);
+      immediate = static_cast<int32_t>(words[2]) >> 8;
+    } else {
+      const uint32_t saddr = rdna ? 0x7c : 0;
+      const uint32_t unused_value = read ? 0x0000ff00u : 0xff000000u;
+      if ((!rdna && arch != IsaFamily::Cdna3 && arch != IsaFamily::Cdna4) ||
+          instruction.size() != 8 || (words[0] & 0x0203f000u) || (words[1] & unused_value) ||
+          ((words[1] >> 16) & 0xff) != saddr)
+        return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                  "unsupported Group-FLAT encoding", offset);
+      immediate = words[0] & 0xfff;
+    }
+    const auto address = allocated_vgpr_tuple(instruction.src_operand(0), 2, allocated_vgprs);
+    const auto value =
+        allocated_vgpr_tuple(read ? instruction.dst_operand(0) : instruction.src_operand(1),
+                             (flat_width + 3) / 4, allocated_vgprs);
+    if (!address || !value)
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "FLAT operands exceed allocation", offset);
+    const RegisterRef high{RegClass::VGPR, static_cast<uint16_t>(address->index + 1), 1};
+    if (!flat_policy)
+      return reject_instruction(error, InputErrorCode::UnsupportedAccess,
+                                "FLAT access requires aperture classification", offset);
+    FlatAssumption assumption = FlatAssumption::None;
+    if (!flat_policy->shared_high.contains(high)) {
+      if (flat_policy->selected_shared_high.contains(high))
+        assumption = FlatAssumption::SelectedSharedHigh;
+      if (flat_policy->non_group_high.contains(high) || assumption == FlatAssumption::None ||
+          flat_policy->mode == FlatPolicy::Strict) {
+        const auto reason = flat_policy->non_group_high.contains(high)
+                                ? FlatExclusionReason::NonGroup
+                            : assumption == FlatAssumption::None ? FlatExclusionReason::Unresolved
+                                                                 : FlatExclusionReason::Strict;
+        flat_policy->exclusions.push_back(
+            {offset, static_cast<uint32_t>(instruction.size()), reason, assumption});
+        return Result::success();
+      }
+    }
+    // The shared aperture is 4-GiB aligned. Under the saved classification,
+    // BeforeInst captures its relative byte offset in the low VGPR. The
+    // ordinary probe widens before adding the immediate and flags overflow.
+    accesses.push_back({.site = static_cast<uint32_t>(accesses.size()),
+                        .original_offset = offset,
+                        .kind = read ? AccessKind::Read : AccessKind::Write,
+                        .address_vgpr = address->index,
+                        .immediate_bytes = immediate,
+                        .guest_size = static_cast<uint32_t>(instruction.size()),
+                        .width = flat_width,
+                        .origin = AccessOrigin::GroupFlat,
+                        .assumption = assumption});
+    return Result::success();
   }
   const bool atomic = instruction.amdgpu_memory_kind() == amdgpu::MemoryKind::Atomic;
   const NativeLdsForm form = native_lds_form(instruction);
@@ -585,7 +690,7 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
           operation == amdgpu::Operation::S_BARRIER_WAIT) {
         barrier_offsets.insert(instruction.src_loc());
       }
-      if (native_lds_form(instruction).width != 0) {
+      if (native_lds_form(instruction).width != 0 || group_flat_width(instruction) != 0) {
         access_offsets.insert(instruction.src_loc());
       }
     }
@@ -604,15 +709,35 @@ Result validate_lds_race_accesses(const InputProgram &program, const Manifest &m
   if (barrier_offsets != expected_barriers) {
     return reject(error, "final reachable barrier multiplicity differs from original");
   }
-  if (access_offsets.size() != manifest.sites.size()) {
+  if (access_offsets.size() != manifest.sites.size() + program.flat_exclusions.size()) {
     return reject(error, "final reachable guest access multiplicity differs from original");
   }
   for (const SiteFacts &site : manifest.sites) {
-    if (!access_offsets.contains(site.prepared_guest_offset) ||
+    if (access_offsets.erase(site.prepared_guest_offset) != 1 ||
         std::memcmp(program.image.data() + program.text_file_offset + site.original_offset,
-                    prepared_text.data() + site.prepared_guest_offset, 8) != 0) {
+                    prepared_text.data() + site.prepared_guest_offset, site.original_size) != 0) {
       return reject(error, "final guest LDS operation/map differs from original bytes");
     }
+  }
+  // Uninstrumented FLAT instructions can share an opcode with an observed
+  // FLAT site. Check their bytes/multiplicity after consuming the mapped sites.
+  const bool wide_flat =
+      program.target->arch == IsaFamily::Rdna4 || program.target->arch == IsaFamily::Cdna5;
+  const size_t flat_bytes = wide_flat ? 12 : 8;
+  std::multiset<std::array<uint8_t, 12>> excluded_guests;
+  for (const FlatExclusion &excluded : program.flat_exclusions) {
+    const uint64_t pc = excluded.original_offset;
+    std::array<uint8_t, 12> words{};
+    std::memcpy(words.data(), program.image.data() + program.text_file_offset + pc, flat_bytes);
+    excluded_guests.insert(words);
+  }
+  for (const uint64_t pc : access_offsets) {
+    std::array<uint8_t, 12> words{};
+    std::memcpy(words.data(), prepared_text.data() + pc, flat_bytes);
+    const auto found = excluded_guests.find(words);
+    if (found == excluded_guests.end())
+      return reject(error, "unmapped guest FLAT operation differs from an excluded original");
+    excluded_guests.erase(found);
   }
   return Result::success();
 }

@@ -189,7 +189,12 @@ void
 load(ArchiveT& ar, HSA_ENGINE_VERSION& data)
 {
     ROCP_SDK_LOAD_DATA_BITFIELD("uCodeSDMA", uCodeSDMA);
+    // The JSON key stays "uCodeRes". Newer hsakmt headers call the field uCodeCompute.
+#if defined(HSAKMT_HAS_UCODE_COMPUTE)
+    ROCP_SDK_LOAD_DATA_BITFIELD("uCodeRes", uCodeCompute);
+#else
     ROCP_SDK_LOAD_DATA_BITFIELD("uCodeRes", uCodeRes);
+#endif
 }
 
 template <typename ArchiveT>

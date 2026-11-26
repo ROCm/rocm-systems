@@ -11,9 +11,16 @@
 namespace rocjitsu::arith::x86_64_v4::scaled_widen_detail {
 // Narrow FP32 to F16/BF16 with RNE and optional finite-overflow saturation.
 // OCP decoding supplies quiet NaNs; native F16 conversion retains their bits.
-inline __m512i encode(__m512 value, ScaledDestination destination, bool saturate) {
+inline __m512i encode(__m512 value, ScaledDestination destination, bool saturate,
+                      bool flush_output = false) {
   auto bits = _mm512_castps_si512(value);
   if (destination == ScaledDestination::F32) {
+    if (flush_output) {
+      auto sub = _mm512_cmpeq_epi32_mask(_mm512_and_si512(bits, _mm512_set1_epi32(0x7f800000)),
+                                         _mm512_setzero_si512());
+      bits = _mm512_mask_mov_epi32(bits, sub,
+                                   _mm512_and_si512(bits, _mm512_set1_epi32(int(0x80000000U))));
+    }
     return bits;
   }
   auto magnitude = _mm512_and_si512(bits, _mm512_set1_epi32(0x7fffffff));
@@ -36,6 +43,12 @@ inline __m512i encode(__m512 value, ScaledDestination destination, bool saturate
     auto overflow = _mm512_cmpeq_epi32_mask(_mm512_and_si512(result, _mm512_set1_epi32(0x7fff)),
                                             _mm512_set1_epi32(infinity));
     result = _mm512_mask_sub_epi32(result, finite & overflow, result, _mm512_set1_epi32(1));
+  }
+  if (flush_output) {
+    auto sub = _mm512_cmpeq_epi32_mask(_mm512_and_si512(result, _mm512_set1_epi32(infinity)),
+                                       _mm512_setzero_si512());
+    result =
+        _mm512_mask_mov_epi32(result, sub, _mm512_and_si512(result, _mm512_set1_epi32(0x8000)));
   }
   return result;
 }

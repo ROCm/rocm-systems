@@ -7,23 +7,24 @@
 namespace rocjitsu::arith {
 // Compute all tied accumulator outputs in this ISA domain.
 template <int M, int K, bool Wmma>
-void sparse_matrix_i8_x86_64_v4(uint64_t controls, bool clamp, uint32_t *const *d,
-                                const uint32_t *const *a, const uint32_t *const *b,
-                                const uint32_t *const *index) {
-  RJ_ARITH_IMPL_NAMESPACE::sparse_matrix_i8_kernel<M, K, Wmma>(controls, clamp, d, a, b, index);
+void sparse_matrix_i8_x86_64_v4(uint64_t controls, bool clamp, bool clamp_per_pass,
+                                uint32_t *const *d, const uint32_t *const *a,
+                                const uint32_t *const *b, const uint32_t *const *index) {
+  RJ_ARITH_IMPL_NAMESPACE::sparse_matrix_i8_kernel<M, K, Wmma>(controls, clamp, clamp_per_pass, d,
+                                                               a, b, index);
 }
 template void sparse_matrix_i8_x86_64_v4<16, 64, false>(uint64_t controls, bool clamp,
-                                                        uint32_t *const *d,
+                                                        bool clamp_per_pass, uint32_t *const *d,
                                                         const uint32_t *const *a,
                                                         const uint32_t *const *b,
                                                         const uint32_t *const *index);
 template void sparse_matrix_i8_x86_64_v4<32, 32, false>(uint64_t controls, bool clamp,
-                                                        uint32_t *const *d,
+                                                        bool clamp_per_pass, uint32_t *const *d,
                                                         const uint32_t *const *a,
                                                         const uint32_t *const *b,
                                                         const uint32_t *const *index);
 template void sparse_matrix_i8_x86_64_v4<32, 64, false>(uint64_t controls, bool clamp,
-                                                        uint32_t *const *d,
+                                                        bool clamp_per_pass, uint32_t *const *d,
                                                         const uint32_t *const *a,
                                                         const uint32_t *const *b,
                                                         const uint32_t *const *index);

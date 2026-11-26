@@ -59,8 +59,10 @@ template <typename Action> std::string failure_message(Action action) {
 
 std::vector<uint8_t> hello_payload(uint16_t rank, uint16_t world_size, uint32_t seed,
                                    uint32_t id_size) {
+  constexpr size_t kRunIdSize = sizeof(kRunId) - 1;
   std::vector<uint8_t> payload;
-  tcp_bootstrap::detail::append_u16(payload, sizeof(kRunId) - 1);
+  payload.reserve(kRunIdSize + 3 * sizeof(uint16_t) + 2 * sizeof(uint32_t));
+  tcp_bootstrap::detail::append_u16(payload, kRunIdSize);
   payload.insert(payload.end(), std::begin(kRunId), std::end(kRunId) - 1);
   tcp_bootstrap::detail::append_u16(payload, rank);
   tcp_bootstrap::detail::append_u16(payload, world_size);

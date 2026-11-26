@@ -56,10 +56,11 @@ struct BinaryArithmeticOptions {
 };
 
 // Test ADD/SUB/SUBREV/MUL, using the independent scalar reference at the call site.
-// FP32, FP16 and FP64 have exact numeric support on these inputs; the loose-only FP16
-// entries of architectures without reviewed captures (half_exact = false) reject
-// explicit exact modes. Reporting is supported only by FP32 MUL, whose named tests
-// also exercise its literal exception cases separately.
+// FP32, packed FP16 and FP64 have exact numeric support on these inputs; scalar FP16
+// supports Loose/Compatibility but rejects explicit exact modes. Reporting is
+// supported only by FP32 MUL, whose
+// named tests also exercise its literal exception cases separately. Compatibility
+// classifiers likewise get instruction-specific cause witnesses at the call site.
 template <int Width, int Lanes, bool Packed = false, typename Call, typename Reference>
 void check_binary_arithmetic(Call call, Reference reference, bool gfx12,
                              bool fp_status_supported = false,

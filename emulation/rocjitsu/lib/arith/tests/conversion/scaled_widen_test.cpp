@@ -18,7 +18,7 @@
 namespace {
 using namespace rocjitsu::arith::test;
 
-// Independently decode OCP narrow values, retaining the input NaN sign.
+// Independently decode OCP narrow values, emitting -qNaN on input NaNs.
 float decode(int source, uint32_t raw) {
   if (source == 0) {
     int magnitude = raw & 7;
@@ -28,30 +28,29 @@ float decode(int source, uint32_t raw) {
   }
   uint32_t bits = fp8_conversion_reference(source == 2, uint8_t(raw));
   if ((bits & 0x7fffffffU) > 0x7f800000U) {
-    bits = ((raw & 0x80) << 24) | 0x7fc00000U;
+    bits = 0xffc00000U;
   }
   return std::bit_cast<float>(bits);
 }
 
-// Preserve the old generator's double scaling, followed by FP32 rounding and
-// optional 16-bit narrowing. The independent integer encoder supplies RNE.
-uint32_t reference(int source, int destination, uint32_t raw, uint32_t scale, bool saturate) {
+// Scale in double, round to FP32 and optional 16-bit RNE, honoring output denormal flush.
+uint32_t reference(int source, int destination, uint32_t raw, uint32_t scale, bool flush_output) {
   int exponent = (scale >> 23) & 255;
   if (exponent == 255) {
-    return destination == 0 ? 0x7fc00000U : destination == 1 ? 0x7e00U : 0x7fc0U;
+    return destination == 0 ? 0xffc00000U : destination == 1 ? 0xfe00U : 0xffc0U;
   }
   float value = float(double(decode(source, raw)) * std::ldexp(1.0, exponent - 127));
   uint32_t bits = std::bit_cast<uint32_t>(value);
+  if ((bits & 0x7fffffffU) > 0x7f800000U) {
+    return destination == 0 ? 0xffc00000U : destination == 1 ? 0xfe00U : 0xffc0U;
+  }
   if (!destination) {
-    return bits;
+    return flush_output && (bits & 0x7f800000U) == 0 ? (bits & 0x80000000U) : bits;
   }
   int fraction = destination == 1 ? 10 : 7, bias = destination == 1 ? 15 : 127;
   uint32_t result = uint32_t(conversion_reencode(bits, 23, 127, fraction, bias));
   uint32_t infinity = destination == 1 ? 0x7c00U : 0x7f80U;
-  if (saturate && (bits & 0x7fffffffU) < 0x7f800000U && (result & 0x7fff) == infinity) {
-    --result;
-  }
-  return result;
+  return flush_output && (result & infinity) == 0 ? (result & 0x8000U) : result;
 }
 
 // Exercise finite range boundaries and special scale exponents, then share
@@ -74,10 +73,10 @@ template <int Lanes, int Src, int Dst, bool Packed, typename Call> void check(Ca
         int shift =
             Packed && Src != 0 ? (mode & RJ_ARITH_ALU_HIGH_A ? 16 : 0) : 8 * int((mode >> 16) & 3);
         uint32_t raw = uint32_t(a >> shift);
-        uint64_t result = reference(Src, Dst, raw, b, flags & RJ_ARITH_FP16_OVFL);
+        bool flush_output = (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) != 0;
+        uint64_t result = reference(Src, Dst, raw, b, flush_output);
         if constexpr (Packed) {
-          result |= uint64_t(reference(Src, Dst, raw >> (Src == 0 ? 4 : 8), b,
-                                       flags & RJ_ARITH_FP16_OVFL))
+          result |= uint64_t(reference(Src, Dst, raw >> (Src == 0 ? 4 : 8), b, flush_output))
                     << (Dst == 0 ? 32 : 16);
         } else if constexpr (Dst == 1) {
           int destination_shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
@@ -85,7 +84,7 @@ template <int Lanes, int Src, int Dst, bool Packed, typename Call> void check(Ca
         }
         return result;
       },
-      conversion_bits, modifiers, false);
+      conversion_bits, modifiers, true, RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS);
 }
 } // namespace
 
