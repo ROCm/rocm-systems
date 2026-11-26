@@ -707,7 +707,7 @@ amd-smi list
 ## Further reading
 
 - [Deep dive into the MI300 compute and memory partition modes (ROCm blog)](https://rocm.blogs.amd.com/software-tools-optimization/compute-memory-modes/README.html)
-- [AMD Instinct MI300 Series microarchitecture (ROCm documentation)](https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300.html)
+- {doc}`AMD Instinct MI300 Series microarchitecture (ROCm documentation) <rocm:reference/gpu-arch/mi300>`
 - [GPU isolation techniques (ROCm documentation)](https://rocm.docs.amd.com/en/latest/conceptual/gpu-isolation.html)
 - [AMD CDNA 3 Architecture White Paper](https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf)
 - [AMDGPU Documentation](https://docs.kernel.org/gpu/amdgpu/index.html)
