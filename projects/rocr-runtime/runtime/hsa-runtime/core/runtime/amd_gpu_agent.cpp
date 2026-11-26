@@ -1840,13 +1840,30 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
   std::vector<core::unique_signal_ptr> body_signal_ptrs;
   std::vector<core::Signal*> body_signals_raw;
 
+  // Other ops of the same batch share out_signal, so an epilogue cannot poll
+  // it for a fixed value. When an epilogue runs, the final body packet of each
+  // engine group decrements a private group counter instead; the epilogue
+  // polls that counter to 0 and then decrements out_signal once.
+  const bool use_group_signal =
+      fused ? coordinator->FusedEpilogueRequired(out_signal) : !use_body_signals;
+  if (use_group_signal) {
+    body_signal_ptrs.emplace_back(
+        new core::DefaultSignal(static_cast<hsa_signal_value_t>(engine_groups.size())));
+    if (!body_signal_ptrs.back()->IsValid())
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    body_signals_raw.push_back(body_signal_ptrs.back().get());
+  }
+  core::Signal& body_out = use_group_signal ? *body_signals_raw[0] : out_signal;
+
   hsa_status_t stat;
 
   if (fused) {
     // === gfx125+ WaitSignal path (1 doorbell for coordinator) ===
 
-    // One final packet per engine group decrements out_signal.
-    out_signal.AddRelaxed(static_cast<uint32_t>(engine_groups.size()));
+    // Without an epilogue the final packet of each engine group decrements
+    // out_signal directly; together they make this op's single decrement.
+    if (!use_group_signal && engine_groups.size() > 1)
+      out_signal.AddRelaxed(static_cast<uint32_t>(engine_groups.size() - 1));
 
     // Gather coordinator group entries.
     std::vector<void*> coord_dsts;
@@ -1881,21 +1898,24 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                core::Signal::Convert(&out_signal).handle);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, nullptr, dst_size_list);
+          ind_src, ind_dst, body_deps, body_out, nullptr, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
     }
 
     // Coordinator: prologue + coord bodies + epilogue in one doorbell.
     LogPrint(HSA_AMD_LOG_FLAG_SDMA,
              "SDMA FanOut(%s) Coordinator: engine %02u, coord_entries=%zu, "
-             "other_groups=%zu, completion_signal=0x%zx, prologue_signal=%p",
+             "other_groups=%zu, completion_signal=0x%zx, prologue_signal=%p, "
+             "group_signal=%p",
              op_name, coord_idx, coord_dsts.size(),
              engine_groups.size() - (engine_groups.count(coord_idx) ? 1 : 0),
              core::Signal::Convert(&out_signal).handle,
-             prologue_signal ? prologue_signal.get() : nullptr);
+             prologue_signal ? prologue_signal.get() : nullptr,
+             use_group_signal ? &body_out : nullptr);
     stat = coordinator->SubmitFusedCoordinator(
         dep_signals, out_signal,
         prologue_signal.get(),
+        use_group_signal ? &body_out : nullptr,
         op, coord_dsts, coord_srcs, coord_sizes_a, coord_sizes_b,
         ind_src, ind_dst, body_deps);
     if (stat != HSA_STATUS_SUCCESS) return stat;
@@ -1912,8 +1932,6 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
           return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         body_signals_raw.push_back(body_signal_ptrs.back().get());
       }
-    } else {
-      out_signal.AddRelaxed(static_cast<uint32_t>(engine_groups.size()));
     }
 
     // Prologue
@@ -1942,7 +1960,7 @@ hsa_status_t GpuAgent::DmaCopyFanOutOp(
                body_sig);
       stat = engines[idxs[0]].blit->SubmitBodies(
           op, dst_list, src_list, size_list, idxs,
-          ind_src, ind_dst, body_deps, out_signal, body_sig, dst_size_list);
+          ind_src, ind_dst, body_deps, body_out, body_sig, dst_size_list);
       if (stat != HSA_STATUS_SUCCESS) return stat;
       ++grp_idx;
     }
