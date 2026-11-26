@@ -392,7 +392,7 @@ TEST_P(FaultOrdinaryWrongAddress, EmissionFailureLeavesPristineSourceForRepeated
 TEST(FaultOrdinaryWrongAddressCapabilities, AllModernProfilesAdvertiseMatchingMutationRows) {
   const std::vector<OrdinaryWrongAddressCapability> capabilities =
       ordinary_wrong_address_capabilities();
-  ASSERT_EQ(capabilities.size(), 8u);
+  ASSERT_EQ(capabilities.size(), 10u);
   for (const test::OrdinaryTargetCase &fixture : test::kOrdinaryTargetCases)
     EXPECT_EQ(std::ranges::count_if(capabilities,
                                     [&](const OrdinaryWrongAddressCapability &capability) {

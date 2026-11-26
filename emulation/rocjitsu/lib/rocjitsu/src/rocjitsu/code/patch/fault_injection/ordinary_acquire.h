@@ -17,7 +17,12 @@
 namespace rocjitsu {
 
 /// @brief A family-specific acquire shape proving at least Agent scope.
-enum class OrdinaryAcquireProfile { Cdna5GlobalB32, Rdna4GlobalB32, Cdna34GlobalDword };
+enum class OrdinaryAcquireProfile {
+  Cdna5GlobalB32,
+  Rdna4GlobalB32,
+  Cdna34GlobalDword,
+  Rdna3GlobalB32Pair
+};
 enum class OrdinaryAcquirePath { SameBlock, ExactFallthroughJoin, ExactSelfLoopExit };
 
 /// @brief One exact pristine instruction used by a bounded acquire proof.

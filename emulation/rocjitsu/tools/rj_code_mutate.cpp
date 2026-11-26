@@ -84,11 +84,13 @@ constexpr std::string_view kMutationHelp =
     "gfx1200/gfx1201 wave32/wave64 profile Rdna4GlobalB32; see --capabilities\n"
     "and each listed address_supported value.\n"
     "gfx950/gfx942 wave64 profile Cdna34GlobalDword uses waitcnt vmcnt(0)+buffer_inv.\n"
+    "gfx1100 wave32/wave64 profile Rdna3GlobalB32Pair requires waitcnt vmcnt(0)\n"
+    "and the complete ordered buffer_gl1_inv + buffer_gl0_inv acquire pair.\n"
     "Legacy GLOBAL scope is implicit Agent; encoded cache flags are preserved.\n"
     "For ordinary sites --exact selects the qualified load and --ordinal counts\n"
     "qualified loads only. Mutation requires a positive, four-byte-aligned\n"
     "--address-delta, at most 8388607 bytes; the native signed sum must fit and align.\n"
-    "Modern profiles use signed24; Cdna34GlobalDword uses signed13.\n"
+    "Modern profiles use signed24; legacy profiles use signed13.\n"
     "Only the load offset changes; cache/wait/bookkeeping, data and scope remain.\n"
     "CDNA5 scale_offset is preserved; the immediate and delta remain byte offsets.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
@@ -102,6 +104,8 @@ std::string_view ordinary_profile_name(OrdinaryAcquireProfile profile) {
     return "Rdna4GlobalB32";
   case OrdinaryAcquireProfile::Cdna34GlobalDword:
     return "Cdna34GlobalDword";
+  case OrdinaryAcquireProfile::Rdna3GlobalB32Pair:
+    return "Rdna3GlobalB32Pair";
   }
   return "Unknown";
 }
