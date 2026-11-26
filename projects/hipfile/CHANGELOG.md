@@ -5,6 +5,7 @@
 ### Added
 
 * Added a Host backend that enables file I/O using host memory. `hipFileBufRegister` now accepts host memory. Only `hipFileRead()` and `hipFileWrite()` accept a host buffer; `hipFileReadAsync()` and `hipFileWriteAsync()` return `hipFileAsyncNotSupported` for one.
+* The fastpath now accepts NFS mounts using `proto=rdma` or `proto=rdma6` by default. On these mounts, `ais-check` reports `yes*` when its direct I/O probe succeeds.
 * MD and LVM software RAID arrays running pass-through personalities whose member devices are all local NVMe are now fastpath capable, and `ais-check` reports them as such.
 * Added the `HIPFILE_DEVICE_STREAM_POOL_SIZE` environment variable, which sets the number of streams in the per-GPU pool that fallback I/O uses for its device copies. The default is 4; setting it to 0 selects the default.
 * Added NIXL to the [Frameworks and applications using hipFile](https://rocm.docs.amd.com/projects/hipFile/en/latest/reference/hipFile-integrations.html#frameworks-and-applications-using-hipfile) documentation. NIXL AIS storage backend moves data directly between GPU memory and files on ROCm using `hipFileRead()` and `hipFileWrite()`.

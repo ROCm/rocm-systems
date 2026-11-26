@@ -15,9 +15,9 @@ WSL2, the ROCm runtime accesses the GPU through the DirectX graphics kernel
 driver (``/dev/dxg``) instead of the amdgpu driver, and that path doesn't
 implement AMD Infinity Storage.
 
-hipFile also requires a direct path from the GPU to the storage device. The
-filesystem must be backed by a local NVMe device that either resides on the
-device's partition or is stacked on it through LVM or MD software RAID. Any
+hipFile also requires a direct path from the GPU to the storage device. A
+block-backed filesystem must reside on a local NVMe device or its partition,
+or be stacked on it through LVM or MD software RAID. Any
 other interposing block layer between the filesystem and the device breaks the
 direct path and forces a fallback to compatibility mode. This includes, but is
 not limited to:
@@ -26,6 +26,8 @@ not limited to:
 - dm-crypt (encrypted volumes)
 - parity RAID (RAID 4, RAID 5, RAID 6), whether MD or LVM RAID
 - loopback devices
+
+NFS mounts must be mounted with proto=rdma or proto=rdma6 and used a hardware RDMA NIC.
 
 LVM logical volumes
 ===================

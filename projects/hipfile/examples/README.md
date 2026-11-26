@@ -6,8 +6,8 @@ results with an FNV-1a hash and print `OK …` on success.
 
 Most examples move data through the GPU on hipFile's fast path, which opens
 files with `O_DIRECT`; running them as written therefore requires an AMD GPU
-supported by ROCm and source/destination paths on an `O_DIRECT`-capable local
-filesystem (ext4 mounted `data=ordered`, or xfs). `O_DIRECT` is not a hipFile
+supported by ROCm and source/destination paths on an `O_DIRECT`-capable filesystem
+(ext4 mounted `data=ordered`, xfs, or NFS over RDMA). `O_DIRECT` is not a hipFile
 requirement, though — files can be registered without it and routed through the
 POSIX compat path (see `basics/no-odirect-write`). Verify fast-path support with
 `/opt/rocm/bin/ais-check`. The `api/` examples are the exception — they only
@@ -128,8 +128,8 @@ cd build
 dd if=/dev/urandom of=input.bin bs=1M count=1
 ```
 
-The input and output paths must live on an `O_DIRECT`-capable local
-filesystem (ext4 mounted `data=ordered`, or xfs); verify with
+The input and output paths must live on an `O_DIRECT`-capable filesystem
+(ext4 mounted `data=ordered`, xfs, or NFS over RDMA); verify with
 `/opt/rocm/bin/ais-check`:
 
 ```bash
@@ -165,7 +165,7 @@ batch-roundtrip READ_FILE WRITE_FILE FILE_SIZE BATCH_SIZE [GPUID]
 `FILE_SIZE` is a positive base-10 byte count. `READ_FILE` is created if it does
 not exist; an existing file is truncated and reseeded to exactly that size.
 `WRITE_FILE` must identify a different file and is created or truncated. Both
-paths must be on an `O_DIRECT`-capable local filesystem. `BATCH_SIZE` is the
+paths must be on an `O_DIRECT`-capable filesystem. `BATCH_SIZE` is the
 number of requests kept in flight and must be between `1` and `128`, the
 largest capacity `hipFileBatchIOSetUp` accepts. `GPUID` is optional and
 defaults to `0`. The registered GPU buffer holds the whole file rounded up to
@@ -206,8 +206,8 @@ compile-time `#define`s documented at the top of each `.cpp`.
 
 ### Running
 
-Both paths must live on an `O_DIRECT`-capable local filesystem (ext4 mounted
-`data=ordered`, or xfs); verify with `/opt/rocm/bin/ais-check`:
+Both paths must live on an `O_DIRECT`-capable filesystem (ext4 mounted
+`data=ordered`, xfs, or NFS over RDMA); verify with `/opt/rocm/bin/ais-check`:
 
 ```bash
 cd build

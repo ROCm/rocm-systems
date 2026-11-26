@@ -12,7 +12,7 @@ The fastpath transfers data between storage and the GPU without the use of a buf
 
 .. note::
 
-   The fastpath backend is only supported on ext4 and xfs file systems
+   The fastpath backend is supported on ext4 with ordered journaling, XFS, and NFS over RDMA.
 
 At submission time, both the fastpath and fallback backends inspect the I/O and provide an eagerness score. The fastpath backend will return an eagerness score of 100 if it can handle the request. The fallback backend will return an eagerness score of 1 if it can handle the request. In the case where a backend can't handle the request, it will return a score of -1.
 
@@ -26,12 +26,7 @@ If I/O is routed through the fastpath but an unexpected error occurs and the I/O
 
    If the ``HIPFILE_FORCE_COMPAT_MODE`` environment variable is set to ``true``, the fastpath backend will never be used and all I/O will go through the fallback backend.
 
-
-.. note::
-
-   ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS`` must be set to ``true`` when using NFSoRDMA on Linux
-
-Fastpath will only return 100 if the file was open with ``O_DIRECT`` and if the destination or the source of the transfer is device memory. The file's type must be either a regular file or a block device. If the file is a regular file, the file must reside on an ext4 filesystem with ordered journaling mode or on an xfs filesystem. Files on other filesystems are rejected by the fastpath backend unless ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS`` is set to ``true``.
+Fastpath will only return 100 if the file was open with ``O_DIRECT`` and if the destination or the source of the transfer is device memory. The file's type must be either a regular file or a block device. If the file is a regular file, the file must reside on an ext4 filesystem with ordered journaling mode, on an xfs filesystem, or on an NFS mount using ``proto=rdma`` or ``proto=rdma6``. Files on other filesystems are rejected by the fastpath backend unless ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS`` is set to ``true``.
 
 File offsets, buffer offsets, and I/O sizes must be aligned to the file system's direct I/O alignment for fastpath to return a score of 100.
 
@@ -44,7 +39,7 @@ I/O fails when both backends reject the request, or when a fastpath runtime erro
 - The HIP runtime doesn't expose ``hipAmdFileRead()`` or ``hipAmdFileWrite()``.
 - The file doesn't have an ``O_DIRECT`` file descriptor. hipFile tries to open one at registration, but if the file or file system doesn't support ``O_DIRECT``, fastpath can't service any requests for that file.
 - The file isn't a regular file or block device.
-- The file is a regular file on a file system other than ext4 with ordered journaling or XFS, and ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS`` isn't set to ``true``.
+- The file is a regular file on a file system other than ext4 with ordered journaling, XFS, or NFS over RDMA, and ``HIPFILE_UNSUPPORTED_FILE_SYSTEMS`` isn't set to ``true``.
 - The buffer isn't ``hipMemoryTypeDevice``. Both fastpath and fallback require device memory. Non-device buffers cause both backends to reject the request.
 - The file offset or I/O size isn't aligned to the file system's offset alignment, or the device buffer address isn't aligned to the memory alignment. These two alignment values can differ depending on what the kernel reports through ``statx()``.
 

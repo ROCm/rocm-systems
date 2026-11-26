@@ -97,6 +97,7 @@ uses one of the following storage configurations:
 * raw NVMe block device (without multipathing)
 * ext4 on an NVMe block device mounted with ``data=ordered``
 * xfs on an NVMe block device
+* NFS over RDMA using a hardware RDMA NIC (see :doc:`/how-to/setup-nfsordma`)
 * an LVM logical volume whose physical volumes are all local NVMe and which is
   linear, striped, or a ``raid0``, ``raid1``, or ``raid10`` RAID LV
 * an MD software RAID array running a ``linear``, ``raid0``, ``raid1``, or

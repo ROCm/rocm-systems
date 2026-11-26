@@ -27,23 +27,27 @@ Optional flags:
 
 When run with the verbose option, a list of discovered HIP runtime libraries is also included in the output.
 
-The mounted volumes table indicates whether a hipFile can use fastpath with each mount point. Each row in the table describes one block-backed mount. Pseudo file systems are omitted. Only mount points with "yes" in the``HIPFILE`` column are eligible for fastpath.
+The mounted volumes table indicates whether hipFile can use fastpath with each mount point. Each row in the table describes one block-backed or NFS mount. Pseudo file systems are omitted. A ``HIPFILE`` result of ``yes`` or ``yes*`` satisfies the volume check.
 
 For example, this table shows that ``/``, ``/home``, ``/data``, and ``/mnt/raid10`` are eligible for fastpath, while ``/mnt/raid5`` and ``/mnt/secure`` are not:
 
 .. code-block:: shell-session
 
    Mounted volumes:
-   MOUNTPOINT   FSTYPE          DEVICE  BACKING  O_DIRECT  HIPFILE
-   /            ext4 (ordered)  nvme0n1  nvme     yes       yes
-   /home        xfs             nvme1n1  nvme     yes       yes
-   /data        ext4 (ordered)  dm-0     lvm      yes       yes
-   /mnt/raid10  xfs             md0      md       yes       yes
-   /mnt/raid5   xfs             md1      md       yes       no
-   /mnt/secure  xfs             dm-1     crypt    yes       no
+   MOUNTPOINT   FSTYPE          DEVICE                BACKING  O_DIRECT  HIPFILE
+   /            ext4 (ordered)  nvme0n1                nvme     yes       yes
+   /home        xfs             nvme1n1                nvme     yes       yes
+   /data        ext4 (ordered)  dm-0                   lvm      yes       yes
+   /mnt/raid10  xfs             md0                    md       yes       yes
+   /mnt/raid5   xfs             md1                    md       yes       no
+   /mnt/secure  xfs             dm-1                   crypt    yes       no
+   /mnt/nfs     nfs4            192.168.2.10:/mnt/nfs  nfs      yes       yes*
+   * NFS requires a hardware RDMA NIC
+
+For the block-backed mounts shown above, the columns have the following meanings.
 
 | ``MOUNTPOINT``: Location where the file system is mounted.
-| ``FSTYPE``: The file system type. hipFile's fastpath accepts only ``xfs`` or ``ext4`` with ``data=ordered`` journaling. When ext4 uses the default mode, ``ais-check`` labels it ``ext4 (ordered)``.
+| ``FSTYPE``: The file system type. For block-backed mounts, hipFile's fastpath accepts only ``xfs`` or ``ext4`` with ``data=ordered`` journaling. When ext4 uses the default mode, ``ais-check`` labels it ``ext4 (ordered)``. NFS mounts require proto=rdma or proto=rdma6 and a hardware RDMA NIC.
 | ``DEVICE``: The underlying block device.
 | ``BACKING``: The type of block device that backs the mount. For example ``nvme``, ``lvm``, ``md``, or ``mpath``. Direct local NVMe backing is required, either raw or through LVM logical volumes and non-parity MD RAID arrays whose member devices are all local NVMe.
 | ``O_DIRECT``: Whether an ``O_DIRECT`` open succeeded on the volume.
@@ -81,7 +85,7 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
 | ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available. On recent ``amdgpu`` DKMS builds, ``ais-check`` reads the AIS capability bit exposed by the KFD topology. On older builds, or when the driver version can't be determined, ``ais-check`` looks for ``CONFIG_PCI_P2PDMA=y`` in the running kernel's configuration.
 | ``HIP runtime``: A discovered HIP runtime library exports  ``hipAmdFileRead()`` and ``hipAmdFileWrite()``.
 | ``amdgpu``: The loaded amdgpu kernel driver exposes ``kfd_ais_rw_file`` in ``/proc/kallsyms``.
-| ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes``.
+| ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes`` or ``yes*``.
 
 ``Kernel P2PDMA support : False`` most often means the distribution's kernel was
 built without ``CONFIG_PCI_P2PDMA``. For example, the Ubuntu 22.04 LTS default
