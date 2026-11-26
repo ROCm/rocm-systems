@@ -63,10 +63,11 @@ constexpr std::string_view kMutationHelp =
     "The caller supplies its runtime value.\n"
     "AtomicWrongAddress lists all owned atomic sites before form admission.\n"
     "Mutation currently supports gfx1250/gfx1251 wave32 and gfx1200/gfx1201\n"
-    "wave32/wave64 flat/global forms; see --capabilities. It requires positive,\n"
+    "wave32/wave64 flat/global/buffer forms; see --capabilities. It requires positive,\n"
     "four-byte-aligned --address-delta, at most 8388607 bytes. Only the immediate\n"
     "offset changes; data, returning behavior, modifiers and waits remain.\n"
     "An unsupported selected form fails without renumbering atomic ordinals.\n"
+    "CDNA5 buffer atomics require a nonnegative original immediate offset.\n"
     "Output must be new; existing files, aliases and in-place mutation are refused.\n"
     "Host transformation only; no GPU execution or detector qualification.\n";
 
