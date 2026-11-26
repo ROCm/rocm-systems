@@ -53,6 +53,7 @@
 #include "suites/functional/memory_basic.h"
 #include "suites/functional/memory_access.h"
 #include "suites/functional/ipc.h"
+#include "suites/functional/ipc_cross_user.h"
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
@@ -357,6 +358,12 @@ TEST(rocrtstFunc, DISABLED_CU_Masking) {
 TEST(rocrtstFunc, IPC) {
     IPCTest ipc;
     RunGenericTest(&ipc);
+}
+
+// Opt-in: runs only when ROCRTST_IPC_SECOND_UID names a second user ID.
+TEST(rocrtstFunc, IPC_Cross_User) {
+    IPCCrossUserTest ipc_cross_user;
+    RunGenericTest(&ipc_cross_user);
 }
 
 TEST(rocrtstFunc, DISABLED_Signal_Kernel_Set) {

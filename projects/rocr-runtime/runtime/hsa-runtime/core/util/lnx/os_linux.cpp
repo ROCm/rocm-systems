@@ -1115,10 +1115,10 @@ intptr_t IPCRecvHandle(IPCSocket conn) {
   msg.msg_controllen = sizeof(c_buffer);
 
   ssize_t rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
-  if (rcv < 0) return -1;
-
-  while (!rcv)
-    rcv = recvmsg(IPCSockToFd(conn), &msg, MSG_WAITALL);
+  // 0 is end-of-stream: the exporter closed the connection without sending a
+  // descriptor (for example because it rejected this peer). Retrying would spin
+  // forever, so report the failure.
+  if (rcv <= 0) return -1;
 
   struct cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
   if (!cmsg) return -1;
