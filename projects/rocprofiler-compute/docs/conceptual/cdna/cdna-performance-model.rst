@@ -175,7 +175,7 @@ to use ROCm Compute Profiler to optimize your code.
    where the exact product at hand is not relevant. For product details, see `AMD Instinct GPUs <https://www.amd.com/en/products/accelerators/instinct.html>`_.
 
    For a comparison of AMD Instinct GPU specifications, refer to
-   :doc:`Hardware specifications <rocm:reference/gpu-arch-specs>`.
+   :doc:`Hardware specifications <rocm:reference/gpu-specs>`.
 
 Hardware blocks
 ================
