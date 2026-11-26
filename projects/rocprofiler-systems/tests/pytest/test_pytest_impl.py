@@ -7,6 +7,7 @@ Unit tests for GPU-specific test counter selection.
 
 from __future__ import annotations
 
+import errno
 import getpass
 import os
 import tempfile
@@ -683,8 +684,7 @@ class TestHostCountersExpected:
 # deny_perf_events (seccomp filter used by the causal open-failure tests)
 # ---------------------------------------------------------------------------
 class TestDenyPerfEvents:
-    # perf_event_open() with a NULL attr; the kernel rejects it before any
-    # paranoid-level permission check, so only the seccomp filter can return EPERM.
+    # perf_event_open() with a NULL attr never succeeds; the exit code is the errno.
     PROBE = (
         "import ctypes, platform, sys\n"
         "nr = {'x86_64': 298, 'aarch64': 241}[platform.machine()]\n"
@@ -697,15 +697,19 @@ class TestDenyPerfEvents:
     def _require_support(self):
         if not deny_perf_events_supported():
             pytest.skip("seccomp perf_event_open filter is not supported here")
+        if self._probe_errno() == errno.EPERM:
+            pytest.skip(
+                "perf_event_open() already fails with EPERM, so the filter's "
+                "effect cannot be observed"
+            )
 
     def _probe_errno(self, **kwargs) -> int:
         import subprocess
         import sys
 
-        return subprocess.run([sys.executable, "-c", self.PROBE], **kwargs).returncode
+        return subprocess.run(
+            [sys.executable, "-c", self.PROBE], check=False, **kwargs
+        ).returncode
 
     def test_hook_returns_eperm(self):
-        assert self._probe_errno(preexec_fn=make_deny_perf_events_hook()) == 1
-
-    def test_without_hook_is_not_eperm(self):
-        assert self._probe_errno() != 1
+        assert self._probe_errno(preexec_fn=make_deny_perf_events_hook()) == errno.EPERM
