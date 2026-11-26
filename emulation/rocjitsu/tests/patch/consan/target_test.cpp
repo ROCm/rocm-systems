@@ -521,6 +521,47 @@ TEST_P(ConSanTargetStatic, LoopLaneSelectorsAvoidScalarReadModifyReadHazards) {
   }
 }
 
+TEST(ConSanInput, GroupFlatRechecksTheApertureOnABarrierLoopBackedge) {
+  std::vector<uint8_t> image =
+      test::read_fixture(test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap"));
+  const TargetProfile &target = *target_profile(950);
+  InputError error;
+  const FailureOr<InputProgram> baseline =
+      build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const uint64_t entry = baseline.value().kernel.entry_text_offset;
+  const size_t start = baseline.value().text_file_offset + entry;
+  constexpr std::array<uint32_t, 13> loop = {
+      0xbe8a0082,             // s_mov_b32 s10, 2
+      0x7e040280,             // v_mov_b32_e32 v2, 0
+      0xbe8401eb,             // setup: s_mov_b64 s[4:5], src_shared_base
+      0x7e060205,             // v_mov_b32_e32 v3, s5
+      0xdc500000, 0x04000002, // load: flat_load_dword v4, v[2:3]
+      0x7e060201,             // v_mov_b32_e32 v3, s1 (kernarg high word for next iteration)
+      0xbf8c0000,             // s_waitcnt 0
+      0xbf8a0000,             // s_barrier
+      0x808a810a,             // s_sub_u32 s10, s10, 1
+      0xbf06800a,             // s_cmp_eq_u32 s10, 0
+      0xbf84fff6,             // s_cbranch_scc0 setup
+      0xbf810000};            // s_endpgm
+  ASSERT_LE(start + sizeof(loop), image.size());
+  std::memcpy(image.data() + start, loop.data(), sizeof(loop));
+
+  const FailureOr<PreparedArtifact> repeated =
+      prepare(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(repeated.succeeded()) << error.message;
+  EXPECT_EQ(repeated.value().manifest.scope, ScopeKind::NativeLdsWorkgroupBarrierLoop);
+  ASSERT_EQ(repeated.value().manifest.sites.size(), 1u);
+  EXPECT_EQ(repeated.value().manifest.sites[0].origin, AccessOrigin::GroupFlat);
+  EXPECT_EQ(repeated.value().manifest.sites[0].original_offset, entry + 16);
+
+  // Branch straight to the load on the second iteration. Only the first
+  // iteration reaches it with a shared pointer.
+  wire::write_u32(image, start + 44, 0xbf84fff8); // s_cbranch_scc0 load
+  EXPECT_TRUE(prepare(image, target, "lds_producer_consumer", error).failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess) << error.message;
+}
+
 TEST_P(ConSanTargetStatic, PreserveRealLoopBackedgesAndRejectMultipleBlockCycles) {
   const test::TargetMode mode = GetParam();
   const TargetProfile &target = *target_profile(mode.target);

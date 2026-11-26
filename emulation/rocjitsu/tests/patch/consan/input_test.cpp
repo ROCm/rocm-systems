@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <limits>
@@ -32,6 +33,86 @@ namespace rocjitsu::consan {
 namespace {
 
 constexpr const TargetProfile &kTarget = kNativeLdsTargets[2];
+
+TEST(ConSanInput, GroupFlatNeedsAnUnclobberedApertureOnEveryIncomingPathAndActiveLane) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  const std::vector<uint8_t> image = test::read_fixture(fixture);
+  ASSERT_FALSE(image.empty());
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto baseline = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  constexpr uint32_t shared = 0xbe8401eb;  // s_mov_b64 s[4:5], src_shared_base
+  constexpr uint32_t copy = 0x7e060205;    // v_mov_b32_e32 v3, s5
+  constexpr uint32_t clobber = 0x7e060280; // v_mov_b32_e32 v3, 0
+  constexpr uint32_t narrow = 0xbe88206a;  // s_and_saveexec_b64 s[8:9], vcc
+  constexpr uint32_t restore = 0xbefe0108; // s_mov_b64 exec, s[8:9]
+  const auto check = [&](std::initializer_list<uint32_t> setup, bool exact) {
+    auto candidate = image;
+    std::vector<uint32_t> words(setup);
+    words.insert(words.end(), {0xdc500000, 0x02000002, 0xbf810000}); // FLAT load then endpgm
+    ASSERT_LE(entry + words.size() * 4, candidate.size());
+    std::memcpy(candidate.data() + entry, words.data(), words.size() * 4);
+    const auto input = build_input_program(candidate, target, "lds_producer_consumer", error);
+    ASSERT_EQ(input.succeeded(), exact) << error.message;
+    if (exact) {
+      ASSERT_EQ(input.value().accesses.size(), 1u);
+      EXPECT_EQ(input.value().accesses.front().origin, AccessOrigin::GroupFlat);
+    } else {
+      EXPECT_EQ(error.code, InputErrorCode::UnsupportedAccess);
+    }
+  };
+  // An extended literal carries its numeric payload in the decoded operand.
+  // Even the two aperture selector values must behave like an unknown pointer.
+  constexpr uint32_t literal = 0xbe8401ff; // s_mov_b64 s[4:5], literal32
+  check({literal, 239, copy}, false);
+  const std::optional<uint64_t> unknown_offset = error.text_offset;
+  for (const uint32_t value : {235u, 237u}) {
+    SCOPED_TRACE(value);
+    check({literal, value, copy}, false);
+    EXPECT_EQ(error.text_offset, unknown_offset);
+  }
+  check({shared, narrow, copy}, true);
+  check({shared, copy, narrow}, true);
+  check({shared, narrow, copy, restore}, false);
+  check({shared, copy, clobber}, false);
+  check({0xbe8401ed, copy}, false);                  // src_private_base, with the same low VGPR
+  check({0xbe840100, copy}, false);                  // kernarg (global) pointer
+  check({copy}, false);                              // no high-word definition
+  check({shared, copy, 0xbf840001, clobber}, false); // conditional branch bypasses the clobber
+}
+
+TEST(ConSanInput, IdenticalFlatOpcodesKeepTheirSharedAndPrivateMappings) {
+  const std::filesystem::path fixture =
+      test::target_fixture_path({"gfx950", 64}, "width-flat-load-overlap");
+  if (fixture.empty())
+    GTEST_SKIP() << "AMD assembler/linker fixtures unavailable";
+  std::vector<uint8_t> image = test::read_fixture(fixture);
+  const auto &target = *target_profile(950);
+  InputError error;
+  const auto baseline = build_input_program(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(baseline.succeeded()) << error.message;
+  const std::array<uint32_t, 9> words = {
+      0xbe8401ed, 0x7e060205, 0xdc500ffc, 0x02000002, // private-base pointer, load +4092
+      0xbe8401eb, 0x7e060205, 0xdc500ffc, 0x02000002, // shared-base pointer, identical operation
+      0xbf810000};
+  const size_t entry =
+      baseline.value().text_file_offset + baseline.value().kernel.entry_text_offset;
+  ASSERT_LE(entry + sizeof(words), image.size());
+  std::memcpy(image.data() + entry, words.data(), sizeof(words));
+  const auto result = prepare(image, target, "lds_producer_consumer", error);
+  ASSERT_TRUE(result.succeeded()) << error.message;
+  ASSERT_EQ(result.value().manifest.sites.size(), 1u);
+  EXPECT_EQ(result.value().manifest.sites.front().origin, AccessOrigin::GroupFlat);
+  EXPECT_EQ(result.value().manifest.sites.front().original_offset,
+            baseline.value().kernel.entry_text_offset + 24);
+  EXPECT_TRUE(validate_prepared(image, result.value(), error).succeeded()) << error.message;
+}
 
 TEST(ConSanInput, AtomicAddRequiresQualifiedLdsFormAndAllocatedOperands) {
   const auto decoder = Decoder::create(IsaFamily::Cdna4);
