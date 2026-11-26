@@ -3,7 +3,14 @@
 
 include(rj_rocm_path)
 
-add_library(rocjitsu_consan_compiler STATIC input.cpp prepare.cpp lds_race.cpp)
+add_library(
+    rocjitsu_consan_compiler
+    STATIC
+    input.cpp
+    prepare.cpp
+    selection.cpp
+    lds_race.cpp
+)
 rj_find_rocm_program(AMDCXX amdclang++)
 rj_find_rocm_program(CLANG_OFFLOAD_BUNDLER clang-offload-bundler)
 if(NOT AMDCXX OR NOT CLANG_OFFLOAD_BUNDLER)

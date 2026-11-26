@@ -19,6 +19,7 @@
 #include "rocjitsu/isa/register_set.h"
 #include "rocjitsu/isa/target_registry.h"
 #include "util/diagnostic.h"
+#include "util/log.h"
 
 #include <gtest/gtest.h>
 
@@ -514,6 +515,276 @@ TEST_F(ConSanPrepareImage, PreservesFourByteAlignedNativeScalarSibling) {
   EXPECT_EQ(decoded.value(), artifact.value().facts);
 }
 
+TEST_F(ConSanPrepareImage, ApplicabilityProofPrecedesPrivatePreloadAndShapeQualification) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() /
+      "multi-entry-native-scalar.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  const AmdGpuCodeObject object(original.data(), original.size());
+  ASSERT_TRUE(object.is_valid());
+  const Section &text = *object.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+  const std::vector<KernelDescriptorInfo>::const_iterator scalar =
+      std::ranges::find(kernels, std::string("mk_c"), &KernelDescriptorInfo::kernel_name);
+  ASSERT_NE(scalar, kernels.end());
+  const std::array<std::string_view, 1> requested = {"mk_c"};
+  const TargetProfile &target = *target_profile("gfx1250");
+  for (const bool preload : {false, true}) {
+    std::vector<uint8_t> changed = original;
+    amdhsa::kernel_descriptor_t descriptor = scalar->descriptor;
+    descriptor.private_segment_fixed_size = preload ? 0 : 68;
+    descriptor.kernarg_preload = preload ? 1 : 0;
+    std::string message;
+    ASSERT_TRUE(amdhsa::update_resource_metadata(changed, *scalar, descriptor, std::nullopt,
+                                                 std::nullopt, &message)
+                    .succeeded())
+        << message;
+    std::memcpy(changed.data() + scalar->descriptor_file_offset, &descriptor, sizeof(descriptor));
+    EXPECT_TRUE(build_image_entry_program(changed, target, "mk_c", error_).failed());
+    EXPECT_EQ(error_.code, InputErrorCode::UnsupportedEntry);
+    const FailureOr<PreparationResult> prepared =
+        prepare_image_best_effort(changed, target, requested, error_);
+    ASSERT_TRUE(prepared.succeeded()) << error_.message;
+    ASSERT_EQ(prepared.value().entries.size(), 1u);
+    const EntryPreparation &entry = prepared.value().entries.front();
+    EXPECT_FALSE(entry.instrumented);
+    ASSERT_TRUE(entry.no_probes_needed);
+    EXPECT_EQ(entry.stage, PreparationStage::Applicability);
+    EXPECT_GT(entry.no_probes_needed->instruction_count, 0u);
+    EXPECT_FALSE(prepared.value().artifact);
+    EXPECT_EQ(prepared.value().inventory_entries, 3u);
+    const std::string report = render_preparation_report(prepared.value());
+    EXPECT_NE(report.find("\"inventory_entries\":3"), std::string::npos);
+    EXPECT_NE(report.find("\"not_requested\":2"), std::string::npos);
+    EXPECT_NE(report.find("\"no_probes_needed\":1"), std::string::npos);
+    EXPECT_NE(report.find("\"requested_coverage\":\"complete\""), std::string::npos);
+  }
+}
+
+TEST_F(ConSanPrepareImage, ZeroAllocationCannotHideFlatMemory) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() /
+      "multi-entry-native-scalar.hsaco";
+  std::vector<uint8_t> original = test::read_fixture(path);
+  ASSERT_FALSE(original.empty());
+  const AmdGpuCodeObject object(original.data(), original.size());
+  const Section &text = *object.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+  const std::vector<KernelDescriptorInfo>::const_iterator scalar =
+      std::ranges::find(kernels, std::string("mk_c"), &KernelDescriptorInfo::kernel_name);
+  ASSERT_NE(scalar, kernels.end());
+  // Native gfx1250 flat_atomic_sub_u32 v0, v1, s[2:3]. Its generic
+  // address space may select LDS even when no fixed LDS was allocated.
+  const std::array<uint32_t, 3> flat = {0xec0d8002, 0x008c0000, 0x00000000};
+  std::memcpy(original.data() + text.sectionOffset() + scalar->entry_text_offset, flat.data(),
+              sizeof(flat));
+  const FailureOr<std::optional<NoProbesNeededProof>> proof = inspect_no_lds_memory(
+      original, *target_profile("gfx1250"), scalar->descriptor_file_offset, error_);
+  ASSERT_TRUE(proof.succeeded()) << error_.message;
+  EXPECT_FALSE(proof.value());
+  const std::array<std::string_view, 1> requested = {"mk_c"};
+  const FailureOr<PreparationResult> prepared =
+      prepare_image_best_effort(original, *target_profile("gfx1250"), requested, error_);
+  ASSERT_TRUE(prepared.succeeded()) << error_.message;
+  EXPECT_FALSE(prepared.value().entries.front().no_probes_needed);
+  EXPECT_EQ(prepared.value().entries.front().reason.code, InputErrorCode::UnsupportedEntry);
+  EXPECT_NE(render_preparation_report(prepared.value()).find("\"blocked\":1"), std::string::npos);
+}
+
+TEST_F(ConSanPrepareImage, TrueLdsAccessWithUnsupportedPrivateOrPreloadAbiRemainsBlocked) {
+  const AmdGpuCodeObject object(original_.data(), original_.size());
+  const Section &text = *object.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(original_, text.sectionOffset(), text.size());
+  const std::vector<KernelDescriptorInfo>::const_iterator selected =
+      std::ranges::find(kernels, std::string("mk_a"), &KernelDescriptorInfo::kernel_name);
+  ASSERT_NE(selected, kernels.end());
+  const std::array<std::string_view, 1> requested = {"mk_a"};
+  for (const bool preload : {false, true}) {
+    SCOPED_TRACE(preload);
+    std::vector<uint8_t> changed = original_;
+    amdhsa::kernel_descriptor_t descriptor = selected->descriptor;
+    descriptor.private_segment_fixed_size = preload ? 0 : 68;
+    descriptor.kernarg_preload = preload ? 1 : 0;
+    std::string message;
+    ASSERT_TRUE(amdhsa::update_resource_metadata(changed, *selected, descriptor, std::nullopt,
+                                                 std::nullopt, &message)
+                    .succeeded())
+        << message;
+    std::memcpy(changed.data() + selected->descriptor_file_offset, &descriptor, sizeof(descriptor));
+    const FailureOr<PreparationResult> prepared =
+        prepare_image_best_effort(changed, *target_profile("gfx1250"), requested, error_);
+    ASSERT_TRUE(prepared.succeeded()) << error_.message;
+    ASSERT_EQ(prepared.value().entries.size(), 1u);
+    const EntryPreparation &entry = prepared.value().entries.front();
+    EXPECT_FALSE(entry.instrumented);
+    EXPECT_FALSE(entry.no_probes_needed);
+    EXPECT_EQ(entry.stage, PreparationStage::Qualification);
+    EXPECT_EQ(entry.reason.code, InputErrorCode::UnsupportedEntry);
+    EXPECT_FALSE(prepared.value().artifact);
+    EXPECT_NE(render_preparation_report(prepared.value()).find("\"blocked\":1"), std::string::npos);
+  }
+}
+
+TEST_F(ConSanPrepareImage, NoProbesProofOwnsReachableCodeAndNeverReplacesTraceProbes) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() /
+      "multi-entry-native-scalar.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  const AmdGpuCodeObject object(original.data(), original.size());
+  const Section &text = *object.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+  const std::vector<KernelDescriptorInfo>::const_iterator scalar =
+      std::ranges::find(kernels, std::string("mk_c"), &KernelDescriptorInfo::kernel_name);
+  ASSERT_NE(scalar, kernels.end());
+  const TargetProfile &target = *target_profile("gfx1250");
+  const FailureOr<std::optional<NoProbesNeededProof>> first =
+      inspect_no_lds_memory(original, target, scalar->descriptor_file_offset, error_);
+  ASSERT_TRUE(first.succeeded());
+  ASSERT_TRUE(first.value());
+  std::vector<uint8_t> changed = original;
+  // Change the scalar-load immediate while preserving its non-LDS semantics.
+  changed[text.sectionOffset() + scalar->entry_text_offset + 4] ^= 4;
+  const FailureOr<std::optional<NoProbesNeededProof>> second =
+      inspect_no_lds_memory(changed, target, scalar->descriptor_file_offset, error_);
+  ASSERT_TRUE(second.succeeded());
+  ASSERT_TRUE(second.value());
+  EXPECT_EQ(first.value()->instruction_count, second.value()->instruction_count);
+  EXPECT_NE(first.value()->code_sha256, second.value()->code_sha256);
+  const std::array<std::string_view, 1> requested = {"mk_c"};
+  const FailureOr<PreparationResult> trace =
+      prepare_image_best_effort(original, target, requested, error_, ScopeKind::ExecutionTrace);
+  ASSERT_TRUE(trace.succeeded()) << error_.message;
+  EXPECT_FALSE(trace.value().entries.front().no_probes_needed);
+  EXPECT_NE(trace.value().entries.front().stage, PreparationStage::Applicability);
+}
+
+TEST_F(ConSanPrepareImage, AbsenceProofRequiresClosedControlFlowButAllowsLoopsAndBarriers) {
+  const std::filesystem::path path =
+      std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() /
+      "multi-entry-native-scalar.hsaco";
+  const std::vector<uint8_t> original = test::read_fixture(path);
+  const AmdGpuCodeObject object(original.data(), original.size());
+  const Section &text = *object.text_sections().front();
+  const std::vector<KernelDescriptorInfo> kernels =
+      scan_kernel_descriptors(original, text.sectionOffset(), text.size());
+  const std::vector<KernelDescriptorInfo>::const_iterator scalar =
+      std::ranges::find(kernels, std::string("mk_c"), &KernelDescriptorInfo::kernel_name);
+  ASSERT_NE(scalar, kernels.end());
+  const TargetProfile &target = *target_profile("gfx1250");
+  const FailureOr<uint32_t> terminator = build_s_endpgm(target.arch);
+  ASSERT_TRUE(terminator.succeeded());
+  const std::array<FailureOr<uint32_t>, 5> transfers = {
+      build_s_setpc_b64(0, target.arch), build_s_swappc_b64(2, 0, target.arch),
+      build_s_call_b64(2, 1, target.arch),
+      build_sop1_encoding(target.arch, cdna5::kSRfeI64Sop1, 0, 0),
+      build_sopp_encoding(target.arch, cdna5::kSTrapSopp, 1)};
+  for (const FailureOr<uint32_t> &transfer : transfers) {
+    ASSERT_TRUE(transfer.succeeded());
+    std::vector<uint8_t> changed = original;
+    std::memcpy(changed.data() + text.sectionOffset() + scalar->entry_text_offset,
+                &transfer.value(), sizeof(uint32_t));
+    for (const size_t relative : {4u, 8u})
+      std::memcpy(changed.data() + text.sectionOffset() + scalar->entry_text_offset + relative,
+                  &terminator.value(), sizeof(uint32_t));
+    const FailureOr<std::optional<NoProbesNeededProof>> proof =
+        inspect_no_lds_memory(changed, target, scalar->descriptor_file_offset, error_);
+    ASSERT_TRUE(proof.succeeded()) << error_.message;
+    EXPECT_FALSE(proof.value());
+  }
+  const FailureOr<uint32_t> signal =
+      build_sop1_encoding(target.arch, cdna5::kSBarrierSignalSop1, 0, 193);
+  const FailureOr<uint32_t> wait =
+      build_sopp_encoding(target.arch, cdna5::kSBarrierWaitSopp, 0xffff);
+  ASSERT_TRUE(signal.succeeded());
+  ASSERT_TRUE(wait.succeeded());
+  const std::array<uint32_t, 3> barriers = {signal.value(), wait.value(), terminator.value()};
+  std::vector<uint8_t> changed = original;
+  std::memcpy(changed.data() + text.sectionOffset() + scalar->entry_text_offset, barriers.data(),
+              sizeof(barriers));
+  const FailureOr<std::optional<NoProbesNeededProof>> barrier_proof =
+      inspect_no_lds_memory(changed, target, scalar->descriptor_file_offset, error_);
+  ASSERT_TRUE(barrier_proof.succeeded()) << error_.message;
+  ASSERT_TRUE(barrier_proof.value());
+  EXPECT_EQ(barrier_proof.value()->instruction_count, 3u);
+  const FailureOr<uint32_t> loop = build_s_branch(-1, target.arch);
+  ASSERT_TRUE(loop.succeeded());
+  changed = original;
+  std::memcpy(changed.data() + text.sectionOffset() + scalar->entry_text_offset, &loop.value(),
+              sizeof(uint32_t));
+  const FailureOr<std::optional<NoProbesNeededProof>> proof =
+      inspect_no_lds_memory(changed, target, scalar->descriptor_file_offset, error_);
+  ASSERT_TRUE(proof.succeeded()) << error_.message;
+  ASSERT_TRUE(proof.value());
+  EXPECT_EQ(proof.value()->instruction_count, 1u);
+  EXPECT_EQ(proof.value()->code_bytes, 4u);
+}
+
+TEST(ConSanPreparationReport, RejectsContradictoryInstrumentationAndAbsenceProof) {
+  PreparationResult result;
+  result.inventory_entries = 1;
+  result.entries.push_back(
+      {.entry = "invalid",
+       .instrumented = true,
+       .no_probes_needed = NoProbesNeededProof{.instruction_count = 1, .code_bytes = 4},
+       .reason = {}});
+  EXPECT_TRUE(render_preparation_report(result).empty());
+}
+
+TEST(ConSanPreparationReport, RejectsMalformedOrMisclassifiedAbsenceProofs) {
+  PreparationResult result;
+  result.inventory_entries = 1;
+  NoProbesNeededProof proof = {.instruction_count = 1, .code_bytes = 4};
+  proof.code_sha256[0] = 1;
+  result.entries.push_back({.entry = "no_lds",
+                            .no_probes_needed = proof,
+                            .stage = PreparationStage::Applicability,
+                            .reason = {}});
+  ASSERT_FALSE(render_preparation_report(result).empty());
+  for (const unsigned invalid : {0u, 1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u, 9u}) {
+    SCOPED_TRACE(invalid);
+    PreparationResult changed = result;
+    EntryPreparation &entry = changed.entries.front();
+    switch (invalid) {
+    case 0:
+      entry.no_probes_needed->version = 2;
+      break;
+    case 1:
+      entry.no_probes_needed->scope = ScopeKind::ExecutionTrace;
+      break;
+    case 2:
+      entry.no_probes_needed->instruction_count = 0;
+      break;
+    case 3:
+      entry.no_probes_needed->code_bytes = 5;
+      break;
+    case 4:
+      entry.no_probes_needed->code_sha256 = {};
+      break;
+    case 5:
+      entry.stage = PreparationStage::Qualification;
+      break;
+    case 6:
+      entry.reason.code = InputErrorCode::UnsupportedEntry;
+      break;
+    case 7:
+      entry.reason.text_offset = 0;
+      break;
+    case 8:
+      changed.requested_scope = ScopeKind::ExecutionTrace;
+      break;
+    case 9:
+      changed.inventory_entries = 0;
+      break;
+    }
+    EXPECT_TRUE(render_preparation_report(changed).empty());
+  }
+}
+
 TEST_F(ConSanPrepareImage, SelectedMultidimensionalRequirementsCannotPublishPreparedFacts) {
   const std::filesystem::path path =
       std::filesystem::path(CONSAN_MULTI_ENTRY_FIXTURE).parent_path() / "multi-entry-abi.hsaco";
@@ -920,6 +1191,91 @@ TEST(ConSanPrepareImageCdna, NativeMetadataRejectsCountsAboveDescriptorCapacity)
       EXPECT_TRUE(prepare_image(image, *target_profile(name), selected, error).failed());
     }
   }
+}
+#endif
+
+#ifdef CONSAN_MULTI_ENTRY_UNSUPPORTED_FIXTURE
+class ConSanPrepareCoverage : public ::testing::Test {
+protected:
+  void SetUp() override {
+    original_ = test::read_fixture(CONSAN_MULTI_ENTRY_UNSUPPORTED_FIXTURE);
+    ASSERT_FALSE(original_.empty());
+  }
+
+  std::vector<uint8_t> original_;
+  InputError error_;
+};
+
+TEST_F(ConSanPrepareCoverage, PartialCoverageMatchesStrictSupportedSubsetAndRetainsNativeBytes) {
+  const TargetProfile &target = *target_profile("gfx1250");
+  const std::array<std::string_view, 2> requested = {"mk_a", "mk_c"};
+  const FailureOr<PreparationResult> result =
+      prepare_image_best_effort(original_, target, requested, error_);
+  ASSERT_TRUE(result.succeeded()) << error_.message;
+  ASSERT_TRUE(result.value().artifact);
+  ASSERT_EQ(result.value().entries.size(), 2u);
+  EXPECT_EQ(result.value().original.sha256, digest(original_));
+  EXPECT_TRUE(result.value().entries[0].instrumented);
+  EXPECT_EQ(result.value().entries[0].reason.code, InputErrorCode::None);
+  EXPECT_FALSE(result.value().entries[1].instrumented);
+  EXPECT_EQ(result.value().entries[1].reason.code, InputErrorCode::UnsupportedInstruction);
+  EXPECT_TRUE(result.value().entries[1].reason.text_offset);
+  EXPECT_NE(result.value().entries[1].reason.message.find("v_xor_b32"), std::string::npos);
+  const std::array<std::string_view, 1> supported = {"mk_a"};
+  const FailureOr<PreparedImageArtifact> strict =
+      prepare_image(original_, target, supported, error_);
+  ASSERT_TRUE(strict.succeeded()) << error_.message;
+  EXPECT_EQ(result.value().artifact->image, strict.value().image);
+  EXPECT_EQ(result.value().artifact->facts, strict.value().facts);
+  util::StringDiagnostic diagnostic;
+  EXPECT_TRUE(verify_artifact_images(result.value().artifact->facts, original_,
+                                     result.value().artifact->image, diagnostic.emitter())
+                  .succeeded())
+      << diagnostic.message();
+  EXPECT_EQ(util::Logger::group_name(util::Logger::GROUP_CONSAN), "CONSAN");
+}
+
+TEST_F(ConSanPrepareCoverage, AllUnsupportedRetainsOriginalIdentityWithoutInventingFacts) {
+  const std::array<std::string_view, 1> requested = {"mk_c"};
+  const FailureOr<PreparationResult> result =
+      prepare_image_best_effort(original_, *target_profile("gfx1250"), requested, error_);
+  ASSERT_TRUE(result.succeeded()) << error_.message;
+  EXPECT_FALSE(result.value().artifact);
+  EXPECT_EQ(result.value().original.sha256, digest(original_));
+  EXPECT_EQ(result.value().original.bytes, original_.size());
+  ASSERT_EQ(result.value().entries.size(), 1u);
+  EXPECT_EQ(result.value().entries[0].entry, "mk_c");
+  EXPECT_FALSE(result.value().entries[0].instrumented);
+  const std::string report = render_preparation_report(result.value());
+  EXPECT_NE(report.find("\"outcome\":\"native_only\""), std::string::npos);
+  EXPECT_NE(report.find("\"requested_coverage\":\"not_performed\""), std::string::npos);
+}
+
+TEST_F(ConSanPrepareCoverage, InvalidSelectionAndImageNeverBecomeOrdinarySkips) {
+  const TargetProfile &target = *target_profile("gfx1250");
+  const std::array<std::string_view, 2> duplicate = {"mk_a", "mk_a"};
+  const std::array<std::string_view, 2> missing = {"mk_c", "missing"};
+  EXPECT_TRUE(prepare_image_best_effort(original_, target, {}, error_).failed());
+  EXPECT_TRUE(prepare_image_best_effort(original_, target, duplicate, error_).failed());
+  EXPECT_TRUE(prepare_image_best_effort(original_, target, missing, error_).failed());
+  const std::array<std::string_view, 1> requested = {"mk_c"};
+  EXPECT_TRUE(prepare_image_best_effort({}, target, requested, error_).failed());
+  EXPECT_EQ(error_.code, InputErrorCode::InvalidImage);
+}
+#endif
+
+#ifdef CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE
+TEST(ConSanPrepareCoverageFailures, FailedNativePreservationCannotBecomeAnUnsupportedSkip) {
+  const std::vector<uint8_t> original =
+      test::read_fixture(CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE);
+  ASSERT_FALSE(original.empty());
+  const std::array<std::string_view, 2> requested = {"mk_a", "mk_b"};
+  InputError error;
+  const FailureOr<PreparationResult> result =
+      prepare_image_best_effort(original, *target_profile("gfx1250"), requested, error);
+  EXPECT_TRUE(result.failed());
+  EXPECT_EQ(error.code, InputErrorCode::UnsupportedInstruction);
+  EXPECT_NE(error.message.find("native entry 'mk_c' reads PC"), std::string::npos);
 }
 #endif
 

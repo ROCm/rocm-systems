@@ -43,6 +43,7 @@ public:
     GROUP_DBT_HOOKS = 2, ///< ROCR HSA tools DBT hook tracing.
     GROUP_PLUGINS = 3,   ///< Plugin discovery, loading, and configuration.
     GROUP_DRIVER = 4,    ///< KFD driver: ioctl dispatch, process/session state.
+    GROUP_CONSAN = 5,    ///< ConSan qualification, instrumentation and capture.
   };
 
   /// @brief Human-readable group name for log prefixes.
@@ -58,6 +59,8 @@ public:
       return "PLUGINS";
     case GROUP_DRIVER:
       return "DRIVER";
+    case GROUP_CONSAN:
+      return "CONSAN";
     default:
       return " ";
     }
@@ -200,6 +203,17 @@ public:
   /// @brief Convenience for logging in GROUP_DRIVER, variadic.
   template <typename... Args> static void driver(Args &&...args) {
     print<GROUP_DRIVER>(std::forward<Args>(args)...);
+  }
+
+  /// @brief Convenience for ConSan qualification, instrumentation and capture.
+  template <typename... Args> static void consan(Args &&...args) {
+    print<GROUP_CONSAN>(std::forward<Args>(args)...);
+  }
+
+  template <typename Fn>
+    requires std::invocable<Fn, std::ostringstream &>
+  static void consan(Fn &&fn) {
+    print<GROUP_CONSAN>(std::forward<Fn>(fn));
   }
 
   /// @brief Convenience for logging in GROUP_DRIVER, lambda.

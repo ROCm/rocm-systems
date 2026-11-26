@@ -77,6 +77,56 @@ The three-stage split has three purposes:
 
 ### Offline preparation
 
+`rj_consan_prepare` classifies requested entries independently. For the LDS
+profile, it first decodes the complete reachable code and checks its memory
+semantics. An entry proven to have no LDS memory accesses needs no probes,
+even when its ABI cannot be instrumented. Fixed LDS allocation alone is not a
+proof: FLAT accesses can address LDS, and incomplete control flow, calls,
+indirect transfers, or unclassified memory operations prevent certification.
+Barriers alone do not require LDS probes. Execution tracing always requires
+boundary probes and does not use this LDS-specific exemption.
+
+Entries have three preparation dispositions: `instrumented`,
+`no_probes_needed`, and `blocked`. A blocked entry remains native and
+uncovered; other qualified entries can still be instrumented in the same
+image. Schema 2 `preparation.json` records the original image SHA256, requested
+scope, exact requested entries, all three counts, and each entry's stage,
+reason code, instruction offset when available, and diagnostic. The legacy
+`skipped` count equals `blocked`. A `no_probes_needed` entry includes a
+versioned proof with decoded instruction count, covered code bytes, and a
+digest of its reachable native code ranges. Its `requested_coverage` describes
+only the explicit request, not whole-application coverage. `inventory_entries`
+counts every kernel in the original image; `not_requested` counts those outside
+the request. These counts preserve that distinction even for native-only
+results, which have no instrumented artifact facts. Invalid input
+images, unknown or duplicate entry names, exhausted budgets, and failed binary
+rewriting remain errors.
+
+When preparation produces no instrumented entries, it succeeds with an
+explicit `native_only` outcome and preserves the exact original bytes as
+`original.hsaco`. The directory contains `preparation.json`, but no
+`prepared.hsaco`, `facts.bin`, or `ready` marker. Configure that original image
+through `RJ_CONSAN_NATIVE_IMAGES` in application mode; it is not a selected
+artifact and produces no selected-execution capture or LDS verdict. Preparation
+does not silently construct empty facts to represent analysis that never ran.
+This can mean complete requested coverage when all requested entries have
+absence proofs, or `not_performed` coverage when every entry is blocked. A
+preparation proof is not an analyzer execution or an LDS race verdict.
+
+Use `--require-all` when a test or workflow requires every requested entry to
+be covered. Instrumented entries and `no_probes_needed` entries satisfy that
+requirement; a blocked entry fails preparation before publishing an artifact.
+The strict C++ `prepare_image()` API retains its existing behavior;
+`prepare_image_best_effort()` returns the owning coverage report and optional
+artifact. Binary rewriting and preservation validation use the same strict
+implementation for all entries that pass qualification.
+
+Coverage degradation emits one warning summary, including with the default
+log-groups-OFF build. Per-entry qualification details use the compile-time
+`CONSAN` log group (`-DRJ_LOG_GROUPS=CONSAN`); the structured report is always
+written regardless of logging configuration. Intentionally unrequested entries
+do not count as skipped and do not generate degradation warnings.
+
 The compiler inventories the exact original image, qualifies each selected entry,
 and plans its probes, bootstrap and resources. One transactional rewrite produces
 a coherent replacement that preserves unselected native entries. Its

@@ -16,6 +16,19 @@ inline constexpr uint32_t kImageEntryLimit = 1024;
 
 enum class EntryDisposition : uint32_t { Selected = 1, Native = 2 };
 
+/// @brief Compiler certificate for a closed reachable body with no LDS accesses.
+/// @details The owning image identity and EntryKey bind this profile-specific
+/// certificate. The canonical code digest includes each reachable range's
+/// original offset, extent and bytes in ascending source-offset order.
+struct NoProbesNeededProof {
+  uint32_t version = 1;
+  ScopeKind scope = ScopeKind::NativeLdsNoSynchronization;
+  uint64_t instruction_count = 0;
+  uint64_t code_bytes = 0;
+  Digest code_sha256{};
+  bool operator==(const NoProbesNeededProof &) const = default;
+};
+
 /// @brief One original reachable native block and its unchanged prepared bytes.
 struct NativeCodeRange {
   uint64_t original_offset = 0;

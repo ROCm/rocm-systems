@@ -100,6 +100,7 @@ if(AMDCXX AND EXISTS "${ROCM_PATH}/lib/llvm/bin/ld.lld")
             CONSAN_MULTI_ENTRY_MIXED_FIXTURE="${_fixture_dir}/multi-entry-mixed.hsaco"
             CONSAN_MULTI_ENTRY_NATIVE_GLOBAL_FIXTURE="${_fixture_dir}/multi-entry-native-global.hsaco"
             CONSAN_MULTI_ENTRY_UNREACHABLE_PC_FIXTURE="${_fixture_dir}/multi-entry-unreachable-pc.hsaco"
+            CONSAN_MULTI_ENTRY_UNSUPPORTED_FIXTURE="${_fixture_dir}/multi-entry-unsupported.hsaco"
     )
 else()
     message(
@@ -125,6 +126,15 @@ set(RJ_CONSAN_TEST_ARTIFACT_ROOT
     "Directory for preserved ConSan integration evidence"
 )
 if(TARGET consan_original_fixtures)
+    add_test(
+        NAME ConSanPrepareCli.BestEffortCoverage
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/prepare_cli_coverage_test.py
+            $<TARGET_FILE:rj_consan_prepare>
+            ${_fixture_dir}/multi-entry-unsupported.hsaco
+            ${RJ_CONSAN_TEST_ARTIFACT_ROOT}
+    )
     add_test(
         NAME ConSanPrepareCli.RejectNonExecutableOriginalBeforePublication
         COMMAND
