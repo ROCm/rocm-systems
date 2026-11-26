@@ -260,8 +260,8 @@ Each model has a different number of XCDs:
 
 - **MI300X / MI325X** (CDNA 3, gfx942): 8 XCDs. In CPX mode, 8 logical GPUs are reported.
 - **MI300A** (CDNA 3, gfx942): 6 XCDs. In CPX mode, 6 logical GPUs are reported.
-- **MI350X / MI355X** (CDNA 4, gfx950): Refer to the [AMD Instinct MI300 Series
-  microarchitecture](https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300.html)
+- **MI350X / MI355X** (CDNA 4, gfx950): Refer to the
+  {doc}`AMD Instinct MI300 Series microarchitecture <rocm:reference/gpu-arch/mi300>`
   documentation and the product data sheet for XCD counts.
 
 To see the exact partition profiles and partition counts available on your system, run
