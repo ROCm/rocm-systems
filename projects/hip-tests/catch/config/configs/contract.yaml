@@ -759,6 +759,15 @@ contract:
   Contract_GraphTopology_HipGraphNodeGetDependentNodes_NodeDependents_ReturnsConfiguredDependent:
     <<: *level_0
     tags: [graph_topology, P0]
+  Contract_GraphTopology_HipGraphGetEdgesV2_OversizedBuffer_FillsOnlyReturnedCount:
+    <<: *level_0
+    tags: [graph_topology, P0]
+  Contract_GraphTopology_HipGraphNodeGetDependenciesV2_OversizedBuffer_FillsOnlyReturnedCount:
+    <<: *level_0
+    tags: [graph_topology, P0]
+  Contract_GraphTopology_HipGraphNodeGetDependentNodesV2_OversizedBuffer_FillsOnlyReturnedCount:
+    <<: *level_0
+    tags: [graph_topology, P0]
   Contract_GraphClone_HipGraphClone_ClonedEmptyGraph_InstantiatesAndLaunches:
     <<: *level_0
     tags: [graph_clone, P0]
@@ -829,6 +838,12 @@ contract:
     <<: *level_0
     tags: [graph_node_types, P0]
   Contract_GraphNodeTypes_HipGraphRemoveDependencies_Default_ClearsEdge:
+    <<: *level_0
+    tags: [graph_node_types, P0]
+  Contract_GraphNodeTypes_HipGraphAddDependenciesV2_DefaultEdgeData_CreatesEdge:
+    <<: *level_0
+    tags: [graph_node_types, P0]
+  Contract_GraphNodeTypes_HipGraphRemoveDependenciesV2_DefaultEdgeData_ClearsEdge:
     <<: *level_0
     tags: [graph_node_types, P0]
   Contract_GraphId_HipGraphNodeGetLocalId_NullArguments_ReturnInvalidValue:
