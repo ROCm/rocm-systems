@@ -2487,6 +2487,7 @@ hipError_t hipGraphRemoveDependencies_v2(hipGraph_t graph, const hipGraphNode_t*
   }
   HIP_RETURN(hipGraphRemoveDependencies_common(graph, from, to, numDependencies));
 }
+
 hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
                             size_t* numEdges) {
   HIP_INIT_API(hipGraphGetEdges, graph, from, to, numEdges);
@@ -2494,14 +2495,13 @@ hipError_t hipGraphGetEdges(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode
 }
 
 hipError_t hipGraphGetEdges_v2(hipGraph_t graph, hipGraphNode_t* from, hipGraphNode_t* to,
-                               hipGraphEdgeData *edgeData, size_t* numEdges)
-{
+                               hipGraphEdgeData *edgeData, size_t* numEdges) {
   HIP_INIT_API(hipGraphGetEdges_v2, graph, from, to, edgeData, numEdges);
   hipError_t result;
-  size_t edgeDataSize = 0;
+  size_t capacity = 0;
 
   if (edgeData) {
-    edgeDataSize = numEdges? *numEdges : 0;
+    capacity = numEdges? *numEdges : 0;
 
     if (!to || !from) {
       HIP_RETURN(hipErrorInvalidValue);
@@ -2510,8 +2510,8 @@ hipError_t hipGraphGetEdges_v2(hipGraph_t graph, hipGraphNode_t* from, hipGraphN
 
   result = hipGraphGetEdges_common(graph, from, to, numEdges);
 
-  if (!result) {
-    std::fill_n(edgeData, edgeDataSize, hipGraphEdgeData {});
+  if (!result && capacity) {
+    std::fill_n(edgeData, *numEdges, hipGraphEdgeData {});
   }
 
   HIP_RETURN(result);
@@ -2558,17 +2558,21 @@ hipError_t hipGraphNodeGetDependencies_v2(hipGraphNode_t node,
   hipError_t result;
   HIP_INIT_API(hipGraphNodeGetDependencies_v2, node, pDependencies, edgeData, pNumDependencies);
   // capture the edgeData array size before it gets overwritten
-  size_t edgeDataSize = edgeData && pNumDependencies? *pNumDependencies : 0;
+  size_t capacity = 0;
 
-  if (edgeData && !pDependencies) {
+  if (edgeData) {
+    capacity = pNumDependencies? *pNumDependencies : 0;
+
     // TODO g-h-c check this
-    HIP_RETURN(hipErrorInvalidValue);
+    if (!pDependencies) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
   }
 
   result = hipGraphNodeGetDependencies_common(node, pDependencies, pNumDependencies);
 
-  if (!result) {
-    std::fill_n(edgeData, edgeDataSize, hipGraphEdgeData {});
+  if (!result && capacity) {
+    std::fill_n(edgeData, *pNumDependencies, hipGraphEdgeData {});
   }
 
   HIP_RETURN(result);
@@ -2607,6 +2611,30 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
                                          size_t* pNumDependentNodes) {
   HIP_INIT_API(hipGraphNodeGetDependentNodes, node, pDependentNodes, pNumDependentNodes);
   HIP_RETURN(hipGraphNodeGetDependentNodes_common(node, pDependentNodes, pNumDependentNodes));
+}
+
+hipError_t hipGraphNodeGetDependentNodes_v2(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
+                                            hipGraphEdgeData* edgeData,
+                                            size_t* pNumDependentNodes) {
+  HIP_INIT_API(hipGraphNodeGetDependentNodes_v2, node, pDependentNodes, edgeData,
+                                                 pNumDependentNodes);
+  hipError_t result;
+  size_t capacity = 0;
+
+  if (edgeData) {
+    capacity = pNumDependentNodes? *pNumDependentNodes : 0;
+    // TODO g-h-c check this
+    if (!pDependentNodes) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+  }
+
+  result = hipGraphNodeGetDependentNodes_common(node, pDependentNodes, pNumDependentNodes);
+
+  if (!result && capacity) {
+    std::fill_n(edgeData, *pNumDependentNodes, hipGraphEdgeData {});
+  }
+  HIP_RETURN(result);
 }
 
 hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType) {
