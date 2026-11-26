@@ -194,16 +194,20 @@ def test_analyze_debug_options():
     """Debug options work without --debug, and without -p."""
     defaults = build_args(["analyze", "-p", "/tmp/workload"])
     assert defaults.debug_metric_expression is False
+    assert defaults.debug_table_decimal == 2
     assert defaults.debug_table_view is False
     assert defaults.debug_verify_deps is False
 
     args = build_args([
         "analyze",
         "--debug-metric-expression",
+        "--debug-table-decimal",
+        "4",
         "--debug-table-view",
         "--debug-verify-deps",
     ])
     assert args.debug_metric_expression is True
+    assert args.debug_table_decimal == 4
     assert args.debug_table_view is True
     assert args.debug_verify_deps is True
 
