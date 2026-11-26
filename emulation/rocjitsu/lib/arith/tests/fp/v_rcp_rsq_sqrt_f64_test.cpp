@@ -268,6 +268,42 @@ TEST(FpTransF64Gfx11, CapturedLanes) {
   check_captured(gfx11_w64, gfx11_lanes);
 }
 
+// MI350X (gfx950) matches the captured TRANS-unit lanes and guards uncaptured active OMOD in
+// mode 2.
+TEST(FpTransF64Gfx950, CapturedLanesAndQualification) {
+  constexpr Calls<32> gfx950_w32{rj_arith_v_rcp_f64_w32_gfx950, rj_arith_v_rsq_f64_w32_gfx950,
+                                 rj_arith_v_sqrt_f64_w32_gfx950};
+  constexpr Calls<64> gfx950_w64{rj_arith_v_rcp_f64_w64_gfx950, rj_arith_v_rsq_f64_w64_gfx950,
+                                 rj_arith_v_sqrt_f64_w64_gfx950};
+  const Captured mi350x_lanes[] = {
+      {"RcpSignalingNan", Trans::Rcp, 0, 0x7ff4000012345678, 0x7ff4000012345678, 0x00},
+      {"RcpSubnormalSourceF0", Trans::Rcp, 0, 0x000fffffffffffff, 0x7fd000000af80000, 0xf0},
+      {"RcpSubnormalSource00", Trans::Rcp, 0, 0x000fffffffffffff, 0x7ff0000000000000, 0x00},
+      {"RcpDiv2KeptDenormals", Trans::Rcp, RJ_ARITH_ALU_OMOD_HALF, 0xd4e86ac4255b6895,
+       0xaaf4f80d140c0000, 0xf0},
+      {"RsqSubnormalSourceF0", Trans::Rsq, 0, 0x000fffffffffffff, 0x5fe00000019e0000, 0xf0},
+      {"RsqSubnormalSource00", Trans::Rsq, 0, 0x000fffffffffffff, 0x7ff0000000000000, 0x00},
+      {"RsqNegative", Trans::Rsq, 0, 0xbff0000000000000, 0xfff8000000000000, 0xc0},
+      {"SqrtSignalingNan", Trans::Sqrt, 0, 0x7ff4000012345678, 0x7ff4000012345678, 0xf0},
+      {"SqrtNegative", Trans::Sqrt, 0, 0xbff0000000000000, 0xfff8000000000000, 0xc0},
+      {"SqrtClampNan", Trans::Sqrt, RJ_ARITH_ALU_CLAMP, 0x7ff0000000000001, 0, 0x00},
+  };
+  check_captured(gfx950_w32, mi350x_lanes);
+  check_captured(gfx950_w64, mi350x_lanes);
+  for (uint64_t cpu : rocjitsu::arith::test::supported_cpu_levels()) {
+    Registers<4, 32> r;
+    rocjitsu::arith::test::write_fp(r.v, 0, 64, 0x3ff0000000000000ULL);
+    EXPECT_EQ(
+        rj_arith_v_rcp_f64_w32_gfx950(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS |
+                                          RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS,
+                                      1U, RJ_ARITH_ALU_OMOD_2, r.v + 2, r.v, nullptr),
+        RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+    EXPECT_EQ(rj_arith_v_rcp_f64_w32_gfx950(cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 1U, 0,
+                                            r.v + 2, r.v, nullptr),
+              RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+  }
+}
+
 TEST(FpNativeMathCdna, Arithmetic) {
   using namespace rocjitsu::arith::test;
   for (auto call : {rj_arith_v_rcp_f64_w32_gfx942, rj_arith_v_rcp_f64_w32_gfx1250}) {

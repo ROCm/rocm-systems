@@ -16,7 +16,7 @@ namespace {
 
 // Fix up division results and special values for the selected lanes. Requires validated
 // controls; preserve inactive destination lanes.
-template <int Width, bool Rdna3 = false, bool Cdna = false>
+template <int Width, bool Rdna3 = false, bool Cdna = false, bool Gfx950 = false>
 int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
         uint32_t *excp_flag_user);
@@ -26,7 +26,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
 // rocjitsu's classify_div_fixup applies this same flush before classifying
 // exceptional arithmetic, with input-denormal causes suppressed. Classifying
 // these already-flushed operands implements that rule without a second model.
-template <int Width, bool Rdna3, bool Cdna>
+template <int Width, bool Rdna3, bool Cdna, bool Gfx950 = false>
 [[gnu::noinline]] int run_flushed(uint64_t flags, uint32_t exec_mask, uint32_t mode,
                                   uint32_t *const *d, const uint32_t *const *a,
                                   const uint32_t *const *b, const uint32_t *const *c,
@@ -61,8 +61,8 @@ template <int Width, bool Rdna3, bool Cdna>
       sources[operand][reg] = words[operand][reg];
     }
   }
-  return run<Width, Rdna3, Cdna>(flags & ~RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, exec_mask, mode, d, a,
-                                 sources[0], sources[1], excp_flag_user);
+  return run<Width, Rdna3, Cdna, Gfx950>(flags & ~RJ_ARITH_FP_FLUSH_INPUT_DENORMALS, exec_mask,
+                                         mode, d, a, sources[0], sources[1], excp_flag_user);
 }
 
 // Validate controls independently of the requested numerical/reporting policy.
@@ -81,7 +81,7 @@ template <int Width, bool Rdna3> int validate_controls(uint64_t flags, uint32_t 
 
 // Fix up division results and special values for the selected lanes. Reject invalid controls
 // before changing outputs.
-template <int Width, bool Rdna3, bool Cdna>
+template <int Width, bool Rdna3, bool Cdna, bool Gfx950>
 int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
         const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
         uint32_t *excp_flag_user) {
@@ -95,6 +95,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
+  constexpr bool cdna_numeric = Cdna && !Gfx950;
   bool cdna_vector = false;
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
   cdna_vector = Cdna && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3);
@@ -102,7 +103,8 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
   cdna_vector = Cdna && rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4);
 #endif
   if ((flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) && !cdna_vector) {
-    return run_flushed<Width, Rdna3, Cdna>(flags, exec_mask, mode, d, a, b, c, excp_flag_user);
+    return run_flushed<Width, Rdna3, Cdna, Gfx950>(flags, exec_mask, mode, d, a, b, c,
+                                                   excp_flag_user);
   }
   bool report = rocjitsu::arith::reports_fp_status(flags);
   uint32_t exceptions = 0;
@@ -143,11 +145,9 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     }
   }
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
-  // CDNA always quiets selected NaNs. In the shared backend IEEE selects only
-  // this numeric policy; architecture-specific OMOD gating happens before run.
-  // RDNA directed-half packing remains scalar; the inherited CDNA half model
-  // always narrows to nearest, and its SIMD recovery already honors guest rounding.
-  const uint64_t numeric_flags = flags | (Cdna ? RJ_ARITH_FP_IEEE_MODE : 0);
+  // Older CDNA/gfx1250 always quiet selected NaNs; gfx950 honors MODE.IEEE like RDNA3.
+  // FP16 SIMD final packing uses nearest rounding; directed modes use the scalar packer.
+  const uint64_t numeric_flags = flags | (cdna_numeric ? RJ_ARITH_FP_IEEE_MODE : 0);
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
   if ((Width != 16 || Cdna || !(flags & RJ_ARITH_FP_ROUND_MASK)) &&
       rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V4)) {
@@ -157,7 +157,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
           rocjitsu::arith::fixup_exceptions_x86_64_v4<Width>(exec_mask, mode, a, b, c, flags, Cdna);
     }
     rocjitsu::arith::fixup_x86_64_v4<Width, Rdna3>(exec_mask, mode, numeric_flags, d, a, b, c,
-                                                   Cdna);
+                                                   cdna_numeric);
     if (report) {
       *excp_flag_user |= exceptions;
     }
@@ -172,7 +172,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
           rocjitsu::arith::fixup_exceptions_x86_64_v3<Width>(exec_mask, mode, a, b, c, flags, Cdna);
     }
     rocjitsu::arith::fixup_x86_64_v3<Width, Rdna3>(exec_mask, mode, numeric_flags, d, a, b, c,
-                                                   Cdna);
+                                                   cdna_numeric);
     if (report) {
       *excp_flag_user |= exceptions;
     }
@@ -196,7 +196,7 @@ int run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
     result[lane] = rocjitsu::arith::fixup_value<Width, Rdna3>(
         av, bv, cv, mode, saturate, unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24),
         flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS, flags & RJ_ARITH_FP_DX10_CLAMP_OFF,
-        Cdna || (flags & RJ_ARITH_FP_IEEE_MODE), Cdna);
+        cdna_numeric || (flags & RJ_ARITH_FP_IEEE_MODE), cdna_numeric);
     if (report && !Rdna3 && ((exec_mask >> lane) & 1)) {
       exceptions |= rocjitsu::arith::fixup_exceptions<Width>(av, bv, cv, mode);
     }
@@ -627,4 +627,163 @@ int rj_arith_v_div_fixup_legacy_f16_w64(uint64_t flags, uint64_t exec_mask,
                                         const uint32_t *const *c, uint32_t *trapsts) {
   return rj_arith_v_div_fixup_f16_w64_gfx942(flags, exec_mask, instruction_flags, d, a, b, c,
                                              trapsts);
+}
+
+namespace {
+
+template <typename Call, typename Mask>
+int gfx950_fixup_f16(Call call, Call fallback, uint64_t flags, Mask exec_mask, uint64_t mode,
+                     uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                     const uint32_t *const *c, uint32_t *trapsts) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  const bool active_omod = (mode & RJ_ARITH_ALU_OMOD_MASK) &&
+                           (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+                           !(flags & RJ_ARITH_FP_IEEE_MODE);
+  if (active_omod) {
+    if (int error = call(flags, 0, mode, nullptr, nullptr, nullptr, nullptr, nullptr)) {
+      return error;
+    }
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+    }
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
+      flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE;
+    }
+    if (mode >> 32) {
+      return call(flags, exec_mask, mode, d, a, b, c, trapsts);
+    }
+    return fallback(flags, exec_mask, mode, d, a, b, c, trapsts);
+  }
+  return call(flags, exec_mask, mode, d, a, b, c, trapsts);
+}
+
+template <int Width>
+int run_gfx950_wide(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                    const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c,
+                    uint32_t *trapsts) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  uint64_t resolved =
+      rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL);
+  if (int error = rocjitsu::arith::validate_semantics(resolved)) {
+    return error;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  if (int error = validate_controls<Width, true>(resolved, uint32_t(mode))) {
+    return error;
+  }
+  if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  const bool active_omod = (mode & RJ_ARITH_ALU_OMOD_MASK) &&
+                           (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+                           !(flags & RJ_ARITH_FP_IEEE_MODE);
+  if (active_omod) {
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+      return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+    }
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
+      resolved = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE;
+    }
+  } else {
+    mode &= ~uint64_t(RJ_ARITH_ALU_OMOD_MASK);
+  }
+  return run<Width, true, true, true>(resolved, exec_mask, uint32_t(mode), d, a, b, c, trapsts);
+}
+
+template <int Width>
+int run_gfx950_wide_wave64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c, uint32_t *trapsts) {
+  if (int error =
+          run_gfx950_wide<Width>(flags, 0, mode, nullptr, nullptr, nullptr, nullptr, trapsts)) {
+    return error;
+  }
+  if (!exec_mask) {
+    return RJ_ARITH_SUCCESS;
+  }
+  const bool report = rocjitsu::arith::reports_fp_status(
+      rocjitsu::arith::resolve_compatibility(flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL));
+  uint32_t exceptions = 0;
+  for (int half = 0; half < 2; ++half) {
+    uint32_t *dest[Width == 64 ? 2 : 1];
+    const uint32_t *av[Width == 64 ? 2 : 1], *bv[Width == 64 ? 2 : 1], *cv[Width == 64 ? 2 : 1];
+    for (int reg = 0; reg < (Width == 64 ? 2 : 1); ++reg) {
+      dest[reg] = d[reg] + half * 32;
+      av[reg] = a[reg] + half * 32;
+      bv[reg] = b[reg] + half * 32;
+      cv[reg] = c[reg] + half * 32;
+    }
+    if (int error = run_gfx950_wide<Width>(flags, uint32_t(exec_mask >> (half * 32)), mode, dest,
+                                           av, bv, cv, report ? &exceptions : nullptr)) {
+      return error;
+    }
+  }
+  if (report) {
+    *trapsts |= exceptions;
+  }
+  return RJ_ARITH_SUCCESS;
+}
+
+} // namespace
+
+int rj_arith_v_div_fixup_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return gfx950_fixup_f16(rj_arith_v_div_fixup_f16_w32, rj_arith_v_div_fixup_f16_w32_gfx942, flags,
+                          exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_div_fixup_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return gfx950_fixup_f16(rj_arith_v_div_fixup_f16_w64, rj_arith_v_div_fixup_f16_w64_gfx942, flags,
+                          exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_div_fixup_legacy_f16_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b,
+                                               const uint32_t *const *c, uint32_t *trapsts) {
+  return rj_arith_v_div_fixup_f16_w32_gfx950(flags, exec_mask, instruction_flags, d, a, b, c,
+                                             trapsts);
+}
+
+int rj_arith_v_div_fixup_legacy_f16_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                               uint64_t instruction_flags, uint32_t *const *d,
+                                               const uint32_t *const *a, const uint32_t *const *b,
+                                               const uint32_t *const *c, uint32_t *trapsts) {
+  return rj_arith_v_div_fixup_f16_w64_gfx950(flags, exec_mask, instruction_flags, d, a, b, c,
+                                             trapsts);
+}
+
+int rj_arith_v_div_fixup_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950_wide<32>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_div_fixup_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950_wide_wave64<32>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_div_fixup_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950_wide<64>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+int rj_arith_v_div_fixup_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask,
+                                        uint64_t instruction_flags, uint32_t *const *d,
+                                        const uint32_t *const *a, const uint32_t *const *b,
+                                        const uint32_t *const *c, uint32_t *trapsts) {
+  return run_gfx950_wide_wave64<64>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }

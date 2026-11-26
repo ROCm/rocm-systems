@@ -89,6 +89,16 @@ accumulation per hardware pass under `RJ_ARITH_FP16_OVFL` and ignore
 `CBSZ`/`ABID`/`BLGP` on single-batch dense forms while unsuffixed shared forms
 preserve gfx942 behavior.
 
+gfx950 FP16 SFU (`v_{rcp,rsq,sqrt,exp,log,sin,cos}_f16_gfx950`), FP32 SFU
+(`v_{rcp,rcp_iflag,rsq,sqrt,exp,log,sin,cos}_f32_gfx950`), FP64 TRANS
+(`v_{rcp,rsq,sqrt}_f64_gfx950`), and IEEE division helpers
+(`v_div_scale_{f32,f64}_gfx950`, `v_div_fmas_{f32,f64}_gfx950`, and
+`v_div_fixup_{f16,legacy_f16,f32,f64}_gfx950`) are calibrated against MI350X
+hardware captures and accept mode 2 (plus mode 3 on unmodified `DIV_SCALE`,
+which has no architectural FP-status output), while uncaptured SDWA encodings,
+legacy `V_{EXP,LOG}_LEGACY_F32`, `DIV_SCALE` `OMOD`/`CLAMP`, and uncaptured
+effective `OMOD` paths remain rejected in strict mode 2.
+
 ### Matrix instructions
 
 CDNA matrix support covers twenty dense and twelve sparse gfx942 MFMA/SMFMAC

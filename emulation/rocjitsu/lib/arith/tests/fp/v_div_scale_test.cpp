@@ -85,6 +85,33 @@ TEST(FpDivScaleGfx11, SignalingNan) {
   check_rdna3_nan<64, 64>(rj_arith_v_div_scale_f64_w64);
 }
 
+TEST(FpDivScaleGfx950, ExactScaleAndOmodGuard) {
+  check_rdna3_nan<32, 32>(rj_arith_v_div_scale_f32_w32_gfx950);
+  check_rdna3_nan<32, 64>(rj_arith_v_div_scale_f32_w64_gfx950);
+  check_rdna3_nan<64, 32>(rj_arith_v_div_scale_f64_w32_gfx950);
+  check_rdna3_nan<64, 64>(rj_arith_v_div_scale_f64_w64_gfx950);
+  using namespace rocjitsu::arith::test;
+  for (uint64_t cpu : supported_cpu_levels()) {
+    Registers<8, 32> r;
+    write_fp(r.v, 0, 32, 0x1f800000U);
+    write_fp(r.v + 2, 0, 32, 0x7f7fffffU);
+    write_fp(r.v + 4, 0, 32, 0x7f7fffffU);
+    uint32_t cond = 0xaaaaU;
+    ASSERT_EQ(rj_arith_v_div_scale_f32_w32_gfx950(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 1U, 0, r.v + 6, &cond,
+                  r.v, r.v + 2, r.v + 4),
+              RJ_ARITH_SUCCESS);
+    EXPECT_EQ(read_fp(r.v + 6, 0, 32), 0x7f800000U);
+    EXPECT_EQ(cond, 0U);
+    cond = 0xaaaaU;
+    EXPECT_EQ(rj_arith_v_div_scale_f32_w32_gfx950(
+                  cpu | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 1U,
+                  RJ_ARITH_ALU_OMOD_2, r.v + 6, &cond, r.v, r.v + 2, r.v + 4),
+              RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+    EXPECT_EQ(cond, 0xaaaaU);
+  }
+}
+
 namespace {
 
 // One gfx1201 capture (gfx1100 is bit-identical): MODE, A, B, C, result and condition.

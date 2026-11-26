@@ -1649,6 +1649,70 @@ int rj_arith_v_sqrt_f64_w32_gfx1250(uint64_t flags, uint32_t exec_mask, uint64_t
       flags, exec_mask, uint32_t(instruction_flags), d, a, nullptr, nullptr);
 }
 
+namespace {
+
+template <typename Call, typename Mask>
+int gfx950_trans_f64(Call call, uint64_t flags, Mask exec_mask, uint64_t instruction_flags,
+                     uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  const bool active_omod = (instruction_flags & RJ_ARITH_ALU_OMOD_MASK) &&
+                           (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) &&
+                           !(flags & RJ_ARITH_FP_IEEE_MODE);
+  if (active_omod) {
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+      if (int error = call(flags, 0, instruction_flags, nullptr, nullptr, nullptr)) {
+        return error;
+      }
+      return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+    }
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
+      flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE;
+    }
+  }
+  return call(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+} // namespace
+
+// MI350X (gfx950) calibrated FP64 TRANS-unit entry points.
+int rj_arith_v_rcp_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_trans_f64(rj_arith_v_rcp_f64_w32, flags, exec_mask, instruction_flags, d, a,
+                          trapsts);
+}
+
+int rj_arith_v_rcp_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_trans_f64(rj_arith_v_rcp_f64_w64, flags, exec_mask, instruction_flags, d, a,
+                          trapsts);
+}
+
+int rj_arith_v_rsq_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_trans_f64(rj_arith_v_rsq_f64_w32, flags, exec_mask, instruction_flags, d, a,
+                          trapsts);
+}
+
+int rj_arith_v_rsq_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_trans_f64(rj_arith_v_rsq_f64_w64, flags, exec_mask, instruction_flags, d, a,
+                          trapsts);
+}
+
+int rj_arith_v_sqrt_f64_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  return gfx950_trans_f64(rj_arith_v_sqrt_f64_w32, flags, exec_mask, instruction_flags, d, a,
+                          trapsts);
+}
+
+int rj_arith_v_sqrt_f64_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  return gfx950_trans_f64(rj_arith_v_sqrt_f64_w64, flags, exec_mask, instruction_flags, d, a,
+                          trapsts);
+}
+
 // Evaluate the instruction under its inherited architecture policy.
 int rj_arith_v_mul_f64_w32_gfx942(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
                                   uint32_t *const *d, const uint32_t *const *a,

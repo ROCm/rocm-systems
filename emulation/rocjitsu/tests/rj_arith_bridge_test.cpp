@@ -17301,9 +17301,10 @@ TEST(ArithBridgeTest, CdnaDivisionFixupGuestModesAndStatus) {
               ASSERT_TRUE(instruction.succeeded());
               ASSERT_TRUE(fixture.cu->execute_instruction(instruction.value().get(), *fixture.wave)
                               .succeeded());
-              uint64_t expected = scenario == 2                    ? inf | quiet | 1
-                                  : scenario == 1 && rounding >= 2 ? inf - 1
-                                                                   : inf;
+              uint64_t expected =
+                  scenario == 2 ? inf | (arch == rocjitsu::IsaFamily::Cdna4 ? 0ULL : quiet) | 1
+                  : scenario == 1 && rounding >= 2 ? inf - 1
+                                                   : inf;
               if (clamp) {
                 expected = scenario == 2 ? 0 : one;
               }
@@ -17769,10 +17770,10 @@ TEST(ArithBridgeTest, CdnaFp16Math) {
                                            cdna4::kVLogF16Vop3,  cdna4::kVSinF16Vop3,
                                            cdna4::kVCosF16Vop3};
               const arith::FloatUnary64Function calls[] = {
-                  rj_arith_v_rcp_f16_w64_gfx942,  rj_arith_v_rsq_f16_w64_gfx942,
-                  rj_arith_v_sqrt_f16_w64_gfx942, rj_arith_v_exp_f16_w64_gfx942,
-                  rj_arith_v_log_f16_w64_gfx942,  rj_arith_v_sin_f16_w64_gfx942,
-                  rj_arith_v_cos_f16_w64_gfx942};
+                  rj_arith_v_rcp_f16_w64_gfx950,  rj_arith_v_rsq_f16_w64_gfx950,
+                  rj_arith_v_sqrt_f16_w64_gfx950, rj_arith_v_exp_f16_w64_gfx950,
+                  rj_arith_v_log_f16_w64_gfx950,  rj_arith_v_sin_f16_w64_gfx950,
+                  rj_arith_v_cos_f16_w64_gfx950};
               ASSERT_EQ(calls[op](flags, exec_mask, modifiers, &d, &a, &state), RJ_ARITH_SUCCESS);
               if (vop3) {
                 words = cdna4::build_vop3(
@@ -17974,28 +17975,58 @@ TEST(ArithBridgeTest, CdnaFp64Math) {
             auto instruction = f.decoder->decode_window(words);
             ASSERT_TRUE(instruction.succeeded());
             ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
-            for (unsigned lane = 0; lane < lanes; ++lane) {
-              double x = inputs[lane % 6];
-              double expected = x;
-              if (exec_mask & (1ULL << lane)) {
-                if (!(denorm & 1) && std::fpclassify(x) == FP_SUBNORMAL) {
-                  x = std::copysign(0.0, x);
-                }
-                expected = op == 0 ? 1.0 / x : op == 1 ? 1.0 / std::sqrt(x) : std::sqrt(x);
-                if (vop3 && (arch == rocjitsu::IsaFamily::Cdna5 || !denorm)) {
-                  expected *= 2.0;
-                }
+            if (arch == rocjitsu::IsaFamily::Cdna4) {
+              std::array<uint32_t, 64> lo{}, hi{};
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                const auto in_bits = std::bit_cast<uint64_t>(inputs[lane % 6]);
+                lo[lane] = uint32_t(in_bits);
+                hi[lane] = uint32_t(in_bits >> 32);
               }
-              const uint64_t bits = f.cu->read_vgpr(f.base(), lane) |
-                                    (uint64_t(f.cu->read_vgpr(f.base() + 1, lane)) << 32);
-              if (std::isnan(expected)) {
-                if (semantics == ArithmeticSemantics::Compatibility && x < 0 && op != 0) {
-                  EXPECT_EQ(bits, 0x7ff8000000000000ULL);
-                } else {
-                  EXPECT_TRUE(std::isnan(std::bit_cast<double>(bits)));
+              uint32_t *d_ptrs[] = {lo.data(), hi.data()};
+              const uint32_t *a_ptrs[] = {lo.data(), hi.data()};
+              uint32_t ref_state = 0x10u;
+              const arith::FloatUnary64Function calls[] = {rj_arith_v_rcp_f64_w64_gfx950,
+                                                           rj_arith_v_rsq_f64_w64_gfx950,
+                                                           rj_arith_v_sqrt_f64_w64_gfx950};
+              const uint64_t ref_flags =
+                  arith::float16_f64_flags(*f.wave, f.cu->arithmetic_flags(), true);
+              ASSERT_EQ(calls[op](ref_flags, exec_mask, vop3 ? RJ_ARITH_ALU_OMOD_2 : 0, d_ptrs,
+                                  a_ptrs, &ref_state),
+                        RJ_ARITH_SUCCESS);
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                const uint64_t bits = f.cu->read_vgpr(f.base(), lane) |
+                                      (uint64_t(f.cu->read_vgpr(f.base() + 1, lane)) << 32);
+                const uint64_t ref_bits = lo[lane] | (uint64_t(hi[lane]) << 32);
+                if (semantics == ArithmeticSemantics::Compatibility &&
+                    (exec_mask & (1ULL << lane)) && inputs[lane % 6] < 0 && op != 0) {
+                  EXPECT_EQ(bits, 0xfff8000000000000ULL) << "lane " << lane;
                 }
-              } else {
-                EXPECT_EQ(bits, std::bit_cast<uint64_t>(expected)) << "lane " << lane;
+                EXPECT_EQ(bits, ref_bits) << "lane " << lane;
+              }
+            } else {
+              for (unsigned lane = 0; lane < lanes; ++lane) {
+                double x = inputs[lane % 6];
+                double expected = x;
+                if (exec_mask & (1ULL << lane)) {
+                  if (!(denorm & 1) && std::fpclassify(x) == FP_SUBNORMAL) {
+                    x = std::copysign(0.0, x);
+                  }
+                  expected = op == 0 ? 1.0 / x : op == 1 ? 1.0 / std::sqrt(x) : std::sqrt(x);
+                  if (vop3 && (arch == rocjitsu::IsaFamily::Cdna5 || !denorm)) {
+                    expected *= 2.0;
+                  }
+                }
+                const uint64_t bits = f.cu->read_vgpr(f.base(), lane) |
+                                      (uint64_t(f.cu->read_vgpr(f.base() + 1, lane)) << 32);
+                if (std::isnan(expected)) {
+                  if (semantics == ArithmeticSemantics::Compatibility && x < 0 && op != 0) {
+                    EXPECT_EQ(bits, 0x7ff8000000000000ULL);
+                  } else {
+                    EXPECT_TRUE(std::isnan(std::bit_cast<double>(bits)));
+                  }
+                } else {
+                  EXPECT_EQ(bits, std::bit_cast<uint64_t>(expected)) << "lane " << lane;
+                }
               }
             }
             EXPECT_EQ(f.wave->trapsts(), 0x10u);
@@ -18070,10 +18101,10 @@ TEST(ArithBridgeTest, CdnaFp32Math) {
                                          cdna4::kVSinF32Vop3,       cdna4::kVCosF32Vop3,
                                          cdna4::kVExpLegacyF32Vop3, cdna4::kVLogLegacyF32Vop3};
             const arith::FloatUnary64Function calls[] = {
-                rj_arith_v_rcp_f32_w64_gfx942,        rj_arith_v_rcp_iflag_f32_w64_gfx942,
-                rj_arith_v_rsq_f32_w64_gfx942,        rj_arith_v_sqrt_f32_w64_gfx942,
-                rj_arith_v_exp_f32_w64_gfx942,        rj_arith_v_log_f32_w64_gfx942,
-                rj_arith_v_sin_f32_w64_gfx942,        rj_arith_v_cos_f32_w64_gfx942,
+                rj_arith_v_rcp_f32_w64_gfx950,        rj_arith_v_rcp_iflag_f32_w64_gfx950,
+                rj_arith_v_rsq_f32_w64_gfx950,        rj_arith_v_sqrt_f32_w64_gfx950,
+                rj_arith_v_exp_f32_w64_gfx950,        rj_arith_v_log_f32_w64_gfx950,
+                rj_arith_v_sin_f32_w64_gfx950,        rj_arith_v_cos_f32_w64_gfx950,
                 rj_arith_v_exp_legacy_f32_w64_gfx942, rj_arith_v_log_legacy_f32_w64_gfx942};
             ASSERT_EQ(calls[op](flags, exec_mask, modifiers, &d, &a, &state), RJ_ARITH_SUCCESS);
             if (vop3) {
@@ -18239,12 +18270,26 @@ TEST(ArithBridgeTest, CdnaNativeF64ModeBoundaries) {
           ASSERT_TRUE(instruction.succeeded());
           ASSERT_TRUE(f.cu->execute_instruction(instruction.value().get(), *f.wave).succeeded());
           const double x = enabled ? 0x1p-1023 : 0;
-          const uint64_t expected =
+          uint64_t expected =
               nan ? 0x7ff4000000000001ULL |
                         (enabled || arch == rocjitsu::IsaFamily::Cdna5 ? 0x0008000000000000ULL : 0)
                   : std::bit_cast<uint64_t>(op == 0   ? 1.0 / x
                                             : op == 1 ? 1.0 / std::sqrt(x)
                                                       : std::sqrt(x));
+          if (!nan && enabled && arch == rocjitsu::IsaFamily::Cdna4) {
+            std::array<uint32_t, 64> lo{}, hi{};
+            lo[0] = 0U;
+            hi[0] = 0x00080000U;
+            uint32_t *d_ptrs[] = {lo.data(), hi.data()};
+            const uint32_t *a_ptrs[] = {lo.data(), hi.data()};
+            const arith::FloatUnary64Function calls[] = {rj_arith_v_rcp_f64_w64_gfx950,
+                                                         rj_arith_v_rsq_f64_w64_gfx950,
+                                                         rj_arith_v_sqrt_f64_w64_gfx950};
+            const uint64_t ref_flags =
+                arith::float16_f64_flags(*f.wave, f.cu->arithmetic_flags(), true);
+            ASSERT_EQ(calls[op](ref_flags, 1ULL, 0, d_ptrs, a_ptrs, nullptr), RJ_ARITH_SUCCESS);
+            expected = lo[0] | (uint64_t(hi[0]) << 32);
+          }
           EXPECT_EQ(f.cu->read_vgpr(f.base() + 2, 0), uint32_t(expected));
           EXPECT_EQ(f.cu->read_vgpr(f.base() + 3, 0), uint32_t(expected >> 32));
         }
@@ -20369,6 +20414,89 @@ TEST(ArithBridgeTest, Cdna4MxfpMfmaExactAndFp16Ovfl) {
       EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 64, 0), ovfl ? 0x7f7fffffu : 0x7f800000u);
       EXPECT_EQ(fixture.cu->read_vgpr(fixture.base() + 64, 1), ovfl ? 0x00000000u : 0xffc00000u);
     }
+  }
+}
+
+TEST(ArithBridgeTest, Cdna4SfuAndDivisionExactAndGuards) {
+  // 1. VOP1/VOP3 FP16, FP32, FP64 SFU and division succeed in mode 2 on CDNA4 and reject mode 3
+  // (except DIV_SCALE without OMOD/CLAMP, which has no architectural FP-status output).
+  for (auto semantics :
+       {ArithmeticSemantics::BitExactEmpiricalNoFpStatus, ArithmeticSemantics::BitExactEmpirical}) {
+    BridgeFixture f(rocjitsu::IsaFamily::Cdna4, 64, {semantics});
+    ASSERT_NE(f.wave, nullptr);
+    f.wave->set_exec(1ULL);
+    f.wave->set_mode_raw(0x0f0U); // IEEE=0, DX10=0, denormals allowed.
+    f.cu->write_vgpr(f.base() + 0, 0, 0x7f800001U);
+    f.cu->write_vgpr(f.base() + 1, 0, 0xdeadbeefU);
+    const auto iflag_words = cdna4::build_vop1(cdna4::kVRcpIflagF32Vop1, {.src0 = 256, .vdst = 1});
+    auto iflag_inst = f.decoder->decode_window(iflag_words);
+    ASSERT_TRUE(iflag_inst.succeeded());
+    const bool ok = semantics == ArithmeticSemantics::BitExactEmpiricalNoFpStatus;
+    EXPECT_EQ(f.cu->execute_instruction(iflag_inst.value().get(), *f.wave).succeeded(), ok);
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 1, 0), ok ? 0x7f800001U : 0xdeadbeefU);
+
+    // Uncaptured SDWA on CDNA4 FP32 and FP16 SFU rejects mode 2/3 without modifying destination.
+    f.wave->clear_instruction_execution_error();
+    f.cu->write_vgpr(f.base() + 1, 0, 0xdeadbeefU);
+    std::array<uint32_t, 2> sdwa32 = {
+        cdna4::build_vop1(cdna4::kVRcpF32Vop1, {.src0 = SRC_SDWA, .vdst = 1})[0],
+        (sdwa::DWORD << 8) | (sdwa::DWORD << 16)};
+    auto sdwa32_inst = f.decoder->decode_window(sdwa32);
+    ASSERT_TRUE(sdwa32_inst.succeeded());
+    EXPECT_FALSE(f.cu->execute_instruction(sdwa32_inst.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 1, 0), 0xdeadbeefU);
+
+    f.wave->clear_instruction_execution_error();
+    std::array<uint32_t, 2> sdwa16 = {
+        cdna4::build_vop1(cdna4::kVRcpF16Vop1, {.src0 = SRC_SDWA, .vdst = 1})[0],
+        (sdwa::WORD_0 << 8) | (sdwa::WORD_0 << 16)};
+    auto sdwa16_inst = f.decoder->decode_window(sdwa16);
+    ASSERT_TRUE(sdwa16_inst.succeeded());
+    EXPECT_FALSE(f.cu->execute_instruction(sdwa16_inst.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 1, 0), 0xdeadbeefU);
+
+    // Uncaptured active DPP on CDNA4 FP32 and FP16 SFU rejects mode 2/3 with
+    // UnsupportedOperandValue and leaves destination VGPRs untouched.
+    for (const auto &dpp_words : {std::array<uint32_t, 2>{0x7e0244faU, 0xff00e400U},
+                                  std::array<uint32_t, 2>{0x7e027afaU, 0xff00e400U}}) {
+      f.wave->clear_instruction_execution_error();
+      f.cu->write_vgpr(f.base() + 1, 0, 0xdeadbeefU);
+      auto dpp_inst = f.decoder->decode_window(dpp_words);
+      ASSERT_TRUE(dpp_inst.succeeded());
+      const auto res = f.cu->execute_instruction(dpp_inst.value().get(), *f.wave);
+      EXPECT_FALSE(res.succeeded());
+      EXPECT_EQ(f.wave->instruction_execution_error(),
+                InstructionExecutionError::UnsupportedOperandValue);
+      EXPECT_EQ(f.cu->read_vgpr(f.base() + 1, 0), 0xdeadbeefU);
+    }
+
+    // Uncaptured V_EXP_LEGACY_F32 stays unqualified in strict mode.
+    f.wave->clear_instruction_execution_error();
+    const auto leg_words = cdna4::build_vop1(cdna4::kVExpLegacyF32Vop1, {.src0 = 256, .vdst = 1});
+    auto leg_inst = f.decoder->decode_window(leg_words);
+    ASSERT_TRUE(leg_inst.succeeded());
+    EXPECT_FALSE(f.cu->execute_instruction(leg_inst.value().get(), *f.wave).succeeded());
+
+    // DIV_SCALE_F32 succeeds in mode 2/3 without OMOD/CLAMP and rejects nonzero OMOD/CLAMP.
+    f.wave->clear_instruction_execution_error();
+    f.cu->write_vgpr(f.base() + 0, 0, 0x1f800000U);
+    f.cu->write_vgpr(f.base() + 2, 0, 0x7f7fffffU);
+    f.cu->write_vgpr(f.base() + 4, 0, 0x7f7fffffU);
+    auto scale_ok =
+        cdna4::build_vop3_sdst_enc(cdna4::kVDivScaleF32Vop3SdstEnc,
+                                   {.vdst = 6, .sdst = 4, .src0 = 256, .src1 = 258, .src2 = 260});
+    auto scale_ok_inst = f.decoder->decode_window(scale_ok);
+    ASSERT_TRUE(scale_ok_inst.succeeded());
+    EXPECT_TRUE(f.cu->execute_instruction(scale_ok_inst.value().get(), *f.wave).succeeded());
+    EXPECT_EQ(f.cu->read_vgpr(f.base() + 6, 0), 0x7f800000U);
+
+    f.wave->clear_instruction_execution_error();
+    auto scale_omod = cdna4::build_vop3_sdst_enc(
+        cdna4::kVDivScaleF32Vop3SdstEnc,
+        {.vdst = 6, .sdst = 4, .clamp = 1, .src0 = 256, .src1 = 258, .src2 = 260});
+    auto scale_omod_inst = f.decoder->decode_window(scale_omod);
+    ASSERT_TRUE(scale_omod_inst.succeeded());
+    EXPECT_FALSE(f.cu->execute_instruction(scale_omod_inst.value().get(), *f.wave).succeeded());
   }
 }
 } // namespace

@@ -46,6 +46,48 @@ int sdwa_math(Call call, uint64_t flags, Mask exec_mask, uint64_t instruction_fl
       });
 }
 
+// Forward MI350X-calibrated FP32 SFU entry points. SQRT retains Compatibility INVALID causes
+// while rejecting explicit mode 3; operations without an active-OMOD capture reject effective
+// OMOD in mode 2 and fall back in mode 1.
+template <bool ActiveOmodCaptured, bool DenormGatesOmod, bool RejectExplicitStatus, typename Call,
+          typename Mask>
+int gfx950_math(Call call, uint64_t flags, Mask exec_mask, uint64_t instruction_flags,
+                uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  if (instruction_flags & RJ_ARITH_ALU_SDWA) {
+    constexpr auto sdwa_out = DenormGatesOmod ? rocjitsu::arith::SdwaOutput::F32Mode
+                                              : rocjitsu::arith::SdwaOutput::F32Nearest;
+    return sdwa_math<sdwa_out>(call, flags, exec_mask, instruction_flags, d, a, trapsts);
+  }
+  const uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  if constexpr (RejectExplicitStatus) {
+    if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+      const uint64_t check_flags =
+          (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS;
+      if (int error = call(check_flags, 0, instruction_flags, nullptr, nullptr, nullptr)) {
+        return error;
+      }
+      return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+    }
+  }
+  if constexpr (!ActiveOmodCaptured) {
+    const bool active_omod = (instruction_flags & RJ_ARITH_ALU_OMOD_MASK) &&
+                             !(flags & RJ_ARITH_FP_IEEE_MODE) &&
+                             (!DenormGatesOmod || (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS));
+    if (active_omod) {
+      if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS) {
+        if (int error = call(flags, 0, instruction_flags, nullptr, nullptr, nullptr)) {
+          return error;
+        }
+        return RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS;
+      }
+      if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE) {
+        flags = (flags & ~RJ_ARITH_SEMANTICS_MASK) | RJ_ARITH_SEMANTICS_LOOSE;
+      }
+    }
+  }
+  return call(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
 } // namespace
 
 // Evaluate the inherited rcp model for the selected lanes, preserving inactive outputs.
@@ -230,4 +272,91 @@ int rj_arith_v_log_legacy_f32_w64_gfx942(uint64_t flags, uint64_t exec_mask,
                                          uint64_t instruction_flags, uint32_t *const *d,
                                          const uint32_t *const *a, uint32_t *trapsts) {
   return rj_arith_v_log_f32_w64_gfx942(flags, exec_mask, instruction_flags, d, a, trapsts);
+}
+
+// MI350X (gfx950) calibrated FP32 SFU entry points.
+int rj_arith_v_rcp_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<true, false, false>(rj_arith_v_rcp_f32_w32, flags, exec_mask,
+                                         instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_rcp_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<true, false, false>(rj_arith_v_rcp_f32_w64, flags, exec_mask,
+                                         instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_rsq_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<false, false, false>(rj_arith_v_rsq_f32_w32, flags, exec_mask,
+                                          instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_rsq_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<false, false, false>(rj_arith_v_rsq_f32_w64, flags, exec_mask,
+                                          instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_sqrt_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  return gfx950_math<false, false, true>(rj_arith_v_sqrt_f32_w32, flags, exec_mask,
+                                         instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_sqrt_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   uint32_t *trapsts) {
+  return gfx950_math<false, false, true>(rj_arith_v_sqrt_f32_w64, flags, exec_mask,
+                                         instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_exp_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<true, false, false>(rj_arith_v_exp_f32_w32, flags, exec_mask,
+                                         instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_exp_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<true, false, false>(rj_arith_v_exp_f32_w64, flags, exec_mask,
+                                         instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_log_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<false, false, false>(rj_arith_v_log_f32_w32, flags, exec_mask,
+                                          instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_log_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<false, false, false>(rj_arith_v_log_f32_w64, flags, exec_mask,
+                                          instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_sin_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<false, true, false>(rj_arith_v_sin_f32_w32, flags, exec_mask,
+                                         instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_sin_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<false, true, false>(rj_arith_v_sin_f32_w64, flags, exec_mask,
+                                         instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cos_f32_w32_gfx950(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<false, false, false>(rj_arith_v_cos_f32_w32, flags, exec_mask,
+                                          instruction_flags, d, a, trapsts);
+}
+
+int rj_arith_v_cos_f32_w64_gfx950(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                                  uint32_t *const *d, const uint32_t *const *a, uint32_t *trapsts) {
+  return gfx950_math<false, false, false>(rj_arith_v_cos_f32_w64, flags, exec_mask,
+                                          instruction_flags, d, a, trapsts);
 }
